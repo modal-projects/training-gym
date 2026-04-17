@@ -13,7 +13,10 @@ into the Ray job runtime env, not passed to SLIME directly.
 
 import math
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from modal_training_gym.common.dataset import DatasetConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
 
@@ -26,7 +29,9 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
 
 # Fields on SlimeConfig that are NOT SLIME CLI args.
-_SLIME_SKIP = {"environment", "async_mode", "slime_model_script"}
+# `dataset` is a DatasetConfig container; its own fields are expanded into
+# cli args inside `_fields()`, but the container itself is never emitted.
+_SLIME_SKIP = {"environment", "async_mode", "slime_model_script", "dataset"}
 
 # SlimeConfig fields that SLIME reads as YAML files at runtime.
 # Users may set these as inline dicts in Python configs; the launcher
@@ -87,6 +92,9 @@ class SlimeConfig:
     }
     async_mode: bool = False  # True → use train_async.py
     slime_model_script: str = ""  # shell script path relative to /root/slime
+    # When set, the dataset's fields (`prompt_data`, `input_key`, …) are merged
+    # into the flat field dict and `prepare_data()` delegates to it.
+    dataset: "DatasetConfig | None" = None
 
     def __init__(self, **kwargs: Any) -> None:
         # Fresh environment dict per instance — never mutate the class-level default.
@@ -97,7 +105,11 @@ class SlimeConfig:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(self) -> dict[str, Any]:
-        """Merged field dict from the class hierarchy; instance attrs win."""
+        """Merged field dict from the class hierarchy; instance attrs win.
+
+        An attached `dataset` (`DatasetConfig`) has its fields merged last, so
+        values set on the dataset override any direct attrs with the same names.
+        """
         fields: dict[str, Any] = {}
         for cls in reversed(type(self).__mro__):
             if cls is object:
@@ -110,6 +122,9 @@ class SlimeConfig:
                 }
             )
         fields.update(vars(self))
+        ds = fields.get("dataset")
+        if ds is not None and hasattr(ds, "to_fields"):
+            fields.update(ds.to_fields())
         return {k: v for k, v in fields.items() if k not in _SLIME_SKIP}
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -138,7 +153,28 @@ class SlimeConfig:
         return out
 
     def prepare_data(self) -> None:
+        """Materialize the training data.
+
+        If a `dataset` (`DatasetConfig`) is attached, delegate to it. Otherwise
+        subclasses must override this method.
+        """
+        ds = getattr(self, "dataset", None)
+        if ds is not None:
+            ds.prepare()
+            return
         raise NotImplementedError(f"{type(self).__name__} has no prepare_data()")
+
+    def to_dataset_config(self) -> "DatasetConfig":
+        """Pull dataset-related fields out of this config into a `DatasetConfig`.
+
+        Reverse of attaching a `DatasetConfig` as the `dataset` field — gives
+        back a bare `DatasetConfig` carrying the current dataset values
+        regardless of whether they came from a direct attr or an attached
+        `DatasetConfig`. The returned instance has no `prepare()` method.
+        """
+        from modal_training_gym.common.dataset import DatasetConfig
+
+        return DatasetConfig.from_fields(self._fields())
 
     def total_nodes(self) -> int:
         """Total Modal cluster nodes required by this config.

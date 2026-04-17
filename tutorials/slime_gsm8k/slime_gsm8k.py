@@ -10,12 +10,38 @@
 # Invoke any function on the returned `app` via `modal run`, or
 # interactively with `app.run()` + `.remote()`.
 
+from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.frameworks.slime import (
     ModalConfig,
     SlimeConfig,
     build_slime_app,
 )
 from modal_training_gym.frameworks.slime.config import DATA_PATH
+
+# ## Define the dataset
+#
+# Subclass `DatasetConfig` with the path + interpretation fields this
+# experiment uses, and implement `prepare()` to materialize the data
+# into the shared data volume.
+
+class GSM8KDataset(DatasetConfig):
+    input_key = "messages"
+    label_key = "label"
+    apply_chat_template = True
+    rollout_shuffle = True
+    rm_type = "math"
+
+    def __init__(self, data_path):
+        self._data_path = str(data_path)
+        self.prompt_data = f"{self._data_path}/gsm8k/train.parquet"
+        self.eval_prompt_data = ["gsm8k", f"{self._data_path}/gsm8k/test.parquet"]
+
+    def prepare(self):
+        from datasets import load_dataset
+
+        ds = load_dataset("zhuzilin/gsm8k")
+        ds["train"].to_parquet(f"{self._data_path}/gsm8k/train.parquet")
+        ds["test"].to_parquet(f"{self._data_path}/gsm8k/test.parquet")
 
 # ## Define the experiment
 #
@@ -24,6 +50,9 @@ from modal_training_gym.frameworks.slime.config import DATA_PATH
 # automatically (`field_name` → `--field-name`).
 
 class _Slime(SlimeConfig):
+    # ── Dataset ───────────────────────────────────────────────────────────
+    dataset = GSM8KDataset(DATA_PATH)
+
     # ── Model ─────────────────────────────────────────────────────────────
     hf_checkpoint = "Qwen/Qwen3-4B"
     ref_load = hf_checkpoint  # bridge mode: ref model = base checkpoint
@@ -33,15 +62,6 @@ class _Slime(SlimeConfig):
     actor_num_nodes = 4
     actor_num_gpus_per_node = 8
     colocate = True
-
-    # ── Data ──────────────────────────────────────────────────────────────
-    prompt_data = f"{DATA_PATH}/gsm8k/train.parquet"
-    eval_prompt_data = ["gsm8k", f"{DATA_PATH}/gsm8k/test.parquet"]
-    input_key = "messages"
-    label_key = "label"
-    apply_chat_template = True
-    rollout_shuffle = True
-    rm_type = "math"
 
     # ── Rollout ───────────────────────────────────────────────────────────
     num_rollout = 3000
@@ -112,14 +132,6 @@ class _Slime(SlimeConfig):
     wandb_project = "slime-grpo"
     wandb_group = "qwen3-4b-gsm8k"
     disable_wandb_random_suffix = True
-
-    def prepare_data(self) -> None:
-        """Download GSM8K from HuggingFace and write to the data volume."""
-        from datasets import load_dataset
-
-        ds = load_dataset("zhuzilin/gsm8k")
-        ds["train"].to_parquet(f"{DATA_PATH}/gsm8k/train.parquet")
-        ds["test"].to_parquet(f"{DATA_PATH}/gsm8k/test.parquet")
 
 # ## Build the Modal app
 
