@@ -1,5 +1,4 @@
 from .base import (
-    ARCHITECTURE_FIELDS,
     BaseModelType,
     Model,
     ModelArchitecture,
@@ -10,7 +9,6 @@ from .base import (
 from . import glm_4_7, qwen3_4b  # noqa: F401
 
 __all__ = [
-    "ARCHITECTURE_FIELDS",
     "BaseModelType",
     "Model",
     "ModelArchitecture",

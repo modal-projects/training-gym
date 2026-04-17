@@ -1,26 +1,21 @@
-"""Model-identity + architecture configs shared across training frameworks.
+"""Model identity + architecture, shared across training frameworks.
 
 A `Model` bundles:
 
-  - `BaseModelType` — enum tag for a supported model family.
-  - `hf_checkpoint`  — HuggingFace repo id (e.g. "Qwen/Qwen3-4B").
+  - `BaseModelType` — enum tag naming the supported model family.
+  - `hf_checkpoint`  — HuggingFace repo id (e.g. `"Qwen/Qwen3-4B"`).
   - `ModelArchitecture` — transformer-architecture fields (layers, heads, …).
 
-Framework configs (e.g. `SlimeConfig`) accept a `Model` as a field; the
-model's fields are merged into the framework's flat field dict at
-`cli_args()` time, so the user no longer has to hand-copy architecture
-values into every experiment config.
-
-Conversion:
-  - `Model.to_fields()`        → flat dict of hf_checkpoint + architecture
-  - `Model.from_fields(flat)`  → `Model` from a framework's flat field dict
+Pure data — each framework config writes its own converter that turns a
+`Model` into its specific CLI flags. The registry (`register_model`) lets
+`Model(BaseModelType.Qwen3_4B)` auto-fill `hf_checkpoint` + `architecture`
+from per-model files; pass either field explicitly to override.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dc_fields
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 
 class BaseModelType(str, Enum):
@@ -28,27 +23,6 @@ class BaseModelType(str, Enum):
 
     Qwen3_4B = "Qwen3_4B"
     GLM_4_7 = "GLM_4_7"
-
-
-# Architecture fields a Model contributes to a framework's flat field dict.
-# Extending this exposes a new architecture knob to frameworks.
-ARCHITECTURE_FIELDS: tuple[str, ...] = (
-    "num_layers",
-    "hidden_size",
-    "ffn_hidden_size",
-    "num_attention_heads",
-    "group_query_attention",
-    "num_query_groups",
-    "kv_channels",
-    "vocab_size",
-    "normalization",
-    "norm_epsilon",
-    "swiglu",
-    "disable_bias_linear",
-    "qk_layernorm",
-    "use_rotary_position_embeddings",
-    "rotary_base",
-)
 
 
 @dataclass
@@ -70,9 +44,6 @@ class ModelArchitecture:
     qk_layernorm: bool = True
     use_rotary_position_embeddings: bool = True
     rotary_base: int = 10000
-
-    def to_fields(self) -> dict[str, Any]:
-        return {f.name: getattr(self, f.name) for f in dc_fields(self)}
 
 
 # Registry populated at import time by per-model modules (qwen3_4b.py etc.).
@@ -119,33 +90,3 @@ class Model:
             self.hf_checkpoint = default_hf
         if self.architecture is None:
             self.architecture = default_arch
-
-    def to_fields(self) -> dict[str, Any]:
-        """Flat {field_name: value} dict this model contributes to a framework."""
-        assert self.architecture is not None  # guaranteed by __post_init__
-        return {
-            "hf_checkpoint": self.hf_checkpoint,
-            **self.architecture.to_fields(),
-        }
-
-    @classmethod
-    def from_fields(
-        cls,
-        fields: dict[str, Any],
-        *,
-        model_type: BaseModelType | None = None,
-    ) -> "Model":
-        """Build a `Model` from a flat field dict.
-
-        Reverse of attaching a `Model` — pull model-related fields out of an
-        existing framework config that has them set directly. `model_type`
-        defaults to the first enum member if not supplied.
-        """
-        arch = ModelArchitecture(
-            **{k: fields[k] for k in ARCHITECTURE_FIELDS if k in fields}
-        )
-        return cls(
-            model_type=model_type or next(iter(BaseModelType)),
-            hf_checkpoint=fields.get("hf_checkpoint", ""),
-            architecture=arch,
-        )

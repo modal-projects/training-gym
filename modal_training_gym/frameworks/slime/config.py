@@ -120,11 +120,66 @@ class SlimeConfig:
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
+    # ── Container → SLIME flag converters ────────────────────────────────────
+    #
+    # Each converter maps a common config struct (`DatasetConfig`, `Model`,
+    # `WandbConfig`) to the specific field names SLIME's CLI expects. Kept
+    # explicit so the SLIME vocabulary lives in one place and the common
+    # configs stay framework-agnostic.
+
+    @staticmethod
+    def _dataset_to_fields(ds: "DatasetConfig") -> dict[str, Any]:
+        return {
+            "prompt_data": ds.prompt_data,
+            "eval_prompt_data": ds.eval_prompt_data,
+            "input_key": ds.input_key,
+            "label_key": ds.label_key,
+            "apply_chat_template": ds.apply_chat_template,
+            "rollout_shuffle": ds.rollout_shuffle,
+            "rm_type": ds.rm_type,
+        }
+
+    @staticmethod
+    def _model_to_fields(m: "Model") -> dict[str, Any]:
+        arch = m.architecture
+        assert arch is not None  # guaranteed by Model.__post_init__
+        return {
+            "hf_checkpoint": m.hf_checkpoint,
+            "num_layers": arch.num_layers,
+            "hidden_size": arch.hidden_size,
+            "ffn_hidden_size": arch.ffn_hidden_size,
+            "num_attention_heads": arch.num_attention_heads,
+            "group_query_attention": arch.group_query_attention,
+            "num_query_groups": arch.num_query_groups,
+            "kv_channels": arch.kv_channels,
+            "vocab_size": arch.vocab_size,
+            "normalization": arch.normalization,
+            "norm_epsilon": arch.norm_epsilon,
+            "swiglu": arch.swiglu,
+            "disable_bias_linear": arch.disable_bias_linear,
+            "qk_layernorm": arch.qk_layernorm,
+            "use_rotary_position_embeddings": arch.use_rotary_position_embeddings,
+            "rotary_base": arch.rotary_base,
+        }
+
+    @staticmethod
+    def _wandb_to_fields(w: "WandbConfig") -> dict[str, Any]:
+        return {
+            "use_wandb": True,
+            "wandb_project": w.project,
+            "wandb_group": w.group,
+            "wandb_key": w.key,
+            "disable_wandb_random_suffix": w.disable_random_suffix,
+        }
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
     def _fields(self) -> dict[str, Any]:
         """Merged field dict from the class hierarchy; instance attrs win.
 
-        An attached `dataset` (`DatasetConfig`) has its fields merged last, so
-        values set on the dataset override any direct attrs with the same names.
+        Attached containers (`dataset`, `model`, `wandb`) are expanded last via
+        the per-framework converters above, so their values override any
+        direct attrs with the same names.
         """
         fields: dict[str, Any] = {}
         for cls in reversed(type(self).__mro__):
@@ -138,10 +193,12 @@ class SlimeConfig:
                 }
             )
         fields.update(vars(self))
-        for key in ("dataset", "model", "wandb"):
-            container = fields.get(key)
-            if container is not None and hasattr(container, "to_fields"):
-                fields.update(container.to_fields())
+        if self.dataset is not None:
+            fields.update(self._dataset_to_fields(self.dataset))
+        if self.model is not None:
+            fields.update(self._model_to_fields(self.model))
+        if self.wandb is not None:
+            fields.update(self._wandb_to_fields(self.wandb))
         return {k: v for k, v in fields.items() if k not in _SLIME_SKIP}
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -182,37 +239,76 @@ class SlimeConfig:
         raise NotImplementedError(f"{type(self).__name__} has no prepare_data()")
 
     def to_dataset_config(self) -> "DatasetConfig":
-        """Pull dataset-related fields out of this config into a `DatasetConfig`.
+        """Extract dataset-related SLIME flags back into a `DatasetConfig`.
 
-        Reverse of attaching a `DatasetConfig` as the `dataset` field — gives
-        back a bare `DatasetConfig` carrying the current dataset values
-        regardless of whether they came from a direct attr or an attached
-        `DatasetConfig`. The returned instance has no `prepare()` method.
+        Reverse of attaching a `DatasetConfig` as the `dataset` field — works
+        whether the fields came from an attached container or were set
+        directly. The returned instance has no `prepare()` method.
         """
         from modal_training_gym.common.dataset import DatasetConfig
 
-        return DatasetConfig.from_fields(self._fields())
+        f = self._fields()
+        return DatasetConfig(
+            prompt_data=f.get("prompt_data", ""),
+            eval_prompt_data=f.get("eval_prompt_data"),
+            input_key=f.get("input_key", ""),
+            label_key=f.get("label_key", ""),
+            apply_chat_template=f.get("apply_chat_template", True),
+            rollout_shuffle=f.get("rollout_shuffle", True),
+            rm_type=f.get("rm_type", ""),
+        )
 
     def to_model(self) -> "Model":
-        """Pull model-related fields out of this config into a `Model`.
+        """Extract model-related SLIME flags back into a `Model`.
 
-        Reverse of attaching a `Model` as the `model` field — works whether
-        the fields came from an attached `Model` or were set directly.
+        Reverse of attaching a `Model` — works whether fields came from an
+        attached container or were set directly.
         """
-        from modal_training_gym.common.models import Model
+        from modal_training_gym.common.models import (
+            BaseModelType,
+            Model,
+            ModelArchitecture,
+        )
 
-        return Model.from_fields(self._fields())
+        f = self._fields()
+        arch = ModelArchitecture(
+            num_layers=f.get("num_layers", 0),
+            hidden_size=f.get("hidden_size", 0),
+            ffn_hidden_size=f.get("ffn_hidden_size", 0),
+            num_attention_heads=f.get("num_attention_heads", 0),
+            group_query_attention=f.get("group_query_attention", True),
+            num_query_groups=f.get("num_query_groups", 0),
+            kv_channels=f.get("kv_channels", 0),
+            vocab_size=f.get("vocab_size", 0),
+            normalization=f.get("normalization", "RMSNorm"),
+            norm_epsilon=f.get("norm_epsilon", 1e-6),
+            swiglu=f.get("swiglu", True),
+            disable_bias_linear=f.get("disable_bias_linear", True),
+            qk_layernorm=f.get("qk_layernorm", True),
+            use_rotary_position_embeddings=f.get("use_rotary_position_embeddings", True),
+            rotary_base=f.get("rotary_base", 10000),
+        )
+        return Model(
+            model_type=next(iter(BaseModelType)),
+            hf_checkpoint=f.get("hf_checkpoint", "") or "",
+            architecture=arch,
+        )
 
     def to_wandb_config(self) -> "WandbConfig":
-        """Pull wandb-related fields out of this config into a `WandbConfig`.
+        """Extract wandb-related SLIME flags back into a `WandbConfig`.
 
-        Reverse of attaching a `WandbConfig` as the `wandb` field — works
-        whether the fields came from an attached `WandbConfig` or were set
-        directly.
+        Reverse of attaching a `WandbConfig` — works whether fields came from
+        an attached container or were set directly.
         """
         from modal_training_gym.common.wandb import WandbConfig
 
-        return WandbConfig.from_fields(self._fields())
+        f = self._fields()
+        return WandbConfig(
+            project=f.get("wandb_project", ""),
+            group=f.get("wandb_group", ""),
+            key=f.get("wandb_key", ""),
+            disable_random_suffix=f.get("disable_wandb_random_suffix", True),
+        )
 
     def total_nodes(self) -> int:
         """Total Modal cluster nodes required by this config.
