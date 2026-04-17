@@ -24,6 +24,7 @@ class BaseModelType(str, Enum):
     Qwen3_4B = "Qwen3_4B"
     Qwen3_32B = "Qwen3_32B"
     GLM_4_7 = "GLM_4_7"
+    Llama2_7B = "Llama2_7B"
 
 
 @dataclass
