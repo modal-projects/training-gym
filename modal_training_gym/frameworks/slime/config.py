@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
+    from modal_training_gym.common.models import Model
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
 
@@ -29,9 +30,10 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
 
 # Fields on SlimeConfig that are NOT SLIME CLI args.
-# `dataset` is a DatasetConfig container; its own fields are expanded into
-# cli args inside `_fields()`, but the container itself is never emitted.
-_SLIME_SKIP = {"environment", "async_mode", "slime_model_script", "dataset"}
+# `dataset` and `model` are container objects; their own fields are expanded
+# into cli args inside `_fields()`, but the containers themselves are never
+# emitted as flags.
+_SLIME_SKIP = {"environment", "async_mode", "slime_model_script", "dataset", "model"}
 
 # SlimeConfig fields that SLIME reads as YAML files at runtime.
 # Users may set these as inline dicts in Python configs; the launcher
@@ -95,6 +97,9 @@ class SlimeConfig:
     # When set, the dataset's fields (`prompt_data`, `input_key`, …) are merged
     # into the flat field dict and `prepare_data()` delegates to it.
     dataset: "DatasetConfig | None" = None
+    # When set, the model's `hf_checkpoint` and architecture fields
+    # (`num_layers`, `hidden_size`, …) are merged into the flat field dict.
+    model: "Model | None" = None
 
     def __init__(self, **kwargs: Any) -> None:
         # Fresh environment dict per instance — never mutate the class-level default.
@@ -125,6 +130,9 @@ class SlimeConfig:
         ds = fields.get("dataset")
         if ds is not None and hasattr(ds, "to_fields"):
             fields.update(ds.to_fields())
+        m = fields.get("model")
+        if m is not None and hasattr(m, "to_fields"):
+            fields.update(m.to_fields())
         return {k: v for k, v in fields.items() if k not in _SLIME_SKIP}
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -175,6 +183,16 @@ class SlimeConfig:
         from modal_training_gym.common.dataset import DatasetConfig
 
         return DatasetConfig.from_fields(self._fields())
+
+    def to_model(self) -> "Model":
+        """Pull model-related fields out of this config into a `Model`.
+
+        Reverse of attaching a `Model` as the `model` field — works whether
+        the fields came from an attached `Model` or were set directly.
+        """
+        from modal_training_gym.common.models import Model
+
+        return Model.from_fields(self._fields())
 
     def total_nodes(self) -> int:
         """Total Modal cluster nodes required by this config.

@@ -25,6 +25,7 @@ def _intro():
 @code
 def _imports():
     from modal_training_gym.common.dataset import DatasetConfig
+    from modal_training_gym.common.models import BaseModelType, Model
     from modal_training_gym.frameworks.slime import (
         ModalConfig,
         SlimeConfig,
@@ -80,12 +81,13 @@ def _explain_config():
 @code
 def _define_config():
     class _Slime(SlimeConfig):
-        # ── Dataset ───────────────────────────────────────────────────────────
+        # ── Model & dataset ───────────────────────────────────────────────────
+        # Architecture + hf_checkpoint are inferred from the BaseModelType.
+        model = Model(BaseModelType.Qwen3_4B)
         dataset = GSM8KDataset(DATA_PATH)
 
-        # ── Model ─────────────────────────────────────────────────────────────
-        hf_checkpoint = "Qwen/Qwen3-4B"
-        ref_load = hf_checkpoint  # bridge mode: ref model = base checkpoint
+        # ── Checkpointing ─────────────────────────────────────────────────────
+        ref_load = model.hf_checkpoint  # bridge mode: ref = base checkpoint
         megatron_to_hf_mode = "bridge"
 
         # ── Infrastructure ────────────────────────────────────────────────────
@@ -139,23 +141,6 @@ def _define_config():
         kl_loss_coef = 0.0
         kl_loss_type = "low_var_kl"
         entropy_coef = 0.0
-
-        # ── Model architecture (Qwen3-4B) ─────────────────────────────────────
-        num_layers = 36
-        hidden_size = 2560
-        ffn_hidden_size = 9728
-        num_attention_heads = 32
-        group_query_attention = True
-        num_query_groups = 8
-        kv_channels = 128
-        vocab_size = 151936
-        normalization = "RMSNorm"
-        norm_epsilon = 1e-6
-        swiglu = True
-        disable_bias_linear = True
-        qk_layernorm = True
-        use_rotary_position_embeddings = True
-        rotary_base = 1000000
 
         # ── WandB ─────────────────────────────────────────────────────────────
         use_wandb = True
