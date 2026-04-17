@@ -1,0 +1,28 @@
+name: CI/CD
+
+
+on:
+  pull_request:
+
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: "check --fix"
+
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: "format"
+
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: auto-format with ruff"
