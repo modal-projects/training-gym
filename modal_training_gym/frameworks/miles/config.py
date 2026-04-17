@@ -60,7 +60,11 @@ class MilesConfig:
 
     # ── Infrastructure ───────────────────────────────────────────────────────
     n_nodes: int = 1
-    gpus_per_node: int = 8
+
+    @property
+    def gpus_per_node(self) -> int:
+        # Our multi-node training set-up requires 8 GPUs per node.
+        return 8
 
     # ── Recipe + overrides ───────────────────────────────────────────────────
     # Raw Miles CLI flag block — comments + blank lines OK, shlex-parsed.
