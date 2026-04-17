@@ -34,6 +34,7 @@ OUTPUT_ROOT = TUTORIALS_DIR
 
 _MARKDOWN = "markdown"
 _CODE = "code"
+_SHELL = "shell"
 _PY_ONLY = "py_only"
 _NOTEBOOK_ONLY = "notebook_only"
 
@@ -72,6 +73,21 @@ def _resolve_targets(deco_names: set[str | None]) -> frozenset[str]:
     return frozenset({_PY, _NB})
 
 
+def _find_shell_command(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
+    """Return the string arg of a `@shell("…")` decorator, if any."""
+    for deco in node.decorator_list:
+        if not isinstance(deco, ast.Call):
+            continue
+        if _decorator_name(deco.func) != _SHELL:
+            continue
+        if not deco.args:
+            continue
+        arg0 = deco.args[0]
+        if isinstance(arg0, ast.Constant) and isinstance(arg0.value, str):
+            return arg0.value
+    return None
+
+
 def _extract_cells(source: str) -> list[Cell]:
     tree = ast.parse(source)
     lines = source.splitlines(keepends=True)
@@ -81,6 +97,13 @@ def _extract_cells(source: str) -> list[Cell]:
             continue
         deco_names = {_decorator_name(d) for d in node.decorator_list}
         targets = _resolve_targets(deco_names)
+
+        # `@shell("…")` — emit the string verbatim as a code cell.
+        shell_cmd = _find_shell_command(node)
+        if shell_cmd is not None:
+            cells.append(Cell(kind="code", source=shell_cmd, targets=targets))
+            continue
+
         if _MARKDOWN in deco_names:
             doc = ast.get_docstring(node, clean=True) or ""
             cells.append(Cell(kind="markdown", source=doc, targets=targets))

@@ -5,7 +5,7 @@ docstring); each `@code`-decorated function contributes a code cell (its
 body, dedented). Function names are arbitrary. Cell order = source order.
 """
 
-from tutorial_generator import code, markdown, notebook_only, py_only
+from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 
 @markdown
@@ -20,6 +20,12 @@ def _intro():
     Invoke any function on the returned `app` via `modal run`, or
     interactively with `app.run()` + `.remote()`.
     """
+
+
+@notebook_only
+@shell("! pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup")
+def _install():
+    pass
 
 
 @code

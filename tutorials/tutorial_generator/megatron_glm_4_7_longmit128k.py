@@ -6,7 +6,7 @@ body, dedented). README content is pulled into markdown cells so it shows
 up in both the .ipynb and (as `#` comments) in the .py.
 """
 
-from tutorial_generator import code, markdown, notebook_only, py_only
+from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 
 @markdown
@@ -56,6 +56,12 @@ def _prereqs():
     modal secret create wandb-secret WANDB_API_KEY=<your-key>
     ```
     """
+
+
+@notebook_only
+@shell("! pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup")
+def _install():
+    pass
 
 
 @code

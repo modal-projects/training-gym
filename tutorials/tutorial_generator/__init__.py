@@ -22,3 +22,17 @@ def py_only(fn):
 def notebook_only(fn):
     """Restrict a `@markdown` or `@code` cell to the generated .ipynb file only."""
     return fn
+
+
+def shell(command: str):
+    """Emit `command` verbatim as a notebook code cell.
+
+    Use when you need shell magic (e.g. `! pip install ...`) or any other
+    non-Python content that must appear exactly as-written in the cell. The
+    decorated function's body is ignored — use `pass`.
+    """
+
+    def wrap(fn):
+        return fn
+
+    return wrap
