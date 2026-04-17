@@ -27,6 +27,7 @@ class BaseModelType(str, Enum):
     """Known model families. Extend as new models are added."""
 
     Qwen3_4B = "Qwen3_4B"
+    GLM_4_7 = "GLM_4_7"
 
 
 # Architecture fields a Model contributes to a framework's flat field dict.

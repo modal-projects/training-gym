@@ -29,13 +29,14 @@ WANDB_FIELDS: tuple[str, ...] = (
 class WandbConfig:
     """Weights & Biases run metadata.
 
-    Class attrs are the user-facing names (`project`, `group`, `key`). They
-    map to framework-side field names (`wandb_project`, `wandb_group`,
-    `wandb_key`) via `to_fields()`.
+    Class attrs are the user-facing names (`project`, `group`, `exp_name`,
+    `key`). They map to framework-side field names (`wandb_project`,
+    `wandb_group`, `wandb_exp_name`, `wandb_key`) via `to_fields()`.
     """
 
     project: str = ""
-    group: str = ""
+    group: str = ""  # wandb "group" tag — used by SLIME
+    exp_name: str = ""  # wandb run name — used by ms-swift as --wandb_exp_name
     key: str = ""  # typically injected from WANDB_API_KEY at launch time
     disable_random_suffix: bool = True
 
@@ -44,7 +45,12 @@ class WandbConfig:
             setattr(self, k, v)
 
     def to_fields(self) -> dict[str, Any]:
-        """Flat framework-side dict. Presence implies `use_wandb=True`."""
+        """Flat framework-side dict. Presence implies `use_wandb=True`.
+
+        Note: Only SLIME-style frameworks can blindly merge this whole dict.
+        Frameworks whose CLI differs (e.g. ms-swift) read specific fields off
+        the `WandbConfig` instance directly rather than merging `to_fields()`.
+        """
         return {
             "use_wandb": True,
             "wandb_project": self.project,
@@ -61,6 +67,8 @@ class WandbConfig:
             kwargs["project"] = fields["wandb_project"]
         if "wandb_group" in fields:
             kwargs["group"] = fields["wandb_group"]
+        if "wandb_exp_name" in fields:
+            kwargs["exp_name"] = fields["wandb_exp_name"]
         if "wandb_key" in fields:
             kwargs["key"] = fields["wandb_key"]
         if "disable_wandb_random_suffix" in fields:
