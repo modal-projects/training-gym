@@ -98,7 +98,7 @@ def _define_config():
         colocate = True
 
         # ── Rollout ───────────────────────────────────────────────────────────
-        num_rollout = 3000
+        num_rollout = 2
         rollout_batch_size = 64
         rollout_max_response_len = 8192
         rollout_temperature = 1.0

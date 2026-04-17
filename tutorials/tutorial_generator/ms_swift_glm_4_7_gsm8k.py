@@ -128,7 +128,9 @@ def _define_config():
         sequence_parallel = True
 
         # ── Training ──────────────────────────────────────────────────────────
-        num_train_epochs = 4
+        # train_iters caps total Megatron iterations; set low for smoke testing.
+        train_iters = 5
+        num_train_epochs = 1
         lr = 1e-4
         global_batch_size = 8
         max_length = 2048
