@@ -240,10 +240,11 @@ def build_slime_app(
 
         prepare_slime_config(slime, tempfile.mkdtemp())
 
-        if (wandb_key := os.environ.get("WANDB_API_KEY", "")) and getattr(
-            slime, "use_wandb", False
-        ):
-            slime.wandb_key = wandb_key
+        if wandb_key := os.environ.get("WANDB_API_KEY", ""):
+            if slime.wandb is not None:
+                slime.wandb.key = wandb_key
+            elif getattr(slime, "use_wandb", False):
+                slime.wandb_key = wandb_key
 
         cmd = build_train_cmd(slime, SLIME_ROOT)
         runtime_env = {

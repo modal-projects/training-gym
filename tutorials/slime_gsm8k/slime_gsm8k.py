@@ -12,6 +12,7 @@
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import BaseModelType, Model
+from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.frameworks.slime import (
     ModalConfig,
     SlimeConfig,
@@ -51,10 +52,11 @@ class GSM8KDataset(DatasetConfig):
 # automatically (`field_name` → `--field-name`).
 
 class _Slime(SlimeConfig):
-    # ── Model & dataset ───────────────────────────────────────────────────
+    # ── Model, dataset, logging ───────────────────────────────────────────
     # Architecture + hf_checkpoint are inferred from the BaseModelType.
     model = Model(BaseModelType.Qwen3_4B)
     dataset = GSM8KDataset(DATA_PATH)
+    wandb = WandbConfig(project="slime-grpo", group="qwen3-4b-gsm8k")
 
     # ── Checkpointing ─────────────────────────────────────────────────────
     ref_load = model.hf_checkpoint  # bridge mode: ref = base checkpoint
@@ -111,12 +113,6 @@ class _Slime(SlimeConfig):
     kl_loss_coef = 0.0
     kl_loss_type = "low_var_kl"
     entropy_coef = 0.0
-
-    # ── WandB ─────────────────────────────────────────────────────────────
-    use_wandb = True
-    wandb_project = "slime-grpo"
-    wandb_group = "qwen3-4b-gsm8k"
-    disable_wandb_random_suffix = True
 
 # ## Build the Modal app
 

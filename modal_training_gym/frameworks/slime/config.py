@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
     from modal_training_gym.common.models import Model
+    from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
 
@@ -30,10 +31,17 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
 
 # Fields on SlimeConfig that are NOT SLIME CLI args.
-# `dataset` and `model` are container objects; their own fields are expanded
-# into cli args inside `_fields()`, but the containers themselves are never
-# emitted as flags.
-_SLIME_SKIP = {"environment", "async_mode", "slime_model_script", "dataset", "model"}
+# `dataset`, `model`, and `wandb` are container objects; their own fields are
+# expanded into cli args inside `_fields()`, but the containers themselves are
+# never emitted as flags.
+_SLIME_SKIP = {
+    "environment",
+    "async_mode",
+    "slime_model_script",
+    "dataset",
+    "model",
+    "wandb",
+}
 
 # SlimeConfig fields that SLIME reads as YAML files at runtime.
 # Users may set these as inline dicts in Python configs; the launcher
@@ -100,6 +108,9 @@ class SlimeConfig:
     # When set, the model's `hf_checkpoint` and architecture fields
     # (`num_layers`, `hidden_size`, …) are merged into the flat field dict.
     model: "Model | None" = None
+    # When set, wandb logging is enabled and the config's fields
+    # (`wandb_project`, `wandb_group`, …) are merged into the flat field dict.
+    wandb: "WandbConfig | None" = None
 
     def __init__(self, **kwargs: Any) -> None:
         # Fresh environment dict per instance — never mutate the class-level default.
@@ -127,12 +138,10 @@ class SlimeConfig:
                 }
             )
         fields.update(vars(self))
-        ds = fields.get("dataset")
-        if ds is not None and hasattr(ds, "to_fields"):
-            fields.update(ds.to_fields())
-        m = fields.get("model")
-        if m is not None and hasattr(m, "to_fields"):
-            fields.update(m.to_fields())
+        for key in ("dataset", "model", "wandb"):
+            container = fields.get(key)
+            if container is not None and hasattr(container, "to_fields"):
+                fields.update(container.to_fields())
         return {k: v for k, v in fields.items() if k not in _SLIME_SKIP}
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -193,6 +202,17 @@ class SlimeConfig:
         from modal_training_gym.common.models import Model
 
         return Model.from_fields(self._fields())
+
+    def to_wandb_config(self) -> "WandbConfig":
+        """Pull wandb-related fields out of this config into a `WandbConfig`.
+
+        Reverse of attaching a `WandbConfig` as the `wandb` field — works
+        whether the fields came from an attached `WandbConfig` or were set
+        directly.
+        """
+        from modal_training_gym.common.wandb import WandbConfig
+
+        return WandbConfig.from_fields(self._fields())
 
     def total_nodes(self) -> int:
         """Total Modal cluster nodes required by this config.
