@@ -26,6 +26,7 @@ import cloudpickle
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
+from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 from .config import (
@@ -100,7 +101,12 @@ def build_slime_app(
     }
 
     # ── App ──────────────────────────────────────────────────────────────────
-    app = App(app_name)
+    tags = {
+        **COMMON_TRAINING_GYM_TAGS,
+        "framework": "slime",
+        **slime.app_tags,
+    }
+    app = App(app_name, tags=tags)
     gpu_spec = f"{modal.gpu}:{slime.actor_num_gpus_per_node}"
 
     @app.function(

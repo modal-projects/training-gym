@@ -31,6 +31,7 @@ import cloudpickle
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
+from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 from .config import (
@@ -94,7 +95,12 @@ def build_verl_app(
     rewards_dir = "/rewards"
     uploaded_reward_path = f"{rewards_dir}/custom_reward.py"
 
-    app = App(app_name)
+    tags = {
+        **COMMON_TRAINING_GYM_TAGS,
+        "framework": "verl",
+        **verl.app_tags,
+    }
+    app = App(app_name, tags=tags)
 
     # ── download_model ───────────────────────────────────────────────────────
     @app.function(

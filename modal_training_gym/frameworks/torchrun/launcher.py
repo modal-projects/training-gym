@@ -36,6 +36,8 @@ import cloudpickle
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
+from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+
 from .config import (
     DATASET_MOUNT_PATH,
     MODEL_MOUNT_PATH,
@@ -78,7 +80,12 @@ def build_torchrun_app(
     scripts_dir = str(SCRIPTS_MOUNT_PATH)
     script_remote_path = f"{scripts_dir}/{config.train_script_name}"
 
-    app = App(app_name)
+    tags = {
+        **COMMON_TRAINING_GYM_TAGS,
+        "framework": "torchrun",
+        **config.app_tags,
+    }
+    app = App(app_name, tags=tags)
     gpu_spec = f"{modal.gpu}:{config.gpus_per_node}"
 
     # ── download_dataset ─────────────────────────────────────────────────────

@@ -35,6 +35,7 @@ _SKIP_FIELDS = {
     "wandb",
     "n_nodes",
     "gpus_per_node",
+    "app_tags",
 }
 
 
@@ -71,6 +72,11 @@ class MsSwiftConfig:
     dataset: "DatasetConfig | None" = None
     model: "Model | None" = None
     wandb: "WandbConfig | None" = None
+
+    # ── Modal app tags ───────────────────────────────────────────────────────
+    # Merged with the framework's default tags (training/source/framework) at
+    # app-build time. Use for per-run tagging.
+    app_tags: dict = {}
 
     # ── Launcher-only (NOT megatron CLI flags) ───────────────────────────────
     environment: dict = {

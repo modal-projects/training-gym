@@ -41,6 +41,7 @@ _SLIME_SKIP = {
     "dataset",
     "model",
     "wandb",
+    "app_tags",
 }
 
 # SlimeConfig fields that SLIME reads as YAML files at runtime.
@@ -111,6 +112,9 @@ class SlimeConfig:
     # When set, wandb logging is enabled and the config's fields
     # (`wandb_project`, `wandb_group`, …) are merged into the flat field dict.
     wandb: "WandbConfig | None" = None
+    # Merged with the framework's default Modal app tags
+    # (`training` / `source` / `framework`) at app-build time.
+    app_tags: dict = {}
 
     def __init__(self, **kwargs: Any) -> None:
         # Fresh environment dict per instance — never mutate the class-level default.

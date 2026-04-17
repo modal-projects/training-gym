@@ -81,6 +81,11 @@ class AccelerateConfig:
     # ── Accelerate-specific ──────────────────────────────────────────────────
     mixed_precision: MixedPrecision = "bf16"
 
+    # ── Modal app tags ───────────────────────────────────────────────────────
+    # Merged with the framework's default tags (training/source/framework) at
+    # app-build time. Use for per-run tagging (experiment id, user, env, …).
+    app_tags: dict = {}
+
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
             setattr(self, k, v)

@@ -32,6 +32,8 @@ import cloudpickle
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
+from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+
 from .config import (
     CHECKPOINTS_DIR,
     DATA_DIR,
@@ -97,7 +99,12 @@ def build_megatron_app(
         f"{app_name}-checkpoints", create_if_missing=True
     )
 
-    app = App(app_name)
+    tags = {
+        **COMMON_TRAINING_GYM_TAGS,
+        "framework": "megatron",
+        **megatron.app_tags,
+    }
+    app = App(app_name, tags=tags)
     gpu_single = f"{modal.gpu}"
     gpu_multi = f"{modal.gpu}:{megatron.gpus_per_node}"
 

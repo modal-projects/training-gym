@@ -30,6 +30,8 @@ import cloudpickle
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
+from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+
 from .config import (
     CHECKPOINTS_PATH,
     HF_CACHE_PATH,
@@ -97,7 +99,12 @@ def build_ms_swift_app(
     hf_cache_str = str(HF_CACHE_PATH)
     checkpoints_str = str(CHECKPOINTS_PATH)
 
-    app = App(app_name)
+    tags = {
+        **COMMON_TRAINING_GYM_TAGS,
+        "framework": "ms-swift",
+        **swift.app_tags,
+    }
+    app = App(app_name, tags=tags)
     gpu_spec = f"{modal.gpu}:{swift.gpus_per_node}"
 
     # ── download_model ───────────────────────────────────────────────────────
