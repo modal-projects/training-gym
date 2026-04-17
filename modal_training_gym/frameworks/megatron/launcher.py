@@ -60,7 +60,7 @@ def build_megatron_app(
 
     # ── Images ───────────────────────────────────────────────────────────────
     download_image = (
-        Image.debian_slim(python_version="3.11")
+        Image.debian_slim(python_version="3.12")
         .uv_pip_install(
             "huggingface_hub==0.36.0",
             "transformers==4.57.4",

@@ -55,7 +55,7 @@ def build_ms_swift_app(
 
     # ── Images ───────────────────────────────────────────────────────────────
     download_image = (
-        Image.debian_slim(python_version="3.11")
+        Image.debian_slim(python_version="3.12")
         .pip_install(
             "huggingface_hub==0.27.1",
             "transformers>=4.50",

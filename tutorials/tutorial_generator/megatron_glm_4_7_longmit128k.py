@@ -327,10 +327,13 @@ def _run_interactive():
 @notebook_only
 @code
 def _invoke():
-    with app.run():
-        # app.download_and_convert.remote()
-        # app.prepare_dataset.remote()
-        app.train_lora.remote()
+    import modal
+    
+    with modal.enable_output():
+        with app.run():
+            # app.download_and_convert.remote()
+            # app.prepare_dataset.remote()
+            app.train_lora.remote()
 
 
 @markdown

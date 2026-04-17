@@ -6,7 +6,7 @@ from .base import (
 )
 
 # Import per-model modules for their registration side-effects.
-from . import glm_4_7, qwen3_4b  # noqa: F401
+from . import glm_4_7, qwen3_4b, qwen3_32b  # noqa: F401
 
 __all__ = [
     "BaseModelType",

@@ -190,6 +190,8 @@ def _run_interactive():
 @notebook_only
 @code
 def _invoke():
+    import modal
+    
     with modal.enable_output():
         with app.run():
             app.download_model.remote()
