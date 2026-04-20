@@ -13,7 +13,9 @@ into the Ray job runtime env, not passed to SLIME directly.
 
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
+
+from modal_training_gym.common import GPUType
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
@@ -27,8 +29,6 @@ DATA_PATH = Path("/data")
 CHECKPOINTS_PATH = Path("/checkpoints")
 
 # ── Types ─────────────────────────────────────────────────────────────────────
-
-GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
 
 # Fields on SlimeConfig that are NOT SLIME CLI args.
 # `dataset`, `model`, and `wandb` are container objects; their own fields are

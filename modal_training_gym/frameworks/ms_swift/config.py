@@ -10,7 +10,9 @@ SlimeConfig — containers aren't merged blindly.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
+
+from modal_training_gym.common import GPUType
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
@@ -23,8 +25,6 @@ HF_CACHE_PATH = Path("/root/.cache/huggingface")
 CHECKPOINTS_PATH = Path("/checkpoints")
 
 # ── Types ─────────────────────────────────────────────────────────────────────
-
-GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
 
 # Fields that are NOT emitted as megatron CLI flags (launcher-only or
 # interpreted explicitly via container mapping in `_fields()`).

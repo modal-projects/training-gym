@@ -10,7 +10,9 @@ config attribute names 1:1.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
+
+from modal_training_gym.common import GPUType
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
@@ -28,9 +30,6 @@ MCORE_MODELS_SUBDIR = "mcore_models"
 TRAINING_CHECKPOINT_SUBDIR = "training_checkpoints"
 
 # ── Types ─────────────────────────────────────────────────────────────────────
-
-GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
-
 
 class VerlModalConfig:
     """Modal infrastructure for verl — GPU family + image registry override."""

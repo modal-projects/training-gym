@@ -11,6 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from modal_training_gym.common import GPUType
+
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
     from modal_training_gym.common.models import Model
@@ -24,7 +26,6 @@ SCRIPTS_MOUNT_PATH = Path("/scripts")
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 
-GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
 MixedPrecision = Literal["no", "fp16", "bf16", "fp8"]
 
 # Default training image (matches the reference starcoder example).

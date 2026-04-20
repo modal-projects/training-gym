@@ -10,7 +10,9 @@ launcher points torchrun at the materialized file.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
+
+from modal_training_gym.common import GPUType
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
@@ -22,10 +24,6 @@ if TYPE_CHECKING:
 DATASET_MOUNT_PATH = Path("/data")
 MODEL_MOUNT_PATH = Path("/model")
 SCRIPTS_MOUNT_PATH = Path("/scripts")
-
-# ── Types ─────────────────────────────────────────────────────────────────────
-
-GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
 
 # Default training image (matches the reference starcoder example).
 _DEFAULT_TRAIN_PIP = (

@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
+
+from modal_training_gym.common import GPUType
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
@@ -29,9 +31,6 @@ DATA_DIR = Path("/data")
 CHECKPOINTS_DIR = Path("/checkpoints")
 
 # ── Types ─────────────────────────────────────────────────────────────────────
-
-GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
-
 
 class MegatronModalConfig:
     """Modal infrastructure for Megatron — GPU family + image overrides."""

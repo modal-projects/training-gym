@@ -10,7 +10,9 @@ hyperparameters. The launcher adds the cluster + Ray glue.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
+
+from modal_training_gym.common import GPUType
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
@@ -22,10 +24,6 @@ if TYPE_CHECKING:
 HF_CACHE_PATH = Path("/root/.cache/huggingface")
 DATA_PATH = Path("/data")
 CHECKPOINTS_PATH = Path("/checkpoints")
-
-# ── Types ─────────────────────────────────────────────────────────────────────
-
-GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
 
 
 class MilesModalConfig:

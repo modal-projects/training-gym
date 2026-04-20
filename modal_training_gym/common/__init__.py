@@ -6,7 +6,13 @@ framework's launcher merges `COMMON_TRAINING_GYM_TAGS` with its own
 `modal.App`.
 """
 
+from typing import Literal
+
 COMMON_TRAINING_GYM_TAGS: dict[str, str] = {
     "training": "True",
     "source": "training-gym",
 }
+
+# Supported Modal GPU families across all frameworks. Framework configs
+# that accept a GPU name should annotate it with this type.
+GPUType = Literal["H100", "H200", "B200", "B300", "A100"]
