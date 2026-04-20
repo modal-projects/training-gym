@@ -26,6 +26,7 @@
 #   can watch the job from your browser.
 
 import modal
+
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 N_NODES = 2

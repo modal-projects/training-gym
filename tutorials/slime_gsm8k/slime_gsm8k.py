@@ -10,6 +10,8 @@
 # Invoke any function on the returned `app` via `modal run`, or
 # interactively with `app.run()` + `.remote()`.
 
+import modal
+
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import BaseModelType, Model
 from modal_training_gym.common.wandb import WandbConfig

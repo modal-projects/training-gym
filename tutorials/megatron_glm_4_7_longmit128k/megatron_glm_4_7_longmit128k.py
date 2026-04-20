@@ -35,6 +35,8 @@
 # modal secret create wandb-secret WANDB_API_KEY=<your-key>
 # ```
 
+import modal
+
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import BaseModelType, Model
 from modal_training_gym.common.wandb import WandbConfig

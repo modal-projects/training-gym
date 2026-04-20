@@ -10,6 +10,8 @@
 # plumbing — we just wrap it with a Modal cluster so it scales across
 # nodes.
 
+import modal
+
 from modal_training_gym.frameworks.lightning import (
     LightningConfig,
     LightningModalConfig,

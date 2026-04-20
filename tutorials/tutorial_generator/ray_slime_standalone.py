@@ -52,6 +52,7 @@ def _install():
 @code
 def _imports_and_image():
     import modal
+
     from modal_training_gym.common.ray_cluster import ModalRayCluster
 
     N_NODES = 2

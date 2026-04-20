@@ -118,10 +118,11 @@ def build_slime_app(
         name="download_model",
     )
     def download_model():
-        """Download `slime.hf_checkpoint` into the shared HF cache volume."""
+        """Download the model's HF checkpoint into the shared HF cache volume."""
         from huggingface_hub import snapshot_download
 
-        snapshot_download(repo_id=slime.hf_checkpoint)
+        assert slime.model is not None, "slime.model must be set"
+        snapshot_download(repo_id=slime.model.hf_checkpoint)
         hf_cache_volume.commit()
 
     @app.function(
@@ -161,7 +162,8 @@ def build_slime_app(
         hf_cache_volume.reload()
         checkpoints_volume.reload()
 
-        hf_path = snapshot_download(slime.hf_checkpoint, local_files_only=True)
+        assert slime.model is not None, "slime.model must be set"
+        hf_path = snapshot_download(slime.model.hf_checkpoint, local_files_only=True)
         save_path = str(slime.ref_load)
         num_nodes, nproc_per_node, extra_args = get_checkpoint_conversion_policy(slime)
         node_rank, master_addr, _, nnodes = get_modal_cluster_context(num_nodes)

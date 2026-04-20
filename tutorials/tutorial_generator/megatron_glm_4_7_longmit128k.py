@@ -66,6 +66,8 @@ def _install():
 
 @code
 def _imports():
+    import modal
+
     from modal_training_gym.common.dataset import DatasetConfig
     from modal_training_gym.common.models import BaseModelType, Model
     from modal_training_gym.common.wandb import WandbConfig
@@ -333,8 +335,6 @@ def _run_interactive():
 @notebook_only
 @code
 def _invoke():
-    import modal
-    
     with modal.enable_output():
         with app.run():
             # app.download_and_convert.remote()

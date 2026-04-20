@@ -31,6 +31,8 @@ def _install():
 
 @code
 def _imports():
+    import modal
+
     from modal_training_gym.frameworks.lightning import (
         LightningConfig,
         LightningModalConfig,
