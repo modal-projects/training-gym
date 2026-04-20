@@ -10,37 +10,6 @@ Reusable building blocks + runnable examples for distributed training on
 once, then import framework-specific launchers from your own scripts or
 notebooks.
 
-## Layout
-
-```
-modal_training_gym/        ← installable package
-├── common/                ← cross-framework classes (pure data)
-│   ├── dataset.py         ← `DatasetConfig` base + `prepare()` hook
-│   ├── wandb.py           ← `WandbConfig`
-│   ├── ray_cluster.py     ← `ModalRayCluster` (Ray head + workers on Modal clusters)
-│   └── models/            ← `BaseModelType` enum + `Model` + per-family specs
-└── frameworks/            ← one package per training framework
-    ├── slime/             ← SLIME RLVR (GRPO, SGLang + Megatron, via Ray)
-    ├── ms_swift/          ← ms-swift Megatron (SFT / LoRA)
-    ├── megatron/          ← NVIDIA NeMo `megatron.bridge`
-    ├── verl/              ← verl (GRPO, Megatron + vLLM, via Ray)
-    ├── torchrun/          ← generic `torchrun`-launched user script
-    └── hf_accelerate/     ← generic `accelerate launch`-driven user script
-
-tutorials/                 ← runnable examples — one folder per tutorial
-├── tutorial_generator/    ← source files; each produces a .py + .ipynb
-│   ├── slime_gsm8k.py
-│   ├── ms_swift_glm_4_7_gsm8k.py
-│   ├── megatron_glm_4_7_longmit128k.py
-│   ├── verl_qwen3_32b_gsm8k.py
-│   ├── starcoder_llama2_7b.py
-│   └── nanogpt_owt.py
-└── generate_tutorial.py   ← AST-walks the sources, regenerates .py + .ipynb
-
-dashboards/                ← Grafana-style dashboards for monitoring runs
-skills/                    ← agent skills for navigating this repo
-```
-
 ## Quickstart
 
 ### Installing the package
@@ -66,6 +35,9 @@ uv run modal run --detach tutorials/slime_gsm8k/slime_gsm8k.py::app.train
 
 Or open the matching `.ipynb` in Jupyter/Modal Notebooks and run cell-by-cell.
 
+See [`tutorials/README.md`](tutorials/README.md) for the full catalog of
+runnable examples.
+
 ## Frameworks
 
 Each framework package exposes a `build_<name>_app(modal=..., config=...)`
@@ -73,22 +45,59 @@ factory that returns a `modal.App` with download / prepare / train functions
 ready to be invoked from `modal run` or `app.run()`. Common-container
 objects (`DatasetConfig`, `Model`, `WandbConfig`) are plugged into the
 framework config; each framework translates them into its own CLI
-vocabulary (SLIME uses `--prompt-data`, ms-swift uses `--dataset`, verl
-uses Hydra-style `key=value`, etc.).
+vocabulary.
 
-| Package                                | Launch mechanism                     | Tutorial                                 |
-|----------------------------------------|--------------------------------------|------------------------------------------|
-| `modal_training_gym.frameworks.slime`  | Ray cluster + `JobSubmissionClient`  | `tutorials/slime_gsm8k/`                 |
-| `…frameworks.ms_swift`                 | `torchrun megatron sft …`            | `tutorials/ms_swift_glm_4_7_gsm8k/`      |
-| `…frameworks.megatron`                 | `torchrun train_script.py` (JSON cfg)| `tutorials/megatron_glm_4_7_longmit128k/`|
-| `…frameworks.verl`                     | Ray + verl Hydra overrides           | `tutorials/verl_qwen3_32b_gsm8k/`        |
-| `…frameworks.torchrun`                 | `torchrun <user script>`             | `tutorials/starcoder_llama2_7b/`         |
-| `…frameworks.hf_accelerate`            | `accelerate launch <user script>`    | `tutorials/starcoder_llama2_7b/` (same)  |
+Browse `modal_training_gym/frameworks/` for the full set of supported
+frameworks, and [`tutorials/README.md`](tutorials/README.md) for a runnable
+example of each.
 
-`starcoder_llama2_7b` showcases both `torchrun` and `hf_accelerate` side by
-side — same training script, two launchers. `nanogpt_owt` is a
-non-framework tutorial that clones karpathy/nanoGPT at image-build time and
-wraps it in Modal functions directly.
+## Documentation
+
+- [Multi-node training guide (Notion)](https://modal-com.notion.site/Multi-node-docs-1281e7f16949806f966adedfe8b2cb74?pvs=4)
+- [Multi-GPU Training on Modal](https://modal.com/docs/guide/gpu#multi-gpu-training)
+- [Using CUDA on Modal](https://modal.com/docs/guide/cuda)
+- [GPU Metrics](https://modal.com/docs/guide/gpu-metrics)
+
+## License
+
+[MIT](LICENSE).
+
+---
+
+# Developer Guide
+
+## Layout
+
+```
+modal_training_gym/        ← installable package
+├── common/                ← cross-framework classes (datasets, models, wandb, Ray cluster helpers)
+└── frameworks/            ← one package per training framework (see tutorials/ for the full list)
+
+tutorials/                 ← runnable examples — one folder per tutorial
+├── tutorial_generator/    ← source files; each produces a .py + .ipynb
+└── generate_tutorial.py   ← AST-walks the sources, regenerates .py + .ipynb
+
+dashboards/                ← Grafana-style dashboards for monitoring runs
+skills/                    ← agent skills for navigating this repo
+```
+
+## Dev setup
+
+```bash
+# editable install + pinned dev deps (pre-commit, ipykernel if you want)
+uv sync
+
+# register this venv as a Jupyter kernel (one-time, for notebook work)
+uv run python -m ipykernel install --user --name=modal-training-gym
+
+# install the pre-commit hook locally
+uv run pre-commit install
+```
+
+Project Python is pinned to 3.12 (see `.python-version` / `pyproject.toml`);
+every `@app.function(serialized=True)` requires the local ↔ remote Python
+versions to match, and a couple of the framework images we use ship py312
+by default.
 
 ## Authoring a new tutorial
 
@@ -132,32 +141,6 @@ automatically so committed `.py` / `.ipynb` never drift from the source.
    explicitly in each framework — don't try to share CLI vocabularies.
    The common config classes stay pure data.
 
-## Dev setup
+## Agent guide
 
-```bash
-# editable install + pinned dev deps (pre-commit, ipykernel if you want)
-uv sync
-
-# register this venv as a Jupyter kernel (one-time, for notebook work)
-uv run python -m ipykernel install --user --name=modal-training-gym
-
-# install the pre-commit hook locally
-uv run pre-commit install
-```
-
-Project Python is pinned to 3.12 (see `.python-version` / `pyproject.toml`);
-every `@app.function(serialized=True)` requires the local ↔ remote Python
-versions to match, and a couple of the framework images we use ship py312
-by default.
-
-## Documentation
-
-- [Multi-node training guide (Notion)](https://modal-com.notion.site/Multi-node-docs-1281e7f16949806f966adedfe8b2cb74?pvs=4)
-- [Multi-GPU Training on Modal](https://modal.com/docs/guide/gpu#multi-gpu-training)
-- [Using CUDA on Modal](https://modal.com/docs/guide/cuda)
-- [GPU Metrics](https://modal.com/docs/guide/gpu-metrics)
-- [Agent guide for running training jobs on Modal](skills/agent-modal-training.md)
-
-## License
-
-[MIT](LICENSE).
+- [Running training jobs on Modal](skills/agent-modal-training.md)
