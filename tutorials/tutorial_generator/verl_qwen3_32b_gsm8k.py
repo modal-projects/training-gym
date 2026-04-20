@@ -39,7 +39,7 @@ def _quickstart():
 
 
 @notebook_only
-@shell("%uv pip install -q 'git+https://x-access-token:${GITHUB_TOKEN}@github.com/modal-projects/training-gym.git@joy/initial-setup'")
+@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup")
 
 def _install():
     pass
