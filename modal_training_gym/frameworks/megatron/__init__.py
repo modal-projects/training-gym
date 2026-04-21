@@ -4,7 +4,7 @@ from .config import (
     HF_CACHE,
     MODELS_DIR,
     MegatronConfig,
-    MegatronModalConfig,
+    MegatronFrameworkConfig,
 )
 from .launcher import build_megatron_app
 
@@ -14,6 +14,6 @@ __all__ = [
     "HF_CACHE",
     "MODELS_DIR",
     "MegatronConfig",
-    "MegatronModalConfig",
+    "MegatronFrameworkConfig",
     "build_megatron_app",
 ]

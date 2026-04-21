@@ -1,30 +1,37 @@
-"""Model identity + architecture, shared across training frameworks.
+"""Model configuration + `download_model()` hook, shared across training frameworks.
 
-A `Model` bundles:
+A `ModelConfiguration` bundles identity (`model_name`), an optional local
+`model_path`, and an optional transformer `architecture`. Pure data —
+each framework config reads what it needs from an attached subclass.
 
-  - `BaseModelType` — enum tag naming the supported model family.
-  - `hf_checkpoint`  — HuggingFace repo id (e.g. `"Qwen/Qwen3-4B"`).
-  - `ModelArchitecture` — transformer-architecture fields (layers, heads, …).
+Subclass and set `model_name` / `model_path` / `architecture` as class
+attributes (or pass them as constructor kwargs), then override
+`download_model()` to materialize weights into the shared model volume.
 
-Pure data — each framework config writes its own converter that turns a
-`Model` into its specific CLI flags. The registry (`register_model`) lets
-`Model(BaseModelType.Qwen3_4B)` auto-fill `hf_checkpoint` + `architecture`
-from per-model files; pass either field explicitly to override.
+The four built-in models (`Qwen3_4B`, `Qwen3_32B`, `GLM_4_7`, `Llama2_7B`)
+are concrete subclasses in their own per-model modules. For a custom
+HuggingFace model, write your own subclass — no registry, no global
+state.
+
+Example (mirrors the `DatasetConfig` pattern in
+`modal_training_gym/common/dataset.py`):
+
+    from huggingface_hub import snapshot_download
+    from modal_training_gym.common.models import (
+        ModelArchitecture, ModelConfiguration,
+    )
+
+    class SmolLM2_135M(ModelConfiguration):
+        model_name = "HuggingFaceTB/SmolLM2-135M"
+
+        def download_model(self) -> None:
+            snapshot_download(repo_id=self.model_name)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
-
-
-class BaseModelType(str, Enum):
-    """Known model families. Extend as new models are added."""
-
-    Qwen3_4B = "Qwen3_4B"
-    Qwen3_32B = "Qwen3_32B"
-    GLM_4_7 = "GLM_4_7"
-    Llama2_7B = "Llama2_7B"
+from typing import Any
 
 
 @dataclass
@@ -48,47 +55,24 @@ class ModelArchitecture:
     rotary_base: int = 10000
 
 
-# Registry populated at import time by per-model modules (qwen3_4b.py etc.).
-# Maps `BaseModelType` → (hf_checkpoint, architecture). Look up via the public
-# `Model(model_type)` constructor, which infers missing fields from here.
-_MODEL_REGISTRY: dict[BaseModelType, tuple[str, ModelArchitecture]] = {}
+class ModelConfiguration:
+    """Known model families. Extend as new models are added.
 
-
-def register_model(
-    model_type: BaseModelType,
-    *,
-    hf_checkpoint: str,
-    architecture: ModelArchitecture,
-) -> None:
-    """Register the canonical hf_checkpoint + architecture for a model type."""
-    _MODEL_REGISTRY[model_type] = (hf_checkpoint, architecture)
-
-
-@dataclass
-class Model:
-    """A training model = type tag + weights location + architecture.
-
-    Only `model_type` is required — `hf_checkpoint` and `architecture` are
-    looked up from the registry populated by per-model modules. Pass either
-    field explicitly to override the default for a registered type.
+    Subclass and set `model_name`, optionally `model_path` and
+    `architecture`, and override `download_model()` to materialize weights
+    into the model volume.
     """
 
-    model_type: BaseModelType
-    hf_checkpoint: str | None = None
+    model_name: str = ""
+    model_path: str | None = None
     architecture: ModelArchitecture | None = None
 
-    def __post_init__(self) -> None:
-        spec = _MODEL_REGISTRY.get(self.model_type)
-        if spec is None:
-            if self.hf_checkpoint is None or self.architecture is None:
-                raise ValueError(
-                    f"No registered spec for {self.model_type!r}; either call "
-                    f"`register_model(...)` in a model module, or pass "
-                    f"hf_checkpoint and architecture explicitly."
-                )
-            return
-        default_hf, default_arch = spec
-        if self.hf_checkpoint is None:
-            self.hf_checkpoint = default_hf
-        if self.architecture is None:
-            self.architecture = default_arch
+    def __init__(self, **kwargs: Any) -> None:
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def download_model(self) -> None:
+        """Download or materialize weights into the model volume."""
+        raise NotImplementedError(
+            f"{type(self).__name__} has no download_model()"
+        )

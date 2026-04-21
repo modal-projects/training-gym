@@ -35,8 +35,7 @@ def _imports():
 
     from modal_training_gym.frameworks.lightning import (
         LightningConfig,
-        LightningModalConfig,
-        build_lightning_app,
+        LightningFrameworkConfig,
     )
 
 
@@ -111,15 +110,19 @@ def _config_section():
 
 @code
 def _define_config():
-    class _Lightning(LightningConfig):
-        n_nodes = 2
-        gpus_per_node = 8
+    lightning_framework_config = LightningFrameworkConfig(
+        gpu="H100",
+        n_nodes=2,
+        gpus_per_node=8,
+        train_script_source=TRAIN_SCRIPT,
+        accelerator="gpu",
+        strategy="ddp",
+        precision="bf16-mixed",
+    )
 
-        train_script_source = TRAIN_SCRIPT
-
-        accelerator = "gpu"
-        strategy = "ddp"
-        precision = "bf16-mixed"
+    my_training_run = LightningConfig(
+        framework_config=lightning_framework_config,
+    )
 
 
 @markdown
@@ -131,17 +134,17 @@ def _build_section():
 
 @code
 def _build_app():
-    app = build_lightning_app(
-        modal=LightningModalConfig(gpu="H100"),
-        config=_Lightning(),
-    )
+    app = my_training_run.build_app()
 
 
 @py_only
 @markdown
 def _run_cli():
     """
+    From the CLI:
+
     ```bash
+    uv run modal run tutorials/lightning_fabric_demo/lightning_fabric_demo.py::app.download_dataset
     uv run modal run tutorials/lightning_fabric_demo/lightning_fabric_demo.py::app.upload_script
     uv run modal run --detach tutorials/lightning_fabric_demo/lightning_fabric_demo.py::app.train
     ```
@@ -149,8 +152,29 @@ def _run_cli():
 
 
 @notebook_only
+@markdown
+def _run_interactive():
+    """
+    Interactive — open an ephemeral app and run one stage per cell:
+    """
+
+
+@notebook_only
 @code
-def _invoke():
+def _invoke_download_dataset():
+    with app.run():
+        app.download_dataset.remote()
+
+
+@notebook_only
+@code
+def _invoke_upload_script():
     with app.run():
         app.upload_script.remote()
+
+
+@notebook_only
+@code
+def _invoke_train():
+    with app.run():
         app.train.remote()

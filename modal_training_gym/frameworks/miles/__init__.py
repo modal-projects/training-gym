@@ -3,7 +3,7 @@ from .config import (
     DATA_PATH,
     HF_CACHE_PATH,
     MilesConfig,
-    MilesModalConfig,
+    MilesFrameworkConfig,
 )
 from .launcher import build_miles_app
 
@@ -12,6 +12,6 @@ __all__ = [
     "DATA_PATH",
     "HF_CACHE_PATH",
     "MilesConfig",
-    "MilesModalConfig",
+    "MilesFrameworkConfig",
     "build_miles_app",
 ]

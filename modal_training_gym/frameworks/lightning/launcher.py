@@ -3,17 +3,18 @@
 Usage (from a tutorial file):
 
     from modal_training_gym.frameworks.lightning import (
-        LightningConfig, LightningModalConfig, build_lightning_app,
+        LightningConfig, LightningFrameworkConfig, build_lightning_app,
     )
 
-    class _Lightning(LightningConfig):
-        train_script_source = TRAIN_SCRIPT
-        strategy = "ddp"
-
-    app = build_lightning_app(
-        modal=LightningModalConfig(gpu="H100"),
-        config=_Lightning(),
+    config = LightningConfig(
+        framework_config=LightningFrameworkConfig(
+            train_script_source=TRAIN_SCRIPT,
+            strategy="ddp",
+            gpu="H100",
+        )
     )
+
+    app = build_lightning_app(config=config)
 
 Exposes `app.download_dataset`, `app.upload_script`, and `app.train`.
 """
@@ -29,33 +30,33 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+from modal_training_gym.common.framework import resolve_caller_module
 
 from .config import (
     DATASET_MOUNT_PATH,
     MODEL_MOUNT_PATH,
     SCRIPTS_MOUNT_PATH,
     LightningConfig,
-    LightningModalConfig,
 )
 
 
 def build_lightning_app(
     *,
-    modal: LightningModalConfig,
     config: LightningConfig,
     name: str | None = None,
 ) -> App:
     app_name = name or f"lightning-{type(config).__name__.lstrip('_').lower()}"
+    framework = config.framework_config
 
-    caller_module = inspect.getmodule(inspect.stack()[1].frame)
+    caller_module = resolve_caller_module()
     if caller_module is not None:
         cloudpickle.register_pickle_by_value(caller_module)
 
     # ── Image ────────────────────────────────────────────────────────────────
     train_image = (
-        Image.debian_slim(python_version=modal.python_version)
+        Image.debian_slim(python_version=framework.python_version)
         .apt_install("libibverbs-dev", "libibverbs1")
-        .pip_install(*modal.pip_deps)
+        .pip_install(*framework.pip_deps)
         .add_local_python_source("modal_training_gym", copy=True)
     )
 
@@ -67,15 +68,15 @@ def build_lightning_app(
     data_dir = str(DATASET_MOUNT_PATH)
     model_dir = str(MODEL_MOUNT_PATH)
     scripts_dir = str(SCRIPTS_MOUNT_PATH)
-    script_remote_path = f"{scripts_dir}/{config.train_script_name}"
+    script_remote_path = f"{scripts_dir}/{framework.train_script_name}"
 
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
         "framework": "lightning",
-        **config.app_tags,
+        **framework.app_tags,
     }
     app = App(app_name, tags=tags)
-    gpu_spec = f"{modal.gpu}:{config.gpus_per_node}"
+    gpu_spec = f"{framework.gpu}:{framework.gpus_per_node}"
 
     # ── download_dataset ─────────────────────────────────────────────────────
     @app.function(
@@ -102,15 +103,15 @@ def build_lightning_app(
         name="upload_script",
     )
     def upload_script():
-        """Write `config.train_script_source` to the scripts volume."""
-        if not config.train_script_source.strip():
-            raise RuntimeError("config.train_script_source is empty")
+        """Write `framework.train_script_source` to the scripts volume."""
+        if not framework.train_script_source.strip():
+            raise RuntimeError("framework.train_script_source is empty")
         os.makedirs(scripts_dir, exist_ok=True)
         with open(script_remote_path, "w") as f:
-            f.write(config.train_script_source)
+            f.write(framework.train_script_source)
         scripts_volume.commit()
         print(
-            f"Wrote training script ({len(config.train_script_source)} chars) "
+            f"Wrote training script ({len(framework.train_script_source)} chars) "
             f"to {script_remote_path}"
         )
 
@@ -132,7 +133,7 @@ def build_lightning_app(
         serialized=True,
         name="train",
     )
-    @clustered(size=config.n_nodes, rdma=True)
+    @clustered(size=framework.n_nodes, rdma=True)
     def train():
         """Run `fabric run` on the uploaded script on each clustered node."""
         assert os.path.exists(script_remote_path), (
@@ -155,7 +156,7 @@ def build_lightning_app(
                     config.wandb.exp_name or config.wandb.group
                 )
 
-        extra = list(config.script_args)
+        extra = list(framework.script_args)
         if "--data_dir" not in extra:
             extra.extend(["--data_dir", data_dir])
         if "--output_dir" not in extra:
@@ -164,14 +165,14 @@ def build_lightning_app(
         cmd = [
             "fabric",
             "run",
-            f"--accelerator={config.accelerator}",
-            f"--strategy={config.strategy}",
-            f"--devices={config.gpus_per_node}",
-            f"--num-nodes={config.n_nodes}",
+            f"--accelerator={framework.accelerator}",
+            f"--strategy={framework.strategy}",
+            f"--devices={framework.gpus_per_node}",
+            f"--num-nodes={framework.n_nodes}",
             f"--node-rank={rank}",
             f"--main-address={master_ip}",
-            f"--main-port={config.main_port}",
-            f"--precision={config.precision}",
+            f"--main-port={framework.main_port}",
+            f"--precision={framework.precision}",
             script_remote_path,
             *extra,
         ]

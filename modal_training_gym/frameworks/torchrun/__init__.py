@@ -3,7 +3,7 @@ from .config import (
     MODEL_MOUNT_PATH,
     SCRIPTS_MOUNT_PATH,
     TorchrunConfig,
-    TorchrunModalConfig,
+    TorchrunFrameworkConfig,
 )
 from .launcher import build_torchrun_app
 
@@ -12,6 +12,6 @@ __all__ = [
     "MODEL_MOUNT_PATH",
     "SCRIPTS_MOUNT_PATH",
     "TorchrunConfig",
-    "TorchrunModalConfig",
+    "TorchrunFrameworkConfig",
     "build_torchrun_app",
 ]

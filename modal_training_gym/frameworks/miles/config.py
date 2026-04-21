@@ -9,14 +9,19 @@ hyperparameters. The launcher adds the cluster + Ray glue.
 
 from __future__ import annotations
 
+from dataclasses import field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from modal_training_gym.common import GPUType
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 if TYPE_CHECKING:
+    from modal import App
+
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import Model
+    from modal_training_gym.common.models import ModelConfiguration
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
@@ -26,23 +31,9 @@ DATA_PATH = Path("/data")
 CHECKPOINTS_PATH = Path("/checkpoints")
 
 
-class MilesModalConfig:
-    """Modal infrastructure for Miles — GPU + image overrides."""
-
-    gpu: GPUType = "H100"
-    # Miles ships a pre-built image with patched Megatron-LM + the trainer.
-    miles_image: str = "radixark/miles:dev-202603231227"
-    # Extra commands appended to the image build (e.g. apply a local patch,
-    # pip-install a pin). Each entry is passed to `Image.run_commands(...)`.
-    image_run_commands: list[str] = []
-
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-
-class MilesConfig:
-    """Miles training configuration.
+@dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
+class MilesFrameworkConfig:
+    """Miles configuration, including Modal infrastructure.
 
     The bulk of the training config lives in `recipe_args` — a string of
     Miles CLI flags copied from the upstream `recipes/*.args` files (one
@@ -51,10 +42,13 @@ class MilesConfig:
     (hf checkpoint, save dir, actor/rollout topology) at the end.
     """
 
-    # ── Containers ───────────────────────────────────────────────────────────
-    dataset: "DatasetConfig | None" = None
-    model: "Model | None" = None
-    wandb: "WandbConfig | None" = None
+    # ── Modal infrastructure ────────────────────────────────────────────────
+    gpu: GPUType = "H100"
+    # Miles ships a pre-built image with patched Megatron-LM + the trainer.
+    miles_image: str = "radixark/miles:dev-202603231227"
+    # Extra commands appended to the image build (e.g. apply a local patch,
+    # pip-install a pin). Each entry is passed to `Image.run_commands(...)`.
+    image_run_commands: list[str] = field(default_factory=list)
 
     # ── Infrastructure ───────────────────────────────────────────────────────
     n_nodes: int = 1
@@ -83,11 +77,7 @@ class MilesConfig:
     rollout_num_gpus: int | None = None
 
     # ── Modal app tags ───────────────────────────────────────────────────────
-    app_tags: dict = {}
-
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    app_tags: dict = field(default_factory=dict)
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -137,3 +127,31 @@ class MilesConfig:
                 f"gpus_per_node={self.gpus_per_node}."
             )
         return spare
+
+
+class MilesConfig:
+    dataset: "DatasetConfig | None"
+    model: "ModelConfiguration | None"
+    wandb: "WandbConfig | None"
+    framework_config: MilesFrameworkConfig
+
+    def __init__(
+        self,
+        dataset: "DatasetConfig | None" = None,
+        model: "ModelConfiguration | None" = None,
+        wandb: "WandbConfig | None" = None,
+        framework_config: MilesFrameworkConfig | None = None,
+    ) -> None:
+        self.dataset = dataset
+        self.model = model
+        self.wandb = wandb
+        self.framework_config = framework_config or MilesFrameworkConfig()
+
+    def build_app(
+        self,
+        *,
+        name: str | None = None,
+    ) -> "App":
+        from .launcher import build_miles_app
+
+        return build_miles_app(miles=self, name=name)

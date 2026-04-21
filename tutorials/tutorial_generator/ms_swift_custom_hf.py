@@ -1,8 +1,9 @@
-"""Tutorial source for `ms_swift_glm_4_7_gsm8k` — parsed by generate_tutorial.py.
+"""Tutorial source for `ms_swift_custom_hf` — parsed by generate_tutorial.py.
 
-Each `@markdown`-decorated function contributes a markdown cell (its
-docstring); each `@code`-decorated function contributes a code cell (its
-body, dedented). Function names are arbitrary. Cell order = source order.
+Demonstrates plugging a *custom* HuggingFace model into an ms-swift LoRA SFT
+run by subclassing `ModelConfiguration` — no entry in the built-in model
+catalog, no registry mutation, just a subclass defined inline in the
+tutorial.
 """
 
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
@@ -11,11 +12,16 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # GLM-4.7 LoRA on GSM8K with ms-swift on Modal
+    # Custom HuggingFace model with ms-swift LoRA SFT on Modal
 
-    Fine-tunes GLM-4.7 with LoRA via ms-swift's Megatron backend. 4 nodes ×
-    8×B200, TP=2 / EP=4 / PP=4 / CP=1. `megatron sft` is launched under
-    `torchrun` on each clustered node.
+    Fine-tunes a **custom** HuggingFace model (`HuggingFaceTB/SmolLM2-135M`,
+    a 135M-parameter open Llama-family model) with LoRA SFT via ms-swift's
+    Megatron backend. 1 node × 1×H100.
+
+    The point of this tutorial is the *custom model* seam: the model is not
+    a member of the in-repo catalog. Instead we define a one-file subclass of
+    `ModelConfiguration` inline — `model_name`, optional `model_path`, and an
+    overridden `download_model()` is all that is needed.
 
     Invoke any function on the returned `app` via `modal run`, or
     interactively with `app.run()` + `.remote()`.
@@ -24,7 +30,6 @@ def _intro():
 
 @notebook_only
 @shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup")
-
 def _install():
     pass
 
@@ -34,7 +39,7 @@ def _imports():
     import modal
 
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import GLM_4_7
+    from modal_training_gym.common.models import ModelConfiguration
     from modal_training_gym.common.wandb import WandbConfig
     from modal_training_gym.frameworks.ms_swift import (
         MsSwiftConfig,
@@ -44,25 +49,50 @@ def _imports():
 
 
 @markdown
+def _explain_model():
+    """
+    ## Define the custom model
+
+    Subclass `ModelConfiguration` with the HuggingFace repo id as
+    `model_name` and a `download_model()` body that materializes the weights
+    into the shared HuggingFace cache. No enum tag, no registry entry, no
+    fork of the library — everything a framework needs to know is carried
+    on the subclass.
+    """
+
+
+@code
+def _define_model():
+    class SmolLM2_135M(ModelConfiguration):
+        model_name = "HuggingFaceTB/SmolLM2-135M"
+
+        def download_model(self) -> None:
+            from huggingface_hub import snapshot_download
+
+            snapshot_download(repo_id=self.model_name)
+
+
+@markdown
 def _explain_dataset():
     """
     ## Define the dataset
 
     ms-swift expects training data as a JSONL file with a `messages` field.
-    Subclass `DatasetConfig`, set `prompt_data` to the output path, and
-    implement `prepare()` to convert a HuggingFace dataset into that format.
+    A tiny GSM8K slice keeps the Tier 2 smoke run cheap — we only need one
+    training step's worth of data to prove the custom-model seam works end
+    to end.
     """
 
 
 @code
 def _define_dataset():
-    class GSM8KDataset(DatasetConfig):
+    class TinyGSM8KDataset(DatasetConfig):
         def __init__(
             self,
             hf_cache_root,
-            data_folder="gsm8k",
+            data_folder="gsm8k_tiny",
             hf_dataset="openai/gsm8k",
-            split="train",
+            split="train[:32]",
             input_col="question",
             output_col="answer",
         ):
@@ -106,39 +136,47 @@ def _explain_config():
     """
     ## Define the experiment
 
-    Build a framework settings object (`MsSwiftFrameworkConfig`) and pass it
-    into `MsSwiftConfig(dataset=..., model=..., framework_config=...)`.
-    The framework settings are forwarded to `megatron sft` as `--flag value`
-    args (ms-swift uses underscore-style names and string-valued booleans).
+    Attach the custom `SmolLM2_135M` subclass to `MsSwiftConfig` just like a
+    built-in — the ms-swift launcher only reads `config.model.model_name`,
+    which our subclass provides. Tiny parallelism settings (single node,
+    single GPU) keep Tier 2 validation cheap.
     """
 
 
 @code
 def _define_config():
     swift_framework_config = MsSwiftFrameworkConfig(
-        gpu="B200",
-        n_nodes=4,
-        gpus_per_node=8,
-        tensor_model_parallel_size=2,
-        expert_model_parallel_size=4,
-        pipeline_model_parallel_size=4,
+        # NGC PyTorch 25.01 ships Python 3.12 + PyTorch 2.6 + CUDA 12.6, which
+        # matches the repo's pinned local Python (3.12) — Modal's
+        # `serialized=True` requires the remote image's Python to match the
+        # local one. The default ModelScope image pins Python 3.11 and would
+        # trip `InvalidError` at app-build time.
+        image="nvcr.io/nvidia/pytorch:25.01-py3",
+        gpu="H100",
+        n_nodes=1,
+        gpus_per_node=1,
+        tensor_model_parallel_size=1,
+        expert_model_parallel_size=1,
+        pipeline_model_parallel_size=1,
         context_parallel_size=1,
-        sequence_parallel=True,
-        train_iters=5,
+        sequence_parallel=False,
         num_train_epochs=1,
         lr=1e-4,
-        global_batch_size=8,
-        max_length=2048,
+        global_batch_size=1,
+        max_length=512,
         tuner_type="lora",
-        lora_rank=128,
-        lora_alpha=32,
+        lora_rank=8,
+        lora_alpha=16,
         merge_lora=False,
+        log_interval=1,
+        save_interval=10,
+        eval_iters=0,
     )
 
     my_training_run = MsSwiftConfig(
-        dataset=GSM8KDataset(HF_CACHE_PATH),
-        model=GLM_4_7(),
-        wandb=WandbConfig(project="glm-4-7-sft"),
+        dataset=TinyGSM8KDataset(HF_CACHE_PATH),
+        model=SmolLM2_135M(),
+        wandb=WandbConfig(project="custom-hf-smoke"),
         framework_config=swift_framework_config,
     )
 
@@ -169,9 +207,9 @@ def _run_cli():
     From the CLI:
 
     ```
-    uv run modal run tutorials/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py::app.download_model
-    uv run modal run tutorials/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py::app.prepare_dataset
-    uv run modal run tutorials/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py::app.train
+    uv run modal run tutorials/ms_swift_custom_hf/ms_swift_custom_hf.py::app.download_model
+    uv run modal run tutorials/ms_swift_custom_hf/ms_swift_custom_hf.py::app.prepare_dataset
+    uv run modal run --detach tutorials/ms_swift_custom_hf/ms_swift_custom_hf.py::app.train
     ```
     """
 

@@ -2,18 +2,19 @@
 
 Usage (from a tutorial file):
 
-    from modal_training_gym.common.models import BaseModelType, Model
+    from modal_training_gym.common.models import Qwen3_32B
     from modal_training_gym.frameworks.verl import (
-        VerlConfig, VerlModalConfig, build_verl_app,
+        VerlConfig, VerlFrameworkConfig, build_verl_app,
     )
 
-    class _Verl(VerlConfig):
-        model = Model(BaseModelType.Qwen3_32B)
-        dataset = ...  # DatasetConfig subclass whose prepare() writes
-                       # {DATA_PATH}/train.parquet + {DATA_PATH}/test.parquet
-        wandb = ...
+    verl = VerlConfig(
+        model=Qwen3_32B(),  # or subclass ModelConfiguration for a custom HF model
+        dataset=...,  # DatasetConfig subclass whose prepare() writes
+        wandb=...,
+        framework_config=VerlFrameworkConfig(gpu="H100"),
+    )
 
-    app = build_verl_app(modal=VerlModalConfig(gpu="H100"), verl=_Verl())
+    app = build_verl_app(verl=verl)
 
 Produces a `modal.App` with:
   - `download_model`      — snapshot_download HF weights into a volume.
@@ -32,13 +33,13 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+from modal_training_gym.common.framework import resolve_caller_module
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 from .config import (
     DATA_PATH,
     MODELS_PATH,
     VerlConfig,
-    VerlModalConfig,
 )
 
 _VERL_REPO_PATH = "/root/verl"
@@ -46,15 +47,15 @@ _VERL_REPO_PATH = "/root/verl"
 
 def build_verl_app(
     *,
-    modal: VerlModalConfig,
     verl: VerlConfig,
     name: str | None = None,
 ) -> App:
     app_name = name or f"verl-{type(verl).__name__.lstrip('_').lower()}"
+    framework = verl.framework_config
 
     # Inline user-defined classes (e.g. `_Verl`) so the remote container
     # doesn't need to re-import the tutorial module.
-    caller_module = inspect.getmodule(inspect.stack()[1].frame)
+    caller_module = resolve_caller_module()
     if caller_module is not None:
         cloudpickle.register_pickle_by_value(caller_module)
 
@@ -62,7 +63,7 @@ def build_verl_app(
     # verl ships pre-built images; we add git + clone the repo for its
     # `scripts/converter_hf_to_mcore.py` and `examples/data_preprocess/gsm8k.py`.
     train_image = (
-        Image.from_registry(modal.image)
+        Image.from_registry(framework.image)
         .apt_install(
             "git",
             "libibverbs-dev",
@@ -70,7 +71,7 @@ def build_verl_app(
             "libhwloc15",
             "libnl-route-3-200",
         )
-        .run_commands(f"git clone {modal.verl_git_url} {_VERL_REPO_PATH}")
+        .run_commands(f"git clone {framework.verl_git_url} {_VERL_REPO_PATH}")
         .uv_pip_install(_VERL_REPO_PATH)
         .entrypoint([])
         .add_local_python_source("modal_training_gym", copy=True)
@@ -98,7 +99,7 @@ def build_verl_app(
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
         "framework": "verl",
-        **verl.app_tags,
+        **framework.app_tags,
     }
     app = App(app_name, tags=tags)
 
@@ -117,7 +118,7 @@ def build_verl_app(
         assert verl.model is not None, "verl.model must be set"
         target = verl.hf_model_dir()
         snapshot_download(
-            repo_id=verl.model.hf_checkpoint,
+            repo_id=verl.model.model_name,
             local_dir=target,
             revision=revision,
         )
@@ -127,7 +128,7 @@ def build_verl_app(
     # ── convert_hf_to_mcore ──────────────────────────────────────────────────
     @app.function(
         image=train_image,
-        gpu=f"{modal.gpu}:2",  # verl's converter runs on a small single node.
+        gpu=f"{framework.gpu}:2",  # verl's converter runs on a small single node.
         timeout=24 * 60 * 60,
         volumes={models_path_str: checkpoints_volume},
         serialized=True,
@@ -174,7 +175,7 @@ def build_verl_app(
         name="upload_reward",
     )
     def upload_reward():
-        """Write `verl.reward_function_source` to the rewards volume.
+        """Write `framework.reward_function_source` to the rewards volume.
 
         Call this once (or whenever the source changes) before `train_multi_node`.
         The resulting file is a regular `.py` importable from either a Python
@@ -183,22 +184,22 @@ def build_verl_app(
         """
         import os
 
-        if not verl.reward_function_source.strip():
+        if not framework.reward_function_source.strip():
             print("No reward_function_source set; nothing to upload.")
             return
         os.makedirs(rewards_dir, exist_ok=True)
         with open(uploaded_reward_path, "w") as f:
-            f.write(verl.reward_function_source)
+            f.write(framework.reward_function_source)
         rewards_volume.commit()
         print(
-            f"Wrote reward source ({len(verl.reward_function_source)} chars) "
+            f"Wrote reward source ({len(framework.reward_function_source)} chars) "
             f"to {uploaded_reward_path}"
         )
 
     # ── train_multi_node ─────────────────────────────────────────────────────
     @app.function(
         image=train_image,
-        gpu=f"{modal.gpu}:{verl.gpus_per_node}",
+        gpu=f"{framework.gpu}:{framework.gpus_per_node}",
         volumes={
             models_path_str: checkpoints_volume,
             data_path_str: data_volume,
@@ -210,7 +211,7 @@ def build_verl_app(
         serialized=True,
         name="train_multi_node",
     )
-    @clustered(size=verl.n_nodes, rdma=True)
+    @clustered(size=framework.n_nodes, rdma=True)
     async def train_multi_node(*extra_overrides: str):
         """Multi-node GRPO training: bring up Ray, submit verl job via client.
 
@@ -224,7 +225,7 @@ def build_verl_app(
         data_volume.reload()
 
         cluster = ModalRayCluster()
-        cluster.start(n_nodes=verl.n_nodes)
+        cluster.start(n_nodes=framework.n_nodes)
 
         if not cluster.is_head:
             await cluster.wait_forever()
@@ -236,12 +237,12 @@ def build_verl_app(
         import os as _os
 
         if (
-            verl.reward_function_source.strip()
+            framework.reward_function_source.strip()
             and _os.path.exists(uploaded_reward_path)
         ):
             reward_path = uploaded_reward_path
-        elif verl.reward_function_path:
-            reward_path = verl.reward_function_path
+        elif framework.reward_function_path:
+            reward_path = framework.reward_function_path
         else:
             import importlib.util
 

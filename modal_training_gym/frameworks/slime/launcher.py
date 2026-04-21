@@ -22,11 +22,13 @@ import shlex
 import subprocess
 import tempfile
 
-import cloudpickle
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
+import cloudpickle
+
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+from modal_training_gym.common.framework import resolve_caller_module
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 from .config import (
@@ -58,15 +60,27 @@ def build_slime_app(
     file holds its own Modal app whose shape is determined entirely by the
     config objects it constructs.
     """
+    # Preflight: SLIME requires a `ModelArchitecture` on the attached model.
+    # Fail locally with an actionable `ValueError` before any `@app.function`
+    # decorator fires.
+    if slime.model is not None:
+        SlimeConfig._validate_custom_model_architecture(slime.model)
+
     app_name = name or f"slime-{type(slime).__name__.lstrip('_').lower()}"
 
-    # Tell cloudpickle to inline the caller's module (e.g. the user's tutorial
-    # file) by value rather than by reference. Without this, the serialized
-    # Modal functions close over the user's SlimeConfig subclass by its
-    # module path, and the remote container fails to re-import that module.
-    caller_module = inspect.getmodule(inspect.stack()[1].frame)
+    # Find the user's tutorial module (walks past framework frames that would
+    # otherwise shadow the real caller when invoked via `SlimeConfig.build_app`).
+    caller_module = resolve_caller_module()
     if caller_module is not None:
+        # Inline the tutorial classes by value so the remote container doesn't
+        # need to re-import the tutorial module at deserialization.
         cloudpickle.register_pickle_by_value(caller_module)
+
+    caller_script = None
+    if caller_module is not None:
+        mod_file = getattr(caller_module, "__file__", None)
+        if mod_file:
+            caller_script = os.path.abspath(mod_file)
 
     # ── Image ────────────────────────────────────────────────────────────────
     image = (
@@ -76,6 +90,14 @@ def build_slime_app(
         .entrypoint([])
         .add_local_python_source("modal_training_gym", copy=True)
     )
+    if caller_script is not None:
+        caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]
+        caller_remote_path = f"/root/{caller_module_name}.py"
+        image = image.add_local_file(
+            caller_script,
+            remote_path=caller_remote_path,
+            copy=True,
+        )
     for patch in modal.patch_files:
         image = image.add_local_file(
             patch, f"/tmp/{os.path.basename(patch)}", copy=True
@@ -122,7 +144,7 @@ def build_slime_app(
         from huggingface_hub import snapshot_download
 
         assert slime.model is not None, "slime.model must be set"
-        snapshot_download(repo_id=slime.model.hf_checkpoint)
+        snapshot_download(repo_id=slime.model.model_name)
         hf_cache_volume.commit()
 
     @app.function(
@@ -163,7 +185,7 @@ def build_slime_app(
         checkpoints_volume.reload()
 
         assert slime.model is not None, "slime.model must be set"
-        hf_path = snapshot_download(slime.model.hf_checkpoint, local_files_only=True)
+        hf_path = snapshot_download(slime.model.model_name, local_files_only=True)
         save_path = str(slime.ref_load)
         num_nodes, nproc_per_node, extra_args = get_checkpoint_conversion_policy(slime)
         node_rank, master_addr, _, nnodes = get_modal_cluster_context(num_nodes)

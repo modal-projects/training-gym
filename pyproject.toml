@@ -6,6 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "modal",
     "cloudpickle",
+    "msgspec",
+    "pydantic",
 ]
 
 [build-system]

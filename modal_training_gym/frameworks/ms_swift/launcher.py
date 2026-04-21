@@ -2,31 +2,31 @@
 
 Usage (from a tutorial file):
 
-    from modal_training_gym.common.models import BaseModelType, Model
+    from modal_training_gym.common.models import GLM_4_7
     from modal_training_gym.frameworks.ms_swift import (
-        MsSwiftConfig, MsSwiftModalConfig, build_ms_swift_app,
+        MsSwiftConfig, MsSwiftFrameworkConfig, build_ms_swift_app,
     )
 
-    class _MsSwift(MsSwiftConfig):
-        model = Model(BaseModelType.GLM_4_7)
-        dataset = ...
-        wandb = ...
-        # ... overrides
+    swift = MsSwiftConfig(
+        model=GLM_4_7(),  # or subclass ModelConfiguration for a custom HF model
+        dataset=...,
+        wandb=...,
+        framework_config=MsSwiftFrameworkConfig(gpu="B200"),
+    )
 
-    app = build_ms_swift_app(modal=MsSwiftModalConfig(gpu="B200"), swift=_MsSwift())
+    app = build_ms_swift_app(swift=swift)
 
 Then `modal run <file>.py::app.train` (or `::app.download_model`, etc).
 """
 
 from __future__ import annotations
 
-import inspect
 import json
 import os
 import subprocess
 import time
+import inspect
 
-import cloudpickle
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
@@ -36,24 +36,123 @@ from .config import (
     CHECKPOINTS_PATH,
     HF_CACHE_PATH,
     MsSwiftConfig,
-    MsSwiftModalConfig,
 )
 
 
+def _train_ms_swift_worker(run_id: str | None = None):
+    from huggingface_hub import snapshot_download
+
+    model_name = os.environ["MS_SWIFT_MODEL_NAME"]
+    dataset_path = os.environ["MS_SWIFT_DATASET_PATH"]
+    app_name = os.environ["MS_SWIFT_APP_NAME"]
+    checkpoints_root = os.environ["MS_SWIFT_CHECKPOINTS_PATH"]
+    checkpoints_volume_name = os.environ["MS_SWIFT_CHECKPOINTS_VOLUME_NAME"]
+    gpus_per_node = int(os.environ["MS_SWIFT_GPUS_PER_NODE"])
+    wandb_project = os.environ.get("MS_SWIFT_WANDB_PROJECT", "")
+    wandb_exp_name = os.environ.get("MS_SWIFT_WANDB_EXP_NAME", "")
+
+    if run_id is None:
+        run_id = f"train_{int(time.time())}"
+
+    cluster_info = get_cluster_info()
+    node_rank = cluster_info.rank
+    n_nodes = len(cluster_info.container_ips) if cluster_info.container_ips else 1
+    master_addr = cluster_info.container_ips[0] if cluster_info.container_ips else "localhost"
+    print(f"Node {node_rank}/{n_nodes}, Master: {master_addr}")
+
+    try:
+        model_dir = snapshot_download(model_name, local_files_only=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"Model {model_name} not found in HF cache. Run `download_model` first."
+        ) from exc
+
+    if not dataset_path or not os.path.exists(dataset_path):
+        raise RuntimeError(
+            f"No training data at {dataset_path!r}. Run `prepare_dataset` first."
+        )
+
+    checkpoint_dir = f"{checkpoints_root}/{app_name}_{run_id}"
+    resuming = False
+    if os.path.exists(checkpoint_dir):
+        iter_dirs = sorted(d for d in os.listdir(checkpoint_dir) if d.startswith("iter_"))
+        if iter_dirs:
+            resuming = True
+            print(f"Resuming from {iter_dirs[-1]}")
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    args_json = os.path.join(checkpoint_dir, "args.json")
+    if not os.path.exists(args_json):
+        with open(args_json, "w") as f:
+            json.dump({"run_id": run_id, "placeholder": True}, f)
+
+    megatron_flags = json.loads(os.environ["MS_SWIFT_BASE_CLI_ARGS_JSON"])
+    for i, arg in enumerate(megatron_flags):
+        if arg == "--output_dir" and i + 1 < len(megatron_flags):
+            megatron_flags[i + 1] = checkpoint_dir
+            break
+    for i, arg in enumerate(megatron_flags):
+        if arg == "--model" and i + 1 < len(megatron_flags):
+            megatron_flags[i + 1] = model_dir
+            break
+
+    if wandb_project and not wandb_exp_name and "--wandb_exp_name" not in megatron_flags:
+        megatron_flags.extend(["--wandb_exp_name", run_id])
+
+    if resuming:
+        megatron_flags.extend(["--load", checkpoint_dir])
+
+    cmd = [
+        "torchrun",
+        "--no_python",
+        "--nproc_per_node",
+        str(gpus_per_node),
+        "--nnodes",
+        str(n_nodes),
+        "--node_rank",
+        str(node_rank),
+        "--master_addr",
+        master_addr,
+        "--master_port",
+        "29500",
+        "megatron",
+        "sft",
+        *megatron_flags,
+    ]
+    print(f"Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=False, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ms-swift failed with code {result.returncode}")
+
+    Volume.from_name(checkpoints_volume_name, create_if_missing=True, version=2).commit()
+    print(f"Training {run_id} completed; results in {checkpoint_dir}")
+    return {"run_id": run_id, "checkpoint_dir": checkpoint_dir}
+
+
 def build_ms_swift_app(
-    *,
-    modal: MsSwiftModalConfig,
     swift: MsSwiftConfig,
     name: str | None = None,
 ) -> App:
     """Return a Modal App with `download_model`, `prepare_dataset`, `train`."""
     app_name = name or f"ms-swift-{type(swift).__name__.lstrip('_').lower()}"
+    framework = swift.framework_config
 
-    # Inline user-defined classes (e.g. `_MsSwift`) so the remote container
-    # doesn't need to re-import the tutorial module (same trick as slime).
-    caller_module = inspect.getmodule(inspect.stack()[1].frame)
-    if caller_module is not None:
-        cloudpickle.register_pickle_by_value(caller_module)
+    caller_script = None
+    cwd = os.path.abspath(os.getcwd())
+    for frame_info in inspect.stack()[1:]:
+        mod = inspect.getmodule(frame_info.frame)
+        if mod is None:
+            continue
+        mod_file = getattr(mod, "__file__", None)
+        if not mod_file:
+            continue
+        abs_mod_file = os.path.abspath(mod_file)
+        if not abs_mod_file.startswith(f"{cwd}{os.sep}"):
+            continue
+        if f"{os.sep}modal_training_gym{os.sep}" in abs_mod_file:
+            continue
+        caller_script = abs_mod_file
+        break
 
     # ── Images ───────────────────────────────────────────────────────────────
     download_image = (
@@ -64,12 +163,14 @@ def build_ms_swift_app(
             "torch==2.5.1",
             "safetensors==0.4.5",
             "datasets>=2.14.0",
+            "msgspec",
+            "pydantic",
         )
         .add_local_python_source("modal_training_gym", copy=True)
     )
 
     train_image = (
-        Image.from_registry(modal.image)
+        Image.from_registry(framework.image)
         .apt_install(
             "libibverbs-dev",
             "libibverbs1",
@@ -82,14 +183,29 @@ def build_ms_swift_app(
             "pip uninstall -y transformers ms-swift swift 2>/dev/null; true",
         )
         .pip_install(
-            f"transformers=={modal.transformers_version}",
+            f"transformers=={framework.transformers_version}",
             "ms-swift @ git+https://github.com/modelscope/ms-swift.git@main",
             "einops==0.8.2",
             "wandb==0.19.1",
+            "msgspec",
+            "pydantic",
         )
-        .env(swift.environment)
+        .env(framework.environment)
         .add_local_python_source("modal_training_gym", copy=True)
     )
+    if caller_script is not None:
+        caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]
+        caller_remote_path = f"/root/{caller_module_name}.py"
+        download_image = download_image.add_local_file(
+            caller_script,
+            remote_path=caller_remote_path,
+            copy=True,
+        )
+        train_image = train_image.add_local_file(
+            caller_script,
+            remote_path=caller_remote_path,
+            copy=True,
+        )
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
@@ -102,10 +218,10 @@ def build_ms_swift_app(
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
         "framework": "ms-swift",
-        **swift.app_tags,
+        **framework.app_tags,
     }
     app = App(app_name, tags=tags)
-    gpu_spec = f"{modal.gpu}:{swift.gpus_per_node}"
+    gpu_spec = f"{framework.gpu}:{framework.gpus_per_node}"
 
     # ── download_model ───────────────────────────────────────────────────────
     @app.function(
@@ -117,13 +233,13 @@ def build_ms_swift_app(
         name="download_model",
     )
     def download_model(force: bool = False):
-        """Download `swift.model.hf_checkpoint` into the shared HF cache."""
+        """Download `swift.model.model_name` into the shared HF cache."""
         from huggingface_hub import snapshot_download
 
         assert swift.model is not None, "swift.model must be set"
         hf_cache_volume.reload()
         path = snapshot_download(
-            swift.model.hf_checkpoint,
+            swift.model.model_name,
             token=os.environ.get("HF_TOKEN"),
             force_download=force,
         )
@@ -147,7 +263,23 @@ def build_ms_swift_app(
         hf_cache_volume.commit()
 
     # ── train ────────────────────────────────────────────────────────────────
-    @app.function(
+    assert swift.model is not None, "swift.model must be set"
+    assert swift.dataset is not None, "swift.dataset must be set"
+    base_cli_args = swift.cli_args(output_dir="__OUTPUT_DIR__")
+    train_env = {
+        "MS_SWIFT_MODEL_NAME": swift.model.model_name,
+        "MS_SWIFT_DATASET_PATH": getattr(swift.dataset, "prompt_data", ""),
+        "MS_SWIFT_APP_NAME": app_name,
+        "MS_SWIFT_GPUS_PER_NODE": str(framework.gpus_per_node),
+        "MS_SWIFT_CHECKPOINTS_PATH": checkpoints_str,
+        "MS_SWIFT_CHECKPOINTS_VOLUME_NAME": f"{app_name}-checkpoints",
+        "MS_SWIFT_BASE_CLI_ARGS_JSON": json.dumps(base_cli_args),
+        "MS_SWIFT_WANDB_PROJECT": swift.wandb.project if swift.wandb else "",
+        "MS_SWIFT_WANDB_EXP_NAME": (
+            (swift.wandb.exp_name or swift.wandb.group) if swift.wandb else ""
+        ),
+    }
+    app.function(
         image=train_image,
         gpu=gpu_spec,
         volumes={
@@ -163,112 +295,10 @@ def build_ms_swift_app(
         memory=1048576,  # 1 TiB
         ephemeral_disk=2_048_000,  # 2 TiB scratch
         experimental_options={"efa_enabled": True},
-        serialized=True,
+        env=train_env,
+        serialized=False,
         name="train",
-    )
-    @clustered(size=swift.n_nodes, rdma=True)
-    def train(run_id: str | None = None):
-        """Run `megatron sft ...` under `torchrun` on each clustered node."""
-        if run_id is None:
-            run_id = f"train_{int(time.time())}"
-
-        assert swift.model is not None, "swift.model must be set"
-        assert swift.dataset is not None, "swift.dataset must be set"
-
-        cluster_info = get_cluster_info()
-        node_rank = cluster_info.rank
-        n_nodes = (
-            len(cluster_info.container_ips) if cluster_info.container_ips else 1
-        )
-        master_addr = (
-            cluster_info.container_ips[0]
-            if cluster_info.container_ips
-            else "localhost"
-        )
-        print(f"Node {node_rank}/{n_nodes}, Master: {master_addr}")
-
-        # Resolve the model dir inside the HF cache volume.
-        from huggingface_hub import snapshot_download
-
-        try:
-            model_dir = snapshot_download(
-                swift.model.hf_checkpoint, local_files_only=True
-            )
-        except FileNotFoundError:
-            raise RuntimeError(
-                f"Model {swift.model.hf_checkpoint} not found in HF cache. "
-                f"Run `download_model` first."
-            )
-
-        dataset_path = getattr(swift.dataset, "prompt_data", "")
-        if not dataset_path or not os.path.exists(dataset_path):
-            raise RuntimeError(
-                f"No training data at {dataset_path!r}. "
-                f"Run `prepare_dataset` first."
-            )
-
-        checkpoint_dir = f"{checkpoints_str}/{app_name}_{run_id}"
-
-        # If a prior attempt crashed mid-train, resume from the latest iter_ dir.
-        resuming = False
-        if os.path.exists(checkpoint_dir):
-            iter_dirs = sorted(
-                d for d in os.listdir(checkpoint_dir) if d.startswith("iter_")
-            )
-            if iter_dirs:
-                resuming = True
-                print(f"Resuming from {iter_dirs[-1]}")
-
-        # Pre-create args.json on every rank. ms-swift writes it from the
-        # master rank but reads it from the last rank (different container on
-        # Modal), so both need to see a file.
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        args_json = os.path.join(checkpoint_dir, "args.json")
-        if not os.path.exists(args_json):
-            with open(args_json, "w") as f:
-                json.dump({"run_id": run_id, "placeholder": True}, f)
-
-        # Default the wandb run name to the run_id if the user didn't set one.
-        if swift.wandb is not None and not swift.wandb.exp_name:
-            swift.wandb.exp_name = run_id
-
-        # The hf_checkpoint on the config might be a bare repo id; the
-        # megatron CLI needs the local cache path. Swap in model_dir.
-        megatron_flags = swift.cli_args(output_dir=checkpoint_dir)
-        for i, a in enumerate(megatron_flags):
-            if a == "--model" and i + 1 < len(megatron_flags):
-                megatron_flags[i + 1] = model_dir
-                break
-
-        if resuming:
-            megatron_flags.extend(["--load", checkpoint_dir])
-
-        cmd = [
-            "torchrun",
-            "--no_python",
-            "--nproc_per_node",
-            str(swift.gpus_per_node),
-            "--nnodes",
-            str(n_nodes),
-            "--node_rank",
-            str(node_rank),
-            "--master_addr",
-            master_addr,
-            "--master_port",
-            "29500",
-            "megatron",
-            "sft",
-            *megatron_flags,
-        ]
-
-        print(f"Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=False, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"ms-swift failed with code {result.returncode}")
-
-        checkpoints_volume.commit()
-        print(f"Training {run_id} completed; results in {checkpoint_dir}")
-        return {"run_id": run_id, "checkpoint_dir": checkpoint_dir}
+    )(clustered(size=framework.n_nodes, rdma=True)(_train_ms_swift_worker))
 
     # Expose registered functions as attributes so notebook callers can do
     # `app.download_model.remote()` instead of app.registered_functions[...].

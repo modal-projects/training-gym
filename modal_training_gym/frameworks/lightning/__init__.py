@@ -3,7 +3,7 @@ from .config import (
     MODEL_MOUNT_PATH,
     SCRIPTS_MOUNT_PATH,
     LightningConfig,
-    LightningModalConfig,
+    LightningFrameworkConfig,
 )
 from .launcher import build_lightning_app
 
@@ -12,6 +12,6 @@ __all__ = [
     "MODEL_MOUNT_PATH",
     "SCRIPTS_MOUNT_PATH",
     "LightningConfig",
-    "LightningModalConfig",
+    "LightningFrameworkConfig",
     "build_lightning_app",
 ]

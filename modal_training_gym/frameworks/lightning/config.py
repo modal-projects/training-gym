@@ -9,14 +9,19 @@ launch code yourself.
 
 from __future__ import annotations
 
+from dataclasses import field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from modal_training_gym.common import GPUType
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 if TYPE_CHECKING:
+    from modal import App
+
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import Model
+    from modal_training_gym.common.models import ModelConfiguration
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
@@ -40,31 +45,14 @@ _DEFAULT_TRAIN_PIP = (
 )
 
 
-class LightningModalConfig:
-    """Modal infrastructure for Lightning — GPU, Python, pip deps."""
+@dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
+class LightningFrameworkConfig:
+    """Lightning Fabric settings, including Modal infrastructure."""
 
+    # ── Modal infrastructure ────────────────────────────────────────────────
     gpu: GPUType = "H100"
     python_version: str = "3.12"
     pip_deps: tuple[str, ...] = _DEFAULT_TRAIN_PIP
-
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-
-class LightningConfig:
-    """Config for a `fabric run`-launched multi-node Lightning run.
-
-    Mirrors `TorchrunConfig` / `AccelerateConfig` so the same
-    `dataset` / `model` / `wandb` containers + `train_script_source` can be
-    reused across launchers. Lightning-specific knobs (`accelerator`,
-    `strategy`) live on this class only.
-    """
-
-    # ── Containers ───────────────────────────────────────────────────────────
-    dataset: "DatasetConfig | None" = None
-    model: "Model | None" = None
-    wandb: "WandbConfig | None" = None
 
     # ── Infrastructure ───────────────────────────────────────────────────────
     n_nodes: int = 2
@@ -76,7 +64,7 @@ class LightningConfig:
     train_script_name: str = "train.py"
 
     # ── Script args ──────────────────────────────────────────────────────────
-    script_args: list[str] = []
+    script_args: list[str] = field(default_factory=list)
 
     # ── Lightning Fabric-specific ────────────────────────────────────────────
     accelerator: Accelerator = "gpu"
@@ -86,8 +74,32 @@ class LightningConfig:
     # ── Modal app tags ───────────────────────────────────────────────────────
     # Merged with the framework's default tags (training/source/framework) at
     # app-build time. Use for per-run tagging (experiment id, user, env, …).
-    app_tags: dict = {}
+    app_tags: dict = field(default_factory=dict)
 
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+
+class LightningConfig:
+    dataset: "DatasetConfig | None"
+    model: "ModelConfiguration | None"
+    wandb: "WandbConfig | None"
+    framework_config: LightningFrameworkConfig
+
+    def __init__(
+        self,
+        dataset: "DatasetConfig | None" = None,
+        model: "ModelConfiguration | None" = None,
+        wandb: "WandbConfig | None" = None,
+        framework_config: LightningFrameworkConfig | None = None,
+    ) -> None:
+        self.dataset = dataset
+        self.model = model
+        self.wandb = wandb
+        self.framework_config = framework_config or LightningFrameworkConfig()
+
+    def build_app(
+        self,
+        *,
+        name: str | None = None,
+    ) -> "App":
+        from .launcher import build_lightning_app
+
+        return build_lightning_app(config=self, name=name)

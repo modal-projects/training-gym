@@ -23,13 +23,12 @@
 import modal
 
 from modal_training_gym.common.dataset import DatasetConfig
-from modal_training_gym.common.models import BaseModelType, Model
+from modal_training_gym.common.models import Qwen3_32B
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.frameworks.verl import (
     DATA_PATH,
     VerlConfig,
-    VerlModalConfig,
-    build_verl_app,
+    VerlFrameworkConfig,
 )
 
 # ## Define the dataset
@@ -63,8 +62,9 @@ class GSM8KDataset(DatasetConfig):
 
 # ## Define the experiment
 #
-# Subclass `VerlConfig` and override class attributes. The launcher
-# translates these into Hydra-style `key=value` overrides appended to
+# Build a `VerlFrameworkConfig(...)` and pass it into
+# `VerlConfig(dataset=..., model=..., framework_config=...)`. The launcher
+# translates this into Hydra-style `key=value` overrides appended to
 # `verl.trainer.main_ppo`. Containers (`dataset`, `model`, `wandb`) are
 # read explicitly — verl's flag vocabulary (e.g.
 # `actor_rollout_ref.actor.megatron.tensor_model_parallel_size`) doesn't
@@ -118,61 +118,47 @@ import textwrap
 
 REWARD_SOURCE = textwrap.dedent(REWARD_SOURCE).lstrip("\n")
 
-class _Verl(VerlConfig):
-    # ── Containers ────────────────────────────────────────────────────────
-    model = Model(BaseModelType.Qwen3_32B)
-    dataset = GSM8KDataset(DATA_PATH)
-    wandb = WandbConfig(
+verl_framework_config = VerlFrameworkConfig(
+    gpu="H100",
+    reward_function_source=REWARD_SOURCE,
+    reward_function_name="compute_reward",
+    n_nodes=4,
+    gpus_per_node=8,
+    adv_estimator="grpo",
+    max_prompt_length=768,
+    max_response_length=2048,
+    train_batch_size=128,
+    actor_strategy="megatron",
+    actor_lr=1e-6,
+    ppo_mini_batch_size=128,
+    actor_use_dynamic_bsz=True,
+    use_kl_loss=True,
+    kl_loss_coef=0.001,
+    actor_tp_size=8,
+    actor_pp_size=1,
+    actor_cp_size=1,
+    actor_ep_size=1,
+    n_rollouts_per_prompt=4,
+    rollout_tp_size=4,
+    rollout_gpu_memory_util=0.25,
+    test_freq=5,
+    save_freq=-1,
+    resume_mode="auto",
+)
+
+my_training_run = VerlConfig(
+    dataset=GSM8KDataset(DATA_PATH),
+    model=Qwen3_32B(),
+    wandb=WandbConfig(
         project="verl_grpo_qwen3_32b",
         exp_name="qwen3_32b_megatron_gsm8k",
-    )
-
-    # ── Reward ────────────────────────────────────────────────────────────
-    # Uploaded to the rewards volume by `app.upload_reward`. Leave empty
-    # to fall back to the shipped GSM8K reward.
-    reward_function_source = REWARD_SOURCE
-    reward_function_name = "compute_reward"
-
-    # ── Infrastructure ────────────────────────────────────────────────────
-    n_nodes = 4
-    gpus_per_node = 8
-
-    # ── Data / algorithm ──────────────────────────────────────────────────
-    adv_estimator = "grpo"
-    max_prompt_length = 768
-    max_response_length = 2048
-    train_batch_size = 128
-
-    # ── Actor ─────────────────────────────────────────────────────────────
-    actor_strategy = "megatron"
-    actor_lr = 1e-6
-    ppo_mini_batch_size = 128
-    actor_use_dynamic_bsz = True
-    use_kl_loss = True
-    kl_loss_coef = 0.001
-
-    # Actor Megatron parallelism
-    actor_tp_size = 8
-    actor_pp_size = 1
-    actor_cp_size = 1
-    actor_ep_size = 1
-
-    # ── Rollout (vLLM) ────────────────────────────────────────────────────
-    n_rollouts_per_prompt = 4
-    rollout_tp_size = 4
-    rollout_gpu_memory_util = 0.25
-
-    # ── Trainer ───────────────────────────────────────────────────────────
-    test_freq = 5
-    save_freq = -1
-    resume_mode = "auto"
+    ),
+    framework_config=verl_framework_config,
+)
 
 # ## Build the Modal app
 
-app = build_verl_app(
-    modal=VerlModalConfig(gpu="H100"),
-    verl=_Verl(),
-)
+app = my_training_run.build_app()
 
 # ## Run it
 

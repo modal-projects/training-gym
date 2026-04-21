@@ -222,9 +222,29 @@ def _run_cli():
 
 
 @notebook_only
+@markdown
+def _run_interactive():
+    """
+    Interactive — open an ephemeral app and run one stage per cell:
+    """
+
+
+@notebook_only
 @code
-def _invoke():
+def _invoke_download_imagenet():
     with app.run():
-        # download_imagenet.remote()
+        download_imagenet.remote()
+
+
+@notebook_only
+@code
+def _invoke_train_resnet50():
+    with app.run():
         train_resnet50.remote()
-        # evaluate_resnet50.remote()
+
+
+@notebook_only
+@code
+def _invoke_evaluate_resnet50():
+    with app.run():
+        evaluate_resnet50.remote()

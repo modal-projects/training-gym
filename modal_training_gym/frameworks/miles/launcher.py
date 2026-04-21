@@ -2,22 +2,26 @@
 
 Usage (from a tutorial file):
 
-    from modal_training_gym.common.models import BaseModelType, Model
+    from modal_training_gym.common.models import Qwen3_32B
     from modal_training_gym.frameworks.miles import (
-        MilesConfig, MilesModalConfig, build_miles_app,
+        MilesConfig, MilesFrameworkConfig, build_miles_app,
     )
 
-    class _Miles(MilesConfig):
-        model = Model(BaseModelType.Qwen3_30B_A3B)  # or your own registration
-        dataset = ...  # DatasetConfig subclass; prepare() populates /data
-        wandb = ...
-        recipe_args = \"\"\"
-            --disable-bias-linear
-            --qk-layernorm
-            ...
-        \"\"\"
+    miles = MilesConfig(
+        model=Qwen3_32B(),  # or subclass ModelConfiguration for a custom HF model
+        dataset=...,  # DatasetConfig subclass; prepare() populates /data
+        wandb=...,
+        framework_config=MilesFrameworkConfig(
+            gpu="H100",
+            recipe_args=\"\"\"
+                --disable-bias-linear
+                --qk-layernorm
+                ...
+            \"\"\",
+        ),
+    )
 
-    app = build_miles_app(modal=MilesModalConfig(gpu="H100"), miles=_Miles())
+    app = build_miles_app(miles=miles)
 
 Exposes `app.download_model`, `app.prepare_dataset`, and `app.train_multi_node`.
 """
@@ -28,12 +32,14 @@ import inspect
 import os
 import pathlib
 import shlex
+import time
 
 import cloudpickle
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+from modal_training_gym.common.framework import resolve_caller_module
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 from .config import (
@@ -41,7 +47,6 @@ from .config import (
     DATA_PATH,
     HF_CACHE_PATH,
     MilesConfig,
-    MilesModalConfig,
 )
 
 _REMOTE_TRAIN_SCRIPT = "/root/miles/train.py"
@@ -49,20 +54,20 @@ _REMOTE_TRAIN_SCRIPT = "/root/miles/train.py"
 
 def build_miles_app(
     *,
-    modal: MilesModalConfig,
     miles: MilesConfig,
     name: str | None = None,
 ) -> App:
     """Return a Modal App with `download_model`, `prepare_dataset`, `train_multi_node`."""
     app_name = name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
+    framework = miles.framework_config
 
-    caller_module = inspect.getmodule(inspect.stack()[1].frame)
+    caller_module = resolve_caller_module()
     if caller_module is not None:
         cloudpickle.register_pickle_by_value(caller_module)
 
     # ── Image ────────────────────────────────────────────────────────────────
-    image = Image.from_registry(modal.miles_image).entrypoint([])
-    for cmd in modal.image_run_commands:
+    image = Image.from_registry(framework.miles_image).entrypoint([])
+    for cmd in framework.image_run_commands:
         image = image.run_commands(cmd)
     image = image.add_local_python_source("modal_training_gym", copy=True)
 
@@ -80,10 +85,10 @@ def build_miles_app(
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
         "framework": "miles",
-        **miles.app_tags,
+        **framework.app_tags,
     }
     app = App(app_name, tags=tags)
-    gpu_spec = f"{modal.gpu}:{miles.gpus_per_node}"
+    gpu_spec = f"{framework.gpu}:{framework.gpus_per_node}"
 
     # ── download_model ───────────────────────────────────────────────────────
     @app.function(
@@ -95,18 +100,18 @@ def build_miles_app(
         name="download_model",
     )
     def download_model(revision: str | None = None):
-        """Snapshot_download `miles.model.hf_checkpoint` into the shared HF cache."""
+        """Snapshot_download `miles.model.model_name` into the shared HF cache."""
         from huggingface_hub import snapshot_download
 
         assert miles.model is not None, "miles.model must be set"
-        assert miles.model.hf_checkpoint is not None
+        assert miles.model.model_name is not None
         hf_cache_volume.reload()
         path = snapshot_download(
-            repo_id=miles.model.hf_checkpoint,
+            repo_id=miles.model.model_name,
             revision=revision,
             token=os.environ.get("HF_TOKEN"),
         )
-        print(f"Downloaded {miles.model.hf_checkpoint} to {path}")
+        print(f"Downloaded {miles.model.model_name} to {path}")
         hf_cache_volume.commit()
 
     # ── prepare_dataset ──────────────────────────────────────────────────────
@@ -142,7 +147,7 @@ def build_miles_app(
         serialized=True,
         name="train_multi_node",
     )
-    @clustered(size=miles.n_nodes, rdma=True)
+    @clustered(size=framework.n_nodes, rdma=True)
     async def train_multi_node(*extra_argv: str):
         """Multi-node Miles training: bring up Ray, submit Miles job via client.
 
@@ -150,9 +155,9 @@ def build_miles_app(
         one-off overrides like `--train-iters 5`.
         """
         assert miles.model is not None, "miles.model must be set"
-        if not miles.recipe_args.strip() and not extra_argv:
+        if not framework.recipe_args.strip() and not extra_argv:
             raise RuntimeError(
-                "MilesConfig.recipe_args is empty — set it to the Miles CLI "
+                "MilesFrameworkConfig.recipe_args is empty — set it to the Miles CLI "
                 "args block describing your model architecture + training hyperparameters."
             )
 
@@ -160,7 +165,7 @@ def build_miles_app(
         data_volume.reload()
 
         cluster = ModalRayCluster()
-        cluster.start(n_nodes=miles.n_nodes)
+        cluster.start(n_nodes=framework.n_nodes)
 
         if not cluster.is_head:
             await cluster.wait_forever()
@@ -169,25 +174,23 @@ def build_miles_app(
         # Resolve the model path inside the HF cache volume.
         from huggingface_hub import snapshot_download
 
-        assert miles.model.hf_checkpoint is not None
+        assert miles.model.model_name is not None
         try:
-            model_path = snapshot_download(
-                miles.model.hf_checkpoint, local_files_only=True
-            )
+            model_path = snapshot_download(miles.model.model_name, local_files_only=True)
         except FileNotFoundError as exc:
             raise RuntimeError(
-                f"Model {miles.model.hf_checkpoint} not present in HF cache. "
+                f"Model {miles.model.model_name} not present in HF cache. "
                 f"Run `app.download_model` first."
             ) from exc
 
         # Build the Miles argv: recipe + extras + framework-enforced flags.
-        run_id = f"{app_name}-{int(__import__('time').time())}"
+        run_id = f"{app_name}-{int(time.time())}"
         checkpoint_dir = f"{checkpoints_str}/{run_id}"
 
         argv: list[str] = [
             "python3",
             _REMOTE_TRAIN_SCRIPT,
-            *miles.parsed_recipe_args(),
+            *framework.parsed_recipe_args(),
             *extra_argv,
             "--train-backend",
             "megatron",
@@ -198,31 +201,29 @@ def build_miles_app(
             "--save",
             checkpoint_dir,
             "--actor-num-nodes",
-            str(miles.resolved_actor_nodes()),
+            str(framework.resolved_actor_nodes()),
             "--actor-num-gpus-per-node",
-            str(miles.gpus_per_node),
+            str(framework.gpus_per_node),
             "--num-gpus-per-node",
-            str(miles.gpus_per_node),
+            str(framework.gpus_per_node),
         ]
 
-        if miles.colocate:
+        if framework.colocate:
             argv.append("--colocate")
         else:
-            rollout_gpus = miles.resolved_rollout_num_gpus()
+            rollout_gpus = framework.resolved_rollout_num_gpus()
             assert rollout_gpus is not None
             argv.extend(["--rollout-num-gpus", str(rollout_gpus)])
 
-        if miles.custom_config_yaml.strip():
+        if framework.custom_config_yaml.strip():
             cfg_path = f"/tmp/{run_id}-overrides.yaml"
-            pathlib.Path(cfg_path).write_text(miles.custom_config_yaml)
+            pathlib.Path(cfg_path).write_text(framework.custom_config_yaml)
             argv.extend(["--custom-config-path", cfg_path])
 
         wandb_key = os.environ.get("WANDB_API_KEY", "")
         if miles.wandb is not None and wandb_key:
             argv.extend(["--use-wandb", "--wandb-key", wandb_key])
 
-        # Runtime env for the Ray job — Miles expects MASTER_ADDR + its patched
-        # Megatron on PYTHONPATH.
         runtime_env = {
             "env_vars": {
                 "MASTER_ADDR": cluster.head_addr,
@@ -242,9 +243,7 @@ def build_miles_app(
         async with cluster.forward_dashboard() as tunnel:
             print(f"Ray dashboard: {tunnel.url}")
             print(f"Miles entrypoint: {entrypoint}")
-            status = await cluster.submit_and_tail(
-                entrypoint, runtime_env=runtime_env
-            )
+            status = await cluster.submit_and_tail(entrypoint, runtime_env=runtime_env)
             print(f"Final status: {status}")
 
         checkpoints_volume.commit()

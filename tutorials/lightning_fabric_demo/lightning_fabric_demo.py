@@ -14,8 +14,7 @@ import modal
 
 from modal_training_gym.frameworks.lightning import (
     LightningConfig,
-    LightningModalConfig,
-    build_lightning_app,
+    LightningFrameworkConfig,
 )
 
 # ## Training script
@@ -74,24 +73,28 @@ TRAIN_SCRIPT = textwrap.dedent(r'''
 # containers needed for this demo — the script downloads WikiText2 on
 # its own.
 
-class _Lightning(LightningConfig):
-    n_nodes = 2
-    gpus_per_node = 8
+lightning_framework_config = LightningFrameworkConfig(
+    gpu="H100",
+    n_nodes=2,
+    gpus_per_node=8,
+    train_script_source=TRAIN_SCRIPT,
+    accelerator="gpu",
+    strategy="ddp",
+    precision="bf16-mixed",
+)
 
-    train_script_source = TRAIN_SCRIPT
-
-    accelerator = "gpu"
-    strategy = "ddp"
-    precision = "bf16-mixed"
+my_training_run = LightningConfig(
+    framework_config=lightning_framework_config,
+)
 
 # ## Build the Modal app
 
-app = build_lightning_app(
-    modal=LightningModalConfig(gpu="H100"),
-    config=_Lightning(),
-)
+app = my_training_run.build_app()
 
+# From the CLI:
+#
 # ```bash
+# uv run modal run tutorials/lightning_fabric_demo/lightning_fabric_demo.py::app.download_dataset
 # uv run modal run tutorials/lightning_fabric_demo/lightning_fabric_demo.py::app.upload_script
 # uv run modal run --detach tutorials/lightning_fabric_demo/lightning_fabric_demo.py::app.train
 # ```

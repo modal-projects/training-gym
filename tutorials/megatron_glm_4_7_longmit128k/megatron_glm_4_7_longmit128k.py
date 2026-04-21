@@ -38,13 +38,12 @@
 import modal
 
 from modal_training_gym.common.dataset import DatasetConfig
-from modal_training_gym.common.models import BaseModelType, Model
+from modal_training_gym.common.models import GLM_4_7
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.frameworks.megatron import (
     DATA_DIR,
     MegatronConfig,
-    MegatronModalConfig,
-    build_megatron_app,
+    MegatronFrameworkConfig,
 )
 
 # ## Define the dataset
@@ -144,9 +143,10 @@ class LongMIT128KDataset(DatasetConfig):
 
 # ## Define the experiment
 #
-# Subclass `MegatronConfig` and override class attributes. The launcher
-# serializes this config to JSON that `train_script.py` reads inside each
-# container — no CLI-flag plumbing needed for new fields.
+# Create a `MegatronFrameworkConfig(...)` and pass it into
+# `MegatronConfig(dataset=..., model=..., framework_config=...)`. The
+# launcher serializes this resolved config to JSON that `train_script.py`
+# reads inside each container.
 #
 # ### Parallelism Strategy
 #
@@ -189,48 +189,37 @@ class LongMIT128KDataset(DatasetConfig):
 # - **Operator fusion:** masked softmax, bias activation, bias dropout, RoPE fusion all on.
 # - **TransformerBlock patch:** custom gradient flow fix for LoRA + recompute compatibility.
 
-class _Megatron(MegatronConfig):
-    # ── Containers ────────────────────────────────────────────────────────
-    model = Model(BaseModelType.GLM_4_7)
-    dataset = LongMIT128KDataset(DATA_DIR)
-    wandb = WandbConfig(project="glm47-lora")
+megatron_framework_config = MegatronFrameworkConfig(
+    gpu="B200",
+    n_nodes=4,
+    gpus_per_node=8,
+    tensor_model_parallel_size=2,
+    pipeline_model_parallel_size=4,
+    expert_model_parallel_size=4,
+    context_parallel_size=4,
+    micro_batch_size=1,
+    global_batch_size=32,
+    seq_length=131_072,
+    train_iters=650,
+    lr=1e-4,
+    lr_warmup_iters=50,
+    save_interval=130,
+    lora_dim=128,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    recompute_num_layers=1,
+)
 
-    # ── Infrastructure ────────────────────────────────────────────────────
-    n_nodes = 4
-    gpus_per_node = 8
-
-    # ── Parallelism (TP=2, PP=4, EP=4, CP=4; DP=4 derived) ────────────────
-    tensor_model_parallel_size = 2
-    pipeline_model_parallel_size = 4
-    expert_model_parallel_size = 4
-    context_parallel_size = 4
-
-    # ── Batch + sequence length ───────────────────────────────────────────
-    # Long-context training is memory heavy; start with mbs=1.
-    micro_batch_size = 1
-    global_batch_size = 32
-    seq_length = 131_072
-
-    # ── Training ──────────────────────────────────────────────────────────
-    train_iters = 650
-    lr = 1e-4
-    lr_warmup_iters = 50
-    save_interval = 130
-
-    # ── LoRA ──────────────────────────────────────────────────────────────
-    lora_dim = 128
-    lora_alpha = 32
-    lora_dropout = 0.05
-
-    # ── Recompute (keep full by default for long context) ─────────────────
-    recompute_num_layers = 1
+my_training_run = MegatronConfig(
+    dataset=LongMIT128KDataset(DATA_DIR),
+    model=GLM_4_7(),
+    wandb=WandbConfig(project="glm47-lora"),
+    framework_config=megatron_framework_config,
+)
 
 # ## Build the Modal app
 
-app = build_megatron_app(
-    modal=MegatronModalConfig(gpu="B200"),
-    megatron=_Megatron(),
-)
+app = my_training_run.build_app()
 
 # ## Quick Start
 #
@@ -247,6 +236,12 @@ app = build_megatron_app(
 # From the CLI:
 #
 # ```bash
+# # Step 1a: Download only
+# uv run modal run tutorials/megatron_glm_4_7_longmit128k/megatron_glm_4_7_longmit128k.py::app.download_model
+#
+# # Step 1b: Convert only (run after download_model)
+# uv run modal run tutorials/megatron_glm_4_7_longmit128k/megatron_glm_4_7_longmit128k.py::app.convert_to_megatron
+#
 # # Step 1: Download + convert (hours; use --detach)
 # uv run modal run --detach tutorials/megatron_glm_4_7_longmit128k/megatron_glm_4_7_longmit128k.py::app.download_and_convert
 #
@@ -279,7 +274,7 @@ app = build_megatron_app(
 #
 # - Adjust parallelism — set `tensor_model_parallel_size` /
 #   `pipeline_model_parallel_size` / `expert_model_parallel_size` /
-#   `context_parallel_size` on the `_Megatron` subclass. The product must
+#   `context_parallel_size` on `megatron_framework_config`. The product must
 #   divide `n_nodes * gpus_per_node` and leave a non-zero `DP`.
 # - Modify LoRA hyperparameters — `lora_dim`, `lora_alpha`, `lora_dropout`.
 # - Change training parameters — `global_batch_size`, `micro_batch_size`,
@@ -294,6 +289,6 @@ app = build_megatron_app(
 #
 # | File | Description |
 # |------|-------------|
-# | `modal_training_gym/frameworks/megatron/config.py`       | `MegatronConfig` + `MegatronModalConfig` |
-# | `modal_training_gym/frameworks/megatron/launcher.py`     | `build_megatron_app()` — Modal app factory |
+# | `modal_training_gym/frameworks/megatron/config.py`       | `MegatronConfig` + `MegatronFrameworkConfig` |
+# | `modal_training_gym/frameworks/megatron/config.py`       | `build_app()` on `MegatronConfig` |
 # | `modal_training_gym/frameworks/megatron/train_script.py` | The torchrun target (uses `megatron.bridge`) |

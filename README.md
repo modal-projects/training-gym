@@ -96,8 +96,8 @@ uv run pre-commit install
 
 Project Python is pinned to 3.12 (see `.python-version` / `pyproject.toml`);
 every `@app.function(serialized=True)` requires the local ↔ remote Python
-versions to match, and a couple of the framework images we use ship py312
-by default.
+versions to match, and the framework images we use (slime nightly, NeMo
+25.11, verl `vllm011.latest`) all ship py312.
 
 ## Authoring a new tutorial
 

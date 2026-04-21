@@ -1,22 +1,26 @@
 """Configuration classes for ms-swift Megatron training on Modal.
 
-`MsSwiftConfig` holds all the `megatron sft` CLI flags; `cli_args()` emits
-them using ms-swift's conventions (underscore-style flag names, string-valued
-booleans). Containers (`dataset`, `model`, `wandb`) are interpreted
-explicitly since ms-swift's flag vocabulary differs from the SLIME-style
-SlimeConfig — containers aren't merged blindly.
+`MsSwiftFrameworkConfig` holds all the `megatron sft` CLI flags. `MsSwiftConfig`
+adds app-level behavior (`build_app`) on top of it.
 """
 
 from __future__ import annotations
 
+from dataclasses import field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import msgspec
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common import GPUType
 
 if TYPE_CHECKING:
+    from modal import App
+
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import Model
+    from modal_training_gym.common.models import ModelConfiguration
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
@@ -26,38 +30,21 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 
-# Fields that are NOT emitted as megatron CLI flags (launcher-only or
-# interpreted explicitly via container mapping in `_fields()`).
+# Fields that are NOT emitted as megatron CLI flags.
 _SKIP_FIELDS = {
+    "gpu",
+    "image",
+    "transformers_version",
     "environment",
-    "dataset",
-    "model",
-    "wandb",
     "n_nodes",
     "gpus_per_node",
     "app_tags",
 }
 
 
-class MsSwiftModalConfig:
-    """Modal infrastructure for ms-swift — GPU family + image overrides."""
-
-    gpu: GPUType = "B200"
-    image: str = (
-        "modelscope-registry.us-west-1.cr.aliyuncs.com/modelscope-repo/modelscope:"
-        "ubuntu22.04-cuda12.8.1-py311-torch2.8.0-vllm0.11.0-modelscope1.31.0-swift3.10.3"
-    )
-    # Baseten's shipped transformers may lack GLM-4 MoE support; reinstall this
-    # version to ensure compatibility.
-    transformers_version: str = "4.57.3"
-
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-
-class MsSwiftConfig:
-    """ms-swift Megatron training configuration.
+@dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
+class MsSwiftFrameworkConfig:
+    """ms-swift Megatron configuration, including Modal infrastructure.
 
     Subclass and override class attributes to customize. All non-skip
     attributes are forwarded to `megatron sft` as `--flag value` CLI args
@@ -68,21 +55,28 @@ class MsSwiftConfig:
     ms-swift's specific flag names inside `_fields()`.
     """
 
-    # ── Containers (interpreted in _fields) ──────────────────────────────────
-    dataset: "DatasetConfig | None" = None
-    model: "Model | None" = None
-    wandb: "WandbConfig | None" = None
+    # ── Modal infrastructure ────────────────────────────────────────────────
+    gpu: GPUType = "B200"
+    image: str = (
+        "modelscope-registry.us-west-1.cr.aliyuncs.com/modelscope-repo/modelscope:"
+        "ubuntu22.04-cuda12.8.1-py311-torch2.8.0-vllm0.11.0-modelscope1.31.0-swift3.10.3"
+    )
+    # Baseten's shipped transformers may lack GLM-4 MoE support; reinstall this
+    # version to ensure compatibility.
+    transformers_version: str = "4.57.3"
 
     # ── Modal app tags ───────────────────────────────────────────────────────
     # Merged with the framework's default tags (training/source/framework) at
     # app-build time. Use for per-run tagging.
-    app_tags: dict = {}
+    app_tags: dict = field(default_factory=dict)
 
     # ── Launcher-only (NOT megatron CLI flags) ───────────────────────────────
-    environment: dict = {
-        "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
-        "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-    }
+    environment: dict[str, str] = field(
+        default_factory=lambda: {
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+            "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+        }
+    )
     n_nodes: int = 4
     gpus_per_node: int = 8
 
@@ -111,6 +105,7 @@ class MsSwiftConfig:
     use_precision_aware_optimizer: bool = True
 
     # ── Training ─────────────────────────────────────────────────────────────
+    train_iters: int = 0
     num_train_epochs: int = 4
     lr: float = 1e-4
     lr_warmup_fraction: float = 0.05
@@ -142,76 +137,58 @@ class MsSwiftConfig:
     lora_alpha: int = 32
     merge_lora: bool = False
 
-    def __init__(self, **kwargs: Any) -> None:
-        self.environment = dict(type(self).environment)
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    @classmethod
+    def from_toml(cls, path: str | Path) -> "MsSwiftFrameworkConfig":
+        payload = msgspec.toml.decode(Path(path).read_bytes())
+        if not isinstance(payload, dict):
+            raise ValueError(f"Expected TOML table at root in {path!r}")
+        return cls(**payload)
 
-    # ── Internal ──────────────────────────────────────────────────────────────
+
+class MsSwiftConfig:
+    """ms-swift run config with a built-in Modal app constructor."""
+
+    dataset: "DatasetConfig | None"
+    model: "ModelConfiguration | None"
+    wandb: "WandbConfig | None"
+    framework_config: MsSwiftFrameworkConfig
+
+    def __init__(
+        self,
+        dataset: "DatasetConfig | None" = None,
+        model: "ModelConfiguration | None" = None,
+        wandb: "WandbConfig | None" = None,
+        framework_config: MsSwiftFrameworkConfig | None = None,
+    ) -> None:
+        self.dataset = dataset
+        self.model = model
+        self.wandb = wandb
+        self.framework_config = framework_config or MsSwiftFrameworkConfig()
 
     def _fields(self) -> dict[str, Any]:
-        """Flat CLI field dict. Containers are interpreted explicitly."""
-        fields: dict[str, Any] = {}
-        for cls in reversed(type(self).__mro__):
-            if cls is object:
-                continue
-            fields.update(
-                {
-                    k: v
-                    for k, v in vars(cls).items()
-                    if not k.startswith("_") and not callable(v)
-                }
-            )
-        fields.update(vars(self))
+        fields = dict(vars(self.framework_config))
         fields = {k: v for k, v in fields.items() if k not in _SKIP_FIELDS}
-
         if self.dataset is not None and hasattr(self.dataset, "prompt_data"):
             fields["dataset"] = self.dataset.prompt_data
         if self.model is not None:
-            fields["model"] = self.model.hf_checkpoint
+            fields["model"] = self.model.model_name
         if self.wandb is not None:
             fields["report_to"] = "wandb"
             if self.wandb.project:
                 fields["wandb_project"] = self.wandb.project
-            # ms-swift uses `--wandb_exp_name` (not `--wandb_group`). Fall back
-            # to `group` if `exp_name` isn't set so the user can pick either.
             exp = self.wandb.exp_name or self.wandb.group
             if exp:
                 fields["wandb_exp_name"] = exp
-
-        # Match the reference: only emit --eval_interval when eval_iters > 0.
         if fields.get("eval_iters", 0) <= 0:
             fields.pop("eval_interval", None)
-
         return fields
 
-    # ── Public API ────────────────────────────────────────────────────────────
-
     def cli_args(self, *, output_dir: str) -> list[str]:
-        """Build the list of `megatron sft ...` flags.
-
-        `output_dir` is a per-run value provided by the launcher, not a field
-        on the config, because it typically embeds the run_id.
-
-        Conversion rules:
-          field_name → --field_name   (ms-swift keeps underscores)
-          True/False → --flag true|false   (string-valued, not bare)
-          None       → omitted
-          list       → --flag v1 v2 …
-          other      → --flag value
-
-        `perform_initialization` is emitted as a bare flag (no value) when
-        True, to match the ms-swift reference; omitted when False.
-        """
         out: list[str] = []
         fields = dict(self._fields())
-
-        # Bare flag: emit without value, then remove from the general pass.
         if fields.pop("perform_initialization", False):
             out.append("--perform_initialization")
-
         fields["output_dir"] = output_dir
-
         for key, val in fields.items():
             if val is None:
                 continue
@@ -223,3 +200,12 @@ class MsSwiftConfig:
             else:
                 out += [flag, str(val)]
         return out
+
+    def build_app(
+        self,
+        *,
+        name: str | None = None,
+    ) -> "App":
+        from .launcher import build_ms_swift_app
+
+        return build_ms_swift_app(swift=self, name=name)

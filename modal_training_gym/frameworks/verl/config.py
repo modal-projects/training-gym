@@ -9,14 +9,19 @@ config attribute names 1:1.
 
 from __future__ import annotations
 
+from dataclasses import field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from modal_training_gym.common import GPUType
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 if TYPE_CHECKING:
+    from modal import App
+
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import Model
+    from modal_training_gym.common.models import ModelConfiguration
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
@@ -31,22 +36,9 @@ TRAINING_CHECKPOINT_SUBDIR = "training_checkpoints"
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 
-class VerlModalConfig:
-    """Modal infrastructure for verl — GPU family + image registry override."""
-
-    gpu: GPUType = "H100"
-    # verl ships pre-built images pinned to a vLLM version.
-    image: str = "verlai/verl:vllm011.latest"
-    # Git ref of verl to `git clone` + install. Pin to a commit for reproducibility.
-    verl_git_url: str = "https://github.com/volcengine/verl"
-
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-
-class VerlConfig:
-    """verl (RLVR / GRPO) training configuration.
+@dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
+class VerlFrameworkConfig:
+    """verl (RLVR / GRPO) configuration, including Modal infrastructure.
 
     Subclass and override class attributes. `cli_args()` assembles Hydra-style
     `key=value` overrides appended to `verl.trainer.main_ppo`.
@@ -57,10 +49,12 @@ class VerlConfig:
     dotted paths that don't line up with the common config attr names.
     """
 
-    # ── Containers ───────────────────────────────────────────────────────────
-    dataset: "DatasetConfig | None" = None
-    model: "Model | None" = None
-    wandb: "WandbConfig | None" = None
+    # ── Modal infrastructure ────────────────────────────────────────────────
+    gpu: GPUType = "H100"
+    # verl ships pre-built images pinned to a vLLM version.
+    image: str = "verlai/verl:vllm011.latest"
+    # Git ref of verl to `git clone` + install. Pin to a commit for reproducibility.
+    verl_git_url: str = "https://github.com/volcengine/verl"
 
     # ── Infrastructure ───────────────────────────────────────────────────────
     n_nodes: int = 4
@@ -92,7 +86,7 @@ class VerlConfig:
     loss_agg_mode: str = "token-mean"
     use_fused_kernels: bool = True
     # Save only the model weights in actor checkpoints (no optimizer state).
-    actor_save_contents: list[str] = ["model"]
+    actor_save_contents: list[str] = field(default_factory=lambda: ["model"])
 
     # ── Actor parallelism (Megatron) ─────────────────────────────────────────
     actor_tp_size: int = 8
@@ -156,42 +150,47 @@ class VerlConfig:
     reward_function_name: str = "compute_reward"
 
     # ── Extra free-form overrides appended to the verl command. ──────────────
-    extra_overrides: list[str] = []
+    extra_overrides: list[str] = field(default_factory=list)
 
     # ── Modal app tags ───────────────────────────────────────────────────────
     # Merged with the framework's default tags (training/source/framework) at
     # app-build time. Use for per-run tagging.
-    app_tags: dict = {}
+    app_tags: dict = field(default_factory=dict)
 
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+class VerlConfig:
+    dataset: "DatasetConfig | None"
+    model: "ModelConfiguration | None"
+    wandb: "WandbConfig | None"
+    framework_config: VerlFrameworkConfig
 
-    # ── Path helpers ─────────────────────────────────────────────────────────
+    def __init__(
+        self,
+        dataset: "DatasetConfig | None" = None,
+        model: "ModelConfiguration | None" = None,
+        wandb: "WandbConfig | None" = None,
+        framework_config: VerlFrameworkConfig | None = None,
+    ) -> None:
+        self.dataset = dataset
+        self.model = model
+        self.wandb = wandb
+        self.framework_config = framework_config or VerlFrameworkConfig()
 
     def hf_model_dir(self) -> str:
-        assert self.model is not None and self.model.hf_checkpoint is not None
-        return str(MODELS_PATH / HF_MODELS_SUBDIR / self.model.hf_checkpoint)
+        assert self.model is not None and self.model.model_name is not None
+        return str(MODELS_PATH / HF_MODELS_SUBDIR / self.model.model_name)
 
     def mcore_model_dir(self) -> str:
-        assert self.model is not None and self.model.hf_checkpoint is not None
-        return str(MODELS_PATH / MCORE_MODELS_SUBDIR / self.model.hf_checkpoint)
+        assert self.model is not None and self.model.model_name is not None
+        return str(MODELS_PATH / MCORE_MODELS_SUBDIR / self.model.model_name)
 
     def training_checkpoint_dir(self) -> str:
-        assert self.model is not None and self.model.hf_checkpoint is not None
-        return str(MODELS_PATH / TRAINING_CHECKPOINT_SUBDIR / self.model.hf_checkpoint)
-
-    # ── CLI assembly ─────────────────────────────────────────────────────────
+        assert self.model is not None and self.model.model_name is not None
+        return str(MODELS_PATH / TRAINING_CHECKPOINT_SUBDIR / self.model.model_name)
 
     def cli_args(self, *, reward_function_path: str) -> list[str]:
-        """Build the list of Hydra overrides appended to `verl.trainer.main_ppo`.
-
-        The launcher prepends the fixed
-        `python -u -m verl.trainer.main_ppo --config-path=config
-        --config-name=ppo_megatron_trainer.yaml` portion.
-        """
         assert self.model is not None, "VerlConfig.model must be set"
         assert self.dataset is not None, "VerlConfig.dataset must be set"
+        cfg = self.framework_config
 
         train_files = self.dataset.prompt_data
         val_files = (
@@ -199,8 +198,6 @@ class VerlConfig:
             if isinstance(self.dataset.eval_prompt_data, str)
             else self.dataset.prompt_data
         )
-        # Common: eval_prompt_data may be ["name", "path"] (SLIME shape) or
-        # a plain string; fall back to train files if absent.
         if isinstance(self.dataset.eval_prompt_data, list) and self.dataset.eval_prompt_data:
             val_files = self.dataset.eval_prompt_data[-1]
 
@@ -211,96 +208,99 @@ class VerlConfig:
         trainer_loggers = '["console","wandb"]' if self.wandb else '["console"]'
 
         overrides: list[str] = [
-            # ─ Algorithm / data ──────────────────────────────────────────────
-            f"algorithm.adv_estimator={self.adv_estimator}",
-            f"algorithm.use_kl_in_reward={self.use_kl_in_reward}",
+            f"algorithm.adv_estimator={cfg.adv_estimator}",
+            f"algorithm.use_kl_in_reward={cfg.use_kl_in_reward}",
             f"data.train_files={train_files}",
             f"data.val_files={val_files}",
-            f"data.prompt_key={self.prompt_key}",
-            f"data.return_raw_chat={self.return_raw_chat}",
-            f"data.max_prompt_length={self.max_prompt_length}",
-            f"data.max_response_length={self.max_response_length}",
-            f"data.filter_overlong_prompts={self.filter_overlong_prompts}",
-            f"data.truncation={self.truncation}",
-            f"data.train_batch_size={self.train_batch_size}",
-            # ─ Base model (HF view) ──────────────────────────────────────────
+            f"data.prompt_key={cfg.prompt_key}",
+            f"data.return_raw_chat={cfg.return_raw_chat}",
+            f"data.max_prompt_length={cfg.max_prompt_length}",
+            f"data.max_response_length={cfg.max_response_length}",
+            f"data.filter_overlong_prompts={cfg.filter_overlong_prompts}",
+            f"data.truncation={cfg.truncation}",
+            f"data.train_batch_size={cfg.train_batch_size}",
             f"actor_rollout_ref.model.path={self.hf_model_dir()}",
-            f"actor_rollout_ref.model.use_fused_kernels={self.use_fused_kernels}",
-            # ─ Resource layout ───────────────────────────────────────────────
-            f"trainer.nnodes={self.n_nodes}",
-            f"trainer.n_gpus_per_node={self.gpus_per_node}",
-            # ─ Actor ─────────────────────────────────────────────────────────
-            f"actor_rollout_ref.actor.strategy={self.actor_strategy}",
-            f"actor_rollout_ref.actor.optim.lr={self.actor_lr}",
-            f"actor_rollout_ref.actor.ppo_mini_batch_size={self.ppo_mini_batch_size}",
-            f"actor_rollout_ref.actor.ppo_max_token_len_per_gpu={self.ppo_max_token_len_per_gpu}",
-            f"actor_rollout_ref.actor.use_dynamic_bsz={self.actor_use_dynamic_bsz}",
-            f"actor_rollout_ref.actor.use_kl_loss={self.use_kl_loss}",
-            f"actor_rollout_ref.actor.kl_loss_coef={self.kl_loss_coef}",
-            f"actor_rollout_ref.actor.kl_loss_type={self.kl_loss_type}",
-            f"actor_rollout_ref.actor.entropy_coeff={self.entropy_coeff}",
-            f"actor_rollout_ref.actor.loss_agg_mode={self.loss_agg_mode}",
+            f"actor_rollout_ref.model.use_fused_kernels={cfg.use_fused_kernels}",
+            f"trainer.nnodes={cfg.n_nodes}",
+            f"trainer.n_gpus_per_node={cfg.gpus_per_node}",
+            f"actor_rollout_ref.actor.strategy={cfg.actor_strategy}",
+            f"actor_rollout_ref.actor.optim.lr={cfg.actor_lr}",
+            f"actor_rollout_ref.actor.ppo_mini_batch_size={cfg.ppo_mini_batch_size}",
+            f"actor_rollout_ref.actor.ppo_max_token_len_per_gpu={cfg.ppo_max_token_len_per_gpu}",
+            f"actor_rollout_ref.actor.use_dynamic_bsz={cfg.actor_use_dynamic_bsz}",
+            f"actor_rollout_ref.actor.use_kl_loss={cfg.use_kl_loss}",
+            f"actor_rollout_ref.actor.kl_loss_coef={cfg.kl_loss_coef}",
+            f"actor_rollout_ref.actor.kl_loss_type={cfg.kl_loss_type}",
+            f"actor_rollout_ref.actor.entropy_coeff={cfg.entropy_coeff}",
+            f"actor_rollout_ref.actor.loss_agg_mode={cfg.loss_agg_mode}",
             (
                 "actor_rollout_ref.actor.checkpoint.save_contents="
-                + "[" + ",".join(f'"{x}"' for x in self.actor_save_contents) + "]"
+                + "[" + ",".join(f'"{x}"' for x in cfg.actor_save_contents) + "]"
             ),
-            # ─ Actor Megatron parallelism + checkpointing ────────────────────
-            f"actor_rollout_ref.actor.megatron.pipeline_model_parallel_size={self.actor_pp_size}",
-            f"actor_rollout_ref.actor.megatron.tensor_model_parallel_size={self.actor_tp_size}",
-            f"actor_rollout_ref.actor.megatron.context_parallel_size={self.actor_cp_size}",
-            f"actor_rollout_ref.actor.megatron.expert_model_parallel_size={self.actor_ep_size}",
-            f"actor_rollout_ref.actor.megatron.expert_tensor_parallel_size={self.actor_etp_size}",
-            f"actor_rollout_ref.actor.megatron.dtype={self.actor_dtype}",
-            f"actor_rollout_ref.actor.megatron.param_offload={self.actor_param_offload}",
-            f"actor_rollout_ref.actor.megatron.grad_offload={self.actor_grad_offload}",
-            f"actor_rollout_ref.actor.megatron.optimizer_offload={self.actor_optimizer_offload}",
+            f"actor_rollout_ref.actor.megatron.pipeline_model_parallel_size={cfg.actor_pp_size}",
+            f"actor_rollout_ref.actor.megatron.tensor_model_parallel_size={cfg.actor_tp_size}",
+            f"actor_rollout_ref.actor.megatron.context_parallel_size={cfg.actor_cp_size}",
+            f"actor_rollout_ref.actor.megatron.expert_model_parallel_size={cfg.actor_ep_size}",
+            f"actor_rollout_ref.actor.megatron.expert_tensor_parallel_size={cfg.actor_etp_size}",
+            f"actor_rollout_ref.actor.megatron.dtype={cfg.actor_dtype}",
+            f"actor_rollout_ref.actor.megatron.param_offload={cfg.actor_param_offload}",
+            f"actor_rollout_ref.actor.megatron.grad_offload={cfg.actor_grad_offload}",
+            f"actor_rollout_ref.actor.megatron.optimizer_offload={cfg.actor_optimizer_offload}",
             "actor_rollout_ref.actor.megatron.use_dist_checkpointing=True",
             f"actor_rollout_ref.actor.megatron.dist_checkpointing_path={self.mcore_model_dir()}",
-            # ─ Rollout (vLLM) ────────────────────────────────────────────────
-            f"actor_rollout_ref.rollout.name={self.rollout_name}",
-            f"actor_rollout_ref.rollout.mode={self.rollout_mode}",
-            f"actor_rollout_ref.rollout.n={self.n_rollouts_per_prompt}",
-            f"actor_rollout_ref.rollout.tensor_model_parallel_size={self.rollout_tp_size}",
-            f"actor_rollout_ref.rollout.data_parallel_size={self.rollout_dp_size}",
-            f"actor_rollout_ref.rollout.expert_parallel_size={self.rollout_ep_size}",
-            f"actor_rollout_ref.rollout.dtype={self.rollout_dtype}",
-            f"actor_rollout_ref.rollout.gpu_memory_utilization={self.rollout_gpu_memory_util}",
-            f"actor_rollout_ref.rollout.log_prob_use_dynamic_bsz={self.rollout_log_prob_use_dynamic_bsz}",
-            f"actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu={self.rollout_log_prob_max_token_len}",
-            f"actor_rollout_ref.rollout.enable_chunked_prefill={self.rollout_enable_chunked_prefill}",
-            f"actor_rollout_ref.rollout.temperature={self.rollout_temperature}",
-            f"actor_rollout_ref.rollout.top_p={self.rollout_top_p}",
-            f"actor_rollout_ref.rollout.top_k={self.rollout_top_k}",
-            f"actor_rollout_ref.rollout.val_kwargs.temperature={self.val_temperature}",
-            f"actor_rollout_ref.rollout.val_kwargs.top_p={self.val_top_p}",
-            f"actor_rollout_ref.rollout.val_kwargs.top_k={self.val_top_k}",
-            f"actor_rollout_ref.rollout.val_kwargs.do_sample={self.val_do_sample}",
-            f"actor_rollout_ref.rollout.val_kwargs.n={self.val_n}",
-            # ─ Reference model (Megatron) ────────────────────────────────────
-            f"actor_rollout_ref.ref.megatron.pipeline_model_parallel_size={self.ref_pp_size}",
-            f"actor_rollout_ref.ref.megatron.tensor_model_parallel_size={self.ref_tp_size}",
-            f"actor_rollout_ref.ref.megatron.context_parallel_size={self.ref_cp_size}",
-            f"actor_rollout_ref.ref.megatron.expert_model_parallel_size={self.ref_ep_size}",
-            f"actor_rollout_ref.ref.megatron.expert_tensor_parallel_size={self.ref_etp_size}",
-            f"actor_rollout_ref.ref.megatron.param_offload={self.ref_param_offload}",
+            f"actor_rollout_ref.rollout.name={cfg.rollout_name}",
+            f"actor_rollout_ref.rollout.mode={cfg.rollout_mode}",
+            f"actor_rollout_ref.rollout.n={cfg.n_rollouts_per_prompt}",
+            f"actor_rollout_ref.rollout.tensor_model_parallel_size={cfg.rollout_tp_size}",
+            f"actor_rollout_ref.rollout.data_parallel_size={cfg.rollout_dp_size}",
+            f"actor_rollout_ref.rollout.expert_parallel_size={cfg.rollout_ep_size}",
+            f"actor_rollout_ref.rollout.dtype={cfg.rollout_dtype}",
+            f"actor_rollout_ref.rollout.gpu_memory_utilization={cfg.rollout_gpu_memory_util}",
+            f"actor_rollout_ref.rollout.log_prob_use_dynamic_bsz={cfg.rollout_log_prob_use_dynamic_bsz}",
+            f"actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu={cfg.rollout_log_prob_max_token_len}",
+            f"actor_rollout_ref.rollout.enable_chunked_prefill={cfg.rollout_enable_chunked_prefill}",
+            f"actor_rollout_ref.rollout.temperature={cfg.rollout_temperature}",
+            f"actor_rollout_ref.rollout.top_p={cfg.rollout_top_p}",
+            f"actor_rollout_ref.rollout.top_k={cfg.rollout_top_k}",
+            f"actor_rollout_ref.rollout.val_kwargs.temperature={cfg.val_temperature}",
+            f"actor_rollout_ref.rollout.val_kwargs.top_p={cfg.val_top_p}",
+            f"actor_rollout_ref.rollout.val_kwargs.top_k={cfg.val_top_k}",
+            f"actor_rollout_ref.rollout.val_kwargs.do_sample={cfg.val_do_sample}",
+            f"actor_rollout_ref.rollout.val_kwargs.n={cfg.val_n}",
+            f"actor_rollout_ref.ref.megatron.pipeline_model_parallel_size={cfg.ref_pp_size}",
+            f"actor_rollout_ref.ref.megatron.tensor_model_parallel_size={cfg.ref_tp_size}",
+            f"actor_rollout_ref.ref.megatron.context_parallel_size={cfg.ref_cp_size}",
+            f"actor_rollout_ref.ref.megatron.expert_model_parallel_size={cfg.ref_ep_size}",
+            f"actor_rollout_ref.ref.megatron.expert_tensor_parallel_size={cfg.ref_etp_size}",
+            f"actor_rollout_ref.ref.megatron.param_offload={cfg.ref_param_offload}",
             "actor_rollout_ref.ref.megatron.use_dist_checkpointing=True",
             f"actor_rollout_ref.ref.megatron.dist_checkpointing_path={self.mcore_model_dir()}",
-            f"actor_rollout_ref.ref.megatron.dtype={self.ref_dtype}",
-            f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={self.ref_log_prob_micro_batch_size_per_gpu}",
-            f"actor_rollout_ref.ref.log_prob_use_dynamic_bsz={self.ref_log_prob_use_dynamic_bsz}",
-            f"actor_rollout_ref.ref.log_prob_max_token_len_per_gpu={self.ref_log_prob_max_token_len}",
-            # ─ Trainer ───────────────────────────────────────────────────────
-            f"trainer.critic_warmup={self.critic_warmup}",
+            f"actor_rollout_ref.ref.megatron.dtype={cfg.ref_dtype}",
+            f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={cfg.ref_log_prob_micro_batch_size_per_gpu}",
+            f"actor_rollout_ref.ref.log_prob_use_dynamic_bsz={cfg.ref_log_prob_use_dynamic_bsz}",
+            f"actor_rollout_ref.ref.log_prob_max_token_len_per_gpu={cfg.ref_log_prob_max_token_len}",
+            f"trainer.critic_warmup={cfg.critic_warmup}",
             f"trainer.logger={trainer_loggers}",
             f"trainer.project_name={project_name}",
             f"trainer.experiment_name={experiment_name}",
-            f"trainer.test_freq={self.test_freq}",
+            f"trainer.test_freq={cfg.test_freq}",
             f"trainer.default_local_dir={self.training_checkpoint_dir()}",
-            f"trainer.save_freq={self.save_freq}",
-            f"trainer.resume_mode={self.resume_mode}",
-            # ─ Reward ────────────────────────────────────────────────────────
+            f"trainer.save_freq={cfg.save_freq}",
+            f"trainer.resume_mode={cfg.resume_mode}",
             f"custom_reward_function.path={reward_function_path}",
-            f"custom_reward_function.name={self.reward_function_name}",
+            f"custom_reward_function.name={cfg.reward_function_name}",
         ]
-        overrides.extend(self.extra_overrides)
+        overrides.extend(cfg.extra_overrides)
         return overrides
+
+    def build_app(
+        self,
+        *,
+        name: str | None = None,
+    ) -> "App":
+        from .launcher import build_verl_app
+
+        return build_verl_app(verl=self, name=name)
+
+
+VerlTrainingConfig = VerlFrameworkConfig

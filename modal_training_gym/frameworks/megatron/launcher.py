@@ -2,17 +2,19 @@
 
 Usage (from a tutorial file):
 
-    from modal_training_gym.common.models import BaseModelType, Model
+    from modal_training_gym.common.models import GLM_4_7
     from modal_training_gym.frameworks.megatron import (
-        MegatronConfig, MegatronModalConfig, build_megatron_app,
+        MegatronConfig, MegatronFrameworkConfig, build_megatron_app,
     )
 
-    class _Megatron(MegatronConfig):
-        model = Model(BaseModelType.GLM_4_7)
-        dataset = ...  # DatasetConfig subclass with prepare()
-        wandb = ...
+    megatron = MegatronConfig(
+        model=GLM_4_7(),  # or subclass ModelConfiguration for a custom HF model
+        dataset=...,  # DatasetConfig subclass with prepare()
+        wandb=...,
+        framework_config=MegatronFrameworkConfig(gpu="B200"),
+    )
 
-    app = build_megatron_app(modal=MegatronModalConfig(gpu="B200"), megatron=_Megatron())
+    app = build_megatron_app(megatron=megatron)
 
 Produces a `modal.App` with:
   - `download_model` — pull HF model into the cache volume.
@@ -33,6 +35,7 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+from modal_training_gym.common.framework import resolve_caller_module
 
 from .config import (
     CHECKPOINTS_DIR,
@@ -40,7 +43,6 @@ from .config import (
     HF_CACHE,
     MODELS_DIR,
     MegatronConfig,
-    MegatronModalConfig,
 )
 
 _CONFIG_PATH = "/tmp/megatron_config.json"
@@ -48,15 +50,15 @@ _CONFIG_PATH = "/tmp/megatron_config.json"
 
 def build_megatron_app(
     *,
-    modal: MegatronModalConfig,
     megatron: MegatronConfig,
     name: str | None = None,
 ) -> App:
     app_name = name or f"megatron-{type(megatron).__name__.lstrip('_').lower()}"
+    framework = megatron.framework_config
 
     # Inline user-defined classes (e.g. `_Megatron`) so the remote container
     # doesn't need to re-import the tutorial module.
-    caller_module = inspect.getmodule(inspect.stack()[1].frame)
+    caller_module = resolve_caller_module()
     if caller_module is not None:
         cloudpickle.register_pickle_by_value(caller_module)
 
@@ -75,7 +77,7 @@ def build_megatron_app(
     )
 
     nemo_image = (
-        Image.from_registry(modal.nemo_image)
+        Image.from_registry(framework.nemo_image)
         .entrypoint([])
         .apt_install(
             "libibverbs-dev",
@@ -102,11 +104,11 @@ def build_megatron_app(
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
         "framework": "megatron",
-        **megatron.app_tags,
+        **framework.app_tags,
     }
     app = App(app_name, tags=tags)
-    gpu_single = f"{modal.gpu}"
-    gpu_multi = f"{modal.gpu}:{megatron.gpus_per_node}"
+    gpu_single = f"{framework.gpu}"
+    gpu_multi = f"{framework.gpu}:{framework.gpus_per_node}"
 
     # ── download_model ───────────────────────────────────────────────────────
     @app.function(
@@ -118,13 +120,13 @@ def build_megatron_app(
         name="download_model",
     )
     def download_model():
-        """Download `megatron.model.hf_checkpoint` into the shared HF cache."""
+        """Download `megatron.model.model_name` into the shared HF cache."""
         from huggingface_hub import snapshot_download
 
         assert megatron.model is not None, "megatron.model must be set"
         models_volume.reload()
         path = snapshot_download(
-            megatron.model.hf_checkpoint,
+            megatron.model.model_name,
             token=os.environ.get("HF_TOKEN"),
         )
         print(f"Downloaded to: {path}")
@@ -157,10 +159,10 @@ def build_megatron_app(
         models_volume.reload()
 
         checkpoint_out = f"{CHECKPOINTS_DIR}/{app_name}-megatron"
-        print(f"Converting {megatron.model.hf_checkpoint} → {checkpoint_out}")
+        print(f"Converting {megatron.model.model_name} → {checkpoint_out}")
 
         bridge = AutoBridge.from_hf_pretrained(
-            megatron.model.hf_checkpoint,
+            megatron.model.model_name,
             dtype=torch.bfloat16,
             device_map="auto",
             trust_remote_code=True,
@@ -172,7 +174,7 @@ def build_megatron_app(
             megatron_model,
             checkpoint_out,
             ckpt_format="torch_dist",
-            hf_tokenizer_path=megatron.model.hf_checkpoint,
+            hf_tokenizer_path=megatron.model.model_name,
         )
 
         checkpoints_volume.commit()
@@ -232,7 +234,7 @@ def build_megatron_app(
         serialized=True,
         name="train_lora",
     )
-    @clustered(size=megatron.n_nodes, rdma=True)
+    @clustered(size=framework.n_nodes, rdma=True)
     def train_lora():
         """Run the LoRA training script on each clustered node via torchrun."""
         assert megatron.model is not None
@@ -251,7 +253,7 @@ def build_megatron_app(
             if cluster_info.container_ips
             else "localhost"
         )
-        print(f"Node {node_rank}/{megatron.n_nodes}, Master: {master_addr}:29500")
+        print(f"Node {node_rank}/{framework.n_nodes}, Master: {master_addr}:29500")
 
         # Dataset: DatasetConfig.prompt_data can be a file path; Megatron's
         # FinetuningDatasetConfig wants the directory containing training.jsonl.
@@ -291,11 +293,11 @@ def build_megatron_app(
 
         cmd = [
             "torchrun",
-            f"--nnodes={megatron.n_nodes}",
+            f"--nnodes={framework.n_nodes}",
             f"--node_rank={node_rank}",
             f"--master_addr={master_addr}",
             "--master_port=29500",
-            f"--nproc_per_node={megatron.gpus_per_node}",
+            f"--nproc_per_node={framework.gpus_per_node}",
             script_path,
             "--preprocessed_dir",
             preprocessed_dir,

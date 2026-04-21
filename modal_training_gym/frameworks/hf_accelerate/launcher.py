@@ -2,18 +2,23 @@
 
 Usage (from a tutorial file):
 
+    from modal_training_gym.common.models import Llama2_7B
     from modal_training_gym.frameworks.hf_accelerate import (
-        AccelerateConfig, AccelerateModalConfig, build_accelerate_app,
+        AccelerateConfig, AccelerateFrameworkConfig, build_accelerate_app,
     )
 
-    class _Accelerate(AccelerateConfig):
-        model = Model(BaseModelType.Llama2_7B)
-        dataset = ...
-        wandb = ...
-        train_script_source = TRAIN_SCRIPT
-        mixed_precision = "bf16"
+    config = AccelerateConfig(
+        model=Llama2_7B(),
+        dataset=...,
+        wandb=...,
+        framework_config=AccelerateFrameworkConfig(
+            train_script_source=TRAIN_SCRIPT,
+            mixed_precision="bf16",
+            gpu="H100",
+        ),
+    )
 
-    app = build_accelerate_app(modal=AccelerateModalConfig(gpu="H100"), config=_Accelerate())
+    app = build_accelerate_app(config=config)
 
 Exposes `app.download_dataset`, `app.upload_script`, and `app.train`.
 """
@@ -29,33 +34,33 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+from modal_training_gym.common.framework import resolve_caller_module
 
 from .config import (
     DATASET_MOUNT_PATH,
     MODEL_MOUNT_PATH,
     SCRIPTS_MOUNT_PATH,
     AccelerateConfig,
-    AccelerateModalConfig,
 )
 
 
 def build_accelerate_app(
     *,
-    modal: AccelerateModalConfig,
     config: AccelerateConfig,
     name: str | None = None,
 ) -> App:
     app_name = name or f"accelerate-{type(config).__name__.lstrip('_').lower()}"
+    framework = config.framework_config
 
-    caller_module = inspect.getmodule(inspect.stack()[1].frame)
+    caller_module = resolve_caller_module()
     if caller_module is not None:
         cloudpickle.register_pickle_by_value(caller_module)
 
     # ── Image ────────────────────────────────────────────────────────────────
     train_image = (
-        Image.debian_slim(python_version=modal.python_version)
+        Image.debian_slim(python_version=framework.python_version)
         .apt_install("libibverbs-dev", "libibverbs1")
-        .pip_install(*modal.pip_deps)
+        .pip_install(*framework.pip_deps)
         .add_local_python_source("modal_training_gym", copy=True)
     )
 
@@ -67,15 +72,15 @@ def build_accelerate_app(
     data_dir = str(DATASET_MOUNT_PATH)
     model_dir = str(MODEL_MOUNT_PATH)
     scripts_dir = str(SCRIPTS_MOUNT_PATH)
-    script_remote_path = f"{scripts_dir}/{config.train_script_name}"
+    script_remote_path = f"{scripts_dir}/{framework.train_script_name}"
 
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
         "framework": "hf-accelerate",
-        **config.app_tags,
+        **framework.app_tags,
     }
     app = App(app_name, tags=tags)
-    gpu_spec = f"{modal.gpu}:{config.gpus_per_node}"
+    gpu_spec = f"{framework.gpu}:{framework.gpus_per_node}"
 
     # ── download_dataset ─────────────────────────────────────────────────────
     @app.function(
@@ -102,15 +107,15 @@ def build_accelerate_app(
         name="upload_script",
     )
     def upload_script():
-        """Write `config.train_script_source` to the scripts volume."""
-        if not config.train_script_source.strip():
-            raise RuntimeError("config.train_script_source is empty")
+        """Write `framework.train_script_source` to the scripts volume."""
+        if not framework.train_script_source.strip():
+            raise RuntimeError("framework.train_script_source is empty")
         os.makedirs(scripts_dir, exist_ok=True)
         with open(script_remote_path, "w") as f:
-            f.write(config.train_script_source)
+            f.write(framework.train_script_source)
         scripts_volume.commit()
         print(
-            f"Wrote training script ({len(config.train_script_source)} chars) "
+            f"Wrote training script ({len(framework.train_script_source)} chars) "
             f"to {script_remote_path}"
         )
 
@@ -132,7 +137,7 @@ def build_accelerate_app(
         serialized=True,
         name="train",
     )
-    @clustered(size=config.n_nodes, rdma=True)
+    @clustered(size=framework.n_nodes, rdma=True)
     def train():
         """Run `accelerate launch` on the uploaded training script on each node."""
         assert os.path.exists(script_remote_path), (
@@ -155,7 +160,7 @@ def build_accelerate_app(
                     config.wandb.exp_name or config.wandb.group
                 )
 
-        extra = list(config.script_args)
+        extra = list(framework.script_args)
         if "--data_dir" not in extra:
             extra.extend(["--data_dir", data_dir])
         if "--output_dir" not in extra:
@@ -165,17 +170,17 @@ def build_accelerate_app(
             "accelerate",
             "launch",
             "--num_processes",
-            str(config.gpus_per_node),
+            str(framework.gpus_per_node),
             "--num_machines",
-            str(config.n_nodes),
+            str(framework.n_nodes),
             "--machine_rank",
             str(rank),
             "--main_process_ip",
             master_ip,
             "--main_process_port",
-            str(config.master_port),
+            str(framework.master_port),
             "--mixed_precision",
-            config.mixed_precision,
+            framework.mixed_precision,
             script_remote_path,
             *extra,
         ]

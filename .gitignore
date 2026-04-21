@@ -182,3 +182,5 @@ slime/test_configs
 
 # Claude
 .claude
+
+.humanize

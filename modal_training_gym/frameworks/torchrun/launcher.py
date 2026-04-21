@@ -2,8 +2,9 @@
 
 Usage (from a tutorial file):
 
+    from modal_training_gym.common.models import Llama2_7B
     from modal_training_gym.frameworks.torchrun import (
-        TorchrunConfig, TorchrunModalConfig, build_torchrun_app,
+        TorchrunConfig, TorchrunFrameworkConfig, build_torchrun_app,
     )
 
     TRAIN_SCRIPT = \"\"\"
@@ -16,13 +17,17 @@ Usage (from a tutorial file):
         main()
     \"\"\"
 
-    class _Torchrun(TorchrunConfig):
-        model = Model(BaseModelType.Llama2_7B)
-        dataset = ...
-        wandb = ...
-        train_script_source = TRAIN_SCRIPT
+    config = TorchrunConfig(
+        model=Llama2_7B(),
+        dataset=...,
+        wandb=...,
+        framework_config=TorchrunFrameworkConfig(
+            train_script_source=TRAIN_SCRIPT,
+            gpu="H100",
+        ),
+    )
 
-    app = build_torchrun_app(modal=TorchrunModalConfig(gpu="H100"), config=_Torchrun())
+    app = build_torchrun_app(config=config)
 
 Exposes `app.download_dataset`, `app.upload_script`, and `app.train`.
 """
@@ -37,36 +42,36 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+from modal_training_gym.common.framework import resolve_caller_module
 
 from .config import (
     DATASET_MOUNT_PATH,
     MODEL_MOUNT_PATH,
     SCRIPTS_MOUNT_PATH,
     TorchrunConfig,
-    TorchrunModalConfig,
 )
 
 
 def build_torchrun_app(
     *,
-    modal: TorchrunModalConfig,
     config: TorchrunConfig,
     name: str | None = None,
 ) -> App:
     app_name = name or f"torchrun-{type(config).__name__.lstrip('_').lower()}"
+    framework = config.framework_config
 
     # Inline user-defined classes (`_Torchrun`, inline `DatasetConfig`
     # subclasses, etc.) so the remote container doesn't need to re-import
     # the tutorial module.
-    caller_module = inspect.getmodule(inspect.stack()[1].frame)
+    caller_module = resolve_caller_module()
     if caller_module is not None:
         cloudpickle.register_pickle_by_value(caller_module)
 
     # ── Image ────────────────────────────────────────────────────────────────
     train_image = (
-        Image.debian_slim(python_version=modal.python_version)
+        Image.debian_slim(python_version=framework.python_version)
         .apt_install("libibverbs-dev", "libibverbs1")
-        .pip_install(*modal.pip_deps)
+        .pip_install(*framework.pip_deps)
         .add_local_python_source("modal_training_gym", copy=True)
     )
 
@@ -78,15 +83,15 @@ def build_torchrun_app(
     data_dir = str(DATASET_MOUNT_PATH)
     model_dir = str(MODEL_MOUNT_PATH)
     scripts_dir = str(SCRIPTS_MOUNT_PATH)
-    script_remote_path = f"{scripts_dir}/{config.train_script_name}"
+    script_remote_path = f"{scripts_dir}/{framework.train_script_name}"
 
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
         "framework": "torchrun",
-        **config.app_tags,
+        **framework.app_tags,
     }
     app = App(app_name, tags=tags)
-    gpu_spec = f"{modal.gpu}:{config.gpus_per_node}"
+    gpu_spec = f"{framework.gpu}:{framework.gpus_per_node}"
 
     # ── download_dataset ─────────────────────────────────────────────────────
     @app.function(
@@ -113,15 +118,15 @@ def build_torchrun_app(
         name="upload_script",
     )
     def upload_script():
-        """Write `config.train_script_source` to the scripts volume."""
-        if not config.train_script_source.strip():
-            raise RuntimeError("config.train_script_source is empty")
+        """Write `framework.train_script_source` to the scripts volume."""
+        if not framework.train_script_source.strip():
+            raise RuntimeError("framework.train_script_source is empty")
         os.makedirs(scripts_dir, exist_ok=True)
         with open(script_remote_path, "w") as f:
-            f.write(config.train_script_source)
+            f.write(framework.train_script_source)
         scripts_volume.commit()
         print(
-            f"Wrote training script ({len(config.train_script_source)} chars) "
+            f"Wrote training script ({len(framework.train_script_source)} chars) "
             f"to {script_remote_path}"
         )
 
@@ -143,7 +148,7 @@ def build_torchrun_app(
         serialized=True,
         name="train",
     )
-    @clustered(size=config.n_nodes, rdma=True)
+    @clustered(size=framework.n_nodes, rdma=True)
     def train():
         """Run `torchrun` on the uploaded training script on each node."""
         from torch.distributed.run import parse_args, run
@@ -170,18 +175,18 @@ def build_torchrun_app(
 
         # Pass data/output/model_cache as standard args. The script is free to
         # ignore them; most distributed-training scripts accept them.
-        extra = list(config.script_args)
+        extra = list(framework.script_args)
         if "--data_dir" not in extra:
             extra.extend(["--data_dir", data_dir])
         if "--output_dir" not in extra:
             extra.extend(["--output_dir", f"{model_dir}/{app_name}"])
 
         torchrun_args = [
-            f"--nnodes={config.n_nodes}",
-            f"--nproc-per-node={config.gpus_per_node}",
+            f"--nnodes={framework.n_nodes}",
+            f"--nproc-per-node={framework.gpus_per_node}",
             f"--node-rank={rank}",
             f"--master-addr={master_ip}",
-            f"--master-port={config.master_port}",
+            f"--master-port={framework.master_port}",
             script_remote_path,
             *extra,
         ]

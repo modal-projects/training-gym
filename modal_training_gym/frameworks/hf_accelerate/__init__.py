@@ -3,7 +3,7 @@ from .config import (
     MODEL_MOUNT_PATH,
     SCRIPTS_MOUNT_PATH,
     AccelerateConfig,
-    AccelerateModalConfig,
+    AccelerateFrameworkConfig,
 )
 from .launcher import build_accelerate_app
 
@@ -12,6 +12,6 @@ __all__ = [
     "MODEL_MOUNT_PATH",
     "SCRIPTS_MOUNT_PATH",
     "AccelerateConfig",
-    "AccelerateModalConfig",
+    "AccelerateFrameworkConfig",
     "build_accelerate_app",
 ]

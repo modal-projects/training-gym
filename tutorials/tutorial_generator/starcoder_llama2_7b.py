@@ -62,18 +62,16 @@ def _imports():
     import modal
 
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import BaseModelType, Model
+    from modal_training_gym.common.models import Llama2_7B
     from modal_training_gym.common.wandb import WandbConfig
     from modal_training_gym.frameworks.hf_accelerate import (
         AccelerateConfig,
-        AccelerateModalConfig,
-        build_accelerate_app,
+        AccelerateFrameworkConfig,
     )
     from modal_training_gym.frameworks.torchrun import (
         DATASET_MOUNT_PATH,
         TorchrunConfig,
-        TorchrunModalConfig,
-        build_torchrun_app,
+        TorchrunFrameworkConfig,
     )
 
 
@@ -307,7 +305,7 @@ def _training_config_section():
 
 @code
 def _shared_settings():
-    _MODEL = Model(BaseModelType.Llama2_7B)
+    _MODEL = Llama2_7B()
     _DATASET = StarcoderGoRustDataset(DATASET_MOUNT_PATH)
     _WANDB = WandbConfig(project="bigcode-starcoderdata-training")
 
@@ -333,21 +331,22 @@ def _launcher_a_section():
 
 @code
 def _torchrun_app():
-    class _Torchrun(TorchrunConfig):
-        model = _MODEL
-        dataset = _DATASET
-        wandb = _WANDB
-
-        n_nodes = 2
-        gpus_per_node = 8
-
-        train_script_source = TRAIN_SCRIPT
-        script_args = _SHARED_SCRIPT_ARGS
-
-    torchrun_app = build_torchrun_app(
-        modal=TorchrunModalConfig(gpu="H100"),
-        config=_Torchrun(),
+    torchrun_framework_config = TorchrunFrameworkConfig(
+        gpu="H100",
+        n_nodes=2,
+        gpus_per_node=8,
+        train_script_source=TRAIN_SCRIPT,
+        script_args=_SHARED_SCRIPT_ARGS,
     )
+
+    torchrun_run = TorchrunConfig(
+        dataset=_DATASET,
+        model=_MODEL,
+        wandb=_WANDB,
+        framework_config=torchrun_framework_config,
+    )
+
+    torchrun_app = torchrun_run.build_app()
 
 
 @markdown
@@ -363,22 +362,23 @@ def _launcher_b_section():
 
 @code
 def _accelerate_app():
-    class _Accelerate(AccelerateConfig):
-        model = _MODEL
-        dataset = _DATASET
-        wandb = _WANDB
-
-        n_nodes = 2
-        gpus_per_node = 8
-
-        train_script_source = TRAIN_SCRIPT
-        script_args = _SHARED_SCRIPT_ARGS
-        mixed_precision = "bf16"
-
-    accelerate_app = build_accelerate_app(
-        modal=AccelerateModalConfig(gpu="H100"),
-        config=_Accelerate(),
+    accelerate_framework_config = AccelerateFrameworkConfig(
+        gpu="H100",
+        n_nodes=2,
+        gpus_per_node=8,
+        train_script_source=TRAIN_SCRIPT,
+        script_args=_SHARED_SCRIPT_ARGS,
+        mixed_precision="bf16",
     )
+
+    accelerate_run = AccelerateConfig(
+        dataset=_DATASET,
+        model=_MODEL,
+        wandb=_WANDB,
+        framework_config=accelerate_framework_config,
+    )
+
+    accelerate_app = accelerate_run.build_app()
 
 
 @markdown
@@ -395,8 +395,8 @@ def _run_section():
     Both apps use their own volumes (`<app_name>-data`, `-model`,
     `-scripts`), so running one doesn't affect the other.
 
-    Key training parameters (configurable on the `_Torchrun` /
-    `_Accelerate` classes above):
+    Key training parameters (configurable on the framework config objects
+    above):
 
     - Global batch size: 2048
     - Per-device batch size: 16
@@ -436,10 +436,22 @@ def _run_torchrun_section():
 
 @notebook_only
 @code
-def _invoke_torchrun():
+def _invoke_torchrun_download_dataset():
     with torchrun_app.run():
         torchrun_app.download_dataset.remote()
+
+
+@notebook_only
+@code
+def _invoke_torchrun_upload_script():
+    with torchrun_app.run():
         torchrun_app.upload_script.remote()
+
+
+@notebook_only
+@code
+def _invoke_torchrun_train():
+    with torchrun_app.run():
         torchrun_app.train.remote()
 
 
@@ -453,10 +465,22 @@ def _run_accelerate_section():
 
 @notebook_only
 @code
-def _invoke_accelerate():
+def _invoke_accelerate_download_dataset():
     with accelerate_app.run():
         accelerate_app.download_dataset.remote()
+
+
+@notebook_only
+@code
+def _invoke_accelerate_upload_script():
+    with accelerate_app.run():
         accelerate_app.upload_script.remote()
+
+
+@notebook_only
+@code
+def _invoke_accelerate_train():
+    with accelerate_app.run():
         accelerate_app.train.remote()
 
 
@@ -495,8 +519,9 @@ def _customization_section():
     """
     ## Customization
 
-    - Adjust the number of nodes and GPUs on the `_Torchrun` / `_Accelerate`
-      subclasses (`n_nodes`, `gpus_per_node`).
+    - Adjust the number of nodes and GPUs on
+      `torchrun_framework_config` / `accelerate_framework_config`
+      (`n_nodes`, `gpus_per_node`).
     - Change training hyperparameters inside `TRAIN_SCRIPT`.
     - Add new evaluation prompts by writing a new framework function.
     - Configure data preprocessing in `StarcoderGoRustDataset.prepare()`.

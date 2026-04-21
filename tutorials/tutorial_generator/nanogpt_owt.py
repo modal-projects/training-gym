@@ -360,17 +360,43 @@ def _run_cli():
 @markdown
 def _run_interactive():
     """
-    Interactive — pick the stage you want and call `.remote()`:
+    Interactive — run one stage per cell. `train_single_node` and
+    `train_multi_node` are alternative launch paths:
     """
 
 
 @notebook_only
 @code
-def _invoke():
+def _invoke_prepare_data():
     with app.run():
-        # prepare_data.remote()
-        # train_multi_node.remote()
-        # bench_single_gpu.remote()
+        prepare_data.remote()
+
+
+@notebook_only
+@code
+def _invoke_train_single_node():
+    with app.run():
+        train_single_node.remote()
+
+
+@notebook_only
+@code
+def _invoke_train_multi_node():
+    with app.run():
+        train_multi_node.remote()
+
+
+@notebook_only
+@code
+def _invoke_bench_single_gpu():
+    with app.run():
+        bench_single_gpu.remote()
+
+
+@notebook_only
+@code
+def _invoke_run_inference():
+    with app.run():
         run_inference.remote()
 
 

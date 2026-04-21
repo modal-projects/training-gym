@@ -18,8 +18,13 @@ from typing import TYPE_CHECKING, Any
 from modal_training_gym.common import GPUType
 
 if TYPE_CHECKING:
+    from modal import App
+
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import Model
+    from modal_training_gym.common.models import (
+        ModelArchitecture,
+        ModelConfiguration,
+    )
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
@@ -41,6 +46,7 @@ _SLIME_SKIP = {
     "dataset",
     "model",
     "wandb",
+    "modal",
     "app_tags",
 }
 
@@ -108,13 +114,14 @@ class SlimeConfig:
     dataset: "DatasetConfig | None" = None
     # When set, the model's `hf_checkpoint` and architecture fields
     # (`num_layers`, `hidden_size`, …) are merged into the flat field dict.
-    model: "Model | None" = None
+    model: "ModelConfiguration | None" = None
     # When set, wandb logging is enabled and the config's fields
     # (`wandb_project`, `wandb_group`, …) are merged into the flat field dict.
     wandb: "WandbConfig | None" = None
     # Merged with the framework's default Modal app tags
     # (`training` / `source` / `framework`) at app-build time.
     app_tags: dict = {}
+    modal: ModalConfig | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         # Fresh environment dict per instance — never mutate the class-level default.
@@ -126,7 +133,7 @@ class SlimeConfig:
 
     # ── Container → SLIME flag converters ────────────────────────────────────
     #
-    # Each converter maps a common config struct (`DatasetConfig`, `Model`,
+    # Each converter maps a common config struct (`DatasetConfig`, `ModelConfiguration`,
     # `WandbConfig`) to the specific field names SLIME's CLI expects. Kept
     # explicit so the SLIME vocabulary lives in one place and the common
     # configs stay framework-agnostic.
@@ -144,11 +151,31 @@ class SlimeConfig:
         }
 
     @staticmethod
-    def _model_to_fields(m: "Model") -> dict[str, Any]:
-        arch = m.architecture
-        assert arch is not None  # guaranteed by Model.__post_init__
+    def _validate_custom_model_architecture(
+        m: "ModelConfiguration",
+    ) -> "ModelArchitecture":
+        """Require a `ModelArchitecture` on the attached model.
+
+        SLIME consumes architecture fields as CLI flags, so a model without an
+        explicit `ModelArchitecture` cannot produce a valid command line. This
+        check fires before any remote Modal function is defined — invoked from
+        `_model_to_fields()` (the converter that emits the flags) and from
+        `build_slime_app()` preflight — so errors surface locally. Returns
+        the non-None architecture for type-narrowing at the call site.
+        """
+        if m.architecture is None:
+            raise ValueError(
+                "SlimeConfig requires a ModelArchitecture on the attached "
+                "ModelConfiguration. Set `architecture = ModelArchitecture(...)` "
+                "on your subclass."
+            )
+        return m.architecture
+
+    @staticmethod
+    def _model_to_fields(m: "ModelConfiguration") -> dict[str, Any]:
+        arch = SlimeConfig._validate_custom_model_architecture(m)
         return {
-            "hf_checkpoint": m.hf_checkpoint,
+            "hf_checkpoint": m.model_name,
             "num_layers": arch.num_layers,
             "hidden_size": arch.hidden_size,
             "ffn_hidden_size": arch.ffn_hidden_size,
@@ -262,40 +289,60 @@ class SlimeConfig:
             rm_type=f.get("rm_type", ""),
         )
 
-    def to_model(self) -> "Model":
-        """Extract model-related SLIME flags back into a `Model`.
+    def to_model(self) -> "ModelConfiguration":
+        """Extract model-related SLIME flags back into a `ModelConfiguration`.
 
-        Reverse of attaching a `Model` — works whether fields came from an
-        attached container or were set directly.
+        Returns the attached `ModelConfiguration` when one is set. Otherwise,
+        constructs an ad-hoc instance from the raw SLIME flag fields, with
+        `architecture=None` when every architecture flag is at its default
+        and a populated `ModelArchitecture` when any field differs.
         """
+        if self.model is not None:
+            return self.model
+
         from modal_training_gym.common.models import (
-            BaseModelType,
-            Model,
             ModelArchitecture,
+            ModelConfiguration,
         )
 
-        f = self._fields()
-        arch = ModelArchitecture(
-            num_layers=f.get("num_layers", 0),
-            hidden_size=f.get("hidden_size", 0),
-            ffn_hidden_size=f.get("ffn_hidden_size", 0),
-            num_attention_heads=f.get("num_attention_heads", 0),
-            group_query_attention=f.get("group_query_attention", True),
-            num_query_groups=f.get("num_query_groups", 0),
-            kv_channels=f.get("kv_channels", 0),
-            vocab_size=f.get("vocab_size", 0),
-            normalization=f.get("normalization", "RMSNorm"),
-            norm_epsilon=f.get("norm_epsilon", 1e-6),
-            swiglu=f.get("swiglu", True),
-            disable_bias_linear=f.get("disable_bias_linear", True),
-            qk_layernorm=f.get("qk_layernorm", True),
-            use_rotary_position_embeddings=f.get("use_rotary_position_embeddings", True),
-            rotary_base=f.get("rotary_base", 10000),
+        fields: dict[str, Any] = {}
+        for cls in reversed(type(self).__mro__):
+            if cls is object:
+                continue
+            fields.update(
+                {
+                    k: v
+                    for k, v in vars(cls).items()
+                    if not k.startswith("_") and not callable(v)
+                }
+            )
+        fields.update(vars(self))
+
+        arch_candidate = ModelArchitecture(
+            num_layers=fields.get("num_layers", 0),
+            hidden_size=fields.get("hidden_size", 0),
+            ffn_hidden_size=fields.get("ffn_hidden_size", 0),
+            num_attention_heads=fields.get("num_attention_heads", 0),
+            group_query_attention=fields.get("group_query_attention", True),
+            num_query_groups=fields.get("num_query_groups", 0),
+            kv_channels=fields.get("kv_channels", 0),
+            vocab_size=fields.get("vocab_size", 0),
+            normalization=fields.get("normalization", "RMSNorm"),
+            norm_epsilon=fields.get("norm_epsilon", 1e-6),
+            swiglu=fields.get("swiglu", True),
+            disable_bias_linear=fields.get("disable_bias_linear", True),
+            qk_layernorm=fields.get("qk_layernorm", True),
+            use_rotary_position_embeddings=fields.get(
+                "use_rotary_position_embeddings", True
+            ),
+            rotary_base=fields.get("rotary_base", 10000),
         )
-        return Model(
-            model_type=next(iter(BaseModelType)),
-            hf_checkpoint=f.get("hf_checkpoint", "") or "",
-            architecture=arch,
+        architecture = (
+            arch_candidate if arch_candidate != ModelArchitecture() else None
+        )
+        return ModelConfiguration(
+            model_name=fields.get("hf_checkpoint", "") or "",
+            architecture=architecture,
         )
 
     def to_wandb_config(self) -> "WandbConfig":
@@ -347,3 +394,17 @@ class SlimeConfig:
             )
 
         return math.ceil(total_gpus / gpus_per_node)
+
+    def build_app(
+        self,
+        *,
+        name: str | None = None,
+        modal: ModalConfig | None = None,
+    ) -> "App":
+        from .launcher import build_slime_app
+
+        return build_slime_app(
+            modal=modal or self.modal or ModalConfig(),
+            slime=self,
+            name=name,
+        )

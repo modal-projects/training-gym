@@ -9,14 +9,19 @@ launcher points torchrun at the materialized file.
 
 from __future__ import annotations
 
+from dataclasses import field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from modal_training_gym.common import GPUType
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 if TYPE_CHECKING:
+    from modal import App
+
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import Model
+    from modal_training_gym.common.models import ModelConfiguration
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
@@ -38,31 +43,15 @@ _DEFAULT_TRAIN_PIP = (
 )
 
 
-class TorchrunModalConfig:
-    """Modal infrastructure for torchrun — GPU family, Python, pip deps."""
+@dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
+class TorchrunFrameworkConfig:
+    """torchrun settings, including Modal infrastructure."""
 
+    # ── Modal infrastructure ────────────────────────────────────────────────
     gpu: GPUType = "H100"
     python_version: str = "3.12"
     # Additional pip deps for the training image. Override to add / replace.
     pip_deps: tuple[str, ...] = _DEFAULT_TRAIN_PIP
-
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-
-class TorchrunConfig:
-    """Config for a torchrun-launched multi-node run.
-
-    Containers (`dataset`, `model`, `wandb`) are interpreted explicitly — the
-    launcher reads fields off them rather than merging `.to_fields()`. The
-    training script decides how to consume them via `script_args`.
-    """
-
-    # ── Containers ───────────────────────────────────────────────────────────
-    dataset: "DatasetConfig | None" = None
-    model: "Model | None" = None
-    wandb: "WandbConfig | None" = None
 
     # ── Infrastructure ───────────────────────────────────────────────────────
     n_nodes: int = 2
@@ -77,13 +66,37 @@ class TorchrunConfig:
     # ── Script args (passed after the torchrun launcher args) ────────────────
     # Values here are forwarded verbatim; the launcher also injects
     # `--data_dir` / `--output_dir` / `--model_cache_dir` from the containers.
-    script_args: list[str] = []
+    script_args: list[str] = field(default_factory=list)
 
     # ── Modal app tags ───────────────────────────────────────────────────────
     # Merged with the framework's default tags (training/source/framework) at
     # app-build time. Use for per-run tagging (experiment id, user, env, …).
-    app_tags: dict = {}
+    app_tags: dict = field(default_factory=dict)
 
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+
+class TorchrunConfig:
+    dataset: "DatasetConfig | None"
+    model: "ModelConfiguration | None"
+    wandb: "WandbConfig | None"
+    framework_config: TorchrunFrameworkConfig
+
+    def __init__(
+        self,
+        dataset: "DatasetConfig | None" = None,
+        model: "ModelConfiguration | None" = None,
+        wandb: "WandbConfig | None" = None,
+        framework_config: TorchrunFrameworkConfig | None = None,
+    ) -> None:
+        self.dataset = dataset
+        self.model = model
+        self.wandb = wandb
+        self.framework_config = framework_config or TorchrunFrameworkConfig()
+
+    def build_app(
+        self,
+        *,
+        name: str | None = None,
+    ) -> "App":
+        from .launcher import build_torchrun_app
+
+        return build_torchrun_app(config=self, name=name)

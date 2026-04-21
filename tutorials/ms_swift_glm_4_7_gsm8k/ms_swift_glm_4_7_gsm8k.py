@@ -13,12 +13,11 @@
 import modal
 
 from modal_training_gym.common.dataset import DatasetConfig
-from modal_training_gym.common.models import BaseModelType, Model
+from modal_training_gym.common.models import GLM_4_7
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.frameworks.ms_swift import (
     MsSwiftConfig,
-    MsSwiftModalConfig,
-    build_ms_swift_app,
+    MsSwiftFrameworkConfig,
 )
 from modal_training_gym.frameworks.ms_swift.config import HF_CACHE_PATH
 
@@ -74,48 +73,41 @@ class GSM8KDataset(DatasetConfig):
 
 # ## Define the experiment
 #
-# Subclass `MsSwiftConfig` and set class attributes. Every attribute except
-# containers (`dataset`, `model`, `wandb`) and launcher-only fields
-# (`environment`, `n_nodes`, `gpus_per_node`) is forwarded to `megatron sft`
-# as a `--flag value` CLI arg (ms-swift uses underscore-style names and
-# string-valued booleans).
+# Build a framework settings object (`MsSwiftFrameworkConfig`) and pass it
+# into `MsSwiftConfig(dataset=..., model=..., framework_config=...)`.
+# The framework settings are forwarded to `megatron sft` as `--flag value`
+# args (ms-swift uses underscore-style names and string-valued booleans).
 
-class _MsSwift(MsSwiftConfig):
-    # ── Containers ────────────────────────────────────────────────────────
-    # hf_checkpoint comes from the Model; ms-swift reads architecture from
-    # the HF config at train time.
-    model = Model(BaseModelType.GLM_4_7)
-    dataset = GSM8KDataset(HF_CACHE_PATH)
-    wandb = WandbConfig(project="glm-4-7-sft")
+swift_framework_config = MsSwiftFrameworkConfig(
+    gpu="B200",
+    n_nodes=4,
+    gpus_per_node=8,
+    tensor_model_parallel_size=2,
+    expert_model_parallel_size=4,
+    pipeline_model_parallel_size=4,
+    context_parallel_size=1,
+    sequence_parallel=True,
+    train_iters=5,
+    num_train_epochs=1,
+    lr=1e-4,
+    global_batch_size=8,
+    max_length=2048,
+    tuner_type="lora",
+    lora_rank=128,
+    lora_alpha=32,
+    merge_lora=False,
+)
 
-    # ── Infrastructure ────────────────────────────────────────────────────
-    n_nodes = 4
-    gpus_per_node = 8
-
-    # ── Parallelism (TP=2, EP=4, PP=4, CP=1) ──────────────────────────────
-    tensor_model_parallel_size = 2
-    expert_model_parallel_size = 4
-    pipeline_model_parallel_size = 4
-    context_parallel_size = 1
-    sequence_parallel = True
-
-    # ── Training ──────────────────────────────────────────────────────────
-    # train_iters caps total Megatron iterations; set low for smoke testing.
-    train_iters = 5
-    num_train_epochs = 1
-    lr = 1e-4
-    global_batch_size = 8
-    max_length = 2048
-
-    # ── LoRA ──────────────────────────────────────────────────────────────
-    tuner_type = "lora"
-    lora_rank = 128
-    lora_alpha = 32
-    merge_lora = False
+my_training_run = MsSwiftConfig(
+    dataset=GSM8KDataset(HF_CACHE_PATH),
+    model=GLM_4_7(),
+    wandb=WandbConfig(project="glm-4-7-sft"),
+    framework_config=swift_framework_config,
+)
 
 # ## Build the Modal app
 
-app = build_ms_swift_app(modal=MsSwiftModalConfig(gpu="B200"), swift=_MsSwift())
+app = my_training_run.build_app()
 
 # ## Run it
 
