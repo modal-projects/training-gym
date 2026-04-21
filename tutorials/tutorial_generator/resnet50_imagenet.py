@@ -10,6 +10,7 @@ TUTORIAL_METADATA = {
     'framework': '— (clones `pytorch/vision`)',
     'cluster_shape': '4 × 8×H100',
     'summary': 'ResNet50 on ImageNet (DDP)',
+    'difficulty': 'Intermediate',
     'order': 80,
 }
 

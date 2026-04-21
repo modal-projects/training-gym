@@ -10,6 +10,7 @@ TUTORIAL_METADATA = {
     'framework': '`megatron`',
     'cluster_shape': '4 × 8×B200',
     'summary': 'GLM-4.7 LoRA on LongMIT-128K (NeMo bridge)',
+    'difficulty': 'Advanced',
     'order': 30,
 }
 

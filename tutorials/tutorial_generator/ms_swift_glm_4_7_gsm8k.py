@@ -9,6 +9,7 @@ TUTORIAL_METADATA = {
     'framework': '`ms_swift`',
     'cluster_shape': '4 × 8×B200',
     'summary': 'GLM-4.7 LoRA SFT on GSM8K (Megatron)',
+    'difficulty': 'Advanced',
     'order': 20,
 }
 

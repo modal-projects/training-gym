@@ -124,31 +124,9 @@ versions to match, and the framework images we use (slime nightly, NeMo
 
 ## Authoring a new tutorial
 
-Tutorials are generated from a Python source file under
-`tutorials/tutorial_generator/`. The generator AST-walks each source and
-emits `tutorials/<name>/<name>.py` + `tutorials/<name>/<name>.ipynb`.
-
-Decorators the generator understands:
-
-- `@markdown` — function's docstring becomes a markdown cell (`.ipynb`) or
-  `#` comments (`.py`).
-- `@code` — function's body (dedented) becomes a code cell.
-- `@shell("…")` — the string arg is emitted verbatim as a code cell
-  (supports `!pip install …` shell magic).
-- `@py_only` / `@notebook_only` — restrict a cell to one output format;
-  stack on top of `@markdown` / `@code` / `@shell`.
-
-Function names and argument lists are arbitrary — only decorator + body
-matter. Cells appear in source order.
-
-Regenerate after editing a source file:
-
-```bash
-uv run python tutorials/generate_tutorial.py
-```
-
-The pre-commit hook (`.pre-commit-config.yaml`) runs the generator
-automatically so committed `.py` / `.ipynb` never drift from the source.
+See [`tutorials/README.md`](tutorials/README.md#authoring-a-new-tutorial)
+for the generator-source format and the per-tutorial `TUTORIAL_METADATA`
+schema.
 
 ## Contributing a new framework
 

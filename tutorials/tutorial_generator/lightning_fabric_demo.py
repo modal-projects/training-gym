@@ -10,6 +10,7 @@ TUTORIAL_METADATA = {
     'framework': '`lightning`',
     'cluster_shape': '2 × 8×H100',
     'summary': 'Transformer on WikiText2 (Fabric DDP)',
+    'difficulty': 'Beginner',
     'order': 70,
 }
 

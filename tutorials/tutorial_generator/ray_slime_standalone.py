@@ -10,6 +10,7 @@ TUTORIAL_METADATA = {
     'framework': '— (raw `ModalRayCluster`)',
     'cluster_shape': '2 × 8×H100',
     'summary': 'Ray-on-Modal pattern demo',
+    'difficulty': 'Intermediate',
     'order': 100,
 }
 

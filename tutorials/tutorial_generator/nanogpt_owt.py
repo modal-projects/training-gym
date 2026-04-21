@@ -14,6 +14,7 @@ TUTORIAL_METADATA = {
     'framework': '— (clones `karpathy/nanoGPT`)',
     'cluster_shape': '2 × 8×H100',
     'summary': 'GPT-2 124M on OpenWebText',
+    'difficulty': 'Intermediate',
     'order': 60,
 }
 

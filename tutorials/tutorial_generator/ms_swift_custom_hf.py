@@ -10,6 +10,7 @@ TUTORIAL_METADATA = {
     'framework': '`ms_swift`',
     'cluster_shape': '1 × 1×H100',
     'summary': 'Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry',
+    'difficulty': 'Beginner',
     'order': 25,
 }
 

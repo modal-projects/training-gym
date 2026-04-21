@@ -8,6 +8,7 @@ TUTORIAL_METADATA = {
     'framework': '— (NCCL utility)',
     'cluster_shape': '2 × 8×H100',
     'summary': 'All-reduce bandwidth benchmark (500000×2000 fp32)',
+    'difficulty': 'Beginner',
     'order': 90,
 }
 

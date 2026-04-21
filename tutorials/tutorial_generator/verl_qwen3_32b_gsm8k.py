@@ -10,6 +10,7 @@ TUTORIAL_METADATA = {
     'framework': '`verl`',
     'cluster_shape': '4 × 8×H100',
     'summary': 'Qwen3-32B GRPO on GSM8K (Megatron + vLLM)',
+    'difficulty': 'Advanced',
     'order': 40,
 }
 

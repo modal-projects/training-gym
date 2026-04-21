@@ -244,12 +244,13 @@ def _render_launch_cell(name: str) -> str:
 
 def _render_tutorial_table(entries: list[tuple[str, dict]]) -> str:
     lines = [
-        "| Tutorial | Framework | Cluster shape | What it trains | Launch |",
-        "|---|---|---|---|---|",
+        "| Tutorial | Difficulty | Framework | Cluster shape | What it trains | Launch |",
+        "|---|---|---|---|---|---|",
     ]
     for name, meta in entries:
         lines.append(
             f"| [`{name}`]({name}/{name}.ipynb)"
+            f" | {meta.get('difficulty', '—')}"
             f" | {meta['framework']}"
             f" | {meta['cluster_shape']}"
             f" | {meta['summary']}"

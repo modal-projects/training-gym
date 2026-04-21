@@ -8,6 +8,7 @@ TUTORIAL_METADATA = {
     'framework': '`torchrun` + `hf_accelerate`',
     'cluster_shape': '2 × 8×H100',
     'summary': 'Llama-2-7B SFT on Go + Rust (FSDP)',
+    'difficulty': 'Intermediate',
     'order': 50,
 }
 
