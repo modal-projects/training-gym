@@ -5,6 +5,14 @@ docstring); each `@code`-decorated function contributes a code cell (its
 body, dedented). Function names are arbitrary. Cell order = source order.
 """
 
+TUTORIAL_METADATA = {
+    'framework': '`ms_swift`',
+    'cluster_shape': '4 × 8×B200',
+    'summary': 'GLM-4.7 LoRA SFT on GSM8K (Megatron)',
+    'order': 20,
+}
+
+
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 

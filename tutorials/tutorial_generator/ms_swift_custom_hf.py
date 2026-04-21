@@ -6,6 +6,14 @@ catalog, no registry mutation, just a subclass defined inline in the
 tutorial.
 """
 
+TUTORIAL_METADATA = {
+    'framework': '`ms_swift`',
+    'cluster_shape': '1 × 1×H100',
+    'summary': 'Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry',
+    'order': 25,
+}
+
+
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 

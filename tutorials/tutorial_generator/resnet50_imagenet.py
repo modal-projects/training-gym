@@ -6,6 +6,14 @@ nodes. Uses PyTorch's official `torchvision` reference classification recipe
 `@modal.experimental.clustered`.
 """
 
+TUTORIAL_METADATA = {
+    'framework': '— (clones `pytorch/vision`)',
+    'cluster_shape': '4 × 8×H100',
+    'summary': 'ResNet50 on ImageNet (DDP)',
+    'order': 80,
+}
+
+
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 

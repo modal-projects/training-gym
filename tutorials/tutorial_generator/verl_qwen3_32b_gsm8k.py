@@ -6,6 +6,14 @@ body, dedented). README content is pulled into markdown cells so it shows
 up in both the .ipynb and (as `#` comments) in the .py.
 """
 
+TUTORIAL_METADATA = {
+    'framework': '`verl`',
+    'cluster_shape': '4 × 8×H100',
+    'summary': 'Qwen3-32B GRPO on GSM8K (Megatron + vLLM)',
+    'order': 40,
+}
+
+
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 

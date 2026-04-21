@@ -6,6 +6,14 @@ Uses Lightning's Fabric launcher to configure and launch a multi-node
 training job via our `lightning` framework.
 """
 
+TUTORIAL_METADATA = {
+    'framework': '`lightning`',
+    'cluster_shape': '2 × 8×H100',
+    'summary': 'Transformer on WikiText2 (Fabric DDP)',
+    'order': 70,
+}
+
+
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 

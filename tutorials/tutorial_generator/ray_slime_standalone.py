@@ -6,6 +6,14 @@ so you can see the bare Ray bootstrap + `JobSubmissionClient` submission
 flow. The SLIME framework package internally builds on this same helper.
 """
 
+TUTORIAL_METADATA = {
+    'framework': '— (raw `ModalRayCluster`)',
+    'cluster_shape': '2 × 8×H100',
+    'summary': 'Ray-on-Modal pattern demo',
+    'order': 100,
+}
+
+
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 

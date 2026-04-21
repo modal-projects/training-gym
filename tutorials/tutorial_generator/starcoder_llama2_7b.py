@@ -4,6 +4,14 @@ README content (from the reference starcoder example) is pulled into markdown
 cells so it shows up in both the .ipynb and (as `#` comments) in the .py.
 """
 
+TUTORIAL_METADATA = {
+    'framework': '`torchrun` + `hf_accelerate`',
+    'cluster_shape': '2 × 8×H100',
+    'summary': 'Llama-2-7B SFT on Go + Rust (FSDP)',
+    'order': 50,
+}
+
+
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 

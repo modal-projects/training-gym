@@ -10,6 +10,14 @@ The supplementary `transformer_sizing.ipynb` and `scaling_laws.ipynb` cells
 from the upstream repo are appended at the bottom under `## Analysis`.
 """
 
+TUTORIAL_METADATA = {
+    'framework': '— (clones `karpathy/nanoGPT`)',
+    'cluster_shape': '2 × 8×H100',
+    'summary': 'GPT-2 124M on OpenWebText',
+    'order': 60,
+}
+
+
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 
