@@ -67,6 +67,12 @@ def build_torchrun_app(
     if caller_module is not None:
         cloudpickle.register_pickle_by_value(caller_module)
 
+    caller_script = None
+    if caller_module is not None:
+        mod_file = getattr(caller_module, "__file__", None)
+        if mod_file:
+            caller_script = os.path.abspath(mod_file)
+
     # ── Image ────────────────────────────────────────────────────────────────
     train_image = (
         Image.debian_slim(python_version=framework.python_version)
@@ -74,6 +80,13 @@ def build_torchrun_app(
         .pip_install(*framework.pip_deps)
         .add_local_python_source("modal_training_gym", copy=True)
     )
+    if caller_script is not None:
+        caller_remote_path = (
+            f"/root/{os.path.splitext(os.path.basename(caller_script))[0]}.py"
+        )
+        train_image = train_image.add_local_file(
+            caller_script, remote_path=caller_remote_path, copy=True,
+        )
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     data_volume = Volume.from_name(f"{app_name}-data", create_if_missing=True)

@@ -26,6 +26,7 @@ Produces a `modal.App` with:
 from __future__ import annotations
 
 import inspect
+import os
 import subprocess
 
 import cloudpickle
@@ -59,6 +60,12 @@ def build_verl_app(
     if caller_module is not None:
         cloudpickle.register_pickle_by_value(caller_module)
 
+    caller_script = None
+    if caller_module is not None:
+        mod_file = getattr(caller_module, "__file__", None)
+        if mod_file:
+            caller_script = os.path.abspath(mod_file)
+
     # ── Images ───────────────────────────────────────────────────────────────
     # verl ships pre-built images; we add git + clone the repo for its
     # `scripts/converter_hf_to_mcore.py` and `examples/data_preprocess/gsm8k.py`.
@@ -79,10 +86,28 @@ def build_verl_app(
 
     download_image = (
         Image.debian_slim(python_version="3.12")
-        .uv_pip_install("huggingface_hub==1.2.1")
+        .uv_pip_install(
+            "huggingface_hub==1.2.1",
+            # Required by modal_training_gym config modules + cloudpickle
+            # deserialization on the remote side.
+            "cloudpickle",
+            "msgspec",
+            "pydantic",
+        )
         .env({"HF_XET_HIGH_PERFORMANCE": "1"})
         .add_local_python_source("modal_training_gym", copy=True)
     )
+
+    if caller_script is not None:
+        caller_remote_path = (
+            f"/root/{os.path.splitext(os.path.basename(caller_script))[0]}.py"
+        )
+        train_image = train_image.add_local_file(
+            caller_script, remote_path=caller_remote_path, copy=True,
+        )
+        download_image = download_image.add_local_file(
+            caller_script, remote_path=caller_remote_path, copy=True,
+        )
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     data_volume = Volume.from_name(f"{app_name}-data", create_if_missing=True)

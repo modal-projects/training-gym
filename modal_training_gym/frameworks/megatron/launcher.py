@@ -62,6 +62,12 @@ def build_megatron_app(
     if caller_module is not None:
         cloudpickle.register_pickle_by_value(caller_module)
 
+    caller_script = None
+    if caller_module is not None:
+        mod_file = getattr(caller_module, "__file__", None)
+        if mod_file:
+            caller_script = os.path.abspath(mod_file)
+
     # ── Images ───────────────────────────────────────────────────────────────
     download_image = (
         Image.debian_slim(python_version="3.12")
@@ -101,6 +107,20 @@ def build_megatron_app(
         .run_commands(f"rm -Rf {HF_CACHE}")
         .add_local_python_source("modal_training_gym", copy=True)
     )
+
+    # Ship the user's tutorial .py into every image that runs a function
+    # closing over it. Without this, cloudpickle falls back to pickle-by-name
+    # and the remote container raises `ModuleNotFoundError` for the tutorial.
+    if caller_script is not None:
+        caller_remote_path = (
+            f"/root/{os.path.splitext(os.path.basename(caller_script))[0]}.py"
+        )
+        download_image = download_image.add_local_file(
+            caller_script, remote_path=caller_remote_path, copy=True,
+        )
+        nemo_image = nemo_image.add_local_file(
+            caller_script, remote_path=caller_remote_path, copy=True,
+        )
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     models_volume = Volume.from_name("big-model-hfcache", create_if_missing=True)
