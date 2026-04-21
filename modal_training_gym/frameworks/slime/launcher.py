@@ -28,7 +28,7 @@ from modal.experimental import clustered
 import cloudpickle
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
-from modal_training_gym.common.framework import resolve_caller_module
+from modal_training_gym.common.framework import TOOLS_LOCAL_PATH, TOOLS_REMOTE_PATH, mount_tools_dir, resolve_caller_module
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 from .config import (
@@ -88,7 +88,7 @@ def build_slime_app(
             "slimerl/slime:nightly-dev-20260329a"
         )  # Check https://hub.docker.com/r/slimerl/slime/tags for the latest version.
         .entrypoint([])
-        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_python_source("modal_training_gym", copy=True).add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
     )
     if caller_script is not None:
         caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]

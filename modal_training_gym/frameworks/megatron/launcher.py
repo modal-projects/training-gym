@@ -35,7 +35,7 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
-from modal_training_gym.common.framework import resolve_caller_module
+from modal_training_gym.common.framework import TOOLS_LOCAL_PATH, TOOLS_REMOTE_PATH, mount_tools_dir, resolve_caller_module
 
 from .config import (
     CHECKPOINTS_DIR,
@@ -84,7 +84,7 @@ def build_megatron_app(
             "pydantic",
         )
         .env({"HF_XET_HIGH_PERFORMANCE": "1"})
-        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_python_source("modal_training_gym", copy=True).add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
     )
 
     nemo_image = (
@@ -105,7 +105,7 @@ def build_megatron_app(
             "pydantic",
         )
         .run_commands(f"rm -Rf {HF_CACHE}")
-        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_python_source("modal_training_gym", copy=True).add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
     )
 
     # Ship the user's tutorial .py into every image that runs a function

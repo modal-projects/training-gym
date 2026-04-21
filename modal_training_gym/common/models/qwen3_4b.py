@@ -1,9 +1,9 @@
-"""Qwen3-4B model spec as a concrete ModelConfiguration subclass."""
+"""Qwen3-4B model spec as a concrete HFModelConfiguration subclass."""
 
-from .base import ModelArchitecture, ModelConfiguration
+from .base import HFModelConfiguration, ModelArchitecture
 
 
-class Qwen3_4B(ModelConfiguration):
+class Qwen3_4B(HFModelConfiguration):
     model_name = "Qwen/Qwen3-4B"
     architecture = ModelArchitecture(
         num_layers=36,
@@ -22,8 +22,3 @@ class Qwen3_4B(ModelConfiguration):
         use_rotary_position_embeddings=True,
         rotary_base=1000000,
     )
-
-    def download_model(self) -> None:
-        from huggingface_hub import snapshot_download
-
-        snapshot_download(repo_id=self.model_name)

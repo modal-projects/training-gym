@@ -31,6 +31,11 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
+from modal_training_gym.common.framework import (
+    TOOLS_LOCAL_PATH,
+    TOOLS_REMOTE_PATH,
+    mount_tools_dir,
+)
 
 from .config import (
     CHECKPOINTS_PATH,
@@ -166,7 +171,7 @@ def build_ms_swift_app(
             "msgspec",
             "pydantic",
         )
-        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_python_source("modal_training_gym", copy=True).add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
     )
 
     train_image = (
@@ -200,7 +205,7 @@ def build_ms_swift_app(
             "tokenizers",
         )
         .env(framework.environment)
-        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_python_source("modal_training_gym", copy=True).add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
     )
     if caller_script is not None:
         caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]

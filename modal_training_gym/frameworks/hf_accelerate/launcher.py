@@ -34,7 +34,7 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
-from modal_training_gym.common.framework import resolve_caller_module
+from modal_training_gym.common.framework import TOOLS_LOCAL_PATH, TOOLS_REMOTE_PATH, mount_tools_dir, resolve_caller_module
 
 from .config import (
     DATASET_MOUNT_PATH,
@@ -67,7 +67,7 @@ def build_accelerate_app(
         Image.debian_slim(python_version=framework.python_version)
         .apt_install("libibverbs-dev", "libibverbs1")
         .pip_install(*framework.pip_deps)
-        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_python_source("modal_training_gym", copy=True).add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
     )
     if caller_script is not None:
         caller_remote_path = (

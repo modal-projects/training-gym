@@ -76,3 +76,18 @@ class ModelConfiguration:
         raise NotImplementedError(
             f"{type(self).__name__} has no download_model()"
         )
+
+
+class HFModelConfiguration(ModelConfiguration):
+    """ModelConfiguration for models hosted on HuggingFace.
+
+    Implements `download_model()` via `huggingface_hub.snapshot_download`
+    against `self.model_name`. Subclass this for any HF-hosted model and
+    only declare `model_name` (plus optionally `architecture`, `model_path`);
+    the download step needs no override.
+    """
+
+    def download_model(self) -> None:
+        from huggingface_hub import snapshot_download
+
+        snapshot_download(repo_id=self.model_name)

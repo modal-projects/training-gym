@@ -39,7 +39,7 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
-from modal_training_gym.common.framework import resolve_caller_module
+from modal_training_gym.common.framework import TOOLS_LOCAL_PATH, TOOLS_REMOTE_PATH, mount_tools_dir, resolve_caller_module
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 from .config import (
@@ -49,7 +49,8 @@ from .config import (
     MilesConfig,
 )
 
-_REMOTE_TRAIN_SCRIPT = "/root/miles/train.py"
+_MILES_ROOT = "/root/miles"
+_REMOTE_TRAIN_SCRIPT = f"{_MILES_ROOT}/train.py"
 
 
 def build_miles_app(
@@ -75,7 +76,7 @@ def build_miles_app(
     image = Image.from_registry(framework.miles_image).entrypoint([])
     for cmd in framework.image_run_commands:
         image = image.run_commands(cmd)
-    image = image.add_local_python_source("modal_training_gym", copy=True)
+    image = image.add_local_python_source("modal_training_gym", copy=True).add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
     if caller_script is not None:
         caller_remote_path = (
             f"/root/{os.path.splitext(os.path.basename(caller_script))[0]}.py"
