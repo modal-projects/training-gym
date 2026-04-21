@@ -67,6 +67,12 @@ class ModalConfig:
     image_run_commands: list[
         str
     ] = []  # commands to run during image build (e.g. git apply /tmp/my.patch)
+    # Sibling Python modules (by import name) to ship into the training image
+    # via `add_local_python_source`. Use when a tutorial has helper modules
+    # alongside it — e.g. a custom reward function referenced via SLIME's
+    # `custom_rm_path`. Each name must be importable on the local sys.path
+    # at the time `build_app()` runs.
+    local_python_sources: list[str] = []
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():

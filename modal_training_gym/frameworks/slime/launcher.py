@@ -98,6 +98,13 @@ def build_slime_app(
             remote_path=caller_remote_path,
             copy=True,
         )
+    # Ship any sibling helper modules the tutorial declared (e.g. a custom
+    # reward function referenced via SLIME's `custom_rm_path`). Using
+    # `add_local_python_source` means Python's normal import machinery
+    # resolves them in-container — the tutorial doesn't need to extend
+    # PYTHONPATH for SLIME to find them.
+    for mod_name in modal.local_python_sources:
+        image = image.add_local_python_source(mod_name, copy=True)
     for patch in modal.patch_files:
         image = image.add_local_file(
             patch, f"/tmp/{os.path.basename(patch)}", copy=True
