@@ -10,7 +10,6 @@ from dataclasses import field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import msgspec
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
@@ -139,6 +138,8 @@ class MsSwiftFrameworkConfig:
 
     @classmethod
     def from_toml(cls, path: str | Path) -> "MsSwiftFrameworkConfig":
+        import msgspec
+
         payload = msgspec.toml.decode(Path(path).read_bytes())
         if not isinstance(payload, dict):
             raise ValueError(f"Expected TOML table at root in {path!r}")
