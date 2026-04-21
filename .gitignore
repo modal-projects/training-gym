@@ -180,7 +180,9 @@ slime/test_configs
 # Ruff cache
 .ruff_cache/
 
-# Claude
+
+# AI tools
 .claude
+.codex
 
 .humanize
