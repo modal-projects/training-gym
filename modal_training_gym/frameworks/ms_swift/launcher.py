@@ -189,6 +189,15 @@ def build_ms_swift_app(
             "wandb==0.19.1",
             "msgspec",
             "pydantic",
+            # ms-swift's megatron backend (`megatron sft`) imports megatron.core.
+            # The ModelScope base image ships this; other py312 bases (NGC
+            # PyTorch, etc.) need it added here.
+            "megatron-core",
+            # transformers' ProcessorMixin (imported by ms-swift's utils) has
+            # lazy deps on pillow/tokenizers that the ModelScope image ships
+            # but NGC PyTorch does not.
+            "pillow",
+            "tokenizers",
         )
         .env(framework.environment)
         .add_local_python_source("modal_training_gym", copy=True)

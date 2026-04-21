@@ -55,7 +55,7 @@ class TinyGSM8KDataset(DatasetConfig):
         hf_cache_root,
         data_folder="gsm8k_tiny",
         hf_dataset="openai/gsm8k",
-        split="train[:32]",
+        split="train[:4]",
         input_col="question",
         output_col="answer",
     ):

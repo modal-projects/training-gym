@@ -40,6 +40,11 @@ _DEFAULT_TRAIN_PIP = (
     "huggingface_hub",
     "torch==2.6.0",
     "accelerate",
+    # Required by modal_training_gym config modules + cloudpickle
+    # deserialization on the remote side.
+    "cloudpickle",
+    "msgspec",
+    "pydantic",
 )
 
 

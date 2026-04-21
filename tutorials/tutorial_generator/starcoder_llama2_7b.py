@@ -257,7 +257,7 @@ def _define_script():
                     "fsdp_transformer_layer_cls_to_wrap": ["LlamaDecoderLayer"],
                 },
                 num_train_epochs=args.epochs,
-                max_steps=10000,
+                max_steps=1,
             )
 
             SFTTrainer(
@@ -310,10 +310,10 @@ def _shared_settings():
     _WANDB = WandbConfig(project="bigcode-starcoderdata-training")
 
     _SHARED_SCRIPT_ARGS = [
-        "--epochs", "2",
-        "--batch_per_device", "16",
-        "--grad_accum", "2",
-        "--block_size", "4096",
+        "--epochs", "1",
+        "--batch_per_device", "1",
+        "--grad_accum", "1",
+        "--block_size", "512",
         "--model_cache_dir", "/model/model_cache",
     ]
 

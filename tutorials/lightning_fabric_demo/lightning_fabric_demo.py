@@ -49,17 +49,17 @@ TRAIN_SCRIPT = textwrap.dedent(r'''
         model, optimizer = fabric.setup(model, optimizer)
         train_dataloader = fabric.setup_dataloaders(train_dataloader)
 
-        max_steps = len(train_dataloader)
+        max_steps = 1
         for batch_idx, batch in enumerate(train_dataloader):
+            if batch_idx >= max_steps:
+                break
             input, target = batch
             output = model(input, target)
             loss = F.nll_loss(output, target.view(-1))
             fabric.backward(loss)
             optimizer.step()
             optimizer.zero_grad()
-
-            if batch_idx % 10 == 0:
-                fabric.print(f"iter {batch_idx}/{max_steps} - loss {loss.item():.4f}")
+            fabric.print(f"iter {batch_idx}/{max_steps} - loss {loss.item():.4f}")
 
 
     if __name__ == "__main__":

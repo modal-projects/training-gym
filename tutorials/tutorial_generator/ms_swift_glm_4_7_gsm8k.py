@@ -124,7 +124,7 @@ def _define_config():
         pipeline_model_parallel_size=4,
         context_parallel_size=1,
         sequence_parallel=True,
-        train_iters=5,
+        train_iters=1,
         num_train_epochs=1,
         lr=1e-4,
         global_batch_size=8,

@@ -159,11 +159,11 @@ def _train_fn():
             "/root/vision/references/classification/train.py",
             "--model", "resnet50",
             "--data-path", "/data/imagenet",
-            "--epochs", "90",
+            "--epochs", "1",
             "--batch-size", "128",
             "--lr", "0.5",  # scales with global batch; reference uses 0.5 for 1024
             "--lr-scheduler", "cosineannealinglr",
-            "--lr-warmup-epochs", "5",
+            "--lr-warmup-epochs", "0",
             "--lr-warmup-method", "linear",
             "--auto-augment", "ta_wide",
             "--ra-sampler",

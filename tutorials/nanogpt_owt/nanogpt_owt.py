@@ -147,6 +147,10 @@ def train_single_node():
             f"--nproc-per-node={N_PROC_PER_NODE}",
             "/root/nanogpt/train.py",
             "config/train_gpt2.py",
+            "--max_iters=1",
+            "--eval_interval=1",
+            "--log_interval=1",
+            "--eval_iters=1",
         ]
     )
 
@@ -180,6 +184,10 @@ def train_multi_node():
         f"--master-addr={master_ip}",
         "/root/nanogpt/train.py",
         "config/train_gpt2.py",
+        "--max_iters=1",
+        "--eval_interval=1",
+        "--log_interval=1",
+        "--eval_iters=1",
         "--wandb_log=True",
         "--wandb_project=nanogpt-owt",
         f"--wandb_run_name=multinode-{container_id}",

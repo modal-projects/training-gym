@@ -42,6 +42,11 @@ _DEFAULT_TRAIN_PIP = (
     "lightning==2.4.0",
     "requests==2.32.3",
     "wandb",
+    # Required by modal_training_gym config modules + cloudpickle
+    # deserialization on the remote side.
+    "cloudpickle",
+    "msgspec",
+    "pydantic",
 )
 
 

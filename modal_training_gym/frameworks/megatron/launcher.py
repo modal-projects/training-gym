@@ -71,6 +71,11 @@ def build_megatron_app(
             "torch==2.9.1",
             "safetensors==0.7.0",
             "sentencepiece==0.2.1",
+            # Required by modal_training_gym config modules + cloudpickle
+            # deserialization on the remote side.
+            "cloudpickle",
+            "msgspec",
+            "pydantic",
         )
         .env({"HF_XET_HIGH_PERFORMANCE": "1"})
         .add_local_python_source("modal_training_gym", copy=True)
@@ -89,6 +94,9 @@ def build_megatron_app(
             "wandb==0.23.1",
             "datasets==3.1.0",
             "transformers",
+            "cloudpickle",
+            "msgspec",
+            "pydantic",
         )
         .run_commands(f"rm -Rf {HF_CACHE}")
         .add_local_python_source("modal_training_gym", copy=True)
