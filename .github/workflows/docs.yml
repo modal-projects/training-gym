@@ -1,0 +1,77 @@
+name: Docs
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/docs.yml"
+      - "README.md"
+      - "docs/**"
+      - "pyproject.toml"
+      - "scripts/generate_docs_pages.py"
+      - "tutorials/**"
+      - "uv.lock"
+  push:
+    paths:
+      - ".github/workflows/docs.yml"
+      - "README.md"
+      - "docs/**"
+      - "pyproject.toml"
+      - "scripts/generate_docs_pages.py"
+      - "tutorials/**"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      UV_CACHE_DIR: /tmp/uv-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync docs dependencies
+        run: uv sync --group docs
+
+      - name: Validate Modal docs app
+        run: uv run python -m py_compile docs/docs_app.py
+
+      - name: Build docs site
+        working-directory: docs
+        run: uv run --group docs properdocs build -f mkdocs.yml --strict
+
+  deploy:
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch && secrets.MODAL_TOKEN_ID != '' && secrets.MODAL_TOKEN_SECRET != ''
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      UV_CACHE_DIR: /tmp/uv-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync --group docs
+
+      - name: Deploy docs to Modal
+        run: uv run modal deploy docs/docs_app.py

@@ -21,3 +21,9 @@ packages = ["modal_training_gym"]
 dev = [
     "pre-commit>=4.5.1",
 ]
+docs = [
+    "mkdocs-gen-files>=0.6.1",
+    "mkdocs-material>=9.7.6",
+    "properdocs>=1.6.7",
+    "pymdown-extensions>=10.21.2",
+]

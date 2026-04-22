@@ -46,7 +46,6 @@ _README_BEGIN = "<!-- BEGIN TUTORIAL TABLE -->"
 _README_END = "<!-- END TUTORIAL TABLE -->"
 _REPO_SLUG = "modal-projects/training-gym"
 _BRANCH = "joy/initial-setup"
-_MODAL_WORKSPACE = "modal-labs/joy-dev"
 _BADGE_IMG = "https://modal-cdn.com/open-in-modal.svg"
 
 _MARKDOWN = "markdown"
@@ -60,7 +59,7 @@ _PY = "py"
 _NB = "notebook"
 
 # Buckets the tutorial catalog is grouped into. Display order in the README
-# table and ordering within each bucket fall back to meta["order"].
+# sections and ordering within each bucket fall back to meta["order"].
 _BUCKETS = ("intro", "rl", "sft", "misc")
 _BUCKET_DISPLAY = {
     "intro": "Intro",
@@ -265,7 +264,7 @@ def _render_launch_cell(bucket: str, name: str) -> str:
         f"/tutorials/{bucket}/{name}/{name}.ipynb"
     )
     launch_url = (
-        f"https://modal.com/notebooks/{_MODAL_WORKSPACE}"
+        f"https://modal.com/notebooks/new"
         f"?import=url&url={urllib.parse.quote(raw_url, safe='')}"
     )
     # Explicit `rel="nofollow noopener noreferrer"` matches GitHub's own
@@ -278,20 +277,30 @@ def _render_launch_cell(bucket: str, name: str) -> str:
     )
 
 
-def _render_tutorial_table(entries: list[tuple[str, str, dict]]) -> str:
-    lines = [
-        "| Tutorial | Category | Difficulty | Framework | Cluster shape | What it trains | Launch |",
-        "|---|---|---|---|---|---|---|",
-    ]
+def _render_tutorial_sections(entries: list[tuple[str, str, dict]]) -> str:
+    """Render the catalog as one H3 section per bucket, each a bulleted list.
+
+    Each tutorial bullet has the shape:
+        - **[`name`](<bucket>/<name>/<name>.ipynb)** — summary. `difficulty` ·
+          framework · cluster_shape · <Launch badge>
+    """
+    lines: list[str] = []
+    current_bucket: str | None = None
     for bucket, name, meta in entries:
+        if bucket != current_bucket:
+            if current_bucket is not None:
+                lines.append("")
+            lines.append(f"### {_BUCKET_DISPLAY.get(bucket, bucket)}")
+            lines.append("")
+            current_bucket = bucket
+        summary = meta["summary"].rstrip(".")
+        difficulty = meta.get("difficulty", "—")
+        framework = meta["framework"]
+        cluster = meta["cluster_shape"]
+        launch = _render_launch_cell(bucket, name)
         lines.append(
-            f"| [`{name}`]({bucket}/{name}/{name}.ipynb)"
-            f" | {_BUCKET_DISPLAY.get(bucket, bucket)}"
-            f" | {meta.get('difficulty', '—')}"
-            f" | {meta['framework']}"
-            f" | {meta['cluster_shape']}"
-            f" | {meta['summary']}"
-            f" | {_render_launch_cell(bucket, name)} |"
+            f"- **[`{name}`]({bucket}/{name}/{name}.ipynb)** — {summary}. "
+            f"`{difficulty}` · {framework} · {cluster} · {launch}"
         )
     return "\n".join(lines)
 
@@ -317,7 +326,7 @@ def _update_readme_table(entries: list[tuple[str, str, dict]]) -> bool:
     )
     new_body = (
         f"{_README_BEGIN}\n{banner}\n\n"
-        f"{_render_tutorial_table(entries)}\n"
+        f"{_render_tutorial_sections(entries)}\n"
         f"{_README_END}"
     )
     new_content = f"{before}{new_body}{after}"

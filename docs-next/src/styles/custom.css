@@ -1,0 +1,46 @@
+/* Modal-flavored Starlight theme overrides.
+ *
+ * Accent: Modal spring-green (#7fee64) with matching low/high shades for
+ * hover/focus states. Dark mode is the default visual target.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  --sl-font:
+    'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --sl-font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+}
+
+/* Dark theme — the default Modal-ish vibe. */
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #163f11;
+  --sl-color-accent: #7fee64;
+  --sl-color-accent-high: #c4f9b1;
+
+  --sl-color-white: #f5f7fa;
+  --sl-color-gray-1: #e5e7eb;
+  --sl-color-gray-2: #c2c7d0;
+  --sl-color-gray-3: #8a8fa3;
+  --sl-color-gray-4: #484a54;
+  --sl-color-gray-5: #25262c;
+  --sl-color-gray-6: #18181b;
+  --sl-color-black: #0c0d10;
+}
+
+/* Light theme — muted green accent, still readable. */
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e8f9de;
+  --sl-color-accent: #3bb820;
+  --sl-color-accent-high: #1c6b0c;
+}
+
+/* Tighten heading weights a touch for that clean tech-doc feel. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  letter-spacing: -0.01em;
+}
