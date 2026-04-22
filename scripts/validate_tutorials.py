@@ -40,7 +40,7 @@ UPLOAD_TIMEOUT = 120
 DEFAULT_PROGRESS_TIMEOUT = 1800
 BENCHMARK_TIMEOUT = 600
 PATTERN_DEMO_TIMEOUT = 600
-LAUNCH_TIMEOUT = 120
+LAUNCH_TIMEOUT = 600
 
 
 class Outcome(str, Enum):
@@ -525,8 +525,14 @@ def _run_detached(cmd: str, markers: list[str], progress_timeout_s: int) -> Stag
     full_cmd = f"uv run {cmd}"
     start = time.monotonic()
 
-    launch = subprocess.run(full_cmd, shell=True, capture_output=True, text=True,
-                            timeout=LAUNCH_TIMEOUT, cwd=str(REPO_ROOT))
+    try:
+        launch = subprocess.run(full_cmd, shell=True, capture_output=True, text=True,
+                                timeout=LAUNCH_TIMEOUT, cwd=str(REPO_ROOT))
+    except subprocess.TimeoutExpired:
+        return StageResult(stage=cmd, command=full_cmd, exit_code=None,
+                           first_error=f"detached launch timed out after {LAUNCH_TIMEOUT}s",
+                           classified_failure=FailureSource.IMAGE_BUILD,
+                           wall_time_s=time.monotonic() - start)
     launch_output = launch.stdout + launch.stderr
     app_id = _extract_app_id(launch_output)
 
