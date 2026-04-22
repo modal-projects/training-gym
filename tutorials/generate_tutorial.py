@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate .py + .ipynb tutorials from decorator-annotated source files.
 
-Input files live in `tutorials/tutorial_generator/<name>.py` and declare cells
-via top-level functions decorated with `@markdown` or `@code`:
+Input files live in `tutorials/tutorial_generator/<bucket>/<name>.py` where
+`<bucket>` is one of `intro`, `rl`, `sft`, `misc`, and declare cells via
+top-level functions decorated with `@markdown` or `@code`:
 
   - `@markdown`: the function's docstring becomes one markdown cell.
   - `@code`:     the function's body (dedented) becomes one code cell.
@@ -11,7 +12,8 @@ Function names don't matter; cells appear in source order. The generator is
 AST-based and deterministic — the same input always produces byte-identical
 outputs, so it's safe to regenerate on every edit.
 
-Outputs land at `tutorials/<name>/<name>.py` and `tutorials/<name>/<name>.ipynb`.
+Outputs land at `tutorials/<bucket>/<name>/<name>.py` and
+`tutorials/<bucket>/<name>/<name>.ipynb`.
 
 Usage:
     uv run python generate_tutorial.py                   # regenerate all
@@ -56,6 +58,16 @@ _NOTEBOOK_ONLY = "notebook_only"
 # Targets a cell can appear in.
 _PY = "py"
 _NB = "notebook"
+
+# Buckets the tutorial catalog is grouped into. Display order in the README
+# table and ordering within each bucket fall back to meta["order"].
+_BUCKETS = ("intro", "rl", "sft", "misc")
+_BUCKET_DISPLAY = {
+    "intro": "Intro",
+    "rl": "RL",
+    "sft": "SFT",
+    "misc": "Misc",
+}
 
 
 @dataclass
@@ -188,13 +200,37 @@ def _render_ipynb(cells: list[Cell]) -> str:
     return json.dumps(nb, indent=1, sort_keys=True) + "\n"
 
 
+def _bucket_for(input_path: pathlib.Path) -> str:
+    """Return the bucket subfolder name for a given tutorial source.
+
+    Expects the `tutorials/tutorial_generator/<bucket>/<name>.py` layout. Raises
+    if a source file is placed outside a bucket subdirectory.
+    """
+    rel = input_path.resolve().relative_to(INPUT_DIR.resolve())
+    parts = rel.parts
+    if len(parts) != 2:
+        raise ValueError(
+            f"Tutorial source {input_path} is not inside a bucket subdirectory of "
+            f"{INPUT_DIR.relative_to(REPO_ROOT)}. Expected "
+            f"tutorial_generator/<bucket>/<name>.py."
+        )
+    bucket = parts[0]
+    if bucket not in _BUCKETS:
+        raise ValueError(
+            f"Tutorial source {input_path} lives under unknown bucket {bucket!r}. "
+            f"Expected one of {_BUCKETS}."
+        )
+    return bucket
+
+
 def generate_one(
     input_path: pathlib.Path, output_root: pathlib.Path
 ) -> tuple[pathlib.Path, pathlib.Path]:
     source = input_path.read_text()
     cells = _extract_cells(source)
     name = input_path.stem
-    out_dir = output_root / name
+    bucket = _bucket_for(input_path)
+    out_dir = output_root / bucket / name
     out_dir.mkdir(parents=True, exist_ok=True)
     py_path = out_dir / f"{name}.py"
     ipynb_path = out_dir / f"{name}.ipynb"
@@ -223,10 +259,10 @@ def _extract_metadata(source: str) -> dict | None:
     return None
 
 
-def _render_launch_cell(name: str) -> str:
+def _render_launch_cell(bucket: str, name: str) -> str:
     raw_url = (
         f"https://raw.githubusercontent.com/{_REPO_SLUG}/{_BRANCH}"
-        f"/tutorials/{name}/{name}.ipynb"
+        f"/tutorials/{bucket}/{name}/{name}.ipynb"
     )
     launch_url = (
         f"https://modal.com/notebooks/{_MODAL_WORKSPACE}"
@@ -242,24 +278,25 @@ def _render_launch_cell(name: str) -> str:
     )
 
 
-def _render_tutorial_table(entries: list[tuple[str, dict]]) -> str:
+def _render_tutorial_table(entries: list[tuple[str, str, dict]]) -> str:
     lines = [
-        "| Tutorial | Difficulty | Framework | Cluster shape | What it trains | Launch |",
-        "|---|---|---|---|---|---|",
+        "| Tutorial | Category | Difficulty | Framework | Cluster shape | What it trains | Launch |",
+        "|---|---|---|---|---|---|---|",
     ]
-    for name, meta in entries:
+    for bucket, name, meta in entries:
         lines.append(
-            f"| [`{name}`]({name}/{name}.ipynb)"
+            f"| [`{name}`]({bucket}/{name}/{name}.ipynb)"
+            f" | {_BUCKET_DISPLAY.get(bucket, bucket)}"
             f" | {meta.get('difficulty', '—')}"
             f" | {meta['framework']}"
             f" | {meta['cluster_shape']}"
             f" | {meta['summary']}"
-            f" | {_render_launch_cell(name)} |"
+            f" | {_render_launch_cell(bucket, name)} |"
         )
     return "\n".join(lines)
 
 
-def _update_readme_table(entries: list[tuple[str, dict]]) -> bool:
+def _update_readme_table(entries: list[tuple[str, str, dict]]) -> bool:
     """Rewrite the `<!-- BEGIN TUTORIAL TABLE --> ... <!-- END TUTORIAL TABLE -->`
     region of tutorials/README.md. Returns True if the file changed."""
     if not _README_PATH.exists():
@@ -290,19 +327,43 @@ def _update_readme_table(entries: list[tuple[str, dict]]) -> bool:
     return True
 
 
-def _collect_all_metadata() -> list[tuple[str, dict]]:
-    """Walk every tutorial source and return `(name, metadata)` sorted by
-    display `order` (defaulting to alphabetical on name when unset)."""
-    entries: list[tuple[str, dict]] = []
-    for path in sorted(INPUT_DIR.glob("*.py")):
-        if path.name == "__init__.py":
+def _iter_source_files() -> list[pathlib.Path]:
+    """Return every tutorial source under `tutorial_generator/<bucket>/`.
+
+    Skips `__init__.py` at any level; skips files that aren't inside a known
+    bucket subdirectory (so a stray top-level file produces a clear error in
+    `_bucket_for` rather than a silent no-op).
+    """
+    return sorted(
+        p
+        for p in INPUT_DIR.rglob("*.py")
+        if p.name != "__init__.py"
+    )
+
+
+def _collect_all_metadata() -> list[tuple[str, str, dict]]:
+    """Walk every tutorial source and return `(bucket, name, metadata)` sorted by
+    bucket display order, then `order`, then alphabetical name."""
+    entries: list[tuple[str, str, dict]] = []
+    for path in _iter_source_files():
+        try:
+            bucket = _bucket_for(path)
+        except ValueError as exc:
+            print(f"  (skipping {path.relative_to(REPO_ROOT)}: {exc})")
             continue
         meta = _extract_metadata(path.read_text())
         if meta is None:
             print(f"  (no TUTORIAL_METADATA in {path.relative_to(REPO_ROOT)})")
             continue
-        entries.append((path.stem, meta))
-    entries.sort(key=lambda item: (item[1].get("order", 10_000), item[0]))
+        entries.append((bucket, path.stem, meta))
+    bucket_rank = {b: i for i, b in enumerate(_BUCKETS)}
+    entries.sort(
+        key=lambda item: (
+            bucket_rank.get(item[0], len(_BUCKETS)),
+            item[2].get("order", 10_000),
+            item[1],
+        )
+    )
     return entries
 
 
@@ -316,9 +377,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    inputs = args.inputs or sorted(
-        p for p in INPUT_DIR.glob("*.py") if p.name != "__init__.py"
-    )
+    inputs = args.inputs or _iter_source_files()
     if not inputs:
         print(f"No input files found in {INPUT_DIR.relative_to(REPO_ROOT)}")
         return
