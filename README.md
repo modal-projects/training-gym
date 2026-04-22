@@ -34,15 +34,15 @@ Every generated tutorial notebook has this line as its first code cell.
 workspace:
 
 ```bash
-uv run modal run --detach tutorials/nccl_benchmark/nccl_benchmark.py::run_benchmark
+uv run modal run --detach tutorials/misc/nccl_benchmark/nccl_benchmark.py::run_benchmark
 ```
 
 **2. Run a tutorial.** Qwen3-4B GRPO on GSM8K using SLIME:
 
 ```bash
-uv run modal run tutorials/slime_gsm8k/slime_gsm8k.py::app.download_model
-uv run modal run tutorials/slime_gsm8k/slime_gsm8k.py::app.prepare_dataset
-uv run modal run --detach tutorials/slime_gsm8k/slime_gsm8k.py::app.train
+uv run modal run tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.download_model
+uv run modal run tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.prepare_dataset
+uv run modal run --detach tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.train
 ```
 
 Or open the matching `.ipynb` in Jupyter / Modal Notebooks and run

@@ -328,7 +328,7 @@ def _define_model():
 
 Better: inherit from `HFModelConfiguration` and skip the `download_model`
 override (the one-line snapshot_download is the inherited default). See
-`tutorials/tutorial_generator/ms_swift_custom_hf.py` for a full example.
+`tutorials/tutorial_generator/sft/ms_swift_custom_hf.py` for a full example.
 
 ## Validation
 
