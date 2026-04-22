@@ -1,8 +1,7 @@
 ---
 title: Support
-description: How to reach the Training Gym / Modal multi-node training team.
+description: Contact points for questions about Training Gym, tutorials, and access to Modal multi-node training.
 ---
-
 
 Questions about Training Gym or access to Modal's multi-node training preview
 should go to [support@modal.com](mailto:support@modal.com).

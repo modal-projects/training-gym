@@ -13,36 +13,14 @@ nav:
   - Support: support.md
 
 theme:
-  name: material
+  name: readthedocs
   language: en
-  icon:
-    repo: fontawesome/brands/github
-  features:
-    - navigation.instant
-    - navigation.tabs
-    - navigation.top
-    - navigation.tracking
-    - search.highlight
-    - search.suggest
-    - content.code.copy
-    - toc.follow
-  palette:
-    - scheme: default
-      media: "(prefers-color-scheme: light)"
-      toggle:
-        icon: material/weather-night
-        name: Switch to dark mode
-    - scheme: slate
-      media: "(prefers-color-scheme: dark)"
-      toggle:
-        icon: material/weather-sunny
-        name: Switch to light mode
 
 plugins:
   - search
   - gen-files:
       scripts:
-        - ../scripts/generate_docs_pages.py
+        - generate_mkdocs_pages.py
 
 markdown_extensions:
   - admonition
@@ -56,4 +34,4 @@ markdown_extensions:
   - pymdownx.superfences
 
 extra_css:
-  - stylesheets/extra.css
+  - stylesheets/modal-green-v2.css

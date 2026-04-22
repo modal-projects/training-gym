@@ -1,0 +1,46 @@
+---
+import config from 'virtual:starlight/user-config';
+import Search from '@astrojs/starlight/components/Search.astro';
+import SiteTitle from '@astrojs/starlight/components/SiteTitle.astro';
+
+const currentPath = Astro.url.pathname;
+const navItems = [
+  { href: '/', label: 'Overview' },
+  { href: '/tutorials/', label: 'Tutorials' },
+  { href: '/support/', label: 'Support' },
+];
+
+const shouldRenderSearch =
+  config.pagefind || config.components.Search !== '@astrojs/starlight/components/Search.astro';
+
+const isActive = (href: string) =>
+  href === '/' ? currentPath === '/' : currentPath === href || currentPath.startsWith(href);
+---
+
+<div class="tg-header">
+  <div class="tg-header__left">
+    <div class="title-wrapper sl-flex">
+      <SiteTitle />
+    </div>
+    <nav class="tg-header__nav sl-hidden lg:sl-flex" aria-label="Primary">
+      {navItems.map((item) => (
+        <a
+          href={item.href}
+          class:list={['tg-header__nav-link', { 'is-active': isActive(item.href) }]}
+        >
+          {item.label}
+        </a>
+      ))}
+    </nav>
+  </div>
+  <div class="tg-header__right print:hidden">
+    {shouldRenderSearch && (
+      <div class="tg-header__search sl-hidden md:sl-flex">
+        <Search class="tg-header__search" />
+      </div>
+    )}
+    <a class="tg-header__repo" href="https://github.com/modal-projects/training-gym">
+      GitHub
+    </a>
+  </div>
+</div>

@@ -1,0 +1,45 @@
+---
+const { editUrl, entry } = Astro.locals.starlightRoute;
+const sourceUrl = editUrl
+  ? editUrl.toString().replace('/edit/', '/blob/')
+  : 'https://github.com/modal-projects/training-gym';
+const pageUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
+---
+
+<div class="tg-page-head">
+  <div class="tg-page-head__actions print:hidden">
+    <a class="tg-action-button tg-action-button--ghost" href={sourceUrl}>View on GitHub</a>
+    <button class="tg-action-button tg-copy-button" type="button" data-copy-page={pageUrl}>
+      Copy page
+    </button>
+  </div>
+  <h1 id="_top">{entry.data.title}</h1>
+  {entry.data.description && <p class="tg-page-head__dek">{entry.data.description}</p>}
+</div>
+
+<script is:inline>
+  document.addEventListener('click', async (event) => {
+    if (!(event.target instanceof Element)) return;
+
+    const button = event.target.closest('[data-copy-page]');
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    const copyUrl = button.dataset.copyPage;
+    if (!copyUrl) return;
+
+    const originalLabel = button.textContent;
+
+    try {
+      await navigator.clipboard.writeText(copyUrl);
+      button.textContent = 'Copied';
+      button.classList.add('is-copied');
+      window.setTimeout(() => {
+        button.textContent = originalLabel;
+        button.classList.remove('is-copied');
+      }, 1600);
+    } catch {
+      button.textContent = copyUrl;
+      button.classList.add('is-copied');
+    }
+  });
+</script>

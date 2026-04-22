@@ -25,18 +25,6 @@ from typing import Any
 
 from modal_training_gym.common.llm_judge import LlmJudge
 
-MODAL_VOCABS = [
-    "modal",
-    "volume",
-    "function",
-    "sandbox",
-    "flash",
-    "inference",
-    "train",
-]
-
-_MODAL_VOCAB_STR = ", ".join(MODAL_VOCABS)
-
 _CMUDICT: dict = {}
 
 
@@ -104,8 +92,7 @@ class HaikuStyleJudge(LlmJudge):
             "You are evaluating a haiku poem.\n\n"
             f"Topic: {prompt}\n"
             f"Response:\n{response}\n\n"
-            "Score 0-10 on relevance to the topic, poetic quality, and use "
-            f"of Modal vocabulary ({_MODAL_VOCAB_STR}). Output ONLY a "
+            "Score 0-10 on relevance to the topic and poetic quality. "
             "single number (0-10), nothing else."
         )
 

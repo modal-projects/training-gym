@@ -1,23 +1,24 @@
 from __future__ import annotations
 
+import argparse
 import os
 import posixpath
 import re
 import subprocess
+import textwrap
 from pathlib import Path, PurePosixPath
-
-import mkdocs_gen_files
 
 
 REPO_URL = "https://github.com/modal-projects/training-gym"
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_STARLIGHT_DIR = ROOT / "docs-next" / "src" / "content" / "docs"
 
-CALL_OUT_KIND = {
-    "CAUTION": "warning",
-    "IMPORTANT": "warning",
+CALLOUT_VARIANTS = {
+    "CAUTION": "caution",
+    "IMPORTANT": "caution",
     "NOTE": "note",
     "TIP": "tip",
-    "WARNING": "warning",
+    "WARNING": "caution",
 }
 MARKDOWN_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
 
@@ -42,6 +43,7 @@ def current_ref() -> str:
 REF = current_ref()
 BLOB_BASE = f"{REPO_URL}/blob/{REF}"
 TREE_BASE = f"{REPO_URL}/tree/{REF}"
+EDIT_BASE = f"{REPO_URL}/edit/{REF}"
 
 
 def convert_github_callouts(markdown: str) -> str:
@@ -57,7 +59,7 @@ def convert_github_callouts(markdown: str) -> str:
             continue
 
         kind = match.group(1).upper()
-        admonition = CALL_OUT_KIND.get(kind, "note")
+        variant = CALLOUT_VARIANTS.get(kind, "note")
         title = kind.title()
         body: list[str] = []
         index += 1
@@ -66,9 +68,9 @@ def convert_github_callouts(markdown: str) -> str:
             body.append(lines[index][1:].lstrip())
             index += 1
 
-        output.append(f'!!! {admonition} "{title}"')
-        if body:
-            output.extend(f"    {line}" if line else "" for line in body)
+        output.append(f":::{variant}[{title}]")
+        output.extend(body)
+        output.append(":::")
         output.append("")
 
     return "\n".join(output).strip() + "\n"
@@ -107,14 +109,22 @@ def rewrite_links(
     return MARKDOWN_LINK.sub(replace, markdown)
 
 
-def write_page(
-    destination: str,
+def strip_first_heading(markdown: str) -> str:
+    lines = markdown.splitlines()
+    if lines and lines[0].startswith("# "):
+        lines = lines[1:]
+        while lines and not lines[0].strip():
+            lines = lines[1:]
+    return "\n".join(lines).strip() + "\n"
+
+
+def transform_markdown(
     source: Path,
     *,
     source_dir: PurePosixPath,
     home_link: str,
     tutorials_link: str,
-) -> None:
+) -> str:
     page = source.read_text()
     page = convert_github_callouts(page)
     page = rewrite_links(
@@ -123,25 +133,86 @@ def write_page(
         home_link=home_link,
         tutorials_link=tutorials_link,
     )
+    return strip_first_heading(page)
 
+
+def starlight_frontmatter(destination: str) -> str:
     if destination == "index.md":
-        page = page.replace("# Training Gym", "# Training Gym SDK", 1)
+        return textwrap.dedent(
+            f"""\
+            ---
+            title: Training Gym SDK
+            description: Reusable building blocks and runnable examples for distributed training on Modal.
+            editUrl: {EDIT_BASE}/README.md
+            ---
+            """
+        )
 
-    with mkdocs_gen_files.open(destination, "w") as generated:
-        generated.write(page)
+    return textwrap.dedent(
+        f"""\
+        ---
+        title: Tutorials
+        description: Runnable Modal training examples across intro, RL, SFT, and infrastructure-focused walkthroughs.
+        editUrl: {EDIT_BASE}/tutorials/README.md
+        ---
+        """
+    )
 
 
-write_page(
-    "index.md",
-    ROOT / "README.md",
-    source_dir=PurePosixPath("."),
-    home_link="index.md",
-    tutorials_link="tutorials/index.md",
-)
-write_page(
-    "tutorials/index.md",
-    ROOT / "tutorials" / "README.md",
-    source_dir=PurePosixPath("tutorials"),
-    home_link="../index.md",
-    tutorials_link="index.md",
-)
+def generate_starlight(output_dir: Path) -> None:
+    pages = (
+        (
+            "index.md",
+            ROOT / "README.md",
+            PurePosixPath("."),
+            "/",
+            "/tutorials/",
+        ),
+        (
+            "tutorials/index.md",
+            ROOT / "tutorials" / "README.md",
+            PurePosixPath("tutorials"),
+            "/",
+            "/tutorials/",
+        ),
+    )
+
+    for destination, source, source_dir, home_link, tutorials_link in pages:
+        content = transform_markdown(
+            source,
+            source_dir=source_dir,
+            home_link=home_link,
+            tutorials_link=tutorials_link,
+        )
+        output_path = output_dir / destination
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(starlight_frontmatter(destination) + "\n" + content)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Generate the Starlight docs pages from the repo READMEs."
+    )
+    parser.add_argument(
+        "--target",
+        choices=["starlight"],
+        default="starlight",
+        help="Docs surface to generate.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_STARLIGHT_DIR,
+        help="Directory where generated pages should be written.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    if args.target == "starlight":
+        generate_starlight(args.output_dir)
+
+
+if __name__ == "__main__":
+    main()

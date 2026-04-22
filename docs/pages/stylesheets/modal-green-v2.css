@@ -1,0 +1,162 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+:root {
+  --modal-bg: #090d12;
+  --modal-panel: #111823;
+  --modal-panel-2: #0f151f;
+  --modal-border: #2a3345;
+  --modal-text: #e7edf7;
+  --modal-link: #7fee64;
+  --modal-link-hover: #a4ff90;
+  --modal-green-soft: rgba(127, 238, 100, 0.16);
+  --modal-green-strong: #7fee64;
+}
+
+html,
+body,
+.wy-body-for-nav {
+  background: radial-gradient(circle at 20% 0, rgba(127, 238, 100, 0.2), transparent 36rem), var(--modal-bg) !important;
+  color: var(--modal-text) !important;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+
+.wy-nav-side {
+  background: linear-gradient(180deg, #111b2a 0%, #0b1119 100%) !important;
+  border-right: 1px solid var(--modal-border) !important;
+}
+
+.wy-side-nav-search {
+  background: linear-gradient(180deg, rgba(127, 238, 100, 0.2) 0%, rgba(127, 238, 100, 0.08) 100%) !important;
+  border-bottom: 1px solid rgba(127, 238, 100, 0.35) !important;
+}
+
+.wy-side-nav-search > a,
+.wy-side-nav-search .wy-dropdown > a {
+  color: #d8ffd1 !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.01em !important;
+}
+
+.wy-side-nav-search input[type="text"] {
+  background: #0b131e !important;
+  border: 1px solid #3d4b66 !important;
+  border-radius: 10px !important;
+  color: #f0f8ff !important;
+}
+
+.wy-menu-vertical a {
+  color: #c7d3e6 !important;
+}
+
+.wy-menu-vertical a:hover {
+  background: #192639 !important;
+  color: #d4ffca !important;
+}
+
+.wy-menu-vertical li.current > a,
+.wy-menu-vertical li.current a {
+  background: var(--modal-green-soft) !important;
+  border-right: 2px solid var(--modal-green-strong) !important;
+  color: #dbffd3 !important;
+}
+
+.wy-nav-top {
+  background: linear-gradient(90deg, #1d5f1a 0%, #3cae2b 45%, #6fe657 100%) !important;
+  color: #061108 !important;
+  border-bottom: none !important;
+}
+
+.wy-nav-top a,
+.wy-nav-top i {
+  color: #061108 !important;
+}
+
+.wy-nav-content-wrap {
+  background: transparent !important;
+}
+
+.wy-nav-content {
+  background: rgba(10, 15, 22, 0.92) !important;
+  border: 1px solid var(--modal-border) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4) !important;
+  color: var(--modal-text) !important;
+  margin: 2rem auto !important;
+  max-width: 1080px !important;
+}
+
+a,
+.rst-content a,
+.rst-content code.literal a {
+  color: var(--modal-link) !important;
+}
+
+a:hover,
+.rst-content a:hover {
+  color: var(--modal-link-hover) !important;
+}
+
+.rst-content h1,
+.rst-content h2,
+.rst-content h3,
+.rst-content h4 {
+  color: #f4f8ff !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.015em !important;
+}
+
+.rst-content p,
+.rst-content li,
+.rst-content dl,
+.rst-content blockquote {
+  color: #d7e0ef !important;
+}
+
+.rst-content pre,
+pre {
+  background: #0b121c !important;
+  border: 1px solid #34435d !important;
+  border-radius: 12px !important;
+}
+
+.rst-content code,
+code,
+tt {
+  background: #111927 !important;
+  border: 1px solid #36435a !important;
+  border-radius: 8px !important;
+  color: #b9ffad !important;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace !important;
+}
+
+.rst-content pre code {
+  border: none !important;
+  background: transparent !important;
+  color: #deebfb !important;
+}
+
+.rst-content table.docutils,
+.rst-content table.docutils td,
+.rst-content table.docutils th {
+  border-color: #35425a !important;
+}
+
+.rst-content table.docutils thead th {
+  background: #1a273b !important;
+  color: #eff7ff !important;
+}
+
+.rst-content table.docutils:not(.field-list) tr:nth-child(2n-1) td {
+  background: #101a29 !important;
+}
+
+.rst-content .admonition,
+.rst-content .note,
+.rst-content .warning,
+.rst-content .important,
+.rst-content .tip {
+  background: #121d2d !important;
+  border: 1px solid #354664 !important;
+  border-left: 4px solid var(--modal-green-strong) !important;
+  border-radius: 12px !important;
+}
