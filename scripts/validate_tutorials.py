@@ -109,6 +109,8 @@ class StageResult:
     first_startup: str | None = None
     first_signal: str | None = None
     first_error: str | None = None
+    classified_failure: FailureSource | None = None
+    app_state: str | None = None
     wall_time_s: float = 0.0
     stdout_tail: str = ""
     stderr_tail: str = ""
@@ -368,20 +370,45 @@ def run_preflight(target: TutorialTarget) -> ValidationResult | None:
         )
 
     if target.target_type != TargetType.CONCEPT_ONLY and target.generated_py.exists():
-        gen_source = target.generated_py.read_text()
         all_commands = target.prereq_commands + ([target.main_command] if target.main_command else [])
         for cmd in all_commands:
             match = re.search(r"::([\w.]+)", cmd)
             if match:
                 entrypoint = match.group(1)
-                if entrypoint not in gen_source:
+                if not _entrypoint_exists_in_module(target.generated_py, entrypoint):
                     return ValidationResult(
                         tutorial=target.tutorial_stem, target=target.target_name,
                         target_type=target.target_type.value, outcome=Outcome.FAIL,
                         failure_source=FailureSource.ARG_PARSE,
-                        reason_detail=f"entrypoint '{entrypoint}' not found in {target.generated_py}",
+                        reason_detail=f"entrypoint '{entrypoint}' not defined as a callable in {target.generated_py}",
                     )
     return None
+
+
+def _entrypoint_exists_in_module(gen_py: Path, entrypoint: str) -> bool:
+    """Verify entrypoint exists as a callable, not just in comments.
+
+    Two patterns:
+    1. Standalone tutorials: function defined directly (e.g. @app.function def run_benchmark)
+    2. Framework tutorials: app created via build_app() factory — the framework launcher
+       defines entrypoints dynamically, so we verify the factory call exists instead.
+    """
+    func_name = entrypoint.split(".")[-1]
+    try:
+        tree = ast.parse(gen_py.read_text())
+    except SyntaxError:
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+            return True
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == "build_app":
+                return True
+
+    return False
 
 
 # ── Executors ────────────────────────────────────────────────────────────────
@@ -443,6 +470,57 @@ def _run_attached(cmd: str, timeout_s: int) -> StageResult:
                            wall_time_s=time.monotonic() - start, first_error="timeout")
 
 
+def _poll_app_state(app_id: str) -> str | None:
+    """Poll modal app list --json for the given app's lifecycle state."""
+    try:
+        result = subprocess.run(
+            ["uv", "run", "modal", "app", "list", "--json"],
+            capture_output=True, text=True, timeout=30, cwd=str(REPO_ROOT),
+        )
+        if result.returncode != 0:
+            return None
+        apps = json.loads(result.stdout)
+        for app in apps:
+            aid = app.get("app_id", "") or app.get("App ID", "") or ""
+            if app_id in aid or app_id in json.dumps(app):
+                return (app.get("state") or app.get("State") or "unknown").lower()
+    except Exception:
+        pass
+    return None
+
+
+def _classify_detached_failure(
+    app_id: str | None,
+    app_state: str | None,
+    t1_reached: bool,
+    first_startup: str | None,
+    first_error: str | None,
+    combined_text: str,
+    elapsed_since_launch: float,
+) -> tuple[FailureSource, str]:
+    """Apply T0→T3 precedence-based classification for a detached stage failure."""
+    blocked = _detect_blocked_in_text(combined_text)
+    if blocked:
+        if blocked[0] == BlockedReason.GATED_ACCESS:
+            return FailureSource.GATED_ACCESS, blocked[1]
+        if blocked[0] == BlockedReason.MISSING_SECRET:
+            return FailureSource.SECRET_MISSING, blocked[1]
+        if blocked[0] == BlockedReason.CAPACITY:
+            return FailureSource.CAPACITY, blocked[1]
+
+    if not t1_reached:
+        if app_state and "creating" in app_state:
+            return FailureSource.IMAGE_BUILD, f"app stuck in '{app_state}' after {elapsed_since_launch:.0f}s"
+        if app_state and ("queue" in app_state or "waiting" in app_state):
+            return FailureSource.CAPACITY, f"app stuck in '{app_state}' — capacity unavailable"
+        return FailureSource.TIMEOUT, "app never reached running state"
+
+    if not first_startup:
+        return FailureSource.TIMEOUT, "app running but never reached user code"
+
+    return FailureSource.TIMEOUT, f"user code started but no progress marker within timeout"
+
+
 def _run_detached(cmd: str, markers: list[str], progress_timeout_s: int) -> StageResult:
     full_cmd = f"uv run {cmd}"
     start = time.monotonic()
@@ -468,6 +546,9 @@ def _run_detached(cmd: str, markers: list[str], progress_timeout_s: int) -> Stag
     first_signal = None
     first_error = None
     log_lines: list[str] = []
+    t1_reached = False
+    app_state: str | None = None
+    last_poll = time.monotonic()
 
     logs_cmd = f"uv run modal app logs {app_id}"
     logs_proc = subprocess.Popen(logs_cmd, shell=True, stdout=subprocess.PIPE,
@@ -492,10 +573,26 @@ def _run_detached(cmd: str, markers: list[str], progress_timeout_s: int) -> Stag
         except queue.Empty:
             if logs_proc.poll() is not None:
                 break
+            if time.monotonic() - last_poll > 30:
+                app_state = _poll_app_state(app_id)
+                last_poll = time.monotonic()
+                if app_state and app_state in ("running", "deployed", "ephemeral"):
+                    t1_reached = True
+                if app_state and not t1_reached:
+                    elapsed = time.monotonic() - start
+                    if "creating" in (app_state or "") and elapsed > IMAGE_BUILD_TIMEOUT:
+                        first_error = f"image build timeout ({elapsed:.0f}s in '{app_state}')"
+                        break
+                    if ("queue" in (app_state or "") or "waiting" in (app_state or "")) and elapsed > CAPACITY_TIMEOUT:
+                        first_error = f"capacity timeout ({elapsed:.0f}s in '{app_state}')"
+                        break
             continue
         if line is None:
             break
+
         log_lines.append(line)
+        if not t1_reached:
+            t1_reached = True
 
         if not first_startup and _is_startup_line(line):
             first_startup = line.strip()[:200]
@@ -529,8 +626,18 @@ def _run_detached(cmd: str, markers: list[str], progress_timeout_s: int) -> Stag
     wall = time.monotonic() - start
     tail = "".join(log_lines[-50:])
 
+    classified = None
+    if not first_signal:
+        classified, detail = _classify_detached_failure(
+            app_id, app_state, t1_reached, first_startup, first_error,
+            tail, wall,
+        )
+        if not first_error:
+            first_error = detail
+
     return StageResult(
         stage=cmd, command=full_cmd, exit_code=0 if first_signal else None,
+        classified_failure=classified, app_state=app_state,
         app_id=app_id, first_startup=first_startup, first_signal=first_signal,
         first_error=first_error, wall_time_s=wall,
         stdout_tail=tail, stderr_tail="",
@@ -670,7 +777,23 @@ def validate_remote_target(target: TutorialTarget) -> ValidationResult:
             app_id=main_result.app_id, first_signal=marker_from_attached,
         )
 
-    if main_result.exit_code is None:
+    if main_result.classified_failure:
+        fs = main_result.classified_failure
+        detail = main_result.first_error or f"classified as {fs.value}"
+        if fs in (FailureSource.GATED_ACCESS, FailureSource.SECRET_MISSING, FailureSource.CAPACITY):
+            blocked_map = {
+                FailureSource.GATED_ACCESS: BlockedReason.GATED_ACCESS,
+                FailureSource.SECRET_MISSING: BlockedReason.MISSING_SECRET,
+                FailureSource.CAPACITY: BlockedReason.CAPACITY,
+            }
+            return ValidationResult(
+                tutorial=target.tutorial_stem, target=target.target_name,
+                target_type=target.target_type.value, outcome=Outcome.BLOCKED,
+                command=target.main_command, blocked_reason=blocked_map[fs],
+                reason_detail=detail, stages=stage_results, wall_time_s=wall,
+                app_id=main_result.app_id, first_error=main_result.first_error,
+            )
+    elif main_result.exit_code is None:
         fs = FailureSource.TIMEOUT
         detail = f"timed out after {target.progress_timeout_s}s without progress marker"
     elif main_result.exit_code != 0:
@@ -745,7 +868,9 @@ def write_markdown_report(results: list[ValidationResult], out: TextIO) -> None:
             for s in r.stages:
                 status = f"exit={s.exit_code}" if s.exit_code is not None else "timeout"
                 app = f" app={s.app_id}" if s.app_id else ""
-                out.write(f"  - `{s.stage}` → {status}{app} ({s.wall_time_s:.1f}s)\n")
+                state = f" state={s.app_state}" if s.app_state else ""
+                classified = f" [{s.classified_failure.value}]" if s.classified_failure else ""
+                out.write(f"  - `{s.stage}` → {status}{app}{state}{classified} ({s.wall_time_s:.1f}s)\n")
                 if s.first_startup:
                     out.write(f"    startup: `{s.first_startup}`\n")
                 if s.first_signal:
@@ -771,6 +896,8 @@ def write_json_report(results: list[ValidationResult], out: TextIO) -> None:
             "stages": [{
                 "stage": s.stage, "command": s.command,
                 "exit_code": s.exit_code, "app_id": s.app_id,
+                "app_state": s.app_state,
+                "classified_failure": s.classified_failure.value if s.classified_failure else None,
                 "first_startup": s.first_startup, "first_signal": s.first_signal,
                 "first_error": s.first_error,
                 "wall_time_s": round(s.wall_time_s, 1),
