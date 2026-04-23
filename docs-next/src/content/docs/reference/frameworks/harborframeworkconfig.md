@@ -37,6 +37,60 @@ Harbor + Miles configuration for sandbox-based RL training.
 | `task_glob` | `str` | `"*"` | Glob pattern for discovering task directories. Default `"*"`. |
 | `instruction_path` | `str` | `"instruction.md"` | Relative path to the instruction file within each task dir. Default `"instruction.md"`. |
 
+## Harbor RL Defaults
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `input_key` | `str` | `"prompt"` | Dataset column key for model input prompts. Default `"prompt"`. |
+| `label_key` | `str` | `"metadata"` | Dataset column key for metadata/labels. Default `"metadata"`. |
+| `apply_chat_template` | `bool` | `True` | Apply the model's chat template to inputs. Default `True`. |
+| `enable_thinking` | `bool` | `True` | Enable thinking/reasoning mode in the model. Default `True`. |
+| `rollout_shuffle` | `bool` | `True` | Shuffle data during rollout generation. Default `True`. |
+
+## Parallelism (Harbor Overrides)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `tensor_model_parallel_size` | `int` | `2` | Tensor parallelism degree. Default `2`. |
+| `sequence_parallel` | `bool` | `True` | Enable sequence parallelism. Default `True`. |
+
+## Memory (Harbor Overrides)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `recompute_granularity` | `str` | `"selective"` | Activation recomputation granularity. Default `"selective"`. |
+
+## Model Overrides
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_position_embeddings` | `int` | `32768` | Maximum sequence position embeddings. Default `32768`. |
+| `untie_embeddings_and_output_weights` | `bool` | `True` | Untie input embeddings from output projection. Default `True`. |
+| `no_masked_softmax_fusion` | `bool` | `True` | Disable masked softmax fusion. Default `True`. |
+
+## Rollout (Harbor)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `num_rollout` | `int` | `200` | Number of rollout episodes per training step. Default `200`. |
+| `rollout_batch_size` | `int` | `64` | Batch size for rollout generation. Default `64`. |
+| `rollout_max_response_len` | `int` | `1024` | Maximum response length during rollout. Default `1024`. |
+| `sglang_mem_fraction_static` | `float` | `0.7` | SGLang static memory fraction. Default `0.7`. |
+
+## Training (Harbor Overrides)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `train_iters` | `int` | `50` | Total training iterations. Default `50`. |
+| `global_batch_size` | `int` | `512` | Global batch size across all ranks. Default `512`. |
+
+## Eval and Checkpointing (Harbor)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `eval_interval` | `int` | `10` | Evaluation interval in iterations. Default `10`. |
+| `save_interval` | `int` | `10` | Checkpoint save interval in iterations. Default `10`. |
+
 ## Image
 
 | Field | Type | Default | Description |
@@ -78,11 +132,6 @@ Harbor + Miles configuration for sandbox-based RL training.
 | `hidden_dropout` | `float` | `0.0` | Hidden layer dropout rate. Default `0.0`. |
 | `rollout_temperature` | `float` | `1.0` | Sampling temperature for rollouts. Default `1.0`. |
 | `no_save_optim` | `bool` | `True` | Skip saving optimizer state. Default `True`. |
-| `input_key` | `str` | `"prompt"` |  |
-| `label_key` | `str` | `"metadata"` |  |
-| `apply_chat_template` | `bool` | `True` |  |
-| `enable_thinking` | `bool` | `True` |  |
-| `rollout_shuffle` | `bool` | `True` |  |
 
 ## Methods
 

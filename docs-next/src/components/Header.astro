@@ -1,7 +1,6 @@
 ---
 import config from 'virtual:starlight/user-config';
 import Search from '@astrojs/starlight/components/Search.astro';
-import SiteTitle from '@astrojs/starlight/components/SiteTitle.astro';
 
 const currentPath = Astro.url.pathname;
 const navItems = [
@@ -19,9 +18,10 @@ const isActive = (href: string) =>
 
 <div class="tg-header">
   <div class="tg-header__left">
-    <div class="title-wrapper sl-flex">
-      <SiteTitle />
-    </div>
+    <a href="/" class="title-wrapper sl-flex" style="text-decoration: none; align-items: center; gap: 0.6rem;">
+      <img src="/modal-logo.svg" alt="Modal" style="height: 1.25rem; width: auto;" />
+      <span class="site-title">Training Gym</span>
+    </a>
     <nav class="tg-header__nav sl-hidden lg:sl-flex" aria-label="Primary">
       {navItems.map((item) => (
         <a

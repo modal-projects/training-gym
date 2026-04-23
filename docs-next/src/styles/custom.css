@@ -7,7 +7,7 @@
   --sl-font-mono:
     'Fira Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     monospace;
-  --sl-content-width: 46rem;
+  --sl-content-width: 56rem;
   --sl-sidebar-width: 18.75rem;
   --sl-text-h1: clamp(2.35rem, 4vw, 3.25rem);
   --sl-text-h2: clamp(1.6rem, 2vw, 2rem);
@@ -88,13 +88,9 @@ body::before {
   content: none;
 }
 
-.page,
-.main-frame,
-.sidebar,
-.header,
-main {
+.header {
   position: relative;
-  z-index: 1;
+  z-index: 10;
 }
 
 .header {
@@ -135,15 +131,6 @@ main > .content-panel + .content-panel {
   display: inline-flex;
   align-items: center;
   gap: 0.7rem;
-}
-
-.site-title span::before {
-  content: '';
-  width: 0.8rem;
-  height: 0.8rem;
-  border-radius: 0.28rem;
-  background: var(--sl-color-accent);
-  box-shadow: 0 0 0 0.28rem color-mix(in srgb, var(--sl-color-accent) 18%, transparent);
 }
 
 .sidebar-pane {
@@ -271,7 +258,7 @@ main > .content-panel + .content-panel {
 
 .tg-right-rail__cta {
   border: 1px solid var(--tg-border);
-  border-radius: 0.85rem;
+  border-radius: 0.375rem;
   background: var(--tg-panel);
   padding: 1rem;
 }
@@ -308,53 +295,51 @@ main > .content-panel + .content-panel {
 }
 
 .tg-action-button,
-.sl-link-button,
+a.sl-link-button,
 .tg-header__repo {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
   min-height: 2.25rem;
-  border: 1px solid var(--tg-border-strong);
-  border-radius: 0.5rem;
-  background: var(--tg-panel-alt);
-  color: var(--sl-color-white);
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 0.375rem !important;
+  background: transparent;
+  color: var(--sl-color-gray-2);
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1;
-  padding: 0.625rem 0.9rem;
+  padding: 0.375rem 0.5rem;
   text-decoration: none;
   transition:
-    border-color 0.18s ease,
-    background-color 0.18s ease,
-    color 0.18s ease,
-    transform 0.18s ease;
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .tg-action-button:hover,
-.sl-link-button:hover,
+a.sl-link-button:hover,
 .tg-header__repo:hover {
   border-color: color-mix(in srgb, var(--tg-border-strong) 72%, white);
-  background: var(--tg-surface);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--sl-color-white);
-  transform: translateY(-1px);
 }
 
 .tg-action-button--primary,
-.sl-link-button.primary {
-  background: var(--sl-color-accent);
-  border-color: color-mix(in srgb, var(--sl-color-accent) 62%, #0f0f0f);
-  color: #111111;
+a.sl-link-button.primary {
+  background: color-mix(in srgb, var(--sl-color-accent) 5%, transparent);
+  border-color: color-mix(in srgb, var(--sl-color-accent) 40%, transparent);
+  color: var(--sl-color-accent);
 }
 
 .tg-action-button--primary:hover,
-.sl-link-button.primary:hover {
-  background: color-mix(in srgb, var(--sl-color-accent) 88%, white);
-  color: #111111;
+a.sl-link-button.primary:hover {
+  background: color-mix(in srgb, var(--sl-color-accent) 10%, transparent);
+  color: var(--sl-color-accent);
 }
 
 .tg-action-button--ghost,
-.sl-link-button.secondary {
+a.sl-link-button.secondary {
   background: transparent;
 }
 
@@ -555,12 +540,16 @@ a:hover {
   border-bottom-color: var(--tg-border-strong);
 }
 
+.sl-markdown-content {
+  overflow-x: auto;
+}
+
 .sl-markdown-content table {
-  width: 100%;
-  overflow: hidden;
+  min-width: 100%;
   border: 1px solid var(--tg-border);
-  border-radius: 0.8rem;
+  border-radius: 0.375rem;
   background: var(--tg-panel);
+  white-space: nowrap;
 }
 
 .sl-markdown-content th {

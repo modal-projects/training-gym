@@ -19,9 +19,7 @@ from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.frameworks.miles.config import (
-    CHECKPOINTS_PATH,
     DATA_PATH,
-    HF_CACHE_PATH,
     MilesFrameworkConfig,
 )
 from modal_training_gym.frameworks.miles.config import (
@@ -94,6 +92,65 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
         Relative path to the instruction file within each task dir.
         Default ``"instruction.md"``.
 
+    ## Harbor RL Defaults
+
+    input_key : str
+        Dataset column key for model input prompts. Default ``"prompt"``.
+    label_key : str
+        Dataset column key for metadata/labels. Default ``"metadata"``.
+    apply_chat_template : bool
+        Apply the model's chat template to inputs. Default ``True``.
+    enable_thinking : bool
+        Enable thinking/reasoning mode in the model. Default ``True``.
+    rollout_shuffle : bool
+        Shuffle data during rollout generation. Default ``True``.
+
+    ## Parallelism (Harbor Overrides)
+
+    tensor_model_parallel_size : int
+        Tensor parallelism degree. Default ``2``.
+    sequence_parallel : bool
+        Enable sequence parallelism. Default ``True``.
+
+    ## Memory (Harbor Overrides)
+
+    recompute_granularity : str
+        Activation recomputation granularity. Default ``"selective"``.
+
+    ## Model Overrides
+
+    max_position_embeddings : int
+        Maximum sequence position embeddings. Default ``32768``.
+    untie_embeddings_and_output_weights : bool
+        Untie input embeddings from output projection. Default ``True``.
+    no_masked_softmax_fusion : bool
+        Disable masked softmax fusion. Default ``True``.
+
+    ## Rollout (Harbor)
+
+    num_rollout : int
+        Number of rollout episodes per training step. Default ``200``.
+    rollout_batch_size : int
+        Batch size for rollout generation. Default ``64``.
+    rollout_max_response_len : int
+        Maximum response length during rollout. Default ``1024``.
+    sglang_mem_fraction_static : float
+        SGLang static memory fraction. Default ``0.7``.
+
+    ## Training (Harbor Overrides)
+
+    train_iters : int
+        Total training iterations. Default ``50``.
+    global_batch_size : int
+        Global batch size across all ranks. Default ``512``.
+
+    ## Eval and Checkpointing (Harbor)
+
+    eval_interval : int
+        Evaluation interval in iterations. Default ``10``.
+    save_interval : int
+        Checkpoint save interval in iterations. Default ``10``.
+
     ## Image
 
     miles_image : str
@@ -119,18 +176,41 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
     task_glob: str = "*"
     instruction_path: str = "instruction.md"
 
-    # ── Harbor RL defaults (emitted as Miles CLI flags) ────────────────────
+    # ── Harbor RL defaults ─────────────────────────────────────────────────
     input_key: str = "prompt"
     label_key: str = "metadata"
     apply_chat_template: bool = True
     enable_thinking: bool = True
     rollout_shuffle: bool = True
 
+    # ── Parallelism ─────────────────────────────────────────────────────────
+    tensor_model_parallel_size: int = 2
+    sequence_parallel: bool = True
+
+    # ── Memory ──────────────────────────────────────────────────────────────
+    recompute_granularity: str = "selective"
+
+    # ── Model overrides ─────────────────────────────────────────────────────
+    max_position_embeddings: int = 32768
+    untie_embeddings_and_output_weights: bool = True
+    no_masked_softmax_fusion: bool = True
+
+    # ── Rollout ─────────────────────────────────────────────────────────────
+    num_rollout: int = 200
+    rollout_batch_size: int = 64
+    rollout_max_response_len: int = 1024
+    sglang_mem_fraction_static: float = 0.7
+
+    # ── Training ────────────────────────────────────────────────────────────
+    train_iters: int = 50
+    global_batch_size: int = 512
+
+    # ── Eval & Checkpointing ────────────────────────────────────────────────
+    eval_interval: int = 10
+    save_interval: int = 10
+
     # ── Image ────────────────────────────────────────────────────────────────
     miles_image: str = "radixark/miles:dev-202604201238"
-    # Miles source commit with --custom-agent-function-path support.
-    # The base Docker image lacks this flag; the launcher clones and
-    # reinstalls Miles from this commit to add it.
     miles_src_commit: str = "9a003644739f4e6dd509e2e8337e8ae7e571941c"
     harbor_install_command: str = (
         "uv pip install --system git+https://github.com/laude-institute/harbor.git"

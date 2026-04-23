@@ -67,7 +67,6 @@ def test_cli_args_exclude_harbor_fields():
 def test_harbor_config_construction():
     cfg = HarborFrameworkConfig(
         agent_import_path="my_agent:MyAgent",
-        recipe_args="--num-layers 36",
     )
     harbor = HarborConfig(
         model=Qwen3_4B(),
@@ -76,13 +75,15 @@ def test_harbor_config_construction():
     assert harbor.framework_config.agent_import_path == "my_agent:MyAgent"
     assert harbor.model is not None
     assert harbor.model.model_name == "Qwen/Qwen3-4B"
+    assert harbor.framework_config.input_key == "prompt"
+    assert harbor.framework_config.tensor_model_parallel_size == 2
+    assert harbor.framework_config.num_rollout == 200
     print("  PASS  test_harbor_config_construction")
 
 
 def test_build_app():
     cfg = HarborFrameworkConfig(
         agent_import_path="my_agent:MyAgent",
-        recipe_args="--num-layers 36",
     )
     harbor = HarborConfig(
         model=Qwen3_4B(),
@@ -189,7 +190,6 @@ harbor = HarborConfig(
     dataset=HelloWorldDataset(),
     framework_config=HarborFrameworkConfig(
         agent_import_path="placeholder:Agent",
-        recipe_args="--num-layers 36 --hidden-size 2560",
     ),
 )
 

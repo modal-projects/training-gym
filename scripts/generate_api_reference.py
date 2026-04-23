@@ -58,15 +58,42 @@ def _get_class_attrs(cls: type) -> dict[str, tuple[type, Any]]:
             except (ValueError, TypeError):
                 pass
 
+        docstring = inspect.getdoc(cls) or ""
+        effective_defaults = _extract_effective_defaults(docstring)
+
         for name, type_hint in hints.items():
             if name.startswith("_"):
                 continue
             default = getattr(cls, name, inspect.Parameter.empty)
             if default is inspect.Parameter.empty and name in init_defaults:
                 default = init_defaults[name]
+            if default is None and name in effective_defaults:
+                default = effective_defaults[name]
             attrs[name] = (type_hint, default)
 
     return attrs
+
+
+def _extract_effective_defaults(docstring: str) -> dict[str, _EffectiveDefault]:
+    """Extract effective defaults documented as 'Default ``Foo()``.' in docstrings."""
+    results: dict[str, _EffectiveDefault] = {}
+    pattern = re.compile(r"^(\w+)\s*:\s*\S+")
+    lines = docstring.splitlines()
+    i = 0
+    while i < len(lines):
+        m = pattern.match(lines[i])
+        if m:
+            field_name = m.group(1)
+            i += 1
+            while i < len(lines) and lines[i].strip() and not pattern.match(lines[i]):
+                line = lines[i].strip()
+                default_match = re.search(r"Default\s+``([^`]+\(\))``", line)
+                if default_match:
+                    results[field_name] = _EffectiveDefault(default_match.group(1))
+                i += 1
+        else:
+            i += 1
+    return results
 
 
 def _format_type(type_hint: Any) -> str:
@@ -84,9 +111,17 @@ def _format_type(type_hint: Any) -> str:
     return raw
 
 
+class _EffectiveDefault:
+    """Wrapper for docstring-documented effective defaults."""
+    def __init__(self, text: str):
+        self.text = text
+
+
 def _format_default(val: Any) -> str:
     if val is inspect.Parameter.empty:
         return ""
+    if isinstance(val, _EffectiveDefault):
+        return f"`{val.text}`"
     if isinstance(val, str):
         return f'`"{val}"`' if val else '`""`'
     if isinstance(val, bool):

@@ -18,7 +18,7 @@ Top-level wrapper that composes a Miles RLVR training run.
 | `dataset` | `'DatasetConfig | None'` | `None` | Dataset configuration with `prepare()` hook. Default `None`. |
 | `model` | `'ModelConfiguration | None'` | `None` | Model identity and download hook. Default `None`. |
 | `wandb` | `'WandbConfig | None'` | `None` | Weights & Biases logging config. Default `None`. |
-| `framework_config` | `MilesFrameworkConfig` | `None` | Miles-specific training and infrastructure settings. Default `MilesFrameworkConfig()`. |
+| `framework_config` | `MilesFrameworkConfig` | `MilesFrameworkConfig()` | Miles-specific training and infrastructure settings. Default `MilesFrameworkConfig()`. |
 
 ## Methods
 

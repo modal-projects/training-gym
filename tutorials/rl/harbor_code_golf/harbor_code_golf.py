@@ -277,16 +277,12 @@ class MBPPCodeGolfDataset(DatasetConfig):
 # - `task_root` / `instruction_path` — where to find task directories
 #   on the data volume.
 #
-# **Miles recipe args**
+# **Training config**
 # - Model architecture flags are auto-generated from `Qwen3_4B().architecture`
 #   — no need to specify `--num-layers`, `--hidden-size`, etc.
-# - Harbor defaults handle `--input-key prompt`, `--label-key metadata`,
-#   `--apply-chat-template`, `--enable-thinking`, and `--rollout-shuffle`.
-# - `--num-rollout 200`, `--rollout-batch-size 64` — how many rollouts
-#   per training step and how many run in parallel.
-# - `--global-batch-size 512` — training batch size.
-# - `--tensor-model-parallel-size 2` — Qwen3-4B is small but we use
-#   TP=2 to leave room for SGLang's KV cache.
+# - `HarborFrameworkConfig` provides typed defaults for everything:
+#   RL settings, parallelism, rollout, batch size, eval intervals.
+# - Override any default by passing it as a keyword argument.
 
 AGENT_IMPORT_PATH = (
     "modal_training_gym.frameworks.harbor.agents.single_shot_code"
@@ -305,29 +301,6 @@ framework_config = HarborFrameworkConfig(
     task_root=str(TASKS_DIR),
     sandbox_timeout_secs=180,
     sandbox_idle_timeout_secs=60,
-    recipe_args="""
-        # ── Training ──
-        --recompute-granularity selective
-        --tensor-model-parallel-size 2
-        --sequence-parallel
-        --untie-embeddings-and-output-weights
-        --no-masked-softmax-fusion
-        --max-position-embeddings 32768
-
-        # ── Rollout ──
-        --num-rollout 200
-        --rollout-batch-size 64
-        --rollout-max-response-len 1024
-        --sglang-mem-fraction-static 0.7
-        --train-iters 50
-
-        # ── Batch ──
-        --global-batch-size 512
-
-        # ── Eval & Save ──
-        --eval-interval 10
-        --save-interval 10
-    """,
 )
 
 harbor = HarborConfig(
