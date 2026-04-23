@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from modal import App
 
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import ModelConfiguration
+    from modal_training_gym.common.models import ModelConfiguration, ModelTrainingConfig
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
@@ -39,6 +39,45 @@ _SKIP_FIELDS = {
     "gpus_per_node",
     "app_tags",
 }
+
+
+# Fields from ModelTrainingConfig that map to MsSwiftFrameworkConfig fields.
+_MODEL_TRAINING_FIELDS = {
+    "gpu_type": "gpu",
+    "n_nodes": "n_nodes",
+    "tensor_model_parallel_size": "tensor_model_parallel_size",
+    "pipeline_model_parallel_size": "pipeline_model_parallel_size",
+    "context_parallel_size": "context_parallel_size",
+    "sequence_parallel": "sequence_parallel",
+    "expert_model_parallel_size": "expert_model_parallel_size",
+    "moe_permute_fusion": "moe_permute_fusion",
+    "moe_grouped_gemm": "moe_grouped_gemm",
+    "moe_shared_expert_overlap": "moe_shared_expert_overlap",
+    "moe_aux_loss_coeff": "moe_aux_loss_coeff",
+    "lora_rank": "lora_rank",
+    "lora_alpha": "lora_alpha",
+    "target_modules": "target_modules",
+    "merge_lora": "merge_lora",
+}
+
+
+def model_training_overrides(
+    model: "ModelConfiguration",
+) -> dict[str, Any]:
+    """Extract model-level training defaults as ms-swift framework config fields.
+
+    Returns a dict keyed by ``MsSwiftFrameworkConfig`` field names. Values
+    come from the model's ``ModelTrainingConfig``. Returns an empty dict
+    when the model has no training config.
+    """
+    if model.training is None:
+        return {}
+    overrides = model.training.to_framework_overrides()
+    return {
+        ms_swift_key: overrides[tc_key]
+        for tc_key, ms_swift_key in _MODEL_TRAINING_FIELDS.items()
+        if tc_key in overrides
+    }
 
 
 @dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
@@ -351,6 +390,11 @@ class MsSwiftConfig:
 
     def _fields(self) -> dict[str, Any]:
         fields = dict(vars(self.framework_config))
+        if self.model is not None:
+            overrides = model_training_overrides(self.model)
+            for k, v in overrides.items():
+                if k in fields and fields[k] == getattr(MsSwiftFrameworkConfig, k, None):
+                    fields[k] = v
         fields = {k: v for k, v in fields.items() if k not in _SKIP_FIELDS}
         if self.dataset is not None and hasattr(self.dataset, "prompt_data"):
             fields["dataset"] = self.dataset.prompt_data

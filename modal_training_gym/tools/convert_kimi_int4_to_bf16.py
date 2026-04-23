@@ -111,8 +111,10 @@ def convert_file(
     tensors = {}
     expert_buffers = defaultdict(lambda: defaultdict(dict))
 
-    # Load weights directly on GPU
-    with safe_open(input_path, framework="pt", device="cuda") as reader:
+    import torch
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    with safe_open(input_path, framework="pt", device=device) as reader:
         keys = list(reader.keys())
         for key in keys:
             tensor = reader.get_tensor(key)
