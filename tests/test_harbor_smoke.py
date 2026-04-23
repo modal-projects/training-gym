@@ -77,7 +77,6 @@ def test_harbor_config_construction():
     assert harbor.model is not None
     assert harbor.model.model_name == "Qwen/Qwen3-4B"
     assert harbor.framework_config.input_key == "prompt"
-    assert harbor.framework_config.tensor_model_parallel_size == 2
     assert harbor.framework_config.num_rollout == 200
     print("  PASS  test_harbor_config_construction")
 

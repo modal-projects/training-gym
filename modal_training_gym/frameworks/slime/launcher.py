@@ -256,7 +256,9 @@ def build_slime_app(
         image=image,
         gpu=gpu_spec,
         volumes=all_volumes,
-        secrets=[Secret.from_name("wandb-secret")],
+        secrets=[
+            *([] if slime.wandb is None else [Secret.from_name("wandb-secret")]),
+        ],
         timeout=24 * 60 * 60,
         experimental_options={"efa_enabled": True},
         serialized=True,

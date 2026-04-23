@@ -62,21 +62,24 @@ def _train_ms_swift_worker(run_id: str | None = None):
     node_rank = cluster_info.rank
 
     if run_id is None:
+        import uuid
+
+        invocation_marker = uuid.uuid4().hex[:8]
         run_id_file = f"{checkpoints_root}/.current_run_id"
+        marker_file = f"{checkpoints_root}/.run_marker"
+        vol = Volume.from_name(checkpoints_volume_name, create_if_missing=True, version=2)
         if node_rank == 0:
             run_id = f"train_{int(time.time())}"
             os.makedirs(checkpoints_root, exist_ok=True)
             with open(run_id_file, "w") as f:
                 f.write(run_id)
-            Volume.from_name(
-                checkpoints_volume_name, create_if_missing=True, version=2
-            ).commit()
+            with open(marker_file, "w") as f:
+                f.write(invocation_marker)
+            vol.commit()
         else:
-            for _ in range(60):
-                Volume.from_name(
-                    checkpoints_volume_name, create_if_missing=True, version=2
-                ).reload()
-                if os.path.exists(run_id_file):
+            for _ in range(120):
+                vol.reload()
+                if os.path.exists(marker_file) and os.path.exists(run_id_file):
                     run_id = open(run_id_file).read().strip()
                     break
                 time.sleep(1)
@@ -173,7 +176,6 @@ def build_ms_swift_app(
     name: str | None = None,
 ) -> App:
     """Return a Modal App with `download_model`, `prepare_dataset`, `train`."""
-    app_name = name or f"ms-swift-{type(swift).__name__.lstrip('_').lower()}"
     framework = swift.framework_config
 
     caller_module = resolve_caller_module()
@@ -185,6 +187,13 @@ def build_ms_swift_app(
         mod_file = getattr(caller_module, "__file__", None)
         if mod_file:
             caller_script = os.path.abspath(mod_file)
+
+    if name:
+        app_name = name
+    elif caller_script:
+        app_name = f"ms-swift-{os.path.splitext(os.path.basename(caller_script))[0]}"
+    else:
+        app_name = f"ms-swift-{type(swift).__name__.lstrip('_').lower()}"
 
     # ── Images ───────────────────────────────────────────────────────────────
     download_image = (
@@ -334,7 +343,7 @@ def build_ms_swift_app(
         },
         secrets=[
             Secret.from_name("huggingface-secret"),
-            Secret.from_name("wandb-secret"),
+            *([] if swift.wandb is None else [Secret.from_name("wandb-secret")]),
         ],
         timeout=24 * 60 * 60,
         retries=2,

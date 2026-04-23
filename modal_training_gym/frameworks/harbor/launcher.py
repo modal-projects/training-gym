@@ -319,7 +319,7 @@ def build_harbor_app(
         },
         secrets=[
             Secret.from_name("huggingface-secret"),
-            Secret.from_name("wandb-secret"),
+            *([] if harbor.wandb is None else [Secret.from_name("wandb-secret")]),
         ],
         timeout=24 * 60 * 60,
         experimental_options={"efa_enabled": True},

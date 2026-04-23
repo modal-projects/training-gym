@@ -127,6 +127,7 @@ class ModelArchitecture:
         if self.kv_channels:
             args += ["--kv-channels", str(self.kv_channels)]
         if self.vocab_size:
+            args += ["--vocab-size", str(self.vocab_size)]
             args += ["--make-vocab-size-divisible-by", "1"]
         if self.normalization:
             args += ["--normalization", self.normalization]
