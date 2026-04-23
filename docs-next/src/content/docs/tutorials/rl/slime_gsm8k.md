@@ -1,0 +1,203 @@
+---
+title: "Qwen3-4B GRPO on GSM8K (colocated)"
+description: "Qwen3-4B GRPO on GSM8K (colocated)"
+---
+
+# Qwen3-4B GRPO on GSM8K with SLIME on Modal
+
+**What SLIME is.** [SLIME](https://github.com/THUDM/slime) is an RL
+post-training framework that pairs Megatron (training) with SGLang
+(rollouts) and orchestrates both with Ray. `modal-training-gym`'s
+`slime` launcher wires that stack onto a Modal multi-node cluster.
+
+**What this tutorial does.** GRPO-tunes Qwen3-4B against
+[GSM8K](https://huggingface.co/datasets/openai/gsm8k) on 4 nodes ×
+8×H100 with actor and rollout **colocated** on the same GPUs. GSM8K
+is the canonical target for math-RL: short prompts, short answers,
+and a deterministic correctness check. This is the "everything works
+end-to-end" reference for the `slime` framework — a medium-scale RL
+post-training run with SLIME's built-in math reward (no custom
+reward code). For a custom-reward example see
+[`slime_haiku`](../slime_haiku/slime_haiku.ipynb); for the shared
+primitives (DatasetConfig, volumes, the 3-stage pipeline) see
+[`quickstart`](../../intro/quickstart/quickstart.ipynb).
+
+**What you'll need.**
+- Access to Modal's multi-node training preview (4 × 8×H100).
+- A `wandb` Modal secret holding your W&B API key (the SLIME launcher
+  mounts it automatically when `WandbConfig` is present).
+- Patience: multi-hour run — use `modal run --detach`.
+
+**What to watch.**
+- **Weights & Biases** under project `slime-grpo`, group
+  `qwen3-4b-gsm8k`. Rollout reward should climb steadily; eval fires
+  every 20 training steps (see `eval_interval` below) against
+  GSM8K's test split.
+- **Modal dashboard** — per-node GPU utilization and live logs. On a
+  healthy run you'll see SGLang warm up, then alternating rollout /
+  training phases.
+
+```python
+import modal
+
+from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.models import Qwen3_4B
+from modal_training_gym.common.wandb import WandbConfig
+from modal_training_gym.frameworks.slime import (
+    ModalConfig,
+    SlimeConfig,
+)
+from modal_training_gym.frameworks.slime.config import DATA_PATH
+```
+
+## Define the dataset
+
+The non-obvious choices for GSM8K under SLIME:
+
+- `input_key="messages"` + `apply_chat_template=True` — the prompt
+  column holds a list of chat messages; SLIME runs the model's chat
+  template over them before tokenizing. The upstream
+  [`zhuzilin/gsm8k`](https://huggingface.co/datasets/zhuzilin/gsm8k)
+  mirror we load below is already in that shape.
+- `label_key="label"` — the column SLIME scores against.
+- `rm_type="math"` — selects SLIME's built-in math correctness
+  reward. It parses the boxed numeric answer out of the rollout and
+  compares to `label`. No custom reward code needed.
+- `rollout_shuffle=True` — matters for GRPO's group-sampling
+  stability.
+
+```python
+class GSM8KDataset(DatasetConfig):
+    input_key = "messages"
+    label_key = "label"
+    apply_chat_template = True
+    rollout_shuffle = True
+    rm_type = "math"
+
+    def __init__(self, data_path):
+        self._data_path = str(data_path)
+        self.prompt_data = f"{self._data_path}/gsm8k/train.parquet"
+        self.eval_prompt_data = ["gsm8k", f"{self._data_path}/gsm8k/test.parquet"]
+
+    def prepare(self):
+        from datasets import load_dataset
+
+        ds = load_dataset("zhuzilin/gsm8k")
+        ds["train"].to_parquet(f"{self._data_path}/gsm8k/train.parquet")
+        ds["test"].to_parquet(f"{self._data_path}/gsm8k/test.parquet")
+```
+
+## Define the experiment
+
+Every non-private attribute on `SlimeConfig` is forwarded to the
+SLIME CLI (`field_name` → `--field-name`). Unlisted knobs fall back
+to SLIME's defaults. The ones below are the non-default choices that
+define *this* run:
+
+**Cluster + parallelism**
+- `actor_num_nodes=4`, `actor_num_gpus_per_node=8` — 32 H100s total.
+- `colocate=True` — rollout (SGLang) and actor (Megatron) share the
+  same GPUs. Cheaper than disaggregated because weights don't have to
+  be shipped between pools on every sync, at the cost of interleaving
+  the two workloads on one set of devices.
+- `tensor_model_parallel_size=1` — Qwen3-4B fits comfortably on a
+  single H100, so no tensor parallelism.
+- `megatron_to_hf_mode="bridge"` — SLIME writes Megatron checkpoints
+  that are readable as HF directly. In raw mode you'd run a one-time
+  `convert_checkpoint` step; in bridge mode it's a no-op, so this
+  tutorial skips it entirely.
+
+**RL objective**
+- `advantage_estimator="grpo"` — GRPO (Group Relative Policy
+  Optimization): sample `n_samples_per_prompt=2` rollouts per prompt,
+  use their relative rewards as the advantage signal, no separate
+  critic.
+- `eps_clip=0.2` / `eps_clip_high=0.28` — asymmetric PPO-style
+  clipping on the importance ratio.
+- `use_kl_loss=True`, `kl_loss_type="low_var_kl"`,
+  `kl_loss_coef=0.0` — KL is computed but not actively penalized in
+  this run. Bump `kl_loss_coef` if you want a reference-model leash.
+
+**Throughput knobs**
+- `use_dynamic_batch_size=True` + `max_tokens_per_gpu=9216` — SLIME
+  packs prompts up to a per-GPU token budget rather than a fixed
+  batch count.
+- `recompute_granularity="full"` + `recompute_method="uniform"` —
+  activation recomputation; trades compute for memory.
+- `eval_interval=20` — run the GSM8K test split every 20 training
+  steps.
+
+```python
+base_model = Qwen3_4B()
+my_training_run = SlimeConfig(
+    model=base_model,
+    dataset=GSM8KDataset(DATA_PATH),
+    wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-gsm8k"),
+    ref_load=base_model.model_name,
+    megatron_to_hf_mode="bridge",
+    actor_num_nodes=4,
+    actor_num_gpus_per_node=8,
+    colocate=True,
+    num_rollout=1,
+    rollout_batch_size=8,
+    rollout_max_response_len=8192,
+    rollout_temperature=1.0,
+    rollout_num_gpus_per_engine=1,
+    sglang_mem_fraction_static=0.7,
+    n_samples_per_prompt=2,
+    global_batch_size=16,
+    use_fault_tolerance=True,
+    eval_interval=20,
+    n_samples_per_eval_prompt=4,
+    eval_max_response_len=16384,
+    eval_top_p=1.0,
+    tensor_model_parallel_size=1,
+    sequence_parallel=False,
+    use_dynamic_batch_size=True,
+    max_tokens_per_gpu=9216,
+    recompute_granularity="full",
+    recompute_method="uniform",
+    recompute_num_layers=1,
+    attention_dropout=0.0,
+    hidden_dropout=0.0,
+    accumulate_allreduce_grads_in_fp32=True,
+    attention_softmax_in_fp32=True,
+    optimizer="adam",
+    lr=1e-6,
+    lr_decay_style="constant",
+    weight_decay=0.1,
+    adam_beta1=0.9,
+    adam_beta2=0.98,
+    advantage_estimator="grpo",
+    eps_clip=0.2,
+    eps_clip_high=0.28,
+    use_kl_loss=True,
+    kl_loss_coef=0.0,
+    kl_loss_type="low_var_kl",
+    entropy_coef=0.0,
+    modal=ModalConfig(gpu="H100"),
+)
+```
+
+## Build and run
+
+`build_app()` returns a Modal app with `download_model`,
+`prepare_dataset`, and `train`. (Bridge mode means there's no
+separate `convert_checkpoint` step to call — see quickstart for the
+general pattern.)
+
+```python
+app = my_training_run.build_app()
+```
+
+---
+
+## Related API Reference
+
+- [`SlimeConfig`](/reference/core/slimeconfig/)
+- [`DatasetConfig`](/reference/core/datasetconfig/)
+- [`Qwen3_4B`](/reference/core/qwen3_4b/)
+- [`WandbConfig`](/reference/core/wandbconfig/)
+
+**Source:** [`tutorials/rl/slime_gsm8k/slime_gsm8k.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_gsm8k/slime_gsm8k.py)
+ | [Open in Modal Notebook](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_gsm8k/slime_gsm8k.ipynb)

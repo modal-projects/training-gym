@@ -16,6 +16,10 @@ TUTORIAL_METADATA = {
     'summary': 'Qwen3-4B GRPO on haiku poems — structure score + LLM judge',
     'difficulty': 'Intermediate',
     'order': 15,
+    'api_classes': [
+        'SlimeConfig', 'ModalConfig', 'DatasetConfig',
+        'Qwen3_4B', 'WandbConfig', 'LlmJudge',
+    ],
 }
 
 

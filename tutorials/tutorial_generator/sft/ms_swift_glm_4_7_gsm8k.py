@@ -11,6 +11,10 @@ TUTORIAL_METADATA = {
     'summary': 'GLM-4.7 LoRA SFT on GSM8K (Megatron)',
     'difficulty': 'Advanced',
     'order': 20,
+    'api_classes': [
+        'MsSwiftConfig', 'MsSwiftFrameworkConfig',
+        'DatasetConfig', 'GLM_4_7', 'WandbConfig',
+    ],
 }
 
 

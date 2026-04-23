@@ -11,6 +11,7 @@ TUTORIAL_METADATA = {
     'summary': 'Qwen3-4B GRPO on GSM8K (colocated)',
     'difficulty': 'Advanced',
     'order': 10,
+    'api_classes': ['SlimeConfig', 'DatasetConfig', 'Qwen3_4B', 'WandbConfig'],
 }
 
 

@@ -11,4 +11,12 @@ from .base import HFModelConfiguration
 
 
 class Qwen3_32B(HFModelConfiguration):
+    """Qwen3-32B (32 billion parameters) from Alibaba.
+
+    No ``architecture`` is set — frameworks that need it (e.g. SLIME
+    with Megatron) should subclass and populate the field. Frameworks
+    that read architecture from the HF config (e.g. ms-swift) work
+    as-is.
+    """
+
     model_name = "Qwen/Qwen3-32B"

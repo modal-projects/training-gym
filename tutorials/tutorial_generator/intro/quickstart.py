@@ -12,6 +12,10 @@ TUTORIAL_METADATA = {
     'summary': 'Shared concepts: config containers, framework factories, volume layout, running the pipeline',
     'difficulty': 'Beginner',
     'order': 0,
+    'api_classes': [
+        'ModelConfiguration', 'HFModelConfiguration', 'ModelArchitecture',
+        'Qwen3_4B', 'DatasetConfig', 'WandbConfig', 'SlimeConfig',
+    ],
 }
 
 

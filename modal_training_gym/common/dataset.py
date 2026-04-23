@@ -14,6 +14,33 @@ from typing import Any
 
 
 class DatasetConfig:
+    """Dataset configuration shared across training frameworks.
+
+    Subclass this and override ``prepare()`` to materialize training data
+    into the shared volume. Each framework config converts these fields
+    into its own CLI flags (e.g. SlimeConfig emits ``--prompt-data``,
+    ``--input-key``, etc.).
+
+    ## Fields
+
+    prompt_data : str
+        Path to the training data file (e.g. a ``.parquet`` file on the
+        data volume). Default ``""``.
+    eval_prompt_data : list[str] | str | None
+        Evaluation data path(s). Can be a single path, a list of paths,
+        or ``None`` to skip evaluation. Default ``None``.
+    input_key : str
+        Column/key name for model input in the dataset. Default ``""``.
+    label_key : str
+        Column/key name for labels/targets in the dataset. Default ``""``.
+    apply_chat_template : bool
+        Whether to apply the model's chat template to inputs. Default ``True``.
+    rollout_shuffle : bool
+        Whether to shuffle data during rollout generation. Default ``True``.
+    rm_type : str
+        Reward model type identifier (e.g. ``"math"``). Default ``""``.
+    """
+
     prompt_data: str = ""
     eval_prompt_data: list[str] | str | None = None
     input_key: str = ""

@@ -10,4 +10,10 @@ from .base import HFModelConfiguration
 
 
 class Llama2_7B(HFModelConfiguration):
+    """Llama 2 7B from Meta.
+
+    No ``architecture`` is set — the torchrun/accelerate launchers read
+    it from the HF config via ``AutoModelForCausalLM.from_pretrained``.
+    """
+
     model_name = "meta-llama/Llama-2-7b-hf"

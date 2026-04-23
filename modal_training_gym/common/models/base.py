@@ -36,7 +36,54 @@ from typing import Any
 
 @dataclass
 class ModelArchitecture:
-    """Transformer architecture parameters for a specific model."""
+    """Transformer architecture parameters for a specific model.
+
+    These fields map directly to Megatron-LM model-parallel configuration
+    flags. Framework launchers read them to generate the correct CLI
+    arguments for distributed training.
+
+    ## Model Dimensions
+
+    num_layers : int
+        Number of transformer layers. Default ``0``.
+    hidden_size : int
+        Hidden dimension size. Default ``0``.
+    ffn_hidden_size : int
+        Feed-forward network intermediate size. Default ``0``.
+    vocab_size : int
+        Vocabulary size. Default ``0``.
+
+    ## Attention
+
+    num_attention_heads : int
+        Number of attention heads. Default ``0``.
+    group_query_attention : bool
+        Enable grouped-query attention (GQA). Default ``True``.
+    num_query_groups : int
+        Number of KV head groups for GQA. Default ``0``.
+    kv_channels : int
+        Per-head key/value channel dimension. Default ``0``.
+
+    ## Normalization and Activation
+
+    normalization : str
+        Layer normalization type. Default ``"RMSNorm"``.
+    norm_epsilon : float
+        Normalization epsilon. Default ``1e-6``.
+    swiglu : bool
+        Use SwiGLU activation in FFN. Default ``True``.
+    disable_bias_linear : bool
+        Disable bias in linear layers. Default ``True``.
+    qk_layernorm : bool
+        Apply layer norm to query and key projections. Default ``True``.
+
+    ## Position Encoding
+
+    use_rotary_position_embeddings : bool
+        Use RoPE positional encoding. Default ``True``.
+    rotary_base : int
+        Base frequency for RoPE. Default ``10000``.
+    """
 
     num_layers: int = 0
     hidden_size: int = 0
@@ -56,11 +103,29 @@ class ModelArchitecture:
 
 
 class ModelConfiguration:
-    """Known model families. Extend as new models are added.
+    """Base class for model identity and weight-download logic.
 
-    Subclass and set `model_name`, optionally `model_path` and
-    `architecture`, and override `download_model()` to materialize weights
-    into the model volume.
+    Subclass and set ``model_name`` (and optionally ``model_path`` and
+    ``architecture``) as class attributes, then override
+    ``download_model()`` to materialize weights into the shared model
+    volume.
+
+    Parameters (constructor kwargs or class attributes)
+    ---------------------------------------------------
+    model_name : str
+        HuggingFace repo ID or other model identifier. Default ``""``.
+    model_path : str | None
+        Override local path for model weights. When ``None``, frameworks
+        derive the path from ``model_name``. Default ``None``.
+    architecture : ModelArchitecture | None
+        Transformer architecture spec for Megatron-based frameworks.
+        Not required for HuggingFace-only workflows. Default ``None``.
+
+    Methods
+    -------
+    download_model()
+        Download or materialize weights into the model volume. Must be
+        overridden by subclasses.
     """
 
     model_name: str = ""
@@ -79,10 +144,20 @@ class ModelConfiguration:
 class HFModelConfiguration(ModelConfiguration):
     """ModelConfiguration for models hosted on HuggingFace.
 
-    Implements `download_model()` via `huggingface_hub.snapshot_download`
-    against `self.model_name`. Subclass this for any HF-hosted model and
-    only declare `model_name` (plus optionally `architecture`, `model_path`);
-    the download step needs no override.
+    Implements ``download_model()`` via ``huggingface_hub.snapshot_download``
+    using ``self.model_name`` as the repo ID. Subclass this for any
+    HF-hosted model — only set ``model_name`` (plus optionally
+    ``architecture`` and ``model_path``); the download step needs no
+    override.
+
+    All built-in model configs (``Qwen3_4B``, ``Qwen3_32B``, ``GLM_4_7``,
+    ``Llama2_7B``) extend this class.
+
+    Methods
+    -------
+    download_model()
+        Downloads the full model snapshot from HuggingFace Hub into the
+        local cache.
     """
 
     def download_model(self) -> None:

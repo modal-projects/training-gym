@@ -209,6 +209,30 @@ class MilesFrameworkConfig:
 
 
 class MilesConfig:
+    """Top-level wrapper that composes a Miles RLVR training run.
+
+    Bundles a model, dataset, W&B logging config, and Miles-specific
+    framework settings. Call ``build_app()`` to get a Modal ``App``
+    ready to run.
+
+    ## Fields
+
+    dataset : DatasetConfig | None
+        Dataset configuration with ``prepare()`` hook. Default ``None``.
+    model : ModelConfiguration | None
+        Model identity and download hook. Default ``None``.
+    wandb : WandbConfig | None
+        Weights & Biases logging config. Default ``None``.
+    framework_config : MilesFrameworkConfig
+        Miles-specific training and infrastructure settings.
+        Default ``MilesFrameworkConfig()``.
+
+    Methods
+    -------
+    build_app(name=None)
+        Build and return a Modal ``App`` for this training run.
+    """
+
     dataset: "DatasetConfig | None"
     model: "ModelConfiguration | None"
     wandb: "WandbConfig | None"

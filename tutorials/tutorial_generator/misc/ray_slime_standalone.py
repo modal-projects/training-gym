@@ -12,6 +12,7 @@ TUTORIAL_METADATA = {
     'summary': 'Ray-on-Modal pattern demo',
     'difficulty': 'Intermediate',
     'order': 100,
+    'api_classes': ['ModalRayCluster'],
 }
 
 

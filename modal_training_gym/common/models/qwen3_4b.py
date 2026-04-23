@@ -4,6 +4,13 @@ from .base import HFModelConfiguration, ModelArchitecture
 
 
 class Qwen3_4B(HFModelConfiguration):
+    """Qwen3-4B (4 billion parameters) from Alibaba.
+
+    Pre-configured with full ``ModelArchitecture`` for Megatron-based
+    frameworks (SLIME, ms-swift Megatron mode). Downloads from
+    ``Qwen/Qwen3-4B`` on HuggingFace.
+    """
+
     model_name = "Qwen/Qwen3-4B"
     architecture = ModelArchitecture(
         num_layers=36,

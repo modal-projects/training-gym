@@ -109,7 +109,29 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
 
 
 class HarborConfig:
-    """Top-level config composing dataset, model, wandb, and Harbor framework settings."""
+    """Top-level wrapper that composes a Harbor + Miles RLVR training run.
+
+    Bundles a model, dataset, W&B logging config, and Harbor-specific
+    framework settings. Call ``build_app()`` to get a Modal ``App``
+    ready to run.
+
+    ## Fields
+
+    dataset : DatasetConfig | None
+        Dataset configuration with ``prepare()`` hook. Default ``None``.
+    model : ModelConfiguration | None
+        Model identity and download hook. Default ``None``.
+    wandb : WandbConfig | None
+        Weights & Biases logging config. Default ``None``.
+    framework_config : HarborFrameworkConfig
+        Harbor + Miles training and infrastructure settings.
+        Default ``HarborFrameworkConfig()``.
+
+    Methods
+    -------
+    build_app(name=None)
+        Build and return a Modal ``App`` for this training run.
+    """
 
     dataset: "DatasetConfig | None"
     model: "ModelConfiguration | None"

@@ -22,6 +22,19 @@ _TOOLS_REMOTE_PATH = "/opt/training-gym/tools"
 
 
 class Kimi_K2_5(HFModelConfiguration):
+    """Kimi K2.5 from Moonshot AI.
+
+    Ships native INT4 weights; ``download_model()`` performs both the
+    HF snapshot download and INT4-to-BF16 conversion. The converted
+    weights are written to ``model_path``.
+
+    Methods
+    -------
+    download_model()
+        Downloads INT4 weights and converts to BF16 using the bundled
+        conversion script.
+    """
+
     model_name = "moonshotai/Kimi-K2.5"
     model_path = "/checkpoints/Kimi-K2.5-bf16"
 

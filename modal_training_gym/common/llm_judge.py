@@ -41,10 +41,33 @@ if TYPE_CHECKING:
 class LlmJudge:
     """LLM-as-judge client for an OpenAI-compatible chat-completions endpoint.
 
-    Subclasses implement `build_prompt()` with the task-specific rubric; the
-    base class handles the HTTP call, response parsing, and normalization.
-    Any error (network, bad JSON, no number found) yields 0.0 rather than
-    raising, so one misbehaving rollout cannot abort a training step.
+    Subclasses implement ``build_prompt()`` with the task-specific rubric;
+    the base class handles the HTTP call, response parsing, and
+    normalization. Any error (network, bad JSON, no number found) yields
+    ``0.0`` rather than raising, so one misbehaving rollout cannot abort
+    a training step.
+
+    Parameters
+    ----------
+    model_name : str
+        Model identifier to pass in the chat-completions request
+        (e.g. ``"qwen3-4b"``).
+    base_url : str
+        Base URL of the OpenAI-compatible endpoint
+        (e.g. ``"http://localhost:8000"``).
+    max_score : float
+        Upper bound of the judge's numeric scale. Scores are normalized
+        to [0, 1] by dividing by this value. Default ``10.0``.
+    max_tokens : int
+        Maximum tokens in the judge response. Default ``100``.
+
+    Methods
+    -------
+    build_prompt(prompt, response, **kwargs)
+        Construct the rubric prompt. Must be overridden by subclasses.
+    score(session, prompt, response, **kwargs)
+        Async method that scores one (prompt, response) pair and returns
+        a float in [0, 1].
     """
 
     def __init__(

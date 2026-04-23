@@ -163,7 +163,31 @@ class MsSwiftFrameworkConfig:
 
 
 class MsSwiftConfig:
-    """ms-swift run config with a built-in Modal app constructor."""
+    """Top-level wrapper that composes an ms-swift Megatron SFT run.
+
+    Bundles a model, dataset, W&B logging config, and ms-swift-specific
+    framework settings. Call ``build_app()`` to get a Modal ``App``
+    ready to run.
+
+    ## Fields
+
+    dataset : DatasetConfig | None
+        Dataset configuration with ``prepare()`` hook. Default ``None``.
+    model : ModelConfiguration | None
+        Model identity and download hook. Default ``None``.
+    wandb : WandbConfig | None
+        Weights & Biases logging config. Default ``None``.
+    framework_config : MsSwiftFrameworkConfig
+        ms-swift Megatron training and infrastructure settings.
+        Default ``MsSwiftFrameworkConfig()``.
+
+    Methods
+    -------
+    cli_args(output_dir)
+        Generate the full ``megatron sft`` CLI argument list.
+    build_app(name=None)
+        Build and return a Modal ``App`` for this training run.
+    """
 
     dataset: "DatasetConfig | None"
     model: "ModelConfiguration | None"
