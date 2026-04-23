@@ -177,9 +177,9 @@ def main() -> None:
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / f"{source_path.stem}.md"
             if out_path.exists():
-                print(f"  WARNING: overwriting existing tutorial page {out_path.relative_to(ROOT)}", file=sys.stderr)
+                print(f"  WARNING: overwriting existing tutorial page {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}", file=sys.stderr)
             out_path.write_text(content)
-            print(f"  {out_path.relative_to(ROOT)}")
+            print(f"  {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}")
             generated += 1
 
     print(f"\nGenerated {generated} tutorial pages")

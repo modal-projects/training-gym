@@ -60,10 +60,9 @@ def _train_ms_swift_worker(run_id: str | None = None):
 
     cluster_info = get_cluster_info()
     node_rank = cluster_info.rank
-    n_nodes = len(cluster_info.container_ips) if cluster_info.container_ips else 1
-    master_addr = (
-        cluster_info.container_ips[0] if cluster_info.container_ips else "localhost"
-    )
+    ips = list(cluster_info.container_ipv4_ips or [])
+    n_nodes = len(ips) if ips else 1
+    master_addr = ips[0] if ips else "localhost"
     print(f"Node {node_rank}/{n_nodes}, Master: {master_addr}")
 
     model_path_override = os.environ.get("MS_SWIFT_MODEL_PATH", "")

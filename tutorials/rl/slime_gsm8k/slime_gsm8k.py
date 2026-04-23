@@ -75,8 +75,11 @@ class GSM8KDataset(DatasetConfig):
         self.eval_prompt_data = ["gsm8k", f"{self._data_path}/gsm8k/test.parquet"]
 
     def prepare(self):
+        import os
+
         from datasets import load_dataset
 
+        os.makedirs(f"{self._data_path}/gsm8k", exist_ok=True)
         ds = load_dataset("zhuzilin/gsm8k")
         ds["train"].to_parquet(f"{self._data_path}/gsm8k/train.parquet")
         ds["test"].to_parquet(f"{self._data_path}/gsm8k/test.parquet")

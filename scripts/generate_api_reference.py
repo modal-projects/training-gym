@@ -570,13 +570,13 @@ def main() -> None:
         out_path = group_dir / f"{slug}.md"
         out_path.write_text(content)
         generated += 1
-        print(f"  {out_path.relative_to(ROOT)}")
+        print(f"  {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}")
 
     index_content = generate_index_page(API_REFERENCE_MANIFEST)
     index_path = output_dir / "index.md"
     index_path.parent.mkdir(parents=True, exist_ok=True)
     index_path.write_text(index_content)
-    print(f"  {index_path.relative_to(ROOT)}")
+    print(f"  {index_path.relative_to(ROOT) if index_path.is_relative_to(ROOT) else index_path}")
 
     print(f"\nGenerated {generated} reference pages + 1 index page")
     if errors:
