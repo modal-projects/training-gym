@@ -493,14 +493,12 @@ a:hover {
 }
 
 .sl-markdown-content code:not(pre code) {
-  border: 1px solid var(--tg-border);
-  border-radius: 0.25rem;
-  background: var(--sl-color-bg-inline-code);
-  color: inherit;
-  margin-block: 0;
+  border: 1px solid #2f2f2f;
+  border-radius: 0.125rem;
+  background: #242424;
+  color: var(--sl-color-gray-1);
   padding: 0.125rem 0.25rem;
   font-size: 0.875em;
-  line-height: 1.4285714286;
 }
 
 .sl-markdown-content pre,
