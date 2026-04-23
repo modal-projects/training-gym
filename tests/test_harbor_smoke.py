@@ -24,6 +24,7 @@ from modal_training_gym.common.models import Qwen3_4B
 from modal_training_gym.frameworks.harbor import (
     HarborConfig,
     HarborFrameworkConfig,
+    HarborTask,
 )
 from modal_training_gym.frameworks.harbor.launcher import _build_training_jsonl
 from modal_training_gym.frameworks.miles import MilesFrameworkConfig
@@ -156,33 +157,16 @@ class HelloWorldDataset(DatasetConfig):
         tasks_dir = DATA_PATH / "tasks"
         tasks_dir.mkdir(parents=True, exist_ok=True)
 
-        task = tasks_dir / "hello-world"
-        task.mkdir(exist_ok=True)
-        (task / "instruction.md").write_text(
-            "Create a file called hello.txt with 'Hello, world!' as the content."
-        )
+        HarborTask(
+            name="hello-world",
+            instruction="Create a file called hello.txt with 'Hello, world!' as the content.",
+            difficulty="easy",
+            agent_timeout=120,
+            verifier_timeout=120,
+            dockerfile="FROM python:3.12-slim\nWORKDIR /app\n",
+        ).write(tasks_dir)
 
-        task_toml = task / "task.toml"
-        task_toml.write_text(
-            '[task]\nversion = "0.1"\ndifficulty = "easy"\n\n'
-            "[environment]\nallow_internet = false\ncpus = 1\nmemory_mb = 2048\n\n"
-            "[timeouts]\nagent = 120\nverifier = 120\n"
-        )
-
-        env_dir = task / "environment"
-        env_dir.mkdir(exist_ok=True)
-        (env_dir / "Dockerfile").write_text("FROM python:3.12-slim\nWORKDIR /app\n")
-
-        tests_dir = task / "tests"
-        tests_dir.mkdir(exist_ok=True)
-        (tests_dir / "test_state.py").write_text(
-            "from pathlib import Path\n\n"
-            "def test_hello_file_exists():\n"
-            "    assert Path('/app/hello.txt').exists()\n\n"
-            "def test_hello_content():\n"
-            "    assert Path('/app/hello.txt').read_text().strip() == 'Hello, world!'\n"
-        )
-        print(f"Prepared hello-world task at {task}")
+        print("Prepared hello-world task")
 
 
 harbor = HarborConfig(

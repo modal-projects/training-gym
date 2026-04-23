@@ -11,6 +11,9 @@ def __getattr__(name: str):
     if name == "build_harbor_app":
         from .launcher import build_harbor_app
         return build_harbor_app
+    if name == "HarborTask":
+        from .task import HarborTask
+        return HarborTask
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -22,6 +25,7 @@ __all__ = [
     "HarborConfig",
     "HarborFrameworkConfig",
     "TrajectoryTurn",
+    "HarborTask",
     "build_harbor_app",
     "parse_thinking",
 ]

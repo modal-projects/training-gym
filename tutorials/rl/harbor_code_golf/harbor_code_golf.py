@@ -26,7 +26,6 @@ import json
 import re
 import textwrap
 from pathlib import Path
-from typing import Any
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import Qwen3_4B
@@ -34,6 +33,7 @@ from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.frameworks.harbor import (
     HarborConfig,
     HarborFrameworkConfig,
+    HarborTask,
 )
 
 # ## Define the dataset
@@ -45,7 +45,8 @@ from modal_training_gym.frameworks.harbor import (
 #
 # - `instruction.md` — the prompt (asking the agent to solve and write
 #   short code)
-# - `task.toml` — Harbor metadata (timeouts, resource limits)
+# - `task.toml` — Harbor metadata (timeouts, resource limits), generated
+#   from `HarborTask` fields — no hand-written TOML
 # - `tests/verify.py` — a verifier that runs the test assertions and
 #   computes a code-golf bonus reward
 # - `environment/Dockerfile` — the sandbox image
@@ -68,42 +69,6 @@ def _extract_function_name(code: str) -> str:
     return m.group(1) if m else "solution"
 
 
-def _build_instruction(text: str, function_name: str) -> str:
-    return textwrap.dedent(f"""\
-        You are solving a Python code-golf programming task.
-
-        **Task:** {text}
-
-        You must define a function named `{function_name}`.
-        Write your solution as valid Python code to `/workspace/solution.py`.
-        Shorter correct solutions earn a higher reward.
-    """)
-
-
-def _build_task_toml(task_id: int) -> str:
-    return textwrap.dedent(f"""\
-        [task]
-        version = "0.1"
-        difficulty = "medium"
-
-        [task.metadata]
-        author = "MBPP"
-        task_id = {task_id}
-        category = "coding"
-        tags = ["mbpp", "python", "code-golf"]
-
-        [timeouts]
-        agent = 180
-        verifier = 180
-
-        [environment]
-        cpus = 1
-        memory_mb = 2048
-        storage_mb = 2048
-        allow_internet = false
-    """)
-
-
 def _build_verify_py(
     test_list: list[str],
     function_name: str,
@@ -112,12 +77,11 @@ def _build_verify_py(
 ) -> str:
     tests_literal = json.dumps(test_list)
     return textwrap.dedent(f"""\
-        import json, sys, traceback
+        import json, sys
         from pathlib import Path
 
         TESTS = {tests_literal}
         FUNCTION_NAME = {function_name!r}
-        TASK_ID = {task_id}
         REFERENCE_BYTES = {reference_bytes}
         LENGTH_BONUS_WEIGHT = {LENGTH_BONUS_WEIGHT}
 
@@ -176,18 +140,6 @@ def _build_verify_py(
     """)
 
 
-def _build_test_sh(task_dir_name: str) -> str:
-    return textwrap.dedent(f"""\
-        #!/usr/bin/env bash
-        set -euo pipefail
-        mkdir -p /logs/verifier
-        python3 /workspace/../tests/verify.py 2>&1 || true
-        if [ ! -f /logs/verifier/reward.json ]; then
-            echo '{{"reward": 0.0, "pass_rate": 0.0, "error": "verifier crashed"}}' > /logs/verifier/reward.json
-        fi
-    """)
-
-
 class MBPPCodeGolfDataset(DatasetConfig):
     """Downloads MBPP and creates Harbor task directories for code-golf training."""
 
@@ -221,32 +173,22 @@ class MBPPCodeGolfDataset(DatasetConfig):
             function_name = _extract_function_name(code)
             reference_bytes = len(code.encode("utf-8"))
 
-            task_dir = TASKS_DIR / f"mbpp_{task_id:04d}"
-            task_dir.mkdir(exist_ok=True)
-
-            (task_dir / "instruction.md").write_text(
-                _build_instruction(text, function_name)
-            )
-            (task_dir / "task.toml").write_text(_build_task_toml(task_id))
-
-            env_dir = task_dir / "environment"
-            env_dir.mkdir(exist_ok=True)
-            (env_dir / "Dockerfile").write_text(
-                "FROM python:3.11-slim\nWORKDIR /workspace\n"
-            )
-
-            tests_dir = task_dir / "tests"
-            tests_dir.mkdir(exist_ok=True)
-            (tests_dir / "verify.py").write_text(
-                _build_verify_py(test_list, function_name, task_id, reference_bytes)
-            )
-            (tests_dir / "test.sh").write_text(_build_test_sh(task_dir.name))
-
-            solution_dir = task_dir / "solution"
-            solution_dir.mkdir(exist_ok=True)
-            (solution_dir / "solve.sh").write_text(
-                f"#!/usr/bin/env bash\ncat > /workspace/solution.py << 'PYEOF'\n{code}\nPYEOF\n"
-            )
+            HarborTask(
+                name=f"mbpp_{task_id:04d}",
+                instruction=(
+                    f"You are solving a Python code-golf programming task.\n\n"
+                    f"**Task:** {text}\n\n"
+                    f"You must define a function named `{function_name}`.\n"
+                    f"Write your solution as valid Python code to `/workspace/solution.py`.\n"
+                    f"Shorter correct solutions earn a higher reward.\n"
+                ),
+                tags=["mbpp", "python", "code-golf"],
+                metadata={"author": "MBPP", "task_id": task_id, "category": "coding"},
+                verify_script=_build_verify_py(test_list, function_name, task_id, reference_bytes),
+                solution_script=(
+                    f"#!/usr/bin/env bash\ncat > /workspace/solution.py << 'PYEOF'\n{code}\nPYEOF\n"
+                ),
+            ).write(TASKS_DIR)
 
         print(f"Prepared {len(records)} MBPP tasks at {TASKS_DIR}")
 

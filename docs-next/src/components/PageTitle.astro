@@ -4,10 +4,27 @@ const sourceUrl = editUrl
   ? editUrl.toString().replace('/edit/', '/blob/')
   : 'https://github.com/modal-projects/training-gym';
 const pageUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
+
+const currentPath = Astro.url.pathname;
+const tutorialMatch = currentPath.match(/^\/tutorials\/(\w+)\/(\w+)\/?$/);
+const notebookUrl = tutorialMatch
+  ? `https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/${tutorialMatch[1]}/${tutorialMatch[2]}/${tutorialMatch[2]}.ipynb`
+  : null;
 ---
 
 <div class="tg-page-head">
   <div class="tg-page-head__actions print:hidden">
+    {notebookUrl && (
+      <a
+        class="tg-action-button tg-action-button--primary"
+        href={notebookUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <img src="https://modal-cdn.com/open-in-modal.svg" alt="" style="height: 1rem; width: auto;" />
+        Open in Modal
+      </a>
+    )}
     <a class="tg-action-button tg-action-button--ghost" href={sourceUrl}>View on GitHub</a>
     <button class="tg-action-button tg-copy-button" type="button" data-copy-page={pageUrl}>
       Copy page
