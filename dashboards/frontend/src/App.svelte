@@ -3,6 +3,7 @@
   import { fetchRuns } from "./lib/api.js";
   import FilterBar from "./FilterBar.svelte";
   import FrameworkSection from "./FrameworkSection.svelte";
+  import logoSvg from "./lib/logo.svg";
 
   let allRuns = $state([]);
   let loading = $state(true);
@@ -118,6 +119,7 @@
 </script>
 
 <header class="topbar">
+  <img src={logoSvg} alt="Modal" class="logo" />
   <h1>training-gym</h1>
   <div class="sep"></div>
   <button class="btn" onclick={load}>Refresh</button>
@@ -170,6 +172,10 @@
     position: sticky;
     top: 0;
     z-index: 10;
+  }
+  .logo {
+    height: 1.4rem;
+    width: auto;
   }
   .topbar h1 {
     font-size: 1.25rem;
