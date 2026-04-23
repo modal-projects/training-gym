@@ -314,13 +314,15 @@ framework_config = HarborFrameworkConfig(
         # by typed HarborFrameworkConfig fields belong here.
         --num-layers 36
         --hidden-size 2560
-        --ffn-hidden-size 6912
-        --num-attention-heads 20
+        --ffn-hidden-size 9728
+        --num-attention-heads 32
         --group-query-attention
-        --num-query-groups 4
+        --num-query-groups 8
+        --kv-channels 128
         --rotary-base 1000000
         --make-vocab-size-divisible-by 1
         --position-embedding-type rope
+        --qk-layernorm
     """,
 )
 
