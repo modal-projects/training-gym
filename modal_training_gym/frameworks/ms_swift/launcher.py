@@ -58,11 +58,30 @@ def _train_ms_swift_worker(run_id: str | None = None):
     wandb_project = os.environ.get("MS_SWIFT_WANDB_PROJECT", "")
     wandb_exp_name = os.environ.get("MS_SWIFT_WANDB_EXP_NAME", "")
 
-    if run_id is None:
-        run_id = os.environ.get("MS_SWIFT_RUN_ID") or f"train_{int(time.time())}"
-
     cluster_info = get_cluster_info()
     node_rank = cluster_info.rank
+
+    if run_id is None:
+        run_id_file = f"{checkpoints_root}/.current_run_id"
+        if node_rank == 0:
+            run_id = f"train_{int(time.time())}"
+            os.makedirs(checkpoints_root, exist_ok=True)
+            with open(run_id_file, "w") as f:
+                f.write(run_id)
+            Volume.from_name(
+                checkpoints_volume_name, create_if_missing=True, version=2
+            ).commit()
+        else:
+            for _ in range(60):
+                Volume.from_name(
+                    checkpoints_volume_name, create_if_missing=True, version=2
+                ).reload()
+                if os.path.exists(run_id_file):
+                    run_id = open(run_id_file).read().strip()
+                    break
+                time.sleep(1)
+            else:
+                run_id = f"train_{int(time.time())}"
     ips = list(cluster_info.container_ipv4_ips or [])
     n_nodes = len(ips) if ips else 1
     master_addr = ips[0] if ips else "localhost"
@@ -291,7 +310,6 @@ def build_ms_swift_app(
     assert swift.model is not None, "swift.model must be set"
     assert swift.dataset is not None, "swift.dataset must be set"
     base_cli_args = swift.cli_args(output_dir="__OUTPUT_DIR__")
-    shared_run_id = f"train_{int(time.time())}"
     train_env = {
         "MS_SWIFT_MODEL_NAME": swift.model.model_name,
         "MS_SWIFT_MODEL_PATH": swift.model.model_path or "",
@@ -305,7 +323,6 @@ def build_ms_swift_app(
         "MS_SWIFT_WANDB_EXP_NAME": (
             (swift.wandb.exp_name or swift.wandb.group) if swift.wandb else ""
         ),
-        "MS_SWIFT_RUN_ID": shared_run_id,
     }
     app.function(
         image=train_image,

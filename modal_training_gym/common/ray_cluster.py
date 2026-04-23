@@ -263,6 +263,8 @@ class ModalRayCluster:
             print(line, end="", flush=True)
         status = self._client.get_job_status(job_id).value
         print(f"\nFinal Ray job status: {status}")
+        if status not in ("SUCCEEDED",):
+            raise RuntimeError(f"Ray job {job_id} finished with status: {status}")
         return status
 
     async def wait_forever(self, poll_seconds: float = 10) -> None:

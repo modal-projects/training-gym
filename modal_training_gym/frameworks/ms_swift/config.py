@@ -80,6 +80,23 @@ def model_training_overrides(
     }
 
 
+_SENTINEL = object()
+
+
+def _get_dataclass_default(cls: type, field_name: str) -> Any:
+    """Return the dataclass default for a field, or _SENTINEL if none."""
+    import dataclasses
+
+    for f in dataclasses.fields(cls):
+        if f.name == field_name:
+            if f.default is not dataclasses.MISSING:
+                return f.default
+            if f.default_factory is not dataclasses.MISSING:
+                return f.default_factory()
+            return _SENTINEL
+    return _SENTINEL
+
+
 @dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
 class MsSwiftFrameworkConfig:
     """ms-swift Megatron SFT configuration, including Modal infrastructure.
@@ -342,8 +359,13 @@ class MsSwiftConfig:
     def _fields(self) -> dict[str, Any]:
         fields = dict(vars(self.framework_config))
         if self.model is not None:
-            for k, v in model_training_overrides(self.model).items():
-                if k not in fields:
+            overrides = model_training_overrides(self.model)
+            for k, v in overrides.items():
+                if k in fields:
+                    dc_default = _get_dataclass_default(MsSwiftFrameworkConfig, k)
+                    if dc_default is not _SENTINEL and fields[k] == dc_default:
+                        fields[k] = v
+                else:
                     fields[k] = v
         fields = {k: v for k, v in fields.items() if k not in _SKIP_FIELDS}
         if self.dataset is not None and hasattr(self.dataset, "prompt_data"):
