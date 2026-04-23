@@ -36,6 +36,7 @@ from modal_training_gym.common.framework import (
     TOOLS_REMOTE_PATH,
     resolve_caller_module,
 )
+from modal_training_gym.common.train_result import TrainResult
 
 from .config import (
     CHECKPOINTS_PATH,
@@ -70,7 +71,9 @@ def _train_ms_swift_worker(run_id: str | None = None):
 
         run_id_file = f"{checkpoints_root}/.current_run_id"
         marker_file = f"{checkpoints_root}/.run_marker"
-        vol = Volume.from_name(checkpoints_volume_name, create_if_missing=True, version=2)
+        vol = Volume.from_name(
+            checkpoints_volume_name, create_if_missing=True, version=2
+        )
 
         vol.reload()
         old_marker = ""
@@ -380,5 +383,25 @@ def build_ms_swift_app(
     # `app.download_model.remote()` instead of app.registered_functions[...].
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
+
+    # Handle for post-training evals — see
+    # ``modal_training_gym.common.train_result``. ms-swift writes each run
+    # under ``{app_name}_{run_id}`` inside the checkpoints mount and saves
+    # per-iteration directories as ``iter_XXX``. The concrete ``run_id`` is
+    # chosen at train time (rank 0 writes a ``.current_run_id`` marker to
+    # the volume), so the default ``TrainResult`` here points at the
+    # checkpoints mount root; use ``TrainResult.list_checkpoints`` against
+    # the concrete ``{app_name}_{run_id}`` subdirectory to locate
+    # iterations.
+    app.train_result = TrainResult(  # type: ignore[attr-defined]
+        app_name=app_name,
+        framework="ms-swift",
+        checkpoints_volume_name=f"{app_name}-checkpoints",
+        checkpoints_mount_path=checkpoints_str,
+        base_model=swift.model.model_name if swift.model is not None else "",
+        checkpoint_subpath="",
+        iteration_prefix="iter_",
+        volume_version=2,
+    )
 
     return app

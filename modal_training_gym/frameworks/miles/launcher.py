@@ -44,6 +44,7 @@ from modal_training_gym.common.framework import (
     resolve_caller_module,
 )
 from modal_training_gym.common.ray_cluster import ModalRayCluster
+from modal_training_gym.common.train_result import TrainResult
 
 from .config import (
     CHECKPOINTS_PATH,
@@ -289,5 +290,21 @@ def build_miles_app(
     # `app.train_multi_node.remote()` instead of app.registered_functions[...].
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
+
+    # Handle for post-training evals — see
+    # ``modal_training_gym.common.train_result``. Miles writes each run
+    # under ``{app_name}-{unix_ts}`` directly inside the checkpoints mount;
+    # with no per-iteration subdirectory convention on the save side,
+    # ``iteration_prefix`` is empty and ``latest_checkpoint_path`` returns
+    # the checkpoints mount root. Evaluation scripts can discover runs via
+    # ``train_result.list_runs_like(f"{app_name}-")`` (implemented as
+    # ``_listdir("")``) when needed.
+    app.train_result = TrainResult(  # type: ignore[attr-defined]
+        app_name=app_name,
+        framework="miles",
+        checkpoints_volume_name=f"{app_name}-checkpoints",
+        checkpoints_mount_path=checkpoints_str,
+        base_model=miles.model.model_name if miles.model is not None else "",
+    )
 
     return app

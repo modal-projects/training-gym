@@ -50,6 +50,7 @@ from modal_training_gym.common.framework import (
     resolve_caller_module,
 )
 from modal_training_gym.common.ray_cluster import ModalRayCluster
+from modal_training_gym.common.train_result import TrainResult
 
 from modal_training_gym.frameworks.miles.config import model_training_cli_args
 
@@ -386,16 +387,19 @@ def build_harbor_app(
 
         obs_base = Path(obs_str)
         await obs_volume.reload.aio()
-        initialize_run_manifest(obs_base, {
-            "run_id": run_id,
-            "app_name": app_name,
-            "model_name": harbor.model.model_name,
-            "agent_import_path": framework.agent_import_path,
-            "status": "running",
-            "started_at": __import__("datetime").datetime.now(
-                __import__("datetime").timezone.utc
-            ).isoformat(),
-        })
+        initialize_run_manifest(
+            obs_base,
+            {
+                "run_id": run_id,
+                "app_name": app_name,
+                "model_name": harbor.model.model_name,
+                "agent_import_path": framework.agent_import_path,
+                "status": "running",
+                "started_at": __import__("datetime")
+                .datetime.now(__import__("datetime").timezone.utc)
+                .isoformat(),
+            },
+        )
         await obs_volume.commit.aio()
 
         model_arch_args: list[str] = []
@@ -474,9 +478,7 @@ def build_harbor_app(
                 "HARBOR_AGENT_KWARGS": json.dumps(framework.agent_kwargs),
                 "AGENT_MODEL_NAME": framework.agent_model_name,
                 "HARBOR_USE_LOCAL_TASKS": "1",
-                "HARBOR_SANDBOX_TIMEOUT_SECS": str(
-                    framework.sandbox_timeout_secs
-                ),
+                "HARBOR_SANDBOX_TIMEOUT_SECS": str(framework.sandbox_timeout_secs),
                 "HARBOR_SANDBOX_IDLE_TIMEOUT_SECS": str(
                     framework.sandbox_idle_timeout_secs
                 ),
@@ -507,9 +509,7 @@ def build_harbor_app(
         ):
             async with modal.forward(SESSION_PROXY_PORT) as session_tunnel:
                 public_base_url = session_tunnel.url.rstrip("/")
-                runtime_env["env_vars"]["HARBOR_PUBLIC_BASE_URL"] = (
-                    public_base_url
-                )
+                runtime_env["env_vars"]["HARBOR_PUBLIC_BASE_URL"] = public_base_url
 
                 entrypoint = shlex.join(argv)
                 async with cluster.forward_dashboard() as tunnel:
@@ -593,5 +593,18 @@ def build_harbor_app(
 
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
+
+    # Handle for post-training evals — see
+    # ``modal_training_gym.common.train_result``. Harbor shares Miles's
+    # checkpoint layout: per-run directories at the checkpoints mount root,
+    # keyed by ``{app_name}-{unix_ts}`` with no per-iteration subdirectory
+    # convention.
+    app.train_result = TrainResult(  # type: ignore[attr-defined]
+        app_name=app_name,
+        framework="harbor",
+        checkpoints_volume_name=f"{app_name}-checkpoints",
+        checkpoints_mount_path=checkpoints_str,
+        base_model=harbor.model.model_name if harbor.model is not None else "",
+    )
 
     return app

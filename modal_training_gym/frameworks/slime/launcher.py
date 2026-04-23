@@ -33,6 +33,7 @@ from modal_training_gym.common.framework import (
     resolve_caller_module,
 )
 from modal_training_gym.common.ray_cluster import ModalRayCluster
+from modal_training_gym.common.train_result import TrainResult
 
 from .config import (
     CHECKPOINTS_PATH,
@@ -129,7 +130,9 @@ def build_slime_app(
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
     data_volume = Volume.from_name(f"{app_name}-data", create_if_missing=True)
-    checkpoints_volume = Volume.from_name(f"{app_name}-checkpoints", create_if_missing=True)
+    checkpoints_volume = Volume.from_name(
+        f"{app_name}-checkpoints", create_if_missing=True
+    )
     all_volumes = {
         str(HF_CACHE_PATH): hf_cache_volume,
         str(DATA_PATH): data_volume,
@@ -309,7 +312,9 @@ def build_slime_app(
         }
 
         mode = "async" if slime.async_mode else "sync"
-        print(f"Training {app_name} — {slime.total_nodes()} node(s) × {gpu_spec}  ({mode})")
+        print(
+            f"Training {app_name} — {slime.total_nodes()} node(s) × {gpu_spec}  ({mode})"
+        )
         print(f"Command: {cmd}, runtime_env: {runtime_env}")
 
         async with cluster.forward_dashboard() as tunnel:
@@ -321,5 +326,31 @@ def build_slime_app(
     # `app.registered_functions["download_model"].remote()`.
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
+
+    # Handle for post-training evals: reads the checkpoints volume to find
+    # the latest iteration, builds vLLM serving apps, etc. SLIME writes
+    # `iter_XXXXXXX` directories at `slime.save` (defaults to `/checkpoints`),
+    # which in this launcher is the volume root — so `checkpoint_subpath` is
+    # empty and iterations live at `/checkpoints/iter_*`.
+    save_root = str(slime.save).rstrip("/") if slime.save else str(CHECKPOINTS_PATH)
+    mount_root = str(CHECKPOINTS_PATH).rstrip("/")
+    if save_root.startswith(mount_root + "/"):
+        subpath = save_root[len(mount_root) + 1 :]
+    elif save_root == mount_root:
+        subpath = ""
+    else:
+        # `slime.save` was set to something outside the checkpoints mount —
+        # fall back to the mount root; `latest_checkpoint_path` degrades
+        # gracefully when no iter_* dirs are found.
+        subpath = ""
+    app.train_result = TrainResult(  # type: ignore[attr-defined]
+        app_name=app_name,
+        framework="slime",
+        checkpoints_volume_name=f"{app_name}-checkpoints",
+        checkpoints_mount_path=mount_root,
+        base_model=slime.model.model_name if slime.model is not None else "",
+        checkpoint_subpath=subpath,
+        iteration_prefix="iter_",
+    )
 
     return app
