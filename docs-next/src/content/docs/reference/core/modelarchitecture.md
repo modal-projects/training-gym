@@ -46,6 +46,12 @@ Transformer architecture parameters for a specific model.
 | `use_rotary_position_embeddings` | `bool` | `True` | Use RoPE positional encoding. Default `True`. |
 | `rotary_base` | `int` | `10000` | Base frequency for RoPE. Default `10000`. |
 
+## Methods
+
+### `to_megatron_args(self) -> 'list[str]'`
+
+Generate Megatron-LM CLI flags from this architecture spec.
+
 ## Related Tutorials
 
 - [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/quickstart/)

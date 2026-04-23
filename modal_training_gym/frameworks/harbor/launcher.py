@@ -337,10 +337,16 @@ def build_harbor_app(
         import modal
 
         assert harbor.model is not None, "harbor.model must be set"
-        if not framework.recipe_args.strip() and not extra_argv:
+        has_arch = (
+            harbor.model is not None
+            and harbor.model.architecture is not None
+            and harbor.model.architecture.num_layers > 0
+        )
+        if not has_arch and not framework.recipe_args.strip() and not extra_argv:
             raise RuntimeError(
-                "HarborFrameworkConfig.recipe_args is empty — set it to the Miles CLI "
-                "args block describing your model architecture + training hyperparameters."
+                "No model architecture found and recipe_args is empty. Either "
+                "use a model with a ModelArchitecture (e.g. Qwen3_4B) or set "
+                "recipe_args to the Miles CLI args for your model."
             )
         if not framework.agent_import_path:
             raise RuntimeError(
@@ -388,10 +394,15 @@ def build_harbor_app(
         })
         await obs_volume.commit.aio()
 
+        model_arch_args: list[str] = []
+        if harbor.model and harbor.model.architecture:
+            model_arch_args = harbor.model.architecture.to_megatron_args()
+
         argv: list[str] = [
             "python3",
             _REMOTE_TRAIN_SCRIPT,
             *framework.cli_args(),
+            *model_arch_args,
             *framework.parsed_recipe_args(),
             *extra_argv,
             "--train-backend",

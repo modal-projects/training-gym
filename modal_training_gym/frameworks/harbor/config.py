@@ -119,6 +119,13 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
     task_glob: str = "*"
     instruction_path: str = "instruction.md"
 
+    # ── Harbor RL defaults (emitted as Miles CLI flags) ────────────────────
+    input_key: str = "prompt"
+    label_key: str = "metadata"
+    apply_chat_template: bool = True
+    enable_thinking: bool = True
+    rollout_shuffle: bool = True
+
     # ── Image ────────────────────────────────────────────────────────────────
     miles_image: str = "radixark/miles:dev-202604201238"
     # Miles source commit with --custom-agent-function-path support.

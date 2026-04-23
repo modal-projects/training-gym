@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from "svelte";
   import "./app.css";
   import { fetchRuns } from "./lib/api.js";
   import FilterBar from "./FilterBar.svelte";
@@ -22,10 +23,9 @@
   }
 
   parseHash();
-  $effect(() => {
-    const handler = () => parseHash();
-    window.addEventListener("hashchange", handler);
-    return () => window.removeEventListener("hashchange", handler);
+  onMount(() => {
+    window.addEventListener("hashchange", parseHash);
+    return () => window.removeEventListener("hashchange", parseHash);
   });
 
   let allRuns = $state([]);

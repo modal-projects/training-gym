@@ -78,6 +78,11 @@ Harbor + Miles configuration for sandbox-based RL training.
 | `hidden_dropout` | `float` | `0.0` | Hidden layer dropout rate. Default `0.0`. |
 | `rollout_temperature` | `float` | `1.0` | Sampling temperature for rollouts. Default `1.0`. |
 | `no_save_optim` | `bool` | `True` | Skip saving optimizer state. Default `True`. |
+| `input_key` | `str` | `"prompt"` |  |
+| `label_key` | `str` | `"metadata"` |  |
+| `apply_chat_template` | `bool` | `True` |  |
+| `enable_thinking` | `bool` | `True` |  |
+| `rollout_shuffle` | `bool` | `True` |  |
 
 ## Methods
 

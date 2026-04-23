@@ -40,7 +40,12 @@ image = (
         "fastapi[standard]==0.118.0",
         "modal",
     )
-    .add_local_dir(str(frontend_path), remote_path="/app/frontend", copy=True)
+    .add_local_dir(
+        str(frontend_path),
+        remote_path="/app/frontend",
+        copy=True,
+        ignore=["node_modules", "dist"],
+    )
     .run_commands(
         "cd /app/frontend && npm install && npm run build",
     )

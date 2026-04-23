@@ -101,6 +101,35 @@ class ModelArchitecture:
     use_rotary_position_embeddings: bool = True
     rotary_base: int = 10000
 
+    def to_megatron_args(self) -> list[str]:
+        """Generate Megatron-LM CLI flags from this architecture spec."""
+        args: list[str] = []
+        if self.num_layers:
+            args += ["--num-layers", str(self.num_layers)]
+        if self.hidden_size:
+            args += ["--hidden-size", str(self.hidden_size)]
+        if self.ffn_hidden_size:
+            args += ["--ffn-hidden-size", str(self.ffn_hidden_size)]
+        if self.num_attention_heads:
+            args += ["--num-attention-heads", str(self.num_attention_heads)]
+        if self.group_query_attention:
+            args.append("--group-query-attention")
+        if self.num_query_groups:
+            args += ["--num-query-groups", str(self.num_query_groups)]
+        if self.vocab_size:
+            args += ["--make-vocab-size-divisible-by", "1"]
+        if self.normalization:
+            args += ["--normalization", self.normalization]
+        if self.swiglu:
+            args.append("--swiglu")
+        if self.disable_bias_linear:
+            args.append("--disable-bias-linear")
+        if self.use_rotary_position_embeddings:
+            args += ["--position-embedding-type", "rope"]
+            if self.rotary_base != 10000:
+                args += ["--rotary-base", str(self.rotary_base)]
+        return args
+
 
 class ModelConfiguration:
     """Base class for model identity and weight-download logic.

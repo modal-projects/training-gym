@@ -278,7 +278,10 @@ class MBPPCodeGolfDataset(DatasetConfig):
 #   on the data volume.
 #
 # **Miles recipe args**
-# - Model architecture flags match Qwen3-4B's config.
+# - Model architecture flags are auto-generated from `Qwen3_4B().architecture`
+#   — no need to specify `--num-layers`, `--hidden-size`, etc.
+# - Harbor defaults handle `--input-key prompt`, `--label-key metadata`,
+#   `--apply-chat-template`, `--enable-thinking`, and `--rollout-shuffle`.
 # - `--num-rollout 200`, `--rollout-batch-size 64` — how many rollouts
 #   per training step and how many run in parallel.
 # - `--global-batch-size 512` — training batch size.
@@ -293,46 +296,23 @@ AGENT_IMPORT_PATH = (
 dataset = MBPPCodeGolfDataset(train_size=900)
 
 framework_config = HarborFrameworkConfig(
-    gpu="H100",
     n_nodes=2,
     colocate=False,
     actor_nodes=1,
     rollout_num_gpus=8,
     agent_import_path=AGENT_IMPORT_PATH,
-    agent_model_name="model",
     agent_kwargs={"temperature": 0.7, "max_tokens": 1024},
     task_root=str(TASKS_DIR),
-    instruction_path="instruction.md",
     sandbox_timeout_secs=180,
     sandbox_idle_timeout_secs=60,
     recipe_args="""
-        # ── Model architecture ──
-        --num-layers 36
-        --hidden-size 2560
-        --ffn-hidden-size 6912
-        --num-attention-heads 20
-        --group-query-attention
-        --num-query-groups 4
-        --max-position-embeddings 32768
-        --rotary-base 1000000
-        --make-vocab-size-divisible-by 1
-        --normalization RMSNorm
-        --swiglu
-        --untie-embeddings-and-output-weights
-        --disable-bias-linear
-        --position-embedding-type rope
-        --no-masked-softmax-fusion
-
         # ── Training ──
         --recompute-granularity selective
         --tensor-model-parallel-size 2
         --sequence-parallel
-
-        # ── RL ──
-        --input-key prompt
-        --label-key metadata
-        --apply-chat-template
-        --rollout-shuffle
+        --untie-embeddings-and-output-weights
+        --no-masked-softmax-fusion
+        --max-position-embeddings 32768
 
         # ── Rollout ──
         --num-rollout 200
