@@ -159,6 +159,26 @@ def _parse_docstring_groups(docstring: str) -> list[tuple[str, list[str]]]:
     return groups
 
 
+def _parse_docstring_groups_from_mro(cls: type) -> list[tuple[str, list[str]]]:
+    """Parse docstring groups across the class MRO, subclass sections first."""
+    seen_groups: set[str] = set()
+    result: list[tuple[str, list[str]]] = []
+
+    for klass in cls.__mro__:
+        if klass is object:
+            continue
+        doc = inspect.getdoc(klass) or ""
+        if not doc:
+            continue
+        groups = _parse_docstring_groups(doc)
+        for group_name, group_lines in groups:
+            if group_name not in seen_groups:
+                result.append((group_name, group_lines))
+                seen_groups.add(group_name)
+
+    return result
+
+
 def _extract_field_docs_from_mro(cls: type) -> dict[str, str]:
     """Extract field docs from docstrings across the class MRO."""
     merged: dict[str, str] = {}
@@ -222,7 +242,7 @@ def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[
     first_para = docstring.split("\n\n")[0] if docstring else ""
     attrs = _get_class_attrs(cls)
     field_docs = _extract_field_docs_from_mro(cls)
-    groups = _parse_docstring_groups(docstring)
+    groups = _parse_docstring_groups_from_mro(cls)
     module_path = entry["module"]
 
     lines = [
