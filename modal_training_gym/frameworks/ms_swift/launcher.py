@@ -50,7 +50,11 @@ def _train_ms_swift_worker(run_id: str | None = None):
     from huggingface_hub import snapshot_download
 
     model_name = os.environ["MS_SWIFT_MODEL_NAME"]
-    dataset_path = os.environ["MS_SWIFT_DATASET_PATH"]
+    dataset_path = os.environ.get("MS_SWIFT_DATASET_PATH", "")
+    if not dataset_path:
+        meta_path = "/data/.meta/dataset_path"
+        if os.path.exists(meta_path):
+            dataset_path = open(meta_path).read().strip()
     app_name = os.environ["MS_SWIFT_APP_NAME"]
     checkpoints_root = os.environ["MS_SWIFT_CHECKPOINTS_PATH"]
     checkpoints_volume_name = os.environ["MS_SWIFT_CHECKPOINTS_VOLUME_NAME"]
@@ -64,27 +68,38 @@ def _train_ms_swift_worker(run_id: str | None = None):
     if run_id is None:
         import uuid
 
-        invocation_marker = uuid.uuid4().hex[:8]
         run_id_file = f"{checkpoints_root}/.current_run_id"
         marker_file = f"{checkpoints_root}/.run_marker"
         vol = Volume.from_name(checkpoints_volume_name, create_if_missing=True, version=2)
+
+        vol.reload()
+        old_marker = ""
+        if os.path.exists(marker_file):
+            old_marker = open(marker_file).read().strip()
+
         if node_rank == 0:
+            new_marker = uuid.uuid4().hex
             run_id = f"train_{int(time.time())}"
             os.makedirs(checkpoints_root, exist_ok=True)
             with open(run_id_file, "w") as f:
                 f.write(run_id)
             with open(marker_file, "w") as f:
-                f.write(invocation_marker)
+                f.write(new_marker)
             vol.commit()
         else:
             for _ in range(120):
                 vol.reload()
-                if os.path.exists(marker_file) and os.path.exists(run_id_file):
-                    run_id = open(run_id_file).read().strip()
-                    break
+                if os.path.exists(marker_file):
+                    current_marker = open(marker_file).read().strip()
+                    if current_marker != old_marker and os.path.exists(run_id_file):
+                        run_id = open(run_id_file).read().strip()
+                        break
                 time.sleep(1)
             else:
-                run_id = f"train_{int(time.time())}"
+                raise RuntimeError(
+                    "Timed out waiting for rank 0 to write the run ID. "
+                    "Check that all cluster nodes started correctly."
+                )
     ips = list(cluster_info.container_ipv4_ips or [])
     n_nodes = len(ips) if ips else 1
     master_addr = ips[0] if ips else "localhost"
@@ -312,6 +327,11 @@ def build_ms_swift_app(
         hf_cache_volume.reload()
         data_volume.reload()
         swift.dataset.prepare()
+        resolved_path = getattr(swift.dataset, "prompt_data", "")
+        if resolved_path:
+            os.makedirs(f"{data_str}/.meta", exist_ok=True)
+            with open(f"{data_str}/.meta/dataset_path", "w") as f:
+                f.write(resolved_path)
         hf_cache_volume.commit()
         data_volume.commit()
 
