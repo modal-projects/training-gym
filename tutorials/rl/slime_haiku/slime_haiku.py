@@ -22,8 +22,10 @@
 #    is set in the training environment, so the tutorial is runnable
 #    end-to-end without standing up a second service.
 #
-# Both pieces are wired into SLIME through its `custom_rm_path` hook,
-# which points at an async function in the sibling `haiku.py` module.
+# Both pieces are wired into SLIME through its `custom_rm_path` hook.
+# In notebooks, the tutorial writes a local `haiku.py` file that SLIME
+# imports; from the CLI, the same config falls back to the packaged
+# `modal_training_gym.common.haiku_reward` module.
 #
 # The workflow has four stages:
 #
@@ -46,13 +48,12 @@
 #   (`modal.enable_output()`, `app.run()`). The training app itself is
 #   built by the launcher, so the tutorial body never touches the
 #   Modal SDK directly.
-# - **`haiku`** — sibling file (`tutorials/rl/slime_haiku/haiku.py`).
-#   Defines the custom reward function SLIME calls, plus the
-#   `MODAL_VOCABS` list the dataset prep borrows for its system
-#   prompt. Lives next to this file (instead of in
-#   `modal_training_gym.common`) because the rubric is tutorial-
-#   specific; the slime launcher ships it into the training image
-#   automatically via `ModalConfig.local_python_sources=["haiku"]`.
+# - **`haiku` / `modal_training_gym.common.haiku_reward`** — the custom
+#   reward module. In notebooks, the next cell writes a local
+#   `haiku.py` file so you can edit the rubric inline and ship it to
+#   the training image with `local_python_sources=["haiku"]`. In the
+#   plain `.py` tutorial, the same code falls back to the packaged
+#   reference module at `modal_training_gym/common/haiku_reward.py`.
 # - **`modal_training_gym.*`** — shared containers (`DatasetConfig`,
 #   `Qwen3_4B`, `WandbConfig`), the vLLM serving helper, and SLIME's
 #   framework-specific config + launcher classes. `DATA_PATH` is the
@@ -61,7 +62,20 @@
 
 import modal
 
-import haiku  # sibling module — defines the custom reward function
+try:
+    import haiku as _local_haiku
+except ImportError:
+    _local_haiku = None
+
+if _local_haiku is not None and hasattr(_local_haiku, "haiku_rm"):
+    haiku = _local_haiku
+    CUSTOM_RM_PATH = "haiku.haiku_rm"
+    LOCAL_PYTHON_SOURCES = ["haiku"]
+else:
+    from modal_training_gym.common import haiku_reward as haiku
+
+    CUSTOM_RM_PATH = "modal_training_gym.common.haiku_reward.haiku_rm"
+    LOCAL_PYTHON_SOURCES = []
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import Qwen3_4B
@@ -100,10 +114,9 @@ from modal_training_gym.frameworks.slime.config import DATA_PATH
 # 1. Download
 #    [`statworx/haiku`](https://huggingface.co/datasets/statworx/haiku),
 #    a dataset of ~7k haiku poems tagged with a `keywords` topic.
-# 2. Turn each row into a chat conversation: a system prompt that
-#    primes the model to incorporate Modal vocabulary
-#    (`haiku.MODAL_VOCABS`, re-used between dataset prep and judge
-#    rubric) and a user prompt like `"Write me a haiku about cat."`.
+# 2. Turn each row into a chat conversation: a short system prompt
+#    that asks for a haiku, plus a user prompt like
+#    `"Write me a haiku about cat."`.
 # 3. Also precompute the tokenized `prompt` string via the model's
 #    chat template — SLIME uses that as the exact rollout input.
 # 4. Hold out the last 20% (capped at 1000 rows) as a test split so
@@ -181,9 +194,12 @@ class HaikuDataset(DatasetConfig):
 
 # ## Reward model
 #
-# GRPO needs a scalar reward for every rollout. The sibling `haiku.py`
-# module defines `haiku_rm`, an **async** reward function matching the
-# signature SLIME expects:
+# GRPO needs a scalar reward for every rollout. The notebook writes a
+# local `haiku.py` module; the CLI version uses the packaged
+# `modal_training_gym.common.haiku_reward` module from
+# `modal_training_gym/common/haiku_reward.py`. Both expose the same
+# `haiku_rm`, an **async** reward function matching the signature
+# SLIME expects:
 #
 # ```python
 # async def haiku_rm(args, sample, **kwargs) -> float:
@@ -237,12 +253,14 @@ class HaikuDataset(DatasetConfig):
 #
 # Key choices for this run:
 #
-# - `rm_type="async_rm"` + `custom_rm_path="haiku.haiku_rm"` — SLIME
-#   imports `haiku` by module name and calls `haiku.haiku_rm(...)` per
-#   rollout sample.
-# - `local_python_sources=["haiku"]` on `ModalConfig` — ships the
-#   sibling `haiku.py` into the training image so the custom reward
-#   import resolves remotely.
+# - `rm_type="async_rm"` + `custom_rm_path=CUSTOM_RM_PATH` — when the
+#   notebook-created `haiku.py` is present, SLIME imports
+#   `haiku.haiku_rm`; otherwise it falls back to
+#   `modal_training_gym.common.haiku_reward.haiku_rm`.
+# - `local_python_sources=LOCAL_PYTHON_SOURCES` on `ModalConfig` —
+#   ships the notebook-authored `haiku.py` into the training image
+#   when present. The packaged fallback already lives under
+#   `modal_training_gym`, so it doesn't need an extra local source.
 # - `apply_chat_template_kwargs='{"enable_thinking": false}'` —
 #   Qwen3's chat template has a `enable_thinking` toggle; we disable
 #   it so rollouts produce poems, not chain-of-thought traces.
@@ -262,7 +280,7 @@ my_training_run = SlimeConfig(
     colocate=True,
 
     rm_type="async_rm",
-    custom_rm_path="haiku.haiku_rm",
+    custom_rm_path=CUSTOM_RM_PATH,
 
     num_rollout=50,
     rollout_batch_size=128,
@@ -280,7 +298,7 @@ my_training_run = SlimeConfig(
 
     modal=ModalConfig(
         gpu="H100",
-        local_python_sources=["haiku"],
+        local_python_sources=LOCAL_PYTHON_SOURCES,
         image_run_commands=[
             "uv pip install --system aiohttp nltk>=3.8.0",
             "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
@@ -359,7 +377,7 @@ app = my_training_run.build_app()
 #
 # and point `model_path` at whichever directory has a `config.json`.
 # The reference
-# [qwen3-haiku `convert_torch_dist_to_hf.py`](https://github.com/modal-labs/qwen3-haiku/blob/main/tools/convert_torch_dist_to_hf.py)
+# [qwen3-haiku `convert_torch_dist_to_hf.py`](https://github.com/modal-labs/qwen3-haiku/blob/joy/initial-setup/tools/convert_torch_dist_to_hf.py)
 # is a worked example of the conversion flow if you need it.
 
 serve_app = build_vllm_serve_app(

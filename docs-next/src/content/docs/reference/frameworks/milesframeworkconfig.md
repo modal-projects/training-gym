@@ -105,4 +105,4 @@ Shlex-parse `recipe_args` + `extra_args` into a flat argv list.
 
 ### `resolved_rollout_num_gpus(self) -> 'int | None'`
 
-**Source:** [`modal_training_gym/frameworks/miles/config.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/frameworks/miles/config.py)
+**Source:** [`modal_training_gym/frameworks/miles/config.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/frameworks/miles/config.py)

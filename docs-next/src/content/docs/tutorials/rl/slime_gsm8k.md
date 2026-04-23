@@ -1,9 +1,7 @@
 ---
-title: "Qwen3-4B GRPO on GSM8K (colocated)"
+title: "Qwen3-4B GRPO on GSM8K with SLIME on Modal"
 description: "Qwen3-4B GRPO on GSM8K (colocated)"
 ---
-
-# Qwen3-4B GRPO on GSM8K with SLIME on Modal
 
 **What SLIME is.** [SLIME](https://github.com/THUDM/slime) is an RL
 post-training framework that pairs Megatron (training) with SGLang
@@ -80,8 +78,11 @@ class GSM8KDataset(DatasetConfig):
         self.eval_prompt_data = ["gsm8k", f"{self._data_path}/gsm8k/test.parquet"]
 
     def prepare(self):
+        import os
+
         from datasets import load_dataset
 
+        os.makedirs(f"{self._data_path}/gsm8k", exist_ok=True)
         ds = load_dataset("zhuzilin/gsm8k")
         ds["train"].to_parquet(f"{self._data_path}/gsm8k/train.parquet")
         ds["test"].to_parquet(f"{self._data_path}/gsm8k/test.parquet")
@@ -89,43 +90,25 @@ class GSM8KDataset(DatasetConfig):
 
 ## Define the experiment
 
-Every non-private attribute on `SlimeConfig` is forwarded to the
-SLIME CLI (`field_name` → `--field-name`). Unlisted knobs fall back
-to SLIME's defaults. The ones below are the non-default choices that
-define *this* run:
+`SlimeConfig` is a pydantic dataclass — hover over any field in
+your IDE to see its type, default, and description. Only non-default
+values need to be specified; everything else inherits sensible
+defaults.
 
-**Cluster + parallelism**
-- `actor_num_nodes=4`, `actor_num_gpus_per_node=8` — 32 H100s total.
-- `colocate=True` — rollout (SGLang) and actor (Megatron) share the
-  same GPUs. Cheaper than disaggregated because weights don't have to
-  be shipped between pools on every sync, at the cost of interleaving
-  the two workloads on one set of devices.
-- `tensor_model_parallel_size=1` — Qwen3-4B fits comfortably on a
-  single H100, so no tensor parallelism.
-- `megatron_to_hf_mode="bridge"` — SLIME writes Megatron checkpoints
-  that are readable as HF directly. In raw mode you'd run a one-time
-  `convert_checkpoint` step; in bridge mode it's a no-op, so this
-  tutorial skips it entirely.
+**Cluster**
+- `actor_num_nodes=4` — 32 H100s (4 × 8 GPUs).
+- `colocate=True` — actor and rollout share the same GPUs.
 
-**RL objective**
-- `advantage_estimator="grpo"` — GRPO (Group Relative Policy
-  Optimization): sample `n_samples_per_prompt=2` rollouts per prompt,
-  use their relative rewards as the advantage signal, no separate
-  critic.
-- `eps_clip=0.2` / `eps_clip_high=0.28` — asymmetric PPO-style
-  clipping on the importance ratio.
-- `use_kl_loss=True`, `kl_loss_type="low_var_kl"`,
-  `kl_loss_coef=0.0` — KL is computed but not actively penalized in
-  this run. Bump `kl_loss_coef` if you want a reference-model leash.
+**Throughput**
+- `use_dynamic_batch_size=True` + `max_tokens_per_gpu=9216` — pack
+  prompts up to a per-GPU token budget.
+- `recompute_granularity="full"` — activation recomputation for
+  memory savings.
 
-**Throughput knobs**
-- `use_dynamic_batch_size=True` + `max_tokens_per_gpu=9216` — SLIME
-  packs prompts up to a per-GPU token budget rather than a fixed
-  batch count.
-- `recompute_granularity="full"` + `recompute_method="uniform"` —
-  activation recomputation; trades compute for memory.
-- `eval_interval=20` — run the GSM8K test split every 20 training
-  steps.
+**RL**
+- `use_kl_loss=True` — KL divergence is computed (but `kl_loss_coef`
+  defaults to 0.0, so it's tracked but not penalized).
+- `weight_decay=0.1`, `adam_beta2=0.98` — optimizer overrides.
 
 ```python
 base_model = Qwen3_4B()
@@ -134,47 +117,7 @@ my_training_run = SlimeConfig(
     dataset=GSM8KDataset(DATA_PATH),
     wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-gsm8k"),
     ref_load=base_model.model_name,
-    megatron_to_hf_mode="bridge",
     actor_num_nodes=4,
-    actor_num_gpus_per_node=8,
-    colocate=True,
-    num_rollout=1,
-    rollout_batch_size=8,
-    rollout_max_response_len=8192,
-    rollout_temperature=1.0,
-    rollout_num_gpus_per_engine=1,
-    sglang_mem_fraction_static=0.7,
-    n_samples_per_prompt=2,
-    global_batch_size=16,
-    use_fault_tolerance=True,
-    eval_interval=20,
-    n_samples_per_eval_prompt=4,
-    eval_max_response_len=16384,
-    eval_top_p=1.0,
-    tensor_model_parallel_size=1,
-    sequence_parallel=False,
-    use_dynamic_batch_size=True,
-    max_tokens_per_gpu=9216,
-    recompute_granularity="full",
-    recompute_method="uniform",
-    recompute_num_layers=1,
-    attention_dropout=0.0,
-    hidden_dropout=0.0,
-    accumulate_allreduce_grads_in_fp32=True,
-    attention_softmax_in_fp32=True,
-    optimizer="adam",
-    lr=1e-6,
-    lr_decay_style="constant",
-    weight_decay=0.1,
-    adam_beta1=0.9,
-    adam_beta2=0.98,
-    advantage_estimator="grpo",
-    eps_clip=0.2,
-    eps_clip_high=0.28,
-    use_kl_loss=True,
-    kl_loss_coef=0.0,
-    kl_loss_type="low_var_kl",
-    entropy_coef=0.0,
     modal=ModalConfig(gpu="H100"),
 )
 ```
@@ -199,5 +142,5 @@ app = my_training_run.build_app()
 - [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/rl/slime_gsm8k/slime_gsm8k.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_gsm8k/slime_gsm8k.py)
- | [Open in Modal Notebook](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_gsm8k/slime_gsm8k.ipynb)
+**Source:** [`tutorials/rl/slime_gsm8k/slime_gsm8k.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/slime_gsm8k/slime_gsm8k.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/slime_gsm8k/slime_gsm8k.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

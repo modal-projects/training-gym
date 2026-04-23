@@ -1,9 +1,7 @@
 ---
-title: "Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry"
+title: "Custom HuggingFace model with ms-swift LoRA SFT on Modal"
 description: "Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry"
 ---
-
-# Custom HuggingFace model with ms-swift LoRA SFT on Modal
 
 **What this tutorial teaches.** How to train a model that isn't in
 the built-in catalog. The built-in classes (`Qwen3_4B`, `GLM_4_7`,
@@ -54,8 +52,17 @@ can stack architecture metadata, tokenizer overrides, or custom
 download logic on top as needed.
 
 ```python
+from modal_training_gym.common.models import ModelTrainingConfig
+
 class SmolLM2_135M(ModelConfiguration):
     model_name = "HuggingFaceTB/SmolLM2-135M"
+    training = ModelTrainingConfig(
+        gpu_type="H100",
+        tensor_model_parallel_size=1,
+        pipeline_model_parallel_size=1,
+        lora_rank=8,
+        lora_alpha=16,
+    )
 
     def download_model(self) -> None:
         from huggingface_hub import snapshot_download
@@ -103,7 +110,7 @@ class TinyGSM8KDataset(DatasetConfig):
         try:
             ds = load_dataset(self._hf_dataset, split=self._split)
         except ValueError:
-            ds = load_dataset(self._hf_dataset, "main", split=self._split)
+            ds = load_dataset(self._hf_dataset, "joy/initial-setup", split=self._split)
 
         out_path = f"{output_dir}/training.jsonl"
         with open(out_path, "w") as f:
@@ -135,16 +142,9 @@ swift_framework_config = MsSwiftFrameworkConfig(
     gpu="H100",
     n_nodes=1,
     gpus_per_node=1,
-    tensor_model_parallel_size=1,
-    expert_model_parallel_size=1,
-    pipeline_model_parallel_size=1,
-    context_parallel_size=1,
-    sequence_parallel=False,
     num_train_epochs=1,
     global_batch_size=1,
     max_length=512,
-    lora_rank=8,
-    lora_alpha=16,
     save_interval=10,
     eval_iters=0,
 )
@@ -176,5 +176,5 @@ app = my_training_run.build_app()
 - [`DatasetConfig`](/reference/core/datasetconfig/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py)
- | [Open in Modal Notebook](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb)
+**Source:** [`tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

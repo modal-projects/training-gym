@@ -50,7 +50,7 @@ def _intro():
 
 
 @notebook_only
-@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
+@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup")
 def _install():
     pass
 
@@ -155,7 +155,7 @@ def _define_dataset():
             try:
                 ds = load_dataset(self._hf_dataset, split=self._split)
             except ValueError:
-                ds = load_dataset(self._hf_dataset, "main", split=self._split)
+                ds = load_dataset(self._hf_dataset, "joy/initial-setup", split=self._split)
 
             out_path = f"{output_dir}/training.jsonl"
             with open(out_path, "w") as f:

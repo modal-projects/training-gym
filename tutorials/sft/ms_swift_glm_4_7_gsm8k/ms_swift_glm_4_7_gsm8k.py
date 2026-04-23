@@ -80,7 +80,7 @@ class GSM8KDataset(DatasetConfig):
         try:
             ds = load_dataset(self._hf_dataset, split=self._split)
         except ValueError:
-            ds = load_dataset(self._hf_dataset, "main", split=self._split)
+            ds = load_dataset(self._hf_dataset, "joy/initial-setup", split=self._split)
 
         out_path = f"{output_dir}/training.jsonl"
         with open(out_path, "w") as f:

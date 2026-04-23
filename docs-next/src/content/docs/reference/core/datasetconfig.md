@@ -38,4 +38,4 @@ Download and/or preprocess the dataset into the data volume.
 - [Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry](/tutorials/sft/ms_swift_custom_hf/)
 - [GLM-4.7 LoRA SFT on GSM8K (Megatron)](/tutorials/sft/ms_swift_glm_4_7_gsm8k/)
 
-**Source:** [`modal_training_gym/common/dataset.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/dataset.py)
+**Source:** [`modal_training_gym/common/dataset.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/dataset.py)

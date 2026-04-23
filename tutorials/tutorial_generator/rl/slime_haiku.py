@@ -3,11 +3,11 @@
 Qwen3-4B GRPO on haiku poems. Demonstrates a custom async reward model
 that combines deterministic structure scoring (5-7-5 syllable count) with
 an optional LLM-as-judge style score. The judge is built on
-`modal_training_gym.common.llm_judge.LlmJudge`; the full reward function
-lives in the tutorial-local `haiku` module (sibling file). The slime
-launcher ships that module into the training image via
-`local_python_sources=["haiku"]`, so SLIME can resolve
-`custom_rm_path="haiku.haiku_rm"` at training time.
+`modal_training_gym.common.llm_judge.LlmJudge`; the reference reward
+implementation lives in `modal_training_gym.common.haiku_reward`. In the
+notebook output, the tutorial writes an editable local `haiku.py` so users
+can modify the reward inline; in the plain `.py` output, the tutorial falls
+back to the packaged module.
 """
 
 TUTORIAL_METADATA = {
@@ -50,8 +50,10 @@ def _intro():
        is set in the training environment, so the tutorial is runnable
        end-to-end without standing up a second service.
 
-    Both pieces are wired into SLIME through its `custom_rm_path` hook,
-    which points at an async function in the sibling `haiku.py` module.
+    Both pieces are wired into SLIME through its `custom_rm_path` hook.
+    In notebooks, the tutorial writes a local `haiku.py` file that SLIME
+    imports; from the CLI, the same config falls back to the packaged
+    `modal_training_gym.common.haiku_reward` module.
 
     The workflow has four stages:
 
@@ -69,7 +71,7 @@ def _intro():
 
 
 @notebook_only
-@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
+@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup")
 def _install():
     pass
 
@@ -85,13 +87,12 @@ def _explain_imports():
       (`modal.enable_output()`, `app.run()`). The training app itself is
       built by the launcher, so the tutorial body never touches the
       Modal SDK directly.
-    - **`haiku`** — sibling file (`tutorials/rl/slime_haiku/haiku.py`).
-      Defines the custom reward function SLIME calls, plus the
-      `MODAL_VOCABS` list the dataset prep borrows for its system
-      prompt. Lives next to this file (instead of in
-      `modal_training_gym.common`) because the rubric is tutorial-
-      specific; the slime launcher ships it into the training image
-      automatically via `ModalConfig.local_python_sources=["haiku"]`.
+    - **`haiku` / `modal_training_gym.common.haiku_reward`** — the custom
+      reward module. In notebooks, the next cell writes a local
+      `haiku.py` file so you can edit the rubric inline and ship it to
+      the training image with `local_python_sources=["haiku"]`. In the
+      plain `.py` tutorial, the same code falls back to the packaged
+      reference module at `modal_training_gym/common/haiku_reward.py`.
     - **`modal_training_gym.*`** — shared containers (`DatasetConfig`,
       `Qwen3_4B`, `WandbConfig`), the vLLM serving helper, and SLIME's
       framework-specific config + launcher classes. `DATA_PATH` is the
@@ -105,16 +106,162 @@ def _explain_imports():
 def _add_tutorial_dir_to_path():
     import sys, os
     # `modal run` adds the script's directory to sys.path automatically;
-    # notebooks don't, so the sibling `haiku` module isn't findable.
+    # notebooks don't, so the local `haiku.py` we write below wouldn't
+    # be importable without this.
     if os.getcwd() not in sys.path:
         sys.path.insert(0, os.getcwd())
+
+
+@notebook_only
+@markdown
+def _write_reward_module_intro():
+    """
+    In the notebook version, make the reward module explicit by writing
+    a real `haiku.py` file in the current working directory. Edit this
+    cell if you want to try a different scoring rubric or add your own
+    custom reward logic.
+    """
+
+
+@notebook_only
+@shell('''%%writefile haiku.py
+"""Notebook-local haiku reward module for the `slime_haiku` tutorial."""
+
+from __future__ import annotations
+
+import os
+import re
+from typing import Any
+
+from modal_training_gym.common.llm_judge import LlmJudge
+
+_CMUDICT: dict = {}
+
+
+def _get_cmudict() -> dict:
+    """Lazy-load NLTK's CMUdict; cached on first call per process."""
+    import nltk
+    from nltk.corpus import cmudict as nltk_cmudict
+
+    if not _CMUDICT:
+        nltk.download("cmudict", quiet=True)
+        _CMUDICT.update(nltk_cmudict.dict())
+    return _CMUDICT
+
+
+def _count_syllables_for_word(word: str, cmudict: dict) -> int:
+    original = word
+    word = word.lower().strip()
+    phones = cmudict.get(word)
+    if phones:
+        return len([p for p in phones[0] if p[-1].isdigit()])
+    if original.isupper() and 2 <= len(original) <= 6 and original.isalpha():
+        return sum(3 if c == "w" else 1 for c in original.lower())
+    count = len(re.findall(r"[aeiouy]+", word))
+    if word.endswith("e") and count > 1:
+        count -= 1
+    return max(count, 1)
+
+
+def _diff_syllables(text: str, target: int, cmudict: dict) -> int:
+    words = re.findall(r"[a-zA-Z]+", text)
+    total = sum(_count_syllables_for_word(w, cmudict) for w in words)
+    return abs(total - target)
+
+
+def _segment_haiku_lines(response: str) -> list[str]:
+    if "/" in response:
+        lines = [line.strip() for line in response.split("/")]
+    elif ". " in response:
+        lines = [line.strip() for line in response.split(". ")]
+    else:
+        lines = [line.strip() for line in response.split("\\n")]
+    return [line for line in lines if line]
+
+
+def score_haiku_structure(response: str, cmudict: dict) -> float:
+    """Score in [0, 1]: 1/4 for 3 lines, 1/4 per line with correct syllables."""
+    lines = _segment_haiku_lines(response)
+    score = 0.25 if len(lines) == 3 else 0.0
+    for i, target in enumerate([5, 7, 5]):
+        if i < len(lines):
+            diff = _diff_syllables(lines[i], target, cmudict)
+            if diff == 0:
+                score += 0.25
+            elif diff == 1:
+                score += 0.125
+    return score
+
+
+class HaikuStyleJudge(LlmJudge):
+    """`LlmJudge` with a haiku rubric: relevance + poetic quality + vocab."""
+
+    def build_prompt(self, prompt: str, response: str, **kwargs: Any) -> str:
+        return (
+            "You are evaluating a haiku poem.\\n\\n"
+            f"Topic: {prompt}\\n"
+            f"Response:\\n{response}\\n\\n"
+            "Score 0-10 on relevance to the topic and poetic quality. "
+            "single number (0-10), nothing else."
+        )
+
+
+def _extract_topic(sample) -> str:
+    """Recover the haiku topic ("cat", "modal", ...) from a SLIME sample."""
+    for attr in ("question", "prompt"):
+        val = getattr(sample, attr, None)
+        if isinstance(val, str) and val:
+            return val
+    data = getattr(sample, "data", None) or {}
+    for key in ("question", "prompt"):
+        val = data.get(key) if hasattr(data, "get") else None
+        if isinstance(val, str) and val:
+            return val
+    return ""
+
+
+async def haiku_rm(args, sample, **kwargs) -> float:
+    """Async SLIME reward: structure plus optional LLM style score."""
+    import aiohttp
+
+    cmudict = _get_cmudict()
+    structure = score_haiku_structure(sample.response, cmudict)
+
+    judge_url = os.environ.get("LLM_JUDGE_URL", "")
+    if not judge_url or structure < 1.0:
+        return structure
+
+    judge = HaikuStyleJudge(
+        model_name=os.environ.get("LLM_JUDGE_MODEL", "qwen3-4b"),
+        base_url=judge_url,
+        max_score=10,
+    )
+    async with aiohttp.ClientSession() as session:
+        style = await judge.score(session, _extract_topic(sample), sample.response)
+    return structure + style
+''')
+def _write_reward_module():
+    pass
 
 
 @code
 def _imports():
     import modal
 
-    import haiku  # sibling module — defines the custom reward function
+    try:
+        import haiku as _local_haiku
+    except ImportError:
+        _local_haiku = None
+
+    if _local_haiku is not None and hasattr(_local_haiku, "haiku_rm"):
+        haiku = _local_haiku
+        CUSTOM_RM_PATH = "haiku.haiku_rm"
+        LOCAL_PYTHON_SOURCES = ["haiku"]
+    else:
+        from modal_training_gym.common import haiku_reward as haiku
+
+        CUSTOM_RM_PATH = "modal_training_gym.common.haiku_reward.haiku_rm"
+        LOCAL_PYTHON_SOURCES = []
 
     from modal_training_gym.common.dataset import DatasetConfig
     from modal_training_gym.common.models import Qwen3_4B
@@ -157,10 +304,9 @@ def _explain_dataset():
     1. Download
        [`statworx/haiku`](https://huggingface.co/datasets/statworx/haiku),
        a dataset of ~7k haiku poems tagged with a `keywords` topic.
-    2. Turn each row into a chat conversation: a system prompt that
-       primes the model to incorporate Modal vocabulary
-       (`haiku.MODAL_VOCABS`, re-used between dataset prep and judge
-       rubric) and a user prompt like `"Write me a haiku about cat."`.
+    2. Turn each row into a chat conversation: a short system prompt
+       that asks for a haiku, plus a user prompt like
+       `"Write me a haiku about cat."`.
     3. Also precompute the tokenized `prompt` string via the model's
        chat template — SLIME uses that as the exact rollout input.
     4. Hold out the last 20% (capped at 1000 rows) as a test split so
@@ -246,9 +392,12 @@ def _explain_reward():
     """
     ## Reward model
 
-    GRPO needs a scalar reward for every rollout. The sibling `haiku.py`
-    module defines `haiku_rm`, an **async** reward function matching the
-    signature SLIME expects:
+    GRPO needs a scalar reward for every rollout. The notebook writes a
+    local `haiku.py` module; the CLI version uses the packaged
+    `modal_training_gym.common.haiku_reward` module from
+    `modal_training_gym/common/haiku_reward.py`. Both expose the same
+    `haiku_rm`, an **async** reward function matching the signature
+    SLIME expects:
 
     ```python
     async def haiku_rm(args, sample, **kwargs) -> float:
@@ -307,12 +456,14 @@ def _explain_config():
 
     Key choices for this run:
 
-    - `rm_type="async_rm"` + `custom_rm_path="haiku.haiku_rm"` — SLIME
-      imports `haiku` by module name and calls `haiku.haiku_rm(...)` per
-      rollout sample.
-    - `local_python_sources=["haiku"]` on `ModalConfig` — ships the
-      sibling `haiku.py` into the training image so the custom reward
-      import resolves remotely.
+    - `rm_type="async_rm"` + `custom_rm_path=CUSTOM_RM_PATH` — when the
+      notebook-created `haiku.py` is present, SLIME imports
+      `haiku.haiku_rm`; otherwise it falls back to
+      `modal_training_gym.common.haiku_reward.haiku_rm`.
+    - `local_python_sources=LOCAL_PYTHON_SOURCES` on `ModalConfig` —
+      ships the notebook-authored `haiku.py` into the training image
+      when present. The packaged fallback already lives under
+      `modal_training_gym`, so it doesn't need an extra local source.
     - `apply_chat_template_kwargs='{"enable_thinking": false}'` —
       Qwen3's chat template has a `enable_thinking` toggle; we disable
       it so rollouts produce poems, not chain-of-thought traces.
@@ -336,7 +487,7 @@ def _define_config():
         colocate=True,
 
         rm_type="async_rm",
-        custom_rm_path="haiku.haiku_rm",
+        custom_rm_path=CUSTOM_RM_PATH,
 
         num_rollout=50,
         rollout_batch_size=128,
@@ -354,7 +505,7 @@ def _define_config():
 
         modal=ModalConfig(
             gpu="H100",
-            local_python_sources=["haiku"],
+            local_python_sources=LOCAL_PYTHON_SOURCES,
             image_run_commands=[
                 "uv pip install --system aiohttp nltk>=3.8.0",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
@@ -491,7 +642,7 @@ def _serve_section():
 
     and point `model_path` at whichever directory has a `config.json`.
     The reference
-    [qwen3-haiku `convert_torch_dist_to_hf.py`](https://github.com/modal-labs/qwen3-haiku/blob/main/tools/convert_torch_dist_to_hf.py)
+    [qwen3-haiku `convert_torch_dist_to_hf.py`](https://github.com/modal-labs/qwen3-haiku/blob/joy/initial-setup/tools/convert_torch_dist_to_hf.py)
     is a worked example of the conversion flow if you need it.
     """
 

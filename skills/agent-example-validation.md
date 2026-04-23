@@ -57,7 +57,7 @@ Run on every PR that changes an example directory, shared training utility, shar
 
 Run nightly or before cutting a release branch.
 
-- Exercise one real remote path per maintained flow.
+- Exercise one real remote path per joy/initial-setuptained flow.
 - Prefer single-node or smallest-cluster commands when the example supports them.
 - Confirm the app launches, user code starts, and the first meaningful artifact or log marker appears.
 
@@ -92,7 +92,7 @@ For normal agent validation, use this order:
 
 Use a separate scheduled workflow for repo-wide confidence:
 
-1. Nightly: Tier 2 for each maintained user-facing workflow.
+1. Nightly: Tier 2 for each joy/initial-setuptained user-facing workflow.
 2. Weekly: Tier 3 for workflows with canonical multi-stage or multi-node training paths.
 3. After major dependency, Modal runtime, or CUDA image changes: rerun Tier 3 for every workflow that shares the changed dependency surface.
 

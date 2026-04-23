@@ -46,7 +46,7 @@ const actions = [
           linear-gradient(180deg, #050a07, #0a110c 100%);
       }
 
-      main {
+      joy/initial-setup {
         width: min(42rem, 100%);
         padding: clamp(1.5rem, 4vw, 3rem);
         border: 1px solid var(--tg-border);
@@ -132,7 +132,7 @@ const actions = [
     </style>
   </head>
   <body>
-    <main>
+    <joy/initial-setup>
       <div class="eyebrow">Training Gym</div>
       <h1>That page drifted off-cluster.</h1>
       <p>
@@ -144,6 +144,6 @@ const actions = [
           <a href={action.href}>{action.label}</a>
         ))}
       </nav>
-    </main>
+    </joy/initial-setup>
   </body>
 </html>

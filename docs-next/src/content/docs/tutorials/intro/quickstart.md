@@ -1,9 +1,7 @@
 ---
-title: "Shared concepts: config containers, framework factories, volume layout, running the pipeline"
+title: "Quickstart: concepts that every tutorial uses"
 description: "Shared concepts: config containers, framework factories, volume layout, running the pipeline"
 ---
-
-# Quickstart: concepts that every tutorial uses
 
 `modal-training-gym` wraps a handful of training frameworks (SLIME,
 Megatron, MS-SWIFT) behind a single pattern: declare
@@ -229,5 +227,5 @@ catalog in [`tutorials/README.md`](../README.md).
 - [`WandbConfig`](/reference/core/wandbconfig/)
 - [`SlimeConfig`](/reference/frameworks/slimeconfig/)
 
-**Source:** [`tutorials/intro/quickstart/quickstart.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/quickstart/quickstart.py)
- | [Open in Modal Notebook](https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/quickstart/quickstart.ipynb)
+**Source:** [`tutorials/intro/quickstart/quickstart.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/intro/quickstart/quickstart.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/intro/quickstart/quickstart.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

@@ -73,19 +73,19 @@ body::before {
   background: var(--sl-color-bg-nav);
 }
 
-.main-frame,
-main,
-main > .content-panel {
+.joy/initial-setup-frame,
+joy/initial-setup,
+joy/initial-setup > .content-panel {
   background: transparent;
 }
 
-main > .content-panel {
+joy/initial-setup > .content-panel {
   border: 0;
   box-shadow: none;
   margin: 0;
 }
 
-main > .content-panel + .content-panel {
+joy/initial-setup > .content-panel + .content-panel {
   border-top: 1px solid var(--tg-border);
 }
 
@@ -128,7 +128,7 @@ main > .content-panel + .content-panel {
   display: none !important;
 }
 
-.page:has(.sidebar-pane:not(:has(ul))) .main-pane {
+.page:has(.sidebar-pane:not(:has(ul))) .joy/initial-setup-pane {
   width: 100% !important;
 }
 

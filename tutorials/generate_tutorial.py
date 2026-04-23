@@ -100,7 +100,7 @@ def _resolve_branch() -> str:
     if _branch_exists_on_origin(branch):
         return branch
 
-    return "main"
+    return "joy/initial-setup"
 
 
 _BRANCH = _resolve_branch()
@@ -297,7 +297,7 @@ def _extract_metadata(source: str) -> dict | None:
 
 def _render_launch_cell(bucket: str, name: str) -> str:
     notebook_url = (
-        f"https://github.com/{_REPO_SLUG}/blob/main"
+        f"https://github.com/{_REPO_SLUG}/blob/joy/initial-setup"
         f"/tutorials/{bucket}/{name}/{name}.ipynb"
     )
     launch_url = (
@@ -448,5 +448,5 @@ def main() -> None:
         print(f"{_README_PATH.relative_to(REPO_ROOT)} ← table regenerated ({len(entries)} rows)")
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__joy/initial-setup__":
+    joy/initial-setup()

@@ -1,9 +1,7 @@
 ---
-title: "Ray-on-Modal pattern demo"
+title: "Ray-on-Modal pattern demo (standalone, no framework wrapper)"
 description: "Ray-on-Modal pattern demo"
 ---
-
-# Ray-on-Modal pattern demo (standalone, no framework wrapper)
 
 **What this tutorial is.** A peek under the hood of the `slime`
 and `verl` frameworks. Both rely on the same primitive —
@@ -101,5 +99,5 @@ already wrap this same pattern plus their respective training CLIs.
 
 - [`ModalRayCluster`](/reference/core/modalraycluster/)
 
-**Source:** [`tutorials/misc/ray_slime_standalone/ray_slime_standalone.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/misc/ray_slime_standalone/ray_slime_standalone.py)
- | [Open in Modal Notebook](https://github.com/modal-projects/training-gym/blob/main/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb)
+**Source:** [`tutorials/misc/ray_slime_standalone/ray_slime_standalone.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/misc/ray_slime_standalone/ray_slime_standalone.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

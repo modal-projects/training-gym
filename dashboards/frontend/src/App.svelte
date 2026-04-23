@@ -172,7 +172,7 @@
     onToggleState={toggleState}
   />
 
-  <div class="main">
+  <div class="joy/initial-setup">
     {#if loading}
       <div class="empty">Loading...</div>
     {:else if error}
@@ -238,7 +238,7 @@
     font-size: 0.85em;
     margin-left: auto;
   }
-  .main {
+  .joy/initial-setup {
     padding: 1.5rem 2rem 3rem;
   }
   .empty {

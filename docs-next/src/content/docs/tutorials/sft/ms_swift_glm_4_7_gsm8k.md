@@ -1,9 +1,7 @@
 ---
-title: "GLM-4.7 LoRA SFT on GSM8K (Megatron)"
+title: "GLM-4.7 LoRA SFT on GSM8K with ms-swift on Modal"
 description: "GLM-4.7 LoRA SFT on GSM8K (Megatron)"
 ---
-
-# GLM-4.7 LoRA SFT on GSM8K with ms-swift on Modal
 
 **What ms-swift is.**
 [ms-swift](https://github.com/modelscope/ms-swift) is ModelScope's
@@ -85,7 +83,7 @@ class GSM8KDataset(DatasetConfig):
         try:
             ds = load_dataset(self._hf_dataset, split=self._split)
         except ValueError:
-            ds = load_dataset(self._hf_dataset, "main", split=self._split)
+            ds = load_dataset(self._hf_dataset, "joy/initial-setup", split=self._split)
 
         out_path = f"{output_dir}/training.jsonl"
         with open(out_path, "w") as f:
@@ -101,13 +99,15 @@ class GSM8KDataset(DatasetConfig):
 ## Define the experiment
 
 `MsSwiftFrameworkConfig` holds ms-swift-specific knobs; the launcher
-forwards them to `megatron sft` as `--flag value` args. ms-swift
-uses underscore-style names (e.g. `--tensor_model_parallel_size 2`)
-and expects booleans as strings.
+forwards them to `megatron sft` as `--flag value` args.
 
-### Parallelism (32 GPUs = 4 nodes × 8 H100)
+### Parallelism, MoE, and LoRA — from `ModelTrainingConfig`
 
-GLM-4.7 is a large MoE — it needs all four axes:
+GLM-4.7's parallelism, MoE, and LoRA settings are defined on the
+model itself via its `ModelTrainingConfig` (see `GLM_4_7` in
+`common/models/glm_4_7.py`). The framework pulls them automatically
+— no need to set them on `MsSwiftFrameworkConfig`. Here's what the
+model provides for 32 GPUs = 4 nodes × 8 H100:
 
 | Axis | Setting | Why |
 |---|---|---|
@@ -115,17 +115,9 @@ GLM-4.7 is a large MoE — it needs all four axes:
 | Expert (EP)   | 4 | Spread MoE experts across 4 GPUs |
 | Pipeline (PP) | 4 | 4-stage pipeline over transformer blocks |
 | Context (CP)  | 1 | No sequence-dim parallelism at this context length |
-| Data (implicit) | 32/(2·4·4·1) = 1 | No data parallelism at this scale |
 
-`sequence_parallel=True` saves activation memory in the TP groups.
-
-### LoRA
-
-- `tuner_type="lora"` + `lora_rank=128`, `lora_alpha=32` — higher
-  rank than the usual 8–16; GLM-4.7 is large enough that a bigger
-  rank pays for itself without running out of memory.
-- `merge_lora=False` — keep the LoRA weights separate at save time
-  (smaller checkpoints, easier to A/B against the base).
+LoRA: `lora_rank=128`, `lora_alpha=32` — higher rank than the usual
+8–16; GLM-4.7 is large enough that a bigger rank pays for itself.
 
 ### Throughput
 
@@ -175,5 +167,5 @@ app = my_training_run.build_app()
 - [`GLM_4_7`](/reference/models/glm_4_7/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py)
- | [Open in Modal Notebook](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb)
+**Source:** [`tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

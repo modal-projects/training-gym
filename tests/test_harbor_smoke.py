@@ -179,5 +179,5 @@ harbor = HarborConfig(
 app = harbor.build_app(name="harbor-smoke-test")
 
 
-if __name__ == "__main__":
+if __name__ == "__joy/initial-setup__":
     run_local_tests()

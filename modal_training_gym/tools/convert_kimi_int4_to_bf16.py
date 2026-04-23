@@ -254,5 +254,5 @@ def main():
     print(f"\nSuccessful! Output saved to: {output_dir}")
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__joy/initial-setup__":
+    joy/initial-setup()

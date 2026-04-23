@@ -311,7 +311,7 @@ class SlimeConfig:
     # ── Cluster and parallelism ─────────────────────────────────────────────
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
-    colocate: bool = False
+    colocate: bool = True
     rollout_num_gpus: int | None = None
     rollout_num_gpus_per_engine: int = 1
     tensor_model_parallel_size: int = 1
@@ -324,7 +324,7 @@ class SlimeConfig:
     n_samples_per_prompt: int = 2
     eps_clip: float = 0.2
     eps_clip_high: float = 0.28
-    use_kl_loss: bool = False
+    use_kl_loss: bool = True
     kl_loss_type: str = "low_var_kl"
     kl_loss_coef: float = 0.0
     entropy_coef: float = 0.0
@@ -341,9 +341,9 @@ class SlimeConfig:
     global_batch_size: int = 16
     lr: float = 1e-6
     lr_decay_style: str = "constant"
-    weight_decay: float = 0.0
+    weight_decay: float = 0.1
     adam_beta1: float = 0.9
-    adam_beta2: float = 0.95
+    adam_beta2: float = 0.98
     optimizer: str = "adam"
 
     # ── Memory and precision ────────────────────────────────────────────────
@@ -351,13 +351,13 @@ class SlimeConfig:
     hidden_dropout: float = 0.0
     attention_softmax_in_fp32: bool = True
     accumulate_allreduce_grads_in_fp32: bool = True
-    recompute_granularity: str = ""
-    recompute_method: str = ""
-    recompute_num_layers: int | None = None
+    recompute_granularity: str = "full"
+    recompute_method: str = "uniform"
+    recompute_num_layers: int = 1
 
     # ── Dynamic batching ────────────────────────────────────────────────────
-    use_dynamic_batch_size: bool = False
-    max_tokens_per_gpu: int | None = None
+    use_dynamic_batch_size: bool = True
+    max_tokens_per_gpu: int = 9216
 
     # ── Eval ────────────────────────────────────────────────────────────────
     eval_interval: int = 20
@@ -370,7 +370,7 @@ class SlimeConfig:
     save: bool = True
     save_interval: int = 1000
     megatron_to_hf_mode: str = "bridge"
-    use_fault_tolerance: bool = False
+    use_fault_tolerance: bool = True
 
     # ── Custom reward ───────────────────────────────────────────────────────
     custom_rm_path: str = ""

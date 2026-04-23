@@ -1,20 +1,9 @@
-"""Tutorial-local reward model for `slime_haiku`.
+"""Reference haiku reward module used by the `slime_haiku` tutorial.
 
-Kept here (not in `modal_training_gym.common`) because the haiku-specific
-rubric and syllable scoring aren't general training-gym infrastructure —
-they're part of this tutorial. SLIME loads the reward function at training
-time via `custom_rm_path="haiku.haiku_rm"`; the slime launcher ships every
-sibling `.py` file from the tutorial directory into the training image via
-`add_local_python_source`, so `import haiku` resolves there as well.
-
-Two reusable parts:
-    - `score_haiku_structure`  — 5-7-5 syllable scorer, via CMUdict.
-    - `HaikuStyleJudge`        — `LlmJudge` subclass with a haiku rubric.
-
-Composed in `haiku_rm`, the async SLIME reward entrypoint. Style scoring
-is gated on `LLM_JUDGE_URL` being set in the env; when absent, the reward
-falls back to structure-only so the tutorial is runnable without a judge
-deployment.
+The notebook tutorial writes an editable local `haiku.py` copy of this
+implementation so users can tune the reward inline. The plain `.py` tutorial
+and the generated docs refer to this packaged module directly via
+`modal_training_gym.common.haiku_reward.haiku_rm`.
 """
 
 from __future__ import annotations
@@ -98,17 +87,7 @@ class HaikuStyleJudge(LlmJudge):
 
 
 def _extract_topic(sample) -> str:
-    """Recover the haiku topic ("cat", "modal", …) from a SLIME sample.
-
-    SLIME's rollout `sample` objects expose the decoded generation under
-    `.response` but don't guarantee the original dataset columns. The
-    dataset prep in the tutorial stashes the question string on the
-    `prompt` field and the keyword under `question` via the chat-
-    template transform; SLIME typically surfaces those back as a `data`
-    mapping or as direct attributes, depending on version. Try each
-    known location in turn and fall back to the empty string — the
-    judge degrades to topic-agnostic scoring rather than erroring.
-    """
+    """Recover the haiku topic ("cat", "modal", ...) from a SLIME sample."""
     for attr in ("question", "prompt"):
         val = getattr(sample, attr, None)
         if isinstance(val, str) and val:
@@ -122,18 +101,7 @@ def _extract_topic(sample) -> str:
 
 
 async def haiku_rm(args, sample, **kwargs) -> float:
-    """Async SLIME reward — structure + (optional) LLM style score.
-
-    Referenced from the tutorial as `custom_rm_path="haiku.haiku_rm"`. The
-    slime launcher adds this file to the training image via
-    `add_local_python_source`, so this plain `haiku` module is importable
-    both locally (from the tutorial dir on `sys.path`) and on the remote
-    container.
-
-    Reads the judge endpoint from `LLM_JUDGE_URL` (and judge model from
-    `LLM_JUDGE_MODEL`, default `qwen3-4b`); when the URL is unset, skips
-    style scoring and returns structure only.
-    """
+    """Async SLIME reward: structure plus optional LLM style score."""
     import aiohttp
 
     cmudict = _get_cmudict()

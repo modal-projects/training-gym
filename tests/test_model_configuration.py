@@ -117,5 +117,5 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == "__joy/initial-setup__":
+    sys.exit(joy/initial-setup())

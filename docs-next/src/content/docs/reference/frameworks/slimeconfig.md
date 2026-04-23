@@ -63,4 +63,4 @@ Total Modal cluster nodes required by this config.
 - [Qwen3-4B GRPO on GSM8K (colocated)](/tutorials/rl/slime_gsm8k/)
 - [Qwen3-4B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/slime_haiku/)
 
-**Source:** [`modal_training_gym/frameworks/slime/config.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/frameworks/slime/config.py)
+**Source:** [`modal_training_gym/frameworks/slime/config.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/frameworks/slime/config.py)
