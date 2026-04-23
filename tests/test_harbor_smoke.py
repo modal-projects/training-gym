@@ -16,7 +16,6 @@ Run with Modal deploy (prepare_dataset):
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 from pathlib import Path
 
@@ -25,8 +24,6 @@ from modal_training_gym.common.models import Qwen3_4B
 from modal_training_gym.frameworks.harbor import (
     HarborConfig,
     HarborFrameworkConfig,
-    build_harbor_app,
-    HARBOR_TRAIN_JSONL,
 )
 from modal_training_gym.frameworks.harbor.launcher import _build_training_jsonl
 from modal_training_gym.frameworks.miles import MilesFrameworkConfig
@@ -34,7 +31,9 @@ from modal_training_gym.frameworks.miles import MilesFrameworkConfig
 
 def test_config_inheritance():
     cfg = HarborFrameworkConfig()
-    assert isinstance(cfg, MilesFrameworkConfig), "HarborFrameworkConfig must extend MilesFrameworkConfig"
+    assert isinstance(cfg, MilesFrameworkConfig), (
+        "HarborFrameworkConfig must extend MilesFrameworkConfig"
+    )
     assert cfg.gpu == "H100"
     assert cfg.agent_import_path == ""
     assert cfg.sandbox_timeout_secs == 1800
@@ -52,7 +51,15 @@ def test_cli_args_exclude_harbor_fields():
     )
     args = cfg.cli_args()
     for arg in args:
-        for forbidden in ("agent", "sandbox", "harbor", "environment-import", "task-root", "task-glob", "instruction-path"):
+        for forbidden in (
+            "agent",
+            "sandbox",
+            "harbor",
+            "environment-import",
+            "task-root",
+            "task-glob",
+            "instruction-path",
+        ):
             assert forbidden not in arg, f"Harbor field leaked to CLI: {arg}"
     print("  PASS  test_cli_args_exclude_harbor_fields")
 
@@ -133,7 +140,7 @@ def run_local_tests():
     test_harbor_config_construction()
     test_build_app()
     test_jsonl_builder()
-    print(f"\nAll 5 test(s) passed.")
+    print("\nAll 5 test(s) passed.")
 
 
 # ── Modal deploy test ────────────────────────────────────────────────────────
@@ -157,8 +164,8 @@ class HelloWorldDataset(DatasetConfig):
         task_toml = task / "task.toml"
         task_toml.write_text(
             '[task]\nversion = "0.1"\ndifficulty = "easy"\n\n'
-            '[environment]\nallow_internet = false\ncpus = 1\nmemory_mb = 2048\n\n'
-            '[timeouts]\nagent = 120\nverifier = 120\n'
+            "[environment]\nallow_internet = false\ncpus = 1\nmemory_mb = 2048\n\n"
+            "[timeouts]\nagent = 120\nverifier = 120\n"
         )
 
         env_dir = task / "environment"

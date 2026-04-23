@@ -19,12 +19,12 @@ from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.frameworks.miles.config import (
-    CHECKPOINTS_PATH,
     DATA_PATH,
-    HF_CACHE_PATH,
     MilesFrameworkConfig,
 )
-from modal_training_gym.frameworks.miles.config import _SKIP_FIELDS as _MILES_SKIP_FIELDS
+from modal_training_gym.frameworks.miles.config import (
+    _SKIP_FIELDS as _MILES_SKIP_FIELDS,
+)
 
 if TYPE_CHECKING:
     from modal import App

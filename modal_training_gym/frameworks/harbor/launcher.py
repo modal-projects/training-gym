@@ -129,9 +129,7 @@ async def _proxy_stream(
 
 
 @asynccontextmanager
-async def _rollout_proxy(
-    *, target_host: str, target_port: int, listen_port: int
-):
+async def _rollout_proxy(*, target_host: str, target_port: int, listen_port: int):
     """TCP proxy forwarding ``listen_port`` → ``target_host:target_port``.
 
     Sandboxes reach the model server through a public Modal tunnel that
@@ -149,7 +147,9 @@ async def _rollout_proxy(
                 target_host, target_port
             )
             up_task = asyncio.create_task(_proxy_stream(upstream_reader, client_writer))
-            down_task = asyncio.create_task(_proxy_stream(client_reader, upstream_writer))
+            down_task = asyncio.create_task(
+                _proxy_stream(client_reader, upstream_writer)
+            )
             done, pending = await asyncio.wait(
                 {up_task, down_task}, return_when=asyncio.FIRST_COMPLETED
             )
@@ -436,13 +436,9 @@ def build_harbor_app(
                             framework.sandbox_idle_timeout_secs
                         ),
                         # Nested Modal access for sandbox creation
-                        "MODAL_ENVIRONMENT": os.environ.get(
-                            "MODAL_ENVIRONMENT", ""
-                        ),
+                        "MODAL_ENVIRONMENT": os.environ.get("MODAL_ENVIRONMENT", ""),
                         "MODAL_TOKEN_ID": os.environ.get("MODAL_TOKEN_ID", ""),
-                        "MODAL_TOKEN_SECRET": os.environ.get(
-                            "MODAL_TOKEN_SECRET", ""
-                        ),
+                        "MODAL_TOKEN_SECRET": os.environ.get("MODAL_TOKEN_SECRET", ""),
                     }
                 }
                 if framework.environment_import_path:
@@ -486,11 +482,14 @@ def build_harbor_app(
         jsonl_path = HARBOR_TRAIN_JSONL
         if not jsonl_path.exists():
             raise FileNotFoundError(
-                f"Training JSONL not found at {jsonl_path}. "
-                "Run prepare_dataset first."
+                f"Training JSONL not found at {jsonl_path}. Run prepare_dataset first."
             )
 
-        records = [json.loads(line) for line in jsonl_path.read_text().splitlines() if line.strip()]
+        records = [
+            json.loads(line)
+            for line in jsonl_path.read_text().splitlines()
+            if line.strip()
+        ]
         print(f"Loaded {len(records)} task records from {jsonl_path}")
 
         output_dir = DATA_PATH / "evals" / f"{app_name}-{int(time.time())}"

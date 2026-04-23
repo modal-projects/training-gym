@@ -11,7 +11,7 @@ Multi-turn agents append a turn for each message in the conversation.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL | re.IGNORECASE)
@@ -27,7 +27,7 @@ def parse_thinking(text: str) -> tuple[str | None, str]:
         return None, text
     m = _THINK_RE.match(text)
     if m:
-        return m.group(1).strip() or None, text[m.end():]
+        return m.group(1).strip() or None, text[m.end() :]
     return None, text
 
 

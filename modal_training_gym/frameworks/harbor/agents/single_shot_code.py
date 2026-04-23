@@ -15,7 +15,10 @@ from pathlib import Path
 import requests
 from harbor.agents.base import BaseAgent
 
-from modal_training_gym.frameworks.harbor.trajectory import TrajectoryTurn, parse_thinking
+from modal_training_gym.frameworks.harbor.trajectory import (
+    TrajectoryTurn,
+    parse_thinking,
+)
 
 
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
@@ -119,8 +122,8 @@ class SingleShotCodeAgent(BaseAgent):
         usage = result.get("usage", {})
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
-        reasoning_tokens = (
-            usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0)
+        reasoning_tokens = usage.get("completion_tokens_details", {}).get(
+            "reasoning_tokens", 0
         )
 
         reasoning, response_content = parse_thinking(raw_content)

@@ -16,7 +16,9 @@ from miles.utils.types import Sample
 logger = logging.getLogger(__name__)
 
 
-async def reward_func(args, samples: Sample | list[Sample], **kwargs) -> float | list[float]:
+async def reward_func(
+    args, samples: Sample | list[Sample], **kwargs
+) -> float | list[float]:
     """Extract the reward set by the Harbor agent function."""
     if isinstance(samples, list):
         return [float(s.metadata.get("reward", 0.0)) for s in samples]

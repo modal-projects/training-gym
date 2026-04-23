@@ -19,7 +19,9 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 
-def _resolve_agent_base_url(*, tracer_base_url: str, public_base_url: str | None) -> str:
+def _resolve_agent_base_url(
+    *, tracer_base_url: str, public_base_url: str | None
+) -> str:
     """Swap the internal cluster host with the public tunnel URL, keeping the path."""
     tracer_base_url = tracer_base_url.rstrip("/")
     public_base_url = (public_base_url or "").strip().rstrip("/")
@@ -31,13 +33,15 @@ def _resolve_agent_base_url(*, tracer_base_url: str, public_base_url: str | None
     if not tracer_split.path:
         return f"{public_base_url}/v1"
 
-    return urlunsplit((
-        public_split.scheme,
-        public_split.netloc,
-        f"{tracer_split.path}/v1",
-        public_split.query,
-        public_split.fragment,
-    ))
+    return urlunsplit(
+        (
+            public_split.scheme,
+            public_split.netloc,
+            f"{tracer_split.path}/v1",
+            public_split.query,
+            public_split.fragment,
+        )
+    )
 
 
 def _load_json_env(name: str) -> dict[str, Any]:
@@ -98,12 +102,19 @@ async def run(
       AGENT_MODEL_NAME          — served model name
     """
     from harbor.models.environment_type import EnvironmentType
-    from harbor.models.trial.config import AgentConfig, EnvironmentConfig, TaskConfig, TrialConfig
+    from harbor.models.trial.config import (
+        AgentConfig,
+        EnvironmentConfig,
+        TaskConfig,
+        TrialConfig,
+    )
     from harbor.trial.trial import Trial
 
     metadata = metadata or {}
     request_kwargs = request_kwargs or {}
-    prompt_text = prompt if isinstance(prompt, str) else json.dumps(prompt, sort_keys=True)
+    prompt_text = (
+        prompt if isinstance(prompt, str) else json.dumps(prompt, sort_keys=True)
+    )
 
     task_path = metadata.get("harbor_task_path")
     if not task_path:
@@ -196,7 +207,9 @@ async def run(
         "model_latency": agent_metadata.get("model_latency", 0.0),
         "verifier_latency": (
             (result.verifier.finished_at - result.verifier.started_at).total_seconds()
-            if result.verifier and result.verifier.started_at and result.verifier.finished_at
+            if result.verifier
+            and result.verifier.started_at
+            and result.verifier.finished_at
             else 0.0
         ),
     }
@@ -206,7 +219,8 @@ async def run(
     return {
         "reward": reward,
         "exit_status": (
-            "ok" if result.exception_info is None
+            "ok"
+            if result.exception_info is None
             else result.exception_info.exception_type
         ),
         "eval_report": eval_report,
