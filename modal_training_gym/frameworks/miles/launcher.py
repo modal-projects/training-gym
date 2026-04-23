@@ -192,19 +192,21 @@ def build_miles_app(
             await cluster.wait_forever()
             return
 
-        # Resolve the model path inside the HF cache volume.
-        from huggingface_hub import snapshot_download
+        assert miles.model is not None
+        if miles.model.model_path:
+            model_path = str(miles.model.model_path)
+        else:
+            from huggingface_hub import snapshot_download
 
-        assert miles.model.model_name is not None
-        try:
-            model_path = snapshot_download(
-                miles.model.model_name, local_files_only=True
-            )
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                f"Model {miles.model.model_name} not present in HF cache. "
-                f"Run `app.download_model` first."
-            ) from exc
+            try:
+                model_path = snapshot_download(
+                    miles.model.model_name, local_files_only=True
+                )
+            except FileNotFoundError as exc:
+                raise RuntimeError(
+                    f"Model {miles.model.model_name} not present in HF cache. "
+                    f"Run `app.download_model` first."
+                ) from exc
 
         # Build the Miles argv: recipe + extras + framework-enforced flags.
         run_id = f"{app_name}-{int(time.time())}"

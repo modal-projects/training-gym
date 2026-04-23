@@ -66,12 +66,16 @@ def _train_ms_swift_worker(run_id: str | None = None):
     )
     print(f"Node {node_rank}/{n_nodes}, Master: {master_addr}")
 
-    try:
-        model_dir = snapshot_download(model_name, local_files_only=True)
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            f"Model {model_name} not found in HF cache. Run `download_model` first."
-        ) from exc
+    model_path_override = os.environ.get("MS_SWIFT_MODEL_PATH", "")
+    if model_path_override:
+        model_dir = model_path_override
+    else:
+        try:
+            model_dir = snapshot_download(model_name, local_files_only=True)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                f"Model {model_name} not found in HF cache. Run `download_model` first."
+            ) from exc
 
     if not dataset_path or not os.path.exists(dataset_path):
         raise RuntimeError(
@@ -293,6 +297,7 @@ def build_ms_swift_app(
     base_cli_args = swift.cli_args(output_dir="__OUTPUT_DIR__")
     train_env = {
         "MS_SWIFT_MODEL_NAME": swift.model.model_name,
+        "MS_SWIFT_MODEL_PATH": swift.model.model_path or "",
         "MS_SWIFT_DATASET_PATH": getattr(swift.dataset, "prompt_data", ""),
         "MS_SWIFT_APP_NAME": app_name,
         "MS_SWIFT_GPUS_PER_NODE": str(framework.gpus_per_node),

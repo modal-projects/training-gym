@@ -196,7 +196,10 @@ def build_slime_app(
         checkpoints_volume.reload()
 
         assert slime.model is not None, "slime.model must be set"
-        hf_path = snapshot_download(slime.model.model_name, local_files_only=True)
+        if slime.model.model_path:
+            hf_path = str(slime.model.model_path)
+        else:
+            hf_path = snapshot_download(slime.model.model_name, local_files_only=True)
         save_path = str(slime.ref_load)
         num_nodes, nproc_per_node, extra_args = get_checkpoint_conversion_policy(slime)
         node_rank, master_addr, _, nnodes = get_modal_cluster_context(num_nodes)

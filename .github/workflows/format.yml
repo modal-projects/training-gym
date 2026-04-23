@@ -14,6 +14,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref || github.ref_name }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
 
       - uses: astral-sh/ruff-action@v3
         with:
@@ -24,5 +25,6 @@ jobs:
           args: "format"
 
       - uses: stefanzweifel/git-auto-commit-action@v5
+        if: github.event.pull_request.head.repo.full_name == github.repository
         with:
           commit_message: "style: auto-format with ruff"
