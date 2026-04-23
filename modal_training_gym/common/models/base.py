@@ -192,4 +192,7 @@ class HFModelConfiguration(ModelConfiguration):
     def download_model(self) -> None:
         from huggingface_hub import snapshot_download
 
-        snapshot_download(repo_id=self.model_name)
+        kwargs: dict = {"repo_id": self.model_name}
+        if self.model_path:
+            kwargs["local_dir"] = str(self.model_path)
+        snapshot_download(**kwargs)

@@ -114,26 +114,23 @@ def build_miles_app(
     # ── download_model ───────────────────────────────────────────────────────
     @app.function(
         image=image,
-        volumes={hf_cache_str: hf_cache_volume},
+        volumes={
+            hf_cache_str: hf_cache_volume,
+            checkpoints_str: checkpoints_volume,
+        },
         secrets=[Secret.from_name("huggingface-secret")],
         timeout=24 * 60 * 60,
         serialized=True,
         name="download_model",
     )
-    def download_model(revision: str | None = None):
-        """Snapshot_download `miles.model.model_name` into the shared HF cache."""
-        from huggingface_hub import snapshot_download
-
+    def download_model():
+        """Download model weights via the attached ModelConfiguration's hook."""
         assert miles.model is not None, "miles.model must be set"
-        assert miles.model.model_name is not None
         hf_cache_volume.reload()
-        path = snapshot_download(
-            repo_id=miles.model.model_name,
-            revision=revision,
-            token=os.environ.get("HF_TOKEN"),
-        )
-        print(f"Downloaded {miles.model.model_name} to {path}")
+        checkpoints_volume.reload()
+        miles.model.download_model()
         hf_cache_volume.commit()
+        checkpoints_volume.commit()
 
     # ── prepare_dataset ──────────────────────────────────────────────────────
     @app.function(

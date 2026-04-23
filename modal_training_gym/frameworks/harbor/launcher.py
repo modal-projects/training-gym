@@ -265,25 +265,23 @@ def build_harbor_app(
     # ── download_model ───────────────────────────────────────────────────────
     @app.function(
         image=image,
-        volumes={hf_cache_str: hf_cache_volume},
+        volumes={
+            hf_cache_str: hf_cache_volume,
+            checkpoints_str: checkpoints_volume,
+        },
         secrets=[Secret.from_name("huggingface-secret")],
         timeout=24 * 60 * 60,
         serialized=True,
         name="download_model",
     )
-    def download_model(revision: str | None = None):
-        from huggingface_hub import snapshot_download
-
+    def download_model():
+        """Download model weights via the attached ModelConfiguration's hook."""
         assert harbor.model is not None, "harbor.model must be set"
-        assert harbor.model.model_name is not None
         hf_cache_volume.reload()
-        path = snapshot_download(
-            repo_id=harbor.model.model_name,
-            revision=revision,
-            token=os.environ.get("HF_TOKEN"),
-        )
-        print(f"Downloaded {harbor.model.model_name} to {path}")
+        checkpoints_volume.reload()
+        harbor.model.download_model()
         hf_cache_volume.commit()
+        checkpoints_volume.commit()
 
     # ── prepare_dataset ──────────────────────────────────────────────────────
     @app.function(
@@ -364,18 +362,21 @@ def build_harbor_app(
             await cluster.wait_forever()
             return
 
-        from huggingface_hub import snapshot_download
+        assert harbor.model is not None
+        if harbor.model.model_path:
+            model_path = str(harbor.model.model_path)
+        else:
+            from huggingface_hub import snapshot_download
 
-        assert harbor.model.model_name is not None
-        try:
-            model_path = snapshot_download(
-                harbor.model.model_name, local_files_only=True
-            )
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                f"Model {harbor.model.model_name} not present in HF cache. "
-                f"Run `app.download_model` first."
-            ) from exc
+            try:
+                model_path = snapshot_download(
+                    harbor.model.model_name, local_files_only=True
+                )
+            except FileNotFoundError as exc:
+                raise RuntimeError(
+                    f"Model {harbor.model.model_name} not present in HF cache. "
+                    f"Run `app.download_model` first."
+                ) from exc
 
         run_id = f"{app_name}-{int(time.time())}"
         checkpoint_dir = f"{checkpoints_str}/{run_id}"
