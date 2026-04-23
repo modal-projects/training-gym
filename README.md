@@ -32,9 +32,9 @@ Every generated tutorial notebook has this line as its first code cell.
 Run a tutorial — Qwen3-4B GRPO on GSM8K using SLIME:
 
 ```bash
-uv run modal run tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.download_model
-uv run modal run tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.prepare_dataset
-uv run modal run --detach tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.train
+uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.download_model
+uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.prepare_dataset
+uv run modal run --detach tutorials/rl/001_slime_intro/001_slime_intro.py::app.train
 ```
 
 Or open the matching `.ipynb` in Jupyter / Modal Notebooks and run
@@ -43,16 +43,18 @@ cell-by-cell — each notebook is a self-contained walkthrough. See
 
 ## Pick your framework
 
-Each framework package exposes `build_<name>_app(modal=..., config=...)` —
-a factory that returns a `modal.App` with `download_model`,
-`prepare_dataset`, and `train` functions. Shared container objects
-(`DatasetConfig`, `Model`, `WandbConfig`) plug into the framework config;
-each framework translates them into its own CLI vocabulary.
+Each framework package exposes a config class (e.g. `SlimeConfig`,
+`MsSwiftConfig`) that returns a `modal.App` via `.build_app()` with
+`download_model`, `prepare_dataset`, and `train` functions. Shared
+container objects (`DatasetConfig`, `Model`, `WandbConfig`) plug into
+the framework config; each framework translates them into its own CLI
+vocabulary.
 
-| Framework | Good for | Abstraction | Example |
-|---|---|---|---|
-| `ms_swift` | ms-swift Megatron SFT (single- and multi-node) | Opinionated | [`ms_swift_glm_4_7_gsm8k`](tutorials/sft/ms_swift_glm_4_7_gsm8k/), [`ms_swift_custom_hf`](tutorials/sft/ms_swift_custom_hf/) |
-| `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | Opinionated | [`slime_gsm8k`](tutorials/rl/slime_gsm8k/), [`slime_haiku`](tutorials/rl/slime_haiku/) |
+| Framework | Good for | Tutorials |
+|---|---|---|
+| `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | [001 Intro](tutorials/rl/001_slime_intro/), [002 Customizing](tutorials/rl/002_customizing_your_slime_run/), [003 LLM Judge](tutorials/rl/003_slime_with_llm_as_judge/) |
+| `harbor` | Sandbox-based agent RL (extends Miles) | [004 Code Golf](tutorials/rl/004_harbor_codegolf/) |
+| `ms_swift` | ms-swift Megatron SFT (single- and multi-node) | [001 ms-swift](tutorials/sft/001_ms_swift/) |
 
 "Thin" launchers give you a cluster and a `torchrun` — bring your own
 training script. "Opinionated" launchers wrap a specific upstream framework

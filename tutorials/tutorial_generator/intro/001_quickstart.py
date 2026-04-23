@@ -1,4 +1,4 @@
-"""Tutorial source for `quickstart` — parsed by generate_tutorial.py.
+"""Tutorial source for `001_quickstart` — parsed by generate_tutorial.py.
 
 Concept-only walkthrough of the shared abstractions every framework tutorial
 uses: the three config containers (Model, DatasetConfig, WandbConfig), the
@@ -73,7 +73,7 @@ def _model_container():
 
     For a custom HF model, subclass `ModelConfiguration` inline in your
     tutorial (see
-    [`ms_swift_custom_hf`](../../sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb)) —
+    [`002_custom_model`](../../intro/002_custom_model/002_custom_model.ipynb)) —
     there's no registry to update.
     """
 
@@ -269,7 +269,7 @@ def _next_section():
     - [`nccl_benchmark`](../../misc/nccl_benchmark/nccl_benchmark.ipynb) —
       validate that multi-node NCCL works in your workspace before
       running real training.
-    - [`ms_swift_custom_hf`](../../sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb) —
+    - [`002_custom_model`](../../intro/002_custom_model/002_custom_model.ipynb) —
       LoRA SFT on a tiny SmolLM2-135M, with an inline custom
       `ModelConfiguration` subclass.
     **Intermediate** (non-default wiring, 1–2 nodes)
@@ -284,6 +284,6 @@ def _next_section():
 
     - [`slime_gsm8k`](../../rl/slime_gsm8k/slime_gsm8k.ipynb) — colocated 4-node
       GRPO, the canonical math-RL reference.
-    - [`ms_swift_glm_4_7_gsm8k`](../../sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb) —
+    - [`001_ms_swift`](../../sft/001_ms_swift/001_ms_swift.ipynb) —
       GLM-4.7 LoRA SFT on GSM8K using ms-swift + Megatron.
     """

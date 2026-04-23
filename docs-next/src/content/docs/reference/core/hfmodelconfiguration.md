@@ -29,6 +29,7 @@ HFModelConfiguration(**kwargs)
 | `model_name` | `str` | `""` | HuggingFace repo ID or other model identifier. Default `""`. |
 | `model_path` | `str | None` | `None` | Override local path for model weights. When `None`, frameworks derive the path from `model_name`. Default `None`. |
 | `architecture` | `ModelArchitecture | None` | `None` | Transformer architecture spec for Megatron-based frameworks. Not required for HuggingFace-only workflows. Default `None`. |
+| `training` | `ModelTrainingConfig | None` | `None` | Optimal training parameters (parallelism, MoE, LoRA) for this model on a specific GPU type. Frameworks pull defaults from here so users don't need to manually specify model-tuned flags. Default `None`. |
 
 ## Methods
 
@@ -38,6 +39,6 @@ Download or materialize weights into the model volume.
 
 ## Related Tutorials
 
-- [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/quickstart/)
+- [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/001_quickstart/)
 
 **Source:** [`modal_training_gym/common/models/base.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/models/base.py)

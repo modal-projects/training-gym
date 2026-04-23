@@ -1,4 +1,4 @@
-"""Tutorial source for `ms_swift_custom_hf` — parsed by generate_tutorial.py.
+"""Tutorial source for `002_custom_model` — parsed by generate_tutorial.py.
 
 Demonstrates plugging a *custom* HuggingFace model into an ms-swift LoRA SFT
 run by subclassing `ModelConfiguration` — no entry in the built-in model
@@ -43,8 +43,8 @@ def _intro():
 
     **What to watch.** W&B project `custom-hf-smoke`. `train/loss`
     should drop within the first 1–2 steps since the dataset is tiny.
-    See [`quickstart`](../../intro/quickstart/quickstart.ipynb) for the shared
-    primitives; [`ms_swift_glm_4_7_gsm8k`](../ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb)
+    See [`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb) for the shared
+    primitives; [`001_ms_swift`](../ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb)
     for a full-scale ms-swift run with 4-D parallelism.
     """
 
@@ -176,7 +176,7 @@ def _build_section():
     """
     ## Build and run
 
-    See [`quickstart`](../../intro/quickstart/quickstart.ipynb) for the
+    See [`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb) for the
     pattern.
     """
 
@@ -193,9 +193,9 @@ def _run_cli():
     From the CLI:
 
     ```
-    uv run modal run tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py::app.download_model
-    uv run modal run tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py::app.prepare_dataset
-    uv run modal run --detach tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py::app.train
+    uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.download_model
+    uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.prepare_dataset
+    uv run modal run --detach tutorials/intro/002_custom_model/002_custom_model.py::app.train
     ```
     """
 

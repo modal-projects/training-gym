@@ -76,22 +76,23 @@ export default defineConfig({
             {
               label: 'Getting Started',
               items: [
-                { label: 'Quickstart', link: '/tutorials/intro/quickstart/' },
+                { label: '001 Quickstart', link: '/tutorials/intro/001_quickstart/' },
+                { label: '002 Custom Model', link: '/tutorials/intro/002_custom_model/' },
               ],
             },
             {
               label: 'Reinforcement Learning',
               items: [
-                { label: 'SLIME GSM8K', link: '/tutorials/rl/slime_gsm8k/' },
-                { label: 'SLIME Haiku', link: '/tutorials/rl/slime_haiku/' },
-                { label: 'Harbor Code Golf', link: '/tutorials/rl/harbor_code_golf/' },
+                { label: '001 SLIME Intro', link: '/tutorials/rl/001_slime_intro/' },
+                { label: '002 Customizing SLIME', link: '/tutorials/rl/002_customizing_your_slime_run/' },
+                { label: '003 SLIME + LLM Judge', link: '/tutorials/rl/003_slime_with_llm_as_judge/' },
+                { label: '004 Harbor Code Golf', link: '/tutorials/rl/004_harbor_codegolf/' },
               ],
             },
             {
               label: 'Supervised Fine-Tuning',
               items: [
-                { label: 'ms-swift GLM-4.7 GSM8K', link: '/tutorials/sft/ms_swift_glm_4_7_gsm8k/' },
-                { label: 'ms-swift Custom HF', link: '/tutorials/sft/ms_swift_custom_hf/' },
+                { label: '001 ms-swift', link: '/tutorials/sft/001_ms_swift/' },
               ],
             },
             {

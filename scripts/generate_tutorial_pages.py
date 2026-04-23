@@ -204,5 +204,5 @@ def main() -> None:
     print(f"\nGenerated {generated} tutorial pages")
 
 
-if __name__ == "__joy/initial-setup__":
-    joy/initial-setup()
+if __name__ == "__main__":
+    main()

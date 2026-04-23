@@ -15,7 +15,6 @@ Miles RLVR configuration, including Modal infrastructure.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `gpu` | `Literal['H100', 'H200', 'B200', 'B300']` | `"H100"` | Modal GPU type. Default `"H100"`. |
 | `miles_image` | `str` | `"radixark/miles:dev-202603231227"` | Docker image with patched Megatron-LM + Miles trainer. |
 | `image_run_commands` | `list[str]` | `[]` | Extra commands appended to the image build. Default `[]`. |
 | `n_nodes` | `int` | `1` | Number of cluster nodes. Default `1`. |

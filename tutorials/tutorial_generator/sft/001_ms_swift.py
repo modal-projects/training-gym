@@ -1,4 +1,4 @@
-"""Tutorial source for `ms_swift_glm_4_7_gsm8k` — parsed by generate_tutorial.py.
+"""Tutorial source for `001_ms_swift` — parsed by generate_tutorial.py.
 
 Each `@markdown`-decorated function contributes a markdown cell (its
 docstring); each `@code`-decorated function contributes a code cell (its
@@ -42,7 +42,7 @@ def _intro():
     4-stage pipeline parallel for the transformer blocks. Under the
     hood this launches `megatron sft` via `torchrun` on each clustered
     node. For the shared primitives (`DatasetConfig`, `Model`, 3-stage
-    pipeline) see [`quickstart`](../../intro/quickstart/quickstart.ipynb).
+    pipeline) see [`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb).
 
     **What you'll need.**
     - Access to Modal's multi-node training preview (4 × 8×H100).
@@ -161,7 +161,7 @@ def _build_section():
 
     `build_app()` returns a Modal app with `download_model`,
     `prepare_dataset`, and `train`. See
-    [`quickstart`](../../intro/quickstart/quickstart.ipynb) for the pattern.
+    [`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb) for the pattern.
     """
 
 
@@ -177,9 +177,9 @@ def _run_cli():
     From the CLI:
 
     ```
-    uv run modal run tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py::app.download_model
-    uv run modal run tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py::app.prepare_dataset
-    uv run modal run --detach tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py::app.train
+    uv run modal run tutorials/sft/001_ms_swift/001_ms_swift.py::app.download_model
+    uv run modal run tutorials/sft/001_ms_swift/001_ms_swift.py::app.prepare_dataset
+    uv run modal run --detach tutorials/sft/001_ms_swift/001_ms_swift.py::app.train
     ```
     """
 

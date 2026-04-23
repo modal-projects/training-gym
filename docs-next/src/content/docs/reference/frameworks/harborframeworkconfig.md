@@ -47,13 +47,6 @@ Harbor + Miles configuration for sandbox-based RL training.
 | `enable_thinking` | `bool` | `True` | Enable thinking/reasoning mode in the model. Default `True`. |
 | `rollout_shuffle` | `bool` | `True` | Shuffle data during rollout generation. Default `True`. |
 
-## Parallelism (Harbor Overrides)
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `tensor_model_parallel_size` | `int` | `2` | Tensor parallelism degree. Default `2`. |
-| `sequence_parallel` | `bool` | `True` | Enable sequence parallelism. Default `True`. |
-
 ## Memory (Harbor Overrides)
 
 | Field | Type | Default | Description |
@@ -103,7 +96,6 @@ Harbor + Miles configuration for sandbox-based RL training.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `gpu` | `Literal['H100', 'H200', 'B200', 'B300']` | `"H100"` | Modal GPU type. Default `"H100"`. |
 | `image_run_commands` | `list[str]` | `[]` | Extra commands appended to the image build. Default `[]`. |
 | `n_nodes` | `int` | `1` | Number of cluster nodes. Default `1`. |
 | `app_tags` | `dict` | `{}` | Extra Modal app tags. Default `{}`. |
@@ -194,6 +186,6 @@ Shlex-parse `recipe_args` + `extra_args` into a flat argv list.
 
 ## Related Tutorials
 
-- [Qwen3-4B RL code-golf on MBPP with Harbor sandboxes](/tutorials/rl/harbor_code_golf/)
+- [Qwen3-4B RL code-golf on MBPP with Harbor sandboxes](/tutorials/rl/004_harbor_codegolf/)
 
 **Source:** [`modal_training_gym/frameworks/harbor/config.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/frameworks/harbor/config.py)

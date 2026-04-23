@@ -54,6 +54,6 @@ Generate Megatron-LM CLI flags from this architecture spec.
 
 ## Related Tutorials
 
-- [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/quickstart/)
+- [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/001_quickstart/)
 
 **Source:** [`modal_training_gym/common/models/base.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/models/base.py)

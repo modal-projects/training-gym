@@ -53,6 +53,7 @@ _SLIME_SKIP = {
     "app_tags",
     "image_run_commands",
     "local_python_sources",
+    "gpu_type",
 }
 
 # SlimeConfig fields that SLIME reads as YAML files at runtime.
@@ -61,36 +62,7 @@ _SLIME_SKIP = {
 YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
 
 
-_MODEL_TRAINING_FIELDS = {
-    "tensor_model_parallel_size": "tensor_model_parallel_size",
-    "pipeline_model_parallel_size": "pipeline_model_parallel_size",
-    "context_parallel_size": "context_parallel_size",
-    "sequence_parallel": "sequence_parallel",
-    "expert_model_parallel_size": "expert_model_parallel_size",
-    "moe_permute_fusion": "moe_permute_fusion",
-    "moe_grouped_gemm": "moe_grouped_gemm",
-    "moe_shared_expert_overlap": "moe_shared_expert_overlap",
-    "moe_aux_loss_coeff": "moe_aux_loss_coeff",
-}
-
-
-def model_training_overrides(
-    model: "ModelConfiguration",
-) -> dict[str, Any]:
-    """Extract model-level training defaults as SLIME config fields.
-
-    Returns a dict keyed by SLIME CLI flag names (underscore form).
-    Values come from the model's ``ModelTrainingConfig``. Returns an
-    empty dict when the model has no training config.
-    """
-    if model.training is None:
-        return {}
-    overrides = model.training.to_framework_overrides()
-    return {
-        slime_key: overrides[tc_key]
-        for tc_key, slime_key in _MODEL_TRAINING_FIELDS.items()
-        if tc_key in overrides
-    }
+from .preset import SlimePreset  # noqa: E402 — re-export
 
 
 class ModalConfig:
@@ -309,13 +281,15 @@ class SlimeConfig:
     image_run_commands: list[str] = field(default_factory=list)
     local_python_sources: list[str] = field(default_factory=list)
 
-    # ── Cluster and parallelism ─────────────────────────────────────────────
-    actor_num_nodes: int = 1
-    actor_num_gpus_per_node: int = 8
-    colocate: bool = True
+    # ── Cluster and parallelism (preset fields — filled from model.slime) ──
+    gpu_type: str | None = None
+    actor_num_nodes: int | None = None
+    actor_num_gpus_per_node: int | None = None
+    colocate: bool | None = None
+    tensor_model_parallel_size: int | None = None
+    sequence_parallel: bool | None = None
     rollout_num_gpus: int | None = None
     rollout_num_gpus_per_engine: int = 1
-    tensor_model_parallel_size: int = 1
     use_critic: bool = False
     critic_num_nodes: int | None = None
     critic_num_gpus_per_node: int | None = None
@@ -368,7 +342,7 @@ class SlimeConfig:
     eval_config: dict | None = None
 
     # ── Checkpointing ───────────────────────────────────────────────────────
-    save: bool = True
+    save: str = "/checkpoints"
     save_interval: int = 1000
     megatron_to_hf_mode: str = "bridge"
     use_fault_tolerance: bool = True
@@ -380,7 +354,7 @@ class SlimeConfig:
     # ── SGLang / config overrides ───────────────────────────────────────────
     sglang_config: dict | None = None
     custom_config_path: dict | None = None
-    apply_chat_template_kwargs: dict | None = None
+    apply_chat_template_kwargs: str = ""
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -390,6 +364,25 @@ class SlimeConfig:
     # `WandbConfig`) to the specific field names SLIME's CLI expects. Kept
     # explicit so the SLIME vocabulary lives in one place and the common
     # configs stay framework-agnostic.
+
+    def __post_init__(self) -> None:
+        _PRESET_FIELDS = ("gpu_type", "actor_num_nodes", "actor_num_gpus_per_node",
+                          "colocate", "tensor_model_parallel_size", "sequence_parallel")
+
+        if self.model is not None:
+            preset = getattr(self.model, "slime", None)
+            if preset is not None:
+                for f in _PRESET_FIELDS:
+                    if getattr(self, f) is None:
+                        object.__setattr__(self, f, getattr(preset, f))
+
+        missing = [f for f in _PRESET_FIELDS if getattr(self, f) is None]
+        if missing:
+            model_name = self.model.model_name if self.model else "None"
+            raise ValueError(
+                f"SlimeConfig is missing required fields: {missing}. "
+                f"Either add a SlimePreset to {model_name} or pass them explicitly."
+            )
 
     @staticmethod
     def _dataset_to_fields(ds: "DatasetConfig") -> dict[str, Any]:
@@ -473,9 +466,6 @@ class SlimeConfig:
             fields.update(self._dataset_to_fields(self.dataset))
         if self.model is not None:
             fields.update(self._model_to_fields(self.model))
-            for k, v in model_training_overrides(self.model).items():
-                if k not in fields:
-                    fields[k] = v
         if self.wandb is not None:
             fields.update(self._wandb_to_fields(self.wandb))
         return {k: v for k, v in fields.items() if k not in _SLIME_SKIP}
@@ -494,7 +484,7 @@ class SlimeConfig:
         """
         out: list[str] = []
         for key, val in self._fields().items():
-            if val is None or val is False:
+            if val is None or val is False or val == "":
                 continue
             flag = f"--{key.replace('_', '-')}"
             if val is True:
@@ -637,11 +627,9 @@ class SlimeConfig:
     ) -> "App":
         from .launcher import build_slime_app
 
-        from modal_training_gym.common.framework import resolve_gpu
-
         return build_slime_app(
             modal=modal or self.modal or ModalConfig(),
-            gpu=resolve_gpu(self.model),
+            gpu=self.gpu_type,
             slime=self,
             name=name,
         )

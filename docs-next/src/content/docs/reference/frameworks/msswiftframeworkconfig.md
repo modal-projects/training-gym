@@ -15,7 +15,6 @@ ms-swift Megatron SFT configuration, including Modal infrastructure.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `gpu` | `Literal['H100', 'H200', 'B200', 'B300']` | `"H100"` | Modal GPU type. Default `"H100"`. |
 | `image` | `str` | `"modelscope-registry.us-west-1.cr.aliyuncs.com/modelscope-repo/modelscope:ubuntu22.04-cuda12.8.1-py311-torch2.8.0-vllm0.11.0-modelscope1.31.0-swift3.10.3"` | Docker image for the training container. |
 | `transformers_version` | `str` | `"4.57.3"` | Transformers version to reinstall for compatibility. Default `"4.57.3"`. |
 | `app_tags` | `dict` | `{}` | Extra Modal app tags. Default `{}`. |
@@ -30,26 +29,7 @@ ms-swift Megatron SFT configuration, including Modal infrastructure.
 | `tuner_type` | `str` | `"lora"` | Fine-tuning method (e.g. `"lora"`). Default `"lora"`. |
 | `split_dataset_ratio` | `float` | `0.01` | Train/eval split ratio. Default `0.01`. |
 | `perform_initialization` | `bool` | `True` | Emit `--perform_initialization` flag. Default `True`. |
-
-## Parallelism
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `tensor_model_parallel_size` | `int` | `2` | Tensor parallelism degree. Default `2`. |
-| `expert_model_parallel_size` | `int` | `4` | Expert parallelism for MoE models. Default `4`. |
-| `pipeline_model_parallel_size` | `int` | `4` | Pipeline parallelism degree. Default `4`. |
-| `context_parallel_size` | `int` | `1` | Context parallelism degree. Default `1`. |
-| `sequence_parallel` | `bool` | `True` | Enable sequence parallelism. Default `True`. |
 | `use_distributed_optimizer` | `bool` | `True` | Enable distributed optimizer. Default `True`. |
-
-## MoE
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `moe_permute_fusion` | `bool` | `True` | Enable MoE permute fusion. Default `True`. |
-| `moe_grouped_gemm` | `bool` | `True` | Enable grouped GEMM for MoE. Default `True`. |
-| `moe_shared_expert_overlap` | `bool` | `True` | Enable shared expert overlap. Default `True`. |
-| `moe_aux_loss_coeff` | `float` | `0.001` | Auxiliary loss coefficient for MoE load balancing. Default `1e-3`. |
 
 ## Batch
 
@@ -117,11 +97,7 @@ ms-swift Megatron SFT configuration, including Modal infrastructure.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `target_modules` | `str` | `"all-linear"` | LoRA target modules. Default `"all-linear"`. |
-| `lora_rank` | `int` | `128` | LoRA rank. Default `128`. |
-| `lora_alpha` | `int` | `32` | LoRA alpha scaling. Default `32`. |
 | `lora_dropout` | `float` | `0.05` | LoRA dropout. Default `0.05`. |
-| `merge_lora` | `bool` | `False` | Merge LoRA weights after training. Default `False`. |
 
 ## Methods
 
@@ -129,7 +105,7 @@ ms-swift Megatron SFT configuration, including Modal infrastructure.
 
 ## Related Tutorials
 
-- [Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry](/tutorials/sft/ms_swift_custom_hf/)
-- [GLM-4.7 LoRA SFT on GSM8K (Megatron)](/tutorials/sft/ms_swift_glm_4_7_gsm8k/)
+- [Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry](/tutorials/intro/002_custom_model/)
+- [GLM-4.7 LoRA SFT on GSM8K (Megatron)](/tutorials/sft/001_ms_swift/)
 
 **Source:** [`modal_training_gym/frameworks/ms_swift/config.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/frameworks/ms_swift/config.py)

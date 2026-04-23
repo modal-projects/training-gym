@@ -1,4 +1,4 @@
-"""Tutorial source for `slime_gsm8k` — parsed by generate_tutorial.py.
+"""Tutorial source for `001_slime_intro` — parsed by generate_tutorial.py.
 
 Each `@markdown`-decorated function contributes a markdown cell (its
 docstring); each `@code`-decorated function contributes a code cell (its
@@ -7,7 +7,7 @@ body, dedented). Function names are arbitrary. Cell order = source order.
 
 TUTORIAL_METADATA = {
     'framework': '`slime`',
-    'cluster_shape': '4 × 8×H100',
+    'cluster_shape': '1 × 8×H100',
     'summary': 'Qwen3-4B GRPO on GSM8K (colocated)',
     'difficulty': 'Advanced',
     'order': 10,
@@ -36,12 +36,12 @@ def _intro():
     end-to-end" reference for the `slime` framework — a medium-scale RL
     post-training run with SLIME's built-in math reward (no custom
     reward code). For a custom-reward example see
-    [`slime_haiku`](../slime_haiku/slime_haiku.ipynb); for the shared
+    [`003_slime_with_llm_as_judge`](../../003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.ipynb); for the shared
     primitives (DatasetConfig, volumes, the 3-stage pipeline) see
-    [`quickstart`](../../intro/quickstart/quickstart.ipynb).
+    [`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb).
 
     **What you'll need.**
-    - Access to Modal's multi-node training preview (4 × 8×H100).
+    - A Modal account with GPU access (1 × 8×H100).
     - A `wandb` Modal secret holding your W&B API key (the SLIME launcher
       mounts it automatically when `WandbConfig` is present).
     - Patience: multi-hour run — use `modal run --detach`.
@@ -131,7 +131,7 @@ def _explain_config():
     defaults.
 
     **Cluster**
-    - `actor_num_nodes=4` — 32 H100s (4 × 8 GPUs).
+    
     - `colocate=True` — actor and rollout share the same GPUs.
 
     **Throughput**
@@ -155,7 +155,6 @@ def _define_config():
         dataset=GSM8KDataset(DATA_PATH),
         wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-gsm8k"),
         ref_load=base_model.model_name,
-        actor_num_nodes=4,
     )
 
 
@@ -184,9 +183,9 @@ def _run_cli():
     From the CLI:
 
     ```bash
-    uv run modal run tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.download_model
-    uv run modal run tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.prepare_dataset
-    uv run modal run --detach tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.train
+    uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.download_model
+    uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.prepare_dataset
+    uv run modal run --detach tutorials/rl/001_slime_intro/001_slime_intro.py::app.train
     ```
     """
 

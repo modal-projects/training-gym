@@ -1,4 +1,4 @@
-"""Tutorial source for `harbor_code_golf` — parsed by generate_tutorial.py.
+"""Tutorial source for `004_harbor_codegolf` — parsed by generate_tutorial.py.
 
 Each `@markdown`-decorated function contributes a markdown cell (its
 docstring); each `@code`-decorated function contributes a code cell (its
@@ -392,13 +392,13 @@ def _run_cli():
 
     ```bash
     # 1. Prepare the dataset (once): download MBPP, create Harbor tasks
-    uv run modal run tutorials/rl/harbor_code_golf/harbor_code_golf.py::app.prepare_dataset
+    uv run modal run tutorials/rl/004_harbor_codegolf/004_harbor_codegolf.py::app.prepare_dataset
 
     # 2. Download model weights (once)
-    uv run modal run tutorials/rl/harbor_code_golf/harbor_code_golf.py::app.download_model
+    uv run modal run tutorials/rl/004_harbor_codegolf/004_harbor_codegolf.py::app.download_model
 
     # 3. Train
-    uv run modal run --detach tutorials/rl/harbor_code_golf/harbor_code_golf.py::app.train_multi_node
+    uv run modal run --detach tutorials/rl/004_harbor_codegolf/004_harbor_codegolf.py::app.train_multi_node
     ```
     """
 

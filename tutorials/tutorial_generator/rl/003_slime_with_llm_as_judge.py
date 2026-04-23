@@ -1,4 +1,4 @@
-"""Tutorial source for `slime_haiku` — parsed by generate_tutorial.py.
+"""Tutorial source for `003_slime_with_llm_as_judge` — parsed by generate_tutorial.py.
 
 Qwen3-4B GRPO on haiku poems. Demonstrates a custom async reward model
 that combines deterministic structure scoring (5-7-5 syllable count) with
@@ -449,7 +449,7 @@ def _explain_config():
     shape into a single object. Fields that aren't set here fall back to
     SLIME's defaults (optimizer, Megatron parallelism, GRPO clipping,
     etc.) — see the
-    [`slime_gsm8k`](../../rl/slime_gsm8k/slime_gsm8k.ipynb) tutorial
+    [`slime_gsm8k`](../../rl/001_slime_intro/001_slime_intro.ipynb) tutorial
     for a fully explicit example.
 
     Key choices for this run:
@@ -545,9 +545,9 @@ def _run_cli():
     long-running; `--detach` keeps it going after you close the terminal:
 
     ```bash
-    uv run modal run tutorials/rl/slime_haiku/slime_haiku.py::app.download_model
-    uv run modal run tutorials/rl/slime_haiku/slime_haiku.py::app.prepare_dataset
-    uv run modal run --detach tutorials/rl/slime_haiku/slime_haiku.py::app.train
+    uv run modal run tutorials/rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.py::app.download_model
+    uv run modal run tutorials/rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.py::app.prepare_dataset
+    uv run modal run --detach tutorials/rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.py::app.train
     ```
 
     To enable the LLM-judge style score, set `LLM_JUDGE_URL` (and
@@ -669,7 +669,7 @@ def _serve_cli():
     Deploy the serving app separately from the training app:
 
     ```bash
-    uv run modal deploy tutorials/rl/slime_haiku/slime_haiku.py::serve_app
+    uv run modal deploy tutorials/rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.py::serve_app
     ```
 
     The URL is deterministic once deployed:

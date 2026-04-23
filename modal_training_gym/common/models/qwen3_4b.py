@@ -1,6 +1,7 @@
 """Qwen3-4B model spec as a concrete HFModelConfiguration subclass."""
 
-from .base import HFModelConfiguration, ModelArchitecture, ModelTrainingConfig
+from .base import HFModelConfiguration, ModelArchitecture
+from modal_training_gym.frameworks.slime.preset import SlimePreset
 
 
 class Qwen3_4B(HFModelConfiguration):
@@ -9,9 +10,6 @@ class Qwen3_4B(HFModelConfiguration):
     Pre-configured with full ``ModelArchitecture`` for Megatron-based
     frameworks (SLIME, ms-swift Megatron mode). Downloads from
     ``Qwen/Qwen3-4B`` on HuggingFace.
-
-    Training config is tuned for a single H100 node — the model is small
-    enough that no tensor/pipeline parallelism is needed.
     """
 
     model_name = "Qwen/Qwen3-4B"
@@ -32,10 +30,11 @@ class Qwen3_4B(HFModelConfiguration):
         use_rotary_position_embeddings=True,
         rotary_base=1000000,
     )
-    training = ModelTrainingConfig(
+    slime = SlimePreset(
         gpu_type="H100",
-        n_nodes=1,
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=8,
+        colocate=True,
         tensor_model_parallel_size=1,
-        pipeline_model_parallel_size=1,
         sequence_parallel=False,
     )

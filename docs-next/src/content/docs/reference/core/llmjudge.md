@@ -36,6 +36,6 @@ Score one (prompt, response) pair; returns a float in [0, 1].
 
 ## Related Tutorials
 
-- [Qwen3-4B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/slime_haiku/)
+- [Qwen3-4B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/003_slime_with_llm_as_judge/)
 
 **Source:** [`modal_training_gym/common/llm_judge.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/llm_judge.py)
