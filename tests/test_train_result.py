@@ -1,8 +1,9 @@
-"""Unit tests for ``TrainResult`` and its wiring into each framework launcher.
+"""Unit tests for :class:`TrainResult`.
 
-Intentionally avoids any real Modal API calls — these tests exercise the
-pure-Python construction + path-resolution logic, which is where regressions
-are most likely to land.
+Intentionally avoids real Modal API calls — these tests exercise the
+pure-Python construction, serialization, and path-resolution logic,
+which is where regressions are most likely to land. Modal-connected
+methods (``volume``, ``save``, ``load``) are patched.
 
 Run from the repo root:
 
@@ -12,94 +13,82 @@ Run from the repo root:
 from __future__ import annotations
 
 import sys
+from dataclasses import asdict
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 
-def test_train_result_defaults_and_dataclass_fields() -> None:
+def _make() -> Any:
     from modal_training_gym.common.train_result import TrainResult
 
-    tr = TrainResult(
+    return TrainResult(
         app_name="demo",
-        framework="slime",
+        framework="ms-swift",
+        run_id="train_1700000000",
+        checkpoint_dir="/checkpoints/demo_train_1700000000",
+        base_model="Qwen/Qwen3-4B",
         checkpoints_volume_name="demo-checkpoints",
         checkpoints_mount_path="/checkpoints",
-        base_model="Qwen/Qwen3-4B",
+        iteration_prefix="iter_",
     )
-    assert tr.app_name == "demo"
-    assert tr.framework == "slime"
-    assert tr.checkpoints_volume_name == "demo-checkpoints"
-    assert tr.checkpoints_mount_path == "/checkpoints"
-    assert tr.base_model == "Qwen/Qwen3-4B"
-    assert tr.checkpoint_subpath == ""
-    assert tr.iteration_prefix == ""
-    assert tr.volume_version is None
-    assert tr.extra == {}
 
 
-def test_latest_checkpoint_path_without_iterations_returns_mount() -> None:
-    """Frameworks with no iteration prefix: ``latest_checkpoint_path``
-    returns the mount root (or subpath) without hitting the Modal API.
-    """
+def test_dataclass_round_trip_via_asdict() -> None:
+    """``save`` persists the result via ``asdict`` and ``load`` must be
+    able to reconstruct the exact same instance."""
+    from modal_training_gym.common.train_result import TrainResult
+
+    tr = _make()
+    data = asdict(tr)
+    assert data["run_id"] == "train_1700000000"
+    assert data["framework"] == "ms-swift"
+    assert data["iteration_prefix"] == "iter_"
+    assert data["extra"] == {}
+    # Round-trip reconstruction
+    assert TrainResult(**data) == tr
+
+
+def test_latest_checkpoint_path_without_iterations_returns_dir() -> None:
+    """Frameworks without iteration subdirs return ``checkpoint_dir``
+    as-is without touching Modal."""
     from modal_training_gym.common.train_result import TrainResult
 
     tr = TrainResult(
         app_name="demo",
         framework="miles",
+        run_id="demo-1700000000",
+        checkpoint_dir="/checkpoints/demo-1700000000",
+        base_model="Qwen/Qwen3-4B",
         checkpoints_volume_name="demo-checkpoints",
         checkpoints_mount_path="/checkpoints",
-        base_model="Qwen/Qwen3-4B",
     )
-    # No iteration_prefix and no subpath — return the mount itself.
-    assert tr.latest_checkpoint_path() == "/checkpoints"
-
-    tr2 = TrainResult(
-        app_name="demo",
-        framework="ms-swift",
-        checkpoints_volume_name="demo-checkpoints",
-        checkpoints_mount_path="/checkpoints",
-        base_model="Qwen/Qwen3-4B",
-        checkpoint_subpath="demo_train_123",
-    )
-    assert tr2.latest_checkpoint_path() == "/checkpoints/demo_train_123"
+    assert tr.latest_checkpoint_path() == "/checkpoints/demo-1700000000"
 
 
 def test_latest_checkpoint_path_with_iterations_sorts_lexicographically() -> None:
     from modal_training_gym.common.train_result import TrainResult
 
-    tr = TrainResult(
-        app_name="demo",
-        framework="slime",
-        checkpoints_volume_name="demo-checkpoints",
-        checkpoints_mount_path="/checkpoints",
-        base_model="Qwen/Qwen3-4B",
-        iteration_prefix="iter_",
-    )
-
+    tr = _make()
     fake_vol = MagicMock()
     fake_vol.iterdir.return_value = iter(
         [
-            _fake_entry("iter_0000020"),
-            _fake_entry("iter_0000100"),
-            _fake_entry("args.json"),
-            _fake_entry("iter_0000050"),
+            _fake_entry("demo_train_1700000000/iter_0000020"),
+            _fake_entry("demo_train_1700000000/iter_0000100"),
+            _fake_entry("demo_train_1700000000/args.json"),
+            _fake_entry("demo_train_1700000000/iter_0000050"),
         ]
     )
     with patch.object(TrainResult, "volume", return_value=fake_vol):
-        assert tr.latest_checkpoint_path() == "/checkpoints/iter_0000100"
+        assert (
+            tr.latest_checkpoint_path()
+            == "/checkpoints/demo_train_1700000000/iter_0000100"
+        )
 
 
 def test_latest_checkpoint_path_raises_when_empty() -> None:
     from modal_training_gym.common.train_result import TrainResult
 
-    tr = TrainResult(
-        app_name="demo",
-        framework="slime",
-        checkpoints_volume_name="demo-checkpoints",
-        checkpoints_mount_path="/checkpoints",
-        base_model="Qwen/Qwen3-4B",
-        iteration_prefix="iter_",
-    )
+    tr = _make()
     fake_vol = MagicMock()
     fake_vol.iterdir.return_value = iter([])
     with patch.object(TrainResult, "volume", return_value=fake_vol):
@@ -107,95 +96,186 @@ def test_latest_checkpoint_path_raises_when_empty() -> None:
             tr.latest_checkpoint_path()
         except FileNotFoundError as e:
             msg = str(e)
-            assert "demo-checkpoints" in msg
             assert "iter_" in msg
+            assert "demo_train_1700000000" in msg
         else:
             raise AssertionError("Expected FileNotFoundError")
 
 
-def test_build_serve_app_passes_volume_and_path() -> None:
-    """``build_serve_app`` wires through the checkpoints volume name and
-    picks a sensible default ``served_model_name``.
-    """
-    from modal_training_gym.common import train_result as tr_mod
+def test_volume_always_uses_version_2() -> None:
+    """Per the user's requirement: ``TrainResult.volume()`` must always
+    pass ``version=2``."""
+    import modal_training_gym.common.train_result as tr_mod
 
+    tr = _make()
+    captured: dict[str, Any] = {}
+
+    class _FakeVolume:
+        @classmethod
+        def from_name(cls, name: str, **kwargs: Any) -> "_FakeVolume":
+            captured["name"] = name
+            captured["kwargs"] = kwargs
+            return cls()
+
+    with patch.object(tr_mod, "__builtins__", dict(tr_mod.__builtins__)):
+        # The import inside ``.volume()`` grabs ``modal.Volume``. Patch that.
+        with patch.dict(
+            "sys.modules",
+            {"modal": MagicMock(Volume=_FakeVolume)},
+        ):
+            tr.volume()
+
+    assert captured["name"] == "demo-checkpoints"
+    assert captured["kwargs"] == {"create_if_missing": True, "version": 2}
+
+
+def test_save_writes_to_store_keyed_by_run_id() -> None:
+    """``save`` writes an ``asdict`` serialization into the shared
+    modal.Dict under this instance's ``run_id``."""
+    tr = _make()
+    store: dict[str, Any] = {}
+
+    class _FakeDict:
+        @classmethod
+        def from_name(cls, name: str, **kwargs: Any) -> "_FakeDict":
+            _FakeDict.last_name = name  # type: ignore[attr-defined]
+            return cls()
+
+        def __setitem__(self, key: str, value: Any) -> None:
+            store[key] = value
+
+    with patch.dict(
+        "sys.modules",
+        {"modal": MagicMock(Dict=_FakeDict)},
+    ):
+        tr.save()
+
+    assert _FakeDict.last_name == "demo-train-results"  # type: ignore[attr-defined]
+    assert "train_1700000000" in store
+    assert store["train_1700000000"]["checkpoint_dir"] == (
+        "/checkpoints/demo_train_1700000000"
+    )
+
+
+def test_load_returns_latest_when_run_id_is_none() -> None:
+    """``load(app_name)`` picks the lexicographically-largest key."""
+    from modal_training_gym.common.train_result import TrainResult
+
+    stored = {
+        "train_1700000000": asdict(_make()),
+        "train_1800000000": {
+            **asdict(_make()),
+            "run_id": "train_1800000000",
+            "checkpoint_dir": "/checkpoints/demo_train_1800000000",
+        },
+    }
+
+    class _FakeDict:
+        @classmethod
+        def from_name(cls, name: str, **kwargs: Any) -> "_FakeDict":
+            return cls()
+
+        def keys(self) -> Any:
+            return list(stored.keys())
+
+        def __contains__(self, key: str) -> bool:
+            return key in stored
+
+        def __getitem__(self, key: str) -> Any:
+            return stored[key]
+
+    with patch.dict("sys.modules", {"modal": MagicMock(Dict=_FakeDict)}):
+        got = TrainResult.load("demo")
+    assert got.run_id == "train_1800000000"
+    assert got.checkpoint_dir == "/checkpoints/demo_train_1800000000"
+
+
+def test_load_raises_when_no_runs_saved() -> None:
+    from modal_training_gym.common.train_result import TrainResult
+
+    class _FakeDict:
+        @classmethod
+        def from_name(cls, name: str, **kwargs: Any) -> "_FakeDict":
+            return cls()
+
+        def keys(self) -> Any:
+            return []
+
+    with patch.dict("sys.modules", {"modal": MagicMock(Dict=_FakeDict)}):
+        try:
+            TrainResult.load("demo")
+        except LookupError as e:
+            assert "demo" in str(e)
+        else:
+            raise AssertionError("Expected LookupError")
+
+
+def test_build_serve_app_wires_volume_and_run_id() -> None:
+    """``build_serve_app`` forwards the checkpoints volume and picks a
+    sensible default ``served_model_name`` that embeds ``run_id``."""
     captured: dict[str, Any] = {}
 
     def fake_build(**kwargs: Any) -> str:
         captured.update(kwargs)
         return "fake-app"
 
-    tr = tr_mod.TrainResult(
-        app_name="demo",
-        framework="slime",
-        checkpoints_volume_name="demo-checkpoints",
-        checkpoints_mount_path="/checkpoints",
-        base_model="Qwen/Qwen3-4B",
-    )
-
+    tr = _make()
     with patch(
         "modal_training_gym.common.serve_vllm.build_vllm_serve_app",
         side_effect=fake_build,
     ):
-        # Pass an explicit checkpoint_path so we don't hit the (un-mocked)
-        # volume in this test.
-        got = tr.build_serve_app(checkpoint_path="/checkpoints/iter_0000050")
+        # Explicit checkpoint_path so we don't hit the (un-mocked) volume.
+        got = tr.build_serve_app(
+            checkpoint_path="/checkpoints/demo_train_1700000000/iter_0000050"
+        )
 
     assert got == "fake-app"
-    assert captured["app_name"] == "demo-serve"
-    assert captured["model_path"] == "/checkpoints/iter_0000050"
-    assert captured["served_model_name"] == "demo"
+    assert captured["app_name"] == "demo-train_1700000000-serve"
+    assert captured["served_model_name"] == "demo-train_1700000000"
     assert captured["checkpoints_volume"] == "demo-checkpoints"
     assert captured["checkpoints_mount_path"] == "/checkpoints"
 
 
-def test_each_framework_attaches_train_result() -> None:
-    """Smoke test: every ``build_*_app`` exposes ``app.train_result``
-    with a consistent shape.
+def test_each_framework_has_train_result_construction_site() -> None:
+    """Smoke test: every launcher imports ``TrainResult`` and references
+    it in its ``train``/``train_multi_node`` function. Catches the case
+    where a launcher edit accidentally drops the publish step.
     """
-    # Import lazily — these pull in modal, which is already a project dep.
-    from modal_training_gym.common.dataset import HuggingFaceDataset
-    from modal_training_gym.common.models import Qwen3_4B
-    from modal_training_gym.common.train_result import TrainResult
+    import pathlib
 
-    # SLIME ----------------------------------------------------------------
-    from modal_training_gym.frameworks.slime import SlimeConfig
-
-    class _GSM8K(HuggingFaceDataset):
-        hf_repo = "zhuzilin/gsm8k"
-        input_key = "messages"
-        label_key = "label"
-
-    slime_app = SlimeConfig(
-        model=Qwen3_4B(),
-        dataset=_GSM8K(data_root="/data"),
-    ).build_app()
-    result = slime_app.train_result
-    assert isinstance(result, TrainResult)
-    assert result.framework == "slime"
-    assert result.checkpoints_volume_name.endswith("-checkpoints")
-    assert result.checkpoints_mount_path == "/checkpoints"
-    assert result.base_model == "Qwen/Qwen3-4B"
-    assert result.iteration_prefix == "iter_"
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    launchers = {
+        "slime": repo / "modal_training_gym/frameworks/slime/launcher.py",
+        "ms-swift": repo / "modal_training_gym/frameworks/ms_swift/launcher.py",
+        "miles": repo / "modal_training_gym/frameworks/miles/launcher.py",
+        "harbor": repo / "modal_training_gym/frameworks/harbor/launcher.py",
+    }
+    for fw, path in launchers.items():
+        text = path.read_text()
+        assert "TrainResult(" in text, f"{fw} launcher never constructs a TrainResult"
+        assert "result.save()" in text, (
+            f"{fw} launcher constructs but never persists TrainResult"
+        )
 
 
-def _fake_entry(name: str) -> Any:
-    """Build a ``FileEntry``-shaped object whose ``path`` field matches
-    what ``modal.Volume.iterdir`` yields for a flat listing.
-    """
+def _fake_entry(path: str) -> Any:
     entry = MagicMock()
-    entry.path = name
+    entry.path = path
     return entry
 
 
 def main() -> int:
     tests = [
-        test_train_result_defaults_and_dataclass_fields,
-        test_latest_checkpoint_path_without_iterations_returns_mount,
+        test_dataclass_round_trip_via_asdict,
+        test_latest_checkpoint_path_without_iterations_returns_dir,
         test_latest_checkpoint_path_with_iterations_sorts_lexicographically,
         test_latest_checkpoint_path_raises_when_empty,
-        test_build_serve_app_passes_volume_and_path,
-        test_each_framework_attaches_train_result,
+        test_volume_always_uses_version_2,
+        test_save_writes_to_store_keyed_by_run_id,
+        test_load_returns_latest_when_run_id_is_none,
+        test_load_raises_when_no_runs_saved,
+        test_build_serve_app_wires_volume_and_run_id,
+        test_each_framework_has_train_result_construction_site,
     ]
     failures: list[tuple[str, str]] = []
     for t in tests:

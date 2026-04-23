@@ -1,142 +1,234 @@
-"""Post-training handle: look up checkpoints, serve them, and write evals.
+"""Post-training handle: look up checkpoints, serve them, write evals.
 
-``build_app()`` attaches a :class:`TrainResult` to the returned
-``modal.App`` as ``app.train_result``. The struct is pure data — it
-does not talk to Modal until you call a query method — so it is safe
-to import at module scope and hand around to evaluation scripts.
+A :class:`TrainResult` is produced by ``train`` itself — one per call —
+and is also persisted to a shared :class:`modal.Dict` keyed by
+``run_id`` so that a *separate* evaluation script can look it up after
+the fact without re-running training.
 
 Typical flow:
 
 .. code-block:: python
 
-    app = my_training_run.build_app()
-    result = app.train_result
+    # training.py
+    app = MsSwiftConfig(...).build_app()
 
-    # After `modal run --detach tutorial.py::app.train` finishes:
-    print(result.latest_checkpoint_path())          # /checkpoints/iter_0000050
-    print(result.dashboard_url())                   # modal.com volume dashboard
+    # Kick off training:
+    #   modal run --detach training.py::app.train
+    # The train function constructs a TrainResult, writes it to the
+    # shared modal.Dict, and returns it.
 
-    serve_app = result.build_serve_app()            # Modal app hosting the
-                                                    # latest checkpoint via
-                                                    # vLLM (OpenAI-compatible).
+    # eval.py (anywhere, any time after `train` finishes):
+    from modal_training_gym.common.train_result import TrainResult
 
-The same :class:`TrainResult` value can also be re-created from a
-bare ``(app_name, framework, ...)`` tuple in an eval-only script
-that does not need to re-build the training config, which is the
-point: eval code should not depend on the trainer's launcher.
+    result = TrainResult.load("my-app")                 # latest run
+    # or
+    result = TrainResult.load("my-app", run_id="...")   # pinned
+
+    print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
+    print(result.latest_checkpoint_path())  # .../iter_0000050
+
+    serve_app = result.build_serve_app()    # vLLM app hosting the ckpt
+
+Two design invariants:
+
+1. ``TrainResult`` is **not** attached to the ``modal.App`` returned by
+   ``build_app()`` — a training run has no "result" before ``train`` has
+   executed. The ``modal.App`` object is a deployment handle, not a run
+   handle.
+2. Every call to ``train`` can produce a *different* result (different
+   ``run_id``, different ``checkpoint_dir``). We use a :class:`modal.Dict`
+   named ``{app_name}-train-results`` as the shared store so that eval
+   scripts — which don't import the training closure and don't call
+   ``train()`` — can still retrieve results by ``run_id``.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from modal import App, Volume
 
 
+def _store_name(app_name: str) -> str:
+    """Canonical name for the shared :class:`modal.Dict` store."""
+    return f"{app_name}-train-results"
+
+
 @dataclass
 class TrainResult:
-    """Handle to a training run's checkpoints volume.
+    """One completed training run's checkpoint handle.
 
-    Constructed by each framework's ``build_*_app()`` and attached to
-    the returned ``modal.App`` as ``app.train_result``. All fields
-    describe *where* a completed run's artifacts live on Modal — none
-    of them require the training function to have executed yet, so the
-    handle is safe to hold in a deploy-time script.
+    Constructed and persisted by each framework's ``train`` function at
+    the end of a run, and loaded by eval scripts via :meth:`load`. All
+    fields are pure data — no method connects to Modal until explicitly
+    invoked.
 
     Fields
     ------
-    app_name : str
-        Modal app name — also the prefix for the per-app
-        checkpoints volume.
-    framework : str
+    app_name:
+        Modal app name — also the prefix for the per-app checkpoints
+        volume (``{app_name}-checkpoints``) and the shared results
+        :class:`modal.Dict` (``{app_name}-train-results``).
+    framework:
         Training framework identifier (``"slime"``, ``"ms-swift"``,
-        ``"miles"``, ``"harbor"``). Evaluation scripts can switch on
-        this to apply framework-specific decoding of the checkpoint
-        directory layout.
-    checkpoints_volume_name : str
-        Name of the Modal Volume holding checkpoints.
-    checkpoints_mount_path : str
-        Where the volume is mounted inside the training container
-        (e.g. ``"/checkpoints"``). Used as the default serving mount
-        path so absolute paths stored in the volume resolve
-        unchanged.
-    base_model : str
+        ``"miles"``, ``"harbor"``). Eval scripts can switch on this to
+        apply framework-specific decoding of the checkpoint layout.
+    run_id:
+        Unique identifier for *this* specific training call. Keys the
+        record in the shared :class:`modal.Dict`; embedded in
+        ``checkpoint_dir`` for frameworks that scope checkpoints by run.
+    checkpoint_dir:
+        Absolute in-container path to this run's checkpoint directory.
+        For ms-swift / miles / harbor this is a run-specific
+        subdirectory under the checkpoints mount; for slime (which
+        writes a single flat ``iter_*`` tree at ``slime.save``) this is
+        that save root.
+    base_model:
         HuggingFace repo id of the base model — useful as a fallback
         ``served_model_name`` and for tokenizer-only evals.
-    checkpoint_subpath : str
-        Framework-specific subdirectory within the volume where
-        per-iteration checkpoints land. Empty string means the volume
-        root. SLIME's ``--save`` path, ms-swift's
-        ``{app_name}_{run_id}`` directory, and Miles/Harbor's
-        ``{run_id}`` directory are all expressed here.
-    iteration_prefix : str
-        Prefix of per-iteration checkpoint directory names (e.g.
-        ``"iter_"``). ``latest_checkpoint_path()`` sorts directories
-        matching this prefix lexicographically and returns the last
-        one. Empty string disables iteration lookup — the checkpoint
-        path is the ``checkpoint_subpath`` directory itself.
-    volume_version : int | None
-        ``modal.Volume`` filesystem version. ``None`` means use the
-        default. ms-swift uses ``version=2``; other frameworks don't
-        set it.
-    extra : dict[str, Any]
-        Free-form metadata a framework launcher may attach (e.g. the
-        specific ``run_id`` rank 0 chose, the wandb group). Not used
-        by the base class — purely a scratchpad for launcher-specific
-        bookkeeping.
+    checkpoints_volume_name:
+        Name of the checkpoints :class:`modal.Volume`.
+    checkpoints_mount_path:
+        Where the checkpoints volume is mounted in the training
+        container (e.g. ``"/checkpoints"``). Reused as the serving
+        mount path so in-volume absolute paths resolve unchanged.
+    iteration_prefix:
+        Prefix of per-iteration subdirectory names inside
+        ``checkpoint_dir`` (e.g. ``"iter_"``).
+        :meth:`latest_checkpoint_path` sorts directories matching this
+        prefix lexicographically and returns the last one. Empty
+        string disables iteration lookup — the checkpoint path is
+        ``checkpoint_dir`` itself.
+    extra:
+        Free-form metadata a launcher may attach (e.g. wandb run name,
+        rollout tunnel URL). Not used by the base class.
     """
 
     app_name: str
     framework: str
+    run_id: str
+    checkpoint_dir: str
+    base_model: str
     checkpoints_volume_name: str
     checkpoints_mount_path: str
-    base_model: str
-    checkpoint_subpath: str = ""
     iteration_prefix: str = ""
-    volume_version: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+    # ── Persistence: shared modal.Dict ────────────────────────────────────
+
+    def save(self) -> None:
+        """Persist this result to the shared :class:`modal.Dict`.
+
+        Called by each framework's ``train`` function at the end of a
+        successful run (from rank 0 only — the others would race).
+        Round-trips through :func:`dataclasses.asdict` so the record is
+        trivially serializable and forward-compatible across launcher
+        upgrades.
+        """
+        from modal import Dict
+
+        store = Dict.from_name(_store_name(self.app_name), create_if_missing=True)
+        store[self.run_id] = asdict(self)
+
+    @classmethod
+    def load(cls, app_name: str, run_id: str | None = None) -> "TrainResult":
+        """Load a completed run's result from the shared store.
+
+        Parameters
+        ----------
+        app_name:
+            Same ``app_name`` the training run used (i.e. the
+            ``modal.App`` name of the training app).
+        run_id:
+            Specific run to load. When ``None`` (default), returns the
+            lexicographically-largest ``run_id`` — since all launchers
+            embed a monotonic timestamp, that is the most recent run.
+
+        Raises
+        ------
+        LookupError
+            No runs have been saved for this app yet, or the given
+            ``run_id`` isn't in the store.
+        """
+        from modal import Dict
+
+        store = Dict.from_name(_store_name(app_name), create_if_missing=True)
+        if run_id is None:
+            keys = sorted(store.keys())
+            if not keys:
+                raise LookupError(
+                    f"No training results saved for app {app_name!r}. "
+                    f"Has `train` completed yet? "
+                    f"(Results are written to the modal.Dict "
+                    f"{_store_name(app_name)!r}.)"
+                )
+            run_id = keys[-1]
+        if run_id not in store:
+            raise LookupError(
+                f"run_id {run_id!r} not found in results for app {app_name!r}. "
+                f"Known runs: {sorted(store.keys())}"
+            )
+        return cls(**store[run_id])
+
+    @classmethod
+    def list_runs(cls, app_name: str) -> list[str]:
+        """Return all ``run_id``s saved for ``app_name``, sorted oldest
+        first (lexicographic ordering matches timestamp ordering)."""
+        from modal import Dict
+
+        store = Dict.from_name(_store_name(app_name), create_if_missing=True)
+        return sorted(store.keys())
 
     # ── Volume lookup ────────────────────────────────────────────────────
 
     def volume(self) -> "Volume":
         """Return a handle to the checkpoints :class:`modal.Volume`.
 
-        The returned object is hydrated lazily — no network call fires
-        until a method on it is invoked.
+        Always uses ``version=2`` — every framework launcher in this
+        package provisions its checkpoints volume at v2.
         """
         from modal import Volume
 
-        kwargs: dict[str, Any] = {"create_if_missing": True}
-        if self.volume_version is not None:
-            kwargs["version"] = self.volume_version
-        return Volume.from_name(self.checkpoints_volume_name, **kwargs)
+        return Volume.from_name(
+            self.checkpoints_volume_name,
+            create_if_missing=True,
+            version=2,
+        )
 
     def dashboard_url(self) -> str:
-        """URL for browsing the checkpoints volume in the Modal dashboard.
-
-        Fully hydrates the volume and returns its dashboard URL.
-        Prefer :meth:`list_checkpoints` or
-        :meth:`latest_checkpoint_path` for programmatic access.
-        """
+        """URL for browsing the checkpoints volume in the Modal dashboard."""
         return self.volume().get_dashboard_url()
 
     # ── Checkpoint enumeration ──────────────────────────────────────────
 
-    def _listdir(self, path: str) -> list[str]:
-        """List one level of entries in the checkpoints volume.
+    def _volume_rel(self, absolute: str) -> str:
+        """Convert an absolute path under ``checkpoints_mount_path`` to a
+        volume-relative path suitable for :meth:`modal.Volume.iterdir`.
+        """
+        mount = self.checkpoints_mount_path.rstrip("/")
+        if not mount:
+            return absolute.lstrip("/")
+        if absolute == mount:
+            return ""
+        if absolute.startswith(mount + "/"):
+            return absolute[len(mount) + 1 :]
+        return absolute.lstrip("/")
 
-        Returns directory *names* (not full paths), filtered to
-        entries at the requested ``path`` only. Raises any underlying
-        exception unchanged — callers must decide whether a missing
-        directory is fatal.
+    def _listdir(self, rel_path: str) -> list[str]:
+        """List one level of entries under a volume-relative path.
+
+        Returns basenames only. Handles both flat listings (entries
+        yield a basename as ``path``) and recursive listings (entries
+        yield ``dir/file``) by filtering to the requested depth.
         """
         vol = self.volume()
-        prefix = path.rstrip("/") + "/" if path else ""
+        rel = rel_path.strip("/")
+        prefix = rel + "/" if rel else ""
         prefix_depth = prefix.count("/")
         names: list[str] = []
-        for entry in vol.iterdir(path or "/"):
+        for entry in vol.iterdir(rel or "/"):
             entry_path = entry.path
             if prefix and not entry_path.startswith(prefix):
                 continue
@@ -149,53 +241,45 @@ class TrainResult:
         return names
 
     def list_checkpoints(self) -> list[str]:
-        """Return per-iteration checkpoint directory names, sorted.
+        """Return per-iteration checkpoint directory names under
+        ``checkpoint_dir``, sorted.
 
-        Returns an empty list when ``iteration_prefix`` is unset,
-        since there is no canonical "latest iteration" concept for
-        frameworks that write a single flat directory.
+        Empty list when ``iteration_prefix`` is unset (frameworks that
+        write a single flat output directory per run).
         """
         if not self.iteration_prefix:
             return []
+        rel = self._volume_rel(self.checkpoint_dir)
         try:
-            entries = self._listdir(self.checkpoint_subpath)
+            entries = self._listdir(rel)
         except Exception:
             return []
         return sorted(e for e in entries if e.startswith(self.iteration_prefix))
 
     def latest_checkpoint_path(self) -> str:
-        """Return the absolute in-volume path of the latest checkpoint.
+        """Absolute in-volume path of the latest checkpoint.
 
-        For frameworks with an ``iteration_prefix``, this is the
-        lexicographically-largest directory that starts with that
-        prefix inside ``checkpoint_subpath``. For frameworks without
-        per-iteration directories, this falls back to
-        ``checkpoint_subpath`` itself (or the mount path when the
-        subpath is also empty).
+        For frameworks with an ``iteration_prefix``, the largest
+        directory (lexicographic sort) starting with that prefix inside
+        :attr:`checkpoint_dir`. For frameworks without iteration
+        directories, :attr:`checkpoint_dir` itself.
 
         Raises
         ------
         FileNotFoundError
-            No checkpoint directories exist yet. Typically means the
-            training function has not finished a save interval.
+            No matching iteration directory exists yet. Typically means
+            the run has not completed a save interval.
         """
-        mount = self.checkpoints_mount_path.rstrip("/") or "/"
-        if self.iteration_prefix:
-            ckpts = self.list_checkpoints()
-            if not ckpts:
-                raise FileNotFoundError(
-                    f"No checkpoints found under "
-                    f"{self.checkpoints_volume_name}:"
-                    f"/{self.checkpoint_subpath.strip('/')} with prefix "
-                    f"{self.iteration_prefix!r}. Has the training run "
-                    f"completed a save interval yet?"
-                )
-            parts = [
-                p for p in (mount, self.checkpoint_subpath, ckpts[-1]) if p and p != "/"
-            ]
-            return "/" + "/".join(parts).lstrip("/")
-        parts = [p for p in (mount, self.checkpoint_subpath) if p and p != "/"]
-        return "/" + "/".join(parts).lstrip("/") if parts else mount
+        if not self.iteration_prefix:
+            return self.checkpoint_dir
+        ckpts = self.list_checkpoints()
+        if not ckpts:
+            raise FileNotFoundError(
+                f"No checkpoints under {self.checkpoint_dir} "
+                f"with prefix {self.iteration_prefix!r}. "
+                f"Has the training run completed a save interval yet?"
+            )
+        return f"{self.checkpoint_dir.rstrip('/')}/{ckpts[-1]}"
 
     # ── Serving ──────────────────────────────────────────────────────────
 
@@ -209,31 +293,28 @@ class TrainResult:
         """Build a vLLM serving app pointing at a trained checkpoint.
 
         Thin wrapper over
-        :func:`modal_training_gym.common.serve_vllm.build_vllm_serve_app`
-        that wires up this result's checkpoints volume and picks a
-        sensible default ``model_path``.
+        :func:`modal_training_gym.common.serve_vllm.build_vllm_serve_app`.
+        The returned app's name embeds ``run_id`` so multiple trained
+        checkpoints can be served concurrently without name collision.
 
         Parameters
         ----------
         served_model_name:
             ``--served-model-name`` passed to vLLM. Defaults to
-            ``self.app_name``.
+            ``f"{app_name}-{run_id}"``.
         checkpoint_path:
             Absolute in-container checkpoint directory. Defaults to
-            :meth:`latest_checkpoint_path`, which queries Modal to find
-            the newest iteration directory. Pass an explicit path to
-            pin a specific iteration.
+            :meth:`latest_checkpoint_path`.
         **vllm_kwargs:
-            Forwarded to ``build_vllm_serve_app`` (e.g. ``gpu``,
-            ``n_gpu``, ``extra_vllm_args``).
+            Forwarded to ``build_vllm_serve_app``.
         """
         from modal_training_gym.common.serve_vllm import build_vllm_serve_app
 
         model_path = checkpoint_path or self.latest_checkpoint_path()
         return build_vllm_serve_app(
-            app_name=f"{self.app_name}-serve",
+            app_name=f"{self.app_name}-{self.run_id}-serve",
             model_path=model_path,
-            served_model_name=served_model_name or self.app_name,
+            served_model_name=served_model_name or f"{self.app_name}-{self.run_id}",
             checkpoints_volume=self.checkpoints_volume_name,
             checkpoints_mount_path=self.checkpoints_mount_path,
             **vllm_kwargs,

@@ -32,6 +32,7 @@ import os
 import pathlib
 import shlex
 import time
+from dataclasses import asdict
 
 import cloudpickle
 from modal import App, Image, Secret, Volume
@@ -284,27 +285,25 @@ def build_miles_app(
             print(f"Final status: {status}")
 
         checkpoints_volume.commit()
-        return {"run_id": run_id, "checkpoint_dir": checkpoint_dir}
+
+        # Publish a TrainResult for this run so eval scripts can pick it
+        # up via ``TrainResult.load(app_name)``. Only the Ray head runs
+        # this tail (non-head ranks return earlier above).
+        result = TrainResult(
+            app_name=app_name,
+            framework="miles",
+            run_id=run_id,
+            checkpoint_dir=checkpoint_dir,
+            base_model=miles.model.model_name if miles.model is not None else "",
+            checkpoints_volume_name=f"{app_name}-checkpoints",
+            checkpoints_mount_path=checkpoints_str,
+        )
+        result.save()
+        return asdict(result)
 
     # Expose registered functions as attributes so notebook callers can do
     # `app.train_multi_node.remote()` instead of app.registered_functions[...].
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
-
-    # Handle for post-training evals — see
-    # ``modal_training_gym.common.train_result``. Miles writes each run
-    # under ``{app_name}-{unix_ts}`` directly inside the checkpoints mount;
-    # with no per-iteration subdirectory convention on the save side,
-    # ``iteration_prefix`` is empty and ``latest_checkpoint_path`` returns
-    # the checkpoints mount root. Evaluation scripts can discover runs via
-    # ``train_result.list_runs_like(f"{app_name}-")`` (implemented as
-    # ``_listdir("")``) when needed.
-    app.train_result = TrainResult(  # type: ignore[attr-defined]
-        app_name=app_name,
-        framework="miles",
-        checkpoints_volume_name=f"{app_name}-checkpoints",
-        checkpoints_mount_path=checkpoints_str,
-        base_model=miles.model.model_name if miles.model is not None else "",
-    )
 
     return app

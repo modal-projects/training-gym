@@ -534,7 +534,20 @@ def build_harbor_app(
         )
         await obs_volume.commit.aio()
 
-        return {"run_id": run_id, "checkpoint_dir": checkpoint_dir}
+        # Publish a TrainResult for this run so eval scripts can pick it
+        # up via ``TrainResult.load(app_name)``. Only the Ray head runs
+        # this tail (non-head ranks return earlier above).
+        result = TrainResult(
+            app_name=app_name,
+            framework="harbor",
+            run_id=run_id,
+            checkpoint_dir=checkpoint_dir,
+            base_model=harbor.model.model_name if harbor.model is not None else "",
+            checkpoints_volume_name=f"{app_name}-checkpoints",
+            checkpoints_mount_path=checkpoints_str,
+        )
+        result.save()
+        return asdict(result)
 
     # ── eval_harbor ──────────────────────────────────────────────────────────
     @app.function(
@@ -593,18 +606,5 @@ def build_harbor_app(
 
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
-
-    # Handle for post-training evals — see
-    # ``modal_training_gym.common.train_result``. Harbor shares Miles's
-    # checkpoint layout: per-run directories at the checkpoints mount root,
-    # keyed by ``{app_name}-{unix_ts}`` with no per-iteration subdirectory
-    # convention.
-    app.train_result = TrainResult(  # type: ignore[attr-defined]
-        app_name=app_name,
-        framework="harbor",
-        checkpoints_volume_name=f"{app_name}-checkpoints",
-        checkpoints_mount_path=checkpoints_str,
-        base_model=harbor.model.model_name if harbor.model is not None else "",
-    )
 
     return app

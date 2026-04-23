@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import time
+from dataclasses import asdict
 
 import cloudpickle
 from modal import App, Image, Secret, Volume
@@ -36,7 +37,6 @@ from modal_training_gym.common.framework import (
     TOOLS_REMOTE_PATH,
     resolve_caller_module,
 )
-from modal_training_gym.common.train_result import TrainResult
 
 from .config import (
     CHECKPOINTS_PATH,
@@ -186,6 +186,25 @@ def _train_ms_swift_worker(run_id: str | None = None):
         checkpoints_volume_name, create_if_missing=True, version=2
     ).commit()
     print(f"Training {run_id} completed; results in {checkpoint_dir}")
+
+    # Rank 0 publishes the result for this run so eval scripts can pick
+    # it up by ``run_id`` via ``TrainResult.load(app_name)`` without
+    # re-importing the training config.
+    if node_rank == 0:
+        from modal_training_gym.common.train_result import TrainResult
+
+        result = TrainResult(
+            app_name=app_name,
+            framework="ms-swift",
+            run_id=run_id,
+            checkpoint_dir=checkpoint_dir,
+            base_model=model_name,
+            checkpoints_volume_name=checkpoints_volume_name,
+            checkpoints_mount_path=checkpoints_root,
+            iteration_prefix="iter_",
+        )
+        result.save()
+        return asdict(result)
     return {"run_id": run_id, "checkpoint_dir": checkpoint_dir}
 
 
@@ -383,25 +402,5 @@ def build_ms_swift_app(
     # `app.download_model.remote()` instead of app.registered_functions[...].
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
-
-    # Handle for post-training evals — see
-    # ``modal_training_gym.common.train_result``. ms-swift writes each run
-    # under ``{app_name}_{run_id}`` inside the checkpoints mount and saves
-    # per-iteration directories as ``iter_XXX``. The concrete ``run_id`` is
-    # chosen at train time (rank 0 writes a ``.current_run_id`` marker to
-    # the volume), so the default ``TrainResult`` here points at the
-    # checkpoints mount root; use ``TrainResult.list_checkpoints`` against
-    # the concrete ``{app_name}_{run_id}`` subdirectory to locate
-    # iterations.
-    app.train_result = TrainResult(  # type: ignore[attr-defined]
-        app_name=app_name,
-        framework="ms-swift",
-        checkpoints_volume_name=f"{app_name}-checkpoints",
-        checkpoints_mount_path=checkpoints_str,
-        base_model=swift.model.model_name if swift.model is not None else "",
-        checkpoint_subpath="",
-        iteration_prefix="iter_",
-        volume_version=2,
-    )
 
     return app

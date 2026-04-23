@@ -20,6 +20,8 @@ import os
 import shlex
 import subprocess
 import tempfile
+import time
+from dataclasses import asdict
 
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
@@ -321,36 +323,31 @@ def build_slime_app(
             print(f"Ray dashboard: {tunnel.url}")
             await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
 
+        # Persist a TrainResult so eval scripts can pick up this run by
+        # run_id via ``TrainResult.load(app_name)``. SLIME writes
+        # ``iter_XXXXXXX`` directories at ``slime.save`` (defaults to the
+        # ``/checkpoints`` mount root); successive runs append iterations
+        # into that same tree, so ``checkpoint_dir`` is that save root
+        # rather than a per-run subdirectory.
+        run_id = f"{app_name}-{int(time.time())}"
+        save_root = str(slime.save).rstrip("/") if slime.save else str(CHECKPOINTS_PATH)
+        result = TrainResult(
+            app_name=app_name,
+            framework="slime",
+            run_id=run_id,
+            checkpoint_dir=save_root,
+            base_model=slime.model.model_name if slime.model is not None else "",
+            checkpoints_volume_name=f"{app_name}-checkpoints",
+            checkpoints_mount_path=str(CHECKPOINTS_PATH).rstrip("/"),
+            iteration_prefix="iter_",
+        )
+        result.save()
+        return asdict(result)
+
     # Expose registered functions as attributes so notebook callers can do
     # `app.download_model.remote()` instead of
     # `app.registered_functions["download_model"].remote()`.
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
-
-    # Handle for post-training evals: reads the checkpoints volume to find
-    # the latest iteration, builds vLLM serving apps, etc. SLIME writes
-    # `iter_XXXXXXX` directories at `slime.save` (defaults to `/checkpoints`),
-    # which in this launcher is the volume root — so `checkpoint_subpath` is
-    # empty and iterations live at `/checkpoints/iter_*`.
-    save_root = str(slime.save).rstrip("/") if slime.save else str(CHECKPOINTS_PATH)
-    mount_root = str(CHECKPOINTS_PATH).rstrip("/")
-    if save_root.startswith(mount_root + "/"):
-        subpath = save_root[len(mount_root) + 1 :]
-    elif save_root == mount_root:
-        subpath = ""
-    else:
-        # `slime.save` was set to something outside the checkpoints mount —
-        # fall back to the mount root; `latest_checkpoint_path` degrades
-        # gracefully when no iter_* dirs are found.
-        subpath = ""
-    app.train_result = TrainResult(  # type: ignore[attr-defined]
-        app_name=app_name,
-        framework="slime",
-        checkpoints_volume_name=f"{app_name}-checkpoints",
-        checkpoints_mount_path=mount_root,
-        base_model=slime.model.model_name if slime.model is not None else "",
-        checkpoint_subpath=subpath,
-        iteration_prefix="iter_",
-    )
 
     return app
