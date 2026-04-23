@@ -23,6 +23,19 @@ CALLOUT_VARIANTS = {
 MARKDOWN_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
 
 
+def branch_exists_on_origin(branch: str) -> bool:
+    if not branch:
+        return False
+    result = subprocess.run(
+        ["git", "ls-remote", "--exit-code", "--heads", "origin", branch],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
 def current_ref() -> str:
     for env_var in ("GITHUB_REF_NAME", "VERCEL_GIT_COMMIT_REF"):
         value = os.getenv(env_var)
@@ -37,7 +50,9 @@ def current_ref() -> str:
         text=True,
     )
     branch = result.stdout.strip()
-    return branch or "main"
+    if branch_exists_on_origin(branch):
+        return branch
+    return "main"
 
 
 REF = current_ref()

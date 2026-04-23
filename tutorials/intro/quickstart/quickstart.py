@@ -4,8 +4,8 @@
 # # Quickstart: concepts that every tutorial uses
 #
 # `modal-training-gym` wraps a handful of training frameworks (SLIME,
-# verl, Megatron, MS-SWIFT, Lightning, HF Accelerate, torchrun) behind a
-# single pattern: declare a model, a dataset, and a logging config; hand
+# Megatron, MS-SWIFT, and raw torchrun) behind a single pattern: declare
+# a model, a dataset, and a logging config; hand
 # them to a framework factory; `modal run` the returned app. This
 # notebook walks through the pieces so the per-framework tutorials can
 # focus on what makes each framework different instead of re-explaining
@@ -126,7 +126,7 @@ print("project:", wandb.project)
 # app = run.build_app()   # modal.App with download_model / prepare_dataset / train
 # ```
 #
-# Different framework, same shape — swap `slime` for `verl`, `ms_swift`,
+# Different framework, same shape — swap `slime` for `ms_swift`,
 # `megatron`, etc. The framework-specific flags differ (that's what makes
 # the frameworks different), but everything around them stays put.
 
@@ -144,7 +144,7 @@ print("project:", wandb.project)
 # Each framework uses its own data and checkpoints volumes (so one
 # framework's half-written state can't corrupt another's), but the HF
 # cache is truly shared — download `Qwen3-4B` once, use it from slime,
-# verl, and ms-swift.
+# megatron, and ms-swift.
 #
 # Nothing in a tutorial directly manipulates volumes — the launchers
 # mount them and the three remote functions know where to write. If you
@@ -194,25 +194,19 @@ print("project:", wandb.project)
 # - [`ms_swift_custom_hf`](../../sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb) —
 #   LoRA SFT on a tiny SmolLM2-135M, with an inline custom
 #   `ModelConfiguration` subclass.
-# - [`lightning_fabric_demo`](../../misc/lightning_fabric_demo/lightning_fabric_demo.ipynb) —
-#   Lightning Fabric DDP on a small transformer.
-#
 # **Intermediate** (non-default wiring, 1–2 nodes)
 #
 # - [`slime_haiku`](../../rl/slime_haiku/slime_haiku.ipynb) — GRPO with a
 #   **custom async reward function** (structure scoring + optional LLM
 #   judge).
-# - [`starcoder_llama2_7b`](../../sft/starcoder_llama2_7b/starcoder_llama2_7b.ipynb) —
-#   Llama-2-7B FSDP SFT on Go + Rust.
-# - [`nanogpt_owt`](../../misc/nanogpt_owt/nanogpt_owt.ipynb) — GPT-2 124M on
-#   OpenWebText, no framework wrapper (direct torchrun of an external
-#   script).
+# - [`ray_slime_standalone`](../../misc/ray_slime_standalone/ray_slime_standalone.ipynb) —
+#   Ray-on-Modal pattern demo with a custom training loop.
 #
 # **Advanced** (≥2 nodes, non-trivial parallelism, large models)
 #
 # - [`slime_gsm8k`](../../rl/slime_gsm8k/slime_gsm8k.ipynb) — colocated 4-node
 #   GRPO, the canonical math-RL reference.
-# - [`verl_qwen3_32b_gsm8k`](../../rl/verl_qwen3_32b_gsm8k/verl_qwen3_32b_gsm8k.ipynb) —
-#   Qwen3-32B GRPO with vLLM for rollouts.
+# - [`ms_swift_glm_4_7_gsm8k`](../../sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb) —
+#   GLM-4.7 LoRA SFT on GSM8K using ms-swift + Megatron.
 # - [`megatron_glm_4_7_longmit128k`](../../sft/megatron_glm_4_7_longmit128k/megatron_glm_4_7_longmit128k.ipynb) —
 #   GLM-4.7 long-context LoRA on the NeMo bridge.

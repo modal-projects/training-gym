@@ -6,9 +6,9 @@
 > for access.
 
 Distributed training on [Modal](https://modal.com) without hand-rolling a
-launcher each time. Pick a training framework (slime, verl, Megatron,
-MS-SWIFT, Lightning, HF Accelerate, or raw torchrun), plug in a model +
-dataset config, and `modal run` it — training-gym handles the image, the
+launcher each time. Pick a training framework (slime, Megatron,
+MS-SWIFT, or raw torchrun), plug in a model + dataset config, and
+`modal run` it — training-gym handles the image, the
 cluster topology, the Ray/NCCL bring-up, volume mounts, and checkpointing.
 
 Packaged as `modal-training-gym` — pip-install once, then import
@@ -59,13 +59,8 @@ each framework translates them into its own CLI vocabulary.
 
 | Framework | Good for | Abstraction | Example |
 |---|---|---|---|
-| `torchrun` | Any `torchrun`-compatible script; BYO training loop | Thin — cluster + launch only | [`starcoder_llama2_7b`](tutorials/starcoder_llama2_7b/) |
-| `hf_accelerate` | Accelerate-based SFT, FSDP | Thin | [`starcoder_llama2_7b`](tutorials/starcoder_llama2_7b/) |
-| `lightning` | PyTorch Lightning Fabric scripts | Thin | [`lightning_fabric_demo`](tutorials/lightning_fabric_demo/) |
-| `ms_swift` | LoRA / full SFT via ModelScope SWIFT (HF or Megatron backend) | Opinionated | [`ms_swift_glm_4_7_gsm8k`](tutorials/ms_swift_glm_4_7_gsm8k/), [`ms_swift_custom_hf`](tutorials/ms_swift_custom_hf/) |
 | `megatron` | Full-parameter training on Megatron-LM (TP / PP / EP) | Opinionated | [`megatron_glm_4_7_longmit128k`](tutorials/megatron_glm_4_7_longmit128k/) |
 | `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | Opinionated | [`slime_gsm8k`](tutorials/slime_gsm8k/), [`slime_haiku`](tutorials/slime_haiku/) |
-| `verl` | GRPO / RL post-training — Ray + Megatron + vLLM | Opinionated | [`verl_qwen3_32b_gsm8k`](tutorials/verl_qwen3_32b_gsm8k/) |
 
 "Thin" launchers give you a cluster and a `torchrun` — bring your own
 training script. "Opinionated" launchers wrap a specific upstream framework
@@ -120,7 +115,7 @@ uv run pre-commit install
 Project Python is pinned to 3.12 (see `.python-version` / `pyproject.toml`);
 every `@app.function(serialized=True)` requires the local ↔ remote Python
 versions to match, and the framework images we use (slime nightly, NeMo
-25.11, verl `vllm011.latest`) all ship py312.
+25.11) all ship py312.
 
 ## Authoring a new tutorial
 
@@ -134,7 +129,7 @@ schema.
    `launcher.py`, `__init__.py`.
 2. `build_<name>_app(*, modal, config, name=None) -> modal.App` is the
    public entrypoint — same shape as the existing frameworks. See
-   `modal_training_gym/frameworks/verl/launcher.py` for a complete
+   `modal_training_gym/frameworks/slime/launcher.py` for a complete
    reference.
 3. Add a new `tutorials/tutorial_generator/<tutorial>.py` demonstrating it,
    and run the generator.

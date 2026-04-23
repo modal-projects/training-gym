@@ -25,13 +25,9 @@ modal_training_gym/         ← installable package
 │   └── ray_cluster.py      ← ModalRayCluster helper (used by slime, miles)
 ├── frameworks/             ← one subpackage per training framework
 │   ├── slime/              ← SLIME GRPO (Ray + Megatron + SGLang)
-│   ├── verl/               ← verl RLVR (Ray + Megatron + vLLM)
 │   ├── megatron/           ← NeMo Megatron LoRA
 │   ├── ms_swift/           ← ms-swift Megatron SFT
 │   ├── miles/              ← Miles RL (Ray + Megatron)
-│   ├── hf_accelerate/      ← HF Accelerate (arbitrary train script)
-│   ├── torchrun/           ← torchrun  (arbitrary train script)
-│   └── lightning/          ← PyTorch Lightning Fabric
 └── tools/                  ← shared scripts mounted on every image at
                               /opt/training-gym/tools (see "Tools" below)
 
@@ -74,9 +70,9 @@ Built-in subclasses:
 | Class | HF repo | Architecture populated? | Notes |
 |---|---|---|---|
 | `Qwen3_4B` | `Qwen/Qwen3-4B` | yes | SLIME-ready |
-| `Qwen3_32B` | `Qwen/Qwen3-32B` | no (stub) | verl derives arch from HF config |
+| `Qwen3_32B` | `Qwen/Qwen3-32B` | no (stub) | architecture inferred from HF config in RL setups |
 | `GLM_4_7` | `zai-org/GLM-4.7` | no | ms-swift / Megatron derive arch |
-| `Llama2_7B` | `meta-llama/Llama-2-7b-hf` | no | torchrun / accelerate |
+| `Llama2_7B` | `meta-llama/Llama-2-7b-hf` | no | torchrun-based workflows |
 | `Kimi_K2_5` | `moonshotai/Kimi-K2.5` | no | **overrides `download_model`**: snapshot + INT4→BF16 conversion via `tools/convert_kimi_int4_to_bf16.py` |
 
 **Rule of thumb for SLIME**: SLIME emits architecture fields as CLI flags,
@@ -135,13 +131,9 @@ the remote container.
 | Framework | Uses `config.model` CLI-wise | Needs `architecture` | Best for |
 |---|---|---|---|
 | `slime` | hf_checkpoint CLI flag **plus** architecture flags | **yes** | GRPO |
-| `verl` | hf_checkpoint (dir path) | no | RLVR (GRPO) |
 | `megatron` | hf_checkpoint passed to train script | no (uses `AutoBridge`) | NeMo Megatron LoRA |
 | `ms_swift` | `--model <model_name>` | no | ms-swift Megatron SFT |
 | `miles` | `--hf-checkpoint` on the Miles argv | no | Miles RL |
-| `hf_accelerate` | decorative (not dereferenced) | no | arbitrary train script |
-| `torchrun` | decorative (not dereferenced) | no | arbitrary train script |
-| `lightning` | decorative (not dereferenced) | no | arbitrary train script |
 
 ## The `tools/` shared directory
 

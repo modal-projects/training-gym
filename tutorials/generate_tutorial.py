@@ -45,7 +45,8 @@ _README_PATH = TUTORIALS_DIR / "README.md"
 _README_BEGIN = "<!-- BEGIN TUTORIAL TABLE -->"
 _README_END = "<!-- END TUTORIAL TABLE -->"
 _REPO_SLUG = "modal-projects/training-gym"
-_BRANCH = "joy/initial-setup"
+# Keep launch links stable against a branch that always exists remotely.
+_BRANCH = "main"
 _BADGE_IMG = "https://modal-cdn.com/open-in-modal.svg"
 
 _MARKDOWN = "markdown"
@@ -277,31 +278,36 @@ def _render_launch_cell(bucket: str, name: str) -> str:
     )
 
 
-def _render_tutorial_sections(entries: list[tuple[str, str, dict]]) -> str:
-    """Render the catalog as one H3 section per bucket, each a bulleted list.
-
-    Each tutorial bullet has the shape:
-        - **[`name`](<bucket>/<name>/<name>.ipynb)** — summary. `difficulty` ·
-          framework · cluster_shape · <Launch badge>
-    """
-    lines: list[str] = []
-    current_bucket: str | None = None
-    for bucket, name, meta in entries:
-        if bucket != current_bucket:
-            if current_bucket is not None:
-                lines.append("")
-            lines.append(f"### {_BUCKET_DISPLAY.get(bucket, bucket)}")
-            lines.append("")
-            current_bucket = bucket
-        summary = meta["summary"].rstrip(".")
-        difficulty = meta.get("difficulty", "—")
-        framework = meta["framework"]
-        cluster = meta["cluster_shape"]
+def _render_tutorial_table(bucket: str, bucket_entries: list[tuple[str, str, dict]]) -> str:
+    lines = [
+        "| Tutorial | Summary | Difficulty | Framework | Cluster | Launch |",
+        "|---|---|---|---|---|---|",
+    ]
+    for _, name, meta in bucket_entries:
+        summary = str(meta["summary"]).rstrip(".").replace("|", r"\|")
+        difficulty = str(meta.get("difficulty", "—")).replace("|", r"\|")
+        framework = str(meta["framework"]).replace("|", r"\|")
+        cluster = str(meta["cluster_shape"]).replace("|", r"\|")
         launch = _render_launch_cell(bucket, name)
         lines.append(
-            f"- **[`{name}`]({bucket}/{name}/{name}.ipynb)** — {summary}. "
-            f"`{difficulty}` · {framework} · {cluster} · {launch}"
+            f"| [`{name}`]({bucket}/{name}/{name}.ipynb) | {summary} | "
+            f"{difficulty} | {framework} | {cluster} | {launch} |"
         )
+    return "\n".join(lines)
+
+
+def _render_tutorial_sections(entries: list[tuple[str, str, dict]]) -> str:
+    """Render the catalog as one H3 section per bucket, each with a table."""
+    lines: list[str] = []
+    for bucket in _BUCKETS:
+        bucket_entries = [entry for entry in entries if entry[0] == bucket]
+        if not bucket_entries:
+            continue
+        if lines:
+            lines.append("")
+        lines.append(f"### {_BUCKET_DISPLAY.get(bucket, bucket)}")
+        lines.append("")
+        lines.append(_render_tutorial_table(bucket, bucket_entries))
     return "\n".join(lines)
 
 
