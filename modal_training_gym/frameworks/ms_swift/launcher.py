@@ -25,8 +25,8 @@ import json
 import os
 import subprocess
 import time
-import inspect
 
+import cloudpickle
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered, get_cluster_info
 
@@ -34,6 +34,7 @@ from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
 from modal_training_gym.common.framework import (
     TOOLS_LOCAL_PATH,
     TOOLS_REMOTE_PATH,
+    resolve_caller_module,
 )
 
 from .config import (
@@ -41,6 +42,8 @@ from .config import (
     HF_CACHE_PATH,
     MsSwiftConfig,
 )
+
+DATA_PATH = "/data"
 
 
 def _train_ms_swift_worker(run_id: str | None = None):
@@ -56,7 +59,7 @@ def _train_ms_swift_worker(run_id: str | None = None):
     wandb_exp_name = os.environ.get("MS_SWIFT_WANDB_EXP_NAME", "")
 
     if run_id is None:
-        run_id = f"train_{int(time.time())}"
+        run_id = os.environ.get("MS_SWIFT_RUN_ID") or f"train_{int(time.time())}"
 
     cluster_info = get_cluster_info()
     node_rank = cluster_info.rank
@@ -154,22 +157,15 @@ def build_ms_swift_app(
     app_name = name or f"ms-swift-{type(swift).__name__.lstrip('_').lower()}"
     framework = swift.framework_config
 
+    caller_module = resolve_caller_module()
+    if caller_module is not None:
+        cloudpickle.register_pickle_by_value(caller_module)
+
     caller_script = None
-    cwd = os.path.abspath(os.getcwd())
-    for frame_info in inspect.stack()[1:]:
-        mod = inspect.getmodule(frame_info.frame)
-        if mod is None:
-            continue
-        mod_file = getattr(mod, "__file__", None)
-        if not mod_file:
-            continue
-        abs_mod_file = os.path.abspath(mod_file)
-        if not abs_mod_file.startswith(f"{cwd}{os.sep}"):
-            continue
-        if f"{os.sep}modal_training_gym{os.sep}" in abs_mod_file:
-            continue
-        caller_script = abs_mod_file
-        break
+    if caller_module is not None:
+        mod_file = getattr(caller_module, "__file__", None)
+        if mod_file:
+            caller_script = os.path.abspath(mod_file)
 
     # ── Images ───────────────────────────────────────────────────────────────
     download_image = (
@@ -237,10 +233,12 @@ def build_ms_swift_app(
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
+    data_volume = Volume.from_name(f"{app_name}-data", create_if_missing=True)
     checkpoints_volume = Volume.from_name(
         f"{app_name}-checkpoints", create_if_missing=True, version=2
     )
     hf_cache_str = str(HF_CACHE_PATH)
+    data_str = DATA_PATH
     checkpoints_str = str(CHECKPOINTS_PATH)
 
     tags = {
@@ -275,7 +273,7 @@ def build_ms_swift_app(
     # ── prepare_dataset ──────────────────────────────────────────────────────
     @app.function(
         image=download_image,
-        volumes={hf_cache_str: hf_cache_volume},
+        volumes={hf_cache_str: hf_cache_volume, data_str: data_volume},
         timeout=60 * 60,
         serialized=True,
         name="prepare_dataset",
@@ -284,13 +282,16 @@ def build_ms_swift_app(
         """Run `swift.dataset.prepare()` to populate the data volume."""
         assert swift.dataset is not None, "swift.dataset must be set"
         hf_cache_volume.reload()
+        data_volume.reload()
         swift.dataset.prepare()
         hf_cache_volume.commit()
+        data_volume.commit()
 
     # ── train ────────────────────────────────────────────────────────────────
     assert swift.model is not None, "swift.model must be set"
     assert swift.dataset is not None, "swift.dataset must be set"
     base_cli_args = swift.cli_args(output_dir="__OUTPUT_DIR__")
+    shared_run_id = f"train_{int(time.time())}"
     train_env = {
         "MS_SWIFT_MODEL_NAME": swift.model.model_name,
         "MS_SWIFT_MODEL_PATH": swift.model.model_path or "",
@@ -304,12 +305,14 @@ def build_ms_swift_app(
         "MS_SWIFT_WANDB_EXP_NAME": (
             (swift.wandb.exp_name or swift.wandb.group) if swift.wandb else ""
         ),
+        "MS_SWIFT_RUN_ID": shared_run_id,
     }
     app.function(
         image=train_image,
         gpu=gpu_spec,
         volumes={
             hf_cache_str: hf_cache_volume,
+            data_str: data_volume,
             checkpoints_str: checkpoints_volume,
         },
         secrets=[
