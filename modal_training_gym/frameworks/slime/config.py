@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from modal_training_gym.common.models import (
         ModelArchitecture,
         ModelConfiguration,
+        ModelTrainingConfig,
     )
     from modal_training_gym.common.wandb import WandbConfig
 
@@ -54,6 +55,38 @@ _SLIME_SKIP = {
 # Users may set these as inline dicts in Python configs; the launcher
 # materializes them to temp YAML files before building the CLI command.
 YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
+
+
+_MODEL_TRAINING_FIELDS = {
+    "tensor_model_parallel_size": "tensor_model_parallel_size",
+    "pipeline_model_parallel_size": "pipeline_model_parallel_size",
+    "context_parallel_size": "context_parallel_size",
+    "sequence_parallel": "sequence_parallel",
+    "expert_model_parallel_size": "expert_model_parallel_size",
+    "moe_permute_fusion": "moe_permute_fusion",
+    "moe_grouped_gemm": "moe_grouped_gemm",
+    "moe_shared_expert_overlap": "moe_shared_expert_overlap",
+    "moe_aux_loss_coeff": "moe_aux_loss_coeff",
+}
+
+
+def model_training_overrides(
+    model: "ModelConfiguration",
+) -> dict[str, Any]:
+    """Extract model-level training defaults as SLIME config fields.
+
+    Returns a dict keyed by SLIME CLI flag names (underscore form).
+    Values come from the model's ``ModelTrainingConfig``. Returns an
+    empty dict when the model has no training config.
+    """
+    if model.training is None:
+        return {}
+    overrides = model.training.to_framework_overrides()
+    return {
+        slime_key: overrides[tc_key]
+        for tc_key, slime_key in _MODEL_TRAINING_FIELDS.items()
+        if tc_key in overrides
+    }
 
 
 class ModalConfig:

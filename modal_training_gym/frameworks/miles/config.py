@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from modal import App
 
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import ModelConfiguration
+    from modal_training_gym.common.models import ModelConfiguration, ModelTrainingConfig
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
@@ -48,6 +48,40 @@ _SKIP_FIELDS = {
     "rollout_num_gpus",
     "app_tags",
 }
+
+
+_MODEL_TRAINING_FIELDS = {
+    "gpu_type": "gpu",
+    "n_nodes": "n_nodes",
+    "tensor_model_parallel_size": "tensor_model_parallel_size",
+    "pipeline_model_parallel_size": "pipeline_model_parallel_size",
+    "context_parallel_size": "context_parallel_size",
+    "sequence_parallel": "sequence_parallel",
+    "expert_model_parallel_size": "expert_model_parallel_size",
+    "moe_permute_fusion": "moe_permute_fusion",
+    "moe_grouped_gemm": "moe_grouped_gemm",
+    "moe_shared_expert_overlap": "moe_shared_expert_overlap",
+    "moe_aux_loss_coeff": "moe_aux_loss_coeff",
+}
+
+
+def model_training_overrides(
+    model: "ModelConfiguration",
+) -> dict[str, Any]:
+    """Extract model-level training defaults as Miles framework config fields.
+
+    Returns a dict keyed by ``MilesFrameworkConfig`` field names. Values
+    come from the model's ``ModelTrainingConfig``. Returns an empty dict
+    when the model has no training config.
+    """
+    if model.training is None:
+        return {}
+    overrides = model.training.to_framework_overrides()
+    return {
+        miles_key: overrides[tc_key]
+        for tc_key, miles_key in _MODEL_TRAINING_FIELDS.items()
+        if tc_key in overrides
+    }
 
 
 @dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))

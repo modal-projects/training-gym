@@ -165,7 +165,7 @@ main > .content-panel + .content-panel {
 
 #starlight__sidebar a {
   border: 1px solid transparent;
-  border-radius: 0.55rem;
+  border-radius: 0;
   color: var(--sl-color-gray-3);
   padding: 0.5rem 0.7rem;
   transition:
@@ -185,10 +185,14 @@ main > .content-panel + .content-panel {
 #starlight__sidebar [aria-current='page']:hover,
 #starlight__sidebar [aria-current='page']:focus {
   background: var(--tg-panel-alt);
-  border-color: var(--tg-border-strong);
-  box-shadow: inset 2px 0 0 var(--sl-color-accent);
+  border-color: transparent;
+  box-shadow: none;
   color: var(--sl-color-white);
   font-weight: 500;
+}
+
+#starlight__sidebar ul ul li:has([aria-current='page']) {
+  border-inline-start-color: var(--sl-color-accent);
 }
 
 #starlight__sidebar .caret {

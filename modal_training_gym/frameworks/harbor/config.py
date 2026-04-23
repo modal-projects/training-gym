@@ -23,6 +23,7 @@ from modal_training_gym.frameworks.miles.config import (
     DATA_PATH,
     HF_CACHE_PATH as HF_CACHE_PATH,
     MilesFrameworkConfig,
+    model_training_overrides,
 )
 from modal_training_gym.frameworks.miles.config import (
     _SKIP_FIELDS as _MILES_SKIP_FIELDS,
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
     from modal import App
 
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import ModelConfiguration
+    from modal_training_gym.common.models import ModelConfiguration, ModelTrainingConfig
     from modal_training_gym.common.wandb import WandbConfig
 
 _HARBOR_SKIP_FIELDS = {
