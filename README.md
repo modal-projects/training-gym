@@ -7,7 +7,7 @@
 
 Distributed training on [Modal](https://modal.com) without hand-rolling a
 launcher each time. Pick a training framework (slime, Megatron,
-MS-SWIFT, or raw torchrun), plug in a model + dataset config, and
+MS-SWIFT), plug in a model + dataset config, and
 `modal run` it — training-gym handles the image, the
 cluster topology, the Ray/NCCL bring-up, volume mounts, and checkpointing.
 

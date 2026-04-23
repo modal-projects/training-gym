@@ -4,7 +4,7 @@
 # # Quickstart: concepts that every tutorial uses
 #
 # `modal-training-gym` wraps a handful of training frameworks (SLIME,
-# Megatron, MS-SWIFT, and raw torchrun) behind a single pattern: declare
+# Megatron, MS-SWIFT) behind a single pattern: declare
 # a model, a dataset, and a logging config; hand
 # them to a framework factory; `modal run` the returned app. This
 # notebook walks through the pieces so the per-framework tutorials can

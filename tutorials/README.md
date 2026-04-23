@@ -43,7 +43,6 @@ context) and assume familiarity with the underlying framework.
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`nccl_benchmark`](misc/nccl_benchmark/nccl_benchmark.ipynb) | All-reduce bandwidth benchmark (500000×2000 fp32) | Beginner | — (NCCL utility) | 2 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/misc/nccl_benchmark/nccl_benchmark.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`ray_slime_standalone`](misc/ray_slime_standalone/ray_slime_standalone.ipynb) | Ray-on-Modal pattern demo | Intermediate | — (raw `ModalRayCluster`) | 2 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
