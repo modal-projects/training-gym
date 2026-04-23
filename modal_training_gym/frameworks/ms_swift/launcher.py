@@ -230,7 +230,7 @@ def build_ms_swift_app(
 
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
-        "framework": "ms-swift",
+        "_modal_framework": "ms-swift",
         **framework.app_tags,
     }
     app = App(app_name, tags=tags)

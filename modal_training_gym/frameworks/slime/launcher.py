@@ -131,7 +131,7 @@ def build_slime_app(
     # ── App ──────────────────────────────────────────────────────────────────
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
-        "framework": "slime",
+        "_modal_framework": "slime",
         **slime.app_tags,
     }
     app = App(app_name, tags=tags)

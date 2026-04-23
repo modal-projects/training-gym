@@ -97,7 +97,7 @@ def build_miles_app(
 
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
-        "framework": "miles",
+        "_modal_framework": "miles",
         **framework.app_tags,
     }
     app = App(app_name, tags=tags)
@@ -203,6 +203,7 @@ def build_miles_app(
         argv: list[str] = [
             "python3",
             _REMOTE_TRAIN_SCRIPT,
+            *framework.cli_args(),
             *framework.parsed_recipe_args(),
             *extra_argv,
             "--train-backend",

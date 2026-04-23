@@ -25,7 +25,6 @@ modal_training_gym/         ← installable package
 │   └── ray_cluster.py      ← ModalRayCluster helper (used by slime, miles)
 ├── frameworks/             ← one subpackage per training framework
 │   ├── slime/              ← SLIME GRPO (Ray + Megatron + SGLang)
-│   ├── megatron/           ← NeMo Megatron LoRA
 │   ├── ms_swift/           ← ms-swift Megatron SFT
 │   ├── miles/              ← Miles RL (Ray + Megatron)
 └── tools/                  ← shared scripts mounted on every image at
@@ -131,7 +130,6 @@ the remote container.
 | Framework | Uses `config.model` CLI-wise | Needs `architecture` | Best for |
 |---|---|---|---|
 | `slime` | hf_checkpoint CLI flag **plus** architecture flags | **yes** | GRPO |
-| `megatron` | hf_checkpoint passed to train script | no (uses `AutoBridge`) | NeMo Megatron LoRA |
 | `ms_swift` | `--model <model_name>` | no | ms-swift Megatron SFT |
 | `miles` | `--hf-checkpoint` on the Miles argv | no | Miles RL |
 

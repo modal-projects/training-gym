@@ -5,6 +5,10 @@ a Docker image (`radixark/miles:…`) containing both the trainer and its
 patched Megatron-LM stack. Users customize a run by providing "recipe args"
 — a block of Miles CLI flags describing the model architecture + training
 hyperparameters. The launcher adds the cluster + Ray glue.
+
+Training defaults are exposed as typed fields on `MilesFrameworkConfig`.
+They are emitted as CLI flags *before* `recipe_args`, so recipe_args can
+override any default.
 """
 
 from __future__ import annotations
@@ -30,16 +34,33 @@ HF_CACHE_PATH = Path("/root/.cache/huggingface")
 DATA_PATH = Path("/data")
 CHECKPOINTS_PATH = Path("/checkpoints")
 
+# Fields that are NOT emitted as Miles CLI flags.
+_SKIP_FIELDS = {
+    "gpu",
+    "miles_image",
+    "image_run_commands",
+    "n_nodes",
+    "recipe_args",
+    "extra_args",
+    "custom_config_yaml",
+    "colocate",
+    "actor_nodes",
+    "rollout_num_gpus",
+    "app_tags",
+}
+
 
 @dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
 class MilesFrameworkConfig:
     """Miles configuration, including Modal infrastructure.
 
-    The bulk of the training config lives in `recipe_args` — a string of
-    Miles CLI flags copied from the upstream `recipes/*.args` files (one
-    flag per line, `#`-comments allowed). The launcher parses it via
-    `shlex`, appends `extra_args`, and tacks on the framework-level flags
-    (hf checkpoint, save dir, actor/rollout topology) at the end.
+    Typed fields provide training defaults and are emitted as Miles CLI
+    flags (``--hyphen-name value``). They appear *before* ``recipe_args``
+    on the command line, so ``recipe_args`` values take precedence when
+    the same flag appears in both places.
+
+    Model architecture flags (``--num-layers``, ``--hidden-size``, etc.)
+    belong in ``recipe_args`` since they vary per model.
     """
 
     # ── Modal infrastructure ────────────────────────────────────────────────
@@ -60,6 +81,8 @@ class MilesFrameworkConfig:
 
     # ── Recipe + overrides ───────────────────────────────────────────────────
     # Raw Miles CLI flag block — comments + blank lines OK, shlex-parsed.
+    # Model architecture flags (--num-layers, --hidden-size, etc.) and any
+    # per-run overrides go here. Values override the typed defaults above.
     recipe_args: str = ""
     # Extra flags appended after recipe_args, before the framework-enforced flags.
     extra_args: str = ""
@@ -79,7 +102,60 @@ class MilesFrameworkConfig:
     # ── Modal app tags ───────────────────────────────────────────────────────
     app_tags: dict = field(default_factory=dict)
 
+    # ── RL algorithm ─────────────────────────────────────────────────────────
+    advantage_estimator: str = "grpo"
+    eps_clip: float = 0.2
+    clip_grad: float = 1.0
+    kl_coef: float = 0.0
+    normalize_advantages: bool = False
+    seed: int = 1234
+
+    # ── Optimizer ────────────────────────────────────────────────────────────
+    lr: float = 1e-6
+    lr_decay_style: str = "constant"
+    weight_decay: float = 0.0
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.95
+
+    # ── Batch ────────────────────────────────────────────────────────────────
+    micro_batch_size: int = 1
+    n_samples_per_prompt: int = 8
+
+    # ── Precision / memory ───────────────────────────────────────────────────
+    bf16: bool = True
+    attention_softmax_in_fp32: bool = True
+
+    # ── Regularization ───────────────────────────────────────────────────────
+    attention_dropout: float = 0.0
+    hidden_dropout: float = 0.0
+
+    # ── Rollout ──────────────────────────────────────────────────────────────
+    rollout_temperature: float = 1.0
+
+    # ── Checkpointing ────────────────────────────────────────────────────────
+    no_save_optim: bool = True
+
     # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def cli_args(self) -> list[str]:
+        """Convert typed training defaults to Miles CLI flags.
+
+        Miles uses hyphen-separated flag names (``--clip-grad``) and bare
+        boolean flags (``--bf16`` when True, omitted when False).
+        """
+        out: list[str] = []
+        for key, val in vars(self).items():
+            if key.startswith("_") or key in _SKIP_FIELDS or val is None:
+                continue
+            flag = f"--{key.replace('_', '-')}"
+            if isinstance(val, bool):
+                if val:
+                    out.append(flag)
+            elif isinstance(val, list):
+                out += [flag] + [str(v) for v in val]
+            else:
+                out += [flag, str(val)]
+        return out
 
     @staticmethod
     def _clean_arg_text(arg_text: str) -> str:

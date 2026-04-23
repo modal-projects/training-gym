@@ -187,7 +187,7 @@ def _factory_section():
     ```
 
     Different framework, same shape — swap `slime` for `ms_swift`,
-    `megatron`, etc. The framework-specific flags differ (that's what makes
+    etc. The framework-specific flags differ (that's what makes
     the frameworks different), but everything around them stays put.
     """
 
@@ -208,8 +208,8 @@ def _volumes_section():
 
     Each framework uses its own data and checkpoints volumes (so one
     framework's half-written state can't corrupt another's), but the HF
-    cache is truly shared — download `Qwen3-4B` once, use it from slime,
-    megatron, and ms-swift.
+    cache is truly shared — download `Qwen3-4B` once, use it from slime
+    and ms-swift.
 
     Nothing in a tutorial directly manipulates volumes — the launchers
     mount them and the three remote functions know where to write. If you
@@ -283,6 +283,4 @@ def _next_section():
       GRPO, the canonical math-RL reference.
     - [`ms_swift_glm_4_7_gsm8k`](../../sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb) —
       GLM-4.7 LoRA SFT on GSM8K using ms-swift + Megatron.
-    - [`megatron_glm_4_7_longmit128k`](../../sft/megatron_glm_4_7_longmit128k/megatron_glm_4_7_longmit128k.ipynb) —
-      GLM-4.7 long-context LoRA on the NeMo bridge.
     """

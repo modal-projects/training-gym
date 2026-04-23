@@ -198,9 +198,7 @@ def _entrypoint_prefix(ep: str) -> str:
     return ep.rsplit(".", 1)[0] if "." in ep else ""
 
 
-_SHORTCUT_ENTRYPOINTS = {
-    "app.download_and_convert": {"app.download_model", "app.convert_to_megatron"},
-}
+_SHORTCUT_ENTRYPOINTS: dict[str, set[str]] = {}
 
 
 def _derive_targets(
@@ -327,7 +325,6 @@ TUTORIAL_CLASSIFICATIONS: dict[str, dict] = {
     "verl_qwen3_32b_gsm8k": {"type": TargetType.TRAINING, "markers": ["train/reward", "iter 0", "reward"], "train_stage_suffix": "-- trainer.total_training_steps=1"},
     "ms_swift_glm_4_7_gsm8k": {"type": TargetType.TRAINING, "markers": ["iter 0/", "train/loss", "iteration"]},
     "ms_swift_custom_hf": {"type": TargetType.TRAINING, "markers": ["iter 0/", "train/loss", "iteration"]},
-    "megatron_glm_4_7_longmit128k": {"type": TargetType.TRAINING, "markers": ["iter 0/", "iteration", "lm loss"]},
     "starcoder_llama2_7b": {"type": TargetType.TRAINING, "markers": ['{"loss":', "loss", "train_loss"]},
     "nanogpt_owt": {"type": TargetType.TRAINING, "markers": ["iter 0,", "loss=", "iter 0 "]},
     "lightning_fabric_demo": {"type": TargetType.TRAINING, "markers": ["iter 0/", "loss"]},

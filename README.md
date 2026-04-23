@@ -6,7 +6,7 @@
 > for access.
 
 Distributed training on [Modal](https://modal.com) without hand-rolling a
-launcher each time. Pick a training framework (slime, Megatron,
+launcher each time. Pick a training framework (SLIME,
 MS-SWIFT), plug in a model + dataset config, and
 `modal run` it — training-gym handles the image, the
 cluster topology, the Ray/NCCL bring-up, volume mounts, and checkpointing.
@@ -29,15 +29,7 @@ Every generated tutorial notebook has this line as its first code cell.
 
 ## Quickstart
 
-**1. Validate your Modal setup.** Before launching anything expensive, run a
-2 × 8 × H100 NCCL all-reduce to confirm multi-node training works in your
-workspace:
-
-```bash
-uv run modal run --detach tutorials/misc/nccl_benchmark/nccl_benchmark.py::run_benchmark
-```
-
-**2. Run a tutorial.** Qwen3-4B GRPO on GSM8K using SLIME:
+Run a tutorial — Qwen3-4B GRPO on GSM8K using SLIME:
 
 ```bash
 uv run modal run tutorials/rl/slime_gsm8k/slime_gsm8k.py::app.download_model
@@ -59,8 +51,8 @@ each framework translates them into its own CLI vocabulary.
 
 | Framework | Good for | Abstraction | Example |
 |---|---|---|---|
-| `megatron` | Full-parameter training on Megatron-LM (TP / PP / EP) | Opinionated | [`megatron_glm_4_7_longmit128k`](tutorials/megatron_glm_4_7_longmit128k/) |
-| `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | Opinionated | [`slime_gsm8k`](tutorials/slime_gsm8k/), [`slime_haiku`](tutorials/slime_haiku/) |
+| `ms_swift` | ms-swift Megatron SFT (single- and multi-node) | Opinionated | [`ms_swift_glm_4_7_gsm8k`](tutorials/sft/ms_swift_glm_4_7_gsm8k/), [`ms_swift_custom_hf`](tutorials/sft/ms_swift_custom_hf/) |
+| `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | Opinionated | [`slime_gsm8k`](tutorials/rl/slime_gsm8k/), [`slime_haiku`](tutorials/rl/slime_haiku/) |
 
 "Thin" launchers give you a cluster and a `torchrun` — bring your own
 training script. "Opinionated" launchers wrap a specific upstream framework

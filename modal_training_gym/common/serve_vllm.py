@@ -114,7 +114,7 @@ def build_vllm_serve_app(
             )
         volumes[checkpoints_mount_path] = checkpoints_volume
 
-    tags = {**COMMON_TRAINING_GYM_TAGS, "framework": "vllm-serve"}
+    tags = {**COMMON_TRAINING_GYM_TAGS, "_modal_framework": "vllm-serve"}
     app = App(app_name, tags=tags)
 
     _extra = list(extra_vllm_args or [])

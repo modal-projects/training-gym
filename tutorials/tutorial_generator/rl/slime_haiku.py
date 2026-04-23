@@ -96,6 +96,16 @@ def _explain_imports():
     """
 
 
+@notebook_only
+@code
+def _add_tutorial_dir_to_path():
+    import sys, os
+    # `modal run` adds the script's directory to sys.path automatically;
+    # notebooks don't, so the sibling `haiku` module isn't findable.
+    if os.getcwd() not in sys.path:
+        sys.path.insert(0, os.getcwd())
+
+
 @code
 def _imports():
     import modal
