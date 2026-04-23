@@ -110,6 +110,15 @@ main > .content-panel + .content-panel {
   background: var(--sl-color-bg-sidebar);
 }
 
+.sidebar-content:not(:has(ul)) ~ * {
+  display: none;
+}
+
+.sidebar-pane:has(.sidebar-content:empty),
+.sidebar-pane:has(.sidebar-content:not(:has(ul))) {
+  display: none !important;
+}
+
 .sidebar-content {
   padding-top: 1.25rem;
 }
