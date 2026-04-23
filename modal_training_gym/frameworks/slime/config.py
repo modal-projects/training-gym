@@ -12,21 +12,23 @@ into the Ray job runtime env, not passed to SLIME directly.
 """
 
 import math
+from dataclasses import field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
+
 from modal_training_gym.common import GPUType
+from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.models import (
+    ModelArchitecture,
+    ModelConfiguration,
+)
+from modal_training_gym.common.wandb import WandbConfig
 
 if TYPE_CHECKING:
     from modal import App
-
-    from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import (
-        ModelArchitecture,
-        ModelConfiguration,
-        ModelTrainingConfig,
-    )
-    from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
 
@@ -126,11 +128,11 @@ class ModalConfig:
             setattr(self, k, v)
 
 
+@dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class SlimeConfig:
-    """Base SLIME GRPO training configuration.
+    """SLIME GRPO training configuration.
 
-    Subclass and set class attributes to configure an experiment.
-    All non-skip attributes are forwarded to SLIME as CLI args
+    All non-skip fields are forwarded to SLIME as CLI args
     (``--hyphen-name value``). Attach ``dataset``, ``model``, and
     ``wandb`` containers to populate their respective CLI flags
     automatically.
@@ -138,69 +140,245 @@ class SlimeConfig:
     ## Launcher Instructions
 
     environment : dict
-        Injected into the Ray job runtime env. Default includes
-        ``PYTHONPATH``, ``CUDA_DEVICE_MAX_CONNECTIONS``, ``NCCL_NVLS_ENABLE``.
+        Injected into the Ray job runtime env.
     async_mode : bool
-        When ``True``, uses ``train_async.py`` instead of ``train.py``. Default ``False``.
+        When ``True``, uses ``train_async.py``. Default ``False``.
     slime_model_script : str
-        Shell script path relative to ``/root/slime`` that defines ``MODEL_ARGS``.
-        Default ``""``.
+        Shell script path relative to ``/root/slime``. Default ``""``.
 
     ## Composed Configs
 
     dataset : DatasetConfig | None
-        Dataset configuration. Fields expanded to SLIME flags via
-        ``_dataset_to_fields()``. Default ``None``.
+        Dataset configuration. Default ``None``.
     model : ModelConfiguration | None
-        Model identity. Fields expanded to SLIME flags via
-        ``_model_to_fields()``. Requires ``ModelArchitecture``. Default ``None``.
+        Model identity. Requires ``ModelArchitecture``. Default ``None``.
     wandb : WandbConfig | None
-        W&B logging config. Fields expanded to SLIME flags via
-        ``_wandb_to_fields()``. Default ``None``.
+        W&B logging config. Default ``None``.
     modal : ModalConfig | None
         Modal infrastructure config. Default ``None``.
     app_tags : dict
-        Extra Modal app tags merged at build time. Default ``{}``.
+        Extra Modal app tags. Default ``{}``.
 
-    Methods
-    -------
-    cli_args()
-        Generate SLIME CLI arguments from all fields.
-    prepare_data()
-        Materialize training data (delegates to attached DatasetConfig).
-    build_app(name=None, modal=None)
-        Build and return a Modal ``App`` for this training run.
-    total_nodes()
-        Calculate total cluster nodes required.
+    ## Cluster and Parallelism
+
+    actor_num_nodes : int
+        Number of actor training nodes. Default ``1``.
+    actor_num_gpus_per_node : int
+        GPUs per actor node. Default ``8``.
+    colocate : bool
+        Colocate actor and rollout on the same GPUs. Default ``False``.
+    rollout_num_gpus : int | None
+        GPU count for non-colocated rollout. Default ``None``.
+    rollout_num_gpus_per_engine : int
+        GPUs per SGLang rollout engine. Default ``1``.
+    tensor_model_parallel_size : int
+        Tensor parallelism degree. Default ``1``.
+    use_critic : bool
+        Use a separate critic network. Default ``False``.
+    critic_num_nodes : int | None
+        Critic node count. Default ``None``.
+    critic_num_gpus_per_node : int | None
+        GPUs per critic node. Default ``None``.
+
+    ## RL Algorithm
+
+    advantage_estimator : str
+        Advantage estimation method. Default ``"grpo"``.
+    n_samples_per_prompt : int
+        Rollout samples per prompt. Default ``2``.
+    eps_clip : float
+        PPO clipping epsilon. Default ``0.2``.
+    eps_clip_high : float
+        Asymmetric high-side PPO clip. Default ``0.28``.
+    use_kl_loss : bool
+        Enable KL divergence loss. Default ``False``.
+    kl_loss_type : str
+        KL loss variant. Default ``"low_var_kl"``.
+    kl_loss_coef : float
+        KL loss coefficient. Default ``0.0``.
+    entropy_coef : float
+        Entropy bonus coefficient. Default ``0.0``.
+    ref_load : str
+        Reference model checkpoint path. Default ``""``.
+
+    ## Rollout
+
+    num_rollout : int
+        Number of rollout episodes per step. Default ``1``.
+    rollout_batch_size : int
+        Batch size for rollout generation. Default ``8``.
+    rollout_max_response_len : int
+        Maximum response length during rollout. Default ``8192``.
+    rollout_temperature : float
+        Sampling temperature for rollouts. Default ``1.0``.
+    sglang_mem_fraction_static : float
+        SGLang static memory fraction. Default ``0.7``.
+
+    ## Training
+
+    global_batch_size : int
+        Global batch size. Default ``16``.
+    lr : float
+        Learning rate. Default ``1e-6``.
+    lr_decay_style : str
+        LR decay schedule. Default ``"constant"``.
+    weight_decay : float
+        Weight decay. Default ``0.0``.
+    adam_beta1 : float
+        Adam beta1. Default ``0.9``.
+    adam_beta2 : float
+        Adam beta2. Default ``0.95``.
+    optimizer : str
+        Optimizer name. Default ``"adam"``.
+
+    ## Memory and Precision
+
+    attention_dropout : float
+        Attention dropout. Default ``0.0``.
+    hidden_dropout : float
+        Hidden layer dropout. Default ``0.0``.
+    attention_softmax_in_fp32 : bool
+        Compute softmax in FP32. Default ``True``.
+    accumulate_allreduce_grads_in_fp32 : bool
+        Accumulate allreduce grads in FP32. Default ``True``.
+    recompute_granularity : str
+        Activation recomputation granularity. Default ``""``.
+    recompute_method : str
+        Activation recomputation method. Default ``""``.
+    recompute_num_layers : int | None
+        Number of layers to recompute. Default ``None``.
+
+    ## Dynamic Batching
+
+    use_dynamic_batch_size : bool
+        Use dynamic batch sizing. Default ``False``.
+    max_tokens_per_gpu : int | None
+        Max tokens per GPU for dynamic batching. Default ``None``.
+
+    ## Eval
+
+    eval_interval : int
+        Evaluation interval in training steps. Default ``20``.
+    n_samples_per_eval_prompt : int
+        Eval samples per prompt. Default ``4``.
+    eval_max_response_len : int
+        Max response length for eval. Default ``16384``.
+    eval_top_p : float
+        Top-p sampling for eval. Default ``1.0``.
+    eval_config : dict | None
+        YAML eval configuration. Default ``None``.
+
+    ## Checkpointing
+
+    save : bool
+        Enable checkpoint saving. Default ``True``.
+    save_interval : int
+        Checkpoint save interval. Default ``1000``.
+    megatron_to_hf_mode : str
+        Checkpoint conversion mode (``"bridge"`` or ``"raw"``). Default ``"bridge"``.
+    use_fault_tolerance : bool
+        Enable fault tolerance. Default ``False``.
+
+    ## Custom Reward
+
+    custom_rm_path : str
+        Python import path for custom reward function. Default ``""``.
+
+    ## SGLang
+
+    sglang_config : dict | None
+        YAML SGLang server configuration. Default ``None``.
+    custom_config_path : dict | None
+        YAML custom config overrides. Default ``None``.
+    apply_chat_template_kwargs : dict | None
+        Extra kwargs for chat template. Default ``None``.
     """
 
-    # Launcher instructions — not passed to SLIME CLI (see _SLIME_SKIP).
-    environment: dict = {
+    # ── Launcher instructions (not SLIME CLI flags) ─────────────────────────
+    environment: dict = field(default_factory=lambda: {
         "PYTHONPATH": "/root/Megatron-LM/",
         "CUDA_DEVICE_MAX_CONNECTIONS": "1",
         "NCCL_NVLS_ENABLE": "1",
-    }
-    async_mode: bool = False  # True → use train_async.py
-    slime_model_script: str = ""  # shell script path relative to /root/slime
-    # When set, the dataset's fields (`prompt_data`, `input_key`, …) are merged
-    # into the flat field dict and `prepare_data()` delegates to it.
-    dataset: "DatasetConfig | None" = None
-    # When set, the model's `hf_checkpoint` and architecture fields
-    # (`num_layers`, `hidden_size`, …) are merged into the flat field dict.
-    model: "ModelConfiguration | None" = None
-    # When set, wandb logging is enabled and the config's fields
-    # (`wandb_project`, `wandb_group`, …) are merged into the flat field dict.
-    wandb: "WandbConfig | None" = None
-    # Merged with the framework's default Modal app tags
-    # (`training` / `source` / `framework`) at app-build time.
-    app_tags: dict = {}
+    })
+    async_mode: bool = False
+    slime_model_script: str = ""
+    dataset: DatasetConfig | None = None
+    model: ModelConfiguration | None = None
+    wandb: WandbConfig | None = None
+    app_tags: dict = field(default_factory=dict)
     modal: ModalConfig | None = None
 
-    def __init__(self, **kwargs: Any) -> None:
-        # Fresh environment dict per instance — never mutate the class-level default.
-        self.environment = dict(type(self).environment)
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    # ── Cluster and parallelism ─────────────────────────────────────────────
+    actor_num_nodes: int = 1
+    actor_num_gpus_per_node: int = 8
+    colocate: bool = False
+    rollout_num_gpus: int | None = None
+    rollout_num_gpus_per_engine: int = 1
+    tensor_model_parallel_size: int = 1
+    use_critic: bool = False
+    critic_num_nodes: int | None = None
+    critic_num_gpus_per_node: int | None = None
+
+    # ── RL algorithm ────────────────────────────────────────────────────────
+    advantage_estimator: str = "grpo"
+    n_samples_per_prompt: int = 2
+    eps_clip: float = 0.2
+    eps_clip_high: float = 0.28
+    use_kl_loss: bool = False
+    kl_loss_type: str = "low_var_kl"
+    kl_loss_coef: float = 0.0
+    entropy_coef: float = 0.0
+    ref_load: str = ""
+
+    # ── Rollout ─────────────────────────────────────────────────────────────
+    num_rollout: int = 1
+    rollout_batch_size: int = 8
+    rollout_max_response_len: int = 8192
+    rollout_temperature: float = 1.0
+    sglang_mem_fraction_static: float = 0.7
+
+    # ── Training ────────────────────────────────────────────────────────────
+    global_batch_size: int = 16
+    lr: float = 1e-6
+    lr_decay_style: str = "constant"
+    weight_decay: float = 0.0
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.95
+    optimizer: str = "adam"
+
+    # ── Memory and precision ────────────────────────────────────────────────
+    attention_dropout: float = 0.0
+    hidden_dropout: float = 0.0
+    attention_softmax_in_fp32: bool = True
+    accumulate_allreduce_grads_in_fp32: bool = True
+    recompute_granularity: str = ""
+    recompute_method: str = ""
+    recompute_num_layers: int | None = None
+
+    # ── Dynamic batching ────────────────────────────────────────────────────
+    use_dynamic_batch_size: bool = False
+    max_tokens_per_gpu: int | None = None
+
+    # ── Eval ────────────────────────────────────────────────────────────────
+    eval_interval: int = 20
+    n_samples_per_eval_prompt: int = 4
+    eval_max_response_len: int = 16384
+    eval_top_p: float = 1.0
+    eval_config: dict | None = None
+
+    # ── Checkpointing ───────────────────────────────────────────────────────
+    save: bool = True
+    save_interval: int = 1000
+    megatron_to_hf_mode: str = "bridge"
+    use_fault_tolerance: bool = False
+
+    # ── Custom reward ───────────────────────────────────────────────────────
+    custom_rm_path: str = ""
+
+    # ── SGLang / config overrides ───────────────────────────────────────────
+    sglang_config: dict | None = None
+    custom_config_path: dict | None = None
+    apply_chat_template_kwargs: dict | None = None
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -279,24 +457,17 @@ class SlimeConfig:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(self) -> dict[str, Any]:
-        """Merged field dict from the class hierarchy; instance attrs win.
+        """Flat field dict for CLI generation.
 
         Attached containers (`dataset`, `model`, `wandb`) are expanded last via
-        the per-framework converters above, so their values override any
-        direct attrs with the same names.
+        the per-framework converters, so their values override direct fields
+        with the same names.
         """
+        import dataclasses as _dc
+
         fields: dict[str, Any] = {}
-        for cls in reversed(type(self).__mro__):
-            if cls is object:
-                continue
-            fields.update(
-                {
-                    k: v
-                    for k, v in vars(cls).items()
-                    if not k.startswith("_") and not callable(v)
-                }
-            )
-        fields.update(vars(self))
+        for f in _dc.fields(self):
+            fields[f.name] = getattr(self, f.name)
         if self.dataset is not None:
             fields.update(self._dataset_to_fields(self.dataset))
         if self.model is not None:
@@ -381,18 +552,7 @@ class SlimeConfig:
             ModelConfiguration,
         )
 
-        fields: dict[str, Any] = {}
-        for cls in reversed(type(self).__mro__):
-            if cls is object:
-                continue
-            fields.update(
-                {
-                    k: v
-                    for k, v in vars(cls).items()
-                    if not k.startswith("_") and not callable(v)
-                }
-            )
-        fields.update(vars(self))
+        fields = self._fields()
 
         arch_candidate = ModelArchitecture(
             num_layers=fields.get("num_layers", 0),
@@ -482,3 +642,12 @@ class SlimeConfig:
             slime=self,
             name=name,
         )
+
+
+# Resolve forward references for pydantic validation
+from modal_training_gym.common.dataset import DatasetConfig  # noqa: E402,F811
+from modal_training_gym.common.models import ModelArchitecture, ModelConfiguration  # noqa: E402,F811
+from modal_training_gym.common.wandb import WandbConfig  # noqa: E402,F811
+from pydantic.dataclasses import rebuild_dataclass  # noqa: E402
+
+rebuild_dataclass(SlimeConfig)
