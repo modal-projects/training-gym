@@ -23,7 +23,6 @@ from dataclasses import asdict, dataclass, field
 
 import modal
 
-from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -37,7 +36,6 @@ image = (
 app = modal.App(
     "training-gym-dashboard",
     image=image,
-    tags={**COMMON_TRAINING_GYM_TAGS, "_modal_framework": "dashboard"},
 )
 
 training_runs_dict = modal.Dict.from_name("training-gym-runs", create_if_missing=True)
