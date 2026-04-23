@@ -17,14 +17,13 @@ theme:
   language: en
   features:
     - navigation.tabs
-    - navigation.sections
+    - navigation.tabs.sticky
     - navigation.instant
     - navigation.top
     - toc.follow
     - search.highlight
     - search.suggest
     - content.code.copy
-    - content.action.view
   font:
     text: Inter
     code: JetBrains Mono
@@ -44,6 +43,9 @@ theme:
   icon:
     repo: fontawesome/brands/github
 
+extra:
+  generator: false
+
 plugins:
   - search
   - gen-files:
@@ -56,7 +58,7 @@ markdown_extensions:
   - md_in_html
   - tables
   - toc:
-      permalink: true
+      permalink: false
   - pymdownx.details
   - pymdownx.inlinehilite
   - pymdownx.superfences

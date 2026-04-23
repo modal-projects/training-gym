@@ -124,6 +124,10 @@ body {
   margin-top: 0.8rem;
 }
 
+.md-grid {
+  max-width: 90rem;
+}
+
 .md-content__inner {
   margin: 0;
   padding-bottom: 3rem;
@@ -131,8 +135,8 @@ body {
 
 .md-typeset {
   color: var(--tg-text-soft);
-  font-size: 0.86rem;
-  line-height: 1.8;
+  font-size: 0.94rem;
+  line-height: 1.72;
 }
 
 .md-typeset h1,
@@ -150,6 +154,24 @@ body {
 
 .md-typeset h2 {
   margin-top: 2.8rem;
+}
+
+.md-typeset h3 + ul {
+  list-style: none;
+  margin: 0.9rem 0 1.6rem;
+  padding: 0;
+}
+
+.md-typeset h3 + ul > li {
+  margin: 0 0 0.7rem;
+  border: 1px solid var(--tg-border);
+  border-radius: 0.75rem;
+  background: linear-gradient(180deg, #101928, #0d1522);
+  padding: 0.85rem 1rem;
+}
+
+.md-typeset h3 + ul > li::marker {
+  content: "";
 }
 
 .md-typeset a {
@@ -215,6 +237,10 @@ body {
 
 .md-source__repository {
   font-weight: 600;
+}
+
+.md-footer {
+  display: none;
 }
 
 @media screen and (max-width: 76.1875em) {
