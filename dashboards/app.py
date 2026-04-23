@@ -61,36 +61,43 @@ class TrainingRun:
 
 
 _FETCH_SCRIPT = r"""
-import json, sys, modal
+import asyncio, json, sys
 
-result = __import__("subprocess").run(
-    ["modal", "app", "list", "--json"],
-    capture_output=True, text=True,
-)
-app_list = json.loads(result.stdout)
+async def _fetch():
+    from modal.client import _Client
+    from modal_proto import api_pb2
 
-seen, runs = set(), []
-for info in app_list:
-    name = info["Description"]
-    if name in seen:
-        continue
-    seen.add(name)
-    try:
-        tags = modal.App.lookup(name).get_tags()
-    except Exception:
-        continue
-    if tags.get("_modal_job_type") != "training":
-        continue
-    runs.append({
-        "app_id": info["App ID"],
-        "name": name,
-        "state": info.get("State", "unknown"),
-        "created_at": info.get("Created at", ""),
-        "stopped_at": info.get("Stopped at"),
-        "framework": tags.get("_modal_framework", "(untagged)"),
-        "tags": tags,
-    })
-json.dump(runs, sys.stdout)
+    result = __import__("subprocess").run(
+        ["modal", "app", "list", "--json"],
+        capture_output=True, text=True,
+    )
+    app_list = json.loads(result.stdout)
+    client = await _Client.from_env()
+
+    runs = []
+    for info in app_list:
+        app_id = info["App ID"]
+        try:
+            resp = await client.stub.AppGetTags(
+                api_pb2.AppGetTagsRequest(app_id=app_id)
+            )
+            tags = dict(resp.tags)
+        except Exception:
+            continue
+        if tags.get("_modal_job_type") != "training":
+            continue
+        runs.append({
+            "app_id": app_id,
+            "name": info["Description"],
+            "state": info.get("State", "unknown"),
+            "created_at": info.get("Created at", ""),
+            "stopped_at": info.get("Stopped at"),
+            "framework": tags.get("_modal_framework", "(untagged)"),
+            "tags": tags,
+        })
+    json.dump(runs, sys.stdout)
+
+asyncio.run(_fetch())
 """
 
 
