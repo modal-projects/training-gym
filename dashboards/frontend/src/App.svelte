@@ -3,7 +3,30 @@
   import { fetchRuns } from "./lib/api.js";
   import FilterBar from "./FilterBar.svelte";
   import FrameworkSection from "./FrameworkSection.svelte";
+  import HarborDetail from "./HarborDetail.svelte";
   import logoSvg from "./lib/logo.svg";
+
+  let page = $state("list");
+  let harborRunId = $state(null);
+
+  function parseHash() {
+    const hash = location.hash || "#/";
+    const m = hash.match(/^#\/harbor\/(.+)/);
+    if (m) {
+      page = "harbor-detail";
+      harborRunId = decodeURIComponent(m[1]);
+    } else {
+      page = "list";
+      harborRunId = null;
+    }
+  }
+
+  parseHash();
+  $effect(() => {
+    const handler = () => parseHash();
+    window.addEventListener("hashchange", handler);
+    return () => window.removeEventListener("hashchange", handler);
+  });
 
   let allRuns = $state([]);
   let loading = $state(true);
@@ -118,47 +141,56 @@
   }
 </script>
 
-<header class="topbar">
-  <img src={logoSvg} alt="Modal" class="logo" />
-  <h1>training-gym</h1>
-  <div class="sep"></div>
-  <button class="btn" onclick={load}>Refresh</button>
-  <span class="status">{statusText}</span>
-</header>
+{#if page === "harbor-detail" && harborRunId}
+  <HarborDetail
+    runId={harborRunId}
+    onBack={() => {
+      location.hash = "#/";
+    }}
+  />
+{:else}
+  <header class="topbar">
+    <img src={logoSvg} alt="Modal" class="logo" />
+    <h1>training-gym</h1>
+    <div class="sep"></div>
+    <button class="btn" onclick={load}>Refresh</button>
+    <span class="status">{statusText}</span>
+  </header>
 
-<FilterBar
-  {frameworks}
-  {fwCounts}
-  {activeFrameworks}
-  allActive={activeFrameworks.size === frameworks.length}
-  {states}
-  {stateCounts}
-  {activeStates}
-  totalRuns={allRuns.length}
-  bind:search
-  onToggleFramework={toggleFramework}
-  onToggleAllFrameworks={toggleAllFrameworks}
-  onToggleState={toggleState}
-/>
+  <FilterBar
+    {frameworks}
+    {fwCounts}
+    {activeFrameworks}
+    allActive={activeFrameworks.size === frameworks.length}
+    {states}
+    {stateCounts}
+    {activeStates}
+    totalRuns={allRuns.length}
+    bind:search
+    onToggleFramework={toggleFramework}
+    onToggleAllFrameworks={toggleAllFrameworks}
+    onToggleState={toggleState}
+  />
 
-<div class="main">
-  {#if loading}
-    <div class="empty">Loading...</div>
-  {:else if error}
-    <div class="empty">Failed to load: {error}</div>
-  {:else if !allRuns.length}
-    <div class="empty">
-      No training runs found. The cron job populates data every 5 minutes —
-      if you just deployed, wait for the first refresh.
-    </div>
-  {:else if !filteredRuns.length}
-    <div class="empty">No runs match the current filters.</div>
-  {:else}
-    {#each sortedFrameworkKeys as fw (fw)}
-      <FrameworkSection framework={fw} runs={groupedRuns[fw]} />
-    {/each}
-  {/if}
-</div>
+  <div class="main">
+    {#if loading}
+      <div class="empty">Loading...</div>
+    {:else if error}
+      <div class="empty">Failed to load: {error}</div>
+    {:else if !allRuns.length}
+      <div class="empty">
+        No training runs found. The cron job populates data every 5 minutes —
+        if you just deployed, wait for the first refresh.
+      </div>
+    {:else if !filteredRuns.length}
+      <div class="empty">No runs match the current filters.</div>
+    {:else}
+      {#each sortedFrameworkKeys as fw (fw)}
+        <FrameworkSection framework={fw} runs={groupedRuns[fw]} />
+      {/each}
+    {/if}
+  </div>
+{/if}
 
 <style>
   .topbar {
