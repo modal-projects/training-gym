@@ -84,9 +84,7 @@ def build_vllm_serve_app(
     from modal import App, Image, Secret, Volume
 
     image = (
-        Image.from_registry(
-            "nvidia/cuda:12.8.0-devel-ubuntu22.04", add_python="3.12"
-        )
+        Image.from_registry("nvidia/cuda:12.8.0-devel-ubuntu22.04", add_python="3.12")
         .entrypoint([])
         .uv_pip_install(
             f"vllm=={vllm_version}",

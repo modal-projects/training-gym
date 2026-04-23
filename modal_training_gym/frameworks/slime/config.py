@@ -343,9 +343,7 @@ class SlimeConfig:
             ),
             rotary_base=fields.get("rotary_base", 10000),
         )
-        architecture = (
-            arch_candidate if arch_candidate != ModelArchitecture() else None
-        )
+        architecture = arch_candidate if arch_candidate != ModelArchitecture() else None
         return ModelConfiguration(
             model_name=fields.get("hf_checkpoint", "") or "",
             architecture=architecture,

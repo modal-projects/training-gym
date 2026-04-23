@@ -33,9 +33,7 @@ def collect_config_class_attrs(
             {
                 key: val
                 for key, val in vars(base).items()
-                if key not in blocked
-                and not key.startswith("_")
-                and not callable(val)
+                if key not in blocked and not key.startswith("_") and not callable(val)
             }
         )
     return attrs
@@ -49,7 +47,9 @@ def mount_tools_dir(image: "Image") -> "Image":
     a predictable remote path regardless of the framework image's layout.
     """
     return image.add_local_dir(
-        TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True,
+        TOOLS_LOCAL_PATH,
+        remote_path=TOOLS_REMOTE_PATH,
+        copy=True,
     )
 
 

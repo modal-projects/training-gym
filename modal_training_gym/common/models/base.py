@@ -73,9 +73,7 @@ class ModelConfiguration:
 
     def download_model(self) -> None:
         """Download or materialize weights into the model volume."""
-        raise NotImplementedError(
-            f"{type(self).__name__} has no download_model()"
-        )
+        raise NotImplementedError(f"{type(self).__name__} has no download_model()")
 
 
 class HFModelConfiguration(ModelConfiguration):

@@ -173,7 +173,10 @@ class MilesFrameworkConfig:
 
         cleaned = "\n".join(
             part
-            for part in (self._clean_arg_text(self.recipe_args), self._clean_arg_text(self.extra_args))
+            for part in (
+                self._clean_arg_text(self.recipe_args),
+                self._clean_arg_text(self.extra_args),
+            )
             if part
         )
         return shlex.split(cleaned) if cleaned else []

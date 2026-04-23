@@ -78,7 +78,9 @@ def _dequantize_tensor(
         if scales.numel() == weight.numel():
             scales = scales.reshape_as(weight)
         else:
-            raise ValueError(f"Scale shape {scales.shape} incompatible with weight shape {weight.shape}")
+            raise ValueError(
+                f"Scale shape {scales.shape} incompatible with weight shape {weight.shape}"
+            )
 
     bf16 = (weight.to(torch.float32) * scales).to(torch.bfloat16)
     return bf16.contiguous()
@@ -156,8 +158,14 @@ def convert_file(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Convert GPTQ MoE experts to BF16 weights.")
-    parser.add_argument("--model-dir", required=True, help="Directory containing safetensors checkpoints.")
+    parser = argparse.ArgumentParser(
+        description="Convert GPTQ MoE experts to BF16 weights."
+    )
+    parser.add_argument(
+        "--model-dir",
+        required=True,
+        help="Directory containing safetensors checkpoints.",
+    )
     parser.add_argument(
         "--output-dir",
         default=None,
@@ -197,7 +205,9 @@ def main():
         targets = [os.path.join(model_dir, fname) for fname in args.files]
     else:
         targets = [
-            os.path.join(model_dir, name) for name in sorted(os.listdir(model_dir)) if name.endswith(".safetensors")
+            os.path.join(model_dir, name)
+            for name in sorted(os.listdir(model_dir))
+            if name.endswith(".safetensors")
         ]
 
     if not targets:
@@ -218,7 +228,11 @@ def main():
         dst_path = os.path.join(output_dir, fname)
         if fname == "model.safetensors.index.json":
             continue
-        if fname.endswith(".json") or fname.endswith(".py") or fname.startswith("tokenizer"):
+        if (
+            fname.endswith(".json")
+            or fname.endswith(".py")
+            or fname.startswith("tokenizer")
+        ):
             shutil.copy2(src_path, dst_path)
 
     # Generate new index

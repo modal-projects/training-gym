@@ -61,7 +61,9 @@ def _train_ms_swift_worker(run_id: str | None = None):
     cluster_info = get_cluster_info()
     node_rank = cluster_info.rank
     n_nodes = len(cluster_info.container_ips) if cluster_info.container_ips else 1
-    master_addr = cluster_info.container_ips[0] if cluster_info.container_ips else "localhost"
+    master_addr = (
+        cluster_info.container_ips[0] if cluster_info.container_ips else "localhost"
+    )
     print(f"Node {node_rank}/{n_nodes}, Master: {master_addr}")
 
     try:
@@ -79,7 +81,9 @@ def _train_ms_swift_worker(run_id: str | None = None):
     checkpoint_dir = f"{checkpoints_root}/{app_name}_{run_id}"
     resuming = False
     if os.path.exists(checkpoint_dir):
-        iter_dirs = sorted(d for d in os.listdir(checkpoint_dir) if d.startswith("iter_"))
+        iter_dirs = sorted(
+            d for d in os.listdir(checkpoint_dir) if d.startswith("iter_")
+        )
         if iter_dirs:
             resuming = True
             print(f"Resuming from {iter_dirs[-1]}")
@@ -100,7 +104,11 @@ def _train_ms_swift_worker(run_id: str | None = None):
             megatron_flags[i + 1] = model_dir
             break
 
-    if wandb_project and not wandb_exp_name and "--wandb_exp_name" not in megatron_flags:
+    if (
+        wandb_project
+        and not wandb_exp_name
+        and "--wandb_exp_name" not in megatron_flags
+    ):
         megatron_flags.extend(["--wandb_exp_name", run_id])
 
     if resuming:
@@ -128,7 +136,9 @@ def _train_ms_swift_worker(run_id: str | None = None):
     if result.returncode != 0:
         raise RuntimeError(f"ms-swift failed with code {result.returncode}")
 
-    Volume.from_name(checkpoints_volume_name, create_if_missing=True, version=2).commit()
+    Volume.from_name(
+        checkpoints_volume_name, create_if_missing=True, version=2
+    ).commit()
     print(f"Training {run_id} completed; results in {checkpoint_dir}")
     return {"run_id": run_id, "checkpoint_dir": checkpoint_dir}
 
@@ -170,7 +180,8 @@ def build_ms_swift_app(
             "msgspec",
             "pydantic",
         )
-        .add_local_python_source("modal_training_gym", copy=True).add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
+        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
     )
 
     train_image = (
@@ -204,7 +215,8 @@ def build_ms_swift_app(
             "tokenizers",
         )
         .env(framework.environment)
-        .add_local_python_source("modal_training_gym", copy=True).add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
+        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
     )
     if caller_script is not None:
         caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]

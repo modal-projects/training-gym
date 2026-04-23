@@ -40,9 +40,7 @@ app = modal.App(
     tags={**COMMON_TRAINING_GYM_TAGS, "_modal_framework": "dashboard"},
 )
 
-training_runs_dict = modal.Dict.from_name(
-    "training-gym-runs", create_if_missing=True
-)
+training_runs_dict = modal.Dict.from_name("training-gym-runs", create_if_missing=True)
 
 RUNS_KEY = "runs"
 
@@ -64,7 +62,7 @@ class TrainingRun:
     tags: dict[str, str] = field(default_factory=dict)
 
 
-_FETCH_SCRIPT = r'''
+_FETCH_SCRIPT = r"""
 import json, sys, modal
 
 result = __import__("subprocess").run(
@@ -95,7 +93,7 @@ for info in app_list:
         "tags": tags,
     })
 json.dump(runs, sys.stdout)
-'''
+"""
 
 
 @app.function(

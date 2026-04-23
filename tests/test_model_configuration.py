@@ -26,11 +26,16 @@ def test_model_configuration_imports_and_constructs() -> None:
         ModelConfiguration,
     )
 
-    assert ModelConfiguration.__doc__ and "Known model families" in ModelConfiguration.__doc__
+    assert (
+        ModelConfiguration.__doc__
+        and "Known model families" in ModelConfiguration.__doc__
+    )
 
     kimi = Kimi_K2_5()
     assert kimi.model_name == "moonshotai/Kimi-K2.5"
-    assert isinstance(kimi.model_path, str) and kimi.model_path.endswith("/Kimi-K2.5-bf16")
+    assert isinstance(kimi.model_path, str) and kimi.model_path.endswith(
+        "/Kimi-K2.5-bf16"
+    )
     assert callable(kimi.download_model)
 
 
@@ -87,7 +92,10 @@ def test_model_lives_on_wrapper_not_framework_config() -> None:
         framework_config=MilesFrameworkConfig(),
     )
     assert isinstance(probe.model, Kimi_K2_5)
-    assert not hasattr(probe.framework_config, "model") or probe.framework_config.model is None
+    assert (
+        not hasattr(probe.framework_config, "model")
+        or probe.framework_config.model is None
+    )
 
 
 def main() -> int:

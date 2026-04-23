@@ -121,7 +121,9 @@ class ModalRayCluster:
     @property
     def is_head(self) -> bool:
         if not self._discovered:
-            raise RuntimeError("ModalRayCluster.discover_cluster() has not been called yet")
+            raise RuntimeError(
+                "ModalRayCluster.discover_cluster() has not been called yet"
+            )
         return self.rank == 0
 
     @property

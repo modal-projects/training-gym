@@ -110,7 +110,9 @@ def rewrite_links(
             rewritten = home_link
         elif normalized == "tutorials/README.md":
             rewritten = tutorials_link
-        elif normalized.startswith("tutorials/") and not PurePosixPath(normalized).suffix:
+        elif (
+            normalized.startswith("tutorials/") and not PurePosixPath(normalized).suffix
+        ):
             rewritten = f"{TREE_BASE}/{normalized}"
         elif normalized.endswith(".md") or normalized == "LICENSE":
             rewritten = f"{BLOB_BASE}/{normalized}"

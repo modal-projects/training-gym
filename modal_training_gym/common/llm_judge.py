@@ -89,9 +89,7 @@ class LlmJudge:
                 },
             ) as resp:
                 if resp.status != 200:
-                    print(
-                        f"LlmJudge HTTP {resp.status}: {await resp.text()}"
-                    )
+                    print(f"LlmJudge HTTP {resp.status}: {await resp.text()}")
                     return 0.0
                 data = await resp.json()
                 raw = data["choices"][0]["message"]["content"].strip()
@@ -99,9 +97,7 @@ class LlmJudge:
                 if match is None:
                     return 0.0
                 raw_score = float(match.group(1))
-                return (
-                    min(max(raw_score, 0.0), self.max_score) / self.max_score
-                )
+                return min(max(raw_score, 0.0), self.max_score) / self.max_score
         except Exception as e:
             print(f"LlmJudge error: {e}")
             return 0.0
