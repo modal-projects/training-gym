@@ -119,6 +119,19 @@ main > .content-panel + .content-panel {
   display: none !important;
 }
 
+/* When left sidebar is empty, go full-width */
+.page:has(.sidebar-pane:not(:has(ul))) {
+  --sl-content-inline-start: 0 !important;
+}
+
+.page:has(.sidebar-pane:not(:has(ul))) .right-sidebar-container {
+  display: none !important;
+}
+
+.page:has(.sidebar-pane:not(:has(ul))) .main-pane {
+  width: 100% !important;
+}
+
 .sidebar-content {
   padding-top: 1.25rem;
 }
