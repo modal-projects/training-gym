@@ -51,6 +51,8 @@ def _aggregate_agent_metrics(samples: list[Sample]) -> dict:
 class RolloutFn(InferenceRolloutFn):
     """Rollout function that aggregates Harbor agent metrics per batch."""
 
+    _rollout_counter: int = 0
+
     async def _call_train(self, input: RolloutFnTrainInput) -> RolloutFnTrainOutput:
         output = await super()._call_train(input)
 
@@ -66,5 +68,14 @@ class RolloutFn(InferenceRolloutFn):
             output.metrics = output.metrics or {}
             output.metrics.update(metrics)
             logger.info("Harbor rollout metrics: %s", metrics)
+
+        rollout_id = getattr(input, "rollout_id", None) or self._rollout_counter
+        self.__class__._rollout_counter += 1
+        try:
+            from .observability import record_rollout
+
+            await record_rollout(output, rollout_id=rollout_id)
+        except Exception as exc:
+            logger.warning("Observability recording failed: %s", exc)
 
         return output

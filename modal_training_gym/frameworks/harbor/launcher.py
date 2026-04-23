@@ -61,6 +61,17 @@ from .config import (
     ROLLOUT_PROXY_PORT,
     ROLLOUT_ROUTER_PORT,
 )
+from .observability import (
+    OBSERVABILITY_COMMIT_INTERVAL_ENV,
+    OBSERVABILITY_ENABLED_ENV,
+    OBSERVABILITY_MOUNT,
+    OBSERVABILITY_ROOT_ENV,
+    OBSERVABILITY_RUN_ID_ENV,
+    OBSERVABILITY_VOLUME,
+    OBSERVABILITY_VOLUME_NAME_ENV,
+    initialize_run_manifest,
+    update_run_manifest,
+)
 
 _REMOTE_TRAIN_SCRIPT = f"{MILES_SRC_PATH}/train.py"
 
@@ -228,10 +239,12 @@ def build_harbor_app(
     checkpoints_volume = Volume.from_name(
         f"{app_name}-checkpoints", create_if_missing=True
     )
+    obs_volume = Volume.from_name(OBSERVABILITY_VOLUME, create_if_missing=True)
 
     hf_cache_str = str(HF_CACHE_PATH)
     data_str = str(DATA_PATH)
     checkpoints_str = str(CHECKPOINTS_PATH)
+    obs_str = OBSERVABILITY_MOUNT
 
     # ── Nested Modal env (for sandbox creation) ──────────────────────────────
     nested_modal_env = {
@@ -302,6 +315,7 @@ def build_harbor_app(
             hf_cache_str: hf_cache_volume,
             data_str: data_volume,
             checkpoints_str: checkpoints_volume,
+            obs_str: obs_volume,
         },
         secrets=[
             Secret.from_name("huggingface-secret"),
@@ -359,6 +373,20 @@ def build_harbor_app(
 
         run_id = f"{app_name}-{int(time.time())}"
         checkpoint_dir = f"{checkpoints_str}/{run_id}"
+
+        obs_base = Path(obs_str)
+        await obs_volume.reload.aio()
+        initialize_run_manifest(obs_base, {
+            "run_id": run_id,
+            "app_name": app_name,
+            "model_name": harbor.model.model_name,
+            "agent_import_path": framework.agent_import_path,
+            "status": "running",
+            "started_at": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ).isoformat(),
+        })
+        await obs_volume.commit.aio()
 
         argv: list[str] = [
             "python3",
@@ -439,6 +467,11 @@ def build_harbor_app(
                 "MODAL_ENVIRONMENT": os.environ.get("MODAL_ENVIRONMENT", ""),
                 "MODAL_TOKEN_ID": os.environ.get("MODAL_TOKEN_ID", ""),
                 "MODAL_TOKEN_SECRET": os.environ.get("MODAL_TOKEN_SECRET", ""),
+                OBSERVABILITY_ENABLED_ENV: "1",
+                OBSERVABILITY_RUN_ID_ENV: run_id,
+                OBSERVABILITY_ROOT_ENV: obs_str,
+                OBSERVABILITY_VOLUME_NAME_ENV: OBSERVABILITY_VOLUME,
+                OBSERVABILITY_COMMIT_INTERVAL_ENV: "15",
             }
         }
         if framework.environment_import_path:
@@ -473,6 +506,18 @@ def build_harbor_app(
                     print(f"Final status: {status}")
 
         await checkpoints_volume.commit.aio()
+
+        from datetime import datetime, timezone
+
+        final_status = "completed" if status == "SUCCEEDED" else "failed"
+        update_run_manifest(
+            obs_base,
+            run_id,
+            status=final_status,
+            ended_at=datetime.now(timezone.utc).isoformat(),
+        )
+        await obs_volume.commit.aio()
+
         return {"run_id": run_id, "checkpoint_dir": checkpoint_dir}
 
     # ── eval_harbor ──────────────────────────────────────────────────────────
