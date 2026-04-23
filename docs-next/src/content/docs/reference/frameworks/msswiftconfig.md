@@ -15,10 +15,10 @@ Top-level wrapper that composes an ms-swift Megatron SFT run.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `dataset` | `'DatasetConfig | None'` |  | Dataset configuration with `prepare()` hook. Default `None`. |
-| `model` | `'ModelConfiguration | None'` |  | Model identity and download hook. Default `None`. |
-| `wandb` | `'WandbConfig | None'` |  | Weights & Biases logging config. Default `None`. |
-| `framework_config` | `MsSwiftFrameworkConfig` |  | ms-swift Megatron training and infrastructure settings. Default `MsSwiftFrameworkConfig()`. |
+| `dataset` | `'DatasetConfig | None'` | `None` | Dataset configuration with `prepare()` hook. Default `None`. |
+| `model` | `'ModelConfiguration | None'` | `None` | Model identity and download hook. Default `None`. |
+| `wandb` | `'WandbConfig | None'` | `None` | Weights & Biases logging config. Default `None`. |
+| `framework_config` | `MsSwiftFrameworkConfig` | `None` | ms-swift Megatron training and infrastructure settings. Default `MsSwiftFrameworkConfig()`. |
 
 ## Methods
 

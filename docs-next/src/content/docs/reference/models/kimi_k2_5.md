@@ -17,9 +17,9 @@ Kimi K2.5 from Moonshot AI.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model_name` | `str` | `"moonshotai/Kimi-K2.5"` |  |
-| `model_path` | `str | None` | `"/checkpoints/Kimi-K2.5-bf16"` |  |
-| `architecture` | `ModelArchitecture | None` | `None` |  |
+| `model_name` | `str` | `"moonshotai/Kimi-K2.5"` | HuggingFace repo ID or other model identifier. Default `""`. |
+| `model_path` | `str | None` | `"/checkpoints/Kimi-K2.5-bf16"` | Override local path for model weights. When `None`, frameworks derive the path from `model_name`. Default `None`. |
+| `architecture` | `ModelArchitecture | None` | `None` | Transformer architecture spec for Megatron-based frameworks. Not required for HuggingFace-only workflows. Default `None`. |
 
 ## Methods
 

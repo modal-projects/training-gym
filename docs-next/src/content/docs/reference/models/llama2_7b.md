@@ -17,9 +17,9 @@ Llama 2 7B from Meta.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model_name` | `str` | `"meta-llama/Llama-2-7b-hf"` |  |
-| `model_path` | `str | None` | `None` |  |
-| `architecture` | `ModelArchitecture | None` | `None` |  |
+| `model_name` | `str` | `"meta-llama/Llama-2-7b-hf"` | HuggingFace repo ID or other model identifier. Default `""`. |
+| `model_path` | `str | None` | `None` | Override local path for model weights. When `None`, frameworks derive the path from `model_name`. Default `None`. |
+| `architecture` | `ModelArchitecture | None` | `None` | Transformer architecture spec for Megatron-based frameworks. Not required for HuggingFace-only workflows. Default `None`. |
 
 ## Methods
 

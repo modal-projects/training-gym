@@ -176,6 +176,8 @@ def main() -> None:
             out_dir = output_dir / bucket
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / f"{source_path.stem}.md"
+            if out_path.exists():
+                print(f"  WARNING: overwriting existing tutorial page {out_path.relative_to(ROOT)}", file=sys.stderr)
             out_path.write_text(content)
             print(f"  {out_path.relative_to(ROOT)}")
             generated += 1

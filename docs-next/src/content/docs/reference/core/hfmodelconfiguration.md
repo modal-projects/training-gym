@@ -26,9 +26,9 @@ HFModelConfiguration(**kwargs)
 
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `model_name` | `str` | `""` |  |
-| `model_path` | `str | None` | `None` |  |
-| `architecture` | `ModelArchitecture | None` | `None` |  |
+| `model_name` | `str` | `""` | HuggingFace repo ID or other model identifier. Default `""`. |
+| `model_path` | `str | None` | `None` | Override local path for model weights. When `None`, frameworks derive the path from `model_name`. Default `None`. |
+| `architecture` | `ModelArchitecture | None` | `None` | Transformer architecture spec for Megatron-based frameworks. Not required for HuggingFace-only workflows. Default `None`. |
 
 ## Methods
 

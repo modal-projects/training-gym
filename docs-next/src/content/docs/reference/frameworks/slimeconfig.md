@@ -11,18 +11,23 @@ from modal_training_gym.frameworks.slime.config import SlimeConfig
 
 Base SLIME GRPO training configuration.
 
-## Fields
+## Launcher Instructions
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `environment` | `dict` | `{'PYTHONPATH': '/root/Megatron-LM/', 'CUDA_DEVICE_MAX_CONNECTIONS': '1', 'NCCL_NVLS_ENABLE': '1'}` | Injected into the Ray job runtime env. Default includes `PYTHONPATH`, `CUDA_DEVICE_MAX_CONNECTIONS`, `NCCL_NVLS_ENABLE`. |
 | `async_mode` | `bool` | `False` | When `True`, uses `train_async.py` instead of `train.py`. Default `False`. |
 | `slime_model_script` | `str` | `""` | Shell script path relative to `/root/slime` that defines `MODEL_ARGS`. Default `""`. |
-| `dataset` | `DatasetConfig | None` | `None` | Dataset configuration. Fields expanded to SLIME flags via `_dataset_to_fields()`. Default `None`. |
 | `model` | `ModelConfiguration | None` | `None` | Model identity. Fields expanded to SLIME flags via `_model_to_fields()`. Requires `ModelArchitecture`. Default `None`. |
+
+## Composed Configs
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `dataset` | `DatasetConfig | None` | `None` | Dataset configuration. Fields expanded to SLIME flags via `_dataset_to_fields()`. Default `None`. |
 | `wandb` | `WandbConfig | None` | `None` | W&B logging config. Fields expanded to SLIME flags via `_wandb_to_fields()`. Default `None`. |
-| `app_tags` | `dict` | `{}` | Extra Modal app tags merged at build time. Default `{}`. |
 | `modal` | `ModalConfig | None` | `None` | Modal infrastructure config. Default `None`. |
+| `app_tags` | `dict` | `{}` | Extra Modal app tags merged at build time. Default `{}`. |
 
 ## Methods
 

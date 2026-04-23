@@ -45,10 +45,25 @@ def _get_class_attrs(cls: type) -> dict[str, tuple[type, Any]]:
                 default = inspect.Parameter.empty
             attrs[f.name] = (hints.get(f.name, Any), default)
     else:
+        init_defaults: dict[str, Any] = {}
+        init_method = getattr(cls, "__init__", None)
+        if init_method:
+            try:
+                sig = inspect.signature(init_method)
+                for pname, param in sig.parameters.items():
+                    if pname == "self":
+                        continue
+                    if param.default is not param.empty:
+                        init_defaults[pname] = param.default
+            except (ValueError, TypeError):
+                pass
+
         for name, type_hint in hints.items():
             if name.startswith("_"):
                 continue
             default = getattr(cls, name, inspect.Parameter.empty)
+            if default is inspect.Parameter.empty and name in init_defaults:
+                default = init_defaults[name]
             attrs[name] = (type_hint, default)
 
     return attrs
@@ -109,6 +124,16 @@ def _parse_docstring_groups(docstring: str) -> list[tuple[str, list[str]]]:
     return groups
 
 
+def _extract_field_docs_from_mro(cls: type) -> dict[str, str]:
+    """Extract field docs from docstrings across the class MRO."""
+    merged: dict[str, str] = {}
+    for klass in reversed(cls.__mro__):
+        doc = inspect.getdoc(klass) or ""
+        if doc:
+            merged.update(_extract_field_docs(doc))
+    return merged
+
+
 def _extract_field_docs(docstring: str) -> dict[str, str]:
     """Extract field-level docs from structured docstring sections."""
     field_docs: dict[str, str] = {}
@@ -161,7 +186,7 @@ def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[
     docstring = inspect.getdoc(cls) or ""
     first_para = docstring.split("\n\n")[0] if docstring else ""
     attrs = _get_class_attrs(cls)
-    field_docs = _extract_field_docs(docstring)
+    field_docs = _extract_field_docs_from_mro(cls)
     groups = _parse_docstring_groups(docstring)
     module_path = entry["module"]
 
@@ -197,7 +222,7 @@ def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[
     if len(attrs) > 15 and not groups:
         print(f"  WARNING: {entry['class_name']} has {len(attrs)} fields but no ## group headers in docstring", file=sys.stderr)
 
-    if groups and len(attrs) > 15:
+    if groups:
         group_field_names: set[str] = set()
         for group_name, group_lines in groups:
             lines.append(f"## {group_name}")
@@ -323,7 +348,7 @@ def generate_behavior_page(cls: type, entry: dict, backlinks: dict[str, list[tup
             lines.append("```")
             lines.append("")
 
-            param_docs = _extract_field_docs(docstring)
+            param_docs = _extract_field_docs_from_mro(cls)
             lines.append("| Parameter | Type | Default | Description |")
             lines.append("|-----------|------|---------|-------------|")
             for pname, param in params.items():
@@ -337,7 +362,7 @@ def generate_behavior_page(cls: type, entry: dict, backlinks: dict[str, list[tup
 
     attrs = _get_class_attrs(cls)
     if attrs:
-        field_docs = _extract_field_docs(docstring)
+        field_docs = _extract_field_docs_from_mro(cls)
         lines.append("## Attributes")
         lines.append("")
         lines.append("| Attribute | Type | Default | Description |")
