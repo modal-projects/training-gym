@@ -65,7 +65,10 @@ def load_verifier_report(
         except (TypeError, ValueError):
             reward = 0.0
 
-    report_path = trials_dir / trial_name / "verifier" / "report.json"
+    verifier_dir = trials_dir / trial_name / "verifier"
+    report_path = verifier_dir / "reward.json"
+    if not report_path.exists():
+        report_path = verifier_dir / "report.json"
     if not report_path.exists():
         return reward, report
 

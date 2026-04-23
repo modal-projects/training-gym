@@ -81,11 +81,14 @@ class ModalConfig:
 
     gpu: GPUType = "H100"
     local_slime: str | None = None
-    patch_files: list[str] = []
-    image_run_commands: list[str] = []
-    local_python_sources: list[str] = []
+    patch_files: list[str]
+    image_run_commands: list[str]
+    local_python_sources: list[str]
 
     def __init__(self, **kwargs: Any) -> None:
+        self.patch_files = list(kwargs.pop("patch_files", []))
+        self.image_run_commands = list(kwargs.pop("image_run_commands", []))
+        self.local_python_sources = list(kwargs.pop("local_python_sources", []))
         for k, v in kwargs.items():
             setattr(self, k, v)
 
