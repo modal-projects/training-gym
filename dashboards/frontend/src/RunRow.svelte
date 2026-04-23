@@ -3,6 +3,10 @@
 
   let { run } = $props();
   let extras = $derived(extraTags(run.tags));
+  let isHarbor = $derived(
+    run.tags?._modal_framework === "harbor" ||
+      run.metadata?.framework === "harbor",
+  );
 </script>
 
 <tr>
@@ -19,11 +23,19 @@
   <td>{fmtDate(run.created_at)}</td>
   <td class="duration">{fmtDuration(run.created_at, run.stopped_at)}</td>
   <td>
+    {#if isHarbor}
+      <a
+        class="traj-link"
+        href="#/harbor/{encodeURIComponent(run.name)}"
+      >
+        Trajectories
+      </a>
+    {/if}
     {#if extras.length}
       {#each extras as [key, value]}
         <span class="tag"><strong>{key}</strong>={value}</span>
       {/each}
-    {:else}
+    {:else if !isHarbor}
       —
     {/if}
   </td>
@@ -97,5 +109,20 @@
   .tag strong {
     color: var(--text);
     font-weight: 500;
+  }
+  .traj-link {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    margin-right: 0.4rem;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-weight: 500;
+    color: var(--accent);
+    background: var(--accent-dim);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .traj-link:hover {
+    background: rgba(125, 211, 252, 0.2);
   }
 </style>
