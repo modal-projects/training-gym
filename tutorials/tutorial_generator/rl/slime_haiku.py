@@ -12,7 +12,7 @@ launcher ships that module into the training image via
 
 TUTORIAL_METADATA = {
     'framework': '`slime`',
-    'cluster_shape': '1 × 8×H200',
+    'cluster_shape': '1 × 8×H100',
     'summary': 'Qwen3-4B GRPO on haiku poems — structure score + LLM judge',
     'difficulty': 'Intermediate',
     'order': 15,
@@ -53,9 +53,9 @@ def _intro():
 
     | Stage | What it does | Where |
     |---|---|---|
-    | `download_model` | Pulls `Qwen/Qwen3-4B` into the HF cache volume | 1×H200 |
+    | `download_model` | Pulls `Qwen/Qwen3-4B` into the HF cache volume | 1×H100 |
     | `prepare_dataset` | Downloads `statworx/haiku` and writes train/test parquet | CPU |
-    | `train` | GRPO training loop over the haiku prompts | 1×8×H200, colocated |
+    | `train` | GRPO training loop over the haiku prompts | 1×8×H100, colocated |
     | `serve_app` (separate) | Hosts the finished checkpoint via vLLM + Flash | 1×H100 |
 
     Invoke any function on the returned training `app` via `modal run`
@@ -195,12 +195,9 @@ def _define_dataset():
             tokenizer = AutoTokenizer.from_pretrained(self._hf_checkpoint)
             ds = load_dataset("statworx/haiku")
 
-            vocab_str = ", ".join(haiku.MODAL_VOCABS)
             system_prompt = (
                 "You are a haiku poet. You will be given a prompt and you "
-                "will need to write a haiku about the prompt. Try to "
-                "incorporate these words into the haiku if possible: "
-                f"{vocab_str}"
+                "will need to write a haiku about the prompt."
             )
 
             def to_chat(example):
@@ -297,95 +294,26 @@ def _explain_config():
     """
     ## Define the experiment
 
-    One big `SlimeConfig(...)` call. Every attribute except the
-    launcher-only ones (`environment`, `async_mode`, `slime_model_script`,
-    `dataset`, `model`, `wandb`, `modal`, `app_tags`) becomes a SLIME CLI
-    flag via `field_name` → `--field-name`. Grouped below by concern.
+    `SlimeConfig(...)` wires the model, dataset, reward, and cluster
+    shape into a single object. Fields that aren't set here fall back to
+    SLIME's defaults (optimizer, Megatron parallelism, GRPO clipping,
+    etc.) — see the
+    [`slime_gsm8k`](../../rl/slime_gsm8k/slime_gsm8k.ipynb) tutorial
+    for a fully explicit example.
 
-    ### Model, cluster, and checkpoint format
-
-    - `model=Qwen3_4B()` — attaches the shared `HFModelConfiguration`
-      subclass; the launcher uses it for `download_model()` and expands
-      its `ModelArchitecture` into per-layer SLIME flags (num_layers,
-      hidden_size, etc.).
-    - `ref_load=base_model.model_name` — GRPO needs a frozen reference
-      policy for its KL term; load it from the same HF checkpoint.
-    - `megatron_to_hf_mode="bridge"` — saves checkpoints through
-      Megatron-Bridge so vLLM can load them directly as HF-format weights
-      without a separate conversion step (`iter_NNNNNNN_hf/` dirs under
-      `save`).
-    - `actor_num_nodes=1`, `actor_num_gpus_per_node=8`, `colocate=True`
-      — single 8×H200 node with rollout (sglang) and training sharing
-      the same GPUs. Colocation keeps weight sync cheap; the tradeoff is
-      memory pressure, which we manage with the sglang + recompute knobs
-      below.
-
-    ### Reward wiring
+    Key choices for this run:
 
     - `rm_type="async_rm"` + `custom_rm_path="haiku.haiku_rm"` — SLIME
       imports `haiku` by module name and calls `haiku.haiku_rm(...)` per
       rollout sample.
-    - `local_python_sources=["haiku"]` on `ModalConfig` — the slime
-      launcher runs `image.add_local_python_source("haiku", copy=True)`
-      at image-build time, which follows Python's normal import
-      machinery to find `tutorials/rl/slime_haiku/haiku.py` on `sys.path`
-      (put there automatically by `modal run path/to/slime_haiku.py`)
-      and bakes it into the training image. On the remote container,
-      `import haiku` then resolves under its plain top-level name — no
-      PYTHONPATH surgery.
-
-    ### Rollout and GRPO group shape
-
-    - `num_rollout=50` — 50 training rollout passes (≈ one epoch here).
-    - `rollout_batch_size=128` — 128 prompts sampled per pass.
-    - `n_samples_per_prompt=8` — per-prompt group size for GRPO's
-      within-group advantage.
-    - `global_batch_size=64` — optimizer step batch size; each step
-      consumes `global_batch_size` samples out of the
-      `rollout_batch_size × n_samples_per_prompt = 1024` rollout buffer.
-    - `rollout_max_response_len=300` — haiku are short; cap generation
-      at 300 tokens.
-    - `rollout_num_gpus_per_engine=2` — two sglang engines share the
-      node (8 GPUs / 2 per engine → 4 engines), each running TP=2.
-
-    ### Evaluation
-
-    - `eval_interval=20` — evaluate every 20 training steps.
-    - `n_samples_per_eval_prompt=8` — sample 8 completions per eval
-      prompt for a stable success rate.
-
-    ### Megatron training knobs
-
-    `tensor_model_parallel_size=2`, `sequence_parallel=True`,
-    `use_dynamic_batch_size=True` with `max_tokens_per_gpu=9216`, and
-    `recompute_granularity="full"` + `recompute_method="uniform"` +
-    `recompute_num_layers=1` together give a memory-for-time tradeoff
-    that keeps the colocated actor + rollout + KL reference model
-    within H200 HBM. The `accumulate_*_in_fp32` flags and
-    `attention_softmax_in_fp32=True` are the usual RL numerics
-    safeguards.
-
-    ### Optimizer + GRPO algorithm
-
-    - `lr=1e-6` with constant schedule — RL policy updates are fragile;
-      small, flat learning rate.
-    - `eps_clip=0.2`, `eps_clip_high=0.28` — GRPO's
-      PPO-style ratio clip (asymmetric high bound is a common GRPO
-      tweak; keeps updates stable on high-advantage tokens).
-    - `use_kl_loss=True`, `kl_loss_coef=0.0`, `kl_loss_type="low_var_kl"`
-      — register the KL penalty but keep its weight at zero; structure
-      is enforced by the reward, not the KL.
-    - `entropy_coef=0.0` — no explicit entropy bonus.
-
-    ### Checkpointing + Modal image
-
-    - `save="/checkpoints/qwen3-4b-haiku"`, `save_interval=10` —
-      checkpoint every 10 steps into the `slime-checkpoints` volume; the
-      **Serve** section below hosts one of those directories.
-    - `ModalConfig(image_run_commands=[...])` — installs `aiohttp`
-      (HTTP client for the LLM judge) and `nltk` (CMUdict) into the
-      SLIME base image, plus pre-downloads `cmudict` at image-build time
-      so the first reward call doesn't pay the download cost.
+    - `local_python_sources=["haiku"]` on `ModalConfig` — ships the
+      sibling `haiku.py` into the training image so the custom reward
+      import resolves remotely.
+    - `apply_chat_template_kwargs='{"enable_thinking": false}'` —
+      Qwen3's chat template has a `enable_thinking` toggle; we disable
+      it so rollouts produce poems, not chain-of-thought traces.
+    - `save_interval=10`, `eval_interval=20` — checkpoint every 10
+      steps, evaluate every 20.
     """
 
 
@@ -393,84 +321,36 @@ def _explain_config():
 def _define_config():
     base_model = Qwen3_4B()
     my_training_run = SlimeConfig(
-        # ── Model + frozen reference policy ────────────────────────────
         model=base_model,
+        dataset=HaikuDataset(DATA_PATH, base_model.model_name),
+        wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-haiku"),
         ref_load=base_model.model_name,
         megatron_to_hf_mode="bridge",
 
-        # ── Shared containers ─────────────────────────────────────────
-        dataset=HaikuDataset(DATA_PATH, base_model.model_name),
-        wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-haiku"),
-
-        # ── Cluster shape ─────────────────────────────────────────────
         actor_num_nodes=1,
         actor_num_gpus_per_node=8,
         colocate=True,
 
-        # ── Custom reward wiring ──────────────────────────────────────
         rm_type="async_rm",
         custom_rm_path="haiku.haiku_rm",
 
-        # ── Rollout + GRPO group shape ────────────────────────────────
         num_rollout=50,
         rollout_batch_size=128,
         rollout_max_response_len=300,
-        rollout_temperature=1.0,
-        rollout_skip_special_tokens=True,
         rollout_num_gpus_per_engine=2,
-        sglang_mem_fraction_static=0.7,
         n_samples_per_prompt=8,
         global_batch_size=64,
         apply_chat_template_kwargs='{"enable_thinking": false}',
 
-        # ── Evaluation ────────────────────────────────────────────────
         eval_interval=20,
         n_samples_per_eval_prompt=8,
-        eval_max_response_len=300,
-        eval_top_p=1.0,
 
-        # ── Megatron training knobs ───────────────────────────────────
-        tensor_model_parallel_size=2,
-        sequence_parallel=True,
-        use_dynamic_batch_size=True,
-        max_tokens_per_gpu=9216,
-        recompute_granularity="full",
-        recompute_method="uniform",
-        recompute_num_layers=1,
-        attention_dropout=0.0,
-        hidden_dropout=0.0,
-        accumulate_allreduce_grads_in_fp32=True,
-        attention_softmax_in_fp32=True,
-
-        # ── Optimizer ─────────────────────────────────────────────────
-        optimizer="adam",
-        lr=1e-6,
-        lr_decay_style="constant",
-        weight_decay=0.1,
-        adam_beta1=0.9,
-        adam_beta2=0.98,
-
-        # ── GRPO algorithm knobs ──────────────────────────────────────
-        advantage_estimator="grpo",
-        eps_clip=0.2,
-        eps_clip_high=0.28,
-        use_kl_loss=True,
-        kl_loss_coef=0.0,
-        kl_loss_type="low_var_kl",
-        entropy_coef=0.0,
-
-        # ── Checkpointing ─────────────────────────────────────────────
         save="/checkpoints/qwen3-4b-haiku",
         save_interval=10,
 
-        # ── Modal infrastructure ──────────────────────────────────────
         modal=ModalConfig(
-            gpu="H200",
-            # Ship the sibling reward module into the training image so
-            # SLIME's custom_rm_path import resolves remotely.
+            gpu="H100",
             local_python_sources=["haiku"],
-            # Runtime deps for the reward function: aiohttp for the LLM
-            # judge client, nltk + cmudict for syllable counting.
             image_run_commands=[
                 "uv pip install --system aiohttp nltk>=3.8.0",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
@@ -488,13 +368,13 @@ def _build_section():
     against the right volumes, secrets, and GPU spec:
 
     - `download_model` — pulls the HF checkpoint into the
-      `huggingface-cache` volume (1×H200, 2 hour timeout).
+      `huggingface-cache` volume (1×H100, 2 hour timeout).
     - `prepare_dataset` — runs `HaikuDataset.prepare()` against the
       `slime-data` volume (CPU).
     - `convert_checkpoint` — no-op in bridge mode; for `megatron_to_hf_mode
       ="raw"` experiments it'd do the HF → torch_dist conversion.
     - `train` — the actual GRPO run on a Modal `@clustered(n_nodes)`
-      cluster (1×8×H200 here), with Ray brought up in-container via
+      cluster (1×8×H100 here), with Ray brought up in-container via
       `ModalRayCluster`.
 
     Every function closes over the `my_training_run` config above, so the
