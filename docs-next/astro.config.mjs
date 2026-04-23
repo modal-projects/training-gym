@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import { modalReferenceThemes } from './modal-reference-theme.mjs';
 
 export default defineConfig({
   site: 'https://training-gym.modal.dev',
@@ -18,6 +19,47 @@ export default defineConfig({
           href: 'https://github.com/modal-projects/training-gym',
         },
       ],
+      expressiveCode: {
+        themes: modalReferenceThemes,
+        useStarlightUiThemeColors: true,
+        customizeTheme: (theme) => {
+          theme.bg = '#1c1c1c';
+          theme.fg = '#d1d1d1';
+          theme.colors['editor.background'] = '#1c1c1c';
+          theme.colors['editor.foreground'] = '#d1d1d1';
+          theme.colors['editor.selectionBackground'] = '#2f2f2f';
+          theme.colors['scrollbarSlider.background'] = '#ffffff17';
+          theme.colors['scrollbarSlider.hoverBackground'] = '#ffffff40';
+          theme.colors['titleBar.activeBackground'] = '#181818';
+          theme.colors['titleBar.activeForeground'] = '#d1d1d1';
+          theme.colors['titleBar.border'] = '#2f2f2f';
+          theme.colors['editorGroupHeader.tabsBackground'] = '#181818';
+          theme.colors['editorGroupHeader.tabsBorder'] = '#2f2f2f';
+          theme.colors['tab.activeBackground'] = '#1c1c1c';
+          theme.colors['tab.activeForeground'] = '#e8e8e8';
+          theme.colors['tab.inactiveBackground'] = '#181818';
+          theme.colors['tab.inactiveForeground'] = '#a3a3a3';
+          theme.colors['tab.activeBorderTop'] = '#7fee64';
+          theme.styleOverrides.frames = {
+            ...theme.styleOverrides.frames,
+            editorBackground: '#1c1c1c',
+            terminalBackground: '#1c1c1c',
+            editorActiveTabBackground: '#1c1c1c',
+            inlineButtonForeground: '#d1d1d1',
+            frameBoxShadowCssValue: 'none',
+          };
+          return theme;
+        },
+        styleOverrides: {
+          borderRadius: '0.375rem',
+          codeBackground: '#1c1c1c',
+          codeForeground: '#d1d1d1',
+          codeSelectionBackground: '#2f2f2f',
+          gutterBorderColor: '#2f2f2f',
+          gutterForeground: '#747474',
+          gutterHighlightForeground: '#e8e8e8',
+        },
+      },
       customCss: ['./src/styles/custom.css'],
       components: {
         Header: './src/components/Header.astro',

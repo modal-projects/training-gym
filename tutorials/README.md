@@ -22,28 +22,28 @@ context) and assume familiarity with the underlying framework.
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`quickstart`](intro/quickstart/quickstart.ipynb) | Shared concepts: config containers, framework factories, volume layout, running the pipeline | Beginner | — (concepts) | — | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/intro/quickstart/quickstart.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`quickstart`](intro/quickstart/quickstart.ipynb) | Shared concepts: config containers, framework factories, volume layout, running the pipeline | Beginner | — (concepts) | — | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/quickstart/quickstart.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### RL
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`slime_gsm8k`](rl/slime_gsm8k/slime_gsm8k.ipynb) | Qwen3-4B GRPO on GSM8K (colocated) | Advanced | `slime` | 4 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/slime_gsm8k/slime_gsm8k.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`slime_haiku`](rl/slime_haiku/slime_haiku.ipynb) | Qwen3-4B GRPO on haiku poems — structure score + LLM judge | Intermediate | `slime` | 1 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/slime_haiku/slime_haiku.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`harbor_code_golf`](rl/harbor_code_golf/harbor_code_golf.ipynb) | Qwen3-4B RL code-golf on MBPP with Harbor sandboxes | Advanced | `harbor` | 2 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/harbor_code_golf/harbor_code_golf.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`slime_gsm8k`](rl/slime_gsm8k/slime_gsm8k.ipynb) | Qwen3-4B GRPO on GSM8K (colocated) | Advanced | `slime` | 4 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_gsm8k/slime_gsm8k.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`slime_haiku`](rl/slime_haiku/slime_haiku.ipynb) | Qwen3-4B GRPO on haiku poems — structure score + LLM judge | Intermediate | `slime` | 1 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_haiku/slime_haiku.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`harbor_code_golf`](rl/harbor_code_golf/harbor_code_golf.ipynb) | Qwen3-4B RL code-golf on MBPP with Harbor sandboxes | Advanced | `harbor` | 2 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/harbor_code_golf/harbor_code_golf.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### SFT
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`ms_swift_glm_4_7_gsm8k`](sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb) | GLM-4.7 LoRA SFT on GSM8K (Megatron) | Advanced | `ms_swift` | 4 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`ms_swift_custom_hf`](sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb) | Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry | Beginner | `ms_swift` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`ms_swift_glm_4_7_gsm8k`](sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb) | GLM-4.7 LoRA SFT on GSM8K (Megatron) | Advanced | `ms_swift` | 4 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`ms_swift_custom_hf`](sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb) | Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry | Beginner | `ms_swift` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### Misc
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`ray_slime_standalone`](misc/ray_slime_standalone/ray_slime_standalone.ipynb) | Ray-on-Modal pattern demo | Intermediate | — (raw `ModalRayCluster`) | 2 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`ray_slime_standalone`](misc/ray_slime_standalone/ray_slime_standalone.ipynb) | Ray-on-Modal pattern demo | Intermediate | — (raw `ModalRayCluster`) | 2 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
 ## Running from the CLI instead

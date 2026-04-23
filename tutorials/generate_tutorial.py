@@ -297,7 +297,7 @@ def _extract_metadata(source: str) -> dict | None:
 
 def _render_launch_cell(bucket: str, name: str) -> str:
     notebook_url = (
-        f"https://github.com/{_REPO_SLUG}/blob/{_BRANCH}"
+        f"https://github.com/{_REPO_SLUG}/blob/main"
         f"/tutorials/{bucket}/{name}/{name}.ipynb"
     )
     launch_url = (
