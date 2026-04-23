@@ -103,18 +103,36 @@ def generate_tutorial_page(
         if cls_name not in CLASS_REFERENCE_PATHS:
             print(f"  WARNING: {source_path.name} references '{cls_name}' in api_classes but it is not in the manifest", file=sys.stderr)
 
+    title = metadata.get("summary", name)
+    found_h1 = False
+    for cell_type, content in cells:
+        if cell_type == "markdown" and not found_h1:
+            for line in content.splitlines():
+                if line.startswith("# "):
+                    title = line[2:].strip()
+                    found_h1 = True
+                    break
+
     lines = [
         "---",
-        f"title: \"{metadata.get('summary', name)}\"",
+        f"title: \"{title}\"",
         f"description: \"{metadata.get('summary', '')}\"",
         "---",
         "",
     ]
 
+    first_markdown = True
     for cell_type, content in cells:
         if cell_type == "markdown":
-            lines.append(content)
-            lines.append("")
+            if first_markdown and found_h1:
+                content_lines = content.splitlines()
+                content_lines = [l for i, l in enumerate(content_lines)
+                                 if not (l.startswith("# ") and i == 0)]
+                content = "\n".join(content_lines).strip()
+                first_markdown = False
+            if content:
+                lines.append(content)
+                lines.append("")
         elif cell_type == "code":
             lines.append("```python")
             lines.append(content)
