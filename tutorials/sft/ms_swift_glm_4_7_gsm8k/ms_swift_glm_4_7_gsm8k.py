@@ -134,20 +134,10 @@ swift_framework_config = MsSwiftFrameworkConfig(
     gpu="B200",
     n_nodes=4,
     gpus_per_node=8,
-    tensor_model_parallel_size=2,
-    expert_model_parallel_size=4,
-    pipeline_model_parallel_size=4,
-    context_parallel_size=1,
-    sequence_parallel=True,
-    train_iters=1,
-    num_train_epochs=1,
-    lr=1e-4,
     global_batch_size=8,
     max_length=2048,
-    tuner_type="lora",
-    lora_rank=128,
-    lora_alpha=32,
-    merge_lora=False,
+    train_iters=1,
+    num_train_epochs=1,
 )
 
 my_training_run = MsSwiftConfig(

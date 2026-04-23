@@ -91,6 +91,7 @@ class MsSwiftFrameworkConfig:
     pipeline_model_parallel_size: int = 4
     context_parallel_size: int = 1
     sequence_parallel: bool = True
+    use_distributed_optimizer: bool = True
 
     # ── MoE ──────────────────────────────────────────────────────────────────
     moe_permute_fusion: bool = True
@@ -100,16 +101,28 @@ class MsSwiftFrameworkConfig:
 
     # ── Batch ────────────────────────────────────────────────────────────────
     global_batch_size: int = 8
-    packing: bool = False
+    packing: bool = True
+    padding_free: bool = True
     use_precision_aware_optimizer: bool = True
 
     # ── Training ─────────────────────────────────────────────────────────────
-    train_iters: int = 0
+    train_iters: int | None = None
     num_train_epochs: int = 4
     lr: float = 1e-4
     lr_warmup_fraction: float = 0.05
-    lr_decay_iters: int = 100000
+    lr_decay_style: str = "cosine"
     min_lr: float = 1e-5
+    weight_decay: float = 0.1
+    clip_grad: float = 1.0
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.95
+    seed: int = 42
+
+    # ── Precision / memory ───────────────────────────────────────────────────
+    bf16: bool = True
+    recompute_granularity: str = "selective"
+    recompute_modules: str = "core_attn"
+    attention_softmax_in_fp32: bool = True
 
     # ── Context / attention ──────────────────────────────────────────────────
     max_length: int = 2048
@@ -117,9 +130,11 @@ class MsSwiftFrameworkConfig:
 
     # ── IO / checkpointing ───────────────────────────────────────────────────
     dataset_num_proc: int = 8
+    dataloader_num_workers: int = 4
     save_interval: int = 50
     no_save_optim: bool = True
     no_save_rng: bool = True
+    save_safetensors: bool = True
     use_hf: int = 1
     # Disable versioned sub-dir in save path. Required so cross-node rank 0
     # and last-rank see the same path (v0-timestamp suffix would race).
@@ -134,6 +149,7 @@ class MsSwiftFrameworkConfig:
     target_modules: str = "all-linear"
     lora_rank: int = 128
     lora_alpha: int = 32
+    lora_dropout: float = 0.05
     merge_lora: bool = False
 
     @classmethod
