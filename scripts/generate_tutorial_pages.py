@@ -159,8 +159,8 @@ def generate_tutorial_page(
 
     py_path = f"tutorials/{bucket}/{name}/{name}.py"
     nb_path = f"tutorials/{bucket}/{name}/{name}.ipynb"
-    nb_url = f"https://modal.com/notebooks/new/{REPO_URL}/blob/main/{nb_path}"
-    lines.append(f"**Source:** [`{py_path}`]({REPO_URL}/blob/main/{py_path})")
+    nb_url = f"https://modal.com/notebooks/new/{REPO_URL}/blob/joy/initial-setup/{nb_path}"
+    lines.append(f"**Source:** [`{py_path}`]({REPO_URL}/blob/joy/initial-setup/{py_path})")
     lines.append(f' | <a href="{nb_url}" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>')
     lines.append("")
 
