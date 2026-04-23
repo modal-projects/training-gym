@@ -27,4 +27,11 @@ Qwen3-4B (4 billion parameters) from Alibaba.
 
 Download or materialize weights into the model volume.
 
+## Related Tutorials
+
+- [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/quickstart/)
+- [Qwen3-4B RL code-golf on MBPP with Harbor sandboxes](/tutorials/rl/harbor_code_golf/)
+- [Qwen3-4B GRPO on GSM8K (colocated)](/tutorials/rl/slime_gsm8k/)
+- [Qwen3-4B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/slime_haiku/)
+
 **Source:** [`modal_training_gym/common/models/qwen3_4b.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/models/qwen3_4b.py)

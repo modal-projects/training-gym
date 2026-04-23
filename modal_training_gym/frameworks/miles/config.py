@@ -52,15 +52,103 @@ _SKIP_FIELDS = {
 
 @dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
 class MilesFrameworkConfig:
-    """Miles configuration, including Modal infrastructure.
+    """Miles RLVR configuration, including Modal infrastructure.
 
     Typed fields provide training defaults and are emitted as Miles CLI
-    flags (``--hyphen-name value``). They appear *before* ``recipe_args``
-    on the command line, so ``recipe_args`` values take precedence when
-    the same flag appears in both places.
+    flags (``--hyphen-name value``). They appear *before* ``recipe_args``,
+    so ``recipe_args`` values take precedence.
 
-    Model architecture flags (``--num-layers``, ``--hidden-size``, etc.)
-    belong in ``recipe_args`` since they vary per model.
+    ## Modal Infrastructure
+
+    gpu : GPUType
+        Modal GPU type. Default ``"H100"``.
+    miles_image : str
+        Docker image with patched Megatron-LM + Miles trainer.
+    image_run_commands : list[str]
+        Extra commands appended to the image build. Default ``[]``.
+    n_nodes : int
+        Number of cluster nodes. Default ``1``.
+    app_tags : dict
+        Extra Modal app tags. Default ``{}``.
+
+    ## Recipe and Overrides
+
+    recipe_args : str
+        Raw Miles CLI flag block. Model architecture flags and per-run
+        overrides go here. Values override typed defaults. Default ``""``.
+    extra_args : str
+        Extra flags appended after ``recipe_args``. Default ``""``.
+    custom_config_yaml : str
+        Inline YAML overrides passed via ``--custom-config-path``. Default ``""``.
+
+    ## Actor and Rollout Topology
+
+    colocate : bool
+        Reuse a single compute pool for actor + rollout. Default ``True``.
+    actor_nodes : int | None
+        Actor node count. Defaults to ``n_nodes`` (colocated) or
+        ``n_nodes - 1`` (non-colocated). Default ``None``.
+    rollout_num_gpus : int | None
+        Rollout GPU count for non-colocated mode. Default ``None``.
+
+    ## RL Algorithm
+
+    advantage_estimator : str
+        Advantage estimation method. Default ``"grpo"``.
+    eps_clip : float
+        PPO clipping epsilon. Default ``0.2``.
+    clip_grad : float
+        Gradient clipping norm. Default ``1.0``.
+    kl_coef : float
+        KL divergence penalty coefficient. Default ``0.0``.
+    normalize_advantages : bool
+        Normalize advantages. Default ``False``.
+    seed : int
+        Random seed. Default ``1234``.
+
+    ## Optimizer
+
+    lr : float
+        Learning rate. Default ``1e-6``.
+    lr_decay_style : str
+        LR decay schedule. Default ``"constant"``.
+    weight_decay : float
+        Weight decay. Default ``0.0``.
+    adam_beta1 : float
+        Adam beta1. Default ``0.9``.
+    adam_beta2 : float
+        Adam beta2. Default ``0.95``.
+
+    ## Batch
+
+    micro_batch_size : int
+        Micro batch size per GPU. Default ``1``.
+    n_samples_per_prompt : int
+        Rollout samples per prompt. Default ``8``.
+
+    ## Precision and Memory
+
+    bf16 : bool
+        Enable BF16 training. Default ``True``.
+    attention_softmax_in_fp32 : bool
+        Compute attention softmax in FP32. Default ``True``.
+
+    ## Regularization
+
+    attention_dropout : float
+        Attention dropout rate. Default ``0.0``.
+    hidden_dropout : float
+        Hidden layer dropout rate. Default ``0.0``.
+
+    ## Rollout
+
+    rollout_temperature : float
+        Sampling temperature for rollouts. Default ``1.0``.
+
+    ## Checkpointing
+
+    no_save_optim : bool
+        Skip saving optimizer state. Default ``True``.
     """
 
     # ── Modal infrastructure ────────────────────────────────────────────────

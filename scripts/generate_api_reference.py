@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import importlib
 import inspect
 import re
-import textwrap
+import sys
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import Any, get_type_hints
@@ -34,8 +35,14 @@ def _get_class_attrs(cls: type) -> dict[str, tuple[type, Any]]:
     attrs: dict[str, tuple[type, Any]] = {}
 
     if _is_dataclass(cls):
+        MISSING = dataclasses.MISSING
         for f in dataclass_fields(cls):
-            default = f.default if f.default is not f.default_factory else f.default_factory()  # type: ignore[arg-type]
+            if f.default is not MISSING:
+                default = f.default
+            elif f.default_factory is not MISSING:
+                default = f.default_factory()
+            else:
+                default = inspect.Parameter.empty
             attrs[f.name] = (hints.get(f.name, Any), default)
     else:
         for name, type_hint in hints.items():
@@ -149,7 +156,7 @@ def _get_methods(cls: type) -> list[tuple[str, str, str]]:
     return methods
 
 
-def generate_config_data_page(cls: type, entry: dict) -> str:
+def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None) -> str:
     """Generate markdown for a config/data class."""
     docstring = inspect.getdoc(cls) or ""
     first_para = docstring.split("\n\n")[0] if docstring else ""
@@ -186,6 +193,9 @@ def generate_config_data_page(cls: type, entry: dict) -> str:
 
     if not attrs:
         return "\n".join(lines)
+
+    if len(attrs) > 15 and not groups:
+        print(f"  WARNING: {entry['class_name']} has {len(attrs)} fields but no ## group headers in docstring", file=sys.stderr)
 
     if groups and len(attrs) > 15:
         group_field_names: set[str] = set()
@@ -245,13 +255,16 @@ def generate_config_data_page(cls: type, entry: dict) -> str:
                 lines.append(doc)
                 lines.append("")
 
+    if backlinks:
+        _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
+
     lines.append(f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)")
     lines.append("")
 
     return "\n".join(lines)
 
 
-def generate_behavior_page(cls: type, entry: dict) -> str:
+def generate_behavior_page(cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None) -> str:
     """Generate markdown for a behavior class."""
     docstring = inspect.getdoc(cls) or ""
     first_para = docstring.split("\n\n")[0] if docstring else ""
@@ -347,6 +360,9 @@ def generate_behavior_page(cls: type, entry: dict) -> str:
                 lines.append(doc)
                 lines.append("")
 
+    if backlinks:
+        _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
+
     lines.append(f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)")
     lines.append("")
 
@@ -395,6 +411,53 @@ def generate_index_page(manifest: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _build_tutorial_backlinks() -> dict[str, list[tuple[str, str]]]:
+    """Scan tutorial sources for api_classes and build class→tutorials map."""
+    import ast as _ast
+
+    tutorial_src = ROOT / "tutorials" / "tutorial_generator"
+    backlinks: dict[str, list[tuple[str, str]]] = {}
+    buckets = ["intro", "rl", "sft", "misc"]
+
+    for bucket in buckets:
+        bucket_dir = tutorial_src / bucket
+        if not bucket_dir.is_dir():
+            continue
+        for src in sorted(bucket_dir.glob("*.py")):
+            if src.name.startswith("_") or src.name == "__init__.py":
+                continue
+            try:
+                tree = _ast.parse(src.read_text())
+            except SyntaxError:
+                continue
+            for node in _ast.walk(tree):
+                if isinstance(node, _ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, _ast.Name) and target.id == "TUTORIAL_METADATA":
+                            try:
+                                metadata = _ast.literal_eval(node.value)
+                            except (ValueError, TypeError):
+                                continue
+                            summary = metadata.get("summary", src.stem)
+                            api_classes = metadata.get("api_classes", [])
+                            tutorial_path = f"/tutorials/{bucket}/{src.stem}/"
+                            for cls_name in api_classes:
+                                backlinks.setdefault(cls_name, []).append((summary, tutorial_path))
+    return backlinks
+
+
+def _append_tutorial_backlinks(lines: list[str], class_name: str, backlinks: dict[str, list[tuple[str, str]]]) -> None:
+    """Append a Related Tutorials section if any tutorials reference this class."""
+    tutorials = backlinks.get(class_name, [])
+    if not tutorials:
+        return
+    lines.append("## Related Tutorials")
+    lines.append("")
+    for summary, path in tutorials:
+        lines.append(f"- [{summary}]({path})")
+    lines.append("")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate API reference pages.")
     parser.add_argument(
@@ -404,6 +467,7 @@ def main() -> None:
     args = parser.parse_args()
     output_dir = args.output_dir
 
+    backlinks = _build_tutorial_backlinks()
     errors = []
     generated = 0
 
@@ -416,9 +480,9 @@ def main() -> None:
             continue
 
         if entry["class_type"] == "config_data":
-            content = generate_config_data_page(cls, entry)
+            content = generate_config_data_page(cls, entry, backlinks=backlinks)
         else:
-            content = generate_behavior_page(cls, entry)
+            content = generate_behavior_page(cls, entry, backlinks=backlinks)
 
         group_dir = output_dir / entry["group"]
         group_dir.mkdir(parents=True, exist_ok=True)

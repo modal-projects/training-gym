@@ -57,21 +57,32 @@ YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
 
 
 class ModalConfig:
-    """Modal infrastructure configuration — GPU provisioning and image setup only."""
+    """Modal infrastructure configuration for SLIME — GPU provisioning and image setup.
+
+    ## Fields
+
+    gpu : GPUType
+        Modal GPU type to provision (e.g. ``"H100"``, ``"A100"``). Default ``"H100"``.
+    local_slime : str | None
+        Path to a local SLIME repo checkout for dev overlay. When set, the
+        launcher mounts it into the image. Default ``None``.
+    patch_files : list[str]
+        Local patch files to inject into the image at ``/tmp/<filename>``.
+        Default ``[]``.
+    image_run_commands : list[str]
+        Shell commands run during image build (e.g. ``git apply /tmp/my.patch``).
+        Default ``[]``.
+    local_python_sources : list[str]
+        Sibling Python modules (by import name) to ship into the training
+        image via ``add_local_python_source``. Use for helper modules like
+        custom reward functions referenced via SLIME's ``custom_rm_path``.
+        Default ``[]``.
+    """
 
     gpu: GPUType = "H100"
-    local_slime: str | None = None  # path to local slime repo for dev overlay
-    patch_files: list[
-        str
-    ] = []  # local patch files; each injected into image at /tmp/<filename>
-    image_run_commands: list[
-        str
-    ] = []  # commands to run during image build (e.g. git apply /tmp/my.patch)
-    # Sibling Python modules (by import name) to ship into the training image
-    # via `add_local_python_source`. Use when a tutorial has helper modules
-    # alongside it — e.g. a custom reward function referenced via SLIME's
-    # `custom_rm_path`. Each name must be importable on the local sys.path
-    # at the time `build_app()` runs.
+    local_slime: str | None = None
+    patch_files: list[str] = []
+    image_run_commands: list[str] = []
     local_python_sources: list[str] = []
 
     def __init__(self, **kwargs: Any) -> None:
@@ -80,31 +91,51 @@ class ModalConfig:
 
 
 class SlimeConfig:
-    """Base SLIME training configuration.
+    """Base SLIME GRPO training configuration.
 
     Subclass and set class attributes to configure an experiment.
-    All attributes (except 'environment') are forwarded to SLIME as CLI args.
-    Each experiment must be fully self-contained — no inherited defaults.
+    All non-skip attributes are forwarded to SLIME as CLI args
+    (``--hyphen-name value``). Attach ``dataset``, ``model``, and
+    ``wandb`` containers to populate their respective CLI flags
+    automatically.
 
-    Fields in _SLIME_SKIP are launcher instructions, not SLIME CLI args:
-      environment       — injected into the Ray job runtime env
-      async_mode        — selects train_async.py vs train.py
-      slime_model_script — path relative to /root/slime to a shell script that
-                           defines MODEL_ARGS for model architecture; sourced
-                           before running the train command
+    ## Launcher Instructions
 
-    Example:
+    environment : dict
+        Injected into the Ray job runtime env. Default includes
+        ``PYTHONPATH``, ``CUDA_DEVICE_MAX_CONNECTIONS``, ``NCCL_NVLS_ENABLE``.
+    async_mode : bool
+        When ``True``, uses ``train_async.py`` instead of ``train.py``. Default ``False``.
+    slime_model_script : str
+        Shell script path relative to ``/root/slime`` that defines ``MODEL_ARGS``.
+        Default ``""``.
 
-        class MyExperiment(SlimeConfig):
-            async_mode = False
-            slime_model_script = ""
-            hf_checkpoint = "Qwen/Qwen3-8B"
-            actor_num_nodes = 1
-            actor_num_gpus_per_node = 8
-            megatron_to_hf_mode = "bridge"
-            ...
+    ## Composed Configs
 
-        slime = MyExperiment()
+    dataset : DatasetConfig | None
+        Dataset configuration. Fields expanded to SLIME flags via
+        ``_dataset_to_fields()``. Default ``None``.
+    model : ModelConfiguration | None
+        Model identity. Fields expanded to SLIME flags via
+        ``_model_to_fields()``. Requires ``ModelArchitecture``. Default ``None``.
+    wandb : WandbConfig | None
+        W&B logging config. Fields expanded to SLIME flags via
+        ``_wandb_to_fields()``. Default ``None``.
+    modal : ModalConfig | None
+        Modal infrastructure config. Default ``None``.
+    app_tags : dict
+        Extra Modal app tags merged at build time. Default ``{}``.
+
+    Methods
+    -------
+    cli_args()
+        Generate SLIME CLI arguments from all fields.
+    prepare_data()
+        Materialize training data (delegates to attached DatasetConfig).
+    build_app(name=None, modal=None)
+        Build and return a Modal ``App`` for this training run.
+    total_nodes()
+        Calculate total cluster nodes required.
     """
 
     # Launcher instructions — not passed to SLIME CLI (see _SLIME_SKIP).

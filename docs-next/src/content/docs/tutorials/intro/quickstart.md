@@ -224,10 +224,10 @@ catalog in [`tutorials/README.md`](../README.md).
 - [`ModelConfiguration`](/reference/core/modelconfiguration/)
 - [`HFModelConfiguration`](/reference/core/hfmodelconfiguration/)
 - [`ModelArchitecture`](/reference/core/modelarchitecture/)
-- [`Qwen3_4B`](/reference/core/qwen3_4b/)
+- [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`DatasetConfig`](/reference/core/datasetconfig/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
-- [`SlimeConfig`](/reference/core/slimeconfig/)
+- [`SlimeConfig`](/reference/frameworks/slimeconfig/)
 
 **Source:** [`tutorials/intro/quickstart/quickstart.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/quickstart/quickstart.py)
  | [Open in Modal Notebook](https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/quickstart/quickstart.ipynb)

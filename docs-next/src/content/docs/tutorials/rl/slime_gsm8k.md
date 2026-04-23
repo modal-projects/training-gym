@@ -194,9 +194,9 @@ app = my_training_run.build_app()
 
 ## Related API Reference
 
-- [`SlimeConfig`](/reference/core/slimeconfig/)
+- [`SlimeConfig`](/reference/frameworks/slimeconfig/)
 - [`DatasetConfig`](/reference/core/datasetconfig/)
-- [`Qwen3_4B`](/reference/core/qwen3_4b/)
+- [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
 **Source:** [`tutorials/rl/slime_gsm8k/slime_gsm8k.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_gsm8k/slime_gsm8k.py)

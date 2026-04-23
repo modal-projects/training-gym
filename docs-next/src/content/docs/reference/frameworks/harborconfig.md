@@ -24,4 +24,8 @@ Top-level wrapper that composes a Harbor + Miles RLVR training run.
 
 ### `build_app(self, *, name: 'str | None' = None) -> "'App'"`
 
+## Related Tutorials
+
+- [Qwen3-4B RL code-golf on MBPP with Harbor sandboxes](/tutorials/rl/harbor_code_golf/)
+
 **Source:** [`modal_training_gym/frameworks/harbor/config.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/frameworks/harbor/config.py)

@@ -169,10 +169,10 @@ app = my_training_run.build_app()
 
 ## Related API Reference
 
-- [`MsSwiftConfig`](/reference/core/msswiftconfig/)
-- [`MsSwiftFrameworkConfig`](/reference/core/msswiftframeworkconfig/)
+- [`MsSwiftConfig`](/reference/frameworks/msswiftconfig/)
+- [`MsSwiftFrameworkConfig`](/reference/frameworks/msswiftframeworkconfig/)
 - [`DatasetConfig`](/reference/core/datasetconfig/)
-- [`GLM_4_7`](/reference/core/glm_4_7/)
+- [`GLM_4_7`](/reference/models/glm_4_7/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
 **Source:** [`tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py)

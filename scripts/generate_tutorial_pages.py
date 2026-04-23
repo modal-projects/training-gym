@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import sys
 import textwrap
 from pathlib import Path
+
+from api_reference_manifest import CLASS_REFERENCE_PATHS
 
 ROOT = Path(__file__).resolve().parents[1]
 TUTORIAL_SRC_DIR = ROOT / "tutorials" / "tutorial_generator"
@@ -96,10 +99,9 @@ def generate_tutorial_page(
     cells = extract_cells(source_path)
 
     api_classes = metadata.get("api_classes", [])
-    api_links = []
     for cls_name in api_classes:
-        slug = cls_name.lower()
-        api_links.append(f"[`{cls_name}`](/reference/core/{slug}/)")
+        if cls_name not in CLASS_REFERENCE_PATHS:
+            print(f"  WARNING: {source_path.name} references '{cls_name}' in api_classes but it is not in the manifest", file=sys.stderr)
 
     lines = [
         "---",
@@ -130,8 +132,11 @@ def generate_tutorial_page(
         lines.append("## Related API Reference")
         lines.append("")
         for cls_name in api_classes:
-            slug = cls_name.lower()
-            lines.append(f"- [`{cls_name}`](/reference/core/{slug}/)")
+            ref_path = CLASS_REFERENCE_PATHS.get(cls_name)
+            if ref_path:
+                lines.append(f"- [`{cls_name}`]({ref_path})")
+            else:
+                lines.append(f"- `{cls_name}`")
         lines.append("")
 
     py_path = f"tutorials/{bucket}/{name}/{name}.py"

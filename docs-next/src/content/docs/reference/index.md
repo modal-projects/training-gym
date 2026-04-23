@@ -16,7 +16,7 @@ Complete reference for the training-gym Python library.
 | [`ModelArchitecture`](/reference/core/modelarchitecture/) | Transformer architecture parameters for a specific model. |
 | [`DatasetConfig`](/reference/core/datasetconfig/) | Dataset configuration shared across training frameworks. |
 | [`WandbConfig`](/reference/core/wandbconfig/) | Weights & Biases logging configuration shared across all frameworks. |
-| [`ModalRayCluster`](/reference/core/modalraycluster/) | Base class for bootstrapping a Ray cluster inside a Modal clustered function. |
+| [`ModalRayCluster`](/reference/core/modalraycluster/) | Base class for bootstrapping a Ray cluster inside Modal clustered functions. |
 | [`LlmJudge`](/reference/core/llmjudge/) | LLM-as-judge client for an OpenAI-compatible chat-completions endpoint. |
 
 ## Models
@@ -33,11 +33,11 @@ Complete reference for the training-gym Python library.
 
 | Class | Description |
 |-------|-------------|
-| [`SlimeConfig`](/reference/frameworks/slimeconfig/) | Base SLIME training configuration. |
-| [`ModalConfig (SLIME)`](/reference/frameworks/modalconfig/) | Modal infrastructure configuration — GPU provisioning and image setup only. |
-| [`MsSwiftFrameworkConfig`](/reference/frameworks/msswiftframeworkconfig/) | ms-swift Megatron configuration, including Modal infrastructure. |
+| [`SlimeConfig`](/reference/frameworks/slimeconfig/) | Base SLIME GRPO training configuration. |
+| [`ModalConfig (SLIME)`](/reference/frameworks/modalconfig/) | Modal infrastructure configuration for SLIME — GPU provisioning and image setup. |
+| [`MsSwiftFrameworkConfig`](/reference/frameworks/msswiftframeworkconfig/) | ms-swift Megatron SFT configuration, including Modal infrastructure. |
 | [`MsSwiftConfig`](/reference/frameworks/msswiftconfig/) | Top-level wrapper that composes an ms-swift Megatron SFT run. |
-| [`MilesFrameworkConfig`](/reference/frameworks/milesframeworkconfig/) | Miles configuration, including Modal infrastructure. |
+| [`MilesFrameworkConfig`](/reference/frameworks/milesframeworkconfig/) | Miles RLVR configuration, including Modal infrastructure. |
 | [`MilesConfig`](/reference/frameworks/milesconfig/) | Top-level wrapper that composes a Miles RLVR training run. |
-| [`HarborFrameworkConfig`](/reference/frameworks/harborframeworkconfig/) | Harbor + Miles configuration. |
+| [`HarborFrameworkConfig`](/reference/frameworks/harborframeworkconfig/) | Harbor + Miles configuration for sandbox-based RL training. |
 | [`HarborConfig`](/reference/frameworks/harborconfig/) | Top-level wrapper that composes a Harbor + Miles RLVR training run. |

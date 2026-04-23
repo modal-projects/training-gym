@@ -27,4 +27,8 @@ GLM-4.7 large MoE model from Zhipu AI.
 
 Download or materialize weights into the model volume.
 
+## Related Tutorials
+
+- [GLM-4.7 LoRA SFT on GSM8K (Megatron)](/tutorials/sft/ms_swift_glm_4_7_gsm8k/)
+
 **Source:** [`modal_training_gym/common/models/glm_4_7.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/models/glm_4_7.py)

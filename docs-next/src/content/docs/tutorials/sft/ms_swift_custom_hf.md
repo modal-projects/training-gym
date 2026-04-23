@@ -170,8 +170,8 @@ app = my_training_run.build_app()
 
 ## Related API Reference
 
-- [`MsSwiftConfig`](/reference/core/msswiftconfig/)
-- [`MsSwiftFrameworkConfig`](/reference/core/msswiftframeworkconfig/)
+- [`MsSwiftConfig`](/reference/frameworks/msswiftconfig/)
+- [`MsSwiftFrameworkConfig`](/reference/frameworks/msswiftframeworkconfig/)
 - [`ModelConfiguration`](/reference/core/modelconfiguration/)
 - [`DatasetConfig`](/reference/core/datasetconfig/)
 - [`WandbConfig`](/reference/core/wandbconfig/)

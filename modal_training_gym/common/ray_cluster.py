@@ -83,21 +83,40 @@ def start_ray_worker(
 
 
 class ModalRayCluster:
-    """Base class for bootstrapping a Ray cluster inside a Modal clustered function.
+    """Base class for bootstrapping a Ray cluster inside Modal clustered functions.
 
-    Typical use from a `@modal.experimental.clustered` function or Modal class:
+    Manages cluster discovery, Ray head/worker startup,
+    ``JobSubmissionClient`` creation, dashboard forwarding, and a
+    worker keep-alive loop. Framework launchers (SLIME, Miles, etc.)
+    compose or subclass this.
 
-        cluster = ModalRayCluster()
-        cluster.start(n_nodes=N_NODES)
-        if cluster.is_head:
-            with cluster.forward_dashboard():
-                status = await cluster.submit_and_tail(entrypoint, runtime_env=env)
-        else:
-            await cluster.wait_forever()
+    Attributes (populated after ``discover_cluster()``)
+    ---------------------------------------------------
+    n_nodes : int
+        Total cluster node count.
+    rank : int
+        This container's rank (0 = head).
+    head_addr : str
+        IPv4 address of the head node.
+    node_ip : str
+        IPv4 address of this container.
+    is_head : bool
+        Property — ``True`` when ``rank == 0``.
 
-    Subclasses can override `head_extra_start_args` / `worker_extra_start_args`
-    to pass framework-specific flags to `ray start`, or override `submit_and_tail`
-    to customize how a training job is launched and streamed.
+    Methods
+    -------
+    discover_cluster(n_nodes)
+        Populate rank, addresses, and node count from Modal cluster info.
+    start_ray(init_retries=30, worker_wait_retries=60)
+        Start Ray head or worker using discovered cluster state.
+    start(n_nodes, init_retries=30, worker_wait_retries=60)
+        Convenience: ``discover_cluster`` + ``start_ray``.
+    forward_dashboard()
+        Return a ``modal.forward`` context manager for the Ray dashboard.
+    submit_and_tail(entrypoint, runtime_env=None)
+        Async: submit a Ray job, stream logs, return final status.
+    wait_forever(poll_seconds=10)
+        Async: keep a worker container alive until termination.
     """
 
     def __init__(self) -> None:

@@ -43,15 +43,158 @@ _SKIP_FIELDS = {
 
 @dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
 class MsSwiftFrameworkConfig:
-    """ms-swift Megatron configuration, including Modal infrastructure.
+    """ms-swift Megatron SFT configuration, including Modal infrastructure.
 
-    Subclass and override class attributes to customize. All non-skip
-    attributes are forwarded to `megatron sft` as `--flag value` CLI args
-    (ms-swift uses underscore-style names and explicit `"true"`/`"false"`
-    string-valued booleans).
+    All non-skip attributes are forwarded to ``megatron sft`` as CLI flags
+    (``--flag value``). ms-swift uses underscore-style names and explicit
+    ``"true"``/``"false"`` string-valued booleans.
 
-    Attach `dataset` / `model` / `wandb` as containers; they're translated to
-    ms-swift's specific flag names inside `_fields()`.
+    ## Modal Infrastructure
+
+    gpu : GPUType
+        Modal GPU type. Default ``"H100"``.
+    image : str
+        Docker image for the training container.
+    transformers_version : str
+        Transformers version to reinstall for compatibility. Default ``"4.57.3"``.
+    app_tags : dict
+        Extra Modal app tags. Default ``{}``.
+    environment : dict[str, str]
+        Environment variables for the training container.
+    n_nodes : int
+        Number of Modal cluster nodes. Default ``4``.
+    gpus_per_node : int
+        GPUs per node. Default ``8``.
+
+    ## Tuner and Data
+
+    tuner_type : str
+        Fine-tuning method (e.g. ``"lora"``). Default ``"lora"``.
+    split_dataset_ratio : float
+        Train/eval split ratio. Default ``0.01``.
+    perform_initialization : bool
+        Emit ``--perform_initialization`` flag. Default ``True``.
+
+    ## Parallelism
+
+    tensor_model_parallel_size : int
+        Tensor parallelism degree. Default ``2``.
+    expert_model_parallel_size : int
+        Expert parallelism for MoE models. Default ``4``.
+    pipeline_model_parallel_size : int
+        Pipeline parallelism degree. Default ``4``.
+    context_parallel_size : int
+        Context parallelism degree. Default ``1``.
+    sequence_parallel : bool
+        Enable sequence parallelism. Default ``True``.
+    use_distributed_optimizer : bool
+        Enable distributed optimizer. Default ``True``.
+
+    ## MoE
+
+    moe_permute_fusion : bool
+        Enable MoE permute fusion. Default ``True``.
+    moe_grouped_gemm : bool
+        Enable grouped GEMM for MoE. Default ``True``.
+    moe_shared_expert_overlap : bool
+        Enable shared expert overlap. Default ``True``.
+    moe_aux_loss_coeff : float
+        Auxiliary loss coefficient for MoE load balancing. Default ``1e-3``.
+
+    ## Batch
+
+    global_batch_size : int
+        Global batch size across all ranks. Default ``8``.
+    packing : bool
+        Enable sequence packing. Default ``True``.
+    padding_free : bool
+        Enable padding-free attention. Default ``True``.
+    use_precision_aware_optimizer : bool
+        Enable precision-aware optimizer. Default ``True``.
+
+    ## Training
+
+    train_iters : int | None
+        Max training iterations. Overrides ``num_train_epochs``. Default ``None``.
+    num_train_epochs : int
+        Number of training epochs. Default ``4``.
+    lr : float
+        Learning rate. Default ``1e-4``.
+    lr_warmup_fraction : float
+        Fraction of training for LR warmup. Default ``0.05``.
+    lr_decay_style : str
+        LR decay schedule. Default ``"cosine"``.
+    min_lr : float
+        Minimum learning rate. Default ``1e-5``.
+    weight_decay : float
+        Weight decay coefficient. Default ``0.1``.
+    clip_grad : float
+        Gradient clipping norm. Default ``1.0``.
+    adam_beta1 : float
+        Adam beta1. Default ``0.9``.
+    adam_beta2 : float
+        Adam beta2. Default ``0.95``.
+    seed : int
+        Random seed. Default ``42``.
+
+    ## Precision and Memory
+
+    bf16 : bool
+        Enable BF16 training. Default ``True``.
+    recompute_granularity : str
+        Activation recomputation granularity. Default ``"selective"``.
+    recompute_modules : str
+        Modules to recompute. Default ``"core_attn"``.
+    attention_softmax_in_fp32 : bool
+        Compute attention softmax in FP32. Default ``True``.
+
+    ## Context and Attention
+
+    max_length : int
+        Maximum sequence length. Default ``2048``.
+    attention_backend : str
+        Attention implementation. Default ``"flash"``.
+
+    ## IO and Checkpointing
+
+    dataset_num_proc : int
+        Dataset preprocessing workers. Default ``8``.
+    dataloader_num_workers : int
+        DataLoader workers. Default ``4``.
+    save_interval : int
+        Checkpoint save interval (iterations). Default ``50``.
+    no_save_optim : bool
+        Skip saving optimizer state. Default ``True``.
+    no_save_rng : bool
+        Skip saving RNG state. Default ``True``.
+    save_safetensors : bool
+        Save in safetensors format. Default ``True``.
+    use_hf : int
+        Use HuggingFace checkpoint format. Default ``1``.
+    add_version : bool
+        Add version sub-directory to save path. Default ``False``.
+
+    ## Logging and Eval
+
+    log_interval : int
+        Logging interval (iterations). Default ``1``.
+    eval_iters : int
+        Evaluation iterations. Default ``10``.
+    eval_interval : int
+        Evaluation interval (iterations). Default ``50``.
+
+    ## LoRA
+
+    target_modules : str
+        LoRA target modules. Default ``"all-linear"``.
+    lora_rank : int
+        LoRA rank. Default ``128``.
+    lora_alpha : int
+        LoRA alpha scaling. Default ``32``.
+    lora_dropout : float
+        LoRA dropout. Default ``0.05``.
+    merge_lora : bool
+        Merge LoRA weights after training. Default ``False``.
     """
 
     # ── Modal infrastructure ────────────────────────────────────────────────

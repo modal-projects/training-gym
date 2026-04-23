@@ -31,4 +31,8 @@ Transformer architecture parameters for a specific model.
 | `use_rotary_position_embeddings` | `bool` | `True` | Use RoPE positional encoding. Default `True`. |
 | `rotary_base` | `int` | `10000` | Base frequency for RoPE. Default `10000`. |
 
+## Related Tutorials
+
+- [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/quickstart/)
+
 **Source:** [`modal_training_gym/common/models/base.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/models/base.py)

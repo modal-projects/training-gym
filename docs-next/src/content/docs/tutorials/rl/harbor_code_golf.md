@@ -379,10 +379,10 @@ app = harbor.build_app(name="harbor-code-golf")
 
 ## Related API Reference
 
-- [`HarborConfig`](/reference/core/harborconfig/)
-- [`HarborFrameworkConfig`](/reference/core/harborframeworkconfig/)
+- [`HarborConfig`](/reference/frameworks/harborconfig/)
+- [`HarborFrameworkConfig`](/reference/frameworks/harborframeworkconfig/)
 - [`DatasetConfig`](/reference/core/datasetconfig/)
-- [`Qwen3_4B`](/reference/core/qwen3_4b/)
+- [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
 **Source:** [`tutorials/rl/harbor_code_golf/harbor_code_golf.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/harbor_code_golf/harbor_code_golf.py)

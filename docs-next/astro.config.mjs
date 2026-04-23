@@ -26,7 +26,39 @@ export default defineConfig({
       },
       sidebar: [
         { label: 'Overview', link: '/' },
-        { label: 'Tutorials', link: '/tutorials/' },
+        {
+          label: 'Tutorials',
+          items: [
+            { label: 'Overview', link: '/tutorials/' },
+            {
+              label: 'Getting Started',
+              items: [
+                { label: 'Quickstart', link: '/tutorials/intro/quickstart/' },
+              ],
+            },
+            {
+              label: 'Reinforcement Learning',
+              items: [
+                { label: 'SLIME GSM8K', link: '/tutorials/rl/slime_gsm8k/' },
+                { label: 'SLIME Haiku', link: '/tutorials/rl/slime_haiku/' },
+                { label: 'Harbor Code Golf', link: '/tutorials/rl/harbor_code_golf/' },
+              ],
+            },
+            {
+              label: 'Supervised Fine-Tuning',
+              items: [
+                { label: 'ms-swift GLM-4.7 GSM8K', link: '/tutorials/sft/ms_swift_glm_4_7_gsm8k/' },
+                { label: 'ms-swift Custom HF', link: '/tutorials/sft/ms_swift_custom_hf/' },
+              ],
+            },
+            {
+              label: 'Infrastructure',
+              items: [
+                { label: 'Ray Standalone', link: '/tutorials/misc/ray_slime_standalone/' },
+              ],
+            },
+          ],
+        },
         {
           label: 'API Reference',
           items: [

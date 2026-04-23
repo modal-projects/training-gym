@@ -387,10 +387,10 @@ serve_app = build_vllm_serve_app(
 
 ## Related API Reference
 
-- [`SlimeConfig`](/reference/core/slimeconfig/)
-- [`ModalConfig`](/reference/core/modalconfig/)
+- [`SlimeConfig`](/reference/frameworks/slimeconfig/)
+- [`ModalConfig`](/reference/frameworks/modalconfig/)
 - [`DatasetConfig`](/reference/core/datasetconfig/)
-- [`Qwen3_4B`](/reference/core/qwen3_4b/)
+- [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 - [`LlmJudge`](/reference/core/llmjudge/)
 

@@ -19,7 +19,9 @@ from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.frameworks.miles.config import (
+    CHECKPOINTS_PATH,
     DATA_PATH,
+    HF_CACHE_PATH,
     MilesFrameworkConfig,
 )
 from modal_training_gym.frameworks.miles.config import (
@@ -57,12 +59,49 @@ ROLLOUT_PROXY_PORT = 30001
 
 @dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
 class HarborFrameworkConfig(MilesFrameworkConfig):
-    """Harbor + Miles configuration.
+    """Harbor + Miles configuration for sandbox-based RL training.
 
-    Inherits all Miles training settings (gpu, n_nodes, recipe_args, etc.)
-    and adds Harbor agent/environment/task configuration. The launcher
-    wires up the agent function, reward function, and rollout function
-    automatically.
+    Inherits all Miles training settings and adds Harbor
+    agent/environment/task configuration. The launcher wires up the
+    agent function, reward function, and rollout function automatically.
+
+    ## Harbor Agent
+
+    agent_import_path : str
+        Python import path for the Harbor agent class. Default ``""``.
+    agent_model_name : str
+        Model name passed to the agent. Default ``"model"``.
+    agent_kwargs : dict[str, Any]
+        Extra keyword arguments for agent construction. Default ``{}``.
+
+    ## Harbor Environment
+
+    environment_import_path : str | None
+        Import path for custom Harbor environment. Default ``None``.
+    sandbox_timeout_secs : int
+        Maximum sandbox execution time in seconds. Default ``1800`` (30 min).
+    sandbox_idle_timeout_secs : int
+        Sandbox idle timeout in seconds. Default ``300`` (5 min).
+
+    ## Harbor Tasks
+
+    task_root : str
+        Root directory for Harbor task directories on the data volume.
+        Default ``"/data/tasks"``.
+    task_glob : str
+        Glob pattern for discovering task directories. Default ``"*"``.
+    instruction_path : str
+        Relative path to the instruction file within each task dir.
+        Default ``"instruction.md"``.
+
+    ## Image
+
+    miles_image : str
+        Docker image with Miles trainer. Default ``"radixark/miles:dev-202604201238"``.
+    miles_src_commit : str
+        Miles source commit with ``--custom-agent-function-path`` support.
+    harbor_install_command : str
+        Command to install Harbor in the image.
     """
 
     # ── Harbor agent ─────────────────────────────────────────────────────────

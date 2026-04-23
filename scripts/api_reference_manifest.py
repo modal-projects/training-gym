@@ -159,3 +159,18 @@ GROUPS = {
     "models": {"label": "Models", "order": 2},
     "frameworks": {"label": "Frameworks", "order": 3},
 }
+
+
+def class_to_reference_path(class_name: str) -> str | None:
+    """Return the Starlight reference path for a class, or None if not in manifest."""
+    for entry in API_REFERENCE_MANIFEST:
+        if entry["class_name"] == class_name:
+            slug = class_name.lower()
+            return f"/reference/{entry['group']}/{slug}/"
+    return None
+
+
+CLASS_REFERENCE_PATHS = {
+    entry["class_name"]: f"/reference/{entry['group']}/{entry['class_name'].lower()}/"
+    for entry in API_REFERENCE_MANIFEST
+}
