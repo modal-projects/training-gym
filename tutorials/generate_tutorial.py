@@ -25,7 +25,9 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import pathlib
+import subprocess
 import textwrap
 import urllib.parse
 from dataclasses import dataclass
@@ -45,8 +47,6 @@ _README_PATH = TUTORIALS_DIR / "README.md"
 _README_BEGIN = "<!-- BEGIN TUTORIAL TABLE -->"
 _README_END = "<!-- END TUTORIAL TABLE -->"
 _REPO_SLUG = "modal-projects/training-gym"
-# Keep launch links stable against a branch that always exists remotely.
-_BRANCH = "main"
 _BADGE_IMG = "https://modal-cdn.com/open-in-modal.svg"
 
 _MARKDOWN = "markdown"
@@ -68,6 +68,42 @@ _BUCKET_DISPLAY = {
     "sft": "SFT",
     "misc": "Misc",
 }
+
+
+def _branch_exists_on_origin(branch: str) -> bool:
+    if not branch:
+        return False
+    result = subprocess.run(
+        ["git", "ls-remote", "--exit-code", "--heads", "origin", branch],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def _resolve_branch() -> str:
+    for env_var in ("GITHUB_REF_NAME", "VERCEL_GIT_COMMIT_REF"):
+        value = os.getenv(env_var)
+        if value and _branch_exists_on_origin(value):
+            return value
+
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    branch = result.stdout.strip()
+    if _branch_exists_on_origin(branch):
+        return branch
+
+    return "main"
+
+
+_BRANCH = _resolve_branch()
 
 
 @dataclass
@@ -260,13 +296,13 @@ def _extract_metadata(source: str) -> dict | None:
 
 
 def _render_launch_cell(bucket: str, name: str) -> str:
-    raw_url = (
-        f"https://raw.githubusercontent.com/{_REPO_SLUG}/{_BRANCH}"
+    notebook_url = (
+        f"https://github.com/{_REPO_SLUG}/blob/{_BRANCH}"
         f"/tutorials/{bucket}/{name}/{name}.ipynb"
     )
     launch_url = (
-        f"https://modal.com/notebooks/new"
-        f"?import=url&url={urllib.parse.quote(raw_url, safe='')}"
+        "https://modal.com/notebooks/new/"
+        f"{urllib.parse.quote(notebook_url, safe=':/')}"
     )
     # Explicit `rel="nofollow noopener noreferrer"` matches GitHub's own
     # auto-added rel, which ensures GitHub's markdown sanitizer preserves
