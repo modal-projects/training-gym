@@ -1,0 +1,44 @@
+---
+import MobileMenuFooter from '@astrojs/starlight/components/MobileMenuFooter.astro';
+import SidebarPersister from '@astrojs/starlight/components/SidebarPersister.astro';
+import SidebarSublist from '@astrojs/starlight/components/SidebarSublist.astro';
+
+const { sidebar } = Astro.locals.starlightRoute;
+const currentPath = Astro.url.pathname;
+
+function getFilteredSidebar() {
+  if (currentPath === '/' || currentPath.startsWith('/support')) {
+    return [];
+  }
+
+  for (const entry of sidebar) {
+    if (entry.type === 'group') {
+      const hasMatchingChild = JSON.stringify(entry).includes(currentPath) ||
+        entry.entries.some((e) =>
+          e.type === 'link'
+            ? currentPath.startsWith(e.href.replace(/\/$/, ''))
+            : JSON.stringify(e).includes(currentPath)
+        );
+
+      if (hasMatchingChild) {
+        return entry.entries;
+      }
+    }
+  }
+
+  return sidebar;
+}
+
+const filteredSidebar = getFilteredSidebar();
+const showSidebar = filteredSidebar.length > 0;
+---
+
+{showSidebar && (
+  <SidebarPersister>
+    <SidebarSublist sublist={filteredSidebar} />
+  </SidebarPersister>
+
+  <div class="md:sl-hidden">
+    <MobileMenuFooter />
+  </div>
+)}
