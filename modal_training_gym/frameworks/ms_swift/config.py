@@ -113,32 +113,8 @@ class MsSwiftFrameworkConfig:
         Train/eval split ratio. Default ``0.01``.
     perform_initialization : bool
         Emit ``--perform_initialization`` flag. Default ``True``.
-
-    ## Parallelism
-
-    tensor_model_parallel_size : int
-        Tensor parallelism degree. Default ``2``.
-    expert_model_parallel_size : int
-        Expert parallelism for MoE models. Default ``4``.
-    pipeline_model_parallel_size : int
-        Pipeline parallelism degree. Default ``4``.
-    context_parallel_size : int
-        Context parallelism degree. Default ``1``.
-    sequence_parallel : bool
-        Enable sequence parallelism. Default ``True``.
     use_distributed_optimizer : bool
         Enable distributed optimizer. Default ``True``.
-
-    ## MoE
-
-    moe_permute_fusion : bool
-        Enable MoE permute fusion. Default ``True``.
-    moe_grouped_gemm : bool
-        Enable grouped GEMM for MoE. Default ``True``.
-    moe_shared_expert_overlap : bool
-        Enable shared expert overlap. Default ``True``.
-    moe_aux_loss_coeff : float
-        Auxiliary loss coefficient for MoE load balancing. Default ``1e-3``.
 
     ## Batch
 
@@ -224,16 +200,8 @@ class MsSwiftFrameworkConfig:
 
     ## LoRA
 
-    target_modules : str
-        LoRA target modules. Default ``"all-linear"``.
-    lora_rank : int
-        LoRA rank. Default ``128``.
-    lora_alpha : int
-        LoRA alpha scaling. Default ``32``.
     lora_dropout : float
         LoRA dropout. Default ``0.05``.
-    merge_lora : bool
-        Merge LoRA weights after training. Default ``False``.
     """
 
     # ── Modal infrastructure ────────────────────────────────────────────────
@@ -266,20 +234,7 @@ class MsSwiftFrameworkConfig:
     split_dataset_ratio: float = 0.01
     # Bare flag — emitted as `--perform_initialization` (no value) when True.
     perform_initialization: bool = True
-
-    # ── Parallelism ──────────────────────────────────────────────────────────
-    tensor_model_parallel_size: int = 2
-    expert_model_parallel_size: int = 4
-    pipeline_model_parallel_size: int = 4
-    context_parallel_size: int = 1
-    sequence_parallel: bool = True
     use_distributed_optimizer: bool = True
-
-    # ── MoE ──────────────────────────────────────────────────────────────────
-    moe_permute_fusion: bool = True
-    moe_grouped_gemm: bool = True
-    moe_shared_expert_overlap: bool = True
-    moe_aux_loss_coeff: float = 1e-3
 
     # ── Batch ────────────────────────────────────────────────────────────────
     global_batch_size: int = 8
@@ -328,11 +283,7 @@ class MsSwiftFrameworkConfig:
     eval_interval: int = 50
 
     # ── LoRA ─────────────────────────────────────────────────────────────────
-    target_modules: str = "all-linear"
-    lora_rank: int = 128
-    lora_alpha: int = 32
     lora_dropout: float = 0.05
-    merge_lora: bool = False
 
     @classmethod
     def from_toml(cls, path: str | Path) -> "MsSwiftFrameworkConfig":
@@ -391,9 +342,8 @@ class MsSwiftConfig:
     def _fields(self) -> dict[str, Any]:
         fields = dict(vars(self.framework_config))
         if self.model is not None:
-            overrides = model_training_overrides(self.model)
-            for k, v in overrides.items():
-                if k in fields and fields[k] == getattr(MsSwiftFrameworkConfig, k, None):
+            for k, v in model_training_overrides(self.model).items():
+                if k not in fields:
                     fields[k] = v
         fields = {k: v for k, v in fields.items() if k not in _SKIP_FIELDS}
         if self.dataset is not None and hasattr(self.dataset, "prompt_data"):

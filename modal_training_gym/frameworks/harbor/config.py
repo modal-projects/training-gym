@@ -108,13 +108,6 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
     rollout_shuffle : bool
         Shuffle data during rollout generation. Default ``True``.
 
-    ## Parallelism (Harbor Overrides)
-
-    tensor_model_parallel_size : int
-        Tensor parallelism degree. Default ``2``.
-    sequence_parallel : bool
-        Enable sequence parallelism. Default ``True``.
-
     ## Memory (Harbor Overrides)
 
     recompute_granularity : str
@@ -185,10 +178,6 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
     apply_chat_template: bool = True
     enable_thinking: bool = True
     rollout_shuffle: bool = True
-
-    # ── Parallelism ─────────────────────────────────────────────────────────
-    tensor_model_parallel_size: int = 2
-    sequence_parallel: bool = True
 
     # ── Memory ──────────────────────────────────────────────────────────────
     recompute_granularity: str = "selective"

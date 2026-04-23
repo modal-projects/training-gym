@@ -399,11 +399,16 @@ def build_harbor_app(
         if harbor.model and harbor.model.architecture:
             model_arch_args = harbor.model.architecture.to_megatron_args()
 
+        model_training_args: list[str] = []
+        if harbor.model and harbor.model.training:
+            model_training_args = harbor.model.training.to_cli_args()
+
         argv: list[str] = [
             "python3",
             _REMOTE_TRAIN_SCRIPT,
             *framework.cli_args(),
             *model_arch_args,
+            *model_training_args,
             *framework.parsed_recipe_args(),
             *extra_argv,
             "--train-backend",

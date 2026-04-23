@@ -91,8 +91,17 @@ def _explain_model():
 
 @code
 def _define_model():
+    from modal_training_gym.common.models import ModelTrainingConfig
+
     class SmolLM2_135M(ModelConfiguration):
         model_name = "HuggingFaceTB/SmolLM2-135M"
+        training = ModelTrainingConfig(
+            gpu_type="H100",
+            tensor_model_parallel_size=1,
+            pipeline_model_parallel_size=1,
+            lora_rank=8,
+            lora_alpha=16,
+        )
 
         def download_model(self) -> None:
             from huggingface_hub import snapshot_download
@@ -184,16 +193,9 @@ def _define_config():
         gpu="H100",
         n_nodes=1,
         gpus_per_node=1,
-        tensor_model_parallel_size=1,
-        expert_model_parallel_size=1,
-        pipeline_model_parallel_size=1,
-        context_parallel_size=1,
-        sequence_parallel=False,
         num_train_epochs=1,
         global_batch_size=1,
         max_length=512,
-        lora_rank=8,
-        lora_alpha=16,
         save_interval=10,
         eval_iters=0,
     )

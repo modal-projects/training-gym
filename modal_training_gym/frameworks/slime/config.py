@@ -301,6 +301,9 @@ class SlimeConfig:
             fields.update(self._dataset_to_fields(self.dataset))
         if self.model is not None:
             fields.update(self._model_to_fields(self.model))
+            for k, v in model_training_overrides(self.model).items():
+                if k not in fields:
+                    fields[k] = v
         if self.wandb is not None:
             fields.update(self._wandb_to_fields(self.wandb))
         return {k: v for k, v in fields.items() if k not in _SLIME_SKIP}
