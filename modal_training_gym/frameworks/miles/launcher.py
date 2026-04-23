@@ -50,6 +50,7 @@ from .config import (
     DATA_PATH,
     HF_CACHE_PATH,
     MilesConfig,
+    model_training_cli_args,
 )
 
 _MILES_ROOT = "/root/miles"
@@ -209,15 +210,11 @@ def build_miles_app(
         run_id = f"{app_name}-{int(time.time())}"
         checkpoint_dir = f"{checkpoints_str}/{run_id}"
 
-        model_training_args: list[str] = []
-        if miles.model and miles.model.training:
-            model_training_args = miles.model.training.to_cli_args()
-
         argv: list[str] = [
             "python3",
             _REMOTE_TRAIN_SCRIPT,
             *framework.cli_args(),
-            *model_training_args,
+            *(model_training_cli_args(miles.model) if miles.model else []),
             *framework.parsed_recipe_args(),
             *extra_argv,
             "--train-backend",

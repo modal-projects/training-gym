@@ -322,13 +322,12 @@ def _explain_config():
     - `task_root` / `instruction_path` — where to find task directories
       on the data volume.
 
-    **Miles recipe args**
-    - Model architecture flags match Qwen3-4B's config.
-    - `--num-rollout 200`, `--rollout-batch-size 64` — how many rollouts
-      per training step and how many run in parallel.
-    - `--global-batch-size 512` — training batch size.
-    - `--tensor-model-parallel-size 2` — Qwen3-4B is small but we use
-      TP=2 to leave room for SGLang's KV cache.
+    **Parallelism override**
+    - `Qwen3_4B`'s `ModelTrainingConfig` defaults to `tensor_model_parallel_size=1`,
+      but this tutorial overrides to TP=2 via `recipe_args` to leave room
+      for SGLang's KV cache during colocated rollout.
+    - Model architecture flags (`--num-layers`, `--hidden-size`, etc.)
+      are pulled automatically from `Qwen3_4B().architecture`.
     """
 
 
@@ -352,19 +351,10 @@ def _define_config():
         sandbox_timeout_secs=180,
         sandbox_idle_timeout_secs=60,
         recipe_args="""
-            # Model architecture (Qwen3-4B) — only flags not covered
-            # by typed HarborFrameworkConfig fields belong here.
-            --num-layers 36
-            --hidden-size 2560
-            --ffn-hidden-size 9728
-            --num-attention-heads 32
-            --group-query-attention
-            --num-query-groups 8
-            --kv-channels 128
-            --rotary-base 1000000
-            --make-vocab-size-divisible-by 1
-            --position-embedding-type rope
-            --qk-layernorm
+            # Override TP from the model default (1) to 2 so SGLang's
+            # KV cache fits alongside the actor weights.
+            --tensor-model-parallel-size 2
+            --sequence-parallel
         """,
     )
 

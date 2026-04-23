@@ -84,6 +84,27 @@ def model_training_overrides(
     }
 
 
+def model_training_cli_args(model: "ModelConfiguration") -> list[str]:
+    """Convert model training config to hyphenated Miles CLI flags.
+
+    Emits parallelism and MoE flags only (no LoRA, no infrastructure).
+    Returns an empty list when the model has no training config.
+    """
+    overrides = model_training_overrides(model)
+    overrides.pop("gpu", None)
+    overrides.pop("n_nodes", None)
+    out: list[str] = []
+    for key, val in overrides.items():
+        if val is None or val is False:
+            continue
+        flag = f"--{key.replace('_', '-')}"
+        if val is True:
+            out.append(flag)
+        else:
+            out += [flag, str(val)]
+    return out
+
+
 @dataclass(config=ConfigDict(extra="forbid", validate_assignment=True))
 class MilesFrameworkConfig:
     """Miles RLVR configuration, including Modal infrastructure.

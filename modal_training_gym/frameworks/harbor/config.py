@@ -23,7 +23,6 @@ from modal_training_gym.frameworks.miles.config import (
     DATA_PATH,
     HF_CACHE_PATH as HF_CACHE_PATH,
     MilesFrameworkConfig,
-    model_training_overrides,
 )
 from modal_training_gym.frameworks.miles.config import (
     _SKIP_FIELDS as _MILES_SKIP_FIELDS,

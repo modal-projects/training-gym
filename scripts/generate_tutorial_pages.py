@@ -161,7 +161,7 @@ def generate_tutorial_page(
     nb_path = f"tutorials/{bucket}/{name}/{name}.ipynb"
     nb_url = f"https://modal.com/notebooks/new/{REPO_URL}/blob/main/{nb_path}"
     lines.append(f"**Source:** [`{py_path}`]({REPO_URL}/blob/main/{py_path})")
-    lines.append(f" | [Open in Modal Notebook]({nb_url})")
+    lines.append(f' | <a href="{nb_url}" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>')
     lines.append("")
 
     return "\n".join(lines)

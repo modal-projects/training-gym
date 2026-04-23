@@ -218,8 +218,6 @@ class ModelTrainingConfig:
     target_modules: str = "all-linear"
     merge_lora: bool = False
 
-    _CLI_SKIP = frozenset({"gpu_type", "n_nodes"})
-
     def to_framework_overrides(self) -> dict[str, Any]:
         """Return training params as a dict for framework config consumption.
 
@@ -229,26 +227,6 @@ class ModelTrainingConfig:
         values taking precedence.
         """
         return {f.name: getattr(self, f.name) for f in dc_fields(self)}
-
-    def to_cli_args(self) -> list[str]:
-        """Emit training params as hyphenated Megatron-style CLI flags.
-
-        Used by Miles, Harbor, and SLIME launchers. Skips infrastructure
-        fields (``gpu_type``, ``n_nodes``) and false/None values.
-        """
-        out: list[str] = []
-        for f in dc_fields(self):
-            if f.name in self._CLI_SKIP:
-                continue
-            val = getattr(self, f.name)
-            if val is None or val is False:
-                continue
-            flag = f"--{f.name.replace('_', '-')}"
-            if val is True:
-                out.append(flag)
-            else:
-                out += [flag, str(val)]
-        return out
 
 
 class ModelConfiguration:

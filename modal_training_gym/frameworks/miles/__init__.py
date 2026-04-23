@@ -4,6 +4,7 @@ from .config import (
     HF_CACHE_PATH,
     MilesConfig,
     MilesFrameworkConfig,
+    model_training_cli_args,
     model_training_overrides,
 )
 from .launcher import build_miles_app
@@ -15,5 +16,6 @@ __all__ = [
     "MilesConfig",
     "MilesFrameworkConfig",
     "build_miles_app",
+    "model_training_cli_args",
     "model_training_overrides",
 ]

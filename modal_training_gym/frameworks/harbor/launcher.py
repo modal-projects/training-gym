@@ -51,6 +51,8 @@ from modal_training_gym.common.framework import (
 )
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
+from modal_training_gym.frameworks.miles.config import model_training_cli_args
+
 from .config import (
     CHECKPOINTS_PATH,
     DATA_PATH,
@@ -399,16 +401,12 @@ def build_harbor_app(
         if harbor.model and harbor.model.architecture:
             model_arch_args = harbor.model.architecture.to_megatron_args()
 
-        model_training_args: list[str] = []
-        if harbor.model and harbor.model.training:
-            model_training_args = harbor.model.training.to_cli_args()
-
         argv: list[str] = [
             "python3",
             _REMOTE_TRAIN_SCRIPT,
             *framework.cli_args(),
             *model_arch_args,
-            *model_training_args,
+            *(model_training_cli_args(harbor.model) if harbor.model else []),
             *framework.parsed_recipe_args(),
             *extra_argv,
             "--train-backend",

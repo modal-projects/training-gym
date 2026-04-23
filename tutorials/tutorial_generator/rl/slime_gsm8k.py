@@ -140,8 +140,8 @@ def _explain_config():
       same GPUs. Cheaper than disaggregated because weights don't have to
       be shipped between pools on every sync, at the cost of interleaving
       the two workloads on one set of devices.
-    - `tensor_model_parallel_size=1` — Qwen3-4B fits comfortably on a
-      single H100, so no tensor parallelism.
+    - Parallelism settings (`tensor_model_parallel_size=1`, etc.) come
+      from `Qwen3_4B`'s `ModelTrainingConfig` — no need to set them here.
     - `megatron_to_hf_mode="bridge"` — SLIME writes Megatron checkpoints
       that are readable as HF directly. In raw mode you'd run a one-time
       `convert_checkpoint` step; in bridge mode it's a no-op, so this
