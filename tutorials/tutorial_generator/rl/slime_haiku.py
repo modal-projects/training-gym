@@ -482,19 +482,10 @@ def _define_config():
         ref_load=base_model.model_name,
         megatron_to_hf_mode="bridge",
 
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
-        colocate=True,
-
         rm_type="async_rm",
         custom_rm_path=CUSTOM_RM_PATH,
 
         num_rollout=50,
-        rollout_batch_size=128,
-        rollout_max_response_len=300,
-        rollout_num_gpus_per_engine=2,
-        n_samples_per_prompt=8,
-        global_batch_size=64,
         apply_chat_template_kwargs='{"enable_thinking": false}',
 
         eval_interval=20,
