@@ -19,7 +19,9 @@ from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.frameworks.miles.config import (
+    CHECKPOINTS_PATH as CHECKPOINTS_PATH,
     DATA_PATH,
+    HF_CACHE_PATH as HF_CACHE_PATH,
     MilesFrameworkConfig,
 )
 from modal_training_gym.frameworks.miles.config import (
