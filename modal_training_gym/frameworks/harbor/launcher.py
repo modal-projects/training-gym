@@ -64,6 +64,7 @@ from .config import (
 
 _REMOTE_TRAIN_SCRIPT = f"{MILES_SRC_PATH}/train.py"
 
+_HARBOR_GENERATE_FN = "miles.rollout.generate_hub.agentic_tool_call.generate"
 _HARBOR_AGENT_FUNCTION = "modal_training_gym.frameworks.harbor.agent_function.run"
 _HARBOR_REWARD_FUNC = "modal_training_gym.frameworks.harbor.reward.reward_func"
 _HARBOR_ROLLOUT_FN = "modal_training_gym.frameworks.harbor.reward.RolloutFn"
@@ -203,6 +204,7 @@ def build_harbor_app(
         image = image.run_commands(cmd)
     if framework.miles_src_commit:
         image = image.run_commands(
+            "uv pip uninstall --system miles 2>/dev/null || true",
             f"git clone https://github.com/radixark/miles.git {MILES_SRC_PATH}",
             f"cd {MILES_SRC_PATH} && git checkout {framework.miles_src_commit}",
             f"cd {MILES_SRC_PATH} && uv pip install --system -e .",
@@ -378,15 +380,21 @@ def build_harbor_app(
             str(framework.gpus_per_node),
             "--num-gpus-per-node",
             str(framework.gpus_per_node),
-            # Harbor integration
+            # Harbor integration: the agentic generate function registers
+            # --custom-agent-function-path via its add_arguments hook
+            # and requires --use-session-server for TITO session tracing.
             "--prompt-data",
             str(HARBOR_TRAIN_JSONL),
+            "--custom-generate-function-path",
+            _HARBOR_GENERATE_FN,
             "--custom-agent-function-path",
             _HARBOR_AGENT_FUNCTION,
             "--custom-rm-path",
             _HARBOR_REWARD_FUNC,
             "--rollout-function-path",
             _HARBOR_ROLLOUT_FN,
+            "--use-session-server",
+            "--generate-multi-samples",
         ]
 
         if framework.colocate:
@@ -405,53 +413,59 @@ def build_harbor_app(
         if harbor.wandb is not None and wandb_key:
             argv.extend(["--use-wandb", "--wandb-key", wandb_key])
 
+        SESSION_SERVER_PORT = 5578
+        SESSION_PROXY_PORT = 30002
+
+        runtime_env: dict[str, Any] = {
+            "env_vars": {
+                "MASTER_ADDR": cluster.head_addr,
+                "MILES_HOST_IP": cluster.head_addr,
+                "no_proxy": cluster.head_addr,
+                "PYTHONPATH": f"{MILES_SRC_PATH}:/root/Megatron-LM",
+                "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+                "NCCL_ALGO": "Ring",
+                "NVTE_ALLOW_NONDETERMINISTIC_ALGO": "0",
+                "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
+                "HARBOR_AGENT_IMPORT_PATH": framework.agent_import_path,
+                "HARBOR_AGENT_KWARGS": json.dumps(framework.agent_kwargs),
+                "AGENT_MODEL_NAME": framework.agent_model_name,
+                "HARBOR_USE_LOCAL_TASKS": "1",
+                "HARBOR_SANDBOX_TIMEOUT_SECS": str(
+                    framework.sandbox_timeout_secs
+                ),
+                "HARBOR_SANDBOX_IDLE_TIMEOUT_SECS": str(
+                    framework.sandbox_idle_timeout_secs
+                ),
+                "MODAL_ENVIRONMENT": os.environ.get("MODAL_ENVIRONMENT", ""),
+                "MODAL_TOKEN_ID": os.environ.get("MODAL_TOKEN_ID", ""),
+                "MODAL_TOKEN_SECRET": os.environ.get("MODAL_TOKEN_SECRET", ""),
+            }
+        }
+        if framework.environment_import_path:
+            runtime_env["env_vars"]["HARBOR_ENVIRONMENT_IMPORT_PATH"] = (
+                framework.environment_import_path
+            )
+        if wandb_key:
+            runtime_env["env_vars"]["WANDB_API_KEY"] = wandb_key
+
+        # The agentic generate function uses a session server for TITO
+        # tracing. Sandboxes reach the session server via a public
+        # tunnel through a local TCP proxy.
         async with _rollout_proxy(
             target_host=cluster.head_addr,
-            target_port=ROLLOUT_ROUTER_PORT,
-            listen_port=ROLLOUT_PROXY_PORT,
+            target_port=SESSION_SERVER_PORT,
+            listen_port=SESSION_PROXY_PORT,
         ):
-            async with modal.forward(ROLLOUT_PROXY_PORT) as rollout_tunnel:
-                public_base_url = rollout_tunnel.url.rstrip("/")
-
-                runtime_env = {
-                    "env_vars": {
-                        "MASTER_ADDR": cluster.head_addr,
-                        "MILES_HOST_IP": cluster.head_addr,
-                        "no_proxy": cluster.head_addr,
-                        "PYTHONPATH": f"{MILES_SRC_PATH}:/root/Megatron-LM",
-                        "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-                        "NCCL_ALGO": "Ring",
-                        "NVTE_ALLOW_NONDETERMINISTIC_ALGO": "0",
-                        "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
-                        # Harbor agent config
-                        "HARBOR_AGENT_IMPORT_PATH": framework.agent_import_path,
-                        "HARBOR_AGENT_KWARGS": json.dumps(framework.agent_kwargs),
-                        "AGENT_MODEL_NAME": framework.agent_model_name,
-                        "HARBOR_PUBLIC_BASE_URL": public_base_url,
-                        "HARBOR_USE_LOCAL_TASKS": "1",
-                        "HARBOR_SANDBOX_TIMEOUT_SECS": str(
-                            framework.sandbox_timeout_secs
-                        ),
-                        "HARBOR_SANDBOX_IDLE_TIMEOUT_SECS": str(
-                            framework.sandbox_idle_timeout_secs
-                        ),
-                        # Nested Modal access for sandbox creation
-                        "MODAL_ENVIRONMENT": os.environ.get("MODAL_ENVIRONMENT", ""),
-                        "MODAL_TOKEN_ID": os.environ.get("MODAL_TOKEN_ID", ""),
-                        "MODAL_TOKEN_SECRET": os.environ.get("MODAL_TOKEN_SECRET", ""),
-                    }
-                }
-                if framework.environment_import_path:
-                    runtime_env["env_vars"]["HARBOR_ENVIRONMENT_IMPORT_PATH"] = (
-                        framework.environment_import_path
-                    )
-                if wandb_key:
-                    runtime_env["env_vars"]["WANDB_API_KEY"] = wandb_key
+            async with modal.forward(SESSION_PROXY_PORT) as session_tunnel:
+                public_base_url = session_tunnel.url.rstrip("/")
+                runtime_env["env_vars"]["HARBOR_PUBLIC_BASE_URL"] = (
+                    public_base_url
+                )
 
                 entrypoint = shlex.join(argv)
                 async with cluster.forward_dashboard() as tunnel:
                     print(f"Ray dashboard: {tunnel.url}")
-                    print(f"Public rollout URL: {public_base_url}")
+                    print(f"Public session server URL: {public_base_url}")
                     print(f"Miles entrypoint: {entrypoint}")
                     status = await cluster.submit_and_tail(
                         entrypoint, runtime_env=runtime_env

@@ -295,6 +295,9 @@ dataset = MBPPCodeGolfDataset(train_size=900)
 framework_config = HarborFrameworkConfig(
     gpu="H100",
     n_nodes=2,
+    colocate=False,
+    actor_nodes=1,
+    rollout_num_gpus=8,
     agent_import_path=AGENT_IMPORT_PATH,
     agent_model_name="model",
     agent_kwargs={"temperature": 0.7, "max_tokens": 1024},
@@ -335,7 +338,7 @@ framework_config = HarborFrameworkConfig(
         --num-rollout 200
         --rollout-batch-size 64
         --rollout-max-response-len 1024
-        --sglang-mem-fraction-static 0.25
+        --sglang-mem-fraction-static 0.7
         --train-iters 50
 
         # ── Batch ──
