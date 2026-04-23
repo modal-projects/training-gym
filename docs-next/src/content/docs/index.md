@@ -1,7 +1,7 @@
 ---
 title: Training Gym SDK
 description: Reusable building blocks and runnable examples for distributed training on Modal.
-editUrl: https://github.com/modal-projects/training-gym/edit/main/README.md
+editUrl: https://github.com/modal-projects/training-gym/edit/joy/initial-setup/README.md
 ---
 
 :::caution[Important]
@@ -57,8 +57,8 @@ each framework translates them into its own CLI vocabulary.
 
 | Framework | Good for | Abstraction | Example |
 |---|---|---|---|
-| `ms_swift` | ms-swift Megatron SFT (single- and multi-node) | Opinionated | [`ms_swift_glm_4_7_gsm8k`](https://github.com/modal-projects/training-gym/tree/main/tutorials/sft/ms_swift_glm_4_7_gsm8k), [`ms_swift_custom_hf`](https://github.com/modal-projects/training-gym/tree/main/tutorials/sft/ms_swift_custom_hf) |
-| `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | Opinionated | [`slime_gsm8k`](https://github.com/modal-projects/training-gym/tree/main/tutorials/rl/slime_gsm8k), [`slime_haiku`](https://github.com/modal-projects/training-gym/tree/main/tutorials/rl/slime_haiku) |
+| `ms_swift` | ms-swift Megatron SFT (single- and multi-node) | Opinionated | [`ms_swift_glm_4_7_gsm8k`](https://github.com/modal-projects/training-gym/tree/joy/initial-setup/tutorials/sft/ms_swift_glm_4_7_gsm8k), [`ms_swift_custom_hf`](https://github.com/modal-projects/training-gym/tree/joy/initial-setup/tutorials/sft/ms_swift_custom_hf) |
+| `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | Opinionated | [`slime_gsm8k`](https://github.com/modal-projects/training-gym/tree/joy/initial-setup/tutorials/rl/slime_gsm8k), [`slime_haiku`](https://github.com/modal-projects/training-gym/tree/joy/initial-setup/tutorials/rl/slime_haiku) |
 
 "Thin" launchers give you a cluster and a `torchrun` — bring your own
 training script. "Opinionated" launchers wrap a specific upstream framework
@@ -76,7 +76,7 @@ Source in `modal_training_gym/frameworks/`. Runnable examples in
 
 ## License
 
-[MIT](https://github.com/modal-projects/training-gym/blob/main/LICENSE).
+[MIT](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/LICENSE).
 
 ---
 
@@ -137,4 +137,4 @@ schema.
 
 ## Agent guide
 
-- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/main/skills/agent-modal-training.md)
+- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/skills/agent-modal-training.md)
