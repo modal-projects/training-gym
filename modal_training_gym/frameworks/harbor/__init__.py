@@ -1,13 +1,19 @@
 from .config import (
-    CHECKPOINTS_PATH,
-    DATA_PATH,
-    HF_CACHE_PATH,
-    HARBOR_TRAIN_JSONL,
     HarborConfig,
     HarborFrameworkConfig,
 )
-from .launcher import build_harbor_app
 from .trajectory import TrajectoryTurn, parse_thinking
+
+
+def __getattr__(name: str):
+    if name in ("CHECKPOINTS_PATH", "DATA_PATH", "HF_CACHE_PATH", "HARBOR_TRAIN_JSONL"):
+        from . import config
+        return getattr(config, name)
+    if name == "build_harbor_app":
+        from .launcher import build_harbor_app
+        return build_harbor_app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "CHECKPOINTS_PATH",
