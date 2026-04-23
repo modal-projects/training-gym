@@ -116,14 +116,20 @@ class ModelArchitecture:
             args.append("--group-query-attention")
         if self.num_query_groups:
             args += ["--num-query-groups", str(self.num_query_groups)]
+        if self.kv_channels:
+            args += ["--kv-channels", str(self.kv_channels)]
         if self.vocab_size:
             args += ["--make-vocab-size-divisible-by", "1"]
         if self.normalization:
             args += ["--normalization", self.normalization]
+        if self.norm_epsilon != 1e-6:
+            args += ["--norm-epsilon", str(self.norm_epsilon)]
         if self.swiglu:
             args.append("--swiglu")
         if self.disable_bias_linear:
             args.append("--disable-bias-linear")
+        if self.qk_layernorm:
+            args.append("--qk-layernorm")
         if self.use_rotary_position_embeddings:
             args += ["--position-embedding-type", "rope"]
             if self.rotary_base != 10000:

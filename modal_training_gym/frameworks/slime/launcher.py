@@ -144,19 +144,23 @@ def build_slime_app(
 
     @app.function(
         image=image,
-        volumes={str(HF_CACHE_PATH): hf_cache_volume},
+        volumes={
+            str(HF_CACHE_PATH): hf_cache_volume,
+            str(CHECKPOINTS_PATH): checkpoints_volume,
+        },
         timeout=2 * 60 * 60,
         secrets=[Secret.from_name("huggingface-secret")],
         serialized=True,
         name="download_model",
     )
     def download_model():
-        """Download the model's HF checkpoint into the shared HF cache volume."""
-        from huggingface_hub import snapshot_download
-
+        """Download model weights via the attached ModelConfiguration's hook."""
         assert slime.model is not None, "slime.model must be set"
-        snapshot_download(repo_id=slime.model.model_name)
+        hf_cache_volume.reload()
+        checkpoints_volume.reload()
+        slime.model.download_model()
         hf_cache_volume.commit()
+        checkpoints_volume.commit()
 
     @app.function(
         image=image,

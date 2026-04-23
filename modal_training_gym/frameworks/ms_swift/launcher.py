@@ -255,26 +255,23 @@ def build_ms_swift_app(
     # ── download_model ───────────────────────────────────────────────────────
     @app.function(
         image=download_image,
-        volumes={hf_cache_str: hf_cache_volume},
+        volumes={
+            hf_cache_str: hf_cache_volume,
+            checkpoints_str: checkpoints_volume,
+        },
         timeout=4 * 60 * 60,
         secrets=[Secret.from_name("huggingface-secret")],
         serialized=True,
         name="download_model",
     )
-    def download_model(force: bool = False):
-        """Download `swift.model.model_name` into the shared HF cache."""
-        from huggingface_hub import snapshot_download
-
+    def download_model():
+        """Download model weights via the attached ModelConfiguration's hook."""
         assert swift.model is not None, "swift.model must be set"
         hf_cache_volume.reload()
-        path = snapshot_download(
-            swift.model.model_name,
-            token=os.environ.get("HF_TOKEN"),
-            force_download=force,
-        )
-        print(f"Downloaded to: {path}")
+        checkpoints_volume.reload()
+        swift.model.download_model()
         hf_cache_volume.commit()
-        return {"path": path}
+        checkpoints_volume.commit()
 
     # ── prepare_dataset ──────────────────────────────────────────────────────
     @app.function(
