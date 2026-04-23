@@ -120,7 +120,7 @@ print("project:", wandb.project)
 #     dataset=MyDataset(...),
 #     wandb=WandbConfig(project="my-runs", group="concepts-demo"),
 #     # … framework-specific flags …
-#     modal=ModalConfig(gpu="H200"),
+#     modal=ModalConfig(gpu="H100"),
 # )
 #
 # app = run.build_app()   # modal.App with download_model / prepare_dataset / train

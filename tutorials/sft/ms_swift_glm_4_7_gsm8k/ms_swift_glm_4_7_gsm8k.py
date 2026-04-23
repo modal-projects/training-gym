@@ -13,7 +13,7 @@
 # parallelism alone.
 #
 # **What this tutorial does.** LoRA SFT of GLM-4.7 (a large MoE model)
-# on GSM8K, on 4 nodes × 8×B200 (32 GPUs). The interesting piece is
+# on GSM8K, on 4 nodes × 8×H100 (32 GPUs). The interesting piece is
 # the parallelism split: TP=2, EP=4, PP=4, CP=1 — tensor parallel
 # across pairs of GPUs, 4-way expert parallel for the MoE layers,
 # 4-stage pipeline parallel for the transformer blocks. Under the
@@ -22,7 +22,7 @@
 # pipeline) see [`quickstart`](../../intro/quickstart/quickstart.ipynb).
 #
 # **What you'll need.**
-# - Access to Modal's multi-node training preview (4 × 8×B200).
+# - Access to Modal's multi-node training preview (4 × 8×H100).
 # - `wandb` Modal secret.
 #
 # **What to watch.** W&B project `glm-4-7-sft`. Watch `train/loss`
@@ -99,7 +99,7 @@ class GSM8KDataset(DatasetConfig):
 # uses underscore-style names (e.g. `--tensor_model_parallel_size 2`)
 # and expects booleans as strings.
 #
-# ### Parallelism (32 GPUs = 4 nodes × 8 B200)
+# ### Parallelism (32 GPUs = 4 nodes × 8 H100)
 #
 # GLM-4.7 is a large MoE — it needs all four axes:
 #
@@ -131,7 +131,7 @@ class GSM8KDataset(DatasetConfig):
 #   bump either for real training.
 
 swift_framework_config = MsSwiftFrameworkConfig(
-    gpu="B200",
+    gpu="H100",
     n_nodes=4,
     gpus_per_node=8,
     global_batch_size=8,

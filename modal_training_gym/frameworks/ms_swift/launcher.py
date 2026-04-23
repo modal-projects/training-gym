@@ -11,7 +11,7 @@ Usage (from a tutorial file):
         model=GLM_4_7(),  # or subclass ModelConfiguration for a custom HF model
         dataset=...,
         wandb=...,
-        framework_config=MsSwiftFrameworkConfig(gpu="B200"),
+        framework_config=MsSwiftFrameworkConfig(gpu="H100"),
     )
 
     app = build_ms_swift_app(swift=swift)

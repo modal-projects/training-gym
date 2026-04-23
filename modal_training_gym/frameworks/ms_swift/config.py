@@ -55,7 +55,7 @@ class MsSwiftFrameworkConfig:
     """
 
     # ── Modal infrastructure ────────────────────────────────────────────────
-    gpu: GPUType = "B200"
+    gpu: GPUType = "H100"
     image: str = (
         "modelscope-registry.us-west-1.cr.aliyuncs.com/modelscope-repo/modelscope:"
         "ubuntu22.04-cuda12.8.1-py311-torch2.8.0-vllm0.11.0-modelscope1.31.0-swift3.10.3"

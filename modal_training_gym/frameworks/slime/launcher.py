@@ -10,7 +10,7 @@ Usage (from a tutorial file):
         actor_num_gpus_per_node = 8
         # ...
 
-    app = build_slime_app(modal=ModalConfig(gpu="H200"), slime=_Slime())
+    app = build_slime_app(modal=ModalConfig(gpu="H100"), slime=_Slime())
 
 Then: `uv run modal run <tutorial_file>.py::train`.
 """

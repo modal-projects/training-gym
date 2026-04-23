@@ -59,7 +59,7 @@ YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
 class ModalConfig:
     """Modal infrastructure configuration — GPU provisioning and image setup only."""
 
-    gpu: GPUType = "H200"
+    gpu: GPUType = "H100"
     local_slime: str | None = None  # path to local slime repo for dev overlay
     patch_files: list[
         str

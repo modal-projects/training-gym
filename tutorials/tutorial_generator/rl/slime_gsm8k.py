@@ -7,7 +7,7 @@ body, dedented). Function names are arbitrary. Cell order = source order.
 
 TUTORIAL_METADATA = {
     'framework': '`slime`',
-    'cluster_shape': '4 × 8×H200',
+    'cluster_shape': '4 × 8×H100',
     'summary': 'Qwen3-4B GRPO on GSM8K (colocated)',
     'difficulty': 'Advanced',
     'order': 10,
@@ -29,7 +29,7 @@ def _intro():
 
     **What this tutorial does.** GRPO-tunes Qwen3-4B against
     [GSM8K](https://huggingface.co/datasets/openai/gsm8k) on 4 nodes ×
-    8×H200 with actor and rollout **colocated** on the same GPUs. GSM8K
+    8×H100 with actor and rollout **colocated** on the same GPUs. GSM8K
     is the canonical target for math-RL: short prompts, short answers,
     and a deterministic correctness check. This is the "everything works
     end-to-end" reference for the `slime` framework — a medium-scale RL
@@ -40,7 +40,7 @@ def _intro():
     [`quickstart`](../../intro/quickstart/quickstart.ipynb).
 
     **What you'll need.**
-    - Access to Modal's multi-node training preview (4 × 8×H200).
+    - Access to Modal's multi-node training preview (4 × 8×H100).
     - A `wandb` Modal secret holding your W&B API key (the SLIME launcher
       mounts it automatically when `WandbConfig` is present).
     - Patience: multi-hour run — use `modal run --detach`.
@@ -131,13 +131,13 @@ def _explain_config():
     define *this* run:
 
     **Cluster + parallelism**
-    - `actor_num_nodes=4`, `actor_num_gpus_per_node=8` — 32 H200s total.
+    - `actor_num_nodes=4`, `actor_num_gpus_per_node=8` — 32 H100s total.
     - `colocate=True` — rollout (SGLang) and actor (Megatron) share the
       same GPUs. Cheaper than disaggregated because weights don't have to
       be shipped between pools on every sync, at the cost of interleaving
       the two workloads on one set of devices.
     - `tensor_model_parallel_size=1` — Qwen3-4B fits comfortably on a
-      single H200, so no tensor parallelism.
+      single H100, so no tensor parallelism.
     - `megatron_to_hf_mode="bridge"` — SLIME writes Megatron checkpoints
       that are readable as HF directly. In raw mode you'd run a one-time
       `convert_checkpoint` step; in bridge mode it's a no-op, so this
@@ -214,7 +214,7 @@ def _define_config():
         kl_loss_coef=0.0,
         kl_loss_type="low_var_kl",
         entropy_coef=0.0,
-        modal=ModalConfig(gpu="H200"),
+        modal=ModalConfig(gpu="H100"),
     )
 
 
