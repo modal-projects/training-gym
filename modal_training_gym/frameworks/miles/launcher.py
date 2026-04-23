@@ -175,10 +175,15 @@ def build_miles_app(
         one-off overrides like `--train-iters 5`.
         """
         assert miles.model is not None, "miles.model must be set"
-        if not framework.recipe_args.strip() and not extra_argv:
+        has_arch = (
+            miles.model.architecture is not None
+            and miles.model.architecture.num_layers > 0
+        )
+        if not has_arch and not framework.recipe_args.strip() and not extra_argv:
             raise RuntimeError(
-                "MilesFrameworkConfig.recipe_args is empty — set it to the Miles CLI "
-                "args block describing your model architecture + training hyperparameters."
+                "No model architecture found and recipe_args is empty. Either "
+                "use a model with a ModelArchitecture (e.g. Qwen3_4B) or set "
+                "recipe_args to the Miles CLI args for your model."
             )
 
         checkpoints_volume.reload()
@@ -211,10 +216,15 @@ def build_miles_app(
         run_id = f"{app_name}-{int(time.time())}"
         checkpoint_dir = f"{checkpoints_str}/{run_id}"
 
+        model_arch_args: list[str] = []
+        if miles.model and miles.model.architecture:
+            model_arch_args = miles.model.architecture.to_megatron_args()
+
         argv: list[str] = [
             "python3",
             _REMOTE_TRAIN_SCRIPT,
             *framework.cli_args(),
+            *model_arch_args,
             *(model_training_cli_args(miles.model) if miles.model else []),
             *framework.parsed_recipe_args(),
             *extra_argv,

@@ -278,9 +278,9 @@ class MBPPCodeGolfDataset(DatasetConfig):
 #   on the data volume.
 #
 # **Parallelism override**
-# - `Qwen3_4B`'s `ModelTrainingConfig` defaults to `tensor_model_parallel_size=1`,
-#   but this tutorial overrides to TP=2 via `recipe_args` to leave room
-#   for SGLang's KV cache during colocated rollout.
+# - `Qwen3_4B`'s preset defaults to `tensor_model_parallel_size=1`,
+#   but this tutorial overrides to TP=2 to leave room for SGLang's KV
+#   cache during colocated rollout.
 # - Model architecture flags (`--num-layers`, `--hidden-size`, etc.)
 #   are pulled automatically from `Qwen3_4B().architecture`.
 
@@ -300,12 +300,8 @@ framework_config = HarborFrameworkConfig(
     instruction_path="instruction.md",
     sandbox_timeout_secs=180,
     sandbox_idle_timeout_secs=60,
-    recipe_args="""
-        # Override TP from the model default (1) to 2 so SGLang's
-        # KV cache fits alongside the actor weights.
-        --tensor-model-parallel-size 2
-        --sequence-parallel
-    """,
+    tensor_model_parallel_size=2,
+    sequence_parallel=True,
 )
 
 harbor = HarborConfig(
