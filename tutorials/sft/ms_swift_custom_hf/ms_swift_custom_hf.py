@@ -25,7 +25,7 @@
 
 import modal
 
-from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.dataset import HuggingFaceDataset
 from modal_training_gym.common.models import ModelConfiguration
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.frameworks.ms_swift import (
@@ -73,49 +73,13 @@ class SmolLM2_135M(ModelConfiguration):
 # The `train[:4]` slice keeps this run cheap — four examples is enough
 # to prove the custom-model seam wires up end-to-end.
 
-class TinyGSM8KDataset(DatasetConfig):
-    def __init__(
-        self,
-        hf_cache_root,
-        data_folder="gsm8k_tiny",
-        hf_dataset="openai/gsm8k",
-        split="train[:4]",
-        input_col="question",
-        output_col="answer",
-    ):
-        self._hf_cache_root = str(hf_cache_root)
-        self._data_folder = data_folder
-        self._hf_dataset = hf_dataset
-        self._split = split
-        self._input_col = input_col
-        self._output_col = output_col
-        self.prompt_data = (
-            f"{self._hf_cache_root}/msswift-data/{data_folder}/training.jsonl"
-        )
-
-    def prepare(self):
-        import json
-        import os
-
-        from datasets import load_dataset
-
-        output_dir = f"{self._hf_cache_root}/msswift-data/{self._data_folder}"
-        os.makedirs(output_dir, exist_ok=True)
-
-        try:
-            ds = load_dataset(self._hf_dataset, split=self._split)
-        except ValueError:
-            ds = load_dataset(self._hf_dataset, "joy/initial-setup", split=self._split)
-
-        out_path = f"{output_dir}/training.jsonl"
-        with open(out_path, "w") as f:
-            for row in ds:
-                messages = [
-                    {"role": "user", "content": row[self._input_col]},
-                    {"role": "assistant", "content": row[self._output_col]},
-                ]
-                f.write(json.dumps({"messages": messages}) + "\n")
-        print(f"Wrote {out_path}")
+class TinyGSM8KDataset(HuggingFaceDataset):
+    hf_repo = "openai/gsm8k"
+    hf_config = "main"
+    hf_split = "train[:4]"
+    output_format = "jsonl"
+    input_column = "question"
+    output_column = "answer"
 
 # ## Define the experiment
 #

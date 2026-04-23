@@ -373,7 +373,8 @@ class SlimeConfig:
     megatron_to_hf_mode: str = "bridge"
     use_fault_tolerance: bool = True
 
-    # ── Custom reward ───────────────────────────────────────────────────────
+    # ── Reward model ─────────────────────────────────────────────────────────
+    rm_type: str = "math"
     custom_rm_path: str = ""
 
     # ── SGLang / config overrides ───────────────────────────────────────────
@@ -399,7 +400,6 @@ class SlimeConfig:
             "label_key": ds.label_key,
             "apply_chat_template": ds.apply_chat_template,
             "rollout_shuffle": ds.rollout_shuffle,
-            "rm_type": ds.rm_type,
         }
 
     @staticmethod
@@ -534,7 +534,6 @@ class SlimeConfig:
             label_key=f.get("label_key", ""),
             apply_chat_template=f.get("apply_chat_template", True),
             rollout_shuffle=f.get("rollout_shuffle", True),
-            rm_type=f.get("rm_type", ""),
         )
 
     def to_model(self) -> "ModelConfiguration":

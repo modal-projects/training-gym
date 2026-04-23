@@ -65,7 +65,7 @@ def _install():
 def _imports():
     import modal
 
-    from modal_training_gym.common.dataset import DatasetConfig
+    from modal_training_gym.common.dataset import HuggingFaceDataset
     from modal_training_gym.common.models import GLM_4_7
     from modal_training_gym.common.wandb import WandbConfig
     from modal_training_gym.frameworks.ms_swift import (
@@ -90,49 +90,12 @@ def _explain_dataset():
 
 @code
 def _define_dataset():
-    class GSM8KDataset(DatasetConfig):
-        def __init__(
-            self,
-            hf_cache_root,
-            data_folder="gsm8k",
-            hf_dataset="openai/gsm8k",
-            split="train",
-            input_col="question",
-            output_col="answer",
-        ):
-            self._hf_cache_root = str(hf_cache_root)
-            self._data_folder = data_folder
-            self._hf_dataset = hf_dataset
-            self._split = split
-            self._input_col = input_col
-            self._output_col = output_col
-            self.prompt_data = (
-                f"{self._hf_cache_root}/msswift-data/{data_folder}/training.jsonl"
-            )
-
-        def prepare(self):
-            import json
-            import os
-
-            from datasets import load_dataset
-
-            output_dir = f"{self._hf_cache_root}/msswift-data/{self._data_folder}"
-            os.makedirs(output_dir, exist_ok=True)
-
-            try:
-                ds = load_dataset(self._hf_dataset, split=self._split)
-            except ValueError:
-                ds = load_dataset(self._hf_dataset, "joy/initial-setup", split=self._split)
-
-            out_path = f"{output_dir}/training.jsonl"
-            with open(out_path, "w") as f:
-                for row in ds:
-                    messages = [
-                        {"role": "user", "content": row[self._input_col]},
-                        {"role": "assistant", "content": row[self._output_col]},
-                    ]
-                    f.write(json.dumps({"messages": messages}) + "\n")
-            print(f"Wrote {out_path}")
+    class GSM8KDataset(HuggingFaceDataset):
+        hf_repo = "openai/gsm8k"
+        hf_config = "main"
+        output_format = "jsonl"
+        input_column = "question"
+        output_column = "answer"
 
 
 @markdown

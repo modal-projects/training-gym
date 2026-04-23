@@ -68,7 +68,7 @@ def _install():
 def _imports():
     import modal
 
-    from modal_training_gym.common.dataset import DatasetConfig
+    from modal_training_gym.common.dataset import HuggingFaceDataset
     from modal_training_gym.common.models import Qwen3_4B
     from modal_training_gym.common.wandb import WandbConfig
     from modal_training_gym.frameworks.slime import (
@@ -101,27 +101,23 @@ def _explain_dataset():
 
 @code
 def _define_dataset():
-    class GSM8KDataset(DatasetConfig):
+    class GSM8KDataset(HuggingFaceDataset):
+        hf_repo = "zhuzilin/gsm8k"
         input_key = "messages"
         label_key = "label"
-        apply_chat_template = True
-        rollout_shuffle = True
-        rm_type = "math"
 
-        def __init__(self, data_path):
-            self._data_path = str(data_path)
-            self.prompt_data = f"{self._data_path}/gsm8k/train.parquet"
-            self.eval_prompt_data = ["gsm8k", f"{self._data_path}/gsm8k/test.parquet"]
+        def __init__(self, data_root):
+            super().__init__(data_root)
+            test_path = self.prompt_data.replace("train.parquet", "test.parquet")
+            self.eval_prompt_data = ["gsm8k", test_path]
 
         def prepare(self):
-            import os
-
             from datasets import load_dataset
 
-            os.makedirs(f"{self._data_path}/gsm8k", exist_ok=True)
-            ds = load_dataset("zhuzilin/gsm8k")
-            ds["train"].to_parquet(f"{self._data_path}/gsm8k/train.parquet")
-            ds["test"].to_parquet(f"{self._data_path}/gsm8k/test.parquet")
+            super().prepare()
+            test_path = self.prompt_data.replace("train.parquet", "test.parquet")
+            ds = load_dataset(self.hf_repo, split="test")
+            ds.to_parquet(test_path)
 
 
 @markdown

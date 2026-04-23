@@ -77,7 +77,7 @@ else:
     CUSTOM_RM_PATH = "modal_training_gym.common.haiku_reward.haiku_rm"
     LOCAL_PYTHON_SOURCES = []
 
-from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.dataset import HuggingFaceDataset
 from modal_training_gym.common.models import Qwen3_4B
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.serve_vllm import build_vllm_serve_app
@@ -123,12 +123,10 @@ from modal_training_gym.frameworks.slime.config import DATA_PATH
 #    `eval_prompt_data` has something to score against during
 #    training.
 
-class HaikuDataset(DatasetConfig):
+class HaikuDataset(HuggingFaceDataset):
+    hf_repo = "statworx/haiku"
     input_key = "messages"
     label_key = "label"
-    apply_chat_template = True
-    rollout_shuffle = True
-    rm_type = "async_rm"
 
     def __init__(self, data_path, hf_checkpoint):
         # `data_path` is DATA_PATH on whichever container is mounting

@@ -308,9 +308,8 @@ def build_slime_app(
             }
         }
 
-        gpu = f"{gpu}:{slime.actor_num_gpus_per_node}"
         mode = "async" if slime.async_mode else "sync"
-        print(f"Training {app_name} — {slime.total_nodes()} node(s) × {gpu}  ({mode})")
+        print(f"Training {app_name} — {slime.total_nodes()} node(s) × {gpu_spec}  ({mode})")
         print(f"Command: {cmd}, runtime_env: {runtime_env}")
 
         async with cluster.forward_dashboard() as tunnel:
