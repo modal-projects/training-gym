@@ -310,47 +310,17 @@ framework_config = HarborFrameworkConfig(
     sandbox_timeout_secs=180,
     sandbox_idle_timeout_secs=60,
     recipe_args="""
-        # ── Model architecture ──
+        # Model architecture (Qwen3-4B) — only flags not covered
+        # by typed HarborFrameworkConfig fields belong here.
         --num-layers 36
         --hidden-size 2560
         --ffn-hidden-size 6912
         --num-attention-heads 20
         --group-query-attention
         --num-query-groups 4
-        --max-position-embeddings 32768
         --rotary-base 1000000
         --make-vocab-size-divisible-by 1
-        --normalization RMSNorm
-        --swiglu
-        --untie-embeddings-and-output-weights
-        --disable-bias-linear
         --position-embedding-type rope
-        --no-masked-softmax-fusion
-
-        # ── Training ──
-        --recompute-granularity selective
-        --tensor-model-parallel-size 2
-        --sequence-parallel
-
-        # ── RL ──
-        --input-key prompt
-        --label-key metadata
-        --apply-chat-template
-        --rollout-shuffle
-
-        # ── Rollout ──
-        --num-rollout 200
-        --rollout-batch-size 64
-        --rollout-max-response-len 1024
-        --sglang-mem-fraction-static 0.25
-        --train-iters 50
-
-        # ── Batch ──
-        --global-batch-size 512
-
-        # ── Eval & Save ──
-        --eval-interval 10
-        --save-interval 10
     """,
 )
 
