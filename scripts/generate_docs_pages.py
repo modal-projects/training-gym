@@ -39,7 +39,7 @@ def branch_exists_on_origin(branch: str) -> bool:
 def current_ref() -> str:
     for env_var in ("GITHUB_REF_NAME", "VERCEL_GIT_COMMIT_REF"):
         value = os.getenv(env_var)
-        if value:
+        if value and branch_exists_on_origin(value):
             return value
 
     result = subprocess.run(
