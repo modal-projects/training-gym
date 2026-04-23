@@ -494,14 +494,11 @@ def _define_config():
         save="/checkpoints/qwen3-4b-haiku",
         save_interval=10,
 
-        modal=ModalConfig(
-            gpu="H100",
-            local_python_sources=LOCAL_PYTHON_SOURCES,
-            image_run_commands=[
-                "uv pip install --system aiohttp nltk>=3.8.0",
-                "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
-            ],
-        ),
+        local_python_sources=LOCAL_PYTHON_SOURCES,
+        image_run_commands=[
+            "uv pip install --system aiohttp nltk>=3.8.0",
+            "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
+        ],
     )
 
 

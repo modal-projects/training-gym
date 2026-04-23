@@ -270,4 +270,6 @@ class HarborConfig:
     def build_app(self, *, name: str | None = None) -> "App":
         from .launcher import build_harbor_app
 
-        return build_harbor_app(harbor=self, name=name)
+        from modal_training_gym.common.framework import resolve_gpu
+
+        return build_harbor_app(harbor=self, gpu=resolve_gpu(self.model), name=name)

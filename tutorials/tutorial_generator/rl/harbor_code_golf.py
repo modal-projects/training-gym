@@ -341,7 +341,6 @@ def _define_config():
     dataset = MBPPCodeGolfDataset(train_size=900)
 
     framework_config = HarborFrameworkConfig(
-        gpu="H100",
         n_nodes=2,
         agent_import_path=AGENT_IMPORT_PATH,
         agent_model_name="model",

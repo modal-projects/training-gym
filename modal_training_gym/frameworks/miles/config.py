@@ -115,8 +115,6 @@ class MilesFrameworkConfig:
 
     ## Modal Infrastructure
 
-    gpu : GPUType
-        Modal GPU type. Default ``"H100"``.
     miles_image : str
         Docker image with patched Megatron-LM + Miles trainer.
     image_run_commands : list[str]
@@ -207,7 +205,6 @@ class MilesFrameworkConfig:
     """
 
     # ── Modal infrastructure ────────────────────────────────────────────────
-    gpu: GPUType = "H100"
     # Miles ships a pre-built image with patched Megatron-LM + the trainer.
     miles_image: str = "radixark/miles:dev-202603231227"
     # Extra commands appended to the image build (e.g. apply a local patch,
@@ -400,4 +397,6 @@ class MilesConfig:
     ) -> "App":
         from .launcher import build_miles_app
 
-        return build_miles_app(miles=self, name=name)
+        from modal_training_gym.common.framework import resolve_gpu
+
+        return build_miles_app(miles=self, gpu=resolve_gpu(self.model), name=name)

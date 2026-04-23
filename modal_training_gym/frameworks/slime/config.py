@@ -51,6 +51,8 @@ _SLIME_SKIP = {
     "wandb",
     "modal",
     "app_tags",
+    "image_run_commands",
+    "local_python_sources",
 }
 
 # SlimeConfig fields that SLIME reads as YAML files at runtime.
@@ -92,12 +94,10 @@ def model_training_overrides(
 
 
 class ModalConfig:
-    """Modal infrastructure configuration for SLIME — GPU provisioning and image setup.
+    """Modal infrastructure configuration for SLIME — image setup and dev overlays.
 
     ## Fields
 
-    gpu : GPUType
-        Modal GPU type to provision (e.g. ``"H100"``, ``"A100"``). Default ``"H100"``.
     local_slime : str | None
         Path to a local SLIME repo checkout for dev overlay. When set, the
         launcher mounts it into the image. Default ``None``.
@@ -114,7 +114,6 @@ class ModalConfig:
         Default ``[]``.
     """
 
-    gpu: GPUType = "H100"
     local_slime: str | None = None
     patch_files: list[str]
     image_run_commands: list[str]
@@ -307,6 +306,8 @@ class SlimeConfig:
     wandb: WandbConfig | None = None
     app_tags: dict = field(default_factory=dict)
     modal: ModalConfig | None = None
+    image_run_commands: list[str] = field(default_factory=list)
+    local_python_sources: list[str] = field(default_factory=list)
 
     # ── Cluster and parallelism ─────────────────────────────────────────────
     actor_num_nodes: int = 1
@@ -637,8 +638,11 @@ class SlimeConfig:
     ) -> "App":
         from .launcher import build_slime_app
 
+        from modal_training_gym.common.framework import resolve_gpu
+
         return build_slime_app(
             modal=modal or self.modal or ModalConfig(),
+            gpu=resolve_gpu(self.model),
             slime=self,
             name=name,
         )

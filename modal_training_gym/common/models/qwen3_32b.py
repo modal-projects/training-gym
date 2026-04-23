@@ -7,7 +7,7 @@ you need to use this model with a framework that consumes
 `--num-layers`/`--hidden-size` as CLI flags (e.g. SLIME).
 """
 
-from .base import HFModelConfiguration
+from .base import HFModelConfiguration, ModelTrainingConfig
 
 
 class Qwen3_32B(HFModelConfiguration):
@@ -20,3 +20,4 @@ class Qwen3_32B(HFModelConfiguration):
     """
 
     model_name = "Qwen/Qwen3-32B"
+    training = ModelTrainingConfig(gpu_type="H100", n_nodes=4)

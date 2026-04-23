@@ -14,7 +14,7 @@ resolves the same path regardless of framework.
 import os
 import subprocess
 
-from .base import HFModelConfiguration
+from .base import HFModelConfiguration, ModelTrainingConfig
 
 # Mirrors common.framework.TOOLS_REMOTE_PATH — inlined here to avoid a
 # cross-module dependency on framework helpers at model-import time.
@@ -37,6 +37,7 @@ class Kimi_K2_5(HFModelConfiguration):
 
     model_name = "moonshotai/Kimi-K2.5"
     model_path = "/checkpoints/Kimi-K2.5-bf16"
+    training = ModelTrainingConfig(gpu_type="H100", n_nodes=4)
 
     def download_model(self) -> None:
         from huggingface_hub import snapshot_download

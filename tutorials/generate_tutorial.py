@@ -297,7 +297,7 @@ def _extract_metadata(source: str) -> dict | None:
 
 def _render_launch_cell(bucket: str, name: str) -> str:
     notebook_url = (
-        f"https://github.com/{_REPO_SLUG}/blob/joy/initial-setup"
+        f"https://github.com/{_REPO_SLUG}/blob/{_BRANCH}"
         f"/tutorials/{bucket}/{name}/{name}.ipynb"
     )
     launch_url = (
@@ -448,5 +448,5 @@ def main() -> None:
         print(f"{_README_PATH.relative_to(REPO_ROOT)} ← table regenerated ({len(entries)} rows)")
 
 
-if __name__ == "__joy/initial-setup__":
-    joy/initial-setup()
+if __name__ == "__main__":
+    main()

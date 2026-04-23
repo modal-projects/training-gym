@@ -188,6 +188,7 @@ def _train_ms_swift_worker(run_id: str | None = None):
 
 def build_ms_swift_app(
     swift: MsSwiftConfig,
+    gpu: str = "H100",
     name: str | None = None,
 ) -> App:
     """Return a Modal App with `download_model`, `prepare_dataset`, `train`."""
@@ -290,7 +291,7 @@ def build_ms_swift_app(
         **framework.app_tags,
     }
     app = App(app_name, tags=tags)
-    gpu_spec = f"{framework.gpu}:{framework.gpus_per_node}"
+    gpu_spec = f"{gpu}:{framework.gpus_per_node}"
 
     # ── download_model ───────────────────────────────────────────────────────
     @app.function(

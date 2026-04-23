@@ -175,7 +175,6 @@ def _explain_config():
 @code
 def _define_config():
     swift_framework_config = MsSwiftFrameworkConfig(
-        gpu="H100",
         n_nodes=4,
         gpus_per_node=8,
         global_batch_size=8,

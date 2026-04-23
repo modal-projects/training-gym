@@ -132,7 +132,6 @@ class TinyGSM8KDataset(DatasetConfig):
 
 swift_framework_config = MsSwiftFrameworkConfig(
     image="nvcr.io/nvidia/pytorch:25.01-py3",
-    gpu="H100",
     n_nodes=1,
     gpus_per_node=1,
     num_train_epochs=1,

@@ -55,6 +55,7 @@ def build_slime_app(
     *,
     modal: ModalConfig,
     slime: SlimeConfig,
+    gpu: str = "H100",
     name: str | None = None,
 ) -> App:
     """Return a Modal App with `download_model`, `prepare_dataset`, `convert_checkpoint`, and `train` defined.
@@ -107,7 +108,8 @@ def build_slime_app(
     # `add_local_python_source` means Python's normal import machinery
     # resolves them in-container — the tutorial doesn't need to extend
     # PYTHONPATH for SLIME to find them.
-    for mod_name in modal.local_python_sources:
+    all_python_sources = slime.local_python_sources or modal.local_python_sources
+    for mod_name in all_python_sources:
         image = image.add_local_python_source(mod_name, copy=True)
     for patch in modal.patch_files:
         image = image.add_local_file(
@@ -120,8 +122,9 @@ def build_slime_app(
             copy=True,
             ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
         )
-    if modal.image_run_commands:
-        image = image.run_commands(*modal.image_run_commands)
+    all_run_commands = slime.image_run_commands or modal.image_run_commands
+    if all_run_commands:
+        image = image.run_commands(*all_run_commands)
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
@@ -140,7 +143,7 @@ def build_slime_app(
         **slime.app_tags,
     }
     app = App(app_name, tags=tags)
-    gpu_spec = f"{modal.gpu}:{slime.actor_num_gpus_per_node}"
+    gpu_spec = f"{gpu}:{slime.actor_num_gpus_per_node}"
 
     @app.function(
         image=image,
@@ -305,7 +308,7 @@ def build_slime_app(
             }
         }
 
-        gpu = f"{modal.gpu}:{slime.actor_num_gpus_per_node}"
+        gpu = f"{gpu}:{slime.actor_num_gpus_per_node}"
         mode = "async" if slime.async_mode else "sync"
         print(f"Training {app_name} — {slime.total_nodes()} node(s) × {gpu}  ({mode})")
         print(f"Command: {cmd}, runtime_env: {runtime_env}")

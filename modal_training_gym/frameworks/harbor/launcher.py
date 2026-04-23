@@ -195,6 +195,7 @@ async def _rollout_proxy(*, target_host: str, target_port: int, listen_port: int
 def build_harbor_app(
     *,
     harbor: HarborConfig,
+    gpu: str = "H100",
     name: str | None = None,
 ) -> App:
     """Return a Modal App with Harbor + Miles training functions."""
@@ -262,7 +263,7 @@ def build_harbor_app(
         **framework.app_tags,
     }
     app = App(app_name, tags=tags)
-    gpu_spec = f"{framework.gpu}:{framework.gpus_per_node}"
+    gpu_spec = f"{gpu}:{framework.gpus_per_node}"
 
     # ── download_model ───────────────────────────────────────────────────────
     @app.function(

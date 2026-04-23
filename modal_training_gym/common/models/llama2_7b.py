@@ -6,7 +6,7 @@ the script reads architecture from the HF config at runtime. `architecture`
 is left as the default `None`.
 """
 
-from .base import HFModelConfiguration
+from .base import HFModelConfiguration, ModelTrainingConfig
 
 
 class Llama2_7B(HFModelConfiguration):
@@ -17,3 +17,4 @@ class Llama2_7B(HFModelConfiguration):
     """
 
     model_name = "meta-llama/Llama-2-7b-hf"
+    training = ModelTrainingConfig(gpu_type="H100", n_nodes=1)

@@ -107,8 +107,6 @@ class MsSwiftFrameworkConfig:
 
     ## Modal Infrastructure
 
-    gpu : GPUType
-        Modal GPU type. Default ``"H100"``.
     image : str
         Docker image for the training container.
     transformers_version : str
@@ -222,7 +220,6 @@ class MsSwiftFrameworkConfig:
     """
 
     # ── Modal infrastructure ────────────────────────────────────────────────
-    gpu: GPUType = "H100"
     image: str = (
         "modelscope-registry.us-west-1.cr.aliyuncs.com/modelscope-repo/modelscope:"
         "ubuntu22.04-cuda12.8.1-py311-torch2.8.0-vllm0.11.0-modelscope1.31.0-swift3.10.3"
@@ -408,4 +405,6 @@ class MsSwiftConfig:
     ) -> "App":
         from .launcher import build_ms_swift_app
 
-        return build_ms_swift_app(swift=self, name=name)
+        from modal_training_gym.common.framework import resolve_gpu
+
+        return build_ms_swift_app(swift=self, gpu=resolve_gpu(self.model), name=name)

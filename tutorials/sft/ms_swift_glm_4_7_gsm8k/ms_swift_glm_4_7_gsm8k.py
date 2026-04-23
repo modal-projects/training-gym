@@ -125,7 +125,6 @@ class GSM8KDataset(DatasetConfig):
 #   bump either for real training.
 
 swift_framework_config = MsSwiftFrameworkConfig(
-    gpu="H100",
     n_nodes=4,
     gpus_per_node=8,
     global_batch_size=8,

@@ -53,6 +53,26 @@ def mount_tools_dir(image: "Image") -> "Image":
     )
 
 
+def resolve_gpu(model: Any) -> str:
+    """Resolve the GPU type from a model's training config.
+
+    All ModelConfiguration subclasses must define a ``training``
+    attribute with ``gpu_type`` set.
+    """
+    if model is None:
+        raise ValueError(
+            "Cannot resolve GPU: no model attached. "
+            "Set model= on your config."
+        )
+    training = getattr(model, "training", None)
+    if training is None:
+        raise ValueError(
+            f"{type(model).__name__} has no training config. "
+            f"Set training = ModelTrainingConfig(gpu_type=...) on your model class."
+        )
+    return training.gpu_type
+
+
 def resolve_caller_module(
     skip_prefix: str = "modal_training_gym",
 ) -> ModuleType | None:

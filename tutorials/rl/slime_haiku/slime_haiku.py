@@ -275,19 +275,10 @@ my_training_run = SlimeConfig(
     ref_load=base_model.model_name,
     megatron_to_hf_mode="bridge",
 
-    actor_num_nodes=1,
-    actor_num_gpus_per_node=8,
-    colocate=True,
-
     rm_type="async_rm",
     custom_rm_path=CUSTOM_RM_PATH,
 
     num_rollout=50,
-    rollout_batch_size=128,
-    rollout_max_response_len=300,
-    rollout_num_gpus_per_engine=2,
-    n_samples_per_prompt=8,
-    global_batch_size=64,
     apply_chat_template_kwargs='{"enable_thinking": false}',
 
     eval_interval=20,
@@ -296,14 +287,11 @@ my_training_run = SlimeConfig(
     save="/checkpoints/qwen3-4b-haiku",
     save_interval=10,
 
-    modal=ModalConfig(
-        gpu="H100",
-        local_python_sources=LOCAL_PYTHON_SOURCES,
-        image_run_commands=[
-            "uv pip install --system aiohttp nltk>=3.8.0",
-            "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
-        ],
-    ),
+    local_python_sources=LOCAL_PYTHON_SOURCES,
+    image_run_commands=[
+        "uv pip install --system aiohttp nltk>=3.8.0",
+        "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
+    ],
 )
 
 # ## Build the Modal app

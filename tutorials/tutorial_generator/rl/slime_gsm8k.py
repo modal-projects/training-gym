@@ -160,7 +160,6 @@ def _define_config():
         wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-gsm8k"),
         ref_load=base_model.model_name,
         actor_num_nodes=4,
-        modal=ModalConfig(gpu="H100"),
     )
 
 
