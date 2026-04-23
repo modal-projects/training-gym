@@ -518,7 +518,7 @@ def _classify_detached_failure(
     if not first_startup:
         return FailureSource.TIMEOUT, "app running but never reached user code"
 
-    return FailureSource.TIMEOUT, f"user code started but no progress marker within timeout"
+    return FailureSource.TIMEOUT, "user code started but no progress marker within timeout"
 
 
 def _run_detached(cmd: str, markers: list[str], progress_timeout_s: int) -> StageResult:
@@ -999,7 +999,7 @@ def main() -> None:
         print(f" {status}{sig}{detail} ({result.wall_time_s:.1f}s)")
 
     all_results = results + skipped_results
-    print(f"\n═══ Summary ═══\n")
+    print("\n═══ Summary ═══\n")
     counts = {o: 0 for o in Outcome}
     for r in all_results:
         counts[r.outcome] += 1

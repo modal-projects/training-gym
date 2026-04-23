@@ -27,3 +27,6 @@ docs = [
     "properdocs>=1.6.7",
     "pymdown-extensions>=10.21.2",
 ]
+
+[tool.ruff]
+extend-exclude = ["tutorials/**"]

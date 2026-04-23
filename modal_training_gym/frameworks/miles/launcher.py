@@ -28,7 +28,6 @@ Exposes `app.download_model`, `app.prepare_dataset`, and `app.train_multi_node`.
 
 from __future__ import annotations
 
-import inspect
 import os
 import pathlib
 import shlex
@@ -39,7 +38,7 @@ from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
-from modal_training_gym.common.framework import TOOLS_LOCAL_PATH, TOOLS_REMOTE_PATH, mount_tools_dir, resolve_caller_module
+from modal_training_gym.common.framework import TOOLS_LOCAL_PATH, TOOLS_REMOTE_PATH, resolve_caller_module
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 from .config import (

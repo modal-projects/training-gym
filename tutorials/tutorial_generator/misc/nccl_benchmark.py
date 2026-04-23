@@ -56,7 +56,7 @@ def _intro():
 
 
 @notebook_only
-@shell("! pip install -q modal")
+@shell("%uv pip install -q modal")
 def _install():
     pass
 

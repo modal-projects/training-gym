@@ -16,7 +16,6 @@ Then: `uv run modal run <tutorial_file>.py::train`.
 """
 
 import asyncio
-import inspect
 import os
 import shlex
 import subprocess
@@ -28,7 +27,7 @@ from modal.experimental import clustered
 import cloudpickle
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
-from modal_training_gym.common.framework import TOOLS_LOCAL_PATH, TOOLS_REMOTE_PATH, mount_tools_dir, resolve_caller_module
+from modal_training_gym.common.framework import TOOLS_LOCAL_PATH, TOOLS_REMOTE_PATH, resolve_caller_module
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 from .config import (
