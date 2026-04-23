@@ -189,7 +189,7 @@ def build_ms_swift_app(
         )
         .pip_install(
             f"transformers=={framework.transformers_version}",
-            "ms-swift @ git+https://github.com/modelscope/ms-swift.git@main",
+            "ms-swift @ git+https://github.com/modelscope/ms-swift.git@joy/initial-setup",
             "einops==0.8.2",
             "wandb==0.19.1",
             "msgspec",

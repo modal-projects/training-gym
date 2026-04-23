@@ -6,7 +6,7 @@ editUrl: https://github.com/modal-projects/training-gym/edit/joy/initial-setup/t
 
 Every tutorial below has a one-click **Launch in Modal Notebook** button.
 The button opens the `.ipynb` in a fresh Modal Notebook — the first code
-cell is a `! pip install git+https://github.com/modal-projects/training-gym.git@main`
+cell is a `! pip install git+https://github.com/modal-projects/training-gym.git@joy/initial-setup`
 that installs `modal-training-gym` into the notebook kernel, so the rest of
 the cells run as-is.
 

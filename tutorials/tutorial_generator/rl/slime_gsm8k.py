@@ -57,7 +57,7 @@ def _intro():
 
 
 @notebook_only
-@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
+@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup")
 
 def _install():
     pass
