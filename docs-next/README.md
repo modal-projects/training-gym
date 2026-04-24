@@ -28,7 +28,7 @@ uv run modal deploy docs-next/docs_next_app.py
 
 This will attach to `training-gym-next.modal.dev` (must be registered in
 workspace Dojoy/initial-setups first). The existing `docs/docs_app.py` continues to serve
-the current mkdocs-material site at `training-gym.modal.dev` until cutover.
+the current mkdocs-material site at `gym.modal.dev` until cutover.
 
 ## Layout
 

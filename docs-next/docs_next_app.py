@@ -36,7 +36,7 @@ app = modal.App("training-gym-docs", image=image)
 
 @app.function(min_containers=1)
 @modal.concurrent(max_inputs=100)
-@modal.asgi_app(custom_domains=["training-gym.modal.dev"])
+@modal.asgi_app(custom_domains=["gym.modal.dev"])
 def serve():
     from fastapi import FastAPI
     from fastapi.staticfiles import StaticFiles

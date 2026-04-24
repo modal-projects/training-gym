@@ -5,7 +5,7 @@
 > generally accessible. Please [**contact us**](https://modal.com/slack)
 > for access.
 
-**[📖 Documentation](https://training-gym.modal.dev)** · **[Tutorials](https://training-gym.modal.dev/tutorials/)** · **[API Reference](https://training-gym.modal.dev/reference/)**
+**[📖 Documentation](https://gym.modal.dev)** · **[Tutorials](https://gym.modal.dev/tutorials/)** · **[API Reference](https://gym.modal.dev/reference/)**
 
 Distributed training on [Modal](https://modal.com) without hand-rolling a
 launcher each time. Pick a training framework (slime,
@@ -67,10 +67,10 @@ Source in `modal_training_gym/frameworks/`. Runnable examples in
 
 ## Documentation
 
-Full docs are hosted at **[training-gym.modal.dev](https://training-gym.modal.dev)**:
+Full docs are hosted at **[gym.modal.dev](https://gym.modal.dev)**:
 
-- [Tutorials](https://training-gym.modal.dev/tutorials/) — step-by-step runnable examples
-- [API Reference](https://training-gym.modal.dev/reference/) — every public class documented with types and defaults
+- [Tutorials](https://gym.modal.dev/tutorials/) — step-by-step runnable examples
+- [API Reference](https://gym.modal.dev/reference/) — every public class documented with types and defaults
 
 External resources:
 

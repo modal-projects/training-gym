@@ -4,7 +4,7 @@ import starlight from '@astrojs/starlight';
 import { modalReferenceThemes } from './modal-reference-theme.mjs';
 
 export default defineConfig({
-  site: 'https://training-gym.modal.dev',
+  site: 'https://gym.modal.dev',
   integrations: [
     starlight({
       title: 'Training Gym',
