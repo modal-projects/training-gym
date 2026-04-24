@@ -75,6 +75,8 @@ def test_harbor_defaults_do_not_force_untied_embeddings():
     args = cfg.cli_args()
     assert "--untie-embeddings-and-output-weights" not in args, args
     assert "--eval-interval" not in args, args
+    assert "--megatron-to-hf-mode" in args, args
+    assert args[args.index("--megatron-to-hf-mode") + 1] == "bridge", args
     print("  PASS  test_harbor_defaults_do_not_force_untied_embeddings")
 
 

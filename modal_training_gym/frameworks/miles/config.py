@@ -202,6 +202,8 @@ class MilesFrameworkConfig:
 
     no_save_optim : bool
         Skip saving optimizer state. Default ``True``.
+    megatron_to_hf_mode : str
+        HF checkpoint loading mode. Default ``"bridge"``.
     """
 
     # ── Modal infrastructure ────────────────────────────────────────────────
@@ -274,6 +276,7 @@ class MilesFrameworkConfig:
 
     # ── Checkpointing ────────────────────────────────────────────────────────
     no_save_optim: bool = True
+    megatron_to_hf_mode: str = "bridge"
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
