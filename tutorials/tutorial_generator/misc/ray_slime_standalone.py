@@ -3,7 +3,7 @@
 Standalone Ray-cluster-on-Modal pattern. Uses `ModalRayCluster` from
 `modal_training_gym.common.ray_cluster` directly — no framework wrapper —
 so you can see the bare Ray bootstrap + `JobSubmissionClient` submission
-flow. The SLIME framework package internally builds on this same helper.
+flow. The slime framework package internally builds on this same helper.
 """
 
 TUTORIAL_METADATA = {
@@ -71,8 +71,8 @@ def _imports_and_image():
 
     N_NODES = 2
 
-    # Any image with Ray installed works. We use the SLIME nightly image
-    # for parity with the framework-backed SLIME tutorial.
+    # Any image with Ray installed works. We use the slime nightly image
+    # for parity with the framework-backed slime tutorial.
     image = (
         modal.Image.from_registry("slimerl/slime:nightly-dev-20260329a")
         .entrypoint([])

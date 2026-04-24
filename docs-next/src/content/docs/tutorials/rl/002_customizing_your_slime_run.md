@@ -1,6 +1,6 @@
 ---
-title: "Customizing your SLIME run"
-description: "Customizing your SLIME run — scaling nodes, parallelism, and throughput"
+title: "Customizing your slime run"
+description: "Customizing your slime run — scaling nodes, parallelism, and throughput"
 ---
 
 The [intro tutorial](../001_slime_intro/001_slime_intro.ipynb) runs

@@ -87,7 +87,7 @@ class ModalRayCluster:
 
     Manages cluster discovery, Ray head/worker startup,
     ``JobSubmissionClient`` creation, dashboard forwarding, and a
-    worker keep-alive loop. Framework launchers (SLIME, Miles, etc.)
+    worker keep-alive loop. Framework launchers (slime, Miles, etc.)
     compose or subclass this.
 
     Attributes (populated after ``discover_cluster()``)

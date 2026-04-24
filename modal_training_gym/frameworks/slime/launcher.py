@@ -67,7 +67,7 @@ def build_slime_app(
     file holds its own Modal app whose shape is determined entirely by the
     config objects it constructs.
     """
-    # Preflight: SLIME requires a `ModelArchitecture` on the attached model.
+    # Preflight: slime requires a `ModelArchitecture` on the attached model.
     # Fail locally with an actionable `ValueError` before any `@app.function`
     # decorator fires.
     if slime.model is not None:
@@ -107,10 +107,10 @@ def build_slime_app(
             copy=True,
         )
     # Ship any sibling helper modules the tutorial declared (e.g. a custom
-    # reward function referenced via SLIME's `custom_rm_path`). Using
+    # reward function referenced via slime's `custom_rm_path`). Using
     # `add_local_python_source` means Python's normal import machinery
     # resolves them in-container — the tutorial doesn't need to extend
-    # PYTHONPATH for SLIME to find them.
+    # PYTHONPATH for slime to find them.
     all_python_sources = slime.local_python_sources or modal.local_python_sources
     for mod_name in all_python_sources:
         image = image.add_local_python_source(mod_name, copy=True)
@@ -373,7 +373,7 @@ def build_slime_app(
         print(f"TrainResult saved: {app_name}/{run_id}")
 
         # Persist a TrainResult so eval scripts can pick up this run by
-        # run_id via ``TrainResult.load(app_name)``. SLIME writes
+        # run_id via ``TrainResult.load(app_name)``. slime writes
         # ``iter_XXXXXXX`` directories at ``slime.save`` (defaults to the
         # ``/checkpoints`` mount root); successive runs append iterations
         # into that same tree, so ``checkpoint_dir`` is that save root

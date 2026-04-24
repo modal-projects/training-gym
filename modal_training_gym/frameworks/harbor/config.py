@@ -47,6 +47,9 @@ _HARBOR_SKIP_FIELDS = {
     "instruction_path",
     "harbor_install_command",
     "miles_src_commit",
+    "enable_thinking",
+    "recipe_args",
+    "extra_args",
 }
 
 MILES_SRC_PATH = "/root/miles-src"
@@ -255,6 +258,9 @@ class HarborConfig:
     wandb: "WandbConfig | None"
     framework_config: HarborFrameworkConfig
 
+    _PRESET_FIELDS = ("n_nodes", "colocate")
+    _PRESET_CLI_FIELDS = ("tensor_model_parallel_size", "sequence_parallel")
+
     def __init__(
         self,
         dataset: "DatasetConfig | None" = None,
@@ -268,6 +274,37 @@ class HarborConfig:
         self.wandb = wandb
         self.framework_config = framework_config or HarborFrameworkConfig()
         self.name = name
+        self._apply_preset()
+
+    def _apply_preset(self) -> None:
+        if self.model is None:
+            return
+        preset = getattr(self.model, "harbor", None)
+        if preset is None:
+            return
+        fc = self.framework_config
+        for f in self._PRESET_FIELDS:
+            if hasattr(preset, f):
+                object.__setattr__(fc, f, getattr(preset, f))
+
+    def preset_cli_args(self) -> list[str]:
+        """Emit Miles CLI flags from the model's HarborPreset (parallelism settings)."""
+        if self.model is None:
+            return []
+        preset = getattr(self.model, "harbor", None)
+        if preset is None:
+            return []
+        out: list[str] = []
+        for f in self._PRESET_CLI_FIELDS:
+            val = getattr(preset, f, None)
+            if val is None or val is False:
+                continue
+            flag = f"--{f.replace('_', '-')}"
+            if val is True:
+                out.append(flag)
+            else:
+                out += [flag, str(val)]
+        return out
 
     def build_app(self, *, name: str | None = None) -> "App":
         from .launcher import build_harbor_app

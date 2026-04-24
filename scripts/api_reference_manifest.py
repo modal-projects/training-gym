@@ -92,7 +92,7 @@ API_REFERENCE_MANIFEST = [
         "class_type": "config_data",
         "sidebar_label": "Kimi-K2.5",
     },
-    # --- Frameworks: SLIME ---
+    # --- Frameworks: slime ---
     {
         "class_name": "SlimeConfig",
         "module": "modal_training_gym.frameworks.slime.config",
@@ -105,7 +105,7 @@ API_REFERENCE_MANIFEST = [
         "module": "modal_training_gym.frameworks.slime.config",
         "group": "frameworks",
         "class_type": "config_data",
-        "sidebar_label": "ModalConfig (SLIME)",
+        "sidebar_label": "ModalConfig (slime)",
     },
     # --- Frameworks: MS-SWIFT ---
     {

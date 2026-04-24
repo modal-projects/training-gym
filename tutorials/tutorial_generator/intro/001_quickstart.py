@@ -27,7 +27,7 @@ def _intro():
     """
     # Quickstart: concepts that every tutorial uses
 
-    `modal-training-gym` wraps a handful of training frameworks (SLIME,
+    `modal-training-gym` wraps a handful of training frameworks (slime,
     Megatron, MS-SWIFT) behind a single pattern: declare
     a model, a dataset, and a logging config; hand
     them to a framework factory; `modal run` the returned app. This
@@ -164,7 +164,7 @@ def _factory_section():
     - `train` — the actual training run. This is the long one; launch it
       with `modal run --detach`.
 
-    Framework-specific extras exist too: raw-mode SLIME/Megatron runs add
+    Framework-specific extras exist too: raw-mode slime/Megatron runs add
     `convert_checkpoint`; RL frameworks may add serving helpers. A
     tutorial's `.py` file is where all of this is wired together —
     calling `framework_config.build_app()` closes over your config and

@@ -47,6 +47,10 @@ from .config import (
 DATA_PATH = "/data"
 
 
+def _use_clustered_launch(n_nodes: int) -> bool:
+    return n_nodes > 1
+
+
 def _train_ms_swift_worker(run_id: str | None = None):
     from huggingface_hub import snapshot_download
 
@@ -60,11 +64,20 @@ def _train_ms_swift_worker(run_id: str | None = None):
     checkpoints_root = os.environ["MS_SWIFT_CHECKPOINTS_PATH"]
     checkpoints_volume_name = os.environ["MS_SWIFT_CHECKPOINTS_VOLUME_NAME"]
     gpus_per_node = int(os.environ["MS_SWIFT_GPUS_PER_NODE"])
+    is_clustered = os.environ.get("MS_SWIFT_CLUSTERED", "0") == "1"
     wandb_project = os.environ.get("MS_SWIFT_WANDB_PROJECT", "")
     wandb_exp_name = os.environ.get("MS_SWIFT_WANDB_EXP_NAME", "")
 
-    cluster_info = get_cluster_info()
-    node_rank = cluster_info.rank
+    if is_clustered:
+        cluster_info = get_cluster_info()
+        node_rank = cluster_info.rank
+        ips = list(cluster_info.container_ipv4_ips or [])
+        n_nodes = len(ips) if ips else 1
+        master_addr = ips[0] if ips else "localhost"
+    else:
+        node_rank = 0
+        n_nodes = 1
+        master_addr = "localhost"
 
     if run_id is None:
         import uuid
@@ -80,7 +93,7 @@ def _train_ms_swift_worker(run_id: str | None = None):
         if os.path.exists(marker_file):
             old_marker = open(marker_file).read().strip()
 
-        if node_rank == 0:
+        if not is_clustered or node_rank == 0:
             new_marker = uuid.uuid4().hex
             run_id = f"train_{int(time.time())}"
             os.makedirs(checkpoints_root, exist_ok=True)
@@ -103,9 +116,6 @@ def _train_ms_swift_worker(run_id: str | None = None):
                     "Timed out waiting for rank 0 to write the run ID. "
                     "Check that all cluster nodes started correctly."
                 )
-    ips = list(cluster_info.container_ipv4_ips or [])
-    n_nodes = len(ips) if ips else 1
-    master_addr = ips[0] if ips else "localhost"
     print(f"Node {node_rank}/{n_nodes}, Master: {master_addr}")
 
     model_path_override = os.environ.get("MS_SWIFT_MODEL_PATH", "")
@@ -216,7 +226,8 @@ def build_ms_swift_app(
     name: str | None = None,
 ) -> App:
     """Return a Modal App with `download_model`, `prepare_dataset`, `train`."""
-    framework = swift.framework_config
+    framework = swift.resolved_framework_config()
+    use_clustered_launch = _use_clustered_launch(framework.n_nodes)
 
     caller_module = resolve_caller_module()
     if caller_module is not None:
@@ -378,32 +389,42 @@ def build_ms_swift_app(
         "MS_SWIFT_CHECKPOINTS_PATH": checkpoints_str,
         "MS_SWIFT_CHECKPOINTS_VOLUME_NAME": f"{app_name}-checkpoints",
         "MS_SWIFT_BASE_CLI_ARGS_JSON": json.dumps(base_cli_args),
+        "MS_SWIFT_CLUSTERED": "1" if use_clustered_launch else "0",
         "MS_SWIFT_WANDB_PROJECT": swift.wandb.project if swift.wandb else "",
         "MS_SWIFT_WANDB_EXP_NAME": (
             (swift.wandb.exp_name or swift.wandb.group) if swift.wandb else ""
         ),
     }
-    app.function(
-        image=train_image,
-        gpu=gpu_spec,
-        volumes={
+    train_kwargs = {
+        "image": train_image,
+        "gpu": gpu_spec,
+        "volumes": {
             hf_cache_str: hf_cache_volume,
             data_str: data_volume,
             checkpoints_str: checkpoints_volume,
         },
-        secrets=[
+        "secrets": [
             Secret.from_name("huggingface-secret"),
             *([] if swift.wandb is None else [Secret.from_name("wandb-secret")]),
         ],
-        timeout=24 * 60 * 60,
-        retries=2,
-        memory=1048576,  # 1 TiB
-        ephemeral_disk=2_048_000,  # 2 TiB scratch
-        experimental_options={"efa_enabled": True},
-        env=train_env,
-        serialized=False,
-        name="train",
-    )(clustered(size=framework.n_nodes, rdma=True)(_train_ms_swift_worker))
+        "timeout": 24 * 60 * 60,
+        "retries": 2,
+        "memory": 1048576,
+        "ephemeral_disk": 2_048_000,
+        "env": train_env,
+        "serialized": False,
+        "name": "train",
+    }
+    if use_clustered_launch:
+        train_kwargs["experimental_options"] = {"efa_enabled": True}
+
+    train_target = _train_ms_swift_worker
+    if use_clustered_launch:
+        train_target = clustered(size=framework.n_nodes, rdma=True)(train_target)
+
+    app.function(
+        **train_kwargs,
+    )(train_target)
 
     # Expose registered functions as attributes so notebook callers can do
     # `app.download_model.remote()` instead of app.registered_functions[...].

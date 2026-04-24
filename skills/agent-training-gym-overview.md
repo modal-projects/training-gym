@@ -24,7 +24,7 @@ modal_training_gym/         ← installable package
 │   ├── framework.py        ← resolve_caller_module, mount_tools_dir, TOOLS_*
 │   └── ray_cluster.py      ← ModalRayCluster helper (used by slime, miles)
 ├── frameworks/             ← one subpackage per training framework
-│   ├── slime/              ← SLIME GRPO (Ray + Megatron + SGLang)
+│   ├── slime/              ← slime GRPO (Ray + Megatron + SGLang)
 │   ├── ms_swift/           ← ms-swift Megatron SFT
 │   ├── miles/              ← Miles RL (Ray + Megatron)
 └── tools/                  ← shared scripts mounted on every image at
@@ -68,13 +68,13 @@ Built-in subclasses:
 
 | Class | HF repo | Architecture populated? | Notes |
 |---|---|---|---|
-| `Qwen3_4B` | `Qwen/Qwen3-4B` | yes | SLIME-ready |
+| `Qwen3_4B` | `Qwen/Qwen3-4B` | yes | slime-ready |
 | `Qwen3_32B` | `Qwen/Qwen3-32B` | no (stub) | architecture inferred from HF config in RL setups |
 | `GLM_4_7` | `zai-org/GLM-4.7` | no | ms-swift / Megatron derive arch |
 | `Llama2_7B` | `meta-llama/Llama-2-7b-hf` | no | torchrun-based workflows |
 | `Kimi_K2_5` | `moonshotai/Kimi-K2.5` | no | **overrides `download_model`**: snapshot + INT4→BF16 conversion via `tools/convert_kimi_int4_to_bf16.py` |
 
-**Rule of thumb for SLIME**: SLIME emits architecture fields as CLI flags,
+**Rule of thumb for slime**: slime emits architecture fields as CLI flags,
 so it requires `architecture` to be a populated `ModelArchitecture(...)`.
 The `SlimeConfig._validate_custom_model_architecture` preflight raises an
 actionable `ValueError` if a user attaches a model with
@@ -160,7 +160,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
    class MyModel(HFModelConfiguration):
        model_name = "org/repo"
-       # Optional: populate only if SLIME users will consume this model.
+       # Optional: populate only if slime users will consume this model.
        architecture = ModelArchitecture(
            num_layers=..., hidden_size=..., ...,
        )
@@ -309,7 +309,7 @@ inline:
 def _define_model():
     class MyTinyModel(ModelConfiguration):
         model_name = "HuggingFaceTB/SmolLM2-135M"
-        # For SLIME, also set architecture = ModelArchitecture(...)
+        # For slime, also set architecture = ModelArchitecture(...)
 
         def download_model(self):
             from huggingface_hub import snapshot_download

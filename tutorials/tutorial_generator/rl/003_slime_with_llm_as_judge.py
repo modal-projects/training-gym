@@ -29,7 +29,7 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Qwen3-4B GRPO on Haiku with SLIME on Modal
+    # Qwen3-4B GRPO on Haiku with slime on Modal
 
     This tutorial teaches [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B)
     to write 5-7-5 haiku poems about Modal-flavored topics. The training
@@ -50,8 +50,8 @@ def _intro():
        is set in the training environment, so the tutorial is runnable
        end-to-end without standing up a second service.
 
-    Both pieces are wired into SLIME through its `custom_rm_path` hook.
-    In notebooks, the tutorial writes a local `haiku.py` file that SLIME
+    Both pieces are wired into slime through its `custom_rm_path` hook.
+    In notebooks, the tutorial writes a local `haiku.py` file that slime
     imports; from the CLI, the same config falls back to the packaged
     `modal_training_gym.common.haiku_reward` module.
 
@@ -94,10 +94,10 @@ def _explain_imports():
       plain `.py` tutorial, the same code falls back to the packaged
       reference module at `modal_training_gym/common/haiku_reward.py`.
     - **`modal_training_gym.*`** — shared containers (`DatasetConfig`,
-      `Qwen3_4B`, `WandbConfig`), the vLLM serving helper, and SLIME's
+      `Qwen3_4B`, `WandbConfig`), the vLLM serving helper, and slime's
       framework-specific config + launcher classes. `DATA_PATH` is the
       canonical mount point (`/data`) for the shared data volume on
-      every SLIME container.
+      every slime container.
     """
 
 
@@ -207,7 +207,7 @@ class HaikuStyleJudge(LlmJudge):
 
 
 def _extract_topic(sample) -> str:
-    """Recover the haiku topic ("cat", "modal", ...) from a SLIME sample."""
+    """Recover the haiku topic ("cat", "modal", ...) from a slime sample."""
     for attr in ("question", "prompt"):
         val = getattr(sample, attr, None)
         if isinstance(val, str) and val:
@@ -221,7 +221,7 @@ def _extract_topic(sample) -> str:
 
 
 async def haiku_rm(args, sample, **kwargs) -> float:
-    """Async SLIME reward: structure plus optional LLM style score."""
+    """Async slime reward: structure plus optional LLM style score."""
     import aiohttp
 
     cmudict = _get_cmudict()
@@ -276,23 +276,23 @@ def _explain_dataset():
     """
     ## Define the dataset
 
-    SLIME reads training data from parquet files on a shared volume. A
+    slime reads training data from parquet files on a shared volume. A
     `DatasetConfig` subclass specifies two things:
 
     1. **Where the files live** (`prompt_data`, `eval_prompt_data`) —
-       paths under `DATA_PATH` (`/data` inside every SLIME container).
+       paths under `DATA_PATH` (`/data` inside every slime container).
     2. **How to produce them** (`prepare()`) — runs once inside the
        `prepare_dataset` Modal function with the data volume mounted
        read-write, and should write the parquet files atomically.
 
-    The class attrs also map to SLIME CLI flags:
+    The class attrs also map to slime CLI flags:
 
-    - `input_key="messages"` — column name SLIME reads the chat
+    - `input_key="messages"` — column name slime reads the chat
       conversation from.
     - `label_key="label"` — column holding the ground-truth poem (used
       only by the optional LLM judge to grade relative quality; the
       structure-only reward ignores it).
-    - `apply_chat_template=True` — ask SLIME to run the tokenizer's
+    - `apply_chat_template=True` — ask slime to run the tokenizer's
       chat template over `messages` before rollout, matching what the
       model was pretrained with.
     - `rm_type="async_rm"` — the reward model is an async Python
@@ -308,7 +308,7 @@ def _explain_dataset():
        that asks for a haiku, plus a user prompt like
        `"Write me a haiku about cat."`.
     3. Also precompute the tokenized `prompt` string via the model's
-       chat template — SLIME uses that as the exact rollout input.
+       chat template — slime uses that as the exact rollout input.
     4. Hold out the last 20% (capped at 1000 rows) as a test split so
        `eval_prompt_data` has something to score against during
        training.
@@ -324,7 +324,7 @@ def _define_dataset():
 
         def __init__(self, data_path, hf_checkpoint):
             # `data_path` is DATA_PATH on whichever container is mounting
-            # the shared volume — /data on SLIME containers. Stashing it
+            # the shared volume — /data on slime containers. Stashing it
             # plus the HF model id lets prepare() run standalone later.
             self._data_path = str(data_path)
             self._hf_checkpoint = hf_checkpoint
@@ -338,7 +338,7 @@ def _define_dataset():
             from transformers import AutoTokenizer
 
             # Use the base-model tokenizer to render the chat template;
-            # SLIME will re-tokenize at rollout, but pre-rendering the
+            # slime will re-tokenize at rollout, but pre-rendering the
             # prompt string here lets us log exactly what the model sees.
             tokenizer = AutoTokenizer.from_pretrained(self._hf_checkpoint)
             ds = load_dataset("statworx/haiku")
@@ -395,14 +395,14 @@ def _explain_reward():
     `modal_training_gym.common.haiku_reward` module from
     `modal_training_gym/common/haiku_reward.py`. Both expose the same
     `haiku_rm`, an **async** reward function matching the signature
-    SLIME expects:
+    slime expects:
 
     ```python
     async def haiku_rm(args, sample, **kwargs) -> float:
         ...
     ```
 
-    - `args` is the SLIME CLI namespace (rarely needed).
+    - `args` is the slime CLI namespace (rarely needed).
     - `sample` exposes `.response` (the model's generation), `.prompt`
       / `.question` (the input), and `.label` (the reference answer,
       when available).
@@ -447,7 +447,7 @@ def _explain_config():
 
     `SlimeConfig(...)` wires the model, dataset, reward, and cluster
     shape into a single object. Fields that aren't set here fall back to
-    SLIME's defaults (optimizer, Megatron parallelism, GRPO clipping,
+    slime's defaults (optimizer, Megatron parallelism, GRPO clipping,
     etc.) — see the
     [`slime_gsm8k`](../../rl/001_slime_intro/001_slime_intro.ipynb) tutorial
     for a fully explicit example.
@@ -455,7 +455,7 @@ def _explain_config():
     Key choices for this run:
 
     - `rm_type="async_rm"` + `custom_rm_path=CUSTOM_RM_PATH` — when the
-      notebook-created `haiku.py` is present, SLIME imports
+      notebook-created `haiku.py` is present, slime imports
       `haiku.haiku_rm`; otherwise it falls back to
       `modal_training_gym.common.haiku_reward.haiku_rm`.
     - `local_python_sources=LOCAL_PYTHON_SOURCES` on `ModalConfig` —
@@ -616,7 +616,7 @@ def _serve_section():
     ### Pointing at the right checkpoint
 
     `model_path` must point at a directory containing an **HF-format**
-    checkpoint (`config.json` plus weight shards). SLIME bridge mode
+    checkpoint (`config.json` plus weight shards). slime bridge mode
     writes Megatron torch_dist checkpoints under `save` — pick out an
     HF-compatible subdirectory once training completes, or run a
     torch_dist → HF conversion if your config didn't emit one. Inspect

@@ -1,10 +1,10 @@
 ---
 import MobileMenuFooter from '@astrojs/starlight/components/MobileMenuFooter.astro';
-import SidebarPersister from '@astrojs/starlight/components/SidebarPersister.astro';
 import SidebarSublist from '@astrojs/starlight/components/SidebarSublist.astro';
 
 const { sidebar } = Astro.locals.starlightRoute;
 const currentPath = Astro.url.pathname;
+const isTutorialRoute = currentPath.startsWith('/tutorials/');
 
 function getFilteredSidebar() {
   if (currentPath === '/' || currentPath.startsWith('/support')) {
@@ -31,14 +31,83 @@ function getFilteredSidebar() {
 
 const filteredSidebar = getFilteredSidebar();
 const showSidebar = filteredSidebar.length > 0;
+
+function flattenLinks(entries) {
+  const links = [];
+  for (const entry of entries) {
+    if (entry.type === 'link') {
+      links.push(entry);
+    } else {
+      links.push(...flattenLinks(entry.entries));
+    }
+  }
+  return links;
+}
+
+function firstLinkHref(entry) {
+  if (entry.type === 'link') return entry.href;
+  const first = flattenLinks(entry.entries)[0];
+  return first?.href;
+}
+
+const tutorialSections = isTutorialRoute
+  ? filteredSidebar.map((entry) => {
+      if (entry.type === 'link') {
+        return {
+          label: entry.label,
+          href: entry.href,
+          isCurrent: entry.isCurrent,
+          items: [],
+        };
+      }
+      const items = flattenLinks(entry.entries);
+      return {
+        label: entry.label,
+        href: firstLinkHref(entry),
+        isCurrent: items.some((item) => item.isCurrent),
+        items,
+      };
+    })
+  : [];
 ---
 
-{showSidebar && (
-  <SidebarPersister>
-    <SidebarSublist sublist={filteredSidebar} />
-  </SidebarPersister>
+{
+  showSidebar ? (
+    <>
+      {isTutorialRoute ? (
+        <ul class="tg-tutorial-sidebar">
+          {tutorialSections.map((section) => (
+            <li>
+              {section.href ? (
+                <a
+                  href={section.href}
+                  class:list={['tg-tutorial-sidebar__header', { active: section.isCurrent }]}
+                >
+                  {section.label}
+                </a>
+              ) : (
+                <span class="tg-tutorial-sidebar__header">{section.label}</span>
+              )}
+              {section.items.map((item) => (
+                <a
+                  href={item.href}
+                  class:list={['tg-tutorial-sidebar__item', { active: item.isCurrent }]}
+                >
+                  {item.label}
+                </a>
+              ))}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <SidebarSublist sublist={filteredSidebar} />
+      )}
 
-  <div class="md:sl-hidden">
-    <MobileMenuFooter />
-  </div>
-)}
+      <div class="md:sl-hidden">
+        <MobileMenuFooter />
+      </div>
+    </>
+  ) : (
+    <div class="tg-sidebar-empty" aria-hidden="true" />
+  )
+}

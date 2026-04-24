@@ -8,6 +8,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Training Gym',
+      favicon: '/modal-logo.svg',
       description:
         'Reusable building blocks + runnable examples for distributed training on Modal.',
       tagline:
@@ -83,9 +84,9 @@ export default defineConfig({
             {
               label: 'Reinforcement Learning',
               items: [
-                { label: '001 SLIME Intro', link: '/tutorials/rl/001_slime_intro/' },
-                { label: '002 Customizing SLIME', link: '/tutorials/rl/002_customizing_your_slime_run/' },
-                { label: '003 SLIME + LLM Judge', link: '/tutorials/rl/003_slime_with_llm_as_judge/' },
+                { label: '001 slime Intro', link: '/tutorials/rl/001_slime_intro/' },
+                { label: '002 Customizing slime', link: '/tutorials/rl/002_customizing_your_slime_run/' },
+                { label: '003 slime + LLM Judge', link: '/tutorials/rl/003_slime_with_llm_as_judge/' },
                 { label: '004 Harbor Code Golf', link: '/tutorials/rl/004_harbor_codegolf/' },
               ],
             },
@@ -134,7 +135,7 @@ export default defineConfig({
               label: 'Frameworks',
               items: [
                 { label: 'SlimeConfig', link: '/reference/frameworks/slimeconfig/' },
-                { label: 'ModalConfig (SLIME)', link: '/reference/frameworks/modalconfig/' },
+                { label: 'ModalConfig (slime)', link: '/reference/frameworks/modalconfig/' },
                 { label: 'MsSwiftFrameworkConfig', link: '/reference/frameworks/msswiftframeworkconfig/' },
                 { label: 'MsSwiftConfig', link: '/reference/frameworks/msswiftconfig/' },
                 { label: 'MilesFrameworkConfig', link: '/reference/frameworks/milesframeworkconfig/' },

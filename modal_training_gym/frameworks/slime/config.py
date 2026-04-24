@@ -3,12 +3,12 @@
 Two separate concerns:
 
   ModalConfig  — Modal infrastructure (gpu model, async mode, dev overlay)
-  SlimeConfig  — SLIME training arguments
+  SlimeConfig  — slime training arguments
 
 Each experiment defines one instance of each. All non-private, non-callable
-attributes on a SlimeConfig subclass become SLIME CLI args automatically via
+attributes on a SlimeConfig subclass become slime CLI args automatically via
 cli_args(). The 'environment' field is the only exception — it is injected
-into the Ray job runtime env, not passed to SLIME directly.
+into the Ray job runtime env, not passed to slime directly.
 """
 
 import math
@@ -38,7 +38,7 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 
-# Fields on SlimeConfig that are NOT SLIME CLI args.
+# Fields on SlimeConfig that are NOT slime CLI args.
 # `dataset`, `model`, and `wandb` are container objects; their own fields are
 # expanded into cli args inside `_fields()`, but the containers themselves are
 # never emitted as flags.
@@ -57,7 +57,7 @@ _SLIME_SKIP = {
     "gpu_type",
 }
 
-# SlimeConfig fields that SLIME reads as YAML files at runtime.
+# SlimeConfig fields that slime reads as YAML files at runtime.
 # Users may set these as inline dicts in Python configs; the launcher
 # materializes them to temp YAML files before building the CLI command.
 YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
@@ -67,12 +67,12 @@ from .preset import SlimePreset  # noqa: E402 — re-export
 
 
 class ModalConfig:
-    """Modal infrastructure configuration for SLIME — image setup and dev overlays.
+    """Modal infrastructure configuration for slime — image setup and dev overlays.
 
     ## Fields
 
     local_slime : str | None
-        Path to a local SLIME repo checkout for dev overlay. When set, the
+        Path to a local slime repo checkout for dev overlay. When set, the
         launcher mounts it into the image. Default ``None``.
     patch_files : list[str]
         Local patch files to inject into the image at ``/tmp/<filename>``.
@@ -83,7 +83,7 @@ class ModalConfig:
     local_python_sources : list[str]
         Sibling Python modules (by import name) to ship into the training
         image via ``add_local_python_source``. Use for helper modules like
-        custom reward functions referenced via SLIME's ``custom_rm_path``.
+        custom reward functions referenced via slime's ``custom_rm_path``.
         Default ``[]``.
     """
 
@@ -102,9 +102,9 @@ class ModalConfig:
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class SlimeConfig:
-    """SLIME GRPO training configuration.
+    """slime GRPO training configuration.
 
-    All non-skip fields are forwarded to SLIME as CLI args
+    All non-skip fields are forwarded to slime as CLI args
     (``--hyphen-name value``). Attach ``dataset``, ``model``, and
     ``wandb`` containers to populate their respective CLI flags
     automatically.
@@ -269,7 +269,7 @@ class SlimeConfig:
     # ── App identity ─────────────────────────────────────────────────────────
     name: str = ""
 
-    # ── Launcher instructions (not SLIME CLI flags) ─────────────────────────
+    # ── Launcher instructions (not slime CLI flags) ─────────────────────────
     environment: dict = field(default_factory=lambda: {
         "PYTHONPATH": "/root/Megatron-LM/",
         "CUDA_DEVICE_MAX_CONNECTIONS": "1",
@@ -362,11 +362,11 @@ class SlimeConfig:
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    # ── Container → SLIME flag converters ────────────────────────────────────
+    # ── Container → slime flag converters ────────────────────────────────────
     #
     # Each converter maps a common config struct (`DatasetConfig`, `ModelConfiguration`,
-    # `WandbConfig`) to the specific field names SLIME's CLI expects. Kept
-    # explicit so the SLIME vocabulary lives in one place and the common
+    # `WandbConfig`) to the specific field names slime's CLI expects. Kept
+    # explicit so the slime vocabulary lives in one place and the common
     # configs stay framework-agnostic.
 
     def __post_init__(self) -> None:
@@ -405,7 +405,7 @@ class SlimeConfig:
     ) -> "ModelArchitecture":
         """Require a `ModelArchitecture` on the attached model.
 
-        SLIME consumes architecture fields as CLI flags, so a model without an
+        slime consumes architecture fields as CLI flags, so a model without an
         explicit `ModelArchitecture` cannot produce a valid command line. This
         check fires before any remote Modal function is defined — invoked from
         `_model_to_fields()` (the converter that emits the flags) and from
@@ -477,7 +477,7 @@ class SlimeConfig:
     # ── Public API ────────────────────────────────────────────────────────────
 
     def cli_args(self) -> list[str]:
-        """SLIME CLI arguments derived from this config.
+        """slime CLI arguments derived from this config.
 
         Conversion rules:
           field_name → --field-name  (underscore to hyphen)
@@ -512,7 +512,7 @@ class SlimeConfig:
         raise NotImplementedError(f"{type(self).__name__} has no prepare_data()")
 
     def to_dataset_config(self) -> "DatasetConfig":
-        """Extract dataset-related SLIME flags back into a `DatasetConfig`.
+        """Extract dataset-related slime flags back into a `DatasetConfig`.
 
         Reverse of attaching a `DatasetConfig` as the `dataset` field — works
         whether the fields came from an attached container or were set
@@ -531,10 +531,10 @@ class SlimeConfig:
         )
 
     def to_model(self) -> "ModelConfiguration":
-        """Extract model-related SLIME flags back into a `ModelConfiguration`.
+        """Extract model-related slime flags back into a `ModelConfiguration`.
 
         Returns the attached `ModelConfiguration` when one is set. Otherwise,
-        constructs an ad-hoc instance from the raw SLIME flag fields, with
+        constructs an ad-hoc instance from the raw slime flag fields, with
         `architecture=None` when every architecture flag is at its default
         and a populated `ModelArchitecture` when any field differs.
         """
@@ -574,7 +574,7 @@ class SlimeConfig:
         )
 
     def to_wandb_config(self) -> "WandbConfig":
-        """Extract wandb-related SLIME flags back into a `WandbConfig`.
+        """Extract wandb-related slime flags back into a `WandbConfig`.
 
         Reverse of attaching a `WandbConfig` — works whether fields came from
         an attached container or were set directly.

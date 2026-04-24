@@ -2,6 +2,9 @@ def __getattr__(name: str):
     if name in ("HarborConfig", "HarborFrameworkConfig"):
         from .config import HarborConfig, HarborFrameworkConfig
         return {"HarborConfig": HarborConfig, "HarborFrameworkConfig": HarborFrameworkConfig}[name]
+    if name == "HarborPreset":
+        from .preset import HarborPreset
+        return HarborPreset
     if name in ("TrajectoryTurn", "parse_thinking"):
         from .trajectory import TrajectoryTurn, parse_thinking
         return {"TrajectoryTurn": TrajectoryTurn, "parse_thinking": parse_thinking}[name]
@@ -24,6 +27,7 @@ __all__ = [
     "HARBOR_TRAIN_JSONL",
     "HarborConfig",
     "HarborFrameworkConfig",
+    "HarborPreset",
     "TrajectoryTurn",
     "HarborTask",
     "build_harbor_app",

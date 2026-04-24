@@ -13,8 +13,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
-from modal_training_gym.common import GPUType
-
 if TYPE_CHECKING:
     from modal import App
 
@@ -31,7 +29,6 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 
 # Fields that are NOT emitted as megatron CLI flags.
 _SKIP_FIELDS = {
-    "gpu",
     "image",
     "transformers_version",
     "environment",
@@ -43,8 +40,8 @@ _SKIP_FIELDS = {
 
 # Fields from ModelTrainingConfig that map to MsSwiftFrameworkConfig fields.
 _MODEL_TRAINING_FIELDS = {
-    "gpu_type": "gpu",
     "n_nodes": "n_nodes",
+    "gpus_per_node": "gpus_per_node",
     "tensor_model_parallel_size": "tensor_model_parallel_size",
     "pipeline_model_parallel_size": "pipeline_model_parallel_size",
     "context_parallel_size": "context_parallel_size",
@@ -243,6 +240,17 @@ class MsSwiftFrameworkConfig:
     n_nodes: int = 4
     gpus_per_node: int = 8
 
+    def __post_init__(self) -> None:
+        if self.n_nodes < 1:
+            raise ValueError("n_nodes must be >= 1")
+        if self.gpus_per_node < 1:
+            raise ValueError("gpus_per_node must be >= 1")
+        if self.n_nodes > 1 and self.gpus_per_node != 8:
+            raise ValueError(
+                "Multi-node ms-swift runs require gpus_per_node=8. "
+                "Single-node runs may use smaller GPU counts."
+            )
+
     # ── Tuner & data split ───────────────────────────────────────────────────
     tuner_type: str = "lora"
     split_dataset_ratio: float = 0.01
@@ -356,16 +364,7 @@ class MsSwiftConfig:
         self.name = name
 
     def _fields(self) -> dict[str, Any]:
-        fields = dict(vars(self.framework_config))
-        if self.model is not None:
-            overrides = model_training_overrides(self.model)
-            for k, v in overrides.items():
-                if k in fields:
-                    dc_default = _get_dataclass_default(MsSwiftFrameworkConfig, k)
-                    if dc_default is not _SENTINEL and fields[k] == dc_default:
-                        fields[k] = v
-                else:
-                    fields[k] = v
+        fields = dict(vars(self.resolved_framework_config()))
         fields = {k: v for k, v in fields.items() if k not in _SKIP_FIELDS}
         if self.dataset is not None and hasattr(self.dataset, "prompt_data"):
             fields["dataset"] = self.dataset.prompt_data
@@ -381,6 +380,19 @@ class MsSwiftConfig:
         if fields.get("eval_iters", 0) <= 0:
             fields.pop("eval_interval", None)
         return fields
+
+    def resolved_framework_config(self) -> MsSwiftFrameworkConfig:
+        """Return framework config with model defaults applied to untouched fields."""
+        fields = dict(vars(self.framework_config))
+        if self.model is not None:
+            overrides = model_training_overrides(self.model)
+            for k, v in overrides.items():
+                if k not in fields:
+                    continue
+                dc_default = _get_dataclass_default(MsSwiftFrameworkConfig, k)
+                if dc_default is not _SENTINEL and fields[k] == dc_default:
+                    fields[k] = v
+        return MsSwiftFrameworkConfig(**fields)
 
     def cli_args(self, *, output_dir: str) -> list[str]:
         out: list[str] = []

@@ -8,6 +8,7 @@ on:
       - "docs-next/**"
       - "modal_training_gym/**"
       - "pyproject.toml"
+      - "scripts/generate_all.py"
       - "scripts/generate_docs_pages.py"
       - "scripts/generate_api_reference.py"
       - "scripts/generate_tutorial_pages.py"
@@ -22,6 +23,7 @@ on:
       - "docs-next/**"
       - "modal_training_gym/**"
       - "pyproject.toml"
+      - "scripts/generate_all.py"
       - "scripts/generate_docs_pages.py"
       - "scripts/generate_api_reference.py"
       - "scripts/generate_tutorial_pages.py"
@@ -59,22 +61,8 @@ jobs:
       - name: Sync Python dependencies
         run: uv sync --group docs
 
-      - name: Generate docs pages from READMEs
-        run: uv run python scripts/generate_docs_pages.py
-
-      - name: Generate API reference pages
-        run: uv run python scripts/generate_api_reference.py
-
-      - name: Generate tutorial pages
-        run: uv run python scripts/generate_tutorial_pages.py
-
-      - name: Install docs-next dependencies
-        working-directory: docs-next
-        run: npm ci
-
-      - name: Build Starlight site
-        working-directory: docs-next
-        run: npm run build
+      - name: Generate and build docs
+        run: uv run python scripts/generate_all.py
 
       - name: Validate docs_next_app.py
         run: uv run python -m py_compile docs-next/docs_next_app.py
@@ -97,8 +85,15 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Sync dependencies
         run: uv sync --group docs
+
+      - name: Generate and build docs
+        run: uv run python scripts/generate_all.py
 
       - name: Deploy docs to Modal
         run: uv run modal deploy docs-next/docs_next_app.py

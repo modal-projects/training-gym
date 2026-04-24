@@ -9,7 +9,7 @@ description: API reference for SlimeConfig
 from modal_training_gym.frameworks.slime.config import SlimeConfig
 ```
 
-SLIME GRPO training configuration.
+slime GRPO training configuration.
 
 ## Launcher Instructions
 
@@ -148,7 +148,7 @@ SLIME GRPO training configuration.
 
 ### `cli_args(self) -> list[str]`
 
-SLIME CLI arguments derived from this config.
+slime CLI arguments derived from this config.
 
 ### `prepare_data(self) -> None`
 
@@ -156,15 +156,15 @@ Materialize the training data.
 
 ### `to_dataset_config(self) -> 'DatasetConfig'`
 
-Extract dataset-related SLIME flags back into a `DatasetConfig`.
+Extract dataset-related slime flags back into a `DatasetConfig`.
 
 ### `to_model(self) -> 'ModelConfiguration'`
 
-Extract model-related SLIME flags back into a `ModelConfiguration`.
+Extract model-related slime flags back into a `ModelConfiguration`.
 
 ### `to_wandb_config(self) -> 'WandbConfig'`
 
-Extract wandb-related SLIME flags back into a `WandbConfig`.
+Extract wandb-related slime flags back into a `WandbConfig`.
 
 ### `total_nodes(self) -> int`
 
@@ -174,7 +174,7 @@ Total Modal cluster nodes required by this config.
 
 - [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/001_quickstart/)
 - [Qwen3-4B GRPO on GSM8K (colocated)](/tutorials/rl/001_slime_intro/)
-- [Customizing your SLIME run — scaling nodes, parallelism, and throughput](/tutorials/rl/002_customizing_your_slime_run/)
+- [Customizing your slime run — scaling nodes, parallelism, and throughput](/tutorials/rl/002_customizing_your_slime_run/)
 - [Qwen3-4B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/003_slime_with_llm_as_judge/)
 
 **Source:** [`modal_training_gym/frameworks/slime/config.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/frameworks/slime/config.py)

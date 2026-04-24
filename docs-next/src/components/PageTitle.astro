@@ -7,6 +7,9 @@ const pageUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
 
 const currentPath = Astro.url.pathname;
 const tutorialMatch = currentPath.match(/^\/tutorials\/(\w+)\/(\w+)\/?$/);
+const useCompactQuickstartHeader =
+  currentPath === '/tutorials/intro/quickstart/' ||
+  currentPath === '/tutorials/intro/001_quickstart/';
 const notebookUrl = tutorialMatch
   ? `https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/${tutorialMatch[1]}/${tutorialMatch[2]}/${tutorialMatch[2]}.ipynb`
   : null;
@@ -30,8 +33,10 @@ const notebookUrl = tutorialMatch
       Copy page
     </button>
   </div>
-  <h1 id="_top">{entry.data.title}</h1>
-  {entry.data.description && <p class="tg-page-head__dek">{entry.data.description}</p>}
+  <h1 id="_top">{useCompactQuickstartHeader ? 'Quickstart' : entry.data.title}</h1>
+  {!useCompactQuickstartHeader && entry.data.description && (
+    <p class="tg-page-head__dek">{entry.data.description}</p>
+  )}
 </div>
 
 <script is:inline>

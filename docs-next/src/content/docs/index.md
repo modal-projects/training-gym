@@ -2,7 +2,7 @@
 title: Training Gym
 description: Reusable building blocks and runnable examples for distributed training on Modal.
 hero:
-  tagline: Distributed training on Modal without hand-rolling a launcher each time. Pick a framework, plug in a model + dataset config, and run it.
+  tagline: Distributed training on Modal has never been easier. Pick a framework, plug in a model, and let it jam on your dataset.
   actions:
     - text: Get started
       link: /tutorials/intro/quickstart/

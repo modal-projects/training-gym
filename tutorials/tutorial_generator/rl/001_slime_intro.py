@@ -21,9 +21,9 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Qwen3-4B GRPO on GSM8K with SLIME on Modal
+    # Qwen3-4B GRPO on GSM8K with slime on Modal
 
-    **What SLIME is.** [SLIME](https://github.com/THUDM/slime) is an RL
+    **What slime is.** [slime](https://github.com/THUDM/slime) is an RL
     post-training framework that pairs Megatron (training) with SGLang
     (rollouts) and orchestrates both with Ray. `modal-training-gym`'s
     `slime` launcher wires that stack onto a Modal multi-node cluster.
@@ -34,7 +34,7 @@ def _intro():
     is the canonical target for math-RL: short prompts, short answers,
     and a deterministic correctness check. This is the "everything works
     end-to-end" reference for the `slime` framework — a medium-scale RL
-    post-training run with SLIME's built-in math reward (no custom
+    post-training run with slime's built-in math reward (no custom
     reward code). For a custom-reward example see
     [`003_slime_with_llm_as_judge`](../../003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.ipynb); for the shared
     primitives (DatasetConfig, volumes, the 3-stage pipeline) see
@@ -42,7 +42,7 @@ def _intro():
 
     **What you'll need.**
     - A Modal account with GPU access (1 × 8×H100).
-    - A `wandb` Modal secret holding your W&B API key (the SLIME launcher
+    - A `wandb` Modal secret holding your W&B API key (the slime launcher
       mounts it automatically when `WandbConfig` is present).
     - Patience: multi-hour run — use `modal run --detach`.
 
@@ -83,15 +83,15 @@ def _explain_dataset():
     """
     ## Define the dataset
 
-    The non-obvious choices for GSM8K under SLIME:
+    The non-obvious choices for GSM8K under slime:
 
     - `input_key="messages"` + `apply_chat_template=True` — the prompt
-      column holds a list of chat messages; SLIME runs the model's chat
+      column holds a list of chat messages; slime runs the model's chat
       template over them before tokenizing. The upstream
       [`zhuzilin/gsm8k`](https://huggingface.co/datasets/zhuzilin/gsm8k)
       mirror we load below is already in that shape.
-    - `label_key="label"` — the column SLIME scores against.
-    - `rm_type="math"` — selects SLIME's built-in math correctness
+    - `label_key="label"` — the column slime scores against.
+    - `rm_type="math"` — selects slime's built-in math correctness
       reward. It parses the boxed numeric answer out of the rollout and
       compares to `label`. No custom reward code needed.
     - `rollout_shuffle=True` — matters for GRPO's group-sampling

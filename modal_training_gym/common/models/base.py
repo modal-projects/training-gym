@@ -9,10 +9,10 @@ Subclass and set `model_name` / `model_path` / `architecture` / `training`
 as class attributes (or pass them as constructor kwargs), then override
 `download_model()` to materialize weights into the shared model volume.
 
-The built-in models (`Qwen3_4B`, `Qwen3_32B`, `GLM_4_7`, `Llama2_7B`,
-`Kimi_K2_5`) are concrete subclasses in their own per-model modules. For
-a custom HuggingFace model, write your own subclass — no registry, no
-global state.
+The built-in models (`Qwen3_0_6B`, `Qwen3_4B`, `Qwen3_32B`, `GLM_4_7`,
+`Llama2_7B`, `Kimi_K2_5`) are concrete subclasses in their own per-model
+modules. For a custom HuggingFace model, write your own subclass — no
+registry, no global state.
 
 Example (mirrors the `DatasetConfig` pattern in
 `modal_training_gym/common/dataset.py`):
@@ -160,6 +160,8 @@ class ModelTrainingConfig:
         Target GPU type these settings are tuned for. Default ``"H100"``.
     n_nodes : int
         Recommended cluster size for this model. Default ``1``.
+    gpus_per_node : int
+        Recommended GPU count per node for this model. Default ``8``.
 
     ## Parallelism
 
@@ -199,6 +201,7 @@ class ModelTrainingConfig:
 
     gpu_type: GPUType = "H100"
     n_nodes: int = 1
+    gpus_per_node: int = 8
 
     # Parallelism
     tensor_model_parallel_size: int = 1
@@ -284,8 +287,8 @@ class HFModelConfiguration(ModelConfiguration):
     ``architecture`` and ``model_path``); the download step needs no
     override.
 
-    All built-in model configs (``Qwen3_4B``, ``Qwen3_32B``, ``GLM_4_7``,
-    ``Llama2_7B``) extend this class.
+    All built-in model configs (``Qwen3_0_6B``, ``Qwen3_4B``, ``Qwen3_32B``,
+    ``GLM_4_7``, ``Llama2_7B``, ``Kimi_K2_5``) extend this class.
 
     Methods
     -------

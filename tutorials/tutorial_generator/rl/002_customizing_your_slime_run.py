@@ -7,7 +7,7 @@ with more nodes, adjust parallelism, and tune data throughput.
 TUTORIAL_METADATA = {
     'framework': '`slime`',
     'cluster_shape': '4 × 8×H100',
-    'summary': 'Customizing your SLIME run — scaling nodes, parallelism, and throughput',
+    'summary': 'Customizing your slime run — scaling nodes, parallelism, and throughput',
     'difficulty': 'Intermediate',
     'order': 12,
     'api_classes': ['SlimeConfig', 'DatasetConfig', 'Qwen3_4B', 'WandbConfig'],
@@ -20,7 +20,7 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Customizing your SLIME run
+    # Customizing your slime run
 
     The [intro tutorial](../001_slime_intro/001_slime_intro.ipynb) runs
     Qwen3-4B GRPO on GSM8K with all defaults — one node, colocated,

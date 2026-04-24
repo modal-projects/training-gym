@@ -261,7 +261,7 @@ class MBPPCodeGolfDataset(DatasetConfig):
 
 # ## Define the experiment
 #
-# Harbor training uses the same Miles RL engine as SLIME but adds
+# Harbor training uses the same Miles RL engine as slime but adds
 # sandbox-based evaluation. The key config choices:
 #
 # **Agent**

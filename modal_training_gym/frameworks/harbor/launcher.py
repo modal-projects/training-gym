@@ -10,14 +10,7 @@ Usage (from a tutorial file):
         model=Qwen3_4B(),
         dataset=MyHarborDataset(),
         framework_config=HarborFrameworkConfig(
-            gpu="H100",
-            n_nodes=2,
             agent_import_path="my_agent:MyHarborAgent",
-            recipe_args=\"\"\"
-                --num-layers 36
-                --hidden-size 2560
-                ...
-            \"\"\",
         ),
     )
 
@@ -76,6 +69,9 @@ from .observability import (
     update_run_manifest,
 )
 
+# Harbor injects custom rollout/agent hooks that are accepted by the main
+# Miles entrypoint. The async entrypoint in the pinned Miles commit does not
+# recognize those Harbor-specific flags.
 _REMOTE_TRAIN_SCRIPT = f"{MILES_SRC_PATH}/train.py"
 
 _HARBOR_GENERATE_FN = "miles.rollout.generate_hub.agentic_tool_call.generate"
@@ -348,11 +344,11 @@ def build_harbor_app(
             and harbor.model.architecture is not None
             and harbor.model.architecture.num_layers > 0
         )
-        if not has_arch and not framework.recipe_args.strip() and not extra_argv:
+        if not has_arch and not extra_argv:
             raise RuntimeError(
-                "No model architecture found and recipe_args is empty. Either "
-                "use a model with a ModelArchitecture (e.g. Qwen3_4B) or set "
-                "recipe_args to the Miles CLI args for your model."
+                "No model architecture found. Use a model with a "
+                "ModelArchitecture (e.g. Qwen3_4B) or pass architecture "
+                "flags as extra_argv."
             )
         if not framework.agent_import_path:
             raise RuntimeError(
@@ -416,7 +412,7 @@ def build_harbor_app(
             *framework.cli_args(),
             *model_arch_args,
             *(model_training_cli_args(harbor.model) if harbor.model else []),
-            *framework.parsed_recipe_args(),
+            *harbor.preset_cli_args(),
             *extra_argv,
             "--train-backend",
             "megatron",
@@ -432,9 +428,6 @@ def build_harbor_app(
             str(framework.gpus_per_node),
             "--num-gpus-per-node",
             str(framework.gpus_per_node),
-            # Harbor integration: the agentic generate function registers
-            # --custom-agent-function-path via its add_arguments hook
-            # and requires --use-session-server for TITO session tracing.
             "--prompt-data",
             str(HARBOR_TRAIN_JSONL),
             "--custom-generate-function-path",

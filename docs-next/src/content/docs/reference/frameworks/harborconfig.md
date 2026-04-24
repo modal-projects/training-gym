@@ -24,6 +24,10 @@ Top-level wrapper that composes a Harbor + Miles RLVR training run.
 
 ### `build_app(self, *, name: 'str | None' = None) -> "'App'"`
 
+### `preset_cli_args(self) -> 'list[str]'`
+
+Emit Miles CLI flags from the model's HarborPreset (parallelism settings).
+
 ## Related Tutorials
 
 - [Qwen3-4B RL code-golf on MBPP with Harbor sandboxes](/tutorials/rl/004_harbor_codegolf/)

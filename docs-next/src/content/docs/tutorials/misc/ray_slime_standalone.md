@@ -41,8 +41,8 @@ from modal_training_gym.common.ray_cluster import ModalRayCluster
 
 N_NODES = 2
 
-# Any image with Ray installed works. We use the SLIME nightly image
-# for parity with the framework-backed SLIME tutorial.
+# Any image with Ray installed works. We use the slime nightly image
+# for parity with the framework-backed slime tutorial.
 image = (
     modal.Image.from_registry("slimerl/slime:nightly-dev-20260329a")
     .entrypoint([])

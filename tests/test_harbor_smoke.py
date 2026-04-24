@@ -26,7 +26,10 @@ from modal_training_gym.frameworks.harbor import (
     HarborFrameworkConfig,
     HarborTask,
 )
-from modal_training_gym.frameworks.harbor.launcher import _build_training_jsonl
+from modal_training_gym.frameworks.harbor.launcher import (
+    _REMOTE_TRAIN_SCRIPT,
+    _build_training_jsonl,
+)
 from modal_training_gym.frameworks.miles import MilesFrameworkConfig
 
 
@@ -98,6 +101,14 @@ def test_build_app():
     print("  PASS  test_build_app")
 
 
+def test_harbor_uses_sync_miles_entrypoint():
+    assert _REMOTE_TRAIN_SCRIPT.endswith("/train.py"), (
+        "Harbor must launch the Miles entrypoint that accepts Harbor-specific "
+        "CLI flags like --custom-agent-function-path."
+    )
+    print("  PASS  test_harbor_uses_sync_miles_entrypoint")
+
+
 def test_jsonl_builder():
     with tempfile.TemporaryDirectory() as tmpdir:
         tasks_dir = Path(tmpdir) / "tasks"
@@ -140,8 +151,9 @@ def run_local_tests():
     test_cli_args_exclude_harbor_fields()
     test_harbor_config_construction()
     test_build_app()
+    test_harbor_uses_sync_miles_entrypoint()
     test_jsonl_builder()
-    print("\nAll 5 test(s) passed.")
+    print("\nAll 6 test(s) passed.")
 
 
 # ── Modal deploy test ────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
-# slime — Modal launcher for SLIME training
+# slime — Modal launcher for slime training
 
-Thin Modal launcher that runs [SLIME](https://github.com/THUDM/slime) RL training on GPU clusters.
+Thin Modal launcher that runs [slime](https://github.com/THUDM/slime) RL training on GPU clusters.
 
 ## Prerequisites
 
@@ -57,7 +57,7 @@ Use `-d` (detached) to keep training running after you close your terminal.
 
 Create `configs/<your_experiment>.py`. Each config file must expose two module-level instances:
 - `modal` — a `ModalConfig` instance (GPU type, image patches)
-- `slime` — a `SlimeConfig` subclass instance (all SLIME training arguments)
+- `slime` — a `SlimeConfig` subclass instance (all slime training arguments)
 
 ```python
 from .base import ModalConfig, SlimeConfig, DATA_PATH
@@ -66,7 +66,7 @@ modal = ModalConfig(gpu="H200")
 
 
 class _Slime(SlimeConfig):
-    # Launcher instructions (not passed to SLIME CLI)
+    # Launcher instructions (not passed to slime CLI)
     slime_model_script = "scripts/models/qwen3-8B.sh"  # sources MODEL_ARGS
     async_mode = False
 
@@ -86,14 +86,14 @@ class _Slime(SlimeConfig):
     label_key = "answer"
     rm_type = "math"
 
-    # ... all other SLIME args as snake_case attributes
+    # ... all other slime args as snake_case attributes
 
 
 slime = _Slime()
 ```
 
 Every attribute on `_Slime` (except `environment`, `async_mode`, `slime_model_script`) is forwarded to
-SLIME as a CLI argument: `field_name` → `--field-name`. See `configs/base.py` for full rules.
+slime as a CLI argument: `field_name` → `--field-name`. See `configs/base.py` for full rules.
 
 ### 2. Add a `prepare_data()` method (if needed)
 
@@ -130,7 +130,7 @@ No registration step needed — the launcher discovers configs automatically fro
 
 ## YAML config fields
 
-`eval_config`, `custom_config_path`, and `sglang_config` normally take file paths in SLIME.
+`eval_config`, `custom_config_path`, and `sglang_config` normally take file paths in slime.
 In Python configs you can write them as inline dicts — the launcher materializes them to temp YAML files automatically:
 
 ```python
@@ -151,7 +151,7 @@ class _Slime(SlimeConfig):
 
 ## Dev overlay
 
-To test local SLIME changes without rebuilding the image, set `local_slime` in your `ModalConfig`:
+To test local slime changes without rebuilding the image, set `local_slime` in your `ModalConfig`:
 
 ```python
 modal = ModalConfig(

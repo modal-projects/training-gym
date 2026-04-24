@@ -33,7 +33,7 @@ Download and/or preprocess the dataset into the data volume.
 - [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/001_quickstart/)
 - [Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry](/tutorials/intro/002_custom_model/)
 - [Qwen3-4B GRPO on GSM8K (colocated)](/tutorials/rl/001_slime_intro/)
-- [Customizing your SLIME run — scaling nodes, parallelism, and throughput](/tutorials/rl/002_customizing_your_slime_run/)
+- [Customizing your slime run — scaling nodes, parallelism, and throughput](/tutorials/rl/002_customizing_your_slime_run/)
 - [Qwen3-4B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/003_slime_with_llm_as_judge/)
 - [Qwen3-4B RL code-golf on MBPP with Harbor sandboxes](/tutorials/rl/004_harbor_codegolf/)
 - [GLM-4.7 LoRA SFT on GSM8K (Megatron)](/tutorials/sft/001_ms_swift/)

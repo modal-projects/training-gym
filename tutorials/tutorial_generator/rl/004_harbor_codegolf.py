@@ -306,7 +306,7 @@ def _explain_config():
     """
     ## Define the experiment
 
-    Harbor training uses the same Miles RL engine as SLIME but adds
+    Harbor training uses the same Miles RL engine as slime but adds
     sandbox-based evaluation. The key config choices:
 
     **Agent**
@@ -322,10 +322,10 @@ def _explain_config():
     - `task_root` / `instruction_path` — where to find task directories
       on the data volume.
 
-    **Parallelism override**
-    - `Qwen3_4B`'s preset defaults to `tensor_model_parallel_size=1`,
-      but this tutorial overrides to TP=2 to leave room for SGLang's KV
-      cache during colocated rollout.
+    **Parallelism and cluster topology**
+    - `Qwen3_4B` declares a `HarborPreset` with `n_nodes=2`,
+      `tensor_model_parallel_size=2`, and `sequence_parallel=True`. These
+      are applied automatically — no need to set them in `HarborFrameworkConfig`.
     - Model architecture flags (`--num-layers`, `--hidden-size`, etc.)
       are pulled automatically from `Qwen3_4B().architecture`.
     """
@@ -341,7 +341,6 @@ def _define_config():
     dataset = MBPPCodeGolfDataset(train_size=900)
 
     framework_config = HarborFrameworkConfig(
-        n_nodes=2,
         agent_import_path=AGENT_IMPORT_PATH,
         agent_model_name="model",
         agent_kwargs={"temperature": 0.7, "max_tokens": 1024},
@@ -349,8 +348,6 @@ def _define_config():
         instruction_path="instruction.md",
         sandbox_timeout_secs=180,
         sandbox_idle_timeout_secs=60,
-        tensor_model_parallel_size=2,
-        sequence_parallel=True,
     )
 
     harbor = HarborConfig(
@@ -363,6 +360,60 @@ def _define_config():
         ),
         framework_config=framework_config,
     )
+
+
+@markdown
+def _explain_sandbox_scaling():
+    """
+    ## Understanding sandbox scaling
+
+    Harbor plugs into Miles as a custom rollout generator. During each
+    training step, Miles loads `num_rollout` prompts and requests
+    `n_samples_per_prompt` completions per prompt. Each sample spawns
+    exactly **one Modal sandbox** via the Harbor agent function. So the
+    total number of sandboxes created per training step is:
+
+    ```
+    total_sandboxes = num_rollout × n_samples_per_prompt
+    ```
+
+    With the defaults (`num_rollout=200`, `n_samples_per_prompt=8`), each
+    step creates **1,600 sandboxes**. Samples are grouped into
+    `rollout_batch_size`-sized chunks during generation.
+
+    The key scaling knobs in `HarborFrameworkConfig`:
+
+    | Knob | Default | Effect |
+    |------|---------|--------|
+    | `num_rollout` | 200 | Prompts per training step |
+    | `n_samples_per_prompt` | 8 | Samples per prompt — multiplies sandbox count |
+    | `rollout_batch_size` | 64 | How samples are grouped during generation |
+    | `n_nodes` | 1 | Cluster size — more nodes = more rollout throughput |
+    | `colocate` | True | Whether actor + rollout share GPUs |
+    | `sandbox_timeout_secs` | 1800 | Per-sandbox max runtime |
+    | `sandbox_idle_timeout_secs` | 300 | Idle before sandbox cleanup |
+
+    Sandboxes are spawned **sequentially** within the Miles rollout phase —
+    there is no sandbox-level concurrency knob during training. To increase
+    throughput, scale up `n_nodes` (more GPU capacity for faster model
+    inference) or reduce `sandbox_timeout_secs` to fail slow sandboxes
+    faster.
+
+    The `eval_harbor` function (used after training) *does* have a
+    `max_concurrency` parameter that parallelizes sandbox creation via an
+    asyncio semaphore.
+    """
+
+
+@notebook_only
+@code
+def _print_sandbox_count():
+    total = framework_config.num_rollout * framework_config.n_samples_per_prompt
+    batches = -(-total // framework_config.rollout_batch_size)
+    print(f"Sandboxes per training step: {framework_config.num_rollout} prompts × {framework_config.n_samples_per_prompt} samples = {total}")
+    print(f"Rollout batches: {batches} (batch size {framework_config.rollout_batch_size})")
+    print(f"Sandbox timeout: {framework_config.sandbox_timeout_secs}s")
+    print(f"Cluster: {framework_config.n_nodes} node(s), colocate={framework_config.colocate}")
 
 
 @markdown

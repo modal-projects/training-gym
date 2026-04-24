@@ -87,7 +87,7 @@ class HaikuStyleJudge(LlmJudge):
 
 
 def _extract_topic(sample) -> str:
-    """Recover the haiku topic ("cat", "modal", ...) from a SLIME sample."""
+    """Recover the haiku topic ("cat", "modal", ...) from a slime sample."""
     for attr in ("question", "prompt"):
         val = getattr(sample, attr, None)
         if isinstance(val, str) and val:
@@ -101,7 +101,7 @@ def _extract_topic(sample) -> str:
 
 
 async def haiku_rm(args, sample, **kwargs) -> float:
-    """Async SLIME reward: structure plus optional LLM style score."""
+    """Async slime reward: structure plus optional LLM style score."""
     import aiohttp
 
     cmudict = _get_cmudict()

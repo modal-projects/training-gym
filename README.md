@@ -5,8 +5,10 @@
 > generally accessible. Please [**contact us**](https://modal.com/slack)
 > for access.
 
+**[📖 Documentation](https://training-gym.modal.dev)** · **[Tutorials](https://training-gym.modal.dev/tutorials/)** · **[API Reference](https://training-gym.modal.dev/reference/)**
+
 Distributed training on [Modal](https://modal.com) without hand-rolling a
-launcher each time. Pick a training framework (SLIME,
+launcher each time. Pick a training framework (slime,
 MS-SWIFT), plug in a model + dataset config, and
 `modal run` it — training-gym handles the image, the
 cluster topology, the Ray/NCCL bring-up, volume mounts, and checkpointing.
@@ -29,7 +31,7 @@ Every generated tutorial notebook has this line as its first code cell.
 
 ## Quickstart
 
-Run a tutorial — Qwen3-4B GRPO on GSM8K using SLIME:
+Run a tutorial — Qwen3-4B GRPO on GSM8K using slime:
 
 ```bash
 uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.download_model
@@ -65,10 +67,39 @@ Source in `modal_training_gym/frameworks/`. Runnable examples in
 
 ## Documentation
 
+Full docs are hosted at **[training-gym.modal.dev](https://training-gym.modal.dev)**:
+
+- [Tutorials](https://training-gym.modal.dev/tutorials/) — step-by-step runnable examples
+- [API Reference](https://training-gym.modal.dev/reference/) — every public class documented with types and defaults
+
+External resources:
+
 - [Multi-node training guide (Notion)](https://modal-com.notion.site/Multi-node-docs-1281e7f16949806f966adedfe8b2cb74?pvs=4)
 - [Multi-GPU Training on Modal](https://modal.com/docs/guide/gpu#multi-gpu-training)
 - [Using CUDA on Modal](https://modal.com/docs/guide/cuda)
 - [GPU Metrics](https://modal.com/docs/guide/gpu-metrics)
+
+## Observability Dashboard
+
+Training Gym ships an observability dashboard that shows all your
+training runs, their status, W&B metrics (inline sparklines), and
+Harbor agent trajectories — all in one place.
+
+Deploy your own instance:
+
+```bash
+uv run modal deploy dashboards/app.py
+```
+
+Modal will print the dashboard URL. The dashboard:
+
+- **Auto-refreshes** every 5 minutes via a cron job that scans your Modal apps for training runs
+- **Links to W&B** — each run shows a direct link to its Weights & Biases project page
+- **Inline metrics** — expand any run to see training loss/reward sparklines pulled from W&B
+- **Harbor trajectories** — drill into individual agent rollouts for Harbor RL runs
+
+The dashboard matches the docs site color scheme and serves a Svelte
+frontend from a Modal web endpoint.
 
 ## License
 
@@ -89,7 +120,8 @@ tutorials/                 ← runnable examples — one folder per tutorial
 ├── tutorial_generator/    ← source files; each produces a .py + .ipynb
 └── generate_tutorial.py   ← AST-walks the sources, regenerates .py + .ipynb
 
-dashboards/                ← Grafana-style dashboards for monitoring runs
+dashboards/                ← observability dashboard (deploy with `modal deploy dashboards/app.py`)
+docs-next/                 ← Starlight docs site (deploy with `modal deploy docs-next/docs_next_app.py`)
 skills/                    ← agent skills for navigating this repo
 ```
 

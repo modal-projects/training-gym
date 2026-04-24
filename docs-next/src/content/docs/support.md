@@ -1,6 +1,9 @@
 ---
 title: Support
 description: Contact points for questions about Training Gym, tutorials, and access to Modal multi-node training.
+tableOfContents: false
+prev: false
+next: false
 ---
 
 Questions about Training Gym or access to Modal's multi-node training preview

@@ -1,4 +1,4 @@
-"""Framework-specific model presets for SLIME."""
+"""Framework-specific model presets for slime."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class SlimePreset:
-    """Model-specific defaults for SLIME training.
+    """Model-specific defaults for slime training.
 
     Every field is required — models must explicitly declare their
-    SLIME configuration. Users can override any field by passing it
+    slime configuration. Users can override any field by passing it
     to ``SlimeConfig(...)`` directly.
     """
 

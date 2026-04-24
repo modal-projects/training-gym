@@ -14,7 +14,7 @@ One completed training run's checkpoint handle.
 ## Constructor
 
 ```python
-TrainResult(app_name, framework, run_id, checkpoint_dir, base_model, checkpoints_volume_name, checkpoints_mount_path, iteration_prefix='', wandb_project='', wandb_entity='', wandb_run_id='', extra=<factory>)
+TrainResult(app_name, framework, run_id, checkpoint_dir, base_model, model_class='', checkpoints_volume_name='', checkpoints_mount_path='', iteration_prefix='', wandb_project='', wandb_entity='', wandb_run_id='', extra=<factory>)
 ```
 
 | Parameter | Type | Default | Description |
@@ -24,8 +24,9 @@ TrainResult(app_name, framework, run_id, checkpoint_dir, base_model, checkpoints
 | `run_id` | `str` | *required* |  |
 | `checkpoint_dir` | `str` | *required* |  |
 | `base_model` | `str` | *required* |  |
-| `checkpoints_volume_name` | `str` | *required* |  |
-| `checkpoints_mount_path` | `str` | *required* |  |
+| `model_class` | `str` | `""` |  |
+| `checkpoints_volume_name` | `str` | `""` |  |
+| `checkpoints_mount_path` | `str` | `""` |  |
 | `iteration_prefix` | `str` | `""` |  |
 | `wandb_project` | `str` | `""` |  |
 | `wandb_entity` | `str` | `""` |  |
@@ -41,8 +42,9 @@ TrainResult(app_name, framework, run_id, checkpoint_dir, base_model, checkpoints
 | `run_id` | `str` |  |  |
 | `checkpoint_dir` | `str` |  |  |
 | `base_model` | `str` |  |  |
-| `checkpoints_volume_name` | `str` |  |  |
-| `checkpoints_mount_path` | `str` |  |  |
+| `model_class` | `str` | `""` |  |
+| `checkpoints_volume_name` | `str` | `""` |  |
+| `checkpoints_mount_path` | `str` | `""` |  |
 | `iteration_prefix` | `str` | `""` |  |
 | `wandb_project` | `str` | `""` |  |
 | `wandb_entity` | `str` | `""` |  |
