@@ -1,9 +1,9 @@
 ---
-title: "Qwen3-4B GRPO on Haiku with slime on Modal"
-description: "Qwen3-4B GRPO on haiku poems — structure score + LLM judge"
+title: "Qwen3-0.6B GRPO on Haiku with slime on Modal"
+description: "Qwen3-0.6B GRPO on haiku poems — structure score + LLM judge"
 ---
 
-This tutorial teaches [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B)
+This tutorial teaches [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B)
 to write 5-7-5 haiku poems about Modal-flavored topics. The training
 algorithm is **GRPO** (Group Relative Policy Optimization, the method
 popularized by DeepSeek-R1): for each prompt, the model generates a
@@ -31,7 +31,7 @@ The workflow has four stages:
 
 | Stage | What it does | Where |
 |---|---|---|
-| `download_model` | Pulls `Qwen/Qwen3-4B` into the HF cache volume | 1×H100 |
+| `download_model` | Pulls `Qwen/Qwen3-0.6B` into the HF cache volume | 1×H100 |
 | `prepare_dataset` | Downloads `statworx/haiku` and writes train/test parquet | CPU |
 | `train` | GRPO training loop over the haiku prompts | 1×8×H100, colocated |
 | `serve_app` (separate) | Hosts the finished checkpoint via vLLM + Flash | 1×H100 |
@@ -55,7 +55,7 @@ Three import groups:
   plain `.py` tutorial, the same code falls back to the packaged
   reference module at `modal_training_gym/common/haiku_reward.py`.
 - **`modal_training_gym.*`** — shared containers (`DatasetConfig`,
-  `Qwen3_4B`, `WandbConfig`), the vLLM serving helper, and slime's
+  `Qwen3_0_6B`, `WandbConfig`), the vLLM serving helper, and slime's
   framework-specific config + launcher classes. `DATA_PATH` is the
   canonical mount point (`/data`) for the shared data volume on
   every slime container.
@@ -79,7 +79,7 @@ else:
     LOCAL_PYTHON_SOURCES = []
 
 from modal_training_gym.common.dataset import DatasetConfig
-from modal_training_gym.common.models import Qwen3_4B
+from modal_training_gym.common.models import Qwen3_0_6B
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.serve_vllm import build_vllm_serve_app
 from modal_training_gym.frameworks.slime import ModalConfig, SlimeConfig
@@ -272,11 +272,11 @@ Key choices for this run:
   steps, evaluate every 20.
 
 ```python
-base_model = Qwen3_4B()
+base_model = Qwen3_0_6B()
 my_training_run = SlimeConfig(
     model=base_model,
     dataset=HaikuDataset(DATA_PATH, base_model.model_name),
-    wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-haiku"),
+    wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-haiku"),
     ref_load=base_model.model_name,
     megatron_to_hf_mode="bridge",
 
@@ -298,7 +298,7 @@ my_training_run = SlimeConfig(
     eval_interval=20,
     n_samples_per_eval_prompt=8,
 
-    save="/checkpoints/qwen3-4b-haiku",
+    save="/checkpoints/qwen3-0.6b-haiku",
     save_interval=10,
 
     modal=ModalConfig(
@@ -363,7 +363,7 @@ torch_dist → HF conversion if your config didn't emit one. Inspect
 what the training left behind with:
 
 ```bash
-modal volume ls slime-checkpoints qwen3-4b-haiku/
+modal volume ls slime-checkpoints qwen3-0.6b-haiku/
 ```
 
 and point `model_path` at whichever directory has a `config.json`.
@@ -381,11 +381,11 @@ serve_app = build_vllm_serve_app(
     # the slime-checkpoints volume — the exact subdirectory depends
     # on slime's bridge-mode output layout. (To smoke-test the
     # serving pipeline before training, swap this for the HF repo
-    # id "Qwen/Qwen3-4B" and drop the `checkpoints_volume` arg
+    # id "Qwen/Qwen3-0.6B" and drop the `checkpoints_volume` arg
     # below; vLLM will download the base model itself.)
-    model_path="/checkpoints/qwen3-4b-haiku",
+    model_path="/checkpoints/qwen3-0.6b-haiku",
     # The `model` field callers pass in chat-completions requests.
-    served_model_name="qwen3-4b-haiku",
+    served_model_name="qwen3-0.6b-haiku",
     # Mount the training checkpoints volume; without this,
     # /checkpoints wouldn't exist in the serving container.
     checkpoints_volume="slime-checkpoints",
@@ -406,7 +406,7 @@ serve_app = build_vllm_serve_app(
 - [`SlimeConfig`](/reference/frameworks/slimeconfig/)
 - [`ModalConfig`](/reference/frameworks/modalconfig/)
 - [`DatasetConfig`](/reference/core/datasetconfig/)
-- [`Qwen3_4B`](/reference/models/qwen3_4b/)
+- [`Qwen3_0_6B`](/reference/models/qwen3_0_6b/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 - [`LlmJudge`](/reference/core/llmjudge/)
 

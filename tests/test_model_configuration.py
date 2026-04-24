@@ -112,6 +112,19 @@ def test_model_architecture_emits_explicit_norm_epsilon() -> None:
     assert argv[idx + 1] == "1e-06", argv
 
 
+def test_qwen3_0_6b_exposes_slime_single_node_preset() -> None:
+    from modal_training_gym.common.models import Qwen3_0_6B
+
+    model = Qwen3_0_6B()
+    assert model.model_name == "Qwen/Qwen3-0.6B"
+    assert model.slime.gpu_type == "H100"
+    assert model.slime.actor_num_nodes == 1
+    assert model.slime.actor_num_gpus_per_node == 8
+    assert model.slime.colocate is True
+    assert model.slime.tensor_model_parallel_size == 1
+    assert model.slime.sequence_parallel is False
+
+
 def test_append_miles_wandb_args_renders_expected_flags() -> None:
     from modal_training_gym.common.wandb import WandbConfig, append_miles_wandb_args
 
@@ -138,6 +151,7 @@ def main() -> int:
         test_model_does_not_leak_into_recipe_args,
         test_model_lives_on_wrapper_not_framework_config,
         test_model_architecture_emits_explicit_norm_epsilon,
+        test_qwen3_0_6b_exposes_slime_single_node_preset,
         test_append_miles_wandb_args_renders_expected_flags,
     ]
     failures = []

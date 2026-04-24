@@ -22,6 +22,6 @@ Modal infrastructure configuration for slime — image setup and dev overlays.
 
 ## Related Tutorials
 
-- [Qwen3-4B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/003_slime_with_llm_as_judge/)
+- [Qwen3-0.6B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/003_slime_with_llm_as_judge/)
 
 **Source:** [`modal_training_gym/frameworks/slime/config.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/frameworks/slime/config.py)

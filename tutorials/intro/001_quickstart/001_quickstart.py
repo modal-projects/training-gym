@@ -25,7 +25,8 @@
 # ### `ModelConfiguration` — the model to train
 #
 # A `ModelConfiguration` is identity + download hook. Built-in subclasses
-# (`Qwen3_4B`, `Qwen3_32B`, `GLM_4_7`, `Llama2_7B`, `KimiK2_5`) set
+# (`Qwen3_0_6B`, `Qwen3_4B`, `Qwen3_32B`, `GLM_4_7`, `Llama2_7B`,
+# `KimiK2_5`) set
 # `model_name` and a `ModelArchitecture` spec. `HFModelConfiguration` is
 # the base for any HF-hosted model — it implements `download_model()` via
 # `huggingface_hub.snapshot_download` pulling weights into the
@@ -36,9 +37,9 @@
 # [`002_custom_model`](../../intro/002_custom_model/002_custom_model.ipynb)) —
 # there's no registry to update.
 
-from modal_training_gym.common.models import Qwen3_4B
+from modal_training_gym.common.models import Qwen3_0_6B
 
-model = Qwen3_4B()
+model = Qwen3_0_6B()
 print("model_name:", model.model_name)
 print("num_layers:", model.architecture.num_layers)
 
@@ -109,14 +110,14 @@ print("project:", wandb.project)
 # The same shape, written out:
 #
 # ```python
-# from modal_training_gym.common.models import Qwen3_4B
+# from modal_training_gym.common.models import Qwen3_0_6B
 # from modal_training_gym.common.wandb import WandbConfig
 # from modal_training_gym.frameworks.slime import (
 #     ModalConfig, SlimeConfig,
 # )
 #
 # run = SlimeConfig(
-#     model=Qwen3_4B(),  # GPU type derived from model.training.gpu_type
+#     model=Qwen3_0_6B(),  # GPU type derived from model.slime.gpu_type
 #     dataset=MyDataset(...),
 #     wandb=WandbConfig(project="my-runs", group="concepts-demo"),
 #     # … framework-specific flags …
@@ -142,7 +143,7 @@ print("project:", wandb.project)
 #
 # Each framework uses its own data and checkpoints volumes (so one
 # framework's half-written state can't corrupt another's), but the HF
-# cache is truly shared — download `Qwen3-4B` once, use it from slime
+# cache is truly shared — download `Qwen3-0.6B` once, use it from slime
 # and ms-swift.
 #
 # Nothing in a tutorial directly manipulates volumes — the launchers

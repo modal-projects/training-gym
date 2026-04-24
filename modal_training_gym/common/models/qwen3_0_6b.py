@@ -1,13 +1,15 @@
 """Qwen3-0.6B model spec as a concrete HFModelConfiguration subclass."""
 
+from modal_training_gym.frameworks.slime.preset import SlimePreset
+
 from .base import HFModelConfiguration, ModelArchitecture, ModelTrainingConfig
 
 
 class Qwen3_0_6B(HFModelConfiguration):
     """Qwen3-0.6B (0.6 billion parameters) from Alibaba.
 
-    Ships a lightweight single-node training preset for ms-swift so cheap
-    smoke tests can run on one GPU without overriding the launcher shape.
+    Ships lightweight single-node presets so tutorials and smoke tests can
+    run without overriding the launcher shape.
     """
 
     model_name = "Qwen/Qwen3-0.6B"
@@ -36,4 +38,12 @@ class Qwen3_0_6B(HFModelConfiguration):
         pipeline_model_parallel_size=1,
         lora_rank=8,
         lora_alpha=16,
+    )
+    slime = SlimePreset(
+        gpu_type="H100",
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=8,
+        colocate=True,
+        tensor_model_parallel_size=1,
+        sequence_parallel=False,
     )

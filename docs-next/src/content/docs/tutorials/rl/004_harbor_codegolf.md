@@ -327,7 +327,7 @@ training step, Miles loads `num_rollout` prompts and requests
 exactly **one Modal sandbox** via the Harbor agent function. So the
 total number of sandboxes created per training step is:
 
-```text
+```
 total_sandboxes = num_rollout × n_samples_per_prompt
 ```
 

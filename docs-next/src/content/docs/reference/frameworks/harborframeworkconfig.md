@@ -58,7 +58,7 @@ Harbor + Miles configuration for sandbox-based RL training.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `max_position_embeddings` | `int` | `32768` | Maximum sequence position embeddings. Default `32768`. |
-| `untie_embeddings_and_output_weights` | `bool` | `True` | Untie input embeddings from output projection. Default `True`. |
+| `untie_embeddings_and_output_weights` | `bool` | `False` | Untie input embeddings from output projection. Default `False`. |
 | `no_masked_softmax_fusion` | `bool` | `True` | Disable masked softmax fusion. Default `True`. |
 
 ## Rollout (Harbor)
@@ -81,7 +81,7 @@ Harbor + Miles configuration for sandbox-based RL training.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `eval_interval` | `int` | `10` | Evaluation interval in iterations. Default `10`. |
+| `eval_interval` | `int` | `0` | Evaluation interval in iterations. Default `0`. |
 | `save_interval` | `int` | `10` | Checkpoint save interval in iterations. Default `10`. |
 
 ## Image
@@ -169,6 +169,7 @@ Harbor + Miles configuration for sandbox-based RL training.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `no_save_optim` | `bool` | `True` | Skip saving optimizer state. Default `True`. |
+| `megatron_to_hf_mode` | `str` | `"bridge"` | HF checkpoint loading mode. Default `"bridge"`. |
 
 ## Methods
 

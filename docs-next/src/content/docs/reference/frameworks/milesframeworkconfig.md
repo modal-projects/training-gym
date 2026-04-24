@@ -89,6 +89,7 @@ Miles RLVR configuration, including Modal infrastructure.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `no_save_optim` | `bool` | `True` | Skip saving optimizer state. Default `True`. |
+| `megatron_to_hf_mode` | `str` | `"bridge"` | HF checkpoint loading mode. Default `"bridge"`. |
 
 ## Methods
 

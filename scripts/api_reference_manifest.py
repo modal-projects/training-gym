@@ -58,6 +58,13 @@ API_REFERENCE_MANIFEST = [
     },
     # --- Models ---
     {
+        "class_name": "Qwen3_0_6B",
+        "module": "modal_training_gym.common.models.qwen3_0_6b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3-0.6B",
+    },
+    {
         "class_name": "Qwen3_4B",
         "module": "modal_training_gym.common.models.qwen3_4b",
         "group": "models",

@@ -8,10 +8,10 @@ body, dedented). Function names are arbitrary. Cell order = source order.
 TUTORIAL_METADATA = {
     'framework': '`slime`',
     'cluster_shape': '1 × 8×H100',
-    'summary': 'Qwen3-4B GRPO on GSM8K (colocated)',
+    'summary': 'Qwen3-0.6B GRPO on GSM8K (colocated)',
     'difficulty': 'Advanced',
     'order': 10,
-    'api_classes': ['SlimeConfig', 'DatasetConfig', 'Qwen3_4B', 'WandbConfig'],
+    'api_classes': ['SlimeConfig', 'DatasetConfig', 'Qwen3_0_6B', 'WandbConfig'],
 }
 
 
@@ -21,21 +21,21 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Qwen3-4B GRPO on GSM8K with slime on Modal
+    # Qwen3-0.6B GRPO on GSM8K with slime on Modal
 
     **What slime is.** [slime](https://github.com/THUDM/slime) is an RL
     post-training framework that pairs Megatron (training) with SGLang
     (rollouts) and orchestrates both with Ray. `modal-training-gym`'s
     `slime` launcher wires that stack onto a Modal multi-node cluster.
 
-    **What this tutorial does.** GRPO-tunes Qwen3-4B against
-    [GSM8K](https://huggingface.co/datasets/openai/gsm8k) on 4 nodes ×
+    **What this tutorial does.** GRPO-tunes Qwen3-0.6B against
+    [GSM8K](https://huggingface.co/datasets/openai/gsm8k) on 1 node ×
     8×H100 with actor and rollout **colocated** on the same GPUs. GSM8K
     is the canonical target for math-RL: short prompts, short answers,
     and a deterministic correctness check. This is the "everything works
-    end-to-end" reference for the `slime` framework — a medium-scale RL
-    post-training run with slime's built-in math reward (no custom
-    reward code). For a custom-reward example see
+    end-to-end" single-node reference for the `slime` framework: small
+    enough to iterate on cheaply, but still exercising the full RL
+    stack. For a custom-reward example see
     [`003_slime_with_llm_as_judge`](../../003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.ipynb); for the shared
     primitives (DatasetConfig, volumes, the 3-stage pipeline) see
     [`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb).
@@ -48,7 +48,7 @@ def _intro():
 
     **What to watch.**
     - **Weights & Biases** under project `slime-grpo`, group
-      `qwen3-4b-gsm8k`. Rollout reward should climb steadily; eval fires
+      `qwen3-0.6b-gsm8k`. Rollout reward should climb steadily; eval fires
       every 20 training steps (see `eval_interval` below) against
       GSM8K's test split.
     - **Modal dashboard** — per-node GPU utilization and live logs. On a
@@ -69,7 +69,7 @@ def _imports():
     import modal
 
     from modal_training_gym.common.dataset import HuggingFaceDataset
-    from modal_training_gym.common.models import Qwen3_4B
+    from modal_training_gym.common.models import Qwen3_0_6B
     from modal_training_gym.common.wandb import WandbConfig
     from modal_training_gym.frameworks.slime import (
         ModalConfig,
@@ -149,12 +149,12 @@ def _explain_config():
 
 @code
 def _define_config():
-    base_model = Qwen3_4B()
+    base_model = Qwen3_0_6B()
     my_training_run = SlimeConfig(
-        name="qwen3-4b-gsm8k",
+        name="qwen3-0.6b-gsm8k",
         model=base_model,
         dataset=GSM8KDataset(DATA_PATH),
-        wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-gsm8k"),
+        wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-gsm8k"),
         ref_load=base_model.model_name,
     )
 
@@ -233,7 +233,7 @@ def _eval_section():
     from modal_training_gym.common.train_result import TrainResult
     from modal_training_gym.common.serve_vllm import build_vllm_serve_app
 
-    result = TrainResult.load("qwen3-4b-gsm8k")
+    result = TrainResult.load("qwen3-0.6b-gsm8k")
     trained_model = result.model
     ```
 
@@ -243,13 +243,13 @@ def _eval_section():
 
     ```python
     # Serve the TRAINED model (checkpoint from training):
-    trained_app = result.build_serve_app(served_model_name="qwen3-4b-gsm8k-trained")
+    trained_app = result.build_serve_app(served_model_name="qwen3-0.6b-gsm8k-trained")
 
     # Serve the BASE model (original HuggingFace weights):
     base_app = build_vllm_serve_app(
-        app_name="qwen3-4b-base-serve",
-        model_path="Qwen/Qwen3-4B",
-        served_model_name="qwen3-4b-base",
+        app_name="qwen3-0.6b-base-serve",
+        model_path="Qwen/Qwen3-0.6B",
+        served_model_name="qwen3-0.6b-base",
     )
     ```
 
@@ -271,12 +271,12 @@ def _eval_section():
     prompt = "What is 15% of 80? Show your work step by step."
 
     base_answer = base_client.chat.completions.create(
-        model="qwen3-4b-base",
+        model="qwen3-0.6b-base",
         messages=[{"role": "user", "content": prompt}],
     ).choices[0].message.content
 
     trained_answer = trained_client.chat.completions.create(
-        model="qwen3-4b-gsm8k-trained",
+        model="qwen3-0.6b-gsm8k-trained",
         messages=[{"role": "user", "content": prompt}],
     ).choices[0].message.content
 

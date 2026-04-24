@@ -20,7 +20,7 @@ GLM-4.7 large MoE model from Zhipu AI.
 | `model_name` | `str` | `"zai-org/GLM-4.7"` | HuggingFace repo ID or other model identifier. Default `""`. |
 | `model_path` | `str | None` | `None` | Override local path for model weights. When `None`, frameworks derive the path from `model_name`. Default `None`. |
 | `architecture` | `ModelArchitecture | None` | `None` | Transformer architecture spec for Megatron-based frameworks. Not required for HuggingFace-only workflows. Default `None`. |
-| `training` | `ModelTrainingConfig | None` | `ModelTrainingConfig(gpu_type='H100', n_nodes=4, tensor_model_parallel_size=2, pipeline_model_parallel_size=4, context_parallel_size=1, sequence_parallel=True, expert_model_parallel_size=4, moe_permute_fusion=True, moe_grouped_gemm=True, moe_shared_expert_overlap=True, moe_aux_loss_coeff=0.001, lora_rank=128, lora_alpha=32, target_modules='all-linear', merge_lora=False)` | Optimal training parameters (parallelism, MoE, LoRA) for this model on a specific GPU type. Frameworks pull defaults from here so users don't need to manually specify model-tuned flags. Default `None`. |
+| `training` | `ModelTrainingConfig | None` | `ModelTrainingConfig(gpu_type='H100', n_nodes=4, gpus_per_node=8, tensor_model_parallel_size=2, pipeline_model_parallel_size=4, context_parallel_size=1, sequence_parallel=True, expert_model_parallel_size=4, moe_permute_fusion=True, moe_grouped_gemm=True, moe_shared_expert_overlap=True, moe_aux_loss_coeff=0.001, lora_rank=128, lora_alpha=32, target_modules='all-linear', merge_lora=False)` | Optimal training parameters (parallelism, MoE, LoRA) for this model on a specific GPU type. Frameworks pull defaults from here so users don't need to manually specify model-tuned flags. Default `None`. |
 
 ## Methods
 
