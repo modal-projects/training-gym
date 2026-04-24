@@ -1,7 +1,7 @@
 """Custom generate hook for Harbor-backed Miles runs.
 
 Loaded on the remote Miles image via ``--custom-generate-function-path``.
-Not importable locally — requires ``slime`` and ``harbor`` on the remote image.
+Not importable locally — requires ``miles`` and ``harbor`` on the remote image.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ def _extract_response_text(result: dict[str, Any]) -> str:
 
 
 async def generate(args, sample, sampling_params, evaluation: bool = False):
-    from slime.rollout.sglang_rollout import GenerateState
-    from slime.utils.types import Sample
+    from miles.rollout.sglang_rollout import GenerateState
+    from miles.utils.types import Sample
 
     state = GenerateState(args)
     prompt_ids = sample.tokens or state.tokenizer.encode(sample.prompt, add_special_tokens=False)

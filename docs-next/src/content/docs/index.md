@@ -44,7 +44,7 @@ Each framework package exposes a factory that returns a `modal.App` with `downlo
 
 ## Install
 
-```python
+```bash
 pip install git+https://github.com/modal-projects/training-gym.git
 ```
 

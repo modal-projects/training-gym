@@ -77,8 +77,6 @@ _REMOTE_TRAIN_SCRIPT = f"{MILES_SRC_PATH}/train.py"
 
 _HARBOR_GENERATE_FN = "modal_training_gym.frameworks.harbor.generate.generate"
 _HARBOR_REWARD_FUNC = "modal_training_gym.frameworks.harbor.reward.reward_func"
-_HARBOR_ROLLOUT_FN = "modal_training_gym.frameworks.harbor.reward.RolloutFn"
-
 
 def _build_training_jsonl(
     task_root: str,
@@ -434,8 +432,6 @@ def build_harbor_app(
             _HARBOR_GENERATE_FN,
             "--custom-rm-path",
             _HARBOR_REWARD_FUNC,
-            "--rollout-function-path",
-            _HARBOR_ROLLOUT_FN,
             "--use-session-server",
         ]
 

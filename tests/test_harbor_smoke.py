@@ -126,7 +126,17 @@ def test_harbor_uses_custom_generate_hook_without_unsupported_flags():
     assert _HARBOR_GENERATE_FN == "modal_training_gym.frameworks.harbor.generate.generate"
     assert "--custom-agent-function-path" not in launcher_text
     assert "--generate-multi-samples" not in launcher_text
+    assert "--rollout-function-path" not in launcher_text
     print("  PASS  test_harbor_uses_custom_generate_hook_without_unsupported_flags")
+
+
+def test_harbor_generate_hook_targets_miles_runtime():
+    generate_text = Path("modal_training_gym/frameworks/harbor/generate.py").read_text()
+    assert "from miles.rollout.sglang_rollout import GenerateState" in generate_text
+    assert "from miles.utils.types import Sample" in generate_text
+    assert "from slime.rollout.sglang_rollout import GenerateState" not in generate_text
+    assert "from slime.utils.types import Sample" not in generate_text
+    print("  PASS  test_harbor_generate_hook_targets_miles_runtime")
 
 
 def test_jsonl_builder():
@@ -174,8 +184,9 @@ def run_local_tests():
     test_build_app()
     test_harbor_uses_sync_miles_entrypoint()
     test_harbor_uses_custom_generate_hook_without_unsupported_flags()
+    test_harbor_generate_hook_targets_miles_runtime()
     test_jsonl_builder()
-    print("\nAll 8 test(s) passed.")
+    print("\nAll 9 test(s) passed.")
 
 
 # ── Modal deploy test ────────────────────────────────────────────────────────
