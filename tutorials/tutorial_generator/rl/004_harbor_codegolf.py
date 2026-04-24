@@ -42,7 +42,8 @@ def _intro():
 
     **What you'll need.**
     - Access to Modal's multi-node training preview (2 × 8×H100).
-    - A `wandb` Modal secret holding your W&B API key.
+    - A `huggingface-secret` Modal secret with `HF_TOKEN`.
+    - A `wandb-secret` Modal secret with `WANDB_API_KEY`.
     - Patience: multi-hour run — use `modal run --detach`.
     """
 

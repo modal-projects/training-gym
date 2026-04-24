@@ -44,6 +44,7 @@ from modal_training_gym.common.framework import (
 )
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 from modal_training_gym.common.train_result import TrainResult
+from modal_training_gym.common.wandb import append_miles_wandb_args
 
 from modal_training_gym.frameworks.miles.config import model_training_cli_args
 
@@ -74,8 +75,7 @@ from .observability import (
 # recognize those Harbor-specific flags.
 _REMOTE_TRAIN_SCRIPT = f"{MILES_SRC_PATH}/train.py"
 
-_HARBOR_GENERATE_FN = "miles.rollout.generate_hub.agentic_tool_call.generate"
-_HARBOR_AGENT_FUNCTION = "modal_training_gym.frameworks.harbor.agent_function.run"
+_HARBOR_GENERATE_FN = "modal_training_gym.frameworks.harbor.generate.generate"
 _HARBOR_REWARD_FUNC = "modal_training_gym.frameworks.harbor.reward.reward_func"
 _HARBOR_ROLLOUT_FN = "modal_training_gym.frameworks.harbor.reward.RolloutFn"
 
@@ -432,14 +432,11 @@ def build_harbor_app(
             str(HARBOR_TRAIN_JSONL),
             "--custom-generate-function-path",
             _HARBOR_GENERATE_FN,
-            "--custom-agent-function-path",
-            _HARBOR_AGENT_FUNCTION,
             "--custom-rm-path",
             _HARBOR_REWARD_FUNC,
             "--rollout-function-path",
             _HARBOR_ROLLOUT_FN,
             "--use-session-server",
-            "--generate-multi-samples",
         ]
 
         if framework.colocate:
@@ -455,8 +452,9 @@ def build_harbor_app(
             argv.extend(["--custom-config-path", cfg_path])
 
         wandb_key = os.environ.get("WANDB_API_KEY", "")
-        if harbor.wandb is not None and wandb_key:
-            argv.extend(["--use-wandb", "--wandb-key", wandb_key])
+        if harbor.wandb is not None:
+            harbor.wandb.key = wandb_key
+            append_miles_wandb_args(argv, harbor.wandb)
 
         SESSION_SERVER_PORT = 5578
         SESSION_PROXY_PORT = 30002
@@ -487,6 +485,9 @@ def build_harbor_app(
                 OBSERVABILITY_ROOT_ENV: obs_str,
                 OBSERVABILITY_VOLUME_NAME_ENV: OBSERVABILITY_VOLUME,
                 OBSERVABILITY_COMMIT_INTERVAL_ENV: "15",
+                "HARBOR_INTERNAL_BASE_URL": (
+                    f"http://{cluster.head_addr}:{SESSION_PROXY_PORT}"
+                ),
             }
         }
         if framework.environment_import_path:

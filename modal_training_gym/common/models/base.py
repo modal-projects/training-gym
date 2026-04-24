@@ -131,7 +131,9 @@ class ModelArchitecture:
             args += ["--make-vocab-size-divisible-by", "1"]
         if self.normalization:
             args += ["--normalization", self.normalization]
-        if self.norm_epsilon != 1e-6:
+        # Megatron/Miles defaults do not consistently match HF config defaults,
+        # so emit the model's declared norm epsilon explicitly.
+        if self.norm_epsilon:
             args += ["--norm-epsilon", str(self.norm_epsilon)]
         if self.swiglu:
             args.append("--swiglu")

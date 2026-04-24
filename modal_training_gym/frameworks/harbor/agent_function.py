@@ -1,9 +1,8 @@
 """Miles custom agent hook that runs Harbor trials.
 
-This module is loaded on the remote Miles image at runtime via
-``--custom-agent-function-path``. Miles calls ``run()`` for each rollout
-sample; it creates a Harbor sandbox, runs the user-supplied agent, and
-returns the reward + metrics.
+This module is loaded on the remote Miles image by Harbor's custom
+generate hook. It creates a Harbor sandbox, runs the user-supplied
+agent, and returns the reward + metrics.
 
 Not importable locally — requires ``harbor`` (installed on the remote image).
 """
@@ -145,6 +144,7 @@ async def run(
     merged_request_kwargs = dict(agent_kwargs.pop("request_kwargs", {}))
     merged_request_kwargs.update(request_kwargs)
     if merged_request_kwargs:
+        agent_kwargs.update(merged_request_kwargs)
         agent_kwargs["request_kwargs"] = merged_request_kwargs
 
     env_import_path = (

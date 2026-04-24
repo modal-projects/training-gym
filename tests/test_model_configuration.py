@@ -95,12 +95,50 @@ def test_model_lives_on_wrapper_not_framework_config() -> None:
     )
 
 
+def test_model_architecture_emits_explicit_norm_epsilon() -> None:
+    from modal_training_gym.common.models import ModelArchitecture
+
+    arch = ModelArchitecture(
+        num_layers=1,
+        hidden_size=1,
+        num_attention_heads=1,
+        norm_epsilon=1e-6,
+    )
+    argv = arch.to_megatron_args()
+    assert "--norm-epsilon" in argv, (
+        f"ModelArchitecture should emit an explicit norm epsilon, got: {argv}"
+    )
+    idx = argv.index("--norm-epsilon")
+    assert argv[idx + 1] == "1e-06", argv
+
+
+def test_append_miles_wandb_args_renders_expected_flags() -> None:
+    from modal_training_gym.common.wandb import WandbConfig, append_miles_wandb_args
+
+    argv = append_miles_wandb_args(
+        ["python3", "train.py"],
+        WandbConfig(
+            project="training-gym",
+            group="harbor-code-golf",
+            key="secret",
+            disable_random_suffix=True,
+        ),
+    )
+    assert "--use-wandb" in argv, argv
+    assert "--wandb-project" in argv and "training-gym" in argv, argv
+    assert "--wandb-group" in argv and "harbor-code-golf" in argv, argv
+    assert "--wandb-key" in argv and "secret" in argv, argv
+    assert "--disable-wandb-random-suffix" in argv, argv
+
+
 def main() -> int:
     tests = [
         test_model_configuration_imports_and_constructs,
         test_base_download_model_is_not_implemented,
         test_model_does_not_leak_into_recipe_args,
         test_model_lives_on_wrapper_not_framework_config,
+        test_model_architecture_emits_explicit_norm_epsilon,
+        test_append_miles_wandb_args_renders_expected_flags,
     ]
     failures = []
     for t in tests:

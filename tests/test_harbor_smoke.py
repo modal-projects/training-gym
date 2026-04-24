@@ -27,6 +27,7 @@ from modal_training_gym.frameworks.harbor import (
     HarborTask,
 )
 from modal_training_gym.frameworks.harbor.launcher import (
+    _HARBOR_GENERATE_FN,
     _REMOTE_TRAIN_SCRIPT,
     _build_training_jsonl,
 )
@@ -41,6 +42,7 @@ def test_config_inheritance():
     assert cfg.miles_image  # has a default image
     assert cfg.agent_import_path == ""
     assert cfg.sandbox_timeout_secs == 1800
+    assert cfg.eval_interval == 0
     print("  PASS  test_config_inheritance")
 
 
@@ -66,6 +68,14 @@ def test_cli_args_exclude_harbor_fields():
         ):
             assert forbidden not in arg, f"Harbor field leaked to CLI: {arg}"
     print("  PASS  test_cli_args_exclude_harbor_fields")
+
+
+def test_harbor_defaults_do_not_force_untied_embeddings():
+    cfg = HarborFrameworkConfig(agent_import_path="test:Agent")
+    args = cfg.cli_args()
+    assert "--untie-embeddings-and-output-weights" not in args, args
+    assert "--eval-interval" not in args, args
+    print("  PASS  test_harbor_defaults_do_not_force_untied_embeddings")
 
 
 def test_harbor_config_construction():
@@ -104,9 +114,17 @@ def test_build_app():
 def test_harbor_uses_sync_miles_entrypoint():
     assert _REMOTE_TRAIN_SCRIPT.endswith("/train.py"), (
         "Harbor must launch the Miles entrypoint that accepts Harbor-specific "
-        "CLI flags like --custom-agent-function-path."
+        "custom generate integration."
     )
     print("  PASS  test_harbor_uses_sync_miles_entrypoint")
+
+
+def test_harbor_uses_custom_generate_hook_without_unsupported_flags():
+    launcher_text = Path("modal_training_gym/frameworks/harbor/launcher.py").read_text()
+    assert _HARBOR_GENERATE_FN == "modal_training_gym.frameworks.harbor.generate.generate"
+    assert "--custom-agent-function-path" not in launcher_text
+    assert "--generate-multi-samples" not in launcher_text
+    print("  PASS  test_harbor_uses_custom_generate_hook_without_unsupported_flags")
 
 
 def test_jsonl_builder():
@@ -149,11 +167,13 @@ def test_jsonl_builder():
 def run_local_tests():
     test_config_inheritance()
     test_cli_args_exclude_harbor_fields()
+    test_harbor_defaults_do_not_force_untied_embeddings()
     test_harbor_config_construction()
     test_build_app()
     test_harbor_uses_sync_miles_entrypoint()
+    test_harbor_uses_custom_generate_hook_without_unsupported_flags()
     test_jsonl_builder()
-    print("\nAll 6 test(s) passed.")
+    print("\nAll 8 test(s) passed.")
 
 
 # ── Modal deploy test ────────────────────────────────────────────────────────

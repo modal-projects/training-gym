@@ -120,7 +120,7 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
     max_position_embeddings : int
         Maximum sequence position embeddings. Default ``32768``.
     untie_embeddings_and_output_weights : bool
-        Untie input embeddings from output projection. Default ``True``.
+        Untie input embeddings from output projection. Default ``False``.
     no_masked_softmax_fusion : bool
         Disable masked softmax fusion. Default ``True``.
 
@@ -145,7 +145,7 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
     ## Eval and Checkpointing (Harbor)
 
     eval_interval : int
-        Evaluation interval in iterations. Default ``10``.
+        Evaluation interval in iterations. Default ``0``.
     save_interval : int
         Checkpoint save interval in iterations. Default ``10``.
 
@@ -186,7 +186,7 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
 
     # ── Model overrides ─────────────────────────────────────────────────────
     max_position_embeddings: int = 32768
-    untie_embeddings_and_output_weights: bool = True
+    untie_embeddings_and_output_weights: bool = False
     no_masked_softmax_fusion: bool = True
 
     # ── Rollout ─────────────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
     global_batch_size: int = 512
 
     # ── Eval & Checkpointing ────────────────────────────────────────────────
-    eval_interval: int = 10
+    eval_interval: int = 0
     save_interval: int = 10
 
     # ── Image ────────────────────────────────────────────────────────────────
@@ -216,6 +216,8 @@ class HarborFrameworkConfig(MilesFrameworkConfig):
         out: list[str] = []
         for key, val in vars(self).items():
             if key.startswith("_") or key in skip or val is None:
+                continue
+            if key == "eval_interval" and not val:
                 continue
             flag = f"--{key.replace('_', '-')}"
             if isinstance(val, bool):

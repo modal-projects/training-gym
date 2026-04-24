@@ -46,6 +46,7 @@ from modal_training_gym.common.framework import (
 )
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 from modal_training_gym.common.train_result import TrainResult
+from modal_training_gym.common.wandb import append_miles_wandb_args
 
 from .config import (
     CHECKPOINTS_PATH,
@@ -263,8 +264,9 @@ def build_miles_app(
             argv.extend(["--custom-config-path", cfg_path])
 
         wandb_key = os.environ.get("WANDB_API_KEY", "")
-        if miles.wandb is not None and wandb_key:
-            argv.extend(["--use-wandb", "--wandb-key", wandb_key])
+        if miles.wandb is not None:
+            miles.wandb.key = wandb_key
+            append_miles_wandb_args(argv, miles.wandb)
 
         runtime_env = {
             "env_vars": {

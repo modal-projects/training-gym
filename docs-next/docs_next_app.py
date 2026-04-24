@@ -26,7 +26,9 @@ REMOTE_DIST = "/assets/dist"
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("fastapi[standard]==0.118.0")
-    .add_local_dir(DIST_DIR, remote_path=REMOTE_DIST, copy=True)
+    # `dist/` is gitignored, so use an explicit predicate to ensure Modal
+    # includes the generated static files in the deployment image.
+    .add_local_dir(DIST_DIR, remote_path=REMOTE_DIST, copy=True, ignore=lambda _: False)
 )
 
 app = modal.App("training-gym-docs", image=image)
