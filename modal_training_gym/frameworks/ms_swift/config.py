@@ -347,11 +347,13 @@ class MsSwiftConfig:
         model: "ModelConfiguration | None" = None,
         wandb: "WandbConfig | None" = None,
         framework_config: MsSwiftFrameworkConfig | None = None,
+        name: str = "",
     ) -> None:
         self.dataset = dataset
         self.model = model
         self.wandb = wandb
         self.framework_config = framework_config or MsSwiftFrameworkConfig()
+        self.name = name
 
     def _fields(self) -> dict[str, Any]:
         fields = dict(vars(self.framework_config))
@@ -404,7 +406,7 @@ class MsSwiftConfig:
         name: str | None = None,
     ) -> "App":
         from .launcher import build_ms_swift_app
+        from modal_training_gym.common.framework import resolve_app_name, resolve_gpu
 
-        from modal_training_gym.common.framework import resolve_gpu
-
-        return build_ms_swift_app(swift=self, gpu=resolve_gpu(self.model), name=name)
+        app_name = resolve_app_name("ms-swift", name or self.name, self.model)
+        return build_ms_swift_app(swift=self, gpu=resolve_gpu(self.model), name=app_name)

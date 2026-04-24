@@ -263,6 +263,10 @@ def build_harbor_app(
         "_modal_framework": "harbor",
         **framework.app_tags,
     }
+    if harbor.wandb is not None:
+        tags["_modal_wandb_project"] = harbor.wandb.project
+        if harbor.wandb.group:
+            tags["_modal_wandb_group"] = harbor.wandb.group
     app = App(app_name, tags=tags)
     gpu_spec = f"{gpu}:{framework.gpus_per_node}"
 
@@ -537,14 +541,21 @@ def build_harbor_app(
         # Publish a TrainResult for this run so eval scripts can pick it
         # up via ``TrainResult.load(app_name)``. Only the Ray head runs
         # this tail (non-head ranks return earlier above).
+        model_class = ""
+        if harbor.model is not None:
+            cls = type(harbor.model)
+            model_class = f"{cls.__module__}.{cls.__name__}"
+
         result = TrainResult(
             app_name=app_name,
             framework="harbor",
             run_id=run_id,
             checkpoint_dir=checkpoint_dir,
             base_model=harbor.model.model_name if harbor.model is not None else "",
+            model_class=model_class,
             checkpoints_volume_name=f"{app_name}-checkpoints",
             checkpoints_mount_path=checkpoints_str,
+            wandb_project=harbor.wandb.project if harbor.wandb else "",
         )
         result.save()
         return asdict(result)

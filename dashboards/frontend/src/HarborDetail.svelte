@@ -105,7 +105,7 @@
   {/if}
 </header>
 
-<div class="harbor-joy/initial-setup">
+<div class="harbor-main">
   {#if loading}
     <div class="empty">Loading...</div>
   {:else if error}
@@ -423,7 +423,7 @@
   .btn:hover {
     background: #374151;
   }
-  .harbor-joy/initial-setup {
+  .harbor-main {
     padding: 1.5rem 2rem 3rem;
     max-width: 1400px;
   }

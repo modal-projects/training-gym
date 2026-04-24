@@ -112,6 +112,10 @@ def build_miles_app(
         "_modal_framework": "miles",
         **framework.app_tags,
     }
+    if miles.wandb is not None:
+        tags["_modal_wandb_project"] = miles.wandb.project
+        if miles.wandb.group:
+            tags["_modal_wandb_group"] = miles.wandb.group
     app = App(app_name, tags=tags)
     gpu_spec = f"{gpu}:{framework.gpus_per_node}"
 
@@ -289,14 +293,21 @@ def build_miles_app(
         # Publish a TrainResult for this run so eval scripts can pick it
         # up via ``TrainResult.load(app_name)``. Only the Ray head runs
         # this tail (non-head ranks return earlier above).
+        model_class = ""
+        if miles.model is not None:
+            cls = type(miles.model)
+            model_class = f"{cls.__module__}.{cls.__name__}"
+
         result = TrainResult(
             app_name=app_name,
             framework="miles",
             run_id=run_id,
             checkpoint_dir=checkpoint_dir,
             base_model=miles.model.model_name if miles.model is not None else "",
+            model_class=model_class,
             checkpoints_volume_name=f"{app_name}-checkpoints",
             checkpoints_mount_path=checkpoints_str,
+            wandb_project=miles.wandb.project if miles.wandb else "",
         )
         result.save()
         return asdict(result)

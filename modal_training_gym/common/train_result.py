@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from modal import App, Volume
+    from modal_training_gym.common.models import ModelConfiguration
 
 
 def _store_name(app_name: str) -> str:
@@ -111,9 +112,13 @@ class TrainResult:
     run_id: str
     checkpoint_dir: str
     base_model: str
-    checkpoints_volume_name: str
-    checkpoints_mount_path: str
+    model_class: str = ""
+    checkpoints_volume_name: str = ""
+    checkpoints_mount_path: str = ""
     iteration_prefix: str = ""
+    wandb_project: str = ""
+    wandb_entity: str = ""
+    wandb_run_id: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ── Persistence: shared modal.Dict ────────────────────────────────────
@@ -281,6 +286,34 @@ class TrainResult:
             )
         return f"{self.checkpoint_dir.rstrip('/')}/{ckpts[-1]}"
 
+    # ── Output model ─────────────────────────────────────────────────────
+
+    @property
+    def model(self) -> "ModelConfiguration":
+        """Return the original model class with ``model_path`` pointing at the checkpoint.
+
+        Reconstructs the same model class used for training (e.g.
+        ``Qwen3_4B``) so it retains architecture, presets, and
+        ``download_model()`` logic. Only ``model_path`` is overridden
+        to point at the trained checkpoint instead of the HF cache.
+        """
+        import importlib
+
+        if self.model_class:
+            module_path, class_name = self.model_class.rsplit(".", 1)
+            mod = importlib.import_module(module_path)
+            cls = getattr(mod, class_name)
+            instance = cls()
+            instance.model_path = self.latest_checkpoint_path()
+            return instance
+
+        from modal_training_gym.common.models import ModelConfiguration
+
+        return ModelConfiguration(
+            model_name=self.base_model,
+            model_path=self.latest_checkpoint_path(),
+        )
+
     # ── Serving ──────────────────────────────────────────────────────────
 
     def build_serve_app(
@@ -319,3 +352,56 @@ class TrainResult:
             checkpoints_mount_path=self.checkpoints_mount_path,
             **vllm_kwargs,
         )
+
+    # ── W&B integration ─────────────────────────────────────────────────
+
+    def wandb_url(self) -> str | None:
+        """Return the W&B run URL, or None if W&B info is not set."""
+        if not self.wandb_run_id or not self.wandb_project:
+            return None
+        entity = self.wandb_entity or "_"
+        return f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_run_id}"
+
+    def wandb_metrics(
+        self,
+        keys: list[str] | None = None,
+        samples: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Fetch training metrics from W&B.
+
+        Parameters
+        ----------
+        keys:
+            Metric keys to fetch (e.g. ``["train/loss", "train/reward"]``).
+            When ``None``, fetches all logged metrics.
+        samples:
+            Max number of data points. Use ``0`` for full unsampled history.
+
+        Returns
+        -------
+        List of dicts, one per logged step. Each dict has ``_step`` plus
+        the requested metric keys.
+        """
+        import wandb
+
+        api = wandb.Api()
+        entity = self.wandb_entity or None
+        path = f"{entity}/{self.wandb_project}/{self.wandb_run_id}" if entity else f"{self.wandb_project}/{self.wandb_run_id}"
+        run = api.run(path)
+
+        if samples == 0:
+            rows = list(run.scan_history(keys=keys))
+        else:
+            df = run.history(keys=keys, samples=samples)
+            rows = df.to_dict("records")
+        return rows
+
+    def wandb_summary(self) -> dict[str, Any]:
+        """Fetch the W&B run summary (final metric values)."""
+        import wandb
+
+        api = wandb.Api()
+        entity = self.wandb_entity or None
+        path = f"{entity}/{self.wandb_project}/{self.wandb_run_id}" if entity else f"{self.wandb_project}/{self.wandb_run_id}"
+        run = api.run(path)
+        return dict(run.summary)

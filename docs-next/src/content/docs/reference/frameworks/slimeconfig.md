@@ -78,6 +78,7 @@ SLIME GRPO training configuration.
 | `adam_beta1` | `float` | `0.9` | Adam beta1. Default `0.9`. |
 | `adam_beta2` | `float` | `0.98` | Adam beta2. Default `0.95`. |
 | `optimizer` | `str` | `"adam"` | Optimizer name. Default `"adam"`. |
+| `name` | `str` | `""` |  |
 
 ## Memory and Precision
 

@@ -39,6 +39,7 @@ image = (
     .pip_install(
         "fastapi[standard]==0.118.0",
         "modal",
+        "wandb",
     )
     .add_local_dir(
         str(frontend_path),
@@ -222,7 +223,19 @@ def fastapi_app():
             runs = await training_runs_dict.get.aio(RUNS_KEY)
         except KeyError:
             runs = []
-        return JSONResponse({"runs": runs if runs is not None else []})
+        if runs is None:
+            runs = []
+
+        for run in runs:
+            wandb_project = run.get("tags", {}).get("_modal_wandb_project", "")
+            wandb_group = run.get("tags", {}).get("_modal_wandb_group", "")
+            if wandb_project:
+                url = f"https://wandb.ai/modal-labs/{wandb_project}"
+                if wandb_group:
+                    url += f"?groupName={wandb_group}"
+                run["wandb_url"] = url
+
+        return JSONResponse({"runs": runs})
 
     @web.get("/api/harbor/runs")
     async def api_harbor_runs():
@@ -249,6 +262,68 @@ def fastapi_app():
             return load_rollout(obs_path, run_id, rollout_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # ── W&B metrics endpoints ──────────────────────────────────────────────
+
+    @web.get("/api/wandb/{app_name}/metrics")
+    async def api_wandb_metrics(app_name: str, keys: str = "", samples: int = 500):
+        """Fetch W&B training metrics for a TrainResult by app name."""
+        from modal_training_gym.common.train_result import TrainResult
+
+        try:
+            result = TrainResult.load(app_name)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if not result.wandb_run_id:
+            raise HTTPException(status_code=404, detail="No W&B run linked")
+
+        key_list = [k.strip() for k in keys.split(",") if k.strip()] or None
+        metrics = result.wandb_metrics(keys=key_list, samples=samples)
+        return JSONResponse({
+            "app_name": app_name,
+            "wandb_url": result.wandb_url(),
+            "run_id": result.run_id,
+            "wandb_run_id": result.wandb_run_id,
+            "metrics": metrics,
+        })
+
+    @web.get("/api/wandb/{app_name}/summary")
+    async def api_wandb_summary(app_name: str):
+        """Fetch W&B run summary (final metric values) for a TrainResult."""
+        from modal_training_gym.common.train_result import TrainResult
+
+        try:
+            result = TrainResult.load(app_name)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if not result.wandb_run_id:
+            raise HTTPException(status_code=404, detail="No W&B run linked")
+
+        summary = result.wandb_summary()
+        return JSONResponse({
+            "app_name": app_name,
+            "wandb_url": result.wandb_url(),
+            "summary": summary,
+        })
+
+    @web.get("/api/train-results/{app_name}")
+    async def api_train_result(app_name: str, run_id: str | None = None):
+        """Fetch a TrainResult by app name."""
+        from modal_training_gym.common.train_result import TrainResult
+
+        try:
+            result = TrainResult.load(app_name, run_id=run_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return JSONResponse(asdict(result))
+
+    @web.get("/api/train-results/{app_name}/runs")
+    async def api_train_result_runs(app_name: str):
+        """List all run IDs for an app."""
+        from modal_training_gym.common.train_result import TrainResult
+
+        runs = TrainResult.list_runs(app_name)
+        return JSONResponse({"app_name": app_name, "runs": runs})
 
     web.mount("/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets")
 

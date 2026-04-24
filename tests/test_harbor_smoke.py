@@ -35,7 +35,7 @@ def test_config_inheritance():
     assert isinstance(cfg, MilesFrameworkConfig), (
         "HarborFrameworkConfig must extend MilesFrameworkConfig"
     )
-    assert cfg.gpu == "H100"
+    assert cfg.miles_image  # has a default image
     assert cfg.agent_import_path == ""
     assert cfg.sandbox_timeout_secs == 1800
     print("  PASS  test_config_inheritance")
@@ -179,5 +179,5 @@ harbor = HarborConfig(
 app = harbor.build_app(name="harbor-smoke-test")
 
 
-if __name__ == "__joy/initial-setup__":
+if __name__ == "__main__":
     run_local_tests()

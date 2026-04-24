@@ -147,6 +147,10 @@ def build_slime_app(
         "_modal_framework": "slime",
         **slime.app_tags,
     }
+    if slime.wandb is not None:
+        tags["_modal_wandb_project"] = slime.wandb.project
+        if slime.wandb.group:
+            tags["_modal_wandb_group"] = slime.wandb.group
     app = App(app_name, tags=tags)
     gpu_spec = f"{gpu}:{slime.actor_num_gpus_per_node}"
 
@@ -322,6 +326,51 @@ def build_slime_app(
         async with cluster.forward_dashboard() as tunnel:
             print(f"Ray dashboard: {tunnel.url}")
             await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
+
+        # Persist TrainResult for post-training evals
+        from modal_training_gym.common.train_result import TrainResult
+
+        run_id = f"train_{int(time.time())}"
+        checkpoint_dir = slime.save if slime.save else str(CHECKPOINTS_PATH)
+
+        wandb_run_id = ""
+        if slime.wandb and slime.wandb.project:
+            try:
+                import wandb
+                api = wandb.Api()
+                runs = api.runs(
+                    slime.wandb.project,
+                    filters={"group": slime.wandb.group} if slime.wandb.group else {},
+                    order="-created_at",
+                    per_page=1,
+                )
+                if runs:
+                    wandb_run_id = runs[0].id
+            except Exception as e:
+                print(f"Could not fetch W&B run ID: {e}")
+
+        model_class = ""
+        if slime.model is not None:
+            cls = type(slime.model)
+            model_class = f"{cls.__module__}.{cls.__name__}"
+
+        result = TrainResult(
+            app_name=app_name,
+            framework="slime",
+            run_id=run_id,
+            checkpoint_dir=checkpoint_dir,
+            base_model=slime.model.model_name if slime.model else "",
+            model_class=model_class,
+            checkpoints_volume_name=f"{app_name}-checkpoints",
+            checkpoints_mount_path=str(CHECKPOINTS_PATH),
+            iteration_prefix="iter_",
+            wandb_project=slime.wandb.project if slime.wandb else "",
+            wandb_entity="",
+            wandb_run_id=wandb_run_id,
+        )
+        result.save()
+        checkpoints_volume.commit()
+        print(f"TrainResult saved: {app_name}/{run_id}")
 
         # Persist a TrainResult so eval scripts can pick up this run by
         # run_id via ``TrainResult.load(app_name)``. SLIME writes

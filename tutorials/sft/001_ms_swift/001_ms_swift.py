@@ -97,6 +97,7 @@ swift_framework_config = MsSwiftFrameworkConfig(
 )
 
 my_training_run = MsSwiftConfig(
+    name="glm-4-7-gsm8k-sft",
     dataset=GSM8KDataset(HF_CACHE_PATH),
     model=GLM_4_7(),
     wandb=WandbConfig(project="glm-4-7-sft"),
@@ -118,3 +119,22 @@ app = my_training_run.build_app()
 # uv run modal run tutorials/sft/001_ms_swift/001_ms_swift.py::app.prepare_dataset
 # uv run modal run --detach tutorials/sft/001_ms_swift/001_ms_swift.py::app.train
 # ```
+
+# ## Evaluate the trained checkpoint
+#
+# After `train` completes, use `TrainResult` to find and serve the
+# checkpoint:
+#
+# ```python
+# from modal_training_gym.common.train_result import TrainResult
+#
+# result = TrainResult.load("glm-4-7-gsm8k-sft")
+# print(result.latest_checkpoint_path())
+#
+# # Serve via vLLM:
+# serve_app = result.build_serve_app()
+# ```
+#
+# See the [TrainResult reference](/reference/core/trainresult/) for
+# the full API — listing runs, pinning specific checkpoints, and
+# browsing the checkpoints volume.

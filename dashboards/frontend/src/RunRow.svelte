@@ -1,5 +1,6 @@
 <script>
   import { fmtDate, fmtDuration, extraTags } from "./lib/format.js";
+  import MetricsChart from "./MetricsChart.svelte";
 
   let { run } = $props();
   let extras = $derived(extraTags(run.tags));
@@ -7,6 +8,7 @@
     run.tags?._modal_framework === "harbor" ||
       run.metadata?.framework === "harbor",
   );
+  let showMetrics = $state(false);
 </script>
 
 <tr>
@@ -23,6 +25,9 @@
   <td>{fmtDate(run.created_at)}</td>
   <td class="duration">{fmtDuration(run.created_at, run.stopped_at)}</td>
   <td>
+    {#if run.wandb_url}
+      <a class="wandb-link" href={run.wandb_url} target="_blank" rel="noopener">W&B ↗</a>
+    {/if}
     {#if isHarbor}
       <a
         class="traj-link"
@@ -31,15 +36,25 @@
         Trajectories
       </a>
     {/if}
+    {#if run.wandb_url}
+      <button class="metrics-toggle" onclick={() => showMetrics = !showMetrics}>
+        {showMetrics ? "▾ Hide" : "▸ Metrics"}
+      </button>
+    {/if}
     {#if extras.length}
       {#each extras as [key, value]}
         <span class="tag"><strong>{key}</strong>={value}</span>
       {/each}
-    {:else if !isHarbor}
-      —
     {/if}
   </td>
 </tr>
+{#if showMetrics && run.name}
+  <tr class="metrics-row">
+    <td colspan="6">
+      <MetricsChart appName={run.name} />
+    </td>
+  </tr>
+{/if}
 
 <style>
   td {
@@ -101,7 +116,7 @@
     display: inline-block;
     padding: 0.1rem 0.45rem;
     margin: 0.1rem 0.2rem 0.1rem 0;
-    background: #1f2937;
+    background: var(--surface);
     border-radius: 4px;
     font-size: 0.8em;
     color: var(--muted);
@@ -124,5 +139,38 @@
   }
   .traj-link:hover {
     background: rgba(125, 211, 252, 0.2);
+  }
+  .wandb-link {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    margin-right: 0.4rem;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-weight: 500;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+    text-decoration: none;
+  }
+  .wandb-link:hover {
+    background: rgba(251, 191, 36, 0.2);
+  }
+  .metrics-toggle {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    margin-right: 0.4rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-weight: 500;
+    color: var(--accent);
+    background: var(--accent-dim);
+    cursor: pointer;
+  }
+  .metrics-toggle:hover {
+    background: rgba(125, 211, 252, 0.2);
+  }
+  .metrics-row td {
+    padding: 0.25rem 1rem 0.75rem;
+    background: var(--panel-alt);
   }
 </style>

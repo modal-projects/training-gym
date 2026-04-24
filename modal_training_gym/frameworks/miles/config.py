@@ -384,11 +384,13 @@ class MilesConfig:
         model: "ModelConfiguration | None" = None,
         wandb: "WandbConfig | None" = None,
         framework_config: MilesFrameworkConfig | None = None,
+        name: str = "",
     ) -> None:
         self.dataset = dataset
         self.model = model
         self.wandb = wandb
         self.framework_config = framework_config or MilesFrameworkConfig()
+        self.name = name
 
     def build_app(
         self,
@@ -396,7 +398,7 @@ class MilesConfig:
         name: str | None = None,
     ) -> "App":
         from .launcher import build_miles_app
+        from modal_training_gym.common.framework import resolve_app_name, resolve_gpu
 
-        from modal_training_gym.common.framework import resolve_gpu
-
-        return build_miles_app(miles=self, gpu=resolve_gpu(self.model), name=name)
+        app_name = resolve_app_name("miles", name or self.name, self.model)
+        return build_miles_app(miles=self, gpu=resolve_gpu(self.model), name=app_name)

@@ -18,6 +18,7 @@ Complete reference for the training-gym Python library.
 | [`WandbConfig`](/reference/core/wandbconfig/) | Weights & Biases logging configuration shared across all frameworks. |
 | [`ModalRayCluster`](/reference/core/modalraycluster/) | Base class for bootstrapping a Ray cluster inside Modal clustered functions. |
 | [`LlmJudge`](/reference/core/llmjudge/) | LLM-as-judge client for an OpenAI-compatible chat-completions endpoint. |
+| [`TrainResult`](/reference/core/trainresult/) | One completed training run's checkpoint handle. |
 
 ## Models
 

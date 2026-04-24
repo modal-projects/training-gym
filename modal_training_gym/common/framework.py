@@ -53,24 +53,49 @@ def mount_tools_dir(image: "Image") -> "Image":
     )
 
 
-def resolve_gpu(model: Any) -> str:
-    """Resolve the GPU type from a model's training config.
+def resolve_app_name(
+    framework: str,
+    explicit_name: str,
+    model: Any = None,
+) -> str:
+    """Derive the Modal app name from the user-provided name or the model.
 
-    All ModelConfiguration subclasses must define a ``training``
-    attribute with ``gpu_type`` set.
+    If ``explicit_name`` is set, uses it directly. Otherwise derives a
+    readable default from the framework + model name and logs it.
+    """
+    if explicit_name:
+        return explicit_name
+    if model is not None and getattr(model, "model_name", ""):
+        slug = model.model_name.split("/")[-1].lower().replace("-", "_")
+        name = f"{framework}-{slug}"
+    else:
+        name = f"{framework}-run"
+    print(f"[training-gym] App name not set — using '{name}'. "
+          f"Set name= on your config to customize.")
+    return name
+
+
+def resolve_gpu(model: Any) -> str:
+    """Resolve the GPU type from a model's preset or gpu_type attribute.
+
+    Checks (in order): model.gpu_type, model.slime.gpu_type,
+    model.training.gpu_type.
     """
     if model is None:
         raise ValueError(
             "Cannot resolve GPU: no model attached. "
             "Set model= on your config."
         )
-    training = getattr(model, "training", None)
-    if training is None:
-        raise ValueError(
-            f"{type(model).__name__} has no training config. "
-            f"Set training = ModelTrainingConfig(gpu_type=...) on your model class."
-        )
-    return training.gpu_type
+    if hasattr(model, "gpu_type") and model.gpu_type:
+        return model.gpu_type
+    for attr in ("slime", "training"):
+        preset = getattr(model, attr, None)
+        if preset is not None and hasattr(preset, "gpu_type"):
+            return preset.gpu_type
+    raise ValueError(
+        f"{type(model).__name__} has no gpu_type. "
+        f"Set gpu_type on your model class or add a framework preset."
+    )
 
 
 def resolve_caller_module(

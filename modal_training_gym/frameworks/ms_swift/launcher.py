@@ -199,9 +199,11 @@ def _train_ms_swift_worker(run_id: str | None = None):
             run_id=run_id,
             checkpoint_dir=checkpoint_dir,
             base_model=model_name,
+            model_class=os.environ.get("MS_SWIFT_MODEL_CLASS", ""),
             checkpoints_volume_name=checkpoints_volume_name,
             checkpoints_mount_path=checkpoints_root,
             iteration_prefix="iter_",
+            wandb_project=wandb_project,
         )
         result.save()
         return asdict(result)
@@ -312,6 +314,10 @@ def build_ms_swift_app(
         "_modal_framework": "ms-swift",
         **framework.app_tags,
     }
+    if swift.wandb is not None:
+        tags["_modal_wandb_project"] = swift.wandb.project
+        if swift.wandb.group:
+            tags["_modal_wandb_group"] = swift.wandb.group
     app = App(app_name, tags=tags)
     gpu_spec = f"{gpu}:{framework.gpus_per_node}"
 
@@ -365,6 +371,7 @@ def build_ms_swift_app(
     train_env = {
         "MS_SWIFT_MODEL_NAME": swift.model.model_name,
         "MS_SWIFT_MODEL_PATH": swift.model.model_path or "",
+        "MS_SWIFT_MODEL_CLASS": f"{type(swift.model).__module__}.{type(swift.model).__name__}",
         "MS_SWIFT_DATASET_PATH": getattr(swift.dataset, "prompt_data", ""),
         "MS_SWIFT_APP_NAME": app_name,
         "MS_SWIFT_GPUS_PER_NODE": str(framework.gpus_per_node),

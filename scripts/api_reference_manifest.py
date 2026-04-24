@@ -152,6 +152,14 @@ API_REFERENCE_MANIFEST = [
         "class_type": "config_data",
         "sidebar_label": "HarborConfig",
     },
+    # --- Results ---
+    {
+        "class_name": "TrainResult",
+        "module": "modal_training_gym.common.train_result",
+        "group": "core",
+        "class_type": "behavior",
+        "sidebar_label": "TrainResult",
+    },
 ]
 
 GROUPS = {

@@ -21,7 +21,7 @@ primitives (DatasetConfig, volumes, the 3-stage pipeline) see
 [`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb).
 
 **What you'll need.**
-- Access to Modal's multi-node training preview (4 × 8×H100).
+- A Modal account with GPU access (1 × 8×H100).
 - A `wandb` Modal secret holding your W&B API key (the SLIME launcher
   mounts it automatically when `WandbConfig` is present).
 - Patience: multi-hour run — use `modal run --detach`.
@@ -92,7 +92,7 @@ values need to be specified; everything else inherits sensible
 defaults.
 
 **Cluster**
-- `actor_num_nodes=4` — 32 H100s (4 × 8 GPUs).
+
 - `colocate=True` — actor and rollout share the same GPUs.
 
 **Throughput**
@@ -109,11 +109,11 @@ defaults.
 ```python
 base_model = Qwen3_4B()
 my_training_run = SlimeConfig(
+    name="qwen3-4b-gsm8k",
     model=base_model,
     dataset=GSM8KDataset(DATA_PATH),
     wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-gsm8k"),
     ref_load=base_model.model_name,
-    actor_num_nodes=4,
 )
 ```
 
@@ -126,6 +126,86 @@ general pattern.)
 
 ```python
 app = my_training_run.build_app()
+```
+
+## Use the trained model
+
+After `train` completes, `TrainResult` gives you back a **model** —
+the trained checkpoint, ready to serve, evaluate, or continue
+training from. No need to re-import the training config.
+
+```python
+from modal_training_gym.common.train_result import TrainResult
+from modal_training_gym.common.serve_vllm import build_vllm_serve_app
+
+result = TrainResult.load("qwen3-4b-gsm8k")
+trained_model = result.model
+```
+
+Both the base model and the trained checkpoint are HuggingFace-format
+weights, so you can serve them the same way. Deploy them side by side
+to compare outputs:
+
+```python
+# Serve the TRAINED model (checkpoint from training):
+trained_app = result.build_serve_app(served_model_name="qwen3-4b-gsm8k-trained")
+
+# Serve the BASE model (original HuggingFace weights):
+base_app = build_vllm_serve_app(
+    app_name="qwen3-4b-base-serve",
+    model_path="Qwen/Qwen3-4B",
+    served_model_name="qwen3-4b-base",
+)
+```
+
+```bash
+# Deploy both:
+modal deploy eval.py::trained_app
+modal deploy eval.py::base_app
+```
+
+Now you have two OpenAI-compatible endpoints. Compare them on
+GSM8K prompts to measure the improvement:
+
+```python
+import openai
+
+base_client = openai.OpenAI(base_url="<base_app_url>/v1", api_key="na")
+trained_client = openai.OpenAI(base_url="<trained_app_url>/v1", api_key="na")
+
+prompt = "What is 15% of 80? Show your work step by step."
+
+base_answer = base_client.chat.completions.create(
+    model="qwen3-4b-base",
+    messages=[{"role": "user", "content": prompt}],
+).choices[0].message.content
+
+trained_answer = trained_client.chat.completions.create(
+    model="qwen3-4b-gsm8k-trained",
+    messages=[{"role": "user", "content": prompt}],
+).choices[0].message.content
+
+print("BASE:", base_answer)
+print("TRAINED:", trained_answer)
+```
+
+The trained model should produce more structured math reasoning
+and box its final answer (the format GSM8K rewards).
+
+You can also continue training from the checkpoint:
+
+```python
+next_run = SlimeConfig(
+    model=trained_model,  # picks up where this run left off
+    dataset=...,
+)
+```
+
+Or pull W&B metrics to see the training curves:
+
+```python
+print(result.wandb_url())
+metrics = result.wandb_metrics(keys=["train/loss", "train/reward"])
 ```
 
 ---

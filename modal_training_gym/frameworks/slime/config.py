@@ -50,6 +50,7 @@ _SLIME_SKIP = {
     "model",
     "wandb",
     "modal",
+    "name",
     "app_tags",
     "image_run_commands",
     "local_python_sources",
@@ -264,6 +265,9 @@ class SlimeConfig:
     apply_chat_template_kwargs : dict | None
         Extra kwargs for chat template. Default ``None``.
     """
+
+    # ── App identity ─────────────────────────────────────────────────────────
+    name: str = ""
 
     # ── Launcher instructions (not SLIME CLI flags) ─────────────────────────
     environment: dict = field(default_factory=lambda: {
@@ -626,12 +630,14 @@ class SlimeConfig:
         modal: ModalConfig | None = None,
     ) -> "App":
         from .launcher import build_slime_app
+        from modal_training_gym.common.framework import resolve_app_name
 
+        app_name = resolve_app_name("slime", name or self.name, self.model)
         return build_slime_app(
             modal=modal or self.modal or ModalConfig(),
             gpu=self.gpu_type,
             slime=self,
-            name=name,
+            name=app_name,
         )
 
 

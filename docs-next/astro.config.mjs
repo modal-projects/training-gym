@@ -117,6 +117,7 @@ export default defineConfig({
                 { label: 'WandbConfig', link: '/reference/core/wandbconfig/' },
                 { label: 'ModalRayCluster', link: '/reference/core/modalraycluster/' },
                 { label: 'LlmJudge', link: '/reference/core/llmjudge/' },
+                { label: 'TrainResult', link: '/reference/core/trainresult/' },
               ],
             },
             {
