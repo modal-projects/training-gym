@@ -1,17 +1,17 @@
 """Tutorial source for `002_ms_swift_qwen3_0_6b` — parsed by generate_tutorial.py.
 
 Single-node, single-GPU LoRA SFT of Qwen3-0.6B on GSM8K using ms-swift.
-Targets an A10 (24 GB) to demonstrate that training-gym works on smaller,
+Targets an A100-40GB to demonstrate that training-gym works on smaller,
 cheaper GPUs — not just H100s.
 """
 
 TUTORIAL_METADATA = {
     'framework': '`ms_swift`',
-    'cluster_shape': '1 × 1×A10',
-    'summary': 'Qwen3-0.6B LoRA SFT on GSM8K — single A10 GPU',
+    'cluster_shape': '1 × 1×A100-40GB',
+    'summary': 'Qwen3-0.6B LoRA SFT on GSM8K — single A100-40GB GPU',
     'difficulty': 'Beginner',
     'order': 15,
-    'gpu_type': 'A10',
+    'gpu_type': 'A100-40GB',
     'n_gpus': 1,
     'api_classes': [
         'MsSwiftConfig', 'MsSwiftFrameworkConfig',
@@ -26,28 +26,28 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Qwen3-0.6B LoRA SFT on GSM8K with ms-swift on a single A10
+    # Qwen3-0.6B LoRA SFT on GSM8K with ms-swift on a single A100-40GB
 
     **What this tutorial does.** LoRA SFT of
     [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) on
     [GSM8K](https://huggingface.co/datasets/openai/gsm8k) using a single
-    NVIDIA A10 GPU (24 GB VRAM). This is the cheapest way to run a
-    real fine-tuning job with `modal-training-gym` — the A10 costs
-    ~$1.10/hr on Modal, so a 5-minute smoke run is under $0.10.
+    NVIDIA A100-40GB GPU (40 GB VRAM). This is the cheapest way to run a
+    real fine-tuning job with `modal-training-gym` — the A100-40GB costs
+    ~$2.10/hr on Modal, so a 5-minute smoke run is under $0.18.
 
-    **Why A10?** Qwen3-0.6B is small enough (≈1.2 GB in bf16) that LoRA
-    SFT fits comfortably in 24 GB. No tensor or pipeline parallelism
+    **Why A100-40GB?** Qwen3-0.6B is small enough (≈1.2 GB in bf16) that LoRA
+    SFT fits comfortably in 40 GB. No tensor or pipeline parallelism
     needed — everything runs on one GPU.
 
     **What you'll need.**
     - A Modal account (no multi-node access required).
     - A `wandb` Modal secret holding your W&B API key.
 
-    **What to watch.** W&B project `qwen3-0.6b-sft-a10`.
+    **What to watch.** W&B project `qwen3-0.6b-sft-a100`.
     `train/loss` should drop within the first few steps.
 
-    **Estimated cost.** ~$1.10/hr on a single A10. A smoke run
-    (`num_train_epochs=1`, 4 examples) completes in <5 min ≈ **~$0.09**.
+    **Estimated cost.** ~$2.10/hr on a single A100-40GB. A smoke run
+    (`num_train_epochs=1`, 4 examples) completes in <5 min ≈ **~$0.18**.
     See [Modal pricing](https://modal.com/pricing) for current rates.
     """
 
@@ -75,10 +75,10 @@ def _imports():
 @markdown
 def _explain_model():
     """
-    ## Retarget the model to A10
+    ## Retarget the model to A100-40GB
 
     `Qwen3_0_6B` ships with `training.gpu_type="H100"` by default.
-    Subclass it and override `training` to target the A10 instead.
+    Subclass it and override `training` to target the A100-40GB instead.
     The architecture and download logic stay the same — only the
     infrastructure hint changes.
     """
@@ -86,11 +86,11 @@ def _explain_model():
 
 @code
 def _define_model():
-    class Qwen3_0_6B_A10(Qwen3_0_6B):
-        """Qwen3-0.6B retargeted for a single A10 GPU."""
+    class Qwen3_0_6B_A100(Qwen3_0_6B):
+        """Qwen3-0.6B retargeted for a single A100-40GB GPU."""
 
         training = ModelTrainingConfig(
-            gpu_type="A10",
+            gpu_type="A100-40GB",
             tensor_model_parallel_size=1,
             pipeline_model_parallel_size=1,
             lora_rank=8,
@@ -148,8 +148,8 @@ def _define_config():
 
     my_training_run = MsSwiftConfig(
         dataset=GSM8KDataset(HF_CACHE_PATH),
-        model=Qwen3_0_6B_A10(),
-        wandb=WandbConfig(project="qwen3-0.6b-sft-a10"),
+        model=Qwen3_0_6B_A100(),
+        wandb=WandbConfig(project="qwen3-0.6b-sft-a100"),
         framework_config=swift_framework_config,
     )
 
@@ -169,7 +169,7 @@ def _cost_estimate_section():
 def _cost_estimate():
     from modal_training_gym.common.cost import GPU_HOURLY_PRICES, estimate_cost
 
-    gpu_type = "A10"
+    gpu_type = "A100-40GB"
     n_gpus = 1
     estimated_minutes = 5  # smoke run; increase for full training
 

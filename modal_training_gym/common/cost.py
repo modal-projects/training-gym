@@ -13,17 +13,12 @@ from __future__ import annotations
 # Modal on-demand GPU prices in USD per hour (as of 2025-06).
 # Source: https://modal.com/pricing
 GPU_HOURLY_PRICES: dict[str, float] = {
-    "T4": 0.59,
-    "L4": 0.80,
-    "A10": 1.10,
-    "L40S": 1.95,
     "A100": 2.50,
     "A100-40GB": 2.10,
     "A100-80GB": 2.50,
     "H100": 3.95,
     "H200": 4.54,
     "B200": 6.25,
-    "B300": 6.25,  # same as B200 at launch; update when pricing diverges
 }
 
 

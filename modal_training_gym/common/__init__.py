@@ -17,7 +17,6 @@ COMMON_TRAINING_GYM_TAGS: dict[str, str] = {
 # Supported Modal GPU families across all frameworks. Framework configs
 # that accept a GPU name should annotate it with this type.
 GPUType = Literal[
-    "T4", "L4", "A10", "L40S",
     "A100", "A100-40GB", "A100-80GB",
-    "H100", "H200", "B200", "B300",
+    "H100", "H200", "B200",
 ]

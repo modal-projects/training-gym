@@ -40,7 +40,7 @@ context) and assume familiarity with the underlying framework.
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Est. Cost/hr | Launch |
 |---|---|---|---|---|---|---|
-| [`002_ms_swift_qwen3_0_6b`](sft/002_ms_swift_qwen3_0_6b/002_ms_swift_qwen3_0_6b.ipynb) | Qwen3-0.6B LoRA SFT on GSM8K — single A10 GPU | Beginner | `ms_swift` | 1 × 1×A10 | ~$1.10 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/devin/1777302694-single-node-tutorials-cost-estimation/tutorials/sft/002_ms_swift_qwen3_0_6b/002_ms_swift_qwen3_0_6b.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`002_ms_swift_qwen3_0_6b`](sft/002_ms_swift_qwen3_0_6b/002_ms_swift_qwen3_0_6b.ipynb) | Qwen3-0.6B LoRA SFT on GSM8K — single A100-40GB GPU | Beginner | `ms_swift` | 1 × 1×A100-40GB | ~$2.10 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/devin/1777302694-single-node-tutorials-cost-estimation/tutorials/sft/002_ms_swift_qwen3_0_6b/002_ms_swift_qwen3_0_6b.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`001_ms_swift`](sft/001_ms_swift/001_ms_swift.ipynb) | GLM-4.7 LoRA SFT on GSM8K (Megatron) | Advanced | `ms_swift` | 4 × 8×H100 | ~$126.40 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/devin/1777302694-single-node-tutorials-cost-estimation/tutorials/sft/001_ms_swift/001_ms_swift.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### Misc
@@ -96,7 +96,7 @@ drives the catalog table above. Fields:
 | `summary` | yes | One-line description of what the tutorial trains |
 | `difficulty` | recommended | One of `'Beginner'`, `'Intermediate'`, `'Advanced'`. Falls back to `—` if omitted. See the column description at the top of this page for what each tier means. |
 | `order` | yes | Integer controlling row order in the catalog; lower appears earlier |
-| `gpu_type` | recommended | Modal GPU string (e.g. `'H100'`, `'A100'`, `'A10'`). Used to compute the Est. Cost/hr column. |
+| `gpu_type` | recommended | Modal GPU string (e.g. `'H100'`, `'A100'`, `'A100-40GB'`). Used to compute the Est. Cost/hr column. |
 | `n_gpus` | recommended | Total GPU count across all nodes. Used with `gpu_type` to compute the Est. Cost/hr column. |
 
 ### Writing style
