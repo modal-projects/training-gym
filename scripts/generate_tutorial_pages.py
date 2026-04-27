@@ -126,8 +126,10 @@ def generate_tutorial_page(
         if cell_type == "markdown":
             if first_markdown and found_h1:
                 content_lines = content.splitlines()
-                content_lines = [l for i, l in enumerate(content_lines)
-                                 if not (l.startswith("# ") and i == 0)]
+                content_lines = [
+                    line for i, line in enumerate(content_lines)
+                    if not (line.startswith("# ") and i == 0)
+                ]
                 content = "\n".join(content_lines).strip()
                 first_markdown = False
             if content:

@@ -29,6 +29,7 @@ import pathlib
 import shlex
 import time
 from contextlib import asynccontextmanager, suppress
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -55,8 +56,6 @@ from .config import (
     HF_CACHE_PATH,
     HarborConfig,
     MILES_SRC_PATH,
-    ROLLOUT_PROXY_PORT,
-    ROLLOUT_ROUTER_PORT,
 )
 from .observability import (
     OBSERVABILITY_COMMIT_INTERVAL_ENV,

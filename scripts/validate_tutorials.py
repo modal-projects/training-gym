@@ -93,8 +93,8 @@ class TutorialTarget:
     target_name: str
     target_type: TargetType
     prereq_commands: list[str]
-    joy/initial-setup_command: str
-    joy/initial-setup_is_detached: bool
+    main_command: str
+    main_is_detached: bool
     progress_markers: list[str]
     progress_timeout_s: int = DEFAULT_PROGRESS_TIMEOUT
     metadata: dict = field(default_factory=dict)
@@ -227,8 +227,8 @@ def _derive_targets(
                 target_name=stem,
                 target_type=target_type,
                 prereq_commands=[],
-                joy/initial-setup_command="",
-                joy/initial-setup_is_detached=False,
+                main_command="",
+                main_is_detached=False,
                 progress_markers=markers,
                 progress_timeout_s=timeout,
                 metadata=metadata,
@@ -255,10 +255,10 @@ def _derive_targets(
 
     if not detached_indices:
         all_cmds = [r.command for r in deduped]
-        joy/initial-setup_cmd = all_cmds[-1] if all_cmds else ""
+        main_cmd = all_cmds[-1] if all_cmds else ""
         prereqs = all_cmds[:-1] if len(all_cmds) > 1 else []
-        if train_suffix and joy/initial-setup_cmd:
-            joy/initial-setup_cmd = f"{joy/initial-setup_cmd} {train_suffix}"
+        if train_suffix and main_cmd:
+            main_cmd = f"{main_cmd} {train_suffix}"
         return [
             TutorialTarget(
                 tutorial_stem=stem,
@@ -268,8 +268,8 @@ def _derive_targets(
                 target_name=stem,
                 target_type=target_type,
                 prereq_commands=prereqs,
-                joy/initial-setup_command=joy/initial-setup_cmd,
-                joy/initial-setup_is_detached=False,
+                main_command=main_cmd,
+                main_is_detached=False,
                 progress_markers=markers,
                 progress_timeout_s=timeout,
                 metadata=metadata,
@@ -289,9 +289,9 @@ def _derive_targets(
             if not det_prefix or not r_prefix or r_prefix == det_prefix:
                 prereqs.append(r.command)
 
-        joy/initial-setup_cmd = detached_rec.command
+        main_cmd = detached_rec.command
         if train_suffix:
-            joy/initial-setup_cmd = f"{joy/initial-setup_cmd} {train_suffix}"
+            main_cmd = f"{main_cmd} {train_suffix}"
 
         target_name = stem
         if len(detached_indices) > 1:
@@ -308,8 +308,8 @@ def _derive_targets(
                 target_name=target_name,
                 target_type=target_type,
                 prereq_commands=prereqs,
-                joy/initial-setup_command=joy/initial-setup_cmd,
-                joy/initial-setup_is_detached=True,
+                main_command=main_cmd,
+                main_is_detached=True,
                 progress_markers=markers,
                 progress_timeout_s=timeout,
                 metadata=metadata,
@@ -439,7 +439,7 @@ def run_preflight(target: TutorialTarget) -> ValidationResult | None:
 
     if target.target_type != TargetType.CONCEPT_ONLY and target.generated_py.exists():
         all_commands = target.prereq_commands + (
-            [target.joy/initial-setup_command] if target.joy/initial-setup_command else []
+            [target.main_command] if target.main_command else []
         )
         for cmd in all_commands:
             match = re.search(r"::([\w.]+)", cmd)
@@ -928,7 +928,7 @@ def validate_remote_target(target: TutorialTarget) -> ValidationResult:
                 wall_time_s=time.monotonic() - start,
             )
 
-    if not target.joy/initial-setup_command:
+    if not target.main_command:
         return ValidationResult(
             tutorial=target.tutorial_stem,
             target=target.target_name,
@@ -941,57 +941,57 @@ def validate_remote_target(target: TutorialTarget) -> ValidationResult:
         )
 
     print(
-        f"\n    main: {target.joy/initial-setup_command} {'(detached)' if target.joy/initial-setup_is_detached else '(attached)'}",
+        f"\n    main: {target.main_command} {'(detached)' if target.main_is_detached else '(attached)'}",
         flush=True,
     )
 
-    if target.joy/initial-setup_is_detached:
-        joy/initial-setup_result = _run_detached(
-            target.joy/initial-setup_command, target.progress_markers, target.progress_timeout_s
+    if target.main_is_detached:
+        main_result = _run_detached(
+            target.main_command, target.progress_markers, target.progress_timeout_s
         )
     else:
-        joy/initial-setup_result = _run_attached(
-            target.joy/initial-setup_command, timeout_s=target.progress_timeout_s
+        main_result = _run_attached(
+            target.main_command, timeout_s=target.progress_timeout_s
         )
 
-    stage_results.append(joy/initial-setup_result)
+    stage_results.append(main_result)
     wall = time.monotonic() - start
 
-    blocked = _detect_blocked_in_text(joy/initial-setup_result.stdout_tail + joy/initial-setup_result.stderr_tail)
+    blocked = _detect_blocked_in_text(main_result.stdout_tail + main_result.stderr_tail)
     if blocked:
         return ValidationResult(
             tutorial=target.tutorial_stem,
             target=target.target_name,
             target_type=target.target_type.value,
             outcome=Outcome.BLOCKED,
-            command=target.joy/initial-setup_command,
+            command=target.main_command,
             blocked_reason=blocked[0],
             reason_detail=blocked[1],
             stages=stage_results,
             wall_time_s=wall,
-            app_id=joy/initial-setup_result.app_id,
-            first_error=joy/initial-setup_result.first_error,
+            app_id=main_result.app_id,
+            first_error=main_result.first_error,
         )
 
-    if joy/initial-setup_result.first_signal:
+    if main_result.first_signal:
         return ValidationResult(
             tutorial=target.tutorial_stem,
             target=target.target_name,
             target_type=target.target_type.value,
             outcome=Outcome.PASS,
-            command=target.joy/initial-setup_command,
-            reason_detail=f"progress marker: {joy/initial-setup_result.first_signal}",
+            command=target.main_command,
+            reason_detail=f"progress marker: {main_result.first_signal}",
             stages=stage_results,
             wall_time_s=wall,
-            app_id=joy/initial-setup_result.app_id,
-            first_startup=joy/initial-setup_result.first_startup,
-            first_signal=joy/initial-setup_result.first_signal,
+            app_id=main_result.app_id,
+            first_startup=main_result.first_startup,
+            first_signal=main_result.first_signal,
         )
 
-    combined = joy/initial-setup_result.stdout_tail + joy/initial-setup_result.stderr_tail
+    combined = main_result.stdout_tail + main_result.stderr_tail
     marker_from_attached = (
         _find_marker_in_line(combined, target.progress_markers)
-        if not target.joy/initial-setup_is_detached
+        if not target.main_is_detached
         else None
     )
     if marker_from_attached:
@@ -1000,17 +1000,17 @@ def validate_remote_target(target: TutorialTarget) -> ValidationResult:
             target=target.target_name,
             target_type=target.target_type.value,
             outcome=Outcome.PASS,
-            command=target.joy/initial-setup_command,
+            command=target.main_command,
             reason_detail=f"progress marker: {marker_from_attached}",
             stages=stage_results,
             wall_time_s=wall,
-            app_id=joy/initial-setup_result.app_id,
+            app_id=main_result.app_id,
             first_signal=marker_from_attached,
         )
 
-    if joy/initial-setup_result.classified_failure:
-        fs = joy/initial-setup_result.classified_failure
-        detail = joy/initial-setup_result.first_error or f"classified as {fs.value}"
+    if main_result.classified_failure:
+        fs = main_result.classified_failure
+        detail = main_result.first_error or f"classified as {fs.value}"
         if fs in (
             FailureSource.GATED_ACCESS,
             FailureSource.SECRET_MISSING,
@@ -1026,21 +1026,21 @@ def validate_remote_target(target: TutorialTarget) -> ValidationResult:
                 target=target.target_name,
                 target_type=target.target_type.value,
                 outcome=Outcome.BLOCKED,
-                command=target.joy/initial-setup_command,
+                command=target.main_command,
                 blocked_reason=blocked_map[fs],
                 reason_detail=detail,
                 stages=stage_results,
                 wall_time_s=wall,
-                app_id=joy/initial-setup_result.app_id,
-                first_error=joy/initial-setup_result.first_error,
+                app_id=main_result.app_id,
+                first_error=main_result.first_error,
             )
-    elif joy/initial-setup_result.exit_code is None:
+    elif main_result.exit_code is None:
         fs = FailureSource.TIMEOUT
         detail = f"timed out after {target.progress_timeout_s}s without progress marker"
-    elif joy/initial-setup_result.exit_code != 0:
+    elif main_result.exit_code != 0:
         fs = FailureSource.TRAINING_RUNTIME
         detail = (
-            f"exited {joy/initial-setup_result.exit_code}: {joy/initial-setup_result.first_error or 'unknown'}"
+            f"exited {main_result.exit_code}: {main_result.first_error or 'unknown'}"
         )
     else:
         fs = FailureSource.UNKNOWN
@@ -1051,14 +1051,14 @@ def validate_remote_target(target: TutorialTarget) -> ValidationResult:
         target=target.target_name,
         target_type=target.target_type.value,
         outcome=Outcome.FAIL,
-        command=target.joy/initial-setup_command,
+        command=target.main_command,
         failure_source=fs,
         reason_detail=detail,
         stages=stage_results,
         wall_time_s=wall,
-        app_id=joy/initial-setup_result.app_id,
-        first_startup=joy/initial-setup_result.first_startup,
-        first_error=joy/initial-setup_result.first_error,
+        app_id=main_result.app_id,
+        first_startup=main_result.first_startup,
+        first_error=main_result.first_error,
     )
 
 
@@ -1214,13 +1214,13 @@ def main() -> None:
                 re.search(r"::([\w.]+)", c).group(1) if "::" in c else c
                 for c in t.prereq_commands
             ]
-            joy/initial-setup_ep = (
-                re.search(r"::([\w.]+)", t.joy/initial-setup_command).group(1)
-                if t.joy/initial-setup_command and "::" in t.joy/initial-setup_command
-                else t.joy/initial-setup_command or "(local)"
+            main_ep = (
+                re.search(r"::([\w.]+)", t.main_command).group(1)
+                if t.main_command and "::" in t.main_command
+                else t.main_command or "(local)"
             )
-            det = " [detached]" if t.joy/initial-setup_is_detached else ""
-            stages_str = " → ".join(prereq_eps + [f"{joy/initial-setup_ep}{det}"])
+            det = " [detached]" if t.main_is_detached else ""
+            stages_str = " → ".join(prereq_eps + [f"{main_ep}{det}"])
             print(
                 f"{t.tutorial_stem:<35} {t.target_name:<40} {t.target_type.value:<15} {stages_str}"
             )
@@ -1331,5 +1331,5 @@ def _write_reports(results: list[ValidationResult], args: argparse.Namespace) ->
         print(f"JSON report: {args.json_report}")
 
 
-if __name__ == "__joy/initial-setup__":
+if __name__ == "__main__":
     main()

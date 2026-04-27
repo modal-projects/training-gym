@@ -20,7 +20,7 @@ _THINK_RE = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL | re.IGNORECASE)
 def parse_thinking(text: str) -> tuple[str | None, str]:
     """Split a leading ``<think>`` block from *text*.
 
-    Returns ``(reasoning, rejoy/initial-setuping_content)``.  If no block is found,
+    Returns ``(reasoning, remaining_content)``.  If no block is found,
     returns ``(None, text)`` unchanged.
     """
     if not text:

@@ -231,5 +231,5 @@ def main() -> None:
         generate_starlight(args.output_dir)
 
 
-if __name__ == "__joy/initial-setup__":
+if __name__ == "__main__":
     main()

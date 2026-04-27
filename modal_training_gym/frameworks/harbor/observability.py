@@ -110,7 +110,6 @@ def _build_trajectory_turns(metadata: dict[str, Any]) -> list[dict[str, Any]]:
 def _serialize_sample(
     sample: Any, *, group_index: int, sample_index: int
 ) -> dict[str, Any]:
-    sample_json = _jsonable(sample)
     metadata = _jsonable(
         _sample_attr(sample, "metadata") or {}
     )

@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from dataclasses import field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from modal_training_gym.common import GPUType
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
@@ -25,7 +24,7 @@ if TYPE_CHECKING:
     from modal import App
 
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import ModelConfiguration, ModelTrainingConfig
+    from modal_training_gym.common.models import ModelConfiguration
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
