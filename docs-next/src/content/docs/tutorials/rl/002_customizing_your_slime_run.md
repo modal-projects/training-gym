@@ -171,5 +171,5 @@ app = my_training_run.build_app()
 - [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

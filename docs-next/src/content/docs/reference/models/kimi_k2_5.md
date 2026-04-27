@@ -28,4 +28,4 @@ Kimi K2.5 from Moonshot AI.
 
 Download or materialize weights into the model volume.
 
-**Source:** [`modal_training_gym/common/models/kimi_k2_5.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/models/kimi_k2_5.py)
+**Source:** [`modal_training_gym/common/models/kimi_k2_5.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/models/kimi_k2_5.py)

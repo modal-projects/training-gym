@@ -34,4 +34,4 @@ Download or materialize weights into the model volume.
 - [Qwen3-0.6B GRPO on GSM8K (colocated)](/tutorials/rl/001_slime_intro/)
 - [Qwen3-0.6B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/003_slime_with_llm_as_judge/)
 
-**Source:** [`modal_training_gym/common/models/qwen3_0_6b.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/models/qwen3_0_6b.py)
+**Source:** [`modal_training_gym/common/models/qwen3_0_6b.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/models/qwen3_0_6b.py)

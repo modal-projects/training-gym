@@ -149,5 +149,5 @@ browsing the checkpoints volume.
 - [`GLM_4_7`](/reference/models/glm_4_7/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/sft/001_ms_swift/001_ms_swift.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/001_ms_swift/001_ms_swift.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/001_ms_swift/001_ms_swift.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/sft/001_ms_swift/001_ms_swift.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/001_ms_swift/001_ms_swift.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/001_ms_swift/001_ms_swift.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

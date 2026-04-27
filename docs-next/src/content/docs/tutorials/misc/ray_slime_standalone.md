@@ -99,5 +99,5 @@ already wrap this same pattern plus their respective training CLIs.
 
 - [`ModalRayCluster`](/reference/core/modalraycluster/)
 
-**Source:** [`tutorials/misc/ray_slime_standalone/ray_slime_standalone.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/misc/ray_slime_standalone/ray_slime_standalone.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/misc/ray_slime_standalone/ray_slime_standalone.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/misc/ray_slime_standalone/ray_slime_standalone.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

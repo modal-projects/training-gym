@@ -338,7 +338,7 @@ def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[
     if backlinks:
         _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
 
-    lines.append(f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/joy/initial-setup/{module_path.replace('.', '/')}.py)")
+    lines.append(f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)")
     lines.append("")
 
     return "\n".join(lines)
@@ -443,7 +443,7 @@ def generate_behavior_page(cls: type, entry: dict, backlinks: dict[str, list[tup
     if backlinks:
         _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
 
-    lines.append(f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/joy/initial-setup/{module_path.replace('.', '/')}.py)")
+    lines.append(f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)")
     lines.append("")
 
     return "\n".join(lines)

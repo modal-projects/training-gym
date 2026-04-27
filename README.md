@@ -24,7 +24,7 @@ walkthrough; this README is the map.
 In a notebook or script:
 
 ```python
-! pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup
+! pip install -q git+https://github.com/modal-projects/training-gym.git@main
 ```
 
 Every generated tutorial notebook has this line as its first code cell.

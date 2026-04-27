@@ -139,5 +139,5 @@ app = my_training_run.build_app()
 - [`DatasetConfig`](/reference/core/datasetconfig/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/intro/002_custom_model/002_custom_model.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/intro/002_custom_model/002_custom_model.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/intro/002_custom_model/002_custom_model.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/intro/002_custom_model/002_custom_model.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/002_custom_model/002_custom_model.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/002_custom_model/002_custom_model.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

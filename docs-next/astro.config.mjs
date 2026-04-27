@@ -150,7 +150,7 @@ export default defineConfig({
       ],
       editLink: {
         baseUrl:
-          'https://github.com/modal-projects/training-gym/edit/joy/initial-setup/docs-next/src/content/docs/',
+          'https://github.com/modal-projects/training-gym/edit/main/docs-next/src/content/docs/',
       },
       lastUpdated: true,
       disable404Route: true,

@@ -83,7 +83,7 @@ class GSM8KDataset(DatasetConfig):
         try:
             ds = load_dataset(self._hf_dataset, split=self._split)
         except ValueError:
-            ds = load_dataset(self._hf_dataset, "joy/initial-setup", split=self._split)
+            ds = load_dataset(self._hf_dataset, "main", split=self._split)
 
         out_path = f"{output_dir}/training.jsonl"
         with open(out_path, "w") as f:
@@ -167,5 +167,5 @@ app = my_training_run.build_app()
 - [`GLM_4_7`](/reference/models/glm_4_7/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

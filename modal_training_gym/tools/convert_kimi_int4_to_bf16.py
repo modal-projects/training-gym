@@ -255,4 +255,4 @@ def main():
 
 
 if __name__ == "__joy/initial-setup__":
-    joy/initial-setup()
+    main()

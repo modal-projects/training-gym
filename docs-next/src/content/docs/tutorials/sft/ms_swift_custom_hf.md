@@ -110,7 +110,7 @@ class TinyGSM8KDataset(DatasetConfig):
         try:
             ds = load_dataset(self._hf_dataset, split=self._split)
         except ValueError:
-            ds = load_dataset(self._hf_dataset, "joy/initial-setup", split=self._split)
+            ds = load_dataset(self._hf_dataset, "main", split=self._split)
 
         out_path = f"{output_dir}/training.jsonl"
         with open(out_path, "w") as f:
@@ -176,5 +176,5 @@ app = my_training_run.build_app()
 - [`DatasetConfig`](/reference/core/datasetconfig/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

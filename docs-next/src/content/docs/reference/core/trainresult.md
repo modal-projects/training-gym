@@ -97,4 +97,4 @@ Fetch the W&B run summary (final metric values).
 
 Return the W&B run URL, or None if W&B info is not set.
 
-**Source:** [`modal_training_gym/common/train_result.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/train_result.py)
+**Source:** [`modal_training_gym/common/train_result.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/train_result.py)

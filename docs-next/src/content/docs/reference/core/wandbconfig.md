@@ -31,4 +31,4 @@ Weights & Biases logging configuration shared across all frameworks.
 - [Qwen3-4B RL code-golf on MBPP with Harbor sandboxes](/tutorials/rl/004_harbor_codegolf/)
 - [GLM-4.7 LoRA SFT on GSM8K (Megatron)](/tutorials/sft/001_ms_swift/)
 
-**Source:** [`modal_training_gym/common/wandb.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/wandb.py)
+**Source:** [`modal_training_gym/common/wandb.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/wandb.py)

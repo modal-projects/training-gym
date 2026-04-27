@@ -935,13 +935,13 @@ def validate_remote_target(target: TutorialTarget) -> ValidationResult:
             target_type=target.target_type.value,
             outcome=Outcome.FAIL,
             failure_source=FailureSource.UNKNOWN,
-            reason_detail="no joy/initial-setup command",
+            reason_detail="no main command",
             stages=stage_results,
             wall_time_s=time.monotonic() - start,
         )
 
     print(
-        f"\n    joy/initial-setup: {target.joy/initial-setup_command} {'(detached)' if target.joy/initial-setup_is_detached else '(attached)'}",
+        f"\n    main: {target.joy/initial-setup_command} {'(detached)' if target.joy/initial-setup_is_detached else '(attached)'}",
         flush=True,
     )
 
@@ -1332,4 +1332,4 @@ def _write_reports(results: list[ValidationResult], args: argparse.Namespace) ->
 
 
 if __name__ == "__joy/initial-setup__":
-    joy/initial-setup()
+    main()

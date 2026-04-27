@@ -28,4 +28,4 @@ Qwen3-32B (32 billion parameters) from Alibaba.
 
 Download or materialize weights into the model volume.
 
-**Source:** [`modal_training_gym/common/models/qwen3_32b.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/models/qwen3_32b.py)
+**Source:** [`modal_training_gym/common/models/qwen3_32b.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/models/qwen3_32b.py)

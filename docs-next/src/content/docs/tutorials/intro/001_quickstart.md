@@ -227,5 +227,5 @@ catalog in [`tutorials/README.md`](../README.md).
 - [`WandbConfig`](/reference/core/wandbconfig/)
 - [`SlimeConfig`](/reference/frameworks/slimeconfig/)
 
-**Source:** [`tutorials/intro/001_quickstart/001_quickstart.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/intro/001_quickstart/001_quickstart.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/intro/001_quickstart/001_quickstart.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/intro/001_quickstart/001_quickstart.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/001_quickstart/001_quickstart.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/001_quickstart/001_quickstart.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

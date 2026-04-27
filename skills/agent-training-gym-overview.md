@@ -215,7 +215,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
 
    @notebook_only
-   @shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup")
+   @shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
    def _install():
        pass
 

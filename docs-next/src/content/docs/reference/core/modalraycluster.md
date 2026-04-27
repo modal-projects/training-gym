@@ -49,4 +49,4 @@ Override to append flags to `ray start` on worker ranks.
 
 - [Ray-on-Modal pattern demo](/tutorials/misc/ray_slime_standalone/)
 
-**Source:** [`modal_training_gym/common/ray_cluster.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/common/ray_cluster.py)
+**Source:** [`modal_training_gym/common/ray_cluster.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/ray_cluster.py)

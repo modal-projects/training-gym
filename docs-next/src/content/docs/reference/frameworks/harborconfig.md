@@ -32,4 +32,4 @@ Emit Miles CLI flags from the model's HarborPreset (parallelism settings).
 
 - [Qwen3-4B RL code-golf on MBPP with Harbor sandboxes](/tutorials/rl/004_harbor_codegolf/)
 
-**Source:** [`modal_training_gym/frameworks/harbor/config.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/frameworks/harbor/config.py)
+**Source:** [`modal_training_gym/frameworks/harbor/config.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/frameworks/harbor/config.py)

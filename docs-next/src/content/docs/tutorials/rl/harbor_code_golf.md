@@ -345,5 +345,5 @@ app = harbor.build_app(name="harbor-code-golf")
 - [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/rl/harbor_code_golf/harbor_code_golf.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/harbor_code_golf/harbor_code_golf.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/harbor_code_golf/harbor_code_golf.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/rl/harbor_code_golf/harbor_code_golf.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/harbor_code_golf/harbor_code_golf.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/harbor_code_golf/harbor_code_golf.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

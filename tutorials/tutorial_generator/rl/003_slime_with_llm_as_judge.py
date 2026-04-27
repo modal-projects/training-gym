@@ -71,7 +71,7 @@ def _intro():
 
 
 @notebook_only
-@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@joy/initial-setup")
+@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
 def _install():
     pass
 
@@ -628,7 +628,7 @@ def _serve_section():
 
     and point `model_path` at whichever directory has a `config.json`.
     The reference
-    [qwen3-haiku `convert_torch_dist_to_hf.py`](https://github.com/modal-labs/qwen3-haiku/blob/joy/initial-setup/tools/convert_torch_dist_to_hf.py)
+    [qwen3-haiku `convert_torch_dist_to_hf.py`](https://github.com/modal-labs/qwen3-haiku/blob/main/tools/convert_torch_dist_to_hf.py)
     is a worked example of the conversion flow if you need it.
     """
 

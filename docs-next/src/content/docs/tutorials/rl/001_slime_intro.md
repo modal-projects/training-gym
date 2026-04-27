@@ -217,5 +217,5 @@ metrics = result.wandb_metrics(keys=["train/loss", "train/reward"])
 - [`Qwen3_0_6B`](/reference/models/qwen3_0_6b/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/rl/001_slime_intro/001_slime_intro.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/001_slime_intro/001_slime_intro.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/001_slime_intro/001_slime_intro.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/rl/001_slime_intro/001_slime_intro.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_slime_intro/001_slime_intro.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_slime_intro/001_slime_intro.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

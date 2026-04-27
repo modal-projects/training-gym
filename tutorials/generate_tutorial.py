@@ -100,7 +100,7 @@ def _resolve_branch() -> str:
     if _branch_exists_on_origin(branch):
         return branch
 
-    return "joy/initial-setup"
+    return "main"
 
 
 _BRANCH = _resolve_branch()

@@ -24,4 +24,4 @@ Top-level wrapper that composes a Miles RLVR training run.
 
 ### `build_app(self, *, name: 'str | None' = None) -> "'App'"`
 
-**Source:** [`modal_training_gym/frameworks/miles/config.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/modal_training_gym/frameworks/miles/config.py)
+**Source:** [`modal_training_gym/frameworks/miles/config.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/frameworks/miles/config.py)

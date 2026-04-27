@@ -52,7 +52,7 @@ def current_ref() -> str:
     branch = result.stdout.strip()
     if branch_exists_on_origin(branch):
         return branch
-    return "joy/initial-setup"
+    return "main"
 
 
 REF = current_ref()
@@ -232,4 +232,4 @@ def main() -> None:
 
 
 if __name__ == "__joy/initial-setup__":
-    joy/initial-setup()
+    main()

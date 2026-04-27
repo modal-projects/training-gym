@@ -368,7 +368,7 @@ modal volume ls slime-checkpoints qwen3-0.6b-haiku/
 
 and point `model_path` at whichever directory has a `config.json`.
 The reference
-[qwen3-haiku `convert_torch_dist_to_hf.py`](https://github.com/modal-labs/qwen3-haiku/blob/joy/initial-setup/tools/convert_torch_dist_to_hf.py)
+[qwen3-haiku `convert_torch_dist_to_hf.py`](https://github.com/modal-labs/qwen3-haiku/blob/main/tools/convert_torch_dist_to_hf.py)
 is a worked example of the conversion flow if you need it.
 
 ```python
@@ -410,5 +410,5 @@ serve_app = build_vllm_serve_app(
 - [`WandbConfig`](/reference/core/wandbconfig/)
 - [`LlmJudge`](/reference/core/llmjudge/)
 
-**Source:** [`tutorials/rl/slime_haiku/slime_haiku.py`](https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/slime_haiku/slime_haiku.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/initial-setup/tutorials/rl/slime_haiku/slime_haiku.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/rl/slime_haiku/slime_haiku.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_haiku/slime_haiku.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_haiku/slime_haiku.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
