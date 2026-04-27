@@ -62,7 +62,7 @@ def format_cost_range(
 
     Example output::
 
-        ~$0.33 (smoke, ~5 min) — ~$3.95/hr (full run) on 1×A10
+        ~$0.33 (smoke, ~5 min) — ~$3.95/hr (full run) on H100
     """
     smoke_cost = estimate_cost(gpu_type, n_gpus, smoke_minutes / 60)
     full_cost = estimate_cost(gpu_type, n_gpus, full_hours)
