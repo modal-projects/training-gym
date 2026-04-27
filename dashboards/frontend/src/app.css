@@ -1,0 +1,31 @@
+:root {
+  --bg: #0f0f0f;
+  --panel: #141414;
+  --panel-alt: #181818;
+  --surface: #1d1d1d;
+  --border: #2f2f2f;
+  --border-strong: #464646;
+  --text: #c7c7c7;
+  --text-bright: #e8e8e8;
+  --muted: #a3a3a3;
+  --accent: #7fee64;
+  --accent-dim: rgba(127, 238, 100, 0.12);
+  --green: #7fee64;
+  --yellow: #fbbf24;
+  --red: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fira+Mono:wght@400&display=swap');
+
+body {
+  font: 14px/1.5 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}

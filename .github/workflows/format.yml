@@ -1,0 +1,25 @@
+name: CI/CD
+
+
+on:
+  pull_request:
+
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: "check"
+
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: "format --check"

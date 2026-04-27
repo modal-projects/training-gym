@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: regenerate-tutorials
+        name: Regenerate tutorials (tutorials/generate_tutorial.py)
+        entry: uv run python tutorials/generate_tutorial.py
+        language: system
+        pass_filenames: false
+        # Run only when the generator or a tutorial source file changes.
+        # Regenerated outputs land in tutorials/<name>/; if they differ from
+        # what's committed, pre-commit fails the commit so you can `git add`
+        # the updated files and retry.
+        files: ^tutorials/(generate_tutorial\.py|tutorial_generator/.*\.py)$

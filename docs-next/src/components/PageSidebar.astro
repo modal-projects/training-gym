@@ -1,0 +1,41 @@
+---
+import MobileTableOfContents from '@astrojs/starlight/components/MobileTableOfContents.astro';
+import TableOfContents from '@astrojs/starlight/components/TableOfContents.astro';
+
+const currentPath = Astro.url.pathname;
+const primaryHref = currentPath.startsWith('/tutorials/') ? '/' : '/tutorials/';
+const primaryLabel = currentPath.startsWith('/tutorials/') ? 'Read overview' : 'Open tutorials';
+---
+
+{
+  Astro.locals.starlightRoute.toc && (
+    <>
+      <div class="lg:sl-hidden">
+        <MobileTableOfContents />
+      </div>
+      <div class="right-sidebar-panel sl-hidden lg:sl-block">
+        <div class="sl-container tg-right-rail">
+          <div class="tg-right-rail__toc">
+            <TableOfContents />
+          </div>
+          <aside class="tg-right-rail__cta">
+            <p class="tg-right-rail__eyebrow">Training Gym</p>
+            <h2>Run distributed training on Modal.</h2>
+            <p>Browse the runnable notebooks and framework launchers that ship with this repo.</p>
+            <div class="tg-right-rail__links">
+              <a class="tg-action-button tg-action-button--primary" href={primaryHref}>
+                {primaryLabel}
+              </a>
+              <a
+                class="tg-action-button tg-action-button--ghost"
+                href="https://github.com/modal-projects/training-gym"
+              >
+                GitHub repo
+              </a>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </>
+  )
+}
