@@ -152,6 +152,24 @@ my_training_run = SlimeConfig(
     rollout_batch_size=64,
 )
 
+# ## Cost estimate
+#
+# Run the cell below to see what this training run will cost before
+# you launch it. Adjust `estimated_minutes` to match your expected
+# wall-clock time.
+
+from modal_training_gym.common.cost import GPU_HOURLY_PRICES, estimate_cost
+
+gpu_type = "H100"
+n_gpus = 32
+estimated_minutes = 60  # multi-hour run for real training
+
+hourly = estimate_cost(gpu_type, n_gpus, hours=1)
+smoke = estimate_cost(gpu_type, n_gpus, hours=estimated_minutes / 60)
+print(f"GPU: {n_gpus}×{gpu_type} @ ${GPU_HOURLY_PRICES[gpu_type]:.2f}/GPU/hr")
+print(f"Estimated cost ({estimated_minutes} min run): ${smoke:.2f}")
+print(f"Estimated cost (1 hr full run):  ${hourly:.2f}")
+
 app = my_training_run.build_app()
 
 # From the CLI:
