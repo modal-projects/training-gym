@@ -328,7 +328,6 @@ def build_slime_app(
             await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
 
         # Persist TrainResult for post-training evals
-        from modal_training_gym.common.train_result import TrainResult
 
         run_id = f"train_{int(time.time())}"
         checkpoint_dir = slime.save if slime.save else str(CHECKPOINTS_PATH)

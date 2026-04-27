@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS, GPUType
+from modal_training_gym.common import GPUType
 
 if TYPE_CHECKING:
     from modal import App, Volume

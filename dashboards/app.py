@@ -184,7 +184,6 @@ def refresh_training_metadata():
 @modal.asgi_app()
 def fastapi_app():
     import asyncio
-    import json
     import time
     from pathlib import Path
 

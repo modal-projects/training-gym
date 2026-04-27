@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from modal import App
 
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import ModelConfiguration, ModelTrainingConfig
+    from modal_training_gym.common.models import ModelConfiguration
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────

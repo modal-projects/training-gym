@@ -246,17 +246,17 @@ def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[
     module_path = entry["module"]
 
     lines = [
-        f"---",
+        "---",
         f"title: {entry['sidebar_label']}",
         f"description: API reference for {entry['class_name']}",
-        f"---",
-        f"",
+        "---",
+        "",
         f"# {entry['class_name']}",
-        f"",
-        f"```python",
+        "",
+        "```python",
         f"from {module_path} import {entry['class_name']}",
-        f"```",
-        f"",
+        "```",
+        "",
     ]
 
     if first_para:
@@ -351,17 +351,17 @@ def generate_behavior_page(cls: type, entry: dict, backlinks: dict[str, list[tup
     module_path = entry["module"]
 
     lines = [
-        f"---",
+        "---",
         f"title: {entry['sidebar_label']}",
         f"description: API reference for {entry['class_name']}",
-        f"---",
-        f"",
+        "---",
+        "",
         f"# {entry['class_name']}",
-        f"",
-        f"```python",
+        "",
+        "```python",
         f"from {module_path} import {entry['class_name']}",
-        f"```",
-        f"",
+        "```",
+        "",
     ]
 
     if first_para:

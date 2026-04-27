@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
-from modal_training_gym.common import GPUType
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import (
     ModelArchitecture,
@@ -63,7 +62,6 @@ _SLIME_SKIP = {
 YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
 
 
-from .preset import SlimePreset  # noqa: E402 — re-export
 
 
 class ModalConfig:
