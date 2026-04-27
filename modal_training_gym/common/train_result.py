@@ -360,7 +360,9 @@ class TrainResult:
         if not self.wandb_run_id or not self.wandb_project:
             return None
         entity = self.wandb_entity or "_"
-        return f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_run_id}"
+        return (
+            f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_run_id}"
+        )
 
     def wandb_metrics(
         self,
@@ -386,7 +388,11 @@ class TrainResult:
 
         api = wandb.Api()
         entity = self.wandb_entity or None
-        path = f"{entity}/{self.wandb_project}/{self.wandb_run_id}" if entity else f"{self.wandb_project}/{self.wandb_run_id}"
+        path = (
+            f"{entity}/{self.wandb_project}/{self.wandb_run_id}"
+            if entity
+            else f"{self.wandb_project}/{self.wandb_run_id}"
+        )
         run = api.run(path)
 
         if samples == 0:
@@ -402,6 +408,10 @@ class TrainResult:
 
         api = wandb.Api()
         entity = self.wandb_entity or None
-        path = f"{entity}/{self.wandb_project}/{self.wandb_run_id}" if entity else f"{self.wandb_project}/{self.wandb_run_id}"
+        path = (
+            f"{entity}/{self.wandb_project}/{self.wandb_run_id}"
+            if entity
+            else f"{self.wandb_project}/{self.wandb_run_id}"
+        )
         run = api.run(path)
         return dict(run.summary)

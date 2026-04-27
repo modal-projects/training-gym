@@ -45,7 +45,9 @@ async def generate(args, sample, sampling_params, evaluation: bool = False):
     from miles.utils.types import Sample
 
     state = GenerateState(args)
-    prompt_ids = sample.tokens or state.tokenizer.encode(sample.prompt, add_special_tokens=False)
+    prompt_ids = sample.tokens or state.tokenizer.encode(
+        sample.prompt, add_special_tokens=False
+    )
 
     internal_base_url = os.getenv("HARBOR_INTERNAL_BASE_URL", "").strip()
     if not internal_base_url:

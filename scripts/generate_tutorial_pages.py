@@ -69,16 +69,21 @@ def extract_cells(source_path: Path) -> list[tuple[str, str]]:
         elif dec_name == "code":
             body_lines = []
             first_line = node.body[0].lineno - 1
-            if (
-                isinstance(node.body[0], ast.Expr)
-                and isinstance(node.body[0].value, (ast.Constant, ast.Str))
+            if isinstance(node.body[0], ast.Expr) and isinstance(
+                node.body[0].value, (ast.Constant, ast.Str)
             ):
-                first_line = node.body[1].lineno - 1 if len(node.body) > 1 else node.end_lineno or first_line
-            last_line = (node.end_lineno or first_line + 1)
+                first_line = (
+                    node.body[1].lineno - 1
+                    if len(node.body) > 1
+                    else node.end_lineno or first_line
+                )
+            last_line = node.end_lineno or first_line + 1
             raw = source_lines[first_line:last_line]
             if raw:
                 indent = len(raw[0]) - len(raw[0].lstrip())
-                body_lines = [line[indent:] if len(line) > indent else "" for line in raw]
+                body_lines = [
+                    line[indent:] if len(line) > indent else "" for line in raw
+                ]
             cells.append(("code", "\n".join(body_lines).strip()))
         elif dec_name == "shell":
             if isinstance(decorator, ast.Call) and decorator.args:
@@ -101,7 +106,10 @@ def generate_tutorial_page(
     api_classes = metadata.get("api_classes", [])
     for cls_name in api_classes:
         if cls_name not in CLASS_REFERENCE_PATHS:
-            print(f"  WARNING: {source_path.name} references '{cls_name}' in api_classes but it is not in the manifest", file=sys.stderr)
+            print(
+                f"  WARNING: {source_path.name} references '{cls_name}' in api_classes but it is not in the manifest",
+                file=sys.stderr,
+            )
 
     title = metadata.get("summary", name)
     found_h1 = False
@@ -115,8 +123,8 @@ def generate_tutorial_page(
 
     lines = [
         "---",
-        f"title: \"{title}\"",
-        f"description: \"{metadata.get('summary', '')}\"",
+        f'title: "{title}"',
+        f'description: "{metadata.get("summary", "")}"',
         "---",
         "",
     ]
@@ -127,7 +135,8 @@ def generate_tutorial_page(
             if first_markdown and found_h1:
                 content_lines = content.splitlines()
                 content_lines = [
-                    line for i, line in enumerate(content_lines)
+                    line
+                    for i, line in enumerate(content_lines)
                     if not (line.startswith("# ") and i == 0)
                 ]
                 content = "\n".join(content_lines).strip()
@@ -163,7 +172,9 @@ def generate_tutorial_page(
     nb_path = f"tutorials/{bucket}/{name}/{name}.ipynb"
     nb_url = f"https://modal.com/notebooks/new/{REPO_URL}/blob/main/{nb_path}"
     lines.append(f"**Source:** [`{py_path}`]({REPO_URL}/blob/main/{py_path})")
-    lines.append(f' | <a href="{nb_url}" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>')
+    lines.append(
+        f' | <a href="{nb_url}" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>'
+    )
     lines.append("")
 
     return "\n".join(lines)
@@ -172,7 +183,9 @@ def generate_tutorial_page(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate tutorial Starlight pages.")
     parser.add_argument(
-        "--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
         help="Output directory for tutorial pages.",
     )
     args = parser.parse_args()
@@ -198,9 +211,14 @@ def main() -> None:
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / f"{source_path.stem}.md"
             if out_path.exists():
-                print(f"  WARNING: overwriting existing tutorial page {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}", file=sys.stderr)
+                print(
+                    f"  WARNING: overwriting existing tutorial page {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}",
+                    file=sys.stderr,
+                )
             out_path.write_text(content)
-            print(f"  {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}")
+            print(
+                f"  {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}"
+            )
             generated += 1
 
     print(f"\nGenerated {generated} tutorial pages")

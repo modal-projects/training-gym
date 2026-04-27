@@ -26,7 +26,10 @@ def test_model_configuration_imports_and_constructs() -> None:
         ModelConfiguration,
     )
 
-    assert ModelConfiguration.__doc__ and "model identity" in ModelConfiguration.__doc__.lower()
+    assert (
+        ModelConfiguration.__doc__
+        and "model identity" in ModelConfiguration.__doc__.lower()
+    )
 
     kimi = Kimi_K2_5()
     assert kimi.model_name == "moonshotai/Kimi-K2.5"

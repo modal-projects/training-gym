@@ -123,7 +123,9 @@ def test_harbor_uses_sync_miles_entrypoint():
 
 def test_harbor_uses_custom_generate_hook_without_unsupported_flags():
     launcher_text = Path("modal_training_gym/frameworks/harbor/launcher.py").read_text()
-    assert _HARBOR_GENERATE_FN == "modal_training_gym.frameworks.harbor.generate.generate"
+    assert (
+        _HARBOR_GENERATE_FN == "modal_training_gym.frameworks.harbor.generate.generate"
+    )
     assert "--custom-agent-function-path" not in launcher_text
     assert "--generate-multi-samples" not in launcher_text
     assert "--rollout-function-path" not in launcher_text

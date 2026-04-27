@@ -336,6 +336,7 @@ def build_slime_app(
         if slime.wandb and slime.wandb.project:
             try:
                 import wandb
+
                 api = wandb.Api()
                 runs = api.runs(
                     slime.wandb.project,

@@ -62,8 +62,6 @@ _SLIME_SKIP = {
 YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
 
 
-
-
 class ModalConfig:
     """Modal infrastructure configuration for slime — image setup and dev overlays.
 
@@ -268,11 +266,13 @@ class SlimeConfig:
     name: str = ""
 
     # ── Launcher instructions (not slime CLI flags) ─────────────────────────
-    environment: dict = field(default_factory=lambda: {
-        "PYTHONPATH": "/root/Megatron-LM/",
-        "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-        "NCCL_NVLS_ENABLE": "1",
-    })
+    environment: dict = field(
+        default_factory=lambda: {
+            "PYTHONPATH": "/root/Megatron-LM/",
+            "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+            "NCCL_NVLS_ENABLE": "1",
+        }
+    )
     async_mode: bool = False
     slime_model_script: str = ""
     dataset: DatasetConfig | None = None
@@ -368,8 +368,14 @@ class SlimeConfig:
     # configs stay framework-agnostic.
 
     def __post_init__(self) -> None:
-        _PRESET_FIELDS = ("gpu_type", "actor_num_nodes", "actor_num_gpus_per_node",
-                          "colocate", "tensor_model_parallel_size", "sequence_parallel")
+        _PRESET_FIELDS = (
+            "gpu_type",
+            "actor_num_nodes",
+            "actor_num_gpus_per_node",
+            "colocate",
+            "tensor_model_parallel_size",
+            "sequence_parallel",
+        )
 
         if self.model is not None:
             preset = getattr(self.model, "slime", None)

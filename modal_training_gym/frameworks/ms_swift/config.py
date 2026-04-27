@@ -421,4 +421,6 @@ class MsSwiftConfig:
         from modal_training_gym.common.framework import resolve_app_name, resolve_gpu
 
         app_name = resolve_app_name("ms-swift", name or self.name, self.model)
-        return build_ms_swift_app(swift=self, gpu=resolve_gpu(self.model), name=app_name)
+        return build_ms_swift_app(
+            swift=self, gpu=resolve_gpu(self.model), name=app_name
+        )

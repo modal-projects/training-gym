@@ -278,13 +278,15 @@ def fastapi_app():
 
         key_list = [k.strip() for k in keys.split(",") if k.strip()] or None
         metrics = result.wandb_metrics(keys=key_list, samples=samples)
-        return JSONResponse({
-            "app_name": app_name,
-            "wandb_url": result.wandb_url(),
-            "run_id": result.run_id,
-            "wandb_run_id": result.wandb_run_id,
-            "metrics": metrics,
-        })
+        return JSONResponse(
+            {
+                "app_name": app_name,
+                "wandb_url": result.wandb_url(),
+                "run_id": result.run_id,
+                "wandb_run_id": result.wandb_run_id,
+                "metrics": metrics,
+            }
+        )
 
     @web.get("/api/wandb/{app_name}/summary")
     async def api_wandb_summary(app_name: str):
@@ -299,11 +301,13 @@ def fastapi_app():
             raise HTTPException(status_code=404, detail="No W&B run linked")
 
         summary = result.wandb_summary()
-        return JSONResponse({
-            "app_name": app_name,
-            "wandb_url": result.wandb_url(),
-            "summary": summary,
-        })
+        return JSONResponse(
+            {
+                "app_name": app_name,
+                "wandb_url": result.wandb_url(),
+                "summary": summary,
+            }
+        )
 
     @web.get("/api/train-results/{app_name}")
     async def api_train_result(app_name: str, run_id: str | None = None):

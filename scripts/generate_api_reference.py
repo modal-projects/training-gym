@@ -113,6 +113,7 @@ def _format_type(type_hint: Any) -> str:
 
 class _EffectiveDefault:
     """Wrapper for docstring-documented effective defaults."""
+
     def __init__(self, text: str):
         self.text = text
 
@@ -145,7 +146,11 @@ def _parse_docstring_groups(docstring: str) -> list[tuple[str, list[str]]]:
 
     for line in docstring.splitlines():
         stripped = line.strip()
-        if stripped.startswith("## ") and not stripped.startswith("## Fields") and not stripped.startswith("## Methods"):
+        if (
+            stripped.startswith("## ")
+            and not stripped.startswith("## Fields")
+            and not stripped.startswith("## Methods")
+        ):
             if current_group is not None:
                 groups.append((current_group, current_lines))
             current_group = stripped[3:].strip()
@@ -236,7 +241,9 @@ def _get_methods(cls: type) -> list[tuple[str, str, str]]:
     return methods
 
 
-def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None) -> str:
+def generate_config_data_page(
+    cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None
+) -> str:
     """Generate markdown for a config/data class."""
     docstring = inspect.getdoc(cls) or ""
     first_para = docstring.split("\n\n")[0] if docstring else ""
@@ -264,18 +271,25 @@ def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[
         lines.append("")
 
     parent_classes = [
-        b.__name__ for b in cls.__mro__[1:]
-        if b.__name__ not in ("object", "type") and b.__module__.startswith("modal_training_gym")
+        b.__name__
+        for b in cls.__mro__[1:]
+        if b.__name__ not in ("object", "type")
+        and b.__module__.startswith("modal_training_gym")
     ]
     if parent_classes:
-        lines.append(f"**Inherits from:** {', '.join(f'`{p}`' for p in parent_classes)}")
+        lines.append(
+            f"**Inherits from:** {', '.join(f'`{p}`' for p in parent_classes)}"
+        )
         lines.append("")
 
     if not attrs:
         return "\n".join(lines)
 
     if len(attrs) > 15 and not groups:
-        print(f"  WARNING: {entry['class_name']} has {len(attrs)} fields but no ## group headers in docstring", file=sys.stderr)
+        print(
+            f"  WARNING: {entry['class_name']} has {len(attrs)} fields but no ## group headers in docstring",
+            file=sys.stderr,
+        )
 
     if groups:
         group_field_names: set[str] = set()
@@ -290,7 +304,11 @@ def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[
                 for attr_name in list(attrs.keys()):
                     if attr_name in group_field_names:
                         continue
-                    if re.match(rf"^{attr_name}\s*:", stripped) or re.match(rf"^#.*{attr_name}", stripped) or attr_name in stripped:
+                    if (
+                        re.match(rf"^{attr_name}\s*:", stripped)
+                        or re.match(rf"^#.*{attr_name}", stripped)
+                        or attr_name in stripped
+                    ):
                         type_hint, default = attrs[attr_name]
                         desc = field_docs.get(attr_name, "")
                         lines.append(
@@ -338,13 +356,17 @@ def generate_config_data_page(cls: type, entry: dict, backlinks: dict[str, list[
     if backlinks:
         _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
 
-    lines.append(f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)")
+    lines.append(
+        f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)"
+    )
     lines.append("")
 
     return "\n".join(lines)
 
 
-def generate_behavior_page(cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None) -> str:
+def generate_behavior_page(
+    cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None
+) -> str:
     """Generate markdown for a behavior class."""
     docstring = inspect.getdoc(cls) or ""
     first_para = docstring.split("\n\n")[0] if docstring else ""
@@ -369,21 +391,22 @@ def generate_behavior_page(cls: type, entry: dict, backlinks: dict[str, list[tup
         lines.append("")
 
     parent_classes = [
-        b.__name__ for b in cls.__mro__[1:]
-        if b.__name__ not in ("object", "type") and b.__module__.startswith("modal_training_gym")
+        b.__name__
+        for b in cls.__mro__[1:]
+        if b.__name__ not in ("object", "type")
+        and b.__module__.startswith("modal_training_gym")
     ]
     if parent_classes:
-        lines.append(f"**Inherits from:** {', '.join(f'`{p}`' for p in parent_classes)}")
+        lines.append(
+            f"**Inherits from:** {', '.join(f'`{p}`' for p in parent_classes)}"
+        )
         lines.append("")
 
     init = getattr(cls, "__init__", None)
     if init:
         try:
             sig = inspect.signature(init)
-            params = {
-                k: v for k, v in sig.parameters.items()
-                if k != "self"
-            }
+            params = {k: v for k, v in sig.parameters.items() if k != "self"}
         except (ValueError, TypeError):
             params = {}
 
@@ -409,8 +432,16 @@ def generate_behavior_page(cls: type, entry: dict, backlinks: dict[str, list[tup
             for pname, param in params.items():
                 if param.kind == param.VAR_KEYWORD:
                     continue
-                type_str = _format_type(param.annotation) if param.annotation is not param.empty else ""
-                default_str = _format_default(param.default) if param.default is not param.empty else "*required*"
+                type_str = (
+                    _format_type(param.annotation)
+                    if param.annotation is not param.empty
+                    else ""
+                )
+                default_str = (
+                    _format_default(param.default)
+                    if param.default is not param.empty
+                    else "*required*"
+                )
                 desc = param_docs.get(pname, "")
                 lines.append(f"| `{pname}` | `{type_str}` | {default_str} | {desc} |")
             lines.append("")
@@ -443,7 +474,9 @@ def generate_behavior_page(cls: type, entry: dict, backlinks: dict[str, list[tup
     if backlinks:
         _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
 
-    lines.append(f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)")
+    lines.append(
+        f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)"
+    )
     lines.append("")
 
     return "\n".join(lines)
@@ -513,7 +546,10 @@ def _build_tutorial_backlinks() -> dict[str, list[tuple[str, str]]]:
             for node in _ast.walk(tree):
                 if isinstance(node, _ast.Assign):
                     for target in node.targets:
-                        if isinstance(target, _ast.Name) and target.id == "TUTORIAL_METADATA":
+                        if (
+                            isinstance(target, _ast.Name)
+                            and target.id == "TUTORIAL_METADATA"
+                        ):
                             try:
                                 metadata = _ast.literal_eval(node.value)
                             except (ValueError, TypeError):
@@ -522,11 +558,15 @@ def _build_tutorial_backlinks() -> dict[str, list[tuple[str, str]]]:
                             api_classes = metadata.get("api_classes", [])
                             tutorial_path = f"/tutorials/{bucket}/{src.stem}/"
                             for cls_name in api_classes:
-                                backlinks.setdefault(cls_name, []).append((summary, tutorial_path))
+                                backlinks.setdefault(cls_name, []).append(
+                                    (summary, tutorial_path)
+                                )
     return backlinks
 
 
-def _append_tutorial_backlinks(lines: list[str], class_name: str, backlinks: dict[str, list[tuple[str, str]]]) -> None:
+def _append_tutorial_backlinks(
+    lines: list[str], class_name: str, backlinks: dict[str, list[tuple[str, str]]]
+) -> None:
     """Append a Related Tutorials section if any tutorials reference this class."""
     tutorials = backlinks.get(class_name, [])
     if not tutorials:
@@ -541,7 +581,9 @@ def _append_tutorial_backlinks(lines: list[str], class_name: str, backlinks: dic
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate API reference pages.")
     parser.add_argument(
-        "--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
         help="Output directory for reference pages.",
     )
     args = parser.parse_args()
@@ -570,13 +612,17 @@ def main() -> None:
         out_path = group_dir / f"{slug}.md"
         out_path.write_text(content)
         generated += 1
-        print(f"  {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}")
+        print(
+            f"  {out_path.relative_to(ROOT) if out_path.is_relative_to(ROOT) else out_path}"
+        )
 
     index_content = generate_index_page(API_REFERENCE_MANIFEST)
     index_path = output_dir / "index.md"
     index_path.parent.mkdir(parents=True, exist_ok=True)
     index_path.write_text(index_content)
-    print(f"  {index_path.relative_to(ROOT) if index_path.is_relative_to(ROOT) else index_path}")
+    print(
+        f"  {index_path.relative_to(ROOT) if index_path.is_relative_to(ROOT) else index_path}"
+    )
 
     print(f"\nGenerated {generated} reference pages + 1 index page")
     if errors:

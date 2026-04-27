@@ -70,8 +70,10 @@ def resolve_app_name(
         name = f"{framework}-{slug}"
     else:
         name = f"{framework}-run"
-    print(f"[training-gym] App name not set — using '{name}'. "
-          f"Set name= on your config to customize.")
+    print(
+        f"[training-gym] App name not set — using '{name}'. "
+        f"Set name= on your config to customize."
+    )
     return name
 
 
@@ -83,8 +85,7 @@ def resolve_gpu(model: Any) -> str:
     """
     if model is None:
         raise ValueError(
-            "Cannot resolve GPU: no model attached. "
-            "Set model= on your config."
+            "Cannot resolve GPU: no model attached. Set model= on your config."
         )
     if hasattr(model, "gpu_type") and model.gpu_type:
         return model.gpu_type

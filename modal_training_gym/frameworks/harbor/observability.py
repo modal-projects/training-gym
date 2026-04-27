@@ -81,9 +81,7 @@ def _jsonable(value: Any) -> Any:
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", dir=path.parent, delete=False
-    ) as fh:
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False) as fh:
         json.dump(_jsonable(payload), fh, indent=2, sort_keys=True)
         fh.write("\n")
         tmp = Path(fh.name)
@@ -93,6 +91,7 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Helpers to extract fields from a Miles Sample
 # ---------------------------------------------------------------------------
+
 
 def _sample_attr(sample: Any, *names: str) -> Any:
     for name in names:
@@ -110,19 +109,15 @@ def _build_trajectory_turns(metadata: dict[str, Any]) -> list[dict[str, Any]]:
 def _serialize_sample(
     sample: Any, *, group_index: int, sample_index: int
 ) -> dict[str, Any]:
-    metadata = _jsonable(
-        _sample_attr(sample, "metadata") or {}
-    )
+    metadata = _jsonable(_sample_attr(sample, "metadata") or {})
     if not isinstance(metadata, dict):
         metadata = {}
 
-    prompt = (
-        _sample_attr(sample, "prompt", "input_text", "instruction")
-        or metadata.get("observability_prompt")
-    )
-    trajectory_text = (
-        metadata.get("observability_response_text")
-        or metadata.get("observability_written_content")
+    prompt = _sample_attr(
+        sample, "prompt", "input_text", "instruction"
+    ) or metadata.get("observability_prompt")
+    trajectory_text = metadata.get("observability_response_text") or metadata.get(
+        "observability_written_content"
     )
     reward = metadata.get("reward", 0.0)
     trajectory_turns = _build_trajectory_turns(metadata)
@@ -138,12 +133,10 @@ def _serialize_sample(
         "eval_report": metadata.get("eval_report", {}),
         "agent_metrics": metadata.get("agent_metrics", {}),
         "task_name": (
-            metadata.get("harbor_task_name")
-            or metadata.get("observability_task_name")
+            metadata.get("harbor_task_name") or metadata.get("observability_task_name")
         ),
         "task_path": (
-            metadata.get("harbor_task_path")
-            or metadata.get("observability_task_path")
+            metadata.get("harbor_task_path") or metadata.get("observability_task_path")
         ),
         "agent_name": metadata.get("observability_agent_name"),
         "metadata": metadata,
@@ -153,6 +146,7 @@ def _serialize_sample(
 # ---------------------------------------------------------------------------
 # Write-side: called during training
 # ---------------------------------------------------------------------------
+
 
 def build_rollout_record(
     *,
@@ -171,11 +165,13 @@ def build_rollout_record(
             _serialize_sample(s, group_index=gi, sample_index=si)
             for si, s in enumerate(samples)
         ]
-        groups.append({
-            "group_index": gi,
-            "sample_count": len(serialized),
-            "samples": serialized,
-        })
+        groups.append(
+            {
+                "group_index": gi,
+                "sample_count": len(serialized),
+                "samples": serialized,
+            }
+        )
         flat_rewards.extend(s["reward"] for s in serialized)
         flat_statuses.extend(s["exit_status"] for s in serialized)
 
@@ -189,9 +185,7 @@ def build_rollout_record(
         "metrics": _jsonable(getattr(output, "metrics", {}) or {}),
         "group_count": len(groups),
         "sample_count": sum(g["sample_count"] for g in groups),
-        "reward_mean": (
-            sum(flat_rewards) / len(flat_rewards) if flat_rewards else 0.0
-        ),
+        "reward_mean": (sum(flat_rewards) / len(flat_rewards) if flat_rewards else 0.0),
         "reward_max": max(flat_rewards) if flat_rewards else 0.0,
         "reward_min": min(flat_rewards) if flat_rewards else 0.0,
         "ok_count": ok,
@@ -237,16 +231,12 @@ async def record_rollout(output: Any, *, rollout_id: Any) -> None:
         logger.warning("Failed to record rollout %s: %s", rollout_id, exc)
 
 
-def initialize_run_manifest(
-    base_path: Path, manifest: dict[str, Any]
-) -> None:
+def initialize_run_manifest(base_path: Path, manifest: dict[str, Any]) -> None:
     path = base_path / manifest["run_id"] / "manifest.json"
     _atomic_write_json(path, manifest)
 
 
-def update_run_manifest(
-    base_path: Path, run_id: str, **updates: Any
-) -> None:
+def update_run_manifest(base_path: Path, run_id: str, **updates: Any) -> None:
     path = base_path / run_id / "manifest.json"
     payload: dict[str, Any] = {}
     if path.exists():
@@ -259,11 +249,9 @@ def update_run_manifest(
 # Read-side: used by the dashboard
 # ---------------------------------------------------------------------------
 
+
 def _natural_sort_key(s: str) -> list[int | str]:
-    return [
-        int(p) if p.isdigit() else p.lower()
-        for p in re.split(r"(\d+)", s)
-    ]
+    return [int(p) if p.isdigit() else p.lower() for p in re.split(r"(\d+)", s)]
 
 
 def list_run_ids(base_path: Path) -> list[str]:
@@ -292,15 +280,11 @@ def list_rollout_ids(base_path: Path, run_id: str) -> list[str]:
     )
 
 
-def load_rollout(
-    base_path: Path, run_id: str, rollout_id: str
-) -> dict[str, Any]:
+def load_rollout(base_path: Path, run_id: str, rollout_id: str) -> dict[str, Any]:
     safe_id = re.sub(r"[^a-zA-Z0-9._-]+", "-", rollout_id).strip("-")
     path = base_path / run_id / "rollouts" / f"{safe_id}.json"
     if not path.exists():
-        raise FileNotFoundError(
-            f"Rollout {rollout_id} not found for run {run_id}"
-        )
+        raise FileNotFoundError(f"Rollout {rollout_id} not found for run {run_id}")
     return json.loads(path.read_text())
 
 
@@ -310,9 +294,7 @@ def list_run_manifests(base_path: Path) -> list[dict[str, Any]]:
         manifest = load_manifest(base_path, run_id)
         rollout_dir = base_path / run_id / "rollouts"
         manifest["rollout_count"] = (
-            sum(1 for _ in rollout_dir.glob("*.json"))
-            if rollout_dir.exists()
-            else 0
+            sum(1 for _ in rollout_dir.glob("*.json")) if rollout_dir.exists() else 0
         )
         manifests.append(manifest)
     return manifests
@@ -333,14 +315,16 @@ def summarize_run(base_path: Path, run_id: str) -> dict[str, Any]:
             for g in rollout.get("groups", [])
             for s in g.get("samples", [])
         )
-        rollout_summaries.append({
-            "rollout_id": rollout.get("rollout_id", rid),
-            "recorded_at": rollout.get("recorded_at"),
-            "sample_count": rollout.get("sample_count", 0),
-            "reward_mean": rollout.get("reward_mean", 0.0),
-            "ok_count": rollout.get("ok_count", 0),
-            "failure_count": rollout.get("failure_count", 0),
-        })
+        rollout_summaries.append(
+            {
+                "rollout_id": rollout.get("rollout_id", rid),
+                "recorded_at": rollout.get("recorded_at"),
+                "sample_count": rollout.get("sample_count", 0),
+                "reward_mean": rollout.get("reward_mean", 0.0),
+                "ok_count": rollout.get("ok_count", 0),
+                "failure_count": rollout.get("failure_count", 0),
+            }
+        )
 
     manifest = load_manifest(base_path, run_id)
     return {
@@ -353,9 +337,7 @@ def summarize_run(base_path: Path, run_id: str) -> dict[str, Any]:
         "sample_count": sample_count,
         "ok_count": ok_count,
         "failure_count": failure_count,
-        "reward_mean": (
-            sum(rewards) / len(rewards) if rewards else 0.0
-        ),
+        "reward_mean": (sum(rewards) / len(rewards) if rewards else 0.0),
         "reward_max": max(rewards) if rewards else 0.0,
         "reward_min": min(rewards) if rewards else 0.0,
         "rollouts": rollout_summaries,

@@ -1,7 +1,7 @@
 """Run all doc generators then build the Starlight site.
 
-    uv run python scripts/generate_all.py          # generate + build
-    uv run python scripts/generate_all.py --skip-build  # generate only
+uv run python scripts/generate_all.py          # generate + build
+uv run python scripts/generate_all.py --skip-build  # generate only
 """
 
 from __future__ import annotations
@@ -22,8 +22,12 @@ GENERATORS = [
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate all docs and build the site.")
-    parser.add_argument("--skip-build", action="store_true", help="Only run generators, skip npm build")
+    parser = argparse.ArgumentParser(
+        description="Generate all docs and build the site."
+    )
+    parser.add_argument(
+        "--skip-build", action="store_true", help="Only run generators, skip npm build"
+    )
     args = parser.parse_args()
 
     for cmd in GENERATORS:
