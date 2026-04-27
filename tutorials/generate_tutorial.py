@@ -314,20 +314,49 @@ def _render_launch_cell(bucket: str, name: str) -> str:
     )
 
 
+def _format_cost(meta: dict) -> str:
+    """Format a cost string from tutorial metadata.
+
+    Uses ``cost_per_hour`` if present; otherwise derives cost from
+    ``gpu_type`` and ``n_gpus`` using the price table in
+    ``modal_training_gym.common.cost``.  Returns ``—`` for concept-only
+    tutorials that don't launch GPU jobs.
+    """
+    if "cost_per_hour" in meta:
+        return f"~${meta['cost_per_hour']:.2f}"
+
+    gpu_type = meta.get("gpu_type")
+    n_gpus = meta.get("n_gpus")
+    if gpu_type and n_gpus:
+        # Inline price lookup to avoid importing the package at generation
+        # time (the generator runs without installing modal-training-gym).
+        _PRICES = {
+            "T4": 0.59, "L4": 0.80, "A10": 1.10, "L40S": 1.95,
+            "A100": 2.50, "A100-40GB": 2.10, "A100-80GB": 2.50,
+            "H100": 3.95, "H200": 4.54, "B200": 6.25, "B300": 6.25,
+        }
+        price = _PRICES.get(gpu_type)
+        if price is not None:
+            return f"~${price * n_gpus:.2f}"
+
+    return "—"
+
+
 def _render_tutorial_table(bucket: str, bucket_entries: list[tuple[str, str, dict]]) -> str:
     lines = [
-        "| Tutorial | Summary | Difficulty | Framework | Cluster | Launch |",
-        "|---|---|---|---|---|---|",
+        "| Tutorial | Summary | Difficulty | Framework | Cluster | Est. Cost/hr | Launch |",
+        "|---|---|---|---|---|---|---|",
     ]
     for _, name, meta in bucket_entries:
         summary = str(meta["summary"]).rstrip(".").replace("|", r"\|")
         difficulty = str(meta.get("difficulty", "—")).replace("|", r"\|")
         framework = str(meta["framework"]).replace("|", r"\|")
         cluster = str(meta["cluster_shape"]).replace("|", r"\|")
+        cost = _format_cost(meta)
         launch = _render_launch_cell(bucket, name)
         lines.append(
             f"| [`{name}`]({bucket}/{name}/{name}.ipynb) | {summary} | "
-            f"{difficulty} | {framework} | {cluster} | {launch} |"
+            f"{difficulty} | {framework} | {cluster} | {cost} | {launch} |"
         )
     return "\n".join(lines)
 

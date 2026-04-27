@@ -10,6 +10,8 @@ TUTORIAL_METADATA = {
     'summary': 'Customizing your slime run — scaling nodes, parallelism, and throughput',
     'difficulty': 'Intermediate',
     'order': 12,
+    'gpu_type': 'H100',
+    'n_gpus': 32,
     'api_classes': ['SlimeConfig', 'DatasetConfig', 'Qwen3_4B', 'WandbConfig'],
 }
 

@@ -11,6 +11,8 @@ TUTORIAL_METADATA = {
     'summary': 'Qwen3-4B RL code-golf on MBPP with Harbor sandboxes',
     'difficulty': 'Advanced',
     'order': 20,
+    'gpu_type': 'H100',
+    'n_gpus': 16,
     'api_classes': [
         'HarborConfig', 'HarborFrameworkConfig',
         'DatasetConfig', 'Qwen3_4B', 'WandbConfig',

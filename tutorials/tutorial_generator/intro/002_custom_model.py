@@ -12,6 +12,8 @@ TUTORIAL_METADATA = {
     'summary': 'Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry',
     'difficulty': 'Beginner',
     'order': 25,
+    'gpu_type': 'H100',
+    'n_gpus': 1,
     'api_classes': [
         'MsSwiftConfig', 'MsSwiftFrameworkConfig',
         'ModelConfiguration', 'DatasetConfig', 'WandbConfig',

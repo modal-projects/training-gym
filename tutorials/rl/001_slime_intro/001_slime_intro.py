@@ -34,6 +34,11 @@
 # - **Modal dashboard** — per-node GPU utilization and live logs. On a
 #   healthy run you'll see SGLang warm up, then alternating rollout /
 #   training phases.
+#
+# **Estimated cost.** ~$31.60/hr on 8×H100. For a cheaper alternative
+# using A100s, see
+# [`005_slime_single_gpu`](../005_slime_single_gpu/005_slime_single_gpu.ipynb).
+# See [Modal pricing](https://modal.com/pricing) for current rates.
 
 import modal
 

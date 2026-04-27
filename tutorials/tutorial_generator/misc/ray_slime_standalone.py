@@ -12,6 +12,8 @@ TUTORIAL_METADATA = {
     'summary': 'Ray-on-Modal pattern demo',
     'difficulty': 'Intermediate',
     'order': 100,
+    'gpu_type': 'H100',
+    'n_gpus': 16,
     'api_classes': ['ModalRayCluster'],
 }
 

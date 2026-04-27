@@ -11,6 +11,8 @@ TUTORIAL_METADATA = {
     'summary': 'Qwen3-0.6B GRPO on GSM8K (colocated)',
     'difficulty': 'Advanced',
     'order': 10,
+    'gpu_type': 'H100',
+    'n_gpus': 8,
     'api_classes': ['SlimeConfig', 'DatasetConfig', 'Qwen3_0_6B', 'WandbConfig'],
 }
 
@@ -54,6 +56,11 @@ def _intro():
     - **Modal dashboard** — per-node GPU utilization and live logs. On a
       healthy run you'll see SGLang warm up, then alternating rollout /
       training phases.
+
+    **Estimated cost.** ~$31.60/hr on 8×H100. For a cheaper alternative
+    using A100s, see
+    [`005_slime_single_gpu`](../005_slime_single_gpu/005_slime_single_gpu.ipynb).
+    See [Modal pricing](https://modal.com/pricing) for current rates.
     """
 
 

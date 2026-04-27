@@ -11,6 +11,8 @@ TUTORIAL_METADATA = {
     'summary': 'GLM-4.7 LoRA SFT on GSM8K (Megatron)',
     'difficulty': 'Advanced',
     'order': 20,
+    'gpu_type': 'H100',
+    'n_gpus': 32,
     'api_classes': [
         'MsSwiftConfig', 'MsSwiftFrameworkConfig',
         'DatasetConfig', 'GLM_4_7', 'WandbConfig',
@@ -51,6 +53,11 @@ def _intro():
     **What to watch.** W&B project `glm-4-7-sft`. Watch `train/loss`
     and `train/grad_norm`; LoRA converges quickly on GSM8K so expect
     loss to fall off within the first few hundred iters.
+
+    **Estimated cost.** ~$126.40/hr on 32×H100. For a cheaper
+    single-GPU alternative, see
+    [`002_ms_swift_qwen3_0_6b`](../002_ms_swift_qwen3_0_6b/002_ms_swift_qwen3_0_6b.ipynb).
+    See [Modal pricing](https://modal.com/pricing) for current rates.
     """
 
 
