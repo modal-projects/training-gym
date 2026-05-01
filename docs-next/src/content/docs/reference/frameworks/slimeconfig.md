@@ -18,7 +18,7 @@ slime GRPO training configuration.
 | `environment` | `dict` | `{'PYTHONPATH': '/root/Megatron-LM/', 'CUDA_DEVICE_MAX_CONNECTIONS': '1', 'NCCL_NVLS_ENABLE': '1'}` | Injected into the Ray job runtime env. |
 | `async_mode` | `bool` | `False` | When `True`, uses `train_async.py`. Default `False`. |
 | `slime_model_script` | `str` | `""` | Shell script path relative to `/root/slime`. Default `""`. |
-| `model` | `ModelConfiguration | None` | `None` | Model identity. Requires `ModelArchitecture`. Default `None`. |
+| `model` | `ModelConfig | None` | `None` | Model identity. Requires `ModelArchitecture`. Default `None`. |
 
 ## Composed Configs
 
@@ -56,6 +56,7 @@ slime GRPO training configuration.
 | `kl_loss_coef` | `float` | `0.0` | KL loss coefficient. Default `0.0`. |
 | `entropy_coef` | `float` | `0.0` | Entropy bonus coefficient. Default `0.0`. |
 | `ref_load` | `str` | `""` | Reference model checkpoint path. Default `""`. |
+| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7f5ab8460470>` |  |
 
 ## Rollout
 
@@ -158,9 +159,9 @@ Materialize the training data.
 
 Extract dataset-related slime flags back into a `DatasetConfig`.
 
-### `to_model(self) -> 'ModelConfiguration'`
+### `to_model(self) -> 'ModelConfig'`
 
-Extract model-related slime flags back into a `ModelConfiguration`.
+Extract model-related slime flags back into a `ModelConfig`.
 
 ### `to_wandb_config(self) -> 'WandbConfig'`
 

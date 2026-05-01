@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 # Canonical mount point for `modal_training_gym/tools/` inside every framework
-# image. Framework-agnostic helpers (e.g. `Kimi_K2_5.download_model`) shell out
+# image. Framework-agnostic helpers (e.g. `Kimi_K2_5.download`) shell out
 # to scripts at this path, so it must exist on every launcher's image.
 TOOLS_REMOTE_PATH = "/opt/training-gym/tools"
 

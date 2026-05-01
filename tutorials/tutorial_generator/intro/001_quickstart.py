@@ -13,7 +13,7 @@ TUTORIAL_METADATA = {
     'difficulty': 'Beginner',
     'order': 0,
     'api_classes': [
-        'ModelConfiguration', 'HFModelConfiguration', 'ModelArchitecture',
+        'ModelConfig', 'HFModelConfiguration', 'ModelArchitecture',
         'Qwen3_0_6B', 'DatasetConfig', 'WandbConfig', 'SlimeConfig',
     ],
 }
@@ -52,7 +52,7 @@ def _containers_section():
     ## The three config containers
 
     Every tutorial builds its run from three pure-data containers: a
-    `ModelConfiguration`, a `DatasetConfig`, and a `WandbConfig`. Each
+    `ModelConfig`, a `DatasetConfig`, and a `WandbConfig`. Each
     framework's launcher translates these into its own CLI vocabulary —
     you don't write framework-specific flag names for the parts that are
     shared across frameworks.
@@ -62,17 +62,17 @@ def _containers_section():
 @markdown
 def _model_container():
     """
-    ### `ModelConfiguration` — the model to train
+    ### `ModelConfig` — the model to train
 
-    A `ModelConfiguration` is identity + download hook. Built-in subclasses
+    A `ModelConfig` is identity + download hook. Built-in subclasses
     (`Qwen3_0_6B`, `Qwen3_4B`, `Qwen3_32B`, `GLM_4_7`, `Llama2_7B`,
     `KimiK2_5`) set
     `model_name` and a `ModelArchitecture` spec. `HFModelConfiguration` is
-    the base for any HF-hosted model — it implements `download_model()` via
+    the base for any HF-hosted model — it implements `download()` via
     `huggingface_hub.snapshot_download` pulling weights into the
     `huggingface-cache` Modal volume.
 
-    For a custom HF model, subclass `ModelConfiguration` inline in your
+    For a custom HF model, subclass `ModelConfig` inline in your
     tutorial (see
     [`002_custom_model`](../../intro/002_custom_model/002_custom_model.ipynb)) —
     there's no registry to update.
@@ -157,7 +157,7 @@ def _factory_section():
     that takes a framework-specific config plus a `ModalConfig` and
     returns a `modal.App` with a standard set of remote functions:
 
-    - `download_model` — pulls the model into the `huggingface-cache`
+    - `download` — pulls the model into the `huggingface-cache`
       volume. One-time per `(model,)` pair — subsequent runs reuse the
       volume.
     - `prepare_dataset` — runs your `DatasetConfig.prepare()` against the
@@ -187,7 +187,7 @@ def _factory_section():
         # … framework-specific flags …
     )
 
-    app = run.build_app()   # modal.App with download_model / prepare_dataset / train
+    app = run.build_app()   # modal.App with download / prepare_dataset / train
     ```
 
     Different framework, same shape — swap `slime` for `ms_swift`,
@@ -206,7 +206,7 @@ def _volumes_section():
 
     | Path (in container) | Volume | Contents |
     |---|---|---|
-    | `/root/.cache/huggingface` | `huggingface-cache` | HF weights + tokenizers. Populated by `download_model`. |
+    | `/root/.cache/huggingface` | `huggingface-cache` | HF weights + tokenizers. Populated by `download`. |
     | `/data` | `<framework>-data` | Preprocessed datasets. Populated by `prepare_dataset`. |
     | `/checkpoints` | `<framework>-checkpoints` | Training outputs. Populated by `train`. |
 
@@ -234,7 +234,7 @@ def _running_section():
     training so the run survives your terminal closing.
 
     ```bash
-    uv run modal run tutorials/<tutorial>/<tutorial>.py::app.download_model
+    uv run modal run tutorials/<tutorial>/<tutorial>.py::app.download
     uv run modal run tutorials/<tutorial>/<tutorial>.py::app.prepare_dataset
     uv run modal run --detach tutorials/<tutorial>/<tutorial>.py::app.train
     ```
@@ -249,7 +249,7 @@ def _running_section():
     ```python
     with modal.enable_output():
         with app.run():
-            app.download_model.remote()
+            app.download.remote()
     ```
 
     The `modal.enable_output()` context manager streams logs back into
@@ -272,7 +272,7 @@ def _next_section():
       running real training.
     - [`002_custom_model`](../../intro/002_custom_model/002_custom_model.ipynb) —
       LoRA SFT on a tiny SmolLM2-135M, with an inline custom
-      `ModelConfiguration` subclass.
+      `ModelConfig` subclass.
     **Intermediate** (non-default wiring, 1–2 nodes)
 
     - [`slime_haiku`](../../rl/slime_haiku/slime_haiku.ipynb) — GRPO with a

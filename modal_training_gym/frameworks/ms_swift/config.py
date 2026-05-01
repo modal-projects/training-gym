@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
+from modal_training_gym.common.checkpoint import CheckpointConfig
+
 if TYPE_CHECKING:
     from modal import App
 
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import ModelConfiguration
+    from modal_training_gym.common.models import ModelConfig
     from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
@@ -59,7 +61,7 @@ _MODEL_TRAINING_FIELDS = {
 
 
 def model_training_overrides(
-    model: "ModelConfiguration",
+    model: "ModelConfig",
 ) -> dict[str, Any]:
     """Extract model-level training defaults as ms-swift framework config fields.
 
@@ -328,13 +330,15 @@ class MsSwiftConfig:
 
     dataset : DatasetConfig | None
         Dataset configuration with ``prepare()`` hook. Default ``None``.
-    model : ModelConfiguration | None
+    model : ModelConfig | None
         Model identity and download hook. Default ``None``.
     wandb : WandbConfig | None
         Weights & Biases logging config. Default ``None``.
     framework_config : MsSwiftFrameworkConfig
         ms-swift Megatron training and infrastructure settings.
         Default ``MsSwiftFrameworkConfig()``.
+    checkpoint : CheckpointConfig
+        Checkpoint directory layout. Default uses ``iteration_prefix="iter_"``.
 
     Methods
     -------
@@ -345,22 +349,25 @@ class MsSwiftConfig:
     """
 
     dataset: "DatasetConfig | None"
-    model: "ModelConfiguration | None"
+    model: "ModelConfig | None"
     wandb: "WandbConfig | None"
     framework_config: MsSwiftFrameworkConfig
+    checkpoint: CheckpointConfig
 
     def __init__(
         self,
         dataset: "DatasetConfig | None" = None,
-        model: "ModelConfiguration | None" = None,
+        model: "ModelConfig | None" = None,
         wandb: "WandbConfig | None" = None,
         framework_config: MsSwiftFrameworkConfig | None = None,
+        checkpoint: CheckpointConfig | None = None,
         name: str = "",
     ) -> None:
         self.dataset = dataset
         self.model = model
         self.wandb = wandb
         self.framework_config = framework_config or MsSwiftFrameworkConfig()
+        self.checkpoint = checkpoint or CheckpointConfig(iteration_prefix="iter_")
         self.name = name
 
     def _fields(self) -> dict[str, Any]:

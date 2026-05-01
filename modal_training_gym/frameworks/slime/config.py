@@ -20,9 +20,10 @@ from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.checkpoint import CheckpointConfig
 from modal_training_gym.common.models import (
     ModelArchitecture,
-    ModelConfiguration,
+    ModelConfig,
 )
 from modal_training_gym.common.wandb import WandbConfig
 
@@ -54,6 +55,7 @@ _SLIME_SKIP = {
     "image_run_commands",
     "local_python_sources",
     "gpu_type",
+    "checkpoint",
 }
 
 # SlimeConfig fields that slime reads as YAML files at runtime.
@@ -118,7 +120,7 @@ class SlimeConfig:
 
     dataset : DatasetConfig | None
         Dataset configuration. Default ``None``.
-    model : ModelConfiguration | None
+    model : ModelConfig | None
         Model identity. Requires ``ModelArchitecture``. Default ``None``.
     wandb : WandbConfig | None
         W&B logging config. Default ``None``.
@@ -276,7 +278,7 @@ class SlimeConfig:
     async_mode: bool = False
     slime_model_script: str = ""
     dataset: DatasetConfig | None = None
-    model: ModelConfiguration | None = None
+    model: ModelConfig | None = None
     wandb: WandbConfig | None = None
     app_tags: dict = field(default_factory=dict)
     modal: ModalConfig | None = None
@@ -362,7 +364,7 @@ class SlimeConfig:
 
     # ── Container → slime flag converters ────────────────────────────────────
     #
-    # Each converter maps a common config struct (`DatasetConfig`, `ModelConfiguration`,
+    # Each converter maps a common config struct (`DatasetConfig`, `ModelConfig`,
     # `WandbConfig`) to the specific field names slime's CLI expects. Kept
     # explicit so the slime vocabulary lives in one place and the common
     # configs stay framework-agnostic.
@@ -405,7 +407,7 @@ class SlimeConfig:
 
     @staticmethod
     def _validate_custom_model_architecture(
-        m: "ModelConfiguration",
+        m: "ModelConfig",
     ) -> "ModelArchitecture":
         """Require a `ModelArchitecture` on the attached model.
 
@@ -419,13 +421,13 @@ class SlimeConfig:
         if m.architecture is None:
             raise ValueError(
                 "SlimeConfig requires a ModelArchitecture on the attached "
-                "ModelConfiguration. Set `architecture = ModelArchitecture(...)` "
+                "ModelConfig. Set `architecture = ModelArchitecture(...)` "
                 "on your subclass."
             )
         return m.architecture
 
     @staticmethod
-    def _model_to_fields(m: "ModelConfiguration") -> dict[str, Any]:
+    def _model_to_fields(m: "ModelConfig") -> dict[str, Any]:
         arch = SlimeConfig._validate_custom_model_architecture(m)
         return {
             "hf_checkpoint": m.model_name,
@@ -534,10 +536,10 @@ class SlimeConfig:
             rollout_shuffle=f.get("rollout_shuffle", True),
         )
 
-    def to_model(self) -> "ModelConfiguration":
-        """Extract model-related slime flags back into a `ModelConfiguration`.
+    def to_model(self) -> "ModelConfig":
+        """Extract model-related slime flags back into a `ModelConfig`.
 
-        Returns the attached `ModelConfiguration` when one is set. Otherwise,
+        Returns the attached `ModelConfig` when one is set. Otherwise,
         constructs an ad-hoc instance from the raw slime flag fields, with
         `architecture=None` when every architecture flag is at its default
         and a populated `ModelArchitecture` when any field differs.
@@ -547,7 +549,7 @@ class SlimeConfig:
 
         from modal_training_gym.common.models import (
             ModelArchitecture,
-            ModelConfiguration,
+            ModelConfig,
         )
 
         fields = self._fields()
@@ -572,7 +574,7 @@ class SlimeConfig:
             rotary_base=fields.get("rotary_base", 10000),
         )
         architecture = arch_candidate if arch_candidate != ModelArchitecture() else None
-        return ModelConfiguration(
+        return ModelConfig(
             model_name=fields.get("hf_checkpoint", "") or "",
             architecture=architecture,
         )
@@ -627,6 +629,10 @@ class SlimeConfig:
 
         return math.ceil(total_gpus / gpus_per_node)
 
+    checkpoint: CheckpointConfig = field(
+        default_factory=lambda: CheckpointConfig(iteration_prefix="iter_")
+    )
+
     def build_app(
         self,
         *,
@@ -647,7 +653,7 @@ class SlimeConfig:
 
 # Resolve forward references for pydantic validation
 from modal_training_gym.common.dataset import DatasetConfig  # noqa: E402,F811
-from modal_training_gym.common.models import ModelArchitecture, ModelConfiguration  # noqa: E402,F811
+from modal_training_gym.common.models import ModelArchitecture, ModelConfig  # noqa: E402,F811
 from modal_training_gym.common.wandb import WandbConfig  # noqa: E402,F811
 from pydantic.dataclasses import rebuild_dataclass  # noqa: E402
 

@@ -8,7 +8,7 @@ Usage (from a tutorial file):
     )
 
     swift = MsSwiftConfig(
-        model=GLM_4_7(),  # or subclass ModelConfiguration for a custom HF model
+        model=GLM_4_7(),  # or subclass ModelConfig for a custom HF model
         dataset=...,
         wandb=...,
         framework_config=MsSwiftFrameworkConfig(gpu="H100"),
@@ -16,7 +16,7 @@ Usage (from a tutorial file):
 
     app = build_ms_swift_app(swift=swift)
 
-Then `modal run <file>.py::app.train` (or `::app.download_model`, etc).
+Then `modal run <file>.py::app.train` (or `::app.download`, etc).
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from modal_training_gym.common.framework import (
     TOOLS_REMOTE_PATH,
     resolve_caller_module,
 )
+from modal_training_gym.common.checkpoint import CheckpointConfig
 
 from .config import (
     CHECKPOINTS_PATH,
@@ -126,7 +127,7 @@ def _train_ms_swift_worker(run_id: str | None = None):
             model_dir = snapshot_download(model_name, local_files_only=True)
         except FileNotFoundError as exc:
             raise RuntimeError(
-                f"Model {model_name} not found in HF cache. Run `download_model` first."
+                f"Model {model_name} not found in HF cache. Run `download` first."
             ) from exc
 
     if not dataset_path or not os.path.exists(dataset_path):
@@ -136,13 +137,11 @@ def _train_ms_swift_worker(run_id: str | None = None):
 
     checkpoint_dir = f"{checkpoints_root}/{app_name}_{run_id}"
     resuming = False
-    if os.path.exists(checkpoint_dir):
-        iter_dirs = sorted(
-            d for d in os.listdir(checkpoint_dir) if d.startswith("iter_")
-        )
-        if iter_dirs:
-            resuming = True
-            print(f"Resuming from {iter_dirs[-1]}")
+    _ckpt_config = CheckpointConfig(iteration_prefix="iter_")
+    checkpoints = _ckpt_config.list_local_checkpoints(checkpoint_dir)
+    if checkpoints:
+        resuming = True
+        print(f"Resuming from {checkpoints[-1].name}")
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     args_json = os.path.join(checkpoint_dir, "args.json")
@@ -212,7 +211,7 @@ def _train_ms_swift_worker(run_id: str | None = None):
             model_class=os.environ.get("MS_SWIFT_MODEL_CLASS", ""),
             checkpoints_volume_name=checkpoints_volume_name,
             checkpoints_mount_path=checkpoints_root,
-            iteration_prefix="iter_",
+            iteration_prefix=_ckpt_config.iteration_prefix,
             wandb_project=wandb_project,
         )
         result.save()
@@ -225,7 +224,7 @@ def build_ms_swift_app(
     gpu: str = "H100",
     name: str | None = None,
 ) -> App:
-    """Return a Modal App with `download_model`, `prepare_dataset`, `train`."""
+    """Return a Modal App with `download`, `prepare_dataset`, `train`."""
     framework = swift.resolved_framework_config()
     use_clustered_launch = _use_clustered_launch(framework.n_nodes)
 
@@ -255,6 +254,7 @@ def build_ms_swift_app(
             "torch==2.5.1",
             "safetensors==0.4.5",
             "datasets>=2.14.0",
+            "cloudpickle",
             "msgspec",
             "pydantic",
         )
@@ -280,6 +280,7 @@ def build_ms_swift_app(
             "ms-swift @ git+https://github.com/modelscope/ms-swift.git@3d9907dbc11cee41058b5122e429100d1f5446a9",
             "einops==0.8.2",
             "wandb==0.19.1",
+            "cloudpickle",
             "msgspec",
             "pydantic",
             # ms-swift's megatron backend (`megatron sft`) imports megatron.core.
@@ -332,7 +333,7 @@ def build_ms_swift_app(
     app = App(app_name, tags=tags)
     gpu_spec = f"{gpu}:{framework.gpus_per_node}"
 
-    # ── download_model ───────────────────────────────────────────────────────
+    # ── download ───────────────────────────────────────────────────────
     @app.function(
         image=download_image,
         volumes={
@@ -342,14 +343,14 @@ def build_ms_swift_app(
         timeout=4 * 60 * 60,
         secrets=[Secret.from_name("huggingface-secret")],
         serialized=True,
-        name="download_model",
+        name="download",
     )
-    def download_model():
-        """Download model weights via the attached ModelConfiguration's hook."""
+    def download():
+        """Download model weights via the attached ModelConfig's hook."""
         assert swift.model is not None, "swift.model must be set"
         hf_cache_volume.reload()
         checkpoints_volume.reload()
-        swift.model.download_model()
+        swift.model.download()
         hf_cache_volume.commit()
         checkpoints_volume.commit()
 
@@ -427,7 +428,7 @@ def build_ms_swift_app(
     )(train_target)
 
     # Expose registered functions as attributes so notebook callers can do
-    # `app.download_model.remote()` instead of app.registered_functions[...].
+    # `app.download.remote()` instead of app.registered_functions[...].
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
 

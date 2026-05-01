@@ -1,7 +1,7 @@
 """Tutorial source for `002_custom_model` — parsed by generate_tutorial.py.
 
 Demonstrates plugging a *custom* HuggingFace model into an ms-swift LoRA SFT
-run by subclassing `ModelConfiguration` — no entry in the built-in model
+run by subclassing `ModelConfig` — no entry in the built-in model
 catalog, no registry mutation, just a subclass defined inline in the
 tutorial.
 """
@@ -9,12 +9,12 @@ tutorial.
 TUTORIAL_METADATA = {
     'framework': '`ms_swift`',
     'cluster_shape': '1 × 1×H100',
-    'summary': 'Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry',
+    'summary': 'Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfig` subclass, no catalog entry',
     'difficulty': 'Beginner',
     'order': 25,
     'api_classes': [
         'MsSwiftConfig', 'MsSwiftFrameworkConfig',
-        'ModelConfiguration', 'DatasetConfig', 'WandbConfig',
+        'ModelConfig', 'DatasetConfig', 'WandbConfig',
     ],
 }
 
@@ -60,7 +60,7 @@ def _imports():
     import modal
 
     from modal_training_gym.common.dataset import HuggingFaceDataset
-    from modal_training_gym.common.models import ModelConfiguration
+    from modal_training_gym.common.models import ModelConfig
     from modal_training_gym.common.wandb import WandbConfig
     from modal_training_gym.frameworks.ms_swift import (
         MsSwiftConfig,
@@ -74,14 +74,14 @@ def _explain_model():
     """
     ## Define the custom model
 
-    Subclass `ModelConfiguration` with:
+    Subclass `ModelConfig` with:
 
     - `model_name` — the HF repo id. Every framework reads this off
       your subclass to know what to tokenize/train.
-    - `download_model()` — how to materialize the weights. For
+    - `download()` — how to materialize the weights. For
       HF-hosted models this is one line: `snapshot_download(repo_id=...)`.
       (If you'd rather not write this body, subclass `HFModelConfiguration`
-      instead — it implements `download_model()` for you.)
+      instead — it implements `download()` for you.)
 
     That's the whole seam. The subclass is a regular Python class; you
     can stack architecture metadata, tokenizer overrides, or custom
@@ -93,7 +93,7 @@ def _explain_model():
 def _define_model():
     from modal_training_gym.common.models import ModelTrainingConfig
 
-    class SmolLM2_135M(ModelConfiguration):
+    class SmolLM2_135M(ModelConfig):
         model_name = "HuggingFaceTB/SmolLM2-135M"
         training = ModelTrainingConfig(
             gpu_type="H100",
@@ -103,7 +103,7 @@ def _define_model():
             lora_alpha=16,
         )
 
-        def download_model(self) -> None:
+        def download(self) -> None:
             from huggingface_hub import snapshot_download
 
             snapshot_download(repo_id=self.model_name)
@@ -193,7 +193,7 @@ def _run_cli():
     From the CLI:
 
     ```
-    uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.download_model
+    uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.download
     uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.prepare_dataset
     uv run modal run --detach tutorials/intro/002_custom_model/002_custom_model.py::app.train
     ```
@@ -213,7 +213,7 @@ def _run_interactive():
 def _invoke_download_model():
     with modal.enable_output():
         with app.run():
-            app.download_model.remote()
+            app.download.remote()
 
 
 @notebook_only

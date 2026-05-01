@@ -124,7 +124,7 @@ my_training_run = SlimeConfig(
 
 ## Build and run
 
-`build_app()` returns a Modal app with `download_model`,
+`build_app()` returns a Modal app with `download`,
 `prepare_dataset`, and `train`. (Bridge mode means there's no
 separate `convert_checkpoint` step to call — see quickstart for the
 general pattern.)

@@ -1,6 +1,6 @@
 ---
 title: "Custom HuggingFace model with ms-swift LoRA SFT on Modal"
-description: "Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry"
+description: "Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfig` subclass, no catalog entry"
 ---
 
 **What this tutorial teaches.** How to train a model that isn't in
@@ -27,7 +27,7 @@ for a full-scale ms-swift run with 4-D parallelism.
 import modal
 
 from modal_training_gym.common.dataset import HuggingFaceDataset
-from modal_training_gym.common.models import ModelConfiguration
+from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.frameworks.ms_swift import (
     MsSwiftConfig,
@@ -38,14 +38,14 @@ from modal_training_gym.frameworks.ms_swift.config import HF_CACHE_PATH
 
 ## Define the custom model
 
-Subclass `ModelConfiguration` with:
+Subclass `ModelConfig` with:
 
 - `model_name` — the HF repo id. Every framework reads this off
   your subclass to know what to tokenize/train.
-- `download_model()` — how to materialize the weights. For
+- `download()` — how to materialize the weights. For
   HF-hosted models this is one line: `snapshot_download(repo_id=...)`.
   (If you'd rather not write this body, subclass `HFModelConfiguration`
-  instead — it implements `download_model()` for you.)
+  instead — it implements `download()` for you.)
 
 That's the whole seam. The subclass is a regular Python class; you
 can stack architecture metadata, tokenizer overrides, or custom
@@ -54,7 +54,7 @@ download logic on top as needed.
 ```python
 from modal_training_gym.common.models import ModelTrainingConfig
 
-class SmolLM2_135M(ModelConfiguration):
+class SmolLM2_135M(ModelConfig):
     model_name = "HuggingFaceTB/SmolLM2-135M"
     training = ModelTrainingConfig(
         gpu_type="H100",
@@ -64,7 +64,7 @@ class SmolLM2_135M(ModelConfiguration):
         lora_alpha=16,
     )
 
-    def download_model(self) -> None:
+    def download(self) -> None:
         from huggingface_hub import snapshot_download
 
         snapshot_download(repo_id=self.model_name)
@@ -135,7 +135,7 @@ app = my_training_run.build_app()
 
 - [`MsSwiftConfig`](/reference/frameworks/msswiftconfig/)
 - [`MsSwiftFrameworkConfig`](/reference/frameworks/msswiftframeworkconfig/)
-- [`ModelConfiguration`](/reference/core/modelconfiguration/)
+- [`ModelConfig`](/reference/core/modelconfiguration/)
 - [`DatasetConfig`](/reference/core/datasetconfig/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 

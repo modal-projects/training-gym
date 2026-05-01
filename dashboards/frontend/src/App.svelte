@@ -1,32 +1,9 @@
 <script>
-  import { onMount } from "svelte";
   import "./app.css";
   import { fetchRuns } from "./lib/api.js";
   import FilterBar from "./FilterBar.svelte";
   import FrameworkSection from "./FrameworkSection.svelte";
-  import HarborDetail from "./HarborDetail.svelte";
   import logoSvg from "./lib/logo.svg";
-
-  let page = $state("list");
-  let harborRunId = $state(null);
-
-  function parseHash() {
-    const hash = location.hash || "#/";
-    const m = hash.match(/^#\/harbor\/(.+)/);
-    if (m) {
-      page = "harbor-detail";
-      harborRunId = decodeURIComponent(m[1]);
-    } else {
-      page = "list";
-      harborRunId = null;
-    }
-  }
-
-  parseHash();
-  onMount(() => {
-    window.addEventListener("hashchange", parseHash);
-    return () => window.removeEventListener("hashchange", parseHash);
-  });
 
   let allRuns = $state([]);
   let loading = $state(true);
@@ -141,14 +118,6 @@
   }
 </script>
 
-{#if page === "harbor-detail" && harborRunId}
-  <HarborDetail
-    runId={harborRunId}
-    onBack={() => {
-      location.hash = "#/";
-    }}
-  />
-{:else}
   <header class="topbar">
     <img src={logoSvg} alt="Modal" class="logo" />
     <h1>training-gym</h1>
@@ -190,7 +159,6 @@
       {/each}
     {/if}
   </div>
-{/if}
 
 <style>
   .topbar {

@@ -61,7 +61,7 @@ def build_slime_app(
     gpu: str = "H100",
     name: str | None = None,
 ) -> App:
-    """Return a Modal App with `download_model`, `prepare_dataset`, `convert_checkpoint`, and `train` defined.
+    """Return a Modal App with `download`, `prepare_dataset`, `convert_checkpoint`, and `train` defined.
 
     The returned functions close over the passed-in configs, so a tutorial
     file holds its own Modal app whose shape is determined entirely by the
@@ -163,14 +163,14 @@ def build_slime_app(
         timeout=2 * 60 * 60,
         secrets=[Secret.from_name("huggingface-secret")],
         serialized=True,
-        name="download_model",
+        name="download",
     )
-    def download_model():
-        """Download model weights via the attached ModelConfiguration's hook."""
+    def download():
+        """Download model weights via the attached ModelConfig's hook."""
         assert slime.model is not None, "slime.model must be set"
         hf_cache_volume.reload()
         checkpoints_volume.reload()
-        slime.model.download_model()
+        slime.model.download()
         hf_cache_volume.commit()
         checkpoints_volume.commit()
 
@@ -363,7 +363,7 @@ def build_slime_app(
             model_class=model_class,
             checkpoints_volume_name=f"{app_name}-checkpoints",
             checkpoints_mount_path=str(CHECKPOINTS_PATH),
-            iteration_prefix="iter_",
+            iteration_prefix=slime.checkpoint.iteration_prefix,
             wandb_project=slime.wandb.project if slime.wandb else "",
             wandb_entity="",
             wandb_run_id=wandb_run_id,
@@ -388,14 +388,14 @@ def build_slime_app(
             base_model=slime.model.model_name if slime.model is not None else "",
             checkpoints_volume_name=f"{app_name}-checkpoints",
             checkpoints_mount_path=str(CHECKPOINTS_PATH).rstrip("/"),
-            iteration_prefix="iter_",
+            iteration_prefix=slime.checkpoint.iteration_prefix,
         )
         result.save()
         return asdict(result)
 
     # Expose registered functions as attributes so notebook callers can do
-    # `app.download_model.remote()` instead of
-    # `app.registered_functions["download_model"].remote()`.
+    # `app.download.remote()` instead of
+    # `app.registered_functions["download"].remote()`.
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
 

@@ -27,7 +27,8 @@ Typical flow:
     print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
     print(result.latest_checkpoint_path())  # .../iter_0000050
 
-    serve_app = result.build_serve_app()    # vLLM app hosting the ckpt
+    deployment = result.model.serve()  # deploys vLLM app hosting the ckpt
+    print(deployment.url)
 
 Two design invariants:
 
@@ -48,8 +49,8 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from modal import App, Volume
-    from modal_training_gym.common.models import ModelConfiguration
+    from modal import Volume
+    from modal_training_gym.common.models import ModelConfig
 
 
 def _store_name(app_name: str) -> str:
@@ -73,17 +74,17 @@ class TrainResult:
         volume (``{app_name}-checkpoints``) and the shared results
         :class:`modal.Dict` (``{app_name}-train-results``).
     framework:
-        Training framework identifier (``"slime"``, ``"ms-swift"``,
-        ``"miles"``, ``"harbor"``). Eval scripts can switch on this to
-        apply framework-specific decoding of the checkpoint layout.
+        Training framework identifier (``"slime"``, ``"ms-swift"``).
+        Eval scripts can switch on this to apply framework-specific
+        decoding of the checkpoint layout.
     run_id:
         Unique identifier for *this* specific training call. Keys the
         record in the shared :class:`modal.Dict`; embedded in
         ``checkpoint_dir`` for frameworks that scope checkpoints by run.
     checkpoint_dir:
         Absolute in-container path to this run's checkpoint directory.
-        For ms-swift / miles / harbor this is a run-specific
-        subdirectory under the checkpoints mount; for slime (which
+        For ms-swift this is a run-specific subdirectory under the
+        checkpoints mount; for slime (which
         writes a single flat ``iter_*`` tree at ``slime.save``) this is
         that save root.
     base_model:
@@ -289,68 +290,35 @@ class TrainResult:
     # ── Output model ─────────────────────────────────────────────────────
 
     @property
-    def model(self) -> "ModelConfiguration":
+    def model(self) -> "ModelConfig":
         """Return the original model class with ``model_path`` pointing at the checkpoint.
 
         Reconstructs the same model class used for training (e.g.
         ``Qwen3_4B``) so it retains architecture, presets, and
-        ``download_model()`` logic. Only ``model_path`` is overridden
-        to point at the trained checkpoint instead of the HF cache.
+        ``download()`` logic. The checkpoint volume metadata is also
+        attached so ``result.model.serve()`` mounts the right checkpoint volume.
         """
         import importlib
+
+        checkpoint_path = self.latest_checkpoint_path()
 
         if self.model_class:
             module_path, class_name = self.model_class.rsplit(".", 1)
             mod = importlib.import_module(module_path)
             cls = getattr(mod, class_name)
             instance = cls()
-            instance.model_path = self.latest_checkpoint_path()
+            instance.model_path = checkpoint_path
+            instance.checkpoints_volume_name = self.checkpoints_volume_name
+            instance.checkpoints_mount_path = self.checkpoints_mount_path
             return instance
 
-        from modal_training_gym.common.models import ModelConfiguration
+        from modal_training_gym.common.models import ModelConfig
 
-        return ModelConfiguration(
+        return ModelConfig(
             model_name=self.base_model,
-            model_path=self.latest_checkpoint_path(),
-        )
-
-    # ── Serving ──────────────────────────────────────────────────────────
-
-    def build_serve_app(
-        self,
-        *,
-        served_model_name: str | None = None,
-        checkpoint_path: str | None = None,
-        **vllm_kwargs: Any,
-    ) -> "App":
-        """Build a vLLM serving app pointing at a trained checkpoint.
-
-        Thin wrapper over
-        :func:`modal_training_gym.common.serve_vllm.build_vllm_serve_app`.
-        The returned app's name embeds ``run_id`` so multiple trained
-        checkpoints can be served concurrently without name collision.
-
-        Parameters
-        ----------
-        served_model_name:
-            ``--served-model-name`` passed to vLLM. Defaults to
-            ``f"{app_name}-{run_id}"``.
-        checkpoint_path:
-            Absolute in-container checkpoint directory. Defaults to
-            :meth:`latest_checkpoint_path`.
-        **vllm_kwargs:
-            Forwarded to ``build_vllm_serve_app``.
-        """
-        from modal_training_gym.common.serve_vllm import build_vllm_serve_app
-
-        model_path = checkpoint_path or self.latest_checkpoint_path()
-        return build_vllm_serve_app(
-            app_name=f"{self.app_name}-{self.run_id}-serve",
-            model_path=model_path,
-            served_model_name=served_model_name or f"{self.app_name}-{self.run_id}",
-            checkpoints_volume=self.checkpoints_volume_name,
+            model_path=checkpoint_path,
+            checkpoints_volume_name=self.checkpoints_volume_name,
             checkpoints_mount_path=self.checkpoints_mount_path,
-            **vllm_kwargs,
         )
 
     # ── W&B integration ─────────────────────────────────────────────────

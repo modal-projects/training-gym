@@ -17,21 +17,21 @@ tutorials at each difficulty tier.
 ## The three config containers
 
 Every tutorial builds its run from three pure-data containers: a
-`ModelConfiguration`, a `DatasetConfig`, and a `WandbConfig`. Each
+`ModelConfig`, a `DatasetConfig`, and a `WandbConfig`. Each
 framework's launcher translates these into its own CLI vocabulary —
 you don't write framework-specific flag names for the parts that are
 shared across frameworks.
 
-### `ModelConfiguration` — the model to train
+### `ModelConfig` — the model to train
 
-A `ModelConfiguration` is identity + download hook. Built-in subclasses
+A `ModelConfig` is identity + download hook. Built-in subclasses
 (`Qwen3_0_6B`, `Qwen3_4B`, `Qwen3_32B`, `GLM_4_7`, `Llama2_7B`, `KimiK2_5`) set
 `model_name` and a `ModelArchitecture` spec. `HFModelConfiguration` is
-the base for any HF-hosted model — it implements `download_model()` via
+the base for any HF-hosted model — it implements `download()` via
 `huggingface_hub.snapshot_download` pulling weights into the
 `huggingface-cache` Modal volume.
 
-For a custom HF model, subclass `ModelConfiguration` inline in your
+For a custom HF model, subclass `ModelConfig` inline in your
 tutorial (see
 [`ms_swift_custom_hf`](../../sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb)) —
 there's no registry to update.
@@ -98,7 +98,7 @@ Every framework package exposes a `build_<name>_app(...)` factory
 that takes a framework-specific config plus a `ModalConfig` and
 returns a `modal.App` with a standard set of remote functions:
 
-- `download_model` — pulls the model into the `huggingface-cache`
+- `download` — pulls the model into the `huggingface-cache`
   volume. One-time per `(model,)` pair — subsequent runs reuse the
   volume.
 - `prepare_dataset` — runs your `DatasetConfig.prepare()` against the
@@ -129,7 +129,7 @@ run = SlimeConfig(
     modal=ModalConfig(gpu="H100"),
 )
 
-app = run.build_app()   # modal.App with download_model / prepare_dataset / train
+app = run.build_app()   # modal.App with download / prepare_dataset / train
 ```
 
 Different framework, same shape — swap `slime` for `ms_swift`,
@@ -143,7 +143,7 @@ download cost once:
 
 | Path (in container) | Volume | Contents |
 |---|---|---|
-| `/root/.cache/huggingface` | `huggingface-cache` | HF weights + tokenizers. Populated by `download_model`. |
+| `/root/.cache/huggingface` | `huggingface-cache` | HF weights + tokenizers. Populated by `download`. |
 | `/data` | `<framework>-data` | Preprocessed datasets. Populated by `prepare_dataset`. |
 | `/checkpoints` | `<framework>-checkpoints` | Training outputs. Populated by `train`. |
 
@@ -166,7 +166,7 @@ invoke it:
 training so the run survives your terminal closing.
 
 ```bash
-uv run modal run tutorials/<tutorial>/<tutorial>.py::app.download_model
+uv run modal run tutorials/<tutorial>/<tutorial>.py::app.download
 uv run modal run tutorials/<tutorial>/<tutorial>.py::app.prepare_dataset
 uv run modal run --detach tutorials/<tutorial>/<tutorial>.py::app.train
 ```
@@ -181,7 +181,7 @@ config without re-submitting the whole script.
 ```python
 with modal.enable_output():
     with app.run():
-        app.download_model.remote()
+        app.download.remote()
 ```
 
 The `modal.enable_output()` context manager streams logs back into
@@ -199,7 +199,7 @@ catalog in [`tutorials/README.md`](../README.md).
   running real training.
 - [`ms_swift_custom_hf`](../../sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb) —
   LoRA SFT on a tiny SmolLM2-135M, with an inline custom
-  `ModelConfiguration` subclass.
+  `ModelConfig` subclass.
 **Intermediate** (non-default wiring, 1–2 nodes)
 
 - [`slime_haiku`](../../rl/slime_haiku/slime_haiku.ipynb) — GRPO with a
@@ -219,7 +219,7 @@ catalog in [`tutorials/README.md`](../README.md).
 
 ## Related API Reference
 
-- [`ModelConfiguration`](/reference/core/modelconfiguration/)
+- [`ModelConfig`](/reference/core/modelconfiguration/)
 - [`HFModelConfiguration`](/reference/core/hfmodelconfiguration/)
 - [`ModelArchitecture`](/reference/core/modelarchitecture/)
 - [`Qwen3_0_6B`](/reference/models/qwen3_0_6b/)

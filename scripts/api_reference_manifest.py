@@ -8,11 +8,11 @@ and class type (config_data or behavior).
 API_REFERENCE_MANIFEST = [
     # --- Core ---
     {
-        "class_name": "ModelConfiguration",
+        "class_name": "ModelConfig",
         "module": "modal_training_gym.common.models.base",
         "group": "core",
         "class_type": "behavior",
-        "sidebar_label": "ModelConfiguration",
+        "sidebar_label": "ModelConfig",
     },
     {
         "class_name": "HFModelConfiguration",
@@ -128,36 +128,6 @@ API_REFERENCE_MANIFEST = [
         "group": "frameworks",
         "class_type": "config_data",
         "sidebar_label": "MsSwiftConfig",
-    },
-    # --- Frameworks: Miles ---
-    {
-        "class_name": "MilesFrameworkConfig",
-        "module": "modal_training_gym.frameworks.miles.config",
-        "group": "frameworks",
-        "class_type": "config_data",
-        "sidebar_label": "MilesFrameworkConfig",
-    },
-    {
-        "class_name": "MilesConfig",
-        "module": "modal_training_gym.frameworks.miles.config",
-        "group": "frameworks",
-        "class_type": "config_data",
-        "sidebar_label": "MilesConfig",
-    },
-    # --- Frameworks: Harbor ---
-    {
-        "class_name": "HarborFrameworkConfig",
-        "module": "modal_training_gym.frameworks.harbor.config",
-        "group": "frameworks",
-        "class_type": "config_data",
-        "sidebar_label": "HarborFrameworkConfig",
-    },
-    {
-        "class_name": "HarborConfig",
-        "module": "modal_training_gym.frameworks.harbor.config",
-        "group": "frameworks",
-        "class_type": "config_data",
-        "sidebar_label": "HarborConfig",
     },
     # --- Results ---
     {

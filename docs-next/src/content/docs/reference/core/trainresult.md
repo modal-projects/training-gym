@@ -53,10 +53,6 @@ TrainResult(app_name, framework, run_id, checkpoint_dir, base_model, model_class
 
 ## Methods
 
-### `build_serve_app(self, *, served_model_name: 'str | None' = None, checkpoint_path: 'str | None' = None, **vllm_kwargs: 'Any') -> "'App'"`
-
-Build a vLLM serving app pointing at a trained checkpoint.
-
 ### `dashboard_url(self) -> 'str'`
 
 URL for browsing the checkpoints volume in the Modal dashboard.
@@ -96,5 +92,10 @@ Fetch the W&B run summary (final metric values).
 ### `wandb_url(self) -> 'str | None'`
 
 Return the W&B run URL, or None if W&B info is not set.
+
+## Related Tutorials
+
+- [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
+- [Qwen3-0.6B SFT on generated arithmetic problems](/tutorials/sft/000_sft_basics/)
 
 **Source:** [`modal_training_gym/common/train_result.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/train_result.py)

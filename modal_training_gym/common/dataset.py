@@ -54,6 +54,10 @@ class DatasetConfig:
         """Download and/or preprocess the dataset into the data volume."""
         raise NotImplementedError(f"{type(self).__name__} has no prepare()")
 
+    def load(self):
+        """Load raw examples for local inspection or evaluation."""
+        raise NotImplementedError(f"{type(self).__name__} has no load()")
+
 
 class HuggingFaceDataset(DatasetConfig):
     """Dataset backed by a HuggingFace ``datasets`` repo.
@@ -103,31 +107,44 @@ class HuggingFaceDataset(DatasetConfig):
             ext = "jsonl" if self.output_format == "jsonl" else "parquet"
             self.prompt_data = f"{self.data_root}/{name}/train.{ext}"
 
-    def prepare(self) -> None:
-        import os
-
+    def load(self):
         from datasets import load_dataset
 
-        os.makedirs(os.path.dirname(self.prompt_data), exist_ok=True)
-        ds = load_dataset(
+        return load_dataset(
             self.hf_repo,
             self.hf_config,
             split=self.hf_split,
         )
 
-        if self.input_column and self.output_column:
-            in_col, out_col = self.input_column, self.output_column
-            sys_prompt = self.system_prompt
+    def _format_for_training(self, ds):
+        if not (self.input_column and self.output_column):
+            return ds
 
-            def _to_chat(row: dict) -> dict:
-                msgs = []
-                if sys_prompt:
-                    msgs.append({"role": "system", "content": sys_prompt})
-                msgs.append({"role": "user", "content": row[in_col]})
-                msgs.append({"role": "assistant", "content": row[out_col]})
-                return {"messages": msgs}
+        in_col, out_col = self.input_column, self.output_column
+        sys_prompt = self.system_prompt
 
-            ds = ds.map(_to_chat, remove_columns=ds.column_names)
+        def _to_chat(row: dict) -> dict:
+            msgs = []
+            if sys_prompt:
+                msgs.append({"role": "system", "content": sys_prompt})
+            msgs.append({"role": "user", "content": row[in_col]})
+            msgs.append({"role": "assistant", "content": row[out_col]})
+            return {"messages": msgs}
+
+        return ds.map(_to_chat, remove_columns=ds.column_names)
+
+    def to_pandas(self, *, formatted: bool = False):
+        ds = self.load()
+        if formatted:
+            ds = self._format_for_training(ds)
+        return ds.to_pandas()
+
+
+    def prepare(self) -> None:
+        import os
+
+        os.makedirs(os.path.dirname(self.prompt_data), exist_ok=True)
+        ds = self._format_for_training(self.load())
 
         if self.output_format == "jsonl":
             ds.to_json(self.prompt_data, orient="records", lines=True)

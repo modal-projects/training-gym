@@ -31,7 +31,7 @@ The workflow has four stages:
 
 | Stage | What it does | Where |
 |---|---|---|
-| `download_model` | Pulls `Qwen/Qwen3-0.6B` into the HF cache volume | 1×H100 |
+| `download` | Pulls `Qwen/Qwen3-0.6B` into the HF cache volume | 1×H100 |
 | `prepare_dataset` | Downloads `statworx/haiku` and writes train/test parquet | CPU |
 | `train` | GRPO training loop over the haiku prompts | 1×8×H100, colocated |
 | `serve_app` (separate) | Hosts the finished checkpoint via vLLM + Flash | 1×H100 |
@@ -303,7 +303,7 @@ my_training_run = SlimeConfig(
 `build_app()` returns a `modal.App` with four functions defined
 against the right volumes, secrets, and GPU spec:
 
-- `download_model` — pulls the HF checkpoint into the
+- `download` — pulls the HF checkpoint into the
   `huggingface-cache` volume (1×H100, 2 hour timeout).
 - `prepare_dataset` — runs `HaikuDataset.prepare()` against the
   `slime-data` volume (CPU).

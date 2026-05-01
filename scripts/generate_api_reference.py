@@ -105,8 +105,6 @@ def _format_type(type_hint: Any) -> str:
     raw = raw.replace("modal_training_gym.common.wandb.", "")
     raw = raw.replace("modal_training_gym.frameworks.slime.config.", "")
     raw = raw.replace("modal_training_gym.frameworks.ms_swift.config.", "")
-    raw = raw.replace("modal_training_gym.frameworks.miles.config.", "")
-    raw = raw.replace("modal_training_gym.frameworks.harbor.config.", "")
     raw = raw.replace("<class '", "").replace("'>", "")
     return raw
 

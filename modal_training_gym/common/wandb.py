@@ -44,8 +44,8 @@ class WandbConfig:
             setattr(self, k, v)
 
 
-def append_miles_wandb_args(argv: list[str], wandb: "WandbConfig | None") -> list[str]:
-    """Append Miles/Harbor W&B CLI args for a configured run."""
+def append_megatron_wandb_args(argv: list[str], wandb: "WandbConfig | None") -> list[str]:
+    """Append Megatron W&B CLI args for a configured run."""
     if wandb is None:
         return argv
 

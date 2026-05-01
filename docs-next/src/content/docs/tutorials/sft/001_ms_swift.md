@@ -112,7 +112,7 @@ my_training_run = MsSwiftConfig(
 
 ## Build and run
 
-`build_app()` returns a Modal app with `download_model`,
+`build_app()` returns a Modal app with `download`,
 `prepare_dataset`, and `train`. See
 [`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb) for the pattern.
 
@@ -131,8 +131,12 @@ from modal_training_gym.common.train_result import TrainResult
 result = TrainResult.load("glm-4-7-gsm8k-sft")
 print(result.latest_checkpoint_path())
 
-# Serve via vLLM:
-serve_app = result.build_serve_app()
+# Serve via vLLM (deploys and returns URL):
+deployment = result.model.serve(
+    app_name="glm-4-7-gsm8k-sft-serve",
+    served_model_name="glm-4-7-gsm8k-sft",
+)
+print(deployment.url)
 ```
 
 See the [TrainResult reference](/reference/core/trainresult/) for

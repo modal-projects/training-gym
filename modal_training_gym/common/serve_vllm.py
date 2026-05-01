@@ -40,7 +40,7 @@ def build_vllm_serve_app(
     vllm_port: int = 8000,
     vllm_version: str = "0.13.0",
     max_concurrent_requests: int = 32,
-    scaledown_window_seconds: int = 15 * 60,
+    scaledown_window_seconds: int = 60,
     startup_timeout_seconds: int = 10 * 60,
     extra_vllm_args: list[str] | None = None,
 ) -> "App":
@@ -71,7 +71,8 @@ def build_vllm_serve_app(
         max_concurrent_requests: How many in-flight requests one replica
             serves before Modal scales out another.
         scaledown_window_seconds: Idle window before the replica scales
-            to zero.
+            to zero. Defaults to 60 seconds so tutorial deployments do
+            not keep GPU containers warm after use.
         startup_timeout_seconds: How long `@modal.web_server` waits for
             vLLM to start responding on `vllm_port`.
         extra_vllm_args: Additional tokens appended to the
@@ -124,6 +125,7 @@ def build_vllm_serve_app(
     @app.function(
         image=image,
         gpu=f"{gpu}:{n_gpu}",
+        # Do not set min_containers: serving apps should scale to zero when idle.
         scaledown_window=scaledown_window_seconds,
         timeout=24 * 60 * 60,
         volumes=volumes,
@@ -134,7 +136,15 @@ def build_vllm_serve_app(
     @modal.concurrent(max_inputs=max_concurrent_requests)
     @modal.web_server(port=vllm_port, startup_timeout=startup_timeout_seconds)
     def serve():
+        import os
         import subprocess
+
+        if model_path.startswith("/") and os.path.isdir(model_path):
+            hf_config_path = os.path.join(model_path, "config.json")
+            if not os.path.exists(hf_config_path):
+                print(
+                    "[training-gym] Converting checkpoint from mt to hf for serving."
+                )
 
         cmd = [
             "vllm",

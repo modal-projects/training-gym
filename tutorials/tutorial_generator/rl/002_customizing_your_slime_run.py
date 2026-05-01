@@ -230,7 +230,7 @@ def _run_cli():
     From the CLI:
 
     ```bash
-    uv run modal run tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py::app.download_model
+    uv run modal run tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py::app.download
     uv run modal run tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py::app.prepare_dataset
     uv run modal run --detach tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py::app.train
     ```
@@ -250,7 +250,7 @@ def _run_interactive():
 def _invoke_download_model():
     import modal
     with app.run():
-        app.download_model.remote()
+        app.download.remote()
 
 @notebook_only
 @code

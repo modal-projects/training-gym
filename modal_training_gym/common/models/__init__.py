@@ -1,7 +1,8 @@
 from .base import (
     HFModelConfiguration,
     ModelArchitecture,
-    ModelConfiguration,
+    ModelConfig,
+    ModelDeployment,
     ModelTrainingConfig,
 )
 from .glm_4_7 import GLM_4_7
@@ -13,7 +14,8 @@ from .qwen3_32b import Qwen3_32B
 
 __all__ = [
     "ModelArchitecture",
-    "ModelConfiguration",
+    "ModelConfig",
+    "ModelDeployment",
     "ModelTrainingConfig",
     "HFModelConfiguration",
     "Qwen3_0_6B",

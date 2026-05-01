@@ -157,7 +157,7 @@ app = my_training_run.build_app()
 # From the CLI:
 #
 # ```bash
-# uv run modal run tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py::app.download_model
+# uv run modal run tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py::app.download
 # uv run modal run tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py::app.prepare_dataset
 # uv run modal run --detach tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.py::app.train
 # ```

@@ -26,7 +26,7 @@
 import modal
 
 from modal_training_gym.common.dataset import HuggingFaceDataset
-from modal_training_gym.common.models import ModelConfiguration
+from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.frameworks.ms_swift import (
     MsSwiftConfig,
@@ -36,14 +36,14 @@ from modal_training_gym.frameworks.ms_swift.config import HF_CACHE_PATH
 
 # ## Define the custom model
 #
-# Subclass `ModelConfiguration` with:
+# Subclass `ModelConfig` with:
 #
 # - `model_name` — the HF repo id. Every framework reads this off
 #   your subclass to know what to tokenize/train.
-# - `download_model()` — how to materialize the weights. For
+# - `download()` — how to materialize the weights. For
 #   HF-hosted models this is one line: `snapshot_download(repo_id=...)`.
 #   (If you'd rather not write this body, subclass `HFModelConfiguration`
-#   instead — it implements `download_model()` for you.)
+#   instead — it implements `download()` for you.)
 #
 # That's the whole seam. The subclass is a regular Python class; you
 # can stack architecture metadata, tokenizer overrides, or custom
@@ -51,7 +51,7 @@ from modal_training_gym.frameworks.ms_swift.config import HF_CACHE_PATH
 
 from modal_training_gym.common.models import ModelTrainingConfig
 
-class SmolLM2_135M(ModelConfiguration):
+class SmolLM2_135M(ModelConfig):
     model_name = "HuggingFaceTB/SmolLM2-135M"
     training = ModelTrainingConfig(
         gpu_type="H100",
@@ -61,7 +61,7 @@ class SmolLM2_135M(ModelConfiguration):
         lora_alpha=16,
     )
 
-    def download_model(self) -> None:
+    def download(self) -> None:
         from huggingface_hub import snapshot_download
 
         snapshot_download(repo_id=self.model_name)
@@ -122,7 +122,7 @@ app = my_training_run.build_app()
 # From the CLI:
 #
 # ```
-# uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.download_model
+# uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.download
 # uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.prepare_dataset
 # uv run modal run --detach tutorials/intro/002_custom_model/002_custom_model.py::app.train
 # ```

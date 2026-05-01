@@ -31,7 +31,7 @@
 #
 # | Stage | What it does | Where |
 # |---|---|---|
-# | `download_model` | Pulls `Qwen/Qwen3-0.6B` into the HF cache volume | 1×H100 |
+# | `download` | Pulls `Qwen/Qwen3-0.6B` into the HF cache volume | 1×H100 |
 # | `prepare_dataset` | Downloads `statworx/haiku` and writes train/test parquet | CPU |
 # | `train` | GRPO training loop over the haiku prompts | 1×8×H100, colocated |
 # | `serve_app` (separate) | Hosts the finished checkpoint via vLLM + Flash | 1×H100 |
@@ -297,7 +297,7 @@ my_training_run = SlimeConfig(
 # `build_app()` returns a `modal.App` with four functions defined
 # against the right volumes, secrets, and GPU spec:
 #
-# - `download_model` — pulls the HF checkpoint into the
+# - `download` — pulls the HF checkpoint into the
 #   `huggingface-cache` volume (1×H100, 2 hour timeout).
 # - `prepare_dataset` — runs `HaikuDataset.prepare()` against the
 #   `slime-data` volume (CPU).
@@ -314,13 +314,13 @@ app = my_training_run.build_app()
 
 # ## Run training
 
-# From the CLI, run the three stages in order. `download_model` and
+# From the CLI, run the three stages in order. `download` and
 # `prepare_dataset` are one-shots — once the HF weights and parquet
 # files are on their volumes, reruns skip the download. `train` is
 # long-running; `--detach` keeps it going after you close the terminal:
 #
 # ```bash
-# uv run modal run tutorials/rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.py::app.download_model
+# uv run modal run tutorials/rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.py::app.download
 # uv run modal run tutorials/rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.py::app.prepare_dataset
 # uv run modal run --detach tutorials/rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.py::app.train
 # ```

@@ -53,10 +53,6 @@ image = (
     .add_local_python_source("modal_training_gym", copy=True)
 )
 
-OBS_VOLUME_NAME = "training-gym-harbor-observability"
-obs_volume = modal.Volume.from_name(OBS_VOLUME_NAME, create_if_missing=True)
-OBS_DIR = "/obs"
-
 app = modal.App(
     "training-gym-dashboard",
     image=image,
@@ -178,43 +174,14 @@ def refresh_training_metadata():
     print(f"Refreshed: {len(runs)} training run(s)")
 
 
-@app.function(
-    volumes={OBS_DIR: obs_volume},
-)
+@app.function()
 @modal.asgi_app()
 def fastapi_app():
-    import asyncio
-    import time
-    from pathlib import Path
-
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import FileResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
 
-    from modal_training_gym.frameworks.harbor.observability import (
-        list_rollout_ids,
-        list_run_manifests,
-        load_rollout,
-        summarize_run,
-    )
-
     web = FastAPI()
-    obs_path = Path(OBS_DIR)
-
-    _RELOAD_INTERVAL = 5
-    _last_reload = 0.0
-    _reload_lock = asyncio.Lock()
-
-    async def _maybe_reload():
-        nonlocal _last_reload
-        now = time.monotonic()
-        if now - _last_reload < _RELOAD_INTERVAL:
-            return
-        async with _reload_lock:
-            if time.monotonic() - _last_reload < _RELOAD_INTERVAL:
-                return
-            await obs_volume.reload.aio()
-            _last_reload = time.monotonic()
 
     @web.get("/api/runs")
     async def api_runs() -> JSONResponse:
@@ -235,32 +202,6 @@ def fastapi_app():
                 run["wandb_url"] = url
 
         return JSONResponse({"runs": runs})
-
-    @web.get("/api/harbor/runs")
-    async def api_harbor_runs():
-        await _maybe_reload()
-        return list_run_manifests(obs_path)
-
-    @web.get("/api/harbor/runs/{run_id}")
-    async def api_harbor_run(run_id: str):
-        await _maybe_reload()
-        try:
-            return summarize_run(obs_path, run_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @web.get("/api/harbor/runs/{run_id}/rollouts")
-    async def api_harbor_rollouts(run_id: str):
-        await _maybe_reload()
-        return list_rollout_ids(obs_path, run_id)
-
-    @web.get("/api/harbor/runs/{run_id}/rollouts/{rollout_id}")
-    async def api_harbor_rollout(run_id: str, rollout_id: str):
-        await _maybe_reload()
-        try:
-            return load_rollout(obs_path, run_id, rollout_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     # ── W&B metrics endpoints ──────────────────────────────────────────────
 

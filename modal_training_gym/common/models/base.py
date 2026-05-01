@@ -1,13 +1,13 @@
-"""Model configuration + `download_model()` hook, shared across training frameworks.
+"""Model configuration + `download()` hook, shared across training frameworks.
 
-A `ModelConfiguration` bundles identity (`model_name`), an optional local
+A `ModelConfig` bundles identity (`model_name`), an optional local
 `model_path`, an optional transformer `architecture`, and an optional
 `training` profile. Pure data — each framework config reads what it
 needs from an attached subclass.
 
 Subclass and set `model_name` / `model_path` / `architecture` / `training`
 as class attributes (or pass them as constructor kwargs), then override
-`download_model()` to materialize weights into the shared model volume.
+`download()` to materialize weights into the shared model volume.
 
 The built-in models (`Qwen3_0_6B`, `Qwen3_4B`, `Qwen3_32B`, `GLM_4_7`,
 `Llama2_7B`, `Kimi_K2_5`) are concrete subclasses in their own per-model
@@ -19,17 +19,17 @@ Example (mirrors the `DatasetConfig` pattern in
 
     from huggingface_hub import snapshot_download
     from modal_training_gym.common.models import (
-        ModelArchitecture, ModelConfiguration, ModelTrainingConfig,
+        ModelArchitecture, ModelConfig, ModelTrainingConfig,
     )
 
-    class SmolLM2_135M(ModelConfiguration):
+    class SmolLM2_135M(ModelConfig):
         model_name = "HuggingFaceTB/SmolLM2-135M"
         training = ModelTrainingConfig(
             gpu_type="H100",
             tensor_model_parallel_size=1,
         )
 
-        def download_model(self) -> None:
+        def download(self) -> None:
             snapshot_download(repo_id=self.model_name)
 """
 
@@ -39,6 +39,8 @@ from dataclasses import dataclass, fields as dc_fields
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from modal import App
+
     from modal_training_gym.common import GPUType
 
 
@@ -131,7 +133,7 @@ class ModelArchitecture:
             args += ["--make-vocab-size-divisible-by", "1"]
         if self.normalization:
             args += ["--normalization", self.normalization]
-        # Megatron/Miles defaults do not consistently match HF config defaults,
+        # Megatron defaults do not consistently match HF config defaults,
         # so emit the model's declared norm epsilon explicitly.
         if self.norm_epsilon:
             args += ["--norm-epsilon", str(self.norm_epsilon)]
@@ -235,12 +237,28 @@ class ModelTrainingConfig:
         return {f.name: getattr(self, f.name) for f in dc_fields(self)}
 
 
-class ModelConfiguration:
+@dataclass(frozen=True)
+class ModelDeployment:
+    """Deployed Model using vLLM serving endpoint metadata.
+    TODO(joy): In the future, we will add an option between vLLM and SGlang, and also add preconfigs to ensure
+    that the model is served in an appropriate way.
+    """
+
+    app: "App"
+    app_name: str
+    served_model_name: str
+    url: str
+    gpu: "GPUType"
+    n_gpu: int
+    extra_vllm_args: list[str]
+
+
+class ModelConfig:
     """Base class for model identity and weight-download logic.
 
     Subclass and set ``model_name`` (and optionally ``model_path`` and
     ``architecture``) as class attributes, then override
-    ``download_model()`` to materialize weights into the shared model
+    ``download()`` to materialize weights into the shared model
     volume.
 
     Parameters (constructor kwargs or class attributes)
@@ -258,32 +276,170 @@ class ModelConfiguration:
         model on a specific GPU type. Frameworks pull defaults from here
         so users don't need to manually specify model-tuned flags.
         Default ``None``.
+    checkpoints_volume_name : str
+        Optional Modal volume name to mount when ``model_path`` points to
+        a local checkpoint path. Typically injected by ``TrainResult.model``.
+    checkpoints_mount_path : str
+        Optional mount path for ``checkpoints_volume_name``.
+        Defaults to ``"/checkpoints"``.
+    gpu : GPUType | None
+        Optional vLLM serving GPU type override. When ``None``, inferred
+        from model presets.
+    n_gpu : int | None
+        Optional vLLM serving GPU count override. When ``None``, inferred
+        from model tensor-parallel presets.
+    extra_vllm_args : list[str] | None
+        Optional additional vLLM CLI args for serving.
+    environment_name : str | None
+        Optional Modal environment name to deploy into.
+    deploy_strategy : str
+        Modal deployment strategy. Default ``"rolling"``.
 
     Methods
     -------
-    download_model()
+    download()
         Download or materialize weights into the model volume. Must be
         overridden by subclasses.
+    serve()
+        Build + deploy a vLLM app and return the endpoint URL.
     """
 
     model_name: str = ""
     model_path: str | None = None
     architecture: ModelArchitecture | None = None
     training: ModelTrainingConfig | None = None
+    checkpoints_volume_name: str = ""
+    checkpoints_mount_path: str = "/checkpoints"
+    gpu: "GPUType | None" = None
+    n_gpu: int | None = None
+    extra_vllm_args: list[str] | None = None
+    environment_name: str | None = None
+    deploy_strategy: str = "rolling"
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-    def download_model(self) -> None:
+    def download(self) -> None:
         """Download or materialize weights into the model volume."""
-        raise NotImplementedError(f"{type(self).__name__} has no download_model()")
+        raise NotImplementedError(f"{type(self).__name__} has no download()")
+
+    def _infer_serve_gpu(self) -> "GPUType":
+        if self.training is not None and getattr(self.training, "gpu_type", None):
+            return self.training.gpu_type
+        for attr in ("slime",):
+            preset = getattr(self, attr, None)
+            if preset is not None and getattr(preset, "gpu_type", None):
+                return preset.gpu_type
+        return "H100"
+
+    def _infer_serve_n_gpu(self) -> int:
+        candidates: list[int] = []
+        if self.training is not None:
+            tp = getattr(self.training, "tensor_model_parallel_size", 0)
+            if isinstance(tp, int) and tp > 0:
+                candidates.append(tp)
+        for attr in ("slime",):
+            preset = getattr(self, attr, None)
+            if preset is None:
+                continue
+            tp = getattr(preset, "tensor_model_parallel_size", 0)
+            if isinstance(tp, int) and tp > 0:
+                candidates.append(tp)
+        return max(candidates) if candidates else 1
+
+    def _infer_serve_vllm_args(self) -> list[str]:
+        model_name = (self.model_name or "").lower()
+        inferred: list[str] = []
+        if "qwen3" in model_name:
+            inferred += ["--reasoning-parser", "qwen3"]
+        return inferred
+
+    def serve(
+        self,
+        *,
+        app_name: str | None = None,
+        served_model_name: str | None = None,
+        checkpoint_path: str | None = None,
+        checkpoints_volume: str | None = None,
+        checkpoints_mount_path: str | None = None,
+    ) -> "ModelDeployment":
+        """Build + deploy a vLLM serving app and return endpoint metadata.
+
+        Uses ``model_path`` when set (or ``checkpoint_path`` override),
+        otherwise falls back to ``model_name`` (HF repo id).
+        """
+        import modal
+
+        from modal_training_gym.common.serve_vllm import build_vllm_serve_app
+
+        model_path = checkpoint_path or self.model_path or self.model_name
+        if not model_path:
+            raise ValueError(
+                f"{type(self).__name__} has no model path to serve. "
+                "Set model_path, model_name, or pass checkpoint_path."
+            )
+
+        default_name_src = self.model_name or model_path
+        default_slug = (
+            default_name_src.rstrip("/").split("/")[-1].replace("_", "-").lower()
+        )
+        resolved_app_name = app_name or f"{default_slug}-serve"
+        resolved_served_model_name = served_model_name or default_slug
+        resolved_checkpoints_volume = (
+            checkpoints_volume or self.checkpoints_volume_name or None
+        )
+        resolved_mount_path = (
+            checkpoints_mount_path or self.checkpoints_mount_path or "/checkpoints"
+        )
+        resolved_gpu = self.gpu or self._infer_serve_gpu()
+        resolved_n_gpu = (
+            self.n_gpu if self.n_gpu is not None else self._infer_serve_n_gpu()
+        )
+        resolved_extra_args = [
+            *self._infer_serve_vllm_args(),
+            *(self.extra_vllm_args or []),
+        ]
+
+        app = build_vllm_serve_app(
+            app_name=resolved_app_name,
+            model_path=model_path,
+            served_model_name=resolved_served_model_name,
+            checkpoints_volume=resolved_checkpoints_volume,
+            checkpoints_mount_path=resolved_mount_path,
+            gpu=resolved_gpu,
+            n_gpu=resolved_n_gpu,
+            extra_vllm_args=resolved_extra_args,
+        )
+        app.deploy(
+            environment_name=self.environment_name,
+            strategy=self.deploy_strategy,
+        )
+        serve_fn = modal.Function.from_name(
+            resolved_app_name,
+            "serve",
+            environment_name=self.environment_name,
+        )
+        url = serve_fn.get_web_url()
+        if not url:
+            raise RuntimeError(
+                f"Deployed {resolved_app_name!r} but no web URL was returned for function 'serve'."
+            )
+        return ModelDeployment(
+            app=app,
+            app_name=resolved_app_name,
+            served_model_name=resolved_served_model_name,
+            url=url,
+            gpu=resolved_gpu,
+            n_gpu=resolved_n_gpu,
+            extra_vllm_args=resolved_extra_args,
+        )
 
 
-class HFModelConfiguration(ModelConfiguration):
-    """ModelConfiguration for models hosted on HuggingFace.
+class HFModelConfiguration(ModelConfig):
+    """ModelConfig for models hosted on HuggingFace.
 
-    Implements ``download_model()`` via ``huggingface_hub.snapshot_download``
+    Implements ``download()`` via ``huggingface_hub.snapshot_download``
     using ``self.model_name`` as the repo ID. Subclass this for any
     HF-hosted model — only set ``model_name`` (plus optionally
     ``architecture`` and ``model_path``); the download step needs no
@@ -294,12 +450,12 @@ class HFModelConfiguration(ModelConfiguration):
 
     Methods
     -------
-    download_model()
+    download()
         Downloads the full model snapshot from HuggingFace Hub into the
         local cache.
     """
 
-    def download_model(self) -> None:
+    def download(self) -> None:
         from huggingface_hub import snapshot_download
 
         kwargs: dict = {"repo_id": self.model_name}

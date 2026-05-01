@@ -113,7 +113,7 @@ my_training_run = SlimeConfig(
 
 # ## Build and run
 #
-# `build_app()` returns a Modal app with `download_model`,
+# `build_app()` returns a Modal app with `download`,
 # `prepare_dataset`, and `train`. (Bridge mode means there's no
 # separate `convert_checkpoint` step to call — see quickstart for the
 # general pattern.)
@@ -123,7 +123,7 @@ app = my_training_run.build_app()
 # From the CLI:
 #
 # ```bash
-# uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.download_model
+# uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.download
 # uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.prepare_dataset
 # uv run modal run --detach tutorials/rl/001_slime_intro/001_slime_intro.py::app.train
 # ```
@@ -148,7 +148,11 @@ app = my_training_run.build_app()
 #
 # ```python
 # # Serve the TRAINED model (checkpoint from training):
-# trained_app = result.build_serve_app(served_model_name="qwen3-0.6b-gsm8k-trained")
+# trained_deployment = result.model.serve(
+#     app_name="qwen3-0.6b-gsm8k-trained-serve",
+#     served_model_name="qwen3-0.6b-gsm8k-trained",
+# )
+# print(trained_deployment.url)
 #
 # # Serve the BASE model (original HuggingFace weights):
 # base_app = build_vllm_serve_app(
@@ -159,8 +163,7 @@ app = my_training_run.build_app()
 # ```
 #
 # ```bash
-# # Deploy both:
-# modal deploy eval.py::trained_app
+# # Deploy only the BASE app (trained model was already deployed by .serve()):
 # modal deploy eval.py::base_app
 # ```
 #

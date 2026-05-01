@@ -160,7 +160,7 @@ def _build_section():
     """
     ## Build and run
 
-    `build_app()` returns a Modal app with `download_model`,
+    `build_app()` returns a Modal app with `download`,
     `prepare_dataset`, and `train`. See
     [`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb) for the pattern.
     """
@@ -178,7 +178,7 @@ def _run_cli():
     From the CLI:
 
     ```
-    uv run modal run tutorials/sft/001_ms_swift/001_ms_swift.py::app.download_model
+    uv run modal run tutorials/sft/001_ms_swift/001_ms_swift.py::app.download
     uv run modal run tutorials/sft/001_ms_swift/001_ms_swift.py::app.prepare_dataset
     uv run modal run --detach tutorials/sft/001_ms_swift/001_ms_swift.py::app.train
     ```
@@ -198,7 +198,7 @@ def _run_interactive():
 def _invoke_download_model():
     with modal.enable_output():
         with app.run():
-            app.download_model.remote()
+            app.download.remote()
 
 
 @notebook_only
@@ -231,8 +231,12 @@ def _eval_section():
     result = TrainResult.load("glm-4-7-gsm8k-sft")
     print(result.latest_checkpoint_path())
 
-    # Serve via vLLM:
-    serve_app = result.build_serve_app()
+    # Serve via vLLM (deploys and returns URL):
+    deployment = result.model.serve(
+        app_name="glm-4-7-gsm8k-sft-serve",
+        served_model_name="glm-4-7-gsm8k-sft",
+    )
+    print(deployment.url)
     ```
 
     See the [TrainResult reference](/reference/core/trainresult/) for
