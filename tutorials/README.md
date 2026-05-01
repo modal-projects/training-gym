@@ -23,6 +23,7 @@ context) and assume familiarity with the underlying framework.
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
 | [`001_quickstart`](intro/001_quickstart/001_quickstart.ipynb) | Shared concepts: config containers, framework factories, volume layout, running the pipeline | Beginner | — (concepts) | — | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/intro/001_quickstart/001_quickstart.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`002_custom_model`](intro/002_custom_model/002_custom_model.ipynb) | Custom HuggingFace model — inline `ModelConfig` subclass, serve and evaluate without training | Beginner | — (eval only) | — | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/intro/002_custom_model/002_custom_model.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### RL
 

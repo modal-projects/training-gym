@@ -41,8 +41,6 @@ from typing import TYPE_CHECKING, Any
 from modal_training_gym.common.deploy import DeployConfig, ModelDeployment
 
 if TYPE_CHECKING:
-    from modal import App
-
     from modal_training_gym.common import GPUType
 
 

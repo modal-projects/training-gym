@@ -250,8 +250,8 @@ def _next_section():
       validate that multi-node NCCL works in your workspace before
       running real training.
     - [`002_custom_model`](../../intro/002_custom_model/002_custom_model.ipynb) —
-      LoRA SFT on a tiny SmolLM2-135M, with an inline custom
-      `ModelConfig` subclass.
+      serve and eval a custom HuggingFace model (SmolLM2-135M) with an
+      inline `ModelConfig` subclass, no training.
     **Intermediate** (non-default wiring, 1–2 nodes)
 
     - [`slime_haiku`](../../rl/slime_haiku/slime_haiku.ipynb) — GRPO with a
