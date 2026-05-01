@@ -2,7 +2,7 @@
 
 Pure data — each framework config writes its own converter from a
 `DatasetConfig` instance to its specific CLI flags (e.g. SlimeConfig emits
-`--prompt-data`, `--input-key`, …; ms-swift emits only `--dataset <path>`).
+`--prompt-data`, `--input-key`, …).
 
 Subclass and override `prepare()` to materialize the data into a shared
 volume.

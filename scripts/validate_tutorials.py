@@ -370,14 +370,6 @@ TUTORIAL_CLASSIFICATIONS: dict[str, dict] = {
         "markers": ["train/reward", "iter 0", "reward"],
         "train_stage_suffix": "-- trainer.total_training_steps=1",
     },
-    "ms_swift_glm_4_7_gsm8k": {
-        "type": TargetType.TRAINING,
-        "markers": ["iter 0/", "train/loss", "iteration"],
-    },
-    "ms_swift_custom_hf": {
-        "type": TargetType.TRAINING,
-        "markers": ["iter 0/", "train/loss", "iteration"],
-    },
     "starcoder_llama2_7b": {
         "type": TargetType.TRAINING,
         "markers": ['{"loss":', "loss", "train_loss"],

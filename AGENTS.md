@@ -60,7 +60,7 @@ SlimeConfig.build_app()
         app.train()             — Ray cluster submit → TrainResult
 ```
 
-There is **no shared abstract base class** for framework configs — SlimeConfig is a Pydantic dataclass, MsSwiftConfig is a plain class. Both follow the same composition pattern independently.
+SlimeConfig is a Pydantic dataclass following the two-class composition pattern.
 
 ### Train pipeline
 

@@ -135,7 +135,6 @@ def _grade_haiku():
         lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
         has_three_lines = len(lines) == 3
 
-        syllable_score = 0.0
         syllable_counts = []
         has_passed = True
         if has_three_lines:

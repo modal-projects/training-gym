@@ -10,7 +10,7 @@ Typical flow:
 .. code-block:: python
 
     # training.py
-    app = MsSwiftConfig(...).build_app()
+    app = SlimeConfig(...).build_app()
 
     # Kick off training:
     #   modal run --detach training.py::app.train
@@ -83,8 +83,7 @@ class TrainResult:
         ``checkpoint_dir`` for frameworks that scope checkpoints by run.
     checkpoint_dir:
         Absolute in-container path to this run's checkpoint directory.
-        For ms-swift this is a run-specific subdirectory under the
-        checkpoints mount; for slime (which
+        For slime (which
         writes a single flat ``iter_*`` tree at ``slime.save``) this is
         that save root.
     model_config:

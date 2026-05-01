@@ -330,25 +330,22 @@ class ModelConfig:
             checkpoints_mount_path
         )
         d = self.deploy
-        resolved_gpu = (d.gpu if d and d.gpu else None) or self._infer_serve_gpu()
-        resolved_n_gpu = (
-            d.n_gpu if d and d.n_gpu is not None else self._infer_serve_n_gpu()
-        )
-        resolved_extra_args = [
-            *self._infer_serve_vllm_args(),
-            *(d.extra_vllm_args if d and d.extra_vllm_args else []),
-        ]
-
-        app = build_vllm_serve_app(
+        build_kwargs: dict[str, Any] = dict(
             app_name=resolved_app_name,
             model_path=model_path,
             served_model_name=resolved_served_model_name,
             checkpoints_volume=resolved_checkpoints_volume,
-            checkpoints_mount_path=resolved_mount_path,
-            gpu=resolved_gpu,
-            n_gpu=resolved_n_gpu,
-            extra_vllm_args=resolved_extra_args,
         )
+        if resolved_mount_path is not None:
+            build_kwargs["checkpoints_mount_path"] = resolved_mount_path
+        if d and d.gpu:
+            build_kwargs["gpu"] = d.gpu
+        if d and d.n_gpu is not None:
+            build_kwargs["n_gpu"] = d.n_gpu
+        if d and d.extra_vllm_args:
+            build_kwargs["extra_vllm_args"] = d.extra_vllm_args
+
+        app = build_vllm_serve_app(**build_kwargs)
         env_name = d.environment_name if d else None
         strategy = d.deploy_strategy if d else "rolling"
         app.deploy(
@@ -370,10 +367,7 @@ class ModelConfig:
             app_name=resolved_app_name,
             served_model_name=resolved_served_model_name,
             url=url,
-            deploy=DeployConfig(
-                gpu=resolved_gpu,
-                n_gpu=resolved_n_gpu,
-                extra_vllm_args=resolved_extra_args,
+            deploy=d or DeployConfig(
                 environment_name=env_name,
                 deploy_strategy=strategy,
             ),

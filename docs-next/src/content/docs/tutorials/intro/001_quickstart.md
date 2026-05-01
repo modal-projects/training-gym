@@ -3,8 +3,8 @@ title: "Quickstart: concepts that every tutorial uses"
 description: "Shared concepts: config containers, framework factories, volume layout, running the pipeline"
 ---
 
-`modal-training-gym` wraps a handful of training frameworks (slime,
-Megatron, MS-SWIFT) behind a single pattern: declare
+`modal-training-gym` wraps training frameworks (slime)
+behind a single pattern: declare
 a model, a dataset, and a logging config; hand
 them to a framework factory; `modal run` the returned app. This
 notebook walks through the pieces so the per-framework tutorials can
@@ -33,9 +33,7 @@ the base for any HF-hosted model — it implements `download()` via
 `huggingface-cache` Modal volume.
 
 For a custom HF model, subclass `ModelConfig` inline in your
-tutorial (see
-[`002_custom_model`](../../intro/002_custom_model/002_custom_model.ipynb)) —
-there's no registry to update.
+tutorial — there's no registry to update.
 
 ```python
 from modal_training_gym.common.models import Qwen3_0_6B
@@ -119,9 +117,8 @@ run = SlimeConfig(
 app = run.build_app()   # modal.App — call app.train to run everything
 ```
 
-Different framework, same shape — swap `slime` for `ms_swift`,
-etc. The framework-specific flags differ (that's what makes
-the frameworks different), but everything around them stays put.
+The framework-specific flags differ across frameworks,
+but everything around them stays put.
 
 ## Volume layout
 
@@ -136,8 +133,8 @@ download cost once:
 
 Each framework uses its own data and checkpoints volumes (so one
 framework's half-written state can't corrupt another's), but the HF
-cache is truly shared — download `Qwen3-0.6B` once, use it from slime
-and ms-swift.
+cache is truly shared — download `Qwen3-0.6B` once, use it from any
+framework.
 
 Nothing in a tutorial directly manipulates volumes — the launchers
 mount them and the three remote functions know where to write. If you
@@ -179,9 +176,6 @@ catalog in [`tutorials/README.md`](../README.md).
 - [`nccl_benchmark`](../../misc/nccl_benchmark/nccl_benchmark.ipynb) —
   validate that multi-node NCCL works in your workspace before
   running real training.
-- [`002_custom_model`](../../intro/002_custom_model/002_custom_model.ipynb) —
-  LoRA SFT on a tiny SmolLM2-135M, with an inline custom
-  `ModelConfig` subclass.
 **Intermediate** (non-default wiring, 1–2 nodes)
 
 - [`slime_haiku`](../../rl/slime_haiku/slime_haiku.ipynb) — GRPO with a
@@ -194,8 +188,6 @@ catalog in [`tutorials/README.md`](../README.md).
 
 - [`slime_gsm8k`](../../rl/slime_gsm8k/slime_gsm8k.ipynb) — colocated 4-node
   GRPO, the canonical math-RL reference.
-- [`001_ms_swift`](../../sft/001_ms_swift/001_ms_swift.ipynb) —
-  GLM-4.7 LoRA SFT on GSM8K using ms-swift + Megatron.
 
 ---
 

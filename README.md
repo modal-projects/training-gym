@@ -8,8 +8,7 @@
 **[📖 Documentation](https://gym.modal.dev)** · **[Tutorials](https://gym.modal.dev/tutorials/)** · **[API Reference](https://gym.modal.dev/reference/)**
 
 Distributed training on [Modal](https://modal.com) without hand-rolling a
-launcher each time. Pick a training framework (slime,
-MS-SWIFT), plug in a model + dataset config, and
+launcher each time. Pick a training framework (slime), plug in a model + dataset config, and
 `modal run` it — training-gym handles the image, the
 cluster topology, the Ray/NCCL bring-up, volume mounts, and checkpointing.
 
@@ -43,8 +42,7 @@ cell-by-cell — each notebook is a self-contained walkthrough. See
 
 ## Pick your framework
 
-Each framework package exposes a config class (e.g. `SlimeConfig`,
-`MsSwiftConfig`) that returns a `modal.App` via `.build_app()` with
+Each framework package exposes a config class (e.g. `SlimeConfig`) that returns a `modal.App` via `.build_app()` with
 `download`, `prepare_dataset`, and `train` functions. Shared
 container objects (`DatasetConfig`, `Model`, `WandbConfig`) plug into
 the framework config; each framework translates them into its own CLI
@@ -53,7 +51,6 @@ vocabulary.
 | Framework | Good for | Tutorials |
 |---|---|---|
 | `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | [001 Intro](tutorials/rl/001_slime_intro/), [002 Customizing](tutorials/rl/002_customizing_your_slime_run/), [003 LLM Judge](tutorials/rl/003_slime_with_llm_as_judge/) |
-| `ms_swift` | ms-swift Megatron SFT (single- and multi-node) | [001 ms-swift](tutorials/sft/001_ms_swift/) |
 
 "Thin" launchers give you a cluster and a `torchrun` — bring your own
 training script. "Opinionated" launchers wrap a specific upstream framework

@@ -25,7 +25,6 @@ modal_training_gym/         ← installable package
 │   └── ray_cluster.py      ← ModalRayCluster helper (used by slime)
 ├── frameworks/             ← one subpackage per training framework
 │   ├── slime/              ← slime GRPO (Ray + Megatron + SGLang)
-│   ├── ms_swift/           ← ms-swift Megatron SFT
 └── tools/                  ← shared scripts mounted on every image at
                               /opt/training-gym/tools (see "Tools" below)
 
@@ -69,7 +68,7 @@ Built-in subclasses:
 |---|---|---|---|
 | `Qwen3_4B` | `Qwen/Qwen3-4B` | yes | slime-ready |
 | `Qwen3_32B` | `Qwen/Qwen3-32B` | no (stub) | architecture inferred from HF config in RL setups |
-| `GLM_4_7` | `zai-org/GLM-4.7` | no | ms-swift / Megatron derive arch |
+| `GLM_4_7` | `zai-org/GLM-4.7` | no | architecture inferred from HF config |
 | `Llama2_7B` | `meta-llama/Llama-2-7b-hf` | no | torchrun-based workflows |
 | `Kimi_K2_5` | `moonshotai/Kimi-K2.5` | no | **overrides `download`**: snapshot + INT4→BF16 conversion via `tools/convert_kimi_int4_to_bf16.py` |
 
@@ -129,7 +128,6 @@ the remote container.
 | Framework | Uses `config.model` CLI-wise | Needs `architecture` | Best for |
 |---|---|---|---|
 | `slime` | hf_checkpoint CLI flag **plus** architecture flags | **yes** | GRPO |
-| `ms_swift` | `--model <model_name>` | no | ms-swift Megatron SFT |
 
 ## The `tools/` shared directory
 
@@ -198,7 +196,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
 2. **Create the source** at
    `tutorials/tutorial_generator/<name>.py`. Structure (follow
-   `ms_swift_glm_4_7_gsm8k.py` or `ms_swift_custom_hf.py` as templates):
+   existing slime tutorials as templates):
 
    ```python
    from tutorial_generator import code, markdown, notebook_only, py_only, shell
@@ -316,7 +314,7 @@ def _define_model():
 
 Better: inherit from `HFModelConfiguration` and skip the `download`
 override (the one-line snapshot_download is the inherited default). See
-`tutorials/tutorial_generator/sft/ms_swift_custom_hf.py` for a full example.
+existing slime tutorials for full examples.
 
 ## Validation
 
@@ -345,7 +343,7 @@ test. Run with `uv run python tests/test_model_configuration.py`.
   3.11 (e.g. some ModelScope images), app build fails with `InvalidError`.
 - **Framework image switches**. To override a framework's default image,
   set `image=` on `<F>FrameworkConfig` in your tutorial. The launcher's
-  `pip_install` chain reinstalls the framework (e.g. ms-swift) fresh, so
+  `pip_install` chain reinstalls the framework fresh, so
   switching the base is usually enough. Check whether transitive deps
   (megatron-core, pillow, tokenizers for transformers) are in the new
   image; the ModelScope image shipped many, bare CUDA/NGC images don't.

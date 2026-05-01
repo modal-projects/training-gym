@@ -1,8 +1,7 @@
 """Weights & Biases run metadata.
 
 Pure data — each framework config writes its own converter from this to its
-specific CLI flags (e.g. SlimeConfig emits `--wandb-project`, ms-swift emits
-`--wandb_project` + `--wandb_exp_name`).
+specific CLI flags (e.g. SlimeConfig emits `--wandb-project`).
 """
 
 from __future__ import annotations
@@ -14,8 +13,7 @@ class WandbConfig:
     """Weights & Biases logging configuration shared across all frameworks.
 
     Each framework config converts these fields into its own CLI flags
-    (e.g. SlimeConfig emits ``--wandb-project``, ms-swift emits
-    ``--wandb_project`` + ``--wandb_exp_name``).
+    (e.g. SlimeConfig emits ``--wandb-project``).
 
     ## Fields
 

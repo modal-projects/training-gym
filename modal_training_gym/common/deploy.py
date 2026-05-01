@@ -63,9 +63,11 @@ class ModelDeployment:
                 return
             except Exception:
                 time.sleep(1)
+                print(f"Waiting for {self.url} to be ready...")
 
     def generate(self, prompt: str) -> str:
         import requests
+        self.wait_until_ready()
         response = requests.post(
             f"{self.url}/v1/chat/completions",
             json={"model": self.served_model_name, "messages": [{"role": "user", "content": prompt}]},

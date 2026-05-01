@@ -37,5 +37,3 @@ Complete reference for the training-gym Python library.
 |-------|-------------|
 | [`SlimeConfig`](/reference/frameworks/slimeconfig/) | slime GRPO training configuration. |
 | [`ModalConfig (slime)`](/reference/frameworks/modalconfig/) | Modal infrastructure configuration for slime — image setup and dev overlays. |
-| [`MsSwiftFrameworkConfig`](/reference/frameworks/msswiftframeworkconfig/) | ms-swift Megatron SFT configuration, including Modal infrastructure. |
-| [`MsSwiftConfig`](/reference/frameworks/msswiftconfig/) | Top-level wrapper that composes an ms-swift Megatron SFT run. |

@@ -56,7 +56,7 @@ slime GRPO training configuration.
 | `kl_loss_coef` | `float` | `0.0` | KL loss coefficient. Default `0.0`. |
 | `entropy_coef` | `float` | `0.0` | Entropy bonus coefficient. Default `0.0`. |
 | `ref_load` | `str` | `""` | Reference model checkpoint path. Default `""`. |
-| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7fad3332fa40>` |  |
+| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7f9edbbc68a0>` |  |
 
 ## Rollout
 
