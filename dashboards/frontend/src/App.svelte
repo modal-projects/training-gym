@@ -10,10 +10,14 @@
   let error = $state(null);
   let search = $state("");
   let activeFrameworks = $state(new Set());
-  let activeStates = $state(new Set());
+  let activeStatuses = $state(new Set());
 
   function getFramework(run) {
-    return run.metadata?.framework || run.framework || "(untagged)";
+    return run.framework || "(untagged)";
+  }
+
+  function getStatus(run) {
+    return run.train_result ? "Completed" : "Pending";
   }
 
   async function load() {
@@ -21,10 +25,8 @@
     error = null;
     try {
       allRuns = await fetchRuns();
-      const fws = new Set(allRuns.map(getFramework));
-      const sts = new Set(allRuns.map((r) => r.state));
-      activeFrameworks = fws;
-      activeStates = sts;
+      activeFrameworks = new Set(allRuns.map(getFramework));
+      activeStatuses = new Set(allRuns.map(getStatus));
     } catch (e) {
       error = e.message;
     } finally {
@@ -38,7 +40,7 @@
     [...new Set(allRuns.map(getFramework))].sort(),
   );
 
-  let states = $derived([...new Set(allRuns.map((r) => r.state))].sort());
+  let statuses = $derived([...new Set(allRuns.map(getStatus))].sort());
 
   let fwCounts = $derived(
     allRuns.reduce((acc, r) => {
@@ -48,9 +50,10 @@
     }, {}),
   );
 
-  let stateCounts = $derived(
+  let statusCounts = $derived(
     allRuns.reduce((acc, r) => {
-      acc[r.state] = (acc[r.state] || 0) + 1;
+      const st = getStatus(r);
+      acc[st] = (acc[st] || 0) + 1;
       return acc;
     }, {}),
   );
@@ -58,12 +61,13 @@
   let filteredRuns = $derived(
     allRuns.filter((r) => {
       if (!activeFrameworks.has(getFramework(r))) return false;
-      if (!activeStates.has(r.state)) return false;
+      if (!activeStatuses.has(getStatus(r))) return false;
       if (search) {
         const q = search.toLowerCase();
         if (
-          !r.name?.toLowerCase().includes(q) &&
-          !r.app_id?.toLowerCase().includes(q)
+          !r.run_id?.toLowerCase().includes(q) &&
+          !r.modal_app_id?.toLowerCase().includes(q) &&
+          !r.config_summary?.model_name?.toLowerCase().includes(q)
         )
           return false;
       }
@@ -110,11 +114,11 @@
     }
   }
 
-  function toggleState(st) {
-    const next = new Set(activeStates);
+  function toggleStatus(st) {
+    const next = new Set(activeStatuses);
     if (next.has(st)) next.delete(st);
     else next.add(st);
-    activeStates = next;
+    activeStatuses = next;
   }
 </script>
 
@@ -131,14 +135,14 @@
     {fwCounts}
     {activeFrameworks}
     allActive={activeFrameworks.size === frameworks.length}
-    {states}
-    {stateCounts}
-    {activeStates}
+    {statuses}
+    {statusCounts}
+    {activeStatuses}
     totalRuns={allRuns.length}
     bind:search
     onToggleFramework={toggleFramework}
     onToggleAllFrameworks={toggleAllFrameworks}
-    onToggleState={toggleState}
+    onToggleStatus={toggleStatus}
   />
 
   <div class="main">

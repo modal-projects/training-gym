@@ -4,13 +4,13 @@ Usage (from a tutorial file):
 
     from modal_training_gym.frameworks.slime import ModalConfig, SlimeConfig, build_slime_app
 
-    class _Slime(SlimeConfig):
-        hf_checkpoint = "Qwen/Qwen3-8B"
-        actor_num_nodes = 1
-        actor_num_gpus_per_node = 8
-        # ...
+    from modal_training_gym.frameworks.slime import SlimeConfig, SlimePreset
 
-    app = build_slime_app(modal=ModalConfig(gpu="H100"), slime=_Slime())
+    slime = SlimeConfig(
+        model=my_model,  # model with a SlimePreset attached
+        # ...
+    )
+    app = slime.build_app()
 
 Then: `uv run modal run <tutorial_file>.py::train`.
 """
@@ -173,7 +173,8 @@ def build_slime_app(
         if slime.wandb.group:
             tags["_modal_wandb_group"] = slime.wandb.group
     app = App(app_name, tags=tags)
-    gpu_spec = f"{gpu}:{slime.actor_num_gpus_per_node}"
+    assert slime.preset is not None
+    gpu_spec = f"{gpu}:{slime.preset.actor_num_gpus_per_node}"
 
     @app.function(
         image=image,
@@ -264,9 +265,8 @@ def build_slime_app(
         )
 
         cmd = (
-            f"source {SLIME_ROOT}/{slime.slime_model_script} && "
             f"torchrun {' '.join(torchrun_args)} {convert_script} "
-            f"${{MODEL_ARGS[@]}} {' '.join(extra_args)} "
+            f"{' '.join(extra_args)} "
             f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(save_path)}"
         )
 
@@ -297,7 +297,7 @@ def build_slime_app(
         serialized=True,
         name="train",
     )
-    @clustered(slime.total_nodes(), rdma=True)
+    @clustered(slime.total_nodes, rdma=True)
     async def train():
         """Launch the slime training run on a Ray cluster."""
         await asyncio.gather(

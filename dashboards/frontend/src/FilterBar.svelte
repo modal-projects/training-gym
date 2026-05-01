@@ -4,14 +4,14 @@
     fwCounts,
     activeFrameworks,
     allActive,
-    states,
-    stateCounts,
-    activeStates,
+    statuses,
+    statusCounts,
+    activeStatuses,
     totalRuns,
     search = $bindable(),
     onToggleFramework,
     onToggleAllFrameworks,
-    onToggleState,
+    onToggleStatus,
   } = $props();
 </script>
 
@@ -37,16 +37,16 @@
   </div>
 
   <div class="filter-sep"></div>
-  <span class="filter-label">State</span>
+  <span class="filter-label">Result</span>
   <div class="pill-group">
-    {#each states as st (st)}
+    {#each statuses as st (st)}
       <button
         class="pill"
-        class:active={activeStates.has(st)}
-        data-state={st}
-        onclick={() => onToggleState(st)}
+        class:active={activeStatuses.has(st)}
+        data-status={st}
+        onclick={() => onToggleStatus(st)}
       >
-        {st} <span class="pill-count">{stateCounts[st] || 0}</span>
+        {st} <span class="pill-count">{statusCounts[st] || 0}</span>
       </button>
     {/each}
   </div>
@@ -55,7 +55,7 @@
   <input
     class="search"
     type="text"
-    placeholder="Search by name or app id..."
+    placeholder="Search by run ID, app ID, or model..."
     bind:value={search}
   />
 </nav>
@@ -114,16 +114,12 @@
     font-size: 0.8em;
     opacity: 0.7;
   }
-  .pill[data-state="Running"].active,
-  .pill[data-state="Deployed"].active {
+  .pill[data-status="Completed"].active {
     border-color: var(--green);
     color: var(--green);
     background: rgba(74, 222, 128, 0.1);
   }
-  .pill[data-state="Stopped"].active {
-    border-color: var(--muted);
-  }
-  .pill[data-state="Ephemeral"].active {
+  .pill[data-status="Pending"].active {
     border-color: var(--yellow);
     color: var(--yellow);
     background: rgba(251, 191, 36, 0.1);
@@ -142,7 +138,7 @@
     padding: 0.35rem 0.7rem;
     font: inherit;
     font-size: 0.85em;
-    width: 14rem;
+    width: 18rem;
     outline: none;
   }
   .search:focus {

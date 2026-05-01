@@ -6,14 +6,12 @@ specific CLI flags (e.g. SlimeConfig emits `--wandb-project`).
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
 
 
+@dataclass
 class WandbConfig:
-    """Weights & Biases logging configuration shared across all frameworks.
-
-    Each framework config converts these fields into its own CLI flags
-    (e.g. SlimeConfig emits ``--wandb-project``).
+    """Weights & Biases logging configuration shared across all frameworks..
 
     ## Fields
 
@@ -36,10 +34,6 @@ class WandbConfig:
     exp_name: str = ""
     key: str = ""
     disable_random_suffix: bool = True
-
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
 
 
 def append_megatron_wandb_args(argv: list[str], wandb: "WandbConfig | None") -> list[str]:

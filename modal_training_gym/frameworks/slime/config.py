@@ -27,6 +27,7 @@ from modal_training_gym.common.models import (
     ModelConfig,
 )
 from modal_training_gym.common.wandb import WandbConfig
+from modal_training_gym.frameworks.slime.preset import SlimePreset
 
 if TYPE_CHECKING:
     from modal import App
@@ -46,7 +47,6 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 _SLIME_SKIP = {
     "environment",
     "async_mode",
-    "slime_model_script",
     "dataset",
     "model",
     "wandb",
@@ -55,7 +55,7 @@ _SLIME_SKIP = {
     "app_tags",
     "image_run_commands",
     "local_python_sources",
-    "gpu_type",
+    "preset",
     "checkpoint",
     "custom_rm_function",
 }
@@ -88,12 +88,10 @@ class ModalConfig:
     """
 
     local_slime: str | None = None
-    patch_files: list[str]
     image_run_commands: list[str]
     local_python_sources: list[str]
 
     def __init__(self, **kwargs: Any) -> None:
-        self.patch_files = list(kwargs.pop("patch_files", []))
         self.image_run_commands = list(kwargs.pop("image_run_commands", []))
         self.local_python_sources = list(kwargs.pop("local_python_sources", []))
         for k, v in kwargs.items():
@@ -105,9 +103,7 @@ class SlimeConfig:
     """slime GRPO training configuration.
 
     All non-skip fields are forwarded to slime as CLI args
-    (``--hyphen-name value``). Attach ``dataset``, ``model``, and
-    ``wandb`` containers to populate their respective CLI flags
-    automatically.
+    (``--hyphen-name value``).
 
     ## Launcher Instructions
 
@@ -115,8 +111,6 @@ class SlimeConfig:
         Injected into the Ray job runtime env.
     async_mode : bool
         When ``True``, uses ``train_async.py``. Default ``False``.
-    slime_model_script : str
-        Shell script path relative to ``/root/slime``. Default ``""``.
 
     ## Composed Configs
 
@@ -133,24 +127,10 @@ class SlimeConfig:
 
     ## Cluster and Parallelism
 
-    actor_num_nodes : int
-        Number of actor training nodes. Default ``1``.
-    actor_num_gpus_per_node : int
-        GPUs per actor node. Default ``8``.
-    colocate : bool
-        Colocate actor and rollout on the same GPUs. Default ``False``.
-    rollout_num_gpus : int | None
-        GPU count for non-colocated rollout. Default ``None``.
-    rollout_num_gpus_per_engine : int
-        GPUs per SGLang rollout engine. Default ``1``.
-    tensor_model_parallel_size : int
-        Tensor parallelism degree. Default ``1``.
-    use_critic : bool
-        Use a separate critic network. Default ``False``.
-    critic_num_nodes : int | None
-        Critic node count. Default ``None``.
-    critic_num_gpus_per_node : int | None
-        GPUs per critic node. Default ``None``.
+    preset : SlimePreset | None
+        Cluster and parallelism settings. Defaults to the model's
+        ``SlimePreset`` if not set. Raises if neither is provided.
+        See ``SlimePreset`` for available fields.
 
     ## RL Algorithm
 
@@ -274,8 +254,13 @@ class SlimeConfig:
         Extra kwargs for chat template. Default ``None``.
     """
 
+    # ── Composed configs (required) ─────────────────────────────────────────
+    dataset: DatasetConfig
+    model: ModelConfig
+
     # ── App identity ─────────────────────────────────────────────────────────
     name: str = ""
+    app_tags: dict = field(default_factory=dict)
 
     # ── Launcher instructions (not slime CLI flags) ─────────────────────────
     environment: dict = field(
@@ -286,27 +271,13 @@ class SlimeConfig:
         }
     )
     async_mode: bool = False
-    slime_model_script: str = ""
-    dataset: DatasetConfig | None = None
-    model: ModelConfig | None = None
     wandb: WandbConfig | None = None
-    app_tags: dict = field(default_factory=dict)
     modal: ModalConfig | None = None
     image_run_commands: list[str] = field(default_factory=list)
     local_python_sources: list[str] = field(default_factory=list)
 
-    # ── Cluster and parallelism (preset fields — filled from model.slime) ──
-    gpu_type: str | None = None
-    actor_num_nodes: int | None = None
-    actor_num_gpus_per_node: int | None = None
-    colocate: bool | None = None
-    tensor_model_parallel_size: int | None = None
-    sequence_parallel: bool | None = None
-    rollout_num_gpus: int | None = None
-    rollout_num_gpus_per_engine: int = 1
-    use_critic: bool = False
-    critic_num_nodes: int | None = None
-    critic_num_gpus_per_node: int | None = None
+    # ── Cluster and parallelism ────────────────────────────────────────────
+    preset: SlimePreset | None = None
 
     # ── RL algorithm ────────────────────────────────────────────────────────
     advantage_estimator: str = "grpo"
@@ -362,7 +333,7 @@ class SlimeConfig:
     use_fault_tolerance: bool = True
 
     # ── Reward model ─────────────────────────────────────────────────────────
-    rm_type: str = "math"
+    rm_type: str | None = None
     custom_rm_path: str = ""
     custom_rm_function: Callable | None = None
 
@@ -381,28 +352,15 @@ class SlimeConfig:
     # configs stay framework-agnostic.
 
     def __post_init__(self) -> None:
-        _PRESET_FIELDS = (
-            "gpu_type",
-            "actor_num_nodes",
-            "actor_num_gpus_per_node",
-            "colocate",
-            "tensor_model_parallel_size",
-            "sequence_parallel",
-        )
+        if self.preset is None and self.model is not None:
+            model_preset = getattr(self.model, "slime", None)
+            if model_preset is not None:
+                object.__setattr__(self, "preset", model_preset)
 
-        if self.model is not None:
-            preset = getattr(self.model, "slime", None)
-            if preset is not None:
-                for f in _PRESET_FIELDS:
-                    if getattr(self, f) is None:
-                        object.__setattr__(self, f, getattr(preset, f))
-
-        missing = [f for f in _PRESET_FIELDS if getattr(self, f) is None]
-        if missing:
-            model_name = self.model.model_name if self.model else "None"
+        if self.preset is None:
             raise ValueError(
-                f"SlimeConfig is missing required fields: {missing}. "
-                f"Either add a SlimePreset to {model_name} or pass them explicitly."
+                "SlimeConfig requires a SlimePreset. Pass preset=SlimePreset(...) "
+                "or attach a SlimePreset to your model."
             )
 
         if self.custom_rm_function is not None and not self.custom_rm_path:
@@ -415,8 +373,6 @@ class SlimeConfig:
                 src_file = inspect.getfile(fn)
                 mod = Path(src_file).stem
             object.__setattr__(self, "custom_rm_path", f"{mod}.{name}")
-            if self.rm_type == "math":
-                object.__setattr__(self, "rm_type", "async_rm")
 
     @staticmethod
     def _dataset_to_fields(ds: "DatasetConfig") -> dict[str, Any]:
@@ -482,20 +438,37 @@ class SlimeConfig:
             "disable_wandb_random_suffix": w.disable_random_suffix,
         }
 
+    @staticmethod
+    def _preset_to_fields(p: "SlimePreset") -> dict[str, Any]:
+        return {
+            "actor_num_nodes": p.actor_num_nodes,
+            "actor_num_gpus_per_node": p.actor_num_gpus_per_node,
+            "colocate": p.colocate,
+            "tensor_model_parallel_size": p.tensor_model_parallel_size,
+            "sequence_parallel": p.sequence_parallel,
+            "rollout_num_gpus": p.rollout_num_gpus,
+            "rollout_num_gpus_per_engine": p.rollout_num_gpus_per_engine,
+            "use_critic": p.use_critic,
+            "critic_num_nodes": p.critic_num_nodes,
+            "critic_num_gpus_per_node": p.critic_num_gpus_per_node,
+        }
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(self) -> dict[str, Any]:
         """Flat field dict for CLI generation.
 
-        Attached containers (`dataset`, `model`, `wandb`) are expanded last via
-        the per-framework converters, so their values override direct fields
-        with the same names.
+        Attached containers (`dataset`, `model`, `wandb`, `preset`) are
+        expanded last via the per-framework converters, so their values
+        override direct fields with the same names.
         """
         import dataclasses as _dc
 
         fields: dict[str, Any] = {}
         for f in _dc.fields(self):
             fields[f.name] = getattr(self, f.name)
+        if self.preset is not None:
+            fields.update(self._preset_to_fields(self.preset))
         if self.dataset is not None:
             fields.update(self._dataset_to_fields(self.dataset))
         if self.model is not None:
@@ -541,84 +514,7 @@ class SlimeConfig:
             return
         raise NotImplementedError(f"{type(self).__name__} has no prepare_data()")
 
-    def to_dataset_config(self) -> "DatasetConfig":
-        """Extract dataset-related slime flags back into a `DatasetConfig`.
-
-        Reverse of attaching a `DatasetConfig` as the `dataset` field — works
-        whether the fields came from an attached container or were set
-        directly. The returned instance has no `prepare()` method.
-        """
-        from modal_training_gym.common.dataset import DatasetConfig
-
-        f = self._fields()
-        return DatasetConfig(
-            prompt_data=f.get("prompt_data", ""),
-            eval_prompt_data=f.get("eval_prompt_data"),
-            input_key=f.get("input_key", ""),
-            label_key=f.get("label_key", ""),
-            apply_chat_template=f.get("apply_chat_template", True),
-            rollout_shuffle=f.get("rollout_shuffle", True),
-        )
-
-    def to_model(self) -> "ModelConfig":
-        """Extract model-related slime flags back into a `ModelConfig`.
-
-        Returns the attached `ModelConfig` when one is set. Otherwise,
-        constructs an ad-hoc instance from the raw slime flag fields, with
-        `architecture=None` when every architecture flag is at its default
-        and a populated `ModelArchitecture` when any field differs.
-        """
-        if self.model is not None:
-            return self.model
-
-        from modal_training_gym.common.models import (
-            ModelArchitecture,
-            ModelConfig,
-        )
-
-        fields = self._fields()
-
-        arch_candidate = ModelArchitecture(
-            num_layers=fields.get("num_layers", 0),
-            hidden_size=fields.get("hidden_size", 0),
-            ffn_hidden_size=fields.get("ffn_hidden_size", 0),
-            num_attention_heads=fields.get("num_attention_heads", 0),
-            group_query_attention=fields.get("group_query_attention", True),
-            num_query_groups=fields.get("num_query_groups", 0),
-            kv_channels=fields.get("kv_channels", 0),
-            vocab_size=fields.get("vocab_size", 0),
-            normalization=fields.get("normalization", "RMSNorm"),
-            norm_epsilon=fields.get("norm_epsilon", 1e-6),
-            swiglu=fields.get("swiglu", True),
-            disable_bias_linear=fields.get("disable_bias_linear", True),
-            qk_layernorm=fields.get("qk_layernorm", True),
-            use_rotary_position_embeddings=fields.get(
-                "use_rotary_position_embeddings", True
-            ),
-            rotary_base=fields.get("rotary_base", 10000),
-        )
-        architecture = arch_candidate if arch_candidate != ModelArchitecture() else None
-        return ModelConfig(
-            model_name=fields.get("hf_checkpoint", "") or "",
-            architecture=architecture,
-        )
-
-    def to_wandb_config(self) -> "WandbConfig":
-        """Extract wandb-related slime flags back into a `WandbConfig`.
-
-        Reverse of attaching a `WandbConfig` — works whether fields came from
-        an attached container or were set directly.
-        """
-        from modal_training_gym.common.wandb import WandbConfig
-
-        f = self._fields()
-        return WandbConfig(
-            project=f.get("wandb_project", ""),
-            group=f.get("wandb_group", ""),
-            key=f.get("wandb_key", ""),
-            disable_random_suffix=f.get("disable_wandb_random_suffix", True),
-        )
-
+    @property
     def total_nodes(self) -> int:
         """Total Modal cluster nodes required by this config.
 
@@ -667,9 +563,11 @@ class SlimeConfig:
         from modal_training_gym.common.framework import resolve_app_name
 
         app_name = resolve_app_name("slime", name or self.name, self.model)
+        assert self.preset is not None
+        gpu = self.preset.gpu_type
         return build_slime_app(
             modal=modal or self.modal or ModalConfig(),
-            gpu=self.gpu_type,
+            gpu=gpu,
             slime=self,
             name=app_name,
         )

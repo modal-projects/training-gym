@@ -14,9 +14,10 @@ _CONVERSION_EXTRA_ARGS = [
 
 def get_checkpoint_conversion_policy(slime_cfg) -> tuple[int, int, list[str]]:
     """Return (num_nodes, nproc_per_node, extra_args) for checkpoint conversion."""
-    gpus_per_node = getattr(slime_cfg, "actor_num_gpus_per_node", 8)
-    actor_nodes = getattr(slime_cfg, "actor_num_nodes", 1)
-    tp = getattr(slime_cfg, "tensor_model_parallel_size", 1)
+    preset = slime_cfg.preset
+    gpus_per_node = preset.actor_num_gpus_per_node
+    actor_nodes = preset.actor_num_nodes
+    tp = preset.tensor_model_parallel_size
     pp = getattr(slime_cfg, "pipeline_model_parallel_size", 1)
 
     world_size = tp * pp if (tp > 1 or pp > 1) else gpus_per_node
@@ -94,14 +95,8 @@ def prepare_slime_config(slime_cfg, tmpdir: str) -> None:
 
 
 def build_train_cmd(slime_cfg, slime_root: str) -> str:
-    """Build the Ray job entrypoint, sourcing model arch args if needed."""
+    """Build the Ray job entrypoint."""
     train_script = (
         f"{slime_root}/{'train_async.py' if slime_cfg.async_mode else 'train.py'}"
     )
-    if slime_cfg.slime_model_script:
-        inner = (
-            f"source {slime_root}/{slime_cfg.slime_model_script} && "
-            f"python3 {train_script} ${{MODEL_ARGS[@]}} {shlex.join(slime_cfg.cli_args())}"
-        )
-        return f"bash -c {shlex.quote(inner)}"
     return f"python3 {train_script} {shlex.join(slime_cfg.cli_args())}"

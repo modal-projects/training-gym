@@ -2,7 +2,7 @@
 
 A :class:`TrainResult` is produced by ``train`` itself — one per call —
 and is also persisted to a shared :class:`modal.Dict` keyed by
-``run_id`` so that a *separate* evaluation script can look it up after
+``training_run_id`` so that a *separate* evaluation script can look it up after
 the fact without re-running training.
 
 Typical flow:
@@ -22,7 +22,7 @@ Typical flow:
 
     result = TrainResult.load("my-app")                 # latest run
     # or
-    result = TrainResult.load("my-app", run_id="...")   # pinned
+    result = TrainResult.load("my-app", training_run_id="...")   # pinned
 
     print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
     print(result.latest_checkpoint_path())  # .../iter_0000050
@@ -37,10 +37,10 @@ Two design invariants:
    executed. The ``modal.App`` object is a deployment handle, not a run
    handle.
 2. Every call to ``train`` can produce a *different* result (different
-   ``run_id``, different ``checkpoint_dir``). We use a :class:`modal.Dict`
+   ``training_run_id``, different ``checkpoint_dir``). We use a :class:`modal.Dict`
    named ``{app_name}-train-results`` as the shared store so that eval
    scripts — which don't import the training closure and don't call
-   ``train()`` — can still retrieve results by ``run_id``.
+   ``train()`` — can still retrieve results by ``training_run_id``.
 """
 
 from __future__ import annotations
@@ -59,6 +59,7 @@ def _store_name(app_name: str) -> str:
     """Canonical name for the shared :class:`modal.Dict` store."""
     return f"{app_name}-train-results"
 
+TRAIN_RESULTS_STORE_NAME = "train-results"
 
 @dataclass
 class TrainResult:
@@ -77,7 +78,7 @@ class TrainResult:
         :class:`modal.Dict` (``{app_name}-train-results``).
     framework:
         Training framework identifier.
-    run_id:
+    training_run_id:
         Unique identifier for *this* specific training call. Keys the
         record in the shared :class:`modal.Dict`; embedded in
         ``checkpoint_dir`` for frameworks that scope checkpoints by run.
@@ -110,7 +111,7 @@ class TrainResult:
 
     app_name: str
     framework: Framework
-    run_id: str
+    training_run_id: str
     checkpoint_dir: str
     model_config: "ModelConfig | None" = None
     checkpoints_volume_name: str = ""
@@ -118,7 +119,7 @@ class TrainResult:
     iteration_prefix: str = ""
     wandb_project: str = ""
     wandb_entity: str = ""
-    wandb_run_id: str = ""
+    wandb_training_run_id: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ── Persistence: shared modal.Dict ────────────────────────────────────
@@ -134,57 +135,29 @@ class TrainResult:
         """
         from modal import Dict
 
-        store = Dict.from_name(_store_name(self.app_name), create_if_missing=True)
-        store[self.run_id] = asdict(self)
+        store = Dict.from_name(TRAIN_RESULTS_STORE_NAME, create_if_missing=True)
+        store[self.training_run_id] = asdict(self)
 
     @classmethod
-    def load(cls, app_name: str, run_id: str | None = None) -> "TrainResult":
+    def load(cls, training_run_id: str) -> "TrainResult":
         """Load a completed run's result from the shared store.
 
         Parameters
         ----------
-        app_name:
-            Same ``app_name`` the training run used (i.e. the
-            ``modal.App`` name of the training app).
-        run_id:
-            Specific run to load. When ``None`` (default), returns the
-            lexicographically-largest ``run_id`` — since all launchers
-            embed a monotonic timestamp, that is the most recent run.
+        training_run_id:
+            Specific run to load.
 
         Raises
         ------
         LookupError
             No runs have been saved for this app yet, or the given
-            ``run_id`` isn't in the store.
+            ``training_run_id`` isn't in the store.
         """
         from modal import Dict
 
-        store = Dict.from_name(_store_name(app_name), create_if_missing=True)
-        if run_id is None:
-            keys = sorted(store.keys())
-            if not keys:
-                raise LookupError(
-                    f"No training results saved for app {app_name!r}. "
-                    f"Has `train` completed yet? "
-                    f"(Results are written to the modal.Dict "
-                    f"{_store_name(app_name)!r}.)"
-                )
-            run_id = keys[-1]
-        if run_id not in store:
-            raise LookupError(
-                f"run_id {run_id!r} not found in results for app {app_name!r}. "
-                f"Known runs: {sorted(store.keys())}"
-            )
-        return cls(**store[run_id])
+        store = Dict.from_name(TRAIN_RESULTS_STORE_NAME, create_if_missing=True)
+        return cls(**store[training_run_id])
 
-    @classmethod
-    def list_runs(cls, app_name: str) -> list[str]:
-        """Return all ``run_id``s saved for ``app_name``, sorted oldest
-        first (lexicographic ordering matches timestamp ordering)."""
-        from modal import Dict
-
-        store = Dict.from_name(_store_name(app_name), create_if_missing=True)
-        return sorted(store.keys())
 
     # ── Volume lookup ────────────────────────────────────────────────────
 
@@ -314,11 +287,11 @@ class TrainResult:
 
     def wandb_url(self) -> str | None:
         """Return the W&B run URL, or None if W&B info is not set."""
-        if not self.wandb_run_id or not self.wandb_project:
+        if not self.wandb_training_run_id or not self.wandb_project:
             return None
         entity = self.wandb_entity or "_"
         return (
-            f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_run_id}"
+            f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_training_run_id}"
         )
 
     def wandb_metrics(
@@ -346,9 +319,9 @@ class TrainResult:
         api = wandb.Api()
         entity = self.wandb_entity or None
         path = (
-            f"{entity}/{self.wandb_project}/{self.wandb_run_id}"
+            f"{entity}/{self.wandb_project}/{self.wandb_training_run_id}"
             if entity
-            else f"{self.wandb_project}/{self.wandb_run_id}"
+            else f"{self.wandb_project}/{self.wandb_training_run_id}"
         )
         run = api.run(path)
 
@@ -366,9 +339,9 @@ class TrainResult:
         api = wandb.Api()
         entity = self.wandb_entity or None
         path = (
-            f"{entity}/{self.wandb_project}/{self.wandb_run_id}"
+            f"{entity}/{self.wandb_project}/{self.wandb_training_run_id}"
             if entity
-            else f"{self.wandb_project}/{self.wandb_run_id}"
+            else f"{self.wandb_project}/{self.wandb_training_run_id}"
         )
         run = api.run(path)
         return dict(run.summary)
