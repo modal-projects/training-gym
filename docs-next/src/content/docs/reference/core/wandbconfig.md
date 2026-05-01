@@ -9,7 +9,7 @@ description: API reference for WandbConfig
 from modal_training_gym.common.wandb import WandbConfig
 ```
 
-Weights & Biases logging configuration shared across all frameworks.
+Weights & Biases logging configuration shared across all frameworks..
 
 ## Fields
 
@@ -24,7 +24,6 @@ Weights & Biases logging configuration shared across all frameworks.
 ## Related Tutorials
 
 - [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/001_quickstart/)
-- [Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfig` subclass, no catalog entry](/tutorials/intro/002_custom_model/)
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
 
 **Source:** [`modal_training_gym/common/wandb.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/wandb.py)

@@ -14,14 +14,14 @@ One completed training run's checkpoint handle.
 ## Constructor
 
 ```python
-TrainResult(app_name, framework, run_id, checkpoint_dir, model_config=None, checkpoints_volume_name='', checkpoints_mount_path='', iteration_prefix='', wandb_project='', wandb_entity='', wandb_run_id='', extra=<factory>)
+TrainResult(app_name, framework, training_run_id, checkpoint_dir, model_config=None, checkpoints_volume_name='', checkpoints_mount_path='', iteration_prefix='', wandb_project='', wandb_entity='', wandb_training_run_id='', extra=<factory>)
 ```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `app_name` | `str` | *required* |  |
 | `framework` | `Framework` | *required* |  |
-| `run_id` | `str` | *required* |  |
+| `training_run_id` | `str` | *required* |  |
 | `checkpoint_dir` | `str` | *required* |  |
 | `model_config` | `'ModelConfig | None'` | `None` |  |
 | `checkpoints_volume_name` | `str` | `""` |  |
@@ -29,7 +29,7 @@ TrainResult(app_name, framework, run_id, checkpoint_dir, model_config=None, chec
 | `iteration_prefix` | `str` | `""` |  |
 | `wandb_project` | `str` | `""` |  |
 | `wandb_entity` | `str` | `""` |  |
-| `wandb_run_id` | `str` | `""` |  |
+| `wandb_training_run_id` | `str` | `""` |  |
 | `extra` | `dict[str, Any]` | `<factory>` |  |
 
 ## Attributes
@@ -38,7 +38,7 @@ TrainResult(app_name, framework, run_id, checkpoint_dir, model_config=None, chec
 |-----------|------|---------|-------------|
 | `app_name` | `str` |  |  |
 | `framework` | `Framework` |  |  |
-| `run_id` | `str` |  |  |
+| `training_run_id` | `str` |  |  |
 | `checkpoint_dir` | `str` |  |  |
 | `model_config` | `'ModelConfig | None'` | `None` |  |
 | `checkpoints_volume_name` | `str` | `""` |  |
@@ -46,7 +46,7 @@ TrainResult(app_name, framework, run_id, checkpoint_dir, model_config=None, chec
 | `iteration_prefix` | `str` | `""` |  |
 | `wandb_project` | `str` | `""` |  |
 | `wandb_entity` | `str` | `""` |  |
-| `wandb_run_id` | `str` | `""` |  |
+| `wandb_training_run_id` | `str` | `""` |  |
 | `extra` | `dict[str, Any]` | `{}` |  |
 
 ## Methods
@@ -63,11 +63,7 @@ Absolute in-volume path of the latest checkpoint.
 
 Return per-iteration checkpoint directory names under
 
-### `list_runs(app_name: 'str') -> 'list[str]'`
-
-Return all ``run_id``s saved for ``app_name``, sorted oldest
-
-### `load(app_name: 'str', run_id: 'str | None' = None) -> "'TrainResult'"`
+### `load(training_run_id: 'str') -> "'TrainResult'"`
 
 Load a completed run's result from the shared store.
 

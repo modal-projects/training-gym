@@ -35,6 +35,6 @@ Download and/or preprocess the dataset into the data volume.
 ## Related Tutorials
 
 - [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/001_quickstart/)
-- [Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfig` subclass, no catalog entry](/tutorials/intro/002_custom_model/)
+- [Custom HuggingFace model — inline `ModelConfig` subclass, serve and evaluate without training](/tutorials/intro/002_custom_model/)
 
 **Source:** [`modal_training_gym/common/dataset.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/dataset.py)

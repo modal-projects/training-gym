@@ -159,17 +159,3 @@ modal = ModalConfig(
     local_slime="/path/to/your/slime",
 )
 ```
-
-## Applying patches to the image
-
-To inject local patch files into the image (e.g. to patch SGLang), use `patch_files` and `image_run_commands`:
-
-```python
-modal = ModalConfig(
-    gpu="H200",
-    patch_files=["patches/sglang_fix.patch"],
-    image_run_commands=["cd /sgl-workspace/sglang && git apply /tmp/sglang_fix.patch"],
-)
-```
-
-Each file in `patch_files` is added to the image at `/tmp/<filename>`.

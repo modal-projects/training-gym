@@ -41,8 +41,7 @@ class EvalConfig:
     dataset: "DatasetConfig"
     eval_fn: EvalFn
     temperature: float = 0.0
-    startup_timeout_seconds: int = 20 * 60
-    startup_poll_seconds: int = 5
+    generate_kwargs: dict[str, Any] = field(default_factory=dict)
 
     def build_prompt(self, example: DatasetExample) -> str:
         input_column = self.dataset.input_column
@@ -52,44 +51,8 @@ class EvalConfig:
             )
         return str(example[input_column])
 
-    def _wait_until_ready(self, client, debug: bool) -> None:
-        import time
-
-        started = time.monotonic()
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                client.models.list()
-                if debug:
-                    print(
-                        f"vLLM endpoint is ready after {time.monotonic() - started:.1f}s",
-                        flush=True,
-                    )
-                return
-            except Exception as exc:
-                elapsed = time.monotonic() - started
-                if elapsed >= self.startup_timeout_seconds:
-                    raise TimeoutError(
-                        f"Timed out waiting {self.startup_timeout_seconds}s for "
-                        f"{self.deployment.url} to become ready."
-                    ) from exc
-                if debug:
-                    print(
-                        f"Waiting for vLLM endpoint to start "
-                        f"({elapsed:.1f}s elapsed, attempt {attempt}): {exc}",
-                        flush=True,
-                    )
-                time.sleep(self.startup_poll_seconds)
-
     def evaluate(self, debug=False) -> EvalResult:
-        from openai import OpenAI
-
-        client = OpenAI(
-            base_url=f"{self.deployment.url.rstrip('/')}/v1",
-            api_key="not-needed",
-        )
-        self._wait_until_ready(client, debug)
+        self.deployment.wait_until_ready()
         rows = self.dataset.load()
 
         total = len(rows)
@@ -98,17 +61,11 @@ class EvalConfig:
         for idx, example in enumerate(rows, start=1):
             if debug:
                 print(f"Evaluating example {idx}/{total}: {example}", flush=True)
-            response = client.chat.completions.create(
-                model=self.deployment.served_model_name,
+            text = self.deployment.generate(
+                self.build_prompt(example),
                 temperature=self.temperature,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": self.build_prompt(example),
-                    }
-                ],
+                **self.generate_kwargs,
             )
-            text = response.choices[0].message.content or ""
             result = self.eval_fn(example, text)
             if not result.response:
                 result = EvalRowResult(

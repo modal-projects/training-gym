@@ -16,7 +16,6 @@ Modal infrastructure configuration for slime — image setup and dev overlays.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `local_slime` | `str | None` | `None` | Path to a local slime repo checkout for dev overlay. When set, the launcher mounts it into the image. Default `None`. |
-| `patch_files` | `list[str]` |  | Local patch files to inject into the image at `/tmp/<filename>`. Default `[]`. |
 | `image_run_commands` | `list[str]` |  | Shell commands run during image build (e.g. `git apply /tmp/my.patch`). Default `[]`. |
 | `local_python_sources` | `list[str]` |  | Sibling Python modules (by import name) to ship into the training image via `add_local_python_source`. Use for helper modules like custom reward functions referenced via slime's `custom_rm_path`. Default `[]`. |
 

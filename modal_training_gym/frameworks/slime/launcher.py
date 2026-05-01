@@ -135,10 +135,6 @@ def build_slime_app(
     all_python_sources = slime.local_python_sources or modal.local_python_sources
     for mod_name in all_python_sources:
         image = image.add_local_python_source(mod_name, copy=True)
-    for patch in modal.patch_files:
-        image = image.add_local_file(
-            patch, f"/tmp/{os.path.basename(patch)}", copy=True
-        )
     if modal.local_slime:
         image = image.add_local_dir(
             modal.local_slime,

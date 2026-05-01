@@ -105,6 +105,7 @@ def _qualitative_eval_of_base_model():
 def _qualitative_eval_of_base_model_code():
     response = base_deployment.generate(
         "Write a haiku about cat.",
+        chat_template_kwargs={"enable_thinking": False},
     )
     print(response)
 
@@ -131,14 +132,14 @@ def _grade_haiku():
             total += max(count, 1)
         return total
 
-    def score_haiku(example: dict[str, Any], response: str) -> bool:
+    def score_haiku(response: str) -> bool:
         lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
         has_three_lines = len(lines) == 3
 
         syllable_counts = []
         has_passed = True
         if has_three_lines:
-            for line, target in zip(lines, [5, 7, 5]):
+            for i, (line, target) in enumerate(zip(lines, [5, 7, 5])):
                 count = _count_syllables(line)
                 syllable_counts.append(count)
                 diff = abs(count - target)
@@ -150,6 +151,7 @@ def _grade_haiku():
     
     response = base_deployment.generate(
         "Write a haiku about cat.",
+        chat_template_kwargs={"enable_thinking": False},
     )
     print(response)
     print(score_haiku(response))
@@ -171,7 +173,7 @@ def _grade_haiku_into_eval():
 
 @code
 def _grade_haiku_into_eval_code():
-    def score_haiku(example: dict[str, Any], response: str) -> EvalRowResult:
+    def score_haiku(response: str) -> EvalRowResult:
         lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
         has_three_lines = len(lines) == 3
 
@@ -202,9 +204,7 @@ def _grade_haiku_into_eval_code():
 
 @code
 def _define_eval_dataset_code():
-    class HaikuEvalConfig(EvalConfig):
-        eval_fn = score_haiku
-        
+    class HaikuEvalConfig(EvalConfig):        
         def build_prompt(self, example: dict[str, Any]) -> str:
             return (
                 f"Write a haiku about {example['keywords'].lower()}.\n\n"
@@ -308,6 +308,8 @@ def _eval_base_model():
     base_eval = HaikuEvalConfig(
         deployment=base_deployment,
         dataset=eval_dataset,
+        eval_fn=(lambda _df_row, response: score_haiku(response)),
+        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
     ).evaluate()
     print(f"Base haiku score: {base_eval.accuracy:.1%}")
     print(f"Passed (score >= 0.75): {base_eval.correct}/{base_eval.total}")
@@ -329,7 +331,7 @@ def _define_training_run():
 
     my_training_run = SlimeConfig(
         model=base_model,
-        dataset=HaikuDataset(DATA_PATH, base_model.model_name),
+        dataset=HaikuDataset(),
         wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-haiku"),
 
         custom_rm_function=haiku_rm,
@@ -408,7 +410,9 @@ def _serve_and_eval_trained():
     trained_eval = HaikuEvalConfig(
         deployment=deployment,
         dataset=eval_dataset,
-    ).evaluate(score_haiku)
+        eval_fn=(lambda golden_df_row, response: score_haiku(response)),
+        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+    ).evaluate(debug=True)
     print(f"Trained haiku score: {trained_eval.accuracy:.1%}")
     print(f"Passed (score >= 0.75): {trained_eval.correct}/{trained_eval.total}")
     print(f"Delta: {trained_eval.accuracy - base_eval.accuracy:+.1%}")

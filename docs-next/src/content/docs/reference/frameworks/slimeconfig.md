@@ -17,14 +17,13 @@ slime GRPO training configuration.
 |-------|------|---------|-------------|
 | `environment` | `dict` | `{'PYTHONPATH': '/root/Megatron-LM/', 'CUDA_DEVICE_MAX_CONNECTIONS': '1', 'NCCL_NVLS_ENABLE': '1'}` | Injected into the Ray job runtime env. |
 | `async_mode` | `bool` | `False` | When `True`, uses `train_async.py`. Default `False`. |
-| `slime_model_script` | `str` | `""` | Shell script path relative to `/root/slime`. Default `""`. |
-| `model` | `ModelConfig | None` | `None` | Model identity. Requires `ModelArchitecture`. Default `None`. |
 
 ## Composed Configs
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `dataset` | `DatasetConfig | None` | `None` | Dataset configuration. Default `None`. |
+| `dataset` | `DatasetConfig` |  | Dataset configuration. Default `None`. |
+| `model` | `ModelConfig` |  | Model identity. Requires `ModelArchitecture`. Default `None`. |
 | `wandb` | `WandbConfig | None` | `None` | W&B logging config. Default `None`. |
 | `modal` | `ModalConfig | None` | `None` | Modal infrastructure config. Default `None`. |
 | `app_tags` | `dict` | `{}` | Extra Modal app tags. Default `{}`. |
@@ -33,15 +32,7 @@ slime GRPO training configuration.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `actor_num_nodes` | `int | None` | `None` | Number of actor training nodes. Default `1`. |
-| `actor_num_gpus_per_node` | `int | None` | `None` | GPUs per actor node. Default `8`. |
-| `colocate` | `bool | None` | `None` | Colocate actor and rollout on the same GPUs. Default `False`. |
-| `rollout_num_gpus` | `int | None` | `None` | GPU count for non-colocated rollout. Default `None`. |
-| `rollout_num_gpus_per_engine` | `int` | `1` | GPUs per SGLang rollout engine. Default `1`. |
-| `tensor_model_parallel_size` | `int | None` | `None` | Tensor parallelism degree. Default `1`. |
-| `use_critic` | `bool` | `False` | Use a separate critic network. Default `False`. |
-| `critic_num_nodes` | `int | None` | `None` | Critic node count. Default `None`. |
-| `critic_num_gpus_per_node` | `int | None` | `None` | GPUs per critic node. Default `None`. |
+| `preset` | `modal_training_gym.frameworks.slime.preset.SlimePreset | None` | `None` | Cluster and parallelism settings. Defaults to the model's `SlimePreset` if not set. Raises if neither is provided. See `SlimePreset` for available fields. |
 
 ## RL Algorithm
 
@@ -56,7 +47,7 @@ slime GRPO training configuration.
 | `kl_loss_coef` | `float` | `0.0` | KL loss coefficient. Default `0.0`. |
 | `entropy_coef` | `float` | `0.0` | Entropy bonus coefficient. Default `0.0`. |
 | `ref_load` | `str` | `""` | Reference model checkpoint path. Default `""`. |
-| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7f9edbbc68a0>` |  |
+| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7fb6a7237f50>` |  |
 
 ## Rollout
 
@@ -124,7 +115,7 @@ slime GRPO training configuration.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `custom_rm_function` | `collections.abc.Callable | None` | `None` | A reward function to use. When set, the launcher automatically writes the function's source file into the training image and derives `custom_rm_path` from it. Also sets `rm_type` to `"async_rm"` unless already overridden. Default `None`. |
-| `rm_type` | `str` | `"math"` |  |
+| `rm_type` | `str | None` | `None` |  |
 | `custom_rm_path` | `str` | `""` | Python import path for custom reward function. Normally auto-derived from `custom_rm_function`; set manually only when shipping the reward module yourself via `local_python_sources`. Default `""`. |
 | `local_python_sources` | `list[str]` | `[]` |  |
 
@@ -141,8 +132,6 @@ slime GRPO training configuration.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `image_run_commands` | `list[str]` | `[]` |  |
-| `gpu_type` | `str | None` | `None` |  |
-| `sequence_parallel` | `bool | None` | `None` |  |
 
 ## Methods
 
@@ -155,22 +144,6 @@ slime CLI arguments derived from this config.
 ### `prepare_data(self) -> None`
 
 Materialize the training data.
-
-### `to_dataset_config(self) -> 'DatasetConfig'`
-
-Extract dataset-related slime flags back into a `DatasetConfig`.
-
-### `to_model(self) -> 'ModelConfig'`
-
-Extract model-related slime flags back into a `ModelConfig`.
-
-### `to_wandb_config(self) -> 'WandbConfig'`
-
-Extract wandb-related slime flags back into a `WandbConfig`.
-
-### `total_nodes(self) -> int`
-
-Total Modal cluster nodes required by this config.
 
 ## Related Tutorials
 

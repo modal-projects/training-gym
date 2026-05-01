@@ -179,7 +179,6 @@ catalog in [`tutorials/README.md`](../README.md).
 - [`002_custom_model`](../../intro/002_custom_model/002_custom_model.ipynb) —
   serve and eval a custom HuggingFace model (SmolLM2-135M) with an
   inline `ModelConfig` subclass, no training.
-
 **Intermediate** (non-default wiring, 1–2 nodes)
 
 - [`slime_haiku`](../../rl/slime_haiku/slime_haiku.ipynb) — GRPO with a

@@ -64,6 +64,7 @@ Now that the model has come alive, we can request it to write a haiku about a to
 ```python
 response = base_deployment.generate(
     "Write a haiku about cat.",
+    chat_template_kwargs={"enable_thinking": False},
 )
 print(response)
 ```
@@ -84,7 +85,7 @@ But we can make it return more granular result on *how much off* it was from the
 target.
 
 ```python
-def score_haiku(example: dict[str, Any], response: str) -> EvalRowResult:
+def score_haiku(response: str) -> EvalRowResult:
     lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
     has_three_lines = len(lines) == 3
 
@@ -114,9 +115,7 @@ def score_haiku(example: dict[str, Any], response: str) -> EvalRowResult:
 ```
 
 ```python
-class HaikuEvalConfig(EvalConfig):
-    eval_fn = score_haiku
-    
+class HaikuEvalConfig(EvalConfig):        
     def build_prompt(self, example: dict[str, Any]) -> str:
         return (
             f"Write a haiku about {example['keywords'].lower()}.\n\n"
@@ -201,6 +200,8 @@ df.head(5)
 base_eval = HaikuEvalConfig(
     deployment=base_deployment,
     dataset=eval_dataset,
+    eval_fn=(lambda df_row, response: score_haiku({}, response)),
+    generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
 ).evaluate()
 print(f"Base haiku score: {base_eval.accuracy:.1%}")
 print(f"Passed (score >= 0.75): {base_eval.correct}/{base_eval.total}")
@@ -262,7 +263,9 @@ print(deployment.url)
 trained_eval = HaikuEvalConfig(
     deployment=deployment,
     dataset=eval_dataset,
-).evaluate(score_haiku)
+    eval_fn=(lambda golden_df_row, response: score_haiku(response)),
+    generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+).evaluate(debug=True)
 print(f"Trained haiku score: {trained_eval.accuracy:.1%}")
 print(f"Passed (score >= 0.75): {trained_eval.correct}/{trained_eval.total}")
 print(f"Delta: {trained_eval.accuracy - base_eval.accuracy:+.1%}")

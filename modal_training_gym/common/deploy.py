@@ -65,11 +65,9 @@ class ModelDeployment:
                 time.sleep(1)
                 print(f"Waiting for {self.url} to be ready...")
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, **kwargs) -> str:
         import requests
         self.wait_until_ready()
-        response = requests.post(
-            f"{self.url}/v1/chat/completions",
-            json={"model": self.served_model_name, "messages": [{"role": "user", "content": prompt}]},
-        )
+        body = {"model": self.served_model_name, "messages": [{"role": "user", "content": prompt}], **kwargs}
+        response = requests.post(f"{self.url}/v1/chat/completions", json=body)
         return response.json()["choices"][0]["message"]["content"]

@@ -15,7 +15,7 @@ Complete reference for the training-gym Python library.
 | [`HFModelConfiguration`](/reference/core/hfmodelconfiguration/) | ModelConfig for models hosted on HuggingFace. |
 | [`ModelArchitecture`](/reference/core/modelarchitecture/) | Transformer architecture parameters for a specific model. |
 | [`DatasetConfig`](/reference/core/datasetconfig/) | Dataset configuration shared across training frameworks. |
-| [`WandbConfig`](/reference/core/wandbconfig/) | Weights & Biases logging configuration shared across all frameworks. |
+| [`WandbConfig`](/reference/core/wandbconfig/) | Weights & Biases logging configuration shared across all frameworks.. |
 | [`ModalRayCluster`](/reference/core/modalraycluster/) | Base class for bootstrapping a Ray cluster inside Modal clustered functions. |
 | [`LlmJudge`](/reference/core/llmjudge/) | LLM-as-judge client for an OpenAI-compatible chat-completions endpoint. |
 | [`TrainResult`](/reference/core/trainresult/) | One completed training run's checkpoint handle. |

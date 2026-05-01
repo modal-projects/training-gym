@@ -74,9 +74,6 @@ class ModalConfig:
     local_slime : str | None
         Path to a local slime repo checkout for dev overlay. When set, the
         launcher mounts it into the image. Default ``None``.
-    patch_files : list[str]
-        Local patch files to inject into the image at ``/tmp/<filename>``.
-        Default ``[]``.
     image_run_commands : list[str]
         Shell commands run during image build (e.g. ``git apply /tmp/my.patch``).
         Default ``[]``.

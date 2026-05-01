@@ -6,11 +6,9 @@ collapsible sections by framework. For each run, checks whether a
 
 Architecture:
     The Svelte frontend is built at image-build time via ``npm install &&
-    npm run build`` and served as static files by FastAPI.  A cron job
-    (``refresh_training_metadata``) runs every 5 minutes, reads from the
-    ``TrainingRun`` and ``TrainResult`` modal.Dict stores, joins them by
-    run ID, and writes combined metadata into a dashboard ``modal.Dict``.
-    The ASGI endpoint reads from that Dict for instant page loads.
+    npm run build`` and served as static files by FastAPI.  The ASGI
+    endpoint reads directly from the ``TrainingRun`` and ``TrainResult``
+    modal.Dict stores on each request — no cron intermediary needed.
 
 Deploy with:
 
@@ -58,9 +56,6 @@ app = modal.App(
     image=image,
 )
 
-dashboard_dict = modal.Dict.from_name("training-gym-runs", create_if_missing=True)
-
-RUNS_KEY = "runs"
 STATIC_DIR = "/app/frontend/dist"
 
 
@@ -109,13 +104,8 @@ def _summarize_result(result_dict: dict) -> dict:
     }
 
 
-@app.function(
-    schedule=modal.Period(minutes=5),
-    timeout=120,
-)
-def refresh_training_metadata():
-    """Cron job: reads TrainingRun and TrainResult stores, joins them,
-    and writes combined dashboard data to a Dict."""
+def _fetch_runs() -> list[dict]:
+    """Read TrainingRun and TrainResult stores, join by run ID."""
     from modal import Dict
 
     from modal_training_gym.common.run import TRAINING_RUNS_STORE_NAME
@@ -145,8 +135,7 @@ def refresh_training_metadata():
             "train_result": _summarize_result(train_result) if train_result else None,
         })
 
-    dashboard_dict[RUNS_KEY] = runs
-    print(f"Refreshed: {len(runs)} training run(s), {len(results_by_id)} result(s)")
+    return runs
 
 
 @app.function()
@@ -160,12 +149,7 @@ def fastapi_app():
 
     @web.get("/api/runs")
     async def api_runs() -> JSONResponse:
-        try:
-            runs = await dashboard_dict.get.aio(RUNS_KEY)
-        except KeyError:
-            runs = []
-        if runs is None:
-            runs = []
+        runs = _fetch_runs()
         return JSONResponse({"runs": runs})
 
     # ── W&B metrics endpoints ──────────────────────────────────────────────

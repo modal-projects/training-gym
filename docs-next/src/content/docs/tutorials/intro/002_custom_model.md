@@ -1,6 +1,6 @@
 ---
 title: "Custom HuggingFace model: serve and evaluate on Modal"
-description: "Custom HuggingFace model — inline ModelConfig subclass, serve and evaluate without training"
+description: "Custom HuggingFace model — inline `ModelConfig` subclass, serve and evaluate without training"
 ---
 
 **What this tutorial teaches.** How to use a model that isn't in
@@ -157,8 +157,8 @@ for i, row in enumerate(result.rows):
 
 - [`ModelConfig`](/reference/core/modelconfig/)
 - [`HFModelConfiguration`](/reference/core/hfmodelconfiguration/)
-- [`EvalConfig`](/reference/core/evalconfig/)
-- [`EvalRowResult`](/reference/core/evalrowresult/)
+- `EvalConfig`
+- `EvalRowResult`
 - [`DatasetConfig`](/reference/core/datasetconfig/)
 
 **Source:** [`tutorials/intro/002_custom_model/002_custom_model.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/002_custom_model/002_custom_model.py)
