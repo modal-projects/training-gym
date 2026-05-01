@@ -135,7 +135,7 @@ app = my_training_run.build_app()
 
 - [`MsSwiftConfig`](/reference/frameworks/msswiftconfig/)
 - [`MsSwiftFrameworkConfig`](/reference/frameworks/msswiftframeworkconfig/)
-- [`ModelConfig`](/reference/core/modelconfiguration/)
+- [`ModelConfig`](/reference/core/modelconfig/)
 - [`DatasetConfig`](/reference/core/datasetconfig/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 

@@ -62,9 +62,9 @@ SlimeConfig.build_app()
 
 There is **no shared abstract base class** for framework configs — SlimeConfig is a Pydantic dataclass, MsSwiftConfig is a plain class. Both follow the same composition pattern independently.
 
-### Three-stage pipeline
+### Train pipeline
 
-All frameworks require three separate manual calls: `download()` → `prepare_dataset()` → `train()`. There is no auto-download or auto-prepare — each step must be invoked explicitly. The `train()` function will fail with a RuntimeError if prerequisites haven't run.
+All frameworks expose a single `train()` entry point. Calling `train()` handles model download, dataset preparation, and training automatically — if the model isn't cached or the dataset isn't materialized, `train()` runs those steps first.
 
 ### Volume layout
 

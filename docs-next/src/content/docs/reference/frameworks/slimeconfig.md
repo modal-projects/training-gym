@@ -56,7 +56,7 @@ slime GRPO training configuration.
 | `kl_loss_coef` | `float` | `0.0` | KL loss coefficient. Default `0.0`. |
 | `entropy_coef` | `float` | `0.0` | Entropy bonus coefficient. Default `0.0`. |
 | `ref_load` | `str` | `""` | Reference model checkpoint path. Default `""`. |
-| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7f5ab8460470>` |  |
+| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7fbd89c7e2d0>` |  |
 
 ## Rollout
 
@@ -123,7 +123,10 @@ slime GRPO training configuration.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `custom_rm_path` | `str` | `""` | Python import path for custom reward function. Default `""`. |
+| `custom_rm_function` | `collections.abc.Callable | None` | `None` | A reward function to use. When set, the launcher automatically writes the function's source file into the training image and derives `custom_rm_path` from it. Also sets `rm_type` to `"async_rm"` unless already overridden. Default `None`. |
+| `rm_type` | `str` | `"math"` |  |
+| `custom_rm_path` | `str` | `""` | Python import path for custom reward function. Normally auto-derived from `custom_rm_function`; set manually only when shipping the reward module yourself via `local_python_sources`. Default `""`. |
+| `local_python_sources` | `list[str]` | `[]` |  |
 
 ## SGLang
 
@@ -138,10 +141,8 @@ slime GRPO training configuration.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `image_run_commands` | `list[str]` | `[]` |  |
-| `local_python_sources` | `list[str]` | `[]` |  |
 | `gpu_type` | `str | None` | `None` |  |
 | `sequence_parallel` | `bool | None` | `None` |  |
-| `rm_type` | `str` | `"math"` |  |
 
 ## Methods
 

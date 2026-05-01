@@ -38,6 +38,8 @@ from __future__ import annotations
 from dataclasses import dataclass, fields as dc_fields
 from typing import TYPE_CHECKING, Any
 
+from modal_training_gym.common.deploy import DeployConfig, ModelDeployment
+
 if TYPE_CHECKING:
     from modal import App
 
@@ -237,21 +239,6 @@ class ModelTrainingConfig:
         return {f.name: getattr(self, f.name) for f in dc_fields(self)}
 
 
-@dataclass(frozen=True)
-class ModelDeployment:
-    """Deployed Model using vLLM serving endpoint metadata.
-    TODO(joy): In the future, we will add an option between vLLM and SGlang, and also add preconfigs to ensure
-    that the model is served in an appropriate way.
-    """
-
-    app: "App"
-    app_name: str
-    served_model_name: str
-    url: str
-    gpu: "GPUType"
-    n_gpu: int
-    extra_vllm_args: list[str]
-
 
 class ModelConfig:
     """Base class for model identity and weight-download logic.
@@ -276,24 +263,10 @@ class ModelConfig:
         model on a specific GPU type. Frameworks pull defaults from here
         so users don't need to manually specify model-tuned flags.
         Default ``None``.
-    checkpoints_volume_name : str
-        Optional Modal volume name to mount when ``model_path`` points to
-        a local checkpoint path. Typically injected by ``TrainResult.model``.
-    checkpoints_mount_path : str
-        Optional mount path for ``checkpoints_volume_name``.
-        Defaults to ``"/checkpoints"``.
-    gpu : GPUType | None
-        Optional vLLM serving GPU type override. When ``None``, inferred
-        from model presets.
-    n_gpu : int | None
-        Optional vLLM serving GPU count override. When ``None``, inferred
-        from model tensor-parallel presets.
-    extra_vllm_args : list[str] | None
-        Optional additional vLLM CLI args for serving.
-    environment_name : str | None
-        Optional Modal environment name to deploy into.
-    deploy_strategy : str
-        Modal deployment strategy. Default ``"rolling"``.
+    deploy : DeployConfig | None
+        vLLM serving configuration (GPU, extra args, deploy strategy).
+        When ``None``, ``serve()`` infers settings from the model's
+        training presets. Default ``None``.
 
     Methods
     -------
@@ -308,13 +281,7 @@ class ModelConfig:
     model_path: str | None = None
     architecture: ModelArchitecture | None = None
     training: ModelTrainingConfig | None = None
-    checkpoints_volume_name: str = ""
-    checkpoints_mount_path: str = "/checkpoints"
-    gpu: "GPUType | None" = None
-    n_gpu: int | None = None
-    extra_vllm_args: list[str] | None = None
-    environment_name: str | None = None
-    deploy_strategy: str = "rolling"
+    deploy: DeployConfig | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -324,36 +291,6 @@ class ModelConfig:
         """Download or materialize weights into the model volume."""
         raise NotImplementedError(f"{type(self).__name__} has no download()")
 
-    def _infer_serve_gpu(self) -> "GPUType":
-        if self.training is not None and getattr(self.training, "gpu_type", None):
-            return self.training.gpu_type
-        for attr in ("slime",):
-            preset = getattr(self, attr, None)
-            if preset is not None and getattr(preset, "gpu_type", None):
-                return preset.gpu_type
-        return "H100"
-
-    def _infer_serve_n_gpu(self) -> int:
-        candidates: list[int] = []
-        if self.training is not None:
-            tp = getattr(self.training, "tensor_model_parallel_size", 0)
-            if isinstance(tp, int) and tp > 0:
-                candidates.append(tp)
-        for attr in ("slime",):
-            preset = getattr(self, attr, None)
-            if preset is None:
-                continue
-            tp = getattr(preset, "tensor_model_parallel_size", 0)
-            if isinstance(tp, int) and tp > 0:
-                candidates.append(tp)
-        return max(candidates) if candidates else 1
-
-    def _infer_serve_vllm_args(self) -> list[str]:
-        model_name = (self.model_name or "").lower()
-        inferred: list[str] = []
-        if "qwen3" in model_name:
-            inferred += ["--reasoning-parser", "qwen3"]
-        return inferred
 
     def serve(
         self,
@@ -387,18 +324,19 @@ class ModelConfig:
         resolved_app_name = app_name or f"{default_slug}-serve"
         resolved_served_model_name = served_model_name or default_slug
         resolved_checkpoints_volume = (
-            checkpoints_volume or self.checkpoints_volume_name or None
+            checkpoints_volume or None
         )
         resolved_mount_path = (
-            checkpoints_mount_path or self.checkpoints_mount_path or "/checkpoints"
+            checkpoints_mount_path
         )
-        resolved_gpu = self.gpu or self._infer_serve_gpu()
+        d = self.deploy
+        resolved_gpu = (d.gpu if d and d.gpu else None) or self._infer_serve_gpu()
         resolved_n_gpu = (
-            self.n_gpu if self.n_gpu is not None else self._infer_serve_n_gpu()
+            d.n_gpu if d and d.n_gpu is not None else self._infer_serve_n_gpu()
         )
         resolved_extra_args = [
             *self._infer_serve_vllm_args(),
-            *(self.extra_vllm_args or []),
+            *(d.extra_vllm_args if d and d.extra_vllm_args else []),
         ]
 
         app = build_vllm_serve_app(
@@ -411,14 +349,16 @@ class ModelConfig:
             n_gpu=resolved_n_gpu,
             extra_vllm_args=resolved_extra_args,
         )
+        env_name = d.environment_name if d else None
+        strategy = d.deploy_strategy if d else "rolling"
         app.deploy(
-            environment_name=self.environment_name,
-            strategy=self.deploy_strategy,
+            environment_name=env_name,
+            strategy=strategy,
         )
         serve_fn = modal.Function.from_name(
             resolved_app_name,
             "serve",
-            environment_name=self.environment_name,
+            environment_name=env_name,
         )
         url = serve_fn.get_web_url()
         if not url:
@@ -430,9 +370,13 @@ class ModelConfig:
             app_name=resolved_app_name,
             served_model_name=resolved_served_model_name,
             url=url,
-            gpu=resolved_gpu,
-            n_gpu=resolved_n_gpu,
-            extra_vllm_args=resolved_extra_args,
+            deploy=DeployConfig(
+                gpu=resolved_gpu,
+                n_gpu=resolved_n_gpu,
+                extra_vllm_args=resolved_extra_args,
+                environment_name=env_name,
+                deploy_strategy=strategy,
+            ),
         )
 
 

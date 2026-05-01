@@ -28,8 +28,7 @@ training iteration. It is a smoke run for the workflow, not a
 quality run.
 
 ```python
-from dataclasses import dataclass
-from enum import Enum
+import re
 from typing import Any
 
 import modal
@@ -63,95 +62,32 @@ base_deployment = base_model.serve(
 print(base_deployment.url)
 ```
 
-## Define the haiku dataset and scorer
-
-The dataset loads [`statworx/haiku`](https://huggingface.co/datasets/statworx/haiku)
-from HuggingFace — ~7k haiku poems tagged with a `keywords`
-topic. Each row becomes a chat-format training example: a system
-prompt asking for a haiku, plus a user prompt like
-*"Write a haiku about cat."*, paired with the reference poem as
-the assistant response.
-
-`prepare()` writes chat-format JSONL for ms-swift:
-`{"messages": [{"role": "system", ...}, {"role": "user", ...}, {"role": "assistant", ...}]}`.
-
-`load()` returns raw `{keywords, text}` dictionaries for local
-inspection and eval.
-
-The scoring function is the **verifiable reward**: it checks
-whether the response has three lines and whether each line hits
-the 5-7-5 syllable target. No network call, no GPU, no
-subjectivity — just syllable counting via a vowel-group
-heuristic. This is the kind of reward that makes RL
-post-training tractable: fast, deterministic, and always
-available inside the training loop.
-
-`EvalConfig` owns the model-calling loop. The task-specific part
-is a scoring function passed to `.evaluate(...)`, which must
-return `EvalRowResult`.
+Now that the model has come alive, we can request it to write a haiku about a topic.
 
 ```python
-SYSTEM_PROMPT = (
-    "You are a haiku poet. Write a haiku about the given topic. "
-    "Use the 5-7-5 syllable format across three lines."
+response = base_deployment.generate(
+    "Write a haiku about cat.",
 )
+print(response)
+```
 
+Okay, how do we evaluate if that was a good haiku or not?
+In addition to the poetic quality, haikus must follow the 5-7-5 syllable format.
+We can use a simple heuristic to count the syllables in the response.
 
-class HaikuDataset(DatasetConfig):
-    input_column = "keywords"
+Seems straightforward enough, right? How do we run an eval on our base model?
+We can transform our scoring function above into an Eval Configuration.
 
-    def __init__(
-        self,
-        data_root=HF_CACHE_PATH,
-        *,
-        split: str = "train",
-        n_train: int = 500,
-        n_eval: int = 50,
-    ):
-        self.split = split
-        self.n_train = n_train
-        self.n_eval = n_eval
-        self.prompt_data = f"{data_root}/haiku/{split}.jsonl"
+First, to explain, an Eval Configuration is a class that owns the model-calling loop.
+The task-specific part is a scoring function passed to `.evaluate(...)`, which must
+return `EvalRowResult`.
 
-    def load(self) -> list[dict[str, Any]]:
-        from datasets import load_dataset
+Before, our score_haiku function only returned a boolean, which gives 0 or 1 score.
+But we can make it return more granular result on *how much off* it was from the syllable
+target.
 
-        ds = load_dataset("statworx/haiku", split="train")
-        if self.split == "train":
-            rows = ds.select(range(min(self.n_train, len(ds))))
-        else:
-            rows = ds.select(range(len(ds) - self.n_eval, len(ds)))
-        return [dict(row) for row in rows]
-
-    def prepare(self) -> None:
-        import json
-        import os
-
-        os.makedirs(os.path.dirname(self.prompt_data), exist_ok=True)
-        with open(self.prompt_data, "w") as f:
-            for record in self.load():
-                f.write(
-                    json.dumps(
-                        {
-                            "messages": [
-                                {"role": "system", "content": SYSTEM_PROMPT},
-                                {
-                                    "role": "user",
-                                    "content": f"Write a haiku about {record['keywords'].lower()}.",
-                                },
-                                {"role": "assistant", "content": record["text"]},
-                            ]
-                        }
-                    )
-                    + "\n"
-                )
-
-
-import re
-
-
+```python
 def _count_syllables(text: str) -> int:
-    """Vowel-group heuristic for syllable counting."""
     words = re.findall(r"[a-zA-Z]+", text)
     total = 0
     for word in words:
@@ -189,8 +125,73 @@ def score_haiku(example: dict[str, Any], response: str) -> EvalRowResult:
             "syllable_counts": syllable_counts,
         },
     )
+```
+
+Let's also define a Haiku dataset.
+Here, we use the statworx/haiku dataset from HuggingFace.
+Each row has a `keywords` topic and a reference `text` haiku.
+We can use this dataset to train our model.
+
+```python
+SYSTEM_PROMPT = (
+    "You are a haiku poet. Write a haiku about the given topic. "
+    "Use the 5-7-5 syllable format across three lines."
+)
 
 
+class HaikuDataset(DatasetConfig):
+    input_column = "keywords"
+
+    def __init__(
+        self,
+        data_root=HF_CACHE_PATH,
+        *,
+        split: str = "train",
+        n_train: int = 500,
+        n_eval: int = 50,
+    ):
+        self.split = split
+        self.n_train = n_train
+        self.n_eval = n_eval
+        self.prompt_data = f"{data_root}/haiku/{split}.jsonl"
+
+    def load(self) -> list[dict[str, Any]]:
+        from datasets import load_dataset
+
+        ds = load_dataset("statworx/haiku", split="train")
+        if self.split == "train":
+            rows = ds.select(range(min(self.n_train, len(ds))))
+        else:
+            rows = ds.select(range(len(ds) - self.n_eval, len(ds)))
+        return [dict(row) for row in rows]
+
+    def to_pandas(self):
+        import pandas as pd
+
+        return pd.DataFrame(self.load())
+
+    def prepare(self) -> None:
+        import json
+        import os
+
+        os.makedirs(os.path.dirname(self.prompt_data), exist_ok=True)
+        with open(self.prompt_data, "w") as f:
+            for record in self.load():
+                f.write(
+                    json.dumps(
+                        {
+                            "messages": [
+                                {"role": "system", "content": SYSTEM_PROMPT},
+                                {
+                                    "role": "user",
+                                    "content": f"Write a haiku about {record['keywords'].lower()}.",
+                                },
+                                {"role": "assistant", "content": record["text"]},
+                            ]
+                        }
+                    )
+                    + "\n"
+                )
 class HaikuPrompts(EvalConfig):
     def build_prompt(self, example: dict[str, Any]) -> str:
         return (
@@ -199,17 +200,15 @@ class HaikuPrompts(EvalConfig):
         )
 
 
-train_dataset = HaikuDataset(split="train", n_train=500)
-eval_dataset = HaikuDataset(split="eval", n_eval=50)
+train_dataset = HaikuDataset(split="train", n_train=50)
+eval_dataset = HaikuDataset(split="eval", n_eval=10)
 ```
 
 Let's take a look at the eval set. Each row has a `keywords`
 topic and a reference `text` haiku.
 
 ```python
-import pandas as pd
-
-df = pd.DataFrame(eval_dataset.load())
+df = eval_dataset.to_pandas()
 print(len(df))
 df.head(5)
 ```
@@ -225,30 +224,34 @@ print(f"Base haiku score: {base_eval.accuracy:.1%}")
 print(f"Passed (score >= 0.75): {base_eval.correct}/{base_eval.total}")
 ```
 
-## Train with ms-swift
+## Train with slime
 
-This run uses a single H100 and one iteration — enough to
-verify the pipeline end-to-end. Increase `train_iters` and
-`n_train` for a real experiment.
+Now, let's actually train the model to write good haikus.
+Here, we use the slime framework (https://github.com/THUDM/slime) on Modal.
 
 ```python
-swift_framework_config = MsSwiftFrameworkConfig(
-    n_nodes=1,
-    gpus_per_node=1,
-    global_batch_size=1,
-    max_length=2048,
-    train_iters=1,
-    num_train_epochs=1,
-    save_interval=1,
-    eval_iters=0,
-)
+from modal_training_gym.common.haiku_reward import haiku_rm
 
-my_training_run = MsSwiftConfig(
-    name="qwen3-4b-haiku-sft",
-    dataset=train_dataset,
+my_training_run = SlimeConfig(
     model=base_model,
-    wandb=WandbConfig(project="qwen3-4b-haiku-sft"),
-    framework_config=swift_framework_config,
+    dataset=HaikuDataset(DATA_PATH, base_model.model_name),
+    wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-haiku"),
+
+    custom_rm_function=haiku_rm,
+
+    num_rollout=10,
+    apply_chat_template_kwargs='{"enable_thinking": false}',
+
+    eval_interval=5,
+    n_samples_per_eval_prompt=8,
+
+    save="/checkpoints/qwen3-0.6b-haiku",
+    save_interval=1,
+
+    image_run_commands=[
+        "uv pip install --system aiohttp nltk>=3.8.0",
+        "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
+    ],
 )
 ```
 
@@ -260,10 +263,9 @@ app = my_training_run.build_app()
 
 ## Serve and evaluate the trained checkpoint
 
-After training completes, `TrainResult.load(...)` reconstructs
-the trained model with its checkpoint path and volume metadata
-attached. Calling `.serve(...)` deploys that checkpoint behind
-vLLM.
+After training completes, `TrainResult.load(...)` reconstructs the
+trained model with its checkpoint path and volume metadata attached.
+Calling `.serve(...)` deploys that checkpoint behind vLLM.
 
 ```python
 result = TrainResult.load("qwen3-4b-haiku-sft")
@@ -284,19 +286,7 @@ print(f"Passed (score >= 0.75): {trained_eval.correct}/{trained_eval.total}")
 print(f"Delta: {trained_eval.accuracy - base_eval.accuracy:+.1%}")
 ```
 
-## What's next: RL with GRPO
-
-SFT teaches the model to imitate reference haikus. RL goes
-further — it lets the model explore and discover poems that
-score well on the reward function, even ones that look nothing
-like the training set.
-
-The [`001_slime_intro`](../001_slime_intro/) tutorial runs
-GRPO (Group Relative Policy Optimization) with the
-[slime](https://github.com/THUDM/slime) framework on Modal.
-[`003_slime_with_llm_as_judge`](../003_slime_with_llm_as_judge/)
-extends the same haiku task with an LLM-as-judge style reward
-on top of the structure score defined here.
+## What's next: RL with LLM--as-a-judge
 
 ---
 

@@ -29,23 +29,10 @@ context) and assume familiarity with the underlying framework.
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`000_rl_basics`](rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `ms_swift` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`000_rl_basics`](rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`001_slime_intro`](rl/001_slime_intro/001_slime_intro.ipynb) | Qwen3-0.6B GRPO on GSM8K (colocated) | Advanced | `slime` | 1 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_slime_intro/001_slime_intro.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`002_customizing_your_slime_run`](rl/002_customizing_your_slime_run/002_customizing_your_slime_run.ipynb) | Customizing your slime run — scaling nodes, parallelism, and throughput | Intermediate | `slime` | 4 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_customizing_your_slime_run/002_customizing_your_slime_run.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`003_slime_with_llm_as_judge`](rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.ipynb) | Qwen3-0.6B GRPO on haiku poems — structure score + LLM judge | Intermediate | `slime` | 1 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/003_slime_with_llm_as_judge/003_slime_with_llm_as_judge.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-
-### SFT
-
-| Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
-|---|---|---|---|---|---|
-| [`000_sft_basics`](sft/000_sft_basics/000_sft_basics.ipynb) | Qwen3-0.6B SFT on generated arithmetic problems | Beginner | `ms_swift` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/000_sft_basics/000_sft_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`001_ms_swift`](sft/001_ms_swift/001_ms_swift.ipynb) | GLM-4.7 LoRA SFT on GSM8K (Megatron) | Advanced | `ms_swift` | 4 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/001_ms_swift/001_ms_swift.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-
-### Misc
-
-| Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
-|---|---|---|---|---|---|
-| [`ray_slime_standalone`](misc/ray_slime_standalone/ray_slime_standalone.ipynb) | Ray-on-Modal pattern demo | Intermediate | — (raw `ModalRayCluster`) | 2 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
 ## Running from the CLI instead

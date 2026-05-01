@@ -12,6 +12,7 @@ into the Ray job runtime env, not passed to slime directly.
 """
 
 import math
+from collections.abc import Callable
 from dataclasses import field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -56,6 +57,7 @@ _SLIME_SKIP = {
     "local_python_sources",
     "gpu_type",
     "checkpoint",
+    "custom_rm_function",
 }
 
 # SlimeConfig fields that slime reads as YAML files at runtime.
@@ -251,8 +253,16 @@ class SlimeConfig:
 
     ## Custom Reward
 
+    custom_rm_function : Callable | None
+        A reward function to use. When set, the launcher automatically
+        writes the function's source file into the training image and
+        derives ``custom_rm_path`` from it. Also sets ``rm_type`` to
+        ``"async_rm"`` unless already overridden. Default ``None``.
     custom_rm_path : str
-        Python import path for custom reward function. Default ``""``.
+        Python import path for custom reward function. Normally
+        auto-derived from ``custom_rm_function``; set manually only
+        when shipping the reward module yourself via
+        ``local_python_sources``. Default ``""``.
 
     ## SGLang
 
@@ -354,6 +364,7 @@ class SlimeConfig:
     # ── Reward model ─────────────────────────────────────────────────────────
     rm_type: str = "math"
     custom_rm_path: str = ""
+    custom_rm_function: Callable | None = None
 
     # ── SGLang / config overrides ───────────────────────────────────────────
     sglang_config: dict | None = None
@@ -393,6 +404,19 @@ class SlimeConfig:
                 f"SlimeConfig is missing required fields: {missing}. "
                 f"Either add a SlimePreset to {model_name} or pass them explicitly."
             )
+
+        if self.custom_rm_function is not None and not self.custom_rm_path:
+            fn = self.custom_rm_function
+            mod = getattr(fn, "__module__", None) or ""
+            name = getattr(fn, "__qualname__", None) or fn.__name__
+            if mod == "__main__":
+                import inspect
+
+                src_file = inspect.getfile(fn)
+                mod = Path(src_file).stem
+            object.__setattr__(self, "custom_rm_path", f"{mod}.{name}")
+            if self.rm_type == "math":
+                object.__setattr__(self, "rm_type", "async_rm")
 
     @staticmethod
     def _dataset_to_fields(ds: "DatasetConfig") -> dict[str, Any]:

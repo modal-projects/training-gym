@@ -27,18 +27,10 @@ In notebooks, the tutorial writes a local `haiku.py` file that slime
 imports; from the CLI, the same config falls back to the packaged
 `modal_training_gym.common.haiku_reward` module.
 
-The workflow has four stages:
-
-| Stage | What it does | Where |
-|---|---|---|
-| `download` | Pulls `Qwen/Qwen3-0.6B` into the HF cache volume | 1×H100 |
-| `prepare_dataset` | Downloads `statworx/haiku` and writes train/test parquet | CPU |
-| `train` | GRPO training loop over the haiku prompts | 1×8×H100, colocated |
-| `serve_app` (separate) | Hosts the finished checkpoint via vLLM + Flash | 1×H100 |
-
-Invoke any function on the returned training `app` via `modal run`
-from the CLI, or interactively with `app.run()` + `.remote()` from a
-notebook.
+Invoke `train` on the returned `app` via `modal run` from the
+CLI, or interactively with `app.run()` + `.remote()` from a
+notebook. `train` handles model download and dataset preparation
+automatically.
 
 ## Imports
 
@@ -300,21 +292,10 @@ my_training_run = SlimeConfig(
 
 ## Build the Modal app
 
-`build_app()` returns a `modal.App` with four functions defined
-against the right volumes, secrets, and GPU spec:
-
-- `download` — pulls the HF checkpoint into the
-  `huggingface-cache` volume (1×H100, 2 hour timeout).
-- `prepare_dataset` — runs `HaikuDataset.prepare()` against the
-  `slime-data` volume (CPU).
-- `convert_checkpoint` — no-op in bridge mode; for `megatron_to_hf_mode
-  ="raw"` experiments it'd do the HF → torch_dist conversion.
-- `train` — the actual GRPO run on a Modal `@clustered(n_nodes)`
-  cluster (1×8×H100 here), with Ray brought up in-container via
-  `ModalRayCluster`.
-
-Every function closes over the `my_training_run` config above, so the
-app is fully determined by that single object.
+`build_app()` returns a `modal.App` with a `train` function that
+handles model download, dataset prep, and GRPO training in one
+call. The app closes over the `my_training_run` config above, so
+the app is fully determined by that single object.
 
 ```python
 app = my_training_run.build_app()

@@ -112,9 +112,8 @@ my_training_run = MsSwiftConfig(
 
 ## Build and run
 
-`build_app()` returns a Modal app with `download`,
-`prepare_dataset`, and `train`. See
-[`001_quickstart`](../../intro/001_quickstart/001_quickstart.ipynb) for the pattern.
+`build_app()` returns a Modal app with a `train` function that
+handles model download, dataset prep, and training in one call.
 
 ```python
 app = my_training_run.build_app()

@@ -202,13 +202,23 @@ def _train_ms_swift_worker(run_id: str | None = None):
     if node_rank == 0:
         from modal_training_gym.common.train_result import TrainResult
 
+        model_class_str = os.environ.get("MS_SWIFT_MODEL_CLASS", "")
+        if model_class_str:
+            import importlib
+
+            _mod_path, _cls_name = model_class_str.rsplit(".", 1)
+            _model_config = getattr(importlib.import_module(_mod_path), _cls_name)()
+        else:
+            from modal_training_gym.common.models import ModelConfig
+
+            _model_config = ModelConfig(model_name=model_name)
+
         result = TrainResult(
             app_name=app_name,
             framework="ms-swift",
             run_id=run_id,
             checkpoint_dir=checkpoint_dir,
-            base_model=model_name,
-            model_class=os.environ.get("MS_SWIFT_MODEL_CLASS", ""),
+            model_config=_model_config,
             checkpoints_volume_name=checkpoints_volume_name,
             checkpoints_mount_path=checkpoints_root,
             iteration_prefix=_ckpt_config.iteration_prefix,

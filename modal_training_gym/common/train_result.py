@@ -48,6 +48,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from modal_training_gym.frameworks.base import Framework
+
 if TYPE_CHECKING:
     from modal import Volume
     from modal_training_gym.common.models import ModelConfig
@@ -74,9 +76,7 @@ class TrainResult:
         volume (``{app_name}-checkpoints``) and the shared results
         :class:`modal.Dict` (``{app_name}-train-results``).
     framework:
-        Training framework identifier (``"slime"``, ``"ms-swift"``).
-        Eval scripts can switch on this to apply framework-specific
-        decoding of the checkpoint layout.
+        Training framework identifier.
     run_id:
         Unique identifier for *this* specific training call. Keys the
         record in the shared :class:`modal.Dict`; embedded in
@@ -87,9 +87,10 @@ class TrainResult:
         checkpoints mount; for slime (which
         writes a single flat ``iter_*`` tree at ``slime.save``) this is
         that save root.
-    base_model:
-        HuggingFace repo id of the base model — useful as a fallback
-        ``served_model_name`` and for tokenizer-only evals.
+    model_config:
+        The ``ModelConfig`` used for training. The :attr:`model` property
+        returns a copy with ``model_path`` pointing at the latest
+        checkpoint, ready to serve.
     checkpoints_volume_name:
         Name of the checkpoints :class:`modal.Volume`.
     checkpoints_mount_path:
@@ -109,11 +110,10 @@ class TrainResult:
     """
 
     app_name: str
-    framework: str
+    framework: Framework
     run_id: str
     checkpoint_dir: str
-    base_model: str
-    model_class: str = ""
+    model_config: "ModelConfig | None" = None
     checkpoints_volume_name: str = ""
     checkpoints_mount_path: str = ""
     iteration_prefix: str = ""
@@ -125,7 +125,7 @@ class TrainResult:
     # ── Persistence: shared modal.Dict ────────────────────────────────────
 
     def save(self) -> None:
-        """Persist this result to the shared :class:`modal.Dict`.
+        """Persist this result. Currently saves to a Modal Dict but in the future, we will save to a database.
 
         Called by each framework's ``train`` function at the end of a
         successful run (from rank 0 only — the others would race).
@@ -291,35 +291,25 @@ class TrainResult:
 
     @property
     def model(self) -> "ModelConfig":
-        """Return the original model class with ``model_path`` pointing at the checkpoint.
+        """Return the model config with ``model_path`` pointing at the latest checkpoint.
 
-        Reconstructs the same model class used for training (e.g.
-        ``Qwen3_4B``) so it retains architecture, presets, and
-        ``download()`` logic. The checkpoint volume metadata is also
-        attached so ``result.model.serve()`` mounts the right checkpoint volume.
+        Returns a shallow copy of ``model_config`` so the stored
+        instance is not mutated. The copy has ``model_path``,
+        ``checkpoints_volume_name``, and ``checkpoints_mount_path``
+        set so that ``result.model.serve()`` works out of the box.
         """
-        import importlib
+        import copy
 
-        checkpoint_path = self.latest_checkpoint_path()
-
-        if self.model_class:
-            module_path, class_name = self.model_class.rsplit(".", 1)
-            mod = importlib.import_module(module_path)
-            cls = getattr(mod, class_name)
-            instance = cls()
-            instance.model_path = checkpoint_path
-            instance.checkpoints_volume_name = self.checkpoints_volume_name
-            instance.checkpoints_mount_path = self.checkpoints_mount_path
-            return instance
-
-        from modal_training_gym.common.models import ModelConfig
-
-        return ModelConfig(
-            model_name=self.base_model,
-            model_path=checkpoint_path,
-            checkpoints_volume_name=self.checkpoints_volume_name,
-            checkpoints_mount_path=self.checkpoints_mount_path,
-        )
+        if self.model_config is None:
+            raise ValueError(
+                "No model_config on this TrainResult. "
+                "Was it saved by an older launcher?"
+            )
+        m = copy.copy(self.model_config)
+        m.model_path = self.latest_checkpoint_path()
+        m.checkpoints_volume_name = self.checkpoints_volume_name
+        m.checkpoints_mount_path = self.checkpoints_mount_path
+        return m
 
     # ── W&B integration ─────────────────────────────────────────────────
 

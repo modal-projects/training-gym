@@ -193,35 +193,9 @@ def _run_cli():
     From the CLI:
 
     ```
-    uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.download
-    uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.prepare_dataset
     uv run modal run --detach tutorials/intro/002_custom_model/002_custom_model.py::app.train
     ```
     """
-
-
-@notebook_only
-@markdown
-def _run_interactive():
-    """
-    Interactive — one stage per cell:
-    """
-
-
-@notebook_only
-@code
-def _invoke_download_model():
-    with modal.enable_output():
-        with app.run():
-            app.download.remote()
-
-
-@notebook_only
-@code
-def _invoke_prepare_dataset():
-    with modal.enable_output():
-        with app.run():
-            app.prepare_dataset.remote()
 
 
 @notebook_only

@@ -106,6 +106,27 @@ def build_slime_app(
             remote_path=caller_remote_path,
             copy=True,
         )
+    # If the user passed custom_rm_function, ship its source file into the
+    # image so slime can import it via the auto-derived custom_rm_path.
+    _rm_fn_shipped = False
+    if slime.custom_rm_function is not None:
+        import inspect as _inspect
+
+        fn = slime.custom_rm_function
+        fn_mod = getattr(fn, "__module__", None) or ""
+        # Functions inside modal_training_gym are already in the image.
+        if not fn_mod.startswith("modal_training_gym"):
+            fn_file = os.path.abspath(_inspect.getfile(fn))
+            # Don't duplicate if it's the caller script (already shipped above).
+            if fn_file != caller_script:
+                fn_module_name = os.path.splitext(os.path.basename(fn_file))[0]
+                image = image.add_local_file(
+                    fn_file,
+                    remote_path=f"/root/{fn_module_name}.py",
+                    copy=True,
+                )
+                _rm_fn_shipped = True
+
     # Ship any sibling helper modules the tutorial declared (e.g. a custom
     # reward function referenced via slime's `custom_rm_path`). Using
     # `add_local_python_source` means Python's normal import machinery
@@ -349,18 +370,12 @@ def build_slime_app(
             except Exception as e:
                 print(f"Could not fetch W&B run ID: {e}")
 
-        model_class = ""
-        if slime.model is not None:
-            cls = type(slime.model)
-            model_class = f"{cls.__module__}.{cls.__name__}"
-
         result = TrainResult(
             app_name=app_name,
             framework="slime",
             run_id=run_id,
             checkpoint_dir=checkpoint_dir,
-            base_model=slime.model.model_name if slime.model else "",
-            model_class=model_class,
+            model_config=slime.model,
             checkpoints_volume_name=f"{app_name}-checkpoints",
             checkpoints_mount_path=str(CHECKPOINTS_PATH),
             iteration_prefix=slime.checkpoint.iteration_prefix,
@@ -385,7 +400,7 @@ def build_slime_app(
             framework="slime",
             run_id=run_id,
             checkpoint_dir=save_root,
-            base_model=slime.model.model_name if slime.model is not None else "",
+            model_config=slime.model,
             checkpoints_volume_name=f"{app_name}-checkpoints",
             checkpoints_mount_path=str(CHECKPOINTS_PATH).rstrip("/"),
             iteration_prefix=slime.checkpoint.iteration_prefix,

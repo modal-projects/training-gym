@@ -113,18 +113,14 @@ my_training_run = SlimeConfig(
 
 # ## Build and run
 #
-# `build_app()` returns a Modal app with `download`,
-# `prepare_dataset`, and `train`. (Bridge mode means there's no
-# separate `convert_checkpoint` step to call — see quickstart for the
-# general pattern.)
+# `build_app()` returns a Modal app with a `train` function that
+# handles model download, dataset prep, and training in one call.
 
 app = my_training_run.build_app()
 
 # From the CLI:
 #
 # ```bash
-# uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.download
-# uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.prepare_dataset
 # uv run modal run --detach tutorials/rl/001_slime_intro/001_slime_intro.py::app.train
 # ```
 

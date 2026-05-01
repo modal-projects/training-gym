@@ -154,40 +154,27 @@ def _factory_section():
     ## The framework factory pattern
 
     Every framework package exposes a `build_<name>_app(...)` factory
-    that takes a framework-specific config plus a `ModalConfig` and
-    returns a `modal.App` with a standard set of remote functions:
+    that takes a framework-specific config and returns a `modal.App`
+    with a `train` function. Calling `train` handles everything:
+    downloading the model (if not already cached), preparing the
+    dataset (if not already materialized), and running the training
+    job. One call, one command.
 
-    - `download` — pulls the model into the `huggingface-cache`
-      volume. One-time per `(model,)` pair — subsequent runs reuse the
-      volume.
-    - `prepare_dataset` — runs your `DatasetConfig.prepare()` against the
-      `/data` volume. One-time per `(dataset,)` pair.
-    - `train` — the actual training run. This is the long one; launch it
-      with `modal run --detach`.
-
-    Framework-specific extras exist too: raw-mode slime/Megatron runs add
-    `convert_checkpoint`; RL frameworks may add serving helpers. A
-    tutorial's `.py` file is where all of this is wired together —
-    calling `framework_config.build_app()` closes over your config and
-    hands back the app.
-
-    The same shape, written out:
+    The shape, written out:
 
     ```python
     from modal_training_gym.common.models import Qwen3_0_6B
     from modal_training_gym.common.wandb import WandbConfig
-    from modal_training_gym.frameworks.slime import (
-        ModalConfig, SlimeConfig,
-    )
+    from modal_training_gym.frameworks.slime import SlimeConfig
 
     run = SlimeConfig(
-        model=Qwen3_0_6B(),  # GPU type derived from model.slime.gpu_type
+        model=Qwen3_0_6B(),
         dataset=MyDataset(...),
         wandb=WandbConfig(project="my-runs", group="concepts-demo"),
         # … framework-specific flags …
     )
 
-    app = run.build_app()   # modal.App with download / prepare_dataset / train
+    app = run.build_app()   # modal.App — call app.train to run everything
     ```
 
     Different framework, same shape — swap `slime` for `ms_swift`,
@@ -225,31 +212,26 @@ def _volumes_section():
 @markdown
 def _running_section():
     """
-    ## Running the pipeline
+    ## Running a training job
 
-    Every tutorial exposes the same three-stage pipeline. Two ways to
-    invoke it:
-
-    **CLI** — one command per stage, easy to script. Always `--detach` for
-    training so the run survives your terminal closing.
+    Every tutorial has one command to run. `train` handles model
+    download, dataset preparation, and training in a single call.
+    Always `--detach` so the run survives your terminal closing:
 
     ```bash
-    uv run modal run tutorials/<tutorial>/<tutorial>.py::app.download
-    uv run modal run tutorials/<tutorial>/<tutorial>.py::app.prepare_dataset
     uv run modal run --detach tutorials/<tutorial>/<tutorial>.py::app.train
     ```
 
     Reattach to a detached run's logs from another terminal with
     `modal app logs <app-name>`.
 
-    **Interactive** — inside a notebook cell, open an ephemeral app and
-    run one stage at a time. Good for iterating on `prepare()` or on a
-    config without re-submitting the whole script.
+    **Interactive** — inside a notebook cell, open an ephemeral app
+    and call `train` directly:
 
     ```python
     with modal.enable_output():
         with app.run():
-            app.download.remote()
+            app.train.remote()
     ```
 
     The `modal.enable_output()` context manager streams logs back into

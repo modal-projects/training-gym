@@ -122,7 +122,5 @@ app = my_training_run.build_app()
 # From the CLI:
 #
 # ```
-# uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.download
-# uv run modal run tutorials/intro/002_custom_model/002_custom_model.py::app.prepare_dataset
 # uv run modal run --detach tutorials/intro/002_custom_model/002_custom_model.py::app.train
 # ```
