@@ -39,6 +39,7 @@ class EvalConfig:
 
     deployment: "ModelDeployment"
     dataset: "DatasetConfig"
+    eval_fn: EvalFn
     temperature: float = 0.0
     startup_timeout_seconds: int = 20 * 60
     startup_poll_seconds: int = 5
@@ -81,7 +82,7 @@ class EvalConfig:
                     )
                 time.sleep(self.startup_poll_seconds)
 
-    def evaluate(self, eval_fn: EvalFn, debug=False) -> EvalResult:
+    def evaluate(self, debug=False) -> EvalResult:
         from openai import OpenAI
 
         client = OpenAI(
@@ -108,7 +109,7 @@ class EvalConfig:
                 ],
             )
             text = response.choices[0].message.content or ""
-            result = eval_fn(example, text)
+            result = self.eval_fn(example, text)
             if not result.response:
                 result = EvalRowResult(
                     score=result.score,

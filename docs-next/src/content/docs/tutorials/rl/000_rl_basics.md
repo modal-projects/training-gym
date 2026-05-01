@@ -9,7 +9,7 @@ This tutorial uses Qwen3-4B and haiku poems to introduce the
 1. Serve the base model.
 2. Define a scoring function with a verifiable reward (syllable structure).
 3. Evaluate the base model against that scorer.
-4. LoRA SFT the model on reference haiku data with ms-swift.
+4. GRPO-train the model with slime using the reward function.
 5. Serve the trained checkpoint.
 6. Evaluate it with the same scorer and compare.
 
@@ -33,16 +33,13 @@ from typing import Any
 
 import modal
 
-from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.dataset import HuggingFaceDataset
 from modal_training_gym.common.eval import EvalConfig, EvalRowResult
 from modal_training_gym.common.models import Qwen3_4B
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.wandb import WandbConfig
-from modal_training_gym.frameworks.ms_swift import (
-    MsSwiftConfig,
-    MsSwiftFrameworkConfig,
-)
-from modal_training_gym.frameworks.ms_swift.config import HF_CACHE_PATH
+from modal_training_gym.frameworks.slime import SlimeConfig
+from modal_training_gym.frameworks.slime.config import DATA_PATH
 ```
 
 ## Serve the base model
@@ -87,17 +84,6 @@ But we can make it return more granular result on *how much off* it was from the
 target.
 
 ```python
-def _count_syllables(text: str) -> int:
-    words = re.findall(r"[a-zA-Z]+", text)
-    total = 0
-    for word in words:
-        count = len(re.findall(r"[aeiouy]+", word.lower()))
-        if word.lower().endswith("e") and count > 1:
-            count -= 1
-        total += max(count, 1)
-    return total
-
-
 def score_haiku(example: dict[str, Any], response: str) -> EvalRowResult:
     lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
     has_three_lines = len(lines) == 3
@@ -127,6 +113,17 @@ def score_haiku(example: dict[str, Any], response: str) -> EvalRowResult:
     )
 ```
 
+```python
+class HaikuEvalConfig(EvalConfig):
+    eval_fn = score_haiku
+    
+    def build_prompt(self, example: dict[str, Any]) -> str:
+        return (
+            f"Write a haiku about {example['keywords'].lower()}.\n\n"
+            "Output only the three lines of the haiku, nothing else."
+        )
+```
+
 Let's also define a Haiku dataset.
 Here, we use the statworx/haiku dataset from HuggingFace.
 Each row has a `keywords` topic and a reference `text` haiku.
@@ -138,66 +135,51 @@ SYSTEM_PROMPT = (
     "Use the 5-7-5 syllable format across three lines."
 )
 
-
-class HaikuDataset(DatasetConfig):
+class HaikuDataset(HuggingFaceDataset):
+    hf_repo = "statworx/haiku"
     input_column = "keywords"
+    output_column = "text"
+    output_format = "jsonl"
+    system_prompt = SYSTEM_PROMPT
 
     def __init__(
         self,
-        data_root=HF_CACHE_PATH,
+        data_root=DATA_PATH,
         *,
         split: str = "train",
         n_train: int = 500,
         n_eval: int = 50,
     ):
+        super().__init__(data_root)
         self.split = split
         self.n_train = n_train
         self.n_eval = n_eval
         self.prompt_data = f"{data_root}/haiku/{split}.jsonl"
 
-    def load(self) -> list[dict[str, Any]]:
-        from datasets import load_dataset
-
-        ds = load_dataset("statworx/haiku", split="train")
+    def load(self):
+        ds = super().load()
         if self.split == "train":
-            rows = ds.select(range(min(self.n_train, len(ds))))
+            return ds.select(range(min(self.n_train, len(ds))))
         else:
-            rows = ds.select(range(len(ds) - self.n_eval, len(ds)))
-        return [dict(row) for row in rows]
+            return ds.select(range(len(ds) - self.n_eval, len(ds)))
 
-    def to_pandas(self):
-        import pandas as pd
+    def _format_for_training(self, ds):
+        in_col = self.input_column
+        sys_prompt = self.system_prompt
 
-        return pd.DataFrame(self.load())
+        def _to_chat(row: dict) -> dict:
+            return {
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {
+                        "role": "user",
+                        "content": f"Write a haiku about {row[in_col].lower()}.",
+                    },
+                    {"role": "assistant", "content": row["text"]},
+                ]
+            }
 
-    def prepare(self) -> None:
-        import json
-        import os
-
-        os.makedirs(os.path.dirname(self.prompt_data), exist_ok=True)
-        with open(self.prompt_data, "w") as f:
-            for record in self.load():
-                f.write(
-                    json.dumps(
-                        {
-                            "messages": [
-                                {"role": "system", "content": SYSTEM_PROMPT},
-                                {
-                                    "role": "user",
-                                    "content": f"Write a haiku about {record['keywords'].lower()}.",
-                                },
-                                {"role": "assistant", "content": record["text"]},
-                            ]
-                        }
-                    )
-                    + "\n"
-                )
-class HaikuPrompts(EvalConfig):
-    def build_prompt(self, example: dict[str, Any]) -> str:
-        return (
-            f"Write a haiku about {example['keywords'].lower()}.\n\n"
-            "Output only the three lines of the haiku, nothing else."
-        )
+        return ds.map(_to_chat, remove_columns=ds.column_names)
 
 
 train_dataset = HaikuDataset(split="train", n_train=50)
@@ -216,10 +198,10 @@ df.head(5)
 ## Evaluate the base model
 
 ```python
-base_eval = HaikuPrompts(
+base_eval = HaikuEvalConfig(
     deployment=base_deployment,
     dataset=eval_dataset,
-).evaluate(score_haiku)
+).evaluate()
 print(f"Base haiku score: {base_eval.accuracy:.1%}")
 print(f"Passed (score >= 0.75): {base_eval.correct}/{base_eval.total}")
 ```
@@ -277,7 +259,7 @@ deployment = result.model.serve(
 )
 print(deployment.url)
 
-trained_eval = HaikuPrompts(
+trained_eval = HaikuEvalConfig(
     deployment=deployment,
     dataset=eval_dataset,
 ).evaluate(score_haiku)
@@ -295,8 +277,7 @@ print(f"Delta: {trained_eval.accuracy - base_eval.accuracy:+.1%}")
 - [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - `EvalConfig`
 - `EvalRowResult`
-- [`MsSwiftConfig`](/reference/frameworks/msswiftconfig/)
-- [`MsSwiftFrameworkConfig`](/reference/frameworks/msswiftframeworkconfig/)
+- [`SlimeConfig`](/reference/frameworks/slimeconfig/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 - [`TrainResult`](/reference/core/trainresult/)
 

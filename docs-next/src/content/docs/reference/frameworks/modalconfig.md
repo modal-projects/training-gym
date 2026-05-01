@@ -20,8 +20,4 @@ Modal infrastructure configuration for slime — image setup and dev overlays.
 | `image_run_commands` | `list[str]` |  | Shell commands run during image build (e.g. `git apply /tmp/my.patch`). Default `[]`. |
 | `local_python_sources` | `list[str]` |  | Sibling Python modules (by import name) to ship into the training image via `add_local_python_source`. Use for helper modules like custom reward functions referenced via slime's `custom_rm_path`. Default `[]`. |
 
-## Related Tutorials
-
-- [Qwen3-0.6B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/003_slime_with_llm_as_judge/)
-
 **Source:** [`modal_training_gym/frameworks/slime/config.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/frameworks/slime/config.py)

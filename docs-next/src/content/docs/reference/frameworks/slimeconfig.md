@@ -56,7 +56,7 @@ slime GRPO training configuration.
 | `kl_loss_coef` | `float` | `0.0` | KL loss coefficient. Default `0.0`. |
 | `entropy_coef` | `float` | `0.0` | Entropy bonus coefficient. Default `0.0`. |
 | `ref_load` | `str` | `""` | Reference model checkpoint path. Default `""`. |
-| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7fbd89c7e2d0>` |  |
+| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7fad3332fa40>` |  |
 
 ## Rollout
 
@@ -175,8 +175,6 @@ Total Modal cluster nodes required by this config.
 ## Related Tutorials
 
 - [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/001_quickstart/)
-- [Qwen3-0.6B GRPO on GSM8K (colocated)](/tutorials/rl/001_slime_intro/)
-- [Customizing your slime run — scaling nodes, parallelism, and throughput](/tutorials/rl/002_customizing_your_slime_run/)
-- [Qwen3-0.6B GRPO on haiku poems — structure score + LLM judge](/tutorials/rl/003_slime_with_llm_as_judge/)
+- [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
 
 **Source:** [`modal_training_gym/frameworks/slime/config.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/frameworks/slime/config.py)

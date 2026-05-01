@@ -45,8 +45,4 @@ Keep a worker container alive until the head terminates the cluster.
 
 Override to append flags to `ray start` on worker ranks.
 
-## Related Tutorials
-
-- [Ray-on-Modal pattern demo](/tutorials/misc/ray_slime_standalone/)
-
 **Source:** [`modal_training_gym/common/ray_cluster.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/ray_cluster.py)

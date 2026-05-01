@@ -14,17 +14,16 @@ One completed training run's checkpoint handle.
 ## Constructor
 
 ```python
-TrainResult(app_name, framework, run_id, checkpoint_dir, base_model, model_class='', checkpoints_volume_name='', checkpoints_mount_path='', iteration_prefix='', wandb_project='', wandb_entity='', wandb_run_id='', extra=<factory>)
+TrainResult(app_name, framework, run_id, checkpoint_dir, model_config=None, checkpoints_volume_name='', checkpoints_mount_path='', iteration_prefix='', wandb_project='', wandb_entity='', wandb_run_id='', extra=<factory>)
 ```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `app_name` | `str` | *required* |  |
-| `framework` | `str` | *required* |  |
+| `framework` | `Framework` | *required* |  |
 | `run_id` | `str` | *required* |  |
 | `checkpoint_dir` | `str` | *required* |  |
-| `base_model` | `str` | *required* |  |
-| `model_class` | `str` | `""` |  |
+| `model_config` | `'ModelConfig | None'` | `None` |  |
 | `checkpoints_volume_name` | `str` | `""` |  |
 | `checkpoints_mount_path` | `str` | `""` |  |
 | `iteration_prefix` | `str` | `""` |  |
@@ -38,11 +37,10 @@ TrainResult(app_name, framework, run_id, checkpoint_dir, base_model, model_class
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `app_name` | `str` |  |  |
-| `framework` | `str` |  |  |
+| `framework` | `Framework` |  |  |
 | `run_id` | `str` |  |  |
 | `checkpoint_dir` | `str` |  |  |
-| `base_model` | `str` |  |  |
-| `model_class` | `str` | `""` |  |
+| `model_config` | `'ModelConfig | None'` | `None` |  |
 | `checkpoints_volume_name` | `str` | `""` |  |
 | `checkpoints_mount_path` | `str` | `""` |  |
 | `iteration_prefix` | `str` | `""` |  |
@@ -75,7 +73,7 @@ Load a completed run's result from the shared store.
 
 ### `save(self) -> 'None'`
 
-Persist this result to the shared :class:`modal.Dict`.
+Persist this result. Currently saves to a Modal Dict but in the future, we will save to a database.
 
 ### `volume(self) -> "'Volume'"`
 
@@ -96,6 +94,5 @@ Return the W&B run URL, or None if W&B info is not set.
 ## Related Tutorials
 
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
-- [Qwen3-0.6B SFT on generated arithmetic problems](/tutorials/sft/000_sft_basics/)
 
 **Source:** [`modal_training_gym/common/train_result.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/train_result.py)

@@ -1,7 +1,7 @@
 ---
 title: Training Gym SDK
 description: Reusable building blocks and runnable examples for distributed training on Modal.
-editUrl: https://github.com/modal-projects/training-gym/edit/main/README.md
+editUrl: https://github.com/modal-projects/training-gym/edit/joy/add-good-eval-framework/README.md
 ---
 
 :::caution[Important]
@@ -58,8 +58,8 @@ vocabulary.
 
 | Framework | Good for | Tutorials |
 |---|---|---|
-| `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | [001 Intro](https://github.com/modal-projects/training-gym/tree/main/tutorials/rl/001_slime_intro), [002 Customizing](https://github.com/modal-projects/training-gym/tree/main/tutorials/rl/002_customizing_your_slime_run), [003 LLM Judge](https://github.com/modal-projects/training-gym/tree/main/tutorials/rl/003_slime_with_llm_as_judge) |
-| `ms_swift` | ms-swift Megatron SFT (single- and multi-node) | [001 ms-swift](https://github.com/modal-projects/training-gym/tree/main/tutorials/sft/001_ms_swift) |
+| `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | [001 Intro](https://github.com/modal-projects/training-gym/tree/joy/add-good-eval-framework/tutorials/rl/001_slime_intro), [002 Customizing](https://github.com/modal-projects/training-gym/tree/joy/add-good-eval-framework/tutorials/rl/002_customizing_your_slime_run), [003 LLM Judge](https://github.com/modal-projects/training-gym/tree/joy/add-good-eval-framework/tutorials/rl/003_slime_with_llm_as_judge) |
+| `ms_swift` | ms-swift Megatron SFT (single- and multi-node) | [001 ms-swift](https://github.com/modal-projects/training-gym/tree/joy/add-good-eval-framework/tutorials/sft/001_ms_swift) |
 
 "Thin" launchers give you a cluster and a `torchrun` — bring your own
 training script. "Opinionated" launchers wrap a specific upstream framework
@@ -105,7 +105,7 @@ frontend from a Modal web endpoint.
 
 ## License
 
-[MIT](https://github.com/modal-projects/training-gym/blob/main/LICENSE).
+[MIT](https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/LICENSE).
 
 ---
 
@@ -167,4 +167,4 @@ schema.
 
 ## Agent guide
 
-- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/main/skills/agent-modal-training.md)
+- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/skills/agent-modal-training.md)
