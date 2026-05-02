@@ -369,7 +369,7 @@ def build_slime_app(
         result = TrainResult(
             app_name=app_name,
             framework="slime",
-            run_id=run_id,
+            training_run_id=run_id,
             checkpoint_dir=checkpoint_dir,
             model_config=slime.model,
             checkpoints_volume_name=f"{app_name}-checkpoints",
@@ -377,7 +377,7 @@ def build_slime_app(
             iteration_prefix=slime.checkpoint.iteration_prefix,
             wandb_project=slime.wandb.project if slime.wandb else "",
             wandb_entity="",
-            wandb_run_id=wandb_run_id,
+            wandb_training_run_id=wandb_run_id,
         )
         result.save()
         checkpoints_volume.commit()
@@ -394,7 +394,7 @@ def build_slime_app(
         result = TrainResult(
             app_name=app_name,
             framework="slime",
-            run_id=run_id,
+            training_run_id=run_id,
             checkpoint_dir=save_root,
             model_config=slime.model,
             checkpoints_volume_name=f"{app_name}-checkpoints",
