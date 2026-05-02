@@ -303,7 +303,7 @@ def build_slime_app(
         )
 
         cluster = ModalRayCluster()
-        cluster.discover_cluster(slime.total_nodes())
+        cluster.discover_cluster(slime.total_nodes)
 
         # slime, sglang, and related processes expect these env vars on every
         # rank before the Ray daemon starts so it inherits them.
@@ -336,7 +336,7 @@ def build_slime_app(
 
         mode = "async" if slime.async_mode else "sync"
         print(
-            f"Training {app_name} — {slime.total_nodes()} node(s) × {gpu_spec}  ({mode})"
+            f"Training {app_name} — {slime.total_nodes} node(s) × {gpu_spec}  ({mode})"
         )
         print(f"Command: {cmd}, runtime_env: {runtime_env}")
 
