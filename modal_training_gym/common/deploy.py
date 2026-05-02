@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
     from modal_training_gym.common import GPUType
 
+
 @dataclass
 class DeployConfig:
     """vLLM serving deployment configuration.
@@ -57,6 +58,7 @@ class ModelDeployment:
     def wait_until_ready(self) -> None:
         import time
         import requests
+
         while True:
             try:
                 requests.get(f"{self.url}/v1/models")
@@ -67,7 +69,12 @@ class ModelDeployment:
 
     def generate(self, prompt: str, **kwargs) -> str:
         import requests
+
         self.wait_until_ready()
-        body = {"model": self.served_model_name, "messages": [{"role": "user", "content": prompt}], **kwargs}
+        body = {
+            "model": self.served_model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            **kwargs,
+        }
         response = requests.post(f"{self.url}/v1/chat/completions", json=body)
         return response.json()["choices"][0]["message"]["content"]

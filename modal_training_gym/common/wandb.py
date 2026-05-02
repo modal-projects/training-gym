@@ -36,7 +36,9 @@ class WandbConfig:
     disable_random_suffix: bool = True
 
 
-def append_megatron_wandb_args(argv: list[str], wandb: "WandbConfig | None") -> list[str]:
+def append_megatron_wandb_args(
+    argv: list[str], wandb: "WandbConfig | None"
+) -> list[str]:
     """Append Megatron W&B CLI args for a configured run."""
     if wandb is None:
         return argv

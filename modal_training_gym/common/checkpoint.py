@@ -78,4 +78,3 @@ class CheckpointConfig:
                 f"with prefix {self.iteration_prefix!r}."
             )
         return ckpts[-1]
-

@@ -91,7 +91,9 @@ def _summarize_result(result_dict: dict) -> dict:
     wandb_url = None
     if wandb_training_run_id and wandb_project:
         entity = wandb_entity or "_"
-        wandb_url = f"https://wandb.ai/{entity}/{wandb_project}/runs/{wandb_training_run_id}"
+        wandb_url = (
+            f"https://wandb.ai/{entity}/{wandb_project}/runs/{wandb_training_run_id}"
+        )
 
     return {
         "training_run_id": result_dict.get("training_run_id", ""),
@@ -127,13 +129,17 @@ def _fetch_runs() -> list[dict]:
         config = run_dict.get("config", {})
         train_result = results_by_id.get(run_id)
 
-        runs.append({
-            "run_id": run_id,
-            "modal_app_id": run_dict.get("modal_app_id", ""),
-            "framework": framework or "(untagged)",
-            "config_summary": _extract_config_summary(config),
-            "train_result": _summarize_result(train_result) if train_result else None,
-        })
+        runs.append(
+            {
+                "run_id": run_id,
+                "modal_app_id": run_dict.get("modal_app_id", ""),
+                "framework": framework or "(untagged)",
+                "config_summary": _extract_config_summary(config),
+                "train_result": _summarize_result(train_result)
+                if train_result
+                else None,
+            }
+        )
 
     return runs
 
@@ -155,7 +161,9 @@ def fastapi_app():
     # ── W&B metrics endpoints ──────────────────────────────────────────────
 
     @web.get("/api/wandb/{training_run_id}/metrics")
-    async def api_wandb_metrics(training_run_id: str, keys: str = "", samples: int = 500):
+    async def api_wandb_metrics(
+        training_run_id: str, keys: str = "", samples: int = 500
+    ):
         from modal_training_gym.common.train_result import TrainResult
 
         try:

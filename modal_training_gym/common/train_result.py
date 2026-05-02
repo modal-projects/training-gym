@@ -59,7 +59,9 @@ def _store_name(app_name: str) -> str:
     """Canonical name for the shared :class:`modal.Dict` store."""
     return f"{app_name}-train-results"
 
+
 TRAIN_RESULTS_STORE_NAME = "train-results"
+
 
 @dataclass
 class TrainResult:
@@ -157,7 +159,6 @@ class TrainResult:
 
         store = Dict.from_name(TRAIN_RESULTS_STORE_NAME, create_if_missing=True)
         return cls(**store[training_run_id])
-
 
     # ── Volume lookup ────────────────────────────────────────────────────
 
@@ -290,9 +291,7 @@ class TrainResult:
         if not self.wandb_training_run_id or not self.wandb_project:
             return None
         entity = self.wandb_entity or "_"
-        return (
-            f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_training_run_id}"
-        )
+        return f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_training_run_id}"
 
     def wandb_metrics(
         self,

@@ -142,9 +142,7 @@ def build_vllm_serve_app(
         if model_path.startswith("/") and os.path.isdir(model_path):
             hf_config_path = os.path.join(model_path, "config.json")
             if not os.path.exists(hf_config_path):
-                print(
-                    "[training-gym] Converting checkpoint from mt to hf for serving."
-                )
+                print("[training-gym] Converting checkpoint from mt to hf for serving.")
 
         cmd = [
             "vllm",

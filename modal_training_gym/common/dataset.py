@@ -139,7 +139,6 @@ class HuggingFaceDataset(DatasetConfig):
             ds = self._format_for_training(ds)
         return ds.to_pandas()
 
-
     def prepare(self) -> None:
         import os
 

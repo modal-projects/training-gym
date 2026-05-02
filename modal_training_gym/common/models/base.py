@@ -237,7 +237,6 @@ class ModelTrainingConfig:
         return {f.name: getattr(self, f.name) for f in dc_fields(self)}
 
 
-
 class ModelConfig:
     """Base class for model identity and weight-download logic.
 
@@ -289,7 +288,6 @@ class ModelConfig:
         """Download or materialize weights into the model volume."""
         raise NotImplementedError(f"{type(self).__name__} has no download()")
 
-
     def serve(
         self,
         *,
@@ -321,12 +319,8 @@ class ModelConfig:
         )
         resolved_app_name = app_name or f"{default_slug}-serve"
         resolved_served_model_name = served_model_name or default_slug
-        resolved_checkpoints_volume = (
-            checkpoints_volume or None
-        )
-        resolved_mount_path = (
-            checkpoints_mount_path
-        )
+        resolved_checkpoints_volume = checkpoints_volume or None
+        resolved_mount_path = checkpoints_mount_path
         d = self.deploy
         build_kwargs: dict[str, Any] = dict(
             app_name=resolved_app_name,
@@ -365,7 +359,8 @@ class ModelConfig:
             app_name=resolved_app_name,
             served_model_name=resolved_served_model_name,
             url=url,
-            deploy=d or DeployConfig(
+            deploy=d
+            or DeployConfig(
                 environment_name=env_name,
                 deploy_strategy=strategy,
             ),
