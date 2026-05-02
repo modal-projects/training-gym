@@ -261,9 +261,10 @@ class ModelConfig:
         so users don't need to manually specify model-tuned flags.
         Default ``None``.
     deploy : DeployConfig | None
-        vLLM serving configuration (GPU, extra args, deploy strategy).
+        Serving configuration (GPU, backend, extra args, deploy strategy).
+        Set ``backend="sglang"`` to serve with SGLang instead of vLLM.
         When ``None``, ``serve()`` infers settings from the model's
-        training presets. Default ``None``.
+        training presets and defaults to vLLM. Default ``None``.
 
     Methods
     -------
@@ -271,7 +272,8 @@ class ModelConfig:
         Download or materialize weights into the model volume. Must be
         overridden by subclasses.
     serve()
-        Build + deploy a vLLM app and return the endpoint URL.
+        Build + deploy a serving app (vLLM or SGLang) and return the
+        endpoint URL.
     """
 
     model_name: str = ""
@@ -297,14 +299,13 @@ class ModelConfig:
         checkpoints_volume: str | None = None,
         checkpoints_mount_path: str | None = None,
     ) -> "ModelDeployment":
-        """Build + deploy a vLLM serving app and return endpoint metadata.
+        """Build + deploy a serving app and return endpoint metadata.
 
+        Dispatches to vLLM or SGLang based on ``deploy.backend``.
         Uses ``model_path`` when set (or ``checkpoint_path`` override),
         otherwise falls back to ``model_name`` (HF repo id).
         """
         import modal
-
-        from modal_training_gym.common.serve_vllm import build_vllm_serve_app
 
         model_path = checkpoint_path or self.model_path or self.model_name
         if not model_path:
@@ -322,6 +323,8 @@ class ModelConfig:
         resolved_checkpoints_volume = checkpoints_volume or None
         resolved_mount_path = checkpoints_mount_path
         d = self.deploy
+        backend = d.backend if d else "vllm"
+
         build_kwargs: dict[str, Any] = dict(
             app_name=resolved_app_name,
             model_path=model_path,
@@ -334,10 +337,22 @@ class ModelConfig:
             build_kwargs["gpu"] = d.gpu
         if d and d.n_gpu is not None:
             build_kwargs["n_gpu"] = d.n_gpu
-        if d and d.extra_vllm_args:
-            build_kwargs["extra_vllm_args"] = d.extra_vllm_args
 
-        app = build_vllm_serve_app(**build_kwargs)
+        if backend == "sglang":
+            from modal_training_gym.common.serve_sglang import build_sglang_serve_app
+
+            if d and d.extra_sglang_args:
+                build_kwargs["extra_sglang_args"] = d.extra_sglang_args
+            if d and d.sglang_image_tag:
+                build_kwargs["sglang_image_tag"] = d.sglang_image_tag
+            app = build_sglang_serve_app(**build_kwargs)
+        else:
+            from modal_training_gym.common.serve_vllm import build_vllm_serve_app
+
+            if d and d.extra_vllm_args:
+                build_kwargs["extra_vllm_args"] = d.extra_vllm_args
+            app = build_vllm_serve_app(**build_kwargs)
+
         env_name = d.environment_name if d else None
         strategy = d.deploy_strategy if d else "rolling"
         app.deploy(

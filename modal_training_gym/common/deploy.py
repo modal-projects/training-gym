@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from modal import App
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class DeployConfig:
-    """vLLM serving deployment configuration.
+    """Serving deployment configuration (vLLM or SGLang).
 
     Attach to a ``ModelConfig`` via ``deploy=DeployConfig(...)`` to
     control how ``serve()`` deploys the model. When ``None``, ``serve()``
@@ -19,23 +19,35 @@ class DeployConfig:
 
     ## Fields
 
+    backend : ``"vllm"`` | ``"sglang"``
+        Inference engine to use. Default ``"vllm"``.
     gpu : GPUType | None
         GPU type for the serving container. When ``None``, inferred
         from the model's training or framework presets. Default ``None``.
     n_gpu : int | None
-        Number of GPUs (tensor-parallel degree for vLLM). When ``None``,
+        Number of GPUs (tensor-parallel degree). When ``None``,
         inferred from the model's presets. Default ``None``.
-    extra_vllm_args : list[str]
-        Additional CLI args passed to ``vllm serve``. Default ``[]``.
+    extra_vllm_args : list[str] | None
+        Additional CLI args passed to ``vllm serve``. Only used when
+        ``backend="vllm"``. Default ``None``.
+    extra_sglang_args : list[str] | None
+        Additional CLI args passed to ``sglang.launch_server``. Only
+        used when ``backend="sglang"``. Default ``None``.
+    sglang_image_tag : str | None
+        Docker image tag for SGLang. When ``None``, the default in
+        ``build_sglang_serve_app`` is used. Default ``None``.
     environment_name : str | None
         Modal environment to deploy into. Default ``None``.
     deploy_strategy : str
         Modal deployment strategy. Default ``"rolling"``.
     """
 
+    backend: Literal["vllm", "sglang"] = "vllm"
     gpu: "GPUType | None" = None
     n_gpu: int | None = None
     extra_vllm_args: list[str] | None = None
+    extra_sglang_args: list[str] | None = None
+    sglang_image_tag: str | None = None
     environment_name: str | None = None
     deploy_strategy: str = "rolling"
 
