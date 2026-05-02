@@ -5,7 +5,6 @@ It is used to track the training run and its results.
 
 from dataclasses import asdict, dataclass
 
-from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.frameworks.base import Framework
 from modal_training_gym.frameworks.slime.config import SlimeConfig
 
