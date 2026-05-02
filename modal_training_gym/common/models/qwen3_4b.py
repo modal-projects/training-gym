@@ -1,7 +1,6 @@
 """Qwen3-4B model spec as a concrete HFModelConfiguration subclass."""
 
 from .base import HFModelConfiguration, ModelArchitecture
-from modal_training_gym.frameworks.harbor.preset import HarborPreset
 from modal_training_gym.frameworks.slime.preset import SlimePreset
 
 
@@ -9,8 +8,7 @@ class Qwen3_4B(HFModelConfiguration):
     """Qwen3-4B (4 billion parameters) from Alibaba.
 
     Pre-configured with full ``ModelArchitecture`` for Megatron-based
-    frameworks (slime, ms-swift Megatron mode). Downloads from
-    ``Qwen/Qwen3-4B`` on HuggingFace.
+    frameworks (slime). Downloads from ``Qwen/Qwen3-4B`` on HuggingFace.
     """
 
     model_name = "Qwen/Qwen3-4B"
@@ -38,11 +36,4 @@ class Qwen3_4B(HFModelConfiguration):
         colocate=True,
         tensor_model_parallel_size=1,
         sequence_parallel=False,
-    )
-    harbor = HarborPreset(
-        gpu_type="H100",
-        n_nodes=2,
-        tensor_model_parallel_size=2,
-        sequence_parallel=True,
-        colocate=True,
     )

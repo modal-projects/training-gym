@@ -1,7 +1,8 @@
+from modal_training_gym.common.deploy import DeployConfig, ModelDeployment
 from .base import (
     HFModelConfiguration,
     ModelArchitecture,
-    ModelConfiguration,
+    ModelConfig,
     ModelTrainingConfig,
 )
 from .glm_4_7 import GLM_4_7
@@ -12,8 +13,10 @@ from .qwen3_4b import Qwen3_4B
 from .qwen3_32b import Qwen3_32B
 
 __all__ = [
+    "DeployConfig",
     "ModelArchitecture",
-    "ModelConfiguration",
+    "ModelConfig",
+    "ModelDeployment",
     "ModelTrainingConfig",
     "HFModelConfiguration",
     "Qwen3_0_6B",

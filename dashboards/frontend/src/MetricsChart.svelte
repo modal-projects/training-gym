@@ -1,15 +1,15 @@
 <script>
   import { fetchWandbMetrics } from "./lib/api.js";
 
-  let { appName, keys = "train/loss,train/reward" } = $props();
+  let { trainingRunId, keys = "train/loss,train/reward" } = $props();
   let metrics = $state(null);
   let error = $state(null);
   let loading = $state(true);
 
   $effect(() => {
-    if (!appName) return;
+    if (!trainingRunId) return;
     loading = true;
-    fetchWandbMetrics(appName, keys, 100)
+    fetchWandbMetrics(trainingRunId, keys, 100)
       .then((data) => {
         metrics = data;
         loading = false;
@@ -70,7 +70,7 @@
     {/each}
     {#if metrics.wandb_url}
       <a class="wandb-link" href={metrics.wandb_url} target="_blank" rel="noopener">
-        W&B ↗
+        W&B
       </a>
     {/if}
   </div>

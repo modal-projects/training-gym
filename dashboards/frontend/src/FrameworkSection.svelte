@@ -4,8 +4,8 @@
   let { framework, runs } = $props();
   let collapsed = $state(false);
 
-  let activeCount = $derived(
-    runs.filter((r) => r.state === "Running" || r.state === "Deployed").length,
+  let completedCount = $derived(
+    runs.filter((r) => r.train_result != null).length,
   );
 </script>
 
@@ -25,10 +25,11 @@
       >
     </div>
     <div class="framework-stats">
-      {#if activeCount > 0}
-        <span class="stat-running">{activeCount} active</span>
-      {:else}
-        <span class="stat-stopped">none active</span>
+      {#if completedCount > 0}
+        <span class="stat-completed">{completedCount} completed</span>
+      {/if}
+      {#if completedCount < runs.length}
+        <span class="stat-pending">{runs.length - completedCount} pending</span>
       {/if}
     </div>
   </header>
@@ -38,16 +39,16 @@
       <table>
         <thead>
           <tr>
-            <th>App ID</th>
-            <th>Name</th>
-            <th>State</th>
-            <th>Created</th>
-            <th>Duration</th>
-            <th>Tags</th>
+            <th>Run ID</th>
+            <th>Model</th>
+            <th>Cluster</th>
+            <th>Config</th>
+            <th>Result</th>
+            <th>Details</th>
           </tr>
         </thead>
         <tbody>
-          {#each runs as run (run.app_id)}
+          {#each runs as run (run.run_id)}
             <RunRow {run} />
           {/each}
         </tbody>
@@ -103,11 +104,11 @@
     gap: 0.75rem;
     font-size: 0.8em;
   }
-  .stat-running {
+  .stat-completed {
     color: var(--green);
   }
-  .stat-stopped {
-    color: var(--muted);
+  .stat-pending {
+    color: var(--yellow);
   }
   table {
     width: 100%;

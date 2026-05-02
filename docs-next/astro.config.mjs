@@ -87,7 +87,6 @@ export default defineConfig({
                 { label: '001 slime Intro', link: '/tutorials/rl/001_slime_intro/' },
                 { label: '002 Customizing slime', link: '/tutorials/rl/002_customizing_your_slime_run/' },
                 { label: '003 slime + LLM Judge', link: '/tutorials/rl/003_slime_with_llm_as_judge/' },
-                { label: '004 Harbor Code Golf', link: '/tutorials/rl/004_harbor_codegolf/' },
               ],
             },
             {
@@ -111,7 +110,7 @@ export default defineConfig({
             {
               label: 'Core',
               items: [
-                { label: 'ModelConfiguration', link: '/reference/core/modelconfiguration/' },
+                { label: 'ModelConfig', link: '/reference/core/modelconfiguration/' },
                 { label: 'HFModelConfiguration', link: '/reference/core/hfmodelconfiguration/' },
                 { label: 'ModelArchitecture', link: '/reference/core/modelarchitecture/' },
                 { label: 'DatasetConfig', link: '/reference/core/datasetconfig/' },
@@ -138,10 +137,6 @@ export default defineConfig({
                 { label: 'ModalConfig (slime)', link: '/reference/frameworks/modalconfig/' },
                 { label: 'MsSwiftFrameworkConfig', link: '/reference/frameworks/msswiftframeworkconfig/' },
                 { label: 'MsSwiftConfig', link: '/reference/frameworks/msswiftconfig/' },
-                { label: 'MilesFrameworkConfig', link: '/reference/frameworks/milesframeworkconfig/' },
-                { label: 'MilesConfig', link: '/reference/frameworks/milesconfig/' },
-                { label: 'HarborFrameworkConfig', link: '/reference/frameworks/harborframeworkconfig/' },
-                { label: 'HarborConfig', link: '/reference/frameworks/harborconfig/' },
               ],
             },
           ],

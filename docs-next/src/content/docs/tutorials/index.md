@@ -1,7 +1,7 @@
 ---
 title: Tutorials
 description: Runnable Modal training examples across intro, RL, SFT, and infrastructure-focused walkthroughs.
-editUrl: https://github.com/modal-projects/training-gym/edit/main/tutorials/README.md
+editUrl: https://github.com/modal-projects/training-gym/edit/joy/add-good-eval-framework/tutorials/README.md
 ---
 
 Every tutorial below has a one-click **Launch in Modal Notebook** button.
@@ -26,28 +26,14 @@ context) and assume familiarity with the underlying framework.
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`quickstart`](https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/quickstart/quickstart.ipynb) | Shared concepts: config containers, framework factories, volume layout, running the pipeline | Beginner | — (concepts) | — | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/quickstart/quickstart.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`001_quickstart`](https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/intro/001_quickstart/001_quickstart.ipynb) | Shared concepts: config containers, framework factories, volume layout, running the pipeline | Beginner | — (concepts) | — | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/intro/001_quickstart/001_quickstart.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`002_custom_model`](https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/intro/002_custom_model/002_custom_model.ipynb) | Custom HuggingFace model — inline `ModelConfig` subclass, serve and evaluate without training | Beginner | — (eval only) | — | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/intro/002_custom_model/002_custom_model.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### RL
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`slime_gsm8k`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_gsm8k/slime_gsm8k.ipynb) | Qwen3-4B GRPO on GSM8K (colocated) | Advanced | `slime` | 4 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_gsm8k/slime_gsm8k.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`slime_haiku`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_haiku/slime_haiku.ipynb) | Qwen3-0.6B GRPO on haiku poems — structure score + LLM judge | Intermediate | `slime` | 1 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_haiku/slime_haiku.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`harbor_code_golf`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/harbor_code_golf/harbor_code_golf.ipynb) | Qwen3-4B RL code-golf on MBPP with Harbor sandboxes | Advanced | `harbor` | 2 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/harbor_code_golf/harbor_code_golf.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-
-### SFT
-
-| Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
-|---|---|---|---|---|---|
-| [`ms_swift_glm_4_7_gsm8k`](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb) | GLM-4.7 LoRA SFT on GSM8K (Megatron) | Advanced | `ms_swift` | 4 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_glm_4_7_gsm8k/ms_swift_glm_4_7_gsm8k.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`ms_swift_custom_hf`](https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb) | Custom HuggingFace model (SmolLM2-135M) LoRA SFT — inline `ModelConfiguration` subclass, no catalog entry | Beginner | `ms_swift` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/sft/ms_swift_custom_hf/ms_swift_custom_hf.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-
-### Misc
-
-| Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
-|---|---|---|---|---|---|
-| [`ray_slime_standalone`](https://github.com/modal-projects/training-gym/blob/main/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb) | Ray-on-Modal pattern demo | Intermediate | — (raw `ModalRayCluster`) | 2 × 8×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/misc/ray_slime_standalone/ray_slime_standalone.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
 ## Running from the CLI instead
@@ -58,7 +44,7 @@ the top-level [`README.md`](/) for the usage pattern.
 ## Authoring a new tutorial
 
 Tutorials are generated from a Python source file under
-[`tutorial_generator/`](https://github.com/modal-projects/training-gym/tree/main/tutorials/tutorial_generator). The generator AST-walks each
+[`tutorial_generator/`](https://github.com/modal-projects/training-gym/tree/joy/add-good-eval-framework/tutorials/tutorial_generator). The generator AST-walks each
 source and emits `tutorials/<bucket>/<name>/<name>.py` + `tutorials/<bucket>/<name>/<name>.ipynb`.
 **Edit the source, not the generated files** — the pre-commit hook
 (`.pre-commit-config.yaml`) regenerates on commit, so hand-edits to the
@@ -112,8 +98,8 @@ are maps, the `.ipynb` is the walkthrough. Aim for roughly:
 - A "Run it" section splitting CLI invocation (`@py_only`) from
   cell-by-cell interactive invocation (`@notebook_only`).
 - Optional: a "Serve / evaluate / next step" tail, where relevant — see
-  [`slime_haiku`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_haiku/slime_haiku.ipynb) for the shape.
+  [`slime_haiku`](https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/rl/slime_haiku/slime_haiku.ipynb) for the shape.
 
-[`slime_gsm8k`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_gsm8k/slime_gsm8k.ipynb) and
-[`slime_haiku`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/slime_haiku/slime_haiku.ipynb) are the reference examples
+[`slime_gsm8k`](https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/rl/slime_gsm8k/slime_gsm8k.ipynb) and
+[`slime_haiku`](https://github.com/modal-projects/training-gym/blob/joy/add-good-eval-framework/tutorials/rl/slime_haiku/slime_haiku.ipynb) are the reference examples
 for tutorial narration depth.

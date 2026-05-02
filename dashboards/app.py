@@ -1,16 +1,14 @@
 """Modal-hosted Svelte + FastAPI dashboard for training-gym runs.
 
-Shows all training runs (``_modal_job_type=training``), grouped into
-collapsible sections by ``_modal_framework``.  Framework pills in the
-toolbar let users toggle which sections are visible.
+Shows all training runs from the ``TrainingRun`` store, grouped into
+collapsible sections by framework. For each run, checks whether a
+``TrainResult`` exists and displays it inline when available.
 
 Architecture:
     The Svelte frontend is built at image-build time via ``npm install &&
-    npm run build`` and served as static files by FastAPI.  A cron job
-    (``refresh_training_metadata``) runs every 5 minutes, fetches all
-    Modal apps, checks their tags, and writes training run metadata into a
-    ``modal.Dict``.  The ASGI dashboard reads from the Dict for instant
-    page loads.
+    npm run build`` and served as static files by FastAPI.  The ASGI
+    endpoint reads directly from the ``TrainingRun`` and ``TrainResult``
+    modal.Dict stores on each request — no cron intermediary needed.
 
 Deploy with:
 
@@ -21,7 +19,7 @@ Modal will print the public URL; open it in a browser.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from pathlib import Path
 
 import modal
@@ -53,280 +51,168 @@ image = (
     .add_local_python_source("modal_training_gym", copy=True)
 )
 
-OBS_VOLUME_NAME = "training-gym-harbor-observability"
-obs_volume = modal.Volume.from_name(OBS_VOLUME_NAME, create_if_missing=True)
-OBS_DIR = "/obs"
-
 app = modal.App(
     "training-gym-dashboard",
     image=image,
 )
 
-training_runs_dict = modal.Dict.from_name("training-gym-runs", create_if_missing=True)
-
-RUNS_KEY = "runs"
 STATIC_DIR = "/app/frontend/dist"
 
 
-@dataclass
-class TrainingMetadata:
-    framework: str = "(untagged)"
+def _safe_str(v) -> str:
+    if hasattr(v, "value"):
+        return v.value
+    return str(v) if v is not None else ""
 
 
-@dataclass
-class TrainingRun:
-    app_id: str
-    name: str
-    description: str
-    state: str
-    created_at: float
-    stopped_at: float | None
-    metadata: TrainingMetadata
-    tags: dict[str, str] = field(default_factory=dict)
+def _extract_config_summary(config: dict) -> dict:
+    if not config or not isinstance(config, dict):
+        return {}
+    model = config.get("model") or {}
+    preset = config.get("preset") or {}
+    wandb = config.get("wandb") or {}
+    return {
+        "model_name": _safe_str(model.get("model_name", "")),
+        "gpu_type": _safe_str(preset.get("gpu_type", "")),
+        "actor_num_nodes": preset.get("actor_num_nodes", 0),
+        "actor_num_gpus_per_node": preset.get("actor_num_gpus_per_node", 0),
+        "lr": config.get("lr", 0),
+        "global_batch_size": config.get("global_batch_size", 0),
+        "wandb_project": wandb.get("project", ""),
+        "wandb_group": wandb.get("group", ""),
+    }
 
 
-_FETCH_SCRIPT = r"""
-import asyncio, json, sys
+def _summarize_result(result_dict: dict) -> dict:
+    wandb_training_run_id = result_dict.get("wandb_training_run_id", "")
+    wandb_project = result_dict.get("wandb_project", "")
+    wandb_entity = result_dict.get("wandb_entity", "")
 
-async def _fetch():
-    from modal.client import _Client
-    from modal_proto import api_pb2
+    wandb_url = None
+    if wandb_training_run_id and wandb_project:
+        entity = wandb_entity or "_"
+        wandb_url = (
+            f"https://wandb.ai/{entity}/{wandb_project}/runs/{wandb_training_run_id}"
+        )
 
-    result = __import__("subprocess").run(
-        ["modal", "app", "list", "--json"],
-        capture_output=True, text=True,
-    )
-    app_list = json.loads(result.stdout)
-    client = await _Client.from_env()
-
-    runs = []
-    for info in app_list:
-        app_id = info["App ID"]
-        try:
-            resp = await client.stub.AppGetTags(
-                api_pb2.AppGetTagsRequest(app_id=app_id)
-            )
-            tags = dict(resp.tags)
-        except Exception:
-            continue
-        if tags.get("_modal_job_type") != "training":
-            continue
-        runs.append({
-            "app_id": app_id,
-            "name": info["Description"],
-            "state": info.get("State", "unknown"),
-            "created_at": info.get("Created at", ""),
-            "stopped_at": info.get("Stopped at"),
-            "framework": tags.get("_modal_framework", "(untagged)"),
-            "tags": tags,
-        })
-    json.dump(runs, sys.stdout)
-
-asyncio.run(_fetch())
-"""
+    return {
+        "training_run_id": result_dict.get("training_run_id", ""),
+        "app_name": result_dict.get("app_name", ""),
+        "checkpoint_dir": result_dict.get("checkpoint_dir", ""),
+        "wandb_url": wandb_url,
+        "wandb_project": wandb_project,
+        "wandb_entity": wandb_entity,
+        "wandb_training_run_id": wandb_training_run_id,
+    }
 
 
-@app.function(
-    schedule=modal.Period(minutes=5),
-    timeout=120,
-)
-def refresh_training_metadata():
-    """Cron job: runs a subprocess to list apps and fetch tags (avoids
-    the container's gRPC event-loop mismatch), then writes to the Dict."""
-    import json
-    import subprocess
-    from datetime import datetime, timezone
+def _fetch_runs() -> list[dict]:
+    """Read TrainingRun and TrainResult stores, join by run ID."""
+    from modal import Dict
 
-    result = subprocess.run(
-        ["python", "-c", _FETCH_SCRIPT],
-        capture_output=True,
-        text=True,
-        timeout=90,
-    )
-    if result.returncode != 0:
-        print(f"Fetch script failed: {result.stderr}")
-        return
+    from modal_training_gym.common.run import TRAINING_RUNS_STORE_NAME
+    from modal_training_gym.common.train_result import TRAIN_RESULTS_STORE_NAME
 
-    raw_runs = json.loads(result.stdout)
+    runs_store = Dict.from_name(TRAINING_RUNS_STORE_NAME, create_if_missing=True)
+    results_store = Dict.from_name(TRAIN_RESULTS_STORE_NAME, create_if_missing=True)
 
-    def _parse_ts(s):
-        if not s:
-            return 0.0
-        try:
-            dt = datetime.fromisoformat(s)
-            return dt.replace(tzinfo=dt.tzinfo or timezone.utc).timestamp()
-        except (ValueError, TypeError):
-            return 0.0
+    results_by_id: dict[str, dict] = {}
+    for result_dict in results_store.values():
+        rid = result_dict.get("training_run_id")
+        if rid:
+            results_by_id[rid] = result_dict
 
     runs: list[dict] = []
-    for r in raw_runs:
-        meta = TrainingMetadata(framework=r["framework"])
-        run = TrainingRun(
-            app_id=r["app_id"],
-            name=r["name"],
-            description=r["name"],
-            state=r["state"].title(),
-            created_at=_parse_ts(r["created_at"]),
-            stopped_at=_parse_ts(r["stopped_at"]) if r["stopped_at"] else None,
-            metadata=meta,
-            tags=r["tags"],
+    for run_dict in runs_store.values():
+        run_id = run_dict.get("run_id", "")
+        framework = _safe_str(run_dict.get("framework", ""))
+        config = run_dict.get("config", {})
+        train_result = results_by_id.get(run_id)
+
+        runs.append(
+            {
+                "run_id": run_id,
+                "modal_app_id": run_dict.get("modal_app_id", ""),
+                "framework": framework or "(untagged)",
+                "config_summary": _extract_config_summary(config),
+                "train_result": _summarize_result(train_result)
+                if train_result
+                else None,
+            }
         )
-        runs.append(asdict(run))
 
-    runs.sort(key=lambda r: r["created_at"], reverse=True)
-    training_runs_dict[RUNS_KEY] = runs
-    print(f"Refreshed: {len(runs)} training run(s)")
+    return runs
 
 
-@app.function(
-    volumes={OBS_DIR: obs_volume},
-)
+@app.function()
 @modal.asgi_app()
 def fastapi_app():
-    import asyncio
-    import time
-    from pathlib import Path
-
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import FileResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
 
-    from modal_training_gym.frameworks.harbor.observability import (
-        list_rollout_ids,
-        list_run_manifests,
-        load_rollout,
-        summarize_run,
-    )
-
     web = FastAPI()
-    obs_path = Path(OBS_DIR)
-
-    _RELOAD_INTERVAL = 5
-    _last_reload = 0.0
-    _reload_lock = asyncio.Lock()
-
-    async def _maybe_reload():
-        nonlocal _last_reload
-        now = time.monotonic()
-        if now - _last_reload < _RELOAD_INTERVAL:
-            return
-        async with _reload_lock:
-            if time.monotonic() - _last_reload < _RELOAD_INTERVAL:
-                return
-            await obs_volume.reload.aio()
-            _last_reload = time.monotonic()
 
     @web.get("/api/runs")
     async def api_runs() -> JSONResponse:
-        try:
-            runs = await training_runs_dict.get.aio(RUNS_KEY)
-        except KeyError:
-            runs = []
-        if runs is None:
-            runs = []
-
-        for run in runs:
-            wandb_project = run.get("tags", {}).get("_modal_wandb_project", "")
-            wandb_group = run.get("tags", {}).get("_modal_wandb_group", "")
-            if wandb_project:
-                url = f"https://wandb.ai/modal-labs/{wandb_project}"
-                if wandb_group:
-                    url += f"?groupName={wandb_group}"
-                run["wandb_url"] = url
-
+        runs = _fetch_runs()
         return JSONResponse({"runs": runs})
-
-    @web.get("/api/harbor/runs")
-    async def api_harbor_runs():
-        await _maybe_reload()
-        return list_run_manifests(obs_path)
-
-    @web.get("/api/harbor/runs/{run_id}")
-    async def api_harbor_run(run_id: str):
-        await _maybe_reload()
-        try:
-            return summarize_run(obs_path, run_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    @web.get("/api/harbor/runs/{run_id}/rollouts")
-    async def api_harbor_rollouts(run_id: str):
-        await _maybe_reload()
-        return list_rollout_ids(obs_path, run_id)
-
-    @web.get("/api/harbor/runs/{run_id}/rollouts/{rollout_id}")
-    async def api_harbor_rollout(run_id: str, rollout_id: str):
-        await _maybe_reload()
-        try:
-            return load_rollout(obs_path, run_id, rollout_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     # ── W&B metrics endpoints ──────────────────────────────────────────────
 
-    @web.get("/api/wandb/{app_name}/metrics")
-    async def api_wandb_metrics(app_name: str, keys: str = "", samples: int = 500):
-        """Fetch W&B training metrics for a TrainResult by app name."""
+    @web.get("/api/wandb/{training_run_id}/metrics")
+    async def api_wandb_metrics(
+        training_run_id: str, keys: str = "", samples: int = 500
+    ):
         from modal_training_gym.common.train_result import TrainResult
 
         try:
-            result = TrainResult.load(app_name)
-        except LookupError as exc:
+            result = TrainResult.load(training_run_id)
+        except (LookupError, KeyError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if not result.wandb_run_id:
+        if not result.wandb_training_run_id:
             raise HTTPException(status_code=404, detail="No W&B run linked")
 
         key_list = [k.strip() for k in keys.split(",") if k.strip()] or None
         metrics = result.wandb_metrics(keys=key_list, samples=samples)
         return JSONResponse(
             {
-                "app_name": app_name,
+                "training_run_id": training_run_id,
                 "wandb_url": result.wandb_url(),
-                "run_id": result.run_id,
-                "wandb_run_id": result.wandb_run_id,
+                "wandb_training_run_id": result.wandb_training_run_id,
                 "metrics": metrics,
             }
         )
 
-    @web.get("/api/wandb/{app_name}/summary")
-    async def api_wandb_summary(app_name: str):
-        """Fetch W&B run summary (final metric values) for a TrainResult."""
+    @web.get("/api/wandb/{training_run_id}/summary")
+    async def api_wandb_summary(training_run_id: str):
         from modal_training_gym.common.train_result import TrainResult
 
         try:
-            result = TrainResult.load(app_name)
-        except LookupError as exc:
+            result = TrainResult.load(training_run_id)
+        except (LookupError, KeyError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if not result.wandb_run_id:
+        if not result.wandb_training_run_id:
             raise HTTPException(status_code=404, detail="No W&B run linked")
 
         summary = result.wandb_summary()
         return JSONResponse(
             {
-                "app_name": app_name,
+                "training_run_id": training_run_id,
                 "wandb_url": result.wandb_url(),
                 "summary": summary,
             }
         )
 
-    @web.get("/api/train-results/{app_name}")
-    async def api_train_result(app_name: str, run_id: str | None = None):
-        """Fetch a TrainResult by app name."""
+    @web.get("/api/train-results/{training_run_id}")
+    async def api_train_result(training_run_id: str):
         from modal_training_gym.common.train_result import TrainResult
 
         try:
-            result = TrainResult.load(app_name, run_id=run_id)
-        except LookupError as exc:
+            result = TrainResult.load(training_run_id)
+        except (LookupError, KeyError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return JSONResponse(asdict(result))
-
-    @web.get("/api/train-results/{app_name}/runs")
-    async def api_train_result_runs(app_name: str):
-        """List all run IDs for an app."""
-        from modal_training_gym.common.train_result import TrainResult
-
-        runs = TrainResult.list_runs(app_name)
-        return JSONResponse({"app_name": app_name, "runs": runs})
 
     web.mount("/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets")
 

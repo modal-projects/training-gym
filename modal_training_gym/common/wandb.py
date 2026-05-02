@@ -1,21 +1,17 @@
 """Weights & Biases run metadata.
 
 Pure data — each framework config writes its own converter from this to its
-specific CLI flags (e.g. SlimeConfig emits `--wandb-project`, ms-swift emits
-`--wandb_project` + `--wandb_exp_name`).
+specific CLI flags (e.g. SlimeConfig emits `--wandb-project`).
 """
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
 
 
+@dataclass
 class WandbConfig:
-    """Weights & Biases logging configuration shared across all frameworks.
-
-    Each framework config converts these fields into its own CLI flags
-    (e.g. SlimeConfig emits ``--wandb-project``, ms-swift emits
-    ``--wandb_project`` + ``--wandb_exp_name``).
+    """Weights & Biases logging configuration shared across all frameworks..
 
     ## Fields
 
@@ -39,13 +35,11 @@ class WandbConfig:
     key: str = ""
     disable_random_suffix: bool = True
 
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
 
-
-def append_miles_wandb_args(argv: list[str], wandb: "WandbConfig | None") -> list[str]:
-    """Append Miles/Harbor W&B CLI args for a configured run."""
+def append_megatron_wandb_args(
+    argv: list[str], wandb: "WandbConfig | None"
+) -> list[str]:
+    """Append Megatron W&B CLI args for a configured run."""
     if wandb is None:
         return argv
 

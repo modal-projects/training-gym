@@ -19,14 +19,12 @@ launchers from their own scripts or notebooks.
 modal_training_gym/         ← installable package
 ├── common/                 ← cross-framework pure data + helpers
 │   ├── dataset.py          ← DatasetConfig base (user subclasses)
-│   ├── models/             ← ModelConfiguration hierarchy (see below)
+│   ├── models/             ← ModelConfig hierarchy (see below)
 │   ├── wandb.py            ← WandbConfig
 │   ├── framework.py        ← resolve_caller_module, mount_tools_dir, TOOLS_*
-│   └── ray_cluster.py      ← ModalRayCluster helper (used by slime, miles)
+│   └── ray_cluster.py      ← ModalRayCluster helper (used by slime)
 ├── frameworks/             ← one subpackage per training framework
 │   ├── slime/              ← slime GRPO (Ray + Megatron + SGLang)
-│   ├── ms_swift/           ← ms-swift Megatron SFT
-│   ├── miles/              ← Miles RL (Ray + Megatron)
 └── tools/                  ← shared scripts mounted on every image at
                               /opt/training-gym/tools (see "Tools" below)
 
@@ -46,21 +44,21 @@ generated.** Edit `tutorials/tutorial_generator/<name>.py` and run
 
 ## Core abstractions
 
-### `ModelConfiguration` / `HFModelConfiguration`
+### `ModelConfig` / `HFModelConfiguration`
 
 Model identity + optional architecture + optional local path + a
-`download_model()` method. Found in `modal_training_gym/common/models/`.
+`download()` method. Found in `modal_training_gym/common/models/`.
 
 ```python
-class ModelConfiguration:                       # base; abstract download_model
+class ModelConfig:                       # base; abstract download
     model_name: str = ""
     model_path: str | None = None
     architecture: ModelArchitecture | None = None
     def __init__(self, **kwargs): ...
-    def download_model(self): raise NotImplementedError
+    def download(self): raise NotImplementedError
 
-class HFModelConfiguration(ModelConfiguration): # HF-hosted; snapshot_download
-    def download_model(self):
+class HFModelConfiguration(ModelConfig): # HF-hosted; snapshot_download
+    def download(self):
         snapshot_download(repo_id=self.model_name)
 ```
 
@@ -70,9 +68,9 @@ Built-in subclasses:
 |---|---|---|---|
 | `Qwen3_4B` | `Qwen/Qwen3-4B` | yes | slime-ready |
 | `Qwen3_32B` | `Qwen/Qwen3-32B` | no (stub) | architecture inferred from HF config in RL setups |
-| `GLM_4_7` | `zai-org/GLM-4.7` | no | ms-swift / Megatron derive arch |
+| `GLM_4_7` | `zai-org/GLM-4.7` | no | architecture inferred from HF config |
 | `Llama2_7B` | `meta-llama/Llama-2-7b-hf` | no | torchrun-based workflows |
-| `Kimi_K2_5` | `moonshotai/Kimi-K2.5` | no | **overrides `download_model`**: snapshot + INT4→BF16 conversion via `tools/convert_kimi_int4_to_bf16.py` |
+| `Kimi_K2_5` | `moonshotai/Kimi-K2.5` | no | **overrides `download`**: snapshot + INT4→BF16 conversion via `tools/convert_kimi_int4_to_bf16.py` |
 
 **Rule of thumb for slime**: slime emits architecture fields as CLI flags,
 so it requires `architecture` to be a populated `ModelArchitecture(...)`.
@@ -115,14 +113,14 @@ app = cfg.build_app()
 
 `<F>Config.build_app()` → `build_<f>_app(<f>=self)` → constructs a
 `modal.App` with Modal functions for each stage (typically
-`download_model`, `prepare_dataset`, `train` / `train_multi_node`, plus
+`download`, `prepare_dataset`, `train` / `train_multi_node`, plus
 framework-specific ones like `convert_hf_to_mcore`, `upload_reward`, etc).
 
 The launcher walks the call stack via
 `common.framework.resolve_caller_module()` to find the true user-tutorial
 module (skipping `modal_training_gym.*` frames) and registers that module
 for cloudpickle by-value inlining — this is how a user's inline
-`DatasetConfig` / `ModelConfiguration` subclasses survive serialization to
+`DatasetConfig` / `ModelConfig` subclasses survive serialization to
 the remote container.
 
 ## Framework catalog
@@ -130,8 +128,6 @@ the remote container.
 | Framework | Uses `config.model` CLI-wise | Needs `architecture` | Best for |
 |---|---|---|---|
 | `slime` | hf_checkpoint CLI flag **plus** architecture flags | **yes** | GRPO |
-| `ms_swift` | `--model <model_name>` | no | ms-swift Megatron SFT |
-| `miles` | `--hf-checkpoint` on the Miles argv | no | Miles RL |
 
 ## The `tools/` shared directory
 
@@ -139,7 +135,7 @@ Any cross-framework script lives at `modal_training_gym/tools/`. Every
 launcher mounts this directory at **`/opt/training-gym/tools`** on its
 remote image(s) via `common.framework.mount_tools_dir`, so scripts are at a
 predictable path regardless of which framework's container calls them.
-Framework-agnostic `ModelConfiguration.download_model` overrides (e.g.
+Framework-agnostic `ModelConfig.download` overrides (e.g.
 `Kimi_K2_5`) use this path.
 
 Current tools:
@@ -164,7 +160,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
        architecture = ModelArchitecture(
            num_layers=..., hidden_size=..., ...,
        )
-       # Optional: override download_model only if the default HF
+       # Optional: override download only if the default HF
        # snapshot_download isn't enough (e.g. Kimi_K2_5 needs a post-
        # conversion step).
    ```
@@ -185,11 +181,11 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
    assert m.model_name == "org/repo"
    ```
 
-### When to override `download_model`
+### When to override `download`
 
 - Just HF snapshot → inherit `HFModelConfiguration` (do nothing).
 - Extra post-processing (format conversion, weight repacking, tokenizer
-  tweaks) → override `download_model` in the subclass. Reference
+  tweaks) → override `download` in the subclass. Reference
   `tools/<script>.py` via the canonical `/opt/training-gym/tools` path.
   Do **not** put this logic in a framework launcher — it keeps Kimi-style
   quirks with the model spec, not the framework plumbing.
@@ -200,7 +196,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
 2. **Create the source** at
    `tutorials/tutorial_generator/<name>.py`. Structure (follow
-   `ms_swift_glm_4_7_gsm8k.py` or `ms_swift_custom_hf.py` as templates):
+   existing slime tutorials as templates):
 
    ```python
    from tutorial_generator import code, markdown, notebook_only, py_only, shell
@@ -259,7 +255,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
    @markdown
    def _run_cli():
        """```bash
-       uv run modal run tutorials/<name>/<name>.py::app.download_model
+       uv run modal run tutorials/<name>/<name>.py::app.download
        uv run modal run tutorials/<name>/<name>.py::app.prepare_dataset
        uv run modal run --detach tutorials/<name>/<name>.py::app.train
        ```"""
@@ -307,18 +303,18 @@ inline:
 ```python
 @code
 def _define_model():
-    class MyTinyModel(ModelConfiguration):
+    class MyTinyModel(ModelConfig):
         model_name = "HuggingFaceTB/SmolLM2-135M"
         # For slime, also set architecture = ModelArchitecture(...)
 
-        def download_model(self):
+        def download(self):
             from huggingface_hub import snapshot_download
             snapshot_download(repo_id=self.model_name)
 ```
 
-Better: inherit from `HFModelConfiguration` and skip the `download_model`
+Better: inherit from `HFModelConfiguration` and skip the `download`
 override (the one-line snapshot_download is the inherited default). See
-`tutorials/tutorial_generator/sft/ms_swift_custom_hf.py` for a full example.
+existing slime tutorials for full examples.
 
 ## Validation
 
@@ -347,7 +343,7 @@ test. Run with `uv run python tests/test_model_configuration.py`.
   3.11 (e.g. some ModelScope images), app build fails with `InvalidError`.
 - **Framework image switches**. To override a framework's default image,
   set `image=` on `<F>FrameworkConfig` in your tutorial. The launcher's
-  `pip_install` chain reinstalls the framework (e.g. ms-swift) fresh, so
+  `pip_install` chain reinstalls the framework fresh, so
   switching the base is usually enough. Check whether transitive deps
   (megatron-core, pillow, tokenizers for transformers) are in the new
   image; the ModelScope image shipped many, bare CUDA/NGC images don't.
@@ -361,7 +357,7 @@ test. Run with `uv run python tests/test_model_configuration.py`.
   Secrets in your environment.
 - **Do not edit generated tutorials**. The pre-commit hook rewrites them.
 - **Do not add framework-specific quirks to `<F>Config`** that only matter
-  for one model. Put those in the model's `download_model` override and
+  for one model. Put those in the model's `download` override and
   make the tool script live in `modal_training_gym/tools/`.
 
 ## Common file references

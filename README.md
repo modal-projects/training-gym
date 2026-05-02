@@ -8,8 +8,7 @@
 **[📖 Documentation](https://gym.modal.dev)** · **[Tutorials](https://gym.modal.dev/tutorials/)** · **[API Reference](https://gym.modal.dev/reference/)**
 
 Distributed training on [Modal](https://modal.com) without hand-rolling a
-launcher each time. Pick a training framework (slime,
-MS-SWIFT), plug in a model + dataset config, and
+launcher each time. Pick a training framework (slime), plug in a model + dataset config, and
 `modal run` it — training-gym handles the image, the
 cluster topology, the Ray/NCCL bring-up, volume mounts, and checkpointing.
 
@@ -31,11 +30,9 @@ Every generated tutorial notebook has this line as its first code cell.
 
 ## Quickstart
 
-Run a tutorial — Qwen3-4B GRPO on GSM8K using slime:
+Run a tutorial — Qwen3-0.6B GRPO on GSM8K using slime:
 
 ```bash
-uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.download_model
-uv run modal run tutorials/rl/001_slime_intro/001_slime_intro.py::app.prepare_dataset
 uv run modal run --detach tutorials/rl/001_slime_intro/001_slime_intro.py::app.train
 ```
 
@@ -45,9 +42,8 @@ cell-by-cell — each notebook is a self-contained walkthrough. See
 
 ## Pick your framework
 
-Each framework package exposes a config class (e.g. `SlimeConfig`,
-`MsSwiftConfig`) that returns a `modal.App` via `.build_app()` with
-`download_model`, `prepare_dataset`, and `train` functions. Shared
+Each framework package exposes a config class (e.g. `SlimeConfig`) that returns a `modal.App` via `.build_app()` with
+`download`, `prepare_dataset`, and `train` functions. Shared
 container objects (`DatasetConfig`, `Model`, `WandbConfig`) plug into
 the framework config; each framework translates them into its own CLI
 vocabulary.
@@ -55,8 +51,6 @@ vocabulary.
 | Framework | Good for | Tutorials |
 |---|---|---|
 | `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | [001 Intro](tutorials/rl/001_slime_intro/), [002 Customizing](tutorials/rl/002_customizing_your_slime_run/), [003 LLM Judge](tutorials/rl/003_slime_with_llm_as_judge/) |
-| `harbor` | Sandbox-based agent RL (extends Miles) | [004 Code Golf](tutorials/rl/004_harbor_codegolf/) |
-| `ms_swift` | ms-swift Megatron SFT (single- and multi-node) | [001 ms-swift](tutorials/sft/001_ms_swift/) |
 
 "Thin" launchers give you a cluster and a `torchrun` — bring your own
 training script. "Opinionated" launchers wrap a specific upstream framework
@@ -82,8 +76,8 @@ External resources:
 ## Observability Dashboard
 
 Training Gym ships an observability dashboard that shows all your
-training runs, their status, W&B metrics (inline sparklines), and
-Harbor agent trajectories — all in one place.
+training runs, their status, and W&B metrics (inline sparklines) —
+all in one place.
 
 Deploy your own instance:
 
@@ -96,7 +90,6 @@ Modal will print the dashboard URL. The dashboard:
 - **Auto-refreshes** every 5 minutes via a cron job that scans your Modal apps for training runs
 - **Links to W&B** — each run shows a direct link to its Weights & Biases project page
 - **Inline metrics** — expand any run to see training loss/reward sparklines pulled from W&B
-- **Harbor trajectories** — drill into individual agent rollouts for Harbor RL runs
 
 The dashboard matches the docs site color scheme and serves a Svelte
 frontend from a Modal web endpoint.

@@ -1,57 +1,62 @@
 <script>
-  import { fmtDate, fmtDuration, extraTags } from "./lib/format.js";
+  import { truncateId, fmtCluster, fmtLr } from "./lib/format.js";
   import MetricsChart from "./MetricsChart.svelte";
 
   let { run } = $props();
-  let extras = $derived(extraTags(run.tags));
-  let isHarbor = $derived(
-    run.tags?._modal_framework === "harbor" ||
-      run.metadata?.framework === "harbor",
-  );
   let showMetrics = $state(false);
+
+  let summary = $derived(run.config_summary || {});
+  let result = $derived(run.train_result);
+  let hasWandb = $derived(!!result?.wandb_url);
 </script>
 
 <tr>
-  <td class="app-id">{run.app_id}</td>
+  <td class="run-id" title={run.run_id}>{truncateId(run.run_id)}</td>
   <td>
-    <div class="run-name">{run.name || "—"}</div>
-    {#if run.description}
-      <div class="run-desc">{run.description}</div>
+    <div class="model-name">{summary.model_name || "—"}</div>
+    {#if run.modal_app_id}
+      <div class="app-id">{run.modal_app_id}</div>
+    {/if}
+  </td>
+  <td class="cluster">{fmtCluster(summary)}</td>
+  <td class="config-details">
+    {#if summary.lr}
+      <span class="config-tag">lr {fmtLr(summary.lr)}</span>
+    {/if}
+    {#if summary.global_batch_size}
+      <span class="config-tag">bs {summary.global_batch_size}</span>
+    {/if}
+    {#if summary.wandb_group}
+      <span class="config-tag">{summary.wandb_group}</span>
     {/if}
   </td>
   <td>
-    <span class="state-badge state-{run.state}">{run.state}</span>
+    {#if result}
+      <span class="result-badge result-completed">Completed</span>
+    {:else}
+      <span class="result-badge result-pending">Pending</span>
+    {/if}
   </td>
-  <td>{fmtDate(run.created_at)}</td>
-  <td class="duration">{fmtDuration(run.created_at, run.stopped_at)}</td>
   <td>
-    {#if run.wandb_url}
-      <a class="wandb-link" href={run.wandb_url} target="_blank" rel="noopener">W&B ↗</a>
-    {/if}
-    {#if isHarbor}
-      <a
-        class="traj-link"
-        href="#/harbor/{encodeURIComponent(run.name)}"
-      >
-        Trajectories
-      </a>
-    {/if}
-    {#if run.wandb_url}
-      <button class="metrics-toggle" onclick={() => showMetrics = !showMetrics}>
-        {showMetrics ? "▾ Hide" : "▸ Metrics"}
-      </button>
-    {/if}
-    {#if extras.length}
-      {#each extras as [key, value]}
-        <span class="tag"><strong>{key}</strong>={value}</span>
-      {/each}
+    {#if result}
+      {#if result.checkpoint_dir}
+        <span class="tag" title={result.checkpoint_dir}>
+          <strong>ckpt</strong>
+        </span>
+      {/if}
+      {#if hasWandb}
+        <a class="wandb-link" href={result.wandb_url} target="_blank" rel="noopener">W&B</a>
+        <button class="metrics-toggle" onclick={() => showMetrics = !showMetrics}>
+          {showMetrics ? "Hide" : "Metrics"}
+        </button>
+      {/if}
     {/if}
   </td>
 </tr>
-{#if showMetrics && run.name}
+{#if showMetrics && result?.training_run_id}
   <tr class="metrics-row">
     <td colspan="6">
-      <MetricsChart appName={run.name} />
+      <MetricsChart trainingRunId={result.training_run_id} />
     </td>
   </tr>
 {/if}
@@ -66,51 +71,53 @@
   tr:last-child td {
     border-bottom: none;
   }
-  .app-id {
+  .run-id {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.85em;
     color: var(--accent);
+    cursor: default;
   }
-  .run-name {
+  .model-name {
     font-weight: 500;
   }
-  .run-desc {
+  .app-id {
     color: var(--muted);
-    font-size: 0.9em;
-    margin-top: 0.15rem;
+    font-size: 0.8em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin-top: 0.1rem;
   }
-  .state-badge {
+  .cluster {
+    font-size: 0.9em;
+    white-space: nowrap;
+  }
+  .config-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  .config-tag {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    background: var(--surface);
+    border-radius: 4px;
+    font-size: 0.8em;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .result-badge {
     display: inline-block;
     padding: 0.15rem 0.5rem;
     border-radius: 9999px;
     font-size: 0.8em;
     font-weight: 500;
   }
-  :global(.state-Running),
-  :global(.state-Deployed) {
+  .result-completed {
     background: rgba(74, 222, 128, 0.12);
     color: var(--green);
   }
-  :global(.state-Stopped),
-  :global(.state-Stopping) {
-    background: rgba(156, 163, 175, 0.12);
-    color: var(--muted);
-  }
-  :global(.state-Ephemeral) {
+  .result-pending {
     background: rgba(251, 191, 36, 0.12);
     color: var(--yellow);
-  }
-  :global(.state-Initializing) {
-    background: rgba(125, 211, 252, 0.12);
-    color: var(--accent);
-  }
-  :global(.state-Errored) {
-    background: rgba(248, 113, 113, 0.12);
-    color: var(--red);
-  }
-  .duration {
-    color: var(--muted);
-    font-size: 0.85em;
   }
   .tag {
     display: inline-block;
@@ -120,25 +127,11 @@
     border-radius: 4px;
     font-size: 0.8em;
     color: var(--muted);
+    cursor: default;
   }
   .tag strong {
     color: var(--text);
     font-weight: 500;
-  }
-  .traj-link {
-    display: inline-block;
-    padding: 0.15rem 0.5rem;
-    margin-right: 0.4rem;
-    border-radius: 4px;
-    font-size: 0.8em;
-    font-weight: 500;
-    color: var(--accent);
-    background: var(--accent-dim);
-    text-decoration: none;
-    cursor: pointer;
-  }
-  .traj-link:hover {
-    background: rgba(125, 211, 252, 0.2);
   }
   .wandb-link {
     display: inline-block;

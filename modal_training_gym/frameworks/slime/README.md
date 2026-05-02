@@ -22,7 +22,7 @@ modal run slime/modal_train.py::list_configs
 Downloads the experiment's HF checkpoint to the `huggingface-cache` volume.
 
 ```bash
-EXPERIMENT_CONFIG=glm47_flash_dapo modal run slime/modal_train.py::download_model
+EXPERIMENT_CONFIG=glm47_flash_dapo modal run slime/modal_train.py::download
 ```
 
 ### 3. Prepare dataset (one-time)
@@ -120,7 +120,7 @@ If `prepare_data()` is not overridden, `prepare_dataset` will raise `NotImplemen
 `EXPERIMENT_CONFIG` is the config filename without `.py`:
 
 ```bash
-EXPERIMENT_CONFIG=my_experiment modal run slime/modal_train.py::download_model
+EXPERIMENT_CONFIG=my_experiment modal run slime/modal_train.py::download
 EXPERIMENT_CONFIG=my_experiment modal run slime/modal_train.py::prepare_dataset  # if prepare_data() defined
 EXPERIMENT_CONFIG=my_experiment modal run slime/modal_train.py::convert_checkpoint  # if megatron_to_hf_mode = "raw"
 EXPERIMENT_CONFIG=my_experiment modal run -d slime/modal_train.py::train
@@ -159,17 +159,3 @@ modal = ModalConfig(
     local_slime="/path/to/your/slime",
 )
 ```
-
-## Applying patches to the image
-
-To inject local patch files into the image (e.g. to patch SGLang), use `patch_files` and `image_run_commands`:
-
-```python
-modal = ModalConfig(
-    gpu="H200",
-    patch_files=["patches/sglang_fix.patch"],
-    image_run_commands=["cd /sgl-workspace/sglang && git apply /tmp/sglang_fix.patch"],
-)
-```
-
-Each file in `patch_files` is added to the image at `/tmp/<filename>`.

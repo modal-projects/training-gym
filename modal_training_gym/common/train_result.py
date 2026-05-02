@@ -2,7 +2,7 @@
 
 A :class:`TrainResult` is produced by ``train`` itself — one per call —
 and is also persisted to a shared :class:`modal.Dict` keyed by
-``run_id`` so that a *separate* evaluation script can look it up after
+``training_run_id`` so that a *separate* evaluation script can look it up after
 the fact without re-running training.
 
 Typical flow:
@@ -10,7 +10,7 @@ Typical flow:
 .. code-block:: python
 
     # training.py
-    app = MsSwiftConfig(...).build_app()
+    app = SlimeConfig(...).build_app()
 
     # Kick off training:
     #   modal run --detach training.py::app.train
@@ -22,12 +22,13 @@ Typical flow:
 
     result = TrainResult.load("my-app")                 # latest run
     # or
-    result = TrainResult.load("my-app", run_id="...")   # pinned
+    result = TrainResult.load("my-app", training_run_id="...")   # pinned
 
     print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
     print(result.latest_checkpoint_path())  # .../iter_0000050
 
-    serve_app = result.build_serve_app()    # vLLM app hosting the ckpt
+    deployment = result.model.serve()  # deploys vLLM app hosting the ckpt
+    print(deployment.url)
 
 Two design invariants:
 
@@ -36,10 +37,10 @@ Two design invariants:
    executed. The ``modal.App`` object is a deployment handle, not a run
    handle.
 2. Every call to ``train`` can produce a *different* result (different
-   ``run_id``, different ``checkpoint_dir``). We use a :class:`modal.Dict`
+   ``training_run_id``, different ``checkpoint_dir``). We use a :class:`modal.Dict`
    named ``{app_name}-train-results`` as the shared store so that eval
    scripts — which don't import the training closure and don't call
-   ``train()`` — can still retrieve results by ``run_id``.
+   ``train()`` — can still retrieve results by ``training_run_id``.
 """
 
 from __future__ import annotations
@@ -47,14 +48,19 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from modal_training_gym.frameworks.base import Framework
+
 if TYPE_CHECKING:
-    from modal import App, Volume
-    from modal_training_gym.common.models import ModelConfiguration
+    from modal import Volume
+    from modal_training_gym.common.models import ModelConfig
 
 
 def _store_name(app_name: str) -> str:
     """Canonical name for the shared :class:`modal.Dict` store."""
     return f"{app_name}-train-results"
+
+
+TRAIN_RESULTS_STORE_NAME = "train-results"
 
 
 @dataclass
@@ -73,22 +79,20 @@ class TrainResult:
         volume (``{app_name}-checkpoints``) and the shared results
         :class:`modal.Dict` (``{app_name}-train-results``).
     framework:
-        Training framework identifier (``"slime"``, ``"ms-swift"``,
-        ``"miles"``, ``"harbor"``). Eval scripts can switch on this to
-        apply framework-specific decoding of the checkpoint layout.
-    run_id:
+        Training framework identifier.
+    training_run_id:
         Unique identifier for *this* specific training call. Keys the
         record in the shared :class:`modal.Dict`; embedded in
         ``checkpoint_dir`` for frameworks that scope checkpoints by run.
     checkpoint_dir:
         Absolute in-container path to this run's checkpoint directory.
-        For ms-swift / miles / harbor this is a run-specific
-        subdirectory under the checkpoints mount; for slime (which
+        For slime (which
         writes a single flat ``iter_*`` tree at ``slime.save``) this is
         that save root.
-    base_model:
-        HuggingFace repo id of the base model — useful as a fallback
-        ``served_model_name`` and for tokenizer-only evals.
+    model_config:
+        The ``ModelConfig`` used for training. The :attr:`model` property
+        returns a copy with ``model_path`` pointing at the latest
+        checkpoint, ready to serve.
     checkpoints_volume_name:
         Name of the checkpoints :class:`modal.Volume`.
     checkpoints_mount_path:
@@ -108,23 +112,22 @@ class TrainResult:
     """
 
     app_name: str
-    framework: str
-    run_id: str
+    framework: Framework
+    training_run_id: str
     checkpoint_dir: str
-    base_model: str
-    model_class: str = ""
+    model_config: "ModelConfig | None" = None
     checkpoints_volume_name: str = ""
     checkpoints_mount_path: str = ""
     iteration_prefix: str = ""
     wandb_project: str = ""
     wandb_entity: str = ""
-    wandb_run_id: str = ""
+    wandb_training_run_id: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ── Persistence: shared modal.Dict ────────────────────────────────────
 
     def save(self) -> None:
-        """Persist this result to the shared :class:`modal.Dict`.
+        """Persist this result. Currently saves to a Modal Dict but in the future, we will save to a database.
 
         Called by each framework's ``train`` function at the end of a
         successful run (from rank 0 only — the others would race).
@@ -134,57 +137,28 @@ class TrainResult:
         """
         from modal import Dict
 
-        store = Dict.from_name(_store_name(self.app_name), create_if_missing=True)
-        store[self.run_id] = asdict(self)
+        store = Dict.from_name(TRAIN_RESULTS_STORE_NAME, create_if_missing=True)
+        store[self.training_run_id] = asdict(self)
 
     @classmethod
-    def load(cls, app_name: str, run_id: str | None = None) -> "TrainResult":
+    def load(cls, training_run_id: str) -> "TrainResult":
         """Load a completed run's result from the shared store.
 
         Parameters
         ----------
-        app_name:
-            Same ``app_name`` the training run used (i.e. the
-            ``modal.App`` name of the training app).
-        run_id:
-            Specific run to load. When ``None`` (default), returns the
-            lexicographically-largest ``run_id`` — since all launchers
-            embed a monotonic timestamp, that is the most recent run.
+        training_run_id:
+            Specific run to load.
 
         Raises
         ------
         LookupError
             No runs have been saved for this app yet, or the given
-            ``run_id`` isn't in the store.
+            ``training_run_id`` isn't in the store.
         """
         from modal import Dict
 
-        store = Dict.from_name(_store_name(app_name), create_if_missing=True)
-        if run_id is None:
-            keys = sorted(store.keys())
-            if not keys:
-                raise LookupError(
-                    f"No training results saved for app {app_name!r}. "
-                    f"Has `train` completed yet? "
-                    f"(Results are written to the modal.Dict "
-                    f"{_store_name(app_name)!r}.)"
-                )
-            run_id = keys[-1]
-        if run_id not in store:
-            raise LookupError(
-                f"run_id {run_id!r} not found in results for app {app_name!r}. "
-                f"Known runs: {sorted(store.keys())}"
-            )
-        return cls(**store[run_id])
-
-    @classmethod
-    def list_runs(cls, app_name: str) -> list[str]:
-        """Return all ``run_id``s saved for ``app_name``, sorted oldest
-        first (lexicographic ordering matches timestamp ordering)."""
-        from modal import Dict
-
-        store = Dict.from_name(_store_name(app_name), create_if_missing=True)
-        return sorted(store.keys())
+        store = Dict.from_name(TRAIN_RESULTS_STORE_NAME, create_if_missing=True)
+        return cls(**store[training_run_id])
 
     # ── Volume lookup ────────────────────────────────────────────────────
 
@@ -289,80 +263,35 @@ class TrainResult:
     # ── Output model ─────────────────────────────────────────────────────
 
     @property
-    def model(self) -> "ModelConfiguration":
-        """Return the original model class with ``model_path`` pointing at the checkpoint.
+    def model(self) -> "ModelConfig":
+        """Return the model config with ``model_path`` pointing at the latest checkpoint.
 
-        Reconstructs the same model class used for training (e.g.
-        ``Qwen3_4B``) so it retains architecture, presets, and
-        ``download_model()`` logic. Only ``model_path`` is overridden
-        to point at the trained checkpoint instead of the HF cache.
+        Returns a shallow copy of ``model_config`` so the stored
+        instance is not mutated. The copy has ``model_path``,
+        ``checkpoints_volume_name``, and ``checkpoints_mount_path``
+        set so that ``result.model.serve()`` works out of the box.
         """
-        import importlib
+        import copy
 
-        if self.model_class:
-            module_path, class_name = self.model_class.rsplit(".", 1)
-            mod = importlib.import_module(module_path)
-            cls = getattr(mod, class_name)
-            instance = cls()
-            instance.model_path = self.latest_checkpoint_path()
-            return instance
-
-        from modal_training_gym.common.models import ModelConfiguration
-
-        return ModelConfiguration(
-            model_name=self.base_model,
-            model_path=self.latest_checkpoint_path(),
-        )
-
-    # ── Serving ──────────────────────────────────────────────────────────
-
-    def build_serve_app(
-        self,
-        *,
-        served_model_name: str | None = None,
-        checkpoint_path: str | None = None,
-        **vllm_kwargs: Any,
-    ) -> "App":
-        """Build a vLLM serving app pointing at a trained checkpoint.
-
-        Thin wrapper over
-        :func:`modal_training_gym.common.serve_vllm.build_vllm_serve_app`.
-        The returned app's name embeds ``run_id`` so multiple trained
-        checkpoints can be served concurrently without name collision.
-
-        Parameters
-        ----------
-        served_model_name:
-            ``--served-model-name`` passed to vLLM. Defaults to
-            ``f"{app_name}-{run_id}"``.
-        checkpoint_path:
-            Absolute in-container checkpoint directory. Defaults to
-            :meth:`latest_checkpoint_path`.
-        **vllm_kwargs:
-            Forwarded to ``build_vllm_serve_app``.
-        """
-        from modal_training_gym.common.serve_vllm import build_vllm_serve_app
-
-        model_path = checkpoint_path or self.latest_checkpoint_path()
-        return build_vllm_serve_app(
-            app_name=f"{self.app_name}-{self.run_id}-serve",
-            model_path=model_path,
-            served_model_name=served_model_name or f"{self.app_name}-{self.run_id}",
-            checkpoints_volume=self.checkpoints_volume_name,
-            checkpoints_mount_path=self.checkpoints_mount_path,
-            **vllm_kwargs,
-        )
+        if self.model_config is None:
+            raise ValueError(
+                "No model_config on this TrainResult. "
+                "Was it saved by an older launcher?"
+            )
+        m = copy.copy(self.model_config)
+        m.model_path = self.latest_checkpoint_path()
+        m.checkpoints_volume_name = self.checkpoints_volume_name
+        m.checkpoints_mount_path = self.checkpoints_mount_path
+        return m
 
     # ── W&B integration ─────────────────────────────────────────────────
 
     def wandb_url(self) -> str | None:
         """Return the W&B run URL, or None if W&B info is not set."""
-        if not self.wandb_run_id or not self.wandb_project:
+        if not self.wandb_training_run_id or not self.wandb_project:
             return None
         entity = self.wandb_entity or "_"
-        return (
-            f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_run_id}"
-        )
+        return f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_training_run_id}"
 
     def wandb_metrics(
         self,
@@ -389,9 +318,9 @@ class TrainResult:
         api = wandb.Api()
         entity = self.wandb_entity or None
         path = (
-            f"{entity}/{self.wandb_project}/{self.wandb_run_id}"
+            f"{entity}/{self.wandb_project}/{self.wandb_training_run_id}"
             if entity
-            else f"{self.wandb_project}/{self.wandb_run_id}"
+            else f"{self.wandb_project}/{self.wandb_training_run_id}"
         )
         run = api.run(path)
 
@@ -409,9 +338,9 @@ class TrainResult:
         api = wandb.Api()
         entity = self.wandb_entity or None
         path = (
-            f"{entity}/{self.wandb_project}/{self.wandb_run_id}"
+            f"{entity}/{self.wandb_project}/{self.wandb_training_run_id}"
             if entity
-            else f"{self.wandb_project}/{self.wandb_run_id}"
+            else f"{self.wandb_project}/{self.wandb_training_run_id}"
         )
         run = api.run(path)
         return dict(run.summary)

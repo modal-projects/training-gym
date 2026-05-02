@@ -1,13 +1,13 @@
-"""Model configuration + `download_model()` hook, shared across training frameworks.
+"""Model configuration + `download()` hook, shared across training frameworks.
 
-A `ModelConfiguration` bundles identity (`model_name`), an optional local
+A `ModelConfig` bundles identity (`model_name`), an optional local
 `model_path`, an optional transformer `architecture`, and an optional
 `training` profile. Pure data — each framework config reads what it
 needs from an attached subclass.
 
 Subclass and set `model_name` / `model_path` / `architecture` / `training`
 as class attributes (or pass them as constructor kwargs), then override
-`download_model()` to materialize weights into the shared model volume.
+`download()` to materialize weights into the shared model volume.
 
 The built-in models (`Qwen3_0_6B`, `Qwen3_4B`, `Qwen3_32B`, `GLM_4_7`,
 `Llama2_7B`, `Kimi_K2_5`) are concrete subclasses in their own per-model
@@ -19,17 +19,17 @@ Example (mirrors the `DatasetConfig` pattern in
 
     from huggingface_hub import snapshot_download
     from modal_training_gym.common.models import (
-        ModelArchitecture, ModelConfiguration, ModelTrainingConfig,
+        ModelArchitecture, ModelConfig, ModelTrainingConfig,
     )
 
-    class SmolLM2_135M(ModelConfiguration):
+    class SmolLM2_135M(ModelConfig):
         model_name = "HuggingFaceTB/SmolLM2-135M"
         training = ModelTrainingConfig(
             gpu_type="H100",
             tensor_model_parallel_size=1,
         )
 
-        def download_model(self) -> None:
+        def download(self) -> None:
             snapshot_download(repo_id=self.model_name)
 """
 
@@ -37,6 +37,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields as dc_fields
 from typing import TYPE_CHECKING, Any
+
+from modal_training_gym.common.deploy import DeployConfig, ModelDeployment
 
 if TYPE_CHECKING:
     from modal_training_gym.common import GPUType
@@ -131,7 +133,7 @@ class ModelArchitecture:
             args += ["--make-vocab-size-divisible-by", "1"]
         if self.normalization:
             args += ["--normalization", self.normalization]
-        # Megatron/Miles defaults do not consistently match HF config defaults,
+        # Megatron defaults do not consistently match HF config defaults,
         # so emit the model's declared norm epsilon explicitly.
         if self.norm_epsilon:
             args += ["--norm-epsilon", str(self.norm_epsilon)]
@@ -235,12 +237,12 @@ class ModelTrainingConfig:
         return {f.name: getattr(self, f.name) for f in dc_fields(self)}
 
 
-class ModelConfiguration:
+class ModelConfig:
     """Base class for model identity and weight-download logic.
 
     Subclass and set ``model_name`` (and optionally ``model_path`` and
     ``architecture``) as class attributes, then override
-    ``download_model()`` to materialize weights into the shared model
+    ``download()`` to materialize weights into the shared model
     volume.
 
     Parameters (constructor kwargs or class attributes)
@@ -258,32 +260,117 @@ class ModelConfiguration:
         model on a specific GPU type. Frameworks pull defaults from here
         so users don't need to manually specify model-tuned flags.
         Default ``None``.
+    deploy : DeployConfig | None
+        vLLM serving configuration (GPU, extra args, deploy strategy).
+        When ``None``, ``serve()`` infers settings from the model's
+        training presets. Default ``None``.
 
     Methods
     -------
-    download_model()
+    download()
         Download or materialize weights into the model volume. Must be
         overridden by subclasses.
+    serve()
+        Build + deploy a vLLM app and return the endpoint URL.
     """
 
     model_name: str = ""
     model_path: str | None = None
     architecture: ModelArchitecture | None = None
     training: ModelTrainingConfig | None = None
+    deploy: DeployConfig | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-    def download_model(self) -> None:
+    def download(self) -> None:
         """Download or materialize weights into the model volume."""
-        raise NotImplementedError(f"{type(self).__name__} has no download_model()")
+        raise NotImplementedError(f"{type(self).__name__} has no download()")
+
+    def serve(
+        self,
+        *,
+        app_name: str | None = None,
+        served_model_name: str | None = None,
+        checkpoint_path: str | None = None,
+        checkpoints_volume: str | None = None,
+        checkpoints_mount_path: str | None = None,
+    ) -> "ModelDeployment":
+        """Build + deploy a vLLM serving app and return endpoint metadata.
+
+        Uses ``model_path`` when set (or ``checkpoint_path`` override),
+        otherwise falls back to ``model_name`` (HF repo id).
+        """
+        import modal
+
+        from modal_training_gym.common.serve_vllm import build_vllm_serve_app
+
+        model_path = checkpoint_path or self.model_path or self.model_name
+        if not model_path:
+            raise ValueError(
+                f"{type(self).__name__} has no model path to serve. "
+                "Set model_path, model_name, or pass checkpoint_path."
+            )
+
+        default_name_src = self.model_name or model_path
+        default_slug = (
+            default_name_src.rstrip("/").split("/")[-1].replace("_", "-").lower()
+        )
+        resolved_app_name = app_name or f"{default_slug}-serve"
+        resolved_served_model_name = served_model_name or default_slug
+        resolved_checkpoints_volume = checkpoints_volume or None
+        resolved_mount_path = checkpoints_mount_path
+        d = self.deploy
+        build_kwargs: dict[str, Any] = dict(
+            app_name=resolved_app_name,
+            model_path=model_path,
+            served_model_name=resolved_served_model_name,
+            checkpoints_volume=resolved_checkpoints_volume,
+        )
+        if resolved_mount_path is not None:
+            build_kwargs["checkpoints_mount_path"] = resolved_mount_path
+        if d and d.gpu:
+            build_kwargs["gpu"] = d.gpu
+        if d and d.n_gpu is not None:
+            build_kwargs["n_gpu"] = d.n_gpu
+        if d and d.extra_vllm_args:
+            build_kwargs["extra_vllm_args"] = d.extra_vllm_args
+
+        app = build_vllm_serve_app(**build_kwargs)
+        env_name = d.environment_name if d else None
+        strategy = d.deploy_strategy if d else "rolling"
+        app.deploy(
+            environment_name=env_name,
+            strategy=strategy,
+        )
+        serve_fn = modal.Function.from_name(
+            resolved_app_name,
+            "serve",
+            environment_name=env_name,
+        )
+        url = serve_fn.get_web_url()
+        if not url:
+            raise RuntimeError(
+                f"Deployed {resolved_app_name!r} but no web URL was returned for function 'serve'."
+            )
+        return ModelDeployment(
+            app=app,
+            app_name=resolved_app_name,
+            served_model_name=resolved_served_model_name,
+            url=url,
+            deploy=d
+            or DeployConfig(
+                environment_name=env_name,
+                deploy_strategy=strategy,
+            ),
+        )
 
 
-class HFModelConfiguration(ModelConfiguration):
-    """ModelConfiguration for models hosted on HuggingFace.
+class HFModelConfiguration(ModelConfig):
+    """ModelConfig for models hosted on HuggingFace.
 
-    Implements ``download_model()`` via ``huggingface_hub.snapshot_download``
+    Implements ``download()`` via ``huggingface_hub.snapshot_download``
     using ``self.model_name`` as the repo ID. Subclass this for any
     HF-hosted model — only set ``model_name`` (plus optionally
     ``architecture`` and ``model_path``); the download step needs no
@@ -294,12 +381,12 @@ class HFModelConfiguration(ModelConfiguration):
 
     Methods
     -------
-    download_model()
+    download()
         Downloads the full model snapshot from HuggingFace Hub into the
         local cache.
     """
 
-    def download_model(self) -> None:
+    def download(self) -> None:
         from huggingface_hub import snapshot_download
 
         kwargs: dict = {"repo_id": self.model_name}

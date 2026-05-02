@@ -4,13 +4,13 @@ Usage (from a tutorial file):
 
     from modal_training_gym.frameworks.slime import ModalConfig, SlimeConfig, build_slime_app
 
-    class _Slime(SlimeConfig):
-        hf_checkpoint = "Qwen/Qwen3-8B"
-        actor_num_nodes = 1
-        actor_num_gpus_per_node = 8
-        # ...
+    from modal_training_gym.frameworks.slime import SlimeConfig, SlimePreset
 
-    app = build_slime_app(modal=ModalConfig(gpu="H100"), slime=_Slime())
+    slime = SlimeConfig(
+        model=my_model,  # model with a SlimePreset attached
+        # ...
+    )
+    app = slime.build_app()
 
 Then: `uv run modal run <tutorial_file>.py::train`.
 """
@@ -61,7 +61,7 @@ def build_slime_app(
     gpu: str = "H100",
     name: str | None = None,
 ) -> App:
-    """Return a Modal App with `download_model`, `prepare_dataset`, `convert_checkpoint`, and `train` defined.
+    """Return a Modal App with `download`, `prepare_dataset`, `convert_checkpoint`, and `train` defined.
 
     The returned functions close over the passed-in configs, so a tutorial
     file holds its own Modal app whose shape is determined entirely by the
@@ -106,6 +106,27 @@ def build_slime_app(
             remote_path=caller_remote_path,
             copy=True,
         )
+    # If the user passed custom_rm_function, ship its source file into the
+    # image so slime can import it via the auto-derived custom_rm_path.
+    _rm_fn_shipped = False
+    if slime.custom_rm_function is not None:
+        import inspect as _inspect
+
+        fn = slime.custom_rm_function
+        fn_mod = getattr(fn, "__module__", None) or ""
+        # Functions inside modal_training_gym are already in the image.
+        if not fn_mod.startswith("modal_training_gym"):
+            fn_file = os.path.abspath(_inspect.getfile(fn))
+            # Don't duplicate if it's the caller script (already shipped above).
+            if fn_file != caller_script:
+                fn_module_name = os.path.splitext(os.path.basename(fn_file))[0]
+                image = image.add_local_file(
+                    fn_file,
+                    remote_path=f"/root/{fn_module_name}.py",
+                    copy=True,
+                )
+                _rm_fn_shipped = True
+
     # Ship any sibling helper modules the tutorial declared (e.g. a custom
     # reward function referenced via slime's `custom_rm_path`). Using
     # `add_local_python_source` means Python's normal import machinery
@@ -114,10 +135,6 @@ def build_slime_app(
     all_python_sources = slime.local_python_sources or modal.local_python_sources
     for mod_name in all_python_sources:
         image = image.add_local_python_source(mod_name, copy=True)
-    for patch in modal.patch_files:
-        image = image.add_local_file(
-            patch, f"/tmp/{os.path.basename(patch)}", copy=True
-        )
     if modal.local_slime:
         image = image.add_local_dir(
             modal.local_slime,
@@ -152,7 +169,8 @@ def build_slime_app(
         if slime.wandb.group:
             tags["_modal_wandb_group"] = slime.wandb.group
     app = App(app_name, tags=tags)
-    gpu_spec = f"{gpu}:{slime.actor_num_gpus_per_node}"
+    assert slime.preset is not None
+    gpu_spec = f"{gpu}:{slime.preset.actor_num_gpus_per_node}"
 
     @app.function(
         image=image,
@@ -163,14 +181,14 @@ def build_slime_app(
         timeout=2 * 60 * 60,
         secrets=[Secret.from_name("huggingface-secret")],
         serialized=True,
-        name="download_model",
+        name="download",
     )
-    def download_model():
-        """Download model weights via the attached ModelConfiguration's hook."""
+    def download():
+        """Download model weights via the attached ModelConfig's hook."""
         assert slime.model is not None, "slime.model must be set"
         hf_cache_volume.reload()
         checkpoints_volume.reload()
-        slime.model.download_model()
+        slime.model.download()
         hf_cache_volume.commit()
         checkpoints_volume.commit()
 
@@ -243,9 +261,8 @@ def build_slime_app(
         )
 
         cmd = (
-            f"source {SLIME_ROOT}/{slime.slime_model_script} && "
             f"torchrun {' '.join(torchrun_args)} {convert_script} "
-            f"${{MODEL_ARGS[@]}} {' '.join(extra_args)} "
+            f"{' '.join(extra_args)} "
             f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(save_path)}"
         )
 
@@ -276,7 +293,7 @@ def build_slime_app(
         serialized=True,
         name="train",
     )
-    @clustered(slime.total_nodes(), rdma=True)
+    @clustered(slime.total_nodes, rdma=True)
     async def train():
         """Launch the slime training run on a Ray cluster."""
         await asyncio.gather(
@@ -286,7 +303,7 @@ def build_slime_app(
         )
 
         cluster = ModalRayCluster()
-        cluster.discover_cluster(slime.total_nodes())
+        cluster.discover_cluster(slime.total_nodes)
 
         # slime, sglang, and related processes expect these env vars on every
         # rank before the Ray daemon starts so it inherits them.
@@ -319,7 +336,7 @@ def build_slime_app(
 
         mode = "async" if slime.async_mode else "sync"
         print(
-            f"Training {app_name} — {slime.total_nodes()} node(s) × {gpu_spec}  ({mode})"
+            f"Training {app_name} — {slime.total_nodes} node(s) × {gpu_spec}  ({mode})"
         )
         print(f"Command: {cmd}, runtime_env: {runtime_env}")
 
@@ -349,24 +366,18 @@ def build_slime_app(
             except Exception as e:
                 print(f"Could not fetch W&B run ID: {e}")
 
-        model_class = ""
-        if slime.model is not None:
-            cls = type(slime.model)
-            model_class = f"{cls.__module__}.{cls.__name__}"
-
         result = TrainResult(
             app_name=app_name,
             framework="slime",
-            run_id=run_id,
+            training_run_id=run_id,
             checkpoint_dir=checkpoint_dir,
-            base_model=slime.model.model_name if slime.model else "",
-            model_class=model_class,
+            model_config=slime.model,
             checkpoints_volume_name=f"{app_name}-checkpoints",
             checkpoints_mount_path=str(CHECKPOINTS_PATH),
-            iteration_prefix="iter_",
+            iteration_prefix=slime.checkpoint.iteration_prefix,
             wandb_project=slime.wandb.project if slime.wandb else "",
             wandb_entity="",
-            wandb_run_id=wandb_run_id,
+            wandb_training_run_id=wandb_run_id,
         )
         result.save()
         checkpoints_volume.commit()
@@ -383,19 +394,19 @@ def build_slime_app(
         result = TrainResult(
             app_name=app_name,
             framework="slime",
-            run_id=run_id,
+            training_run_id=run_id,
             checkpoint_dir=save_root,
-            base_model=slime.model.model_name if slime.model is not None else "",
+            model_config=slime.model,
             checkpoints_volume_name=f"{app_name}-checkpoints",
             checkpoints_mount_path=str(CHECKPOINTS_PATH).rstrip("/"),
-            iteration_prefix="iter_",
+            iteration_prefix=slime.checkpoint.iteration_prefix,
         )
         result.save()
         return asdict(result)
 
     # Expose registered functions as attributes so notebook callers can do
-    # `app.download_model.remote()` instead of
-    # `app.registered_functions["download_model"].remote()`.
+    # `app.download.remote()` instead of
+    # `app.registered_functions["download"].remote()`.
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
 
