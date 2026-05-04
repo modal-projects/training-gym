@@ -10,7 +10,7 @@ Typical flow:
 .. code-block:: python
 
     # training.py
-    app = SlimeConfig(...).build_app()
+    app = TrainConfig(...).build_app()
 
     # Kick off training:
     #   modal run --detach training.py::app.train
@@ -27,7 +27,8 @@ Typical flow:
     print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
     print(result.latest_checkpoint_path())  # .../iter_0000050
 
-    deployment = result.model.serve()  # deploys vLLM app hosting the ckpt
+    from modal_training_gym.common.deployment import DeploymentConfig
+    deployment = DeploymentConfig(model=result.model).serve()
     print(deployment.url)
 
 Two design invariants:
@@ -53,11 +54,6 @@ from modal_training_gym.frameworks.base import Framework
 if TYPE_CHECKING:
     from modal import Volume
     from modal_training_gym.common.models import ModelConfig
-
-
-def _store_name(app_name: str) -> str:
-    """Canonical name for the shared :class:`modal.Dict` store."""
-    return f"{app_name}-train-results"
 
 
 TRAIN_RESULTS_STORE_NAME = "train-results"
@@ -124,10 +120,10 @@ class TrainResult:
     wandb_training_run_id: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
-    # ── Persistence: shared modal.Dict ────────────────────────────────────
+    # ── Persistence ────────────────────────────────────────────────────────
 
     def save(self) -> None:
-        """Persist this result. Currently saves to a Modal Dict but in the future, we will save to a database.
+        """Persist this result to the central gym server.
 
         Called by each framework's ``train`` function at the end of a
         successful run (from rank 0 only — the others would race).
@@ -135,14 +131,13 @@ class TrainResult:
         trivially serializable and forward-compatible across launcher
         upgrades.
         """
-        from modal import Dict
+        from modal_training_gym.common.client import _post
 
-        store = Dict.from_name(TRAIN_RESULTS_STORE_NAME, create_if_missing=True)
-        store[self.training_run_id] = asdict(self)
+        _post("/train-result", asdict(self))
 
     @classmethod
     def load(cls, training_run_id: str) -> "TrainResult":
-        """Load a completed run's result from the shared store.
+        """Load a completed run's result from the central gym server.
 
         Parameters
         ----------
@@ -155,10 +150,15 @@ class TrainResult:
             No runs have been saved for this app yet, or the given
             ``training_run_id`` isn't in the store.
         """
-        from modal import Dict
+        from modal_training_gym.common.client import _get
 
-        store = Dict.from_name(TRAIN_RESULTS_STORE_NAME, create_if_missing=True)
-        return cls(**store[training_run_id])
+        return cls(**_get(f"/train-results/{training_run_id}"))
+
+    @classmethod
+    def list_results(cls) -> list["TrainResult"]:
+        from modal_training_gym.common.client import _get
+
+        return [cls(**r) for r in _get("/train-results")]
 
     # ── Volume lookup ────────────────────────────────────────────────────
 
@@ -269,7 +269,8 @@ class TrainResult:
         Returns a shallow copy of ``model_config`` so the stored
         instance is not mutated. The copy has ``model_path``,
         ``checkpoints_volume_name``, and ``checkpoints_mount_path``
-        set so that ``result.model.serve()`` works out of the box.
+        set so that ``DeploymentConfig(model=result.model).serve()``
+        works out of the box.
         """
         import copy
 

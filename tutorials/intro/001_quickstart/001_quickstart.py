@@ -98,14 +98,17 @@ print("project:", wandb.project)
 #
 # ```python
 # from modal_training_gym.common.models import Qwen3_0_6B
+# from modal_training_gym.common.train import TrainConfig
 # from modal_training_gym.common.wandb import WandbConfig
-# from modal_training_gym.frameworks.slime import SlimeConfig
+# from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 #
-# run = SlimeConfig(
+# run = TrainConfig(
 #     model=Qwen3_0_6B(),
 #     dataset=MyDataset(...),
-#     wandb=WandbConfig(project="my-runs", group="concepts-demo"),
-#     # … framework-specific flags …
+#     recipe=SlimeRecipe(
+#         wandb=WandbConfig(project="my-runs", group="concepts-demo"),
+#         # … framework-specific flags …
+#     ),
 # )
 #
 # app = run.build_app()   # modal.App — call app.train to run everything

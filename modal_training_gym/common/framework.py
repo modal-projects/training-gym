@@ -104,7 +104,7 @@ def resolve_caller_module(
 ) -> ModuleType | None:
     """Return the first stack frame's module whose name is outside this package.
 
-    Framework configs (e.g. `SlimeConfig.build_app`) delegate to launcher
+    Framework configs (e.g. `TrainConfig.build_app`) delegate to launcher
     factories (e.g. `build_slime_app`) on behalf of user tutorials, so the
     immediate caller of the factory is a framework module — not the tutorial.
     `cloudpickle.register_pickle_by_value(module)` needs the tutorial module

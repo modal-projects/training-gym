@@ -1,21 +1,50 @@
 <script>
   import { truncateId, fmtCluster, fmtLr } from "./lib/format.js";
-  import MetricsChart from "./MetricsChart.svelte";
 
   let { run } = $props();
-  let showMetrics = $state(false);
 
   let summary = $derived(run.config_summary || {});
   let result = $derived(run.train_result);
-  let hasWandb = $derived(!!result?.wandb_url);
+  let modalAppUrl = $derived(run.modal_app_url || null);
+
+  function openModalApp() {
+    if (!modalAppUrl) return;
+    window.open(modalAppUrl, "_blank", "noopener,noreferrer");
+  }
+
+  function onRowKeydown(event) {
+    if (!modalAppUrl) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openModalApp();
+    }
+  }
 </script>
 
-<tr>
+<tr
+  class:clickable={!!modalAppUrl}
+  onclick={openModalApp}
+  onkeydown={onRowKeydown}
+  role={modalAppUrl ? "link" : undefined}
+  tabindex={modalAppUrl ? "0" : undefined}
+  aria-label={modalAppUrl ? `Open Modal app for run ${run.run_id}` : undefined}
+>
   <td class="run-id" title={run.run_id}>{truncateId(run.run_id)}</td>
   <td>
     <div class="model-name">{summary.model_name || "—"}</div>
     {#if run.modal_app_id}
-      <div class="app-id">{run.modal_app_id}</div>
+      {#if modalAppUrl}
+        <a
+          class="app-id app-link"
+          href={modalAppUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onclick={(event) => event.stopPropagation()}
+          >{run.modal_app_id}</a
+        >
+      {:else}
+        <div class="app-id">{run.modal_app_id}</div>
+      {/if}
     {/if}
   </td>
   <td class="cluster">{fmtCluster(summary)}</td>
@@ -30,7 +59,7 @@
       <span class="config-tag">{summary.wandb_group}</span>
     {/if}
   </td>
-  <td>
+  <td class="status-cell">
     {#if result}
       <span class="result-badge result-completed">Completed</span>
     {:else}
@@ -44,51 +73,67 @@
           <strong>ckpt</strong>
         </span>
       {/if}
-      {#if hasWandb}
-        <a class="wandb-link" href={result.wandb_url} target="_blank" rel="noopener">W&B</a>
-        <button class="metrics-toggle" onclick={() => showMetrics = !showMetrics}>
-          {showMetrics ? "Hide" : "Metrics"}
-        </button>
+      {#if result.wandb_url}
+        <a
+          class="wandb-link"
+          href={result.wandb_url}
+          target="_blank"
+          rel="noopener"
+          onclick={(event) => event.stopPropagation()}>W&B</a
+        >
       {/if}
     {/if}
   </td>
 </tr>
-{#if showMetrics && result?.training_run_id}
-  <tr class="metrics-row">
-    <td colspan="6">
-      <MetricsChart trainingRunId={result.training_run_id} />
-    </td>
-  </tr>
-{/if}
 
 <style>
   td {
-    padding: 0.55rem 1rem;
+    padding: 0.5rem 0.8rem;
     text-align: left;
     border-bottom: 1px solid var(--border);
     vertical-align: top;
+    font-size: 0.79rem;
+  }
+  tr:hover td {
+    background: color-mix(in srgb, var(--text) 4%, transparent);
+  }
+  .clickable td {
+    cursor: pointer;
+  }
+  .clickable:focus-visible td {
+    outline: 1px solid var(--accent-border);
+    outline-offset: -1px;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
   tr:last-child td {
     border-bottom: none;
   }
   .run-id {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.85em;
-    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: color-mix(in srgb, var(--accent) 78%, white);
     cursor: default;
   }
   .model-name {
     font-weight: 500;
+    color: var(--text-bright);
   }
   .app-id {
-    color: var(--muted);
-    font-size: 0.8em;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--muted-strong);
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
     margin-top: 0.1rem;
   }
+  .app-link {
+    text-decoration: none;
+  }
+  .app-link:hover {
+    color: var(--accent);
+  }
   .cluster {
-    font-size: 0.9em;
+    font-size: 0.75rem;
     white-space: nowrap;
+    color: var(--text);
   }
   .config-details {
     display: flex;
@@ -97,73 +142,72 @@
   }
   .config-tag {
     display: inline-block;
-    padding: 0.1rem 0.4rem;
-    background: var(--surface);
-    border-radius: 4px;
-    font-size: 0.8em;
+    padding: 0.12rem 0.4rem;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    font-size: 0.67rem;
     color: var(--muted);
     white-space: nowrap;
   }
+  .status-cell {
+    white-space: nowrap;
+  }
   .result-badge {
-    display: inline-block;
-    padding: 0.15rem 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.12rem 0.55rem;
     border-radius: 9999px;
-    font-size: 0.8em;
+    font-size: 0.71rem;
     font-weight: 500;
+    border: 1px solid transparent;
+  }
+  .result-badge::before {
+    content: "";
+    width: 0.38rem;
+    height: 0.38rem;
+    border-radius: 9999px;
+    background: currentColor;
   }
   .result-completed {
-    background: rgba(74, 222, 128, 0.12);
+    border-color: var(--accent-border);
+    background: var(--accent-soft);
     color: var(--green);
   }
   .result-pending {
-    background: rgba(251, 191, 36, 0.12);
+    border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
+    background: color-mix(in srgb, var(--yellow) 10%, transparent);
     color: var(--yellow);
   }
   .tag {
     display: inline-block;
-    padding: 0.1rem 0.45rem;
-    margin: 0.1rem 0.2rem 0.1rem 0;
-    background: var(--surface);
-    border-radius: 4px;
-    font-size: 0.8em;
+    padding: 0.12rem 0.45rem;
+    margin: 0 0.2rem 0.15rem 0;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.68rem;
     color: var(--muted);
     cursor: default;
   }
   .tag strong {
-    color: var(--text);
+    color: var(--text-bright);
     font-weight: 500;
   }
   .wandb-link {
     display: inline-block;
-    padding: 0.15rem 0.5rem;
-    margin-right: 0.4rem;
-    border-radius: 4px;
-    font-size: 0.8em;
+    padding: 0.14rem 0.48rem;
+    margin-right: 0.3rem;
+    border-radius: 6px;
+    font-size: 0.68rem;
     font-weight: 500;
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.1);
+    color: var(--yellow);
+    border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
+    background: color-mix(in srgb, var(--yellow) 10%, transparent);
     text-decoration: none;
   }
   .wandb-link:hover {
-    background: rgba(251, 191, 36, 0.2);
-  }
-  .metrics-toggle {
-    display: inline-block;
-    padding: 0.15rem 0.5rem;
-    margin-right: 0.4rem;
-    border: none;
-    border-radius: 4px;
-    font-size: 0.8em;
-    font-weight: 500;
-    color: var(--accent);
-    background: var(--accent-dim);
-    cursor: pointer;
-  }
-  .metrics-toggle:hover {
-    background: rgba(125, 211, 252, 0.2);
-  }
-  .metrics-row td {
-    padding: 0.25rem 1rem 0.75rem;
-    background: var(--panel-alt);
+    background: color-mix(in srgb, var(--yellow) 18%, transparent);
   }
 </style>

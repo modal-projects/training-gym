@@ -84,7 +84,7 @@ def _explain_serve():
     """
     ## Serve the model
 
-    `ModelConfig.serve()` builds a vLLM app on Modal, deploys it,
+    `DeploymentConfig.serve()` builds a vLLM app on Modal, deploys it,
     and returns a `ModelDeployment` with the live endpoint URL.
     The model weights are downloaded automatically on first deploy.
     """
@@ -92,11 +92,14 @@ def _explain_serve():
 
 @code
 def _serve_model():
+    from modal_training_gym.common.deployment import DeploymentConfig
+
     model = SmolLM2_135M()
-    deployment = model.serve(
+    deployment = DeploymentConfig(
+        model=model,
         app_name="smollm2-135m-serve",
         served_model_name="smollm2-135m",
-    )
+    ).serve()
     print(deployment.url)
 
 
@@ -211,7 +214,7 @@ def _whats_next():
     ## What's next
 
     - **Train the model** — plug the same `SmolLM2_135M` into a
-      `SlimeConfig` (with a `ModelArchitecture`) to GRPO-train it,
+      `TrainConfig` with a `SlimeRecipe` (with a `ModelArchitecture`) to GRPO-train it,
       then re-run this eval to measure improvement. See
       [`000_rl_basics`](../../rl/000_rl_basics/000_rl_basics.ipynb).
     - **Custom reward** — swap `score_gsm8k` for any function that

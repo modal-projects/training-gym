@@ -14,7 +14,7 @@ TUTORIAL_METADATA = {
     'order': 0,
     'api_classes': [
         'ModelConfig', 'HFModelConfiguration', 'ModelArchitecture',
-        'Qwen3_0_6B', 'DatasetConfig', 'WandbConfig', 'SlimeConfig',
+        'Qwen3_0_6B', 'DatasetConfig', 'WandbConfig', 'TrainConfig', 'SlimeRecipe',
     ],
 }
 
@@ -162,14 +162,17 @@ def _factory_section():
 
     ```python
     from modal_training_gym.common.models import Qwen3_0_6B
+    from modal_training_gym.common.train import TrainConfig
     from modal_training_gym.common.wandb import WandbConfig
-    from modal_training_gym.frameworks.slime import SlimeConfig
+    from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 
-    run = SlimeConfig(
+    run = TrainConfig(
         model=Qwen3_0_6B(),
         dataset=MyDataset(...),
-        wandb=WandbConfig(project="my-runs", group="concepts-demo"),
-        # … framework-specific flags …
+        recipe=SlimeRecipe(
+            wandb=WandbConfig(project="my-runs", group="concepts-demo"),
+            # … framework-specific flags …
+        ),
     )
 
     app = run.build_app()   # modal.App — call app.train to run everything

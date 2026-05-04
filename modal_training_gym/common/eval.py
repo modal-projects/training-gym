@@ -3,31 +3,60 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
+from pydantic import BaseModel, ConfigDict, Field
+
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.models import ModelDeployment
+    from modal_training_gym.common.deployment import ModelDeployment
 
 
 DatasetExample = dict[str, Any]
 
+EVAL_RESULTS_STORE_NAME = "eval-results"
 
-@dataclass(frozen=True)
-class EvalRowResult:
+
+class EvalRowResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     score: float
     passed: bool
     response: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 EvalFn = Callable[[DatasetExample, str], EvalRowResult]
 
 
-@dataclass
-class EvalResult:
+class EvalResult(BaseModel):
+    eval_id: str
     accuracy: float
     correct: int
     total: int
-    rows: list[EvalRowResult] = field(default_factory=list)
+    deployment_app_name: str = ""
+    deployment_url: str = ""
+    deployment_model_name: str = ""
+    dataset_id: str = ""
+    dataset_name: str = ""
+    training_run_id: str = ""
+    created_at: int = 0
+    rows: list[EvalRowResult] = Field(default_factory=list)
+
+    def save(self) -> None:
+        from modal_training_gym.common.client import _post
+
+        _post("/eval", self.model_dump())
+
+    @classmethod
+    def from_id(cls, eval_id: str) -> "EvalResult":
+        from modal_training_gym.common.client import _get
+
+        return cls.model_validate(_get(f"/evals/{eval_id}"))
+
+    @classmethod
+    def list_results(cls) -> list["EvalResult"]:
+        from modal_training_gym.common.client import _get
+
+        return [cls.model_validate(r) for r in _get("/evals")]
 
 
 @dataclass
@@ -42,6 +71,7 @@ class EvalConfig:
     eval_fn: EvalFn
     temperature: float = 0.0
     generate_kwargs: dict[str, Any] = field(default_factory=dict)
+    training_run_id: str = ""
 
     def build_prompt(self, example: DatasetExample) -> str:
         input_column = self.dataset.input_column
@@ -51,9 +81,12 @@ class EvalConfig:
             )
         return str(example[input_column])
 
-    def evaluate(self, debug=False) -> EvalResult:
+    def evaluate(self, debug: bool = False, persist: bool = True) -> EvalResult:
+        import time
+        from uuid import uuid4
+
         self.deployment.wait_until_ready()
-        rows = self.dataset.load()
+        rows = list(self.dataset.load())
 
         total = len(rows)
         results: list[EvalRowResult] = []
@@ -85,9 +118,47 @@ class EvalConfig:
         correct = sum(int(result.passed) for result in results)
         score = sum(result.score for result in results)
 
-        return EvalResult(
+        dataset_id = self._dataset_id()
+        result = EvalResult(
+            eval_id=f"eval-{uuid4().hex[:12]}",
             accuracy=score / total if total else 0.0,
             correct=correct,
             total=total,
+            deployment_app_name=getattr(self.deployment, "app_name", ""),
+            deployment_url=getattr(self.deployment, "url", ""),
+            deployment_model_name=getattr(self.deployment, "served_model_name", ""),
+            dataset_id=dataset_id,
+            dataset_name=self._dataset_name(),
+            training_run_id=self.training_run_id,
+            created_at=int(time.time()),
             rows=results,
         )
+        if persist:
+            result.save()
+        return result
+
+    def _dataset_id(self) -> str:
+        hf_repo = str(getattr(self.dataset, "hf_repo", "") or "")
+        hf_split = str(getattr(self.dataset, "hf_split", "") or "")
+        hf_config = str(getattr(self.dataset, "hf_config", "") or "")
+        prompt_data = str(getattr(self.dataset, "prompt_data", "") or "")
+
+        if hf_repo:
+            parts = ["hf", hf_repo]
+            if hf_config:
+                parts.append(hf_config)
+            if hf_split:
+                parts.append(hf_split)
+            return ":".join(parts)
+        if prompt_data:
+            return prompt_data
+        return self.dataset.__class__.__name__
+
+    def _dataset_name(self) -> str:
+        hf_repo = str(getattr(self.dataset, "hf_repo", "") or "")
+        if hf_repo:
+            return hf_repo
+        prompt_data = str(getattr(self.dataset, "prompt_data", "") or "")
+        if prompt_data:
+            return prompt_data
+        return self.dataset.__class__.__name__

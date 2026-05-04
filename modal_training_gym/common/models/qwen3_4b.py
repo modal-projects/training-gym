@@ -1,7 +1,6 @@
 """Qwen3-4B model spec as a concrete HFModelConfiguration subclass."""
 
 from .base import HFModelConfiguration, ModelArchitecture
-from modal_training_gym.frameworks.slime.preset import SlimePreset
 
 
 class Qwen3_4B(HFModelConfiguration):
@@ -28,12 +27,4 @@ class Qwen3_4B(HFModelConfiguration):
         qk_layernorm=True,
         use_rotary_position_embeddings=True,
         rotary_base=1000000,
-    )
-    slime = SlimePreset(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
-        colocate=True,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
     )

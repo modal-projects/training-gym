@@ -200,7 +200,7 @@ df.head(5)
 base_eval = HaikuEvalConfig(
     deployment=base_deployment,
     dataset=eval_dataset,
-    eval_fn=(lambda df_row, response: score_haiku({}, response)),
+    eval_fn=(lambda _df_row, response: score_haiku(response)),
     generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
 ).evaluate()
 print(f"Base haiku score: {base_eval.accuracy:.1%}")
@@ -217,7 +217,7 @@ from modal_training_gym.common.haiku_reward import haiku_rm
 
 my_training_run = SlimeConfig(
     model=base_model,
-    dataset=HaikuDataset(DATA_PATH, base_model.model_name),
+    dataset=HaikuDataset(),
     wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-haiku"),
 
     custom_rm_function=haiku_rm,

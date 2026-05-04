@@ -8,9 +8,11 @@ TUTORIAL_METADATA = {
     "order": 10,
     "api_classes": [
         "Qwen3_4B",
+        "DeploymentConfig",
         "EvalConfig",
         "EvalRowResult",
-        "SlimeConfig",
+        "TrainConfig",
+        "SlimeRecipe",
         "WandbConfig",
         "TrainResult",
     ],
@@ -65,12 +67,14 @@ def _imports():
     import modal
 
     from modal_training_gym.common.dataset import HuggingFaceDataset
+    from modal_training_gym.common.deployment import DeploymentConfig
     from modal_training_gym.common.eval import EvalConfig, EvalRowResult
     from modal_training_gym.common.models import Qwen3_4B
+    from modal_training_gym.common.train import TrainConfig
     from modal_training_gym.common.train_result import TrainResult
     from modal_training_gym.common.wandb import WandbConfig
-    from modal_training_gym.frameworks.slime import SlimeConfig
-    from modal_training_gym.frameworks.slime.config import DATA_PATH
+    from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+    from modal_training_gym.train_recipes.slime_recipe.recipe import DATA_PATH
 
 
 @markdown
@@ -81,7 +85,7 @@ def _serve_base_intro():
     So, how does Qwen3-4B currently fare at writing haikus? We can
     serve the base model and find out.
 
-    `ModelConfig.serve()` builds and deploys a vLLM app, then
+    `DeploymentConfig.serve()` builds and deploys a vLLM app, then
     returns a `ModelDeployment` with the concrete endpoint URL.
     """
 
@@ -89,10 +93,11 @@ def _serve_base_intro():
 @code
 def _serve_base_model():
     base_model = Qwen3_4B()
-    base_deployment = base_model.serve(
+    base_deployment = DeploymentConfig(
+        model=base_model,
         app_name="qwen3-4b-base-serve",
         served_model_name="qwen3-4b-base",
-    )
+    ).serve()
     print(base_deployment.url)
 
 @markdown
@@ -120,8 +125,7 @@ def _quantiative_grading_of_base_model():
 
 @notebook_only
 @code
-def _grade_haiku():
-    
+def _count_syllables_in_haiku():
     def _count_syllables(text: str) -> int:
         words = re.findall(r"[a-zA-Z]+", text)
         total = 0
@@ -132,6 +136,10 @@ def _grade_haiku():
             total += max(count, 1)
         return total
 
+
+@notebook_only
+@code
+def _grade_haiku():
     def score_haiku(response: str) -> bool:
         lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
         has_three_lines = len(lines) == 3
@@ -224,60 +232,24 @@ def _define_dataset():
 
 @code
 def _define_dataset_code():
-    SYSTEM_PROMPT = (
-        "You are a haiku poet. Write a haiku about the given topic. "
-        "Use the 5-7-5 syllable format across three lines."
-    )
-
     class HaikuDataset(HuggingFaceDataset):
         hf_repo = "statworx/haiku"
         input_column = "keywords"
         output_column = "text"
         output_format = "jsonl"
-        system_prompt = SYSTEM_PROMPT
+        apply_chat_template = False
+        system_prompt = (
+            "You are a haiku poet. Write a haiku about the given topic. "
+            "Use the 5-7-5 syllable format across three lines."
+        )
+        prompt_template = "Write a haiku about {input}."
 
-        def __init__(
-            self,
-            data_root=DATA_PATH,
-            *,
-            split: str = "train",
-            n_train: int = 500,
-            n_eval: int = 50,
-        ):
-            super().__init__(data_root)
-            self.split = split
-            self.n_train = n_train
-            self.n_eval = n_eval
-            self.prompt_data = f"{data_root}/haiku/{split}.jsonl"
-
-        def load(self):
-            ds = super().load()
-            if self.split == "train":
-                return ds.select(range(min(self.n_train, len(ds))))
-            else:
-                return ds.select(range(len(ds) - self.n_eval, len(ds)))
-
-        def _format_for_training(self, ds):
-            in_col = self.input_column
-            sys_prompt = self.system_prompt
-
-            def _to_chat(row: dict) -> dict:
-                return {
-                    "messages": [
-                        {"role": "system", "content": sys_prompt},
-                        {
-                            "role": "user",
-                            "content": f"Write a haiku about {row[in_col].lower()}.",
-                        },
-                        {"role": "assistant", "content": row["text"]},
-                    ]
-                }
-
-            return ds.map(_to_chat, remove_columns=ds.column_names)
-    
-
-    train_dataset = HaikuDataset(split="train", n_train=50)
-    eval_dataset = HaikuDataset(split="eval", n_eval=10)
+    train_dataset = HaikuDataset(
+        prompt_data=f"{DATA_PATH}/haiku/train.jsonl",
+        eval_prompt_data=["haiku", f"{DATA_PATH}/haiku/eval.jsonl"],
+        n_rows=50,
+    )
+    eval_dataset = HaikuDataset(prompt_data=f"{DATA_PATH}/haiku/eval.jsonl", n_rows=10)
 
 
 
@@ -329,26 +301,22 @@ def _train_intro():
 def _define_training_run():
     from modal_training_gym.common.haiku_reward import haiku_rm
 
-    my_training_run = SlimeConfig(
+    my_training_run = TrainConfig(
         model=base_model,
-        dataset=HaikuDataset(),
-        wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-haiku"),
+        dataset=train_dataset,
+        recipe=SlimeRecipe(
+            wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-haiku"),
 
-        custom_rm_function=haiku_rm,
+            custom_rm_function=haiku_rm,
 
-        num_rollout=10,
-        apply_chat_template_kwargs='{"enable_thinking": false}',
+            num_rollout=10,
+            apply_chat_template_kwargs='{"enable_thinking": false}',
 
-        eval_interval=5,
-        n_samples_per_eval_prompt=8,
-
-        save="/checkpoints/qwen3-0.6b-haiku",
-        save_interval=1,
-
-        image_run_commands=[
-            "uv pip install --system aiohttp nltk>=3.8.0",
-            "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
-        ],
+            image_run_commands=lambda image: image.run_commands(
+                "uv pip install --system aiohttp nltk>=3.8.0",
+                "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
+            ),
+        ),
     )
 
 
@@ -392,19 +360,21 @@ def _trained_eval_intro():
 
     After training completes, `TrainResult.load(...)` reconstructs the
     trained model with its checkpoint path and volume metadata attached.
-    Calling `.serve(...)` deploys that checkpoint behind vLLM.
+    Wrapping it in `DeploymentConfig` and calling `.serve()` deploys
+    that checkpoint behind vLLM.
     """
 
 
 @code
 def _serve_and_eval_trained():
-    result = TrainResult.load("qwen3-4b-haiku-sft")
+    result = TrainResult.load("qwen3-4b-haiku")
     print(result.latest_checkpoint_path())
 
-    deployment = result.model.serve(
-        app_name="qwen3-4b-haiku-sft-serve",
-        served_model_name="qwen3-4b-haiku-sft",
-    )
+    deployment = DeploymentConfig(
+        model=result.model,
+        app_name="qwen3-4b-haiku-serve",
+        served_model_name="qwen3-4b-haiku",
+    ).serve()
     print(deployment.url)
 
     trained_eval = HaikuEvalConfig(

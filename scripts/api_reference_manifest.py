@@ -56,6 +56,21 @@ API_REFERENCE_MANIFEST = [
         "class_type": "behavior",
         "sidebar_label": "LlmJudge",
     },
+    # --- Deployment ---
+    {
+        "class_name": "DeploymentConfig",
+        "module": "modal_training_gym.common.deployment",
+        "group": "core",
+        "class_type": "config_data",
+        "sidebar_label": "DeploymentConfig",
+    },
+    {
+        "class_name": "VllmRecipe",
+        "module": "modal_training_gym.deploy_recipes.vllm_recipe",
+        "group": "core",
+        "class_type": "config_data",
+        "sidebar_label": "VllmRecipe",
+    },
     # --- Models ---
     {
         "class_name": "Qwen3_0_6B",
@@ -99,20 +114,21 @@ API_REFERENCE_MANIFEST = [
         "class_type": "config_data",
         "sidebar_label": "Kimi-K2.5",
     },
+    # --- Train config ---
+    {
+        "class_name": "TrainConfig",
+        "module": "modal_training_gym.common.train",
+        "group": "frameworks",
+        "class_type": "config_data",
+        "sidebar_label": "TrainConfig",
+    },
     # --- Frameworks: slime ---
     {
-        "class_name": "SlimeConfig",
-        "module": "modal_training_gym.frameworks.slime.config",
+        "class_name": "SlimeRecipe",
+        "module": "modal_training_gym.train_recipes.slime_recipe.recipe",
         "group": "frameworks",
         "class_type": "config_data",
-        "sidebar_label": "SlimeConfig",
-    },
-    {
-        "class_name": "ModalConfig",
-        "module": "modal_training_gym.frameworks.slime.config",
-        "group": "frameworks",
-        "class_type": "config_data",
-        "sidebar_label": "ModalConfig (slime)",
+        "sidebar_label": "SlimeRecipe",
     },
     # --- Results ---
     {
