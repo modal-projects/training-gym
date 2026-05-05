@@ -1,4 +1,5 @@
 import math
+import os
 from collections.abc import Callable
 from dataclasses import field
 from pathlib import Path
@@ -155,9 +156,14 @@ class SlimeRecipe(BaseTrainRecipe):
             name = getattr(fn, "__qualname__", None) or fn.__name__
             if mod == "__main__":
                 import inspect
-
-                src_file = inspect.getfile(fn)
-                mod = Path(src_file).stem
+                try:
+                    src_file = inspect.getfile(fn)
+                    if os.path.isfile(src_file):
+                        mod = Path(src_file).stem
+                    else:
+                        mod = "__pending__"
+                except (TypeError, OSError):
+                    mod = "__pending__"
             object.__setattr__(self, "custom_rm_path", f"{mod}.{name}")
 
     # ── Container → slime flag converters ────────────────────────────────────

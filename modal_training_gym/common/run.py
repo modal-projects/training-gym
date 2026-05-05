@@ -39,32 +39,34 @@ class TrainingRun(BaseModel):
     metadata: dict[str, Any] | None = None
 
     def save(self) -> None:
-        from modal_training_gym.common.client import _post
+        from modal_training_gym.common import vol_put
 
-        _post("/run", self.model_dump())
+        vol_put(TRAINING_RUNS_STORE_NAME, self.run_id, self.model_dump(mode="json"))
 
     @classmethod
     def from_id(cls, run_id: str) -> "TrainingRun":
-        from modal_training_gym.common.client import _get
+        from modal_training_gym.common import vol_get
 
-        return cls.model_validate(_get(f"/runs/{run_id}"))
+        return cls.model_validate(vol_get(TRAINING_RUNS_STORE_NAME, run_id))
 
     @classmethod
     def list_runs(cls) -> list["TrainingRun"]:
-        from modal_training_gym.common.client import _get
+        from modal_training_gym.common import vol_list
 
-        return [cls.model_validate(r) for r in _get("/runs")]
+        return [cls.model_validate(r) for r in vol_list(TRAINING_RUNS_STORE_NAME)]
 
     @classmethod
     def list_runs_with_train_result(cls) -> list[TrainingRunWithResult]:
-        from modal_training_gym.common.client import _get
-        from modal_training_gym.common.train_result import TrainResult
+        from modal_training_gym.common.train_result import (
+            TrainResult,
+            TRAIN_RESULTS_STORE_NAME,
+        )
+        from modal_training_gym.common import vol_list
 
         runs = cls.list_runs()
-        train_result_records: list[dict[str, Any]] = _get("/train-results")
 
         train_results_by_run_id: dict[str, TrainResult] = {}
-        for record in train_result_records:
+        for record in vol_list(TRAIN_RESULTS_STORE_NAME):
             result_run_id = record.get("training_run_id", "")
             if result_run_id:
                 train_results_by_run_id[result_run_id] = TrainResult(**record)

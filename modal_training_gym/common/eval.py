@@ -11,7 +11,6 @@ if TYPE_CHECKING:
 
 
 DatasetExample = dict[str, Any]
-PromptFn = Callable[[DatasetExample], str]
 
 EVAL_RESULTS_STORE_NAME = "eval-results"
 
@@ -21,7 +20,9 @@ class EvalRowResult(BaseModel):
 
     score: float
     response: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict) # metadata that user can inject about the evaluation result
+    metadata: dict[str, Any] = Field(
+        default_factory=dict
+    )  # metadata that user can inject about the evaluation result
 
 
 EvalFn = Callable[[DatasetExample, str], EvalRowResult]
@@ -30,6 +31,7 @@ EvalFn = Callable[[DatasetExample, str], EvalRowResult]
 class EvalResult(BaseModel):
     eval_id: str
     created_at: int = 0
+    config: dict[str, Any] = Field(default_factory=dict)
     rows: list[EvalRowResult] = Field(default_factory=list)
 
     @property
@@ -37,25 +39,25 @@ class EvalResult(BaseModel):
         return len(self.rows)
 
     @property
-    def accuracy(self) -> float:
+    def mean(self) -> float:
         return sum(r.score for r in self.rows) / self.total if self.total else 0.0
 
     def save(self) -> None:
-        from modal_training_gym.common.client import _post
+        from modal_training_gym.common import vol_put
 
-        _post("/eval", self.model_dump())
+        vol_put(EVAL_RESULTS_STORE_NAME, self.eval_id, self.model_dump(mode="json"))
 
     @classmethod
     def from_id(cls, eval_id: str) -> "EvalResult":
-        from modal_training_gym.common.client import _get
+        from modal_training_gym.common import vol_get
 
-        return cls.model_validate(_get(f"/evals/{eval_id}"))
+        return cls.model_validate(vol_get(EVAL_RESULTS_STORE_NAME, eval_id))
 
     @classmethod
     def list_results(cls) -> list["EvalResult"]:
-        from modal_training_gym.common.client import _get
+        from modal_training_gym.common import vol_list
 
-        return [cls.model_validate(r) for r in _get("/evals")]
+        return [cls.model_validate(v) for v in vol_list(EVAL_RESULTS_STORE_NAME)]
 
 
 @dataclass
@@ -65,34 +67,36 @@ class EvalConfig:
     The dataset must expose ``load()`` and return iterable dict examples.
     """
 
-    deployment: "ModelDeployment"
     dataset: "DatasetConfig"
     eval_fn: EvalFn
-    prompt_fn: PromptFn | None = None
     generate_kwargs: dict[str, Any] = field(default_factory=dict)
 
     def build_prompt(self, example: DatasetExample) -> str:
-        if self.prompt_fn is not None:
-            return self.prompt_fn(example)
-        input_column = self.dataset.input_column
+        input_column = getattr(self.dataset, "input_column", "")
         if not input_column:
             raise ValueError(
-                "EvalConfig requires dataset.input_column, prompt_fn, or an overridden build_prompt()."
+                "EvalConfig.build_prompt() requires dataset.input_column to be set."
             )
-        return str(example[input_column])
+        raw = str(example[input_column])
+        template = getattr(self.dataset, "prompt_template", "")
+        if template:
+            return template.format(input=raw)
+        return raw
 
-    def evaluate(self, debug: bool = False, persist: bool = True) -> EvalResult:
+    def evaluate(
+        self, deployment: "ModelDeployment", debug: bool = False
+    ) -> EvalResult:
         import time
         from uuid import uuid4
 
-        self.deployment.wait_until_ready()
+        deployment.wait_until_ready()
 
         results: list[EvalRowResult] = []
 
         for idx, example in enumerate(self.dataset.load(), start=1):
             if debug:
                 print(f"Evaluating example {idx}: {example}", flush=True)
-            text = self.deployment.generate(
+            text = deployment.generate(
                 self.build_prompt(example),
                 **self.generate_kwargs,
             )
@@ -111,50 +115,20 @@ class EvalConfig:
                 )
             results.append(result)
 
-        config_summary = {
-            "deployment": {
-                "app_name": getattr(self.deployment, "app_name", ""),
-                "url": getattr(self.deployment, "url", ""),
-                "model_name": getattr(self.deployment, "served_model_name", ""),
-            },
-            "dataset": {
-                "id": self._dataset_id(),
-                "name": self._dataset_name(),
-            },
-        }
-
         result = EvalResult(
             eval_id=f"eval-{uuid4().hex[:12]}",
             created_at=int(time.time()),
-            config=config_summary,
+            config={
+                "deployment": {
+                    "app_name": getattr(deployment, "app_name", ""),
+                    "url": getattr(deployment, "url", ""),
+                    "served_model_name": getattr(deployment, "served_model_name", ""),
+                },
+                "dataset": type(self.dataset).__name__,
+                "eval_fn": getattr(self.eval_fn, "__name__", str(self.eval_fn)),
+                "generate_kwargs": self.generate_kwargs,
+            },
             rows=results,
         )
-        if persist:
-            result.save()
+        result.save()
         return result
-
-    def _dataset_id(self) -> str:
-        hf_repo = str(getattr(self.dataset, "hf_repo", "") or "")
-        hf_split = str(getattr(self.dataset, "hf_split", "") or "")
-        hf_config = str(getattr(self.dataset, "hf_config", "") or "")
-        prompt_data = str(getattr(self.dataset, "prompt_data", "") or "")
-
-        if hf_repo:
-            parts = ["hf", hf_repo]
-            if hf_config:
-                parts.append(hf_config)
-            if hf_split:
-                parts.append(hf_split)
-            return ":".join(parts)
-        if prompt_data:
-            return prompt_data
-        return self.dataset.__class__.__name__
-
-    def _dataset_name(self) -> str:
-        hf_repo = str(getattr(self.dataset, "hf_repo", "") or "")
-        if hf_repo:
-            return hf_repo
-        prompt_data = str(getattr(self.dataset, "prompt_data", "") or "")
-        if prompt_data:
-            return prompt_data
-        return self.dataset.__class__.__name__

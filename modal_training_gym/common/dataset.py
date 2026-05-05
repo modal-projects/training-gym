@@ -115,9 +115,7 @@ class HuggingFaceDataset(DatasetConfig):
         if not self.prompt_data:
             self.prompt_data = f"{self.data_root}/{name}/{self.hf_split}.{ext}"
         if self.include_eval and not self.eval_prompt_data:
-            self.eval_prompt_data = {
-                "eval": f"{self.data_root}/{name}/eval.{ext}"
-            }
+            self.eval_prompt_data = {"eval": f"{self.data_root}/{name}/eval.{ext}"}
         if not self.input_key and self.input_column and self.output_column:
             self.input_key = "messages"
 

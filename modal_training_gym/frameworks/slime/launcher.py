@@ -67,13 +67,13 @@ def build_slime_app(
     app_name = name or f"slime-{type(slime).__name__.lstrip('_').lower()}"
 
     caller_module = resolve_caller_module()
-    if caller_module is not None:
+    if caller_module is not None and caller_module.__name__ != "__main__":
         cloudpickle.register_pickle_by_value(caller_module)
 
     caller_script = None
     if caller_module is not None:
         mod_file = getattr(caller_module, "__file__", None)
-        if mod_file:
+        if mod_file and os.path.isfile(mod_file):
             caller_script = os.path.abspath(mod_file)
 
     # ── Image ────────────────────────────────────────────────────────────────
@@ -106,18 +106,37 @@ def build_slime_app(
     _rm_fn_shipped = False
     if slime.custom_rm_function is not None:
         import inspect as _inspect
+        import textwrap as _tw
+        import tempfile as _tmp
 
         fn = slime.custom_rm_function
         fn_mod = getattr(fn, "__module__", None) or ""
         if not fn_mod.startswith("modal_training_gym"):
-            fn_file = os.path.abspath(_inspect.getfile(fn))
-            if fn_file != caller_script:
+            try:
+                fn_file = os.path.abspath(_inspect.getfile(fn))
+            except (TypeError, OSError):
+                fn_file = None
+            if fn_file and os.path.isfile(fn_file) and fn_file != caller_script:
                 fn_module_name = os.path.splitext(os.path.basename(fn_file))[0]
                 image = image.add_local_file(
                     fn_file,
                     remote_path=f"/root/{fn_module_name}.py",
                     copy=True,
                 )
+                _rm_fn_shipped = True
+            elif not fn_file or not os.path.isfile(fn_file):
+                fn_name = getattr(fn, "__name__", "custom_rm")
+                src = _tw.dedent(_inspect.getsource(fn))
+                tmp = _tmp.NamedTemporaryFile(
+                    mode="w", suffix=".py", prefix="notebook_rm_", delete=False
+                )
+                tmp.write(src)
+                tmp.flush()
+                mod_name = os.path.splitext(os.path.basename(tmp.name))[0]
+                image = image.add_local_file(
+                    tmp.name, remote_path=f"/root/{mod_name}.py", copy=True
+                )
+                object.__setattr__(slime, "custom_rm_path", f"{mod_name}.{fn_name}")
                 _rm_fn_shipped = True
 
     for mod_name in slime.local_python_sources:
@@ -306,7 +325,7 @@ def build_slime_app(
         }
         TrainingRun(
             run_id=run_id,
-            modal_app_id=app.app_id or "",
+            modal_app_id=os.environ.get("MODAL_APP_ID", ""),
             framework="slime",
             config=config_summary,
             created_at=created_at,

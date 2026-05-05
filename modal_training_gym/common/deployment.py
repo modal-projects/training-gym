@@ -130,21 +130,37 @@ class ModelDeployment(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    app: Any = Field(default=None, exclude=True)
     app_name: str
     served_model_name: str
     url: str
 
-    def save(self) -> None:
-        from modal_training_gym.common.client import _post
+    def generate(self, prompt: str, **kwargs) -> str:
+        import requests
 
-        _post("/deployment", self.model_dump())
+        self.wait_until_ready()
+        body = {
+            "model": self.served_model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            **kwargs,
+        }
+        resp = requests.post(f"{self.url}/v1/chat/completions", json=body, timeout=120)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
+
+    def __post_init__(self) -> None:
+        self.save()
+
+    def save(self) -> None:
+        from modal_training_gym.common import vol_put
+
+        vol_put(DEPLOYMENTS_STORE_NAME, self.app_name, self.model_dump(mode="json"))
 
     @classmethod
     def list_deployments(cls) -> list["ModelDeployment"]:
-        from modal_training_gym.common.client import _get
+        from modal_training_gym.common import vol_list
 
-        return [cls.model_validate(d) for d in _get("/deployments")]
+        return [cls.model_validate(d) for d in vol_list(DEPLOYMENTS_STORE_NAME)]
 
     def wait_until_ready(self, timeout: int = 600) -> None:
         import time
@@ -168,18 +184,3 @@ class ModelDeployment(BaseModel):
                 print(f"Waiting for {self.url} (not ready yet)...")
             time.sleep(5)
         raise TimeoutError(f"{self.url} not ready after {timeout}s")
-
-    def generate(self, prompt: str, **kwargs) -> str:
-        import requests
-
-        self.wait_until_ready()
-        body = {
-            "model": self.served_model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            **kwargs,
-        }
-        resp = requests.post(
-            f"{self.url}/v1/chat/completions", json=body, timeout=120
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
