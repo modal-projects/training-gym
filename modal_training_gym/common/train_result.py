@@ -163,17 +163,12 @@ class TrainResult:
     # ── Volume lookup ────────────────────────────────────────────────────
 
     def volume(self) -> "Volume":
-        """Return a handle to the checkpoints :class:`modal.Volume`.
-
-        Always uses ``version=2`` — every framework launcher in this
-        package provisions its checkpoints volume at v2.
-        """
+        """Return a handle to the checkpoints :class:`modal.Volume`."""
         from modal import Volume
 
         return Volume.from_name(
             self.checkpoints_volume_name,
             create_if_missing=True,
-            version=2,
         )
 
     def dashboard_url(self) -> str:
@@ -231,7 +226,7 @@ class TrainResult:
         rel = self._volume_rel(self.checkpoint_dir)
         try:
             entries = self._listdir(rel)
-        except Exception:
+        except FileNotFoundError:
             return []
         return sorted(e for e in entries if e.startswith(self.iteration_prefix))
 
