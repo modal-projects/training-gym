@@ -119,7 +119,6 @@ def _quantiative_grading_of_base_model():
     We can use a simple heuristic to count the syllables in the response.
     """
 
-@notebook_only
 @code
 def _count_syllables_in_haiku():
     def _count_syllables(text: str) -> int:
@@ -132,7 +131,7 @@ def _count_syllables_in_haiku():
             total += max(count, 1)
         return total
 
-
+# TODO: fix later
 @notebook_only
 @code
 def _grade_haiku():
@@ -298,49 +297,6 @@ def _train_intro():
 
 @code
 def _define_training_run():
-    _CMUDICT: dict = {}
-
-
-    def _get_cmudict() -> dict:
-        """Lazy-load NLTK's CMUdict; cached on first call per process."""
-        import nltk
-        from nltk.corpus import cmudict as nltk_cmudict
-
-        if not _CMUDICT:
-            nltk.download("cmudict", quiet=True)
-            _CMUDICT.update(nltk_cmudict.dict())
-        return _CMUDICT
-
-
-    def _count_syllables_for_word(word: str, cmudict: dict) -> int:
-        original = word
-        word = word.lower().strip()
-        phones = cmudict.get(word)
-        if phones:
-            return len([p for p in phones[0] if p[-1].isdigit()])
-        if original.isupper() and 2 <= len(original) <= 6 and original.isalpha():
-            # Letters-as-name heuristic for unknown acronyms; 'w' = "double-u" = 3 syllables.
-            return sum(3 if c == "w" else 1 for c in original.lower())
-        count = len(re.findall(r"[aeiouy]+", word))
-        if word.endswith("e") and count > 1:
-            count -= 1
-        return max(count, 1)
-
-
-    def _diff_syllables(text: str, target: int, cmudict: dict) -> int:
-        words = re.findall(r"[a-zA-Z]+", text)
-        total = sum(_count_syllables_for_word(w, cmudict) for w in words)
-        return abs(total - target)
-
-
-    def _segment_haiku_lines(response: str) -> list[str]:
-        if "/" in response:
-            lines = [line.strip() for line in response.split("/")]
-        elif ". " in response:
-            lines = [line.strip() for line in response.split(". ")]
-        else:
-            lines = [line.strip() for line in response.split("\n")]
-        return [line for line in lines if line]
 
 
     def score_haiku_structure(response: str, cmudict: dict) -> float:
@@ -357,7 +313,7 @@ def _define_training_run():
         return score
 
 
-    async def haiku_rm(args, sample, **kwargs) -> float:
+    def haiku_rm(args, sample, **kwargs) -> float:
         cmudict = _get_cmudict()
         structure = score_haiku_structure(sample.response, cmudict)
         return structure
