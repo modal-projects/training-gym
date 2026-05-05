@@ -135,12 +135,12 @@ def _count_syllables_in_haiku():
 @notebook_only
 @code
 def _grade_haiku():
-    def score_haiku(response: str) -> bool:
+    def score_haiku(response: str) -> int:
         lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
         has_three_lines = len(lines) == 3
 
         syllable_counts = []
-        has_passed = True
+        syllable_count_diffs = []
         if has_three_lines:
             for i, (line, target) in enumerate(zip(lines, [5, 7, 5])):
                 count = _count_syllables(line)
@@ -148,16 +148,16 @@ def _grade_haiku():
                 diff = abs(count - target)
                 if diff != 0:
                     print(f"Line {i+1} has {count} syllables, expected {target}. Difference: {diff}")
-                    has_passed = False
+                    syllable_count_diffs.append(diff)
         
-        return has_passed
+        return syllable_count_diffs
     
     response = base_deployment.generate(
         "Write a haiku about cat.",
         chat_template_kwargs={"enable_thinking": False},
     )
     print(response)
-    print(score_haiku(response))
+    print(f"Syllable count diffs: {score_haiku(response)}")
 
 @markdown
 def _grade_haiku_into_eval():
@@ -173,35 +173,6 @@ def _grade_haiku_into_eval():
     But we can make it return more granular result on *how much off* it was from the syllable
     target.
     """
-
-@code
-def _grade_haiku_into_eval_code():
-    def score_haiku(response: str) -> EvalRowResult:
-        lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
-        has_three_lines = len(lines) == 3
-
-        syllable_score = 0.0
-        syllable_counts = []
-        if has_three_lines:
-            for line, target in zip(lines, [5, 7, 5]):
-                count = _count_syllables(line)
-                syllable_counts.append(count)
-                diff = abs(count - target)
-                if diff == 0:
-                    syllable_score += 1.0
-                elif diff == 1:
-                    syllable_score += 0.5
-            syllable_score /= 3.0
-
-        score = (0.25 if has_three_lines else 0.0) + 0.75 * syllable_score
-        return EvalRowResult(
-            score=score,
-            response=response,
-            metadata={
-                "lines": len(lines),
-                "syllable_counts": syllable_counts,
-            },
-        )
 
 
 @markdown
@@ -274,7 +245,15 @@ def _eval_base_model():
             )
         
         def eval_fn(self, _df_row: dict, response: str) -> EvalRowResult:
-            return score_haiku(response)
+            syllable_count_diffs = score_haiku(response)
+            return EvalRowResult(
+                score=sum(syllable_count_diffs),
+                response=response,
+                metadata={
+                    "lines": len(lines),
+                    "syllable_counts": syllable_counts,
+                },
+            )
 
     base_eval = HaikuEvalConfig(
         deployment=base_deployment,
@@ -297,26 +276,9 @@ def _train_intro():
 
 @code
 def _define_training_run():
-
-
-    def score_haiku_structure(response: str, cmudict: dict) -> float:
-        """Score in [0, 1]: 1/4 for 3 lines, 1/4 per line with correct syllables."""
-        lines = _segment_haiku_lines(response)
-        score = 0.25 if len(lines) == 3 else 0.0
-        for i, target in enumerate([5, 7, 5]):
-            if i < len(lines):
-                diff = _diff_syllables(lines[i], target, cmudict)
-                if diff == 0:
-                    score += 0.25
-                elif diff == 1:
-                    score += 0.125
-        return score
-
-
     def haiku_rm(args, sample, **kwargs) -> float:
-        cmudict = _get_cmudict()
-        structure = score_haiku_structure(sample.response, cmudict)
-        return structure
+        syllable_count_diffs = score_haiku(sample.response)
+        return sum(syllable_count_diffs)
 
     my_training_run = TrainConfig(
         model=base_model,
@@ -390,12 +352,4 @@ def _serve_and_eval_trained():
         generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
     ).evaluate(debug=True)
     print(f"Trained haiku score: {trained_eval.accuracy:.1%}")
-    print(f"Passed (score >= 0.75): {trained_eval.correct}/{trained_eval.total}")
-    print(f"Delta: {trained_eval.accuracy - base_eval.accuracy:+.1%}")
 
-
-@markdown
-def _whats_next():
-    """
-    ## What's next: RL with LLM--as-a-judge
-    """

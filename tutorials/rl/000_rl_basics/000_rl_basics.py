@@ -87,33 +87,6 @@ def _count_syllables(text: str) -> int:
 # But we can make it return more granular result on *how much off* it was from the syllable
 # target.
 
-def score_haiku(response: str) -> EvalRowResult:
-    lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
-    has_three_lines = len(lines) == 3
-
-    syllable_score = 0.0
-    syllable_counts = []
-    if has_three_lines:
-        for line, target in zip(lines, [5, 7, 5]):
-            count = _count_syllables(line)
-            syllable_counts.append(count)
-            diff = abs(count - target)
-            if diff == 0:
-                syllable_score += 1.0
-            elif diff == 1:
-                syllable_score += 0.5
-        syllable_score /= 3.0
-
-    score = (0.25 if has_three_lines else 0.0) + 0.75 * syllable_score
-    return EvalRowResult(
-        score=score,
-        response=response,
-        metadata={
-            "lines": len(lines),
-            "syllable_counts": syllable_counts,
-        },
-    )
-
 # Let's also define a Haiku dataset.
 # Here, we use the statworx/haiku dataset from HuggingFace.
 # Each row has a `keywords` topic and a reference `text` haiku.
@@ -161,7 +134,15 @@ class HaikuEvalConfig(EvalConfig):
         )
 
     def eval_fn(self, _df_row: dict, response: str) -> EvalRowResult:
-        return score_haiku(response)
+        syllable_count_diffs = score_haiku(response)
+        return EvalRowResult(
+            score=sum(syllable_count_diffs),
+            response=response,
+            metadata={
+                "lines": len(lines),
+                "syllable_counts": syllable_counts,
+            },
+        )
 
 base_eval = HaikuEvalConfig(
     deployment=base_deployment,
@@ -176,24 +157,9 @@ print(f"Passed (score >= 0.75): {base_eval.correct}/{base_eval.total}")
 # Now, let's actually train the model to write good haikus.
 # Here, we use the slime framework (https://github.com/THUDM/slime) on Modal.
 
-def score_haiku_structure(response: str, cmudict: dict) -> float:
-    """Score in [0, 1]: 1/4 for 3 lines, 1/4 per line with correct syllables."""
-    lines = _segment_haiku_lines(response)
-    score = 0.25 if len(lines) == 3 else 0.0
-    for i, target in enumerate([5, 7, 5]):
-        if i < len(lines):
-            diff = _diff_syllables(lines[i], target, cmudict)
-            if diff == 0:
-                score += 0.25
-            elif diff == 1:
-                score += 0.125
-    return score
-
-
 def haiku_rm(args, sample, **kwargs) -> float:
-    cmudict = _get_cmudict()
-    structure = score_haiku_structure(sample.response, cmudict)
-    return structure
+    syllable_count_diffs = score_haiku(sample.response)
+    return sum(syllable_count_diffs)
 
 my_training_run = TrainConfig(
     model=base_model,
@@ -250,7 +216,3 @@ trained_eval = EvalConfig(
     generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
 ).evaluate(debug=True)
 print(f"Trained haiku score: {trained_eval.accuracy:.1%}")
-print(f"Passed (score >= 0.75): {trained_eval.correct}/{trained_eval.total}")
-print(f"Delta: {trained_eval.accuracy - base_eval.accuracy:+.1%}")
-
-# ## What's next: RL with LLM--as-a-judge
