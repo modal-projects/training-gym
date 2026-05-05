@@ -1,7 +1,7 @@
 """Dataset config + `prepare()` hook, shared across training frameworks.
 
 Pure data — each framework config writes its own converter from a
-`DatasetConfig` instance to its specific CLI flags (e.g. SlimeConfig emits
+`DatasetConfig` instance to its specific CLI flags (e.g. SlimeRecipe emits
 `--prompt-data`, `--input-key`, …).
 
 Subclass and override `prepare()` to materialize the data into a shared
@@ -18,7 +18,7 @@ class DatasetConfig:
 
     Subclass this and override ``prepare()`` to materialize training data
     into the shared volume. Each framework config converts these fields
-    into its own CLI flags (e.g. SlimeConfig emits ``--prompt-data``,
+    into its own CLI flags (e.g. SlimeRecipe emits ``--prompt-data``,
     ``--input-key``, etc.).
 
     ## Fields
@@ -26,25 +26,22 @@ class DatasetConfig:
     prompt_data : str
         Path to the training data file (e.g. a ``.parquet`` file on the
         data volume). Default ``""``.
-    eval_prompt_data : list[str] | str | None
-        Evaluation data path(s). Can be a single path, a list of paths,
-        or ``None`` to skip evaluation. Default ``None``.
+    eval_prompt_data : dict[str, str] | None
+        Evaluation datasets as ``{name: path}`` pairs, or ``None`` to
+        skip evaluation. Default ``None``.
     input_key : str
         Column/key name for model input in the dataset. Default ``""``.
     label_key : str
         Column/key name for labels/targets in the dataset. Default ``""``.
     apply_chat_template : bool
         Whether to apply the model's chat template to inputs. Default ``True``.
-    rollout_shuffle : bool
-        Whether to shuffle data during rollout generation. Default ``True``.
     """
 
     prompt_data: str = ""
-    eval_prompt_data: list[str] | str | None = None
+    eval_prompt_data: dict[str, str] | None = None
     input_key: str = ""
     label_key: str = ""
     apply_chat_template: bool = True
-    rollout_shuffle: bool = True
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -87,6 +84,14 @@ class HuggingFaceDataset(DatasetConfig):
     system_prompt : str
         Optional system message prepended to every conversation.
         Default ``""``.
+    prompt_template : str
+        Template for the user message with an ``{input}`` placeholder.
+        When set, ``row[input_column]`` is formatted through this
+        template (e.g. ``"Write a haiku about {input}."``) instead of
+        being used verbatim. Default ``""`` (no template).
+    n_rows : int
+        Limit the dataset to the first *n* rows after loading.
+        ``0`` means use all rows. Default ``0``.
     """
 
     hf_repo: str = ""
@@ -97,6 +102,8 @@ class HuggingFaceDataset(DatasetConfig):
     input_column: str = ""
     output_column: str = ""
     system_prompt: str = ""
+    prompt_template: str = ""
+    n_rows: int = 0
 
     def __init__(self, data_root: str = "/data", **kwargs: Any) -> None:
         self.data_root = str(data_root)
@@ -106,15 +113,20 @@ class HuggingFaceDataset(DatasetConfig):
             name = self.hf_repo.replace("/", "_")
             ext = "jsonl" if self.output_format == "jsonl" else "parquet"
             self.prompt_data = f"{self.data_root}/{name}/train.{ext}"
+        if not self.input_key and self.input_column and self.output_column:
+            self.input_key = "messages"
 
     def load(self):
         from datasets import load_dataset
 
-        return load_dataset(
+        ds = load_dataset(
             self.hf_repo,
             self.hf_config,
             split=self.hf_split,
         )
+        if self.n_rows:
+            ds = ds.select(range(min(self.n_rows, len(ds))))
+        return ds
 
     def _format_for_training(self, ds):
         if not (self.input_column and self.output_column):
@@ -122,12 +134,16 @@ class HuggingFaceDataset(DatasetConfig):
 
         in_col, out_col = self.input_column, self.output_column
         sys_prompt = self.system_prompt
+        template = self.prompt_template
 
         def _to_chat(row: dict) -> dict:
+            user_content = row[in_col]
+            if template:
+                user_content = template.format(input=user_content)
             msgs = []
             if sys_prompt:
                 msgs.append({"role": "system", "content": sys_prompt})
-            msgs.append({"role": "user", "content": row[in_col]})
+            msgs.append({"role": "user", "content": user_content})
             msgs.append({"role": "assistant", "content": row[out_col]})
             return {"messages": msgs}
 
@@ -139,13 +155,20 @@ class HuggingFaceDataset(DatasetConfig):
             ds = self._format_for_training(ds)
         return ds.to_pandas()
 
-    def prepare(self) -> None:
+    def _write_split(self, ds, path: str) -> None:
         import os
 
-        os.makedirs(os.path.dirname(self.prompt_data), exist_ok=True)
-        ds = self._format_for_training(self.load())
-
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         if self.output_format == "jsonl":
-            ds.to_json(self.prompt_data, orient="records", lines=True)
+            ds.to_json(path, orient="records", lines=True)
         else:
-            ds.to_parquet(self.prompt_data)
+            ds.to_parquet(path)
+
+    def prepare(self) -> None:
+        ds = self._format_for_training(self.load())
+        self._write_split(ds, self.prompt_data)
+
+        if self.eval_prompt_data:
+            for path in self.eval_prompt_data.values():
+                eval_ds = self._format_for_training(self.load())
+                self._write_split(eval_ds, path)

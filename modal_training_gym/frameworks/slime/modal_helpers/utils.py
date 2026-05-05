@@ -14,10 +14,9 @@ _CONVERSION_EXTRA_ARGS = [
 
 def get_checkpoint_conversion_policy(slime_cfg) -> tuple[int, int, list[str]]:
     """Return (num_nodes, nproc_per_node, extra_args) for checkpoint conversion."""
-    preset = slime_cfg.preset
-    gpus_per_node = preset.actor_num_gpus_per_node
-    actor_nodes = preset.actor_num_nodes
-    tp = preset.tensor_model_parallel_size
+    gpus_per_node = slime_cfg.actor_num_gpus_per_node
+    actor_nodes = slime_cfg.actor_num_nodes
+    tp = slime_cfg.tensor_model_parallel_size
     pp = getattr(slime_cfg, "pipeline_model_parallel_size", 1)
 
     world_size = tp * pp if (tp > 1 or pp > 1) else gpus_per_node
@@ -74,16 +73,21 @@ def get_modal_cluster_context(n_nodes: int) -> tuple[int, str, str, int]:
     )
 
 
-def prepare_slime_config(slime_cfg, tmpdir: str) -> None:
+def prepare_slime_config(slime_cfg, model, tmpdir: str) -> None:
     """Resolve HF repo IDs to local paths and materialize inline YAML configs."""
     from huggingface_hub import snapshot_download
     import yaml
 
-    from ..config import YAML_CONFIG_FIELDS
+    from modal_training_gym.train_recipes.slime_recipe.recipe import YAML_CONFIG_FIELDS
 
-    for attr in ("hf_checkpoint", "load", "ref_load", "critic_load"):
+    if model and model.model_name and not str(model.model_name).startswith("/"):
+        model.model_path = snapshot_download(model.model_name, local_files_only=True)
+
+    for attr in ("ref_load", "critic_load"):
         if (val := getattr(slime_cfg, attr, None)) and not str(val).startswith("/"):
-            setattr(slime_cfg, attr, snapshot_download(val, local_files_only=True))
+            object.__setattr__(
+                slime_cfg, attr, snapshot_download(val, local_files_only=True)
+            )
 
     for field in YAML_CONFIG_FIELDS:
         if isinstance(val := getattr(slime_cfg, field, None), dict):
@@ -91,12 +95,12 @@ def prepare_slime_config(slime_cfg, tmpdir: str) -> None:
             with open(path, "w") as f:
                 yaml.dump(val, f)
             print(f"Materialized {field} → {path}")
-            setattr(slime_cfg, field, path)
+            object.__setattr__(slime_cfg, field, path)
 
 
-def build_train_cmd(slime_cfg, slime_root: str) -> str:
+def build_train_cmd(slime_cfg, slime_root: str, model=None, dataset=None) -> str:
     """Build the Ray job entrypoint."""
     train_script = (
         f"{slime_root}/{'train_async.py' if slime_cfg.async_mode else 'train.py'}"
     )
-    return f"python3 {train_script} {shlex.join(slime_cfg.cli_args())}"
+    return f"python3 {train_script} {shlex.join(slime_cfg.cli_args(dataset=dataset, model=model))}"

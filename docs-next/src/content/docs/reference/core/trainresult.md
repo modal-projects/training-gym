@@ -63,13 +63,15 @@ Absolute in-volume path of the latest checkpoint.
 
 Return per-iteration checkpoint directory names under
 
+### `list_results() -> "list['TrainResult']"`
+
 ### `load(training_run_id: 'str') -> "'TrainResult'"`
 
-Load a completed run's result from the shared store.
+Load a completed run's result from the central gym server.
 
 ### `save(self) -> 'None'`
 
-Persist this result. Currently saves to a Modal Dict but in the future, we will save to a database.
+Persist this result to the central gym server.
 
 ### `volume(self) -> "'Volume'"`
 

@@ -24,7 +24,7 @@ Complete reference for the training-gym Python library.
 
 | Class | Description |
 |-------|-------------|
-| [`Qwen3-0.6B`](/reference/models/qwen3_0_6b/) | Qwen3-0.6B (0.6 billion parameters) from Alibaba. |
+| [`qwen3-4b`](/reference/models/qwen3_0_6b/) | qwen3-4b (0.6 billion parameters) from Alibaba. |
 | [`Qwen3-4B`](/reference/models/qwen3_4b/) | Qwen3-4B (4 billion parameters) from Alibaba. |
 | [`Qwen3-32B`](/reference/models/qwen3_32b/) | Qwen3-32B (32 billion parameters) from Alibaba. |
 | [`GLM-4.7`](/reference/models/glm_4_7/) | GLM-4.7 large MoE model from Zhipu AI. |

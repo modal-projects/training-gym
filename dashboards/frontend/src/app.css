@@ -1,18 +1,28 @@
+@import url("https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap");
+
 :root {
-  --bg: #0f0f0f;
-  --panel: #141414;
-  --panel-alt: #181818;
-  --surface: #1d1d1d;
-  --border: #2f2f2f;
-  --border-strong: #464646;
-  --text: #c7c7c7;
-  --text-bright: #e8e8e8;
+  --bg: #181818;
+  --bg-depth: #111111;
+  --panel: #1c1c1c;
+  --panel-alt: #242424;
+  --surface: #2f2f2f;
+  --surface-raised: #323232;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --text: #d1d1d1;
+  --text-bright: #ffffff;
   --muted: #a3a3a3;
+  --muted-strong: #747474;
   --accent: #7fee64;
-  --accent-dim: rgba(127, 238, 100, 0.12);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 40%, transparent);
   --green: #7fee64;
-  --yellow: #fbbf24;
-  --red: #f87171;
+  --yellow: #f2c96a;
+  --red: #f18888;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono:
+    "Fira Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas,
+    monospace;
 }
 
 * {
@@ -21,11 +31,12 @@
   padding: 0;
 }
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fira+Mono:wght@400&display=swap');
-
 body {
-  font: 14px/1.5 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  background: var(--bg);
+  font: 14px/1.5 var(--font-sans);
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-depth) 100%);
   color: var(--text);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  color-scheme: dark;
 }

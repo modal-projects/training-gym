@@ -3,40 +3,76 @@
 It is used to track the training run and its results.
 """
 
-from dataclasses import asdict, dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel
 
 from modal_training_gym.frameworks.base import Framework
-from modal_training_gym.frameworks.slime.config import SlimeConfig
 
-
-TrainConfig = SlimeConfig  # TODO: add other frameworks like `| Miles | MsSwift`
+if TYPE_CHECKING:
+    from modal_training_gym.common.train_result import TrainResult
 
 TRAINING_RUNS_STORE_NAME = "training-runs"
 
 
-@dataclass
-class TrainingRun:
+@dataclass(frozen=True)
+class TrainingRunWithResult:
+    run: "TrainingRun"
+    train_result: "TrainResult | None"
+
+    @property
+    def has_train_result(self) -> bool:
+        return self.train_result is not None
+
+
+class TrainingRun(BaseModel):
     run_id: str
     modal_app_id: str
     framework: Framework
-    config: TrainConfig  # TODO: add other frameworks
+    config: Any
+    dataset_id: str = ""
+    deployment_id: str = ""
+    created_at: int = 0
+    metadata: dict[str, Any] | None = None
 
     def save(self) -> None:
-        from modal import Dict
+        from modal_training_gym.common.client import _post
 
-        store = Dict.from_name(TRAINING_RUNS_STORE_NAME, create_if_missing=True)
-        store[self.run_id] = asdict(self)
+        _post("/run", self.model_dump())
 
     @classmethod
     def from_id(cls, run_id: str) -> "TrainingRun":
-        from modal import Dict
+        from modal_training_gym.common.client import _get
 
-        store = Dict.from_name(TRAINING_RUNS_STORE_NAME, create_if_missing=True)
-        return cls(**store[run_id])
+        return cls.model_validate(_get(f"/runs/{run_id}"))
 
     @classmethod
     def list_runs(cls) -> list["TrainingRun"]:
-        from modal import Dict
+        from modal_training_gym.common.client import _get
 
-        store = Dict.from_name(TRAINING_RUNS_STORE_NAME, create_if_missing=True)
-        return [cls(**run) for run in store.values()]
+        return [cls.model_validate(r) for r in _get("/runs")]
+
+    @classmethod
+    def list_runs_with_train_result(cls) -> list[TrainingRunWithResult]:
+        from modal_training_gym.common.client import _get
+        from modal_training_gym.common.train_result import TrainResult
+
+        runs = cls.list_runs()
+        train_result_records: list[dict[str, Any]] = _get("/train-results")
+
+        train_results_by_run_id: dict[str, TrainResult] = {}
+        for record in train_result_records:
+            result_run_id = record.get("training_run_id", "")
+            if result_run_id:
+                train_results_by_run_id[result_run_id] = TrainResult(**record)
+
+        return [
+            TrainingRunWithResult(
+                run=run,
+                train_result=train_results_by_run_id.get(run.run_id),
+            )
+            for run in runs
+        ]

@@ -1,9 +1,9 @@
 ---
-title: "Qwen3-0.6B GRPO on Haiku with slime on Modal"
-description: "Qwen3-0.6B GRPO on haiku poems — structure score + LLM judge"
+title: "qwen3-4b GRPO on Haiku with slime on Modal"
+description: "qwen3-4b GRPO on haiku poems — structure score + LLM judge"
 ---
 
-This tutorial teaches [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B)
+This tutorial teaches [qwen3-4b](https://huggingface.co/Qwen/qwen3-4b)
 to write 5-7-5 haiku poems about Modal-flavored topics. The training
 algorithm is **GRPO** (Group Relative Policy Optimization, the method
 popularized by DeepSeek-R1): for each prompt, the model generates a
@@ -266,7 +266,7 @@ base_model = Qwen3_0_6B()
 my_training_run = SlimeConfig(
     model=base_model,
     dataset=HaikuDataset(DATA_PATH, base_model.model_name),
-    wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-haiku"),
+    wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-haiku"),
     ref_load=base_model.model_name,
     megatron_to_hf_mode="bridge",
 
@@ -279,7 +279,7 @@ my_training_run = SlimeConfig(
     eval_interval=20,
     n_samples_per_eval_prompt=8,
 
-    save="/checkpoints/qwen3-0.6b-haiku",
+    save="/checkpoints/qwen3-4b-haiku",
     save_interval=10,
 
     local_python_sources=LOCAL_PYTHON_SOURCES,
@@ -330,7 +330,7 @@ torch_dist → HF conversion if your config didn't emit one. Inspect
 what the training left behind with:
 
 ```bash
-modal volume ls slime-checkpoints qwen3-0.6b-haiku/
+modal volume ls slime-checkpoints qwen3-4b-haiku/
 ```
 
 and point `model_path` at whichever directory has a `config.json`.
@@ -348,11 +348,11 @@ serve_app = build_vllm_serve_app(
     # the slime-checkpoints volume — the exact subdirectory depends
     # on slime's bridge-mode output layout. (To smoke-test the
     # serving pipeline before training, swap this for the HF repo
-    # id "Qwen/Qwen3-0.6B" and drop the `checkpoints_volume` arg
+    # id "Qwen/qwen3-4b" and drop the `checkpoints_volume` arg
     # below; vLLM will download the base model itself.)
-    model_path="/checkpoints/qwen3-0.6b-haiku",
+    model_path="/checkpoints/qwen3-4b-haiku",
     # The `model` field callers pass in chat-completions requests.
-    served_model_name="qwen3-0.6b-haiku",
+    served_model_name="qwen3-4b-haiku",
     # Mount the training checkpoints volume; without this,
     # /checkpoints wouldn't exist in the serving container.
     checkpoints_volume="slime-checkpoints",

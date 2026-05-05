@@ -14,7 +14,7 @@ TUTORIAL_METADATA = {
     'order': 0,
     'api_classes': [
         'ModelConfig', 'HFModelConfiguration', 'ModelArchitecture',
-        'Qwen3_0_6B', 'DatasetConfig', 'WandbConfig', 'SlimeConfig',
+        'Qwen3_0_6B', 'DatasetConfig', 'WandbConfig', 'TrainConfig', 'SlimeRecipe',
     ],
 }
 
@@ -162,14 +162,17 @@ def _factory_section():
 
     ```python
     from modal_training_gym.common.models import Qwen3_0_6B
+    from modal_training_gym.common.train import TrainConfig
     from modal_training_gym.common.wandb import WandbConfig
-    from modal_training_gym.frameworks.slime import SlimeConfig
+    from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 
-    run = SlimeConfig(
+    run = TrainConfig(
         model=Qwen3_0_6B(),
         dataset=MyDataset(...),
-        wandb=WandbConfig(project="my-runs", group="concepts-demo"),
-        # … framework-specific flags …
+        recipe=SlimeRecipe(
+            wandb=WandbConfig(project="my-runs", group="concepts-demo"),
+            # … framework-specific flags …
+        ),
     )
 
     app = run.build_app()   # modal.App — call app.train to run everything
@@ -196,7 +199,7 @@ def _volumes_section():
 
     Each framework uses its own data and checkpoints volumes (so one
     framework's half-written state can't corrupt another's), but the HF
-    cache is truly shared — download `Qwen3-0.6B` once, use it from any
+    cache is truly shared — download `qwen3-4b` once, use it from any
     framework.
 
     Nothing in a tutorial directly manipulates volumes — the launchers
