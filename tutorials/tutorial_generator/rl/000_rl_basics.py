@@ -21,7 +21,15 @@ TUTORIAL_METADATA = {
 
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
+@py_only
+@markdown
+def _todo_impl():
+    """
+    TODO: Make the python implementation of the tutorial actually run and good. Omit some of the teaching sections to make code < 100 LOC.
+    """
+    pass
 
+@notebook_only
 @markdown
 def _intro():
     """
@@ -33,48 +41,43 @@ def _intro():
     1. Serve the base model.
     2. Define a scoring function with a verifiable reward (syllable structure).
     3. Evaluate the base model against that scorer.
-    4. GRPO-train the model with slime using the reward function.
+    4. GRPO-train the model with [slime](https://github.com/THUDM/slime) using the reward function.
     5. Serve the trained checkpoint.
     6. Evaluate it with the same scorer and compare.
 
-    Why haikus? A haiku has two attributes you can score
+    **Why haikus?** A haiku has two attributes you can score
     automatically — whether it follows the 5-7-5 syllable format
-    (deterministic, cheap) and whether the poem is actually good
-    (subjective, needs an LLM judge). That split between
+    (deterministic, cheap) and whether the poem is actually good. That split between
     *verifiable* and *subjective* rewards is exactly the landscape
     RL post-training operates in. This tutorial covers the
-    verifiable half; see
-    [`003_slime_with_llm_as_judge`](../003_slime_with_llm_as_judge/)
-    for the LLM-judge extension.
+    verifiable half. In later tutorials, we will cover the subjective half.
 
-    The training config is intentionally tiny: 1×H100 and one
+    The training config is intentionally tiny: 1xH100 and one
     training iteration. It is a smoke run for the workflow, not a
     quality run.
     """
 
 
 @notebook_only
-@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
+@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main nltk")
 def _install():
     pass
 
-
+@notebook_only
 @code
 def _imports():
     import re
-    from typing import Any
 
     from modal_training_gym.common.dataset import HuggingFaceDataset
     from modal_training_gym.common.deployment import DeploymentConfig
     from modal_training_gym.common.eval import EvalConfig, EvalRowResult
     from modal_training_gym.common.models import Qwen3_4B
     from modal_training_gym.common.train import TrainConfig
-    from modal_training_gym.common.train_result import TrainResult
     from modal_training_gym.common.wandb import WandbConfig
     from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-    from modal_training_gym.train_recipes.slime_recipe.recipe import DATA_PATH
 
 
+@notebook_only
 @markdown
 def _serve_base_intro():
     """
@@ -88,22 +91,23 @@ def _serve_base_intro():
     """
 
 
+@notebook_only
 @code
 def _serve_base_model():
     base_model = Qwen3_4B()
     base_deployment = DeploymentConfig(
         model=base_model,
-        app_name="qwen3-4b-base-serve",
-        served_model_name="qwen3-4b-base",
     ).serve()
     print(base_deployment.url)
 
+@notebook_only
 @markdown
 def _qualitative_eval_of_base_model():
     """
     Now that the model has come alive, we can request it to write a haiku about a topic.
     """
 
+@notebook_only
 @code
 def _qualitative_eval_of_base_model_code():
     response = base_deployment.generate(
@@ -113,102 +117,66 @@ def _qualitative_eval_of_base_model_code():
     print(response)
 
 
+@notebook_only
 @markdown
-def _quantiative_grading_of_base_model():
+def _scoring_intro():
     """
     Okay, how do we evaluate if that was a good haiku or not?
-    In addition to the poetic quality, haikus must follow the 5-7-5 syllable format.
-    We can use a simple heuristic to count the syllables in the response.
+    A haiku must follow the 5-7-5 syllable format.
+    We can count syllables using NLTK's CMU Pronouncing Dictionary
+    (with a regex fallback for words not in the dictionary)
+    and score how close each line is to its target.
     """
 
 @notebook_only
 @code
-def _count_syllables_in_haiku():
+def _score_haiku():
+    _cmudict_cache = {}
+
+    def _get_cmudict() -> dict:
+        if not _cmudict_cache:
+            import nltk
+            from nltk.corpus import cmudict
+            nltk.download("cmudict", quiet=True)
+            _cmudict_cache.update(cmudict.dict())
+        return _cmudict_cache
+
     def _count_syllables(text: str) -> int:
-        words = re.findall(r"[a-zA-Z]+", text)
+        cmu = _get_cmudict()
         total = 0
-        for word in words:
-            count = len(re.findall(r"[aeiouy]+", word.lower()))
-            if word.lower().endswith("e") and count > 1:
-                count -= 1
-            total += max(count, 1)
+        for word in re.findall(r"[a-zA-Z]+", text):
+            phones = cmu.get(word.lower())
+            if phones:
+                total += sum(p[-1].isdigit() for p in phones[0])
+            else:
+                count = len(re.findall(r"[aeiouy]+", word.lower()))
+                if word.lower().endswith("e") and count > 1:
+                    count -= 1
+                total += max(count, 1)
         return total
 
+    def score_haiku(response: str) -> float:
+        lines = [l.strip() for l in response.strip().split("\n") if l.strip()]
+        if len(lines) != 3:
+            return 0.0
+        total_diff = sum(
+            abs(_count_syllables(line) - target)
+            for line, target in zip(lines, [5, 7, 5])
+        )
+        return -float(total_diff)
 
 @notebook_only
 @code
-def _grade_haiku():
-    def score_haiku(response: str) -> bool:
-        lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
-        has_three_lines = len(lines) == 3
-
-        syllable_counts = []
-        has_passed = True
-        if has_three_lines:
-            for i, (line, target) in enumerate(zip(lines, [5, 7, 5])):
-                count = _count_syllables(line)
-                syllable_counts.append(count)
-                diff = abs(count - target)
-                if diff != 0:
-                    print(f"Line {i+1} has {count} syllables, expected {target}. Difference: {diff}")
-                    has_passed = False
-        
-        return has_passed
-    
+def _score_haiku_demo():
     response = base_deployment.generate(
         "Write a haiku about cat.",
         chat_template_kwargs={"enable_thinking": False},
     )
     print(response)
-    print(score_haiku(response))
+    print(f"Score: {score_haiku(response)}")
 
 @markdown
-def _grade_haiku_into_eval():
-    """
-    Seems straightforward enough, right? How do we run an eval on our base model?
-    We can transform our scoring function above into an Eval Configuration.
-
-    First, to explain, an Eval Configuration is a class that owns the model-calling loop.
-    The task-specific part is a scoring function passed to `.evaluate(...)`, which must
-    return `EvalRowResult`.
-
-    Before, our score_haiku function only returned a boolean, which gives 0 or 1 score.
-    But we can make it return more granular result on *how much off* it was from the syllable
-    target.
-    """
-
-@code
-def _grade_haiku_into_eval_code():
-    def score_haiku(response: str) -> EvalRowResult:
-        lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
-        has_three_lines = len(lines) == 3
-
-        syllable_score = 0.0
-        syllable_counts = []
-        if has_three_lines:
-            for line, target in zip(lines, [5, 7, 5]):
-                count = _count_syllables(line)
-                syllable_counts.append(count)
-                diff = abs(count - target)
-                if diff == 0:
-                    syllable_score += 1.0
-                elif diff == 1:
-                    syllable_score += 0.5
-            syllable_score /= 3.0
-
-        score = (0.25 if has_three_lines else 0.0) + 0.75 * syllable_score
-        return EvalRowResult(
-            score=score,
-            passed=score >= 0.75,
-            response=response,
-            metadata={
-                "lines": len(lines),
-                "syllable_counts": syllable_counts,
-            },
-        )
-
-
-@markdown
+@notebook_only
 def _define_dataset():
     """
     Let's also define a Haiku dataset.
@@ -217,6 +185,7 @@ def _define_dataset():
     We can use this dataset to train our model.
     """
 
+@notebook_only
 @code
 def _define_dataset_code():
     class HaikuDataset(HuggingFaceDataset):
@@ -231,15 +200,10 @@ def _define_dataset_code():
         )
         prompt_template = "Write a haiku about {input}."
 
-    train_dataset = HaikuDataset(
-        prompt_data=f"{DATA_PATH}/haiku/train.jsonl",
-        eval_prompt_data={"haiku": f"{DATA_PATH}/haiku/eval.jsonl"},
-        n_rows=50,
-    )
-    eval_dataset = HaikuDataset(prompt_data=f"{DATA_PATH}/haiku/eval.jsonl", n_rows=10)
+    train_dataset = HaikuDataset(n_rows=50, include_eval=True)
+    eval_dataset = HaikuDataset(n_rows=10)
 
-
-
+@notebook_only
 @markdown
 def _eval_dataset_head():
     """
@@ -247,40 +211,49 @@ def _eval_dataset_head():
     topic and a reference `text` haiku.
     """
 
-
+@notebook_only
 @code
 def _eval_dataset_head_code():
     df = eval_dataset.to_pandas()
     print(len(df))
     df.head(5)
 
+@markdown
+@notebook_only
+def _grade_haiku_into_eval():
+    """
+    Seems straightforward enough, right? How do we run an eval on our base model with this dataset?
+    We can transform our scoring function above into an Eval Configuration.
 
+    First, to explain, an Eval Configuration is a class that owns the model-calling loop.
+    The task-specific part is a scoring function passed to `.evaluate(...)`, which must
+    return `EvalRowResult`.
+    """
+
+
+
+@notebook_only
 @markdown
 def _eval_base_intro():
     """
     ## Evaluate the base model
     """
 
-
+@notebook_only
 @code
 def _eval_base_model():
-    def haiku_prompt(example: dict[str, Any]) -> str:
-        return (
-            f"Write a haiku about {example['keywords'].lower()}.\n\n"
-            "Output only the three lines of the haiku, nothing else."
-        )
+    def eval_fn(_example: dict, response: str) -> EvalRowResult:
+        return EvalRowResult(score=score_haiku(response), response=response)
 
-    base_eval = EvalConfig(
-        prompt_fn=haiku_prompt,
-        deployment=base_deployment,
+    base_eval_config = EvalConfig(
         dataset=eval_dataset,
-        eval_fn=(lambda _df_row, response: score_haiku(response)),
+        eval_fn=eval_fn,
         generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
-    ).evaluate()
-    print(f"Base haiku score: {base_eval.accuracy:.1%}")
-    print(f"Passed (score >= 0.75): {base_eval.correct}/{base_eval.total}")
+    )
+    base_eval = base_eval_config.evaluate(base_deployment)
+    print(f"Average haiku score: {base_eval.mean:.1%}")
 
-
+@notebook_only
 @markdown
 def _train_intro():
     """
@@ -290,21 +263,44 @@ def _train_intro():
     Here, we use the slime framework (https://github.com/THUDM/slime) on Modal.
     """
 
-
+@notebook_only
 @code
 def _define_training_run():
-    from modal_training_gym.common.haiku_reward import haiku_rm
+    async def haiku_rm(args, sample, **kwargs) -> float:
+        import re
+        import nltk
+        from nltk.corpus import cmudict
+        nltk.download("cmudict", quiet=True)
+        cmu = dict(cmudict.dict())
+
+        def _count(text):
+            total = 0
+            for w in re.findall(r"[a-zA-Z]+", text):
+                phones = cmu.get(w.lower())
+                if phones:
+                    total += sum(p[-1].isdigit() for p in phones[0])
+                else:
+                    c = len(re.findall(r"[aeiouy]+", w.lower()))
+                    if w.lower().endswith("e") and c > 1:
+                        c -= 1
+                    total += max(c, 1)
+            return total
+
+        lines = [l.strip() for l in sample.response.strip().split("\n") if l.strip()]
+        if len(lines) != 3:
+            return 0.0
+        return -float(sum(abs(_count(line) - t) for line, t in zip(lines, [5, 7, 5])))
 
     my_training_run = TrainConfig(
         model=base_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
-            wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-haiku"),
+            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
 
             custom_rm_function=haiku_rm,
 
             num_rollout=10,
-            save_interval=5,
+            save_interval=2,
             apply_chat_template_kwargs='{"enable_thinking": false}',
 
             image_run_commands=lambda image: image.run_commands(
@@ -315,7 +311,7 @@ def _define_training_run():
     )
 
 
-
+@notebook_only
 @markdown
 def _train_section():
     """
@@ -326,11 +322,13 @@ def _train_section():
     """
 
 
+@notebook_only
 @code
 def _invoke_train():
     result = my_training_run.train()
 
 
+@notebook_only
 @markdown
 def _trained_eval_intro():
     """
@@ -342,6 +340,7 @@ def _trained_eval_intro():
     """
 
 
+@notebook_only
 @code
 def _serve_and_eval_trained():
     print(result.latest_checkpoint_path())
@@ -353,26 +352,36 @@ def _serve_and_eval_trained():
     ).serve()
     print(deployment.url)
 
-    def haiku_prompt(example: dict[str, Any]) -> str:
-        return (
-            f"Write a haiku about {example['keywords'].lower()}.\n\n"
-            "Output only the three lines of the haiku, nothing else."
-        )
 
-    trained_eval = EvalConfig(
-        prompt_fn=haiku_prompt,
-        deployment=deployment,
-        dataset=eval_dataset,
-        eval_fn=(lambda golden_df_row, response: score_haiku(response)),
-        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
-    ).evaluate(debug=True)
-    print(f"Trained haiku score: {trained_eval.accuracy:.1%}")
-    print(f"Passed (score >= 0.75): {trained_eval.correct}/{trained_eval.total}")
-    print(f"Delta: {trained_eval.accuracy - base_eval.accuracy:+.1%}")
-
-
+@notebook_only
 @markdown
-def _whats_next():
+def _trained_eval_intro():
     """
-    ## What's next: RL with LLM--as-a-judge
+    ## Serve and evaluate the trained checkpoint
+
+    The returned `TrainResult` has the checkpoint path and volume
+    metadata attached. Wrapping `result.model` in a `DeploymentConfig`
+    and calling `.serve()` deploys that checkpoint behind SGLang.
+    """
+    trained_eval = base_eval_config.evaluate(deployment, debug=True)
+    print(f"Trained haiku score: {trained_eval.mean:.1%}")
+
+
+@notebook_only
+@markdown
+def _sweep_intro():
+    """
+    ## Parameter sweeping
+
+    The reward function defines what "good" means — and different
+    definitions push the model in different directions. Let's define
+    three grading schemes and train with each:
+
+    | Scheme | Rule |
+    |--------|------|
+    | **strict** | Binary 1/0 — perfect 5-7-5 or nothing. |
+    | **graduated** | Negative sum of per-line syllable errors (the scorer we already wrote). |
+    ... more
+
+    TODO: implement async so we can parallelize param sweeping. Also would be good to try to attempt partial rewards.
     """

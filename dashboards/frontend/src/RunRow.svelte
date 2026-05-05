@@ -85,7 +85,7 @@
           class="pill-link pill-wandb"
           href={result.wandb_url}
           target="_blank"
-          rel="noopener"
+          rel="noopener noreferrer"
           onclick={(event) => event.stopPropagation()}>W&B</a
         >
       {/if}

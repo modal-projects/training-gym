@@ -123,57 +123,39 @@ class TrainResult:
     # ── Persistence ────────────────────────────────────────────────────────
 
     def save(self) -> None:
-        """Persist this result to the central gym server.
+        """Persist this result to the shared metadata volume."""
+        from modal_training_gym.common import vol_put
 
-        Called by each framework's ``train`` function at the end of a
-        successful run (from rank 0 only — the others would race).
-        Round-trips through :func:`dataclasses.asdict` so the record is
-        trivially serializable and forward-compatible across launcher
-        upgrades.
-        """
-        from modal_training_gym.common.client import _post
-
-        _post("/train-result", asdict(self))
+        vol_put(TRAIN_RESULTS_STORE_NAME, self.training_run_id, asdict(self))
 
     @classmethod
     def load(cls, training_run_id: str) -> "TrainResult":
-        """Load a completed run's result from the central gym server.
-
-        Parameters
-        ----------
-        training_run_id:
-            Specific run to load.
+        """Load a completed run's result.
 
         Raises
         ------
-        LookupError
-            No runs have been saved for this app yet, or the given
-            ``training_run_id`` isn't in the store.
+        KeyError
+            The given ``training_run_id`` isn't in the store.
         """
-        from modal_training_gym.common.client import _get
+        from modal_training_gym.common import vol_get
 
-        return cls(**_get(f"/train-results/{training_run_id}"))
+        return cls(**vol_get(TRAIN_RESULTS_STORE_NAME, training_run_id))
 
     @classmethod
     def list_results(cls) -> list["TrainResult"]:
-        from modal_training_gym.common.client import _get
+        from modal_training_gym.common import vol_list
 
-        return [cls(**r) for r in _get("/train-results")]
+        return [cls(**r) for r in vol_list(TRAIN_RESULTS_STORE_NAME)]
 
     # ── Volume lookup ────────────────────────────────────────────────────
 
     def volume(self) -> "Volume":
-        """Return a handle to the checkpoints :class:`modal.Volume`.
-
-        Always uses ``version=2`` — every framework launcher in this
-        package provisions its checkpoints volume at v2.
-        """
+        """Return a handle to the checkpoints :class:`modal.Volume`."""
         from modal import Volume
 
         return Volume.from_name(
             self.checkpoints_volume_name,
             create_if_missing=True,
-            version=2,
         )
 
     def dashboard_url(self) -> str:
@@ -231,7 +213,7 @@ class TrainResult:
         rel = self._volume_rel(self.checkpoint_dir)
         try:
             entries = self._listdir(rel)
-        except Exception:
+        except FileNotFoundError:
             return []
         return sorted(e for e in entries if e.startswith(self.iteration_prefix))
 
@@ -289,10 +271,13 @@ class TrainResult:
 
     def wandb_url(self) -> str | None:
         """Return the W&B run URL, or None if W&B info is not set."""
-        if not self.wandb_training_run_id or not self.wandb_project:
+        if (
+            not self.wandb_training_run_id
+            or not self.wandb_project
+            or not self.wandb_entity
+        ):
             return None
-        entity = self.wandb_entity or "_"
-        return f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_training_run_id}"
+        return f"https://wandb.ai/{self.wandb_entity}/{self.wandb_project}/runs/{self.wandb_training_run_id}"
 
     def wandb_metrics(
         self,
