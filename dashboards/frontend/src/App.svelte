@@ -1,14 +1,15 @@
 <script>
   import "./app.css";
-  import { fetchRuns, fetchEvals } from "./lib/api.js";
+  import { fetchRuns, fetchEvals, fetchDeployments } from "./lib/api.js";
   import FilterBar from "./FilterBar.svelte";
   import FrameworkSection from "./FrameworkSection.svelte";
   import logoSvg from "./lib/logo.svg";
 
-  import { fmtDate } from "./lib/format.js";
+  import { fmtDate, truncateId } from "./lib/format.js";
 
   let allRuns = $state([]);
   let allEvals = $state([]);
+  let allDeployments = $state([]);
   let loading = $state(true);
   let error = $state(null);
   let search = $state("");
@@ -54,9 +55,14 @@
     loading = true;
     error = null;
     try {
-      const [runs, evals] = await Promise.all([fetchRuns(), fetchEvals()]);
+      const [runs, evals, deployments] = await Promise.all([
+        fetchRuns(),
+        fetchEvals(),
+        fetchDeployments(),
+      ]);
       allRuns = runs;
       allEvals = evals;
+      allDeployments = deployments;
       activeFrameworks = new Set(allRuns.map(getFramework));
       activeStatuses = new Set(allRuns.map(getStatus));
     } catch (e) {
@@ -91,20 +97,22 @@
   );
 
   let filteredRuns = $derived(
-    allRuns.filter((r) => {
-      if (!activeFrameworks.has(getFramework(r))) return false;
-      if (!activeStatuses.has(getStatus(r))) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        if (
-          !r.run_id?.toLowerCase().includes(q) &&
-          !r.modal_app_id?.toLowerCase().includes(q) &&
-          !r.config_summary?.model_name?.toLowerCase().includes(q)
-        )
-          return false;
-      }
-      return true;
-    }),
+    allRuns
+      .filter((r) => {
+        if (!activeFrameworks.has(getFramework(r))) return false;
+        if (!activeStatuses.has(getStatus(r))) return false;
+        if (search) {
+          const q = search.toLowerCase();
+          if (
+            !r.run_id?.toLowerCase().includes(q) &&
+            !r.modal_app_id?.toLowerCase().includes(q) &&
+            !r.config_summary?.model_name?.toLowerCase().includes(q)
+          )
+            return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
   );
 
   let groupedRuns = $derived.by(() => {
@@ -119,7 +127,11 @@
   let sortedFrameworkKeys = $derived(Object.keys(groupedRuns).sort());
   let completedTotal = $derived(allRuns.filter((run) => run.train_result).length);
   let pendingTotal = $derived(allRuns.length - completedTotal);
-  let completedRuns = $derived(allRuns.filter((run) => run.train_result));
+  let completedRuns = $derived(
+    allRuns
+      .filter((run) => run.train_result)
+      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
+  );
 
   let sortedEvals = $derived(
     [...allEvals].sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
@@ -267,7 +279,7 @@
             <div class="empty">No runs match the current filters.</div>
           {:else}
             {#each sortedFrameworkKeys as fw (fw)}
-              <FrameworkSection framework={fw} runs={groupedRuns[fw]} />
+              <FrameworkSection framework={fw} runs={groupedRuns[fw]} deployments={allDeployments} />
             {/each}
           {/if}
         </div>
@@ -308,31 +320,31 @@
                     <th>Training run</th>
                     <th>Base model</th>
                     <th>Status</th>
-                    <th>Last updated</th>
                     <th>Cluster</th>
-                    <th>Adapter</th>
+                    <th>Checkpoint</th>
+                    <th>Links</th>
                   </tr>
                 </thead>
                 <tbody>
                   {#each completedRuns as run (run.run_id)}
                     <tr>
                       <td class="mono">
-                        {#if run.modal_app_url}
-                          <a
-                            class="run-link"
-                            href={run.modal_app_url}
-                            target="_blank"
-                            rel="noopener noreferrer">{run.run_id}</a
-                          >
-                        {:else}
-                          {run.run_id}
-                        {/if}
+                        <button class="cross-link" onclick={() => { search = run.run_id; activePage = "training"; }}>
+                          {truncateId(run.run_id)}
+                        </button>
                       </td>
                       <td>{run.config_summary?.model_name || "—"}</td>
                       <td><span class="deploy-status">Ready</span></td>
-                      <td>just now</td>
                       <td>{run.config_summary?.gpu_type || "—"}</td>
                       <td class="mono">{run.train_result?.checkpoint_dir || "—"}</td>
+                      <td class="links-cell">
+                        {#if run.modal_app_url}
+                          <a class="pill-link pill-modal" href={run.modal_app_url} target="_blank" rel="noopener noreferrer">Modal</a>
+                        {/if}
+                        {#if run.train_result?.wandb_url}
+                          <a class="pill-link pill-wandb" href={run.train_result.wandb_url} target="_blank" rel="noopener">W&B</a>
+                        {/if}
+                      </td>
                     </tr>
                   {/each}
                 </tbody>
@@ -381,6 +393,7 @@
                     <th>Score</th>
                     <th>Training run</th>
                     <th>Created</th>
+                    <th>Links</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -395,8 +408,21 @@
                         </span>
                       </td>
                       <td>{ev.correct}/{ev.total}</td>
-                      <td class="mono">{ev.training_run_id || "—"}</td>
+                      <td class="mono">
+                        {#if ev.training_run_id}
+                          <button class="cross-link" onclick={() => { search = ev.training_run_id; activePage = "training"; }}>
+                            {truncateId(ev.training_run_id)}
+                          </button>
+                        {:else}
+                          —
+                        {/if}
+                      </td>
                       <td>{fmtDate(ev.created_at)}</td>
+                      <td class="links-cell">
+                        {#if ev.deployment_url}
+                          <a class="pill-link pill-modal" href={ev.deployment_url} target="_blank" rel="noopener noreferrer">Endpoint</a>
+                        {/if}
+                      </td>
                     </tr>
                   {/each}
                 </tbody>
@@ -608,14 +634,6 @@
     font-family: var(--font-mono);
     color: color-mix(in srgb, var(--accent) 80%, white);
   }
-  .run-link {
-    color: inherit;
-    text-decoration: none;
-  }
-  .run-link:hover {
-    color: var(--accent);
-    text-decoration: underline;
-  }
   .deploy-status {
     display: inline-flex;
     align-items: center;
@@ -656,6 +674,50 @@
     border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
     background: color-mix(in srgb, var(--red) 10%, transparent);
     color: var(--red);
+  }
+  .links-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  .pill-link {
+    display: inline-block;
+    padding: 0.14rem 0.48rem;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .pill-modal {
+    color: var(--accent);
+    border: 1px solid var(--accent-border);
+    background: var(--accent-soft);
+  }
+  .pill-modal:hover {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .pill-wandb {
+    color: var(--yellow);
+    border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
+    background: color-mix(in srgb, var(--yellow) 10%, transparent);
+  }
+  .pill-wandb:hover {
+    background: color-mix(in srgb, var(--yellow) 18%, transparent);
+  }
+  .cross-link {
+    background: none;
+    border: none;
+    color: color-mix(in srgb, var(--accent) 80%, white);
+    font-family: var(--font-mono);
+    font-size: inherit;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .cross-link:hover {
+    color: var(--accent);
+    text-decoration: underline;
   }
   .empty {
     color: var(--muted);

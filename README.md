@@ -30,7 +30,7 @@ Every generated tutorial notebook has this line as its first code cell.
 
 ## Quickstart
 
-Run a tutorial — Qwen3-0.6B GRPO on GSM8K using slime:
+Run a tutorial — qwen3-4b GRPO on GSM8K using slime:
 
 ```bash
 uv run modal run --detach tutorials/rl/001_slime_intro/001_slime_intro.py::app.train

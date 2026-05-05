@@ -164,9 +164,14 @@ class SlimeRecipe(BaseTrainRecipe):
 
     @staticmethod
     def _dataset_to_fields(ds: "DatasetConfig") -> dict[str, Any]:
+        eval_prompt_data: list[str] | None = None
+        if ds.eval_prompt_data:
+            eval_prompt_data = [
+                v for name, path in ds.eval_prompt_data.items() for v in (name, path)
+            ]
         return {
             "prompt_data": ds.prompt_data,
-            "eval_prompt_data": ds.eval_prompt_data,
+            "eval_prompt_data": eval_prompt_data,
             "input_key": ds.input_key,
             "label_key": ds.label_key,
             "apply_chat_template": ds.apply_chat_template,

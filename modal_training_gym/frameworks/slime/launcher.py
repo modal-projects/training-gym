@@ -77,12 +77,24 @@ def build_slime_app(
             caller_script = os.path.abspath(mod_file)
 
     # ── Image ────────────────────────────────────────────────────────────────
-    image = (
-        Image.from_registry("slimerl/slime:nightly-dev-20260329a")
-        .entrypoint([])
-        .add_local_python_source("modal_training_gym", copy=True)
-        .add_local_dir(TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True)
+    image = Image.from_registry("slimerl/slime:nightly-dev-20260329a").entrypoint([])
+
+    if slime.image_run_commands is not None:
+        image = slime.image_run_commands(image)
+
+    if slime.local_slime:
+        image = image.add_local_dir(
+            slime.local_slime,
+            remote_path=SLIME_ROOT,
+            copy=True,
+            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
+        )
+
+    image = image.add_local_python_source("modal_training_gym", copy=True)
+    image = image.add_local_dir(
+        TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True
     )
+
     if caller_script is not None:
         caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]
         caller_remote_path = f"/root/{caller_module_name}.py"
@@ -110,15 +122,6 @@ def build_slime_app(
 
     for mod_name in slime.local_python_sources:
         image = image.add_local_python_source(mod_name, copy=True)
-    if slime.local_slime:
-        image = image.add_local_dir(
-            slime.local_slime,
-            remote_path=SLIME_ROOT,
-            copy=True,
-            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
-        )
-    if slime.image_run_commands is not None:
-        image = slime.image_run_commands(image)
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
@@ -279,7 +282,8 @@ def build_slime_app(
             await cluster.wait_forever()
             return
 
-        run_id = f"{app_name}-{int(time.time())}"
+        created_at = int(time.time())
+        run_id = f"{app_name}-{created_at}"
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
             "recipe": {
@@ -305,6 +309,7 @@ def build_slime_app(
             modal_app_id=os.environ.get("MODAL_APP_ID", ""),
             framework="slime",
             config=config_summary,
+            created_at=created_at,
         ).save()
         print(f"TrainingRun recorded: {run_id}")
 

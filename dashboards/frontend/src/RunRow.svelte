@@ -1,11 +1,14 @@
 <script>
   import { truncateId, fmtCluster, fmtLr } from "./lib/format.js";
 
-  let { run } = $props();
+  let { run, deployments = [] } = $props();
 
   let summary = $derived(run.config_summary || {});
   let result = $derived(run.train_result);
   let modalAppUrl = $derived(run.modal_app_url || null);
+  let deployment = $derived(
+    deployments.find((d) => d.app_name && result?.app_name && d.app_name === result.app_name) || null,
+  );
 
   function openModalApp() {
     if (!modalAppUrl) return;
@@ -67,20 +70,38 @@
     {/if}
   </td>
   <td>
+    {#if modalAppUrl}
+      <a
+        class="pill-link pill-modal"
+        href={modalAppUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        onclick={(event) => event.stopPropagation()}>Modal</a
+      >
+    {/if}
     {#if result}
-      {#if result.checkpoint_dir}
-        <span class="tag" title={result.checkpoint_dir}>
-          <strong>ckpt</strong>
-        </span>
-      {/if}
       {#if result.wandb_url}
         <a
-          class="wandb-link"
+          class="pill-link pill-wandb"
           href={result.wandb_url}
           target="_blank"
           rel="noopener"
           onclick={(event) => event.stopPropagation()}>W&B</a
         >
+      {/if}
+      {#if deployment?.url}
+        <a
+          class="pill-link pill-deploy"
+          href={deployment.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onclick={(event) => event.stopPropagation()}>Endpoint</a
+        >
+      {/if}
+      {#if result.checkpoint_dir}
+        <span class="tag" title={result.checkpoint_dir}>
+          <strong>ckpt</strong>
+        </span>
       {/if}
     {/if}
   </td>
@@ -195,19 +216,37 @@
     color: var(--text-bright);
     font-weight: 500;
   }
-  .wandb-link {
+  .pill-link {
     display: inline-block;
     padding: 0.14rem 0.48rem;
     margin-right: 0.3rem;
     border-radius: 6px;
     font-size: 0.68rem;
     font-weight: 500;
+    text-decoration: none;
+  }
+  .pill-modal {
+    color: var(--accent);
+    border: 1px solid var(--accent-border);
+    background: var(--accent-soft);
+  }
+  .pill-modal:hover {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .pill-wandb {
     color: var(--yellow);
     border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
     background: color-mix(in srgb, var(--yellow) 10%, transparent);
-    text-decoration: none;
   }
-  .wandb-link:hover {
+  .pill-wandb:hover {
     background: color-mix(in srgb, var(--yellow) 18%, transparent);
+  }
+  .pill-deploy {
+    color: var(--green);
+    border: 1px solid var(--accent-border);
+    background: var(--accent-soft);
+  }
+  .pill-deploy:hover {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
   }
 </style>

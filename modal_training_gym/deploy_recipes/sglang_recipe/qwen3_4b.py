@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from modal_training_gym.deploy_recipes.sglang_recipe.recipe import SglangRecipe
 
 _QWEN3_4B_DEFAULTS = {
@@ -13,6 +15,7 @@ _QWEN3_4B_DEFAULTS = {
 _SGLANG_DEFAULTS = SglangRecipe()
 
 
+@dataclass
 class Qwen3_4b_SglangRecipe(SglangRecipe):
     """Qwen3-4B on 1×H100 — sensible SGLang defaults for a 4B model."""
 

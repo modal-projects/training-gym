@@ -130,7 +130,7 @@ print("project:", wandb.project)
 #
 # Each framework uses its own data and checkpoints volumes (so one
 # framework's half-written state can't corrupt another's), but the HF
-# cache is truly shared — download `Qwen3-0.6B` once, use it from any
+# cache is truly shared — download `qwen3-4b` once, use it from any
 # framework.
 #
 # Nothing in a tutorial directly manipulates volumes — the launchers

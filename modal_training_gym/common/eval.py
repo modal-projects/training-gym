@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 
 DatasetExample = dict[str, Any]
+PromptFn = Callable[[DatasetExample], str]
 
 EVAL_RESULTS_STORE_NAME = "eval-results"
 
@@ -69,15 +70,18 @@ class EvalConfig:
     deployment: "ModelDeployment"
     dataset: "DatasetConfig"
     eval_fn: EvalFn
+    prompt_fn: PromptFn | None = None
     temperature: float = 0.0
     generate_kwargs: dict[str, Any] = field(default_factory=dict)
     training_run_id: str = ""
 
     def build_prompt(self, example: DatasetExample) -> str:
+        if self.prompt_fn is not None:
+            return self.prompt_fn(example)
         input_column = self.dataset.input_column
         if not input_column:
             raise ValueError(
-                "EvalConfig requires dataset.input_column or an overridden build_prompt()."
+                "EvalConfig requires dataset.input_column, prompt_fn, or an overridden build_prompt()."
             )
         return str(example[input_column])
 

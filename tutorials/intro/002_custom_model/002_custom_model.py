@@ -64,10 +64,10 @@ print(response)
 # An `EvalConfig` owns the model-calling loop. You provide:
 #
 # 1. A **dataset** — must expose `load()` returning iterable examples.
-# 2. A **scoring function** — takes `(example, model_response)` and
+# 2. A **scoring function** (`eval_fn`) — takes `(example, model_response)` and
 #    returns an `EvalRowResult` with a `score` and `passed` flag.
-# 3. A **prompt builder** — override `build_prompt()` to format each
-#    example into the prompt the model sees.
+# 3. A **prompt function** (`prompt_fn`) — takes an example dict and
+#    returns the prompt string the model sees.
 #
 # We'll use a tiny slice of GSM8K (grade-school math) and check
 # whether the model's answer contains the correct number.
@@ -98,15 +98,12 @@ def score_gsm8k(example: dict[str, Any], response: str) -> EvalRowResult:
         metadata={"gold": gold_number, "predicted": pred_number},
     )
 
-class GSM8KEval(EvalConfig):
-    eval_fn = score_gsm8k
-
-    def build_prompt(self, example: dict[str, Any]) -> str:
-        return (
-            f"{example['question']}\n\n"
-            "Solve step by step. Put your final numeric answer "
-            "after ####."
-        )
+def gsm8k_prompt(example: dict[str, Any]) -> str:
+    return (
+        f"{example['question']}\n\n"
+        "Solve step by step. Put your final numeric answer "
+        "after ####."
+    )
 
 # ## Run the eval
 #
@@ -116,9 +113,11 @@ class GSM8KEval(EvalConfig):
 
 eval_dataset = TinyGSM8K()
 
-result = GSM8KEval(
+result = EvalConfig(
     deployment=deployment,
     dataset=eval_dataset,
+    eval_fn=score_gsm8k,
+    prompt_fn=gsm8k_prompt,
 ).evaluate(debug=True)
 
 print(f"\nAccuracy: {result.accuracy:.1%}")

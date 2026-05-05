@@ -81,7 +81,7 @@ def build_sglang_serve_app(
     @app.cls(
         image=image,
         gpu=gpu_spec,
-        scaledown_window=60,
+        scaledown_window=10 * 60,
         timeout=24 * 60 * 60,
         volumes=volumes,
         secrets=[Secret.from_name("huggingface-secret")],
@@ -92,6 +92,7 @@ def build_sglang_serve_app(
         port=sglang_port,
         exit_grace_period=25,
         startup_timeout=startup_timeout,
+        proxy_regions=["us-east"],
     )
     @modal.concurrent(target_inputs=8)
     class Server:

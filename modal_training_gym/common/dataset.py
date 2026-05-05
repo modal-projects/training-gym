@@ -26,9 +26,9 @@ class DatasetConfig:
     prompt_data : str
         Path to the training data file (e.g. a ``.parquet`` file on the
         data volume). Default ``""``.
-    eval_prompt_data : list[str] | str | None
-        Evaluation data path(s). Can be a single path, a list of paths,
-        or ``None`` to skip evaluation. Default ``None``.
+    eval_prompt_data : dict[str, str] | None
+        Evaluation datasets as ``{name: path}`` pairs, or ``None`` to
+        skip evaluation. Default ``None``.
     input_key : str
         Column/key name for model input in the dataset. Default ``""``.
     label_key : str
@@ -38,7 +38,7 @@ class DatasetConfig:
     """
 
     prompt_data: str = ""
-    eval_prompt_data: list[str] | str | None = None
+    eval_prompt_data: dict[str, str] | None = None
     input_key: str = ""
     label_key: str = ""
     apply_chat_template: bool = True
@@ -113,6 +113,8 @@ class HuggingFaceDataset(DatasetConfig):
             name = self.hf_repo.replace("/", "_")
             ext = "jsonl" if self.output_format == "jsonl" else "parquet"
             self.prompt_data = f"{self.data_root}/{name}/train.{ext}"
+        if not self.input_key and self.input_column and self.output_column:
+            self.input_key = "messages"
 
     def load(self):
         from datasets import load_dataset
@@ -167,13 +169,6 @@ class HuggingFaceDataset(DatasetConfig):
         self._write_split(ds, self.prompt_data)
 
         if self.eval_prompt_data:
-            eval_paths = (
-                self.eval_prompt_data
-                if isinstance(self.eval_prompt_data, list)
-                else [self.eval_prompt_data]
-            )
-            for path in eval_paths:
-                if not path:
-                    continue
+            for path in self.eval_prompt_data.values():
                 eval_ds = self._format_for_training(self.load())
                 self._write_split(eval_ds, path)

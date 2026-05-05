@@ -64,8 +64,6 @@ def _imports():
     import re
     from typing import Any
 
-    import modal
-
     from modal_training_gym.common.dataset import HuggingFaceDataset
     from modal_training_gym.common.deployment import DeploymentConfig
     from modal_training_gym.common.eval import EvalConfig, EvalRowResult
@@ -210,17 +208,6 @@ def _grade_haiku_into_eval_code():
         )
 
 
-@code
-def _define_eval_dataset_code():
-    class HaikuEvalConfig(EvalConfig):        
-        def build_prompt(self, example: dict[str, Any]) -> str:
-            return (
-                f"Write a haiku about {example['keywords'].lower()}.\n\n"
-                "Output only the three lines of the haiku, nothing else."
-            )
-
-
-
 @markdown
 def _define_dataset():
     """
@@ -237,7 +224,7 @@ def _define_dataset_code():
         input_column = "keywords"
         output_column = "text"
         output_format = "jsonl"
-        apply_chat_template = False
+        apply_chat_template = True
         system_prompt = (
             "You are a haiku poet. Write a haiku about the given topic. "
             "Use the 5-7-5 syllable format across three lines."
@@ -246,7 +233,7 @@ def _define_dataset_code():
 
     train_dataset = HaikuDataset(
         prompt_data=f"{DATA_PATH}/haiku/train.jsonl",
-        eval_prompt_data=["haiku", f"{DATA_PATH}/haiku/eval.jsonl"],
+        eval_prompt_data={"haiku": f"{DATA_PATH}/haiku/eval.jsonl"},
         n_rows=50,
     )
     eval_dataset = HaikuDataset(prompt_data=f"{DATA_PATH}/haiku/eval.jsonl", n_rows=10)
@@ -277,7 +264,14 @@ def _eval_base_intro():
 
 @code
 def _eval_base_model():
-    base_eval = HaikuEvalConfig(
+    def haiku_prompt(example: dict[str, Any]) -> str:
+        return (
+            f"Write a haiku about {example['keywords'].lower()}.\n\n"
+            "Output only the three lines of the haiku, nothing else."
+        )
+
+    base_eval = EvalConfig(
+        prompt_fn=haiku_prompt,
         deployment=base_deployment,
         dataset=eval_dataset,
         eval_fn=(lambda _df_row, response: score_haiku(response)),
@@ -305,11 +299,12 @@ def _define_training_run():
         model=base_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
-            wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-haiku"),
+            wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-haiku"),
 
             custom_rm_function=haiku_rm,
 
             num_rollout=10,
+            save_interval=5,
             apply_chat_template_kwargs='{"enable_thinking": false}',
 
             image_run_commands=lambda image: image.run_commands(
@@ -322,35 +317,18 @@ def _define_training_run():
 
 
 @markdown
-def _build_section():
+def _train_section():
     """
-    ## Build and run
-    """
+    ## Train
 
-
-@code
-def _build_app():
-    app = my_training_run.build_app()
-
-
-@py_only
-@markdown
-def _run_cli():
-    """
-    From the CLI:
-
-    ```bash
-    uv run modal run --detach tutorials/rl/000_rl_basics/000_rl_basics.py::app.train
-    ```
+    `TrainConfig.train()` builds the Modal app, runs training, and
+    returns a `TrainResult` with the run ID and checkpoint path.
     """
 
 
-@notebook_only
 @code
 def _invoke_train():
-    with modal.enable_output():
-        with app.run():
-            app.train.remote()
+    result = my_training_run.train()
 
 
 @markdown
@@ -358,16 +336,14 @@ def _trained_eval_intro():
     """
     ## Serve and evaluate the trained checkpoint
 
-    After training completes, `TrainResult.load(...)` reconstructs the
-    trained model with its checkpoint path and volume metadata attached.
-    Wrapping it in `DeploymentConfig` and calling `.serve()` deploys
-    that checkpoint behind vLLM.
+    The returned `TrainResult` has the checkpoint path and volume
+    metadata attached. Wrapping `result.model` in a `DeploymentConfig`
+    and calling `.serve()` deploys that checkpoint behind SGLang.
     """
 
 
 @code
 def _serve_and_eval_trained():
-    result = TrainResult.load("qwen3-4b-haiku")
     print(result.latest_checkpoint_path())
 
     deployment = DeploymentConfig(
@@ -377,7 +353,14 @@ def _serve_and_eval_trained():
     ).serve()
     print(deployment.url)
 
-    trained_eval = HaikuEvalConfig(
+    def haiku_prompt(example: dict[str, Any]) -> str:
+        return (
+            f"Write a haiku about {example['keywords'].lower()}.\n\n"
+            "Output only the three lines of the haiku, nothing else."
+        )
+
+    trained_eval = EvalConfig(
+        prompt_fn=haiku_prompt,
         deployment=deployment,
         dataset=eval_dataset,
         eval_fn=(lambda golden_df_row, response: score_haiku(response)),

@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from modal_training_gym.deploy_recipes.vllm_recipe.recipe import VllmRecipe
 
 _QWEN3_4B_DEFAULTS = {
@@ -8,6 +10,7 @@ _QWEN3_4B_DEFAULTS = {
 _VLLM_DEFAULTS = VllmRecipe()
 
 
+@dataclass
 class Qwen3_4b_VllmRecipe(VllmRecipe):
     """Qwen3-4B on 1×H100 — sensible vLLM defaults for a 4B model."""
 

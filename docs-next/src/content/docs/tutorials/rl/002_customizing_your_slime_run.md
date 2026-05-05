@@ -4,7 +4,7 @@ description: "Customizing your slime run — scaling nodes, parallelism, and thr
 ---
 
 The [intro tutorial](../001_slime_intro/001_slime_intro.ipynb) runs
-Qwen3-0.6B GRPO on GSM8K with all defaults — one node, colocated,
+qwen3-4b GRPO on GSM8K with all defaults — one node, colocated,
 the model's built-in `SlimePreset`. This tutorial shows how to use
 the same slime knobs on a larger Qwen3-4B run when you need more
 from your training job.

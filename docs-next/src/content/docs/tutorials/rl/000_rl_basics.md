@@ -218,7 +218,7 @@ from modal_training_gym.common.haiku_reward import haiku_rm
 my_training_run = SlimeConfig(
     model=base_model,
     dataset=HaikuDataset(),
-    wandb=WandbConfig(project="slime-grpo", group="qwen3-0.6b-haiku"),
+    wandb=WandbConfig(project="slime-grpo", group="qwen3-4b-haiku"),
 
     custom_rm_function=haiku_rm,
 
@@ -228,7 +228,7 @@ my_training_run = SlimeConfig(
     eval_interval=5,
     n_samples_per_eval_prompt=8,
 
-    save="/checkpoints/qwen3-0.6b-haiku",
+    save="/checkpoints/qwen3-4b-haiku",
     save_interval=1,
 
     image_run_commands=[

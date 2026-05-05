@@ -81,7 +81,7 @@ def build_vllm_serve_app(
     @app.function(
         image=image,
         gpu=f"{gpu}:{n_gpu}",
-        scaledown_window=60,
+        scaledown_window=10 * 60,
         timeout=24 * 60 * 60,
         volumes=volumes,
         secrets=[Secret.from_name("huggingface-secret")],

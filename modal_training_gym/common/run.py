@@ -35,6 +35,7 @@ class TrainingRun(BaseModel):
     config: Any
     dataset_id: str = ""
     deployment_id: str = ""
+    created_at: int = 0
     metadata: dict[str, Any] | None = None
 
     def save(self) -> None:

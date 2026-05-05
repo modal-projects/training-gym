@@ -2,6 +2,7 @@ import dataclasses as _dc
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.frameworks.slime import build_slime_app
 from modal_training_gym.train_recipes.base import RecipeType
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
@@ -47,3 +48,15 @@ class TrainConfig:
                 name=self.name,
             )
         raise ValueError(f"Unknown recipe type: {recipe_type}")
+
+    def train(self) -> TrainResult:
+        """Build the app, run training, and return the TrainResult."""
+        import modal
+
+        app = self.build_app()
+        with modal.enable_output():
+            with app.run():
+                result_dict = app.train.remote()
+        result = TrainResult(**result_dict)
+        print(f"Training complete: {result.training_run_id}")
+        return result

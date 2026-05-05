@@ -1,7 +1,7 @@
 <script>
   import RunRow from "./RunRow.svelte";
 
-  let { framework, runs } = $props();
+  let { framework, runs, deployments = [] } = $props();
   let collapsed = $state(false);
 
   let completedCount = $derived(
@@ -45,12 +45,12 @@
             <th>Cluster</th>
             <th>Config</th>
             <th>Status</th>
-            <th>Details</th>
+            <th>Links</th>
           </tr>
         </thead>
         <tbody>
           {#each runs as run (run.run_id)}
-            <RunRow {run} />
+            <RunRow {run} {deployments} />
           {/each}
         </tbody>
       </table>
