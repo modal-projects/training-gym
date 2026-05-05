@@ -21,7 +21,7 @@ modal_training_gym/         ← installable package
 │   ├── dataset.py          ← DatasetConfig base (user subclasses)
 │   ├── models/             ← ModelConfig hierarchy (see below)
 │   ├── wandb.py            ← WandbConfig
-│   ├── framework.py        ← resolve_caller_module, mount_tools_dir, TOOLS_*
+│   ├── framework.py        ← resolve_caller_module, TOOLS_*
 │   └── ray_cluster.py      ← ModalRayCluster helper (used by slime)
 ├── frameworks/             ← one subpackage per training framework
 │   ├── slime/              ← slime GRPO (Ray + Megatron + SGLang)

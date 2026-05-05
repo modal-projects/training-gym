@@ -93,8 +93,6 @@ def _serve_base_model():
     base_model = Qwen3_4B()
     base_deployment = DeploymentConfig(
         model=base_model,
-        app_name="qwen3-4b-base-serve",
-        served_model_name="qwen3-4b-base",
     ).serve()
     print(base_deployment.url)
 
@@ -199,7 +197,6 @@ def _grade_haiku_into_eval_code():
         score = (0.25 if has_three_lines else 0.0) + 0.75 * syllable_score
         return EvalRowResult(
             score=score,
-            passed=score >= 0.75,
             response=response,
             metadata={
                 "lines": len(lines),
@@ -264,17 +261,25 @@ def _eval_base_intro():
 
 @code
 def _eval_base_model():
-    def haiku_prompt(example: dict[str, Any]) -> str:
+    def haiku_prompt(example: dict) -> str:
         return (
             f"Write a haiku about {example['keywords'].lower()}.\n\n"
             "Output only the three lines of the haiku, nothing else."
         )
+    
+    class HaikuEvalConfig(EvalConfig):
+        def build_prompt(self, example: dict) -> str:
+            return (
+                f"Write a haiku about {example['keywords'].lower()}.\n\n"
+                "Output only the three lines of the haiku, nothing else."
+            )
+        
+        def eval_fn(self, _df_row: dict, response: str) -> EvalRowResult:
+            return score_haiku(response)
 
-    base_eval = EvalConfig(
-        prompt_fn=haiku_prompt,
+    base_eval = HaikuEvalConfig(
         deployment=base_deployment,
         dataset=eval_dataset,
-        eval_fn=(lambda _df_row, response: score_haiku(response)),
         generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
     ).evaluate()
     print(f"Base haiku score: {base_eval.accuracy:.1%}")
@@ -293,7 +298,69 @@ def _train_intro():
 
 @code
 def _define_training_run():
-    from modal_training_gym.common.haiku_reward import haiku_rm
+    _CMUDICT: dict = {}
+
+
+    def _get_cmudict() -> dict:
+        """Lazy-load NLTK's CMUdict; cached on first call per process."""
+        import nltk
+        from nltk.corpus import cmudict as nltk_cmudict
+
+        if not _CMUDICT:
+            nltk.download("cmudict", quiet=True)
+            _CMUDICT.update(nltk_cmudict.dict())
+        return _CMUDICT
+
+
+    def _count_syllables_for_word(word: str, cmudict: dict) -> int:
+        original = word
+        word = word.lower().strip()
+        phones = cmudict.get(word)
+        if phones:
+            return len([p for p in phones[0] if p[-1].isdigit()])
+        if original.isupper() and 2 <= len(original) <= 6 and original.isalpha():
+            # Letters-as-name heuristic for unknown acronyms; 'w' = "double-u" = 3 syllables.
+            return sum(3 if c == "w" else 1 for c in original.lower())
+        count = len(re.findall(r"[aeiouy]+", word))
+        if word.endswith("e") and count > 1:
+            count -= 1
+        return max(count, 1)
+
+
+    def _diff_syllables(text: str, target: int, cmudict: dict) -> int:
+        words = re.findall(r"[a-zA-Z]+", text)
+        total = sum(_count_syllables_for_word(w, cmudict) for w in words)
+        return abs(total - target)
+
+
+    def _segment_haiku_lines(response: str) -> list[str]:
+        if "/" in response:
+            lines = [line.strip() for line in response.split("/")]
+        elif ". " in response:
+            lines = [line.strip() for line in response.split(". ")]
+        else:
+            lines = [line.strip() for line in response.split("\n")]
+        return [line for line in lines if line]
+
+
+    def score_haiku_structure(response: str, cmudict: dict) -> float:
+        """Score in [0, 1]: 1/4 for 3 lines, 1/4 per line with correct syllables."""
+        lines = _segment_haiku_lines(response)
+        score = 0.25 if len(lines) == 3 else 0.0
+        for i, target in enumerate([5, 7, 5]):
+            if i < len(lines):
+                diff = _diff_syllables(lines[i], target, cmudict)
+                if diff == 0:
+                    score += 0.25
+                elif diff == 1:
+                    score += 0.125
+        return score
+
+
+    async def haiku_rm(args, sample, **kwargs) -> float:
+        cmudict = _get_cmudict()
+        structure = score_haiku_structure(sample.response, cmudict)
+        return structure
 
     my_training_run = TrainConfig(
         model=base_model,

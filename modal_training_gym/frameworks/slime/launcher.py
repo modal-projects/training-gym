@@ -306,7 +306,7 @@ def build_slime_app(
         }
         TrainingRun(
             run_id=run_id,
-            modal_app_id=os.environ.get("MODAL_APP_ID", ""),
+            modal_app_id=app.app_id or "",
             framework="slime",
             config=config_summary,
             created_at=created_at,
@@ -359,6 +359,7 @@ def build_slime_app(
         save_root = str(slime.save).rstrip("/") if slime.save else str(CHECKPOINTS_PATH)
 
         wandb_run_id = ""
+        wandb_entity = ""
         if slime.wandb and slime.wandb.project:
             try:
                 import wandb
@@ -372,6 +373,7 @@ def build_slime_app(
                 )
                 if runs:
                     wandb_run_id = runs[0].id
+                    wandb_entity = runs[0].entity
             except Exception as e:
                 print(f"Could not fetch W&B run ID: {e}")
 
@@ -385,7 +387,7 @@ def build_slime_app(
             checkpoints_mount_path=str(CHECKPOINTS_PATH).rstrip("/"),
             iteration_prefix=slime.checkpoint.iteration_prefix,
             wandb_project=slime.wandb.project if slime.wandb else "",
-            wandb_entity="",
+            wandb_entity=wandb_entity,
             wandb_training_run_id=wandb_run_id,
         )
         result.save()

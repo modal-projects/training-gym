@@ -133,16 +133,22 @@
       .sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
   );
 
+  function evalAccuracy(ev) {
+    const rows = ev.rows || [];
+    if (!rows.length) return 0;
+    return rows.reduce((s, r) => s + (r.score || 0), 0) / rows.length;
+  }
+
   let sortedEvals = $derived(
     [...allEvals].sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
   );
   let avgAccuracy = $derived(
     allEvals.length
-      ? allEvals.reduce((s, e) => s + (e.accuracy || 0), 0) / allEvals.length
+      ? allEvals.reduce((s, e) => s + evalAccuracy(e), 0) / allEvals.length
       : 0,
   );
   let distinctDatasets = $derived(
-    new Set(allEvals.map((e) => e.dataset_name || "—")).size,
+    new Set(allEvals.map((e) => e.config?.dataset?.name || "—")).size,
   );
 
   let statusText = $derived.by(() => {
@@ -342,7 +348,7 @@
                           <a class="pill-link pill-modal" href={run.modal_app_url} target="_blank" rel="noopener noreferrer">Modal</a>
                         {/if}
                         {#if run.train_result?.wandb_url}
-                          <a class="pill-link pill-wandb" href={run.train_result.wandb_url} target="_blank" rel="noopener">W&B</a>
+                          <a class="pill-link pill-wandb" href={run.train_result.wandb_url} target="_blank" rel="noopener noreferrer">W&B</a>
                         {/if}
                       </td>
                     </tr>
@@ -368,8 +374,8 @@
           <strong>{distinctDatasets}</strong>
         </article>
         <article class="summary-card">
-          <span class="summary-label">Training runs</span>
-          <strong>{new Set(allEvals.map((e) => e.training_run_id).filter(Boolean)).size}</strong>
+          <span class="summary-label">Total examples</span>
+          <strong>{allEvals.reduce((s, e) => s + (e.rows || []).length, 0)}</strong>
         </article>
       </section>
 
@@ -391,36 +397,29 @@
                     <th>Model</th>
                     <th>Accuracy</th>
                     <th>Score</th>
-                    <th>Training run</th>
                     <th>Created</th>
                     <th>Links</th>
                   </tr>
                 </thead>
                 <tbody>
                   {#each sortedEvals as ev (ev.eval_id)}
+                    {@const acc = evalAccuracy(ev)}
+                    {@const total = (ev.rows || []).length}
+                    {@const cfg = ev.config || {}}
                     <tr>
                       <td class="mono">{ev.eval_id}</td>
-                      <td>{ev.dataset_name || "—"}</td>
-                      <td>{ev.deployment_model_name || "—"}</td>
+                      <td>{cfg.dataset?.name || "—"}</td>
+                      <td>{cfg.deployment?.model_name || "—"}</td>
                       <td>
-                        <span class="eval-accuracy" class:eval-high={ev.accuracy >= 0.7} class:eval-mid={ev.accuracy >= 0.4 && ev.accuracy < 0.7} class:eval-low={ev.accuracy < 0.4}>
-                          {(ev.accuracy * 100).toFixed(1)}%
+                        <span class="eval-accuracy" class:eval-high={acc >= 0.7} class:eval-mid={acc >= 0.4 && acc < 0.7} class:eval-low={acc < 0.4}>
+                          {(acc * 100).toFixed(1)}%
                         </span>
                       </td>
-                      <td>{ev.correct}/{ev.total}</td>
-                      <td class="mono">
-                        {#if ev.training_run_id}
-                          <button class="cross-link" onclick={() => { search = ev.training_run_id; activePage = "training"; }}>
-                            {truncateId(ev.training_run_id)}
-                          </button>
-                        {:else}
-                          —
-                        {/if}
-                      </td>
+                      <td>{(acc * total).toFixed(1)}/{total}</td>
                       <td>{fmtDate(ev.created_at)}</td>
                       <td class="links-cell">
-                        {#if ev.deployment_url}
-                          <a class="pill-link pill-modal" href={ev.deployment_url} target="_blank" rel="noopener noreferrer">Endpoint</a>
+                        {#if cfg.deployment?.url}
+                          <a class="pill-link pill-modal" href={cfg.deployment.url} target="_blank" rel="noopener noreferrer">Endpoint</a>
                         {/if}
                       </td>
                     </tr>

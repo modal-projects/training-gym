@@ -6,4 +6,4 @@ Tasks that are currently not fully validated.
     - non-cluster examples with a smaller model to ensure cost savings.
     - using it on a larger model (e.g. GLM 4.7)
 - In logs, tell user we are converting checkpoint from mt to hf. Do this in serve.
-- Self host gym-server
+- Remove gym-server from the modal-training-gym client side and move to shared functions that operate on volumes. Still keep the gym-server for the dashboard but when training results finish they just call shared fns to write.

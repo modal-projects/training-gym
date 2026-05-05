@@ -33,7 +33,7 @@ class TrainConfig:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def build_app(self):
+    def _build_app(self):
         recipe_type = self.recipe.recipe_type if self.recipe else RecipeType.SLIME
         if recipe_type == RecipeType.SLIME:
             base_recipe = SlimeRecipe.get_base_recipe(self.model)
@@ -53,7 +53,7 @@ class TrainConfig:
         """Build the app, run training, and return the TrainResult."""
         import modal
 
-        app = self.build_app()
+        app = self._build_app()
         with modal.enable_output():
             with app.run():
                 result_dict = app.train.remote()

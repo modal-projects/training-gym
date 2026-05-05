@@ -20,9 +20,8 @@ class EvalRowResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     score: float
-    passed: bool
     response: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict) # metadata that user can inject about the evaluation result
 
 
 EvalFn = Callable[[DatasetExample, str], EvalRowResult]
@@ -30,17 +29,16 @@ EvalFn = Callable[[DatasetExample, str], EvalRowResult]
 
 class EvalResult(BaseModel):
     eval_id: str
-    accuracy: float
-    correct: int
-    total: int
-    deployment_app_name: str = ""
-    deployment_url: str = ""
-    deployment_model_name: str = ""
-    dataset_id: str = ""
-    dataset_name: str = ""
-    training_run_id: str = ""
     created_at: int = 0
     rows: list[EvalRowResult] = Field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return len(self.rows)
+
+    @property
+    def accuracy(self) -> float:
+        return sum(r.score for r in self.rows) / self.total if self.total else 0.0
 
     def save(self) -> None:
         from modal_training_gym.common.client import _post
@@ -71,9 +69,7 @@ class EvalConfig:
     dataset: "DatasetConfig"
     eval_fn: EvalFn
     prompt_fn: PromptFn | None = None
-    temperature: float = 0.0
     generate_kwargs: dict[str, Any] = field(default_factory=dict)
-    training_run_id: str = ""
 
     def build_prompt(self, example: DatasetExample) -> str:
         if self.prompt_fn is not None:
@@ -90,51 +86,47 @@ class EvalConfig:
         from uuid import uuid4
 
         self.deployment.wait_until_ready()
-        rows = list(self.dataset.load())
 
-        total = len(rows)
         results: list[EvalRowResult] = []
 
-        for idx, example in enumerate(rows, start=1):
+        for idx, example in enumerate(self.dataset.load(), start=1):
             if debug:
-                print(f"Evaluating example {idx}/{total}: {example}", flush=True)
+                print(f"Evaluating example {idx}: {example}", flush=True)
             text = self.deployment.generate(
                 self.build_prompt(example),
-                temperature=self.temperature,
                 **self.generate_kwargs,
             )
             result = self.eval_fn(example, text)
             if not result.response:
                 result = EvalRowResult(
                     score=result.score,
-                    passed=result.passed,
                     response=text,
                     metadata=result.metadata,
                 )
             if debug:
                 print(
-                    f"Finished example {idx}/{total}: "
+                    f"Finished example {idx}: "
                     f"response={result.response!r} score={result.score}",
                     flush=True,
                 )
             results.append(result)
 
-        correct = sum(int(result.passed) for result in results)
-        score = sum(result.score for result in results)
+        config_summary = {
+            "deployment": {
+                "app_name": getattr(self.deployment, "app_name", ""),
+                "url": getattr(self.deployment, "url", ""),
+                "model_name": getattr(self.deployment, "served_model_name", ""),
+            },
+            "dataset": {
+                "id": self._dataset_id(),
+                "name": self._dataset_name(),
+            },
+        }
 
-        dataset_id = self._dataset_id()
         result = EvalResult(
             eval_id=f"eval-{uuid4().hex[:12]}",
-            accuracy=score / total if total else 0.0,
-            correct=correct,
-            total=total,
-            deployment_app_name=getattr(self.deployment, "app_name", ""),
-            deployment_url=getattr(self.deployment, "url", ""),
-            deployment_model_name=getattr(self.deployment, "served_model_name", ""),
-            dataset_id=dataset_id,
-            dataset_name=self._dataset_name(),
-            training_run_id=self.training_run_id,
             created_at=int(time.time()),
+            config=config_summary,
             rows=results,
         )
         if persist:

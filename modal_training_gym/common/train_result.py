@@ -289,10 +289,9 @@ class TrainResult:
 
     def wandb_url(self) -> str | None:
         """Return the W&B run URL, or None if W&B info is not set."""
-        if not self.wandb_training_run_id or not self.wandb_project:
+        if not self.wandb_training_run_id or not self.wandb_project or not self.wandb_entity:
             return None
-        entity = self.wandb_entity or "_"
-        return f"https://wandb.ai/{entity}/{self.wandb_project}/runs/{self.wandb_training_run_id}"
+        return f"https://wandb.ai/{self.wandb_entity}/{self.wandb_project}/runs/{self.wandb_training_run_id}"
 
     def wandb_metrics(
         self,

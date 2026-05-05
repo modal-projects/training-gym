@@ -65,7 +65,7 @@ print(response)
 #
 # 1. A **dataset** — must expose `load()` returning iterable examples.
 # 2. A **scoring function** (`eval_fn`) — takes `(example, model_response)` and
-#    returns an `EvalRowResult` with a `score` and `passed` flag.
+#    returns an `EvalRowResult` with a `score`.
 # 3. A **prompt function** (`prompt_fn`) — takes an example dict and
 #    returns the prompt string the model sees.
 #
@@ -90,10 +90,9 @@ def score_gsm8k(example: dict[str, Any], response: str) -> EvalRowResult:
     gold_number = extract_final_number(gold_answer.split("####")[-1])
     pred_number = extract_final_number(response)
 
-    passed = gold_number is not None and pred_number == gold_number
+    correct = gold_number is not None and pred_number == gold_number
     return EvalRowResult(
-        score=1.0 if passed else 0.0,
-        passed=passed,
+        score=1.0 if correct else 0.0,
         response=response,
         metadata={"gold": gold_number, "predicted": pred_number},
     )
@@ -120,11 +119,10 @@ result = EvalConfig(
     prompt_fn=gsm8k_prompt,
 ).evaluate(debug=True)
 
-print(f"\nAccuracy: {result.accuracy:.1%}")
-print(f"Passed: {result.correct}/{result.total}")
+print(f"\nAccuracy: {result.accuracy:.1%} ({result.total} examples)")
 
 for i, row in enumerate(result.rows):
-    status = "PASS" if row.passed else "FAIL"
+    status = "PASS" if row.score >= 1.0 else "FAIL"
     print(f"  [{status}] #{i+1}: gold={row.metadata['gold']} pred={row.metadata['predicted']}")
 
 # ## What's next
