@@ -21,7 +21,15 @@ TUTORIAL_METADATA = {
 
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
+@py_only
+@markdown
+def _todo_impl():
+    """
+    TODO: Make the python implementation of the tutorial actually run and good. Omit some of the teaching sections to make code < 100 LOC.
+    """
+    pass
 
+@notebook_only
 @markdown
 def _intro():
     """
@@ -33,21 +41,18 @@ def _intro():
     1. Serve the base model.
     2. Define a scoring function with a verifiable reward (syllable structure).
     3. Evaluate the base model against that scorer.
-    4. GRPO-train the model with slime using the reward function.
+    4. GRPO-train the model with [slime](https://github.com/THUDM/slime) using the reward function.
     5. Serve the trained checkpoint.
     6. Evaluate it with the same scorer and compare.
 
-    Why haikus? A haiku has two attributes you can score
+    **Why haikus?** A haiku has two attributes you can score
     automatically — whether it follows the 5-7-5 syllable format
-    (deterministic, cheap) and whether the poem is actually good
-    (subjective, needs an LLM judge). That split between
+    (deterministic, cheap) and whether the poem is actually good. That split between
     *verifiable* and *subjective* rewards is exactly the landscape
     RL post-training operates in. This tutorial covers the
-    verifiable half; see
-    [`003_slime_with_llm_as_judge`](../003_slime_with_llm_as_judge/)
-    for the LLM-judge extension.
+    verifiable half. In later tutorials, we will cover the subjective half.
 
-    The training config is intentionally tiny: 1×H100 and one
+    The training config is intentionally tiny: 1xH100 and one
     training iteration. It is a smoke run for the workflow, not a
     quality run.
     """
@@ -58,7 +63,7 @@ def _intro():
 def _install():
     pass
 
-
+@notebook_only
 @code
 def _imports():
     import re
@@ -72,9 +77,9 @@ def _imports():
     from modal_training_gym.common.train_result import TrainResult
     from modal_training_gym.common.wandb import WandbConfig
     from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-    from modal_training_gym.train_recipes.slime_recipe.recipe import DATA_PATH
 
 
+@notebook_only
 @markdown
 def _serve_base_intro():
     """
@@ -88,6 +93,7 @@ def _serve_base_intro():
     """
 
 
+@notebook_only
 @code
 def _serve_base_model():
     base_model = Qwen3_4B()
@@ -96,12 +102,14 @@ def _serve_base_model():
     ).serve()
     print(base_deployment.url)
 
+@notebook_only
 @markdown
 def _qualitative_eval_of_base_model():
     """
     Now that the model has come alive, we can request it to write a haiku about a topic.
     """
 
+@notebook_only
 @code
 def _qualitative_eval_of_base_model_code():
     response = base_deployment.generate(
@@ -111,6 +119,7 @@ def _qualitative_eval_of_base_model_code():
     print(response)
 
 
+@notebook_only
 @markdown
 def _quantiative_grading_of_base_model():
     """
@@ -119,8 +128,9 @@ def _quantiative_grading_of_base_model():
     We can use a simple heuristic to count the syllables in the response.
     """
 
+@notebook_only
 @code
-def _count_syllables_in_haiku():
+def _count_syllables_in_haiku_code():
     def _count_syllables(text: str) -> int:
         words = re.findall(r"[a-zA-Z]+", text)
         total = 0
@@ -131,9 +141,8 @@ def _count_syllables_in_haiku():
             total += max(count, 1)
         return total
 
-# TODO: fix later
-@notebook_only
 @code
+@notebook_only
 def _grade_haiku():
     def score_haiku(response: str) -> int:
         lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
@@ -160,6 +169,7 @@ def _grade_haiku():
     print(f"Syllable count diffs: {score_haiku(response)}")
 
 @markdown
+@notebook_only
 def _grade_haiku_into_eval():
     """
     Seems straightforward enough, right? How do we run an eval on our base model?
@@ -168,14 +178,11 @@ def _grade_haiku_into_eval():
     First, to explain, an Eval Configuration is a class that owns the model-calling loop.
     The task-specific part is a scoring function passed to `.evaluate(...)`, which must
     return `EvalRowResult`.
-
-    Before, our score_haiku function only returned a boolean, which gives 0 or 1 score.
-    But we can make it return more granular result on *how much off* it was from the syllable
-    target.
     """
 
 
 @markdown
+@notebook_only
 def _define_dataset():
     """
     Let's also define a Haiku dataset.
@@ -184,6 +191,7 @@ def _define_dataset():
     We can use this dataset to train our model.
     """
 
+@notebook_only
 @code
 def _define_dataset_code():
     class HaikuDataset(HuggingFaceDataset):
@@ -198,15 +206,11 @@ def _define_dataset_code():
         )
         prompt_template = "Write a haiku about {input}."
 
-    train_dataset = HaikuDataset(
-        prompt_data=f"{DATA_PATH}/haiku/train.jsonl",
-        eval_prompt_data={"haiku": f"{DATA_PATH}/haiku/eval.jsonl"},
-        n_rows=50,
-    )
-    eval_dataset = HaikuDataset(prompt_data=f"{DATA_PATH}/haiku/eval.jsonl", n_rows=10)
+    train_dataset = HaikuDataset(n_rows=50, include_eval=True)
+    eval_dataset = HaikuDataset(n_rows=10)
 
 
-
+@notebook_only
 @markdown
 def _eval_dataset_head():
     """
@@ -214,21 +218,21 @@ def _eval_dataset_head():
     topic and a reference `text` haiku.
     """
 
-
+@notebook_only
 @code
 def _eval_dataset_head_code():
     df = eval_dataset.to_pandas()
     print(len(df))
     df.head(5)
 
-
+@notebook_only
 @markdown
 def _eval_base_intro():
     """
     ## Evaluate the base model
     """
 
-
+@notebook_only
 @code
 def _eval_base_model():
     def haiku_prompt(example: dict) -> str:
@@ -263,7 +267,7 @@ def _eval_base_model():
     print(f"Base haiku score: {base_eval.accuracy:.1%}")
     print(f"Passed (score >= 0.75): {base_eval.correct}/{base_eval.total}")
 
-
+@notebook_only
 @markdown
 def _train_intro():
     """
@@ -273,7 +277,7 @@ def _train_intro():
     Here, we use the slime framework (https://github.com/THUDM/slime) on Modal.
     """
 
-
+@notebook_only
 @code
 def _define_training_run():
     def haiku_rm(args, sample, **kwargs) -> float:
@@ -300,7 +304,7 @@ def _define_training_run():
     )
 
 
-
+@notebook_only
 @markdown
 def _train_section():
     """
@@ -311,11 +315,13 @@ def _train_section():
     """
 
 
+@notebook_only
 @code
 def _invoke_train():
     result = my_training_run.train()
 
 
+@notebook_only
 @markdown
 def _trained_eval_intro():
     """
@@ -327,6 +333,7 @@ def _trained_eval_intro():
     """
 
 
+@notebook_only
 @code
 def _serve_and_eval_trained():
     print(result.latest_checkpoint_path())

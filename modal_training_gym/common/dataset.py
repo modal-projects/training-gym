@@ -97,6 +97,7 @@ class HuggingFaceDataset(DatasetConfig):
     hf_repo: str = ""
     hf_split: str = "train"
     hf_config: str | None = None
+    include_eval: bool = False
     data_root: str = "/data"
     output_format: str = "parquet"
     input_column: str = ""
@@ -109,10 +110,14 @@ class HuggingFaceDataset(DatasetConfig):
         self.data_root = str(data_root)
         for k, v in kwargs.items():
             setattr(self, k, v)
+        name = self.hf_repo.replace("/", "_")
+        ext = "jsonl" if self.output_format == "jsonl" else "parquet"
         if not self.prompt_data:
-            name = self.hf_repo.replace("/", "_")
-            ext = "jsonl" if self.output_format == "jsonl" else "parquet"
-            self.prompt_data = f"{self.data_root}/{name}/train.{ext}"
+            self.prompt_data = f"{self.data_root}/{name}/{self.hf_split}.{ext}"
+        if self.include_eval and not self.eval_prompt_data:
+            self.eval_prompt_data = {
+                "eval": f"{self.data_root}/{name}/eval.{ext}"
+            }
         if not self.input_key and self.input_column and self.output_column:
             self.input_key = "messages"
 
