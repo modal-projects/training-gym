@@ -4,7 +4,7 @@ from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.frameworks.slime import build_slime_app
-from modal_training_gym.train_recipes.base import RecipeType
+from modal_training_gym.train_recipes.base import BaseTrainRecipe, RecipeType
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
@@ -26,15 +26,13 @@ class TrainConfig:
     # ── Composed configs (required) ─────────────────────────────────────────
     dataset: DatasetConfig
     model: ModelConfig
-    recipe: SlimeRecipe | None = None
+    recipe: BaseTrainRecipe
 
-    # ── App identity ─────────────────────────────────────────────────────────
-    name: str = ""
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def _build_app(self):
-        recipe_type = self.recipe.recipe_type if self.recipe else RecipeType.SLIME
+        recipe_type = self.recipe.recipe_type
         if recipe_type == RecipeType.SLIME:
             base_recipe = SlimeRecipe.get_base_recipe(self.model)
             if self.recipe is not None:
@@ -45,7 +43,6 @@ class TrainConfig:
                 slime=combined,
                 model=self.model,
                 dataset=self.dataset,
-                name=self.name,
             )
         raise ValueError(f"Unknown recipe type: {recipe_type}")
 
@@ -57,6 +54,6 @@ class TrainConfig:
         with modal.enable_output():
             with app.run():
                 result_dict = app.train.remote()
-        result = TrainResult(**result_dict)
+        result = TrainResult(**TrainResult._parse_model_config(result_dict))
         print(f"Training complete: {result.training_run_id}")
         return result

@@ -6,6 +6,19 @@ Tasks that are currently not fully validated.
     - non-cluster examples with a smaller model to ensure cost savings.
     - using it on a larger model (e.g. GLM 4.7)
 - In logs, tell user we are converting checkpoint from mt to hf. Do this in serve.
-- ~~Remove gym-server from the modal-training-gym client side and move to shared functions that operate on volumes. Still keep the gym-server for the dashboard but when training results finish they just call shared fns to write.~~ **Done** — server now persists to `training-gym-metadata` Volume instead of `modal.Dict`.
+- Use mount_tools_dir
+
+
+## Unknowns
 - How do u add tool calling to your model: eval is single turn in how it works right now
-- Make .train() and other functions async so we can parallelize stuff
+- EvalConfig passes in EvalFn, which is very similar to how we pass in custom_rm_fn, but that requires allowing the two to translate between each other, which is very cursed.
+- We might want to allow users to specify top level args (e.g. number of rollouts) without knowing what framework they are using?
+
+
+## Standouts/Differentiator
+People care about 2 things:
+- How efficient training is
+- How customizable is the training
+
+## Ideas
+- Training with sandbox (deep multiturns agents using sandbox)

@@ -27,6 +27,8 @@ class WandbConfig:
     disable_random_suffix : bool
         When ``True``, suppresses the random suffix that W&B appends to
         run names. Default ``True``.
+    modal_wandb_secret_name : str
+        Name of the Modal secret containing the W&B API key. Default ``"wandb-secret"``.
     """
 
     project: str = ""
@@ -34,6 +36,7 @@ class WandbConfig:
     exp_name: str = ""
     key: str = ""
     disable_random_suffix: bool = True
+    modal_wandb_secret_name: str = "wandb-secret"
 
 
 def append_megatron_wandb_args(

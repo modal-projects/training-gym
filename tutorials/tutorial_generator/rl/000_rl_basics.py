@@ -68,13 +68,16 @@ def _install():
 def _imports():
     import re
 
-    from modal_training_gym.common.dataset import HuggingFaceDataset
-    from modal_training_gym.common.deployment import DeploymentConfig
-    from modal_training_gym.common.eval import EvalConfig, EvalRowResult
-    from modal_training_gym.common.models import Qwen3_4B
-    from modal_training_gym.common.train import TrainConfig
-    from modal_training_gym.common.wandb import WandbConfig
-    from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+    from modal_training_gym import (
+        DeploymentConfig,
+        EvalConfig,
+        EvalRowResult,
+        HuggingFaceDataset,
+        Qwen3_4B,
+        SlimeRecipe,
+        TrainConfig,
+        WandbConfig,
+    )
 
 
 @notebook_only
@@ -200,7 +203,7 @@ def _define_dataset_code():
         )
         prompt_template = "Write a haiku about {input}."
 
-    train_dataset = HaikuDataset(n_rows=50, include_eval=True)
+    train_dataset = HaikuDataset(n_rows=50)
     eval_dataset = HaikuDataset(n_rows=10)
 
 @notebook_only
@@ -355,14 +358,17 @@ def _serve_and_eval_trained():
 
 @notebook_only
 @markdown
-def _trained_eval_intro():
+def _trained_eval_section():
     """
-    ## Serve and evaluate the trained checkpoint
+    ## Evaluate the trained checkpoint
 
-    The returned `TrainResult` has the checkpoint path and volume
-    metadata attached. Wrapping `result.model` in a `DeploymentConfig`
-    and calling `.serve()` deploys that checkpoint behind SGLang.
+    Now let's run the same eval on the trained model and compare.
     """
+
+
+@notebook_only
+@code
+def _eval_trained():
     trained_eval = base_eval_config.evaluate(deployment, debug=True)
     print(f"Trained haiku score: {trained_eval.mean:.1%}")
 
