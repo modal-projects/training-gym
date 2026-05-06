@@ -1,44 +1,26 @@
-"""Dataset config + `prepare()` hook, shared across training frameworks.
+"""Dataset config + ``prepare()`` hook, shared across training frameworks.
 
 Pure data — each framework config writes its own converter from a
-`DatasetConfig` instance to its specific CLI flags (e.g. SlimeRecipe emits
-`--prompt-data`, `--input-key`, …).
+``DatasetConfig`` instance to its specific CLI flags (e.g. SlimeRecipe emits
+``--prompt-data``, ``--input-key``, …).
 
-Subclass and override `prepare()` to materialize the data into a shared
+Subclass and override ``prepare()`` to materialize the data into a shared
 volume.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
+DatasetRow = dict[str, Any]
 
 class DatasetConfig:
     """Dataset configuration shared across training frameworks.
 
-    Subclass this and override ``prepare()`` to materialize training data
-    into the shared volume. Each framework config converts these fields
-    into its own CLI flags (e.g. SlimeRecipe emits ``--prompt-data``,
-    ``--input-key``, etc.).
-
-    ## Fields
-
-    prompt_data : str
-        Path to the training data file (e.g. a ``.parquet`` file on the
-        data volume). Default ``""``.
-    eval_prompt_data : dict[str, str] | None
-        Evaluation datasets as ``{name: path}`` pairs, or ``None`` to
-        skip evaluation. Default ``None``.
-    input_key : str
-        Column/key name for model input in the dataset. Default ``""``.
-    label_key : str
-        Column/key name for labels/targets in the dataset. Default ``""``.
-    apply_chat_template : bool
-        Whether to apply the model's chat template to inputs. Default ``True``.
+    Describes *what* the data is. Where it gets written on disk is decided
+    by the recipe/launcher layer, not by the dataset itself.
     """
 
-    prompt_data: str = ""
-    eval_prompt_data: dict[str, str] | None = None
     input_key: str = ""
     label_key: str = ""
     apply_chat_template: bool = True
@@ -47,11 +29,11 @@ class DatasetConfig:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
-    def prepare(self) -> None:
-        """Download and/or preprocess the dataset into the data volume."""
+    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
+        """Materialize training data to ``path`` (and eval splits to ``eval_paths``)."""
         raise NotImplementedError(f"{type(self).__name__} has no prepare()")
 
-    def load(self):
+    def load(self) -> Iterable[DatasetRow]:
         """Load raw examples for local inspection or evaluation."""
         raise NotImplementedError(f"{type(self).__name__} has no load()")
 
@@ -63,42 +45,11 @@ class HuggingFaceDataset(DatasetConfig):
     ``input_column`` and ``output_column`` are set, ``prepare()``
     auto-wraps rows into chat-message format
     (``{"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}``).
-
-    ## Fields
-
-    hf_repo : str
-        HuggingFace dataset repo ID (e.g. ``"openai/gsm8k"``).
-    hf_split : str
-        Dataset split to load. Default ``"train"``.
-    hf_config : str | None
-        Dataset config name (for multi-config datasets). Default ``None``.
-    data_root : str
-        Root directory on the data volume. Default ``"/data"``.
-    output_format : str
-        Output format: ``"parquet"`` or ``"jsonl"``. Default ``"parquet"``.
-    input_column : str
-        Source column for user messages. When set with ``output_column``,
-        rows are auto-converted to chat format. Default ``""``.
-    output_column : str
-        Source column for assistant messages. Default ``""``.
-    system_prompt : str
-        Optional system message prepended to every conversation.
-        Default ``""``.
-    prompt_template : str
-        Template for the user message with an ``{input}`` placeholder.
-        When set, ``row[input_column]`` is formatted through this
-        template (e.g. ``"Write a haiku about {input}."``) instead of
-        being used verbatim. Default ``""`` (no template).
-    n_rows : int
-        Limit the dataset to the first *n* rows after loading.
-        ``0`` means use all rows. Default ``0``.
     """
 
     hf_repo: str = ""
     hf_split: str = "train"
     hf_config: str | None = None
-    include_eval: bool = False
-    data_root: str = "/data"
     output_format: str = "parquet"
     input_column: str = ""
     output_column: str = ""
@@ -106,20 +57,13 @@ class HuggingFaceDataset(DatasetConfig):
     prompt_template: str = ""
     n_rows: int = 0
 
-    def __init__(self, data_root: str = "/data", **kwargs: Any) -> None:
-        self.data_root = str(data_root)
+    def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
             setattr(self, k, v)
-        name = self.hf_repo.replace("/", "_")
-        ext = "jsonl" if self.output_format == "jsonl" else "parquet"
-        if not self.prompt_data:
-            self.prompt_data = f"{self.data_root}/{name}/{self.hf_split}.{ext}"
-        if self.include_eval and not self.eval_prompt_data:
-            self.eval_prompt_data = {"eval": f"{self.data_root}/{name}/eval.{ext}"}
         if not self.input_key and self.input_column and self.output_column:
             self.input_key = "messages"
 
-    def load(self):
+    def load(self) -> Iterable[DatasetRow]:
         from datasets import load_dataset
 
         ds = load_dataset(
@@ -167,11 +111,11 @@ class HuggingFaceDataset(DatasetConfig):
         else:
             ds.to_parquet(path)
 
-    def prepare(self) -> None:
+    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
         ds = self._format_for_training(self.load())
-        self._write_split(ds, self.prompt_data)
+        self._write_split(ds, path)
 
-        if self.eval_prompt_data:
-            for path in self.eval_prompt_data.values():
+        if eval_paths:
+            for eval_path in eval_paths.values():
                 eval_ds = self._format_for_training(self.load())
-                self._write_split(eval_ds, path)
+                self._write_split(eval_ds, eval_path)

@@ -3,21 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
+
+from modal_training_gym.common.dataset import DatasetRow
+from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_list, vol_put
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
     from modal_training_gym.common.deployment import ModelDeployment
 
 
-DatasetExample = dict[str, Any]
-
-EVAL_RESULTS_STORE_NAME = "eval-results"
+EVAL_RESULTS_STORE_NAME = MetadataStore.EVAL_RESULTS.value
 
 
 class EvalRowResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
     score: float
     response: str = ""
     metadata: dict[str, Any] = Field(
@@ -25,7 +24,7 @@ class EvalRowResult(BaseModel):
     )  # metadata that user can inject about the evaluation result
 
 
-EvalFn = Callable[[DatasetExample, str], EvalRowResult]
+EvalFn = Callable[[DatasetRow, str], EvalRowResult]
 
 
 class EvalResult(BaseModel):
@@ -43,21 +42,15 @@ class EvalResult(BaseModel):
         return sum(r.score for r in self.rows) / self.total if self.total else 0.0
 
     def save(self) -> None:
-        from modal_training_gym.common import vol_put
-
-        vol_put(EVAL_RESULTS_STORE_NAME, self.eval_id, self.model_dump(mode="json"))
+        vol_put(MetadataStore.EVAL_RESULTS, self.eval_id, self.model_dump(mode="json"))
 
     @classmethod
     def from_id(cls, eval_id: str) -> "EvalResult":
-        from modal_training_gym.common import vol_get
-
-        return cls.model_validate(vol_get(EVAL_RESULTS_STORE_NAME, eval_id))
+        return cls.model_validate(vol_get(MetadataStore.EVAL_RESULTS, eval_id))
 
     @classmethod
     def list_results(cls) -> list["EvalResult"]:
-        from modal_training_gym.common import vol_list
-
-        return [cls.model_validate(v) for v in vol_list(EVAL_RESULTS_STORE_NAME)]
+        return [cls.model_validate(v) for v in vol_list(MetadataStore.EVAL_RESULTS)]
 
 
 @dataclass
@@ -71,13 +64,13 @@ class EvalConfig:
     eval_fn: EvalFn
     generate_kwargs: dict[str, Any] = field(default_factory=dict)
 
-    def build_prompt(self, example: DatasetExample) -> str:
+    def build_prompt(self, row: DatasetRow) -> str:
         input_column = getattr(self.dataset, "input_column", "")
         if not input_column:
             raise ValueError(
                 "EvalConfig.build_prompt() requires dataset.input_column to be set."
             )
-        raw = str(example[input_column])
+        raw = str(row[input_column])
         template = getattr(self.dataset, "prompt_template", "")
         if template:
             return template.format(input=raw)
@@ -120,9 +113,14 @@ class EvalConfig:
             created_at=int(time.time()),
             config={
                 "deployment": {
-                    "app_name": getattr(deployment, "app_name", ""),
+                    "app_name": getattr(deployment.deployment_config, "app_name", ""),
                     "url": getattr(deployment, "url", ""),
-                    "served_model_name": getattr(deployment, "served_model_name", ""),
+                    "served_model_name": getattr(
+                        deployment.deployment_config, "served_model_name", ""
+                    ),
+                    "model_name": getattr(
+                        deployment.deployment_config.model, "model_name", ""
+                    ),
                 },
                 "dataset": type(self.dataset).__name__,
                 "eval_fn": getattr(self.eval_fn, "__name__", str(self.eval_fn)),

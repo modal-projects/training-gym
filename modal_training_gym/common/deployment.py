@@ -11,16 +11,15 @@ the live endpoint URL and convenience methods for generation and eval.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
-if TYPE_CHECKING:
-    from modal_training_gym.common.models import ModelConfig
-    from modal_training_gym.deploy_recipes.vllm_recipe import VllmRecipe
-    from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
+from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
+from modal_training_gym.deploy_recipes.vllm_recipe import VllmRecipe
+from modal_training_gym.utils.metadata import MetadataStore, vol_list, vol_put
 
-DEPLOYMENTS_STORE_NAME = "deployments"
+DEPLOYMENTS_STORE_NAME = MetadataStore.DEPLOYMENTS.value
 
 
 @dataclass
@@ -57,32 +56,36 @@ class DeploymentConfig:
         default_slug = (
             default_name_src.rstrip("/").split("/")[-1].replace("_", "-").lower()
         )
-        resolved_app_name = self.app_name or f"{default_slug}-serve"
-        resolved_served_model_name = self.served_model_name or default_slug
+        if not self.app_name:
+            self.app_name = f"{default_slug}-serve"
+        if not self.served_model_name:
+            self.served_model_name = default_slug
         checkpoints_volume = getattr(model, "checkpoints_volume_name", None)
         checkpoints_mount_path = getattr(model, "checkpoints_mount_path", None)
 
         if recipe.recipe_type == DeployRecipeType.SGLANG:
-            from modal_training_gym.common.serve_sglang import (
+            from modal_training_gym.deploy_recipes.sglang_recipe.serve_sglang import (
                 build_sglang_serve_app,
             )
 
             app = build_sglang_serve_app(
                 recipe=recipe,
-                app_name=resolved_app_name,
+                app_name=self.app_name,
                 model_path=model_path,
-                served_model_name=resolved_served_model_name,
+                served_model_name=self.served_model_name,
                 checkpoints_volume=checkpoints_volume,
                 checkpoints_mount_path=checkpoints_mount_path,
             )
         else:
-            from modal_training_gym.common.serve_vllm import build_vllm_serve_app
+            from modal_training_gym.deploy_recipes.vllm_recipe.serve_vllm import (
+                build_vllm_serve_app,
+            )
 
             app = build_vllm_serve_app(
                 recipe=recipe,
-                app_name=resolved_app_name,
+                app_name=self.app_name,
                 model_path=model_path,
-                served_model_name=resolved_served_model_name,
+                served_model_name=self.served_model_name,
                 checkpoints_volume=checkpoints_volume,
                 checkpoints_mount_path=checkpoints_mount_path,
             )
@@ -96,7 +99,7 @@ class DeploymentConfig:
 
         if recipe.recipe_type == DeployRecipeType.SGLANG:
             serve_cls = modal.Cls.from_name(
-                resolved_app_name,
+                self.app_name,
                 "Server",
                 environment_name=env_name,
             )
@@ -104,19 +107,17 @@ class DeploymentConfig:
             url = urls[0] if urls else None
         else:
             serve_fn = modal.Function.from_name(
-                resolved_app_name,
+                self.app_name,
                 "serve",
                 environment_name=env_name,
             )
             url = serve_fn.get_web_url()
         if not url:
             raise RuntimeError(
-                f"Deployed {resolved_app_name!r} but no web URL was returned."
+                f"Deployed {self.app_name!r} but no web URL was returned."
             )
         return ModelDeployment(
-            app=app,
-            app_name=resolved_app_name,
-            served_model_name=resolved_served_model_name,
+            deployment_config=self,
             url=url,
         )
 
@@ -128,10 +129,10 @@ class ModelDeployment(BaseModel):
     URL and convenience methods for generation and evaluation.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    app_name: str
-    served_model_name: str
+    deployment_config: DeploymentConfig
+    # TODO: Add Modal app id
     url: str
 
     def generate(self, prompt: str, **kwargs) -> str:
@@ -139,7 +140,7 @@ class ModelDeployment(BaseModel):
 
         self.wait_until_ready()
         body = {
-            "model": self.served_model_name,
+            "model": self.deployment_config.served_model_name,
             "messages": [{"role": "user", "content": prompt}],
             **kwargs,
         }
@@ -147,20 +148,19 @@ class ModelDeployment(BaseModel):
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
 
-
     def __post_init__(self) -> None:
         self.save()
 
     def save(self) -> None:
-        from modal_training_gym.common import vol_put
-
-        vol_put(DEPLOYMENTS_STORE_NAME, self.app_name, self.model_dump(mode="json"))
+        vol_put(
+            MetadataStore.DEPLOYMENTS,
+            self.deployment_config.app_name,
+            self.model_dump(mode="json"),
+        )
 
     @classmethod
     def list_deployments(cls) -> list["ModelDeployment"]:
-        from modal_training_gym.common import vol_list
-
-        return [cls.model_validate(d) for d in vol_list(DEPLOYMENTS_STORE_NAME)]
+        return [cls.model_validate(d) for d in vol_list(MetadataStore.DEPLOYMENTS)]
 
     def wait_until_ready(self, timeout: int = 600) -> None:
         import time

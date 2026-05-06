@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from modal_training_gym.frameworks.base import Framework
+from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_list, vol_put
 
 if TYPE_CHECKING:
     from modal_training_gym.common.train_result import TrainResult
 
-TRAINING_RUNS_STORE_NAME = "training-runs"
+TRAINING_RUNS_STORE_NAME = MetadataStore.TRAINING_RUNS.value
 
 
 @dataclass(frozen=True)
@@ -39,37 +40,29 @@ class TrainingRun(BaseModel):
     metadata: dict[str, Any] | None = None
 
     def save(self) -> None:
-        from modal_training_gym.common import vol_put
-
-        vol_put(TRAINING_RUNS_STORE_NAME, self.run_id, self.model_dump(mode="json"))
+        vol_put(MetadataStore.TRAINING_RUNS, self.run_id, self.model_dump(mode="json"))
 
     @classmethod
     def from_id(cls, run_id: str) -> "TrainingRun":
-        from modal_training_gym.common import vol_get
-
-        return cls.model_validate(vol_get(TRAINING_RUNS_STORE_NAME, run_id))
+        return cls.model_validate(vol_get(MetadataStore.TRAINING_RUNS, run_id))
 
     @classmethod
     def list_runs(cls) -> list["TrainingRun"]:
-        from modal_training_gym.common import vol_list
-
-        return [cls.model_validate(r) for r in vol_list(TRAINING_RUNS_STORE_NAME)]
+        return [cls.model_validate(r) for r in vol_list(MetadataStore.TRAINING_RUNS)]
 
     @classmethod
     def list_runs_with_train_result(cls) -> list[TrainingRunWithResult]:
-        from modal_training_gym.common.train_result import (
-            TrainResult,
-            TRAIN_RESULTS_STORE_NAME,
-        )
-        from modal_training_gym.common import vol_list
+        from modal_training_gym.common.train_result import TrainResult
 
         runs = cls.list_runs()
 
         train_results_by_run_id: dict[str, TrainResult] = {}
-        for record in vol_list(TRAIN_RESULTS_STORE_NAME):
+        for record in vol_list(MetadataStore.TRAIN_RESULTS):
             result_run_id = record.get("training_run_id", "")
             if result_run_id:
-                train_results_by_run_id[result_run_id] = TrainResult(**record)
+                train_results_by_run_id[result_run_id] = TrainResult(
+                    **TrainResult._parse_model_config(record)
+                )
 
         return [
             TrainingRunWithResult(

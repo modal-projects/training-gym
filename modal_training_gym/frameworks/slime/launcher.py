@@ -21,8 +21,6 @@ import shlex
 import subprocess
 import tempfile
 import time
-from dataclasses import asdict
-
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
@@ -195,7 +193,8 @@ def build_slime_app(
     )
     def prepare_dataset():
         data_volume.reload()
-        dataset.prepare()
+        prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
+        dataset.prepare(prompt_data, eval_paths)
         data_volume.commit()
 
     convert_nnodes = get_checkpoint_conversion_policy(slime)[0]
@@ -271,9 +270,50 @@ def build_slime_app(
     @app.function(
         image=image,
         gpu=gpu_spec,
+        volumes={
+            str(HF_CACHE_PATH): hf_cache_volume,
+            str(CHECKPOINTS_PATH): checkpoints_volume,
+        },
+        timeout=4 * 60 * 60,
+        secrets=[Secret.from_name("huggingface-secret")],
+        serialized=True,
+        name="convert_to_hf",
+    )
+    def convert_to_hf(input_dir: str, output_dir: str):
+        from huggingface_hub import snapshot_download
+
+        import importlib.util
+
+        hf_cache_volume.reload()
+        checkpoints_volume.reload()
+
+        hf_path = (
+            str(model.model_path) if model.model_path
+            else snapshot_download(model.model_name, local_files_only=True)
+        )
+
+        convert_script = importlib.util.find_spec(
+            "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf"
+        ).origin
+
+        cmd = (
+            f"python {convert_script} "
+            f"--input-dir {shlex.quote(input_dir)} "
+            f"--output-dir {shlex.quote(output_dir)} "
+            f"--origin-hf-dir {shlex.quote(hf_path)} "
+            f"--force"
+        )
+        print(f"Converting: {cmd}")
+        subprocess.run(["bash", "-c", cmd], check=True)
+        checkpoints_volume.commit()
+        print(f"Saved HF checkpoint to {output_dir}")
+
+    @app.function(
+        image=image,
+        gpu=gpu_spec,
         volumes=all_volumes,
         secrets=[
-            *([] if slime.wandb is None else [Secret.from_name("wandb-secret")]),
+            *([] if slime.wandb is None else [Secret.from_name(slime.wandb.modal_wandb_secret_name)]),
         ],
         timeout=24 * 60 * 60,
         experimental_options={"efa_enabled": True},
@@ -316,7 +356,6 @@ def build_slime_app(
                 else {}
             ),
             "dataset": {
-                "prompt_data": getattr(dataset, "prompt_data", ""),
                 "hf_repo": getattr(dataset, "hf_repo", ""),
                 "name": type(dataset).__name__,
             },
@@ -343,10 +382,12 @@ def build_slime_app(
                 model.download()
                 hf_cache_volume.commit()
 
-        if dataset and not os.path.exists(dataset.prompt_data):
-            print(f"Preparing dataset ({dataset.prompt_data} not found)...")
-            dataset.prepare()
-            data_volume.commit()
+        if dataset:
+            prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
+            if not os.path.exists(prompt_data):
+                print(f"Preparing dataset ({prompt_data} not found)...")
+                dataset.prepare(prompt_data, eval_paths)
+                data_volume.commit()
 
         prepare_slime_config(slime, model, tempfile.mkdtemp())
 
@@ -377,24 +418,33 @@ def build_slime_app(
 
         save_root = str(slime.save).rstrip("/") if slime.save else str(CHECKPOINTS_PATH)
 
-        wandb_run_id = ""
-        wandb_entity = ""
-        if slime.wandb and slime.wandb.project:
-            try:
-                import wandb
+        if model and slime.megatron_to_hf_mode == "bridge":
+            from huggingface_hub import snapshot_download as _snap
 
-                api = wandb.Api()
-                runs = api.runs(
-                    slime.wandb.project,
-                    filters={"group": slime.wandb.group} if slime.wandb.group else {},
-                    order="-created_at",
-                    per_page=1,
-                )
-                if runs:
-                    wandb_run_id = runs[0].id
-                    wandb_entity = runs[0].entity
-            except Exception as e:
-                print(f"Could not fetch W&B run ID: {e}")
+            hf_path = (
+                str(model.model_path) if model.model_path
+                else _snap(model.model_name, local_files_only=True)
+            )
+            prefix = slime.checkpoint.iteration_prefix
+            ckpt_dirs = sorted(
+                (d for d in os.scandir(save_root)
+                 if d.is_dir() and d.name.startswith(prefix) and not d.name.endswith("_hf")),
+                key=lambda d: d.name,
+            ) if prefix else []
+
+            for entry in ckpt_dirs:
+                hf_dir = f"{entry.path}_hf"
+                if not os.path.exists(hf_dir):
+                    cmd = (
+                        f"python {SLIME_ROOT}/tools/convert_torch_dist_to_hf.py "
+                        f"--input-dir {shlex.quote(entry.path)} "
+                        f"--output-dir {shlex.quote(hf_dir)} "
+                        f"--origin-hf-dir {shlex.quote(hf_path)} "
+                        f"--force"
+                    )
+                    print(f"Converting {entry.name} → HF: {cmd}")
+                    subprocess.run(["bash", "-c", cmd], check=True)
+                    print(f"Converted {entry.name} → {hf_dir}")
 
         result = TrainResult(
             app_name=app_name,
@@ -405,14 +455,11 @@ def build_slime_app(
             checkpoints_volume_name=f"{app_name}-checkpoints",
             checkpoints_mount_path=str(CHECKPOINTS_PATH).rstrip("/"),
             iteration_prefix=slime.checkpoint.iteration_prefix,
-            wandb_project=slime.wandb.project if slime.wandb else "",
-            wandb_entity=wandb_entity,
-            wandb_training_run_id=wandb_run_id,
         )
         result.save()
         checkpoints_volume.commit()
         print(f"TrainResult saved: {run_id}")
-        return asdict(result)
+        return result._to_dict()
 
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)

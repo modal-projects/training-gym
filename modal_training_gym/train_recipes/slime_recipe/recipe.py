@@ -169,14 +169,29 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── Container → slime flag converters ────────────────────────────────────
 
     @staticmethod
+    def _resolve_data_paths(
+        ds: "DatasetConfig",
+    ) -> tuple[str, dict[str, str] | None]:
+        """Derive on-volume file paths from a dataset's properties."""
+        hf_repo = getattr(ds, "hf_repo", "")
+        name = hf_repo.replace("/", "_") if hf_repo else type(ds).__name__
+        fmt = getattr(ds, "output_format", "parquet")
+        ext = "jsonl" if fmt == "jsonl" else "parquet"
+        split = getattr(ds, "hf_split", "train")
+        prompt_data = f"{DATA_PATH}/{name}/{split}.{ext}"
+        eval_prompt_data = {"eval": f"{DATA_PATH}/{name}/eval.{ext}"}
+        return prompt_data, eval_prompt_data
+
+    @staticmethod
     def _dataset_to_fields(ds: "DatasetConfig") -> dict[str, Any]:
+        prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(ds)
         eval_prompt_data: list[str] | None = None
-        if ds.eval_prompt_data:
+        if eval_paths:
             eval_prompt_data = [
-                v for name, path in ds.eval_prompt_data.items() for v in (name, path)
+                v for name, path in eval_paths.items() for v in (name, path)
             ]
         return {
-            "prompt_data": ds.prompt_data,
+            "prompt_data": prompt_data,
             "eval_prompt_data": eval_prompt_data,
             "input_key": ds.input_key,
             "label_key": ds.label_key,

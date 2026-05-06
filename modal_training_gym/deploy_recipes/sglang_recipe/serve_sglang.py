@@ -98,7 +98,7 @@ def build_sglang_serve_app(
     class Server:
         @modal.enter()
         def startup(self):
-            from modal_training_gym.common._sglang_endpoint import (
+            from modal_training_gym.deploy_recipes.sglang_recipe._sglang_endpoint import (
                 SGLangEndpoint,
                 warmup_chat_completions,
             )

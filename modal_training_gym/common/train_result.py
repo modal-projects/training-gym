@@ -50,13 +50,14 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from modal_training_gym.frameworks.base import Framework
+from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_list, vol_put
 
 if TYPE_CHECKING:
     from modal import Volume
     from modal_training_gym.common.models import ModelConfig
 
 
-TRAIN_RESULTS_STORE_NAME = "train-results"
+TRAIN_RESULTS_STORE_NAME = MetadataStore.TRAIN_RESULTS.value
 
 
 @dataclass
@@ -115,18 +116,31 @@ class TrainResult:
     checkpoints_volume_name: str = ""
     checkpoints_mount_path: str = ""
     iteration_prefix: str = ""
-    wandb_project: str = ""
-    wandb_entity: str = ""
-    wandb_training_run_id: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ── Persistence ────────────────────────────────────────────────────────
 
+    def _to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        if self.model_config is not None:
+            d["model_config"] = {
+                "model_name": self.model_config.model_name,
+                "model_path": self.model_config.model_path,
+            }
+        return d
+
     def save(self) -> None:
         """Persist this result to the shared metadata volume."""
-        from modal_training_gym.common import vol_put
+        vol_put(MetadataStore.TRAIN_RESULTS, self.training_run_id, self._to_dict())
 
-        vol_put(TRAIN_RESULTS_STORE_NAME, self.training_run_id, asdict(self))
+    @staticmethod
+    def _parse_model_config(d: dict[str, Any]) -> dict[str, Any]:
+        mc = d.get("model_config")
+        if isinstance(mc, dict):
+            from modal_training_gym.common.models import ModelConfig
+
+            d["model_config"] = ModelConfig(**mc)
+        return d
 
     @classmethod
     def load(cls, training_run_id: str) -> "TrainResult":
@@ -137,15 +151,18 @@ class TrainResult:
         KeyError
             The given ``training_run_id`` isn't in the store.
         """
-        from modal_training_gym.common import vol_get
-
-        return cls(**vol_get(TRAIN_RESULTS_STORE_NAME, training_run_id))
+        return cls(
+            **cls._parse_model_config(
+                vol_get(MetadataStore.TRAIN_RESULTS, training_run_id)
+            )
+        )
 
     @classmethod
     def list_results(cls) -> list["TrainResult"]:
-        from modal_training_gym.common import vol_list
-
-        return [cls(**r) for r in vol_list(TRAIN_RESULTS_STORE_NAME)]
+        return [
+            cls(**cls._parse_model_config(r))
+            for r in vol_list(MetadataStore.TRAIN_RESULTS)
+        ]
 
     # ── Volume lookup ────────────────────────────────────────────────────
 
@@ -215,7 +232,11 @@ class TrainResult:
             entries = self._listdir(rel)
         except FileNotFoundError:
             return []
-        return sorted(e for e in entries if e.startswith(self.iteration_prefix))
+        return sorted(
+            e
+            for e in entries
+            if e.startswith(self.iteration_prefix) and not e.endswith("_hf")
+        )
 
     def latest_checkpoint_path(self) -> str:
         """Absolute in-volume path of the latest checkpoint.
@@ -240,7 +261,11 @@ class TrainResult:
                 f"with prefix {self.iteration_prefix!r}. "
                 f"Has the training run completed a save interval yet?"
             )
-        return f"{self.checkpoint_dir.rstrip('/')}/{ckpts[-1]}"
+        latest = ckpts[-1]
+        hf_variant = f"{latest}_hf"
+        if hf_variant in self._listdir(self._volume_rel(self.checkpoint_dir)):
+            latest = hf_variant
+        return f"{self.checkpoint_dir.rstrip('/')}/{latest}"
 
     # ── Output model ─────────────────────────────────────────────────────
 
@@ -266,67 +291,3 @@ class TrainResult:
         m.checkpoints_volume_name = self.checkpoints_volume_name
         m.checkpoints_mount_path = self.checkpoints_mount_path
         return m
-
-    # ── W&B integration ─────────────────────────────────────────────────
-
-    def wandb_url(self) -> str | None:
-        """Return the W&B run URL, or None if W&B info is not set."""
-        if (
-            not self.wandb_training_run_id
-            or not self.wandb_project
-            or not self.wandb_entity
-        ):
-            return None
-        return f"https://wandb.ai/{self.wandb_entity}/{self.wandb_project}/runs/{self.wandb_training_run_id}"
-
-    def wandb_metrics(
-        self,
-        keys: list[str] | None = None,
-        samples: int = 500,
-    ) -> list[dict[str, Any]]:
-        """Fetch training metrics from W&B.
-
-        Parameters
-        ----------
-        keys:
-            Metric keys to fetch (e.g. ``["train/loss", "train/reward"]``).
-            When ``None``, fetches all logged metrics.
-        samples:
-            Max number of data points. Use ``0`` for full unsampled history.
-
-        Returns
-        -------
-        List of dicts, one per logged step. Each dict has ``_step`` plus
-        the requested metric keys.
-        """
-        import wandb
-
-        api = wandb.Api()
-        entity = self.wandb_entity or None
-        path = (
-            f"{entity}/{self.wandb_project}/{self.wandb_training_run_id}"
-            if entity
-            else f"{self.wandb_project}/{self.wandb_training_run_id}"
-        )
-        run = api.run(path)
-
-        if samples == 0:
-            rows = list(run.scan_history(keys=keys))
-        else:
-            df = run.history(keys=keys, samples=samples)
-            rows = df.to_dict("records")
-        return rows
-
-    def wandb_summary(self) -> dict[str, Any]:
-        """Fetch the W&B run summary (final metric values)."""
-        import wandb
-
-        api = wandb.Api()
-        entity = self.wandb_entity or None
-        path = (
-            f"{entity}/{self.wandb_project}/{self.wandb_training_run_id}"
-            if entity
-            else f"{self.wandb_project}/{self.wandb_training_run_id}"
-        )
-        run = api.run(path)
-        return dict(run.summary)

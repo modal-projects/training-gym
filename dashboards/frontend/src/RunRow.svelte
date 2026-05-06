@@ -7,7 +7,7 @@
   let result = $derived(run.train_result);
   let modalAppUrl = $derived(run.modal_app_url || null);
   let deployment = $derived(
-    deployments.find((d) => d.app_name && result?.app_name && d.app_name === result.app_name) || null,
+    deployments.find((d) => d.deployment_config?.app_name && result?.app_name && d.deployment_config.app_name === result.app_name) || null,
   );
 
   function openModalApp() {
