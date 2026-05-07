@@ -142,6 +142,9 @@ def build_slime_app(
                 object.__setattr__(slime, "custom_rm_path", f"{mod_name}.{fn_name}")
                 _rm_fn_shipped = True
 
+    if slime.custom_rm_function is not None and slime.custom_rm_path:
+        object.__setattr__(slime, "custom_rm_function", None)
+
     for mod_name in slime.local_python_sources:
         image = image.add_local_python_source(mod_name, copy=True)
 
@@ -322,6 +325,8 @@ def build_slime_app(
         checkpoints_volume.commit()
         print(f"Saved HF checkpoint to {output_dir}")
 
+    _multi_node = slime.total_nodes > 1
+
     @app.function(
         image=image,
         gpu=gpu_spec,
@@ -330,11 +335,11 @@ def build_slime_app(
             *([] if slime.wandb is None else [Secret.from_name(slime.wandb.modal_wandb_secret_name)]),
         ],
         timeout=24 * 60 * 60,
-        experimental_options={"efa_enabled": True},
+        experimental_options={"efa_enabled": True} if _multi_node else {},
         serialized=True,
         name="train",
     )
-    @clustered(slime.total_nodes, rdma=True)  # pyright: ignore[reportCallIssue, reportOptionalCall]
+    @clustered(slime.total_nodes, rdma=_multi_node)  # pyright: ignore[reportCallIssue, reportOptionalCall]
     async def train(run_id: str | None = None):
         await asyncio.gather(
             hf_cache_volume.reload.aio(),

@@ -1,13 +1,8 @@
 <script>
-  let { logoSrc, navItems, activePage, onNavigate } = $props();
+  let { navItems, activePage, onNavigate } = $props();
 </script>
 
 <aside class="sidebar">
-  <div class="brand">
-    <img src={logoSrc} alt="Modal" class="logo" />
-    <span class="brand-title">Modal Training Gym</span>
-  </div>
-
   <nav class="nav-list">
     {#each navItems as item (item.key)}
       <a
@@ -32,26 +27,7 @@
   .sidebar {
     border-right: 1px solid var(--border);
     background: var(--bg-depth);
-    padding: 1rem 0.7rem;
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-    padding: 0.25rem 0.35rem;
-  }
-
-  .logo {
-    width: 1.2rem;
-    height: 1.2rem;
-  }
-
-  .brand-title {
-    color: var(--text-bright);
-    font-size: 0.92rem;
-    font-weight: 600;
+    padding: 0.9rem 0.7rem;
   }
 
   .nav-list {
@@ -83,8 +59,9 @@
   }
 
   .nav-item.active {
-    background: color-mix(in srgb, var(--accent) 16%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+    border-radius: 10px;
+    background: var(--Primary---Background, rgba(127, 238, 100, 0.1));
+    border-color: transparent;
     color: var(--text-bright);
   }
 

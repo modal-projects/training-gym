@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { FlaskConical, Rocket, Zap } from "lucide-svelte";
+  import { Book, CheckCircle2, Rocket, Zap } from "lucide-svelte";
   import "./app.css";
   import Sidebar from "./components/Sidebar.svelte";
   import DashboardHeader from "./components/DashboardHeader.svelte";
@@ -45,7 +45,7 @@
   const navItems = [
     { key: "training", label: "Training runs", Icon: Zap, path: pagePaths.training },
     { key: "deployments", label: "Deployments", Icon: Rocket, path: pagePaths.deployments },
-    { key: "evals", label: "Evals", Icon: FlaskConical, path: pagePaths.evals },
+    { key: "evals", label: "Evals", Icon: CheckCircle2, path: pagePaths.evals },
   ];
 
   if (typeof window !== "undefined") {
@@ -411,21 +411,31 @@
   }
 </script>
 
-<div class="shell">
-  <Sidebar
-    logoSrc={logoSvg}
-    {navItems}
-    {activePage}
-    onNavigate={setActivePage}
-  />
+<div class="app-shell">
+  <header class="top-navbar">
+    <div class="top-brand">
+      <img src={logoSvg} alt="Modal" class="top-brand-logo" />
+      <span class="top-brand-title">
+        <span class="top-brand-modal">Modal</span>
+        <span class="top-brand-gym">Training Gym</span>
+      </span>
+    </div>
+    <a
+      class="docs-button"
+      href={DOCS_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <Book size={14} strokeWidth={2.1} />
+      <span>Docs</span>
+    </a>
+  </header>
 
-  <main class="workspace">
-    <DashboardHeader
-      title={pageMeta[activePage].title}
-      {statusText}
-      docsUrl={DOCS_URL}
-      onRefresh={load}
-    />
+  <div class="shell">
+    <Sidebar {navItems} {activePage} onNavigate={setActivePage} />
+
+    <main class="workspace">
+      <DashboardHeader title={pageMeta[activePage].title} {statusText} onRefresh={load} />
 
     {#if activePage === "training"}
       <TrainingPage
@@ -472,14 +482,85 @@
         {evalConfigGroups}
       />
     {/if}
-  </main>
+    </main>
+  </div>
 </div>
 
 <style>
+  .app-shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    background: var(--bg);
+  }
+
+  .top-navbar {
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-depth);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 10px 1.35rem;
+  }
+
+  .top-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.62rem;
+    min-width: 0;
+  }
+
+  .top-brand-logo {
+    width: 1.7rem;
+    height: 1.7rem;
+    flex: 0 0 auto;
+  }
+
+  .top-brand-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    font-size: 1.85rem;
+    line-height: 1;
+    padding-block: 0.08rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    white-space: nowrap;
+  }
+
+  .top-brand-modal {
+    color: var(--text-bright);
+  }
+
+  .top-brand-gym {
+    color: var(--green);
+  }
+
+  .docs-button {
+    border: 0;
+    border-radius: 8px;
+    color: var(--muted);
+    background: transparent;
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.34rem 0.68rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    flex: 0 0 auto;
+  }
+
+  .docs-button:hover {
+    color: var(--text-bright);
+    background: color-mix(in srgb, white 4%, transparent);
+  }
+
   .shell {
     display: grid;
     grid-template-columns: 232px minmax(0, 1fr);
-    min-height: 100vh;
+    min-height: 0;
     background: var(--bg);
   }
 
@@ -488,6 +569,19 @@
   }
 
   @media (max-width: 900px) {
+    .top-navbar {
+      padding: 8px 0.95rem;
+    }
+
+    .top-brand-logo {
+      width: 1.35rem;
+      height: 1.35rem;
+    }
+
+    .top-brand-title {
+      font-size: 1.35rem;
+    }
+
     .shell {
       grid-template-columns: 1fr;
     }

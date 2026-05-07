@@ -3,6 +3,8 @@
   import Drawer from "../components/Drawer.svelte";
   import FilterBar from "../components/FilterBar.svelte";
   import MinimalTable from "../components/MinimalTable.svelte";
+  import MinimalTableSkeleton from "../components/MinimalTableSkeleton.svelte";
+  import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
 
   let {
@@ -114,7 +116,13 @@
 
   <div class="runs-body">
     {#if loading}
-      <div class="empty">Loading runs...</div>
+      <div class="table-wrap">
+        <MinimalTableSkeleton
+          class="runs-table"
+          columns={["Run", "Status", "Model", "Cluster", "Started", ""]}
+          rows={8}
+        />
+      </div>
     {:else if error}
       <div class="empty">Failed to load: {error}</div>
     {:else if !allRuns.length}
@@ -145,13 +153,7 @@
                 </td>
                 <td>
                   <button class="cell-open-button" onclick={() => selectRun(run.run_id)}>
-                    <span
-                      class="status-pill"
-                      class:status-pending={status === "Pending"}
-                      class:status-completed={status === "Completed"}
-                    >
-                      {status}
-                    </span>
+                    <StatusPill status={status} />
                   </button>
                 </td>
                 <td class="model-cell" title={modelName(run)}>
@@ -170,21 +172,25 @@
                   </button>
                 </td>
                 <td class="modal-link-cell">
-                  {#if run.modal_app_url}
-                    <a
-                      class="open-modal-link"
-                      href={run.modal_app_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onclick={(event) => event.stopPropagation()}
-                    >
-                      Open in Modal
-                    </a>
-                  {:else}
-                    <span class="open-modal-link open-modal-link-disabled">
-                      Open in Modal
-                    </span>
-                  {/if}
+                  <div class="modal-link-wrap">
+                    {#if run.modal_app_url}
+                      <a
+                        class="open-modal-link"
+                        href={run.modal_app_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onclick={(event) => event.stopPropagation()}
+                      >
+                        <span class="open-modal-link-label">Open in Modal</span>
+                        <ExternalLink size={12} strokeWidth={2.1} />
+                      </a>
+                    {:else}
+                      <span class="open-modal-link open-modal-link-disabled">
+                        <span class="open-modal-link-label">Open in Modal</span>
+                        <ExternalLink size={12} strokeWidth={2.1} />
+                      </span>
+                    {/if}
+                  </div>
                 </td>
               </tr>
             {/each}
@@ -224,13 +230,7 @@
       <section class="drawer-section">
         <div class="drawer-kv">
           <span class="drawer-key">Status</span>
-          <span
-            class="status-pill"
-            class:status-pending={getStatus(selectedRun) === "Pending"}
-            class:status-completed={getStatus(selectedRun) === "Completed"}
-          >
-            {getStatus(selectedRun)}
-          </span>
+          <StatusPill status={getStatus(selectedRun)} />
         </div>
         <div class="drawer-kv">
           <span class="drawer-key">Model</span>
@@ -274,17 +274,17 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.7rem;
-    margin-bottom: 0.7rem;
+    margin-bottom: 24px;
   }
 
   .training-summary {
-    margin-bottom: 0.75rem;
+    margin-bottom: 24px;
   }
 
   .summary-card {
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: 10px;
-    background: var(--panel);
+    background: color-mix(in srgb, #ffffff 7%, transparent);
     padding: 0.8rem 0.95rem;
     display: flex;
     flex-direction: column;
@@ -306,10 +306,13 @@
   .runs-surface {
     border: 0;
     background: transparent;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
   }
 
   .filters-row {
-    margin: 0.05rem 0 0.55rem;
+    margin: 0;
   }
 
   .runs-body {
@@ -363,35 +366,22 @@
     width: 24%;
   }
 
-  .status-pill {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 9999px;
-    border: 1px solid transparent;
-    padding: 0.13rem 0.56rem;
-    font-size: 0.72rem;
-    font-weight: 500;
-  }
-
-  .status-pending {
-    color: #d18be7;
-    border-color: color-mix(in srgb, #d18be7 35%, transparent);
-    background: color-mix(in srgb, #d18be7 12%, transparent);
-  }
-
-  .status-completed {
-    color: var(--green);
-    border-color: color-mix(in srgb, var(--green) 36%, transparent);
-    background: color-mix(in srgb, var(--green) 10%, transparent);
-  }
-
   .modal-link-cell {
-    text-align: right;
-    width: 1%;
+    min-width: 9.75rem;
+    width: 12.5rem;
+  }
+
+  .modal-link-wrap {
+    display: flex;
   }
 
   .open-modal-link {
-    display: inline-block;
+    display: inline-flex;
+    flex: 1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.38rem;
+    white-space: nowrap;
     border: 1px solid var(--border);
     border-radius: 7px;
     padding: 0.2rem 0.58rem;
@@ -400,6 +390,11 @@
     font-size: 0.72rem;
     font-weight: 500;
     background: var(--panel-alt);
+  }
+
+  .open-modal-link-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .open-modal-link:hover {

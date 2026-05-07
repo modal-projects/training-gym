@@ -231,12 +231,9 @@ class ModelDeployment(BaseModel):
         return resp.json()["choices"][0]["message"]["content"]
 
     def save(self) -> None:
-        app_name = self.deployment_config.app_name
-        if app_name is None:
-            raise ValueError("deployment_config.app_name must be set before save()")
         vol_put(
             MetadataStore.DEPLOYMENTS,
-            app_name,
+            self.deployment_id,
             self.model_dump(mode="json"),
         )
 

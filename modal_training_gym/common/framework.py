@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+import sysconfig
 from types import ModuleType
 from typing import TYPE_CHECKING
 
@@ -48,13 +49,38 @@ def resolve_caller_module(
     to inline the user's inline classes; walking past framework frames
     recovers it.
     """
+    stdlib_dirs = [
+        Path(path).resolve()
+        for key in ("stdlib", "platstdlib")
+        if (path := sysconfig.get_path(key))
+    ]
     for frame_info in inspect.stack()[1:]:
         module = inspect.getmodule(frame_info.frame)
         if module is None:
             continue
         name = getattr(module, "__name__", "")
-        if not name.startswith(skip_prefix):
-            return module
+        if not name or name.startswith(skip_prefix):
+            continue
+        if name.startswith(
+            (
+                "IPython",
+                "ipykernel",
+                "asyncio",
+                "traitlets",
+                "contextlib",
+                "runpy",
+                "importlib",
+            )
+        ):
+            continue
+        module_file = getattr(module, "__file__", None)
+        if module_file:
+            module_path = Path(module_file).resolve()
+            if {"site-packages", "dist-packages"} & set(module_path.parts):
+                continue
+            if any(module_path.is_relative_to(stdlib_dir) for stdlib_dir in stdlib_dirs):
+                continue
+        return module
     return None
 
 

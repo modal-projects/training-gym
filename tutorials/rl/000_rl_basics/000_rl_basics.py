@@ -22,7 +22,7 @@
 
 # To run the tutorial, run the following command:
 # ```
-# modal run tutorials/rl/000_rl_basics/000_rl_basics.py
+# uv run python tutorials/rl/000_rl_basics/000_rl_basics.py
 # ```
 
 import re
@@ -86,7 +86,7 @@ def _count_syllables(text: str) -> int:
 def score_haiku(response: str) -> float:
     lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
     if len(lines) != 3:
-        return 0.0
+        return -10
     total_diff = sum(
         abs(_count_syllables(line) - target)
         for line, target in zip(lines, [5, 7, 5])
@@ -130,7 +130,7 @@ eval_config = EvalConfig(
 )
 print("——— Running base model evaluation... ———")
 base_eval = eval_config.evaluate(base_model_deployment, debug=True)
-print(f"Average haiku score: {base_eval.mean:.1}")
+print(f"Average haiku score: {base_eval.mean:.1f}")
 print("——— Base model evaluation complete ———")
 
 # ## Train with slime
@@ -193,5 +193,5 @@ print(f"Trained model deployed to {trained_model_deployment.url}")
 
 print("——— Running trained model evaluation... ———")
 trained_eval = eval_config.evaluate(trained_model_deployment, debug=True)
-print(f"Trained haiku score: {trained_eval.mean:.1}")
+print(f"Trained haiku score: {trained_eval.mean:.1f}")
 print("——— Trained model evaluation complete ———")

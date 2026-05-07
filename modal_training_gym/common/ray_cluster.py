@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import inspect
 import subprocess
 import time
 
@@ -259,8 +260,15 @@ class ModalRayCluster:
             runtime_env=runtime_env or {},
         )
         print(f"Submitted Ray job: {job_id}")
-        for line in self._client.tail_job_logs(job_id):
-            print(line, end="", flush=True)
+        log_stream = self._client.tail_job_logs(job_id)
+        if inspect.isawaitable(log_stream):
+            log_stream = await log_stream
+        if hasattr(log_stream, "__aiter__"):
+            async for line in log_stream:
+                print(line, end="", flush=True)
+        else:
+            for line in log_stream:
+                print(line, end="", flush=True)
         status = self._client.get_job_status(job_id).value
         print(f"\nFinal Ray job status: {status}")
         if status not in ("SUCCEEDED",):

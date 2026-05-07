@@ -1,15 +1,6 @@
 <script>
-  import { Book } from "lucide-svelte";
-
-  let { title, statusText, docsUrl, onRefresh } = $props();
+  let { title, statusText, onRefresh } = $props();
 </script>
-
-<div class="topbar">
-  <a class="docs-button" href={docsUrl}>
-    <Book size={14} strokeWidth={2.1} />
-    <span>Docs</span>
-  </a>
-</div>
 
 <header class="workspace-header">
   <h1>{title}</h1>
@@ -20,31 +11,6 @@
 </header>
 
 <style>
-  .topbar {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 0.65rem;
-  }
-
-  .docs-button {
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--muted);
-    background: var(--panel);
-    text-decoration: none;
-    font-size: 0.78rem;
-    font-weight: 500;
-    padding: 0.34rem 0.66rem;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.38rem;
-  }
-
-  .docs-button:hover {
-    color: var(--text-bright);
-    border-color: var(--border-strong);
-  }
-
   .workspace-header {
     display: flex;
     justify-content: space-between;

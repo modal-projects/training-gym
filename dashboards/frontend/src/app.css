@@ -1,4 +1,23 @@
-@import url("https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap");
+@font-face {
+  font-family: "Inter Variable";
+  src:
+    url("https://modal-cdn.com/fonts/inter-variable.woff2")
+      format("woff2-variations"),
+    url("https://modal-cdn.com/fonts/inter-variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Inter Variable";
+  src:
+    url("https://modal-cdn.com/fonts/inter-variable-italic.woff2")
+      format("woff2-variations"),
+    url("https://modal-cdn.com/fonts/inter-variable-italic.woff2")
+      format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+}
 
 :root {
   --bg: #181818;
@@ -13,13 +32,15 @@
   --text-bright: #ffffff;
   --muted: #a3a3a3;
   --muted-strong: #747474;
-  --accent: #7fee64;
+  --accent: #7fef64;
   --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
   --accent-border: color-mix(in srgb, var(--accent) 40%, transparent);
-  --green: #7fee64;
+  --green: #7fef64;
   --yellow: #f2c96a;
   --red: #f18888;
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans:
+    "Inter Variable", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --font-mono:
     "Fira Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas,
     monospace;
@@ -36,7 +57,9 @@ body {
   background: linear-gradient(180deg, var(--bg) 0%, var(--bg-depth) 100%);
   color: var(--text);
   min-height: 100vh;
+  -moz-osx-font-smoothing: grayscale;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   color-scheme: dark;
+  font-feature-settings: "cv11" on;
 }

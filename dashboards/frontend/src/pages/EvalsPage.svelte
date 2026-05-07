@@ -1,5 +1,6 @@
 <script>
   import MinimalTable from "../components/MinimalTable.svelte";
+  import MinimalTableSkeleton from "../components/MinimalTableSkeleton.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
 
   let {
@@ -30,7 +31,13 @@
 <section class="runs-surface">
   <div class="runs-body">
     {#if loading}
-      <div class="empty">Loading evals...</div>
+      <div class="table-wrap">
+        <MinimalTableSkeleton
+          class="runs-table"
+          columns={["Rank", "Eval run", "Avg score", "Delta vs best", "Examples", "Created", "Links"]}
+          rows={6}
+        />
+      </div>
     {:else if error}
       <div class="empty">Failed to load: {error}</div>
     {:else if !allEvals.length}
@@ -107,13 +114,13 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.7rem;
-    margin-bottom: 0.7rem;
+    margin-bottom: 24px;
   }
 
   .summary-card {
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: 10px;
-    background: var(--panel);
+    background: color-mix(in srgb, #ffffff 7%, transparent);
     padding: 0.8rem 0.95rem;
     display: flex;
     flex-direction: column;
