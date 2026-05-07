@@ -273,6 +273,115 @@ def score_code_with_sandbox(
 async def code_golf_rm(args, sample, **kwargs) -> float:
     import asyncio
     import json
+    import re
+    from functools import lru_cache
+
+    import modal
+
+    def _inline_score_code_with_sandbox(
+        response: str,
+        *,
+        tests: list[str],
+        entrypoint: str,
+        reference_solution: str,
+        timeout_sec: int = 25,
+    ) -> tuple[float, dict]:
+        code_fence_re = re.compile(r"```(?:python)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+        sandbox_image = modal.Image.debian_slim(python_version="3.11")
+        length_bonus_weight = 0.2
+
+        def extract_python_code(text: str) -> str:
+            normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+            if "<|im_start|>assistant" in normalized:
+                normalized = normalized.rsplit("<|im_start|>assistant", 1)[-1]
+            if "</think>" in normalized:
+                normalized = normalized.split("</think>", 1)[-1]
+            normalized = normalized.replace("<think>", "").replace("<|im_end|>", "").strip()
+            if match := code_fence_re.search(normalized):
+                return match.group(1).strip()
+            return normalized
+
+        @lru_cache(maxsize=1)
+        def sandbox_app() -> modal.App:
+            return modal.App.lookup("training-gym-code-golf-rm", create_if_missing=True)
+
+        def last_json_line(text: str) -> dict:
+            for line in reversed(text.splitlines()):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(data, dict):
+                    return data
+            return {}
+
+        candidate_code = extract_python_code(response)
+        script = "\n".join(
+            [
+                "import json",
+                f"candidate = {json.dumps(candidate_code)}",
+                f"tests = {json.dumps(tests)}",
+                f"entrypoint = {json.dumps(entrypoint)}",
+                "scope = {}",
+                "try:",
+                "    exec(candidate, scope, scope)",
+                "    fn = scope.get(entrypoint)",
+                "    if not callable(fn):",
+                "        raise RuntimeError(f'Missing callable: {entrypoint}')",
+                "    passed = 0",
+                "    for expr in tests:",
+                "        exec(expr, scope, scope)",
+                "        passed += 1",
+                "    print(json.dumps({'pass_rate': passed / len(tests) if tests else 0.0, 'passed': passed, 'total': len(tests)}))",
+                "except Exception as exc:",
+                "    print(json.dumps({'pass_rate': 0.0, 'passed': 0, 'total': len(tests), 'error': repr(exc)}))",
+            ]
+        ) + "\n"
+
+        try:
+            sandbox = modal.Sandbox.create(
+                "python",
+                "-c",
+                script,
+                app=sandbox_app(),
+                image=sandbox_image,
+                timeout=timeout_sec,
+                cpu=1.0,
+                memory=1024,
+            )
+            stdout = sandbox.stdout.read()
+            stderr = sandbox.stderr.read()
+            exit_code = sandbox.wait()
+        except Exception as exc:
+            candidate_bytes = len(candidate_code.encode("utf-8"))
+            reference_bytes = len(reference_solution.encode("utf-8"))
+            return 0.0, {
+                "pass_rate": 0.0,
+                "candidate_bytes": candidate_bytes,
+                "reference_bytes": reference_bytes,
+                "ratio": 0.0,
+                "sandbox_exit_code": -1,
+                "sandbox_stderr": repr(exc),
+            }
+
+        payload = last_json_line(stdout)
+        pass_rate = float(payload.get("pass_rate", 0.0))
+        candidate_bytes = len(candidate_code.encode("utf-8"))
+        reference_bytes = len(reference_solution.encode("utf-8"))
+        ratio = min(2.0, reference_bytes / max(candidate_bytes, 1))
+        size_bonus = max(0.0, ratio - 1.0)
+        reward = pass_rate * (1.0 + (length_bonus_weight * size_bonus))
+        return reward, {
+            "pass_rate": pass_rate,
+            "candidate_bytes": candidate_bytes,
+            "reference_bytes": reference_bytes,
+            "ratio": ratio,
+            "sandbox_exit_code": exit_code,
+            "sandbox_stderr": stderr.strip(),
+        }
 
     raw_label = getattr(sample, "label", None)
     if isinstance(raw_label, dict):
@@ -284,12 +393,29 @@ async def code_golf_rm(args, sample, **kwargs) -> float:
             label = {}
     else:
         label = {}
-    tests = label.get("tests") or TASKS[0]["tests"]
-    entrypoint = label.get("entrypoint") or TASKS[0]["entrypoint"]
-    reference_solution = label.get("reference_solution") or TASKS[0]["reference_solution"]
+
+    tests = label.get("tests")
+    entrypoint = label.get("entrypoint")
+    reference_solution = label.get("reference_solution")
+    if (
+        not isinstance(tests, list)
+        or not tests
+        or not isinstance(entrypoint, str)
+        or not entrypoint
+        or not isinstance(reference_solution, str)
+        or not reference_solution
+    ):
+        sample_metadata = getattr(sample, "metadata", None)
+        if not isinstance(sample_metadata, dict):
+            sample_metadata = {}
+        sample_metadata["code_golf"] = {"pass_rate": 0.0, "reason": "missing_label"}
+        sample.metadata = sample_metadata
+        return 0.0
+
+    score_fn = globals().get("score_code_with_sandbox") or _inline_score_code_with_sandbox
 
     reward, metadata = await asyncio.to_thread(
-        score_code_with_sandbox,
+        score_fn,
         sample.response,
         tests=tests,
         entrypoint=entrypoint,

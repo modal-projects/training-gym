@@ -65,6 +65,32 @@ from modal_training_gym.common.framework import Framework
 SLIME_ROOT = "/root/slime"
 
 
+def _has_torch_dist_checkpoint(save_path: str) -> bool:
+    if not os.path.isdir(save_path):
+        return False
+
+    tracker_path = os.path.join(save_path, "latest_checkpointed_iteration.txt")
+    if os.path.isfile(tracker_path):
+        try:
+            with open(tracker_path) as f:
+                marker = f.read().strip()
+        except OSError:
+            marker = ""
+        if marker == "release":
+            return os.path.isdir(os.path.join(save_path, "release"))
+        if marker.isdigit():
+            iter_dir = f"iter_{int(marker):07d}"
+            return os.path.isdir(os.path.join(save_path, iter_dir))
+
+    try:
+        return any(
+            entry.is_dir() and (entry.name == "release" or entry.name.startswith("iter_"))
+            for entry in os.scandir(save_path)
+        )
+    except OSError:
+        return False
+
+
 def build_slime_app(
     *,
     slime: SlimeRecipe,
@@ -301,6 +327,9 @@ def build_slime_app(
         else:
             hf_path = snapshot_download(model.model_name, local_files_only=True)
         save_path = str(slime.ref_load)
+        if _has_torch_dist_checkpoint(save_path):
+            print(f"Found existing torch_dist checkpoint at {save_path}; skipping conversion.")
+            return
         num_nodes, nproc_per_node, extra_args = get_checkpoint_conversion_policy(slime)
         node_rank, master_addr, _, nnodes = get_modal_cluster_context(num_nodes)
 
