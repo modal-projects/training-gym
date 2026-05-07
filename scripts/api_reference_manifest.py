@@ -36,6 +36,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "DatasetConfig",
     },
     {
+        "class_name": "HuggingFaceDataset",
+        "module": "modal_training_gym.common.dataset",
+        "group": "core",
+        "class_type": "config_data",
+        "sidebar_label": "HuggingFaceDataset",
+    },
+    {
         "class_name": "WandbConfig",
         "module": "modal_training_gym.common.wandb",
         "group": "core",
@@ -50,35 +57,35 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "ModalRayCluster",
     },
     {
-        "class_name": "LlmJudge",
-        "module": "modal_training_gym.common.llm_judge",
+        "class_name": "TrainResult",
+        "module": "modal_training_gym.common.train_result",
         "group": "core",
         "class_type": "behavior",
-        "sidebar_label": "LlmJudge",
+        "sidebar_label": "TrainResult",
     },
-    # --- Deployment ---
+    # --- Evaluation ---
     {
-        "class_name": "DeploymentConfig",
-        "module": "modal_training_gym.common.deployment",
-        "group": "core",
+        "class_name": "EvalConfig",
+        "module": "modal_training_gym.common.eval",
+        "group": "evaluation",
         "class_type": "config_data",
-        "sidebar_label": "DeploymentConfig",
+        "sidebar_label": "EvalConfig",
     },
     {
-        "class_name": "VllmRecipe",
-        "module": "modal_training_gym.deploy_recipes.vllm_recipe",
-        "group": "core",
-        "class_type": "config_data",
-        "sidebar_label": "VllmRecipe",
+        "class_name": "EvalResult",
+        "module": "modal_training_gym.common.eval",
+        "group": "evaluation",
+        "class_type": "behavior",
+        "sidebar_label": "EvalResult",
+    },
+    {
+        "class_name": "EvalRowResult",
+        "module": "modal_training_gym.common.eval",
+        "group": "evaluation",
+        "class_type": "behavior",
+        "sidebar_label": "EvalRowResult",
     },
     # --- Models ---
-    {
-        "class_name": "Qwen3_0_6B",
-        "module": "modal_training_gym.common.models.qwen3_0_6b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "qwen3-4b",
-    },
     {
         "class_name": "Qwen3_4B",
         "module": "modal_training_gym.common.models.qwen3_4b",
@@ -86,64 +93,58 @@ API_REFERENCE_MANIFEST = [
         "class_type": "config_data",
         "sidebar_label": "Qwen3-4B",
     },
-    {
-        "class_name": "Qwen3_32B",
-        "module": "modal_training_gym.common.models.qwen3_32b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3-32B",
-    },
-    {
-        "class_name": "GLM_4_7",
-        "module": "modal_training_gym.common.models.glm_4_7",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "GLM-4.7",
-    },
-    {
-        "class_name": "Llama2_7B",
-        "module": "modal_training_gym.common.models.llama2_7b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Llama2-7B",
-    },
-    {
-        "class_name": "Kimi_K2_5",
-        "module": "modal_training_gym.common.models.kimi_k2_5",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Kimi-K2.5",
-    },
-    # --- Train config ---
+    # --- Training ---
     {
         "class_name": "TrainConfig",
         "module": "modal_training_gym.common.train",
-        "group": "frameworks",
+        "group": "training",
         "class_type": "config_data",
         "sidebar_label": "TrainConfig",
     },
-    # --- Frameworks: slime ---
     {
         "class_name": "SlimeRecipe",
         "module": "modal_training_gym.train_recipes.slime_recipe.recipe",
-        "group": "frameworks",
+        "group": "training",
         "class_type": "config_data",
         "sidebar_label": "SlimeRecipe",
     },
-    # --- Results ---
+    # --- Deployment ---
     {
-        "class_name": "TrainResult",
-        "module": "modal_training_gym.common.train_result",
-        "group": "core",
+        "class_name": "DeploymentConfig",
+        "module": "modal_training_gym.common.deployment",
+        "group": "deployment",
+        "class_type": "config_data",
+        "sidebar_label": "DeploymentConfig",
+    },
+    {
+        "class_name": "ModelDeployment",
+        "module": "modal_training_gym.common.deployment",
+        "group": "deployment",
         "class_type": "behavior",
-        "sidebar_label": "TrainResult",
+        "sidebar_label": "ModelDeployment",
+    },
+    {
+        "class_name": "SglangRecipe",
+        "module": "modal_training_gym.deploy_recipes.sglang_recipe",
+        "group": "deployment",
+        "class_type": "config_data",
+        "sidebar_label": "SglangRecipe",
+    },
+    {
+        "class_name": "VllmRecipe",
+        "module": "modal_training_gym.deploy_recipes.vllm_recipe",
+        "group": "deployment",
+        "class_type": "config_data",
+        "sidebar_label": "VllmRecipe",
     },
 ]
 
 GROUPS = {
     "core": {"label": "Core", "order": 1},
-    "models": {"label": "Models", "order": 2},
-    "frameworks": {"label": "Frameworks", "order": 3},
+    "evaluation": {"label": "Evaluation", "order": 2},
+    "models": {"label": "Models", "order": 3},
+    "training": {"label": "Training", "order": 4},
+    "deployment": {"label": "Deployment", "order": 5},
 }
 
 

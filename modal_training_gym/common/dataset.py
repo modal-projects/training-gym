@@ -10,7 +10,9 @@ volume.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from dataclasses import field
+from typing import Any
+import uuid
 
 DatasetRow = dict[str, Any]
 
@@ -21,6 +23,7 @@ class DatasetConfig:
     by the recipe/launcher layer, not by the dataset itself.
     """
 
+    dataset_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     input_key: str = ""
     label_key: str = ""
     apply_chat_template: bool = True
@@ -33,7 +36,7 @@ class DatasetConfig:
         """Materialize training data to ``path`` (and eval splits to ``eval_paths``)."""
         raise NotImplementedError(f"{type(self).__name__} has no prepare()")
 
-    def load(self) -> Iterable[DatasetRow]:
+    def load(self) -> Any:
         """Load raw examples for local inspection or evaluation."""
         raise NotImplementedError(f"{type(self).__name__} has no load()")
 
@@ -62,8 +65,10 @@ class HuggingFaceDataset(DatasetConfig):
             setattr(self, k, v)
         if not self.input_key and self.input_column and self.output_column:
             self.input_key = "messages"
+        if "dataset_id" not in kwargs:
+            self.dataset_id = f"{self.hf_repo}-{self.hf_split}-{uuid.uuid4()}"
 
-    def load(self) -> Iterable[DatasetRow]:
+    def load(self) -> Any:
         from datasets import load_dataset
 
         ds = load_dataset(

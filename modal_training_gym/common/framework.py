@@ -5,6 +5,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
 
+from enum import Enum
+
 if TYPE_CHECKING:
     from modal import Image
 
@@ -54,3 +56,7 @@ def resolve_caller_module(
         if not name.startswith(skip_prefix):
             return module
     return None
+
+
+class Framework(Enum):
+    SLIME = "slime"

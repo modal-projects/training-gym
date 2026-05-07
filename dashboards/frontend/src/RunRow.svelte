@@ -1,13 +1,60 @@
 <script>
+  import { onDestroy } from "svelte";
   import { truncateId, fmtCluster, fmtLr } from "./lib/format.js";
 
   let { run, deployments = [] } = $props();
 
+  function safeText(value) {
+    if (value && typeof value === "object" && "value" in value) return value.value;
+    return value != null ? String(value) : "";
+  }
+
+  function normalizePath(value) {
+    return safeText(value).replace(/\/+$/, "");
+  }
+
+  function pathMatches(left, right) {
+    const a = normalizePath(left);
+    const b = normalizePath(right);
+    if (!a || !b) return false;
+    return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  }
+
   let summary = $derived(run.config_summary || {});
   let result = $derived(run.train_result);
+  let trainingRunId = $derived(result?.training_run_id || run.run_id || "");
   let modalAppUrl = $derived(run.modal_app_url || null);
+  let copiedTrainingRunId = $state(false);
+  let copyResetTimer = null;
   let deployment = $derived(
-    deployments.find((d) => d.deployment_config?.app_name && result?.app_name && d.deployment_config.app_name === result.app_name) || null,
+    deployments.find((d) => {
+      const deploymentAppName = safeText(d.app_name || "");
+      const deploymentModelName = safeText(d.model_name || "");
+      const deploymentModelPath = normalizePath(d.model_path || "");
+      const deploymentCheckpointPath = normalizePath(d.checkpoint_path || "");
+      const runModelName = safeText(result?.model_name || summary.model_name || "");
+      const runModelPath = normalizePath(result?.model_path || "");
+      const runCheckpointDir = normalizePath(result?.checkpoint_dir || "");
+
+      if (run.deployment_id && deploymentAppName && run.deployment_id === deploymentAppName) {
+        return true;
+      }
+      if (
+        deploymentCheckpointPath &&
+        (pathMatches(deploymentCheckpointPath, runCheckpointDir) ||
+          pathMatches(deploymentCheckpointPath, runModelPath))
+      ) {
+        return true;
+      }
+      if (
+        deploymentModelPath &&
+        (pathMatches(deploymentModelPath, runCheckpointDir) ||
+          pathMatches(deploymentModelPath, runModelPath))
+      ) {
+        return true;
+      }
+      return !!deploymentModelName && deploymentModelName === runModelName;
+    }) || null,
   );
 
   function openModalApp() {
@@ -22,6 +69,38 @@
       openModalApp();
     }
   }
+
+  async function copyTrainingRunId(event) {
+    event.stopPropagation();
+    if (!trainingRunId) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(trainingRunId);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = trainingRunId;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      copiedTrainingRunId = true;
+      if (copyResetTimer) {
+        clearTimeout(copyResetTimer);
+      }
+      copyResetTimer = setTimeout(() => {
+        copiedTrainingRunId = false;
+      }, 1200);
+    } catch {
+      copiedTrainingRunId = false;
+    }
+  }
+
+  onDestroy(() => {
+    if (copyResetTimer) clearTimeout(copyResetTimer);
+  });
 </script>
 
 <tr
@@ -30,25 +109,32 @@
   onkeydown={onRowKeydown}
   role={modalAppUrl ? "link" : undefined}
   tabindex={modalAppUrl ? "0" : undefined}
-  aria-label={modalAppUrl ? `Open Modal app for run ${run.run_id}` : undefined}
+  aria-label={modalAppUrl ? `Open Modal app for training run ${run.run_id}` : undefined}
 >
-  <td class="run-id" title={run.run_id}>{truncateId(run.run_id)}</td>
+  <td class="run-id" title={run.run_id}>
+    <div class="mono">{truncateId(run.run_id)}</div>
+    {#if run.modal_app_id}
+      <div class="app-id" title={run.modal_app_id}>{truncateId(run.modal_app_id)}</div>
+    {/if}
+  </td>
+  <td class="training-run-id-cell">
+    {#if trainingRunId}
+      <button
+        type="button"
+        class="copy-chip mono"
+        title={`Click to copy ${trainingRunId}`}
+        aria-label={`Copy training run id ${trainingRunId}`}
+        onclick={copyTrainingRunId}
+      >
+        <span>{truncateId(trainingRunId)}</span>
+        <span class="copy-chip-state">{copiedTrainingRunId ? "Copied" : "Copy"}</span>
+      </button>
+    {:else}
+      —
+    {/if}
+  </td>
   <td>
     <div class="model-name">{summary.model_name || "—"}</div>
-    {#if run.modal_app_id}
-      {#if modalAppUrl}
-        <a
-          class="app-id app-link"
-          href={modalAppUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onclick={(event) => event.stopPropagation()}
-          >{run.modal_app_id}</a
-        >
-      {:else}
-        <div class="app-id">{run.modal_app_id}</div>
-      {/if}
-    {/if}
   </td>
   <td class="cluster">{fmtCluster(summary)}</td>
   <td class="config-details">
@@ -62,11 +148,37 @@
       <span class="config-tag">{summary.wandb_group}</span>
     {/if}
   </td>
-  <td class="status-cell">
+  <td class="result-cell">
     {#if result}
       <span class="result-badge result-completed">Completed</span>
+      <div class="result-meta mono" title={result.training_run_id}>
+        TrainResult {truncateId(result.training_run_id)}
+      </div>
+      {#if result.checkpoint_dir}
+        <div class="result-meta mono" title={result.checkpoint_dir}>
+          {truncateId(result.checkpoint_dir)}
+        </div>
+      {/if}
     {:else}
       <span class="result-badge result-pending">Pending</span>
+    {/if}
+  </td>
+  <td class="deployment-cell">
+    {#if deployment}
+      <div class="deployment-name">
+        {deployment.app_name || deployment.served_model_name || deployment.model_name || "Deployment"}
+      </div>
+      {#if deployment.url}
+        <a
+          class="pill-link pill-deploy"
+          href={deployment.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onclick={(event) => event.stopPropagation()}>Endpoint</a
+        >
+      {/if}
+    {:else}
+      <span class="result-badge result-pending">Not deployed</span>
     {/if}
   </td>
   <td>
@@ -87,15 +199,6 @@
           target="_blank"
           rel="noopener noreferrer"
           onclick={(event) => event.stopPropagation()}>W&B</a
-        >
-      {/if}
-      {#if deployment?.url}
-        <a
-          class="pill-link pill-deploy"
-          href={deployment.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          onclick={(event) => event.stopPropagation()}>Endpoint</a
         >
       {/if}
       {#if result.checkpoint_dir}
@@ -135,6 +238,34 @@
     color: color-mix(in srgb, var(--accent) 78%, white);
     cursor: default;
   }
+  .mono {
+    font-family: var(--font-mono);
+  }
+  .training-run-id-cell {
+    white-space: nowrap;
+  }
+  .copy-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.16rem 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-alt);
+    color: var(--text);
+    font-size: 0.66rem;
+    cursor: copy;
+  }
+  .copy-chip:hover {
+    border-color: var(--accent-border);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .copy-chip-state {
+    color: var(--muted-strong);
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
   .model-name {
     font-weight: 500;
     color: var(--text-bright);
@@ -144,12 +275,6 @@
     font-size: 0.72rem;
     font-family: var(--font-mono);
     margin-top: 0.1rem;
-  }
-  .app-link {
-    text-decoration: none;
-  }
-  .app-link:hover {
-    color: var(--accent);
   }
   .cluster {
     font-size: 0.75rem;
@@ -171,7 +296,8 @@
     color: var(--muted);
     white-space: nowrap;
   }
-  .status-cell {
+  .result-cell,
+  .deployment-cell {
     white-space: nowrap;
   }
   .result-badge {
@@ -200,6 +326,16 @@
     border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
     background: color-mix(in srgb, var(--yellow) 10%, transparent);
     color: var(--yellow);
+  }
+  .result-meta {
+    margin-top: 0.18rem;
+    font-size: 0.7rem;
+    color: var(--muted-strong);
+  }
+  .deployment-name {
+    font-weight: 500;
+    color: var(--text-bright);
+    margin-bottom: 0.15rem;
   }
   .tag {
     display: inline-block;

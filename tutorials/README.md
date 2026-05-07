@@ -27,8 +27,9 @@ context) and assume familiarity with the underlying framework.
 
 ## Running from the CLI instead
 
-Every tutorial is also a plain `.py` file runnable via `modal run`. See
-the top-level [`README.md`](../README.md) for the usage pattern.
+Some tutorials also emit a plain `.py` companion, but the current source
+tutorial is notebook-first and intentionally narrated for Modal Notebooks.
+Use the notebook as the canonical walkthrough.
 
 ## Authoring a new tutorial
 
@@ -86,9 +87,7 @@ are maps, the `.ipynb` is the walkthrough. Aim for roughly:
   get their own explanation cell.
 - A "Run it" section splitting CLI invocation (`@py_only`) from
   cell-by-cell interactive invocation (`@notebook_only`).
-- Optional: a "Serve / evaluate / next step" tail, where relevant — see
-  [`slime_haiku`](rl/slime_haiku/slime_haiku.ipynb) for the shape.
+- Optional: a "Serve / evaluate / next step" tail, where relevant.
 
-[`slime_gsm8k`](rl/slime_gsm8k/slime_gsm8k.ipynb) and
-[`slime_haiku`](rl/slime_haiku/slime_haiku.ipynb) are the reference examples
-for tutorial narration depth.
+[`000_rl_basics`](rl/000_rl_basics/000_rl_basics.ipynb) is the current
+reference example for tutorial narration depth.

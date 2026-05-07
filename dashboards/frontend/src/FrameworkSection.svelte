@@ -40,11 +40,13 @@
       <table>
         <thead>
           <tr>
-            <th>Run</th>
+            <th>Training Run</th>
+            <th>Training Run ID</th>
             <th>Model</th>
             <th>Cluster</th>
             <th>Config</th>
-            <th>Status</th>
+            <th>TrainResult</th>
+            <th>Deployment</th>
             <th>Links</th>
           </tr>
         </thead>
@@ -126,7 +128,7 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 920px;
+    min-width: 1260px;
   }
   th {
     padding: 0.45rem 0.8rem;

@@ -16,11 +16,14 @@ Then: `uv run modal run <tutorial_file>.py::train`.
 """
 
 import asyncio
+import inspect
 import os
 import shlex
 import subprocess
 import tempfile
 import time
+from pathlib import PurePosixPath
+from typing import Any
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
@@ -50,6 +53,8 @@ from .modal_helpers.utils import (
     get_modal_cluster_context,
     prepare_slime_config,
 )
+from modal_training_gym.common.checkpoint import _get_slime_checkpoint_prefix
+from modal_training_gym.common.framework import Framework
 
 SLIME_ROOT = "/root/slime"
 
@@ -77,8 +82,8 @@ def build_slime_app(
     # ── Image ────────────────────────────────────────────────────────────────
     image = Image.from_registry("slimerl/slime:nightly-dev-20260329a").entrypoint([])
 
-    if slime.image_run_commands is not None:
-        image = slime.image_run_commands(image)
+    if slime.image_overlay is not None:
+        image = slime.image_overlay(image)
 
     if slime.local_slime:
         image = image.add_local_dir(
@@ -146,7 +151,7 @@ def build_slime_app(
     checkpoints_volume = Volume.from_name(
         f"{app_name}-checkpoints", create_if_missing=True
     )
-    all_volumes = {
+    all_volumes: dict[str | PurePosixPath, Any] = {
         str(HF_CACHE_PATH): hf_cache_volume,
         str(DATA_PATH): data_volume,
         str(CHECKPOINTS_PATH): checkpoints_volume,
@@ -208,7 +213,7 @@ def build_slime_app(
         serialized=True,
         name="convert_checkpoint",
     )
-    @clustered(convert_nnodes, rdma=True)
+    @clustered(convert_nnodes, rdma=True)  # pyright: ignore[reportCallIssue, reportOptionalCall]
     def convert_checkpoint():
         from huggingface_hub import snapshot_download
 
@@ -238,13 +243,17 @@ def build_slime_app(
 
         import importlib.util
 
-        convert_script = (
-            importlib.util.find_spec(
+        if num_nodes > 1:
+            spec = importlib.util.find_spec(
                 "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
-            ).origin
-            if num_nodes > 1
-            else f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"
-        )
+            )
+            convert_script = spec.origin if spec is not None else None
+            if not convert_script:
+                raise RuntimeError(
+                    "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
+                )
+        else:
+            convert_script = f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"
 
         cmd = (
             f"torchrun {' '.join(torchrun_args)} {convert_script} "
@@ -292,9 +301,14 @@ def build_slime_app(
             else snapshot_download(model.model_name, local_files_only=True)
         )
 
-        convert_script = importlib.util.find_spec(
+        spec = importlib.util.find_spec(
             "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf"
-        ).origin
+        )
+        convert_script = spec.origin if spec is not None else None
+        if not convert_script:
+            raise RuntimeError(
+                "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf not found"
+            )
 
         cmd = (
             f"python {convert_script} "
@@ -320,8 +334,8 @@ def build_slime_app(
         serialized=True,
         name="train",
     )
-    @clustered(slime.total_nodes, rdma=True)
-    async def train():
+    @clustered(slime.total_nodes, rdma=True)  # pyright: ignore[reportCallIssue, reportOptionalCall]
+    async def train(run_id: str | None = None):
         await asyncio.gather(
             hf_cache_volume.reload.aio(),
             data_volume.reload.aio(),
@@ -342,7 +356,8 @@ def build_slime_app(
             return
 
         created_at = int(time.time())
-        run_id = f"{app_name}-{created_at}"
+        run_id = run_id or f"{app_name}-{created_at}"
+        print(f"Training run id: {run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
             "recipe": {
@@ -362,13 +377,15 @@ def build_slime_app(
             "lr": slime.lr,
             "global_batch_size": slime.global_batch_size,
         }
-        TrainingRun(
+        run_record = TrainingRun(
             run_id=run_id,
             modal_app_id=os.environ.get("MODAL_APP_ID", ""),
-            framework="slime",
+            framework=Framework.SLIME,
             config=config_summary,
             created_at=created_at,
-        ).save()
+            started_at=created_at,
+        )
+        run_record.save()
         print(f"TrainingRun recorded: {run_id}")
 
         if model:
@@ -394,10 +411,24 @@ def build_slime_app(
         if wandb_key := os.environ.get("WANDB_API_KEY", ""):
             if slime.wandb is not None:
                 slime.wandb.key = wandb_key
-            elif getattr(slime, "use_wandb", False):
-                slime.wandb_key = wandb_key
 
-        cmd = build_train_cmd(slime, SLIME_ROOT, model=model, dataset=dataset)
+        default_save_root = str(CHECKPOINTS_PATH).rstrip("/")
+        configured_save_root = (
+            str(slime.save).rstrip("/") if slime.save else default_save_root
+        )
+        save_root = (
+            f"{default_save_root}/{run_id}"
+            if configured_save_root == default_save_root
+            else configured_save_root
+        )
+        os.makedirs(save_root, exist_ok=True)
+
+        original_save = slime.save
+        object.__setattr__(slime, "save", save_root)
+        try:
+            cmd = build_train_cmd(slime, SLIME_ROOT, model=model, dataset=dataset)
+        finally:
+            object.__setattr__(slime, "save", original_save)
         runtime_env = {
             "env_vars": {
                 "no_proxy": f"127.0.0.1,{cluster.head_addr}",
@@ -416,8 +447,6 @@ def build_slime_app(
             print(f"Ray dashboard: {tunnel.url}")
             await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
 
-        save_root = str(slime.save).rstrip("/") if slime.save else str(CHECKPOINTS_PATH)
-
         if model and slime.megatron_to_hf_mode == "bridge":
             from huggingface_hub import snapshot_download as _snap
 
@@ -425,7 +454,7 @@ def build_slime_app(
                 str(model.model_path) if model.model_path
                 else _snap(model.model_name, local_files_only=True)
             )
-            prefix = slime.checkpoint.iteration_prefix
+            prefix = _get_slime_checkpoint_prefix()
             ckpt_dirs = sorted(
                 (d for d in os.scandir(save_root)
                  if d.is_dir() and d.name.startswith(prefix) and not d.name.endswith("_hf")),
@@ -446,17 +475,24 @@ def build_slime_app(
                     subprocess.run(["bash", "-c", cmd], check=True)
                     print(f"Converted {entry.name} → {hf_dir}")
 
+        result_kwargs = {
+            "app_name": app_name,
+            "framework": "slime",
+            "training_run_id": run_id,
+            "checkpoint_dir": save_root,
+            "model_config": model,
+            "checkpoints_volume_name": f"{app_name}-checkpoints",
+            "checkpoints_mount_path": str(CHECKPOINTS_PATH).rstrip("/"),
+        }
+        accepted_fields = set(inspect.signature(TrainResult).parameters)
         result = TrainResult(
-            app_name=app_name,
-            framework="slime",
-            training_run_id=run_id,
-            checkpoint_dir=save_root,
-            model_config=model,
-            checkpoints_volume_name=f"{app_name}-checkpoints",
-            checkpoints_mount_path=str(CHECKPOINTS_PATH).rstrip("/"),
-            iteration_prefix=slime.checkpoint.iteration_prefix,
+            **{k: v for k, v in result_kwargs.items() if k in accepted_fields}
         )
         result.save()
+        finished_at = int(time.time())
+        run_record.ended_at = finished_at
+        run_record.duration_seconds = max(0, finished_at - run_record.started_at)
+        run_record.save()
         checkpoints_volume.commit()
         print(f"TrainResult saved: {run_id}")
         return result._to_dict()

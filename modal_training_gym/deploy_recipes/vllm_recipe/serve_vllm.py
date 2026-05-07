@@ -20,7 +20,8 @@ Deploy separately from the training app:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from modal import App, Volume
@@ -56,7 +57,7 @@ def build_vllm_serve_app(
 
     hf_cache_vol = Volume.from_name("huggingface-cache", create_if_missing=True)
     vllm_cache_vol = Volume.from_name("vllm-cache", create_if_missing=True)
-    volumes = {
+    volumes: dict[str | PurePosixPath, Any] = {
         "/root/.cache/huggingface": hf_cache_vol,
         "/root/.cache/vllm": vllm_cache_vol,
     }
@@ -117,5 +118,6 @@ def build_vllm_serve_app(
         print(*cmd)
         subprocess.Popen(" ".join(cmd), shell=True)
 
-    app.serve = serve  # type: ignore[attr-defined]
+    for tag, fn in app.registered_functions.items():
+        setattr(app, tag, fn)
     return app

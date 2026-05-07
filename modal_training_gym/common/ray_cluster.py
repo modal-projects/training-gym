@@ -259,7 +259,7 @@ class ModalRayCluster:
             runtime_env=runtime_env or {},
         )
         print(f"Submitted Ray job: {job_id}")
-        async for line in self._client.tail_job_logs(job_id):
+        for line in self._client.tail_job_logs(job_id):
             print(line, end="", flush=True)
         status = self._client.get_job_status(job_id).value
         print(f"\nFinal Ray job status: {status}")

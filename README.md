@@ -8,9 +8,10 @@
 **[📖 Documentation](https://gym.modal.dev)** · **[Tutorials](https://gym.modal.dev/tutorials/)** · **[API Reference](https://gym.modal.dev/reference/)**
 
 Distributed training on [Modal](https://modal.com) without hand-rolling a
-launcher each time. Pick a training framework (slime), plug in a model + dataset config, and
-`modal run` it — training-gym handles the image, the
-cluster topology, the Ray/NCCL bring-up, volume mounts, and checkpointing.
+launcher each time. Compose a `TrainConfig` or `DeploymentConfig` from
+shared model, dataset, and recipe objects, and training-gym handles the
+image, the cluster topology, the Ray/NCCL bring-up, volume mounts,
+checkpointing, and serving deployment.
 
 Packaged as `modal-training-gym` — pip-install once, then import
 framework-specific launchers from your own scripts or notebooks. Every
@@ -30,34 +31,21 @@ Every generated tutorial notebook has this line as its first code cell.
 
 ## Quickstart
 
-Run a tutorial — qwen3-4b GRPO on GSM8K using slime:
+The current end-to-end tutorial is notebook-first:
 
-```bash
-uv run modal run --detach tutorials/rl/001_slime_intro/001_slime_intro.py::app.train
-```
+- [`tutorials/rl/000_rl_basics/000_rl_basics.ipynb`](tutorials/rl/000_rl_basics/000_rl_basics.ipynb)
+  walks through serving `Qwen3_4B`, evaluating it, training it with
+  `SlimeRecipe`, and comparing the result.
 
-Or open the matching `.ipynb` in Jupyter / Modal Notebooks and run
-cell-by-cell — each notebook is a self-contained walkthrough. See
-[`tutorials/README.md`](tutorials/README.md) for the full catalog.
+The main public surfaces are:
 
-## Pick your framework
+- `TrainConfig` combines `DatasetConfig`, `ModelConfig`, and a training
+  recipe such as `SlimeRecipe`.
+- `DeploymentConfig` combines a `ModelConfig` with a serving recipe such
+  as `SglangRecipe` or `VllmRecipe`.
+- `Qwen3_4B` is the built-in model preset in the current branch.
 
-Each framework package exposes a config class (e.g. `SlimeConfig`) that returns a `modal.App` via `.build_app()` with
-`download`, `prepare_dataset`, and `train` functions. Shared
-container objects (`DatasetConfig`, `Model`, `WandbConfig`) plug into
-the framework config; each framework translates them into its own CLI
-vocabulary.
-
-| Framework | Good for | Tutorials |
-|---|---|---|
-| `slime` | GRPO / RL post-training — Ray + Megatron + SGLang | [001 Intro](tutorials/rl/001_slime_intro/), [002 Customizing](tutorials/rl/002_customizing_your_slime_run/), [003 LLM Judge](tutorials/rl/003_slime_with_llm_as_judge/) |
-
-"Thin" launchers give you a cluster and a `torchrun` — bring your own
-training script. "Opinionated" launchers wrap a specific upstream framework
-and expect you to configure it via that framework's CLI/YAML vocabulary.
-
-Source in `modal_training_gym/frameworks/`. Runnable examples in
-[`tutorials/README.md`](tutorials/README.md).
+See [`tutorials/README.md`](tutorials/README.md) for the current catalog.
 
 ## Documentation
 
@@ -106,8 +94,10 @@ frontend from a Modal web endpoint.
 
 ```
 modal_training_gym/        ← installable package
-├── common/                ← cross-framework classes (datasets, models, wandb, Ray cluster helpers)
-└── frameworks/            ← one package per training framework (see tutorials/ for the full list)
+├── common/                ← shared classes (datasets, models, eval, deployment, Ray helpers)
+├── deploy_recipes/        ← serving presets for engines like SGLang and vLLM
+├── frameworks/            ← launcher implementations that build Modal apps
+└── train_recipes/         ← training presets such as SlimeRecipe
 
 tutorials/                 ← runnable examples — one folder per tutorial
 ├── tutorial_generator/    ← source files; each produces a .py + .ipynb
@@ -142,19 +132,18 @@ See [`tutorials/README.md`](tutorials/README.md#authoring-a-new-tutorial)
 for the generator-source format and the per-tutorial `TUTORIAL_METADATA`
 schema.
 
-## Contributing a new framework
+## Contributing a new recipe
 
-1. Create `modal_training_gym/frameworks/<name>/` with `config.py`,
-   `launcher.py`, `__init__.py`.
-2. `build_<name>_app(*, modal, config, name=None) -> modal.App` is the
-   public entrypoint — same shape as the existing frameworks. See
-   `modal_training_gym/frameworks/slime/launcher.py` for a complete
-   reference.
-3. Add a new `tutorials/tutorial_generator/<tutorial>.py` demonstrating it,
-   and run the generator.
-4. Container configs (`dataset`, `model`, `wandb`) are interpreted
-   explicitly in each framework — don't try to share CLI vocabularies.
-   The common config classes stay pure data.
+1. Add a train recipe under `modal_training_gym/train_recipes/` or a
+   deploy recipe under `modal_training_gym/deploy_recipes/`.
+2. If the recipe needs new runtime behavior, wire it into the relevant
+   launcher or serving builder under `modal_training_gym/frameworks/` or
+   `modal_training_gym/deploy_recipes/*/serve_*.py`.
+3. Add or update a source tutorial under
+   `tutorials/tutorial_generator/<bucket>/` and run the generators.
+4. Keep shared container objects (`dataset`, `model`, `wandb`, `eval`)
+   framework-agnostic; recipe layers should do the translation into
+   engine-specific flags.
 
 ## Agent guide
 

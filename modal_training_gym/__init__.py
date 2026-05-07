@@ -1,6 +1,11 @@
 from modal_training_gym.common.dataset import DatasetConfig, HuggingFaceDataset
 from modal_training_gym.common.deployment import DeploymentConfig, ModelDeployment
-from modal_training_gym.common.eval import EvalConfig, EvalResult, EvalRowResult
+from modal_training_gym.common.eval import (
+    EvalConfig,
+    EvalConfigDurable,
+    EvalResult,
+    EvalRowResult,
+)
 from modal_training_gym.common.models import (
     HFModelConfiguration,
     ModelArchitecture,
@@ -17,6 +22,7 @@ __all__ = [
     "DatasetConfig",
     "DeploymentConfig",
     "EvalConfig",
+    "EvalConfigDurable",
     "EvalResult",
     "EvalRowResult",
     "HFModelConfiguration",

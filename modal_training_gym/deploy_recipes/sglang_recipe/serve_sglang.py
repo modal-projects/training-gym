@@ -12,7 +12,8 @@ endpoint until ready, runs a warmup request, then proxies traffic.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from modal import App, Volume
@@ -51,7 +52,7 @@ def build_sglang_serve_app(
     )
 
     hf_cache_vol = Volume.from_name("huggingface-cache", create_if_missing=True)
-    volumes: dict[str, Volume] = {
+    volumes: dict[str | PurePosixPath, Any] = {
         "/root/.cache/huggingface": hf_cache_vol,
     }
 
@@ -130,5 +131,8 @@ def build_sglang_serve_app(
             if hasattr(self, "endpoint"):
                 self.endpoint.stop()
 
-    app.serve = Server  # type: ignore[attr-defined]
+    for tag, fn in app.registered_functions.items():
+        setattr(app, tag, fn)
+    for tag, cls in app.registered_classes.items():
+        setattr(app, tag, cls)
     return app

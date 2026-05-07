@@ -10,7 +10,6 @@ from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
-from modal_training_gym.common.checkpoint import CheckpointConfig
 from modal_training_gym.common.models import (
     ModelArchitecture,
     ModelConfig,
@@ -34,7 +33,7 @@ _SLIME_SKIP = {
     "wandb",
     "name",
     "app_tags",
-    "image_run_commands",
+    "image_overlay",
     "local_python_sources",
     "local_slime",
     "checkpoint",
@@ -46,6 +45,8 @@ YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class SlimeRecipe(BaseTrainRecipe):
+    """Recipe dataclass for configuring slime GRPO training on Modal."""
+
     recipe_type: RecipeType = RecipeType.SLIME
 
     # ── App identity ─────────────────────────────────────────────────────────
@@ -62,7 +63,7 @@ class SlimeRecipe(BaseTrainRecipe):
     )
     async_mode: bool = False
     wandb: WandbConfig | None = None
-    image_run_commands: Callable[[modal.Image], modal.Image] | None = None
+    image_overlay: Callable[[modal.Image], modal.Image] | None = None
     local_python_sources: list[str] = field(default_factory=list)
     local_slime: str | None = None
 
@@ -132,10 +133,6 @@ class SlimeRecipe(BaseTrainRecipe):
     save_interval: int = 1000
     megatron_to_hf_mode: str = "bridge"
     use_fault_tolerance: bool = True
-
-    checkpoint: CheckpointConfig = field(
-        default_factory=lambda: CheckpointConfig(iteration_prefix="iter_")
-    )
 
     # ── Reward model ─────────────────────────────────────────────────────────
     rm_type: str | None = None
