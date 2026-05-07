@@ -77,7 +77,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {#each group.runs as run (run.eval.eval_id)}
+                  {#each group.runs as run, runIndex (run.eval.eval_id || `${group.key}-${run.eval.created_at || 0}-${runIndex}`)}
                     {@const cfg = run.eval.config || {}}
                     <tr>
                       <td>

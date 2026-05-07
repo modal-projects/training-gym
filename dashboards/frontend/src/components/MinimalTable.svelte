@@ -12,12 +12,13 @@
     border-collapse: separate;
     border-spacing: 0;
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, white 10%, transparent);
+    border: 1px solid var(--border);
     border-radius: 2px;
+    background: var(--panel);
   }
 
   :where(.minimal-table) :global(th) {
-    background: color-mix(in srgb, white 5%, transparent);
+    background: var(--panel-alt);
     padding: 0.58rem 0.88rem;
     text-align: left;
     vertical-align: middle;

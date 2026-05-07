@@ -58,7 +58,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each deploymentRows as row (row.deployment.url || row.deployment.app_name || row.deployment.model_name)}
+            {#each deploymentRows as row, rowIndex (row.deployment.deployment_id || `${row.deployment.url || row.deployment.app_name || row.deployment.model_name || "deployment"}-${rowIndex}`)}
               <tr>
                 <td>
                   <div class="run-name">{deploymentLabel(row.deployment)}</div>

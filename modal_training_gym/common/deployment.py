@@ -24,7 +24,12 @@ from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 from modal_training_gym.deploy_recipes.vllm_recipe import VllmRecipe
 from modal_training_gym.deploy_recipes.base import DeployRecipeType
 from modal.experimental import list_deployed_apps
-from modal_training_gym.utils.metadata import MetadataStore, vol_list, vol_put
+from modal_training_gym.utils.metadata import (
+    MetadataStore,
+    vol_list,
+    vol_put,
+    vol_upsert_summary_item,
+)
 
 DEPLOYMENTS_STORE_NAME = MetadataStore.DEPLOYMENTS.value
 
@@ -217,24 +222,72 @@ class ModelDeployment(BaseModel):
             "served_model_name": value.served_model_name,
         }
 
-    def generate(self, prompt: str, **kwargs) -> str:
+    def generate(self, prompt: str, ensure_ready: bool = True, **kwargs) -> str:
+        import time
+
         import requests
 
-        self.wait_until_ready()
+        if ensure_ready:
+            self.wait_until_ready()
         body = {
             "model": self.deployment_config.served_model_name,
             "messages": [{"role": "user", "content": prompt}],
             **kwargs,
         }
-        resp = requests.post(f"{self.url}/v1/chat/completions", json=body, timeout=120)
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        transient_status_codes = {502, 503, 504}
+        max_attempts = 4
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = requests.post(
+                    f"{self.url}/v1/chat/completions",
+                    json=body,
+                    timeout=120,
+                )
+                if resp.status_code in transient_status_codes and attempt < max_attempts:
+                    print(
+                        f"Transient generation error {resp.status_code} from {self.url}; "
+                        f"retrying ({attempt}/{max_attempts})..."
+                    )
+                    self.wait_until_ready(timeout=120)
+                    time.sleep(min(2 * attempt, 5))
+                    continue
+                resp.raise_for_status()
+                message = resp.json()["choices"][0]["message"]
+                content = message.get("content")
+                if isinstance(content, str):
+                    return content
+                if content is None:
+                    return message.get("reasoning_content", "")
+                return str(content)
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                if attempt >= max_attempts:
+                    raise
+                print(
+                    f"Transient generation transport error from {self.url}: {exc}; "
+                    f"retrying ({attempt}/{max_attempts})..."
+                )
+                self.wait_until_ready(timeout=120)
+                time.sleep(min(2 * attempt, 5))
+
+        raise RuntimeError(f"Failed to generate from {self.url} after {max_attempts} attempts")
 
     def save(self) -> None:
+        payload = self.model_dump(mode="json")
         vol_put(
             MetadataStore.DEPLOYMENTS,
             self.deployment_id,
-            self.model_dump(mode="json"),
+            payload,
+        )
+        vol_upsert_summary_item(
+            MetadataStore.DEPLOYMENTS_SUMMARY,
+            payload,
+            item_id_key="deployment_id",
+            sort_key=lambda item: (
+                str(item.get("deployment_config", {}).get("app_name", "")),
+                str(item.get("deployment_id", "")),
+            ),
+            reverse=True,
         )
 
     @property

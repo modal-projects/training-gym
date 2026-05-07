@@ -43,7 +43,7 @@ The main public surfaces are:
   recipe such as `SlimeRecipe`.
 - `DeploymentConfig` combines a `ModelConfig` with a serving recipe such
   as `SglangRecipe` or `VllmRecipe`.
-- `Qwen3_4B` is the built-in model preset in the current branch.
+- Built-in model presets: `Qwen3_0_6B`, `Qwen3_4B`, `Qwen3_30B`.
 
 See [`tutorials/README.md`](tutorials/README.md) for the current catalog.
 

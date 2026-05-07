@@ -191,14 +191,15 @@
   --color-edge-accent: var(--color-c-green-20);
   --color-edge-danger: var(--color-c-red-20);
   --color-edge-warning: var(--color-c-yellow-30);
-  --bg: var(--color-surface-primary);
-  --bg-depth: #111111;
+  --bg: #181818;
+  --bg-depth: #181818;
   --panel: var(--color-c-surface-base-gray-opaque);
   --panel-alt: var(--color-c-gray-5);
   --surface: var(--color-c-gray-10);
   --surface-raised: var(--color-c-gray-15);
-  --border: color-mix(in srgb, var(--color-c-gray-100) 10%, transparent);
-  --border-strong: color-mix(in srgb, var(--color-c-gray-100) 20%, transparent);
+  --border-secondary: var(--color-edge-secondary);
+  --border: var(--border-secondary);
+  --border-strong: var(--color-edge-primary);
   --text: var(--color-foreground-primary);
   --text-bright: var(--color-foreground-active);
   --muted: var(--color-foreground-secondary);
@@ -225,7 +226,7 @@
 
 body {
   font: 14px/1.5 var(--font-sans);
-  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-depth) 100%);
+  background: var(--bg);
   color: var(--text);
   min-height: 100vh;
   -moz-osx-font-smoothing: grayscale;

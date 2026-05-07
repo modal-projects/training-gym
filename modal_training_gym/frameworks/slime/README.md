@@ -26,6 +26,28 @@ result = config.train()
 
 Then run: `uv run modal run my_tutorial.py::train`
 
+## Recipe building blocks
+
+`SlimeRecipe` can be composed with reusable blocks:
+
+```python
+from modal_training_gym import MultiTurn, SlimeRecipe
+
+recipe = SlimeRecipe(
+    rollout_batch_size=4,
+).with_blocks(
+    MultiTurn(
+        generate_function=number_guess_generate,
+        reward_function=number_guess_rm,
+        max_turns=6,
+        log_multi_turn=True,
+    )
+)
+```
+
+Each block gets the current recipe and returns a new one, so users can share
+"lego" blocks across tasks.
+
 ## SlimeRecipe
 
 `SlimeRecipe` is a Pydantic dataclass that holds all configuration for a slime training run:

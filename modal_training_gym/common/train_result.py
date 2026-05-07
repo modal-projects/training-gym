@@ -51,7 +51,13 @@ import copy
 from typing import TYPE_CHECKING, Any
 
 from modal_training_gym.common.framework import Framework
-from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_list, vol_put
+from modal_training_gym.utils.metadata import (
+    MetadataStore,
+    vol_get,
+    vol_list,
+    vol_put,
+    vol_upsert_summary_item,
+)
 
 if TYPE_CHECKING:
     from modal import Volume
@@ -119,7 +125,15 @@ class TrainResult:
 
     def save(self) -> None:
         """Persist this result to the shared metadata volume."""
-        vol_put(MetadataStore.TRAIN_RESULTS, self.training_run_id, self._to_dict())
+        payload = self._to_dict()
+        vol_put(MetadataStore.TRAIN_RESULTS, self.training_run_id, payload)
+        vol_upsert_summary_item(
+            MetadataStore.TRAIN_RESULTS_SUMMARY,
+            payload,
+            item_id_key="training_run_id",
+            sort_key=lambda item: str(item.get("training_run_id", "")),
+            reverse=True,
+        )
 
     @staticmethod
     def _parse_model_config(d: dict[str, Any]) -> dict[str, Any]:

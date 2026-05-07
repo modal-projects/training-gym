@@ -9,7 +9,7 @@
   import EvalsPage from "./pages/EvalsPage.svelte";
   import { fetchRuns, fetchEvals, fetchDeployments } from "./lib/api.js";
   import logoSvg from "./lib/logo.svg";
-  import { fmtDuration, fmtCluster, truncateId } from "./lib/format.js";
+  import { fmtDuration, truncateId } from "./lib/format.js";
 
   const DOCS_URL = "https://gym.modal.dev";
 
@@ -17,14 +17,18 @@
   let allEvals = $state([]);
   let allDeployments = $state([]);
   let loading = $state(true);
-  let loadingEvals = $state(true);
-  let loadingDeployments = $state(true);
+  let loadingEvals = $state(false);
+  let loadingDeployments = $state(false);
   let error = $state(null);
   let search = $state("");
-  let activeFrameworks = $state(new Set());
+  let activeRecipes = $state(new Set());
   let activeStatuses = $state(new Set());
   let activePage = $state("training");
-  let loadRequestId = 0;
+  let runsRequestId = 0;
+  let evalsRequestId = 0;
+  let deploymentsRequestId = 0;
+  let hasLoadedEvals = $state(false);
+  let hasLoadedDeployments = $state(false);
 
   const pageMeta = {
     training: { title: "Training runs" },
@@ -67,18 +71,22 @@
     }
 
     window.addEventListener("popstate", syncPageWithPath);
+    void loadRuns();
     return () => window.removeEventListener("popstate", syncPageWithPath);
   });
 
-  function getFramework(run) {
+  function getRecipe(run) {
     return run.framework || "(untagged)";
   }
 
   function getStatus(run) {
-    if (run.train_result) return "Completed";
-    if (run.status === "stopped") return "Stopped";
-    if (run.status === "failed") return "Failed";
-    return "Running";
+    const rawStatus = safeText(run.status).toLowerCase();
+    if (run.train_result || rawStatus === "completed") return "Completed";
+    if (rawStatus === "stopped") return "Stopped";
+    if (rawStatus === "failed") return "Failed";
+    if (rawStatus === "running") return "Running";
+    if (rawStatus === "pending") return "Pending";
+    return rawStatus ? rawStatus[0].toUpperCase() + rawStatus.slice(1) : "Pending";
   }
 
   function modelName(run) {
@@ -173,74 +181,87 @@
     );
   }
 
-  async function load() {
-    const requestId = ++loadRequestId;
-    const isStale = () => requestId !== loadRequestId;
+  async function loadRuns() {
+    const requestId = ++runsRequestId;
+    const isStale = () => requestId !== runsRequestId;
 
     loading = true;
-    loadingEvals = true;
-    loadingDeployments = true;
     error = null;
-
-    const evalsPromise = fetchWithTimeout(fetchEvals, 15000, "evals");
-    const deploymentsPromise = fetchWithTimeout(fetchDeployments, 15000, "deployments");
-
-    evalsPromise
-      .then((evals) => {
-        if (isStale()) return;
-        allEvals = evals;
-      })
-      .catch((reason) => {
-        if (isStale()) return;
-        allEvals = [];
-        console.warn(getErrorMessage(reason));
-      })
-      .finally(() => {
-        if (isStale()) return;
-        loadingEvals = false;
-      });
-
-    deploymentsPromise
-      .then((deployments) => {
-        if (isStale()) return;
-        allDeployments = deployments;
-      })
-      .catch((reason) => {
-        if (isStale()) return;
-        allDeployments = [];
-        console.warn(getErrorMessage(reason));
-      })
-      .finally(() => {
-        if (isStale()) return;
-        loadingDeployments = false;
-      });
 
     try {
       const runs = await fetchWithTimeout(fetchRuns, 30000, "runs");
       if (isStale()) return;
       allRuns = runs;
-      activeFrameworks = new Set(allRuns.map(getFramework));
+      activeRecipes = new Set(allRuns.map(getRecipe));
       activeStatuses = new Set(allRuns.map(getStatus));
     } catch (e) {
       if (isStale()) return;
       error = getErrorMessage(e);
       allRuns = [];
-      activeFrameworks = new Set();
+      activeRecipes = new Set();
       activeStatuses = new Set();
     }
-    if (isStale()) return;
-    loading = false;
+    if (!isStale()) loading = false;
   }
 
-  load();
+  async function loadEvals() {
+    const requestId = ++evalsRequestId;
+    const isStale = () => requestId !== evalsRequestId;
 
-  let frameworks = $derived([...new Set(allRuns.map(getFramework))].sort());
+    loadingEvals = true;
+    try {
+      const evals = await fetchWithTimeout(fetchEvals, 15000, "evals");
+      if (isStale()) return;
+      allEvals = evals;
+      hasLoadedEvals = true;
+    } catch (reason) {
+      if (isStale()) return;
+      allEvals = [];
+      console.warn(getErrorMessage(reason));
+    }
+    if (!isStale()) loadingEvals = false;
+  }
+
+  async function loadDeployments() {
+    const requestId = ++deploymentsRequestId;
+    const isStale = () => requestId !== deploymentsRequestId;
+
+    loadingDeployments = true;
+    try {
+      const deployments = await fetchWithTimeout(fetchDeployments, 15000, "deployments");
+      if (isStale()) return;
+      allDeployments = deployments;
+      hasLoadedDeployments = true;
+    } catch (reason) {
+      if (isStale()) return;
+      allDeployments = [];
+      console.warn(getErrorMessage(reason));
+    }
+    if (!isStale()) loadingDeployments = false;
+  }
+
+  function load() {
+    void loadRuns();
+    if (activePage === "evals") void loadEvals();
+    if (activePage === "deployments") void loadDeployments();
+  }
+
+  $effect(() => {
+    if (activePage === "evals" && !hasLoadedEvals) {
+      void loadEvals();
+    }
+    if (activePage === "deployments" && !hasLoadedDeployments) {
+      void loadDeployments();
+    }
+  });
+
+  let recipes = $derived([...new Set(allRuns.map(getRecipe))].sort());
   let statuses = $derived([...new Set(allRuns.map(getStatus))].sort());
 
-  let fwCounts = $derived(
+  let recipeCounts = $derived(
     allRuns.reduce((acc, run) => {
-      const fw = getFramework(run);
-      acc[fw] = (acc[fw] || 0) + 1;
+      const recipe = getRecipe(run);
+      acc[recipe] = (acc[recipe] || 0) + 1;
       return acc;
     }, {}),
   );
@@ -256,7 +277,7 @@
   let filteredRuns = $derived(
     allRuns
       .filter((run) => {
-        if (!activeFrameworks.has(getFramework(run))) return false;
+        if (!activeRecipes.has(getRecipe(run))) return false;
         if (!activeStatuses.has(getStatus(run))) return false;
         if (search) {
           const q = search.toLowerCase();
@@ -310,6 +331,7 @@
   );
 
   function evalAccuracy(ev) {
+    if (typeof ev.mean === "number") return ev.mean;
     const rows = ev.rows || [];
     if (!rows.length) return 0;
     return rows.reduce((sum, row) => sum + (row.score || 0), 0) / rows.length;
@@ -374,7 +396,7 @@
       }
       const group = groups.get(key);
       const avgScore = evalAccuracy(ev);
-      const totalRows = (ev.rows || []).length;
+      const totalRows = ev.total ?? (ev.rows || []).length;
       group.runs.push({
         eval: ev,
         avgScore,
@@ -447,16 +469,16 @@
     return `${filteredRuns.length} of ${allRuns.length} runs`;
   });
 
-  function toggleFramework(framework) {
-    const next = new Set(activeFrameworks);
-    if (next.has(framework)) next.delete(framework);
-    else next.add(framework);
-    activeFrameworks = next;
+  function toggleRecipe(recipe) {
+    const next = new Set(activeRecipes);
+    if (next.has(recipe)) next.delete(recipe);
+    else next.add(recipe);
+    activeRecipes = next;
   }
 
-  function toggleAllFrameworks() {
-    if (activeFrameworks.size === frameworks.length) activeFrameworks = new Set();
-    else activeFrameworks = new Set(frameworks);
+  function toggleAllRecipes() {
+    if (activeRecipes.size === recipes.length) activeRecipes = new Set();
+    else activeRecipes = new Set(recipes);
   }
 
   function toggleStatus(status) {
@@ -514,9 +536,9 @@
         {runningTotal}
         {stoppedTotal}
         {failedTotal}
-        {frameworks}
-        {fwCounts}
-        {activeFrameworks}
+        {recipes}
+        {recipeCounts}
+        {activeRecipes}
         {statuses}
         {statusCounts}
         {activeStatuses}
@@ -525,11 +547,10 @@
         {error}
         {modelName}
         {getStatus}
-        {fmtCluster}
         {fmtDuration}
         bind:search
-        onToggleFramework={toggleFramework}
-        onToggleAllFrameworks={toggleAllFrameworks}
+        onToggleRecipe={toggleRecipe}
+        onToggleAllRecipes={toggleAllRecipes}
         onToggleStatus={toggleStatus}
       />
     {:else if activePage === "deployments"}

@@ -11,14 +11,21 @@ volume.
 from __future__ import annotations
 
 from dataclasses import field
+from enum import Enum
 from typing import Any
 import json
 import random
+import shutil
 import tomllib
 import uuid
 from pathlib import Path
 
 DatasetRow = dict[str, Any]
+
+class DatasetType(Enum):
+    DEFAULT = "default"
+    HUGGING_FACE = "hugging_face"
+    HARBOR = "harbor"
 
 class DatasetConfig:
     """Dataset configuration shared across training frameworks.
@@ -27,6 +34,7 @@ class DatasetConfig:
     by the recipe/launcher layer, not by the dataset itself.
     """
 
+    _type: DatasetType = DatasetType.DEFAULT
     dataset_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     input_key: str = ""
     label_key: str = ""
@@ -54,6 +62,7 @@ class HuggingFaceDataset(DatasetConfig):
     (``{"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}``).
     """
 
+    _type: DatasetType = DatasetType.HUGGING_FACE
     hf_repo: str = ""
     hf_split: str = "train"
     hf_config: str | None = None
@@ -61,7 +70,7 @@ class HuggingFaceDataset(DatasetConfig):
     input_column: str = ""
     output_column: str = ""
     system_prompt: str = ""
-    prompt_template: str = ""
+    prompt_template: str = "{input}"
     n_rows: int = 0
 
     def __init__(self, **kwargs: Any) -> None:
@@ -93,9 +102,7 @@ class HuggingFaceDataset(DatasetConfig):
         template = self.prompt_template
 
         def _to_chat(row: dict) -> dict:
-            user_content = row[in_col]
-            if template:
-                user_content = template.format(input=user_content)
+            user_content = template.format(input=row[in_col])
             msgs = []
             if sys_prompt:
                 msgs.append({"role": "system", "content": sys_prompt})
@@ -131,15 +138,20 @@ class HuggingFaceDataset(DatasetConfig):
 
 
 class HarborDataset(DatasetConfig):
+    _type: DatasetType = DatasetType.HARBOR
+    dataset_name: str = ""
+    path: str | None = None
     task_root: str = ""
     task_glob: str = "*"
     task_names: list[str] | None = None
     instruction_path: str = "instruction.md"
     label_metadata_path: str | None = None
+    test_data_dir: str | None = None
     output_format: str = "parquet"
     prompt_template: str = "{instruction}"
     system_prompt: str = ""
     train_size: int | None = None
+    eval_size: int | None = None
     train_repeats: int = 1
     eval_repeats: int = 1
     shuffle_tasks: bool = False
@@ -153,8 +165,56 @@ class HarborDataset(DatasetConfig):
         if not self.label_key:
             self.label_key = "label"
         if "dataset_id" not in kwargs:
-            root_slug = self.task_root.replace("/", "_") if self.task_root else "harbor"
-            self.dataset_id = f"{root_slug}-{uuid.uuid4()}"
+            if self.dataset_name:
+                slug = self.dataset_name.replace("/", "-")
+            elif self.path:
+                slug = self.path.replace("/", "_")
+            elif self.task_root:
+                slug = self.task_root.replace("/", "_")
+            else:
+                slug = "harbor"
+            self.dataset_id = f"{slug}-{uuid.uuid4()}"
+
+    def _harbor_dataset_ref(self) -> str:
+        if "@" in self.dataset_name:
+            return self.dataset_name
+        return f"{self.dataset_name}@latest"
+
+    def _harbor_cache_dir(self) -> Path:
+        slug = self._harbor_dataset_ref().replace("/", "--").replace("@", "--")
+        return Path.home() / ".cache" / "harbor" / "datasets" / slug
+
+    def _download_harbor_dataset(self, cache_dir: Path) -> None:
+        import subprocess
+
+        ref = self._harbor_dataset_ref()
+        harbor_bin = shutil.which("harbor")
+        if harbor_bin is not None:
+            cmd = [
+                harbor_bin,
+                "datasets",
+                "download",
+                ref,
+                "--output-dir",
+                str(cache_dir),
+            ]
+        else:
+            uvx_bin = shutil.which("uvx")
+            if uvx_bin is None:
+                raise FileNotFoundError(
+                    "Harbor CLI not found. Install `harbor` or `uvx` to download "
+                    f"{self.dataset_name!r}."
+                )
+            cmd = [
+                uvx_bin,
+                "harbor",
+                "datasets",
+                "download",
+                ref,
+                "--output-dir",
+                str(cache_dir),
+            ]
+        subprocess.run(cmd, check=True)
 
     def _write_split(self, rows: list[dict[str, Any]], path: str) -> None:
         import os
@@ -168,31 +228,76 @@ class HarborDataset(DatasetConfig):
             return
         ds.to_parquet(path)
 
-    def _resolve_task_root(self) -> Path:
-        if not self.task_root:
-            raise ValueError(f"{type(self).__name__} requires task_root")
-        task_root = Path(self.task_root).resolve()
-        if not task_root.exists():
-            raise FileNotFoundError(f"task_root does not exist: {task_root}")
-        if not task_root.is_dir():
-            raise ValueError(f"task_root is not a directory: {task_root}")
+    def _pull_harbor_dataset(self) -> Path:
+        cache_dir = self._harbor_cache_dir()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        if not any(cache_dir.rglob(self.instruction_path)):
+            self._download_harbor_dataset(cache_dir)
+        task_root = self._discover_task_root(cache_dir)
+        if not any(task_root.rglob(self.instruction_path)):
+            raise FileNotFoundError(f"No Harbor tasks found under {cache_dir}")
         return task_root
 
-    def _iter_task_dirs(self) -> list[Path]:
-        task_root = self._resolve_task_root()
+    def _discover_task_root(self, search_root: Path) -> Path:
+        task_dirs = sorted(
+            {
+                instruction_file.parent
+                for instruction_file in search_root.rglob(self.instruction_path)
+                if instruction_file.is_file()
+            }
+        )
+        if not task_dirs:
+            return search_root
+        if len(task_dirs) == 1:
+            return task_dirs[0].parent
+        import os
+
+        return Path(os.path.commonpath([str(path) for path in task_dirs]))
+
+    def _resolve_task_root(self) -> Path:
+        if self.path:
+            task_root = Path(self.path).resolve()
+        elif self.dataset_name:
+            task_root = self._pull_harbor_dataset()
+        elif self.task_root:
+            task_root = Path(self.task_root).resolve()
+        else:
+            raise ValueError(
+                f"{type(self).__name__} requires dataset_name, path, or task_root"
+            )
+        if not task_root.exists():
+            raise FileNotFoundError(f"task root does not exist: {task_root}")
+        if not task_root.is_dir():
+            raise ValueError(f"task root is not a directory: {task_root}")
+        return task_root
+
+    def _candidate_task_dirs(self, task_root: Path) -> list[Path]:
         if self.task_names is not None:
-            task_dirs = [
+            return [
                 (task_root / name).resolve()
                 for name in self.task_names
                 if (task_root / name).is_dir()
             ]
-        else:
-            task_dirs = sorted(path.resolve() for path in task_root.glob(self.task_glob) if path.is_dir())
+        return sorted(
+            path.resolve() for path in task_root.glob(self.task_glob) if path.is_dir()
+        )
+
+    def _iter_task_dirs(self) -> list[Path]:
+        task_root = self._resolve_task_root()
+        task_dirs = self._candidate_task_dirs(task_root)
+        if not task_dirs:
+            discovered_root = self._discover_task_root(task_root)
+            if discovered_root != task_root:
+                task_root = discovered_root
+                task_dirs = self._candidate_task_dirs(task_root)
         if self.shuffle_tasks:
             rng = random.Random(self.shuffle_seed)
             rng.shuffle(task_dirs)
         if not task_dirs:
             raise ValueError(f"No Harbor tasks found under {task_root}")
+        if self.train_size is not None:
+            max_tasks = self.train_size + (self.eval_size or 0)
+            task_dirs = task_dirs[:max_tasks]
         return task_dirs
 
     def _read_label_metadata(self, task_dir: Path) -> dict[str, Any]:
@@ -213,15 +318,32 @@ class HarborDataset(DatasetConfig):
             raise ValueError(f"Label metadata must decode to an object: {metadata_path}")
         return data
 
+    def _read_test_data(self, task_dir: Path) -> list[dict[str, str]]:
+        assert self.test_data_dir is not None
+        tests_dir = task_dir / self.test_data_dir
+        test_cases: list[dict[str, str]] = []
+        if not tests_dir.is_dir():
+            return test_cases
+        for in_file in sorted(tests_dir.glob("*.in")):
+            out_file = in_file.with_suffix(".out")
+            if out_file.exists():
+                test_cases.append({
+                    "input": in_file.read_text(encoding="utf-8"),
+                    "expected_output": out_file.read_text(encoding="utf-8"),
+                })
+        return test_cases
+
     def _build_label(self, task_root: Path, task_dir: Path) -> dict[str, Any]:
         rel = task_dir.relative_to(task_root)
         rel_with_root = (Path(task_root.name) / rel).as_posix()
-        label = {
+        label: dict[str, Any] = {
             "harbor_task_name": task_dir.name,
             "harbor_task_path": task_dir.as_posix(),
             "harbor_task_rel": rel_with_root,
         }
         label.update(self._read_label_metadata(task_dir))
+        if self.test_data_dir:
+            label["test_cases"] = self._read_test_data(task_dir)
         return label
 
     def _format_prompt(self, *, instruction: str, task_dir: Path, label: dict[str, Any]) -> str:
@@ -276,6 +398,16 @@ class HarborDataset(DatasetConfig):
             )
         return out
 
+    def to_pandas(self, *, formatted: bool = False):
+        import pandas as pd
+
+        if not formatted:
+            return pd.DataFrame(self.load())
+
+        task_root = self._resolve_task_root()
+        rows = [self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()]
+        return pd.DataFrame(rows)
+
     def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
         task_root = self._resolve_task_root()
         base_rows = [self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()]
@@ -286,7 +418,7 @@ class HarborDataset(DatasetConfig):
         else:
             train_size = max(1, min(int(self.train_size), len(base_rows)))
             train_base = base_rows[:train_size]
-            eval_base = base_rows[train_size:] or base_rows
+            eval_base = base_rows[train_size: train_size + (self.eval_size or 0)] or base_rows
 
         train_rows = self._repeat_rows(train_base, int(self.train_repeats))
         eval_rows = self._repeat_rows(eval_base, int(self.eval_repeats))

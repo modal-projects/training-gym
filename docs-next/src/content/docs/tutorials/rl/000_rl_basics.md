@@ -112,8 +112,8 @@ class HaikuDataset(HuggingFaceDataset):
     )
     prompt_template = "Write a haiku about {input}."
 
-train_dataset = HaikuDataset(n_rows=50)
-eval_dataset = HaikuDataset(n_rows=10)
+train_dataset = HaikuDataset(n_rows=10)
+eval_dataset = HaikuDataset(n_rows=5)
 ```
 
 Seems straightforward enough, right? How do we run an eval on our base model with this dataset?

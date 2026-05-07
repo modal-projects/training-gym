@@ -37,4 +37,6 @@ EvalResult(**data)
 
 ### `save(self) -> 'None'`
 
+### `to_summary(self) -> 'EvalSummary'`
+
 **Source:** [`modal_training_gym/common/eval.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/eval.py)

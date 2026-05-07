@@ -120,12 +120,12 @@ eval_dataset = HaikuDataset(n_rows=5)
 # The task-specific part is a scoring function passed to `.evaluate(...)`, which must
 # return `EvalRowResult`.
 
-def eval_fn(_example: dict, response: str) -> EvalRowResult:
+def eval_response_fn(_example: dict, response: str) -> EvalRowResult:
     return EvalRowResult(score=score_haiku(response), response=response)
 
 eval_config = EvalConfig(
     dataset=eval_dataset,
-    eval_fn=eval_fn,
+    eval_response_fn=eval_response_fn,
     generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
 )
 print("——— Running base model evaluation... ———")
