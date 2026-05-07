@@ -92,7 +92,7 @@
     <strong>{completedTotal}</strong>
   </article>
   <article class="summary-card">
-    <span class="summary-label">Running</span>
+    <span class="summary-label">Pending</span>
     <strong>{runningTotal}</strong>
   </article>
   <article class="summary-card">
@@ -282,7 +282,7 @@
   .summary-row {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0.7rem;
+    gap: 24px;
     margin-bottom: 24px;
   }
 
@@ -294,7 +294,7 @@
     border: 0;
     border-radius: 10px;
     background: color-mix(in srgb, #ffffff 7%, transparent);
-    padding: 0.8rem 0.95rem;
+    padding: 24px;
     display: flex;
     flex-direction: column;
     gap: 0.12rem;
@@ -318,6 +318,7 @@
     display: flex;
     flex-direction: column;
     gap: 24px;
+    padding: 24px;
   }
 
   .filters-row {
@@ -534,7 +535,7 @@
   }
 
   .empty {
-    padding: 2.5rem 2rem;
+    padding: 24px;
     color: var(--muted);
     text-align: center;
     font-size: 0.84rem;

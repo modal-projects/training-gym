@@ -84,7 +84,7 @@
     if (run.train_result || rawStatus === "completed") return "Completed";
     if (rawStatus === "stopped") return "Stopped";
     if (rawStatus === "failed") return "Failed";
-    if (rawStatus === "running") return "Running";
+    if (rawStatus === "running") return "Pending";
     if (rawStatus === "pending") return "Pending";
     return rawStatus ? rawStatus[0].toUpperCase() + rawStatus.slice(1) : "Pending";
   }
@@ -250,6 +250,9 @@
     if (activePage === "evals" && !hasLoadedEvals) {
       void loadEvals();
     }
+    if (activePage === "deployments" && !hasLoadedEvals) {
+      void loadEvals();
+    }
     if (activePage === "deployments" && !hasLoadedDeployments) {
       void loadDeployments();
     }
@@ -317,24 +320,34 @@
       ),
   );
 
-  let linkedDeployments = $derived(
-    deploymentRows.filter(({ run }) => run != null).length,
-  );
-
-  let distinctDeploymentModels = $derived(
-    new Set(
-      allDeployments.map(
-        (deployment) =>
-          deployment.model_name || deployment.served_model_name || "—",
-      ),
-    ).size,
-  );
-
   function evalAccuracy(ev) {
     if (typeof ev.mean === "number") return ev.mean;
     const rows = ev.rows || [];
     if (!rows.length) return 0;
     return rows.reduce((sum, row) => sum + (row.score || 0), 0) / rows.length;
+  }
+
+  function getEvalStatus(ev) {
+    const rawStatus = safeText(ev.status).toLowerCase();
+    if (
+      rawStatus === "completed" ||
+      rawStatus === "success" ||
+      rawStatus === "succeeded"
+    ) {
+      return "Completed";
+    }
+    if (rawStatus === "failed" || rawStatus === "error") return "Failed";
+    if (
+      rawStatus === "running" ||
+      rawStatus === "pending" ||
+      rawStatus === "queued" ||
+      rawStatus === "initializing"
+    ) {
+      return "Pending";
+    }
+    const total = ev.total ?? (Array.isArray(ev.rows) ? ev.rows.length : 0);
+    if (total > 0) return "Completed";
+    return "Pending";
   }
 
   function normalizeConfigValue(value) {
@@ -375,7 +388,9 @@
       safeText(config?.judge?.model_name) ||
       safeText(config?.judge_model_name) ||
       "";
-    return { dataset, model, split, judge };
+    const evalFn =
+      safeText(config?.eval_fn_name) || safeText(config?.grader_name) || "";
+    return { dataset, model, split, judge, evalFn };
   }
 
   let sortedEvals = $derived(
@@ -385,22 +400,31 @@
   let evalConfigGroups = $derived.by(() => {
     const groups = new Map();
     for (const ev of sortedEvals) {
-      const key = evalConfigKey(ev);
+      const key = safeText(ev.eval_config_id).trim() || evalConfigKey(ev);
       if (!groups.has(key)) {
         groups.set(key, {
           key,
+          evalConfigId: key,
           config: ev.config || {},
           runs: [],
           latestCreatedAt: 0,
         });
       }
       const group = groups.get(key);
+      if (
+        (!group.config || Object.keys(group.config).length === 0) &&
+        ev.config &&
+        Object.keys(ev.config).length > 0
+      ) {
+        group.config = ev.config;
+      }
       const avgScore = evalAccuracy(ev);
       const totalRows = ev.total ?? (ev.rows || []).length;
       group.runs.push({
         eval: ev,
         avgScore,
         totalRows,
+        status: getEvalStatus(ev),
       });
       group.latestCreatedAt = Math.max(group.latestCreatedAt, ev.created_at || 0);
     }
@@ -409,8 +433,8 @@
       .map((group) => {
         const sortedRuns = [...group.runs].sort(
           (a, b) =>
-            b.avgScore - a.avgScore ||
-            (b.eval.created_at || 0) - (a.eval.created_at || 0),
+            (b.eval.created_at || 0) - (a.eval.created_at || 0) ||
+            b.avgScore - a.avgScore,
         );
         const totalEvals = sortedRuns.length;
         const totalExamples = sortedRuns.reduce(
@@ -428,17 +452,36 @@
             : totalEvals > 0
               ? sortedRuns.reduce((sum, run) => sum + run.avgScore, 0) / totalEvals
               : 0;
+        const completedCount = sortedRuns.filter(
+          (run) => run.status === "Completed",
+        ).length;
+        const pendingCount = sortedRuns.filter(
+          (run) => run.status === "Pending",
+        ).length;
+        const failedCount = sortedRuns.filter((run) => run.status === "Failed").length;
+        const deploymentCount = new Set(
+          sortedRuns
+            .map(
+              (run) =>
+                safeText(
+                  run.eval.config?.deployment?.url ||
+                    run.eval.config?.deployment?.model_name ||
+                    run.eval.config?.deployment?.served_model_name,
+                ) || null,
+            )
+            .filter(Boolean),
+        ).size;
         return {
           ...group,
           meta: evalConfigMeta(group.config),
           bestScore,
           totalEvals,
           avgAccuracy,
-          runs: sortedRuns.map((entry, idx) => ({
-            ...entry,
-            rank: idx + 1,
-            deltaFromBest: entry.avgScore - bestScore,
-          })),
+          completedCount,
+          pendingCount,
+          failedCount,
+          deploymentCount,
+          runs: sortedRuns,
         };
       })
       .sort(
@@ -448,12 +491,14 @@
       );
   });
 
-  let evalConfigCount = $derived(evalConfigGroups.length);
-
-  let avgAccuracy = $derived(
-    allEvals.length
-      ? allEvals.reduce((sum, ev) => sum + evalAccuracy(ev), 0) / allEvals.length
-      : 0,
+  let evalCompletedTotal = $derived(
+    allEvals.filter((ev) => getEvalStatus(ev) === "Completed").length,
+  );
+  let evalPendingTotal = $derived(
+    allEvals.filter((ev) => getEvalStatus(ev) === "Pending").length,
+  );
+  let evalFailedTotal = $derived(
+    allEvals.filter((ev) => getEvalStatus(ev) === "Failed").length,
   );
 
   let statusText = $derived.by(() => {
@@ -556,20 +601,21 @@
     {:else if activePage === "deployments"}
       <DeploymentsPage
         {allDeployments}
-        {linkedDeployments}
-        {distinctDeploymentModels}
+        {allEvals}
         loading={loadingDeployments}
         {error}
         {deploymentRows}
         {deploymentLabel}
         {truncateId}
+        {getStatus}
         onOpenTrainingRun={openTrainingRun}
       />
     {:else if activePage === "evals"}
       <EvalsPage
         {allEvals}
-        {avgAccuracy}
-        {evalConfigCount}
+        {evalCompletedTotal}
+        {evalPendingTotal}
+        {evalFailedTotal}
         loading={loadingEvals}
         {error}
         {evalConfigGroups}
@@ -658,7 +704,7 @@
   }
 
   .workspace {
-    padding: 0.8rem 1.5rem 1.5rem;
+    padding: 24px;
   }
 
   @media (max-width: 900px) {
@@ -680,7 +726,7 @@
     }
 
     .workspace {
-      padding: 1rem;
+      padding: 24px;
     }
   }
 </style>

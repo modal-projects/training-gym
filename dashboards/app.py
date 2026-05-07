@@ -64,6 +64,7 @@ def fastapi_app():
         vol_put,
         vol_put_summary_items,
     )
+    from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 
     web = FastAPI()
     cache_ttl_seconds = 5.0
@@ -114,6 +115,21 @@ def fastapi_app():
             if isinstance(items, list):
                 return [item for item in items if isinstance(item, dict)]
         return []
+
+    def add_modal_app_urls(
+        items: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], bool]:
+        updated = []
+        changed = False
+        for item in items:
+            new_item = dict(item)
+            if not new_item.get("modal_app_url"):
+                app_id = str(new_item.get("modal_app_id", "") or "")
+                if app_id:
+                    new_item["modal_app_url"] = modal_app_dashboard_url(app_id)
+                    changed = True
+            updated.append(new_item)
+        return updated, changed
 
     def persist_eval_summaries(summaries: list[dict[str, Any]]) -> None:
         vol_put(
@@ -166,9 +182,19 @@ def fastapi_app():
     ) -> list[dict[str, Any]]:
         items = await run_in_threadpool(vol_get_summary_items, summary_store)
         if items is not None:
+            items, changed = add_modal_app_urls(items)
+            if changed:
+                await run_in_threadpool(
+                    vol_put_summary_items,
+                    summary_store,
+                    items,
+                    key=eval_summary_key,
+                    payload_key=SUMMARY_ITEMS_KEY,
+                )
             return items
 
         items = await run_in_threadpool(vol_list, detail_store)
+        items, _ = add_modal_app_urls(items)
         await run_in_threadpool(
             vol_put_summary_items,
             summary_store,

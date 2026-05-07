@@ -19,12 +19,6 @@ EVAL_SUMMARY_KEY = "summary"
 EVAL_SUMMARY_PAYLOAD_KEY = "summaries"
 
 
-def _new_eval_config_id() -> str:
-    from uuid import uuid4
-
-    return f"eval-config-{uuid4().hex[:12]}"
-
-
 def _callable_name(fn: Callable[..., Any]) -> str:
     name = getattr(fn, "__qualname__", None) or getattr(fn, "__name__", None)
     if name:
@@ -55,7 +49,6 @@ class EvalConfigDurable(BaseModel):
     @classmethod
     def list_configs(cls) -> list["EvalConfigDurable"]:
         return [cls.model_validate(v) for v in vol_list(MetadataStore.EVAL_CONFIGS)]
-
 
 class EvalRowResult(BaseModel):
     """One evaluated row: score, response text, and optional metadata."""
@@ -107,6 +100,7 @@ class EvalResult(BaseModel):
 
     eval_id: str
     eval_config_id: str
+    deployment_id: str
     created_at: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC)
     )
@@ -168,7 +162,7 @@ class EvalConfig:
     eval_fn: EvalFn | None = None
     eval_response_fn: EvalResponseFn | None = None
     prompt_column: str | None = None
-    eval_config_id: str = field(default_factory=_new_eval_config_id)
+    eval_config_id: str | None = None
     generate_kwargs: dict[str, Any] = field(default_factory=dict)
 
     def _build_eval_fn(self, eval_response_fn: EvalResponseFn) -> EvalFn:
@@ -190,6 +184,13 @@ class EvalConfig:
         return eval_fn
 
     def __post_init__(self):
+        if self.eval_config_id is None:
+            from uuid import uuid4
+
+            class_name = type(self).__name__
+            dataset_name = type(self.dataset).__name__
+            eval_fn_name = _callable_name(self.eval_fn or self.eval_response_fn)
+            self.eval_config_id = f"{class_name}.{dataset_name}.{eval_fn_name}.{uuid4().hex[:4]}"
         if self.eval_fn is None:
             assert self.eval_response_fn is not None, "eval_fn or eval_response_fn must be set"
             self.eval_fn = self._build_eval_fn(self.eval_response_fn)
@@ -281,6 +282,7 @@ class EvalConfig:
 
         result = EvalResult(
             eval_id=f"eval-{uuid4().hex[:12]}",
+            deployment_id=deployment.deployment_id,
             eval_config_id=self.eval_config_id,
             rows=results,
         )

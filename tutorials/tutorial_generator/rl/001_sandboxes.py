@@ -4,7 +4,7 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 1×H100",
-    "summary": "Competitive programming RL with Harbor USACO and sandboxed verification",
+    "summary": "Code RL with Harbor hello-world and sandboxed verification",
     "difficulty": "Intermediate",
     "order": 20,
     "api_classes": [
@@ -27,14 +27,14 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Competitive programming RL with Harbor USACO + Modal sandboxes
+    # Code RL with Harbor hello-world + Modal sandboxes
 
-    This tutorial trains a model on USACO competitive programming problems
-    from the [Harbor Hub](https://hub.harborframework.com/datasets/usaco/usaco/latest),
-    scoring solutions by executing them in Modal sandboxes.
+    This tutorial trains a model on the
+    [hello-world](https://hub.harborframework.com/tasks/habor/hello-world/latest)
+    task from Harbor Hub, scoring solutions by executing them in Modal sandboxes.
 
     Workflow:
-    1. Pull the USACO dataset from Harbor Hub via `HarborDataset`.
+    1. Pull the hello-world task from Harbor Hub via `HarborDataset`.
     2. Score model outputs by executing code in Modal sandboxes,
        piping test inputs via stdin and comparing stdout.
     3. Use that scorer for both offline eval and as SLIME `custom_rm_function`.
@@ -51,7 +51,7 @@ def _run_instructions():
     """
     Run with:
     ```
-    uv run python tutorials/rl/001_code_golf_sandboxes/001_code_golf_sandboxes.py
+    uv run python tutorials/rl/001_sandboxes/001_sandboxes.py
     ```
     """
 
@@ -66,7 +66,6 @@ def _install():
 def _imports():
     import json
     import re
-    from functools import lru_cache
 
     import modal
 
@@ -87,10 +86,10 @@ def _imports():
 @markdown
 def _dataset_intro():
     """
-    ## Load USACO from Harbor Hub
+    ## Load hello-world from Harbor Hub
 
-    `HarborDataset` accepts a `dataset_name` to pull datasets from
-    [Harbor Hub](https://hub.harborframework.com). Each USACO task has:
+    `HarborDataset` accepts a `dataset_name` to pull tasks from
+    [Harbor Hub](https://hub.harborframework.com). Each task has:
     - `instruction.md` — the problem statement (prompt)
     - `task.toml` — metadata (difficulty, category)
     - `tests/` — input/output test pairs for verification
@@ -108,12 +107,10 @@ def _dataset_intro():
 @code
 def _dataset():
     dataset = HarborDataset(
-        dataset_name="usaco/usaco",
+        dataset_name="harbor/hello-world",
         label_metadata_path="task.toml",
         test_data_dir="tests",
-        train_size=5,
-        eval_size=5,
-        train_repeats=2,
+        train_repeats=20,
     )
 
 
@@ -148,7 +145,6 @@ def _sandbox_reward_intro():
 @code
 def _sandbox_reward():
     _CODE_FENCE_RE = re.compile(r"```(?:python)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
-    _SANDBOX_IMAGE = modal.Image.debian_slim(python_version="3.11")
 
     def extract_python_code(text: str) -> str:
         normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
@@ -161,16 +157,14 @@ def _sandbox_reward():
             return match.group(1).strip()
         return normalized
 
-    @lru_cache(maxsize=1)
-    def _sandbox_app() -> modal.App:
-        return modal.App.lookup("training-gym-usaco-rm", create_if_missing=True)
-
     def score_usaco_with_sandbox(
         response: str,
         *,
         test_cases: list[dict],
         timeout_sec: int = 60,
     ) -> tuple[float, dict]:
+        import modal as _modal
+
         code = extract_python_code(response)
         if not test_cases:
             return 0.0, {"passed": 0, "total": 0}
@@ -196,10 +190,11 @@ def _sandbox_reward():
         ]) + "\n"
 
         try:
-            sandbox = modal.Sandbox.create(
+            app = _modal.App.lookup("training-gym-sandbox-rm", create_if_missing=True)
+            sandbox = _modal.Sandbox.create(
                 "python", "-c", script,
-                app=_sandbox_app(),
-                image=_SANDBOX_IMAGE,
+                app=app,
+                image=_modal.Image.debian_slim(python_version="3.11"),
                 timeout=timeout_sec,
                 cpu=1.0,
                 memory=1024,
@@ -279,12 +274,12 @@ def _train():
         model=Qwen3_4B(),
         dataset=dataset,
         recipe=SlimeRecipe(
-            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-usaco"),
+            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-hello-world"),
             custom_rm_function=usaco_rm,
             num_rollout=10,
-            rollout_batch_size=32,
+            rollout_batch_size=8,
             n_samples_per_prompt=8,
-            global_batch_size=256,
+            global_batch_size=8,
             rollout_max_response_len=2048,
             eval_max_response_len=2048,
             n_samples_per_eval_prompt=8,
@@ -315,8 +310,8 @@ def _serve_trained():
     trained_deployment = DeploymentConfig(
         model=Qwen3_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-usaco-serve",
-        served_model_name="qwen3-4b-usaco",
+        app_name="qwen3-4b-hello-world-serve",
+        served_model_name="qwen3-4b-hello-world",
     ).serve()
     print(f"Trained model URL: {trained_deployment.url}")
 

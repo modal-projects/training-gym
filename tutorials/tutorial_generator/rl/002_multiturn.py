@@ -436,7 +436,7 @@ def _train():
                 "max_turns": _MAX_TURNS,
                 "log_multi_turn": True,
             },
-            num_rollout=10,
+            num_rollout=20,
             rollout_batch_size=8,
             n_samples_per_prompt=1,
             rollout_max_response_len=64,

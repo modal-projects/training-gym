@@ -5,6 +5,7 @@ from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.train_result import TrainResult
+from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.frameworks.slime import build_slime_app
 from modal_training_gym.train_recipes.base import BaseTrainRecipe, RecipeType
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
@@ -65,7 +66,12 @@ class TrainConfig:
         result_dict = None
         with modal.enable_output():
             with app.run():
-                result_dict = app.train.remote(run_id=run_id)
+                modal_app_id = app.app_id or ""
+                result_dict = app.train.remote(
+                    run_id=run_id,
+                    modal_app_id=modal_app_id,
+                    modal_app_url=modal_app_dashboard_url(modal_app_id),
+                )
         if result_dict is None:
             raise RuntimeError(
                 "Training app exited before returning a result. "

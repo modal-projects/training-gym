@@ -40,6 +40,7 @@ from modal_training_gym.common.framework import (
     resolve_caller_module,
 )
 from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.train_result import TrainResult
@@ -441,7 +442,13 @@ def build_slime_app(
         name="train",
     )
     @clustered(slime.total_nodes, rdma=_multi_node)  # pyright: ignore[reportCallIssue, reportOptionalCall]
-    async def train(run_id: str | None = None):
+    async def train(
+        run_id: str | None = None,
+        modal_app_id: str = "",
+        modal_app_url: str = "",
+    ):
+        modal_app_id = modal_app_id or os.environ.get("MODAL_APP_ID", "")
+        modal_app_url = modal_app_url or modal_app_dashboard_url(modal_app_id)
         await asyncio.gather(
             hf_cache_volume.reload.aio(),
             data_volume.reload.aio(),
@@ -485,7 +492,8 @@ def build_slime_app(
         }
         run_record = TrainingRun(
             run_id=run_id,
-            modal_app_id=os.environ.get("MODAL_APP_ID", ""),
+            modal_app_id=modal_app_id,
+            modal_app_url=modal_app_url or modal_app_dashboard_url(modal_app_id),
             framework=Framework.SLIME,
             config=config_summary,
             created_at=created_at,
