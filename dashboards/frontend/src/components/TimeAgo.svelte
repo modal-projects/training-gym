@@ -1,7 +1,7 @@
 <script>
   import { formatDistance } from "date-fns";
   import { readable } from "svelte/store";
-  import { fmtDate } from "../lib/format.js";
+  import { fmtDate, toEpochSeconds } from "../lib/format.js";
 
   let {
     timestamp,
@@ -12,6 +12,14 @@
   } = $props();
 
   let text = $state("");
+  let normalizedSeconds = $derived(toEpochSeconds(timestamp));
+  let hasTimestamp = $derived(normalizedSeconds != null && normalizedSeconds > 0);
+  let datetime = $derived.by(() => {
+    if (!hasTimestamp) return undefined;
+    const date = new Date(normalizedSeconds * 1000);
+    if (Number.isNaN(date.getTime())) return undefined;
+    return date.toISOString();
+  });
 
   const now = readable(Date.now(), (set) => {
     if (typeof window !== "undefined") {
@@ -23,12 +31,12 @@
   });
 
   $effect(() => {
-    if (!timestamp) {
+    if (!hasTimestamp) {
       text = falsyRepresentation;
       return;
     }
 
-    let valueMs = Number(timestamp) * 1000;
+    let valueMs = normalizedSeconds * 1000;
     if (!allowFuture && valueMs > $now) {
       valueMs = $now;
     }
@@ -46,8 +54,8 @@
 </script>
 
 <time
-  datetime={timestamp ? new Date(Number(timestamp) * 1000).toISOString() : undefined}
-  title={timestamp ? fmtDate(timestamp) : undefined}
+  {datetime}
+  title={hasTimestamp ? fmtDate(normalizedSeconds) : undefined}
 >
   {text}
 </time>

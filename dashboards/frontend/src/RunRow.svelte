@@ -159,6 +159,8 @@
           {truncateId(result.checkpoint_dir)}
         </div>
       {/if}
+    {:else if run.status === "stopped" || run.status === "failed"}
+      <span class="result-badge result-stopped">No result</span>
     {:else}
       <span class="result-badge result-pending">Pending</span>
     {/if}
@@ -326,6 +328,11 @@
     border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
     background: color-mix(in srgb, var(--yellow) 10%, transparent);
     color: var(--yellow);
+  }
+  .result-stopped {
+    border-color: color-mix(in srgb, #f87171 45%, transparent);
+    background: color-mix(in srgb, #f87171 10%, transparent);
+    color: #f87171;
   }
   .result-meta {
     margin-top: 0.18rem;

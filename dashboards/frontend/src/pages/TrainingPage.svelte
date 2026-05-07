@@ -10,10 +10,12 @@
   let {
     allRuns,
     completedTotal,
-    pendingTotal,
-    frameworks,
-    fwCounts,
-    activeFrameworks,
+    runningTotal,
+    stoppedTotal,
+    failedTotal,
+    recipes,
+    recipeCounts,
+    activeRecipes,
     statuses,
     statusCounts,
     activeStatuses,
@@ -22,11 +24,10 @@
     error,
     modelName,
     getStatus,
-    fmtCluster,
     fmtDuration,
     search = $bindable(),
-    onToggleFramework,
-    onToggleAllFrameworks,
+    onToggleRecipe,
+    onToggleAllRecipes,
     onToggleStatus,
   } = $props();
 
@@ -91,25 +92,33 @@
     <strong>{completedTotal}</strong>
   </article>
   <article class="summary-card">
-    <span class="summary-label">Pending runs</span>
-    <strong>{pendingTotal}</strong>
+    <span class="summary-label">Running</span>
+    <strong>{runningTotal}</strong>
+  </article>
+  <article class="summary-card">
+    <span class="summary-label">Stopped</span>
+    <strong>{stoppedTotal}</strong>
+  </article>
+  <article class="summary-card">
+    <span class="summary-label">Failed</span>
+    <strong>{failedTotal}</strong>
   </article>
 </section>
 
 <section class="runs-surface">
   <div class="filters-row">
     <FilterBar
-      {frameworks}
-      {fwCounts}
-      {activeFrameworks}
-      allActive={activeFrameworks.size === frameworks.length}
+      {recipes}
+      {recipeCounts}
+      {activeRecipes}
+      allRecipesActive={activeRecipes.size === recipes.length}
       {statuses}
       {statusCounts}
       {activeStatuses}
       totalRuns={allRuns.length}
       bind:search
-      onToggleFramework={onToggleFramework}
-      onToggleAllFrameworks={onToggleAllFrameworks}
+      onToggleRecipe={onToggleRecipe}
+      onToggleAllRecipes={onToggleAllRecipes}
       onToggleStatus={onToggleStatus}
     />
   </div>
@@ -119,7 +128,7 @@
       <div class="table-wrap">
         <MinimalTableSkeleton
           class="runs-table"
-          columns={["Run", "Status", "Model", "Cluster", "Started", ""]}
+          columns={["Name", "Status", "Model", "Dataset", "Recipe", ""]}
           rows={8}
         />
       </div>
@@ -134,11 +143,11 @@
         <MinimalTable class="runs-table">
           <thead>
             <tr>
-              <th>Run</th>
+              <th>Name</th>
               <th>Status</th>
               <th>Model</th>
-              <th>Cluster</th>
-              <th>Started</th>
+              <th>Dataset</th>
+              <th>Recipe</th>
               <th></th>
             </tr>
           </thead>
@@ -161,14 +170,14 @@
                     {modelName(run)}
                   </button>
                 </td>
-                <td>
+                <td class="dataset-cell" title={run.config_summary?.dataset_name || "—"}>
                   <button class="cell-open-button" onclick={() => selectRun(run.run_id)}>
-                    {fmtCluster(run.config_summary)}
+                    {run.config_summary?.dataset_name || "—"}
                   </button>
                 </td>
                 <td>
                   <button class="cell-open-button" onclick={() => selectRun(run.run_id)}>
-                    <TimeAgo timestamp={run.started_at || run.created_at} showJustNow />
+                    {run.framework || "—"}
                   </button>
                 </td>
                 <td class="modal-link-cell">
@@ -182,12 +191,12 @@
                         onclick={(event) => event.stopPropagation()}
                       >
                         <span class="open-modal-link-label">Open in Modal</span>
-                        <ExternalLink size={12} strokeWidth={2.1} />
+                        <ExternalLink class="open-modal-link-icon" size={12} strokeWidth={2.1} />
                       </a>
                     {:else}
                       <span class="open-modal-link open-modal-link-disabled">
                         <span class="open-modal-link-label">Open in Modal</span>
-                        <ExternalLink size={12} strokeWidth={2.1} />
+                        <ExternalLink class="open-modal-link-icon" size={12} strokeWidth={2.1} />
                       </span>
                     {/if}
                   </div>
@@ -237,7 +246,7 @@
           <span class="drawer-value">{modelName(selectedRun)}</span>
         </div>
         <div class="drawer-kv">
-          <span class="drawer-key">Framework</span>
+          <span class="drawer-key">Recipe</span>
           <span class="drawer-value">{selectedRun.framework || "—"}</span>
         </div>
         <div class="drawer-kv">
@@ -272,7 +281,7 @@
 <style>
   .summary-row {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0.7rem;
     margin-bottom: 24px;
   }
@@ -325,7 +334,7 @@
 
   :global(table.runs-table) {
     width: 100%;
-    min-width: 920px;
+    min-width: 860px;
   }
 
   :global(table.runs-table tr.row-selected td) {
@@ -359,11 +368,15 @@
   }
 
   .run-cell {
-    width: 22%;
+    width: 24%;
   }
 
   .model-cell {
-    width: 24%;
+    width: 20%;
+  }
+
+  .dataset-cell {
+    width: 18%;
   }
 
   .modal-link-cell {
@@ -377,29 +390,31 @@
 
   .open-modal-link {
     display: inline-flex;
-    flex: 1;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 0.38rem;
     white-space: nowrap;
     border: 1px solid var(--border);
     border-radius: 7px;
     padding: 0.2rem 0.58rem;
-    color: var(--text);
     text-decoration: none;
     font-size: 0.72rem;
     font-weight: 500;
-    background: var(--panel-alt);
+    background: var(--panel);
   }
 
   .open-modal-link-label {
+    color: var(--muted);
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
+  :global(.open-modal-link-icon) {
+    color: var(--muted-strong);
+  }
+
   .open-modal-link:hover {
     border-color: var(--border-strong);
-    color: var(--text-bright);
   }
 
   .open-modal-link-disabled {
@@ -525,13 +540,13 @@
     font-size: 0.84rem;
   }
 
-  @media (max-width: 1080px) {
+  @media (max-width: 900px) {
     .summary-row {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
-  @media (max-width: 900px) {
+  @media (max-width: 640px) {
     .summary-row {
       grid-template-columns: 1fr;
     }

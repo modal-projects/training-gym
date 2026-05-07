@@ -1,18 +1,18 @@
 <script>
-  import { Check, ChevronDown, Filter } from "lucide-svelte";
+  import { Check, ChevronDown, Filter, Search } from "lucide-svelte";
 
   let {
-    frameworks,
-    fwCounts,
-    activeFrameworks,
-    allActive,
+    recipes,
+    recipeCounts,
+    activeRecipes,
+    allRecipesActive,
     statuses,
     statusCounts,
     activeStatuses,
     totalRuns,
     search = $bindable(),
-    onToggleFramework,
-    onToggleAllFrameworks,
+    onToggleRecipe,
+    onToggleAllRecipes,
     onToggleStatus,
   } = $props();
 
@@ -26,6 +26,20 @@
 <svelte:window onclick={() => (openMenu = null)} />
 
 <nav class="filters">
+  <label class="search-wrap" aria-label="Search training runs by name">
+    <span class="search-icon">
+      <Search size={13} />
+    </span>
+    <input
+      type="search"
+      class="search-input"
+      placeholder="Search by name"
+      bind:value={search}
+      autocomplete="off"
+      spellcheck="false"
+    />
+  </label>
+
   <div class="menu-wrap">
     <button
       class="filter-button"
@@ -69,52 +83,52 @@
   <div class="menu-wrap">
     <button
       class="filter-button"
-      class:open={openMenu === "frameworks"}
+      class:open={openMenu === "recipes"}
       onclick={(event) => {
         event.stopPropagation();
-        toggleMenu("frameworks");
+        toggleMenu("recipes");
       }}
     >
       <span class="button-icon">
         <Filter size={12} />
       </span>
-      <span>Frameworks</span>
-      <span class="chevron" class:rotated={openMenu === "frameworks"}>
+      <span>Recipe</span>
+      <span class="chevron" class:rotated={openMenu === "recipes"}>
         <ChevronDown size={12} />
       </span>
     </button>
-    {#if openMenu === "frameworks"}
+    {#if openMenu === "recipes"}
       <div class="menu">
         <button
           class="menu-item"
           onclick={(event) => {
             event.stopPropagation();
-            onToggleAllFrameworks();
+            onToggleAllRecipes();
           }}
         >
-          <span class="checkmark" class:checked={allActive}>
-            {#if allActive}
+          <span class="checkmark" class:checked={allRecipesActive}>
+            {#if allRecipesActive}
               <Check size={11} />
             {/if}
           </span>
           <span class="item-label">All</span>
           <span class="item-count">{totalRuns}</span>
         </button>
-        {#each frameworks as fw (fw)}
+        {#each recipes as recipe (recipe)}
           <button
             class="menu-item"
             onclick={(event) => {
               event.stopPropagation();
-              onToggleFramework(fw);
+              onToggleRecipe(recipe);
             }}
           >
-            <span class="checkmark" class:checked={activeFrameworks.has(fw)}>
-              {#if activeFrameworks.has(fw)}
+            <span class="checkmark" class:checked={activeRecipes.has(recipe)}>
+              {#if activeRecipes.has(recipe)}
                 <Check size={11} />
               {/if}
             </span>
-            <span class="item-label">{fw}</span>
-            <span class="item-count">{fwCounts[fw] || 0}</span>
+            <span class="item-label">{recipe}</span>
+            <span class="item-count">{recipeCounts[recipe] || 0}</span>
           </button>
         {/each}
       </div>
@@ -127,8 +141,41 @@
     padding: 0;
     display: flex;
     align-items: center;
-    gap: 0.42rem;
+    gap: 0.5rem;
     position: relative;
+    flex-wrap: wrap;
+  }
+
+  .search-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.42rem;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--panel);
+    min-width: 240px;
+    width: min(320px, 100%);
+    padding: 0.26rem 0.58rem;
+  }
+
+  .search-icon {
+    display: inline-flex;
+    color: var(--muted);
+  }
+
+  .search-input {
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text);
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+    font-size: 0.78rem;
+  }
+
+  .search-input::placeholder {
+    color: var(--muted);
   }
 
   .menu-wrap {
@@ -138,14 +185,14 @@
   .filter-button {
     display: inline-flex;
     align-items: center;
-    gap: 0.34rem;
+    gap: 0.26rem;
     border: 1px solid var(--border);
     border-radius: 7px;
-    background: color-mix(in srgb, var(--panel-alt) 88%, black);
+    background: var(--panel);
     color: var(--text);
     font: inherit;
-    font-size: 0.74rem;
-    padding: 0.24rem 0.52rem;
+    font-size: 0.76rem;
+    padding: 0.25rem 0.58rem;
     cursor: pointer;
     transition: all 0.15s ease;
   }
@@ -156,17 +203,18 @@
   }
 
   .filter-button.open {
-    border-color: color-mix(in srgb, var(--accent) 42%, transparent);
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-color: var(--border-strong);
+    background: var(--panel-alt);
     color: var(--text-bright);
   }
 
   .button-icon {
+    display: inline-flex;
     color: var(--muted);
   }
 
   .filter-button.open .button-icon {
-    color: var(--accent);
+    color: var(--text-bright);
   }
 
   .chevron {
@@ -187,9 +235,9 @@
     min-width: 210px;
     max-height: 280px;
     overflow: auto;
-    border: 1px solid var(--border-strong);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--panel) 94%, black);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
     box-shadow: 0 12px 26px color-mix(in srgb, black 55%, transparent);
     padding: 0.25rem;
   }

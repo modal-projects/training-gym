@@ -1,7 +1,7 @@
 ---
 title: Training Gym SDK
 description: Reusable building blocks and runnable examples for distributed training on Modal.
-editUrl: https://github.com/modal-projects/training-gym/edit/joy/refactor-gym-to-add-recipes/README.md
+editUrl: https://github.com/modal-projects/training-gym/edit/main/README.md
 ---
 
 :::caution[Important]
@@ -39,7 +39,7 @@ Every generated tutorial notebook has this line as its first code cell.
 
 The current end-to-end tutorial is notebook-first:
 
-- [`tutorials/rl/000_rl_basics/000_rl_basics.ipynb`](https://github.com/modal-projects/training-gym/blob/joy/refactor-gym-to-add-recipes/tutorials/rl/000_rl_basics/000_rl_basics.ipynb)
+- [`tutorials/rl/000_rl_basics/000_rl_basics.ipynb`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb)
   walks through serving `Qwen3_4B`, evaluating it, training it with
   `SlimeRecipe`, and comparing the result.
 
@@ -49,7 +49,7 @@ The main public surfaces are:
   recipe such as `SlimeRecipe`.
 - `DeploymentConfig` combines a `ModelConfig` with a serving recipe such
   as `SglangRecipe` or `VllmRecipe`.
-- `Qwen3_4B` is the built-in model preset in the current branch.
+- Built-in model presets: `Qwen3_0_6B`, `Qwen3_4B`, `Qwen3_30B`.
 
 See [`tutorials/README.md`](/tutorials/) for the current catalog.
 
@@ -90,7 +90,7 @@ frontend from a Modal web endpoint.
 
 ## License
 
-[MIT](https://github.com/modal-projects/training-gym/blob/joy/refactor-gym-to-add-recipes/LICENSE).
+[MIT](https://github.com/modal-projects/training-gym/blob/main/LICENSE).
 
 ---
 
@@ -153,4 +153,4 @@ schema.
 
 ## Agent guide
 
-- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/joy/refactor-gym-to-add-recipes/skills/agent-modal-training.md)
+- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/main/skills/agent-modal-training.md)

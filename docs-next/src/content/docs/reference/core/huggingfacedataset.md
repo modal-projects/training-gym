@@ -17,7 +17,7 @@ Dataset backed by a HuggingFace ``datasets`` repo.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `dataset_id` | `str` | `Field(name=None,type=None,default=<dataclasses._MISSING_TYPE object at 0x7f38a6893230>,default_factory=<function DatasetConfig.<lambda> at 0x7f38a6424680>,init=True,repr=True,hash=None,compare=True,metadata=mappingproxy({}),kw_only=<dataclasses._MISSING_TYPE object at 0x7f38a6893230>,_field_type=None)` |  |
+| `dataset_id` | `str` | `Field(name=None,type=None,default=<dataclasses._MISSING_TYPE object at 0x7f99a7817170>,default_factory=<function DatasetConfig.<lambda> at 0x7f99a7400e00>,init=True,repr=True,hash=None,compare=True,metadata=mappingproxy({}),kw_only=<dataclasses._MISSING_TYPE object at 0x7f99a7817170>,_field_type=None)` |  |
 | `input_key` | `str` | `""` |  |
 | `label_key` | `str` | `""` |  |
 | `apply_chat_template` | `bool` | `True` |  |
@@ -28,7 +28,7 @@ Dataset backed by a HuggingFace ``datasets`` repo.
 | `input_column` | `str` | `""` |  |
 | `output_column` | `str` | `""` |  |
 | `system_prompt` | `str` | `""` |  |
-| `prompt_template` | `str` | `""` |  |
+| `prompt_template` | `str` | `"{input}"` |  |
 | `n_rows` | `int` | `0` |  |
 
 ## Methods

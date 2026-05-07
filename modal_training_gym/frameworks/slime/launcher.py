@@ -33,7 +33,7 @@ from modal.experimental import clustered
 import cloudpickle
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
-from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
 from modal_training_gym.common.framework import (
     TOOLS_LOCAL_PATH,
     TOOLS_REMOTE_PATH,
@@ -63,6 +63,7 @@ from modal_training_gym.common.checkpoint import (
 from modal_training_gym.common.framework import Framework
 
 SLIME_ROOT = "/root/slime"
+HARBOR_PKG_VERSION = "0.6.6"
 
 
 def _has_torch_dist_checkpoint(save_path: str) -> bool:
@@ -117,6 +118,10 @@ def build_slime_app(
 
     if slime.image_overlay is not None:
         image = slime.image_overlay(image)
+        object.__setattr__(slime, "image_overlay", None)
+
+    if isinstance(dataset, HarborDataset):
+        image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
     if slime.local_slime:
         image = image.add_local_dir(
@@ -175,8 +180,6 @@ def build_slime_app(
                 remote_path=f"/root/{fn_module_name}.py",
                 copy=True,
             )
-            return
-        if fn_file and os.path.isfile(fn_file):
             return
         fn_name = getattr(fn, "__name__", fallback_name)
         try:
@@ -612,6 +615,8 @@ def build_slime_app(
         finally:
             finished_at = int(time.time())
             run_record.ended_at = finished_at
+            if run_record.completed_at is None:
+                run_record.completed_at = finished_at
             run_record.duration_seconds = max(0, finished_at - run_record.started_at)
             run_record.save()
 

@@ -3,7 +3,7 @@ import os
 from collections.abc import Callable
 from dataclasses import field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from modal_training_gym.train_recipes.base import BaseTrainRecipe, RecipeType
 from pydantic import ConfigDict
@@ -17,6 +17,9 @@ from modal_training_gym.common.models import (
 from modal_training_gym.common.wandb import WandbConfig
 
 import modal
+
+if TYPE_CHECKING:
+    from modal_training_gym.train_recipes.slime_recipe.blocks import SlimeRecipeBlock
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
 

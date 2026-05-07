@@ -295,7 +295,7 @@ def _eval_intro():
     """
     ## Offline multi-turn trajectory evaluator
 
-    `EvalConfig` now supports `generic_eval_fn`, so we can plug in a full
+    `EvalConfig` now supports `eval_fn`, so we can plug in a full
     multi-turn evaluator per row while still using the standard eval runner.
     """
 
@@ -354,7 +354,7 @@ def _eval_helpers():
             return int(payload.get("answer", 1))
         return 1
 
-    def guessing_generic_eval_fn(
+    def guessing_eval_fn(
         deployment: ModelDeployment,
         example: dict,
     ) -> EvalRowResult:
@@ -407,7 +407,7 @@ def _serve_base():
     print(f"Base model URL: {base_deployment.url}")
     eval_config = EvalConfig(
         dataset=eval_dataset,
-        generic_eval_fn=guessing_generic_eval_fn,
+        eval_fn=guessing_eval_fn,
     )
     base_eval = eval_config.evaluate(base_deployment, debug=True)
     base_summary = summarize_eval(base_eval)
@@ -437,10 +437,10 @@ def _train():
                 "log_multi_turn": True,
             },
             num_rollout=10,
-            rollout_batch_size=2,
+            rollout_batch_size=8,
             n_samples_per_prompt=1,
             rollout_max_response_len=64,
-            global_batch_size=2,
+            global_batch_size=8,
             eval_interval=0,
             save_interval=10,
             apply_chat_template_kwargs='{"enable_thinking": false}',

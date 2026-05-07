@@ -16,15 +16,17 @@ Evaluate a deployed model on a dataset config.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `dataset` | `'DatasetConfig'` |  |  |
-| `eval_fn` | `EvalFn` |  |  |
-| `eval_config_id` | `str` | `"eval-config-f4346c92b6d1"` |  |
+| `eval_fn` | `EvalFn | None` | `None` |  |
+| `eval_response_fn` | `EvalResponseFn | None` | `None` |  |
+| `prompt_column` | `str | None` | `None` |  |
+| `eval_config_id` | `str` | `"eval-config-2a9bdd23a19e"` |  |
 | `generate_kwargs` | `dict[str, Any]` | `{}` |  |
 
 ## Methods
 
 ### `build_prompt(self, row: 'DatasetRow') -> 'str'`
 
-### `evaluate(self, deployment: "'ModelDeployment'", debug: 'bool' = False) -> 'EvalResult'`
+### `evaluate(self, deployment: "'ModelDeployment'", debug: 'bool' = False, max_concurrency: 'int' = 1) -> 'EvalResult'`
 
 ### `save(self) -> 'EvalConfigDurable'`
 
@@ -33,6 +35,7 @@ Evaluate a deployed model on a dataset config.
 ## Related Tutorials
 
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
-- [Code-golf RL with sandboxed verification reward in Modal](/tutorials/rl/001_code_golf_sandboxes/)
+- [Competitive programming RL with Harbor USACO and sandboxed verification](/tutorials/rl/001_code_golf_sandboxes/)
+- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn_number_guessing/)
 
 **Source:** [`modal_training_gym/common/eval.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/eval.py)
