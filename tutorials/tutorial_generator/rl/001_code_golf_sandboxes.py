@@ -8,7 +8,7 @@ TUTORIAL_METADATA = {
     "difficulty": "Intermediate",
     "order": 20,
     "api_classes": [
-        "DatasetConfig",
+        "HarborDataset",
         "DeploymentConfig",
         "EvalConfig",
         "EvalRowResult",
@@ -69,10 +69,10 @@ def _imports():
     import modal
 
     from modal_training_gym import (
-        DatasetConfig,
         DeploymentConfig,
         EvalConfig,
         EvalRowResult,
+        HarborDataset,
         ModelDeployment,
         Qwen3_4B,
         SlimeRecipe,
@@ -85,97 +85,118 @@ def _imports():
 @markdown
 def _dataset_intro():
     """
-    ## Build a tiny code-golf dataset
+    ## Build Harbor tasks from MBPP
 
-    We keep this tutorial small and explicit: two Python tasks, each with:
-    - prompt text,
-    - reference solution,
-    - assert-style tests.
+    We ingest MBPP from Hugging Face and materialize a Harbor-style task tree:
+    - `instruction.md` for prompt text
+    - per-task metadata (`record.json`) for tests/reference solution
 
-    For training, rows are written in SLIME's chat format and task metadata
-    is packed into `label` JSON so the custom reward can recover task-specific
-    tests at runtime.
+    `HarborDataset` then converts those task folders into SLIME-ready chat rows.
     """
 
 
 @code
 def _dataset():
-    TASKS = [
-        {
-            "name": "triangular_number",
-            "entrypoint": "solve",
-            "prompt": (
-                "Write a Python function `solve(n)` that returns the nth triangular number."
-            ),
-            "reference_solution": "def solve(n):\n    return n * (n + 1) // 2\n",
-            "tests": [
-                "assert solve(1) == 1",
-                "assert solve(3) == 6",
-                "assert solve(10) == 55",
-            ],
-        },
-        {
-            "name": "digit_sum",
-            "entrypoint": "solve",
-            "prompt": "Write a Python function `solve(n)` that returns sum(map(int, str(abs(n)))).",
-            "reference_solution": "def solve(n):\n    return sum(map(int, str(abs(n))))\n",
-            "tests": [
-                "assert solve(0) == 0",
-                "assert solve(12345) == 15",
-                "assert solve(-909) == 18",
-            ],
-        },
-    ]
+    MBPP_REPO = "Muennighoff/mbpp"
+    MBPP_SPLIT = "train"
+    MBPP_LIMIT = 96
+    MBPP_TRAIN_SIZE = 80
 
+    def _extract_function_name(code: str) -> str | None:
+        import ast
 
-    class CodeGolfDataset(DatasetConfig):
-        input_key = "messages"
-        label_key = "label"
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return None
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return node.name
+        return None
+
+    def _load_mbpp_records(limit: int) -> list[dict]:
+        from datasets import load_dataset
+
+        ds = load_dataset(MBPP_REPO, split=MBPP_SPLIT)
+        ds = ds.select(range(min(limit, len(ds))))
+        records = []
+        for row in ds:
+            task_id = int(row["task_id"])
+            code = str(row["code"]).replace("\r\n", "\n").replace("\r", "\n")
+            entrypoint = _extract_function_name(code)
+            if not entrypoint:
+                continue
+            tests = [
+                *list(row.get("test_list", [])),
+                *list(row.get("challenge_test_list", [])),
+            ]
+            if not tests:
+                continue
+            records.append(
+                {
+                    "task_id": task_id,
+                    "name": f"mbpp_{task_id:04d}",
+                    "entrypoint": entrypoint,
+                    "prompt": str(row["text"]).strip(),
+                    "reference_solution": code,
+                    "tests": tests,
+                }
+            )
+        records.sort(key=lambda x: x["task_id"])
+        if not records:
+            raise ValueError("No usable MBPP records were loaded")
+        return records
+
+    def _write_harbor_tasks(tasks_root: str, tasks: list[dict]) -> None:
+        import os
+
+        os.makedirs(tasks_root, exist_ok=True)
+        for task in tasks:
+            task_dir = os.path.join(tasks_root, task["name"])
+            os.makedirs(task_dir, exist_ok=True)
+            with open(os.path.join(task_dir, "instruction.md"), "w", encoding="utf-8") as f:
+                f.write(
+                    (
+                        "Solve the following Python task.\n\n"
+                        f"Task:\n{task['prompt']}\n\n"
+                        f"Required function name: `{task['entrypoint']}`.\n\n"
+                        "Output only Python code. Do not include Markdown fences.\n"
+                    )
+                )
+            with open(os.path.join(task_dir, "record.json"), "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "task_id": task["task_id"],
+                        "task_name": task["name"],
+                        "entrypoint": task["entrypoint"],
+                        "tests": task["tests"],
+                        "reference_solution": task["reference_solution"],
+                    },
+                    f,
+                )
+
+    class CodeGolfDataset(HarborDataset):
         apply_chat_template = True
-        input_column = "prompt"
+        prompt_template = "{instruction}"
+        label_metadata_path = "record.json"
+        train_repeats = 16
+        mbpp_limit = MBPP_LIMIT
+        train_size = MBPP_TRAIN_SIZE
 
         def load(self):
-            return [
-                {
-                    "prompt": task["prompt"],
-                    "tests": list(task["tests"]),
-                    "entrypoint": task["entrypoint"],
-                    "reference_solution": task["reference_solution"],
-                }
-                for task in TASKS
-            ]
+            return _load_mbpp_records(limit=int(self.mbpp_limit))
 
         def prepare(self, path: str, eval_paths: dict[str, str] | None = None):
             import os
 
-            from datasets import Dataset
-
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-
-            def _to_train_row(task: dict) -> dict:
-                user_prompt = (
-                    f"{task['prompt']}\n"
-                    f"Return only Python code defining `{task['entrypoint']}`."
-                )
-                label_payload = {
-                    "task_name": task["name"],
-                    "entrypoint": task["entrypoint"],
-                    "tests": task["tests"],
-                    "reference_solution": task["reference_solution"],
-                }
-                return {
-                    "messages": [{"role": "user", "content": user_prompt}],
-                    "label": json.dumps(label_payload),
-                }
-
-            train_rows = [_to_train_row(task) for task in TASKS for _ in range(16)]
-            eval_rows = [_to_train_row(task) for task in TASKS]
-
-            Dataset.from_list(train_rows).to_parquet(path)
-            if eval_paths:
-                for eval_path in eval_paths.values():
-                    os.makedirs(os.path.dirname(eval_path), exist_ok=True)
-                    Dataset.from_list(eval_rows).to_parquet(eval_path)
+            tasks = self.load()
+            tasks_root = os.path.join(os.path.dirname(path), "code_golf_tasks", "tasks")
+            _write_harbor_tasks(tasks_root, tasks)
+            self.task_root = tasks_root
+            max_train = max(1, len(tasks) - 1)
+            self.train_size = min(int(self.train_size), max_train)
+            self.eval_repeats = 1
+            super().prepare(path, eval_paths)
 
 
     train_dataset = CodeGolfDataset()
@@ -537,13 +558,16 @@ def _train():
         recipe=SlimeRecipe(
             wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-code-golf"),
             custom_rm_function=code_golf_rm,
-            rm_type="math",
-            num_rollout=20,
-            rollout_batch_size=8,
-            n_samples_per_prompt=4,
+            num_rollout=10,
+            rollout_batch_size=32,
+            n_samples_per_prompt=8,
+            global_batch_size=256,
+            rollout_max_response_len=1024,
+            eval_max_response_len=1024,
+            n_samples_per_eval_prompt=8,
+            rollout_temperature=0.9,
+            max_tokens_per_gpu=4096,
             save_interval=10,
-            actor_num_nodes=1,
-            actor_num_gpus_per_node=1,
             apply_chat_template_kwargs='{"enable_thinking": false}',
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system modal>=1.2.0 datasets>=3.0.0",

@@ -4,6 +4,7 @@ from importlib import import_module
 
 _EXPORTS = {
     "DatasetConfig": ("modal_training_gym.common.dataset", "DatasetConfig"),
+    "HarborDataset": ("modal_training_gym.common.dataset", "HarborDataset"),
     "DeploymentConfig": ("modal_training_gym.common.deployment", "DeploymentConfig"),
     "EvalConfig": ("modal_training_gym.common.eval", "EvalConfig"),
     "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
@@ -25,6 +26,7 @@ _EXPORTS = {
 
 __all__ = [
     "DatasetConfig",
+    "HarborDataset",
     "DeploymentConfig",
     "EvalConfig",
     "EvalConfigDurable",

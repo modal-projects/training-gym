@@ -41,7 +41,7 @@ from modal_training_gym.common.framework import (
 )
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import ModalRayCluster
-from modal_training_gym.common.run import TrainingRun
+from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.train_result import TrainResult
 
 from modal_training_gym.train_recipes.slime_recipe.recipe import (
@@ -491,120 +491,129 @@ def build_slime_app(
         run_record.save()
         print(f"TrainingRun recorded: {run_id}")
 
-        if model:
-            cache_dir = (
-                HF_CACHE_PATH / "hub" / f"models--{model.model_name.replace('/', '--')}"
-            )
-            snapshots_dir = cache_dir / "snapshots"
-            has_snapshot = snapshots_dir.is_dir() and any(snapshots_dir.iterdir())
-            if not has_snapshot:
-                print(f"Downloading model {model.model_name}...")
-                model.download()
-                hf_cache_volume.commit()
-
-        if dataset:
-            prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
-            if not os.path.exists(prompt_data):
-                print(f"Preparing dataset ({prompt_data} not found)...")
-                dataset.prepare(prompt_data, eval_paths)
-                data_volume.commit()
-
-        prepare_slime_config(slime, model, tempfile.mkdtemp())
-
-        if wandb_key := os.environ.get("WANDB_API_KEY", ""):
-            if slime.wandb is not None:
-                slime.wandb.key = wandb_key
-
-        recipe_default_save_root = str(CHECKPOINTS_PATH).rstrip("/")
-        mounted_save_root = checkpoints_mount_path
-        configured_save_root = (
-            str(slime.save).rstrip("/") if slime.save else mounted_save_root
-        )
-        base_save_root = (
-            mounted_save_root
-            if configured_save_root == recipe_default_save_root
-            else configured_save_root
-        )
-        save_root = (
-            f"{mounted_save_root}/{run_id}"
-            if base_save_root == mounted_save_root
-            else configured_save_root
-        )
-        os.makedirs(save_root, exist_ok=True)
-
-        original_save = slime.save
-        object.__setattr__(slime, "save", save_root)
         try:
-            cmd = build_train_cmd(slime, SLIME_ROOT, model=model, dataset=dataset)
-        finally:
-            object.__setattr__(slime, "save", original_save)
-        runtime_env = {
-            "env_vars": {
-                "no_proxy": f"127.0.0.1,{cluster.head_addr}",
-                "MASTER_ADDR": cluster.head_addr,
-                **slime.environment,
-            }
-        }
+            if model:
+                cache_dir = (
+                    HF_CACHE_PATH / "hub" / f"models--{model.model_name.replace('/', '--')}"
+                )
+                snapshots_dir = cache_dir / "snapshots"
+                has_snapshot = snapshots_dir.is_dir() and any(snapshots_dir.iterdir())
+                if not has_snapshot:
+                    print(f"Downloading model {model.model_name}...")
+                    model.download()
+                    hf_cache_volume.commit()
 
-        mode = "async" if slime.async_mode else "sync"
-        print(
-            f"Training {app_name} — {slime.total_nodes} node(s) × {gpu_spec}  ({mode})"
-        )
-        print(f"Command: {cmd}, runtime_env: {runtime_env}")
+            if dataset:
+                prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
+                if not os.path.exists(prompt_data):
+                    print(f"Preparing dataset ({prompt_data} not found)...")
+                    dataset.prepare(prompt_data, eval_paths)
+                    data_volume.commit()
 
-        async with cluster.forward_dashboard() as tunnel:
-            print(f"Ray dashboard: {tunnel.url}")
-            await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
+            prepare_slime_config(slime, model, tempfile.mkdtemp())
 
-        if model and slime.megatron_to_hf_mode == "bridge":
-            from huggingface_hub import snapshot_download as _snap
+            if wandb_key := os.environ.get("WANDB_API_KEY", ""):
+                if slime.wandb is not None:
+                    slime.wandb.key = wandb_key
 
-            hf_path = (
-                str(model.model_path) if model.model_path
-                else _snap(model.model_name, local_files_only=True)
+            recipe_default_save_root = str(CHECKPOINTS_PATH).rstrip("/")
+            mounted_save_root = checkpoints_mount_path
+            configured_save_root = (
+                str(slime.save).rstrip("/") if slime.save else mounted_save_root
             )
-            prefix = _get_slime_checkpoint_prefix()
-            ckpt_dirs = sorted(
-                (d for d in os.scandir(save_root)
-                 if d.is_dir() and d.name.startswith(prefix) and not d.name.endswith("_hf")),
-                key=lambda d: d.name,
-            ) if prefix else []
+            base_save_root = (
+                mounted_save_root
+                if configured_save_root == recipe_default_save_root
+                else configured_save_root
+            )
+            save_root = (
+                f"{mounted_save_root}/{run_id}"
+                if base_save_root == mounted_save_root
+                else configured_save_root
+            )
+            os.makedirs(save_root, exist_ok=True)
 
-            for entry in ckpt_dirs:
-                hf_dir = f"{entry.path}_hf"
-                if not os.path.exists(hf_dir):
-                    cmd = (
-                        f"python {SLIME_ROOT}/tools/convert_torch_dist_to_hf.py "
-                        f"--input-dir {shlex.quote(entry.path)} "
-                        f"--output-dir {shlex.quote(hf_dir)} "
-                        f"--origin-hf-dir {shlex.quote(hf_path)} "
-                        f"--force"
-                    )
-                    print(f"Converting {entry.name} → HF: {cmd}")
-                    subprocess.run(["bash", "-c", cmd], check=True)
-                    print(f"Converted {entry.name} → {hf_dir}")
+            original_save = slime.save
+            object.__setattr__(slime, "save", save_root)
+            try:
+                cmd = build_train_cmd(slime, SLIME_ROOT, model=model, dataset=dataset)
+            finally:
+                object.__setattr__(slime, "save", original_save)
+            runtime_env = {
+                "env_vars": {
+                    "no_proxy": f"127.0.0.1,{cluster.head_addr}",
+                    "MASTER_ADDR": cluster.head_addr,
+                    **slime.environment,
+                }
+            }
 
-        result_kwargs = {
-            "app_name": app_name,
-            "framework": "slime",
-            "training_run_id": run_id,
-            "checkpoint_dir": save_root,
-            "model_config": model,
-            "checkpoints_volume_name": checkpoints_volume_name,
-            "checkpoints_mount_path": checkpoints_mount_path,
-        }
-        accepted_fields = set(inspect.signature(TrainResult).parameters)
-        result = TrainResult(
-            **{k: v for k, v in result_kwargs.items() if k in accepted_fields}
-        )
-        result.save()
-        finished_at = int(time.time())
-        run_record.ended_at = finished_at
-        run_record.duration_seconds = max(0, finished_at - run_record.started_at)
-        run_record.save()
-        checkpoints_volume.commit()
-        print(f"TrainResult saved: {run_id}")
-        return result._to_dict()
+            mode = "async" if slime.async_mode else "sync"
+            print(
+                f"Training {app_name} — {slime.total_nodes} node(s) × {gpu_spec}  ({mode})"
+            )
+            print(f"Command: {cmd}, runtime_env: {runtime_env}")
+
+            async with cluster.forward_dashboard() as tunnel:
+                print(f"Ray dashboard: {tunnel.url}")
+                await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
+
+            if model and slime.megatron_to_hf_mode == "bridge":
+                from huggingface_hub import snapshot_download as _snap
+
+                hf_path = (
+                    str(model.model_path) if model.model_path
+                    else _snap(model.model_name, local_files_only=True)
+                )
+                prefix = _get_slime_checkpoint_prefix()
+                ckpt_dirs = sorted(
+                    (d for d in os.scandir(save_root)
+                     if d.is_dir() and d.name.startswith(prefix) and not d.name.endswith("_hf")),
+                    key=lambda d: d.name,
+                ) if prefix else []
+
+                for entry in ckpt_dirs:
+                    hf_dir = f"{entry.path}_hf"
+                    if not os.path.exists(hf_dir):
+                        cmd = (
+                            f"python {SLIME_ROOT}/tools/convert_torch_dist_to_hf.py "
+                            f"--input-dir {shlex.quote(entry.path)} "
+                            f"--output-dir {shlex.quote(hf_dir)} "
+                            f"--origin-hf-dir {shlex.quote(hf_path)} "
+                            f"--force"
+                        )
+                        print(f"Converting {entry.name} → HF: {cmd}")
+                        subprocess.run(["bash", "-c", cmd], check=True)
+                        print(f"Converted {entry.name} → {hf_dir}")
+
+            result_kwargs = {
+                "app_name": app_name,
+                "framework": "slime",
+                "training_run_id": run_id,
+                "checkpoint_dir": save_root,
+                "model_config": model,
+                "checkpoints_volume_name": checkpoints_volume_name,
+                "checkpoints_mount_path": checkpoints_mount_path,
+            }
+            accepted_fields = set(inspect.signature(TrainResult).parameters)
+            result = TrainResult(
+                **{k: v for k, v in result_kwargs.items() if k in accepted_fields}
+            )
+            result.save()
+            run_record.status = TrainingRunStatus.COMPLETED
+            checkpoints_volume.commit()
+            print(f"TrainResult saved: {run_id}")
+            return result._to_dict()
+        except KeyboardInterrupt:
+            run_record.status = TrainingRunStatus.STOPPED
+            raise
+        except BaseException:
+            run_record.status = TrainingRunStatus.FAILED
+            raise
+        finally:
+            finished_at = int(time.time())
+            run_record.ended_at = finished_at
+            run_record.duration_seconds = max(0, finished_at - run_record.started_at)
+            run_record.save()
 
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)

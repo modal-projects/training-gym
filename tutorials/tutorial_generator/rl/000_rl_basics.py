@@ -194,8 +194,8 @@ def _define_dataset_code():
         )
         prompt_template = "Write a haiku about {input}."
 
-    train_dataset = HaikuDataset(n_rows=50)
-    eval_dataset = HaikuDataset(n_rows=10)
+    train_dataset = HaikuDataset(n_rows=10)
+    eval_dataset = HaikuDataset(n_rows=5)
 
 @notebook_only
 @markdown
