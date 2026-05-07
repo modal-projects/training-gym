@@ -29,7 +29,8 @@ class TrainingRunStatus(Enum):
 
 class TrainingRun(BaseModel):
     run_id: str
-    modal_app_id: str
+    modal_app_id: str = ""
+    modal_app_url: str = ""
     framework: Framework
     config: Any
     dataset_id: str = ""

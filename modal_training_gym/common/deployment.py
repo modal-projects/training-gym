@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType, convert_checkpoint_to_hf
 from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 from modal_training_gym.deploy_recipes.vllm_recipe import VllmRecipe
 from modal_training_gym.deploy_recipes.base import DeployRecipeType
@@ -150,6 +151,7 @@ class DeploymentConfig:
         else:
             url = app.serve.get_web_url()
         modal_app_id = app.app_id
+        modal_app_url = app.get_dashboard_url() if modal_app_id else ""
         if not url:
             raise RuntimeError(
                 f"Deployed {self.app_name!r} but no web URL was returned."
@@ -161,6 +163,7 @@ class DeploymentConfig:
         deployment = ModelDeployment(
             deployment_config=self,
             modal_app_id=modal_app_id,
+            modal_app_url=modal_app_url or modal_app_dashboard_url(modal_app_id),
             url=url,
         )
         deployment.save()
@@ -185,7 +188,8 @@ class ModelDeployment(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     deployment_config: DeploymentConfig
 
-    modal_app_id: str
+    modal_app_id: str = ""
+    modal_app_url: str = ""
     url: str
 
     @field_validator("deployment_config", mode="before")

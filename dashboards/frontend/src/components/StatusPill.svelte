@@ -1,18 +1,19 @@
 <script>
-  import { CheckCircle2, Loader2, OctagonX, TriangleAlert } from "lucide-svelte";
+  import { CheckCircle2, CircleX, Loader2, OctagonX } from "lucide-svelte";
 
   let { status, iconOnly = false } = $props();
 
   const STATUS_MAP = {
     completed: "Completed",
     pending: "Pending",
-    running: "Running",
+    running: "Pending",
     stopped: "Stopped",
     failed: "Failed",
   };
 
   let normalizedStatus = $derived.by(() => {
     const s = String(status || "").toLowerCase();
+    if (s === "running") return "pending";
     return s in STATUS_MAP ? s : "pending";
   });
 
@@ -21,6 +22,7 @@
 
 <div
   class="status-pill"
+  class:icon-only={iconOnly}
   class:status-completed={normalizedStatus === "completed"}
   class:status-running={normalizedStatus === "running"}
   class:status-pending={normalizedStatus === "pending"}
@@ -33,7 +35,7 @@
   {:else if normalizedStatus === "stopped"}
     <OctagonX size={14} />
   {:else if normalizedStatus === "failed"}
-    <TriangleAlert size={14} />
+    <CircleX size={14} />
   {:else}
     <span class="live-spinner">
       <Loader2 size={16} />
@@ -48,13 +50,24 @@
   .status-pill {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.35rem;
     white-space: nowrap;
     border-radius: 9999px;
-    padding: 0.2rem 0.5rem;
+    padding: 0.2rem 0.65rem;
+    min-width: 96px;
+    min-height: 24px;
     font-size: 0.72rem;
     line-height: 1;
     border: 1px solid transparent;
+    box-sizing: border-box;
+  }
+
+  .status-pill.icon-only {
+    min-width: 24px;
+    width: 24px;
+    padding-inline: 0;
+    gap: 0;
   }
 
   .status-running {
