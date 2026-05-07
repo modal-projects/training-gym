@@ -195,3 +195,35 @@ print("——— Running trained model evaluation... ———")
 trained_eval = eval_config.evaluate(trained_model_deployment, debug=True)
 print(f"Trained haiku score: {trained_eval.mean:.1f}")
 print("——— Trained model evaluation complete ———")
+
+# ## Evaluate the trained checkpoint
+#
+# Now let's run the same eval on the newly trained model and compare.
+
+new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
+print(new_checkpoint.path)
+
+new_model_deployment = DeploymentConfig(
+    model=Qwen3_4B(),
+    checkpoint=new_checkpoint,
+    app_name="qwen3-4b-haiku-serve-new",
+    served_model_name="qwen3-4b-haiku",
+).serve()
+print(f"Newly trained model deployed to {new_model_deployment.url}")
+
+# ## Compare the results
+#
+# Now let's compare the results of the newly trained model and the base model.
+
+print("——— Running trained model evaluation... ———")
+new_eval = eval_config.evaluate(new_model_deployment, debug=True)
+print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
+print("——— Trained model (new) evaluation complete ———")
+
+# ## Compare the results
+#
+# Now let's compare the results of the newly trained model and the base model.
+
+print(f"Base model haiku score: {base_eval.mean:.1f}")
+print(f"Trained model haiku score: {trained_eval.mean:.1f}")
+print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")

@@ -14,7 +14,7 @@ One completed training run's checkpoint handle.
 ## Constructor
 
 ```python
-TrainResult(app_name, framework, training_run_id, checkpoint_dir, model_config=None, checkpoints_volume_name='', checkpoints_mount_path='', iteration_prefix='', extra=<factory>)
+TrainResult(app_name, framework, training_run_id, checkpoint_dir='', checkpoints_volume_name='', checkpoints_mount_path='', model_config=None, extra=<factory>)
 ```
 
 | Parameter | Type | Default | Description |
@@ -22,11 +22,10 @@ TrainResult(app_name, framework, training_run_id, checkpoint_dir, model_config=N
 | `app_name` | `str` | *required* |  |
 | `framework` | `Framework` | *required* |  |
 | `training_run_id` | `str` | *required* |  |
-| `checkpoint_dir` | `str` | *required* |  |
-| `model_config` | `'ModelConfig | None'` | `None` |  |
+| `checkpoint_dir` | `str` | `""` |  |
 | `checkpoints_volume_name` | `str` | `""` |  |
 | `checkpoints_mount_path` | `str` | `""` |  |
-| `iteration_prefix` | `str` | `""` |  |
+| `model_config` | `'ModelConfig | None'` | `None` |  |
 | `extra` | `dict[str, Any]` | `<factory>` |  |
 
 ## Attributes
@@ -36,11 +35,10 @@ TrainResult(app_name, framework, training_run_id, checkpoint_dir, model_config=N
 | `app_name` | `str` |  |  |
 | `framework` | `Framework` |  |  |
 | `training_run_id` | `str` |  |  |
-| `checkpoint_dir` | `str` |  |  |
-| `model_config` | `'ModelConfig | None'` | `None` |  |
+| `checkpoint_dir` | `str` | `""` |  |
 | `checkpoints_volume_name` | `str` | `""` |  |
 | `checkpoints_mount_path` | `str` | `""` |  |
-| `iteration_prefix` | `str` | `""` |  |
+| `model_config` | `'ModelConfig | None'` | `None` |  |
 | `extra` | `dict[str, Any]` | `{}` |  |
 
 ## Methods
@@ -49,27 +47,19 @@ TrainResult(app_name, framework, training_run_id, checkpoint_dir, model_config=N
 
 URL for browsing the checkpoints volume in the Modal dashboard.
 
-### `latest_checkpoint_path(self) -> 'str'`
+### `from_training_run_id(training_run_id: 'str') -> "'TrainResult'"`
 
-Absolute in-volume path of the latest checkpoint.
-
-### `list_checkpoints(self) -> 'list[str]'`
-
-Return per-iteration checkpoint directory names under
+Load a completed run's result.
 
 ### `list_results() -> "list['TrainResult']"`
 
 ### `load(training_run_id: 'str') -> "'TrainResult'"`
-
-Load a completed run's result.
 
 ### `save(self) -> 'None'`
 
 Persist this result to the shared metadata volume.
 
 ### `volume(self) -> "'Volume'"`
-
-Return a handle to the checkpoints :class:`modal.Volume`.
 
 ## Related Tutorials
 

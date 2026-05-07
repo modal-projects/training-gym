@@ -23,7 +23,7 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 | `environment` | `dict` | `{'PYTHONPATH': '/root/Megatron-LM/', 'CUDA_DEVICE_MAX_CONNECTIONS': '1', 'NCCL_NVLS_ENABLE': '1'}` |  |
 | `async_mode` | `bool` | `False` |  |
 | `wandb` | `WandbConfig | None` | `None` |  |
-| `image_run_commands` | `collections.abc.Callable[[modal.image.Image], modal.image.Image] | None` | `None` |  |
+| `image_overlay` | `collections.abc.Callable[[modal.image.Image], modal.image.Image] | None` | `None` |  |
 | `local_python_sources` | `list[str]` | `[]` |  |
 | `local_slime` | `str | None` | `None` |  |
 | `gpu_type` | `str` | `"H100"` |  |
@@ -77,10 +77,10 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 | `save_interval` | `int` | `1000` |  |
 | `megatron_to_hf_mode` | `str` | `"bridge"` |  |
 | `use_fault_tolerance` | `bool` | `True` |  |
-| `checkpoint` | `modal_training_gym.common.checkpoint.CheckpointConfig` | `<modal_training_gym.common.checkpoint.CheckpointConfig object at 0x7f2bcae6c140>` |  |
 | `rm_type` | `str | None` | `None` |  |
 | `custom_rm_path` | `str` | `""` |  |
 | `custom_rm_function` | `collections.abc.Callable | None` | `None` |  |
+| `custom_generate_function` | `collections.abc.Callable | None` | `None` |  |
 | `sglang_config` | `dict | None` | `None` |  |
 | `custom_config_path` | `dict | None` | `None` |  |
 | `apply_chat_template_kwargs` | `str` | `""` |  |
@@ -94,5 +94,6 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 ## Related Tutorials
 
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
+- [Code-golf RL with sandboxed verification reward in Modal](/tutorials/rl/001_code_golf_sandboxes/)
 
 **Source:** [`modal_training_gym/train_recipes/slime_recipe/recipe.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/train_recipes/slime_recipe/recipe.py)

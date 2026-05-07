@@ -38,6 +38,7 @@ _SLIME_SKIP = {
     "local_slime",
     "checkpoint",
     "custom_rm_function",
+    "custom_generate_function",
 }
 
 YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
@@ -138,6 +139,7 @@ class SlimeRecipe(BaseTrainRecipe):
     rm_type: str | None = None
     custom_rm_path: str = ""
     custom_rm_function: Callable | None = None
+    custom_generate_function: Callable | None = None
 
     # ── SGLang / config overrides ───────────────────────────────────────────
     sglang_config: dict | None = None
@@ -146,22 +148,37 @@ class SlimeRecipe(BaseTrainRecipe):
 
     # ── Post-init ────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _callable_path(fn: Callable) -> str:
+        mod = getattr(fn, "__module__", None) or ""
+        name = getattr(fn, "__qualname__", None) or fn.__name__
+        if mod == "__main__":
+            import inspect
+
+            try:
+                src_file = inspect.getfile(fn)
+                if os.path.isfile(src_file):
+                    mod = Path(src_file).stem
+                else:
+                    mod = "__pending__"
+            except (TypeError, OSError):
+                mod = "__pending__"
+        return f"{mod}.{name}"
+
     def __post_init__(self) -> None:
         if self.custom_rm_function is not None and not self.custom_rm_path:
-            fn = self.custom_rm_function
-            mod = getattr(fn, "__module__", None) or ""
-            name = getattr(fn, "__qualname__", None) or fn.__name__
-            if mod == "__main__":
-                import inspect
-                try:
-                    src_file = inspect.getfile(fn)
-                    if os.path.isfile(src_file):
-                        mod = Path(src_file).stem
-                    else:
-                        mod = "__pending__"
-                except (TypeError, OSError):
-                    mod = "__pending__"
-            object.__setattr__(self, "custom_rm_path", f"{mod}.{name}")
+            object.__setattr__(
+                self,
+                "custom_rm_path",
+                self._callable_path(self.custom_rm_function),
+            )
+        if self.custom_generate_function is not None:
+            custom_config = dict(self.custom_config_path or {})
+            if not custom_config.get("custom_generate_function_path"):
+                custom_config["custom_generate_function_path"] = self._callable_path(
+                    self.custom_generate_function
+                )
+                object.__setattr__(self, "custom_config_path", custom_config)
 
     # ── Container → slime flag converters ────────────────────────────────────
 

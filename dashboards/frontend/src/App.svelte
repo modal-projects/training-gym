@@ -17,11 +17,14 @@
   let allEvals = $state([]);
   let allDeployments = $state([]);
   let loading = $state(true);
+  let loadingEvals = $state(true);
+  let loadingDeployments = $state(true);
   let error = $state(null);
   let search = $state("");
   let activeFrameworks = $state(new Set());
   let activeStatuses = $state(new Set());
   let activePage = $state("training");
+  let loadRequestId = 0;
 
   const pageMeta = {
     training: { title: "Training runs" },
@@ -99,6 +102,30 @@
     return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
   }
 
+  function getErrorMessage(value) {
+    if (value instanceof Error) return value.message;
+    if (typeof value === "string") return value;
+    return "unknown error";
+  }
+
+  function withTimeout(promise, timeoutMs, label) {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`${label} request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      promise.then(
+        (value) => {
+          clearTimeout(timeoutId);
+          resolve(value);
+        },
+        (reason) => {
+          clearTimeout(timeoutId);
+          reject(reason);
+        },
+      );
+    });
+  }
+
   function deploymentLabel(deployment) {
     return (
       deployment?.app_name ||
@@ -146,24 +173,62 @@
   }
 
   async function load() {
+    const requestId = ++loadRequestId;
+    const isStale = () => requestId !== loadRequestId;
+
     loading = true;
+    loadingEvals = true;
+    loadingDeployments = true;
     error = null;
+
+    const evalsPromise = withTimeout(fetchEvals(), 15000, "evals");
+    const deploymentsPromise = withTimeout(fetchDeployments(), 15000, "deployments");
+
+    evalsPromise
+      .then((evals) => {
+        if (isStale()) return;
+        allEvals = evals;
+      })
+      .catch((reason) => {
+        if (isStale()) return;
+        allEvals = [];
+        console.warn(getErrorMessage(reason));
+      })
+      .finally(() => {
+        if (isStale()) return;
+        loadingEvals = false;
+      });
+
+    deploymentsPromise
+      .then((deployments) => {
+        if (isStale()) return;
+        allDeployments = deployments;
+      })
+      .catch((reason) => {
+        if (isStale()) return;
+        allDeployments = [];
+        console.warn(getErrorMessage(reason));
+      })
+      .finally(() => {
+        if (isStale()) return;
+        loadingDeployments = false;
+      });
+
     try {
-      const [runs, evals, deployments] = await Promise.all([
-        fetchRuns(),
-        fetchEvals(),
-        fetchDeployments(),
-      ]);
+      const runs = await withTimeout(fetchRuns(), 10000, "runs");
+      if (isStale()) return;
       allRuns = runs;
-      allEvals = evals;
-      allDeployments = deployments;
       activeFrameworks = new Set(allRuns.map(getFramework));
       activeStatuses = new Set(allRuns.map(getStatus));
     } catch (e) {
-      error = e.message;
-    } finally {
-      loading = false;
+      if (isStale()) return;
+      error = getErrorMessage(e);
+      allRuns = [];
+      activeFrameworks = new Set();
+      activeStatuses = new Set();
     }
+    if (isStale()) return;
+    loading = false;
   }
 
   load();
@@ -367,7 +432,9 @@
   );
 
   let statusText = $derived.by(() => {
-    if (loading) return "loading...";
+    if (activePage === "training" && loading) return "loading...";
+    if (activePage === "evals" && loadingEvals) return "loading...";
+    if (activePage === "deployments" && loadingDeployments) return "loading...";
     if (error) return "error";
     if (activePage === "evals")
       return `${allEvals.length} eval${allEvals.length === 1 ? "" : "s"}`;
@@ -465,7 +532,7 @@
         {allDeployments}
         {linkedDeployments}
         {distinctDeploymentModels}
-        {loading}
+        loading={loadingDeployments}
         {error}
         {deploymentRows}
         {deploymentLabel}
@@ -477,7 +544,7 @@
         {allEvals}
         {avgAccuracy}
         {evalConfigCount}
-        {loading}
+        loading={loadingEvals}
         {error}
         {evalConfigGroups}
       />

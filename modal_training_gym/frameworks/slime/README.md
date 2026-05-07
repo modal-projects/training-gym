@@ -1,161 +1,90 @@
-# slime — Modal launcher for slime training
+# slime — Modal launcher for slime RL training
 
-Thin Modal launcher that runs [slime](https://github.com/THUDM/slime) RL training on GPU clusters.
+Thin Modal launcher that runs [slime](https://github.com/THUDM/slime) GRPO training on GPU clusters.
 
-## Prerequisites
+## Quick start
 
-- Modal CLI installed and authenticated
-- Set your Modal environment: `export MODAL_ENVIRONMENT=<your-env>`
-
-## Running an experiment
-
-All commands take the experiment name via `EXPERIMENT_CONFIG`. Run from the repo root.
-
-### 1. List available experiments
-
-```bash
-modal run slime/modal_train.py::list_configs
-```
-
-### 2. Download model (one-time)
-
-Downloads the experiment's HF checkpoint to the `huggingface-cache` volume.
-
-```bash
-EXPERIMENT_CONFIG=glm47_flash_dapo modal run slime/modal_train.py::download
-```
-
-### 3. Prepare dataset (one-time)
-
-Downloads and preprocesses the training dataset to the `slime-data` volume.
-Only required if the experiment defines a `prepare_data()` function (see [Adding an experiment](#adding-an-experiment)).
-
-```bash
-EXPERIMENT_CONFIG=glm47_flash_dapo modal run slime/modal_train.py::prepare_dataset
-```
-
-### 4. Convert checkpoint (one-time, raw mode only)
-
-Converts the HF checkpoint to `torch_dist` format. Only required when `megatron_to_hf_mode = "raw"`.
-Skip this step if using bridge mode.
-
-```bash
-EXPERIMENT_CONFIG=glm47_flash_dapo modal run slime/modal_train.py::convert_checkpoint
-```
-
-### 5. Run training
-
-```bash
-EXPERIMENT_CONFIG=glm47_flash_dapo modal run -d slime/modal_train.py::train
-```
-
-Use `-d` (detached) to keep training running after you close your terminal.
-
-## Adding an experiment
-
-### 1. Create the config file
-
-Create `configs/<your_experiment>.py`. Each config file must expose two module-level instances:
-- `modal` — a `ModalConfig` instance (GPU type, image patches)
-- `slime` — a `SlimeConfig` subclass instance (all slime training arguments)
+Define a `TrainConfig` with your model, dataset, and a `SlimeRecipe`, then call `train()`:
 
 ```python
-from .base import ModalConfig, SlimeConfig, DATA_PATH
+from modal_training_gym import SlimeRecipe, TrainConfig, WandbConfig
+from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.models import ModelConfig
 
-modal = ModalConfig(gpu="H200")
-
-
-class _Slime(SlimeConfig):
-    # Launcher instructions (not passed to slime CLI)
-    slime_model_script = "scripts/models/qwen3-8B.sh"  # sources MODEL_ARGS
-    async_mode = False
-
-    # Model
-    hf_checkpoint = "Qwen/Qwen3-8B"
-    load = "Qwen/Qwen3-8B"
-    megatron_to_hf_mode = "bridge"  # or "raw" (requires convert_checkpoint)
-
-    # Infrastructure
-    actor_num_nodes = 1
-    actor_num_gpus_per_node = 8
-    colocate = True
-
-    # Data
-    prompt_data = f"{DATA_PATH}/my_dataset/train.parquet"
-    input_key = "problem"
-    label_key = "answer"
-    rm_type = "math"
-
-    # ... all other slime args as snake_case attributes
-
-
-slime = _Slime()
+config = TrainConfig(
+    model=my_model,
+    dataset=my_dataset,
+    recipe=SlimeRecipe(
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=8,
+        gpu_type="H100",
+        wandb=WandbConfig(project="my-project"),
+    ),
+)
+result = config.train()
 ```
 
-Every attribute on `_Slime` (except `environment`, `async_mode`, `slime_model_script`) is forwarded to
-slime as a CLI argument: `field_name` → `--field-name`. See `configs/base.py` for full rules.
+Then run: `uv run modal run my_tutorial.py::train`
 
-### 2. Add a `prepare_data()` method (if needed)
+## SlimeRecipe
 
-If your experiment needs to download or preprocess a dataset, override `prepare_data()` on `_Slime`.
-It runs inside the Modal container with the `slime-data` volume mounted at `DATA_PATH`.
+`SlimeRecipe` is a Pydantic dataclass that holds all configuration for a slime training run:
+launcher instructions, cluster topology, RL hyperparameters, and checkpointing.
 
-```python
-class _Slime(SlimeConfig):
-    ...
-    def prepare_data(self) -> None:
-        from huggingface_hub import snapshot_download
+Every field on `SlimeRecipe` (except internal fields like `environment`, `async_mode`,
+`wandb`, `image_overlay`, etc.) is forwarded to slime as a CLI argument:
+`field_name` → `--field-name`.
 
-        snapshot_download(
-            repo_id="org/my-dataset",
-            repo_type="dataset",
-            local_dir=f"{DATA_PATH}/my_dataset",
-        )
-```
+See `modal_training_gym/train_recipes/slime_recipe/recipe.py` for the full field list.
 
-If `prepare_data()` is not overridden, `prepare_dataset` will raise `NotImplementedError` — simply skip that step.
+### Key field groups
 
-### 3. Run the workflow
-
-`EXPERIMENT_CONFIG` is the config filename without `.py`:
-
-```bash
-EXPERIMENT_CONFIG=my_experiment modal run slime/modal_train.py::download
-EXPERIMENT_CONFIG=my_experiment modal run slime/modal_train.py::prepare_dataset  # if prepare_data() defined
-EXPERIMENT_CONFIG=my_experiment modal run slime/modal_train.py::convert_checkpoint  # if megatron_to_hf_mode = "raw"
-EXPERIMENT_CONFIG=my_experiment modal run -d slime/modal_train.py::train
-```
-
-No registration step needed — the launcher discovers configs automatically from the `configs/` directory.
+- **Cluster**: `gpu_type`, `actor_num_nodes`, `actor_num_gpus_per_node`, `colocate`, `tensor_model_parallel_size`
+- **RL algorithm**: `advantage_estimator`, `n_samples_per_prompt`, `eps_clip`, `kl_loss_coef`
+- **Rollout**: `rollout_batch_size`, `rollout_max_response_len`, `rollout_temperature`
+- **Training**: `global_batch_size`, `lr`, `lr_decay_style`, `weight_decay`, `optimizer`
+- **Checkpointing**: `save`, `save_interval`, `megatron_to_hf_mode`
+- **Eval**: `eval_interval`, `eval_config`
+- **Reward**: `rm_type`, `custom_rm_path`, `custom_rm_function`
 
 ## YAML config fields
 
 `eval_config`, `custom_config_path`, and `sglang_config` normally take file paths in slime.
-In Python configs you can write them as inline dicts — the launcher materializes them to temp YAML files automatically:
+In `SlimeRecipe` you can write them as inline dicts — the launcher materializes them to temp YAML files automatically:
 
 ```python
-class _Slime(SlimeConfig):
-    eval_config = {
+recipe = SlimeRecipe(
+    eval_config={
         "eval": {
             "defaults": {"max_response_len": 16384},
             "datasets": [
                 {"name": "aime", "path": "/data/aime.jsonl", "rm_type": "deepscaler"},
             ],
         }
-    }
-    custom_config_path = {
+    },
+    custom_config_path={
         "max_turns": 3,
         "rollout_interaction_env_path": "examples.my_env.rollout",
-    }
+    },
+)
+```
+
+## Image overlay
+
+To customize the container image (e.g. install extra packages), pass `image_overlay`:
+
+```python
+recipe = SlimeRecipe(
+    image_overlay=lambda img: img.pip_install("my-package"),
+)
 ```
 
 ## Dev overlay
 
-To test local slime changes without rebuilding the image, set `local_slime` in your `ModalConfig`:
+To test local slime changes without rebuilding the image, set `local_slime`:
 
 ```python
-modal = ModalConfig(
-    gpu="H200",
+recipe = SlimeRecipe(
     local_slime="/path/to/your/slime",
 )
 ```

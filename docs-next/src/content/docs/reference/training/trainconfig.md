@@ -21,12 +21,13 @@ Compose dataset, model, and recipe into one training entrypoint.
 
 ## Methods
 
-### `train(self) -> modal_training_gym.common.train_result.TrainResult`
+### `train(self, run_id: str | None = None) -> modal_training_gym.common.train_result.TrainResult`
 
 Build the app, run training, and return the TrainResult.
 
 ## Related Tutorials
 
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
+- [Code-golf RL with sandboxed verification reward in Modal](/tutorials/rl/001_code_golf_sandboxes/)
 
 **Source:** [`modal_training_gym/common/train.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/train.py)

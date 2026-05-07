@@ -1,12 +1,120 @@
 ---
-title: "Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare"
+title: "RL basics: verifiable rewards, haiku edition"
 description: "Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare"
 ---
+
+This tutorial uses Qwen3-4B and haiku poems to introduce the
+**verifiable reward** pattern that underpins RL post-training:
+
+1. Serve the base model.
+2. Define a scoring function with a verifiable reward (syllable structure).
+3. Evaluate the base model against that scorer.
+4. GRPO-train the model with [slime](https://github.com/THUDM/slime) using the reward function.
+5. Serve the trained checkpoint.
+6. Evaluate it with the same scorer and compare.
+
+**Why haikus?** A haiku has two attributes you can score
+automatically — whether it follows the 5-7-5 syllable format
+(deterministic, cheap) and whether the poem is actually good. That split between
+*verifiable* and *subjective* rewards is exactly the landscape
+RL post-training operates in. This tutorial covers the
+verifiable half. In later tutorials, we will cover the subjective half.
+
+```python
+import re
+
+from modal_training_gym import (
+    DeploymentConfig,
+    EvalConfig,
+    EvalRowResult,
+    HuggingFaceDataset,
+    Qwen3_4B,
+    SlimeRecipe,
+    TrainConfig,
+    WandbConfig,
+)
+from modal_training_gym.common.checkpoint import list_checkpoints
+```
+
+## Serve the base model
+
+So, how does Qwen3-4B currently fare at writing haikus? We can
+serve the base model and find out.
+
+`DeploymentConfig.serve()` builds and deploys a vLLM app, then
+returns a `ModelDeployment` with the concrete endpoint URL.
+
+```python
+base_model = Qwen3_4B()
+base_model_deployment = DeploymentConfig(
+    model=base_model,
+).serve()
+print(f"Base model deployed to {base_model_deployment.url}")
+```
+
+Okay, how do we evaluate if that was a good haiku or not?
+A haiku must follow the 5-7-5 syllable format.
+We can count syllables using NLTK's CMU Pronouncing Dictionary
+(with a regex fallback for words not in the dictionary)
+and score how close each line is to its target.
+
+```python
+_cmudict_cache = {}
+
+def _get_cmudict() -> dict:
+    if not _cmudict_cache:
+        import nltk
+        from nltk.corpus import cmudict
+        nltk.download("cmudict", quiet=True)
+        _cmudict_cache.update(cmudict.dict())
+    return _cmudict_cache
+
+def _count_syllables(text: str) -> int:
+    cmu = _get_cmudict()
+    total = 0
+    for word in re.findall(r"[a-zA-Z]+", text):
+        phones = cmu.get(word.lower())
+        if phones:
+            total += sum(p[-1].isdigit() for p in phones[0])
+        else:
+            count = len(re.findall(r"[aeiouy]+", word.lower()))
+            if word.lower().endswith("e") and count > 1:
+                count -= 1
+            total += max(count, 1)
+    return total
+
+def score_haiku(response: str) -> float:
+    lines = [line.strip() for line in response.strip().split("\n") if line.strip()]
+    if len(lines) != 3:
+        return -10
+    total_diff = sum(
+        abs(_count_syllables(line) - target)
+        for line, target in zip(lines, [5, 7, 5])
+    )
+    return -float(total_diff)
+```
 
 Let's also define a Haiku dataset.
 Here, we use the statworx/haiku dataset from HuggingFace.
 Each row has a `keywords` topic and a reference `text` haiku.
 We can use this dataset to train our model.
+
+```python
+class HaikuDataset(HuggingFaceDataset):
+    hf_repo = "statworx/haiku"
+    input_column = "keywords"
+    output_column = "text"
+    output_format = "jsonl"
+    apply_chat_template = True
+    system_prompt = (
+        "You are a haiku poet. Write a haiku about the given topic. "
+        "Use the 5-7-5 syllable format across three lines."
+    )
+    prompt_template = "Write a haiku about {input}."
+
+train_dataset = HaikuDataset(n_rows=50)
+eval_dataset = HaikuDataset(n_rows=10)
+```
 
 Seems straightforward enough, right? How do we run an eval on our base model with this dataset?
 We can transform our scoring function above into an Eval Configuration.
@@ -14,6 +122,130 @@ We can transform our scoring function above into an Eval Configuration.
 First, to explain, an Eval Configuration is a class that owns the model-calling loop.
 The task-specific part is a scoring function passed to `.evaluate(...)`, which must
 return `EvalRowResult`.
+
+```python
+def eval_fn(_example: dict, response: str) -> EvalRowResult:
+    return EvalRowResult(score=score_haiku(response), response=response)
+
+eval_config = EvalConfig(
+    dataset=eval_dataset,
+    eval_fn=eval_fn,
+    generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+)
+print("——— Running base model evaluation... ———")
+base_eval = eval_config.evaluate(base_model_deployment, debug=True)
+print(f"Average haiku score: {base_eval.mean:.1f}")
+print("——— Base model evaluation complete ———")
+```
+
+## Train with slime
+
+Now, let's actually train the model to write good haikus.
+Here, we use the slime framework (https://github.com/THUDM/slime) on Modal.
+
+```python
+async def haiku_rm(args, sample, **kwargs) -> float:
+    return score_haiku(sample.response)
+
+training_run = TrainConfig(
+    model=base_model,
+    dataset=train_dataset,
+    recipe=SlimeRecipe(
+        wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
+
+        custom_rm_function=haiku_rm,
+
+        num_rollout=10,
+        save_interval=5,
+        apply_chat_template_kwargs='{"enable_thinking": false}',
+
+        image_overlay=lambda image: image.run_commands(
+            "uv pip install --system aiohttp nltk>=3.8.0",
+            "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
+        ),
+    ),
+)
+```
+
+## Train
+
+`TrainConfig.train()` builds the Modal app, runs training, and
+returns a `TrainResult` with the run ID and checkpoint path.
+
+```python
+print("——— Running training... ———")
+train_result = training_run.train()
+print("——— Training complete ———")
+```
+
+## Serve and evaluate the trained checkpoint
+
+The returned `TrainResult` has the checkpoint path and volume
+metadata attached. You can pass an explicit `checkpoint=` to
+`DeploymentConfig` to pin a specific checkpoint, or omit it to use
+the model's default path.
+
+```python
+checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+print(checkpoint.path)
+
+trained_model_deployment = DeploymentConfig(
+    model=Qwen3_4B(),
+    checkpoint=checkpoint,
+    app_name="qwen3-4b-haiku-serve",
+    served_model_name="qwen3-4b-haiku",
+).serve()
+print(f"Trained model deployed to {trained_model_deployment.url}")
+```
+
+## Evaluate the trained checkpoint
+
+Now let's run the same eval on the trained model and compare.
+
+```python
+print("——— Running trained model evaluation... ———")
+trained_eval = eval_config.evaluate(trained_model_deployment, debug=True)
+print(f"Trained haiku score: {trained_eval.mean:.1f}")
+print("——— Trained model evaluation complete ———")
+```
+
+## Evaluate the trained checkpoint
+
+Now let's run the same eval on the newly trained model and compare.
+
+```python
+new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
+print(new_checkpoint.path)
+
+new_model_deployment = DeploymentConfig(
+    model=Qwen3_4B(),
+    checkpoint=new_checkpoint,
+    app_name="qwen3-4b-haiku-serve-new",
+    served_model_name="qwen3-4b-haiku",
+).serve()
+print(f"Newly trained model deployed to {new_model_deployment.url}")
+```
+
+## Compare the results
+
+Now let's compare the results of the newly trained model and the base model.
+
+```python
+print("——— Running trained model evaluation... ———")
+new_eval = eval_config.evaluate(new_model_deployment, debug=True)
+print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
+print("——— Trained model (new) evaluation complete ———")
+```
+
+## Compare the results
+
+Now let's compare the results of the newly trained model and the base model.
+
+```python
+print(f"Base model haiku score: {base_eval.mean:.1f}")
+print(f"Trained model haiku score: {trained_eval.mean:.1f}")
+print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
+```
 
 ---
 

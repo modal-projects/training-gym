@@ -61,9 +61,6 @@ class EvalRowResult(BaseModel):
     )  # metadata that user can inject about the evaluation result
 
 
-EvalFn = Callable[[DatasetRow, str], EvalRowResult]
-
-
 class EvalResult(BaseModel):
     """Saved results for one evaluation run across a dataset."""
 
@@ -94,6 +91,12 @@ class EvalResult(BaseModel):
         return [cls.model_validate(v) for v in vol_list(MetadataStore.EVAL_RESULTS)]
 
 
+
+Response = str
+EvalFn = Callable[[DatasetRow, Response], EvalRowResult] # TOOD: bad name
+GenericEvalFn = Callable[["ModelDeployment", DatasetRow], EvalRowResult]
+
+
 @dataclass
 class EvalConfig:
     """Evaluate a deployed model on a dataset config.
@@ -102,15 +105,39 @@ class EvalConfig:
     """
 
     dataset: "DatasetConfig"
-    eval_fn: EvalFn
+    generic_eval_fn: GenericEvalFn | None = None
+    eval_fn: EvalFn | None = None
     eval_config_id: str = field(default_factory=_new_eval_config_id)
     generate_kwargs: dict[str, Any] = field(default_factory=dict)
 
+    def _build_generic_eval_fn(self, eval_fn: EvalFn) -> GenericEvalFn:
+        def generic_eval_fn(
+            deployment: ModelDeployment,
+            example: DatasetRow,
+        ) -> EvalRowResult:
+            text = deployment.generate(
+                self.build_prompt(example),
+                **self.generate_kwargs,
+            )
+            result = eval_fn(example, text)
+            return EvalRowResult(
+                score=result.score,
+                response=text,
+                metadata=result.metadata,
+            )
+        return generic_eval_fn
+
+    def __post_init__(self):
+        if self.generic_eval_fn is None:
+            assert self.eval_fn is not None, "eval_fn or generic_eval_fn must be set"
+            self.generic_eval_fn = self._build_generic_eval_fn(self.eval_fn)
+
     def to_durable(self) -> EvalConfigDurable:
+        eval_callable = self.eval_fn if self.eval_fn is not None else self.generic_eval_fn
         return EvalConfigDurable(
             eval_config_id=self.eval_config_id,
             dataset_name=type(self.dataset).__name__,
-            eval_fn_name=_callable_name(self.eval_fn),
+            eval_fn_name=_callable_name(eval_callable),
             generate_kwargs=self.generate_kwargs,
         )
 
@@ -142,17 +169,7 @@ class EvalConfig:
         results: list[EvalRowResult] = []
 
         for idx, example in enumerate(self.dataset.load(), start=1):
-            text = deployment.generate(
-                self.build_prompt(example),
-                **self.generate_kwargs,
-            )
-            result = self.eval_fn(example, text)
-            if not result.response:
-                result = EvalRowResult(
-                    score=result.score,
-                    response=text,
-                    metadata=result.metadata,
-                )
+            result = self.generic_eval_fn(deployment, example)
             if debug:
                 print(
                     f"Finished example {idx}: "

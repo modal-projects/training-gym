@@ -16,6 +16,7 @@ Deploy a model behind a serving engine.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `model` | `ModelConfig` |  |  |
+| `checkpoint` | `modal_training_gym.common.checkpoint.Checkpoint | None` | `None` |  |
 | `recipe` | `VllmRecipe | SglangRecipe | None` | `None` |  |
 | `app_name` | `str | None` | `None` |  |
 | `served_model_name` | `str | None` | `None` |  |
@@ -29,5 +30,6 @@ Build, deploy, and return a ``ModelDeployment`` handle.
 ## Related Tutorials
 
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
+- [Code-golf RL with sandboxed verification reward in Modal](/tutorials/rl/001_code_golf_sandboxes/)
 
 **Source:** [`modal_training_gym/common/deployment.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/deployment.py)

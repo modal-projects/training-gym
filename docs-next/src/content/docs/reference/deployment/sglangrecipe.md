@@ -18,7 +18,7 @@ SGLang serving configuration.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `recipe_type` | `<enum 'DeployRecipeType` | `sglang` |  |
-| `gpu` | `Optional[Literal['H100', 'H200', 'B200', 'B300']]` | `"H100"` | GPU type for the serving container. Default `"H100"`. |
+| `gpu` | `Literal['H100', 'H200', 'B200', 'B300']` | `"H100"` | GPU type for the serving container. Default `"H100"`. |
 | `tp` | `int | None` | `None` | Tensor parallelism degree. Default `None` (SGLang infers from GPU count). |
 | `dp` | `int | None` | `None` | Data parallelism degree. Enables `--enable-dp-attention` when set. Default `None`. |
 | `context_length` | `int | None` | `None` | Maximum context length. Default `None` (model default). |

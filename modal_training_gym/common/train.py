@@ -3,6 +3,7 @@ from typing import cast
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.frameworks.slime import build_slime_app
 from modal_training_gym.train_recipes.base import BaseTrainRecipe, RecipeType
@@ -30,6 +31,7 @@ class TrainConfig:
     dataset: DatasetConfig
     model: ModelConfig
     recipe: BaseTrainRecipe
+    checkpoint: Checkpoint | None = None
 
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -47,6 +49,7 @@ class TrainConfig:
                 slime=combined,
                 model=self.model,
                 dataset=self.dataset,
+                checkpoint=self.checkpoint,
             )
         raise ValueError(f"Unknown recipe type: {recipe_type}")
 

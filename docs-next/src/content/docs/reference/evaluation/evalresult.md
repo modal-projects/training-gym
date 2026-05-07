@@ -25,8 +25,8 @@ EvalResult(**data)
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `eval_id` | `str` |  |  |
-| `created_at` | `int` |  |  |
-| `config` | `dict[str, Any]` |  |  |
+| `eval_config_id` | `str` |  |  |
+| `created_at` | `datetime.datetime` |  |  |
 | `rows` | `list[EvalRowResult]` |  |  |
 
 ## Methods

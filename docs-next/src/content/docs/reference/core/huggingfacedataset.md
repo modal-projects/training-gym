@@ -17,6 +17,7 @@ Dataset backed by a HuggingFace ``datasets`` repo.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `dataset_id` | `str` | `Field(name=None,type=None,default=<dataclasses._MISSING_TYPE object at 0x7f38a6893230>,default_factory=<function DatasetConfig.<lambda> at 0x7f38a6424680>,init=True,repr=True,hash=None,compare=True,metadata=mappingproxy({}),kw_only=<dataclasses._MISSING_TYPE object at 0x7f38a6893230>,_field_type=None)` |  |
 | `input_key` | `str` | `""` |  |
 | `label_key` | `str` | `""` |  |
 | `apply_chat_template` | `bool` | `True` |  |
@@ -32,7 +33,7 @@ Dataset backed by a HuggingFace ``datasets`` repo.
 
 ## Methods
 
-### `load(self) -> 'Iterable[DatasetRow]'`
+### `load(self) -> 'Any'`
 
 Load raw examples for local inspection or evaluation.
 

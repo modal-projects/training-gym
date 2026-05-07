@@ -80,7 +80,12 @@ def prepare_slime_config(slime_cfg, model, tmpdir: str) -> None:
 
     from modal_training_gym.train_recipes.slime_recipe.recipe import YAML_CONFIG_FIELDS
 
-    if model and model.model_name and not str(model.model_name).startswith("/"):
+    if (
+        model
+        and not model.model_path
+        and model.model_name
+        and not str(model.model_name).startswith("/")
+    ):
         model.model_path = snapshot_download(model.model_name, local_files_only=True)
 
     for attr in ("ref_load", "critic_load"):
