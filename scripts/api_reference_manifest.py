@@ -43,6 +43,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "HuggingFaceDataset",
     },
     {
+        "class_name": "HarborDataset",
+        "module": "modal_training_gym.common.dataset",
+        "group": "core",
+        "class_type": "config_data",
+        "sidebar_label": "HarborDataset",
+    },
+    {
         "class_name": "WandbConfig",
         "module": "modal_training_gym.common.wandb",
         "group": "core",

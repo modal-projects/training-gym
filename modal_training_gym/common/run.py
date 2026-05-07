@@ -5,6 +5,7 @@ It is used to track the training run and its results.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel
@@ -14,6 +15,12 @@ from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_list, 
 
 TRAINING_RUNS_STORE_NAME = MetadataStore.TRAINING_RUNS.value
 
+class TrainingRunStatus(Enum):
+    RUNNING = "running"
+    STOPPED = "stopped"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
 class TrainingRun(BaseModel):
     run_id: str
     modal_app_id: str
@@ -21,6 +28,7 @@ class TrainingRun(BaseModel):
     config: Any
     dataset_id: str = ""
     deployment_id: str = ""
+    status: TrainingRunStatus = TrainingRunStatus.RUNNING
     created_at: int = 0
     started_at: int = 0
     ended_at: int | None = None
