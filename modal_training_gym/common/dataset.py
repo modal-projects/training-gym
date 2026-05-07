@@ -21,10 +21,12 @@ from pathlib import Path
 
 DatasetRow = dict[str, Any]
 
+
 class DatasetType(Enum):
     DEFAULT = "default"
     HUGGING_FACE = "hugging_face"
     HARBOR = "harbor"
+
 
 class DatasetConfig:
     """Dataset configuration shared across training frameworks.
@@ -328,7 +330,9 @@ class HarborDataset(DatasetConfig):
                 f"Unsupported label metadata file type for {metadata_path}; expected .json or .toml"
             )
         if not isinstance(data, dict):
-            raise ValueError(f"Label metadata must decode to an object: {metadata_path}")
+            raise ValueError(
+                f"Label metadata must decode to an object: {metadata_path}"
+            )
         return data
 
     def _read_test_data(self, task_dir: Path) -> list[dict[str, str]]:
@@ -340,10 +344,12 @@ class HarborDataset(DatasetConfig):
         for in_file in sorted(tests_dir.glob("*.in")):
             out_file = in_file.with_suffix(".out")
             if out_file.exists():
-                test_cases.append({
-                    "input": in_file.read_text(encoding="utf-8"),
-                    "expected_output": out_file.read_text(encoding="utf-8"),
-                })
+                test_cases.append(
+                    {
+                        "input": in_file.read_text(encoding="utf-8"),
+                        "expected_output": out_file.read_text(encoding="utf-8"),
+                    }
+                )
         return test_cases
 
     def _build_label(self, task_root: Path, task_dir: Path) -> dict[str, Any]:
@@ -359,7 +365,9 @@ class HarborDataset(DatasetConfig):
             label["test_cases"] = self._read_test_data(task_dir)
         return label
 
-    def _format_prompt(self, *, instruction: str, task_dir: Path, label: dict[str, Any]) -> str:
+    def _format_prompt(
+        self, *, instruction: str, task_dir: Path, label: dict[str, Any]
+    ) -> str:
         context = {
             "instruction": instruction,
             "task_name": task_dir.name,
@@ -376,7 +384,9 @@ class HarborDataset(DatasetConfig):
             )
         instruction = instruction_file.read_text(encoding="utf-8").strip()
         label = self._build_label(task_root, task_dir)
-        user_prompt = self._format_prompt(instruction=instruction, task_dir=task_dir, label=label)
+        user_prompt = self._format_prompt(
+            instruction=instruction, task_dir=task_dir, label=label
+        )
         messages = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
@@ -411,6 +421,18 @@ class HarborDataset(DatasetConfig):
             )
         return out
 
+    @property
+    def reward_function(self):
+        """Default reward function for Harbor tasks.
+
+        Returns ``harbor_rm`` which scores candidate code in Modal sandboxes
+        against the task's assert-style tests. ``TrainConfig`` picks this up
+        automatically so you don't need to pass ``custom_rm_function``.
+        """
+        from modal_training_gym.common.harbor import harbor_rm
+
+        return harbor_rm
+
     def to_pandas(self, *, formatted: bool = False):
         import pandas as pd
 
@@ -418,12 +440,16 @@ class HarborDataset(DatasetConfig):
             return pd.DataFrame(self.load())
 
         task_root = self._resolve_task_root()
-        rows = [self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()]
+        rows = [
+            self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()
+        ]
         return pd.DataFrame(rows)
 
     def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
         task_root = self._resolve_task_root()
-        base_rows = [self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()]
+        base_rows = [
+            self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()
+        ]
 
         if self.train_size is None:
             train_base = base_rows
@@ -431,7 +457,9 @@ class HarborDataset(DatasetConfig):
         else:
             train_size = max(1, min(int(self.train_size), len(base_rows)))
             train_base = base_rows[:train_size]
-            eval_base = base_rows[train_size: train_size + (self.eval_size or 0)] or base_rows
+            eval_base = (
+                base_rows[train_size : train_size + (self.eval_size or 0)] or base_rows
+            )
 
         train_rows = self._repeat_rows(train_base, int(self.train_repeats))
         eval_rows = self._repeat_rows(eval_base, int(self.eval_repeats))

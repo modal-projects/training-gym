@@ -34,7 +34,6 @@ class TrainConfig:
     recipe: BaseTrainRecipe
     checkpoint: Checkpoint | None = None
 
-
     # ── Public API ────────────────────────────────────────────────────────────
 
     @property
@@ -51,7 +50,19 @@ class TrainConfig:
                     raise TypeError(
                         f"Recipe type {recipe_type} requires SlimeRecipe, got {type(self.recipe).__name__}"
                     )
-                combined = _merge_recipe(base_recipe, cast(SlimeRecipe, self.recipe))
+                recipe = cast(SlimeRecipe, self.recipe)
+                # Auto-detect reward function from dataset if not explicitly set
+                if recipe.custom_rm_function is None:
+                    ds_rm = getattr(self.dataset, "reward_function", None)
+                    if ds_rm is not None:
+                        object.__setattr__(recipe, "custom_rm_function", ds_rm)
+                        if not recipe.custom_rm_path:
+                            object.__setattr__(
+                                recipe,
+                                "custom_rm_path",
+                                recipe._callable_path(ds_rm),
+                            )
+                combined = _merge_recipe(base_recipe, recipe)
             return build_slime_app(
                 training_run_id=self.training_run_id,
                 slime=combined,

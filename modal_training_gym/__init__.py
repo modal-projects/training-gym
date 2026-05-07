@@ -5,12 +5,16 @@ from importlib import import_module
 _EXPORTS = {
     "DatasetConfig": ("modal_training_gym.common.dataset", "DatasetConfig"),
     "HarborDataset": ("modal_training_gym.common.dataset", "HarborDataset"),
+    "HarborTask": ("modal_training_gym.common.harbor", "HarborTask"),
     "DeploymentConfig": ("modal_training_gym.common.deployment", "DeploymentConfig"),
     "EvalConfig": ("modal_training_gym.common.eval", "EvalConfig"),
     "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
     "EvalResult": ("modal_training_gym.common.eval", "EvalResult"),
     "EvalRowResult": ("modal_training_gym.common.eval", "EvalRowResult"),
-    "HFModelConfiguration": ("modal_training_gym.common.models", "HFModelConfiguration"),
+    "HFModelConfiguration": (
+        "modal_training_gym.common.models",
+        "HFModelConfiguration",
+    ),
     "HuggingFaceDataset": ("modal_training_gym.common.dataset", "HuggingFaceDataset"),
     "list_checkpoints": ("modal_training_gym.common.checkpoint", "list_checkpoints"),
     "METADATA_VOLUME_NAME": ("modal_training_gym.utils.metadata", "METADATA_VOLUME_NAME"),
@@ -39,6 +43,7 @@ _EXPORTS = {
 __all__ = [
     "DatasetConfig",
     "HarborDataset",
+    "HarborTask",
     "DeploymentConfig",
     "EvalConfig",
     "EvalConfigDurable",
