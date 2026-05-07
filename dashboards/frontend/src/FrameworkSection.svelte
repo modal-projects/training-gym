@@ -7,6 +7,13 @@
   let completedCount = $derived(
     runs.filter((r) => r.train_result != null).length,
   );
+  let stoppedCount = $derived(
+    runs.filter((r) => r.status === "stopped").length,
+  );
+  let failedCount = $derived(
+    runs.filter((r) => r.status === "failed").length,
+  );
+  let runningCount = $derived(runs.length - completedCount - stoppedCount - failedCount);
 </script>
 
 <section class="framework-section" class:collapsed>
@@ -29,8 +36,14 @@
       {#if completedCount > 0}
         <span class="stat-completed">{completedCount} completed</span>
       {/if}
-      {#if completedCount < runs.length}
-        <span class="stat-pending">{runs.length - completedCount} pending</span>
+      {#if runningCount > 0}
+        <span class="stat-running">{runningCount} running</span>
+      {/if}
+      {#if stoppedCount > 0}
+        <span class="stat-stopped">{stoppedCount} stopped</span>
+      {/if}
+      {#if failedCount > 0}
+        <span class="stat-failed">{failedCount} failed</span>
       {/if}
     </div>
   </header>
@@ -119,8 +132,14 @@
   .stat-completed {
     color: var(--green);
   }
-  .stat-pending {
+  .stat-running {
     color: var(--yellow);
+  }
+  .stat-stopped {
+    color: #fb923c;
+  }
+  .stat-failed {
+    color: #f87171;
   }
   .fw-body {
     overflow-x: auto;

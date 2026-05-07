@@ -75,7 +75,10 @@
   }
 
   function getStatus(run) {
-    return run.train_result ? "Completed" : "Pending";
+    if (run.train_result) return "Completed";
+    if (run.status === "stopped") return "Stopped";
+    if (run.status === "failed") return "Failed";
+    return "Running";
   }
 
   function modelName(run) {
@@ -108,22 +111,20 @@
     return "unknown error";
   }
 
-  function withTimeout(promise, timeoutMs, label) {
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        reject(new Error(`${label} request timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      promise.then(
-        (value) => {
-          clearTimeout(timeoutId);
-          resolve(value);
-        },
-        (reason) => {
-          clearTimeout(timeoutId);
-          reject(reason);
-        },
-      );
-    });
+  function fetchWithTimeout(fn, timeoutMs, label) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    return fn({ signal: controller.signal })
+      .then((value) => {
+        clearTimeout(timeoutId);
+        return value;
+      })
+      .catch((err) => {
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError")
+          throw new Error(`${label} request timed out after ${timeoutMs}ms`);
+        throw err;
+      });
   }
 
   function deploymentLabel(deployment) {
@@ -181,8 +182,8 @@
     loadingDeployments = true;
     error = null;
 
-    const evalsPromise = withTimeout(fetchEvals(), 15000, "evals");
-    const deploymentsPromise = withTimeout(fetchDeployments(), 15000, "deployments");
+    const evalsPromise = fetchWithTimeout(fetchEvals, 15000, "evals");
+    const deploymentsPromise = fetchWithTimeout(fetchDeployments, 15000, "deployments");
 
     evalsPromise
       .then((evals) => {
@@ -215,7 +216,7 @@
       });
 
     try {
-      const runs = await withTimeout(fetchRuns(), 10000, "runs");
+      const runs = await fetchWithTimeout(fetchRuns, 30000, "runs");
       if (isStale()) return;
       allRuns = runs;
       activeFrameworks = new Set(allRuns.map(getFramework));
@@ -278,7 +279,9 @@
   );
 
   let completedTotal = $derived(allRuns.filter((run) => run.train_result).length);
-  let pendingTotal = $derived(allRuns.length - completedTotal);
+  let stoppedTotal = $derived(allRuns.filter((run) => getStatus(run) === "Stopped").length);
+  let failedTotal = $derived(allRuns.filter((run) => getStatus(run) === "Failed").length);
+  let runningTotal = $derived(allRuns.length - completedTotal - stoppedTotal - failedTotal);
 
   let deploymentRows = $derived.by(() =>
     [...allDeployments]
@@ -508,7 +511,9 @@
       <TrainingPage
         {allRuns}
         {completedTotal}
-        {pendingTotal}
+        {runningTotal}
+        {stoppedTotal}
+        {failedTotal}
         {frameworks}
         {fwCounts}
         {activeFrameworks}
@@ -568,7 +573,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 10px 1.35rem;
+    padding: 18px 1.35rem;
   }
 
   .top-brand {
@@ -637,7 +642,7 @@
 
   @media (max-width: 900px) {
     .top-navbar {
-      padding: 8px 0.95rem;
+      padding: 14px 0.95rem;
     }
 
     .top-brand-logo {

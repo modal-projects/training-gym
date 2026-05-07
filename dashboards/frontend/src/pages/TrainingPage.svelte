@@ -10,7 +10,9 @@
   let {
     allRuns,
     completedTotal,
-    pendingTotal,
+    runningTotal,
+    stoppedTotal,
+    failedTotal,
     frameworks,
     fwCounts,
     activeFrameworks,
@@ -91,8 +93,16 @@
     <strong>{completedTotal}</strong>
   </article>
   <article class="summary-card">
-    <span class="summary-label">Pending runs</span>
-    <strong>{pendingTotal}</strong>
+    <span class="summary-label">Running</span>
+    <strong>{runningTotal}</strong>
+  </article>
+  <article class="summary-card">
+    <span class="summary-label">Stopped</span>
+    <strong>{stoppedTotal}</strong>
+  </article>
+  <article class="summary-card">
+    <span class="summary-label">Failed</span>
+    <strong>{failedTotal}</strong>
   </article>
 </section>
 
@@ -182,12 +192,12 @@
                         onclick={(event) => event.stopPropagation()}
                       >
                         <span class="open-modal-link-label">Open in Modal</span>
-                        <ExternalLink size={12} strokeWidth={2.1} />
+                        <ExternalLink class="open-modal-link-icon" size={12} strokeWidth={2.1} />
                       </a>
                     {:else}
                       <span class="open-modal-link open-modal-link-disabled">
                         <span class="open-modal-link-label">Open in Modal</span>
-                        <ExternalLink size={12} strokeWidth={2.1} />
+                        <ExternalLink class="open-modal-link-icon" size={12} strokeWidth={2.1} />
                       </span>
                     {/if}
                   </div>
@@ -377,15 +387,13 @@
 
   .open-modal-link {
     display: inline-flex;
-    flex: 1;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 0.38rem;
     white-space: nowrap;
-    border: 1px solid var(--border);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 7px;
     padding: 0.2rem 0.58rem;
-    color: var(--text);
     text-decoration: none;
     font-size: 0.72rem;
     font-weight: 500;
@@ -393,13 +401,17 @@
   }
 
   .open-modal-link-label {
+    color: rgba(255, 255, 255, 0.6);
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
+  :global(.open-modal-link-icon) {
+    color: rgba(255, 255, 255, 0.3);
+  }
+
   .open-modal-link:hover {
-    border-color: var(--border-strong);
-    color: var(--text-bright);
+    border-color: rgba(255, 255, 255, 0.1);
   }
 
   .open-modal-link-disabled {
