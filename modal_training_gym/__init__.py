@@ -1,22 +1,33 @@
-from modal_training_gym.common.dataset import DatasetConfig, HuggingFaceDataset
-from modal_training_gym.common.deployment import DeploymentConfig, ModelDeployment
-from modal_training_gym.common.eval import EvalConfig, EvalResult, EvalRowResult
-from modal_training_gym.common.models import (
-    HFModelConfiguration,
-    ModelArchitecture,
-    ModelConfig,
-    Qwen3_4B,
-)
-from modal_training_gym.common.train import TrainConfig
-from modal_training_gym.common.train_result import TrainResult
-from modal_training_gym.common.wandb import WandbConfig
-from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-from modal_training_gym.utils.metadata import METADATA_VOLUME_NAME, MetadataStore
+from __future__ import annotations
+
+from importlib import import_module
+
+_EXPORTS = {
+    "DatasetConfig": ("modal_training_gym.common.dataset", "DatasetConfig"),
+    "DeploymentConfig": ("modal_training_gym.common.deployment", "DeploymentConfig"),
+    "EvalConfig": ("modal_training_gym.common.eval", "EvalConfig"),
+    "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
+    "EvalResult": ("modal_training_gym.common.eval", "EvalResult"),
+    "EvalRowResult": ("modal_training_gym.common.eval", "EvalRowResult"),
+    "HFModelConfiguration": ("modal_training_gym.common.models", "HFModelConfiguration"),
+    "HuggingFaceDataset": ("modal_training_gym.common.dataset", "HuggingFaceDataset"),
+    "METADATA_VOLUME_NAME": ("modal_training_gym.utils.metadata", "METADATA_VOLUME_NAME"),
+    "MetadataStore": ("modal_training_gym.utils.metadata", "MetadataStore"),
+    "ModelArchitecture": ("modal_training_gym.common.models", "ModelArchitecture"),
+    "ModelConfig": ("modal_training_gym.common.models", "ModelConfig"),
+    "ModelDeployment": ("modal_training_gym.common.deployment", "ModelDeployment"),
+    "Qwen3_4B": ("modal_training_gym.common.models", "Qwen3_4B"),
+    "SlimeRecipe": ("modal_training_gym.train_recipes.slime_recipe", "SlimeRecipe"),
+    "TrainConfig": ("modal_training_gym.common.train", "TrainConfig"),
+    "TrainResult": ("modal_training_gym.common.train_result", "TrainResult"),
+    "WandbConfig": ("modal_training_gym.common.wandb", "WandbConfig"),
+}
 
 __all__ = [
     "DatasetConfig",
     "DeploymentConfig",
     "EvalConfig",
+    "EvalConfigDurable",
     "EvalResult",
     "EvalRowResult",
     "HFModelConfiguration",
@@ -32,3 +43,17 @@ __all__ = [
     "TrainResult",
     "WandbConfig",
 ]
+
+
+def __getattr__(name: str):
+    module_name, attr_name = _EXPORTS.get(name, (None, None))
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_name)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

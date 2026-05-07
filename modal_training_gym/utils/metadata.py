@@ -14,6 +14,7 @@ class MetadataStore(Enum):
     TRAINING_RUNS = "training-runs"
     TRAIN_RESULTS = "train-results"
     EVAL_RESULTS = "eval-results"
+    EVAL_CONFIGS = "eval-configs"
     DEPLOYMENTS = "deployments"
 
 
@@ -30,10 +31,20 @@ def _store_path(store: MetadataStore | str) -> str:
 
 
 def vol_put(store: MetadataStore | str, key: str, value: dict[str, Any]) -> None:
+    from modal.exception import InvalidError, NotFoundError
+
     vol = _metadata_volume()
     data = json.dumps(value).encode()
+    path = f"{_store_path(store)}/{key}.json"
+    try:
+        vol.remove_file(path)
+    except (FileNotFoundError, NotFoundError):
+        pass
+    except InvalidError as exc:
+        if "No such file or directory" not in str(exc):
+            raise
     with vol.batch_upload() as batch:
-        batch.put_file(io.BytesIO(data), f"{_store_path(store)}/{key}.json")
+        batch.put_file(io.BytesIO(data), path)
 
 
 def vol_get(store: MetadataStore | str, key: str) -> dict[str, Any]:

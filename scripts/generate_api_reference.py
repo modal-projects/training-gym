@@ -7,8 +7,10 @@ import dataclasses
 import importlib
 import inspect
 import re
+import shutil
 import sys
 from dataclasses import fields as dataclass_fields
+from enum import Enum
 from pathlib import Path
 from typing import Any, get_type_hints
 
@@ -103,7 +105,11 @@ def _format_type(type_hint: Any) -> str:
     raw = raw.replace("modal_training_gym.common.models.base.", "")
     raw = raw.replace("modal_training_gym.common.dataset.", "")
     raw = raw.replace("modal_training_gym.common.wandb.", "")
-    raw = raw.replace("modal_training_gym.frameworks.slime.config.", "")
+    raw = raw.replace("modal_training_gym.common.eval.", "")
+    raw = raw.replace("modal_training_gym.common.deployment.", "")
+    raw = raw.replace("modal_training_gym.deploy_recipes.sglang_recipe.recipe.", "")
+    raw = raw.replace("modal_training_gym.deploy_recipes.vllm_recipe.recipe.", "")
+    raw = raw.replace("modal_training_gym.train_recipes.slime_recipe.recipe.", "")
     raw = raw.replace("<class '", "").replace("'>", "")
     return raw
 
@@ -124,6 +130,8 @@ def _format_default(val: Any) -> str:
         return f'`"{val}"`' if val else '`""`'
     if isinstance(val, bool):
         return f"`{val}`"
+    if isinstance(val, Enum):
+        return f"`{val.value}`"
     if isinstance(val, (int, float)):
         return f"`{val}`"
     if val is None:
@@ -226,6 +234,8 @@ def _get_methods(cls: type) -> list[tuple[str, str, str]]:
         if attr is None or not callable(attr):
             continue
         if isinstance(attr, property):
+            continue
+        if not getattr(attr, "__module__", "").startswith("modal_training_gym"):
             continue
         try:
             sig = inspect.signature(attr)
@@ -585,6 +595,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     output_dir = args.output_dir
+    if output_dir.exists():
+        for child in output_dir.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
 
     backlinks = _build_tutorial_backlinks()
     errors = []

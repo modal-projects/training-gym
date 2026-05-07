@@ -11,21 +11,31 @@ tracker file just fine.
 When SKIP_RELEASE_RENAME is unset this wrapper is a transparent pass-through.
 """
 
+from __future__ import annotations
+
 import os
 
 _UPSTREAM = "/root/slime/tools/convert_hf_to_torch_dist.py"
 
-if os.environ.get("SKIP_RELEASE_RENAME"):
+
+def _load_upstream_source() -> str:
     with open(_UPSTREAM) as f:
-        _src = f.read()
-    _src = _src.replace(
-        "shutil.move(source_dir, target_dir)",
-        "pass  # SKIP_RELEASE_RENAME",
-    )
-    _src = _src.replace(
-        'f.write("release")',
-        'f.write("1")  # SKIP_RELEASE_RENAME: keep iter_0000001',
-    )
-    exec(compile(_src, _UPSTREAM, "exec"))
-else:
-    exec(compile(open(_UPSTREAM).read(), _UPSTREAM, "exec"))
+        return f.read()
+
+
+def main() -> None:
+    src = _load_upstream_source()
+    if os.environ.get("SKIP_RELEASE_RENAME"):
+        src = src.replace(
+            "shutil.move(source_dir, target_dir)",
+            "pass  # SKIP_RELEASE_RENAME",
+        )
+        src = src.replace(
+            'f.write("release")',
+            'f.write("1")  # SKIP_RELEASE_RENAME: keep iter_0000001',
+        )
+    exec(compile(src, _UPSTREAM, "exec"), {"__name__": "__main__", "__file__": _UPSTREAM})
+
+
+if __name__ == "__main__":
+    main()

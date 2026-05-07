@@ -1,0 +1,578 @@
+# pyright: reportUndefinedVariable=false
+"""Tutorial source for `001_code_golf_sandboxes` — parsed by generate_tutorial.py."""
+
+TUTORIAL_METADATA = {
+    "framework": "`slime`",
+    "cluster_shape": "1 × 1×H100",
+    "summary": "Code-golf RL with sandboxed verification reward in Modal",
+    "difficulty": "Intermediate",
+    "order": 20,
+    "api_classes": [
+        "DatasetConfig",
+        "DeploymentConfig",
+        "EvalConfig",
+        "EvalRowResult",
+        "ModelDeployment",
+        "Qwen3_4B",
+        "SlimeRecipe",
+        "TrainConfig",
+        "WandbConfig",
+    ],
+}
+
+
+from tutorial_generator import code, markdown, notebook_only, py_only, shell
+
+
+@markdown
+def _intro():
+    """
+    # Code-golf RL with Modal sandboxes
+
+    This tutorial mirrors the PR's "code-golf with sandboxed tests" idea, but uses
+    `modal-training-gym` directly.
+
+    Workflow:
+    1. Create a tiny code-golf dataset.
+    2. Score model outputs by executing generated code inside Modal sandboxes.
+    3. Use that scorer both for offline eval and as SLIME `custom_rm_function`.
+    4. Train and compare base vs. trained behavior.
+
+    The key pattern is: **correctness first, size second**.
+    A sample only gets a size bonus if sandbox tests pass.
+    """
+
+
+@py_only
+@markdown
+def _run_instructions():
+    """
+    Run with:
+    ```
+    uv run python tutorials/rl/001_code_golf_sandboxes/001_code_golf_sandboxes.py
+    ```
+    """
+
+
+@notebook_only
+@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
+def _install():
+    pass
+
+
+@code
+def _imports():
+    import json
+    import re
+    from functools import lru_cache
+
+    import modal
+
+    from modal_training_gym import (
+        DatasetConfig,
+        DeploymentConfig,
+        EvalConfig,
+        EvalRowResult,
+        ModelDeployment,
+        Qwen3_4B,
+        SlimeRecipe,
+        TrainConfig,
+        WandbConfig,
+    )
+    from modal_training_gym.common.checkpoint import list_checkpoints
+
+
+@markdown
+def _dataset_intro():
+    """
+    ## Build a tiny code-golf dataset
+
+    We keep this tutorial small and explicit: two Python tasks, each with:
+    - prompt text,
+    - reference solution,
+    - assert-style tests.
+
+    For training, rows are written in SLIME's chat format and task metadata
+    is packed into `label` JSON so the custom reward can recover task-specific
+    tests at runtime.
+    """
+
+
+@code
+def _dataset():
+    TASKS = [
+        {
+            "name": "triangular_number",
+            "entrypoint": "solve",
+            "prompt": (
+                "Write a Python function `solve(n)` that returns the nth triangular number."
+            ),
+            "reference_solution": "def solve(n):\n    return n * (n + 1) // 2\n",
+            "tests": [
+                "assert solve(1) == 1",
+                "assert solve(3) == 6",
+                "assert solve(10) == 55",
+            ],
+        },
+        {
+            "name": "digit_sum",
+            "entrypoint": "solve",
+            "prompt": "Write a Python function `solve(n)` that returns sum(map(int, str(abs(n)))).",
+            "reference_solution": "def solve(n):\n    return sum(map(int, str(abs(n))))\n",
+            "tests": [
+                "assert solve(0) == 0",
+                "assert solve(12345) == 15",
+                "assert solve(-909) == 18",
+            ],
+        },
+    ]
+
+
+    class CodeGolfDataset(DatasetConfig):
+        input_key = "messages"
+        label_key = "label"
+        apply_chat_template = True
+        input_column = "prompt"
+
+        def load(self):
+            return [
+                {
+                    "prompt": task["prompt"],
+                    "tests": list(task["tests"]),
+                    "entrypoint": task["entrypoint"],
+                    "reference_solution": task["reference_solution"],
+                }
+                for task in TASKS
+            ]
+
+        def prepare(self, path: str, eval_paths: dict[str, str] | None = None):
+            import os
+
+            from datasets import Dataset
+
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+
+            def _to_train_row(task: dict) -> dict:
+                user_prompt = (
+                    f"{task['prompt']}\n"
+                    f"Return only Python code defining `{task['entrypoint']}`."
+                )
+                label_payload = {
+                    "task_name": task["name"],
+                    "entrypoint": task["entrypoint"],
+                    "tests": task["tests"],
+                    "reference_solution": task["reference_solution"],
+                }
+                return {
+                    "messages": [{"role": "user", "content": user_prompt}],
+                    "label": json.dumps(label_payload),
+                }
+
+            train_rows = [_to_train_row(task) for task in TASKS for _ in range(16)]
+            eval_rows = [_to_train_row(task) for task in TASKS]
+
+            Dataset.from_list(train_rows).to_parquet(path)
+            if eval_paths:
+                for eval_path in eval_paths.values():
+                    os.makedirs(os.path.dirname(eval_path), exist_ok=True)
+                    Dataset.from_list(eval_rows).to_parquet(eval_path)
+
+
+    train_dataset = CodeGolfDataset()
+    eval_dataset = CodeGolfDataset()
+
+
+@markdown
+def _sandbox_reward_intro():
+    """
+    ## Sandbox-backed scorer
+
+    We execute candidate code in a Modal sandbox and run assert tests there.
+    Reward is:
+    - `0` if tests fail,
+    - otherwise `pass_rate * (1 + length_bonus_weight * size_bonus)`.
+
+    `size_bonus` is derived from `reference_bytes / candidate_bytes`, capped at `2.0`.
+    """
+
+
+@code
+def _sandbox_reward():
+    _CODE_FENCE_RE = re.compile(r"```(?:python)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+    _SANDBOX_IMAGE = modal.Image.debian_slim(python_version="3.11")
+    _LENGTH_BONUS_WEIGHT = 0.2
+
+    def extract_python_code(text: str) -> str:
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if "<|im_start|>assistant" in normalized:
+            normalized = normalized.rsplit("<|im_start|>assistant", 1)[-1]
+        if "</think>" in normalized:
+            normalized = normalized.split("</think>", 1)[-1]
+        normalized = normalized.replace("<think>", "").replace("<|im_end|>", "").strip()
+        if match := _CODE_FENCE_RE.search(normalized):
+            return match.group(1).strip()
+        return normalized
+
+    @lru_cache(maxsize=1)
+    def _sandbox_app() -> modal.App:
+        return modal.App.lookup("training-gym-code-golf-rm", create_if_missing=True)
+
+    def _parse_label(sample) -> dict:
+        raw = getattr(sample, "label", None)
+        if not raw:
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+
+    def _last_json_line(text: str) -> dict:
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                return data
+        return {}
+
+    def _build_sandbox_test_script(
+        candidate_code: str,
+        *,
+        tests: list[str],
+        entrypoint: str,
+    ) -> str:
+        lines = [
+            "import json",
+            f"candidate = {json.dumps(candidate_code)}",
+            f"tests = {json.dumps(tests)}",
+            f"entrypoint = {json.dumps(entrypoint)}",
+            "scope = {}",
+            "try:",
+            "    exec(candidate, scope, scope)",
+            "    fn = scope.get(entrypoint)",
+            "    if not callable(fn):",
+            "        raise RuntimeError(f'Missing callable: {entrypoint}')",
+            "    passed = 0",
+            "    for expr in tests:",
+            "        exec(expr, scope, scope)",
+            "        passed += 1",
+            "    print(json.dumps({'pass_rate': passed / len(tests) if tests else 0.0, 'passed': passed, 'total': len(tests)}))",
+            "except Exception as exc:",
+            "    print(json.dumps({'pass_rate': 0.0, 'passed': 0, 'total': len(tests), 'error': repr(exc)}))",
+        ]
+        return "\n".join(lines) + "\n"
+
+    def score_code_with_sandbox(
+        response: str,
+        *,
+        tests: list[str],
+        entrypoint: str,
+        reference_solution: str,
+        timeout_sec: int = 25,
+    ) -> tuple[float, dict]:
+        candidate_code = extract_python_code(response)
+        script = _build_sandbox_test_script(
+            candidate_code,
+            tests=tests,
+            entrypoint=entrypoint,
+        )
+
+        try:
+            sandbox = modal.Sandbox.create(
+                "python",
+                "-c",
+                script,
+                app=_sandbox_app(),
+                image=_SANDBOX_IMAGE,
+                timeout=timeout_sec,
+                cpu=1.0,
+                memory=1024,
+            )
+            stdout = sandbox.stdout.read()
+            stderr = sandbox.stderr.read()
+            exit_code = sandbox.wait()
+        except Exception as exc:
+            candidate_bytes = len(candidate_code.encode("utf-8"))
+            reference_bytes = len(reference_solution.encode("utf-8"))
+            return 0.0, {
+                "pass_rate": 0.0,
+                "candidate_bytes": candidate_bytes,
+                "reference_bytes": reference_bytes,
+                "ratio": 0.0,
+                "sandbox_exit_code": -1,
+                "sandbox_stderr": repr(exc),
+            }
+
+        payload = _last_json_line(stdout)
+        pass_rate = float(payload.get("pass_rate", 0.0))
+
+        candidate_bytes = len(candidate_code.encode("utf-8"))
+        reference_bytes = len(reference_solution.encode("utf-8"))
+        ratio = min(2.0, reference_bytes / max(candidate_bytes, 1))
+        size_bonus = max(0.0, ratio - 1.0)
+        reward = pass_rate * (1.0 + (_LENGTH_BONUS_WEIGHT * size_bonus))
+
+        metadata = {
+            "pass_rate": pass_rate,
+            "candidate_bytes": candidate_bytes,
+            "reference_bytes": reference_bytes,
+            "ratio": ratio,
+            "sandbox_exit_code": exit_code,
+            "sandbox_stderr": stderr.strip(),
+        }
+        return reward, metadata
+
+    async def code_golf_rm(args, sample, **kwargs) -> float:
+        import asyncio
+        import json
+        import re
+        from functools import lru_cache
+
+        import modal
+
+        def _inline_score_code_with_sandbox(
+            response: str,
+            *,
+            tests: list[str],
+            entrypoint: str,
+            reference_solution: str,
+            timeout_sec: int = 25,
+        ) -> tuple[float, dict]:
+            code_fence_re = re.compile(r"```(?:python)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+            sandbox_image = modal.Image.debian_slim(python_version="3.11")
+            length_bonus_weight = 0.2
+
+            def extract_python_code(text: str) -> str:
+                normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+                if "<|im_start|>assistant" in normalized:
+                    normalized = normalized.rsplit("<|im_start|>assistant", 1)[-1]
+                if "</think>" in normalized:
+                    normalized = normalized.split("</think>", 1)[-1]
+                normalized = normalized.replace("<think>", "").replace("<|im_end|>", "").strip()
+                if match := code_fence_re.search(normalized):
+                    return match.group(1).strip()
+                return normalized
+
+            @lru_cache(maxsize=1)
+            def sandbox_app() -> modal.App:
+                return modal.App.lookup("training-gym-code-golf-rm", create_if_missing=True)
+
+            def last_json_line(text: str) -> dict:
+                for line in reversed(text.splitlines()):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(data, dict):
+                        return data
+                return {}
+
+            candidate_code = extract_python_code(response)
+            script = "\n".join(
+                [
+                    "import json",
+                    f"candidate = {json.dumps(candidate_code)}",
+                    f"tests = {json.dumps(tests)}",
+                    f"entrypoint = {json.dumps(entrypoint)}",
+                    "scope = {}",
+                    "try:",
+                    "    exec(candidate, scope, scope)",
+                    "    fn = scope.get(entrypoint)",
+                    "    if not callable(fn):",
+                    "        raise RuntimeError(f'Missing callable: {entrypoint}')",
+                    "    passed = 0",
+                    "    for expr in tests:",
+                    "        exec(expr, scope, scope)",
+                    "        passed += 1",
+                    "    print(json.dumps({'pass_rate': passed / len(tests) if tests else 0.0, 'passed': passed, 'total': len(tests)}))",
+                    "except Exception as exc:",
+                    "    print(json.dumps({'pass_rate': 0.0, 'passed': 0, 'total': len(tests), 'error': repr(exc)}))",
+                ]
+            ) + "\n"
+
+            try:
+                sandbox = modal.Sandbox.create(
+                    "python",
+                    "-c",
+                    script,
+                    app=sandbox_app(),
+                    image=sandbox_image,
+                    timeout=timeout_sec,
+                    cpu=1.0,
+                    memory=1024,
+                )
+                stdout = sandbox.stdout.read()
+                stderr = sandbox.stderr.read()
+                exit_code = sandbox.wait()
+            except Exception as exc:
+                candidate_bytes = len(candidate_code.encode("utf-8"))
+                reference_bytes = len(reference_solution.encode("utf-8"))
+                return 0.0, {
+                    "pass_rate": 0.0,
+                    "candidate_bytes": candidate_bytes,
+                    "reference_bytes": reference_bytes,
+                    "ratio": 0.0,
+                    "sandbox_exit_code": -1,
+                    "sandbox_stderr": repr(exc),
+                }
+
+            payload = last_json_line(stdout)
+            pass_rate = float(payload.get("pass_rate", 0.0))
+            candidate_bytes = len(candidate_code.encode("utf-8"))
+            reference_bytes = len(reference_solution.encode("utf-8"))
+            ratio = min(2.0, reference_bytes / max(candidate_bytes, 1))
+            size_bonus = max(0.0, ratio - 1.0)
+            reward = pass_rate * (1.0 + (length_bonus_weight * size_bonus))
+            return reward, {
+                "pass_rate": pass_rate,
+                "candidate_bytes": candidate_bytes,
+                "reference_bytes": reference_bytes,
+                "ratio": ratio,
+                "sandbox_exit_code": exit_code,
+                "sandbox_stderr": stderr.strip(),
+            }
+
+        raw_label = getattr(sample, "label", None)
+        if isinstance(raw_label, dict):
+            label = raw_label
+        elif raw_label:
+            try:
+                label = json.loads(raw_label)
+            except json.JSONDecodeError:
+                label = {}
+        else:
+            label = {}
+
+        tests = label.get("tests")
+        entrypoint = label.get("entrypoint")
+        reference_solution = label.get("reference_solution")
+        if (
+            not isinstance(tests, list)
+            or not tests
+            or not isinstance(entrypoint, str)
+            or not entrypoint
+            or not isinstance(reference_solution, str)
+            or not reference_solution
+        ):
+            sample_metadata = getattr(sample, "metadata", None)
+            if not isinstance(sample_metadata, dict):
+                sample_metadata = {}
+            sample_metadata["code_golf"] = {"pass_rate": 0.0, "reason": "missing_label"}
+            sample.metadata = sample_metadata
+            return 0.0
+
+        score_fn = globals().get("score_code_with_sandbox") or _inline_score_code_with_sandbox
+
+        reward, metadata = await asyncio.to_thread(
+            score_fn,
+            sample.response,
+            tests=tests,
+            entrypoint=entrypoint,
+            reference_solution=reference_solution,
+        )
+        sample_metadata = getattr(sample, "metadata", None)
+        if not isinstance(sample_metadata, dict):
+            sample_metadata = {}
+        sample_metadata["code_golf"] = metadata
+        sample.metadata = sample_metadata
+        return float(reward)
+
+
+@markdown
+def _serve_eval_base_intro():
+    """
+    ## Serve and evaluate the base model
+    """
+
+
+@code
+def _serve_eval_base():
+    base_model = Qwen3_4B()
+    base_deployment: ModelDeployment = DeploymentConfig(model=base_model).serve()
+    print(f"Base model URL: {base_deployment.url}")
+
+    def eval_fn(example: dict, response: str) -> EvalRowResult:
+        score, metadata = score_code_with_sandbox(
+            response,
+            tests=example["tests"],
+            entrypoint=example["entrypoint"],
+            reference_solution=example["reference_solution"],
+        )
+        return EvalRowResult(score=score, response=response, metadata=metadata)
+
+    eval_config = EvalConfig(
+        dataset=eval_dataset,
+        eval_fn=eval_fn,
+        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+    )
+    print("Running base eval...")
+    base_eval = eval_config.evaluate(base_deployment, debug=True)
+    print(f"Base mean reward: {base_eval.mean:.4f}")
+
+
+@markdown
+def _train_intro():
+    """
+    ## Train with SLIME and sandbox reward
+
+    The custom RM function is the same sandbox scorer used in eval.
+    This keeps train/eval reward logic aligned.
+    """
+
+
+@code
+def _train():
+    training_run = TrainConfig(
+        model=Qwen3_4B(),
+        dataset=train_dataset,
+        recipe=SlimeRecipe(
+            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-code-golf"),
+            custom_rm_function=code_golf_rm,
+            rm_type="math",
+            num_rollout=20,
+            rollout_batch_size=8,
+            n_samples_per_prompt=4,
+            save_interval=10,
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=1,
+            apply_chat_template_kwargs='{"enable_thinking": false}',
+            image_overlay=lambda image: image.run_commands(
+                "uv pip install --system modal>=1.2.0 datasets>=3.0.0",
+            ),
+        ),
+    )
+    print("Starting training...")
+    train_result = training_run.train()
+    print(f"Training run id: {train_result.training_run_id}")
+
+
+@markdown
+def _serve_trained_intro():
+    """
+    ## Evaluate the trained checkpoint
+    """
+
+
+@code
+def _serve_trained():
+    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+    trained_deployment = DeploymentConfig(
+        model=Qwen3_4B(),
+        checkpoint=checkpoint,
+        app_name="qwen3-4b-code-golf-serve",
+        served_model_name="qwen3-4b-code-golf",
+    ).serve()
+    print(f"Trained model URL: {trained_deployment.url}")
+
+    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
+    print(f"Trained mean reward: {trained_eval.mean:.4f}")
+    print(f"Base mean reward:    {base_eval.mean:.4f}")

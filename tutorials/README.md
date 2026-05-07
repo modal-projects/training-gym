@@ -23,12 +23,15 @@ context) and assume familiarity with the underlying framework.
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
 | [`000_rl_basics`](rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/refactor-gym-to-add-recipes/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`001_code_golf_sandboxes`](rl/001_code_golf_sandboxes/001_code_golf_sandboxes.ipynb) | Code-golf RL with sandboxed verification reward in Modal | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/refactor-gym-to-add-recipes/tutorials/rl/001_code_golf_sandboxes/001_code_golf_sandboxes.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`002_multiturn_number_guessing`](rl/002_multiturn_number_guessing/002_multiturn_number_guessing.ipynb) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/refactor-gym-to-add-recipes/tutorials/rl/002_multiturn_number_guessing/002_multiturn_number_guessing.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
 ## Running from the CLI instead
 
-Every tutorial is also a plain `.py` file runnable via `modal run`. See
-the top-level [`README.md`](../README.md) for the usage pattern.
+Some tutorials also emit a plain `.py` companion, but the current source
+tutorial is notebook-first and intentionally narrated for Modal Notebooks.
+Use the notebook as the canonical walkthrough.
 
 ## Authoring a new tutorial
 
@@ -86,9 +89,7 @@ are maps, the `.ipynb` is the walkthrough. Aim for roughly:
   get their own explanation cell.
 - A "Run it" section splitting CLI invocation (`@py_only`) from
   cell-by-cell interactive invocation (`@notebook_only`).
-- Optional: a "Serve / evaluate / next step" tail, where relevant — see
-  [`slime_haiku`](rl/slime_haiku/slime_haiku.ipynb) for the shape.
+- Optional: a "Serve / evaluate / next step" tail, where relevant.
 
-[`slime_gsm8k`](rl/slime_gsm8k/slime_gsm8k.ipynb) and
-[`slime_haiku`](rl/slime_haiku/slime_haiku.ipynb) are the reference examples
-for tutorial narration depth.
+[`000_rl_basics`](rl/000_rl_basics/000_rl_basics.ipynb) is the current
+reference example for tutorial narration depth.

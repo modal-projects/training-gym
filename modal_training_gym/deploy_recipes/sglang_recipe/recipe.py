@@ -41,7 +41,7 @@ class SglangRecipe(BaseDeployRecipe):
 
     recipe_type: DeployRecipeType = DeployRecipeType.SGLANG
 
-    gpu: GPUType | None = "H100"
+    gpu: GPUType = "H100"
     tp: int | None = None
     dp: int | None = None
     context_length: int | None = None

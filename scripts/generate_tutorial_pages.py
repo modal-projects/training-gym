@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import shutil
 import sys
 import textwrap
 from pathlib import Path
@@ -190,6 +191,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     output_dir = args.output_dir
+    for bucket in BUCKETS:
+        bucket_output_dir = output_dir / bucket
+        if bucket_output_dir.exists():
+            shutil.rmtree(bucket_output_dir)
     generated = 0
 
     for bucket in BUCKETS:

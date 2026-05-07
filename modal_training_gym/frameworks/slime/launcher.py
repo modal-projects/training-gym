@@ -16,11 +16,17 @@ Then: `uv run modal run <tutorial_file>.py::train`.
 """
 
 import asyncio
+import base64
+import inspect
 import os
 import shlex
 import subprocess
 import tempfile
+import textwrap
 import time
+from pathlib import PurePosixPath
+from typing import Any
+from collections.abc import Callable
 from modal import App, Image, Secret, Volume
 from modal.experimental import clustered
 
@@ -50,8 +56,39 @@ from .modal_helpers.utils import (
     get_modal_cluster_context,
     prepare_slime_config,
 )
+from modal_training_gym.common.checkpoint import (
+    Checkpoint,
+    _get_slime_checkpoint_prefix,
+)
+from modal_training_gym.common.framework import Framework
 
 SLIME_ROOT = "/root/slime"
+
+
+def _has_torch_dist_checkpoint(save_path: str) -> bool:
+    if not os.path.isdir(save_path):
+        return False
+
+    tracker_path = os.path.join(save_path, "latest_checkpointed_iteration.txt")
+    if os.path.isfile(tracker_path):
+        try:
+            with open(tracker_path) as f:
+                marker = f.read().strip()
+        except OSError:
+            marker = ""
+        if marker == "release":
+            return os.path.isdir(os.path.join(save_path, "release"))
+        if marker.isdigit():
+            iter_dir = f"iter_{int(marker):07d}"
+            return os.path.isdir(os.path.join(save_path, iter_dir))
+
+    try:
+        return any(
+            entry.is_dir() and (entry.name == "release" or entry.name.startswith("iter_"))
+            for entry in os.scandir(save_path)
+        )
+    except OSError:
+        return False
 
 
 def build_slime_app(
@@ -59,6 +96,7 @@ def build_slime_app(
     slime: SlimeRecipe,
     model: ModelConfig,
     dataset: DatasetConfig,
+    checkpoint: Checkpoint | None = None,
     name: str | None = None,
 ) -> App:
     """Return a Modal App with `download`, `prepare_dataset`, `convert_checkpoint`, and `train` defined."""
@@ -77,8 +115,8 @@ def build_slime_app(
     # ── Image ────────────────────────────────────────────────────────────────
     image = Image.from_registry("slimerl/slime:nightly-dev-20260329a").entrypoint([])
 
-    if slime.image_run_commands is not None:
-        image = slime.image_run_commands(image)
+    if slime.image_overlay is not None:
+        image = slime.image_overlay(image)
 
     if slime.local_slime:
         image = image.add_local_dir(
@@ -101,41 +139,94 @@ def build_slime_app(
             remote_path=caller_remote_path,
             copy=True,
         )
-    _rm_fn_shipped = False
-    if slime.custom_rm_function is not None:
-        import inspect as _inspect
-        import textwrap as _tw
-        import tempfile as _tmp
 
-        fn = slime.custom_rm_function
+    def _get_custom_generate_path() -> str:
+        cfg = slime.custom_config_path
+        if not isinstance(cfg, dict):
+            return ""
+        raw = cfg.get("custom_generate_function_path", "")
+        return raw if isinstance(raw, str) else ""
+
+    def _set_custom_generate_path(path: str) -> None:
+        cfg = dict(slime.custom_config_path or {})
+        cfg["custom_generate_function_path"] = path
+        object.__setattr__(slime, "custom_config_path", cfg)
+
+    def _ship_callable(
+        fn: Any,
+        *,
+        fallback_name: str,
+        set_path: Callable[[str], None],
+    ) -> None:
+        nonlocal image
+        if fn is None:
+            return
         fn_mod = getattr(fn, "__module__", None) or ""
-        if not fn_mod.startswith("modal_training_gym"):
-            try:
-                fn_file = os.path.abspath(_inspect.getfile(fn))
-            except (TypeError, OSError):
-                fn_file = None
-            if fn_file and os.path.isfile(fn_file) and fn_file != caller_script:
-                fn_module_name = os.path.splitext(os.path.basename(fn_file))[0]
-                image = image.add_local_file(
-                    fn_file,
-                    remote_path=f"/root/{fn_module_name}.py",
-                    copy=True,
-                )
-                _rm_fn_shipped = True
-            elif not fn_file or not os.path.isfile(fn_file):
-                fn_name = getattr(fn, "__name__", "custom_rm")
-                src = _tw.dedent(_inspect.getsource(fn))
-                tmp = _tmp.NamedTemporaryFile(
-                    mode="w", suffix=".py", prefix="notebook_rm_", delete=False
-                )
-                tmp.write(src)
-                tmp.flush()
-                mod_name = os.path.splitext(os.path.basename(tmp.name))[0]
-                image = image.add_local_file(
-                    tmp.name, remote_path=f"/root/{mod_name}.py", copy=True
-                )
-                object.__setattr__(slime, "custom_rm_path", f"{mod_name}.{fn_name}")
-                _rm_fn_shipped = True
+        if fn_mod.startswith("modal_training_gym"):
+            return
+        try:
+            fn_file = os.path.abspath(inspect.getfile(fn))
+        except (TypeError, OSError):
+            fn_file = None
+        if fn_file and os.path.isfile(fn_file) and fn_file != caller_script:
+            fn_module_name = os.path.splitext(os.path.basename(fn_file))[0]
+            image = image.add_local_file(
+                fn_file,
+                remote_path=f"/root/{fn_module_name}.py",
+                copy=True,
+            )
+            return
+        if fn_file and os.path.isfile(fn_file):
+            return
+        fn_name = getattr(fn, "__name__", fallback_name)
+        try:
+            payload = base64.b64encode(cloudpickle.dumps(fn)).decode("ascii")
+        except Exception:
+            src = textwrap.dedent(inspect.getsource(fn))
+            module_src = src
+        else:
+            module_src = textwrap.dedent(
+                f"""
+                import base64
+                import cloudpickle
+
+                {fn_name} = cloudpickle.loads(base64.b64decode({payload!r}))
+                """
+            ).lstrip()
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".py",
+            prefix=f"notebook_{fallback_name}_",
+            delete=False,
+        ) as tmp:
+            tmp.write(module_src)
+            tmp_path = tmp.name
+        mod_name = os.path.splitext(os.path.basename(tmp_path))[0]
+        image = image.add_local_file(
+            tmp_path,
+            remote_path=f"/root/{mod_name}.py",
+            copy=True,
+        )
+        set_path(f"{mod_name}.{fn_name}")
+
+    _ship_callable(
+        slime.custom_rm_function,
+        fallback_name="custom_rm",
+        set_path=lambda path: object.__setattr__(slime, "custom_rm_path", path),
+    )
+    _ship_callable(
+        slime.custom_generate_function,
+        fallback_name="custom_generate",
+        set_path=_set_custom_generate_path,
+    )
+
+    if slime.custom_rm_function is not None and slime.custom_rm_path:
+        object.__setattr__(slime, "custom_rm_function", None)
+    if (
+        slime.custom_generate_function is not None
+        and _get_custom_generate_path()
+    ):
+        object.__setattr__(slime, "custom_generate_function", None)
 
     for mod_name in slime.local_python_sources:
         image = image.add_local_python_source(mod_name, copy=True)
@@ -143,13 +234,25 @@ def build_slime_app(
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
     data_volume = Volume.from_name(f"{app_name}-data", create_if_missing=True)
-    checkpoints_volume = Volume.from_name(
-        f"{app_name}-checkpoints", create_if_missing=True
+    checkpoints_volume_name = (
+        checkpoint.checkpoints_volume_name
+        if checkpoint is not None and checkpoint.checkpoints_volume_name
+        else f"{app_name}-checkpoints"
     )
-    all_volumes = {
+    checkpoints_mount_path = (
+        checkpoint.checkpoints_mount_path.rstrip("/") or "/"
+        if checkpoint is not None and checkpoint.checkpoints_mount_path
+        else str(CHECKPOINTS_PATH).rstrip("/")
+    )
+    checkpoints_volume = Volume.from_name(
+        checkpoints_volume_name, create_if_missing=True
+    )
+    if checkpoint is not None and checkpoint.path and not model.model_path:
+        model.model_path = checkpoint.path
+    all_volumes: dict[str | PurePosixPath, Any] = {
         str(HF_CACHE_PATH): hf_cache_volume,
         str(DATA_PATH): data_volume,
-        str(CHECKPOINTS_PATH): checkpoints_volume,
+        checkpoints_mount_path: checkpoints_volume,
     }
 
     # ── App ──────────────────────────────────────────────────────────────────
@@ -169,7 +272,7 @@ def build_slime_app(
         image=image,
         volumes={
             str(HF_CACHE_PATH): hf_cache_volume,
-            str(CHECKPOINTS_PATH): checkpoints_volume,
+            checkpoints_mount_path: checkpoints_volume,
         },
         timeout=2 * 60 * 60,
         secrets=[Secret.from_name("huggingface-secret")],
@@ -208,7 +311,7 @@ def build_slime_app(
         serialized=True,
         name="convert_checkpoint",
     )
-    @clustered(convert_nnodes, rdma=True)
+    @clustered(convert_nnodes, rdma=True)  # pyright: ignore[reportCallIssue, reportOptionalCall]
     def convert_checkpoint():
         from huggingface_hub import snapshot_download
 
@@ -224,6 +327,9 @@ def build_slime_app(
         else:
             hf_path = snapshot_download(model.model_name, local_files_only=True)
         save_path = str(slime.ref_load)
+        if _has_torch_dist_checkpoint(save_path):
+            print(f"Found existing torch_dist checkpoint at {save_path}; skipping conversion.")
+            return
         num_nodes, nproc_per_node, extra_args = get_checkpoint_conversion_policy(slime)
         node_rank, master_addr, _, nnodes = get_modal_cluster_context(num_nodes)
 
@@ -238,13 +344,17 @@ def build_slime_app(
 
         import importlib.util
 
-        convert_script = (
-            importlib.util.find_spec(
+        if num_nodes > 1:
+            spec = importlib.util.find_spec(
                 "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
-            ).origin
-            if num_nodes > 1
-            else f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"
-        )
+            )
+            convert_script = spec.origin if spec is not None else None
+            if not convert_script:
+                raise RuntimeError(
+                    "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
+                )
+        else:
+            convert_script = f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"
 
         cmd = (
             f"torchrun {' '.join(torchrun_args)} {convert_script} "
@@ -272,7 +382,7 @@ def build_slime_app(
         gpu=gpu_spec,
         volumes={
             str(HF_CACHE_PATH): hf_cache_volume,
-            str(CHECKPOINTS_PATH): checkpoints_volume,
+            checkpoints_mount_path: checkpoints_volume,
         },
         timeout=4 * 60 * 60,
         secrets=[Secret.from_name("huggingface-secret")],
@@ -292,9 +402,14 @@ def build_slime_app(
             else snapshot_download(model.model_name, local_files_only=True)
         )
 
-        convert_script = importlib.util.find_spec(
+        spec = importlib.util.find_spec(
             "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf"
-        ).origin
+        )
+        convert_script = spec.origin if spec is not None else None
+        if not convert_script:
+            raise RuntimeError(
+                "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf not found"
+            )
 
         cmd = (
             f"python {convert_script} "
@@ -308,6 +423,8 @@ def build_slime_app(
         checkpoints_volume.commit()
         print(f"Saved HF checkpoint to {output_dir}")
 
+    _multi_node = slime.total_nodes > 1
+
     @app.function(
         image=image,
         gpu=gpu_spec,
@@ -316,12 +433,12 @@ def build_slime_app(
             *([] if slime.wandb is None else [Secret.from_name(slime.wandb.modal_wandb_secret_name)]),
         ],
         timeout=24 * 60 * 60,
-        experimental_options={"efa_enabled": True},
+        experimental_options={"efa_enabled": True} if _multi_node else {},
         serialized=True,
         name="train",
     )
-    @clustered(slime.total_nodes, rdma=True)
-    async def train():
+    @clustered(slime.total_nodes, rdma=_multi_node)  # pyright: ignore[reportCallIssue, reportOptionalCall]
+    async def train(run_id: str | None = None):
         await asyncio.gather(
             hf_cache_volume.reload.aio(),
             data_volume.reload.aio(),
@@ -342,7 +459,8 @@ def build_slime_app(
             return
 
         created_at = int(time.time())
-        run_id = f"{app_name}-{created_at}"
+        run_id = run_id or f"{app_name}-{created_at}"
+        print(f"Training run id: {run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
             "recipe": {
@@ -362,13 +480,15 @@ def build_slime_app(
             "lr": slime.lr,
             "global_batch_size": slime.global_batch_size,
         }
-        TrainingRun(
+        run_record = TrainingRun(
             run_id=run_id,
             modal_app_id=os.environ.get("MODAL_APP_ID", ""),
-            framework="slime",
+            framework=Framework.SLIME,
             config=config_summary,
             created_at=created_at,
-        ).save()
+            started_at=created_at,
+        )
+        run_record.save()
         print(f"TrainingRun recorded: {run_id}")
 
         if model:
@@ -394,10 +514,30 @@ def build_slime_app(
         if wandb_key := os.environ.get("WANDB_API_KEY", ""):
             if slime.wandb is not None:
                 slime.wandb.key = wandb_key
-            elif getattr(slime, "use_wandb", False):
-                slime.wandb_key = wandb_key
 
-        cmd = build_train_cmd(slime, SLIME_ROOT, model=model, dataset=dataset)
+        recipe_default_save_root = str(CHECKPOINTS_PATH).rstrip("/")
+        mounted_save_root = checkpoints_mount_path
+        configured_save_root = (
+            str(slime.save).rstrip("/") if slime.save else mounted_save_root
+        )
+        base_save_root = (
+            mounted_save_root
+            if configured_save_root == recipe_default_save_root
+            else configured_save_root
+        )
+        save_root = (
+            f"{mounted_save_root}/{run_id}"
+            if base_save_root == mounted_save_root
+            else configured_save_root
+        )
+        os.makedirs(save_root, exist_ok=True)
+
+        original_save = slime.save
+        object.__setattr__(slime, "save", save_root)
+        try:
+            cmd = build_train_cmd(slime, SLIME_ROOT, model=model, dataset=dataset)
+        finally:
+            object.__setattr__(slime, "save", original_save)
         runtime_env = {
             "env_vars": {
                 "no_proxy": f"127.0.0.1,{cluster.head_addr}",
@@ -416,8 +556,6 @@ def build_slime_app(
             print(f"Ray dashboard: {tunnel.url}")
             await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
 
-        save_root = str(slime.save).rstrip("/") if slime.save else str(CHECKPOINTS_PATH)
-
         if model and slime.megatron_to_hf_mode == "bridge":
             from huggingface_hub import snapshot_download as _snap
 
@@ -425,7 +563,7 @@ def build_slime_app(
                 str(model.model_path) if model.model_path
                 else _snap(model.model_name, local_files_only=True)
             )
-            prefix = slime.checkpoint.iteration_prefix
+            prefix = _get_slime_checkpoint_prefix()
             ckpt_dirs = sorted(
                 (d for d in os.scandir(save_root)
                  if d.is_dir() and d.name.startswith(prefix) and not d.name.endswith("_hf")),
@@ -446,17 +584,24 @@ def build_slime_app(
                     subprocess.run(["bash", "-c", cmd], check=True)
                     print(f"Converted {entry.name} → {hf_dir}")
 
+        result_kwargs = {
+            "app_name": app_name,
+            "framework": "slime",
+            "training_run_id": run_id,
+            "checkpoint_dir": save_root,
+            "model_config": model,
+            "checkpoints_volume_name": checkpoints_volume_name,
+            "checkpoints_mount_path": checkpoints_mount_path,
+        }
+        accepted_fields = set(inspect.signature(TrainResult).parameters)
         result = TrainResult(
-            app_name=app_name,
-            framework="slime",
-            training_run_id=run_id,
-            checkpoint_dir=save_root,
-            model_config=model,
-            checkpoints_volume_name=f"{app_name}-checkpoints",
-            checkpoints_mount_path=str(CHECKPOINTS_PATH).rstrip("/"),
-            iteration_prefix=slime.checkpoint.iteration_prefix,
+            **{k: v for k, v in result_kwargs.items() if k in accepted_fields}
         )
         result.save()
+        finished_at = int(time.time())
+        run_record.ended_at = finished_at
+        run_record.duration_seconds = max(0, finished_at - run_record.started_at)
+        run_record.save()
         checkpoints_volume.commit()
         print(f"TrainResult saved: {run_id}")
         return result._to_dict()

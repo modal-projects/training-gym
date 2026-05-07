@@ -1,47 +1,74 @@
 <script>
+  import { onMount } from "svelte";
+  import { Book, CheckCircle2, Rocket, Zap } from "lucide-svelte";
   import "./app.css";
+  import Sidebar from "./components/Sidebar.svelte";
+  import DashboardHeader from "./components/DashboardHeader.svelte";
+  import TrainingPage from "./pages/TrainingPage.svelte";
+  import DeploymentsPage from "./pages/DeploymentsPage.svelte";
+  import EvalsPage from "./pages/EvalsPage.svelte";
   import { fetchRuns, fetchEvals, fetchDeployments } from "./lib/api.js";
-  import FilterBar from "./FilterBar.svelte";
-  import FrameworkSection from "./FrameworkSection.svelte";
   import logoSvg from "./lib/logo.svg";
+  import { fmtDuration, fmtCluster, truncateId } from "./lib/format.js";
 
-  import { fmtDate, truncateId } from "./lib/format.js";
+  const DOCS_URL = "https://gym.modal.dev";
 
   let allRuns = $state([]);
   let allEvals = $state([]);
   let allDeployments = $state([]);
   let loading = $state(true);
+  let loadingEvals = $state(true);
+  let loadingDeployments = $state(true);
   let error = $state(null);
   let search = $state("");
   let activeFrameworks = $state(new Set());
   let activeStatuses = $state(new Set());
   let activePage = $state("training");
+  let loadRequestId = 0;
 
   const pageMeta = {
-    training: {
-      title: "Training",
-      subtitle: "Hosted RL training on environments",
-    },
-    deployments: {
-      title: "Deployments",
-      subtitle: "Manage LoRA adapter deployments",
-    },
-    evals: {
-      title: "Evals",
-      subtitle: "Model eval runs and reports",
-    },
+    training: { title: "Training runs" },
+    deployments: { title: "Deployments" },
+    evals: { title: "Evals" },
   };
 
-  const navSections = [
-    {
-      label: "Overview",
-      items: [
-        { key: "training", label: "Training" },
-        { key: "deployments", label: "Deployments" },
-        { key: "evals", label: "Evals" },
-      ],
-    },
+  const pagePaths = {
+    training: "/training",
+    deployments: "/deployments",
+    evals: "/evals",
+  };
+
+  function pageFromPath(pathname) {
+    if (pathname === "/" || pathname.startsWith("/training")) return "training";
+    if (pathname.startsWith("/deployments")) return "deployments";
+    if (pathname.startsWith("/evals")) return "evals";
+    return "training";
+  }
+
+  const navItems = [
+    { key: "training", label: "Training runs", Icon: Zap, path: pagePaths.training },
+    { key: "deployments", label: "Deployments", Icon: Rocket, path: pagePaths.deployments },
+    { key: "evals", label: "Evals", Icon: CheckCircle2, path: pagePaths.evals },
   ];
+
+  if (typeof window !== "undefined") {
+    activePage = pageFromPath(window.location.pathname);
+  }
+
+  onMount(() => {
+    const syncPageWithPath = () => {
+      activePage = pageFromPath(window.location.pathname);
+    };
+
+    if (window.location.pathname === "/") {
+      window.history.replaceState({}, "", pagePaths.training);
+    } else {
+      syncPageWithPath();
+    }
+
+    window.addEventListener("popstate", syncPageWithPath);
+    return () => window.removeEventListener("popstate", syncPageWithPath);
+  });
 
   function getFramework(run) {
     return run.framework || "(untagged)";
@@ -51,692 +78,581 @@
     return run.train_result ? "Completed" : "Pending";
   }
 
+  function modelName(run) {
+    return run.train_result?.model_name || run.config_summary?.model_name || "—";
+  }
+
+  function safeText(value) {
+    if (value && typeof value === "object" && "value" in value) return value.value;
+    return value != null ? String(value) : "";
+  }
+
+  function includesText(value, query) {
+    return safeText(value).toLowerCase().includes(query);
+  }
+
+  function normalizePath(value) {
+    return safeText(value).replace(/\/+$/, "");
+  }
+
+  function pathMatches(left, right) {
+    const a = normalizePath(left);
+    const b = normalizePath(right);
+    if (!a || !b) return false;
+    return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  }
+
+  function getErrorMessage(value) {
+    if (value instanceof Error) return value.message;
+    if (typeof value === "string") return value;
+    return "unknown error";
+  }
+
+  function withTimeout(promise, timeoutMs, label) {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`${label} request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      promise.then(
+        (value) => {
+          clearTimeout(timeoutId);
+          resolve(value);
+        },
+        (reason) => {
+          clearTimeout(timeoutId);
+          reject(reason);
+        },
+      );
+    });
+  }
+
+  function deploymentLabel(deployment) {
+    return (
+      deployment?.app_name ||
+      deployment?.served_model_name ||
+      deployment?.model_name ||
+      "Deployment"
+    );
+  }
+
+  function findRunForDeployment(deployment) {
+    const deploymentAppName = safeText(deployment?.app_name || "");
+    const deploymentModelName = safeText(deployment?.model_name || "");
+    const deploymentModelPath = normalizePath(deployment?.model_path || "");
+    const deploymentCheckpointPath = normalizePath(deployment?.checkpoint_path || "");
+
+    return (
+      allRuns.find((run) => {
+        const result = run.train_result || {};
+        const runModelName = safeText(
+          result.model_name || run.config_summary?.model_name || "",
+        );
+        const runModelPath = normalizePath(result.model_path || "");
+        const runCheckpointDir = normalizePath(result.checkpoint_dir || "");
+
+        if (run.deployment_id && deploymentAppName && run.deployment_id === deploymentAppName) {
+          return true;
+        }
+        if (
+          deploymentCheckpointPath &&
+          (pathMatches(deploymentCheckpointPath, runCheckpointDir) ||
+            pathMatches(deploymentCheckpointPath, runModelPath))
+        ) {
+          return true;
+        }
+        if (
+          deploymentModelPath &&
+          (pathMatches(deploymentModelPath, runCheckpointDir) ||
+            pathMatches(deploymentModelPath, runModelPath))
+        ) {
+          return true;
+        }
+        return !!deploymentModelName && deploymentModelName === runModelName;
+      }) || null
+    );
+  }
+
   async function load() {
+    const requestId = ++loadRequestId;
+    const isStale = () => requestId !== loadRequestId;
+
     loading = true;
+    loadingEvals = true;
+    loadingDeployments = true;
     error = null;
+
+    const evalsPromise = withTimeout(fetchEvals(), 15000, "evals");
+    const deploymentsPromise = withTimeout(fetchDeployments(), 15000, "deployments");
+
+    evalsPromise
+      .then((evals) => {
+        if (isStale()) return;
+        allEvals = evals;
+      })
+      .catch((reason) => {
+        if (isStale()) return;
+        allEvals = [];
+        console.warn(getErrorMessage(reason));
+      })
+      .finally(() => {
+        if (isStale()) return;
+        loadingEvals = false;
+      });
+
+    deploymentsPromise
+      .then((deployments) => {
+        if (isStale()) return;
+        allDeployments = deployments;
+      })
+      .catch((reason) => {
+        if (isStale()) return;
+        allDeployments = [];
+        console.warn(getErrorMessage(reason));
+      })
+      .finally(() => {
+        if (isStale()) return;
+        loadingDeployments = false;
+      });
+
     try {
-      const [runs, evals, deployments] = await Promise.all([
-        fetchRuns(),
-        fetchEvals(),
-        fetchDeployments(),
-      ]);
+      const runs = await withTimeout(fetchRuns(), 10000, "runs");
+      if (isStale()) return;
       allRuns = runs;
-      allEvals = evals;
-      allDeployments = deployments;
       activeFrameworks = new Set(allRuns.map(getFramework));
       activeStatuses = new Set(allRuns.map(getStatus));
     } catch (e) {
-      error = e.message;
-    } finally {
-      loading = false;
+      if (isStale()) return;
+      error = getErrorMessage(e);
+      allRuns = [];
+      activeFrameworks = new Set();
+      activeStatuses = new Set();
     }
+    if (isStale()) return;
+    loading = false;
   }
 
   load();
 
-  let frameworks = $derived(
-    [...new Set(allRuns.map(getFramework))].sort(),
-  );
-
+  let frameworks = $derived([...new Set(allRuns.map(getFramework))].sort());
   let statuses = $derived([...new Set(allRuns.map(getStatus))].sort());
 
   let fwCounts = $derived(
-    allRuns.reduce((acc, r) => {
-      const fw = getFramework(r);
+    allRuns.reduce((acc, run) => {
+      const fw = getFramework(run);
       acc[fw] = (acc[fw] || 0) + 1;
       return acc;
     }, {}),
   );
 
   let statusCounts = $derived(
-    allRuns.reduce((acc, r) => {
-      const st = getStatus(r);
-      acc[st] = (acc[st] || 0) + 1;
+    allRuns.reduce((acc, run) => {
+      const status = getStatus(run);
+      acc[status] = (acc[status] || 0) + 1;
       return acc;
     }, {}),
   );
 
   let filteredRuns = $derived(
     allRuns
-      .filter((r) => {
-        if (!activeFrameworks.has(getFramework(r))) return false;
-        if (!activeStatuses.has(getStatus(r))) return false;
+      .filter((run) => {
+        if (!activeFrameworks.has(getFramework(run))) return false;
+        if (!activeStatuses.has(getStatus(run))) return false;
         if (search) {
           const q = search.toLowerCase();
           if (
-            !r.run_id?.toLowerCase().includes(q) &&
-            !r.modal_app_id?.toLowerCase().includes(q) &&
-            !r.config_summary?.model_name?.toLowerCase().includes(q)
-          )
+            !includesText(run.run_id, q) &&
+            !includesText(run.modal_app_id, q) &&
+            !includesText(run.config_summary?.model_name, q) &&
+            !includesText(run.train_result?.training_run_id, q) &&
+            !includesText(run.train_result?.checkpoint_dir, q) &&
+            !includesText(run.train_result?.model_name, q) &&
+            !includesText(run.train_result?.model_path, q) &&
+            !includesText(run.deployment_id, q)
+          ) {
             return false;
+          }
         }
         return true;
       })
       .sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
   );
 
-  let groupedRuns = $derived.by(() => {
-    const groups = {};
-    for (const r of filteredRuns) {
-      const fw = getFramework(r);
-      (groups[fw] ||= []).push(r);
-    }
-    return groups;
-  });
-
-  let sortedFrameworkKeys = $derived(Object.keys(groupedRuns).sort());
   let completedTotal = $derived(allRuns.filter((run) => run.train_result).length);
   let pendingTotal = $derived(allRuns.length - completedTotal);
-  let completedRuns = $derived(
-    allRuns
-      .filter((run) => run.train_result)
-      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
+
+  let deploymentRows = $derived.by(() =>
+    [...allDeployments]
+      .map((deployment) => ({
+        deployment,
+        run: findRunForDeployment(deployment),
+      }))
+      .sort((a, b) =>
+        deploymentLabel(a.deployment).localeCompare(
+          deploymentLabel(b.deployment),
+        ),
+      ),
+  );
+
+  let linkedDeployments = $derived(
+    deploymentRows.filter(({ run }) => run != null).length,
+  );
+
+  let distinctDeploymentModels = $derived(
+    new Set(
+      allDeployments.map(
+        (deployment) =>
+          deployment.model_name || deployment.served_model_name || "—",
+      ),
+    ).size,
   );
 
   function evalAccuracy(ev) {
     const rows = ev.rows || [];
     if (!rows.length) return 0;
-    return rows.reduce((s, r) => s + (r.score || 0), 0) / rows.length;
+    return rows.reduce((sum, row) => sum + (row.score || 0), 0) / rows.length;
+  }
+
+  function normalizeConfigValue(value) {
+    if (value && typeof value === "object" && "value" in value) {
+      return normalizeConfigValue(value.value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => normalizeConfigValue(item));
+    }
+    if (value && typeof value === "object") {
+      return Object.keys(value)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = normalizeConfigValue(value[key]);
+          return acc;
+        }, {});
+    }
+    return value ?? null;
+  }
+
+  function evalConfigKey(ev) {
+    return JSON.stringify(normalizeConfigValue(ev.config || {}));
+  }
+
+  function evalConfigMeta(config) {
+    const dataset =
+      safeText(config?.dataset?.name) ||
+      safeText(config?.dataset?.hf_repo) ||
+      safeText(config?.dataset?.prompt_data) ||
+      "—";
+    const model =
+      safeText(config?.deployment?.model_name) ||
+      safeText(config?.deployment?.served_model_name) ||
+      safeText(config?.model?.model_name) ||
+      "—";
+    const split = safeText(config?.dataset?.split);
+    const judge =
+      safeText(config?.judge?.model_name) ||
+      safeText(config?.judge_model_name) ||
+      "";
+    return { dataset, model, split, judge };
   }
 
   let sortedEvals = $derived(
     [...allEvals].sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
   );
+
+  let evalConfigGroups = $derived.by(() => {
+    const groups = new Map();
+    for (const ev of sortedEvals) {
+      const key = evalConfigKey(ev);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          config: ev.config || {},
+          runs: [],
+          latestCreatedAt: 0,
+        });
+      }
+      const group = groups.get(key);
+      const avgScore = evalAccuracy(ev);
+      const totalRows = (ev.rows || []).length;
+      group.runs.push({
+        eval: ev,
+        avgScore,
+        totalRows,
+      });
+      group.latestCreatedAt = Math.max(group.latestCreatedAt, ev.created_at || 0);
+    }
+
+    return [...groups.values()]
+      .map((group) => {
+        const sortedRuns = [...group.runs].sort(
+          (a, b) =>
+            b.avgScore - a.avgScore ||
+            (b.eval.created_at || 0) - (a.eval.created_at || 0),
+        );
+        const totalEvals = sortedRuns.length;
+        const totalExamples = sortedRuns.reduce(
+          (sum, run) => sum + run.totalRows,
+          0,
+        );
+        const weightedScoreTotal = sortedRuns.reduce(
+          (sum, run) => sum + run.avgScore * run.totalRows,
+          0,
+        );
+        const bestScore = sortedRuns[0]?.avgScore ?? 0;
+        const avgAccuracy =
+          totalExamples > 0
+            ? weightedScoreTotal / totalExamples
+            : totalEvals > 0
+              ? sortedRuns.reduce((sum, run) => sum + run.avgScore, 0) / totalEvals
+              : 0;
+        return {
+          ...group,
+          meta: evalConfigMeta(group.config),
+          bestScore,
+          totalEvals,
+          avgAccuracy,
+          runs: sortedRuns.map((entry, idx) => ({
+            ...entry,
+            rank: idx + 1,
+            deltaFromBest: entry.avgScore - bestScore,
+          })),
+        };
+      })
+      .sort(
+        (a, b) =>
+          (b.latestCreatedAt || 0) - (a.latestCreatedAt || 0) ||
+          b.runs.length - a.runs.length,
+      );
+  });
+
+  let evalConfigCount = $derived(evalConfigGroups.length);
+
   let avgAccuracy = $derived(
     allEvals.length
-      ? allEvals.reduce((s, e) => s + evalAccuracy(e), 0) / allEvals.length
+      ? allEvals.reduce((sum, ev) => sum + evalAccuracy(ev), 0) / allEvals.length
       : 0,
-  );
-  let distinctDatasets = $derived(
-    new Set(allEvals.map((e) => e.config?.dataset?.name || "—")).size,
   );
 
   let statusText = $derived.by(() => {
-    if (loading) return "loading...";
+    if (activePage === "training" && loading) return "loading...";
+    if (activePage === "evals" && loadingEvals) return "loading...";
+    if (activePage === "deployments" && loadingDeployments) return "loading...";
     if (error) return "error";
     if (activePage === "evals")
       return `${allEvals.length} eval${allEvals.length === 1 ? "" : "s"}`;
-    if (!allRuns.length) return "0 runs";
     if (activePage === "deployments")
-      return `${completedRuns.length} deployment-ready run${completedRuns.length === 1 ? "" : "s"}`;
-    if (activePage !== "training")
-      return `${allRuns.length} total run${allRuns.length === 1 ? "" : "s"}`;
-    const shown = filteredRuns.length;
-    const total = allRuns.length;
-    const fwCount = sortedFrameworkKeys.length;
-    const fwLabel = fwCount === 1 ? "framework" : "frameworks";
-    if (shown === total)
-      return `${total} run${total === 1 ? "" : "s"} across ${fwCount} ${fwLabel}`;
-    return `${shown} of ${total} runs across ${fwCount} ${fwLabel}`;
+      return `${allDeployments.length} deployment${allDeployments.length === 1 ? "" : "s"}`;
+    if (!allRuns.length) return "0 runs";
+    return `${filteredRuns.length} of ${allRuns.length} runs`;
   });
 
-  function toggleFramework(fw) {
+  function toggleFramework(framework) {
     const next = new Set(activeFrameworks);
-    if (next.has(fw)) next.delete(fw);
-    else next.add(fw);
+    if (next.has(framework)) next.delete(framework);
+    else next.add(framework);
     activeFrameworks = next;
   }
 
   function toggleAllFrameworks() {
-    if (activeFrameworks.size === frameworks.length) {
-      activeFrameworks = new Set();
-    } else {
-      activeFrameworks = new Set(frameworks);
-    }
+    if (activeFrameworks.size === frameworks.length) activeFrameworks = new Set();
+    else activeFrameworks = new Set(frameworks);
   }
 
-  function toggleStatus(st) {
+  function toggleStatus(status) {
     const next = new Set(activeStatuses);
-    if (next.has(st)) next.delete(st);
-    else next.add(st);
+    if (next.has(status)) next.delete(status);
+    else next.add(status);
     activeStatuses = next;
   }
 
   function setActivePage(page) {
     activePage = page;
+    if (typeof window === "undefined") return;
+    const targetPath = pagePaths[page] || pagePaths.training;
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, "", targetPath);
+    }
+  }
+
+  function openTrainingRun(runId) {
+    search = runId;
+    setActivePage("training");
   }
 </script>
 
-<div class="shell">
-  <aside class="sidebar">
-    <div class="brand">
-      <img src={logoSvg} alt="Modal" class="logo" />
-      <div>
-        <div class="brand-title">training-gym</div>
-        <div class="brand-subtitle">Distributed training and evaluation</div>
-      </div>
+<div class="app-shell">
+  <header class="top-navbar">
+    <div class="top-brand">
+      <img src={logoSvg} alt="Modal" class="top-brand-logo" />
+      <span class="top-brand-title">
+        <span class="top-brand-modal">Modal</span>
+        <span class="top-brand-gym">Training Gym</span>
+      </span>
     </div>
+    <a
+      class="docs-button"
+      href={DOCS_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <Book size={14} strokeWidth={2.1} />
+      <span>Docs</span>
+    </a>
+  </header>
 
-    {#each navSections as section (section.label)}
-      <div class="nav-group">
-        <div class="nav-label">{section.label}</div>
-        {#each section.items as item (item.key)}
-          <button
-            class="nav-item"
-            class:active={activePage === item.key}
-            onclick={() => setActivePage(item.key)}
-          >
-            {item.label}
-          </button>
-        {/each}
-      </div>
-    {/each}
-  </aside>
+  <div class="shell">
+    <Sidebar {navItems} {activePage} onNavigate={setActivePage} />
 
-  <main class="workspace">
-    <header class="workspace-header">
-      <div>
-        <h1>{pageMeta[activePage].title}</h1>
-        <p>{pageMeta[activePage].subtitle}</p>
-      </div>
-      <div class="workspace-actions">
-        <span class="status-text">{statusText}</span>
-        <button class="btn" onclick={load}>Refresh</button>
-      </div>
-    </header>
+    <main class="workspace">
+      <DashboardHeader title={pageMeta[activePage].title} {statusText} onRefresh={load} />
 
     {#if activePage === "training"}
-      <section class="summary-row">
-        <article class="summary-card">
-          <span class="summary-label">Total runs</span>
-          <strong>{allRuns.length}</strong>
-        </article>
-        <article class="summary-card summary-green">
-          <span class="summary-label">Completed</span>
-          <strong>{completedTotal}</strong>
-        </article>
-        <article class="summary-card summary-amber">
-          <span class="summary-label">Pending</span>
-          <strong>{pendingTotal}</strong>
-        </article>
-        <article class="summary-card">
-          <span class="summary-label">Frameworks</span>
-          <strong>{frameworks.length}</strong>
-        </article>
-      </section>
-
-      <section class="runs-surface">
-        <FilterBar
-          {frameworks}
-          {fwCounts}
-          {activeFrameworks}
-          allActive={activeFrameworks.size === frameworks.length}
-          {statuses}
-          {statusCounts}
-          {activeStatuses}
-          totalRuns={allRuns.length}
-          bind:search
-          onToggleFramework={toggleFramework}
-          onToggleAllFrameworks={toggleAllFrameworks}
-          onToggleStatus={toggleStatus}
-        />
-
-        <div class="runs-body">
-          {#if loading}
-            <div class="empty">Loading runs...</div>
-          {:else if error}
-            <div class="empty">Failed to load: {error}</div>
-          {:else if !allRuns.length}
-            <div class="empty">
-              No training runs found. The cron job populates data every 5 minutes —
-              if you just deployed, wait for the first refresh.
-            </div>
-          {:else if !filteredRuns.length}
-            <div class="empty">No runs match the current filters.</div>
-          {:else}
-            {#each sortedFrameworkKeys as fw (fw)}
-              <FrameworkSection framework={fw} runs={groupedRuns[fw]} deployments={allDeployments} />
-            {/each}
-          {/if}
-        </div>
-      </section>
+      <TrainingPage
+        {allRuns}
+        {completedTotal}
+        {pendingTotal}
+        {frameworks}
+        {fwCounts}
+        {activeFrameworks}
+        {statuses}
+        {statusCounts}
+        {activeStatuses}
+        {filteredRuns}
+        {loading}
+        {error}
+        {modelName}
+        {getStatus}
+        {fmtCluster}
+        {fmtDuration}
+        bind:search
+        onToggleFramework={toggleFramework}
+        onToggleAllFrameworks={toggleAllFrameworks}
+        onToggleStatus={toggleStatus}
+      />
     {:else if activePage === "deployments"}
-      <section class="summary-row">
-        <article class="summary-card">
-          <span class="summary-label">Deployment-ready</span>
-          <strong>{completedRuns.length}</strong>
-        </article>
-        <article class="summary-card summary-amber">
-          <span class="summary-label">Waiting for result</span>
-          <strong>{pendingTotal}</strong>
-        </article>
-        <article class="summary-card">
-          <span class="summary-label">Distinct models</span>
-          <strong>{new Set(completedRuns.map((run) => run.config_summary?.model_name || "—")).size}</strong>
-        </article>
-        <article class="summary-card">
-          <span class="summary-label">Frameworks</span>
-          <strong>{frameworks.length}</strong>
-        </article>
-      </section>
-
-      <section class="runs-surface">
-        <div class="runs-body">
-          {#if loading}
-            <div class="empty">Loading deployments...</div>
-          {:else if error}
-            <div class="empty">Failed to load: {error}</div>
-          {:else if !completedRuns.length}
-            <div class="empty">No completed runs yet. Deployments appear after training completes.</div>
-          {:else}
-            <div class="deployments-table-wrap">
-              <table class="deployments-table">
-                <thead>
-                  <tr>
-                    <th>Training run</th>
-                    <th>Base model</th>
-                    <th>Status</th>
-                    <th>Cluster</th>
-                    <th>Checkpoint</th>
-                    <th>Links</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each completedRuns as run (run.run_id)}
-                    <tr>
-                      <td class="mono">
-                        <button class="cross-link" onclick={() => { search = run.run_id; activePage = "training"; }}>
-                          {truncateId(run.run_id)}
-                        </button>
-                      </td>
-                      <td>{run.config_summary?.model_name || "—"}</td>
-                      <td><span class="deploy-status">Ready</span></td>
-                      <td>{run.config_summary?.gpu_type || "—"}</td>
-                      <td class="mono">{run.train_result?.checkpoint_dir || "—"}</td>
-                      <td class="links-cell">
-                        {#if run.modal_app_url}
-                          <a class="pill-link pill-modal" href={run.modal_app_url} target="_blank" rel="noopener noreferrer">Modal</a>
-                        {/if}
-                        {#if run.train_result?.wandb_url}
-                          <a class="pill-link pill-wandb" href={run.train_result.wandb_url} target="_blank" rel="noopener noreferrer">W&B</a>
-                        {/if}
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {/if}
-        </div>
-      </section>
+      <DeploymentsPage
+        {allDeployments}
+        {linkedDeployments}
+        {distinctDeploymentModels}
+        loading={loadingDeployments}
+        {error}
+        {deploymentRows}
+        {deploymentLabel}
+        {truncateId}
+        onOpenTrainingRun={openTrainingRun}
+      />
     {:else if activePage === "evals"}
-      <section class="summary-row">
-        <article class="summary-card">
-          <span class="summary-label">Total evals</span>
-          <strong>{allEvals.length}</strong>
-        </article>
-        <article class="summary-card summary-green">
-          <span class="summary-label">Avg accuracy</span>
-          <strong>{allEvals.length ? (avgAccuracy * 100).toFixed(1) + "%" : "—"}</strong>
-        </article>
-        <article class="summary-card">
-          <span class="summary-label">Datasets</span>
-          <strong>{distinctDatasets}</strong>
-        </article>
-        <article class="summary-card">
-          <span class="summary-label">Total examples</span>
-          <strong>{allEvals.reduce((s, e) => s + (e.rows || []).length, 0)}</strong>
-        </article>
-      </section>
-
-      <section class="runs-surface">
-        <div class="runs-body">
-          {#if loading}
-            <div class="empty">Loading evals...</div>
-          {:else if error}
-            <div class="empty">Failed to load: {error}</div>
-          {:else if !allEvals.length}
-            <div class="empty">No eval results yet. Run an evaluation to see results here.</div>
-          {:else}
-            <div class="deployments-table-wrap">
-              <table class="deployments-table">
-                <thead>
-                  <tr>
-                    <th>Eval ID</th>
-                    <th>Dataset</th>
-                    <th>Model</th>
-                    <th>Accuracy</th>
-                    <th>Score</th>
-                    <th>Created</th>
-                    <th>Links</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each sortedEvals as ev (ev.eval_id)}
-                    {@const acc = evalAccuracy(ev)}
-                    {@const total = (ev.rows || []).length}
-                    {@const cfg = ev.config || {}}
-                    <tr>
-                      <td class="mono">{ev.eval_id}</td>
-                      <td>{cfg.dataset?.name || "—"}</td>
-                      <td>{cfg.deployment?.model_name || "—"}</td>
-                      <td>
-                        <span class="eval-accuracy" class:eval-high={acc >= 0.7} class:eval-mid={acc >= 0.4 && acc < 0.7} class:eval-low={acc < 0.4}>
-                          {(acc * 100).toFixed(1)}%
-                        </span>
-                      </td>
-                      <td>{(acc * total).toFixed(1)}/{total}</td>
-                      <td>{fmtDate(ev.created_at)}</td>
-                      <td class="links-cell">
-                        {#if cfg.deployment?.url}
-                          <a class="pill-link pill-modal" href={cfg.deployment.url} target="_blank" rel="noopener noreferrer">Endpoint</a>
-                        {/if}
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {/if}
-        </div>
-      </section>
+      <EvalsPage
+        {allEvals}
+        {avgAccuracy}
+        {evalConfigCount}
+        loading={loadingEvals}
+        {error}
+        {evalConfigGroups}
+      />
     {/if}
-  </main>
+    </main>
+  </div>
 </div>
 
 <style>
-  .shell {
-    display: grid;
-    grid-template-columns: 250px minmax(0, 1fr);
+  .app-shell {
     min-height: 100vh;
-  }
-  .sidebar {
-    border-right: 1px solid var(--border);
-    background: var(--panel);
-    padding: 1rem 0.75rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-    padding: 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--panel-alt);
-  }
-  .logo {
-    width: 1.3rem;
-    height: 1.3rem;
-  }
-  .brand-title {
-    font-size: 0.88rem;
-    font-weight: 600;
-    color: var(--text-bright);
-    line-height: 1.2;
-  }
-  .brand-subtitle {
-    font-size: 0.72rem;
-    color: var(--muted);
-  }
-  .nav-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  .nav-label {
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-    font-weight: 600;
-    padding: 0.4rem 0.6rem;
-  }
-  .nav-item {
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--muted);
-    text-align: left;
-    font: inherit;
-    font-size: 0.84rem;
-    border-radius: 8px;
-    padding: 0.45rem 0.6rem;
-    cursor: pointer;
-    transition: all 120ms ease;
-  }
-  .nav-item:hover {
-    background: var(--panel-alt);
-    color: var(--text-bright);
-  }
-  .nav-item.active {
-    color: var(--text-bright);
-    border-color: var(--accent-border);
-    background: var(--accent-soft);
-  }
-  .workspace {
-    padding: 1.25rem 1.5rem 2rem;
-    background:
-      radial-gradient(880px 420px at 14% -20%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
-      var(--bg);
-  }
-  .workspace-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1rem;
-  }
-  h1 {
-    font-size: 1.25rem;
-    line-height: 1.1;
-    color: var(--text-bright);
-    margin-bottom: 0.2rem;
-  }
-  p {
-    font-size: 0.82rem;
-    color: var(--muted);
-  }
-  .workspace-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-  }
-  .btn {
-    background: var(--accent-soft);
-    color: var(--accent);
-    border: 1px solid var(--accent-border);
-    padding: 0.36rem 0.82rem;
-    border-radius: 7px;
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.8rem;
-    font-weight: 500;
-    transition:
-      border-color 0.15s ease,
-      background-color 0.15s ease,
-      color 0.15s ease;
-  }
-  .btn:hover {
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-    color: var(--text-bright);
-  }
-  .status-text {
-    color: var(--muted);
-    font-size: 0.78rem;
-    white-space: nowrap;
-  }
-  .summary-row {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.75rem;
-    margin-bottom: 1rem;
+    grid-template-rows: auto 1fr;
+    background: var(--bg);
   }
-  .summary-card {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--panel);
-    padding: 0.65rem 0.8rem;
+
+  .top-navbar {
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-depth);
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: baseline;
+    gap: 1rem;
+    padding: 10px 1.35rem;
   }
-  .summary-label {
-    font-size: 0.78rem;
-    color: var(--muted);
-  }
-  .summary-card strong {
-    font-size: 0.95rem;
-    color: var(--text-bright);
-    font-weight: 600;
-  }
-  .summary-green strong {
-    color: var(--green);
-  }
-  .summary-amber strong {
-    color: var(--yellow);
-  }
-  .runs-surface {
-    border: 1px solid var(--border);
-    border-radius: 11px;
-    background: var(--panel);
-    overflow: hidden;
-  }
-  .runs-body {
-    padding: 0.8rem;
-  }
-  .deployments-table-wrap {
-    overflow-x: auto;
-  }
-  .deployments-table {
-    width: 100%;
-    border-collapse: collapse;
-    min-width: 860px;
-  }
-  .deployments-table th {
-    background: var(--panel-alt);
-    color: var(--muted-strong);
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 500;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-    padding: 0.45rem 0.8rem;
-  }
-  .deployments-table td {
-    border-bottom: 1px solid var(--border);
-    padding: 0.5rem 0.8rem;
-    font-size: 0.78rem;
-    color: var(--text);
-    max-width: 300px;
-    text-overflow: ellipsis;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .deployments-table tr:hover td {
-    background: color-mix(in srgb, var(--text) 4%, transparent);
-  }
-  .mono {
-    font-family: var(--font-mono);
-    color: color-mix(in srgb, var(--accent) 80%, white);
-  }
-  .deploy-status {
+
+  .top-brand {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.12rem 0.55rem;
-    border-radius: 9999px;
-    font-size: 0.71rem;
-    font-weight: 500;
-    border: 1px solid var(--accent-border);
-    background: var(--accent-soft);
-    color: var(--green);
+    gap: 0.62rem;
+    min-width: 0;
   }
-  .deploy-status::before {
-    content: "";
-    width: 0.38rem;
-    height: 0.38rem;
-    border-radius: 9999px;
-    background: currentColor;
+
+  .top-brand-logo {
+    width: 1.7rem;
+    height: 1.7rem;
+    flex: 0 0 auto;
   }
-  .eval-accuracy {
-    display: inline-block;
-    padding: 0.12rem 0.55rem;
-    border-radius: 9999px;
-    font-size: 0.73rem;
-    font-weight: 600;
-  }
-  .eval-high {
-    border: 1px solid var(--accent-border);
-    background: var(--accent-soft);
-    color: var(--green);
-  }
-  .eval-mid {
-    border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
-    background: color-mix(in srgb, var(--yellow) 10%, transparent);
-    color: var(--yellow);
-  }
-  .eval-low {
-    border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
-    background: color-mix(in srgb, var(--red) 10%, transparent);
-    color: var(--red);
-  }
-  .links-cell {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-  }
-  .pill-link {
-    display: inline-block;
-    padding: 0.14rem 0.48rem;
-    border-radius: 6px;
-    font-size: 0.68rem;
-    font-weight: 500;
-    text-decoration: none;
+
+  .top-brand-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    font-size: 1.85rem;
+    line-height: 1;
+    padding-block: 0.08rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
     white-space: nowrap;
   }
-  .pill-modal {
-    color: var(--accent);
-    border: 1px solid var(--accent-border);
-    background: var(--accent-soft);
+
+  .top-brand-modal {
+    color: var(--text-bright);
   }
-  .pill-modal:hover {
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
+
+  .top-brand-gym {
+    color: var(--green);
   }
-  .pill-wandb {
-    color: var(--yellow);
-    border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
-    background: color-mix(in srgb, var(--yellow) 10%, transparent);
-  }
-  .pill-wandb:hover {
-    background: color-mix(in srgb, var(--yellow) 18%, transparent);
-  }
-  .cross-link {
-    background: none;
-    border: none;
-    color: color-mix(in srgb, var(--accent) 80%, white);
-    font-family: var(--font-mono);
-    font-size: inherit;
-    padding: 0;
-    cursor: pointer;
-    text-decoration: none;
-  }
-  .cross-link:hover {
-    color: var(--accent);
-    text-decoration: underline;
-  }
-  .empty {
+
+  .docs-button {
+    border: 0;
+    border-radius: 8px;
     color: var(--muted);
-    padding: 3rem 2rem;
-    text-align: center;
-    font-size: 0.85rem;
+    background: transparent;
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.34rem 0.68rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.38rem;
+    flex: 0 0 auto;
   }
-  @media (max-width: 1120px) {
-    .summary-row {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+
+  .docs-button:hover {
+    color: var(--text-bright);
+    background: color-mix(in srgb, white 4%, transparent);
   }
+
+  .shell {
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    min-height: 0;
+    background: var(--bg);
+  }
+
+  .workspace {
+    padding: 0.8rem 1.5rem 1.5rem;
+  }
+
   @media (max-width: 900px) {
+    .top-navbar {
+      padding: 8px 0.95rem;
+    }
+
+    .top-brand-logo {
+      width: 1.35rem;
+      height: 1.35rem;
+    }
+
+    .top-brand-title {
+      font-size: 1.35rem;
+    }
+
     .shell {
       grid-template-columns: 1fr;
     }
-    .sidebar {
-      border-right: 0;
-      border-bottom: 1px solid var(--border);
-    }
+
     .workspace {
       padding: 1rem;
     }

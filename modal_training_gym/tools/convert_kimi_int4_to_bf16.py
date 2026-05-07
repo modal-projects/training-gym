@@ -23,16 +23,14 @@ Example:
 python convert_kimi_int4_to_bf16.py --model-dir /Kimi-K2.5 --output-dir /Kimi-K2.5-bf16
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
 import shutil
 from collections import defaultdict
-
-import torch
-from compressed_tensors.compressors import unpack_from_int32
-from safetensors.torch import safe_open, save_file
-from tqdm import tqdm
+from typing import Any
 
 
 def _load_config(model_dir: str, config_path: str | None) -> tuple[int, int, int]:
@@ -53,16 +51,22 @@ def _load_config(model_dir: str, config_path: str | None) -> tuple[int, int, int
 
 
 def _dequantize_tensor(
-    weight_packed: torch.Tensor,
-    weight_scale: torch.Tensor,
-    weight_shape: torch.Tensor,
+    weight_packed: Any,
+    weight_scale: Any,
+    weight_shape: Any,
     group_size: int,
-) -> torch.Tensor:
+) -> Any:
     """Unpack int32 quantized tensor and multiply with scales to create BF16 tensor."""
+    import torch  # pyright: ignore[reportMissingImports]
+
     if isinstance(weight_shape, torch.Tensor):
         shape = tuple(int(v) for v in weight_shape.view(-1).tolist())
     else:
         shape = tuple(weight_shape)
+
+    from compressed_tensors.compressors import (  # pyright: ignore[reportMissingImports]
+        unpack_from_int32,
+    )
 
     weight = unpack_from_int32(weight_packed, 4, shape)
 
@@ -105,13 +109,15 @@ def convert_file(
     skip_existing: bool = True,
 ):
     """Convert a single safetensors file from quantized format to BF16 (GPU accelerated)."""
+    import torch  # pyright: ignore[reportMissingImports]
+
+    from safetensors.torch import safe_open, save_file  # pyright: ignore[reportMissingImports]
+
     if skip_existing and os.path.exists(output_path):
         return
 
     tensors = {}
     expert_buffers = defaultdict(lambda: defaultdict(dict))
-
-    import torch
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     with safe_open(input_path, framework="pt", device=device) as reader:
@@ -193,6 +199,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main():
+    from tqdm import tqdm
+    from safetensors.torch import safe_open  # pyright: ignore[reportMissingImports]
+
     args = parse_args()
     model_dir = os.path.abspath(args.model_dir)
     output_dir = os.path.abspath(args.output_dir or f"{model_dir}_bf16")

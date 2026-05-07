@@ -15,26 +15,23 @@ Dataset configuration shared across training frameworks.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `prompt_data` | `str` | `""` | Path to the training data file (e.g. a `.parquet` file on the data volume). Default `""`. |
-| `eval_prompt_data` | `list[str] | str | None` | `None` | Evaluation data path(s). Can be a single path, a list of paths, or `None` to skip evaluation. Default `None`. |
-| `input_key` | `str` | `""` | Column/key name for model input in the dataset. Default `""`. |
-| `label_key` | `str` | `""` | Column/key name for labels/targets in the dataset. Default `""`. |
-| `apply_chat_template` | `bool` | `True` | Whether to apply the model's chat template to inputs. Default `True`. |
-| `rollout_shuffle` | `bool` | `True` | Whether to shuffle data during rollout generation. Default `True`. |
+| `dataset_id` | `str` | `Field(name=None,type=None,default=<dataclasses._MISSING_TYPE object at 0x7f38a6893230>,default_factory=<function DatasetConfig.<lambda> at 0x7f38a6424680>,init=True,repr=True,hash=None,compare=True,metadata=mappingproxy({}),kw_only=<dataclasses._MISSING_TYPE object at 0x7f38a6893230>,_field_type=None)` |  |
+| `input_key` | `str` | `""` |  |
+| `label_key` | `str` | `""` |  |
+| `apply_chat_template` | `bool` | `True` |  |
 
 ## Methods
 
-### `load(self)`
+### `load(self) -> 'Any'`
 
 Load raw examples for local inspection or evaluation.
 
-### `prepare(self) -> 'None'`
+### `prepare(self, path: 'str', eval_paths: 'dict[str, str] | None' = None) -> 'None'`
 
-Download and/or preprocess the dataset into the data volume.
+Materialize training data to ``path`` (and eval splits to ``eval_paths``).
 
 ## Related Tutorials
 
-- [Shared concepts: config containers, framework factories, volume layout, running the pipeline](/tutorials/intro/001_quickstart/)
-- [Custom HuggingFace model — inline `ModelConfig` subclass, serve and evaluate without training](/tutorials/intro/002_custom_model/)
+- [Code-golf RL with sandboxed verification reward in Modal](/tutorials/rl/001_code_golf_sandboxes/)
 
 **Source:** [`modal_training_gym/common/dataset.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/dataset.py)

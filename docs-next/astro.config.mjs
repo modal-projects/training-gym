@@ -75,30 +75,9 @@ export default defineConfig({
           items: [
             { label: 'Overview', link: '/tutorials/' },
             {
-              label: 'Getting Started',
-              items: [
-                { label: '001 Quickstart', link: '/tutorials/intro/001_quickstart/' },
-                { label: '002 Custom Model', link: '/tutorials/intro/002_custom_model/' },
-              ],
-            },
-            {
               label: 'Reinforcement Learning',
               items: [
-                { label: '001 slime Intro', link: '/tutorials/rl/001_slime_intro/' },
-                { label: '002 Customizing slime', link: '/tutorials/rl/002_customizing_your_slime_run/' },
-                { label: '003 slime + LLM Judge', link: '/tutorials/rl/003_slime_with_llm_as_judge/' },
-              ],
-            },
-            {
-              label: 'Supervised Fine-Tuning',
-              items: [
-                { label: '001 ms-swift', link: '/tutorials/sft/001_ms_swift/' },
-              ],
-            },
-            {
-              label: 'Infrastructure',
-              items: [
-                { label: 'Ray Standalone', link: '/tutorials/misc/ray_slime_standalone/' },
+                { label: 'RL Basics', link: '/tutorials/rl/000_rl_basics/' },
               ],
             },
           ],
@@ -110,33 +89,44 @@ export default defineConfig({
             {
               label: 'Core',
               items: [
-                { label: 'ModelConfig', link: '/reference/core/modelconfiguration/' },
+                { label: 'ModelConfig', link: '/reference/core/modelconfig/' },
                 { label: 'HFModelConfiguration', link: '/reference/core/hfmodelconfiguration/' },
                 { label: 'ModelArchitecture', link: '/reference/core/modelarchitecture/' },
                 { label: 'DatasetConfig', link: '/reference/core/datasetconfig/' },
+                { label: 'HuggingFaceDataset', link: '/reference/core/huggingfacedataset/' },
                 { label: 'WandbConfig', link: '/reference/core/wandbconfig/' },
                 { label: 'ModalRayCluster', link: '/reference/core/modalraycluster/' },
-                { label: 'LlmJudge', link: '/reference/core/llmjudge/' },
                 { label: 'TrainResult', link: '/reference/core/trainresult/' },
+              ],
+            },
+            {
+              label: 'Evaluation',
+              items: [
+                { label: 'EvalConfig', link: '/reference/evaluation/evalconfig/' },
+                { label: 'EvalResult', link: '/reference/evaluation/evalresult/' },
+                { label: 'EvalRowResult', link: '/reference/evaluation/evalrowresult/' },
               ],
             },
             {
               label: 'Models',
               items: [
                 { label: 'Qwen3-4B', link: '/reference/models/qwen3_4b/' },
-                { label: 'Qwen3-32B', link: '/reference/models/qwen3_32b/' },
-                { label: 'GLM-4.7', link: '/reference/models/glm_4_7/' },
-                { label: 'Llama2-7B', link: '/reference/models/llama2_7b/' },
-                { label: 'Kimi-K2.5', link: '/reference/models/kimi_k2_5/' },
               ],
             },
             {
-              label: 'Frameworks',
+              label: 'Training',
               items: [
-                { label: 'SlimeConfig', link: '/reference/frameworks/slimeconfig/' },
-                { label: 'ModalConfig (slime)', link: '/reference/frameworks/modalconfig/' },
-                { label: 'MsSwiftFrameworkConfig', link: '/reference/frameworks/msswiftframeworkconfig/' },
-                { label: 'MsSwiftConfig', link: '/reference/frameworks/msswiftconfig/' },
+                { label: 'TrainConfig', link: '/reference/training/trainconfig/' },
+                { label: 'SlimeRecipe', link: '/reference/training/slimerecipe/' },
+              ],
+            },
+            {
+              label: 'Deployment',
+              items: [
+                { label: 'DeploymentConfig', link: '/reference/deployment/deploymentconfig/' },
+                { label: 'ModelDeployment', link: '/reference/deployment/modeldeployment/' },
+                { label: 'SglangRecipe', link: '/reference/deployment/sglangrecipe/' },
+                { label: 'VllmRecipe', link: '/reference/deployment/vllmrecipe/' },
               ],
             },
           ],

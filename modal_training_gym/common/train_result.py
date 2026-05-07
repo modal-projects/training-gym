@@ -46,14 +46,16 @@ Two design invariants:
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
+import copy
 from typing import TYPE_CHECKING, Any
 
-from modal_training_gym.frameworks.base import Framework
+from modal_training_gym.common.framework import Framework
 from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_list, vol_put
 
 if TYPE_CHECKING:
     from modal import Volume
+
     from modal_training_gym.common.models import ModelConfig
 
 
@@ -90,19 +92,6 @@ class TrainResult:
         The ``ModelConfig`` used for training. The :attr:`model` property
         returns a copy with ``model_path`` pointing at the latest
         checkpoint, ready to serve.
-    checkpoints_volume_name:
-        Name of the checkpoints :class:`modal.Volume`.
-    checkpoints_mount_path:
-        Where the checkpoints volume is mounted in the training
-        container (e.g. ``"/checkpoints"``). Reused as the serving
-        mount path so in-volume absolute paths resolve unchanged.
-    iteration_prefix:
-        Prefix of per-iteration subdirectory names inside
-        ``checkpoint_dir`` (e.g. ``"iter_"``).
-        :meth:`latest_checkpoint_path` sorts directories matching this
-        prefix lexicographically and returns the last one. Empty
-        string disables iteration lookup — the checkpoint path is
-        ``checkpoint_dir`` itself.
     extra:
         Free-form metadata a launcher may attach (e.g. wandb run name,
         rollout tunnel URL). Not used by the base class.
@@ -111,11 +100,10 @@ class TrainResult:
     app_name: str
     framework: Framework
     training_run_id: str
-    checkpoint_dir: str
-    model_config: "ModelConfig | None" = None
+    checkpoint_dir: str = ""
     checkpoints_volume_name: str = ""
     checkpoints_mount_path: str = ""
-    iteration_prefix: str = ""
+    model_config: "ModelConfig | None" = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     # ── Persistence ────────────────────────────────────────────────────────
@@ -135,15 +123,23 @@ class TrainResult:
 
     @staticmethod
     def _parse_model_config(d: dict[str, Any]) -> dict[str, Any]:
-        mc = d.get("model_config")
+        parsed = dict(d)
+        mc = parsed.get("model_config")
         if isinstance(mc, dict):
             from modal_training_gym.common.models import ModelConfig
 
-            d["model_config"] = ModelConfig(**mc)
-        return d
+            parsed["model_config"] = ModelConfig(**mc)
+        valid_fields = {f.name for f in fields(TrainResult)}
+        unknown = {k: v for k, v in parsed.items() if k not in valid_fields}
+        extra = parsed.get("extra")
+        if not isinstance(extra, dict):
+            extra = {}
+        if unknown:
+            parsed["extra"] = {**unknown, **extra}
+        return {k: v for k, v in parsed.items() if k in valid_fields}
 
     @classmethod
-    def load(cls, training_run_id: str) -> "TrainResult":
+    def from_training_run_id(cls, training_run_id: str) -> "TrainResult":
         """Load a completed run's result.
 
         Raises
@@ -158,6 +154,10 @@ class TrainResult:
         )
 
     @classmethod
+    def load(cls, training_run_id: str) -> "TrainResult":
+        return cls.from_training_run_id(training_run_id)
+
+    @classmethod
     def list_results(cls) -> list["TrainResult"]:
         return [
             cls(**cls._parse_model_config(r))
@@ -167,127 +167,34 @@ class TrainResult:
     # ── Volume lookup ────────────────────────────────────────────────────
 
     def volume(self) -> "Volume":
-        """Return a handle to the checkpoints :class:`modal.Volume`."""
         from modal import Volume
 
-        return Volume.from_name(
-            self.checkpoints_volume_name,
-            create_if_missing=True,
-        )
+        volume_name = self.checkpoints_volume_name or f"{self.app_name}-checkpoints"
+        return Volume.from_name(volume_name, create_if_missing=True)
 
     def dashboard_url(self) -> str:
         """URL for browsing the checkpoints volume in the Modal dashboard."""
         return self.volume().get_dashboard_url()
 
-    # ── Checkpoint enumeration ──────────────────────────────────────────
-
-    def _volume_rel(self, absolute: str) -> str:
-        """Convert an absolute path under ``checkpoints_mount_path`` to a
-        volume-relative path suitable for :meth:`modal.Volume.iterdir`.
-        """
-        mount = self.checkpoints_mount_path.rstrip("/")
-        if not mount:
-            return absolute.lstrip("/")
-        if absolute == mount:
-            return ""
-        if absolute.startswith(mount + "/"):
-            return absolute[len(mount) + 1 :]
-        return absolute.lstrip("/")
-
-    def _listdir(self, rel_path: str) -> list[str]:
-        """List one level of entries under a volume-relative path.
-
-        Returns basenames only. Handles both flat listings (entries
-        yield a basename as ``path``) and recursive listings (entries
-        yield ``dir/file``) by filtering to the requested depth.
-        """
-        vol = self.volume()
-        rel = rel_path.strip("/")
-        prefix = rel + "/" if rel else ""
-        prefix_depth = prefix.count("/")
-        names: list[str] = []
-        for entry in vol.iterdir(rel or "/"):
-            entry_path = entry.path
-            if prefix and not entry_path.startswith(prefix):
-                continue
-            remainder = entry_path[len(prefix) :] if prefix else entry_path
-            if "/" in remainder:
-                continue
-            if prefix and entry_path.count("/") != prefix_depth:
-                continue
-            names.append(remainder)
-        return names
-
-    def list_checkpoints(self) -> list[str]:
-        """Return per-iteration checkpoint directory names under
-        ``checkpoint_dir``, sorted.
-
-        Empty list when ``iteration_prefix`` is unset (frameworks that
-        write a single flat output directory per run).
-        """
-        if not self.iteration_prefix:
-            return []
-        rel = self._volume_rel(self.checkpoint_dir)
-        try:
-            entries = self._listdir(rel)
-        except FileNotFoundError:
-            return []
-        return sorted(
-            e
-            for e in entries
-            if e.startswith(self.iteration_prefix) and not e.endswith("_hf")
-        )
-
-    def latest_checkpoint_path(self) -> str:
-        """Absolute in-volume path of the latest checkpoint.
-
-        For frameworks with an ``iteration_prefix``, the largest
-        directory (lexicographic sort) starting with that prefix inside
-        :attr:`checkpoint_dir`. For frameworks without iteration
-        directories, :attr:`checkpoint_dir` itself.
-
-        Raises
-        ------
-        FileNotFoundError
-            No matching iteration directory exists yet. Typically means
-            the run has not completed a save interval.
-        """
-        if not self.iteration_prefix:
-            return self.checkpoint_dir
-        ckpts = self.list_checkpoints()
-        if not ckpts:
-            raise FileNotFoundError(
-                f"No checkpoints under {self.checkpoint_dir} "
-                f"with prefix {self.iteration_prefix!r}. "
-                f"Has the training run completed a save interval yet?"
-            )
-        latest = ckpts[-1]
-        hf_variant = f"{latest}_hf"
-        if hf_variant in self._listdir(self._volume_rel(self.checkpoint_dir)):
-            latest = hf_variant
-        return f"{self.checkpoint_dir.rstrip('/')}/{latest}"
-
-    # ── Output model ─────────────────────────────────────────────────────
-
     @property
     def model(self) -> "ModelConfig":
-        """Return the model config with ``model_path`` pointing at the latest checkpoint.
-
-        Returns a shallow copy of ``model_config`` so the stored
-        instance is not mutated. The copy has ``model_path``,
-        ``checkpoints_volume_name``, and ``checkpoints_mount_path``
-        set so that ``DeploymentConfig(model=result.model).serve()``
-        works out of the box.
-        """
-        import copy
-
         if self.model_config is None:
             raise ValueError(
                 "No model_config on this TrainResult. "
                 "Was it saved by an older launcher?"
             )
-        m = copy.copy(self.model_config)
-        m.model_path = self.latest_checkpoint_path()
-        m.checkpoints_volume_name = self.checkpoints_volume_name
-        m.checkpoints_mount_path = self.checkpoints_mount_path
-        return m
+
+        from modal_training_gym.common.checkpoint import list_checkpoints
+
+        model = copy.copy(self.model_config)
+        checkpoints = list_checkpoints(self.training_run_id)
+        if checkpoints:
+            model.model_path = checkpoints[-1].path
+        elif self.checkpoint_dir:
+            model.model_path = self.checkpoint_dir
+
+        if self.checkpoints_volume_name:
+            setattr(model, "checkpoints_volume_name", self.checkpoints_volume_name)
+        if self.checkpoints_mount_path:
+            setattr(model, "checkpoints_mount_path", self.checkpoints_mount_path)
+        return model
