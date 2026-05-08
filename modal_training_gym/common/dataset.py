@@ -46,7 +46,7 @@ class DatasetConfig:
             self.dataset_id = str(uuid.uuid4())
         for k, v in kwargs.items():
             setattr(self, k, v)
-    
+
     @property
     def name(self) -> str:
         return self.dataset_id
@@ -87,7 +87,7 @@ class HuggingFaceDataset(DatasetConfig):
             self.input_key = "messages"
         if "dataset_id" not in kwargs:
             self.dataset_id = f"{self.hf_repo}-{self.hf_split}-{uuid.uuid4()}"
-    
+
     @property
     def name(self) -> str:
         return self.hf_repo
@@ -185,7 +185,7 @@ class HarborDataset(DatasetConfig):
             else:
                 slug = "harbor"
             self.dataset_id = f"{slug}-{uuid.uuid4()}"
-    
+
     @property
     def name(self) -> str:
         return self.dataset_name
