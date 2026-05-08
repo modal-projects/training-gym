@@ -1,41 +1,31 @@
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
+
 from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
-_QWEN3_4B_DEFAULTS = {
-    # ── Cluster ─────────────────────────────────────────────────────────
-    "gpu_type": "H100",
-    "actor_num_nodes": 1,
-    "actor_num_gpus_per_node": 8,
-    "colocate": True,
-    "tensor_model_parallel_size": 1,
-    "sequence_parallel": False,
-    # ── RL / rollout ────────────────────────────────────────────────────
-    "n_samples_per_prompt": 8,
-    "rollout_batch_size": 16,
-    "rollout_max_response_len": 4096,
-    "rollout_temperature": 1.0,
-    "sglang_mem_fraction_static": 0.75,
-    # ── Training ────────────────────────────────────────────────────────
-    "global_batch_size": 16,
-    "lr": 5e-7,
-    "max_tokens_per_gpu": 8192,
-    # ── Eval ────────────────────────────────────────────────────────────
-    "eval_interval": 10,
-    "n_samples_per_eval_prompt": 4,
-    "eval_max_response_len": 4096,
-    # ── Checkpointing ───────────────────────────────────────────────────
-    "save_interval": 10,
-    "megatron_to_hf_mode": "bridge",
-}
 
-
-_SLIME_DEFAULTS = SlimeRecipe()
-
-
+@dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Qwen3_4b_Recipe(SlimeRecipe):
     """Qwen3-4B on 1×8×H100, colocated GRPO."""
 
-    def __post_init__(self) -> None:
-        for key, val in _QWEN3_4B_DEFAULTS.items():
-            if getattr(self, key) == getattr(_SLIME_DEFAULTS, key):
-                object.__setattr__(self, key, val)
-        super().__post_init__()
+    # ── Required fields with Qwen3-4B defaults ─────────────────────────────
+    gpu_type: str = "H100"
+    colocate: bool = True
+    tensor_model_parallel_size: int = 1
+    sequence_parallel: bool = False
+    rollout_num_gpus_per_engine: int = 1
+
+    num_rollout: int = 1
+    rollout_batch_size: int = 16
+    rollout_max_response_len: int = 4096
+    rollout_temperature: float = 1.0
+    sglang_mem_fraction_static: float = 0.75
+
+    save_interval: int = 10
+
+    # ── Overrides from SlimeRecipe defaults ─────────────────────────────────
+    n_samples_per_prompt: int = 8
+    lr: float = 5e-7
+    max_tokens_per_gpu: int = 8192
+    eval_interval: int | None = 10
+    eval_max_response_len: int = 4096

@@ -3,10 +3,10 @@ import os
 from collections.abc import Callable
 from dataclasses import field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from modal_training_gym.train_recipes.base import BaseTrainRecipe, RecipeType
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
@@ -17,9 +17,6 @@ from modal_training_gym.common.models import (
 from modal_training_gym.common.wandb import WandbConfig
 
 import modal
-
-if TYPE_CHECKING:
-    from modal_training_gym.train_recipes.slime_recipe.blocks import SlimeRecipeBlock
 
 # ── Volume mount paths ────────────────────────────────────────────────────────
 
@@ -37,23 +34,37 @@ _SLIME_SKIP = {
     "name",
     "app_tags",
     "image_overlay",
-    "local_python_sources",
     "local_slime",
     "checkpoint",
     "custom_rm_function",
     "custom_generate_function",
 }
 
-YAML_CONFIG_FIELDS = ("eval_config", "custom_config_path", "sglang_config")
+YAML_CONFIG_FIELDS = ("eval_config", "extra_config", "sglang_config")
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class SlimeRecipe(BaseTrainRecipe):
     """Recipe dataclass for configuring slime GRPO training on Modal."""
 
-    recipe_type: RecipeType = RecipeType.SLIME
+    # ── Required: cluster and parallelism ──────────────────────────────────
+    gpu_type: str
+    colocate: bool
+    tensor_model_parallel_size: int
+    sequence_parallel: bool
+    rollout_num_gpus_per_engine: int
+
+    # ── Required: rollout ──────────────────────────────────────────────────
+    num_rollout: int
+    rollout_batch_size: int
+    rollout_max_response_len: int
+    rollout_temperature: float
+
+    # ── Required: checkpointing ────────────────────────────────────────────
+    save_interval: int
 
     # ── App identity ─────────────────────────────────────────────────────────
+    recipe_type: RecipeType = RecipeType.SLIME
     name: str = ""
     app_tags: dict = field(default_factory=dict)
 
@@ -68,18 +79,12 @@ class SlimeRecipe(BaseTrainRecipe):
     async_mode: bool = False
     wandb: WandbConfig | None = None
     image_overlay: Callable[[modal.Image], modal.Image] | None = None
-    local_python_sources: list[str] = field(default_factory=list)
     local_slime: str | None = None
 
-    # ── Cluster and parallelism ────────────────────────────────────────────
-    gpu_type: str = "H100"
+    # ── Cluster and parallelism (optional) ─────────────────────────────────
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
-    colocate: bool = True
-    tensor_model_parallel_size: int = 1
-    sequence_parallel: bool = False
     rollout_num_gpus: int | None = None
-    rollout_num_gpus_per_engine: int = 1
     use_critic: bool = False
     critic_num_nodes: int | None = None
     critic_num_gpus_per_node: int | None = None
@@ -95,13 +100,9 @@ class SlimeRecipe(BaseTrainRecipe):
     entropy_coef: float = 0.0
     ref_load: str = ""
 
-    # ── Rollout ─────────────────────────────────────────────────────────────
-    num_rollout: int = 1
-    rollout_batch_size: int = 8
-    rollout_max_response_len: int = 8192
-    rollout_temperature: float = 1.0
-    sglang_mem_fraction_static: float = 0.7
+    # ── Rollout (optional) ─────────────────────────────────────────────────
     rollout_shuffle: bool = True
+    sglang_mem_fraction_static: float = 0.75
 
     # ── Training ────────────────────────────────────────────────────────────
     global_batch_size: int = 16
@@ -126,15 +127,14 @@ class SlimeRecipe(BaseTrainRecipe):
     max_tokens_per_gpu: int = 9216
 
     # ── Eval ────────────────────────────────────────────────────────────────
-    eval_interval: int = 0
+    eval_interval: int | None = None
     n_samples_per_eval_prompt: int = 4
     eval_max_response_len: int = 16384
     eval_top_p: float = 1.0
     eval_config: dict | None = None
 
-    # ── Checkpointing ───────────────────────────────────────────────────────
+    # ── Checkpointing (optional) ───────────────────────────────────────────
     save: str = "/checkpoints"
-    save_interval: int = 1000
     megatron_to_hf_mode: str = "bridge"
     use_fault_tolerance: bool = True
 
@@ -145,11 +145,11 @@ class SlimeRecipe(BaseTrainRecipe):
     custom_generate_function: Callable | None = None
 
     # ── SGLang / config overrides ───────────────────────────────────────────
+    extra_config: dict | None = None
     sglang_config: dict | None = None
-    custom_config_path: dict | None = None
     apply_chat_template_kwargs: str = ""
 
-    # ── Post-init ────────────────────────────────────────────────────────────
+    # ── Validators ───────────────────────────────────────────────────────────
 
     @staticmethod
     def _callable_path(fn: Callable) -> str:
@@ -168,7 +168,8 @@ class SlimeRecipe(BaseTrainRecipe):
                 mod = "__pending__"
         return f"{mod}.{name}"
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def _resolve_callable_paths(self) -> "SlimeRecipe":
         if self.custom_rm_function is not None and not self.custom_rm_path:
             object.__setattr__(
                 self,
@@ -176,12 +177,13 @@ class SlimeRecipe(BaseTrainRecipe):
                 self._callable_path(self.custom_rm_function),
             )
         if self.custom_generate_function is not None:
-            custom_config = dict(self.custom_config_path or {})
-            if not custom_config.get("custom_generate_function_path"):
-                custom_config["custom_generate_function_path"] = self._callable_path(
+            cfg = dict(self.extra_config or {})
+            if not cfg.get("custom_generate_function_path"):
+                cfg["custom_generate_function_path"] = self._callable_path(
                     self.custom_generate_function
                 )
-                object.__setattr__(self, "custom_config_path", custom_config)
+                object.__setattr__(self, "extra_config", cfg)
+        return self
 
     # ── Container → slime flag converters ────────────────────────────────────
 
@@ -245,6 +247,7 @@ class SlimeRecipe(BaseTrainRecipe):
             "swiglu": arch.swiglu,
             "disable_bias_linear": arch.disable_bias_linear,
             "qk_layernorm": arch.qk_layernorm,
+            "untie_embeddings_and_output_weights": arch.untie_embeddings_and_output_weights,
             "use_rotary_position_embeddings": arch.use_rotary_position_embeddings,
             "rotary_base": arch.rotary_base,
         }
@@ -277,7 +280,10 @@ class SlimeRecipe(BaseTrainRecipe):
             fields.update(self._model_to_fields(model))
         if self.wandb is not None:
             fields.update(self._wandb_to_fields(self.wandb))
-        return {k: v for k, v in fields.items() if k not in _SLIME_SKIP}
+        out = {k: v for k, v in fields.items() if k not in _SLIME_SKIP}
+        if "extra_config" in out:
+            out["custom_config_path"] = out.pop("extra_config")
+        return out
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -329,11 +335,31 @@ class SlimeRecipe(BaseTrainRecipe):
         return math.ceil(total_gpus / gpus_per_node)
 
     @classmethod
-    def get_base_recipe(cls, model_config: ModelConfig) -> "SlimeRecipe":
+    def get_base_recipe(cls, model_config: ModelConfig) -> "SlimeRecipe | None":
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_1_7b import (
+            Qwen3_1_7b_Recipe,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_8b import (
+            Qwen3_8b_Recipe,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_14b import (
+            Qwen3_14b_Recipe,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_32b import (
+            Qwen3_32b_Recipe,
+        )
         from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import (
             Qwen3_4b_Recipe,
         )
 
+        if model_config.model_name == "Qwen/Qwen3-1.7B":
+            return Qwen3_1_7b_Recipe()
         if model_config.model_name == "Qwen/Qwen3-4B":
             return Qwen3_4b_Recipe()
-        return SlimeRecipe()
+        if model_config.model_name == "Qwen/Qwen3-8B":
+            return Qwen3_8b_Recipe()
+        if model_config.model_name == "Qwen/Qwen3-14B":
+            return Qwen3_14b_Recipe()
+        if model_config.model_name == "Qwen/Qwen3-32B":
+            return Qwen3_32b_Recipe()
+        return None

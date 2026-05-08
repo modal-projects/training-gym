@@ -57,11 +57,8 @@ def fastapi_app():
 
     from modal_training_gym.utils.metadata import (
         MetadataStore,
-        SUMMARY_ITEMS_KEY,
         vol_get,
         vol_get_summary_items,
-        vol_list,
-        vol_put,
         vol_put_summary_items,
     )
     from modal_training_gym.common.modal_urls import modal_app_dashboard_url
@@ -131,96 +128,121 @@ def fastapi_app():
             updated.append(new_item)
         return updated, changed
 
-    def persist_eval_summaries(summaries: list[dict[str, Any]]) -> None:
-        vol_put(
-            eval_summary_store,
-            eval_summary_key,
-            {eval_summary_payload_key: summaries},
-        )
-
     async def load_eval_summaries() -> list[dict[str, Any]]:
         try:
             payload = await run_in_threadpool(
                 vol_get, eval_summary_store, eval_summary_key
             )
         except KeyError:
-            payload = None
-        else:
-            if isinstance(payload, (dict, list)):
-                return list_from_payload(
-                    payload,
-                    payload_key=eval_summary_payload_key,
+            return []
+
+        summaries = list_from_payload(
+            payload, payload_key=eval_summary_payload_key
+        )
+        if not summaries:
+            return []
+
+        eval_ids = [
+            str(s.get("eval_id", ""))
+            for s in summaries
+            if isinstance(s, dict) and s.get("eval_id")
+        ]
+
+        async def fetch_result(eval_id: str) -> tuple[str, dict | None]:
+            try:
+                r = await run_in_threadpool(
+                    vol_get, MetadataStore.EVAL_RESULTS, eval_id
                 )
+                return eval_id, r
+            except KeyError:
+                return eval_id, None
 
-        legacy_summaries = await run_in_threadpool(vol_list, MetadataStore.EVAL_SUMMARIES)
-        if legacy_summaries:
-            await run_in_threadpool(persist_eval_summaries, legacy_summaries)
-            return legacy_summaries
+        fetched = await asyncio.gather(*(fetch_result(eid) for eid in eval_ids))
+        results_by_id = {eid: r for eid, r in fetched if r is not None}
 
-        eval_results = await run_in_threadpool(vol_list, MetadataStore.EVAL_RESULTS)
-        generated_summaries: list[dict[str, Any]] = []
-        for result in eval_results:
-            rows = result.get("rows", [])
-            total = len(rows) if isinstance(rows, list) else 0
-            mean = (
-                sum(row.get("score", 0) for row in rows) / total
-                if total
-                else 0.0
-            )
-            summary = {key: value for key, value in result.items() if key != "rows"}
-            summary["total"] = total
-            summary["mean"] = mean
-            generated_summaries.append(summary)
+        eval_config_ids = [
+            str(s.get("eval_config_id", ""))
+            for s in summaries
+            if isinstance(s, dict) and s.get("eval_config_id")
+        ]
 
-        await run_in_threadpool(persist_eval_summaries, generated_summaries)
-        return generated_summaries
+        async def fetch_eval_config(eval_config_id: str) -> tuple[str, dict | None]:
+            try:
+                cfg = await run_in_threadpool(
+                    vol_get, MetadataStore.EVAL_CONFIGS, eval_config_id
+                )
+                return eval_config_id, cfg
+            except KeyError:
+                return eval_config_id, None
+
+        fetched_configs = await asyncio.gather(
+            *(fetch_eval_config(cfg_id) for cfg_id in eval_config_ids)
+        )
+        configs_by_id = {cfg_id: cfg for cfg_id, cfg in fetched_configs if cfg is not None}
+
+        enriched: list[dict[str, Any]] = []
+        for summary in summaries:
+            if not isinstance(summary, dict):
+                continue
+            eval_id = str(summary.get("eval_id", ""))
+            eval_config_id = str(summary.get("eval_config_id", ""))
+            result = results_by_id.get(eval_id)
+            eval_config = configs_by_id.get(eval_config_id)
+            if not result:
+                merged = dict(summary)
+                if eval_config:
+                    merged["eval_config"] = eval_config
+                    for field in (
+                        "dataset_name",
+                        "eval_fn_name",
+                        "prompt_column",
+                        "generate_kwargs",
+                    ):
+                        value = eval_config.get(field)
+                        if field not in merged and value is not None:
+                            merged[field] = value
+                enriched.append(merged)
+                continue
+            merged = dict(summary)
+            for field in ("deployment_id", "config", "status"):
+                value = result.get(field)
+                if field not in merged and value is not None:
+                    merged[field] = value
+            if eval_config:
+                merged["eval_config"] = eval_config
+                for field in (
+                    "dataset_name",
+                    "eval_fn_name",
+                    "prompt_column",
+                    "generate_kwargs",
+                ):
+                    value = eval_config.get(field)
+                    if field not in merged and value is not None:
+                        merged[field] = value
+            enriched.append(merged)
+        return enriched
 
     async def load_list_summary(
-        *,
         summary_store: MetadataStore,
-        detail_store: MetadataStore,
     ) -> list[dict[str, Any]]:
         items = await run_in_threadpool(vol_get_summary_items, summary_store)
-        if items is not None:
-            items, changed = add_modal_app_urls(items)
-            if changed:
-                await run_in_threadpool(
-                    vol_put_summary_items,
-                    summary_store,
-                    items,
-                    key=eval_summary_key,
-                    payload_key=SUMMARY_ITEMS_KEY,
-                )
-            return items
-
-        items = await run_in_threadpool(vol_list, detail_store)
-        items, _ = add_modal_app_urls(items)
-        await run_in_threadpool(
-            vol_put_summary_items,
-            summary_store,
-            items,
-            key=eval_summary_key,
-            payload_key=SUMMARY_ITEMS_KEY,
-        )
+        if items is None:
+            return []
+        items, changed = add_modal_app_urls(items)
+        if changed:
+            await run_in_threadpool(
+                vol_put_summary_items, summary_store, items
+            )
         return items
 
     async def load_runs() -> list[dict[str, Any]]:
-        return await load_list_summary(
-            summary_store=MetadataStore.TRAINING_RUNS_SUMMARY,
-            detail_store=MetadataStore.TRAINING_RUNS,
-        )
+        return await load_list_summary(MetadataStore.TRAINING_RUNS_SUMMARY)
 
     async def load_train_results() -> list[dict[str, Any]]:
-        return await load_list_summary(
-            summary_store=MetadataStore.TRAIN_RESULTS_SUMMARY,
-            detail_store=MetadataStore.TRAIN_RESULTS,
-        )
+        return await load_list_summary(MetadataStore.TRAIN_RESULTS_SUMMARY)
 
     async def load_deployments() -> list[dict[str, Any]]:
-        return await load_list_summary(
-            summary_store=MetadataStore.DEPLOYMENTS_SUMMARY,
-            detail_store=MetadataStore.DEPLOYMENTS,
-        )
+        return await load_list_summary(MetadataStore.DEPLOYMENTS_SUMMARY)
 
     # ── Training runs ────────────────────────────────────────────────────
 

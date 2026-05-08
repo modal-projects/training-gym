@@ -17,10 +17,24 @@ from modal_training_gym.utils.metadata import (
     vol_put,
     vol_put_summary_items,
 )
+from modal_training_gym.common.modal_urls import modal_app_dashboard_url
+
+
+def _with_modal_urls(items: list[dict]) -> list[dict]:
+    updated: list[dict] = []
+    for item in items:
+        new_item = dict(item)
+        if not new_item.get("modal_app_url"):
+            app_id = str(new_item.get("modal_app_id", "") or "")
+            if app_id:
+                new_item["modal_app_url"] = modal_app_dashboard_url(app_id)
+        updated.append(new_item)
+    return updated
 
 
 def _sorted_training_runs() -> list[dict]:
     runs = vol_list(MetadataStore.TRAINING_RUNS)
+    runs = _with_modal_urls(runs)
     runs.sort(
         key=lambda item: (
             int(item.get("created_at", 0) or 0),
@@ -42,6 +56,7 @@ def _sorted_train_results() -> list[dict]:
 
 def _sorted_deployments() -> list[dict]:
     deployments = vol_list(MetadataStore.DEPLOYMENTS)
+    deployments = _with_modal_urls(deployments)
     deployments.sort(
         key=lambda item: (
             str(item.get("deployment_config", {}).get("app_name", "")),
@@ -98,6 +113,10 @@ def main() -> None:
         print("\nDry run. Pass --apply to write summaries.")
         return
 
+    for run in runs:
+        vol_put(MetadataStore.TRAINING_RUNS, run["run_id"], run)
+    for deployment in deployments:
+        vol_put(MetadataStore.DEPLOYMENTS, deployment["deployment_id"], deployment)
     vol_put_summary_items(MetadataStore.TRAINING_RUNS_SUMMARY, runs)
     vol_put_summary_items(MetadataStore.TRAIN_RESULTS_SUMMARY, train_results)
     vol_put_summary_items(MetadataStore.DEPLOYMENTS_SUMMARY, deployments)

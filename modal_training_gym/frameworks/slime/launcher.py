@@ -35,8 +35,7 @@ import cloudpickle
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS
 from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
 from modal_training_gym.common.framework import (
-    TOOLS_LOCAL_PATH,
-    TOOLS_REMOTE_PATH,
+    mount_tools_dir,
     resolve_caller_module,
 )
 from modal_training_gym.common.models import ModelConfig
@@ -95,6 +94,7 @@ def _has_torch_dist_checkpoint(save_path: str) -> bool:
 
 def build_slime_app(
     *,
+    training_run_id: str,
     slime: SlimeRecipe,
     model: ModelConfig,
     dataset: DatasetConfig,
@@ -133,9 +133,7 @@ def build_slime_app(
         )
 
     image = image.add_local_python_source("modal_training_gym", copy=True)
-    image = image.add_local_dir(
-        TOOLS_LOCAL_PATH, remote_path=TOOLS_REMOTE_PATH, copy=True
-    )
+    image = mount_tools_dir(image)
 
     if caller_script is not None:
         caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]
@@ -147,16 +145,16 @@ def build_slime_app(
         )
 
     def _get_custom_generate_path() -> str:
-        cfg = slime.custom_config_path
+        cfg = slime.extra_config
         if not isinstance(cfg, dict):
             return ""
         raw = cfg.get("custom_generate_function_path", "")
         return raw if isinstance(raw, str) else ""
 
     def _set_custom_generate_path(path: str) -> None:
-        cfg = dict(slime.custom_config_path or {})
+        cfg = dict(slime.extra_config or {})
         cfg["custom_generate_function_path"] = path
-        object.__setattr__(slime, "custom_config_path", cfg)
+        object.__setattr__(slime, "extra_config", cfg)
 
     def _ship_callable(
         fn: Any,
@@ -231,9 +229,6 @@ def build_slime_app(
         and _get_custom_generate_path()
     ):
         object.__setattr__(slime, "custom_generate_function", None)
-
-    for mod_name in slime.local_python_sources:
-        image = image.add_local_python_source(mod_name, copy=True)
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
@@ -443,7 +438,6 @@ def build_slime_app(
     )
     @clustered(slime.total_nodes, rdma=_multi_node)  # pyright: ignore[reportCallIssue, reportOptionalCall]
     async def train(
-        run_id: str | None = None,
         modal_app_id: str = "",
         modal_app_url: str = "",
     ):
@@ -469,8 +463,7 @@ def build_slime_app(
             return
 
         created_at = int(time.time())
-        run_id = run_id or f"{app_name}-{created_at}"
-        print(f"Training run id: {run_id}")
+        print(f"Training run id: {training_run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
             "recipe": {
@@ -491,7 +484,7 @@ def build_slime_app(
             "global_batch_size": slime.global_batch_size,
         }
         run_record = TrainingRun(
-            run_id=run_id,
+            training_run_id=training_run_id,
             modal_app_id=modal_app_id,
             modal_app_url=modal_app_url or modal_app_dashboard_url(modal_app_id),
             framework=Framework.SLIME,
@@ -500,7 +493,7 @@ def build_slime_app(
             started_at=created_at,
         )
         run_record.save()
-        print(f"TrainingRun recorded: {run_id}")
+        print(f"TrainingRun recorded: {training_run_id}")
 
         try:
             if model:
@@ -538,7 +531,7 @@ def build_slime_app(
                 else configured_save_root
             )
             save_root = (
-                f"{mounted_save_root}/{run_id}"
+                f"{mounted_save_root}/{training_run_id}"
                 if base_save_root == mounted_save_root
                 else configured_save_root
             )
@@ -599,7 +592,7 @@ def build_slime_app(
             result_kwargs = {
                 "app_name": app_name,
                 "framework": "slime",
-                "training_run_id": run_id,
+                "training_run_id": training_run_id,
                 "checkpoint_dir": save_root,
                 "model_config": model,
                 "checkpoints_volume_name": checkpoints_volume_name,
@@ -612,7 +605,7 @@ def build_slime_app(
             result.save()
             run_record.status = TrainingRunStatus.COMPLETED
             checkpoints_volume.commit()
-            print(f"TrainResult saved: {run_id}")
+            print(f"TrainResult saved: {training_run_id}")
             return result._to_dict()
         except KeyboardInterrupt:
             run_record.status = TrainingRunStatus.STOPPED

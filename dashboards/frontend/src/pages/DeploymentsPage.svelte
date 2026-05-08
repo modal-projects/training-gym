@@ -6,6 +6,7 @@
     PanelRightClose,
     Search,
   } from "lucide-svelte";
+  import Drawer from "../components/Drawer.svelte";
   import MinimalTable from "../components/MinimalTable.svelte";
   import MinimalTableSkeleton from "../components/MinimalTableSkeleton.svelte";
   import StatusPill from "../components/StatusPill.svelte";
@@ -39,44 +40,82 @@
     return safeText(value).replace(/\/+$/, "").toLowerCase();
   }
 
+  function toTimestampSeconds(value) {
+    if (value && typeof value === "object" && "value" in value) {
+      return toTimestampSeconds(value.value);
+    }
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const text = safeText(value).trim();
+    if (!text) return 0;
+    const numeric = Number(text);
+    if (Number.isFinite(numeric)) return numeric;
+    const epochMs = Date.parse(text);
+    if (Number.isFinite(epochMs)) return Math.floor(epochMs / 1000);
+    return 0;
+  }
+
+  function rowCreatedAt(row) {
+    return (
+      toTimestampSeconds(row.deployment.created_at) ||
+      toTimestampSeconds(row.run?.created_at) ||
+      toTimestampSeconds(row.run?.started_at) ||
+      0
+    );
+  }
+
   function normalizeStatus(row) {
-    const raw = safeText(row.deployment.status).toLowerCase();
+    const raw = safeText(row.deployment.status).trim().toLowerCase();
+    const hasEndpoint = !!safeText(row.deployment.url).trim();
+    const createdAt = rowCreatedAt(row);
+    const ageSeconds = createdAt > 0 ? Math.floor(Date.now() / 1000) - createdAt : 0;
+    const endpointCreationTimedOut = !hasEndpoint && ageSeconds > 3600;
     if (
-      raw === "ready" ||
-      raw === "healthy" ||
-      raw === "active" ||
-      raw === "completed"
+      raw.includes("ready") ||
+      raw.includes("healthy") ||
+      raw.includes("active") ||
+      raw.includes("available") ||
+      raw.includes("serving") ||
+      raw.includes("online") ||
+      raw.includes("completed") ||
+      raw.includes("success")
     ) {
       return "Ready";
     }
     if (
-      raw === "running" ||
-      raw === "pending" ||
-      raw === "initializing" ||
-      raw === "starting" ||
-      raw === "deploying"
+      raw.includes("running") ||
+      raw.includes("pending") ||
+      raw.includes("initializing") ||
+      raw.includes("starting") ||
+      raw.includes("deploying") ||
+      raw.includes("creating") ||
+      raw.includes("provisioning") ||
+      raw.includes("building")
     ) {
       return "Pending";
     }
     if (
-      raw === "inactive" ||
-      raw === "failed" ||
-      raw === "stopped" ||
-      raw === "error"
+      raw.includes("inactive") ||
+      raw.includes("failed") ||
+      raw.includes("stopped") ||
+      raw.includes("error") ||
+      raw.includes("deleted") ||
+      raw.includes("terminated")
     ) {
       return "Inactive";
     }
-    if (row.deployment.url && row.run?.train_result) return "Ready";
+    if (endpointCreationTimedOut) return "Inactive";
+    if (row.run && getStatus(row.run) === "Failed") return "Inactive";
     return "Pending";
   }
 
   function rowKey(row, rowIndex) {
-    return (
+    const base =
       row.deployment.deployment_id ||
       row.deployment.app_name ||
       row.deployment.url ||
-      `${row.deployment.model_name || "deployment"}-${rowIndex}`
-    );
+      row.deployment.model_name ||
+      "deployment";
+    return `${base}-${rowIndex}`;
   }
 
   function statusTone(status) {
@@ -224,7 +263,7 @@
 
 <svelte:window onclick={() => (statusMenuOpen = false)} />
 
-<section class="summary-row" class:compact={!!selectedDeployment}>
+<section class="summary-row">
   <article class="summary-card">
     <span class="summary-label">Total deployments</span>
     <strong>{allDeployments.length}</strong>
@@ -239,7 +278,7 @@
   </article>
 </section>
 
-<section class="deployments-layout" class:with-panel={!!selectedDeployment}>
+<section class="deployments-layout">
   <div class="table-pane">
     <div class="filters-row">
       <label class="search-wrap" aria-label="Search deployments">
@@ -310,20 +349,26 @@
           </thead>
           <tbody>
             {#each filteredRows as row (row.key)}
+              {@const deploymentName = row.deployment.deployment_id || deploymentLabel(row.deployment)}
+              {@const deploymentAppName =
+                row.deployment.app_name && row.deployment.app_name !== row.deployment.deployment_id
+                  ? row.deployment.app_name
+                  : ""}
               <tr
                 class:row-selected={selectedDeployment?.key === row.key}
                 onclick={() => selectDeployment(row)}
               >
                 <td class="name-cell">
-                  <div class="run-name">{row.deployment.deployment_id || deploymentLabel(row.deployment)}</div>
-                  {#if row.deployment.app_name && row.deployment.app_name !== row.deployment.deployment_id}
-                    <div class="subtle">{row.deployment.app_name}</div>
+                  <div class="run-name" title={deploymentName}>{deploymentName}</div>
+                  {#if deploymentAppName}
+                    <div class="subtle" title={deploymentAppName}>{deploymentAppName}</div>
                   {/if}
                 </td>
                 <td class="training-cell">
                   {#if row.run}
                     <button
                       class="cross-link"
+                      title={row.run.run_id}
                       onclick={(event) => {
                         event.stopPropagation();
                         onOpenTrainingRun(row.run.run_id);
@@ -373,7 +418,8 @@
   </div>
 
   {#if selectedDeployment}
-    <aside class="details-pane">
+    <Drawer open={!!selectedDeployment} onclose={closeDetails}>
+      <div class="deployment-drawer">
       <div class="details-header">
         <div>
           <div class="details-eyebrow">Deployment</div>
@@ -411,7 +457,10 @@
         </div>
         <div class="meta-row">
           <span class="meta-key">Training run</span>
-          <span class="meta-value">
+          <span
+            class="meta-value training-run-id-value"
+            title={selectedDeployment.run?.run_id || ""}
+          >
             {selectedDeployment.run?.run_id || "—"}
           </span>
         </div>
@@ -440,41 +489,41 @@
         </div>
       </section>
 
-      <section class="details-section">
-        <button
-          class="section-toggle"
-          onclick={() => (relatedRunExpanded = !relatedRunExpanded)}
-        >
-          <span>Related training run</span>
-          <ChevronDown size={13} class={relatedRunExpanded ? "rotated" : ""} />
-        </button>
-        {#if relatedRunExpanded}
-          {#if selectedDeployment.run}
+      {#if selectedDeployment.run}
+        <section class="details-section">
+          <button
+            class="section-toggle"
+            onclick={() => (relatedRunExpanded = !relatedRunExpanded)}
+          >
+            <span>Related training run</span>
+            <ChevronDown size={13} class={relatedRunExpanded ? "rotated" : ""} />
+          </button>
+          {#if relatedRunExpanded}
             <button
               class="related-run-row"
               onclick={() => onOpenTrainingRun(selectedDeployment.run.run_id)}
             >
               <StatusPill status={getStatus(selectedDeployment.run)} />
-              <span class="mono">{selectedDeployment.run.run_id}</span>
+              <span class="mono related-run-id" title={selectedDeployment.run.run_id}>
+                {selectedDeployment.run.run_id}
+              </span>
             </button>
-          {:else}
-            <div class="related-empty">No linked training run.</div>
           {/if}
-        {/if}
-      </section>
+        </section>
+      {/if}
 
-      <section class="details-section">
-        <button
-          class="section-toggle"
-          onclick={() => (relatedEvalsExpanded = !relatedEvalsExpanded)}
-        >
-          <span>Related evals</span>
-          <ChevronDown size={13} class={relatedEvalsExpanded ? "rotated" : ""} />
-        </button>
-        {#if relatedEvalsExpanded}
-          {#if selectedDeploymentEvals.length}
+      {#if selectedDeploymentEvals.length}
+        <section class="details-section">
+          <button
+            class="section-toggle"
+            onclick={() => (relatedEvalsExpanded = !relatedEvalsExpanded)}
+          >
+            <span>Related evals</span>
+            <ChevronDown size={13} class={relatedEvalsExpanded ? "rotated" : ""} />
+          </button>
+          {#if relatedEvalsExpanded}
             <div class="eval-list">
-              {#each selectedDeploymentEvals as evalRun (`${evalRun.dataset}-${evalRun.evalId}`)}
+              {#each selectedDeploymentEvals as evalRun, evalIndex (`${evalRun.dataset}-${evalRun.evalId || "eval"}-${evalRun.createdAt || 0}-${evalIndex}`)}
                 <div class="eval-row">
                   <div class="eval-left">
                     <span class="eval-chip">{evalRun.dataset}</span>
@@ -484,12 +533,11 @@
                 </div>
               {/each}
             </div>
-          {:else}
-            <div class="related-empty">No evals found for this deployment.</div>
           {/if}
-        {/if}
-      </section>
-    </aside>
+        </section>
+      {/if}
+      </div>
+    </Drawer>
   {/if}
 </section>
 
@@ -523,10 +571,6 @@
     font-weight: 600;
   }
 
-  .summary-row.compact {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .deployments-layout {
     border: 0;
     background: transparent;
@@ -534,10 +578,6 @@
     grid-template-columns: minmax(0, 1fr);
     min-height: 520px;
     padding: 0;
-  }
-
-  .deployments-layout.with-panel {
-    grid-template-columns: minmax(0, 1fr) 380px;
   }
 
   .table-pane {
@@ -693,6 +733,7 @@
     color: var(--text-bright);
     font-family: var(--font-mono);
     font-size: 0.73rem;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -701,6 +742,9 @@
     color: var(--muted-strong);
     font-size: 0.7rem;
     margin-top: 0.1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .cross-link {
@@ -785,11 +829,9 @@
     pointer-events: none;
   }
 
-  .details-pane {
-    border-left: 1px solid var(--border);
-    min-width: 0;
-    background: color-mix(in srgb, var(--panel) 70%, var(--bg-depth));
-    overflow-y: auto;
+  .deployment-drawer {
+    width: min(420px, calc(100vw - 24px));
+    height: 100%;
   }
 
   .details-header {
@@ -863,6 +905,13 @@
     overflow-wrap: anywhere;
   }
 
+  .training-run-id-value {
+    overflow-wrap: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .endpoint-value {
     font-family: var(--font-mono);
     font-size: 0.72rem;
@@ -911,6 +960,13 @@
   .mono {
     font-family: var(--font-mono);
     font-size: 0.7rem;
+  }
+
+  .related-run-id {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .eval-list {
@@ -966,17 +1022,6 @@
     color: var(--muted);
     text-align: center;
     font-size: 0.84rem;
-  }
-
-  @media (max-width: 1240px) {
-    .deployments-layout.with-panel {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .details-pane {
-      border-left: 0;
-      border-top: 1px solid var(--border);
-    }
   }
 
   @media (max-width: 1080px) {

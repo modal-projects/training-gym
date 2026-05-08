@@ -15,6 +15,7 @@ import json
 import subprocess
 from datetime import datetime, timezone
 
+from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.utils.metadata import MetadataStore, vol_list, vol_put
 
 
@@ -84,6 +85,7 @@ def main():
 
         if best_app_id and best_delta <= 120:
             run["modal_app_id"] = best_app_id
+            run["modal_app_url"] = modal_app_dashboard_url(best_app_id)
             updates.append((run_id, run, best_app_id, best_delta))
 
     if not updates:

@@ -28,7 +28,7 @@ class TrainingRunStatus(Enum):
     FAILED = "failed"
 
 class TrainingRun(BaseModel):
-    run_id: str
+    training_run_id: str
     modal_app_id: str = ""
     modal_app_url: str = ""
     framework: Framework
@@ -45,14 +45,14 @@ class TrainingRun(BaseModel):
 
     def save(self) -> None:
         payload = self.model_dump(mode="json")
-        vol_put(MetadataStore.TRAINING_RUNS, self.run_id, payload)
+        vol_put(MetadataStore.TRAINING_RUNS, self.training_run_id, payload)
         vol_upsert_summary_item(
             MetadataStore.TRAINING_RUNS_SUMMARY,
             payload,
-            item_id_key="run_id",
+            item_id_key="training_run_id",
             sort_key=lambda item: (
                 int(item.get("created_at", 0) or 0),
-                str(item.get("run_id", "")),
+                str(item.get("training_run_id", "")),
             ),
             reverse=True,
         )

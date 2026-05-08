@@ -79,8 +79,8 @@ def _imports():
         SlimeRecipe,
         TrainConfig,
         WandbConfig,
+        list_checkpoints,
     )
-    from modal_training_gym.common.checkpoint import list_checkpoints
 
 
 @markdown
@@ -276,14 +276,22 @@ def _train():
         recipe=SlimeRecipe(
             wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-hello-world"),
             custom_rm_function=usaco_rm,
+
+            gpu_type="H100",
+            colocate=True,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,
+            rollout_num_gpus_per_engine=1,
+
             num_rollout=10,
             rollout_batch_size=8,
             n_samples_per_prompt=8,
-            global_batch_size=8,
             rollout_max_response_len=2048,
+            rollout_temperature=0.9,
+
+            global_batch_size=8,
             eval_max_response_len=2048,
             n_samples_per_eval_prompt=8,
-            rollout_temperature=0.9,
             max_tokens_per_gpu=4096,
             save_interval=10,
             apply_chat_template_kwargs='{"enable_thinking": false}',

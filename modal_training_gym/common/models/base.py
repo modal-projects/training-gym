@@ -46,6 +46,9 @@ class ModelArchitecture:
         Disable bias in linear layers. Default ``True``.
     qk_layernorm : bool
         Apply layer norm to query and key projections. Default ``True``.
+    untie_embeddings_and_output_weights : bool
+        Use separate output projection weights instead of tying to token
+        embeddings. Default ``False``.
 
     ## Position Encoding
 
@@ -68,6 +71,7 @@ class ModelArchitecture:
     swiglu: bool = True
     disable_bias_linear: bool = True
     qk_layernorm: bool = True
+    untie_embeddings_and_output_weights: bool = False
     use_rotary_position_embeddings: bool = True
     rotary_base: int = 10000
 
@@ -101,6 +105,8 @@ class ModelArchitecture:
             args.append("--disable-bias-linear")
         if self.qk_layernorm:
             args.append("--qk-layernorm")
+        if self.untie_embeddings_and_output_weights:
+            args.append("--untie-embeddings-and-output-weights")
         if self.use_rotary_position_embeddings:
             args += ["--position-embedding-type", "rope"]
             if self.rotary_base != 10000:
