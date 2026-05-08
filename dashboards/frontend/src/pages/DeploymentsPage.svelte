@@ -21,6 +21,8 @@
     deploymentLabel,
     truncateId,
     getStatus,
+    focusDeploymentRef,
+    onFocusResolved,
     onOpenTrainingRun,
   } = $props();
 
@@ -198,6 +200,25 @@
     }
   }
 
+  function deploymentRefMatches(row, targetRef) {
+    const rawTarget = safeText(targetRef).trim();
+    if (!rawTarget) return false;
+    const normalizedTarget = normalizePath(rawTarget);
+    const candidates = [
+      safeText(row.deployment.deployment_id).trim(),
+      safeText(row.deployment.app_name).trim(),
+      safeText(row.deployment.modal_app_id).trim(),
+      normalizePath(row.deployment.url),
+    ];
+    return candidates.some((candidate) => {
+      const value = safeText(candidate).trim();
+      if (!value) return false;
+      if (value === rawTarget) return true;
+      if (normalizedTarget && normalizePath(value) === normalizedTarget) return true;
+      return false;
+    });
+  }
+
   let enrichedRows = $derived.by(() =>
     deploymentRows.map((row, index) => {
       const status = normalizeStatus(row);
@@ -244,6 +265,20 @@
     if (!selectedDeploymentKey) return;
     if (!filteredRows.some((row) => row.key === selectedDeploymentKey)) {
       selectedDeploymentKey = null;
+    }
+  });
+
+  $effect(() => {
+    const targetRef = safeText(focusDeploymentRef).trim();
+    if (!targetRef) return;
+    const match = enrichedRows.find((row) => deploymentRefMatches(row, targetRef));
+    if (match) {
+      selectedDeploymentKey = match.key;
+      onFocusResolved?.();
+      return;
+    }
+    if (!loading) {
+      onFocusResolved?.();
     }
   });
 

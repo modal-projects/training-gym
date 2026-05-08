@@ -29,6 +29,7 @@
   let deploymentsRequestId = 0;
   let hasLoadedEvals = $state(false);
   let hasLoadedDeployments = $state(false);
+  let pendingDeploymentFocus = $state(null);
 
   const pageMeta = {
     training: { title: "Training runs" },
@@ -599,6 +600,18 @@
     search = runId;
     setActivePage("training");
   }
+
+  function openDeployment(deploymentRef) {
+    const value = safeText(deploymentRef).trim();
+    if (!value) return;
+    pendingDeploymentFocus = value;
+    setActivePage("deployments");
+    if (!hasLoadedDeployments) void loadDeployments();
+  }
+
+  function clearDeploymentFocus() {
+    pendingDeploymentFocus = null;
+  }
 </script>
 
 <div class="app-shell">
@@ -661,18 +674,22 @@
         {deploymentLabel}
         {truncateId}
         {getStatus}
+        focusDeploymentRef={pendingDeploymentFocus}
+        onFocusResolved={clearDeploymentFocus}
         onOpenTrainingRun={openTrainingRun}
       />
     {:else if activePage === "evals"}
       <EvalsPage
         {allEvals}
-        {allDeployments}
+        {deploymentRows}
         {evalCompletedTotal}
         {evalPendingTotal}
         {evalFailedTotal}
         loading={loadingEvals}
         {error}
         {evalConfigGroups}
+        onOpenTrainingRun={openTrainingRun}
+        onOpenDeployment={openDeployment}
       />
     {/if}
     </main>

@@ -3,8 +3,6 @@ title: API Reference
 description: API reference for training-gym public classes.
 ---
 
-# API Reference
-
 Complete reference for the training-gym Python library.
 
 ## Core
@@ -34,8 +32,12 @@ Complete reference for the training-gym Python library.
 | Class | Description |
 |-------|-------------|
 | [`Qwen3-0.6B`](/reference/models/qwen3_0_6b/) | Qwen3-0.6B (0.6 billion parameters) from Alibaba. |
+| [`Qwen3-1.7B`](/reference/models/qwen3_1_7b/) | Qwen3-1.7B (1.7 billion parameters) from Alibaba. |
 | [`Qwen3-4B`](/reference/models/qwen3_4b/) | Qwen3-4B (4 billion parameters) from Alibaba. |
+| [`Qwen3-8B`](/reference/models/qwen3_8b/) | Qwen3-8B (8 billion parameters) from Alibaba. |
+| [`Qwen3-14B`](/reference/models/qwen3_14b/) | Qwen3-14B (14 billion parameters) from Alibaba. |
 | [`Qwen3-30B-A3B`](/reference/models/qwen3_30b/) | Qwen3-30B-A3B (30B total, ~3B active) MoE model from Alibaba. |
+| [`Qwen3-32B`](/reference/models/qwen3_32b/) | Qwen3-32B (32 billion parameters) from Alibaba. |
 
 ## Training
 

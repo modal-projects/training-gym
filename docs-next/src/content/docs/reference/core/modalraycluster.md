@@ -3,8 +3,6 @@ title: ModalRayCluster
 description: API reference for ModalRayCluster
 ---
 
-# ModalRayCluster
-
 ```python
 from modal_training_gym.common.ray_cluster import ModalRayCluster
 ```

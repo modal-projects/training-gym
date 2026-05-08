@@ -6,13 +6,15 @@
 
   let {
     allEvals,
-    allDeployments,
+    deploymentRows,
     evalCompletedTotal,
     evalPendingTotal,
     evalFailedTotal,
     loading,
     error,
     evalConfigGroups,
+    onOpenTrainingRun,
+    onOpenDeployment,
   } = $props();
 
   let search = $state("");
@@ -69,6 +71,24 @@
     return safeText(deployment?.deployment_id || deployment?.id).trim();
   }
 
+  function normalizePath(value) {
+    return safeText(value).replace(/\/+$/, "").toLowerCase();
+  }
+
+  function toTimestampSeconds(value) {
+    if (value && typeof value === "object" && "value" in value) {
+      return toTimestampSeconds(value.value);
+    }
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const text = safeText(value).trim();
+    if (!text) return 0;
+    const numeric = Number(text);
+    if (Number.isFinite(numeric)) return numeric;
+    const epochMs = Date.parse(text);
+    if (Number.isFinite(epochMs)) return Math.floor(epochMs / 1000);
+    return 0;
+  }
+
   function deploymentModelValue(deployment) {
     return safeText(
       deployment?.model_name ||
@@ -80,21 +100,96 @@
 
   let deploymentsById = $derived.by(() => {
     const byId = new Map();
-    for (const deployment of allDeployments || []) {
+    for (const row of deploymentRows || []) {
+      const deployment = row?.deployment || {};
       const deploymentId = deploymentIdValue(deployment);
-      if (deploymentId) byId.set(deploymentId, deployment);
+      const appName = safeText(deployment?.app_name).trim();
+      if (deploymentId && !byId.has(deploymentId)) byId.set(deploymentId, row);
+      if (appName && !byId.has(appName)) byId.set(appName, row);
     }
     return byId;
   });
 
-  function evalBaseModel(run, group) {
+  let deploymentsByUrl = $derived.by(() => {
+    const byUrl = new Map();
+    for (const row of deploymentRows || []) {
+      const deployment = row?.deployment || {};
+      const normalized = normalizePath(deployment?.url);
+      if (normalized && !byUrl.has(normalized)) byUrl.set(normalized, row);
+    }
+    return byUrl;
+  });
+
+  let deploymentsByModel = $derived.by(() => {
+    const byModel = new Map();
+    for (const row of deploymentRows || []) {
+      const deployment = row?.deployment || {};
+      const model = deploymentModelValue(deployment).toLowerCase();
+      if (!model) continue;
+      if (!byModel.has(model)) byModel.set(model, []);
+      byModel.get(model).push(row);
+    }
+    for (const rows of byModel.values()) {
+      rows.sort(
+        (a, b) =>
+          toTimestampSeconds(b?.deployment?.created_at) -
+          toTimestampSeconds(a?.deployment?.created_at),
+      );
+    }
+    return byModel;
+  });
+
+  function findDeploymentRow(run, group) {
     const config = run.eval.config || {};
-    const evalDeploymentId = safeText(
-      run.eval.deployment_id || config.deployment?.deployment_id,
+    const deploymentConfig = config.deployment || {};
+    const directKeys = [
+      run.eval.deployment_id,
+      deploymentConfig.deployment_id,
+      deploymentConfig.app_name,
+    ];
+    for (const key of directKeys) {
+      const value = safeText(key).trim();
+      if (!value) continue;
+      const matched = deploymentsById.get(value);
+      if (matched) return matched;
+    }
+    const evalUrl = normalizePath(deploymentConfig.url || deploymentConfig.endpoint);
+    if (evalUrl) {
+      const byUrl = deploymentsByUrl.get(evalUrl);
+      if (byUrl) return byUrl;
+    }
+    const modelKey = safeText(
+      deploymentConfig.model_name ||
+        deploymentConfig.served_model_name ||
+        config.model?.model_name ||
+        group.meta.model,
+    )
+      .trim()
+      .toLowerCase();
+    if (modelKey) {
+      const byModel = deploymentsByModel.get(modelKey);
+      if (byModel?.length) return byModel[0];
+    }
+    return null;
+  }
+
+  function deploymentRefValue(deploymentRow) {
+    const deployment = deploymentRow?.deployment || {};
+    return safeText(
+      deployment.deployment_id || deployment.app_name || deployment.url || deployment.modal_app_id,
     ).trim();
-    if (evalDeploymentId) {
-      const deployment = deploymentsById.get(evalDeploymentId);
-      const deploymentModel = deploymentModelValue(deployment);
+  }
+
+  function linkedTrainingRunId(deploymentRow) {
+    return safeText(
+      deploymentRow?.run?.run_id || deploymentRow?.run?.train_result?.training_run_id,
+    ).trim();
+  }
+
+  function evalBaseModel(run, group, deploymentRow = null) {
+    const config = run.eval.config || {};
+    if (deploymentRow?.deployment) {
+      const deploymentModel = deploymentModelValue(deploymentRow.deployment);
       if (deploymentModel) return deploymentModel;
     }
     const configModel = safeText(
@@ -107,7 +202,14 @@
     return "[unknown Base Model]";
   }
 
-  function evalDeploymentName(run) {
+  function evalDeploymentName(run, deploymentRow = null) {
+    if (deploymentRow?.deployment) {
+      const deployment = deploymentRow.deployment;
+      const deploymentName = safeText(
+        deployment.deployment_id || deployment.app_name || deploymentIdValue(deployment),
+      ).trim();
+      if (deploymentName) return deploymentName;
+    }
     const config = run.eval.config || {};
     const deployment = config.deployment || {};
     if (run.eval.deployment_id) return run.eval.deployment_id;
@@ -317,7 +419,7 @@
       <div class="table-wrap">
         <MinimalTableSkeleton
           class="runs-table"
-          columns={["Name", "Base model", "Status", "Average score", "Examples"]}
+          columns={["Name", "Training run", "Base model", "Status", "Average score", "Examples"]}
           rows={6}
         />
       </div>
@@ -358,6 +460,7 @@
                 <MinimalTable class="runs-table evals-runs-table">
                   <colgroup>
                     <col class="col-name" />
+                    <col class="col-training" />
                     <col class="col-model" />
                     <col class="col-status" />
                     <col class="col-score" />
@@ -366,6 +469,7 @@
                   <thead>
                     <tr>
                       <th>Name</th>
+                      <th>Training run</th>
                       <th>Base model</th>
                       <th>Status</th>
                       <th>Average score</th>
@@ -374,11 +478,35 @@
                   </thead>
                   <tbody>
                     {#each group.visibleRuns as run, runIndex (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}-${runIndex}`)}
-                      {@const deploymentName = evalDeploymentName(run)}
-                      {@const baseModel = evalBaseModel(run, group)}
+                      {@const linkedDeployment = findDeploymentRow(run, group)}
+                      {@const deploymentName = evalDeploymentName(run, linkedDeployment)}
+                      {@const deploymentRef = deploymentRefValue(linkedDeployment)}
+                      {@const trainingRunId = linkedTrainingRunId(linkedDeployment)}
+                      {@const baseModel = evalBaseModel(run, group, linkedDeployment)}
                       <tr>
                         <td class="mono name-cell" title={deploymentName}>
-                          <span class="truncate-text">{deploymentName}</span>
+                          {#if deploymentRef}
+                            <button
+                              class="cross-link mono truncate-text"
+                              onclick={() => onOpenDeployment?.(deploymentRef)}
+                            >
+                              {deploymentName}
+                            </button>
+                          {:else}
+                            <span class="truncate-text">{deploymentName}</span>
+                          {/if}
+                        </td>
+                        <td class="training-run-cell" title={trainingRunId || "—"}>
+                          {#if trainingRunId}
+                            <button
+                              class="cross-link mono"
+                              onclick={() => onOpenTrainingRun?.(trainingRunId)}
+                            >
+                              {trainingRunId}
+                            </button>
+                          {:else}
+                            —
+                          {/if}
                         </td>
                         <td class="base-model-cell" title={baseModel}>
                           <span class="truncate-text">{baseModel}</span>
@@ -635,7 +763,7 @@
 
   :global(table.runs-table) {
     width: 100%;
-    min-width: 1080px;
+    min-width: 1180px;
   }
 
   :global(table.evals-runs-table) {
@@ -643,23 +771,27 @@
   }
 
   :global(table.evals-runs-table col.col-name) {
-    width: 36%;
+    width: 27%;
+  }
+
+  :global(table.evals-runs-table col.col-training) {
+    width: 19%;
   }
 
   :global(table.evals-runs-table col.col-model) {
-    width: 24%;
+    width: 20%;
   }
 
   :global(table.evals-runs-table col.col-status) {
-    width: 16%;
-  }
-
-  :global(table.evals-runs-table col.col-score) {
     width: 14%;
   }
 
+  :global(table.evals-runs-table col.col-score) {
+    width: 12%;
+  }
+
   :global(table.evals-runs-table col.col-examples) {
-    width: 10%;
+    width: 8%;
   }
 
   .mono {
@@ -675,6 +807,29 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .training-run-cell {
+    max-width: 0;
+  }
+
+  .cross-link {
+    border: 0;
+    background: transparent;
+    color: color-mix(in srgb, var(--text) 86%, white);
+    padding: 0;
+    font: inherit;
+    font-size: 0.74rem;
+    cursor: pointer;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .cross-link:hover {
+    color: var(--text-bright);
   }
 
   .base-model-cell .truncate-text {

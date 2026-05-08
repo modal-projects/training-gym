@@ -3,8 +3,6 @@ title: SlimeRecipe
 description: API reference for SlimeRecipe
 ---
 
-# SlimeRecipe
-
 ```python
 from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 ```
@@ -17,6 +15,16 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `gpu_type` | `str` |  |  |
+| `colocate` | `bool` |  |  |
+| `tensor_model_parallel_size` | `int` |  |  |
+| `sequence_parallel` | `bool` |  |  |
+| `rollout_num_gpus_per_engine` | `int` |  |  |
+| `num_rollout` | `int` |  |  |
+| `rollout_batch_size` | `int` |  |  |
+| `rollout_max_response_len` | `int` |  |  |
+| `rollout_temperature` | `float` |  |  |
+| `save_interval` | `int` |  |  |
 | `recipe_type` | `<enum 'RecipeType` | `slime` |  |
 | `name` | `str` | `""` |  |
 | `app_tags` | `dict` | `{}` |  |
@@ -24,16 +32,10 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 | `async_mode` | `bool` | `False` |  |
 | `wandb` | `WandbConfig | None` | `None` |  |
 | `image_overlay` | `collections.abc.Callable[[modal.image.Image], modal.image.Image] | None` | `None` |  |
-| `local_python_sources` | `list[str]` | `[]` |  |
 | `local_slime` | `str | None` | `None` |  |
-| `gpu_type` | `str` | `"H100"` |  |
 | `actor_num_nodes` | `int` | `1` |  |
 | `actor_num_gpus_per_node` | `int` | `8` |  |
-| `colocate` | `bool` | `True` |  |
-| `tensor_model_parallel_size` | `int` | `1` |  |
-| `sequence_parallel` | `bool` | `False` |  |
 | `rollout_num_gpus` | `int | None` | `None` |  |
-| `rollout_num_gpus_per_engine` | `int` | `1` |  |
 | `use_critic` | `bool` | `False` |  |
 | `critic_num_nodes` | `int | None` | `None` |  |
 | `critic_num_gpus_per_node` | `int | None` | `None` |  |
@@ -46,12 +48,8 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 | `kl_loss_coef` | `float` | `0.0` |  |
 | `entropy_coef` | `float` | `0.0` |  |
 | `ref_load` | `str` | `""` |  |
-| `num_rollout` | `int` | `1` |  |
-| `rollout_batch_size` | `int` | `8` |  |
-| `rollout_max_response_len` | `int` | `8192` |  |
-| `rollout_temperature` | `float` | `1.0` |  |
-| `sglang_mem_fraction_static` | `float` | `0.7` |  |
 | `rollout_shuffle` | `bool` | `True` |  |
+| `sglang_mem_fraction_static` | `float` | `0.75` |  |
 | `global_batch_size` | `int` | `16` |  |
 | `lr` | `float` | `1e-06` |  |
 | `lr_decay_style` | `str` | `"constant"` |  |
@@ -68,33 +66,32 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 | `recompute_num_layers` | `int` | `1` |  |
 | `use_dynamic_batch_size` | `bool` | `True` |  |
 | `max_tokens_per_gpu` | `int` | `9216` |  |
-| `eval_interval` | `int` | `0` |  |
+| `eval_interval` | `int | None` | `None` |  |
 | `n_samples_per_eval_prompt` | `int` | `4` |  |
 | `eval_max_response_len` | `int` | `16384` |  |
 | `eval_top_p` | `float` | `1.0` |  |
 | `eval_config` | `dict | None` | `None` |  |
 | `save` | `str` | `"/checkpoints"` |  |
-| `save_interval` | `int` | `1000` |  |
 | `megatron_to_hf_mode` | `str` | `"bridge"` |  |
 | `use_fault_tolerance` | `bool` | `True` |  |
 | `rm_type` | `str | None` | `None` |  |
 | `custom_rm_path` | `str` | `""` |  |
 | `custom_rm_function` | `collections.abc.Callable | None` | `None` |  |
 | `custom_generate_function` | `collections.abc.Callable | None` | `None` |  |
+| `extra_config` | `dict | None` | `None` |  |
 | `sglang_config` | `dict | None` | `None` |  |
-| `custom_config_path` | `dict | None` | `None` |  |
 | `apply_chat_template_kwargs` | `str` | `""` |  |
 
 ## Methods
 
 ### `cli_args(self, dataset: 'DatasetConfig | None' = None, model: 'ModelConfig | None' = None) -> list[str]`
 
-### `get_base_recipe(model_config: modal_training_gym.common.models.base.ModelConfig) -> 'SlimeRecipe'`
+### `get_base_recipe(model_config: modal_training_gym.common.models.base.ModelConfig) -> 'SlimeRecipe | None'`
 
 ## Related Tutorials
 
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
-- [Competitive programming RL with Harbor USACO and sandboxed verification](/tutorials/rl/001_code_golf_sandboxes/)
-- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn_number_guessing/)
+- [Code RL with Harbor hello-world and sandboxed verification](/tutorials/rl/001_sandboxes/)
+- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn/)
 
 **Source:** [`modal_training_gym/train_recipes/slime_recipe/recipe.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/train_recipes/slime_recipe/recipe.py)

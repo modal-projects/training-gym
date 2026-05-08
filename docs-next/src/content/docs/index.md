@@ -1,7 +1,7 @@
 ---
 title: Training Gym SDK
 description: Reusable building blocks and runnable examples for distributed training on Modal.
-editUrl: https://github.com/modal-projects/training-gym/edit/main/README.md
+editUrl: https://github.com/modal-projects/training-gym/edit/joy/update-ui-and-sdk-ux/README.md
 ---
 
 :::caution[Important]
@@ -39,7 +39,7 @@ Every generated tutorial notebook has this line as its first code cell.
 
 The current end-to-end tutorial is notebook-first:
 
-- [`tutorials/rl/000_rl_basics/000_rl_basics.ipynb`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb)
+- [`tutorials/rl/000_rl_basics/000_rl_basics.ipynb`](https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/000_rl_basics/000_rl_basics.ipynb)
   walks through serving `Qwen3_4B`, evaluating it, training it with
   `SlimeRecipe`, and comparing the result.
 
@@ -90,7 +90,7 @@ frontend from a Modal web endpoint.
 
 ## License
 
-[MIT](https://github.com/modal-projects/training-gym/blob/main/LICENSE).
+[MIT](https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/LICENSE).
 
 ---
 
@@ -153,4 +153,4 @@ schema.
 
 ## Agent guide
 
-- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/main/skills/agent-modal-training.md)
+- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/skills/agent-modal-training.md)
