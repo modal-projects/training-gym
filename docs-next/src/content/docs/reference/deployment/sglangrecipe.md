@@ -3,8 +3,6 @@ title: SglangRecipe
 description: API reference for SglangRecipe
 ---
 
-# SglangRecipe
-
 ```python
 from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 ```

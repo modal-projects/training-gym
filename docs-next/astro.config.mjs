@@ -76,9 +76,7 @@ export default defineConfig({
             { label: 'Overview', link: '/tutorials/' },
             {
               label: 'Reinforcement Learning',
-              items: [
-                { label: 'RL Basics', link: '/tutorials/rl/000_rl_basics/' },
-              ],
+              autogenerate: { directory: 'tutorials/rl' },
             },
           ],
         },

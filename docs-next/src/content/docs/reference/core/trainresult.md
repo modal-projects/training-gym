@@ -3,8 +3,6 @@ title: TrainResult
 description: API reference for TrainResult
 ---
 
-# TrainResult
-
 ```python
 from modal_training_gym.common.train_result import TrainResult
 ```

@@ -3,8 +3,6 @@ title: ModelArchitecture
 description: API reference for ModelArchitecture
 ---
 
-# ModelArchitecture
-
 ```python
 from modal_training_gym.common.models.base import ModelArchitecture
 ```
@@ -38,6 +36,7 @@ Transformer architecture parameters for a specific model.
 | `swiglu` | `bool` | `True` | Use SwiGLU activation in FFN. Default `True`. |
 | `disable_bias_linear` | `bool` | `True` | Disable bias in linear layers. Default `True`. |
 | `qk_layernorm` | `bool` | `True` | Apply layer norm to query and key projections. Default `True`. |
+| `untie_embeddings_and_output_weights` | `bool` | `False` | Use separate output projection weights instead of tying to token embeddings. Default `False`. |
 
 ## Position Encoding
 

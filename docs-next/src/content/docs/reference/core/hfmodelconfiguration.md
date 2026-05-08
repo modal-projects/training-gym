@@ -3,8 +3,6 @@ title: HFModelConfiguration
 description: API reference for HFModelConfiguration
 ---
 
-# HFModelConfiguration
-
 ```python
 from modal_training_gym.common.models.base import HFModelConfiguration
 ```

@@ -3,8 +3,6 @@ title: ModelDeployment
 description: API reference for ModelDeployment
 ---
 
-# ModelDeployment
-
 ```python
 from modal_training_gym.common.deployment import ModelDeployment
 ```
@@ -27,6 +25,7 @@ ModelDeployment(**data)
 | `deployment_id` | `str` |  |  |
 | `deployment_config` | `DeploymentConfig` |  |  |
 | `modal_app_id` | `str` |  |  |
+| `modal_app_url` | `str` |  |  |
 | `url` | `str` |  |  |
 
 ## Methods
@@ -41,7 +40,7 @@ ModelDeployment(**data)
 
 ## Related Tutorials
 
-- [Competitive programming RL with Harbor USACO and sandboxed verification](/tutorials/rl/001_code_golf_sandboxes/)
-- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn_number_guessing/)
+- [Code RL with Harbor hello-world and sandboxed verification](/tutorials/rl/001_sandboxes/)
+- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn/)
 
 **Source:** [`modal_training_gym/common/deployment.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/deployment.py)

@@ -27,12 +27,12 @@ from modal_training_gym import (
     EvalConfig,
     EvalRowResult,
     ModelDeployment,
-    Qwen3_0_6B,
+    Qwen3_4B,
     SlimeRecipe,
     TrainConfig,
     WandbConfig,
+    list_checkpoints,
 )
-from modal_training_gym.common.checkpoint import list_checkpoints
 ```
 
 ## Build a deterministic guessing dataset
@@ -334,7 +334,7 @@ def summarize_eval(eval_result) -> dict:
 ## Serve and evaluate the base model
 
 ```python
-base_deployment = DeploymentConfig(model=Qwen3_0_6B()).serve()
+base_deployment = DeploymentConfig(model=Qwen3_4B()).serve()
 print(f"Base model URL: {base_deployment.url}")
 eval_config = EvalConfig(
     dataset=eval_dataset,
@@ -351,22 +351,30 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 
 ```python
 training_run = TrainConfig(
-    model=Qwen3_0_6B(),
+    model=Qwen3_4B(),
     dataset=train_dataset,
     recipe=SlimeRecipe(
-        wandb=WandbConfig(project="gym-tutorial", group="qwen3-0-6b-guessing-multiturn"),
+        wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-guessing-multiturn"),
         custom_generate_function=number_guess_generate,
         custom_rm_function=number_guess_rm,
-        custom_config_path={
+        extra_config={
             "max_turns": _MAX_TURNS,
             "log_multi_turn": True,
         },
-        num_rollout=10,
-        rollout_batch_size=2,
+
+        gpu_type="H100",
+        colocate=True,
+        tensor_model_parallel_size=1,
+        sequence_parallel=False,
+        rollout_num_gpus_per_engine=1,
+
+        num_rollout=20,
+        rollout_batch_size=8,
         n_samples_per_prompt=1,
         rollout_max_response_len=64,
-        global_batch_size=2,
-        eval_interval=0,
+        rollout_temperature=1.0,
+
+        global_batch_size=8,
         save_interval=10,
         apply_chat_template_kwargs='{"enable_thinking": false}',
         image_overlay=lambda image: image.run_commands(
@@ -384,10 +392,10 @@ print(f"Training run id: {train_result.training_run_id}")
 ```python
 checkpoint = list_checkpoints(train_result.training_run_id)[-1]
 trained_deployment = DeploymentConfig(
-    model=Qwen3_0_6B(),
+    model=Qwen3_4B(),
     checkpoint=checkpoint,
-    app_name="qwen3-0-6b-guessing-multiturn-serve",
-    served_model_name="qwen3-0-6b-guessing-multiturn",
+    app_name="qwen3-4b-guessing-multiturn-serve",
+    served_model_name="qwen3-4b-guessing-multiturn",
 ).serve()
 print(f"Trained model URL: {trained_deployment.url}")
 
@@ -410,10 +418,10 @@ print(f"Base mean turns:      {base_summary['mean_turns']:.2f}")
 - [`EvalConfig`](/reference/evaluation/evalconfig/)
 - [`EvalRowResult`](/reference/evaluation/evalrowresult/)
 - [`ModelDeployment`](/reference/deployment/modeldeployment/)
-- [`Qwen3_0_6B`](/reference/models/qwen3_0_6b/)
+- [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`SlimeRecipe`](/reference/training/slimerecipe/)
 - [`TrainConfig`](/reference/training/trainconfig/)
 - [`WandbConfig`](/reference/core/wandbconfig/)
 
-**Source:** [`tutorials/rl/002_multiturn_number_guessing/002_multiturn_number_guessing.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn_number_guessing/002_multiturn_number_guessing.py)
- | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn_number_guessing/002_multiturn_number_guessing.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>
+**Source:** [`tutorials/rl/002_multiturn/002_multiturn.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.py)
+ | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

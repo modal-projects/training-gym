@@ -3,8 +3,6 @@ title: VllmRecipe
 description: API reference for VllmRecipe
 ---
 
-# VllmRecipe
-
 ```python
 from modal_training_gym.deploy_recipes.vllm_recipe import VllmRecipe
 ```

@@ -3,8 +3,6 @@ title: TrainConfig
 description: API reference for TrainConfig
 ---
 
-# TrainConfig
-
 ```python
 from modal_training_gym.common.train import TrainConfig
 ```
@@ -22,14 +20,14 @@ Compose dataset, model, and recipe into one training entrypoint.
 
 ## Methods
 
-### `train(self, run_id: str | None = None) -> modal_training_gym.common.train_result.TrainResult`
+### `train(self) -> modal_training_gym.common.train_result.TrainResult`
 
 Build the app, run training, and return the TrainResult.
 
 ## Related Tutorials
 
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
-- [Competitive programming RL with Harbor USACO and sandboxed verification](/tutorials/rl/001_code_golf_sandboxes/)
-- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn_number_guessing/)
+- [Code RL with Harbor hello-world and sandboxed verification](/tutorials/rl/001_sandboxes/)
+- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn/)
 
 **Source:** [`modal_training_gym/common/train.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/train.py)

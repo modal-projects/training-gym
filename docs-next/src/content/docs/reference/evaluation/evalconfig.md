@@ -3,8 +3,6 @@ title: EvalConfig
 description: API reference for EvalConfig
 ---
 
-# EvalConfig
-
 ```python
 from modal_training_gym.common.eval import EvalConfig
 ```
@@ -19,7 +17,7 @@ Evaluate a deployed model on a dataset config.
 | `eval_fn` | `EvalFn | None` | `None` |  |
 | `eval_response_fn` | `EvalResponseFn | None` | `None` |  |
 | `prompt_column` | `str | None` | `None` |  |
-| `eval_config_id` | `str` | `"eval-config-2a9bdd23a19e"` |  |
+| `eval_config_id` | `str | None` | `None` |  |
 | `generate_kwargs` | `dict[str, Any]` | `{}` |  |
 
 ## Methods
@@ -35,7 +33,7 @@ Evaluate a deployed model on a dataset config.
 ## Related Tutorials
 
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
-- [Competitive programming RL with Harbor USACO and sandboxed verification](/tutorials/rl/001_code_golf_sandboxes/)
-- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn_number_guessing/)
+- [Code RL with Harbor hello-world and sandboxed verification](/tutorials/rl/001_sandboxes/)
+- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn/)
 
 **Source:** [`modal_training_gym/common/eval.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/eval.py)

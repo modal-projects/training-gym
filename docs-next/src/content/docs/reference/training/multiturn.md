@@ -3,8 +3,6 @@ title: MultiTurn
 description: API reference for MultiTurn
 ---
 
-# MultiTurn
-
 ```python
 from modal_training_gym.train_recipes.slime_recipe.blocks import MultiTurn
 ```

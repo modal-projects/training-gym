@@ -63,9 +63,8 @@ External resources:
 
 ## Observability Dashboard
 
-Training Gym ships an observability dashboard that shows all your
-training runs, their status, and W&B metrics (inline sparklines) —
-all in one place.
+Training Gym ships an observability dashboard that tracks training
+runs, deployments, and eval results in one place.
 
 Deploy your own instance:
 
@@ -75,12 +74,11 @@ uv run modal deploy dashboards/app.py
 
 Modal will print the dashboard URL. The dashboard:
 
-- **Auto-refreshes** every 5 minutes via a cron job that scans your Modal apps for training runs
-- **Links to W&B** — each run shows a direct link to its Weights & Biases project page
-- **Inline metrics** — expand any run to see training loss/reward sparklines pulled from W&B
+- **Live data** — training runs, deployments, and evals are recorded to a shared metadata volume as they happen; the dashboard reads on demand
+- **Three views** — Training, Deployments, and Evals pages with status tracking and Modal app links
+- **Links to Modal** — each run links to its Modal app dashboard for logs and GPU metrics
 
-The dashboard matches the docs site color scheme and serves a Svelte
-frontend from a Modal web endpoint.
+The dashboard is a Svelte SPA served from a Modal ASGI endpoint.
 
 ## License
 

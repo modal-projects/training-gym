@@ -3,8 +3,6 @@ title: ModelConfig
 description: API reference for ModelConfig
 ---
 
-# ModelConfig
-
 ```python
 from modal_training_gym.common.models.base import ModelConfig
 ```

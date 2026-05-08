@@ -101,6 +101,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Qwen3-0.6B",
     },
     {
+        "class_name": "Qwen3_1_7B",
+        "module": "modal_training_gym.common.models.qwen3_1_7b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3-1.7B",
+    },
+    {
         "class_name": "Qwen3_4B",
         "module": "modal_training_gym.common.models.qwen3_4b",
         "group": "models",
@@ -108,11 +115,32 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Qwen3-4B",
     },
     {
+        "class_name": "Qwen3_8B",
+        "module": "modal_training_gym.common.models.qwen3_8b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3-8B",
+    },
+    {
+        "class_name": "Qwen3_14B",
+        "module": "modal_training_gym.common.models.qwen3_14b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3-14B",
+    },
+    {
         "class_name": "Qwen3_30B",
         "module": "modal_training_gym.common.models.qwen3_30b",
         "group": "models",
         "class_type": "config_data",
         "sidebar_label": "Qwen3-30B-A3B",
+    },
+    {
+        "class_name": "Qwen3_32B",
+        "module": "modal_training_gym.common.models.qwen3_32b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3-32B",
     },
     # --- Training ---
     {

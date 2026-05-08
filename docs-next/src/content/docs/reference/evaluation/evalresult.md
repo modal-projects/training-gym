@@ -3,8 +3,6 @@ title: EvalResult
 description: API reference for EvalResult
 ---
 
-# EvalResult
-
 ```python
 from modal_training_gym.common.eval import EvalResult
 ```
@@ -26,6 +24,7 @@ EvalResult(**data)
 |-----------|------|---------|-------------|
 | `eval_id` | `str` |  |  |
 | `eval_config_id` | `str` |  |  |
+| `deployment_id` | `str` |  |  |
 | `created_at` | `datetime.datetime` |  |  |
 | `rows` | `list[EvalRowResult]` |  |  |
 
