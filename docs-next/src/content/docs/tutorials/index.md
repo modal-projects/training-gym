@@ -1,7 +1,7 @@
 ---
 title: Tutorials
 description: Runnable Modal training examples across intro, RL, SFT, and infrastructure-focused walkthroughs.
-editUrl: https://github.com/modal-projects/training-gym/edit/joy/update-ui-and-sdk-ux/tutorials/README.md
+editUrl: https://github.com/modal-projects/training-gym/edit/joy/update-documentation/tutorials/README.md
 ---
 
 Every tutorial below has a one-click **Launch in Modal Notebook** button.
@@ -26,9 +26,9 @@ context) and assume familiarity with the underlying framework.
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`001_sandboxes`](https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/001_sandboxes/001_sandboxes.ipynb) | Code RL with Harbor hello-world and sandboxed verification | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/001_sandboxes/001_sandboxes.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`002_multiturn`](https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/002_multiturn/002_multiturn.ipynb) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/002_multiturn/002_multiturn.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/joy/update-documentation/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`001_sandboxes`](https://github.com/modal-projects/training-gym/blob/joy/update-documentation/tutorials/rl/001_sandboxes/001_sandboxes.ipynb) | Code RL with Harbor hello-world and sandboxed verification | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/001_sandboxes/001_sandboxes.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`002_multiturn`](https://github.com/modal-projects/training-gym/blob/joy/update-documentation/tutorials/rl/002_multiturn/002_multiturn.ipynb) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/002_multiturn/002_multiturn.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
 ## Running from the CLI instead
@@ -40,7 +40,7 @@ Use the notebook as the canonical walkthrough.
 ## Authoring a new tutorial
 
 Tutorials are generated from a Python source file under
-[`tutorial_generator/`](https://github.com/modal-projects/training-gym/tree/joy/update-ui-and-sdk-ux/tutorials/tutorial_generator). The generator AST-walks each
+[`tutorial_generator/`](https://github.com/modal-projects/training-gym/tree/joy/update-documentation/tutorials/tutorial_generator). The generator AST-walks each
 source and emits `tutorials/<bucket>/<name>/<name>.py` + `tutorials/<bucket>/<name>/<name>.ipynb`.
 **Edit the source, not the generated files** — the pre-commit hook
 (`.pre-commit-config.yaml`) regenerates on commit, so hand-edits to the
@@ -95,5 +95,5 @@ are maps, the `.ipynb` is the walkthrough. Aim for roughly:
   cell-by-cell interactive invocation (`@notebook_only`).
 - Optional: a "Serve / evaluate / next step" tail, where relevant.
 
-[`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) is the current
+[`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/joy/update-documentation/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) is the current
 reference example for tutorial narration depth.

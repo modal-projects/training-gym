@@ -1,7 +1,8 @@
-"""Training-gym dashboard: SPA host + data API.
+"""Training-gym dashboard: Svelte SPA + JSON data APIs.
 
 The Svelte frontend is built at image-build time. Data endpoints read
-directly from the shared metadata volume via ``modal_training_gym.utils.metadata``.
+summary JSON from the shared metadata volume (``training-gym-metadata``)
+on demand — no cron job or polling.
 
 Deploy with:
 

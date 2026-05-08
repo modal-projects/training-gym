@@ -99,7 +99,7 @@ Each source declares `TUTORIAL_METADATA` dict with `framework`, `cluster_shape`,
 
 ### Dashboard
 
-`dashboards/app.py` is a Modal app with a Svelte frontend. A cron job (`refresh_training_metadata`) runs every 5 minutes, fetches all Modal apps tagged `_modal_job_type=training`, and writes metadata to a `modal.Dict`. The ASGI endpoint serves the pre-built frontend + JSON APIs for runs and W&B metrics.
+`dashboards/app.py` is a Modal app with a Svelte frontend (built at image-build time). Training runs, deployments, and evals write metadata to a shared Modal Volume (`training-gym-metadata`) via `modal_training_gym.utils.metadata`. The ASGI endpoint serves the pre-built SPA + JSON APIs (`/api/runs`, `/api/train-results`, `/api/evals`, `/api/deployments`) that read summary JSON from the volume on demand.
 
 ## Working rules
 
