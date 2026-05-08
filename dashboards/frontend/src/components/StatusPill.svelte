@@ -50,7 +50,7 @@
   .status-pill {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     gap: 0.35rem;
     white-space: nowrap;
     border-radius: 9999px;
@@ -68,6 +68,7 @@
     width: 24px;
     padding-inline: 0;
     gap: 0;
+    justify-content: center;
   }
 
   .status-running {

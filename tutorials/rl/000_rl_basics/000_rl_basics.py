@@ -36,8 +36,8 @@ from modal_training_gym import (
     SlimeRecipe,
     TrainConfig,
     WandbConfig,
+    list_checkpoints,
 )
-from modal_training_gym.common.checkpoint import list_checkpoints
 
 # ## Serve the base model
 #
@@ -146,10 +146,19 @@ training_run = TrainConfig(
     dataset=train_dataset,
     recipe=SlimeRecipe(
         wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
-
         custom_rm_function=haiku_rm,
 
+        gpu_type="H100",
+        colocate=True,
+        tensor_model_parallel_size=1,
+        sequence_parallel=False,
+        rollout_num_gpus_per_engine=1,
+
         num_rollout=10,
+        rollout_batch_size=16,
+        rollout_max_response_len=4096,
+        rollout_temperature=1.0,
+
         save_interval=5,
         apply_chat_template_kwargs='{"enable_thinking": false}',
 

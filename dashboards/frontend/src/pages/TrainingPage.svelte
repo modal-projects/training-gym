@@ -140,7 +140,7 @@
       <div class="empty">No runs match the current filters.</div>
     {:else}
       <div class="table-wrap">
-        <MinimalTable class="runs-table">
+        <MinimalTable class="runs-table training-runs-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -152,12 +152,17 @@
             </tr>
           </thead>
           <tbody>
-            {#each filteredRuns as run (run.run_id)}
+            {#each filteredRuns as run, runIndex (`${run.run_id || "run"}-${run.created_at || 0}-${runIndex}`)}
+              {@const runName = run.run_id || "—"}
               {@const status = getStatus(run)}
               <tr class:row-selected={selectedRunId === run.run_id}>
                 <td class="run-cell">
-                  <button class="cell-open-button" onclick={() => selectRun(run.run_id)}>
-                    <div class="run-name">{run.run_id}</div>
+                  <button
+                    class="cell-open-button"
+                    title={runName}
+                    onclick={() => selectRun(run.run_id)}
+                  >
+                    <div class="run-name">{runName}</div>
                   </button>
                 </td>
                 <td>
@@ -216,7 +221,7 @@
       <div class="drawer-header">
         <div>
           <div class="drawer-eyebrow">Training run</div>
-          <h2 class="drawer-run-id">{selectedRun.run_id}</h2>
+          <h2 class="drawer-run-id" title={selectedRun.run_id}>{selectedRun.run_id}</h2>
         </div>
         <div class="drawer-actions">
           {#if selectedRun.modal_app_url}
@@ -318,7 +323,7 @@
     display: flex;
     flex-direction: column;
     gap: 24px;
-    padding: 24px;
+    padding: 0;
   }
 
   .filters-row {
@@ -336,6 +341,10 @@
   :global(table.runs-table) {
     width: 100%;
     min-width: 860px;
+  }
+
+  :global(table.training-runs-table) {
+    table-layout: fixed;
   }
 
   :global(table.runs-table tr.row-selected td) {
@@ -362,10 +371,12 @@
   }
 
   .run-name {
+    display: block;
     color: var(--text-bright);
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .run-cell {
@@ -448,6 +459,7 @@
     font-size: 1.1rem;
     font-weight: 500;
     font-family: var(--font-mono);
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }

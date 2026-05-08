@@ -35,8 +35,8 @@ from modal_training_gym import (
     SlimeRecipe,
     TrainConfig,
     WandbConfig,
+    list_checkpoints,
 )
-from modal_training_gym.common.checkpoint import list_checkpoints
 
 # ## Build a deterministic guessing dataset
 #
@@ -351,16 +351,24 @@ training_run = TrainConfig(
         wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-guessing-multiturn"),
         custom_generate_function=number_guess_generate,
         custom_rm_function=number_guess_rm,
-        custom_config_path={
+        extra_config={
             "max_turns": _MAX_TURNS,
             "log_multi_turn": True,
         },
+
+        gpu_type="H100",
+        colocate=True,
+        tensor_model_parallel_size=1,
+        sequence_parallel=False,
+        rollout_num_gpus_per_engine=1,
+
         num_rollout=20,
         rollout_batch_size=8,
         n_samples_per_prompt=1,
         rollout_max_response_len=64,
+        rollout_temperature=1.0,
+
         global_batch_size=8,
-        eval_interval=0,
         save_interval=10,
         apply_chat_template_kwargs='{"enable_thinking": false}',
         image_overlay=lambda image: image.run_commands(

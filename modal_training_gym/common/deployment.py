@@ -72,7 +72,17 @@ class DeploymentConfig:
                 "Set model_path or model_name."
             )
         return model_path
+    
+    def _new_deployment_id(self) -> str:
+        model_name = self.served_model_name or self.model.model_name or self.model.model_path
+        if self.checkpoint is not None:
+            model_name = f"{model_name}-{self.checkpoint.name}"
+        
+        recipe_name = self.recipe.recipe_type.value if self.recipe is not None else "sglang"
+        
+        return f"{model_name}.{recipe_name}.{uuid.uuid4().hex[:4]}"
 
+    # TODO: add _merge_recipe for deployment configs
     def serve(self) -> "ModelDeployment":
         """Build, deploy, and return a ``ModelDeployment`` handle."""
 
@@ -161,6 +171,7 @@ class DeploymentConfig:
                 f"Deployed {self.app_name!r} but no Modal app id was returned."
             )
         deployment = ModelDeployment(
+            deployment_id=self._new_deployment_id(),
             deployment_config=self,
             modal_app_id=modal_app_id,
             modal_app_url=modal_app_url or modal_app_dashboard_url(modal_app_id),
@@ -183,14 +194,15 @@ class ModelDeployment(BaseModel):
     URL, Modal app id, and convenience methods for generation and evaluation.
     """
 
-    deployment_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-
+    deployment_id: str
+    
     model_config = ConfigDict(arbitrary_types_allowed=True)
     deployment_config: DeploymentConfig
 
     modal_app_id: str = ""
     modal_app_url: str = ""
     url: str
+
 
     @field_validator("deployment_config", mode="before")
     @classmethod

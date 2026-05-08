@@ -22,7 +22,6 @@ TOOLS_REMOTE_PATH = "/opt/training-gym/tools"
 TOOLS_LOCAL_PATH = Path(__file__).resolve().parent.parent / "tools"
 
 
-# TODO: use this
 def mount_tools_dir(image: "Image") -> "Image":
     """Attach `modal_training_gym/tools/` to a Modal image at `TOOLS_REMOTE_PATH`.
 

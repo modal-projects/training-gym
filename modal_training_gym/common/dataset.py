@@ -10,7 +10,6 @@ volume.
 
 from __future__ import annotations
 
-from dataclasses import field
 from enum import Enum
 from typing import Any
 import json
@@ -35,14 +34,20 @@ class DatasetConfig:
     """
 
     _type: DatasetType = DatasetType.DEFAULT
-    dataset_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    dataset_id: str = ""
     input_key: str = ""
     label_key: str = ""
     apply_chat_template: bool = True
 
     def __init__(self, **kwargs: Any) -> None:
+        if not self.dataset_id:
+            self.dataset_id = str(uuid.uuid4())
         for k, v in kwargs.items():
             setattr(self, k, v)
+    
+    @property
+    def name(self) -> str:
+        return self.dataset_id
 
     def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
         """Materialize training data to ``path`` (and eval splits to ``eval_paths``)."""
@@ -80,6 +85,10 @@ class HuggingFaceDataset(DatasetConfig):
             self.input_key = "messages"
         if "dataset_id" not in kwargs:
             self.dataset_id = f"{self.hf_repo}-{self.hf_split}-{uuid.uuid4()}"
+    
+    @property
+    def name(self) -> str:
+        return self.hf_repo
 
     def load(self) -> Any:
         from datasets import load_dataset
@@ -174,6 +183,10 @@ class HarborDataset(DatasetConfig):
             else:
                 slug = "harbor"
             self.dataset_id = f"{slug}-{uuid.uuid4()}"
+    
+    @property
+    def name(self) -> str:
+        return self.dataset_name
 
     def _harbor_dataset_ref(self) -> str:
         if "@" in self.dataset_name:

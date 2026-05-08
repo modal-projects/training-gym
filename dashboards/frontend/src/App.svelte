@@ -242,13 +242,19 @@
 
   function load() {
     void loadRuns();
-    if (activePage === "evals") void loadEvals();
+    if (activePage === "evals") {
+      void loadEvals();
+      void loadDeployments();
+    }
     if (activePage === "deployments") void loadDeployments();
   }
 
   $effect(() => {
     if (activePage === "evals" && !hasLoadedEvals) {
       void loadEvals();
+    }
+    if (activePage === "evals" && !hasLoadedDeployments) {
+      void loadDeployments();
     }
     if (activePage === "deployments" && !hasLoadedEvals) {
       void loadEvals();
@@ -327,6 +333,21 @@
     return rows.reduce((sum, row) => sum + (row.score || 0), 0) / rows.length;
   }
 
+  function evalCreatedAt(ev) {
+    const raw = ev?.created_at;
+    if (raw && typeof raw === "object" && "value" in raw) {
+      return evalCreatedAt({ created_at: raw.value });
+    }
+    if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
+    const text = safeText(raw).trim();
+    if (!text) return 0;
+    const numeric = Number(text);
+    if (Number.isFinite(numeric)) return numeric;
+    const epochMs = Date.parse(text);
+    if (Number.isFinite(epochMs)) return Math.floor(epochMs / 1000);
+    return 0;
+  }
+
   function getEvalStatus(ev) {
     const rawStatus = safeText(ev.status).toLowerCase();
     if (
@@ -372,29 +393,58 @@
     return JSON.stringify(normalizeConfigValue(ev.config || {}));
   }
 
-  function evalConfigMeta(config) {
+  function evalConfigMeta(config, ev = null) {
+    const evalConfig = ev?.eval_config || {};
+    const sourceConfig = ev?.config || {};
     const dataset =
       safeText(config?.dataset?.name) ||
       safeText(config?.dataset?.hf_repo) ||
       safeText(config?.dataset?.prompt_data) ||
+      safeText(config?.dataset_name) ||
+      safeText(sourceConfig?.dataset?.name) ||
+      safeText(sourceConfig?.dataset?.hf_repo) ||
+      safeText(sourceConfig?.dataset?.prompt_data) ||
+      safeText(sourceConfig?.dataset_name) ||
+      safeText(evalConfig?.dataset_name) ||
+      safeText(ev?.dataset_name) ||
       "—";
     const model =
       safeText(config?.deployment?.model_name) ||
       safeText(config?.deployment?.served_model_name) ||
       safeText(config?.model?.model_name) ||
+      safeText(sourceConfig?.deployment?.model_name) ||
+      safeText(sourceConfig?.deployment?.served_model_name) ||
+      safeText(sourceConfig?.model?.model_name) ||
+      safeText(evalConfig?.deployment?.model_name) ||
+      safeText(evalConfig?.deployment?.served_model_name) ||
+      safeText(evalConfig?.model?.model_name) ||
       "—";
-    const split = safeText(config?.dataset?.split);
+    const split =
+      safeText(config?.dataset?.split) ||
+      safeText(sourceConfig?.dataset?.split) ||
+      safeText(evalConfig?.dataset?.split);
     const judge =
       safeText(config?.judge?.model_name) ||
       safeText(config?.judge_model_name) ||
+      safeText(sourceConfig?.judge?.model_name) ||
+      safeText(sourceConfig?.judge_model_name) ||
+      safeText(evalConfig?.judge?.model_name) ||
+      safeText(evalConfig?.judge_model_name) ||
       "";
     const evalFn =
-      safeText(config?.eval_fn_name) || safeText(config?.grader_name) || "";
+      safeText(config?.eval_fn_name) ||
+      safeText(config?.grader_name) ||
+      safeText(sourceConfig?.eval_fn_name) ||
+      safeText(sourceConfig?.grader_name) ||
+      safeText(evalConfig?.eval_fn_name) ||
+      safeText(evalConfig?.grader_name) ||
+      safeText(ev?.eval_fn_name) ||
+      "";
     return { dataset, model, split, judge, evalFn };
   }
 
   let sortedEvals = $derived(
-    [...allEvals].sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
+    [...allEvals].sort((a, b) => evalCreatedAt(b) - evalCreatedAt(a)),
   );
 
   let evalConfigGroups = $derived.by(() => {
@@ -411,6 +461,7 @@
         });
       }
       const group = groups.get(key);
+      const createdAt = evalCreatedAt(ev);
       if (
         (!group.config || Object.keys(group.config).length === 0) &&
         ev.config &&
@@ -425,15 +476,16 @@
         avgScore,
         totalRows,
         status: getEvalStatus(ev),
+        createdAt,
       });
-      group.latestCreatedAt = Math.max(group.latestCreatedAt, ev.created_at || 0);
+      group.latestCreatedAt = Math.max(group.latestCreatedAt, createdAt);
     }
 
     return [...groups.values()]
       .map((group) => {
         const sortedRuns = [...group.runs].sort(
           (a, b) =>
-            (b.eval.created_at || 0) - (a.eval.created_at || 0) ||
+            b.createdAt - a.createdAt ||
             b.avgScore - a.avgScore,
         );
         const totalEvals = sortedRuns.length;
@@ -464,6 +516,7 @@
             .map(
               (run) =>
                 safeText(
+                  run.eval.deployment_id ||
                   run.eval.config?.deployment?.url ||
                     run.eval.config?.deployment?.model_name ||
                     run.eval.config?.deployment?.served_model_name,
@@ -473,7 +526,7 @@
         ).size;
         return {
           ...group,
-          meta: evalConfigMeta(group.config),
+          meta: evalConfigMeta(group.config, sortedRuns[0]?.eval),
           bestScore,
           totalEvals,
           avgAccuracy,
@@ -613,6 +666,7 @@
     {:else if activePage === "evals"}
       <EvalsPage
         {allEvals}
+        {allDeployments}
         {evalCompletedTotal}
         {evalPendingTotal}
         {evalFailedTotal}

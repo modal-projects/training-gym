@@ -6,6 +6,7 @@
 
   let {
     allEvals,
+    allDeployments,
     evalCompletedTotal,
     evalPendingTotal,
     evalFailedTotal,
@@ -17,6 +18,8 @@
   let search = $state("");
   let statusFilter = $state("all");
   let statusMenuOpen = $state(false);
+  let datasetFilter = $state("all");
+  let datasetMenuOpen = $state(false);
   let expandedConfigIds = $state(new Set());
   let expandedInitialized = $state(false);
 
@@ -29,29 +32,85 @@
     return safeText(value).toLowerCase().includes(query);
   }
 
+  function nonPlaceholderText(value) {
+    const text = safeText(value).trim();
+    if (!text || text === "—") return "";
+    return text;
+  }
+
+  function evalConfigIdFallbackMeta(evalConfigId) {
+    const raw = safeText(evalConfigId).trim();
+    if (!raw) return { dataset: "", evalFn: "" };
+    const parts = raw.split(".");
+    if (parts.length < 3) return { dataset: "", evalFn: "" };
+    const [prefix, dataset, evalFn] = parts;
+    if (prefix !== "EvalConfig") return { dataset: "", evalFn: "" };
+    return { dataset: dataset || "", evalFn: evalFn || "" };
+  }
+
   function groupSubtitle(group) {
-    const parts = [group.evalConfigId];
-    if (group.meta.judge || group.meta.evalFn) {
-      parts.push(group.meta.judge || group.meta.evalFn);
-    }
+    const fallback = evalConfigIdFallbackMeta(group.evalConfigId);
+    const parts = [];
+    const dataset = nonPlaceholderText(group.meta.dataset) || fallback.dataset;
+    const fnName =
+      nonPlaceholderText(group.meta.evalFn || group.meta.judge) || fallback.evalFn;
+    if (dataset) parts.push(dataset);
+    if (fnName) parts.push(fnName);
     parts.push(`${group.deploymentCount} deployment${group.deploymentCount === 1 ? "" : "s"}`);
     return parts.join(" • ");
   }
 
+  function groupDataset(group) {
+    const fallback = evalConfigIdFallbackMeta(group.evalConfigId);
+    return nonPlaceholderText(group.meta.dataset) || fallback.dataset || "Unknown";
+  }
+
+  function deploymentIdValue(deployment) {
+    return safeText(deployment?.deployment_id || deployment?.id).trim();
+  }
+
+  function deploymentModelValue(deployment) {
+    return safeText(
+      deployment?.model_name ||
+        deployment?.deployment_config?.model?.model_name ||
+        deployment?.served_model_name ||
+        deployment?.deployment_config?.served_model_name,
+    ).trim();
+  }
+
+  let deploymentsById = $derived.by(() => {
+    const byId = new Map();
+    for (const deployment of allDeployments || []) {
+      const deploymentId = deploymentIdValue(deployment);
+      if (deploymentId) byId.set(deploymentId, deployment);
+    }
+    return byId;
+  });
+
   function evalBaseModel(run, group) {
     const config = run.eval.config || {};
-    return (
-      config.deployment?.served_model_name ||
-      config.deployment?.model_name ||
+    const evalDeploymentId = safeText(
+      run.eval.deployment_id || config.deployment?.deployment_id,
+    ).trim();
+    if (evalDeploymentId) {
+      const deployment = deploymentsById.get(evalDeploymentId);
+      const deploymentModel = deploymentModelValue(deployment);
+      if (deploymentModel) return deploymentModel;
+    }
+    const configModel = safeText(
       config.model?.model_name ||
-      group.meta.model ||
-      "—"
-    );
+        config.deployment?.model_name ||
+        config.deployment?.served_model_name ||
+        group.meta.model,
+    ).trim();
+    if (configModel) return configModel;
+    return "[unknown Base Model]";
   }
 
   function evalDeploymentName(run) {
     const config = run.eval.config || {};
     const deployment = config.deployment || {};
+    if (run.eval.deployment_id) return run.eval.deployment_id;
     if (deployment.app_name) return deployment.app_name;
     if (deployment.deployment_name) return deployment.deployment_name;
     if (deployment.name) return deployment.name;
@@ -64,7 +123,7 @@
         return value;
       }
     }
-    return "—";
+    return safeText(run.eval.eval_id).trim() || "—";
   }
 
   function toggleGroup(evalConfigId) {
@@ -80,10 +139,28 @@
     expandedInitialized = true;
   });
 
+  let datasetOptions = $derived.by(() =>
+    [...new Set(evalConfigGroups.map((group) => groupDataset(group)))].sort((a, b) =>
+      a.localeCompare(b),
+    ),
+  );
+
+  let datasetCounts = $derived.by(
+    () =>
+      evalConfigGroups.reduce((acc, group) => {
+        const dataset = groupDataset(group);
+        acc[dataset] = (acc[dataset] || 0) + group.runs.length;
+        return acc;
+      }, {}),
+  );
+
   let filteredGroups = $derived.by(() => {
     const query = search.trim().toLowerCase();
     return evalConfigGroups
       .map((group) => {
+        if (datasetFilter !== "all" && groupDataset(group) !== datasetFilter) {
+          return null;
+        }
         let runs = group.runs;
         if (statusFilter !== "all") {
           const wanted =
@@ -97,7 +174,7 @@
         if (query) {
           const groupMatches =
             includesText(group.evalConfigId, query) ||
-            includesText(group.meta.dataset, query) ||
+            includesText(groupDataset(group), query) ||
             includesText(group.meta.model, query) ||
             includesText(group.meta.judge, query) ||
             includesText(group.meta.evalFn, query);
@@ -121,9 +198,19 @@
       })
       .filter(Boolean);
   });
+
+  function switchDatasetFilter(dataset) {
+    datasetFilter = dataset;
+    datasetMenuOpen = false;
+  }
 </script>
 
-<svelte:window onclick={() => (statusMenuOpen = false)} />
+<svelte:window
+  onclick={() => {
+    statusMenuOpen = false;
+    datasetMenuOpen = false;
+  }}
+/>
 
 <section class="summary-row">
   <article class="summary-card">
@@ -160,6 +247,7 @@
         onclick={(event) => {
           event.stopPropagation();
           statusMenuOpen = !statusMenuOpen;
+          datasetMenuOpen = false;
         }}
       >
         <Filter size={12} />
@@ -190,6 +278,38 @@
         </div>
       {/if}
     </div>
+    <div class="menu-wrap">
+      <button
+        class="status-filter"
+        class:open={datasetMenuOpen}
+        onclick={(event) => {
+          event.stopPropagation();
+          datasetMenuOpen = !datasetMenuOpen;
+          statusMenuOpen = false;
+        }}
+      >
+        <Filter size={12} />
+        <span>Dataset</span>
+        <ChevronDown
+          size={12}
+          style={`transform: ${datasetMenuOpen ? "rotate(180deg)" : "rotate(0deg)"};`}
+        />
+      </button>
+      {#if datasetMenuOpen}
+        <div class="status-menu dataset-menu">
+          <button class="status-item" onclick={() => switchDatasetFilter("all")}>
+            <span class="dataset-item-label">All datasets</span>
+            <span class="status-count">{allEvals.length}</span>
+          </button>
+          {#each datasetOptions as dataset (dataset)}
+            <button class="status-item" onclick={() => switchDatasetFilter(dataset)}>
+              <span class="dataset-item-label">{dataset}</span>
+              <span class="status-count">{datasetCounts[dataset] || 0}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
   </div>
 
   <div class="runs-body">
@@ -197,7 +317,7 @@
       <div class="table-wrap">
         <MinimalTableSkeleton
           class="runs-table"
-          columns={["Base model", "Deployment name", "Status", "Average score", "Examples"]}
+          columns={["Name", "Base model", "Status", "Average score", "Examples"]}
           rows={6}
         />
       </div>
@@ -214,14 +334,14 @@
           <section class="eval-group">
             <button class="eval-group-header" onclick={() => toggleGroup(group.evalConfigId)}>
               <div class="eval-group-title-wrap">
-                <div class="eval-group-title">{group.meta.dataset || group.evalConfigId}</div>
+                <div class="eval-group-title">{group.evalConfigId || group.meta.dataset}</div>
                 <div class="eval-group-subtitle">{groupSubtitle(group)}</div>
               </div>
               <div class="eval-group-meta">
-                {#if group.meta.model}
+                {#if nonPlaceholderText(group.meta.model)}
                   <span class="group-meta-pill">{group.meta.model}</span>
                 {/if}
-                {#if group.meta.split}
+                {#if nonPlaceholderText(group.meta.split)}
                   <span class="group-meta-pill">split: {group.meta.split}</span>
                 {/if}
                 <span class="group-meta-pill">total evals: {group.totalEvals}</span>
@@ -235,21 +355,34 @@
 
             {#if expandedConfigIds.has(group.evalConfigId)}
               <div class="table-wrap">
-                <MinimalTable class="runs-table">
+                <MinimalTable class="runs-table evals-runs-table">
+                  <colgroup>
+                    <col class="col-name" />
+                    <col class="col-model" />
+                    <col class="col-status" />
+                    <col class="col-score" />
+                    <col class="col-examples" />
+                  </colgroup>
                   <thead>
                     <tr>
+                      <th>Name</th>
                       <th>Base model</th>
-                      <th>Deployment name</th>
                       <th>Status</th>
                       <th>Average score</th>
                       <th>Examples</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {#each group.visibleRuns as run (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}`)}
+                    {#each group.visibleRuns as run, runIndex (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}-${runIndex}`)}
+                      {@const deploymentName = evalDeploymentName(run)}
+                      {@const baseModel = evalBaseModel(run, group)}
                       <tr>
-                        <td>{evalBaseModel(run, group)}</td>
-                        <td class="mono">{evalDeploymentName(run)}</td>
+                        <td class="mono name-cell" title={deploymentName}>
+                          <span class="truncate-text">{deploymentName}</span>
+                        </td>
+                        <td class="base-model-cell" title={baseModel}>
+                          <span class="truncate-text">{baseModel}</span>
+                        </td>
                         <td>
                           <StatusPill status={run.status} />
                         </td>
@@ -382,6 +515,10 @@
     padding: 0.25rem;
   }
 
+  .dataset-menu {
+    width: min(320px, calc(100vw - 2rem));
+  }
+
   .status-item {
     width: 100%;
     border: 0;
@@ -406,6 +543,13 @@
   .status-count {
     color: var(--muted);
     font-size: 0.68rem;
+  }
+
+  .dataset-item-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .runs-body {
@@ -494,10 +638,52 @@
     min-width: 1080px;
   }
 
+  :global(table.evals-runs-table) {
+    table-layout: fixed;
+  }
+
+  :global(table.evals-runs-table col.col-name) {
+    width: 36%;
+  }
+
+  :global(table.evals-runs-table col.col-model) {
+    width: 24%;
+  }
+
+  :global(table.evals-runs-table col.col-status) {
+    width: 16%;
+  }
+
+  :global(table.evals-runs-table col.col-score) {
+    width: 14%;
+  }
+
+  :global(table.evals-runs-table col.col-examples) {
+    width: 10%;
+  }
+
   .mono {
     font-family: var(--font-mono);
     color: color-mix(in srgb, var(--accent) 78%, white);
     font-size: 0.72rem;
+  }
+
+  .name-cell .truncate-text {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .base-model-cell .truncate-text {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .eval-score {
