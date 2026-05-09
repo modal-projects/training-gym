@@ -1,27 +1,29 @@
 # Training Gym
 
-> [!IMPORTANT]
-> Modal's multi-node cluster training product is in early preview and not
-> generally accessible. Please [**contact us**](https://modal.com/slack)
-> for access.
-
 **[📖 Documentation](https://gym.modal.dev)** · **[Tutorials](https://gym.modal.dev/tutorials/)** · **[API Reference](https://gym.modal.dev/reference/)**
 
-Distributed training on [Modal](https://modal.com) without hand-rolling a
-launcher each time. Compose a `TrainConfig` or `DeploymentConfig` from
-shared model, dataset, and recipe objects, and training-gym handles the
-image, the cluster topology, the Ray/NCCL bring-up, volume mounts,
-checkpointing, and serving deployment.
+Modal Training Gym provides building blocks for you to compose distributed training runs on [Modal](https://modal.com)
+without handrolling a training launcher each time.
+
+Just pick a dataset, base model, and
+training framework of choice, and let training-gym handle the
+compute infrastructure, cluster topology, the Ray/NCCL bring-up, volume mounts,
+checkpointing, and serving deployment for training/eval/rollouts.
+
+## Usage
 
 Packaged as `modal-training-gym` — pip-install once, then import
-framework-specific launchers from your own scripts or notebooks. Every
-tutorial is a runnable `.py` file **and** a matching `.ipynb` with the same
+framework-specific launchers from your own scripts.
+
+To teach you how to use the gym, we created [tutorials](./tutorials/) for you.
+
+Every tutorial is a runnable `.py` file **and** a matching `.ipynb` with the same
 steps narrated cell-by-cell — the notebook is the place to read the
-walkthrough; this README is the map.
+walkthrough.
 
-## Install
+### Installation
 
-In a notebook or script:
+### Package Install
 
 ```python
 ! pip install -q git+https://github.com/modal-projects/training-gym.git@main
@@ -29,23 +31,34 @@ In a notebook or script:
 
 Every generated tutorial notebook has this line as its first code cell.
 
-## Quickstart
 
-The current end-to-end tutorial is notebook-first:
+Then, in a script, you can import `modal-training-gym` as follows to use our building blocks:
+```python
+from modal_training_gym import TrainConfig
+```
 
-- [`tutorials/rl/000_rl_basics/000_rl_basics.ipynb`](tutorials/rl/000_rl_basics/000_rl_basics.ipynb)
-  walks through serving `Qwen3_4B`, evaluating it, training it with
-  `SlimeRecipe`, and comparing the result.
+### Observability Dashboard
 
-The main public surfaces are:
+Training Gym ships an observability dashboard that tracks training
+runs, deployments, and eval results in one place.
 
-- `TrainConfig` combines `DatasetConfig`, `ModelConfig`, and a training
-  recipe such as `SlimeRecipe`.
-- `DeploymentConfig` combines a `ModelConfig` with a serving recipe such
-  as `SglangRecipe` or `VllmRecipe`.
-- Built-in model presets: `Qwen3_0_6B`, `Qwen3_4B`, `Qwen3_30B`.
+We recommend you deploy your own instance of our observability dashboard by running.
+```bash
+modal deploy dashboards/app.py
+```
+It will print out the corresponding URL that you can visit to look at your training run status
 
-See [`tutorials/README.md`](tutorials/README.md) for the current catalog.
+![Gym Observability Dashboard](./assets/observability_dashboard.png)
+
+### Note for multi-node
+
+Currently, all users can use the gym for single-node training.
+
+
+> [!IMPORTANT]
+> Modal’s training SDK requires multi-node clusters for larger models. Please [**contact us**](https://modal.com/slack)
+> for access.
+
 
 ## Documentation
 
@@ -55,30 +68,10 @@ Full docs are hosted at **[gym.modal.dev](https://gym.modal.dev)**:
 - [API Reference](https://gym.modal.dev/reference/) — every public class documented with types and defaults
 
 External resources:
-
-- [Multi-node training guide (Notion)](https://modal-com.notion.site/Multi-node-docs-1281e7f16949806f966adedfe8b2cb74?pvs=4)
-- [Multi-GPU Training on Modal](https://modal.com/docs/guide/gpu#multi-gpu-training)
 - [Using CUDA on Modal](https://modal.com/docs/guide/cuda)
 - [GPU Metrics](https://modal.com/docs/guide/gpu-metrics)
-
-## Observability Dashboard
-
-Training Gym ships an observability dashboard that tracks training
-runs, deployments, and eval results in one place.
-
-Deploy your own instance:
-
-```bash
-uv run modal deploy dashboards/app.py
-```
-
-Modal will print the dashboard URL. The dashboard:
-
-- **Live data** — training runs, deployments, and evals are recorded to a shared metadata volume as they happen; the dashboard reads on demand
-- **Three views** — Training, Deployments, and Evals pages with status tracking and Modal app links
-- **Links to Modal** — each run links to its Modal app dashboard for logs and GPU metrics
-
-The dashboard is a Svelte SPA served from a Modal ASGI endpoint.
+- [Multi-node clusters (Beta)](https://modal.com/docs/guide/multi-node-training)
+- [Multi-GPU Training on Modal](https://modal.com/docs/guide/gpu#multi-gpu-training)
 
 ## License
 

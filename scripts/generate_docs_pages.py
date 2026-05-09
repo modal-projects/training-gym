@@ -21,6 +21,7 @@ CALLOUT_VARIANTS = {
     "WARNING": "caution",
 }
 MARKDOWN_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
+MARKDOWN_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 
 def branch_exists_on_origin(branch: str) -> bool:
@@ -59,6 +60,7 @@ REF = current_ref()
 BLOB_BASE = f"{REPO_URL}/blob/{REF}"
 TREE_BASE = f"{REPO_URL}/tree/{REF}"
 EDIT_BASE = f"{REPO_URL}/edit/{REF}"
+RAW_BASE = f"https://raw.githubusercontent.com/modal-projects/training-gym/{REF}"
 
 
 def convert_github_callouts(markdown: str) -> str:
@@ -126,6 +128,22 @@ def rewrite_links(
     return MARKDOWN_LINK.sub(replace, markdown)
 
 
+def rewrite_images(markdown: str, *, source_dir: PurePosixPath) -> str:
+    def replace(match: re.Match[str]) -> str:
+        alt_text, target = match.groups()
+        if target.startswith(("http://", "https://", "data:", "#", "/")):
+            return match.group(0)
+
+        path_part, hash_part = (target.split("#", 1) + [""])[:2]
+        normalized = posixpath.normpath(PurePosixPath(source_dir, path_part).as_posix())
+        rewritten = f"{RAW_BASE}/{normalized}"
+        if hash_part:
+            rewritten = f"{rewritten}#{hash_part}"
+        return f"![{alt_text}]({rewritten})"
+
+    return MARKDOWN_IMAGE.sub(replace, markdown)
+
+
 def strip_first_heading(markdown: str) -> str:
     lines = markdown.splitlines()
     if lines and lines[0].startswith("# "):
@@ -144,6 +162,7 @@ def transform_markdown(
 ) -> str:
     page = source.read_text()
     page = convert_github_callouts(page)
+    page = rewrite_images(page, source_dir=source_dir)
     page = rewrite_links(
         page,
         source_dir=source_dir,

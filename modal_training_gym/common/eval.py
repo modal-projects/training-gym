@@ -54,7 +54,7 @@ class EvalRowResult(BaseModel):
     """One evaluated row: score, response text, and optional metadata."""
 
     score: float
-    response: str = ""
+    response: str = "" # TODO, this doesn't have to be a string
     metadata: dict[str, Any] = Field(
         default_factory=dict
     )  # metadata that user can inject about the evaluation result
