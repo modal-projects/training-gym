@@ -705,13 +705,13 @@
   }
 
   .top-navbar {
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--color-c-surface-highlight-gray-opaque, #272727);
     background: var(--bg-depth);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 18px 1.35rem;
+    padding: 8px 24px 12px;
   }
 
   .top-brand {
@@ -749,16 +749,16 @@
 
   .docs-button {
     border: 0;
-    border-radius: 8px;
-    color: var(--muted);
+    border-radius: 10px;
+    color: var(--text);
     background: transparent;
     text-decoration: none;
-    font-size: 0.8rem;
+    font-size: 14px;
     font-weight: 500;
-    padding: 0.34rem 0.68rem;
+    padding: 8px;
     display: inline-flex;
     align-items: center;
-    gap: 0.38rem;
+    gap: 8px;
     flex: 0 0 auto;
   }
 
@@ -775,7 +775,7 @@
   }
 
   .workspace {
-    padding: 24px;
+    padding: 16px 24px;
   }
 
   @media (max-width: 900px) {

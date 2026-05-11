@@ -50,17 +50,15 @@
   .status-pill {
     display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.35rem;
+    gap: 6px;
     white-space: nowrap;
     border-radius: 9999px;
-    padding: 0.2rem 0.65rem;
-    min-width: 96px;
-    min-height: 24px;
-    font-size: 0.72rem;
-    line-height: 1;
+    padding: 3px 10px;
+    font-size: 12px;
+    line-height: 12px;
     border: 1px solid transparent;
     box-sizing: border-box;
+    width: fit-content;
   }
 
   .status-pill.icon-only {
@@ -72,26 +70,26 @@
   }
 
   .status-running {
-    background: #22313f;
-    color: #91c8ef;
-    border-color: #303b43;
+    background: #2f2436;
+    color: #d176bd;
+    border-color: #3b2a37;
   }
 
   .status-pending {
     background: #2f2436;
-    color: #ff8de6;
+    color: #d176bd;
     border-color: #3b2a37;
   }
 
   .status-completed {
     background: #273823;
-    color: #7fee64;
+    color: #6ac355;
     border-color: #2d4327;
   }
 
   .status-stopped {
     background: #3b2f20;
-    color: #fb923c;
+    color: #ffab5e;
     border-color: #5d442d;
   }
 

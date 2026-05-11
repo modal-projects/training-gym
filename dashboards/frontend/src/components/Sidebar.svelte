@@ -25,30 +25,33 @@
 
 <style>
   .sidebar {
-    border-right: 1px solid var(--border);
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
     background: var(--bg-depth);
-    padding: 0.9rem 0.7rem;
+    padding: 4px 20px 0;
   }
 
   .nav-list {
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
+    gap: 4px;
+    padding-top: 12px;
   }
 
   .nav-item {
-    border: 1px solid transparent;
-    border-radius: 8px;
+    border: 0;
+    border-radius: 10px;
     background: transparent;
-    color: var(--muted);
+    color: var(--text);
     text-decoration: none;
     text-align: left;
     font: inherit;
-    font-size: 0.84rem;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
     display: flex;
     align-items: center;
-    gap: 0.45rem;
-    padding: 0.42rem 0.56rem;
+    gap: 8px;
+    padding: 8px 12px;
     cursor: pointer;
     transition: all 0.16s ease;
   }
@@ -60,8 +63,7 @@
 
   .nav-item.active {
     border-radius: 10px;
-    background: var(--Primary---Background, rgba(127, 238, 100, 0.1));
-    border-color: transparent;
+    background: rgba(127, 238, 100, 0.1);
     color: var(--text-bright);
   }
 
@@ -69,7 +71,7 @@
     display: inline-flex;
     align-items: center;
     flex: 0 0 auto;
-    color: color-mix(in srgb, var(--muted) 88%, white);
+    opacity: 0.6;
   }
 
   @media (max-width: 900px) {

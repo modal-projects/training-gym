@@ -1,12 +1,19 @@
 <script>
+  import { RefreshCw } from "lucide-svelte";
+
   let { title, statusText, onRefresh } = $props();
 </script>
 
 <header class="workspace-header">
   <h1>{title}</h1>
   <div class="workspace-actions">
-    <span class="status-text">{statusText}</span>
-    <button class="btn" onclick={onRefresh}>Refresh</button>
+    {#if statusText}
+      <span class="status-text">{statusText}</span>
+    {/if}
+    <button class="btn" onclick={onRefresh}>
+      <RefreshCw size={16} strokeWidth={2.1} />
+      <span>Refresh</span>
+    </button>
   </div>
 </header>
 
@@ -19,10 +26,10 @@
   }
 
   h1 {
-    color: var(--text-bright);
-    font-size: 1.85rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    color: var(--text);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 36px;
   }
 
   .workspace-actions {
@@ -38,19 +45,22 @@
   }
 
   .btn {
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
     color: var(--text);
-    background: var(--panel);
+    background: var(--bg);
     font: inherit;
-    font-size: 0.78rem;
+    font-size: 14px;
     font-weight: 500;
-    padding: 0.36rem 0.72rem;
+    padding: 6px 8px;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .btn:hover {
-    border-color: var(--border-strong);
+    border-color: var(--color-c-gray-50, #8b8b8b);
     color: var(--text-bright);
   }
 </style>

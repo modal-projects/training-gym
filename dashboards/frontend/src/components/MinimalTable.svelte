@@ -12,19 +12,20 @@
     border-collapse: separate;
     border-spacing: 0;
     overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: 2px;
-    background: var(--panel);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
   }
 
   :where(.minimal-table) :global(th) {
-    background: var(--panel-alt);
-    padding: 0.58rem 0.88rem;
+    background: transparent;
+    padding: 8px 16px;
     text-align: left;
     vertical-align: middle;
-    font-size: 0.72rem;
-    font-weight: 500;
+    font-size: 14px;
+    font-weight: 400;
     color: var(--muted);
+    line-height: 20px;
   }
 
   :where(.minimal-table) :global(tbody tr:hover) {
@@ -32,8 +33,9 @@
   }
 
   :where(.minimal-table) :global(tbody td) {
-    border-top: 1px solid var(--border);
-    padding: 0.58rem 0.88rem;
+    border-top: 1px solid var(--color-c-gray-10, #2f2f2f);
+    padding: 8px 16px;
     vertical-align: middle;
+    height: 40px;
   }
 </style>

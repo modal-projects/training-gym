@@ -535,30 +535,33 @@
   .summary-row {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 24px;
+    gap: 14px;
     margin-bottom: 24px;
   }
 
   .summary-card {
     border: 0;
-    border-radius: 10px;
-    background: color-mix(in srgb, #ffffff 7%, transparent);
-    padding: 24px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 0.12rem;
+    gap: 8px;
+    height: 80px;
   }
 
   .summary-label {
     color: var(--muted);
-    font-size: 0.74rem;
-    text-transform: none;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
   }
 
   .summary-card strong {
     color: var(--text-bright);
-    font-size: 1.36rem;
-    font-weight: 600;
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 32px;
   }
 
   .runs-surface {

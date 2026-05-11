@@ -33,7 +33,7 @@
     <input
       type="search"
       class="search-input"
-      placeholder="Search by name"
+      placeholder="Search"
       bind:value={search}
       autocomplete="off"
       spellcheck="false"
@@ -149,13 +149,12 @@
   .search-wrap {
     display: inline-flex;
     align-items: center;
-    gap: 0.42rem;
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    background: var(--panel);
-    min-width: 240px;
-    width: min(320px, 100%);
-    padding: 0.26rem 0.58rem;
+    gap: 8px;
+    border: 1px solid var(--color-c-gray-10, #2f2f2f);
+    border-radius: 6px;
+    background: transparent;
+    width: 260px;
+    padding: 6px 8px;
   }
 
   .search-icon {
@@ -171,11 +170,11 @@
     width: 100%;
     min-width: 0;
     font: inherit;
-    font-size: 0.78rem;
+    font-size: 14px;
   }
 
   .search-input::placeholder {
-    color: var(--muted);
+    color: var(--color-foreground-tertiary, #747474);
   }
 
   .menu-wrap {
@@ -185,14 +184,15 @@
   .filter-button {
     display: inline-flex;
     align-items: center;
-    gap: 0.26rem;
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    background: var(--panel);
+    gap: 8px;
+    border: 1px solid var(--color-c-gray-10, #2f2f2f);
+    border-radius: 6px;
+    background: var(--bg);
     color: var(--text);
     font: inherit;
-    font-size: 0.76rem;
-    padding: 0.25rem 0.58rem;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 6px 8px;
     cursor: pointer;
     transition: all 0.15s ease;
   }
