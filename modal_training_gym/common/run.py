@@ -16,7 +16,9 @@ from modal_training_gym.utils.metadata import (
     vol_get,
     vol_list,
     vol_put,
+    vol_put_async,
     vol_upsert_summary_item,
+    vol_upsert_summary_item_async,
 )
 
 TRAINING_RUNS_STORE_NAME = MetadataStore.TRAINING_RUNS.value
@@ -43,6 +45,12 @@ class TrainingRun(BaseModel):
     duration_seconds: int | None = None
     metadata: dict[str, Any] | None = None
 
+    def _summary_sort_key(self, item: dict[str, Any]) -> tuple[int, str]:
+        return (
+            int(item.get("created_at", 0) or 0),
+            str(item.get("training_run_id", "")),
+        )
+
     def save(self) -> None:
         payload = self.model_dump(mode="json")
         vol_put(MetadataStore.TRAINING_RUNS, self.training_run_id, payload)
@@ -50,10 +58,18 @@ class TrainingRun(BaseModel):
             MetadataStore.TRAINING_RUNS_SUMMARY,
             payload,
             item_id_key="training_run_id",
-            sort_key=lambda item: (
-                int(item.get("created_at", 0) or 0),
-                str(item.get("training_run_id", "")),
-            ),
+            sort_key=self._summary_sort_key,
+            reverse=True,
+        )
+
+    async def save_async(self) -> None:
+        payload = self.model_dump(mode="json")
+        await vol_put_async(MetadataStore.TRAINING_RUNS, self.training_run_id, payload)
+        await vol_upsert_summary_item_async(
+            MetadataStore.TRAINING_RUNS_SUMMARY,
+            payload,
+            item_id_key="training_run_id",
+            sort_key=self._summary_sort_key,
             reverse=True,
         )
 

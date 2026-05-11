@@ -57,6 +57,10 @@ Load a completed run's result.
 
 Persist this result to the shared metadata volume.
 
+### `save_async(self) -> 'None'`
+
+Async variant of :meth:`save`. Use from inside an event loop.
+
 ### `volume(self) -> "'Volume'"`
 
 ## Related Tutorials

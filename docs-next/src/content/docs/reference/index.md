@@ -15,7 +15,7 @@ Complete reference for the training-gym Python library.
 | [`DatasetConfig`](/reference/core/datasetconfig/) | Dataset configuration shared across training frameworks. |
 | [`HuggingFaceDataset`](/reference/core/huggingfacedataset/) | Dataset backed by a HuggingFace ``datasets`` repo. |
 | [`HarborDataset`](/reference/core/harbordataset/) | Dataset configuration shared across training frameworks. |
-| [`WandbConfig`](/reference/core/wandbconfig/) | Weights & Biases logging configuration shared across all frameworks.. |
+| [`WandbConfig`](/reference/core/wandbconfig/) | Weights & Biases logging configuration shared across all frameworks. |
 | [`ModalRayCluster`](/reference/core/modalraycluster/) | Base class for bootstrapping a Ray cluster inside Modal clustered functions. |
 | [`TrainResult`](/reference/core/trainresult/) | One completed training run's checkpoint handle. |
 

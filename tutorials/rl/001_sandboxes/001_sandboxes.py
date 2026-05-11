@@ -143,7 +143,6 @@ import modal
 tutorial_cli_app = modal.App()
 
 def _main_impl() -> None:
-
     # ## Load hello-world from Harbor Hub
     #
     # `HarborDataset` accepts a `dataset_name` to pull tasks from
@@ -234,11 +233,8 @@ def _main_impl() -> None:
     print(f"Base mean reward:    {base_eval.mean:.4f}")
 
 @tutorial_cli_app.local_entrypoint()
-
 def main() -> None:
-
     _main_impl()
 
 if __name__ == "__main__":
-
     main()

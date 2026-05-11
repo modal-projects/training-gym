@@ -39,12 +39,12 @@ INPUT_DIR = TUTORIALS_DIR / "tutorial_generator"
 OUTPUT_ROOT = TUTORIALS_DIR
 
 # ── README table generation ─────────────────────────────────────────────────
-# The tutorials/README.md table is auto-generated from a top-level
+# The repo-root README.md table is auto-generated from a top-level
 # `TUTORIAL_METADATA = { "framework": ..., "cluster_shape": ..., "summary": ...,
 # "order": <int> }` dict declared in each source file under
 # tutorial_generator/. Edit that dict to edit the table row — do not hand-edit
 # the README.
-_README_PATH = TUTORIALS_DIR / "README.md"
+_README_PATH = REPO_ROOT / "README.md"
 _README_BEGIN = "<!-- BEGIN TUTORIAL TABLE -->"
 _README_END = "<!-- END TUTORIAL TABLE -->"
 _REPO_SLUG = "modal-projects/training-gym"
@@ -222,19 +222,15 @@ def _render_py(cells: list[Cell], header: str) -> str:
     chunks.extend(module_chunks)
 
     if main_chunks:
-        chunks.append("import modal")
-        chunks.append("")
-        chunks.append('tutorial_cli_app = modal.App()')
-        chunks.append("")
-        chunks.append("def _main_impl() -> None:")
-        chunks.extend(textwrap.indent(chunk, "    ") for chunk in main_chunks)
-        chunks.append("")
-        chunks.append("@tutorial_cli_app.local_entrypoint()")
-        chunks.append("def main() -> None:")
-        chunks.append("    _main_impl()")
-        chunks.append("")
-        chunks.append('if __name__ == "__main__":')
-        chunks.append("    main()")
+        chunks.append("import modal\n\ntutorial_cli_app = modal.App()")
+        indented = "\n\n".join(textwrap.indent(chunk, "    ") for chunk in main_chunks)
+        chunks.append(f"def _main_impl() -> None:\n{indented}")
+        chunks.append(
+            "@tutorial_cli_app.local_entrypoint()\n"
+            "def main() -> None:\n"
+            "    _main_impl()"
+        )
+        chunks.append('if __name__ == "__main__":\n    main()')
 
     return "\n\n".join(c for c in chunks if c) + "\n"
 
@@ -459,7 +455,7 @@ def _render_tutorial_table(bucket: str, bucket_entries: list[tuple[str, str, dic
         cluster = str(meta["cluster_shape"]).replace("|", r"\|")
         launch = _render_launch_cell(bucket, name)
         lines.append(
-            f"| [`{name}`]({bucket}/{name}/{name}.ipynb) | {summary} | "
+            f"| [`{name}`](tutorials/{bucket}/{name}/{name}.ipynb) | {summary} | "
             f"{difficulty} | {framework} | {cluster} | {launch} |"
         )
     return "\n".join(lines)
@@ -482,7 +478,7 @@ def _render_tutorial_sections(entries: list[tuple[str, str, dict]]) -> str:
 
 def _update_readme_table(entries: list[tuple[str, str, dict]]) -> bool:
     """Rewrite the `<!-- BEGIN TUTORIAL TABLE --> ... <!-- END TUTORIAL TABLE -->`
-    region of tutorials/README.md. Returns True if the file changed."""
+    region of the repo-root README.md. Returns True if the file changed."""
     if not _README_PATH.exists():
         print(f"Skipping README update: {_README_PATH} not found")
         return False

@@ -4,12 +4,11 @@ Thin Modal launcher that runs [slime](https://github.com/THUDM/slime) GRPO train
 
 ## Quick start
 
-Define a `TrainConfig` with your model, dataset, and a `SlimeRecipe`, then call `train()`:
+Define a `TrainConfig` with your model, dataset, and a `SlimeRecipe`, then call
+`train()`:
 
 ```python
 from modal_training_gym import SlimeRecipe, TrainConfig, WandbConfig
-from modal_training_gym.common.dataset import DatasetConfig
-from modal_training_gym.common.models import ModelConfig
 
 config = TrainConfig(
     model=my_model,
@@ -21,10 +20,20 @@ config = TrainConfig(
         wandb=WandbConfig(project="my-project"),
     ),
 )
-result = config.train()
+
+
+def train():
+    return config.train()
 ```
 
-Then run: `uv run modal run my_tutorial.py::train`
+Then run:
+
+```bash
+uv run modal run my_tutorial.py::train
+```
+
+`config.train()` handles model download and dataset prep automatically — if
+either isn't cached yet, it runs those steps before training.
 
 ## Recipe building blocks
 
