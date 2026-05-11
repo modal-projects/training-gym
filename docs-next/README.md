@@ -1,7 +1,8 @@
-# Training Gym docs — Starlight preview
+# Training Gym docs site
 
-Side-by-side preview of the docs site, migrating from `mkdocs-material` to
-[Starlight](https://starlight.astro.build/) (Astro).
+The [gym.modal.dev](https://gym.modal.dev) docs, built with
+[Starlight](https://starlight.astro.build/) (Astro) and served from a Modal
+ASGI app.
 
 ## Dev
 
@@ -18,23 +19,20 @@ npm run build      # emits dist/
 npm run preview    # serves dist/ on http://localhost:4321
 ```
 
-## Deploy (preview URL)
-
-Once `docs_next_app.py` is added in this directory:
+## Deploy
 
 ```bash
 uv run modal deploy docs-next/docs_next_app.py
 ```
 
-This will attach to `training-gym-next.modal.dev` (must be registered in
-workspace Dojoy/initial-setups first). The existing `docs/docs_app.py` continues to serve
-the current mkdocs-material site at `gym.modal.dev` until cutover.
+This serves the site at `gym.modal.dev`.
 
 ## Layout
 
 ```
 docs-next/
 ├── astro.config.mjs        # Starlight config: sidebar, theme hooks
+├── docs_next_app.py        # Modal ASGI app that serves dist/
 ├── src/
 │   ├── styles/custom.css   # Modal-green accent, Inter font
 │   └── content/
@@ -46,6 +44,9 @@ docs-next/
 └── package.json
 ```
 
-Content under `src/content/docs/` is largely regenerated from the repo's
-`README.md` and `tutorials/README.md` via `scripts/generate_docs_pages.py`.
-Edit those source files, not the generated pages.
+The top-level `index.md` and `tutorials/index.md` are **regenerated** from
+the repo's `README.md` and `tutorials/README.md` by
+`scripts/generate_docs_pages.py`. Edit those source files, not the generated
+pages. API reference pages under `reference/` come from
+`scripts/generate_api_reference.py`. Use `scripts/generate_all.py` to
+regenerate everything at once.

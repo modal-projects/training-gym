@@ -118,7 +118,6 @@ import modal
 tutorial_cli_app = modal.App()
 
 def _main_impl() -> None:
-
     # ## Serve the base model
     #
     # So, how does Qwen3-4B currently fare at writing haikus? We can
@@ -282,11 +281,8 @@ def _main_impl() -> None:
     print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
 
 @tutorial_cli_app.local_entrypoint()
-
 def main() -> None:
-
     _main_impl()
 
 if __name__ == "__main__":
-
     main()

@@ -6,8 +6,12 @@ prev: false
 next: false
 ---
 
-Questions about Training Gym or access to Modal's multi-node training preview
-should go to [support@modal.com](mailto:support@modal.com).
+For questions about Training Gym, or to request access to Modal's multi-node
+training Beta, email [support@modal.com](mailto:support@modal.com) or reach
+out on [Slack](https://modal.com/slack).
 
-If you are reporting an issue with a tutorial or the SDK itself, include the
-training framework, cluster shape, and a link to the tutorial you were running.
+When reporting an issue with a tutorial or the SDK itself, please include:
+
+- the training framework (e.g. `slime`)
+- the cluster shape (e.g. `2 × 8×H100`)
+- a link to the tutorial you were running, or a minimal `TrainConfig` repro

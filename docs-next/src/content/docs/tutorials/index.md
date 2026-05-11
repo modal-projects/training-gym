@@ -4,18 +4,19 @@ description: Runnable Modal training examples across intro, RL, SFT, and infrast
 editUrl: https://github.com/modal-projects/training-gym/edit/main/tutorials/README.md
 ---
 
-Every tutorial below has a one-click **Launch in Modal Notebook** button.
-The button opens the `.ipynb` in a fresh Modal Notebook — the first code
-cell is a `! pip install git+https://github.com/modal-projects/training-gym.git@main`
-that installs `modal-training-gym` into the notebook kernel, so the rest of
-the cells run as-is.
+Each tutorial below has a one-click **Launch** button that opens the `.ipynb`
+in a fresh Modal Notebook. The first code cell pip-installs
+`modal-training-gym` into the notebook kernel, so the rest of the cells run
+as-is.
 
-The **Difficulty** column is a rough self-assessed signal for where to
-start: *Beginner* tutorials are single-node and introduce one framework
-concept; *Intermediate* tutorials span 1–2 nodes or wire up something
-non-default (custom reward, external script); *Advanced* tutorials run on
-≥2 nodes with non-trivial parallelism (tensor-parallel, colocated RL, long
-context) and assume familiarity with the underlying framework.
+**Difficulty** is a rough self-assessed signal for where to start:
+
+- *Beginner* — single-node, introduces one framework concept.
+- *Intermediate* — 1–2 nodes, or wires up something non-default (custom
+  reward, external script).
+- *Advanced* — ≥2 nodes with non-trivial parallelism (tensor-parallel,
+  colocated RL, long context); assumes familiarity with the underlying
+  framework.
 
 ## Tutorials
 
@@ -26,16 +27,17 @@ context) and assume familiarity with the underlying framework.
 
 | Tutorial | Summary | Difficulty | Framework | Cluster | Launch |
 |---|---|---|---|---|---|
-| [`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`001_sandboxes`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_sandboxes/001_sandboxes.ipynb) | Code RL with Harbor hello-world and sandboxed verification | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/001_sandboxes/001_sandboxes.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`002_multiturn`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.ipynb) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/joy/update-ui-and-sdk-ux/tutorials/rl/002_multiturn/002_multiturn.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`001_sandboxes`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_sandboxes/001_sandboxes.ipynb) | Code RL with Harbor hello-world and sandboxed verification | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_sandboxes/001_sandboxes.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`002_multiturn`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.ipynb) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
-## Running from the CLI instead
+## Running from the CLI
 
-Some tutorials also emit a plain `.py` companion, but the current source
-tutorial is notebook-first and intentionally narrated for Modal Notebooks.
-Use the notebook as the canonical walkthrough.
+Each tutorial also ships a plain `.py` companion you can `modal run` directly.
+The sources are written notebook-first and narrated for Modal Notebooks, so
+treat the `.ipynb` as the canonical walkthrough — the `.py` is the same
+content stripped of narration.
 
 ## Authoring a new tutorial
 
@@ -54,9 +56,9 @@ uv run python tutorials/generate_tutorial.py
 
 ### Cell decorators
 
-Top-level functions in the source file produce cells; function names and
-argument lists don't matter, only decorator + body. Cells appear in source
-order.
+Each top-level function in the source file produces one cell, in source order.
+Function names and argument lists are ignored — only the decorator and the
+body matter.
 
 - `@markdown` — the function's docstring becomes one markdown cell
   (`.ipynb`) or `#` comments (`.py`).

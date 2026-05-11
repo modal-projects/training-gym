@@ -1,11 +1,11 @@
 # Tutorials
 
-Every tutorial in the table below has a one-click button in the **Launch**
-column. Clicking it opens the `.ipynb` in a fresh Modal Notebook; the first
-code cell `pip install`s `modal-training-gym` into the notebook kernel, so
-the remaining cells run as-is.
+Each tutorial below has a one-click **Launch** button that opens the `.ipynb`
+in a fresh Modal Notebook. The first code cell pip-installs
+`modal-training-gym` into the notebook kernel, so the rest of the cells run
+as-is.
 
-The **Difficulty** column is a rough self-assessed signal for where to start:
+**Difficulty** is a rough self-assessed signal for where to start:
 
 - *Beginner* — single-node, introduces one framework concept.
 - *Intermediate* — 1–2 nodes, or wires up something non-default (custom
@@ -28,11 +28,12 @@ The **Difficulty** column is a rough self-assessed signal for where to start:
 | [`002_multiturn`](rl/002_multiturn/002_multiturn.ipynb) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | 1 × 1×H100 | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
-## Running from the CLI instead
+## Running from the CLI
 
-Each tutorial also emits a plain `.py` companion, but the sources are
-written notebook-first and narrated for Modal Notebooks — treat the
-`.ipynb` as the canonical walkthrough.
+Each tutorial also ships a plain `.py` companion you can `modal run` directly.
+The sources are written notebook-first and narrated for Modal Notebooks, so
+treat the `.ipynb` as the canonical walkthrough — the `.py` is the same
+content stripped of narration.
 
 ## Authoring a new tutorial
 
@@ -51,9 +52,9 @@ uv run python tutorials/generate_tutorial.py
 
 ### Cell decorators
 
-Each top-level function in the source file produces one cell. Function
-names and argument lists are ignored — only the decorator and the body
-matter. Cells appear in source order.
+Each top-level function in the source file produces one cell, in source order.
+Function names and argument lists are ignored — only the decorator and the
+body matter.
 
 - `@markdown` — the function's docstring becomes one markdown cell
   (`.ipynb`) or `#` comments (`.py`).

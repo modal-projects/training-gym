@@ -329,7 +329,6 @@ import modal
 tutorial_cli_app = modal.App()
 
 def _main_impl() -> None:
-
     train_dataset = NumberGuessDataset()
     eval_dataset = NumberGuessDataset()
 
@@ -376,9 +375,6 @@ def _main_impl() -> None:
             global_batch_size=8,
             save_interval=10,
             apply_chat_template_kwargs='{"enable_thinking": false}',
-            image_overlay=lambda image: image.run_commands(
-                "uv pip install --system datasets>=3.0.0",
-            ),
         ),
     )
     print("Starting training...")
@@ -406,11 +402,8 @@ def _main_impl() -> None:
     print(f"Base mean turns:      {base_summary['mean_turns']:.2f}")
 
 @tutorial_cli_app.local_entrypoint()
-
 def main() -> None:
-
     _main_impl()
 
 if __name__ == "__main__":
-
     main()

@@ -222,19 +222,15 @@ def _render_py(cells: list[Cell], header: str) -> str:
     chunks.extend(module_chunks)
 
     if main_chunks:
-        chunks.append("import modal")
-        chunks.append("")
-        chunks.append('tutorial_cli_app = modal.App()')
-        chunks.append("")
-        chunks.append("def _main_impl() -> None:")
-        chunks.extend(textwrap.indent(chunk, "    ") for chunk in main_chunks)
-        chunks.append("")
-        chunks.append("@tutorial_cli_app.local_entrypoint()")
-        chunks.append("def main() -> None:")
-        chunks.append("    _main_impl()")
-        chunks.append("")
-        chunks.append('if __name__ == "__main__":')
-        chunks.append("    main()")
+        chunks.append("import modal\n\ntutorial_cli_app = modal.App()")
+        indented = "\n\n".join(textwrap.indent(chunk, "    ") for chunk in main_chunks)
+        chunks.append(f"def _main_impl() -> None:\n{indented}")
+        chunks.append(
+            "@tutorial_cli_app.local_entrypoint()\n"
+            "def main() -> None:\n"
+            "    _main_impl()"
+        )
+        chunks.append('if __name__ == "__main__":\n    main()')
 
     return "\n\n".join(c for c in chunks if c) + "\n"
 
