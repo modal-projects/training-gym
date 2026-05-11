@@ -48,7 +48,7 @@ class SglangRecipe(BaseDeployRecipe):
     mem_fraction_static: float | None = None
     chunked_prefill_size: int | None = None
     max_running_requests: int | None = None
-    sglang_image: str = "lmsysorg/sglang:nightly-dev-cu13-20260311-dc4380e3"
+    sglang_image: str = "lmsysorg/sglang:nightly-dev-cu13-20260508-2cf1a4ab"
     extra_server_args: dict[str, str] | None = None
     environment_name: str | None = None
     deploy_strategy: str = "rolling"
