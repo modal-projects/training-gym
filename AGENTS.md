@@ -91,7 +91,7 @@ Tutorials live in `tutorials/tutorial_generator/<bucket>/<name>.py` as decorator
 
 Decorators: `@markdown` (docstring → md cell), `@code` (body → code cell), `@shell("...")` (verbatim cell), `@py_only` / `@notebook_only` (restrict output format).
 
-Each source declares `TUTORIAL_METADATA` dict with `framework`, `cluster_shape`, `summary`, `difficulty`, `order`, `api_classes` — this drives the catalog table in tutorials/README.md and backlinks in API reference pages.
+Each source declares `TUTORIAL_METADATA` dict with `framework`, `cluster_shape`, `summary`, `difficulty`, `order`, `api_classes` — this drives the catalog table in the repo-root README.md and backlinks in API reference pages.
 
 ### API reference generation
 

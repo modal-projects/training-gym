@@ -347,6 +347,35 @@ def _main_impl() -> None:
     print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 
     # ## Train with custom multi-turn rollout
+    #
+    # A quick tour of the `SlimeRecipe` knobs we set below.
+    #
+    # **Cluster and parallelism**
+    # - `gpu_type="H100"` — GPU SKU used for both the rollout (sglang) and training
+    #   (Megatron) ranks.
+    # - `colocate=True` — share the same GPUs between rollout and training, alternating
+    #   between the two. Set `False` to give sglang dedicated GPUs (faster, more expensive).
+    # - `tensor_model_parallel_size=1` — Megatron tensor-parallel degree. `1` keeps the
+    #   4B model on a single GPU; bump it for larger models that don't fit.
+    # - `sequence_parallel=False` — only meaningful when `tensor_model_parallel_size > 1`.
+    # - `rollout_num_gpus_per_engine=1` — GPUs per sglang inference engine (sglang's TP).
+    #
+    # **Rollout**
+    # - `num_rollout=20` — total rollout/train iterations to run. Each iteration samples
+    #   a batch, scores it, and applies one policy update.
+    # - `rollout_batch_size=8` — prompts sampled per rollout iteration.
+    # - `n_samples_per_prompt=1` — GRPO group size. `1` disables grouping; bump to ≥2
+    #   to get within-prompt advantage normalization.
+    # - `rollout_max_response_len=64` — max new tokens per sglang call. We keep it tiny
+    #    because every turn is `<answer>N</answer>` plus a bit of thinking.
+    # - `rollout_temperature=1.0` — sampling temperature during rollouts.
+    #
+    # **Training and checkpoints**
+    # - `global_batch_size=8` — effective batch size for the policy gradient update.
+    # - `save_interval=10` — write a Megatron checkpoint every N rollout iterations.
+    # - `apply_chat_template_kwargs='{"enable_thinking": false}'` — passed to the
+    #   tokenizer's chat template; disables Qwen3's `<think>` block so responses stay
+    #   short and parseable.
 
     training_run = TrainConfig(
         model=Qwen3_4B(),
