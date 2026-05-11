@@ -28,6 +28,7 @@ import json
 import os
 import pathlib
 import subprocess
+import symtable
 import textwrap
 import urllib.parse
 from dataclasses import dataclass
@@ -183,16 +184,148 @@ def _extract_cells(source: str) -> list[Cell]:
 
 def _render_py(cells: list[Cell], header: str) -> str:
     chunks: list[str] = [header.rstrip()] if header else []
+    module_chunks: list[str] = []
+    main_chunks: list[str] = []
+    pending_comment_lines: list[str] = []
+    globals_used_by_defs = _py_globals_used_by_definitions(cells)
+
     for cell in cells:
         if _PY not in cell.targets:
             continue
         if cell.kind == "markdown":
-            chunks.append(
-                "\n".join(f"# {ln}" if ln else "#" for ln in cell.source.splitlines())
+            pending_comment_lines.extend(
+                f"# {ln}" if ln else "#" for ln in cell.source.splitlines()
             )
-        else:
-            chunks.append(cell.source)
+            continue
+
+        blocks = _split_py_code_cell(
+            cell.source,
+            globals_used_by_defs=globals_used_by_defs,
+        )
+        if not blocks:
+            continue
+
+        pending_comment_block = "\n".join(pending_comment_lines).rstrip()
+        pending_comment_lines = []
+        for i, (scope, segment) in enumerate(blocks):
+            block = segment
+            if i == 0 and pending_comment_block:
+                block = f"{pending_comment_block}\n\n{block}"
+            if scope == "module":
+                module_chunks.append(block)
+            else:
+                main_chunks.append(block)
+
+    if pending_comment_lines:
+        module_chunks.append("\n".join(pending_comment_lines))
+
+    chunks.extend(module_chunks)
+
+    if main_chunks:
+        chunks.append("import modal")
+        chunks.append("")
+        chunks.append('tutorial_cli_app = modal.App()')
+        chunks.append("")
+        chunks.append("def _main_impl() -> None:")
+        chunks.extend(textwrap.indent(chunk, "    ") for chunk in main_chunks)
+        chunks.append("")
+        chunks.append("@tutorial_cli_app.local_entrypoint()")
+        chunks.append("def main() -> None:")
+        chunks.append("    _main_impl()")
+        chunks.append("")
+        chunks.append('if __name__ == "__main__":')
+        chunks.append("    main()")
+
     return "\n\n".join(c for c in chunks if c) + "\n"
+
+
+def _py_globals_used_by_definitions(cells: list[Cell]) -> set[str]:
+    py_code = [
+        cell.source
+        for cell in cells
+        if _PY in cell.targets and cell.kind == "code"
+    ]
+    if not py_code:
+        return set()
+
+    table = symtable.symtable("\n\n".join(py_code), "<generated_tutorial>", "exec")
+    refs: set[str] = set()
+
+    def _walk(child_table: symtable.SymbolTable) -> None:
+        if child_table.get_type() != "module":
+            for symbol in child_table.get_symbols():
+                if symbol.is_global() and symbol.is_referenced():
+                    refs.add(symbol.get_name())
+        for nested in child_table.get_children():
+            _walk(nested)
+
+    _walk(table)
+    return refs
+
+
+def _split_py_code_cell(
+    source: str,
+    *,
+    globals_used_by_defs: set[str],
+) -> list[tuple[str, str]]:
+    tree = ast.parse(source)
+    if not tree.body:
+        return []
+
+    lines = source.splitlines(keepends=True)
+    blocks: list[tuple[str, str]] = []
+
+    stmt_scopes = [
+        _stmt_belongs_at_module_scope(stmt, globals_used_by_defs)
+        for stmt in tree.body
+    ]
+    group_start = 0
+
+    for i in range(1, len(tree.body) + 1):
+        same_scope = i < len(tree.body) and stmt_scopes[i] == stmt_scopes[group_start]
+        if same_scope:
+            continue
+
+        start = 0 if group_start == 0 else tree.body[group_start].lineno - 1
+        end = tree.body[i].lineno - 1 if i < len(tree.body) else len(lines)
+        segment = "".join(lines[start:end]).rstrip("\n")
+        if segment:
+            scope = "module" if stmt_scopes[group_start] else "main"
+            blocks.append((scope, segment))
+        group_start = i
+
+    return blocks
+
+
+def _stmt_belongs_at_module_scope(
+    stmt: ast.stmt,
+    globals_used_by_defs: set[str],
+) -> bool:
+    if isinstance(stmt, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return True
+    if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        return bool(_assigned_names(stmt) & globals_used_by_defs)
+    return False
+
+
+def _assigned_names(stmt: ast.Assign | ast.AnnAssign | ast.AugAssign) -> set[str]:
+    if isinstance(stmt, ast.Assign):
+        names: set[str] = set()
+        for target in stmt.targets:
+            names.update(_names_in_target(target))
+        return names
+    return _names_in_target(stmt.target)
+
+
+def _names_in_target(target: ast.expr) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names: set[str] = set()
+        for elt in target.elts:
+            names.update(_names_in_target(elt))
+        return names
+    return set()
 
 
 def _nb_source_lines(text: str) -> list[str]:
