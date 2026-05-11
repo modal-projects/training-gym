@@ -396,6 +396,7 @@ def _continue_to_train_off_of_a_checkpoint_code():
     new_train_result = new_training_run.train()
     print("——— New training complete ———")
 
+@notebook_only
 @markdown
 def _trained_eval_off_of_a_checkpoint():
     """
@@ -404,6 +405,7 @@ def _trained_eval_off_of_a_checkpoint():
     Now let's run the same eval on the newly trained model and compare.
     """
 
+@notebook_only
 @code
 def _trained_eval_off_of_a_checkpoint_code():
     new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
@@ -417,6 +419,7 @@ def _trained_eval_off_of_a_checkpoint_code():
     ).serve()
     print(f"Newly trained model deployed to {new_model_deployment.url}")
 
+@notebook_only
 @markdown
 def _trained_eval_off_of_a_checkpoint_results():
     """
@@ -425,6 +428,7 @@ def _trained_eval_off_of_a_checkpoint_results():
     Now let's compare the results of the newly trained model and the base model.
     """
 
+@notebook_only
 @code
 def _trained_eval_off_of_a_checkpoint_results_code():
     print("——— Running trained model evaluation... ———")
@@ -444,4 +448,5 @@ def _compare_results():
 def _compare_results_code():
     print(f"Base model haiku score: {base_eval.mean:.1f}")
     print(f"Trained model haiku score: {trained_eval.mean:.1f}")
-    print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
+    if "new_eval" in locals():
+        print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")

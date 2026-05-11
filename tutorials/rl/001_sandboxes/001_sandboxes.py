@@ -16,7 +16,6 @@
 #
 # The key pattern: **correctness drives reward**.
 # Reward = fraction of test cases whose output matches expected.
-
 # Run with:
 # ```
 # uv run python tutorials/rl/001_sandboxes/001_sandboxes.py
@@ -38,29 +37,6 @@ from modal_training_gym import (
     TrainConfig,
     WandbConfig,
     list_checkpoints,
-)
-
-# ## Load hello-world from Harbor Hub
-#
-# `HarborDataset` accepts a `dataset_name` to pull tasks from
-# [Harbor Hub](https://hub.harborframework.com). Each task has:
-# - `instruction.md` — the problem statement (prompt)
-# - `task.toml` — metadata (difficulty, category)
-# - `tests/` — input/output test pairs for verification
-#
-# Setting `test_data_dir="tests"` reads `*.in`/`*.out` file pairs and
-# embeds them in each sample's label so the reward function can verify
-# solutions without filesystem access.
-#
-# A single dataset instance handles both training and eval —
-# `prepare()` writes train and eval splits to the volume,
-# while `load()` returns all tasks for offline evaluation.
-
-dataset = HarborDataset(
-    dataset_name="harbor/hello-world",
-    label_metadata_path="task.toml",
-    test_data_dir="tests",
-    train_repeats=20,
 )
 
 # ## Sandbox-backed scorer
@@ -157,73 +133,112 @@ async def usaco_rm(args, sample, **kwargs) -> float:
     sample.metadata = {**(getattr(sample, "metadata", None) or {}), "usaco": meta}
     return float(reward)
 
-# ## Serve and evaluate the base model
-
-base_model = Qwen3_4B()
-base_deployment: ModelDeployment = DeploymentConfig(model=base_model).serve()
-print(f"Base model URL: {base_deployment.url}")
-
 def eval_response_fn(example: dict, response: str) -> EvalRowResult:
     test_cases = example.get("label", {}).get("test_cases", [])
     score, metadata = score_usaco_with_sandbox(response, test_cases=test_cases)
     return EvalRowResult(score=score, response=response, metadata=metadata)
 
-eval_config = EvalConfig(
-    dataset=dataset,
-    eval_response_fn=eval_response_fn,
-    generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
-)
-print("Running base eval...")
-base_eval = eval_config.evaluate(base_deployment, debug=True)
-print(f"Base mean reward: {base_eval.mean:.4f}")
+import modal
 
-# ## Train with SLIME and sandbox reward
+tutorial_cli_app = modal.App()
 
-training_run = TrainConfig(
-    model=Qwen3_4B(),
-    dataset=dataset,
-    recipe=SlimeRecipe(
-        wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-hello-world"),
-        custom_rm_function=usaco_rm,
+def _main_impl() -> None:
 
-        gpu_type="H100",
-        colocate=True,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus_per_engine=1,
+    # ## Load hello-world from Harbor Hub
+    #
+    # `HarborDataset` accepts a `dataset_name` to pull tasks from
+    # [Harbor Hub](https://hub.harborframework.com). Each task has:
+    # - `instruction.md` — the problem statement (prompt)
+    # - `task.toml` — metadata (difficulty, category)
+    # - `tests/` — input/output test pairs for verification
+    #
+    # Setting `test_data_dir="tests"` reads `*.in`/`*.out` file pairs and
+    # embeds them in each sample's label so the reward function can verify
+    # solutions without filesystem access.
+    #
+    # A single dataset instance handles both training and eval —
+    # `prepare()` writes train and eval splits to the volume,
+    # while `load()` returns all tasks for offline evaluation.
 
-        num_rollout=10,
-        rollout_batch_size=8,
-        n_samples_per_prompt=8,
-        rollout_max_response_len=2048,
-        rollout_temperature=0.9,
+    dataset = HarborDataset(
+        dataset_name="harbor/hello-world",
+        label_metadata_path="task.toml",
+        test_data_dir="tests",
+        train_repeats=20,
+    )
 
-        global_batch_size=8,
-        eval_max_response_len=2048,
-        n_samples_per_eval_prompt=8,
-        max_tokens_per_gpu=4096,
-        save_interval=10,
-        apply_chat_template_kwargs='{"enable_thinking": false}',
-        image_overlay=lambda image: image.run_commands(
-            "uv pip install --system modal>=1.2.0",
+    # ## Serve and evaluate the base model
+
+    base_model = Qwen3_4B()
+    base_deployment: ModelDeployment = DeploymentConfig(model=base_model).serve()
+    print(f"Base model URL: {base_deployment.url}")
+
+    eval_config = EvalConfig(
+        dataset=dataset,
+        eval_response_fn=eval_response_fn,
+        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+    )
+    print("Running base eval...")
+    base_eval = eval_config.evaluate(base_deployment, debug=True)
+    print(f"Base mean reward: {base_eval.mean:.4f}")
+
+    # ## Train with SLIME and sandbox reward
+
+    training_run = TrainConfig(
+        model=Qwen3_4B(),
+        dataset=dataset,
+        recipe=SlimeRecipe(
+            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-hello-world"),
+            custom_rm_function=usaco_rm,
+
+            gpu_type="H100",
+            colocate=True,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,
+            rollout_num_gpus_per_engine=1,
+
+            num_rollout=10,
+            rollout_batch_size=8,
+            n_samples_per_prompt=8,
+            rollout_max_response_len=2048,
+            rollout_temperature=0.9,
+
+            global_batch_size=8,
+            eval_max_response_len=2048,
+            n_samples_per_eval_prompt=8,
+            max_tokens_per_gpu=4096,
+            save_interval=10,
+            apply_chat_template_kwargs='{"enable_thinking": false}',
+            image_overlay=lambda image: image.run_commands(
+                "uv pip install --system modal>=1.2.0",
+            ),
         ),
-    ),
-)
-print("Starting training...")
-train_result = training_run.train()
-print(f"Training run id: {train_result.training_run_id}")
+    )
+    print("Starting training...")
+    train_result = training_run.train()
+    print(f"Training run id: {train_result.training_run_id}")
 
-# ## Evaluate the trained checkpoint
+    # ## Evaluate the trained checkpoint
 
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-trained_deployment = DeploymentConfig(
-    model=Qwen3_4B(),
-    checkpoint=checkpoint,
-    app_name="qwen3-4b-hello-world-serve",
-    served_model_name="qwen3-4b-hello-world",
-).serve()
-print(f"Trained model URL: {trained_deployment.url}")
+    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+    trained_deployment = DeploymentConfig(
+        model=Qwen3_4B(),
+        checkpoint=checkpoint,
+        app_name="qwen3-4b-hello-world-serve",
+        served_model_name="qwen3-4b-hello-world",
+    ).serve()
+    print(f"Trained model URL: {trained_deployment.url}")
 
-trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-print(f"Trained mean reward: {trained_eval.mean:.4f}")
-print(f"Base mean reward:    {base_eval.mean:.4f}")
+    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
+    print(f"Trained mean reward: {trained_eval.mean:.4f}")
+    print(f"Base mean reward:    {base_eval.mean:.4f}")
+
+@tutorial_cli_app.local_entrypoint()
+
+def main() -> None:
+
+    _main_impl()
+
+if __name__ == "__main__":
+
+    main()

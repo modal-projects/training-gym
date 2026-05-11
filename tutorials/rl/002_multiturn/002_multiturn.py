@@ -16,7 +16,6 @@
 # - `custom_generate_function`: runs the interaction loop.
 # - `custom_rm_function`: rewards correct answers with an early-turn bonus.
 # - `loss_mask`: trains only on model-generated tokens, not environment feedback.
-
 # Run with:
 # ```
 # uv run python tutorials/rl/002_multiturn_number_guessing/002_multiturn_number_guessing.py
@@ -88,9 +87,6 @@ class NumberGuessDataset(DatasetConfig):
             for eval_path in eval_paths.values():
                 os.makedirs(os.path.dirname(eval_path), exist_ok=True)
                 Dataset.from_list(eval_rows).to_parquet(eval_path)
-
-train_dataset = NumberGuessDataset()
-eval_dataset = NumberGuessDataset()
 
 # ## Multi-turn environment and reward
 #
@@ -328,74 +324,93 @@ def summarize_eval(eval_result) -> dict:
         "mean_turns": float(mean_turns),
     }
 
-# ## Serve and evaluate the base model
+import modal
 
-base_deployment = DeploymentConfig(model=Qwen3_4B()).serve()
-print(f"Base model URL: {base_deployment.url}")
-eval_config = EvalConfig(
-    dataset=eval_dataset,
-    eval_fn=guessing_eval_fn,
-)
-base_eval = eval_config.evaluate(base_deployment, debug=True)
-base_summary = summarize_eval(base_eval)
-print(f"Base success rate: {base_summary['success_rate']:.2%}")
-print(f"Base mean reward: {base_eval.mean:.3f}")
-print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
+tutorial_cli_app = modal.App()
 
-# ## Train with custom multi-turn rollout
+def _main_impl() -> None:
 
-training_run = TrainConfig(
-    model=Qwen3_4B(),
-    dataset=train_dataset,
-    recipe=SlimeRecipe(
-        wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-guessing-multiturn"),
-        custom_generate_function=number_guess_generate,
-        custom_rm_function=number_guess_rm,
-        extra_config={
-            "max_turns": _MAX_TURNS,
-            "log_multi_turn": True,
-        },
+    train_dataset = NumberGuessDataset()
+    eval_dataset = NumberGuessDataset()
 
-        gpu_type="H100",
-        colocate=True,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus_per_engine=1,
+    # ## Serve and evaluate the base model
 
-        num_rollout=20,
-        rollout_batch_size=8,
-        n_samples_per_prompt=1,
-        rollout_max_response_len=64,
-        rollout_temperature=1.0,
+    base_deployment = DeploymentConfig(model=Qwen3_4B()).serve()
+    print(f"Base model URL: {base_deployment.url}")
+    eval_config = EvalConfig(
+        dataset=eval_dataset,
+        eval_fn=guessing_eval_fn,
+    )
+    base_eval = eval_config.evaluate(base_deployment, debug=True)
+    base_summary = summarize_eval(base_eval)
+    print(f"Base success rate: {base_summary['success_rate']:.2%}")
+    print(f"Base mean reward: {base_eval.mean:.3f}")
+    print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 
-        global_batch_size=8,
-        save_interval=10,
-        apply_chat_template_kwargs='{"enable_thinking": false}',
-        image_overlay=lambda image: image.run_commands(
-            "uv pip install --system datasets>=3.0.0",
+    # ## Train with custom multi-turn rollout
+
+    training_run = TrainConfig(
+        model=Qwen3_4B(),
+        dataset=train_dataset,
+        recipe=SlimeRecipe(
+            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-guessing-multiturn"),
+            custom_generate_function=number_guess_generate,
+            custom_rm_function=number_guess_rm,
+            extra_config={
+                "max_turns": _MAX_TURNS,
+                "log_multi_turn": True,
+            },
+
+            gpu_type="H100",
+            colocate=True,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,
+            rollout_num_gpus_per_engine=1,
+
+            num_rollout=20,
+            rollout_batch_size=8,
+            n_samples_per_prompt=1,
+            rollout_max_response_len=64,
+            rollout_temperature=1.0,
+
+            global_batch_size=8,
+            save_interval=10,
+            apply_chat_template_kwargs='{"enable_thinking": false}',
+            image_overlay=lambda image: image.run_commands(
+                "uv pip install --system datasets>=3.0.0",
+            ),
         ),
-    ),
-)
-print("Starting training...")
-train_result = training_run.train()
-print(f"Training run id: {train_result.training_run_id}")
+    )
+    print("Starting training...")
+    train_result = training_run.train()
+    print(f"Training run id: {train_result.training_run_id}")
 
-# ## Evaluate trained checkpoint
+    # ## Evaluate trained checkpoint
 
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-trained_deployment = DeploymentConfig(
-    model=Qwen3_4B(),
-    checkpoint=checkpoint,
-    app_name="qwen3-4b-guessing-multiturn-serve",
-    served_model_name="qwen3-4b-guessing-multiturn",
-).serve()
-print(f"Trained model URL: {trained_deployment.url}")
+    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+    trained_deployment = DeploymentConfig(
+        model=Qwen3_4B(),
+        checkpoint=checkpoint,
+        app_name="qwen3-4b-guessing-multiturn-serve",
+        served_model_name="qwen3-4b-guessing-multiturn",
+    ).serve()
+    print(f"Trained model URL: {trained_deployment.url}")
 
-trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-trained_summary = summarize_eval(trained_eval)
-print(f"Trained success rate: {trained_summary['success_rate']:.2%}")
-print(f"Trained mean reward: {trained_eval.mean:.3f}")
-print(f"Trained mean turns:  {trained_summary['mean_turns']:.2f}")
-print(f"Base success rate:    {base_summary['success_rate']:.2%}")
-print(f"Base mean reward:     {base_eval.mean:.3f}")
-print(f"Base mean turns:      {base_summary['mean_turns']:.2f}")
+    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
+    trained_summary = summarize_eval(trained_eval)
+    print(f"Trained success rate: {trained_summary['success_rate']:.2%}")
+    print(f"Trained mean reward: {trained_eval.mean:.3f}")
+    print(f"Trained mean turns:  {trained_summary['mean_turns']:.2f}")
+    print(f"Base success rate:    {base_summary['success_rate']:.2%}")
+    print(f"Base mean reward:     {base_eval.mean:.3f}")
+    print(f"Base mean turns:      {base_summary['mean_turns']:.2f}")
+
+@tutorial_cli_app.local_entrypoint()
+
+def main() -> None:
+
+    _main_impl()
+
+if __name__ == "__main__":
+
+    main()

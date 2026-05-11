@@ -1,7 +1,7 @@
 ---
 title: Training Gym SDK
 description: Reusable building blocks and runnable examples for distributed training on Modal.
-editUrl: https://github.com/modal-projects/training-gym/edit/joy/update-documentation/README.md
+editUrl: https://github.com/modal-projects/training-gym/edit/main/README.md
 ---
 
 **[📖 Documentation](https://gym.modal.dev)** · **[Tutorials](https://gym.modal.dev/tutorials/)** · **[API Reference](https://gym.modal.dev/reference/)**
@@ -19,7 +19,7 @@ checkpointing, and serving deployment for training/eval/rollouts.
 Packaged as `modal-training-gym` — pip-install once, then import
 framework-specific launchers from your own scripts.
 
-To teach you how to use the gym, we created [tutorials](https://github.com/modal-projects/training-gym/blob/joy/update-documentation/tutorials) for you.
+To teach you how to use the gym, we created [tutorials](https://github.com/modal-projects/training-gym/blob/main/tutorials) for you.
 
 Every tutorial is a runnable `.py` file **and** a matching `.ipynb` with the same
 steps narrated cell-by-cell — the notebook is the place to read the
@@ -52,7 +52,7 @@ modal deploy dashboards/app.py
 ```
 It will print out the corresponding URL that you can visit to look at your training run status
 
-![Gym Observability Dashboard](https://raw.githubusercontent.com/modal-projects/training-gym/joy/update-documentation/assets/observability_dashboard.png)
+![Gym Observability Dashboard](https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/observability_dashboard.png)
 
 ### Note for multi-node
 
@@ -81,7 +81,7 @@ External resources:
 
 ## License
 
-[MIT](https://github.com/modal-projects/training-gym/blob/joy/update-documentation/LICENSE).
+[MIT](https://github.com/modal-projects/training-gym/blob/main/LICENSE).
 
 ---
 
@@ -144,4 +144,4 @@ schema.
 
 ## Agent guide
 
-- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/joy/update-documentation/skills/agent-modal-training.md)
+- [Running training jobs on Modal](https://github.com/modal-projects/training-gym/blob/main/skills/agent-modal-training.md)
