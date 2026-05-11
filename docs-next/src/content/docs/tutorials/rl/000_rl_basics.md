@@ -218,6 +218,47 @@ print(f"Trained haiku score: {trained_eval.mean:.1f}")
 print("——— Trained model evaluation complete ———")
 ```
 
+## Train off of a checkpoint
+Hmm, looks like the trained model is not doing very well.
+Maybe it's because it only trained for 10 iterations.
+
+What happens if we train it for more?
+We want to train it off of the latest checkpoint, not from scratch.
+
+```python
+new_training_run = TrainConfig(
+    model=Qwen3_4B(),
+    dataset=train_dataset,
+    checkpoint=checkpoint,
+    recipe=SlimeRecipe(
+        wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
+        custom_rm_function=haiku_rm,
+
+        gpu_type="H100",
+        colocate=True,
+        tensor_model_parallel_size=1,
+        sequence_parallel=False,
+        rollout_num_gpus_per_engine=1,
+
+        num_rollout=20,
+        rollout_batch_size=16,
+        rollout_max_response_len=4096,
+        rollout_temperature=1.0,
+
+        save_interval=10,
+        apply_chat_template_kwargs='{"enable_thinking": false}',
+
+        image_overlay=lambda image: image.run_commands(
+            "uv pip install --system aiohttp nltk>=3.8.0",
+            "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
+        ),
+    ),
+)
+print("——— Running new training... ———")
+new_train_result = new_training_run.train()
+print("——— New training complete ———")
+```
+
 ## Evaluate the trained checkpoint
 
 Now let's run the same eval on the newly trained model and compare.

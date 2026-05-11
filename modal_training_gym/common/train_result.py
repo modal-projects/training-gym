@@ -56,7 +56,9 @@ from modal_training_gym.utils.metadata import (
     vol_get,
     vol_list,
     vol_put,
+    vol_put_async,
     vol_upsert_summary_item,
+    vol_upsert_summary_item_async,
 )
 
 if TYPE_CHECKING:
@@ -123,6 +125,10 @@ class TrainResult:
             }
         return d
 
+    @staticmethod
+    def _summary_sort_key(item: dict[str, Any]) -> str:
+        return str(item.get("training_run_id", ""))
+
     def save(self) -> None:
         """Persist this result to the shared metadata volume."""
         payload = self._to_dict()
@@ -131,7 +137,19 @@ class TrainResult:
             MetadataStore.TRAIN_RESULTS_SUMMARY,
             payload,
             item_id_key="training_run_id",
-            sort_key=lambda item: str(item.get("training_run_id", "")),
+            sort_key=self._summary_sort_key,
+            reverse=True,
+        )
+
+    async def save_async(self) -> None:
+        """Async variant of :meth:`save`. Use from inside an event loop."""
+        payload = self._to_dict()
+        await vol_put_async(MetadataStore.TRAIN_RESULTS, self.training_run_id, payload)
+        await vol_upsert_summary_item_async(
+            MetadataStore.TRAIN_RESULTS_SUMMARY,
+            payload,
+            item_id_key="training_run_id",
+            sort_key=self._summary_sort_key,
             reverse=True,
         )
 

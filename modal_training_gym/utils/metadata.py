@@ -56,11 +56,39 @@ def vol_put(store: MetadataStore | str, key: str, value: dict[str, Any]) -> None
         batch.put_file(io.BytesIO(data), path)
 
 
+async def vol_put_async(
+    store: MetadataStore | str, key: str, value: dict[str, Any]
+) -> None:
+    from modal.exception import InvalidError, NotFoundError
+
+    vol = _metadata_volume()
+    data = json.dumps(value).encode()
+    path = f"{_store_path(store)}/{key}.json"
+    try:
+        await vol.remove_file.aio(path)
+    except (FileNotFoundError, NotFoundError):
+        pass
+    except InvalidError as exc:
+        if "No such file or directory" not in str(exc):
+            raise
+    async with vol.batch_upload() as batch:
+        batch.put_file(io.BytesIO(data), path)
+
+
 def vol_get(store: MetadataStore | str, key: str) -> dict[str, Any]:
     vol = _metadata_volume()
     try:
         data = b"".join(vol.read_file(f"{_store_path(store)}/{key}.json"))
         return json.loads(data)
+    except FileNotFoundError:
+        raise KeyError(key) from None
+
+
+async def vol_get_async(store: MetadataStore | str, key: str) -> dict[str, Any]:
+    vol = _metadata_volume()
+    try:
+        chunks = [chunk async for chunk in vol.read_file.aio(f"{_store_path(store)}/{key}.json")]
+        return json.loads(b"".join(chunks))
     except FileNotFoundError:
         raise KeyError(key) from None
 
@@ -73,6 +101,19 @@ def vol_list(store: MetadataStore | str) -> list[dict[str, Any]]:
             if entry.path.endswith(".json"):
                 data = b"".join(vol.read_file(entry.path))
                 results.append(json.loads(data))
+    except FileNotFoundError:
+        pass
+    return results
+
+
+async def vol_list_async(store: MetadataStore | str) -> list[dict[str, Any]]:
+    vol = _metadata_volume()
+    results = []
+    try:
+        async for entry in vol.iterdir.aio(_store_path(store)):
+            if entry.path.endswith(".json"):
+                chunks = [chunk async for chunk in vol.read_file.aio(entry.path)]
+                results.append(json.loads(b"".join(chunks)))
     except FileNotFoundError:
         pass
     return results
@@ -106,6 +147,19 @@ def vol_get_summary_items(
     return summary_items_from_payload(payload, payload_key=payload_key)
 
 
+async def vol_get_summary_items_async(
+    store: MetadataStore | str,
+    *,
+    key: str = SUMMARY_KEY,
+    payload_key: str = SUMMARY_ITEMS_KEY,
+) -> list[dict[str, Any]] | None:
+    try:
+        payload = await vol_get_async(store, key)
+    except KeyError:
+        return None
+    return summary_items_from_payload(payload, payload_key=payload_key)
+
+
 def vol_put_summary_items(
     store: MetadataStore | str,
     items: list[dict[str, Any]],
@@ -114,6 +168,16 @@ def vol_put_summary_items(
     payload_key: str = SUMMARY_ITEMS_KEY,
 ) -> None:
     vol_put(store, key, {payload_key: items})
+
+
+async def vol_put_summary_items_async(
+    store: MetadataStore | str,
+    items: list[dict[str, Any]],
+    *,
+    key: str = SUMMARY_KEY,
+    payload_key: str = SUMMARY_ITEMS_KEY,
+) -> None:
+    await vol_put_async(store, key, {payload_key: items})
 
 
 def vol_upsert_summary_item(
@@ -138,6 +202,28 @@ def vol_upsert_summary_item(
     vol_put_summary_items(store, items, key=key, payload_key=payload_key)
 
 
+async def vol_upsert_summary_item_async(
+    store: MetadataStore | str,
+    item: dict[str, Any],
+    *,
+    item_id_key: str,
+    key: str = SUMMARY_KEY,
+    payload_key: str = SUMMARY_ITEMS_KEY,
+    sort_key: Any = None,
+    reverse: bool = False,
+) -> None:
+    item_id = item.get(item_id_key)
+    if item_id is None:
+        raise KeyError(f"Missing summary item id key {item_id_key!r}")
+
+    items = await vol_get_summary_items_async(store, key=key, payload_key=payload_key) or []
+    items = [existing for existing in items if existing.get(item_id_key) != item_id]
+    items.append(item)
+    if sort_key is not None:
+        items.sort(key=sort_key, reverse=reverse)
+    await vol_put_summary_items_async(store, items, key=key, payload_key=payload_key)
+
+
 __all__ = [
     "METADATA_VOLUME_NAME",
     "MetadataStore",
@@ -145,9 +231,15 @@ __all__ = [
     "SUMMARY_KEY",
     "summary_items_from_payload",
     "vol_get",
+    "vol_get_async",
     "vol_list",
+    "vol_list_async",
     "vol_put",
+    "vol_put_async",
     "vol_get_summary_items",
+    "vol_get_summary_items_async",
     "vol_put_summary_items",
+    "vol_put_summary_items_async",
     "vol_upsert_summary_item",
+    "vol_upsert_summary_item_async",
 ]

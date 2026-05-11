@@ -7,7 +7,7 @@ description: API reference for WandbConfig
 from modal_training_gym.common.wandb import WandbConfig
 ```
 
-Weights & Biases logging configuration shared across all frameworks..
+Weights & Biases logging configuration shared across all frameworks.
 
 ## Fields
 

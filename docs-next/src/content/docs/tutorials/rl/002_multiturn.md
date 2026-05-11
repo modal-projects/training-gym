@@ -377,9 +377,6 @@ training_run = TrainConfig(
         global_batch_size=8,
         save_interval=10,
         apply_chat_template_kwargs='{"enable_thinking": false}',
-        image_overlay=lambda image: image.run_commands(
-            "uv pip install --system datasets>=3.0.0",
-        ),
     ),
 )
 print("Starting training...")

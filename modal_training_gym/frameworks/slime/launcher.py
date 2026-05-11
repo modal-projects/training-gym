@@ -492,7 +492,7 @@ def build_slime_app(
             created_at=created_at,
             started_at=created_at,
         )
-        run_record.save()
+        await run_record.save_async()
         print(f"TrainingRun recorded: {training_run_id}")
 
         try:
@@ -505,14 +505,14 @@ def build_slime_app(
                 if not has_snapshot:
                     print(f"Downloading model {model.model_name}...")
                     model.download()
-                    hf_cache_volume.commit()
+                    await hf_cache_volume.commit.aio()
 
             if dataset:
                 prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
                 if not os.path.exists(prompt_data):
                     print(f"Preparing dataset ({prompt_data} not found)...")
                     dataset.prepare(prompt_data, eval_paths)
-                    data_volume.commit()
+                    await data_volume.commit.aio()
 
             prepare_slime_config(slime, model, tempfile.mkdtemp())
 
@@ -602,9 +602,9 @@ def build_slime_app(
             result = TrainResult(
                 **{k: v for k, v in result_kwargs.items() if k in accepted_fields}
             )
-            result.save()
+            await result.save_async()
             run_record.status = TrainingRunStatus.COMPLETED
-            checkpoints_volume.commit()
+            await checkpoints_volume.commit.aio()
             print(f"TrainResult saved: {training_run_id}")
             return result._to_dict()
         except KeyboardInterrupt:
@@ -619,7 +619,7 @@ def build_slime_app(
             if run_record.completed_at is None:
                 run_record.completed_at = finished_at
             run_record.duration_seconds = max(0, finished_at - run_record.started_at)
-            run_record.save()
+            await run_record.save_async()
 
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
