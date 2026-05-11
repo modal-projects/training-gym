@@ -92,15 +92,15 @@
     <strong>{completedTotal}</strong>
   </article>
   <article class="summary-card">
-    <span class="summary-label">Pending</span>
+    <span class="summary-label">Pending runs</span>
     <strong>{runningTotal}</strong>
   </article>
   <article class="summary-card">
-    <span class="summary-label">Stopped</span>
+    <span class="summary-label">Stopped runs</span>
     <strong>{stoppedTotal}</strong>
   </article>
   <article class="summary-card">
-    <span class="summary-label">Failed</span>
+    <span class="summary-label">Failed runs</span>
     <strong>{failedTotal}</strong>
   </article>
 </section>
@@ -219,7 +219,7 @@
   <Drawer open={!!selectedRun} onclose={closeDrawer}>
     <div class="run-drawer" aria-label={`Training run ${selectedRun.run_id}`}>
       <div class="drawer-header">
-        <div>
+        <div class="drawer-header-left">
           <div class="drawer-eyebrow">Training run</div>
           <h2 class="drawer-run-id" title={selectedRun.run_id}>{selectedRun.run_id}</h2>
         </div>
@@ -287,7 +287,7 @@
   .summary-row {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 24px;
+    gap: 14px;
     margin-bottom: 24px;
   }
 
@@ -297,24 +297,27 @@
 
   .summary-card {
     border: 0;
-    border-radius: 10px;
-    background: color-mix(in srgb, #ffffff 7%, transparent);
-    padding: 24px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 0.12rem;
+    gap: 8px;
+    height: 80px;
   }
 
   .summary-label {
     color: var(--muted);
-    font-size: 0.74rem;
-    text-transform: none;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
   }
 
   .summary-card strong {
     color: var(--text-bright);
-    font-size: 1.36rem;
-    font-weight: 600;
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 32px;
   }
 
   .runs-surface {
@@ -356,7 +359,8 @@
     background: transparent;
     color: var(--text);
     font: inherit;
-    font-size: 0.81rem;
+    font-size: 14px;
+    line-height: 20px;
     cursor: pointer;
     padding: 0;
     text-align: left;
@@ -373,7 +377,10 @@
   .run-name {
     display: block;
     color: var(--text-bright);
-    font-weight: 500;
+    font-family: var(--font-mono);
+    font-weight: 400;
+    font-size: 14px;
+    line-height: 20px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -404,15 +411,16 @@
     display: inline-flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 0.38rem;
+    gap: 6px;
     white-space: nowrap;
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    padding: 0.2rem 0.58rem;
+    border: 1px solid var(--color-c-gray-10, #2f2f2f);
+    border-radius: 6px;
+    padding: 4px 8px;
     text-decoration: none;
-    font-size: 0.72rem;
+    font-size: 12px;
     font-weight: 500;
-    background: var(--panel);
+    line-height: 16px;
+    background: transparent;
   }
 
   .open-modal-link-label {
@@ -440,25 +448,32 @@
   }
 
   .drawer-header {
-    border-bottom: 1px solid var(--border);
-    padding: 0.92rem 1rem;
+    border-bottom: 1px solid var(--color-c-gray-10, #2f2f2f);
+    padding: 16px 20px;
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 0.75rem;
+    gap: 12px;
+  }
+
+  .drawer-header-left {
+    min-width: 0;
+    overflow: hidden;
   }
 
   .drawer-eyebrow {
     color: var(--muted);
-    font-size: 0.72rem;
-    margin-bottom: 0.35rem;
+    font-size: 12px;
+    line-height: 16px;
+    margin-bottom: 4px;
   }
 
   .drawer-run-id {
     color: var(--text-bright);
-    font-size: 1.1rem;
+    font-size: 16px;
     font-weight: 500;
     font-family: var(--font-mono);
+    line-height: 24px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -467,20 +482,22 @@
   .drawer-actions {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 8px;
     flex-shrink: 0;
   }
 
   .view-app-link {
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    border: 1px solid var(--border);
+    gap: 6px;
+    border: 1px solid var(--color-c-gray-10, #2f2f2f);
     border-radius: 6px;
-    padding: 0.18rem 0.42rem;
+    padding: 4px 8px;
     text-decoration: none;
-    color: var(--text);
-    font-size: 0.68rem;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
   }
 
   .view-app-link:hover {
@@ -489,7 +506,7 @@
   }
 
   .drawer-close {
-    border: 1px solid var(--border);
+    border: 1px solid var(--color-c-gray-10, #2f2f2f);
     border-radius: 6px;
     background: transparent;
     color: var(--muted);
@@ -497,7 +514,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.18rem;
+    padding: 4px;
   }
 
   .drawer-close:hover {
@@ -506,44 +523,49 @@
   }
 
   .drawer-section {
-    border-bottom: 1px solid var(--border);
-    padding: 0.82rem 1rem 0.9rem;
+    border-bottom: 1px solid var(--color-c-gray-10, #2f2f2f);
+    padding: 16px 20px;
   }
 
   .drawer-section-title {
     color: var(--text-bright);
-    font-size: 0.85rem;
+    font-size: 14px;
     font-weight: 500;
-    margin-bottom: 0.55rem;
+    line-height: 20px;
+    margin-bottom: 8px;
   }
 
   .drawer-kv {
     display: grid;
-    grid-template-columns: 122px minmax(0, 1fr);
+    grid-template-columns: 100px minmax(0, 1fr);
     align-items: baseline;
-    gap: 0.55rem;
-    padding: 0.2rem 0;
+    gap: 8px;
+    padding: 4px 0;
   }
 
   .drawer-key {
     color: var(--muted);
-    font-size: 0.74rem;
+    font-size: 12px;
+    line-height: 16px;
   }
 
   .drawer-value {
     color: var(--text);
-    font-size: 0.76rem;
+    font-size: 14px;
+    line-height: 20px;
     overflow-wrap: anywhere;
   }
 
   .drawer-value-mono {
     font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: 12px;
+    line-height: 16px;
   }
 
   .drawer-empty {
     color: var(--muted);
-    font-size: 0.76rem;
+    font-size: 12px;
+    line-height: 16px;
   }
 
   .empty {

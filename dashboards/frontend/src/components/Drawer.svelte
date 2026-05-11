@@ -53,11 +53,11 @@
   .drawer {
     position: relative;
     z-index: 1;
-    background: color-mix(in srgb, var(--bg-depth) 65%, var(--panel));
-    border-left: 1px solid var(--border);
+    background: var(--color-c-gray-2, #1c1c1c);
+    border-left: 1px solid var(--color-c-gray-10, #2f2f2f);
     height: 100%;
     max-width: 100vw;
-    box-shadow: 0 0 32px 6px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 0 32px 6px rgba(0, 0, 0, 0.4);
   }
 
   .drawer-overlay {
