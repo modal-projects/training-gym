@@ -1,17 +1,18 @@
 # Tutorials
 
-Every tutorial below has a one-click **Launch in Modal Notebook** button.
-The button opens the `.ipynb` in a fresh Modal Notebook — the first code
-cell is a `! pip install git+https://github.com/modal-projects/training-gym.git@main`
-that installs `modal-training-gym` into the notebook kernel, so the rest of
-the cells run as-is.
+Every tutorial in the table below has a one-click button in the **Launch**
+column. Clicking it opens the `.ipynb` in a fresh Modal Notebook; the first
+code cell `pip install`s `modal-training-gym` into the notebook kernel, so
+the remaining cells run as-is.
 
-The **Difficulty** column is a rough self-assessed signal for where to
-start: *Beginner* tutorials are single-node and introduce one framework
-concept; *Intermediate* tutorials span 1–2 nodes or wire up something
-non-default (custom reward, external script); *Advanced* tutorials run on
-≥2 nodes with non-trivial parallelism (tensor-parallel, colocated RL, long
-context) and assume familiarity with the underlying framework.
+The **Difficulty** column is a rough self-assessed signal for where to start:
+
+- *Beginner* — single-node, introduces one framework concept.
+- *Intermediate* — 1–2 nodes, or wires up something non-default (custom
+  reward, external script).
+- *Advanced* — ≥2 nodes with non-trivial parallelism (tensor-parallel,
+  colocated RL, long context); assumes familiarity with the underlying
+  framework.
 
 ## Tutorials
 
@@ -29,9 +30,9 @@ context) and assume familiarity with the underlying framework.
 
 ## Running from the CLI instead
 
-Some tutorials also emit a plain `.py` companion, but the current source
-tutorial is notebook-first and intentionally narrated for Modal Notebooks.
-Use the notebook as the canonical walkthrough.
+Each tutorial also emits a plain `.py` companion, but the sources are
+written notebook-first and narrated for Modal Notebooks — treat the
+`.ipynb` as the canonical walkthrough.
 
 ## Authoring a new tutorial
 
@@ -50,9 +51,9 @@ uv run python tutorials/generate_tutorial.py
 
 ### Cell decorators
 
-Top-level functions in the source file produce cells; function names and
-argument lists don't matter, only decorator + body. Cells appear in source
-order.
+Each top-level function in the source file produces one cell. Function
+names and argument lists are ignored — only the decorator and the body
+matter. Cells appear in source order.
 
 - `@markdown` — the function's docstring becomes one markdown cell
   (`.ipynb`) or `#` comments (`.py`).

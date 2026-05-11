@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 @dataclass
 class WandbConfig:
-    """Weights & Biases logging configuration shared across all frameworks..
+    """Weights & Biases logging configuration shared across all frameworks.
 
     ## Fields
 
