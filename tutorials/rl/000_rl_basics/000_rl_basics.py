@@ -210,14 +210,76 @@ def _main_impl() -> None:
     print(f"Trained haiku score: {trained_eval.mean:.1f}")
     print("——— Trained model evaluation complete ———")
 
+    # ## Train off of a checkpoint
+    # Hmm, looks like the trained model is not doing very well.
+    # Maybe it's because it only trained for 10 iterations.
+    #
+    # What happens if we train it for more?
+    # We want to train it off of the latest checkpoint, not from scratch.
+
+    new_training_run = TrainConfig(
+        model=Qwen3_4B(),
+        dataset=train_dataset,
+        checkpoint=checkpoint,
+        recipe=SlimeRecipe(
+            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
+            custom_rm_function=haiku_rm,
+
+            gpu_type="H100",
+            colocate=True,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,
+            rollout_num_gpus_per_engine=1,
+
+            num_rollout=20,
+            rollout_batch_size=16,
+            rollout_max_response_len=4096,
+            rollout_temperature=1.0,
+
+            save_interval=10,
+            apply_chat_template_kwargs='{"enable_thinking": false}',
+
+            image_overlay=lambda image: image.run_commands(
+                "uv pip install --system aiohttp nltk>=3.8.0",
+                "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
+            ),
+        ),
+    )
+    print("——— Running new training... ———")
+    new_train_result = new_training_run.train()
+    print("——— New training complete ———")
+
+    # ## Evaluate the trained checkpoint
+    #
+    # Now let's run the same eval on the newly trained model and compare.
+
+    new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
+    print(new_checkpoint.path)
+
+    new_model_deployment = DeploymentConfig(
+        model=Qwen3_4B(),
+        checkpoint=new_checkpoint,
+        app_name="qwen3-4b-haiku-serve-new",
+        served_model_name="qwen3-4b-haiku",
+    ).serve()
+    print(f"Newly trained model deployed to {new_model_deployment.url}")
+
+    # ## Compare the results
+    #
+    # Now let's compare the results of the newly trained model and the base model.
+
+    print("——— Running trained model evaluation... ———")
+    new_eval = eval_config.evaluate(new_model_deployment, debug=True)
+    print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
+    print("——— Trained model (new) evaluation complete ———")
+
     # ## Compare the results
     #
     # Now let's compare the results of the newly trained model and the base model.
 
     print(f"Base model haiku score: {base_eval.mean:.1f}")
     print(f"Trained model haiku score: {trained_eval.mean:.1f}")
-    if "new_eval" in locals():
-        print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
+    print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
 
 @tutorial_cli_app.local_entrypoint()
 
