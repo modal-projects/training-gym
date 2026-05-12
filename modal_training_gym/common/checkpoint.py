@@ -205,6 +205,7 @@ def convert_checkpoint_to_hf(
     image = (
         Image.from_registry("slimerl/slime:nightly-dev-20260329a")
         .entrypoint([])
+        .run_commands("rm -rf /root/.cache/huggingface")
         .add_local_python_source("modal_training_gym", copy=True)
     )
     conversion_app = App("training-gym-checkpoint-convert")

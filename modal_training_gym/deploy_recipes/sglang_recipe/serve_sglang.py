@@ -40,6 +40,7 @@ def build_sglang_serve_app(
         .run_commands(
             "sed -i 's/timeout_keep_alive=5/timeout_keep_alive=300/g'"
             " /sgl-workspace/sglang/python/sglang/srt/entrypoints/http_server.py",
+            "rm -rf /root/.cache/huggingface",
         )
         .env(
             {

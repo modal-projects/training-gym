@@ -115,7 +115,11 @@ def build_slime_app(
             caller_script = os.path.abspath(mod_file)
 
     # ── Image ────────────────────────────────────────────────────────────────
-    image = Image.from_registry("slimerl/slime:nightly-dev-20260329a").entrypoint([])
+    image = (
+        Image.from_registry("slimerl/slime:nightly-dev-20260329a")
+        .entrypoint([])
+        .run_commands("rm -rf /root/.cache/huggingface")
+    )
 
     if slime.image_overlay is not None:
         image = slime.image_overlay(image)
