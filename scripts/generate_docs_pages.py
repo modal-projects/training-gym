@@ -178,7 +178,7 @@ def starlight_frontmatter(destination: str) -> str:
             f"""\
             ---
             title: Training Gym SDK
-            description: Reusable building blocks and runnable examples for distributed training on Modal.
+            description: Reusable building blocks and runnable examples for RL post-training on Modal.
             editUrl: {EDIT_BASE}/README.md
             ---
             """

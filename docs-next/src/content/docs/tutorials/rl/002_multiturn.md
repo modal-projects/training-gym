@@ -30,7 +30,6 @@ from modal_training_gym import (
     Qwen3_4B,
     SlimeRecipe,
     TrainConfig,
-    WandbConfig,
     list_checkpoints,
 )
 ```
@@ -383,7 +382,6 @@ training_run = TrainConfig(
     model=Qwen3_4B(),
     dataset=train_dataset,
     recipe=SlimeRecipe(
-        wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-guessing-multiturn"),
         custom_generate_function=number_guess_generate,
         custom_rm_function=number_guess_rm,
         extra_config={
@@ -447,7 +445,6 @@ print(f"Base mean turns:      {base_summary['mean_turns']:.2f}")
 - [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`SlimeRecipe`](/reference/training/slimerecipe/)
 - [`TrainConfig`](/reference/training/trainconfig/)
-- [`WandbConfig`](/reference/core/wandbconfig/)
 
 **Source:** [`tutorials/rl/002_multiturn/002_multiturn.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.py)
  | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

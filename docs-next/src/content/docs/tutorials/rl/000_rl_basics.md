@@ -31,7 +31,6 @@ from modal_training_gym import (
     Qwen3_4B,
     SlimeRecipe,
     TrainConfig,
-    WandbConfig,
     list_checkpoints,
 )
 ```
@@ -151,7 +150,6 @@ training_run = TrainConfig(
     model=base_model,
     dataset=train_dataset,
     recipe=SlimeRecipe(
-        wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
         custom_rm_function=haiku_rm,
 
         gpu_type="H100",
@@ -231,7 +229,6 @@ new_training_run = TrainConfig(
     dataset=train_dataset,
     checkpoint=checkpoint,
     recipe=SlimeRecipe(
-        wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
         custom_rm_function=haiku_rm,
 
         gpu_type="H100",
@@ -307,7 +304,6 @@ print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
 - [`EvalRowResult`](/reference/evaluation/evalrowresult/)
 - [`TrainConfig`](/reference/training/trainconfig/)
 - [`SlimeRecipe`](/reference/training/slimerecipe/)
-- [`WandbConfig`](/reference/core/wandbconfig/)
 - [`TrainResult`](/reference/core/trainresult/)
 
 **Source:** [`tutorials/rl/000_rl_basics/000_rl_basics.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.py)

@@ -23,7 +23,7 @@ SGLang serving configuration.
 | `mem_fraction_static` | `float | None` | `None` | Fraction of GPU memory for KV cache. Default `None` (SGLang default). |
 | `chunked_prefill_size` | `int | None` | `None` | Chunked prefill token budget. Default `None`. |
 | `max_running_requests` | `int | None` | `None` | Max concurrent requests per worker. Default `None`. |
-| `sglang_image` | `str` | `"lmsysorg/sglang:nightly-dev-cu13-20260311-dc4380e3"` | Docker image tag for the SGLang container. Default is a recent nightly. |
+| `sglang_image` | `str` | `"lmsysorg/sglang:nightly-dev-cu13-20260508-2cf1a4ab"` | Docker image tag for the SGLang container. Default is a recent nightly. |
 | `extra_server_args` | `dict[str, str] | None` | `None` | Additional `--flag value` pairs passed to `sglang.launch_server`. Use an empty string value for boolean flags (e.g. `{"--trust-remote-code": ""}`). Default `None`. |
 | `environment_name` | `str | None` | `None` | Modal environment to deploy into. Default `None`. |
 | `deploy_strategy` | `str` | `"rolling"` | Modal deployment strategy. Default `"rolling"`. |

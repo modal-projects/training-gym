@@ -20,10 +20,4 @@ Weights & Biases logging configuration shared across all frameworks.
 | `disable_random_suffix` | `bool` | `True` | When `True`, suppresses the random suffix that W&B appends to run names. Default `True`. |
 | `modal_wandb_secret_name` | `str` | `"wandb-secret"` | Name of the Modal secret containing the W&B API key. Default `"wandb-secret"`. |
 
-## Related Tutorials
-
-- [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
-- [Code RL with Harbor hello-world and sandboxed verification](/tutorials/rl/001_sandboxes/)
-- [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn/)
-
 **Source:** [`modal_training_gym/common/wandb.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/wandb.py)

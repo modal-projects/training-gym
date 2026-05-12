@@ -10,9 +10,9 @@ export default defineConfig({
       title: 'Training Gym',
       favicon: '/modal-logo.svg',
       description:
-        'Reusable building blocks + runnable examples for distributed training on Modal.',
+        'Reusable building blocks + runnable examples for RL post-training on Modal.',
       tagline:
-        'Framework-aware launchers, paired notebooks, and fewer one-off cluster scripts.',
+        'GRPO, PPO, custom reward and generate functions — runnable on Modal in minutes.',
       social: [
         {
           icon: 'github',
