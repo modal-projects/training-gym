@@ -52,6 +52,7 @@ def build_vllm_serve_app(
             f"vllm=={vllm_version}",
             "huggingface-hub==0.36.0",
         )
+        .run_commands("rm -rf /root/.cache/huggingface")
         .env({"HF_XET_HIGH_PERFORMANCE": "1"})
     )
 
