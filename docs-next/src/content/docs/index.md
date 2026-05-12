@@ -84,6 +84,9 @@ for larger models — are still in Beta.
 :::
 
 
+## Architecture
+![Architecture diagram](https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/training_gym_architecture_restyled.svg)
+
 ## Documentation
 
 Full docs are hosted at **[gym.modal.dev](https://gym.modal.dev)**:
