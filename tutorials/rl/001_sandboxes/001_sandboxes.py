@@ -20,6 +20,13 @@
 # ```
 # uv run python tutorials/rl/001_sandboxes/001_sandboxes.py
 # ```
+# ## Prerequisites
+#
+# This tutorial requires a Modal Secret named `huggingface-secret` containing your
+# `HF_TOKEN`. Create one at [modal.com/secrets](https://modal.com/secrets) if you
+# haven't already — the cell below fails fast with instructions otherwise.
+
+import modal
 
 import json
 import re
@@ -35,7 +42,6 @@ from modal_training_gym import (
     Qwen3_4B,
     SlimeRecipe,
     TrainConfig,
-    WandbConfig,
     list_checkpoints,
 )
 
@@ -143,6 +149,14 @@ import modal
 tutorial_cli_app = modal.App()
 
 def _main_impl() -> None:
+    try:
+        modal.Secret.from_name("huggingface-secret").hydrate()
+    except modal.exception.NotFoundError as e:
+        raise RuntimeError(
+            "Missing Modal Secret 'huggingface-secret'. Create one at "
+            "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
+        ) from e
+
     # ## Load hello-world from Harbor Hub
     #
     # `HarborDataset` accepts a `dataset_name` to pull tasks from
@@ -187,7 +201,6 @@ def _main_impl() -> None:
         model=Qwen3_4B(),
         dataset=dataset,
         recipe=SlimeRecipe(
-            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-hello-world"),
             custom_rm_function=usaco_rm,
 
             gpu_type="H100",

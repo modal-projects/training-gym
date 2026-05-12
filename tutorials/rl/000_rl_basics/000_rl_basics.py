@@ -23,6 +23,13 @@
 # ```
 # uv run python tutorials/rl/000_rl_basics/000_rl_basics.py
 # ```
+# ## Prerequisites
+#
+# This tutorial requires a Modal Secret named `huggingface-secret` containing your
+# `HF_TOKEN`. Create one at [modal.com/secrets](https://modal.com/secrets) if you
+# haven't already — the cell below fails fast with instructions otherwise.
+
+import modal
 
 import re
 
@@ -34,7 +41,6 @@ from modal_training_gym import (
     Qwen3_4B,
     SlimeRecipe,
     TrainConfig,
-    WandbConfig,
     list_checkpoints,
 )
 
@@ -118,6 +124,14 @@ import modal
 tutorial_cli_app = modal.App()
 
 def _main_impl() -> None:
+    try:
+        modal.Secret.from_name("huggingface-secret").hydrate()
+    except modal.exception.NotFoundError as e:
+        raise RuntimeError(
+            "Missing Modal Secret 'huggingface-secret'. Create one at "
+            "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
+        ) from e
+
     # ## Serve the base model
     #
     # So, how does Qwen3-4B currently fare at writing haikus? We can
@@ -149,7 +163,6 @@ def _main_impl() -> None:
         model=base_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
-            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
             custom_rm_function=haiku_rm,
 
             gpu_type="H100",
@@ -221,7 +234,6 @@ def _main_impl() -> None:
         dataset=train_dataset,
         checkpoint=checkpoint,
         recipe=SlimeRecipe(
-            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
             custom_rm_function=haiku_rm,
 
             gpu_type="H100",

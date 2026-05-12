@@ -107,6 +107,28 @@ def _resolve_branch() -> str:
 _BRANCH = _resolve_branch()
 
 
+# Injected before every tutorial's first code cell so missing secrets fail
+# fast locally instead of mid-launch on a Modal worker.
+_HF_SECRET_CHECK_MARKDOWN = (
+    "## Prerequisites\n"
+    "\n"
+    "This tutorial requires a Modal Secret named `huggingface-secret` containing your\n"
+    "`HF_TOKEN`. Create one at [modal.com/secrets](https://modal.com/secrets) if you\n"
+    "haven't already — the cell below fails fast with instructions otherwise."
+)
+_HF_SECRET_CHECK_CODE = (
+    "import modal\n"
+    "\n"
+    "try:\n"
+    '    modal.Secret.from_name("huggingface-secret").hydrate()\n'
+    "except modal.exception.NotFoundError as e:\n"
+    "    raise RuntimeError(\n"
+    "        \"Missing Modal Secret 'huggingface-secret'. Create one at \"\n"
+    '        "https://modal.com/secrets with an HF_TOKEN entry, then re-run."\n'
+    "    ) from e"
+)
+
+
 @dataclass
 class Cell:
     kind: str  # "markdown" | "code"
@@ -129,7 +151,9 @@ def _resolve_targets(deco_names: set[str | None]) -> frozenset[str]:
     py_only = _PY_ONLY in deco_names
     nb_only = _NOTEBOOK_ONLY in deco_names
     if py_only and nb_only:
-        raise ValueError("@py_only and @notebook_only are mutually exclusive on the same cell")
+        raise ValueError(
+            "@py_only and @notebook_only are mutually exclusive on the same cell"
+        )
     if py_only:
         return frozenset({_PY})
     if nb_only:
@@ -179,7 +203,20 @@ def _extract_cells(source: str) -> list[Cell]:
             body_src = "".join(lines[start:end])
             body_src = textwrap.dedent(body_src).rstrip("\n")
             cells.append(Cell(kind="code", source=body_src, targets=targets))
-    return cells
+    return _inject_hf_secret_check(cells)
+
+
+def _inject_hf_secret_check(cells: list[Cell]) -> list[Cell]:
+    """Insert the HF secret precheck right before the first code cell."""
+    both = frozenset({_PY, _NB})
+    prereq = [
+        Cell(kind="markdown", source=_HF_SECRET_CHECK_MARKDOWN, targets=both),
+        Cell(kind="code", source=_HF_SECRET_CHECK_CODE, targets=both),
+    ]
+    for i, cell in enumerate(cells):
+        if cell.kind == "code":
+            return cells[:i] + prereq + cells[i:]
+    return cells + prereq
 
 
 def _render_py(cells: list[Cell], header: str) -> str:
@@ -237,9 +274,7 @@ def _render_py(cells: list[Cell], header: str) -> str:
 
 def _py_globals_used_by_definitions(cells: list[Cell]) -> set[str]:
     py_code = [
-        cell.source
-        for cell in cells
-        if _PY in cell.targets and cell.kind == "code"
+        cell.source for cell in cells if _PY in cell.targets and cell.kind == "code"
     ]
     if not py_code:
         return set()
@@ -272,8 +307,7 @@ def _split_py_code_cell(
     blocks: list[tuple[str, str]] = []
 
     stmt_scopes = [
-        _stmt_belongs_at_module_scope(stmt, globals_used_by_defs)
-        for stmt in tree.body
+        _stmt_belongs_at_module_scope(stmt, globals_used_by_defs) for stmt in tree.body
     ]
     group_start = 0
 
@@ -297,7 +331,16 @@ def _stmt_belongs_at_module_scope(
     stmt: ast.stmt,
     globals_used_by_defs: set[str],
 ) -> bool:
-    if isinstance(stmt, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+    if isinstance(
+        stmt,
+        (
+            ast.Import,
+            ast.ImportFrom,
+            ast.FunctionDef,
+            ast.AsyncFunctionDef,
+            ast.ClassDef,
+        ),
+    ):
         return True
     if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
         return bool(_assigned_names(stmt) & globals_used_by_defs)
@@ -430,8 +473,7 @@ def _render_launch_cell(bucket: str, name: str) -> str:
         f"/tutorials/{bucket}/{name}/{name}.ipynb"
     )
     launch_url = (
-        "https://modal.com/notebooks/new/"
-        f"{urllib.parse.quote(notebook_url, safe=':/')}"
+        f"https://modal.com/notebooks/new/{urllib.parse.quote(notebook_url, safe=':/')}"
     )
     # Explicit `rel="nofollow noopener noreferrer"` matches GitHub's own
     # auto-added rel, which ensures GitHub's markdown sanitizer preserves
@@ -443,7 +485,9 @@ def _render_launch_cell(bucket: str, name: str) -> str:
     )
 
 
-def _render_tutorial_table(bucket: str, bucket_entries: list[tuple[str, str, dict]]) -> str:
+def _render_tutorial_table(
+    bucket: str, bucket_entries: list[tuple[str, str, dict]]
+) -> str:
     lines = [
         "| Tutorial | Summary | Difficulty | Framework | Cluster | Launch |",
         "|---|---|---|---|---|---|",
@@ -514,11 +558,7 @@ def _iter_source_files() -> list[pathlib.Path]:
     bucket subdirectory (so a stray top-level file produces a clear error in
     `_bucket_for` rather than a silent no-op).
     """
-    return sorted(
-        p
-        for p in INPUT_DIR.rglob("*.py")
-        if p.name != "__init__.py"
-    )
+    return sorted(p for p in INPUT_DIR.rglob("*.py") if p.name != "__init__.py")
 
 
 def _collect_all_metadata() -> list[tuple[str, str, dict]]:
@@ -574,7 +614,9 @@ def main() -> None:
     # the whole catalog even when a single file is regenerated.
     entries = _collect_all_metadata()
     if entries and _update_readme_table(entries):
-        print(f"{_README_PATH.relative_to(REPO_ROOT)} ← table regenerated ({len(entries)} rows)")
+        print(
+            f"{_README_PATH.relative_to(REPO_ROOT)} ← table regenerated ({len(entries)} rows)"
+        )
 
 
 if __name__ == "__main__":

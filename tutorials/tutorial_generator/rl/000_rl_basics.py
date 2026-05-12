@@ -13,7 +13,6 @@ TUTORIAL_METADATA = {
         "EvalRowResult",
         "TrainConfig",
         "SlimeRecipe",
-        "WandbConfig",
         "TrainResult",
     ],
 }
@@ -73,7 +72,6 @@ def _imports():
         Qwen3_4B,
         SlimeRecipe,
         TrainConfig,
-        WandbConfig,
         list_checkpoints,
     )
 
@@ -265,7 +263,6 @@ def _define_training_run():
         model=base_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
-            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
             custom_rm_function=haiku_rm,
 
             gpu_type="H100",
@@ -367,7 +364,6 @@ def _continue_to_train_off_of_a_checkpoint_code():
         dataset=train_dataset,
         checkpoint=checkpoint,
         recipe=SlimeRecipe(
-            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-haiku"),
             custom_rm_function=haiku_rm,
 
             gpu_type="H100",
