@@ -153,6 +153,24 @@ def strip_first_heading(markdown: str) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def strip_developer_guide(markdown: str) -> str:
+    """Drop the trailing `# Developer Guide` section (and its preceding `---`).
+
+    The Developer Guide lives in README.md for GitHub readers but is intentionally
+    omitted from the published docs site.
+    """
+    lines = markdown.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() == "# Developer Guide":
+            cutoff = index
+            while cutoff > 0 and not lines[cutoff - 1].strip():
+                cutoff -= 1
+            if cutoff > 0 and lines[cutoff - 1].strip() == "---":
+                cutoff -= 1
+            return "\n".join(lines[:cutoff]).rstrip() + "\n"
+    return markdown
+
+
 def transform_markdown(
     source: Path,
     *,
@@ -161,6 +179,7 @@ def transform_markdown(
     tutorials_link: str,
 ) -> str:
     page = source.read_text()
+    page = strip_developer_guide(page)
     page = convert_github_callouts(page)
     page = rewrite_images(page, source_dir=source_dir)
     page = rewrite_links(
