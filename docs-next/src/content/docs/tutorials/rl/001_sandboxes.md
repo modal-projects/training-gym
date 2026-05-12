@@ -32,7 +32,6 @@ from modal_training_gym import (
     Qwen3_4B,
     SlimeRecipe,
     TrainConfig,
-    WandbConfig,
     list_checkpoints,
 )
 ```
@@ -187,7 +186,6 @@ training_run = TrainConfig(
     model=Qwen3_4B(),
     dataset=dataset,
     recipe=SlimeRecipe(
-        wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-hello-world"),
         custom_rm_function=usaco_rm,
 
         gpu_type="H100",
@@ -247,7 +245,6 @@ print(f"Base mean reward:    {base_eval.mean:.4f}")
 - [`Qwen3_4B`](/reference/models/qwen3_4b/)
 - [`SlimeRecipe`](/reference/training/slimerecipe/)
 - [`TrainConfig`](/reference/training/trainconfig/)
-- [`WandbConfig`](/reference/core/wandbconfig/)
 
 **Source:** [`tutorials/rl/001_sandboxes/001_sandboxes.py`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_sandboxes/001_sandboxes.py)
  | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_sandboxes/001_sandboxes.ipynb" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>

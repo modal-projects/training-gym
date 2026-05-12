@@ -116,6 +116,11 @@ _HF_SECRET_CHECK_MARKDOWN = (
     "`HF_TOKEN`. Create one at [modal.com/secrets](https://modal.com/secrets) if you\n"
     "haven't already — the cell below fails fast with instructions otherwise."
 )
+_NOTEBOOK_GPU_NOTE_MARKDOWN = (
+    "> **Note:** you do **not** need to attach a GPU to this notebook. All training and\n"
+    "> serving happens on Modal-managed GPU workers spun up by the SDK — the notebook\n"
+    "> itself only needs to issue API calls."
+)
 _HF_SECRET_CHECK_CODE = (
     "import modal\n"
     "\n"
@@ -209,8 +214,10 @@ def _extract_cells(source: str) -> list[Cell]:
 def _inject_hf_secret_check(cells: list[Cell]) -> list[Cell]:
     """Insert the HF secret precheck right before the first code cell."""
     both = frozenset({_PY, _NB})
+    nb_only = frozenset({_NB})
     prereq = [
         Cell(kind="markdown", source=_HF_SECRET_CHECK_MARKDOWN, targets=both),
+        Cell(kind="markdown", source=_NOTEBOOK_GPU_NOTE_MARKDOWN, targets=nb_only),
         Cell(kind="code", source=_HF_SECRET_CHECK_CODE, targets=both),
     ]
     for i, cell in enumerate(cells):
@@ -489,18 +496,17 @@ def _render_tutorial_table(
     bucket: str, bucket_entries: list[tuple[str, str, dict]]
 ) -> str:
     lines = [
-        "| Tutorial | Summary | Difficulty | Framework | Cluster | Launch |",
-        "|---|---|---|---|---|---|",
+        "| Tutorial | Summary | Difficulty | Framework | Launch |",
+        "|---|---|---|---|---|",
     ]
     for _, name, meta in bucket_entries:
         summary = str(meta["summary"]).rstrip(".").replace("|", r"\|")
         difficulty = str(meta.get("difficulty", "—")).replace("|", r"\|")
         framework = str(meta["framework"]).replace("|", r"\|")
-        cluster = str(meta["cluster_shape"]).replace("|", r"\|")
         launch = _render_launch_cell(bucket, name)
         lines.append(
             f"| [`{name}`](tutorials/{bucket}/{name}/{name}.ipynb) | {summary} | "
-            f"{difficulty} | {framework} | {cluster} | {launch} |"
+            f"{difficulty} | {framework} | {launch} |"
         )
     return "\n".join(lines)
 
