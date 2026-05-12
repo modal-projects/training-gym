@@ -104,6 +104,9 @@ def build_slime_app(
     """Return a Modal App with `download`, `prepare_dataset`, `convert_checkpoint`, and `train` defined."""
     app_name = name or f"slime-{type(slime).__name__.lstrip('_').lower()}"
 
+    SlimeRecipe._validate_custom_model_architecture(model)
+    SlimeRecipe._validate_dataset(dataset)
+
     caller_module = resolve_caller_module()
     if caller_module is not None and caller_module.__name__ != "__main__":
         cloudpickle.register_pickle_by_value(caller_module)
@@ -301,6 +304,9 @@ def build_slime_app(
         data_volume.reload()
         prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
         dataset.prepare(prompt_data, eval_paths)
+        dataset.validate_prepared(prompt_data)
+        for ep in (eval_paths or {}).values():
+            dataset.validate_prepared(ep)
         data_volume.commit()
 
     convert_nnodes = get_checkpoint_conversion_policy(slime)[0]
@@ -517,6 +523,10 @@ def build_slime_app(
                     print(f"Preparing dataset ({prompt_data} not found)...")
                     dataset.prepare(prompt_data, eval_paths)
                     await data_volume.commit.aio()
+                dataset.validate_prepared(prompt_data)
+                for ep in (eval_paths or {}).values():
+                    if os.path.exists(ep):
+                        dataset.validate_prepared(ep)
 
             prepare_slime_config(slime, model, tempfile.mkdtemp())
 

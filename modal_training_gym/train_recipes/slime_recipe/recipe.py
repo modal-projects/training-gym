@@ -230,6 +230,26 @@ class SlimeRecipe(BaseTrainRecipe):
         return m.architecture
 
     @staticmethod
+    def _validate_dataset(ds: "DatasetConfig") -> None:
+        """Local preflight for the most common dataset misconfigurations.
+
+        Slime indexes ``data[input_key]`` and ``data[label_key]`` inside a Ray
+        actor's ``__init__``; if those are unset or collide, the failure only
+        surfaces after image build + Ray bringup. Catch it here instead.
+        """
+        if not ds.input_key:
+            raise ValueError(
+                f"{type(ds).__name__}.input_key is unset. Slime requires a "
+                "column name (e.g. 'messages' for chat data, 'text' for raw "
+                "prompts). Set `input_key = ...` on your DatasetConfig subclass."
+            )
+        if ds.label_key and ds.label_key == ds.input_key:
+            raise ValueError(
+                f"{type(ds).__name__}: input_key and label_key are both "
+                f"{ds.input_key!r}; they must name distinct columns."
+            )
+
+    @staticmethod
     def _model_to_fields(m: "ModelConfig") -> dict[str, Any]:
         arch = SlimeRecipe._validate_custom_model_architecture(m)
         return {

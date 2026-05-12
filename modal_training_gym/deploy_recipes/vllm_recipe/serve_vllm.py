@@ -36,6 +36,7 @@ def build_vllm_serve_app(
     served_model_name: str,
     checkpoints_volume: "Volume | str | None" = None,
     checkpoints_mount_path: str | None = None,
+    deployment_id: str | None = None,
 ) -> "App":
     import modal
     from modal import App, Image, Secret, Volume
@@ -53,6 +54,7 @@ def build_vllm_serve_app(
             "huggingface-hub==0.36.0",
         )
         .env({"HF_XET_HIGH_PERFORMANCE": "1"})
+        .add_local_python_source("modal_training_gym", copy=True)
     )
 
     hf_cache_vol = Volume.from_name("huggingface-cache", create_if_missing=True)
@@ -78,8 +80,9 @@ def build_vllm_serve_app(
     app = App(app_name, tags=tags)
 
     _extra = list(recipe.extra_vllm_args or [])
+    _deployment_id = deployment_id
 
-    @app.function(
+    @app.cls(
         image=image,
         gpu=f"{gpu}:{n_gpu}",
         scaledown_window=10 * 60,
@@ -87,37 +90,63 @@ def build_vllm_serve_app(
         volumes=volumes,
         secrets=[Secret.from_name("huggingface-secret")],
         serialized=True,
-        name="serve",
+        include_source=False,
+    )
+    @modal.experimental.http_server(
+        port=vllm_port,
+        startup_timeout=10 * 60,
+        proxy_regions=["us-east"],
     )
     @modal.concurrent(max_inputs=32)
-    @modal.web_server(port=vllm_port, startup_timeout=10 * 60)
-    def serve():
-        import os
-        import subprocess
+    class Server:
+        @modal.enter()
+        def startup(self):
+            import os
+            import subprocess
 
-        if model_path.startswith("/") and os.path.isdir(model_path):
-            hf_config_path = os.path.join(model_path, "config.json")
-            if not os.path.exists(hf_config_path):
-                print("[training-gym] Converting checkpoint from mt to hf for serving.")
+            if model_path.startswith("/") and os.path.isdir(model_path):
+                hf_config_path = os.path.join(model_path, "config.json")
+                if not os.path.exists(hf_config_path):
+                    print(
+                        "[training-gym] Converting checkpoint from mt to hf for serving."
+                    )
 
-        cmd = [
-            "vllm",
-            "serve",
-            "--uvicorn-log-level=info",
-            model_path,
-            "--served-model-name",
-            served_model_name,
-            "--host",
-            "0.0.0.0",
-            "--port",
-            str(vllm_port),
-            "--tensor-parallel-size",
-            str(n_gpu),
-            *_extra,
-        ]
-        print(*cmd)
-        subprocess.Popen(" ".join(cmd), shell=True)
+            cmd = [
+                "vllm",
+                "serve",
+                "--uvicorn-log-level=info",
+                model_path,
+                "--served-model-name",
+                served_model_name,
+                "--host",
+                "0.0.0.0",
+                "--port",
+                str(vllm_port),
+                "--tensor-parallel-size",
+                str(n_gpu),
+                *_extra,
+            ]
+            print(*cmd)
+            subprocess.Popen(" ".join(cmd), shell=True)
+
+            if _deployment_id:
+                from modal_training_gym.common.deployment import (
+                    update_deployment_status,
+                )
+
+                update_deployment_status(_deployment_id, "running")
+
+        @modal.exit()
+        def stop(self):
+            if _deployment_id:
+                from modal_training_gym.common.deployment import (
+                    update_deployment_status,
+                )
+
+                update_deployment_status(_deployment_id, "stopped")
 
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
+    for tag, cls in app.registered_classes.items():
+        setattr(app, tag, cls)
     return app
