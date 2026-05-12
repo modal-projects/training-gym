@@ -101,7 +101,7 @@ Modal platform references:
 
 ---
 
-# Developer Guide
+# Contributing Guide
 
 ## Layout
 
