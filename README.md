@@ -118,7 +118,7 @@ tutorials/                 ← runnable examples — one folder per tutorial
 
 dashboards/                ← observability dashboard (deploy with `modal deploy dashboards/app.py`)
 docs-next/                 ← Starlight docs site (deploy with `modal deploy docs-next/docs_next_app.py`)
-skills/                    ← agent skills for navigating this repo
+.claude/skills/            ← agent skills for navigating this repo
 ```
 
 ## Dev setup
@@ -160,6 +160,6 @@ schema.
 
 ## Agent guide
 
-Working on this repo with an AI coding agent? See
-[`skills/agent-modal-training.md`](skills/agent-modal-training.md) for guidance
-on running training jobs on Modal.
+Working on this repo with an AI coding agent? The `.claude/skills/` directory
+contains auto-triggering skills for Modal training workflows, example
+validation, and repo navigation.

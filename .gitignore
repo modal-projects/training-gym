@@ -185,7 +185,8 @@ slime/test_configs
 node_modules/
 
 # AI tools
-.claude
+.claude/*
+!.claude/skills/
 .codex
 
 .humanize

@@ -1,9 +1,23 @@
-# Agent Guide: Training Gym Overview
+---
+name: training-gym-overview
+description: >-
+  One-stop reference for the modal-training-gym repo: package layout, core
+  abstractions (ModelConfig, DatasetConfig, framework two-class split,
+  build_app, cloudpickle caller resolution), the tutorial generator system,
+  model catalog, tools/ directory, and common gotchas. Use when working with
+  tutorials, models, frameworks, or any code in this repository.
+when_to_use: >-
+  User edits or asks about modal_training_gym/ code, tutorials, framework
+  configs, ModelConfig, DatasetConfig, build_app, the tutorial generator,
+  adding a new model or tutorial, or repo structure questions.
+---
+
+# Training Gym Overview
 
 One-stop reference for agents asked to build, modify, or validate tutorials
 and examples in this repo. Pairs with
-[agent-modal-training.md](agent-modal-training.md) (Modal launch/debug) and
-[agent-example-validation.md](agent-example-validation.md) (tiered example
+[modal-training](../modal-training/SKILL.md) (Modal launch/debug) and
+[example-validation](../example-validation/SKILL.md) (tiered example
 validation).
 
 ## What this repo is
@@ -16,29 +30,29 @@ launchers from their own scripts or notebooks.
 ## Top-level layout
 
 ```
-modal_training_gym/         ← installable package
-├── common/                 ← cross-framework pure data + helpers
-│   ├── dataset.py          ← DatasetConfig base (user subclasses)
-│   ├── models/             ← ModelConfig hierarchy (see below)
-│   ├── wandb.py            ← WandbConfig
-│   ├── framework.py        ← resolve_caller_module, TOOLS_*
-│   └── ray_cluster.py      ← ModalRayCluster helper (used by slime)
-├── frameworks/             ← one subpackage per training framework
-│   ├── slime/              ← slime GRPO (Ray + Megatron + SGLang)
-└── tools/                  ← shared scripts mounted on every image at
+modal_training_gym/         <- installable package
+├── common/                 <- cross-framework pure data + helpers
+│   ├── dataset.py          <- DatasetConfig base (user subclasses)
+│   ├── models/             <- ModelConfig hierarchy (see below)
+│   ├── wandb.py            <- WandbConfig
+│   ├── framework.py        <- resolve_caller_module, TOOLS_*
+│   └── ray_cluster.py      <- ModalRayCluster helper (used by slime)
+├── frameworks/             <- one subpackage per training framework
+│   ├── slime/              <- slime GRPO (Ray + Megatron + SGLang)
+└── tools/                  <- shared scripts mounted on every image at
                               /opt/training-gym/tools (see "Tools" below)
 
 tutorials/
-├── tutorial_generator/     ← decorator-annotated source files — THIS is
+├── tutorial_generator/     <- decorator-annotated source files -- THIS is
 │                             what you edit; each file is one tutorial
-└── generate_tutorial.py    ← AST-walks each source, emits
+└── generate_tutorial.py    <- AST-walks each source, emits
                               tutorials/<name>/<name>.py + .ipynb
 
-tests/                      ← plain-script tests (uv run python tests/<x>.py)
-skills/                     ← agent-facing docs (you are here)
+tests/                      <- plain-script tests (uv run python tests/<x>.py)
+.claude/skills/             <- agent-facing skills (you are here)
 ```
 
-**Never edit `tutorials/<name>/<name>.py` or `.ipynb` directly — they are
+**Never edit `tutorials/<name>/<name>.py` or `.ipynb` directly -- they are
 generated.** Edit `tutorials/tutorial_generator/<name>.py` and run
 `uv run python tutorials/generate_tutorial.py`.
 
@@ -70,7 +84,7 @@ Built-in subclasses:
 | `Qwen3_32B` | `Qwen/Qwen3-32B` | no (stub) | architecture inferred from HF config in RL setups |
 | `GLM_4_7` | `zai-org/GLM-4.7` | no | architecture inferred from HF config |
 | `Llama2_7B` | `meta-llama/Llama-2-7b-hf` | no | torchrun-based workflows |
-| `Kimi_K2_5` | `moonshotai/Kimi-K2.5` | no | **overrides `download`**: snapshot + INT4→BF16 conversion via `tools/convert_kimi_int4_to_bf16.py` |
+| `Kimi_K2_5` | `moonshotai/Kimi-K2.5` | no | **overrides `download`**: snapshot + INT4->BF16 conversion via `tools/convert_kimi_int4_to_bf16.py` |
 
 **Rule of thumb for slime**: slime emits architecture fields as CLI flags,
 so it requires `architecture` to be a populated `ModelArchitecture(...)`.
@@ -89,10 +103,10 @@ framework's config converter.
 
 Every framework exposes **two** dataclasses:
 
-- `<F>FrameworkConfig` — Modal infra (gpu, image, n_nodes, gpus_per_node) +
+- `<F>FrameworkConfig` -- Modal infra (gpu, image, n_nodes, gpus_per_node) +
   framework-specific CLI flags. Uses pydantic with `extra="forbid"`, so any
   unknown kwarg fails loudly.
-- `<F>Config` — wraps `dataset`, `model`, `wandb`, `framework_config`.
+- `<F>Config` -- wraps `dataset`, `model`, `wandb`, `framework_config`.
   Exposes `build_app()` which delegates to the launcher's
   `build_<f>_app(...)` factory. Typically has `_WRAPPER_FIELDS` (in some
   frameworks) to exclude the wrapper slots from CLI-arg rendering.
@@ -111,7 +125,7 @@ app = cfg.build_app()
 
 ### `build_app()` delegation
 
-`<F>Config.build_app()` → `build_<f>_app(<f>=self)` → constructs a
+`<F>Config.build_app()` -> `build_<f>_app(<f>=self)` -> constructs a
 `modal.App` with Modal functions for each stage (typically
 `download`, `prepare_dataset`, `train` / `train_multi_node`, plus
 framework-specific ones like `convert_hf_to_mcore`, `upload_reward`, etc).
@@ -119,7 +133,7 @@ framework-specific ones like `convert_hf_to_mcore`, `upload_reward`, etc).
 The launcher walks the call stack via
 `common.framework.resolve_caller_module()` to find the true user-tutorial
 module (skipping `modal_training_gym.*` frames) and registers that module
-for cloudpickle by-value inlining — this is how a user's inline
+for cloudpickle by-value inlining -- this is how a user's inline
 `DatasetConfig` / `ModelConfig` subclasses survive serialization to
 the remote container.
 
@@ -140,7 +154,7 @@ Framework-agnostic `ModelConfig.download` overrides (e.g.
 
 Current tools:
 
-- `convert_kimi_int4_to_bf16.py` — INT4 → BF16 conversion for Kimi K2.5.
+- `convert_kimi_int4_to_bf16.py` -- INT4 -> BF16 conversion for Kimi K2.5.
 
 To add a new tool: drop the script in `modal_training_gym/tools/`, commit.
 It's automatically mounted via `add_local_dir(TOOLS_LOCAL_PATH,
@@ -183,16 +197,16 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
 ### When to override `download`
 
-- Just HF snapshot → inherit `HFModelConfiguration` (do nothing).
+- Just HF snapshot -> inherit `HFModelConfiguration` (do nothing).
 - Extra post-processing (format conversion, weight repacking, tokenizer
-  tweaks) → override `download` in the subclass. Reference
+  tweaks) -> override `download` in the subclass. Reference
   `tools/<script>.py` via the canonical `/opt/training-gym/tools` path.
-  Do **not** put this logic in a framework launcher — it keeps Kimi-style
+  Do **not** put this logic in a framework launcher -- it keeps Kimi-style
   quirks with the model spec, not the framework plumbing.
 
 ## Adding a new tutorial
 
-1. **Pick the framework** — almost always one of the catalog above.
+1. **Pick the framework** -- almost always one of the catalog above.
 
 2. **Create the source** at
    `tutorials/tutorial_generator/<name>.py`. Structure (follow
@@ -270,21 +284,21 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
    ```
 
 3. **Decorators cheat sheet**:
-   - `@markdown` — function docstring becomes a markdown cell.
-   - `@code` — function body (dedented) becomes a code cell.
-   - `@shell("...")` — string arg is the code cell verbatim (supports
+   - `@markdown` -- function docstring becomes a markdown cell.
+   - `@code` -- function body (dedented) becomes a code cell.
+   - `@shell("...")` -- string arg is the code cell verbatim (supports
      `%uv pip install`, etc).
-   - `@py_only` / `@notebook_only` — restrict a cell to one output format.
+   - `@py_only` / `@notebook_only` -- restrict a cell to one output format.
      Stack on top of `@markdown` / `@code` / `@shell`.
 
 4. **Regenerate** and verify determinism:
    ```bash
    uv run python tutorials/generate_tutorial.py
-   # Run it again — should produce byte-identical output (no git diff).
+   # Run it again -- should produce byte-identical output (no git diff).
    uv run python tutorials/generate_tutorial.py
    git diff tutorials/
    ```
-   Pre-commit hook also runs this — committed `.py`/`.ipynb` never drift.
+   Pre-commit hook also runs this -- committed `.py`/`.ipynb` never drift.
 
 5. **Keep training cheap by default**. Tutorials should smoke in a single
    step by default so Tier 2 validation is cheap:
@@ -319,14 +333,14 @@ existing slime tutorials for full examples.
 ## Validation
 
 Always follow the tiered policy in
-[agent-example-validation.md](agent-example-validation.md):
+[example-validation](../example-validation/SKILL.md):
 
-- **Tier 0 (local compile)** — `uv run python -m compileall modal_training_gym/`.
-- **Tier 1 (cheap drift checks)** — regenerate tutorials (byte-determinism
+- **Tier 0 (local compile)** -- `uv run python -m compileall modal_training_gym/`.
+- **Tier 1 (cheap drift checks)** -- regenerate tutorials (byte-determinism
   check) + local instantiation smoke across the affected frameworks. No GPU.
-- **Tier 2 (scheduled smoke)** — one remote `modal run --detach` that
-  reaches ≥1 training step, then kill the detached app.
-- **Tier 3 (full example validation)** — canonical multi-node runs.
+- **Tier 2 (scheduled smoke)** -- one remote `modal run --detach` that
+  reaches >=1 training step, then kill the detached app.
+- **Tier 3 (full example validation)** -- canonical multi-node runs.
   Scheduled, not per-PR gating.
 
 Per-change default: Tier 0 + Tier 1, plus Tier 2 for the new/modified
@@ -362,10 +376,10 @@ test. Run with `uv run python tests/test_model_configuration.py`.
 
 ## Common file references
 
-- Adding/modifying a model → `modal_training_gym/common/models/`.
-- Adding/modifying a framework → `modal_training_gym/frameworks/<name>/`.
-- Cross-framework scripts → `modal_training_gym/tools/`.
-- Cross-framework helpers → `modal_training_gym/common/framework.py`.
-- Tutorial sources → `tutorials/tutorial_generator/<name>.py`.
-- Tutorial regeneration → `uv run python tutorials/generate_tutorial.py`.
-- Tests → `tests/test_*.py`, run via `uv run python tests/<file>.py`.
+- Adding/modifying a model -> `modal_training_gym/common/models/`.
+- Adding/modifying a framework -> `modal_training_gym/frameworks/<name>/`.
+- Cross-framework scripts -> `modal_training_gym/tools/`.
+- Cross-framework helpers -> `modal_training_gym/common/framework.py`.
+- Tutorial sources -> `tutorials/tutorial_generator/<name>.py`.
+- Tutorial regeneration -> `uv run python tutorials/generate_tutorial.py`.
+- Tests -> `tests/test_*.py`, run via `uv run python tests/<file>.py`.

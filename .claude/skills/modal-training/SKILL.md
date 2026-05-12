@@ -1,4 +1,18 @@
-# Agent Guide: Running Training Jobs On Modal
+---
+name: modal-training
+description: >-
+  Runbook for launching, monitoring, and debugging training jobs on Modal:
+  entrypoint discovery, detached app workflow, log filtering, container
+  inspection, volume state, image build behavior, and debugging strategy.
+  Use when running modal run, checking app status, reading logs, or
+  troubleshooting a Modal training job.
+when_to_use: >-
+  User runs modal run/deploy, asks about Modal app state, checks logs with
+  modal app logs, debugs a stuck or failed training job, inspects containers
+  or volumes, or asks how to launch/monitor a training run on Modal.
+---
+
+# Running Training Jobs On Modal
 
 This document captures durable repo-specific workflow for agents launching and debugging training jobs on Modal in this repository.
 
@@ -76,7 +90,6 @@ modal app stop <app-id>
 - In general, the examples in this repo build on training frameworks with notoriously noisy logs. It's often best to be proactively defensive with context by filtering the logs, either with `grep`/`rg`, or with the extra parameters available to `modal app logs`:
 
 ```bash
-
 # Fetch the last 500 log entries and grep them
 modal app logs <app-id> --tail 500 | rg "error|CUDA|OOM|loss"
 
