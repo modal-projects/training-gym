@@ -23,8 +23,8 @@ ModelConfig(**kwargs)
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model_name` | `str` | `""` |  |
-| `model_path` | `str | None` | `None` |  |
-| `architecture` | `ModelArchitecture | None` | `None` |  |
+| `model_path` | `str \| None` | `None` |  |
+| `architecture` | `ModelArchitecture \| None` | `None` |  |
 
 ## Methods
 

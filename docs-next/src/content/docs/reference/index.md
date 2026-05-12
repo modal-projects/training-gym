@@ -13,7 +13,7 @@ Complete reference for the training-gym Python library.
 | [`HFModelConfiguration`](/reference/core/hfmodelconfiguration/) | ModelConfig for models hosted on HuggingFace. |
 | [`ModelArchitecture`](/reference/core/modelarchitecture/) | Transformer architecture parameters for a specific model. |
 | [`DatasetConfig`](/reference/core/datasetconfig/) | Dataset configuration shared across training frameworks. |
-| [`HuggingFaceDataset`](/reference/core/huggingfacedataset/) | Dataset backed by a HuggingFace ``datasets`` repo. |
+| [`HuggingFaceDataset`](/reference/core/huggingfacedataset/) | Dataset backed by a HuggingFace `datasets` repo. |
 | [`HarborDataset`](/reference/core/harbordataset/) | Dataset configuration shared across training frameworks. |
 | [`WandbConfig`](/reference/core/wandbconfig/) | Weights & Biases logging configuration shared across all frameworks. |
 | [`ModalRayCluster`](/reference/core/modalraycluster/) | Base class for bootstrapping a Ray cluster inside Modal clustered functions. |

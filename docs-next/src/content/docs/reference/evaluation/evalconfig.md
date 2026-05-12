@@ -14,10 +14,10 @@ Evaluate a deployed model on a dataset config.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `dataset` | `'DatasetConfig'` |  |  |
-| `eval_fn` | `EvalFn | None` | `None` |  |
-| `eval_response_fn` | `EvalResponseFn | None` | `None` |  |
-| `prompt_column` | `str | None` | `None` |  |
-| `eval_config_id` | `str | None` | `None` |  |
+| `eval_fn` | `EvalFn \| None` | `None` |  |
+| `eval_response_fn` | `EvalResponseFn \| None` | `None` |  |
+| `prompt_column` | `str \| None` | `None` |  |
+| `eval_config_id` | `str \| None` | `None` |  |
 | `generate_kwargs` | `dict[str, Any]` | `{}` |  |
 
 ## Methods

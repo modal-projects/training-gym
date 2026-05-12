@@ -2,8 +2,12 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import { modalReferenceThemes } from './modal-reference-theme.mjs';
+import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
 
 export default defineConfig({
+  markdown: {
+    rehypePlugins: [rehypeTableWrapper],
+  },
   site: 'https://gym.modal.dev',
   integrations: [
     starlight({

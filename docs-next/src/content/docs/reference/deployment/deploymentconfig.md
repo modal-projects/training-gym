@@ -14,16 +14,16 @@ Deploy a model behind a serving engine.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `model` | `ModelConfig` |  |  |
-| `checkpoint` | `modal_training_gym.common.checkpoint.Checkpoint | None` | `None` |  |
-| `recipe` | `VllmRecipe | SglangRecipe | None` | `None` |  |
-| `app_name` | `str | None` | `None` |  |
-| `served_model_name` | `str | None` | `None` |  |
+| `checkpoint` | `modal_training_gym.common.checkpoint.Checkpoint \| None` | `None` |  |
+| `recipe` | `VllmRecipe \| SglangRecipe \| None` | `None` |  |
+| `app_name` | `str \| None` | `None` |  |
+| `served_model_name` | `str \| None` | `None` |  |
 
 ## Methods
 
 ### `serve(self) -> "'ModelDeployment'"`
 
-Build, deploy, and return a ``ModelDeployment`` handle.
+Build, deploy, and return a `ModelDeployment` handle.
 
 ## Related Tutorials
 

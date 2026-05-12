@@ -7,7 +7,7 @@ description: API reference for HuggingFaceDataset
 from modal_training_gym.common.dataset import HuggingFaceDataset
 ```
 
-Dataset backed by a HuggingFace ``datasets`` repo.
+Dataset backed by a HuggingFace `datasets` repo.
 
 **Inherits from:** `DatasetConfig`
 
@@ -21,7 +21,7 @@ Dataset backed by a HuggingFace ``datasets`` repo.
 | `apply_chat_template` | `bool` | `True` |  |
 | `hf_repo` | `str` | `""` |  |
 | `hf_split` | `str` | `"train"` |  |
-| `hf_config` | `str | None` | `None` |  |
+| `hf_config` | `str \| None` | `None` |  |
 | `output_format` | `str` | `"parquet"` |  |
 | `input_column` | `str` | `""` |  |
 | `output_column` | `str` | `""` |  |
@@ -37,7 +37,7 @@ Load raw examples for local inspection or evaluation.
 
 ### `prepare(self, path: 'str', eval_paths: 'dict[str, str] | None' = None) -> 'None'`
 
-Materialize training data to ``path`` (and eval splits to ``eval_paths``).
+Materialize training data to `path` (and eval splits to `eval_paths`).
 
 ### `to_pandas(self, *, formatted: 'bool' = False)`
 

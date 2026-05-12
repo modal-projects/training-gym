@@ -14,9 +14,9 @@ MultiTurn(generate_function: 'Callable', reward_function: 'Callable | None' = No
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `generate_function` | `collections.abc.Callable` |  |  |
-| `reward_function` | `collections.abc.Callable | None` | `None` |  |
-| `max_turns` | `int | None` | `None` |  |
-| `log_multi_turn` | `bool | None` | `None` |  |
+| `reward_function` | `collections.abc.Callable \| None` | `None` |  |
+| `max_turns` | `int \| None` | `None` |  |
+| `log_multi_turn` | `bool \| None` | `None` |  |
 | `config_overrides` | `collections.abc.Mapping[str, Any]` | `{}` |  |
 
 ## Methods

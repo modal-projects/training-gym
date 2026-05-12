@@ -16,7 +16,7 @@ Compose dataset, model, and recipe into one training entrypoint.
 | `dataset` | `DatasetConfig` |  |  |
 | `model` | `ModelConfig` |  |  |
 | `recipe` | `modal_training_gym.train_recipes.base.BaseTrainRecipe` |  |  |
-| `checkpoint` | `modal_training_gym.common.checkpoint.Checkpoint | None` | `None` |  |
+| `checkpoint` | `modal_training_gym.common.checkpoint.Checkpoint \| None` | `None` |  |
 
 ## Methods
 

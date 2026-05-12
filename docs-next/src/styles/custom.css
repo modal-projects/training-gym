@@ -635,16 +635,20 @@ a:hover {
   overflow-x: visible;
 }
 
-.sl-markdown-content table {
+.sl-markdown-content .table-wrapper {
   margin: 1.25rem 0 1.75rem;
-  min-width: 100%;
+  overflow-x: auto;
   border: 1px solid var(--tg-border);
+  border-radius: 0.375rem;
+}
+
+.sl-markdown-content table {
+  min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: auto;
   border-radius: 0.375rem;
   background: var(--tg-panel);
-  overflow: hidden;
   white-space: normal;
 }
 
