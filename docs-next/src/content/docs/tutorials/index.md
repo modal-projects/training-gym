@@ -19,7 +19,7 @@ content stripped of narration.
 ## Authoring a new tutorial
 
 Tutorials are generated from a Python source file under
-[`tutorial_generator/`](https://github.com/modal-projects/training-gym/tree/joy/update-docs-to-add-no-need-for-gpu-messages-for-notebooks-and-add-focus-on-rl-in-docs/tutorials/tutorial_generator). The generator AST-walks each
+[`tutorial_generator/`](https://github.com/modal-projects/training-gym/tree/main/tutorials/tutorial_generator). The generator AST-walks each
 source and emits `tutorials/<bucket>/<name>/<name>.py` + `tutorials/<bucket>/<name>/<name>.ipynb`.
 **Edit the source, not the generated files** — the pre-commit hook
 (`.pre-commit-config.yaml`) regenerates on commit, so hand-edits to the
@@ -74,5 +74,5 @@ are maps, the `.ipynb` is the walkthrough. Aim for roughly:
   cell-by-cell interactive invocation (`@notebook_only`).
 - Optional: a "Serve / evaluate / next step" tail, where relevant.
 
-[`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/joy/update-docs-to-add-no-need-for-gpu-messages-for-notebooks-and-add-focus-on-rl-in-docs/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) is the current
+[`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) is the current
 reference example for tutorial narration depth.

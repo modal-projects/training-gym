@@ -31,7 +31,7 @@ from modal_training_gym import TrainConfig
 
 ## Tutorials
 
-The fastest path through the API is the [tutorials](https://github.com/modal-projects/training-gym/blob/joy/update-docs-to-add-no-need-for-gpu-messages-for-notebooks-and-add-focus-on-rl-in-docs/tutorials). Each one
+The fastest path through the API is the [tutorials](https://github.com/modal-projects/training-gym/blob/main/tutorials). Each one
 ships as a runnable `.py` **and** a paired `.ipynb` narrated cell-by-cell —
 the notebook is the canonical walkthrough. Each tutorial below has a one-click
 **Launch** button that opens the `.ipynb` in a fresh Modal Notebook; the first
@@ -54,9 +54,9 @@ rest of the cells run as-is.
 
 | Tutorial | Summary | Difficulty | Framework | Launch |
 |---|---|---|---|---|
-| [`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/joy/update-docs-to-add-no-need-for-gpu-messages-for-notebooks-and-add-focus-on-rl-in-docs/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`001_sandboxes`](https://github.com/modal-projects/training-gym/blob/joy/update-docs-to-add-no-need-for-gpu-messages-for-notebooks-and-add-focus-on-rl-in-docs/tutorials/rl/001_sandboxes/001_sandboxes.ipynb) | Code RL with Harbor hello-world and sandboxed verification | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_sandboxes/001_sandboxes.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`002_multiturn`](https://github.com/modal-projects/training-gym/blob/joy/update-docs-to-add-no-need-for-gpu-messages-for-notebooks-and-add-focus-on-rl-in-docs/tutorials/rl/002_multiturn/002_multiturn.ipynb) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`000_rl_basics`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/000_rl_basics/000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`001_sandboxes`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_sandboxes/001_sandboxes.ipynb) | Code RL with Harbor hello-world and sandboxed verification | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/001_sandboxes/001_sandboxes.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`002_multiturn`](https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.ipynb) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/rl/002_multiturn/002_multiturn.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
 See [`tutorials/README.md`](/tutorials/) for how to run the `.py`
@@ -73,7 +73,7 @@ modal deploy dashboards/app.py
 
 Modal prints a URL where you can watch jobs in progress.
 
-![Gym Observability Dashboard](https://raw.githubusercontent.com/modal-projects/training-gym/joy/update-docs-to-add-no-need-for-gpu-messages-for-notebooks-and-add-focus-on-rl-in-docs/assets/observability_dashboard.png)
+![Gym Observability Dashboard](https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/observability_dashboard.png)
 
 ## Multi-node access
 
@@ -85,7 +85,7 @@ for larger models — are still in Beta.
 
 
 ## Architecture
-![Architecture diagram](https://raw.githubusercontent.com/modal-projects/training-gym/joy/update-docs-to-add-no-need-for-gpu-messages-for-notebooks-and-add-focus-on-rl-in-docs/assets/training_gym_architecture_restyled.svg)
+![Architecture diagram](https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/training_gym_architecture_restyled.svg)
 
 ## Documentation
 
@@ -103,4 +103,4 @@ Modal platform references:
 
 ## License
 
-[MIT](https://github.com/modal-projects/training-gym/blob/joy/update-docs-to-add-no-need-for-gpu-messages-for-notebooks-and-add-focus-on-rl-in-docs/LICENSE).
+[MIT](https://github.com/modal-projects/training-gym/blob/main/LICENSE).
