@@ -44,7 +44,21 @@ class DatasetConfig:
             self.dataset_id = str(uuid.uuid4())
         for k, v in kwargs.items():
             setattr(self, k, v)
-    
+        self._validate()
+
+    def _validate(self) -> None:
+        """Required-field check; subclasses call this at the end of their own ``__init__``."""
+        if not self.label_key:
+            raise ValueError(
+                f"{type(self).__name__} requires `label_key` to be set. "
+                "It names the column on the materialized dataset that holds "
+                "per-sample ground-truth / reward-function input. "
+                "Declare it as a class attribute (`label_key = \"label\"`) on "
+                "your subclass, or pass `label_key=...` as a kwarg. Frameworks "
+                "like slime index `data[label_key]` at load time, so an unset "
+                "value reliably crashes deep in a remote Ray actor."
+            )
+
     @property
     def name(self) -> str:
         return self.dataset_id
@@ -56,6 +70,64 @@ class DatasetConfig:
     def load(self) -> Any:
         """Load raw examples for local inspection or evaluation."""
         raise NotImplementedError(f"{type(self).__name__} has no load()")
+
+    def _expected_columns(self) -> set[str]:
+        cols: set[str] = set()
+        if self.input_key:
+            cols.add(self.input_key)
+        if self.label_key:
+            cols.add(self.label_key)
+        return cols
+
+    def validate_prepared(self, path: str) -> None:
+        """Sniff what ``prepare()`` wrote and confirm the columns the framework will index.
+
+        Catches the common ``KeyError: 'label'`` (and friends) that otherwise
+        only fire deep inside a Ray actor on a remote container, after image
+        build and cluster bringup.
+        """
+        import os
+
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"{type(self).__name__}.prepare() did not produce {path!r}. "
+                "Ensure your prepare(path, ...) override writes to the `path` arg."
+            )
+
+        expected = self._expected_columns()
+        if not expected:
+            return
+
+        try:
+            if path.endswith(".parquet"):
+                import pyarrow.parquet as pq
+
+                cols = set(pq.read_schema(path).names)
+            elif path.endswith((".jsonl", ".json")):
+                with open(path) as f:
+                    first = f.readline().strip()
+                if not first:
+                    raise ValueError(f"{path!r} is empty")
+                cols = set(json.loads(first).keys())
+            else:
+                return
+        except Exception as e:  # don't shadow the user's real bug with a sniff bug
+            print(
+                f"[{type(self).__name__}.validate_prepared] could not sniff "
+                f"{path!r} ({e!r}); skipping schema check."
+            )
+            return
+
+        missing = expected - cols
+        if missing:
+            raise ValueError(
+                f"{type(self).__name__}.prepare() wrote {path!r} but it is "
+                f"missing required column(s) {sorted(missing)} "
+                f"(input_key={self.input_key!r}, label_key={self.label_key!r}). "
+                f"Columns present: {sorted(cols)}. "
+                "Either rename the column(s) your prepare() writes, or set "
+                "input_key/label_key on your DatasetConfig subclass to match."
+            )
 
 
 class HuggingFaceDataset(DatasetConfig):
@@ -77,6 +149,7 @@ class HuggingFaceDataset(DatasetConfig):
     system_prompt: str = ""
     prompt_template: str = "{input}"
     n_rows: int = 0
+    label_key: str = "label"
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -85,6 +158,7 @@ class HuggingFaceDataset(DatasetConfig):
             self.input_key = "messages"
         if "dataset_id" not in kwargs:
             self.dataset_id = f"{self.hf_repo}-{self.hf_split}-{uuid.uuid4()}"
+        self._validate()
     
     @property
     def name(self) -> str:
@@ -109,6 +183,7 @@ class HuggingFaceDataset(DatasetConfig):
         in_col, out_col = self.input_column, self.output_column
         sys_prompt = self.system_prompt
         template = self.prompt_template
+        label_key = self.label_key
 
         def _to_chat(row: dict) -> dict:
             user_content = template.format(input=row[in_col])
@@ -117,7 +192,7 @@ class HuggingFaceDataset(DatasetConfig):
                 msgs.append({"role": "system", "content": sys_prompt})
             msgs.append({"role": "user", "content": user_content})
             msgs.append({"role": "assistant", "content": row[out_col]})
-            return {"messages": msgs}
+            return {"messages": msgs, label_key: str(row[out_col])}
 
         return ds.map(_to_chat, remove_columns=ds.column_names)
 
@@ -183,6 +258,7 @@ class HarborDataset(DatasetConfig):
             else:
                 slug = "harbor"
             self.dataset_id = f"{slug}-{uuid.uuid4()}"
+        self._validate()
     
     @property
     def name(self) -> str:

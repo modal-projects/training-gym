@@ -25,6 +25,27 @@ Then import the building blocks from your own script:
 from modal_training_gym import TrainConfig
 ```
 
+## Agent set-up
+
+This repository includes an `AGENTS.md` and a `skills/` directory (symlinked to `.claude/skills/`) that teach Claude Code how to navigate the framework — W&B configuration, custom rollouts and generate functions, custom eval functions, and more.
+
+Clone the repo and run `claude` from its root; the skills load automatically based on what you ask for.
+
+## Observability dashboard
+
+Training Gym ships a dashboard that aggregates training runs, deployments,
+and eval results in one place. Deploy your own copy:
+
+```bash
+git clone https://github.com/modal-projects/training-gym/
+modal deploy dashboards/app.py
+```
+
+Modal prints a URL where you can watch jobs in progress.
+
+![Gym Observability Dashboard](./assets/observability_dashboard.png)
+
+
 ## Tutorials
 
 The fastest path through the API is the [tutorials](./tutorials/). Each one
@@ -57,19 +78,6 @@ rest of the cells run as-is.
 
 See [`tutorials/README.md`](tutorials/README.md) for how to run the `.py`
 companions from the CLI and how to author a new tutorial.
-
-## Observability dashboard
-
-Training Gym ships a dashboard that aggregates training runs, deployments,
-and eval results in one place. Deploy your own copy:
-
-```bash
-modal deploy dashboards/app.py
-```
-
-Modal prints a URL where you can watch jobs in progress.
-
-![Gym Observability Dashboard](./assets/observability_dashboard.png)
 
 ## Multi-node access
 

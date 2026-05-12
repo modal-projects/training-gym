@@ -11,14 +11,19 @@ the live endpoint URL and convenience methods for generation and eval.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 import inspect
+import threading
 import uuid
 
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 
-from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType, convert_checkpoint_to_hf
+from modal_training_gym.common.checkpoint import (
+    Checkpoint,
+    CheckpointType,
+    convert_checkpoint_to_hf,
+)
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
@@ -27,6 +32,7 @@ from modal_training_gym.deploy_recipes.base import DeployRecipeType
 from modal.experimental import list_deployed_apps
 from modal_training_gym.utils.metadata import (
     MetadataStore,
+    vol_get,
     vol_list,
     vol_put,
     vol_upsert_summary_item,
@@ -72,14 +78,18 @@ class DeploymentConfig:
                 "Set model_path or model_name."
             )
         return model_path
-    
+
     def _new_deployment_id(self) -> str:
-        model_name = self.served_model_name or self.model.model_name or self.model.model_path
+        model_name = (
+            self.served_model_name or self.model.model_name or self.model.model_path
+        )
         if self.checkpoint is not None:
             model_name = f"{model_name}-{self.checkpoint.name}"
-        
-        recipe_name = self.recipe.recipe_type.value if self.recipe is not None else "sglang"
-        
+
+        recipe_name = (
+            self.recipe.recipe_type.value if self.recipe is not None else "sglang"
+        )
+
         return f"{model_name}.{recipe_name}.{uuid.uuid4().hex[:4]}"
 
     # TODO: add _merge_recipe for deployment configs
@@ -109,6 +119,8 @@ class DeploymentConfig:
             self.app_name = f"{default_slug}-serve"
         if not self.served_model_name:
             self.served_model_name = default_slug
+
+        deployment_id = self._new_deployment_id()
         checkpoints_volume = self._checkpoints_volume_name()
         checkpoints_mount_path = self._checkpoints_mount_path()
 
@@ -124,6 +136,7 @@ class DeploymentConfig:
                 served_model_name=self.served_model_name,
                 checkpoints_volume=checkpoints_volume,
                 checkpoints_mount_path=checkpoints_mount_path,
+                deployment_id=deployment_id,
             )
         elif isinstance(recipe, VllmRecipe):
             from modal_training_gym.deploy_recipes.vllm_recipe.serve_vllm import (
@@ -137,6 +150,7 @@ class DeploymentConfig:
                 served_model_name=self.served_model_name,
                 checkpoints_volume=checkpoints_volume,
                 checkpoints_mount_path=checkpoints_mount_path,
+                deployment_id=deployment_id,
             )
         else:
             raise ValueError(f"Unsupported deploy recipe: {type(recipe).__name__}")
@@ -171,20 +185,43 @@ class DeploymentConfig:
                 f"Deployed {self.app_name!r} but no Modal app id was returned."
             )
         deployment = ModelDeployment(
-            deployment_id=self._new_deployment_id(),
+            deployment_id=deployment_id,
             deployment_config=self,
             modal_app_id=modal_app_id,
             modal_app_url=modal_app_url or modal_app_dashboard_url(modal_app_id),
             url=url,
+            status=DeploymentStatus.RUNNING.value,
         )
         deployment.save()
         return deployment
 
 
 class DeploymentStatus(Enum):
+    RUNNING = "running"
+    STOPPED = "stopped"
     READY = "ready"
     INITIALIZING = "initializing"
     INACTIVE = "inactive"
+
+
+def update_deployment_status(deployment_id: str, status: str) -> None:
+    """Update a deployment's status in both individual record and summary."""
+    try:
+        payload = vol_get(MetadataStore.DEPLOYMENTS, deployment_id)
+    except KeyError:
+        return
+    payload["status"] = status
+    vol_put(MetadataStore.DEPLOYMENTS, deployment_id, payload)
+    vol_upsert_summary_item(
+        MetadataStore.DEPLOYMENTS_SUMMARY,
+        payload,
+        item_id_key="deployment_id",
+        sort_key=lambda item: (
+            str(item.get("deployment_config", {}).get("app_name", "")),
+            str(item.get("deployment_id", "")),
+        ),
+        reverse=True,
+    )
 
 
 class ModelDeployment(BaseModel):
@@ -195,14 +232,14 @@ class ModelDeployment(BaseModel):
     """
 
     deployment_id: str
-    
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
     deployment_config: DeploymentConfig
 
     modal_app_id: str = ""
     modal_app_url: str = ""
     url: str
-
+    status: str = DeploymentStatus.RUNNING.value
 
     @field_validator("deployment_config", mode="before")
     @classmethod
@@ -217,7 +254,9 @@ class ModelDeployment(BaseModel):
         return DeploymentConfig(**deployment_config)
 
     @field_serializer("deployment_config")
-    def _serialize_deployment_config(self, value: DeploymentConfig) -> dict[str, object]:
+    def _serialize_deployment_config(
+        self, value: DeploymentConfig
+    ) -> dict[str, object]:
         model = value.model
         return {
             "model": {
@@ -260,7 +299,10 @@ class ModelDeployment(BaseModel):
                     json=body,
                     timeout=120,
                 )
-                if resp.status_code in transient_status_codes and attempt < max_attempts:
+                if (
+                    resp.status_code in transient_status_codes
+                    and attempt < max_attempts
+                ):
                     print(
                         f"Transient generation error {resp.status_code} from {self.url}; "
                         f"retrying ({attempt}/{max_attempts})..."
@@ -286,7 +328,9 @@ class ModelDeployment(BaseModel):
                 self.wait_until_ready(timeout=120)
                 time.sleep(min(2 * attempt, 5))
 
-        raise RuntimeError(f"Failed to generate from {self.url} after {max_attempts} attempts")
+        raise RuntimeError(
+            f"Failed to generate from {self.url} after {max_attempts} attempts"
+        )
 
     def save(self) -> None:
         payload = self.model_dump(mode="json")
@@ -307,7 +351,8 @@ class ModelDeployment(BaseModel):
         )
 
     @property
-    def status(self) -> str:
+    def live_status(self) -> str:
+        """Poll endpoint + Modal API to determine real-time status."""
         import requests
 
         try:
@@ -334,7 +379,43 @@ class ModelDeployment(BaseModel):
 
     @classmethod
     def list_deployments(cls) -> dict[str, "ModelDeployment"]:
-        return {d["deployment_id"]: cls.model_validate(d) for d in vol_list(MetadataStore.DEPLOYMENTS)}
+        return {
+            d["deployment_id"]: cls.model_validate(d)
+            for d in vol_list(MetadataStore.DEPLOYMENTS)
+        }
+
+    def _start_log_tailer(self) -> "threading.Thread | None":
+        """Spawn a daemon thread that streams deployed-app logs to stdout.
+
+        Returns the thread (or None if we can't resolve the app).
+        """
+        import modal
+
+        app_name = self.deployment_config.app_name
+        env_name = (
+            self.deployment_config.recipe.environment_name
+            if self.deployment_config.recipe is not None
+            else None
+        )
+
+        def _tail() -> None:
+            try:
+                app = modal.App.lookup(app_name, environment_name=env_name)
+            except Exception:
+                return
+
+            async def _stream() -> None:
+                async for line in app._logs():
+                    print(line, end="", flush=True)
+
+            try:
+                asyncio.run(_stream())
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_tail, daemon=True)
+        t.start()
+        return t
 
     def wait_until_ready(self, timeout: int = 600) -> None:
         import time
@@ -343,61 +424,60 @@ class ModelDeployment(BaseModel):
 
         app_name = self.deployment_config.app_name
         logs_hint = (
-            f"`modal app logs {self.modal_app_id}`" if self.modal_app_id else f"`modal app logs {app_name}`"
+            f"`modal app logs {self.modal_app_id}`"
+            if self.modal_app_id
+            else f"`modal app logs {app_name}`"
         )
         print(f"Waiting for {app_name!r} — {self.modal_app_url}")
 
+        log_thread = self._start_log_tailer()
+
         deadline = time.time() + timeout
-        modal_poll_interval = 20  # seconds between Modal-side checks
-        zero_container_grace = 150  # seconds at 0 containers before declaring crashloop
+        modal_poll_interval = 20
+        zero_container_grace = 150
         zero_container_since: float | None = None
         last_modal_poll = 0.0
-        last_endpoint_msg = ""
 
-        while time.time() < deadline:
-            try:
-                resp = requests.get(f"{self.url}/v1/models", timeout=10)
-                if resp.ok and resp.json().get("data"):
-                    return
-                last_endpoint_msg = (
-                    "no models loaded yet" if resp.ok else f"status {resp.status_code}"
-                )
-            except requests.ConnectionError:
-                last_endpoint_msg = "connection refused"
-            except Exception as exc:
-                last_endpoint_msg = f"transport error: {exc!r}"
+        try:
+            while time.time() < deadline:
+                try:
+                    resp = requests.get(f"{self.url}/v1/models", timeout=10)
+                    if resp.ok and resp.json().get("data"):
+                        return
+                except requests.ConnectionError:
+                    pass
+                except Exception:
+                    pass
 
-            now = time.time()
-            if now - last_modal_poll >= modal_poll_interval:
-                last_modal_poll = now
-                containers = self._modal_container_count()
-                if containers is None:
-                    raise RuntimeError(
-                        f"Modal app {app_name!r} is not in a deployed state — "
-                        f"the deploy likely failed or was stopped. Check {self.modal_app_url} "
-                        f"and {logs_hint}."
-                    )
-                if containers == 0:
-                    if zero_container_since is None:
-                        zero_container_since = now
-                    elapsed = int(now - zero_container_since)
-                    if elapsed >= zero_container_grace:
+                now = time.time()
+                if now - last_modal_poll >= modal_poll_interval:
+                    last_modal_poll = now
+                    containers = self._modal_container_count()
+                    if containers is None:
                         raise RuntimeError(
-                            f"Modal app {app_name!r} has had 0 running containers for "
-                            f"~{elapsed}s while {self.url} keeps returning "
-                            f"{last_endpoint_msg!r}. Containers are most likely crashlooping "
-                            f"on startup (OOM, missing weights, bad config, etc.). "
-                            f"Inspect logs with {logs_hint} or open {self.modal_app_url}."
+                            f"Modal app {app_name!r} is not in a deployed state — "
+                            f"the deploy likely failed or was stopped. Check {self.modal_app_url} "
+                            f"and {logs_hint}."
                         )
-                else:
-                    zero_container_since = None
-                print(f"  [{containers} container(s)] {last_endpoint_msg}")
+                    if containers == 0:
+                        if zero_container_since is None:
+                            zero_container_since = now
+                        elapsed = int(now - zero_container_since)
+                        if elapsed >= zero_container_grace:
+                            raise RuntimeError(
+                                f"Modal app {app_name!r} has had 0 running containers for "
+                                f"~{elapsed}s. Containers are most likely crashlooping "
+                                f"on startup (OOM, missing weights, bad config, etc.). "
+                                f"Inspect logs with {logs_hint} or open {self.modal_app_url}."
+                            )
 
-            time.sleep(5)
+                time.sleep(5)
+        finally:
+            if log_thread is not None and log_thread.is_alive():
+                log_thread.join(timeout=2)
 
         raise TimeoutError(
             f"{self.url} not ready after {timeout}s. "
-            f"Last endpoint status: {last_endpoint_msg!r}. "
             f"Inspect logs with {logs_hint} or open {self.modal_app_url}."
         )
 
