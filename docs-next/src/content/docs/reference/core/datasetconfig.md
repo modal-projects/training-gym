@@ -26,7 +26,7 @@ Load raw examples for local inspection or evaluation.
 
 ### `prepare(self, path: 'str', eval_paths: 'dict[str, str] | None' = None) -> 'None'`
 
-Materialize training data to ``path`` (and eval splits to ``eval_paths``).
+Materialize training data to `path` (and eval splits to `eval_paths`).
 
 ## Related Tutorials
 

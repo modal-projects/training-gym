@@ -23,7 +23,7 @@ TrainResult(app_name, framework, training_run_id, checkpoint_dir='', checkpoints
 | `checkpoint_dir` | `str` | `""` |  |
 | `checkpoints_volume_name` | `str` | `""` |  |
 | `checkpoints_mount_path` | `str` | `""` |  |
-| `model_config` | `'ModelConfig | None'` | `None` |  |
+| `model_config` | `'ModelConfig \| None'` | `None` |  |
 | `extra` | `dict[str, Any]` | `<factory>` |  |
 
 ## Attributes
@@ -36,7 +36,7 @@ TrainResult(app_name, framework, training_run_id, checkpoint_dir='', checkpoints
 | `checkpoint_dir` | `str` | `""` |  |
 | `checkpoints_volume_name` | `str` | `""` |  |
 | `checkpoints_mount_path` | `str` | `""` |  |
-| `model_config` | `'ModelConfig | None'` | `None` |  |
+| `model_config` | `'ModelConfig \| None'` | `None` |  |
 | `extra` | `dict[str, Any]` | `{}` |  |
 
 ## Methods

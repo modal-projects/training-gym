@@ -98,6 +98,11 @@ def _extract_effective_defaults(docstring: str) -> dict[str, _EffectiveDefault]:
     return results
 
 
+def _rst_to_md(text: str) -> str:
+    """Convert reST-style double backticks to Markdown single backticks."""
+    return re.sub(r"``(.*?)``", r"`\1`", text)
+
+
 def _format_type(type_hint: Any) -> str:
     """Format a type hint for display."""
     raw = str(type_hint)
@@ -110,7 +115,8 @@ def _format_type(type_hint: Any) -> str:
     raw = raw.replace("modal_training_gym.deploy_recipes.sglang_recipe.recipe.", "")
     raw = raw.replace("modal_training_gym.deploy_recipes.vllm_recipe.recipe.", "")
     raw = raw.replace("modal_training_gym.train_recipes.slime_recipe.recipe.", "")
-    raw = raw.replace("<class '", "").replace("'>", "")
+    raw = re.sub(r"<(?:class|enum) '([^']+)'>", r"\1", raw)
+    raw = raw.replace("|", "\\|")
     return raw
 
 
@@ -272,7 +278,7 @@ def generate_config_data_page(
     ]
 
     if first_para:
-        lines.append(first_para)
+        lines.append(_rst_to_md(first_para))
         lines.append("")
 
     parent_classes = [
@@ -355,7 +361,7 @@ def generate_config_data_page(
             lines.append(f"### `{name}{sig}`")
             lines.append("")
             if doc:
-                lines.append(doc)
+                lines.append(_rst_to_md(doc))
                 lines.append("")
 
     if backlinks:
@@ -390,7 +396,7 @@ def generate_behavior_page(
     ]
 
     if first_para:
-        lines.append(first_para)
+        lines.append(_rst_to_md(first_para))
         lines.append("")
 
     parent_classes = [
@@ -471,7 +477,7 @@ def generate_behavior_page(
             lines.append(f"### `{name}{sig}`")
             lines.append("")
             if doc:
-                lines.append(doc)
+                lines.append(_rst_to_md(doc))
                 lines.append("")
 
     if backlinks:
@@ -518,7 +524,7 @@ def generate_index_page(manifest: list[dict]) -> str:
 
             slug = entry["class_name"].lower()
             link = f"/reference/{group_key}/{slug}/"
-            lines.append(f"| [`{entry['sidebar_label']}`]({link}) | {first_line} |")
+            lines.append(f"| [`{entry['sidebar_label']}`]({link}) | {_rst_to_md(first_line)} |")
 
         lines.append("")
 

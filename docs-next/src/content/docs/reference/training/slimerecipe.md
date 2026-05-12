@@ -25,20 +25,20 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 | `rollout_max_response_len` | `int` |  |  |
 | `rollout_temperature` | `float` |  |  |
 | `save_interval` | `int` |  |  |
-| `recipe_type` | `<enum 'RecipeType` | `slime` |  |
+| `recipe_type` | `RecipeType` | `slime` |  |
 | `name` | `str` | `""` |  |
 | `app_tags` | `dict` | `{}` |  |
 | `environment` | `dict` | `{'PYTHONPATH': '/root/Megatron-LM/', 'CUDA_DEVICE_MAX_CONNECTIONS': '1', 'NCCL_NVLS_ENABLE': '1'}` |  |
 | `async_mode` | `bool` | `False` |  |
-| `wandb` | `WandbConfig | None` | `None` |  |
-| `image_overlay` | `collections.abc.Callable[[modal.image.Image], modal.image.Image] | None` | `None` |  |
-| `local_slime` | `str | None` | `None` |  |
+| `wandb` | `WandbConfig \| None` | `None` |  |
+| `image_overlay` | `collections.abc.Callable[[modal.image.Image], modal.image.Image] \| None` | `None` |  |
+| `local_slime` | `str \| None` | `None` |  |
 | `actor_num_nodes` | `int` | `1` |  |
 | `actor_num_gpus_per_node` | `int` | `8` |  |
-| `rollout_num_gpus` | `int | None` | `None` |  |
+| `rollout_num_gpus` | `int \| None` | `None` |  |
 | `use_critic` | `bool` | `False` |  |
-| `critic_num_nodes` | `int | None` | `None` |  |
-| `critic_num_gpus_per_node` | `int | None` | `None` |  |
+| `critic_num_nodes` | `int \| None` | `None` |  |
+| `critic_num_gpus_per_node` | `int \| None` | `None` |  |
 | `advantage_estimator` | `str` | `"grpo"` |  |
 | `n_samples_per_prompt` | `int` | `2` |  |
 | `eps_clip` | `float` | `0.2` |  |
@@ -66,20 +66,20 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 | `recompute_num_layers` | `int` | `1` |  |
 | `use_dynamic_batch_size` | `bool` | `True` |  |
 | `max_tokens_per_gpu` | `int` | `9216` |  |
-| `eval_interval` | `int | None` | `None` |  |
+| `eval_interval` | `int \| None` | `None` |  |
 | `n_samples_per_eval_prompt` | `int` | `4` |  |
 | `eval_max_response_len` | `int` | `16384` |  |
 | `eval_top_p` | `float` | `1.0` |  |
-| `eval_config` | `dict | None` | `None` |  |
+| `eval_config` | `dict \| None` | `None` |  |
 | `save` | `str` | `"/checkpoints"` |  |
 | `megatron_to_hf_mode` | `str` | `"bridge"` |  |
 | `use_fault_tolerance` | `bool` | `True` |  |
-| `rm_type` | `str | None` | `None` |  |
+| `rm_type` | `str \| None` | `None` |  |
 | `custom_rm_path` | `str` | `""` |  |
-| `custom_rm_function` | `collections.abc.Callable | None` | `None` |  |
-| `custom_generate_function` | `collections.abc.Callable | None` | `None` |  |
-| `extra_config` | `dict | None` | `None` |  |
-| `sglang_config` | `dict | None` | `None` |  |
+| `custom_rm_function` | `collections.abc.Callable \| None` | `None` |  |
+| `custom_generate_function` | `collections.abc.Callable \| None` | `None` |  |
+| `extra_config` | `dict \| None` | `None` |  |
+| `sglang_config` | `dict \| None` | `None` |  |
 | `apply_chat_template_kwargs` | `str` | `""` |  |
 
 ## Methods
