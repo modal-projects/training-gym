@@ -161,7 +161,7 @@ class DeploymentConfig:
         else:
             url = app.serve.get_web_url()
         modal_app_id = app.app_id
-        modal_app_url = app.get_dashboard_url() if modal_app_id else ""
+        modal_app_url = modal_app_dashboard_url(modal_app_id)
         if not url:
             raise RuntimeError(
                 f"Deployed {self.app_name!r} but no web URL was returned."
@@ -341,20 +341,79 @@ class ModelDeployment(BaseModel):
 
         import requests
 
+        app_name = self.deployment_config.app_name
+        logs_hint = (
+            f"`modal app logs {self.modal_app_id}`" if self.modal_app_id else f"`modal app logs {app_name}`"
+        )
+        print(f"Waiting for {app_name!r} — {self.modal_app_url}")
+
         deadline = time.time() + timeout
+        modal_poll_interval = 20  # seconds between Modal-side checks
+        zero_container_grace = 150  # seconds at 0 containers before declaring crashloop
+        zero_container_since: float | None = None
+        last_modal_poll = 0.0
+        last_endpoint_msg = ""
+
         while time.time() < deadline:
             try:
                 resp = requests.get(f"{self.url}/v1/models", timeout=10)
-                if resp.ok:
-                    data = resp.json()
-                    if data.get("data"):
-                        return
-                    print(f"Waiting for {self.url} (no models loaded yet)...")
-                else:
-                    print(f"Waiting for {self.url} (status {resp.status_code})...")
+                if resp.ok and resp.json().get("data"):
+                    return
+                last_endpoint_msg = (
+                    "no models loaded yet" if resp.ok else f"status {resp.status_code}"
+                )
             except requests.ConnectionError:
-                print(f"Waiting for {self.url} to be ready...")
-            except Exception:
-                print(f"Waiting for {self.url} (not ready yet)...")
+                last_endpoint_msg = "connection refused"
+            except Exception as exc:
+                last_endpoint_msg = f"transport error: {exc!r}"
+
+            now = time.time()
+            if now - last_modal_poll >= modal_poll_interval:
+                last_modal_poll = now
+                containers = self._modal_container_count()
+                if containers is None:
+                    raise RuntimeError(
+                        f"Modal app {app_name!r} is not in a deployed state — "
+                        f"the deploy likely failed or was stopped. Check {self.modal_app_url} "
+                        f"and {logs_hint}."
+                    )
+                if containers == 0:
+                    if zero_container_since is None:
+                        zero_container_since = now
+                    elapsed = int(now - zero_container_since)
+                    if elapsed >= zero_container_grace:
+                        raise RuntimeError(
+                            f"Modal app {app_name!r} has had 0 running containers for "
+                            f"~{elapsed}s while {self.url} keeps returning "
+                            f"{last_endpoint_msg!r}. Containers are most likely crashlooping "
+                            f"on startup (OOM, missing weights, bad config, etc.). "
+                            f"Inspect logs with {logs_hint} or open {self.modal_app_url}."
+                        )
+                else:
+                    zero_container_since = None
+                print(f"  [{containers} container(s)] {last_endpoint_msg}")
+
             time.sleep(5)
-        raise TimeoutError(f"{self.url} not ready after {timeout}s")
+
+        raise TimeoutError(
+            f"{self.url} not ready after {timeout}s. "
+            f"Last endpoint status: {last_endpoint_msg!r}. "
+            f"Inspect logs with {logs_hint} or open {self.modal_app_url}."
+        )
+
+    def _modal_container_count(self) -> int | None:
+        """Container count for this deployment, or None if app isn't DEPLOYED."""
+        try:
+            apps = list_deployed_apps()
+            if inspect.isawaitable(apps):
+                apps = asyncio.run(apps)
+        except Exception as exc:
+            print(f"[deployment] couldn't query Modal app state: {exc!r}")
+            return -1
+        for app in apps:
+            if (
+                app.app_id == self.modal_app_id
+                or app.name == self.deployment_config.app_name
+            ):
+                return app.containers
+        return None
