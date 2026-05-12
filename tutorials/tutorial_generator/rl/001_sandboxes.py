@@ -16,7 +16,6 @@ TUTORIAL_METADATA = {
         "Qwen3_4B",
         "SlimeRecipe",
         "TrainConfig",
-        "WandbConfig",
     ],
 }
 
@@ -78,7 +77,6 @@ def _imports():
         Qwen3_4B,
         SlimeRecipe,
         TrainConfig,
-        WandbConfig,
         list_checkpoints,
     )
 
@@ -274,7 +272,6 @@ def _train():
         model=Qwen3_4B(),
         dataset=dataset,
         recipe=SlimeRecipe(
-            wandb=WandbConfig(project="gym-tutorial", group="qwen3-4b-hello-world"),
             custom_rm_function=usaco_rm,
 
             gpu_type="H100",
