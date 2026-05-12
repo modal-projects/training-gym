@@ -78,6 +78,9 @@ Modal prints a URL where you can watch jobs in progress.
 > for larger models — are still in Beta.
 > [**Contact us on Slack**](https://modal.com/slack) for access.
 
+## Architecture
+![Architecture diagram](./assets/training_gym_architecture_restyled.svg)
+
 ## Documentation
 
 Full docs are hosted at **[gym.modal.dev](https://gym.modal.dev)**:
