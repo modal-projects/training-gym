@@ -59,20 +59,31 @@ def vol_put(store: MetadataStore | str, key: str, value: dict[str, Any]) -> None
 async def vol_put_async(
     store: MetadataStore | str, key: str, value: dict[str, Any]
 ) -> None:
+    import asyncio
+
     from modal.exception import InvalidError, NotFoundError
 
     vol = _metadata_volume()
     data = json.dumps(value).encode()
     path = f"{_store_path(store)}/{key}.json"
-    try:
-        await vol.remove_file.aio(path)
-    except (FileNotFoundError, NotFoundError):
-        pass
-    except InvalidError as exc:
-        if "No such file or directory" not in str(exc):
-            raise
-    async with vol.batch_upload() as batch:
-        batch.put_file(io.BytesIO(data), path)
+
+    for attempt in range(3):
+        try:
+            await vol.remove_file.aio(path)
+        except (FileNotFoundError, NotFoundError):
+            pass
+        except InvalidError as exc:
+            if "No such file or directory" not in str(exc):
+                raise
+        try:
+            async with vol.batch_upload() as batch:
+                batch.put_file(io.BytesIO(data), path)
+            return
+        except FileExistsError:
+            if attempt < 2:
+                await asyncio.sleep(0.5 * (attempt + 1))
+            else:
+                raise
 
 
 def vol_get(store: MetadataStore | str, key: str) -> dict[str, Any]:

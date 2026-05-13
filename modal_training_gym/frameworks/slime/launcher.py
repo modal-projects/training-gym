@@ -63,6 +63,7 @@ from modal_training_gym.common.checkpoint import (
 from modal_training_gym.common.framework import Framework
 
 SLIME_ROOT = "/root/slime"
+SLIME_IMAGE = "slimerl/slime:nightly-dev-20260430b"
 HARBOR_PKG_VERSION = "0.6.6"
 
 
@@ -119,7 +120,7 @@ def build_slime_app(
 
     # ── Image ────────────────────────────────────────────────────────────────
     image = (
-        Image.from_registry("slimerl/slime:nightly-dev-20260329a")
+        Image.from_registry(SLIME_IMAGE)
         .entrypoint([])
         .run_commands("rm -rf /root/.cache/huggingface")
     )

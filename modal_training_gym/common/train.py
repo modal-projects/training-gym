@@ -44,14 +44,15 @@ class TrainConfig:
     def _build_app(self):
         recipe_type = self.recipe.recipe_type
         if recipe_type == RecipeType.SLIME:
+            if not isinstance(self.recipe, SlimeRecipe):
+                raise TypeError(
+                    f"Recipe type {recipe_type} requires SlimeRecipe, got {type(self.recipe).__name__}"
+                )
             base_recipe = SlimeRecipe.get_base_recipe(self.model)
-            combined = base_recipe
             if base_recipe is not None:
-                if not isinstance(self.recipe, SlimeRecipe):
-                    raise TypeError(
-                        f"Recipe type {recipe_type} requires SlimeRecipe, got {type(self.recipe).__name__}"
-                    )
                 combined = _merge_recipe(base_recipe, cast(SlimeRecipe, self.recipe))
+            else:
+                combined = cast(SlimeRecipe, self.recipe)
             return build_slime_app(
                 training_run_id=self.training_run_id,
                 slime=combined,
