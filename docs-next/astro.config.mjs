@@ -136,6 +136,7 @@ export default defineConfig({
             },
           ],
         },
+        { label: 'CLI Reference', link: '/reference/cli/' },
         { label: 'Support', link: '/support/' },
       ],
       editLink: {
