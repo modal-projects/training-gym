@@ -33,6 +33,7 @@ _EXPORTS = {
     ),
     "TrainConfig": ("modal_training_gym.common.train", "TrainConfig"),
     "TrainResult": ("modal_training_gym.common.train_result", "TrainResult"),
+    "setup": ("modal_training_gym.setup", "setup"),
     "WandbConfig": ("modal_training_gym.common.wandb", "WandbConfig"),
 }
 
@@ -61,6 +62,7 @@ __all__ = [
     "Qwen3_30B",
     "Qwen3_32B",
     "SlimeRecipe",
+    "setup",
     "SlimeRecipeBlock",
     "TrainConfig",
     "TrainResult",

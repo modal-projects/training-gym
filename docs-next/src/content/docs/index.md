@@ -23,7 +23,11 @@ Or pin it in `pyproject.toml` for uv:
 training-gym = { git = "https://github.com/modal-projects/training-gym.git", branch = "main" }
 ```
 
-Then import the building blocks from your own script:
+Then deploy the observability dashboard and import the building blocks:
+
+```bash
+training-gym setup
+```
 
 ```python
 from modal_training_gym import TrainConfig
@@ -66,6 +70,12 @@ companions from the CLI and how to author a new tutorial.
 
 Training Gym ships a dashboard that aggregates training runs, deployments,
 and eval results in one place. Deploy your own copy:
+
+```bash
+training-gym setup
+```
+
+Or equivalently:
 
 ```bash
 modal deploy dashboards/app.py

@@ -88,6 +88,7 @@ export default defineConfig({
           label: 'API Reference',
           items: [
             { label: 'Overview', link: '/reference/' },
+            { label: 'CLI Reference', link: '/reference/cli/' },
             {
               label: 'Core',
               items: [

@@ -31,8 +31,6 @@ import modal
 import json
 import re
 
-import modal
-
 from modal_training_gym import (
     DeploymentConfig,
     EvalConfig,
