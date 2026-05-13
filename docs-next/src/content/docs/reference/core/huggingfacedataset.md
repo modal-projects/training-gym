@@ -17,7 +17,7 @@ Dataset backed by a HuggingFace `datasets` repo.
 |-------|------|---------|-------------|
 | `dataset_id` | `str` | `""` |  |
 | `input_key` | `str` | `""` |  |
-| `label_key` | `str` | `""` |  |
+| `label_key` | `str` | `"label"` |  |
 | `apply_chat_template` | `bool` | `True` |  |
 | `hf_repo` | `str` | `""` |  |
 | `hf_split` | `str` | `"train"` |  |
@@ -40,5 +40,9 @@ Load raw examples for local inspection or evaluation.
 Materialize training data to `path` (and eval splits to `eval_paths`).
 
 ### `to_pandas(self, *, formatted: 'bool' = False)`
+
+### `validate_prepared(self, path: 'str') -> 'None'`
+
+Sniff what `prepare()` wrote and confirm the columns the framework will index.
 
 **Source:** [`modal_training_gym/common/dataset.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/dataset.py)

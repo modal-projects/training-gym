@@ -28,6 +28,10 @@ Load raw examples for local inspection or evaluation.
 
 Materialize training data to `path` (and eval splits to `eval_paths`).
 
+### `validate_prepared(self, path: 'str') -> 'None'`
+
+Sniff what `prepare()` wrote and confirm the columns the framework will index.
+
 ## Related Tutorials
 
 - [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn/)
