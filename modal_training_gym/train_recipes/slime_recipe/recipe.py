@@ -38,6 +38,8 @@ _SLIME_SKIP = {
     "checkpoint",
     "custom_rm_function",
     "custom_generate_function",
+    "rollout_function",
+    "custom_megatron_before_train_step_hook",
 }
 
 YAML_CONFIG_FIELDS = ("eval_config", "extra_config", "sglang_config")
@@ -140,9 +142,13 @@ class SlimeRecipe(BaseTrainRecipe):
 
     # ── Reward model ─────────────────────────────────────────────────────────
     rm_type: str | None = None
-    custom_rm_path: str = ""
+    
+    # -- Slime customization flags ───────────────────────────────────────────
+    # See https://github.com/THUDM/slime/blob/0988f0f4a0ab55d1bb3ce6285a597d912144fa80/docs/en/get_started/customization.md#1-rollout-function---rollout-function-path
     custom_rm_function: Callable | None = None
     custom_generate_function: Callable | None = None
+    rollout_function: Callable | str | None = None
+    custom_megatron_before_train_step_hook: Callable | str | None = None
 
     # ── SGLang / config overrides ───────────────────────────────────────────
     extra_config: dict | None = None
@@ -170,12 +176,6 @@ class SlimeRecipe(BaseTrainRecipe):
 
     @model_validator(mode="after")
     def _resolve_callable_paths(self) -> "SlimeRecipe":
-        if self.custom_rm_function is not None and not self.custom_rm_path:
-            object.__setattr__(
-                self,
-                "custom_rm_path",
-                self._callable_path(self.custom_rm_function),
-            )
         if self.custom_generate_function is not None:
             cfg = dict(self.extra_config or {})
             if not cfg.get("custom_generate_function_path"):
@@ -303,6 +303,12 @@ class SlimeRecipe(BaseTrainRecipe):
         out = {k: v for k, v in fields.items() if k not in _SLIME_SKIP}
         if "extra_config" in out:
             out["custom_config_path"] = out.pop("extra_config")
+        rf = fields.get("rollout_function")
+        if isinstance(rf, str) and rf:
+            out["rollout_function_path"] = rf
+        hook = fields.get("custom_megatron_before_train_step_hook")
+        if isinstance(hook, str) and hook:
+            out["custom_megatron_before_train_step_hook_path"] = hook
         return out
 
     # ── Public API ────────────────────────────────────────────────────────────

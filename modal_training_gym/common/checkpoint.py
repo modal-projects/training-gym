@@ -15,6 +15,7 @@ from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.deploy_recipes import SglangRecipe, VllmRecipe
+from modal_training_gym.frameworks.slime.launcher import SLIME_IMAGE
 
 
 class CheckpointType(Enum):
@@ -203,7 +204,7 @@ def convert_checkpoint_to_hf(
         create_if_missing=True,
     )
     image = (
-        Image.from_registry("slimerl/slime:nightly-dev-20260430b")
+        Image.from_registry(SLIME_IMAGE)
         .entrypoint([])
         .run_commands("rm -rf /root/.cache/huggingface")
         .add_local_python_source("modal_training_gym", copy=True)
