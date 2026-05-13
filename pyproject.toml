@@ -20,6 +20,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["modal_training_gym"]
 
+[project.scripts]
+training-gym = "modal_training_gym.cli:main"
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.5.1",
