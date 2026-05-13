@@ -37,8 +37,7 @@ Training Gym ships a dashboard that aggregates training runs, deployments,
 and eval results in one place. Deploy your own copy:
 
 ```bash
-git clone https://github.com/modal-projects/training-gym/
-modal deploy dashboards/app.py
+training-gym setup
 ```
 
 Modal prints a URL where you can watch jobs in progress.

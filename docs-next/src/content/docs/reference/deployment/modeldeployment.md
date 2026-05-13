@@ -27,6 +27,7 @@ ModelDeployment(**data)
 | `modal_app_id` | `str` |  |  |
 | `modal_app_url` | `str` |  |  |
 | `url` | `str` |  |  |
+| `status` | `str` |  |  |
 
 ## Methods
 
