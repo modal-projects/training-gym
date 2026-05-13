@@ -63,7 +63,7 @@ from modal_training_gym.common.checkpoint import (
 from modal_training_gym.common.framework import Framework
 
 SLIME_ROOT = "/root/slime"
-SLIME_IMAGE = "slimerl/slime:nightly-dev-20260430b"
+SLIME_IMAGE = "slimerl/slime:nightly-dev-20260329a"
 HARBOR_PKG_VERSION = "0.6.6"
 
 
@@ -219,18 +219,28 @@ def build_slime_app(
         )
         set_path(f"{mod_name}.{fn_name}")
 
+    def _set_custom_rm_path(path: str) -> None:
+        cfg = dict(slime.extra_config or {})
+        cfg["custom_rm_path"] = path
+        object.__setattr__(slime, "extra_config", cfg)
+
     _ship_callable(
         slime.custom_rm_function,
         fallback_name="custom_rm",
-        set_path=lambda path: object.__setattr__(slime, "custom_rm_path", path),
+        set_path=_set_custom_rm_path,
     )
     _ship_callable(
         slime.custom_generate_function,
         fallback_name="custom_generate",
         set_path=_set_custom_generate_path,
     )
+    _ship_callable(
+        slime.rollout_function if callable(slime.rollout_function) else None,
+        fallback_name="rollout_function",
+        set_path=lambda path: object.__setattr__(slime, "rollout_function", path),
+    )
 
-    if slime.custom_rm_function is not None and slime.custom_rm_path:
+    if slime.custom_rm_function is not None:
         object.__setattr__(slime, "custom_rm_function", None)
     if (
         slime.custom_generate_function is not None
