@@ -40,6 +40,7 @@ class DatasetConfig:
     input_key: str = ""
     label_key: str = ""
     apply_chat_template: bool = True
+    always_prepare: bool = False
 
     def __init__(self, **kwargs: Any) -> None:
         if not self.dataset_id:

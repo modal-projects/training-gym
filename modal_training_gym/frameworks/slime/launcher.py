@@ -319,6 +319,12 @@ def build_slime_app(
     def prepare_dataset():
         data_volume.reload()
         prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
+        if dataset.always_prepare and os.path.exists(prompt_data):
+            import shutil
+
+            data_dir = os.path.dirname(prompt_data)
+            print(f"always_prepare=True — removing {data_dir}")
+            shutil.rmtree(data_dir, ignore_errors=True)
         dataset.prepare(prompt_data, eval_paths)
         dataset.validate_prepared(prompt_data)
         for ep in (eval_paths or {}).values():
@@ -544,8 +550,16 @@ def build_slime_app(
 
             if dataset:
                 prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
-                if not os.path.exists(prompt_data):
-                    print(f"Preparing dataset ({prompt_data} not found)...")
+                needs_prepare = not os.path.exists(prompt_data)
+                if dataset.always_prepare and os.path.exists(prompt_data):
+                    import shutil
+
+                    data_dir = os.path.dirname(prompt_data)
+                    print(f"always_prepare=True — removing {data_dir}")
+                    shutil.rmtree(data_dir, ignore_errors=True)
+                    needs_prepare = True
+                if needs_prepare:
+                    print(f"Preparing dataset ({prompt_data})...")
                     dataset.prepare(prompt_data, eval_paths)
                     await data_volume.commit.aio()
                 dataset.validate_prepared(prompt_data)
