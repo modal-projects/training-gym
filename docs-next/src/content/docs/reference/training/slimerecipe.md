@@ -75,9 +75,10 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 | `megatron_to_hf_mode` | `str` | `"bridge"` |  |
 | `use_fault_tolerance` | `bool` | `True` |  |
 | `rm_type` | `str \| None` | `None` |  |
-| `custom_rm_path` | `str` | `""` |  |
 | `custom_rm_function` | `collections.abc.Callable \| None` | `None` |  |
 | `custom_generate_function` | `collections.abc.Callable \| None` | `None` |  |
+| `rollout_function` | `collections.abc.Callable \| str \| None` | `None` |  |
+| `custom_megatron_before_train_step_hook` | `collections.abc.Callable \| str \| None` | `None` |  |
 | `extra_config` | `dict \| None` | `None` |  |
 | `sglang_config` | `dict \| None` | `None` |  |
 | `apply_chat_template_kwargs` | `str` | `""` |  |

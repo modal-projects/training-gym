@@ -502,7 +502,7 @@ def _render_tutorial_table(
     for _, name, meta in bucket_entries:
         summary = str(meta["summary"]).rstrip(".").replace("|", r"\|")
         difficulty = str(meta.get("difficulty", "—")).replace("|", r"\|")
-        framework = str(meta["framework"]).replace("|", r"\|")
+        framework = str(meta.get("framework", "—")).replace("|", r"\|")
         launch = _render_launch_cell(bucket, name)
         lines.append(
             f"| [`{name}`](tutorials/{bucket}/{name}/{name}.ipynb) | {summary} | "
