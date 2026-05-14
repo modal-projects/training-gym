@@ -244,13 +244,22 @@ def _serve_eval_base():
     base_deployment: ModelDeployment = DeploymentConfig(model=base_model).serve()
     print(f"Base model URL: {base_deployment.url}")
 
-    def eval_response_fn(example: dict, response: str) -> EvalRowResult:
+    def eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
+        prompt = example.get("instruction", "")
+        response = deployment.generate(
+            prompt,
+            ensure_ready=False,
+            messages=[
+                {"role": "system", "content": dataset.system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+        )
         score, metadata = score_usaco_with_sandbox(response, test_cases=HELLO_WORLD_TESTS)
         return EvalRowResult(score=score, response=response, metadata=metadata)
 
     eval_config = EvalConfig(
         dataset=dataset,
-        eval_response_fn=eval_response_fn,
+        eval_fn=eval_fn,
     )
     print("Running base eval...")
     base_eval = eval_config.evaluate(base_deployment, debug=True)

@@ -61,6 +61,20 @@ from modal_training_gym import (
 
 HELLO_WORLD_TESTS = [{"input": "", "expected_output": "Hello, world!\n"}]
 
+dataset = HarborDataset(
+    dataset_name="harbor/hello-world",
+    label_metadata_path="task.toml",
+    train_repeats=20,
+    always_prepare=True, # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
+    system_prompt=(
+        "You are an expert Python programmer. "
+        "Solve the given problem by writing a complete Python program. "
+        "Your program must print the answer to stdout using print(). "
+        "Do not create or write any files. "
+        "Put your solution in a ```python code fence."
+    ),
+)
+
 # ## Sandbox-backed scorer
 #
 # We execute candidate code in a Modal sandbox with test inputs piped via
@@ -148,7 +162,16 @@ async def usaco_rm(args, sample, **kwargs) -> float:
     sample.metadata = {**(getattr(sample, "metadata", None) or {}), "usaco": meta}
     return float(reward)
 
-def eval_response_fn(example: dict, response: str) -> EvalRowResult:
+def eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
+    prompt = example.get("instruction", "")
+    response = deployment.generate(
+        prompt,
+        ensure_ready=False,
+        messages=[
+            {"role": "system", "content": dataset.system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+    )
     score, metadata = score_usaco_with_sandbox(response, test_cases=HELLO_WORLD_TESTS)
     return EvalRowResult(score=score, response=response, metadata=metadata)
 
@@ -165,20 +188,6 @@ def _main_impl() -> None:
             "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
         ) from e
 
-    dataset = HarborDataset(
-        dataset_name="harbor/hello-world",
-        label_metadata_path="task.toml",
-        train_repeats=20,
-        always_prepare=True, # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
-        system_prompt=(
-            "You are an expert Python programmer. "
-            "Solve the given problem by writing a complete Python program. "
-            "Your program must print the answer to stdout using print(). "
-            "Do not create or write any files. "
-            "Put your solution in a ```python code fence."
-        ),
-    )
-
     # ## Serve and evaluate the base model
 
     base_model = Qwen3_4B()
@@ -187,7 +196,7 @@ def _main_impl() -> None:
 
     eval_config = EvalConfig(
         dataset=dataset,
-        eval_response_fn=eval_response_fn,
+        eval_fn=eval_fn,
     )
     print("Running base eval...")
     base_eval = eval_config.evaluate(base_deployment, debug=True)
