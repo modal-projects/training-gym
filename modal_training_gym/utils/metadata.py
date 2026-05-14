@@ -40,20 +40,31 @@ def _store_path(store: MetadataStore | str) -> str:
 
 
 def vol_put(store: MetadataStore | str, key: str, value: dict[str, Any]) -> None:
+    import time
+
     from modal.exception import InvalidError, NotFoundError
 
     vol = _metadata_volume()
     data = json.dumps(value).encode()
     path = f"{_store_path(store)}/{key}.json"
-    try:
-        vol.remove_file(path)
-    except (FileNotFoundError, NotFoundError):
-        pass
-    except InvalidError as exc:
-        if "No such file or directory" not in str(exc):
-            raise
-    with vol.batch_upload() as batch:
-        batch.put_file(io.BytesIO(data), path)
+
+    for attempt in range(3):
+        try:
+            vol.remove_file(path)
+        except (FileNotFoundError, NotFoundError):
+            pass
+        except InvalidError as exc:
+            if "No such file or directory" not in str(exc):
+                raise
+        try:
+            with vol.batch_upload() as batch:
+                batch.put_file(io.BytesIO(data), path)
+            return
+        except FileExistsError:
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+            else:
+                raise
 
 
 async def vol_put_async(
@@ -98,7 +109,10 @@ def vol_get(store: MetadataStore | str, key: str) -> dict[str, Any]:
 async def vol_get_async(store: MetadataStore | str, key: str) -> dict[str, Any]:
     vol = _metadata_volume()
     try:
-        chunks = [chunk async for chunk in vol.read_file.aio(f"{_store_path(store)}/{key}.json")]
+        chunks = [
+            chunk
+            async for chunk in vol.read_file.aio(f"{_store_path(store)}/{key}.json")
+        ]
         return json.loads(b"".join(chunks))
     except FileNotFoundError:
         raise KeyError(key) from None
@@ -227,7 +241,9 @@ async def vol_upsert_summary_item_async(
     if item_id is None:
         raise KeyError(f"Missing summary item id key {item_id_key!r}")
 
-    items = await vol_get_summary_items_async(store, key=key, payload_key=payload_key) or []
+    items = (
+        await vol_get_summary_items_async(store, key=key, payload_key=payload_key) or []
+    )
     items = [existing for existing in items if existing.get(item_id_key) != item_id]
     items.append(item)
     if sort_key is not None:

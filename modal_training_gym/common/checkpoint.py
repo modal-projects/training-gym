@@ -15,7 +15,6 @@ from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.deploy_recipes import SglangRecipe, VllmRecipe
-from modal_training_gym.frameworks.slime.launcher import SLIME_IMAGE
 
 
 class CheckpointType(Enum):
@@ -79,8 +78,7 @@ def _list_checkpoints_for_slime(train_result: "TrainResult") -> list[Checkpoint]
         return CheckpointType.hf if name.endswith("_hf") else CheckpointType.megatron
 
     checkpoints_volume_name = (
-        train_result.checkpoints_volume_name
-        or f"{train_result.app_name}-checkpoints"
+        train_result.checkpoints_volume_name or f"{train_result.app_name}-checkpoints"
     )
     checkpoints_mount_path = train_result.checkpoints_mount_path or "/checkpoints"
     volume = Volume.from_name(checkpoints_volume_name, create_if_missing=True)
@@ -101,9 +99,7 @@ def _list_checkpoints_for_slime(train_result: "TrainResult") -> list[Checkpoint]
             return []
         name = os.path.basename(checkpoint_dir)
         checkpoint_type = (
-            CheckpointType.hf
-            if name.endswith("_hf")
-            else CheckpointType.megatron
+            CheckpointType.hf if name.endswith("_hf") else CheckpointType.megatron
         )
         return [
             Checkpoint(
@@ -154,7 +150,9 @@ def _list_checkpoints_for_slime(train_result: "TrainResult") -> list[Checkpoint]
     return checkpoints
 
 
-def _conversion_gpu_spec(checkpoint: Checkpoint, recipe: VllmRecipe | SglangRecipe) -> str:
+def _conversion_gpu_spec(
+    checkpoint: Checkpoint, recipe: VllmRecipe | SglangRecipe
+) -> str:
     run_id = getattr(checkpoint, "training_run_id", "")
     if run_id:
         try:
@@ -177,13 +175,14 @@ def _conversion_gpu_spec(checkpoint: Checkpoint, recipe: VllmRecipe | SglangReci
         n_gpu = recipe.n_gpu or 1
     return f"{gpu}:{n_gpu}" if n_gpu > 1 else str(gpu)
 
+
 def convert_checkpoint_to_hf(
     checkpoint: Checkpoint,
     model: ModelConfig,
     recipe: VllmRecipe | SglangRecipe,
 ) -> Checkpoint:
     import modal
-    from modal import App, Image, Secret, Volume
+    from modal import App, Secret, Volume
 
     checkpoints_volume_name = checkpoint.checkpoints_volume_name
     if not checkpoints_volume_name:
@@ -203,11 +202,10 @@ def convert_checkpoint_to_hf(
         checkpoints_volume_name,
         create_if_missing=True,
     )
-    image = (
-        Image.from_registry(SLIME_IMAGE)
-        .entrypoint([])
-        .run_commands("rm -rf /root/.cache/huggingface")
-        .add_local_python_source("modal_training_gym", copy=True)
+    from modal_training_gym.frameworks.slime.launcher import _build_slime_base_image
+
+    image = _build_slime_base_image().add_local_python_source(
+        "modal_training_gym", copy=True
     )
     conversion_app = App("training-gym-checkpoint-convert")
     gpu_spec = _conversion_gpu_spec(checkpoint, recipe)
