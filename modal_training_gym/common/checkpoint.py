@@ -182,7 +182,7 @@ def convert_checkpoint_to_hf(
     recipe: VllmRecipe | SglangRecipe,
 ) -> Checkpoint:
     import modal
-    from modal import App, Secret, Volume
+    from modal import App, Volume
 
     checkpoints_volume_name = checkpoint.checkpoints_volume_name
     if not checkpoints_volume_name:
@@ -202,6 +202,7 @@ def convert_checkpoint_to_hf(
         checkpoints_volume_name,
         create_if_missing=True,
     )
+    from modal_training_gym.common import hf_secrets
     from modal_training_gym.frameworks.slime.launcher import _build_slime_base_image
 
     image = _build_slime_base_image().add_local_python_source(
@@ -218,7 +219,7 @@ def convert_checkpoint_to_hf(
             checkpoints_mount_path: checkpoints_volume,
         },
         timeout=4 * 60 * 60,
-        secrets=[Secret.from_name("huggingface-secret")],
+        secrets=hf_secrets(),
         serialized=True,
         name="convert_megatron_to_hf",
     )
