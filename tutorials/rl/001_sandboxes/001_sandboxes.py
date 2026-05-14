@@ -194,7 +194,6 @@ def _main_impl() -> None:
     eval_config = EvalConfig(
         dataset=dataset,
         eval_response_fn=eval_response_fn,
-        generate_kwargs={"chat_template_kwargs": {"enable_thinking": True}},
     )
     print("Running base eval...")
     base_eval = eval_config.evaluate(base_deployment, debug=True)
@@ -225,7 +224,6 @@ def _main_impl() -> None:
             n_samples_per_eval_prompt=8,
             max_tokens_per_gpu=4096,
             save_interval=10,
-            apply_chat_template_kwargs='{"enable_thinking": true}',
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system modal>=1.2.0",
             ),
