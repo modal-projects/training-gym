@@ -18,7 +18,9 @@ from modal_training_gym.utils.metadata import MetadataStore, vol_list, vol_put
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--apply", action="store_true", help="Write changes to the volume")
+    parser.add_argument(
+        "--apply", action="store_true", help="Write changes to the volume"
+    )
     args = parser.parse_args()
 
     runs = vol_list(MetadataStore.TRAINING_RUNS)
@@ -51,7 +53,9 @@ def main():
         print("Nothing to backfill.")
         return
 
-    print(f"\n{len(updates)} runs to update{'  (dry-run)' if not args.apply else ''}:\n")
+    print(
+        f"\n{len(updates)} runs to update{'  (dry-run)' if not args.apply else ''}:\n"
+    )
     for run_id, run, old_status in updates:
         print(f"  {run_id}: {old_status} -> {run['status']}")
 
@@ -61,7 +65,9 @@ def main():
             if not run.get("ended_at"):
                 run["ended_at"] = run.get("started_at") or int(time.time())
             if run.get("status") == "completed" and not run.get("completed_at"):
-                run["completed_at"] = run.get("ended_at") or run.get("started_at") or int(time.time())
+                run["completed_at"] = (
+                    run.get("ended_at") or run.get("started_at") or int(time.time())
+                )
             if run.get("duration_seconds") is None:
                 started = run.get("started_at", 0)
                 ended = run.get("ended_at", 0)

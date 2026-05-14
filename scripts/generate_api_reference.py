@@ -524,7 +524,9 @@ def generate_index_page(manifest: list[dict]) -> str:
 
             slug = entry["class_name"].lower()
             link = f"/reference/{group_key}/{slug}/"
-            lines.append(f"| [`{entry['sidebar_label']}`]({link}) | {_rst_to_md(first_line)} |")
+            lines.append(
+                f"| [`{entry['sidebar_label']}`]({link}) | {_rst_to_md(first_line)} |"
+            )
 
         lines.append("")
 

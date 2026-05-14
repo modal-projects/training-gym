@@ -10,4 +10,3 @@ class DeployRecipeType(Enum):
 class BaseDeployRecipe(ABC):
     recipe_type: DeployRecipeType
     env_vars: dict[str, str] = {}
-

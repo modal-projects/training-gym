@@ -10,10 +10,16 @@ _EXPORTS = {
     "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
     "EvalResult": ("modal_training_gym.common.eval", "EvalResult"),
     "EvalRowResult": ("modal_training_gym.common.eval", "EvalRowResult"),
-    "HFModelConfiguration": ("modal_training_gym.common.models", "HFModelConfiguration"),
+    "HFModelConfiguration": (
+        "modal_training_gym.common.models",
+        "HFModelConfiguration",
+    ),
     "HuggingFaceDataset": ("modal_training_gym.common.dataset", "HuggingFaceDataset"),
     "list_checkpoints": ("modal_training_gym.common.checkpoint", "list_checkpoints"),
-    "METADATA_VOLUME_NAME": ("modal_training_gym.utils.metadata", "METADATA_VOLUME_NAME"),
+    "METADATA_VOLUME_NAME": (
+        "modal_training_gym.utils.metadata",
+        "METADATA_VOLUME_NAME",
+    ),
     "MetadataStore": ("modal_training_gym.utils.metadata", "MetadataStore"),
     "ModelArchitecture": ("modal_training_gym.common.models", "ModelArchitecture"),
     "ModelConfig": ("modal_training_gym.common.models", "ModelConfig"),

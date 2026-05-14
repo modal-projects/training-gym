@@ -22,7 +22,8 @@ from modal_training_gym.utils.metadata import MetadataStore, vol_list, vol_put
 def _get_modal_apps(app_name: str) -> list[dict]:
     result = subprocess.run(
         ["modal", "app", "list", "--json"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         print(f"  modal app list failed: {result.stderr}")
@@ -92,7 +93,9 @@ def main():
         print("No matches found within 120s window.")
         return
 
-    print(f"\n{len(updates)} runs to update{'  (dry-run)' if not args.apply else ''}:\n")
+    print(
+        f"\n{len(updates)} runs to update{'  (dry-run)' if not args.apply else ''}:\n"
+    )
     for run_id, _, app_id, delta in updates:
         print(f"  {run_id} -> {app_id}  (delta: {delta}s)")
 

@@ -50,11 +50,12 @@ class EvalConfigDurable(BaseModel):
     def list_configs(cls) -> list["EvalConfigDurable"]:
         return [cls.model_validate(v) for v in vol_list(MetadataStore.EVAL_CONFIGS)]
 
+
 class EvalRowResult(BaseModel):
     """One evaluated row: score, response text, and optional metadata."""
 
     score: float
-    response: str = "" # TODO, this doesn't have to be a string
+    response: str = ""  # TODO, this doesn't have to be a string
     metadata: dict[str, Any] = Field(
         default_factory=dict
     )  # metadata that user can inject about the evaluation result
@@ -145,9 +146,8 @@ class EvalResult(BaseModel):
         return [cls.model_validate(v) for v in vol_list(MetadataStore.EVAL_RESULTS)]
 
 
-
 Response = str
-EvalResponseFn = Callable[[DatasetRow, Response], EvalRowResult] # TOOD: bad name
+EvalResponseFn = Callable[[DatasetRow, Response], EvalRowResult]  # TOOD: bad name
 EvalFn = Callable[["ModelDeployment", DatasetRow], EvalRowResult]
 
 
@@ -181,6 +181,7 @@ class EvalConfig:
                 response=text,
                 metadata=result.metadata,
             )
+
         return eval_fn
 
     def __post_init__(self):
@@ -190,13 +191,19 @@ class EvalConfig:
             class_name = type(self).__name__
             dataset_name = type(self.dataset).__name__
             eval_fn_name = _callable_name(self.eval_fn or self.eval_response_fn)
-            self.eval_config_id = f"{class_name}.{dataset_name}.{eval_fn_name}.{uuid4().hex[:4]}"
+            self.eval_config_id = (
+                f"{class_name}.{dataset_name}.{eval_fn_name}.{uuid4().hex[:4]}"
+            )
         if self.eval_fn is None:
-            assert self.eval_response_fn is not None, "eval_fn or eval_response_fn must be set"
+            assert self.eval_response_fn is not None, (
+                "eval_fn or eval_response_fn must be set"
+            )
             self.eval_fn = self._build_eval_fn(self.eval_response_fn)
 
     def to_durable(self) -> EvalConfigDurable:
-        eval_callable = self.eval_response_fn if self.eval_response_fn is not None else self.eval_fn
+        eval_callable = (
+            self.eval_response_fn if self.eval_response_fn is not None else self.eval_fn
+        )
         return EvalConfigDurable(
             eval_config_id=self.eval_config_id,
             dataset_name=type(self.dataset).__name__,
@@ -229,7 +236,9 @@ class EvalConfig:
                 continue
             raw = str(row[column])
             if column in {prompt_column, dataset_column}:
-                template = getattr(self.dataset, "prompt_template", "{input}") or "{input}"
+                template = (
+                    getattr(self.dataset, "prompt_template", "{input}") or "{input}"
+                )
                 row_context = {
                     key: str(value)
                     for key, value in row.items()
@@ -261,7 +270,9 @@ class EvalConfig:
         self.save()
         deployment.wait_until_ready()
 
-        def _evaluate_indexed(item: tuple[int, DatasetRow]) -> tuple[int, EvalRowResult]:
+        def _evaluate_indexed(
+            item: tuple[int, DatasetRow],
+        ) -> tuple[int, EvalRowResult]:
             idx, example = item
             return idx, self.eval_fn(deployment, example)
 

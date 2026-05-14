@@ -9,8 +9,7 @@ if TYPE_CHECKING:
 
 
 class SlimeRecipeBlock(Protocol):
-    def apply(self, recipe: "SlimeRecipe") -> "SlimeRecipe":
-        ...
+    def apply(self, recipe: "SlimeRecipe") -> "SlimeRecipe": ...
 
 
 @dataclass

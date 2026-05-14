@@ -77,7 +77,9 @@ def resolve_caller_module(
             module_path = Path(module_file).resolve()
             if {"site-packages", "dist-packages"} & set(module_path.parts):
                 continue
-            if any(module_path.is_relative_to(stdlib_dir) for stdlib_dir in stdlib_dirs):
+            if any(
+                module_path.is_relative_to(stdlib_dir) for stdlib_dir in stdlib_dirs
+            ):
                 continue
         return module
     return None
