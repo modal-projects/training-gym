@@ -63,8 +63,17 @@ from modal_training_gym.common.checkpoint import (
 from modal_training_gym.common.framework import Framework
 
 SLIME_ROOT = "/root/slime"
-SLIME_IMAGE = "slimerl/slime:nightly-dev-20260329a"
+# Pin by digest to prevent mutable-tag drift.  Tag: nightly-dev-20260329a
+SLIME_IMAGE = "slimerl/slime@sha256:d8ccfba3cd21134b277da4e0f37f57d6290d7b68432e6de047c7d25406c35190"
 HARBOR_PKG_VERSION = "0.6.6"
+
+
+def _build_slime_base_image() -> "Image":
+    return (
+        Image.from_registry(SLIME_IMAGE)
+        .entrypoint([])
+        .run_commands("rm -rf /root/.cache/huggingface")
+    )
 
 
 def _has_torch_dist_checkpoint(save_path: str) -> bool:
@@ -86,7 +95,8 @@ def _has_torch_dist_checkpoint(save_path: str) -> bool:
 
     try:
         return any(
-            entry.is_dir() and (entry.name == "release" or entry.name.startswith("iter_"))
+            entry.is_dir()
+            and (entry.name == "release" or entry.name.startswith("iter_"))
             for entry in os.scandir(save_path)
         )
     except OSError:
@@ -119,11 +129,7 @@ def build_slime_app(
             caller_script = os.path.abspath(mod_file)
 
     # ── Image ────────────────────────────────────────────────────────────────
-    image = (
-        Image.from_registry(SLIME_IMAGE)
-        .entrypoint([])
-        .run_commands("rm -rf /root/.cache/huggingface")
-    )
+    image = _build_slime_base_image()
 
     if slime.image_overlay is not None:
         image = slime.image_overlay(image)
@@ -242,10 +248,7 @@ def build_slime_app(
 
     if slime.custom_rm_function is not None:
         object.__setattr__(slime, "custom_rm_function", None)
-    if (
-        slime.custom_generate_function is not None
-        and _get_custom_generate_path()
-    ):
+    if slime.custom_generate_function is not None and _get_custom_generate_path():
         object.__setattr__(slime, "custom_generate_function", None)
 
     # ── Volumes ──────────────────────────────────────────────────────────────
@@ -348,7 +351,9 @@ def build_slime_app(
             hf_path = snapshot_download(model.model_name, local_files_only=True)
         save_path = str(slime.ref_load)
         if _has_torch_dist_checkpoint(save_path):
-            print(f"Found existing torch_dist checkpoint at {save_path}; skipping conversion.")
+            print(
+                f"Found existing torch_dist checkpoint at {save_path}; skipping conversion."
+            )
             return
         num_nodes, nproc_per_node, extra_args = get_checkpoint_conversion_policy(slime)
         node_rank, master_addr, _, nnodes = get_modal_cluster_context(num_nodes)
@@ -418,7 +423,8 @@ def build_slime_app(
         checkpoints_volume.reload()
 
         hf_path = (
-            str(model.model_path) if model.model_path
+            str(model.model_path)
+            if model.model_path
             else snapshot_download(model.model_name, local_files_only=True)
         )
 
@@ -450,7 +456,11 @@ def build_slime_app(
         gpu=gpu_spec,
         volumes=all_volumes,
         secrets=[
-            *([] if slime.wandb is None else [Secret.from_name(slime.wandb.modal_wandb_secret_name)]),
+            *(
+                []
+                if slime.wandb is None
+                else [Secret.from_name(slime.wandb.modal_wandb_secret_name)]
+            ),
         ],
         timeout=24 * 60 * 60,
         experimental_options={"efa_enabled": True} if _multi_node else {},
@@ -519,7 +529,9 @@ def build_slime_app(
         try:
             if model:
                 cache_dir = (
-                    HF_CACHE_PATH / "hub" / f"models--{model.model_name.replace('/', '--')}"
+                    HF_CACHE_PATH
+                    / "hub"
+                    / f"models--{model.model_name.replace('/', '--')}"
                 )
                 snapshots_dir = cache_dir / "snapshots"
                 has_snapshot = snapshots_dir.is_dir() and any(snapshots_dir.iterdir())
@@ -590,15 +602,25 @@ def build_slime_app(
                 from huggingface_hub import snapshot_download as _snap
 
                 hf_path = (
-                    str(model.model_path) if model.model_path
+                    str(model.model_path)
+                    if model.model_path
                     else _snap(model.model_name, local_files_only=True)
                 )
                 prefix = _get_slime_checkpoint_prefix()
-                ckpt_dirs = sorted(
-                    (d for d in os.scandir(save_root)
-                     if d.is_dir() and d.name.startswith(prefix) and not d.name.endswith("_hf")),
-                    key=lambda d: d.name,
-                ) if prefix else []
+                ckpt_dirs = (
+                    sorted(
+                        (
+                            d
+                            for d in os.scandir(save_root)
+                            if d.is_dir()
+                            and d.name.startswith(prefix)
+                            and not d.name.endswith("_hf")
+                        ),
+                        key=lambda d: d.name,
+                    )
+                    if prefix
+                    else []
+                )
 
                 for entry in ckpt_dirs:
                     hf_dir = f"{entry.path}_hf"
