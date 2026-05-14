@@ -108,6 +108,12 @@ def _dataset():
         test_data_dir="tests",
         train_repeats=20,
         always_prepare=True, # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
+        system_prompt=(
+            "You are an expert Python programmer. "
+            "Solve the given problem by writing a complete Python program. "
+            "Your code should read any required input from stdin and write output to stdout. "
+            "Put your solution in a ```python code fence."
+        ),
     )
 
 
@@ -251,7 +257,7 @@ def _serve_eval_base():
     eval_config = EvalConfig(
         dataset=dataset,
         eval_response_fn=eval_response_fn,
-        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+        generate_kwargs={"chat_template_kwargs": {"enable_thinking": True}},
     )
     print("Running base eval...")
     base_eval = eval_config.evaluate(base_deployment, debug=True)
@@ -290,7 +296,7 @@ def _train():
             n_samples_per_eval_prompt=8,
             max_tokens_per_gpu=4096,
             save_interval=10,
-            apply_chat_template_kwargs='{"enable_thinking": false}',
+            apply_chat_template_kwargs='{"enable_thinking": true}',
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system modal>=1.2.0",
             ),
