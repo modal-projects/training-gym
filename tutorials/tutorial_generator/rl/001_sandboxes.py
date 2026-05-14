@@ -88,11 +88,11 @@ def _dataset_intro():
     [Harbor Hub](https://hub.harborframework.com). Each task has:
     - `instruction.md` — the problem statement (prompt)
     - `task.toml` — metadata (difficulty, category)
-    - `tests/` — input/output test pairs for verification
+    - `tests/` — verification tests (format varies by task)
 
-    Setting `test_data_dir="tests"` reads `*.in`/`*.out` file pairs and
-    embeds them in each sample's label so the reward function can verify
-    solutions without filesystem access.
+    The hello-world task uses pytest-based verification rather than
+    `*.in`/`*.out` file pairs, so we define stdin/stdout test cases
+    inline and pass them directly to the sandbox scorer.
 
     A single dataset instance handles both training and eval —
     `prepare()` writes train and eval splits to the volume,
@@ -102,16 +102,18 @@ def _dataset_intro():
 
 @code
 def _dataset():
+    HELLO_WORLD_TESTS = [{"input": "", "expected_output": "Hello, world!\n"}]
+
     dataset = HarborDataset(
         dataset_name="harbor/hello-world",
         label_metadata_path="task.toml",
-        test_data_dir="tests",
         train_repeats=20,
         always_prepare=True, # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
         system_prompt=(
             "You are an expert Python programmer. "
             "Solve the given problem by writing a complete Python program. "
-            "Your code should read any required input from stdin and write output to stdout. "
+            "Your program must print the answer to stdout using print(). "
+            "Do not create or write any files. "
             "Put your solution in a ```python code fence."
         ),
     )
@@ -221,16 +223,9 @@ def _sandbox_reward():
 
     async def usaco_rm(args, sample, **kwargs) -> float:
         import asyncio
-        import json
-
-        raw = getattr(sample, "label", None)
-        label = json.loads(raw) if isinstance(raw, str) else (raw or {})
-        test_cases = label.get("test_cases", [])
-        if not test_cases:
-            return 0.0
 
         reward, meta = await asyncio.to_thread(
-            score_usaco_with_sandbox, sample.response, test_cases=test_cases,
+            score_usaco_with_sandbox, sample.response, test_cases=HELLO_WORLD_TESTS,
         )
         sample.metadata = {**(getattr(sample, "metadata", None) or {}), "usaco": meta}
         return float(reward)
@@ -250,8 +245,7 @@ def _serve_eval_base():
     print(f"Base model URL: {base_deployment.url}")
 
     def eval_response_fn(example: dict, response: str) -> EvalRowResult:
-        test_cases = example.get("label", {}).get("test_cases", [])
-        score, metadata = score_usaco_with_sandbox(response, test_cases=test_cases)
+        score, metadata = score_usaco_with_sandbox(response, test_cases=HELLO_WORLD_TESTS)
         return EvalRowResult(score=score, response=response, metadata=metadata)
 
     eval_config = EvalConfig(
