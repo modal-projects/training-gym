@@ -34,7 +34,6 @@ class TrainConfig:
     recipe: BaseTrainRecipe
     checkpoint: Checkpoint | None = None
 
-
     # ── Public API ────────────────────────────────────────────────────────────
 
     @property

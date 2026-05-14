@@ -38,9 +38,7 @@ def hf_secrets() -> list:
     """
     from modal import Secret
 
-    hf_token = os.environ.get("HF_TOKEN") or os.environ.get(
-        "HUGGING_FACE_HUB_TOKEN"
-    )
+    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     if hf_token:
         return [Secret.from_dict({"HF_TOKEN": hf_token})]
 

@@ -142,7 +142,7 @@ class SlimeRecipe(BaseTrainRecipe):
 
     # ── Reward model ─────────────────────────────────────────────────────────
     rm_type: str | None = None
-    
+
     # -- Slime customization flags ───────────────────────────────────────────
     # See https://github.com/THUDM/slime/blob/0988f0f4a0ab55d1bb3ce6285a597d912144fa80/docs/en/get_started/customization.md#1-rollout-function---rollout-function-path
     custom_rm_function: Callable | None = None

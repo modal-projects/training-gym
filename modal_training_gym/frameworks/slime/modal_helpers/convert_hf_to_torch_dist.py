@@ -34,7 +34,9 @@ def main() -> None:
             'f.write("release")',
             'f.write("1")  # SKIP_RELEASE_RENAME: keep iter_0000001',
         )
-    exec(compile(src, _UPSTREAM, "exec"), {"__name__": "__main__", "__file__": _UPSTREAM})
+    exec(
+        compile(src, _UPSTREAM, "exec"), {"__name__": "__main__", "__file__": _UPSTREAM}
+    )
 
 
 if __name__ == "__main__":

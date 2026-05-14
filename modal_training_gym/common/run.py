@@ -23,11 +23,13 @@ from modal_training_gym.utils.metadata import (
 
 TRAINING_RUNS_STORE_NAME = MetadataStore.TRAINING_RUNS.value
 
+
 class TrainingRunStatus(Enum):
     RUNNING = "running"
     STOPPED = "stopped"
     COMPLETED = "completed"
     FAILED = "failed"
+
 
 class TrainingRun(BaseModel):
     training_run_id: str

@@ -73,11 +73,7 @@ def _eval_summaries() -> list[dict]:
     for result in eval_results:
         rows = result.get("rows", [])
         total = len(rows) if isinstance(rows, list) else 0
-        mean = (
-            sum(row.get("score", 0) for row in rows) / total
-            if total
-            else 0.0
-        )
+        mean = sum(row.get("score", 0) for row in rows) / total if total else 0.0
         summary = {key: value for key, value in result.items() if key != "rows"}
         summary["total"] = total
         summary["mean"] = mean

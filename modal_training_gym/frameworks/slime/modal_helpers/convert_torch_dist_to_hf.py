@@ -13,9 +13,7 @@ _UPSTREAM = "/root/slime/tools/convert_torch_dist_to_hf.py"
 
 def main() -> None:
     if not os.path.exists(_UPSTREAM):
-        raise FileNotFoundError(
-            f"Upstream conversion script not found: {_UPSTREAM}"
-        )
+        raise FileNotFoundError(f"Upstream conversion script not found: {_UPSTREAM}")
     runpy.run_path(_UPSTREAM, run_name="__main__")
 
 
