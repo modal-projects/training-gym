@@ -10,7 +10,7 @@ dependencies = [
     "msgspec",
     "openai",
     "pydantic",
-    "fastapi"
+    "fastapi",
 ]
 
 [build-system]
@@ -32,6 +32,9 @@ docs = [
     "mkdocs-material>=9.7.6",
     "properdocs>=1.6.7",
     "pymdown-extensions>=10.21.2",
+]
+tutorials = [
+    "nltk>=3.9.4",
 ]
 
 [tool.ruff]
