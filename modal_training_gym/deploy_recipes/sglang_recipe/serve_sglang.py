@@ -31,7 +31,9 @@ def build_sglang_serve_app(
     deployment_id: str | None = None,
 ) -> "App":
     import modal
-    from modal import App, Image, Secret, Volume
+    from modal import App, Image, Volume
+
+    from modal_training_gym.common import hf_secrets
 
     sglang_port = 8000
 
@@ -88,7 +90,7 @@ def build_sglang_serve_app(
         scaledown_window=10 * 60,
         timeout=24 * 60 * 60,
         volumes=volumes,
-        secrets=[Secret.from_name("huggingface-secret")],
+        secrets=hf_secrets(),
         serialized=True,
         include_source=False,
     )

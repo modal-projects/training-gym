@@ -28,6 +28,8 @@ from pathlib import PurePosixPath
 from typing import Any
 from collections.abc import Callable
 from modal import App, Image, Secret, Volume
+
+from modal_training_gym.common import hf_secrets
 from modal.experimental import clustered
 
 import cloudpickle
@@ -295,7 +297,7 @@ def build_slime_app(
             checkpoints_mount_path: checkpoints_volume,
         },
         timeout=2 * 60 * 60,
-        secrets=[Secret.from_name("huggingface-secret")],
+        secrets=hf_secrets(),
         serialized=True,
         name="download",
     )
@@ -310,7 +312,7 @@ def build_slime_app(
         image=image,
         volumes={str(DATA_PATH): data_volume},
         timeout=2 * 60 * 60,
-        secrets=[Secret.from_name("huggingface-secret")],
+        secrets=hf_secrets(),
         serialized=True,
         name="prepare_dataset",
     )
@@ -410,7 +412,7 @@ def build_slime_app(
             checkpoints_mount_path: checkpoints_volume,
         },
         timeout=4 * 60 * 60,
-        secrets=[Secret.from_name("huggingface-secret")],
+        secrets=hf_secrets(),
         serialized=True,
         name="convert_to_hf",
     )
