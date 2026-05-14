@@ -48,7 +48,7 @@ def test_hf_token_takes_priority_over_legacy(monkeypatch: pytest.MonkeyPatch):
 
     with _mock_secret_cls() as mock_cls:
         mock_cls.from_dict.return_value = MagicMock()
-        result = hf_secrets()
+        hf_secrets()
 
     mock_cls.from_dict.assert_called_once_with({"HF_TOKEN": "hf_primary"})
 
