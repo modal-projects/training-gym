@@ -7,7 +7,7 @@ trains the model with a sandbox-backed reward function that runs
 Setup:
     export MODAL_TOKEN_ID=<your-token-id>
     export MODAL_TOKEN_SECRET=<your-token-secret>
-    uv run python examples/modal_app_builder.py
+    MODAL_ENVIRONMENT=joy-agents-dev uv run python examples/modal_app_builder.py
 
 References:
     - 001_sandboxes tutorial  (sandbox reward pattern)
@@ -36,6 +36,7 @@ from modal_training_gym import (
 
 _MODAL_TOKEN_ID = os.environ.get("MODAL_TOKEN_ID", "")
 _MODAL_TOKEN_SECRET = os.environ.get("MODAL_TOKEN_SECRET", "")
+_MODAL_ENVIRONMENT = os.environ.get("MODAL_ENVIRONMENT", "joy-agents-dev")
 
 # ── Fixed list of Modal app ideas ─────────────────────────────────────────
 
@@ -216,6 +217,7 @@ def score_modal_deploy(
                     {
                         "MODAL_TOKEN_ID": _MODAL_TOKEN_ID,
                         "MODAL_TOKEN_SECRET": _MODAL_TOKEN_SECRET,
+                        "MODAL_ENVIRONMENT": _MODAL_ENVIRONMENT,
                     }
                 ),
             ],
