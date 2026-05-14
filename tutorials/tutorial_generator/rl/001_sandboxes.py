@@ -107,6 +107,7 @@ def _dataset():
         label_metadata_path="task.toml",
         test_data_dir="tests",
         train_repeats=20,
+        always_prepare=True, # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
     )
 
 

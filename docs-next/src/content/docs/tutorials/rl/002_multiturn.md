@@ -60,6 +60,7 @@ class NumberGuessDataset(DatasetConfig):
     label_key = "label"
     apply_chat_template = True
     input_column = "prompt"
+    always_prepare = True # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
 
     def load(self):
         return [{"prompt": _PROMPT, "target": target} for target in TEST_TARGETS]

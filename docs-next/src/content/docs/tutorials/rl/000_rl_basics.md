@@ -110,6 +110,7 @@ class HaikuDataset(HuggingFaceDataset):
         "Use the 5-7-5 syllable format across three lines."
     )
     prompt_template = "Write a haiku about {input}."
+    always_prepare = True # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
 
 train_dataset = HaikuDataset(n_rows=10)
 eval_dataset = HaikuDataset(n_rows=5)

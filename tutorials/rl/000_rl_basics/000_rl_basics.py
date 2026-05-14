@@ -100,6 +100,7 @@ class HaikuDataset(HuggingFaceDataset):
         "Use the 5-7-5 syllable format across three lines."
     )
     prompt_template = "Write a haiku about {input}."
+    always_prepare = True # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
 
 # Seems straightforward enough, right? How do we run an eval on our base model with this dataset?
 # We can transform our scoring function above into an Eval Configuration.
