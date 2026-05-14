@@ -106,6 +106,7 @@ class ModalAppDataset(DatasetConfig):
                 rows.append(
                     {
                         "messages": messages,
+                        "prompt": prompt,
                         "label": json.dumps({"task": idea}),
                     }
                 )
@@ -256,60 +257,62 @@ async def modal_deploy_rm(args, sample, **kwargs) -> float:
 
 # ── Training configuration ────────────────────────────────────────────────
 
-dataset = ModalAppDataset(n_repeats=5, always_prepare=True)
-
-training_run = TrainConfig(
-    model=Qwen3_8B(),
-    dataset=dataset,
-    recipe=SlimeRecipe(
-        custom_rm_function=modal_deploy_rm,
-        gpu_type="H100",
-        colocate=True,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus_per_engine=1,
-        num_rollout=10,
-        rollout_batch_size=8,
-        n_samples_per_prompt=8,
-        rollout_max_response_len=2048,
-        rollout_temperature=0.9,
-        global_batch_size=8,
-        eval_max_response_len=2048,
-        n_samples_per_eval_prompt=8,
-        max_tokens_per_gpu=2048,
-        save_interval=10,
-        apply_chat_template_kwargs='{"enable_thinking": false}',
-        image_overlay=lambda image: image.run_commands(
-            "uv pip install --system modal>=1.2.0",
-        ),
-    ),
-)
-
-print("Starting training...")
-train_result = training_run.train()
-print(f"Training run id: {train_result.training_run_id}")
-
-# ── Evaluate trained checkpoint ───────────────────────────────────────────
-
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-trained_deployment = DeploymentConfig(
-    model=Qwen3_8B(),
-    checkpoint=checkpoint,
-    app_name="qwen3-8b-modal-builder-serve",
-    served_model_name="qwen3-8b-modal-builder",
-).serve()
-print(f"Trained model URL: {trained_deployment.url}")
-
 
 def eval_response_fn(example: dict, response: str) -> EvalRowResult:
     score, metadata = score_modal_deploy(response)
     return EvalRowResult(score=score, response=response, metadata=metadata)
 
 
-eval_config = EvalConfig(
-    dataset=dataset,
-    eval_response_fn=eval_response_fn,
-    generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
-)
-trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-print(f"Trained mean reward: {trained_eval.mean:.4f}")
+if __name__ == "__main__":
+    dataset = ModalAppDataset(n_repeats=5, always_prepare=True)
+
+    training_run = TrainConfig(
+        model=Qwen3_8B(),
+        dataset=dataset,
+        recipe=SlimeRecipe(
+            custom_rm_function=modal_deploy_rm,
+            gpu_type="H100",
+            colocate=True,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,
+            rollout_num_gpus_per_engine=1,
+            num_rollout=10,
+            rollout_batch_size=8,
+            n_samples_per_prompt=8,
+            rollout_max_response_len=2048,
+            rollout_temperature=0.9,
+            global_batch_size=8,
+            eval_max_response_len=2048,
+            n_samples_per_eval_prompt=8,
+            max_tokens_per_gpu=2048,
+            save_interval=10,
+            apply_chat_template_kwargs='{"enable_thinking": false}',
+            image_overlay=lambda image: image.run_commands(
+                "uv pip install --system modal>=1.2.0",
+            ),
+        ),
+    )
+
+    print("Starting training...")
+    train_result = training_run.train()
+    print(f"Training run id: {train_result.training_run_id}")
+
+    # ── Evaluate trained checkpoint ───────────────────────────────────────
+
+    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+    trained_deployment = DeploymentConfig(
+        model=Qwen3_8B(),
+        checkpoint=checkpoint,
+        app_name="qwen3-8b-modal-builder-serve",
+        served_model_name="qwen3-8b-modal-builder",
+    ).serve()
+    print(f"Trained model URL: {trained_deployment.url}")
+
+    eval_config = EvalConfig(
+        dataset=dataset,
+        eval_response_fn=eval_response_fn,
+        prompt_column="prompt",
+        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+    )
+    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
+    print(f"Trained mean reward: {trained_eval.mean:.4f}")
