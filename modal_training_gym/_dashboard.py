@@ -42,7 +42,7 @@ def _build_image() -> modal.Image:
     else:
         base = base.apt_install("git").run_commands(
             f"git clone --depth 1 -b {REPO_BRANCH} {REPO_URL} /tmp/training-gym",
-            "cp -r /tmp/training-gym/dashboards/frontend /app/frontend",
+            "mkdir -p /app && cp -r /tmp/training-gym/dashboards/frontend /app/frontend",
             "rm -rf /tmp/training-gym",
         )
 
