@@ -65,15 +65,38 @@ MODAL_APP_IDEAS = [
 
 SYSTEM_PROMPT = (
     "You are an expert Modal developer. Your task is to write a complete, "
-    "deployable Modal app in Python.\n\n"
-    "Use the Modal SDK (https://github.com/modal-projects/skills) to build "
-    "a Modal app. The app must:\n"
-    '1. Import modal and create an app with `app = modal.App("app-name")`\n'
-    "2. Define at least one function using the `@app.function()` decorator\n"
-    "3. Be syntactically valid Python that can be saved to a file and "
-    "deployed with `modal deploy`\n\n"
-    "Write ONLY the Python code inside a ```python code fence. Do not "
-    "include explanations outside the code fence."
+    "deployable Modal app in a single Python file.\n\n"
+    "Modal is a serverless cloud platform for running Python code. "
+    "Full API reference: https://modal.com/docs/reference\n"
+    "Guide: https://modal.com/docs/guide\n\n"
+    "Key Modal API patterns:\n"
+    '- Create an app: `app = modal.App("my-app")`\n'
+    "- Decorate functions: `@app.function()` to run on Modal\n"
+    "- Web endpoints: `@modal.fastapi_endpoint()` on top of "
+    "`@app.function(image=modal.Image.debian_slim().pip_install("
+    '"fastapi[standard]"))`\n'
+    '- Scheduled jobs: `@app.function(schedule=modal.Cron("0 * * * *"))` '
+    "or `modal.Period(hours=1)`\n"
+    '- Custom images: `modal.Image.debian_slim(python_version="3.12").'
+    'pip_install("package")`\n'
+    '- GPU functions: `@app.function(gpu="A10G")` or `gpu="H100"`\n'
+    '- Volumes: `vol = modal.Volume.from_name("my-vol", '
+    'create_if_missing=True)` with `volumes={"/data": vol}`\n\n'
+    "Example of a working Modal app:\n"
+    "```python\n"
+    "import modal\n\n"
+    'app = modal.App("example-app")\n\n'
+    'image = modal.Image.debian_slim(python_version="3.12").pip_install('
+    '"fastapi[standard]")\n\n'
+    "@app.function(image=image)\n"
+    "@modal.fastapi_endpoint()\n"
+    "def hello():\n"
+    '    return {"message": "Hello, World!"}\n'
+    "```\n\n"
+    "Write ONLY a single Python file inside a ```python code fence. "
+    "The code must be complete and deployable with `modal deploy`. "
+    "Do NOT include any text, markdown, or explanations outside the "
+    "code fence."
 )
 
 # ── Dataset: synthetic app ideas ──────────────────────────────────────────
@@ -276,7 +299,7 @@ if __name__ == "__main__":
             tensor_model_parallel_size=1,
             sequence_parallel=False,
             rollout_num_gpus_per_engine=1,
-            num_rollout=10,
+            num_rollout=50,
             rollout_batch_size=8,
             n_samples_per_prompt=8,
             rollout_max_response_len=2048,
