@@ -50,26 +50,121 @@ _JUDGE_URL: str = ""
 # ── Fixed list of Modal app ideas ─────────────────────────────────────────
 
 MODAL_APP_IDEAS = [
-    "a web endpoint that returns 'Hello, World!' as JSON",
-    "a function that computes the nth Fibonacci number",
-    "a scheduled cron job that prints the current UTC time every hour",
-    "an API endpoint that converts Celsius to Fahrenheit",
-    "a function that generates a random UUID and returns it",
-    "a web endpoint that accepts a POST with a name and returns a greeting",
-    "a function that counts the number of words in a given string",
-    "a web endpoint that returns the current date and time as ISO 8601",
-    "a function that checks if a given number is prime",
-    "a function that reverses a string and returns it",
-    "a web endpoint that accepts a list of numbers and returns their sum",
-    "a function that computes the factorial of a given integer",
-    "a scheduled job that logs 'heartbeat' every 5 minutes",
-    "a web endpoint that returns server uptime information",
-    "a function that generates a random password of a given length",
-    "a web endpoint that echoes back the request headers as JSON",
-    "a function that sorts a list of strings alphabetically",
-    "a web endpoint that returns a random motivational quote",
-    "a function that validates whether a string is a valid email address",
-    "a web endpoint that computes the SHA-256 hash of a given input string",
+    # ── Volume-backed persistence ──
+    (
+        "a Volume-backed key-value store with PUT and GET web endpoints. "
+        "Use modal.Volume to persist data as JSON files under /data. "
+        "PUT /kv?key=foo&value=bar writes the value, GET /kv?key=foo reads it"
+    ),
+    (
+        "a URL shortener that stores mappings in a modal.Volume. "
+        "POST /shorten accepts a JSON body with 'url' and returns a short code. "
+        "GET /r/{code} returns a redirect response to the original URL"
+    ),
+    (
+        "a paste-bin service using a modal.Volume to persist text snippets. "
+        "POST /paste accepts JSON with 'content', stores it with a random ID, "
+        "and returns the ID. GET /paste/{id} retrieves the content"
+    ),
+    (
+        "a visitor counter web endpoint backed by a modal.Volume. "
+        "Each request to GET /count increments a counter stored in a JSON file "
+        "on the volume and returns the updated count"
+    ),
+    # ── Custom images with pip packages ──
+    (
+        "a web endpoint that accepts a CSV string, parses it with the pandas "
+        "library, and returns summary statistics (mean, median, std) as JSON. "
+        "Use modal.Image.debian_slim().pip_install('pandas', 'fastapi[standard]')"
+    ),
+    (
+        "a Markdown-to-HTML converter web endpoint. Accept a POST with "
+        "markdown text and return rendered HTML. Use pip_install('markdown', "
+        "'fastapi[standard]') on the image"
+    ),
+    (
+        "a web endpoint that accepts a JSON payload with 'expression' and "
+        "evaluates it as a safe math expression using the 'simpleeval' library. "
+        "Install simpleeval and fastapi[standard] on the image"
+    ),
+    (
+        "a YAML-to-JSON converter web endpoint. Accept a POST with raw YAML "
+        "text and return the equivalent JSON. Use pip_install('pyyaml', "
+        "'fastapi[standard]') on the image"
+    ),
+    # ── Scheduled jobs with real logic ──
+    (
+        "a scheduled cron job (every hour) that fetches the current Bitcoin "
+        "price from a public API (e.g. coingecko) and appends the timestamp "
+        "and price to a JSON log file stored on a modal.Volume"
+    ),
+    (
+        "a scheduled job using modal.Period(minutes=30) that writes system "
+        "health metrics (timestamp, random simulated cpu/memory percentages) "
+        "as a JSON line to a log file on a modal.Volume"
+    ),
+    # ── Multiple functions / fan-out ──
+    (
+        "an app with two functions: a @app.function 'process_item' that "
+        "uppercases a string, and a web endpoint 'batch_process' that "
+        "accepts a JSON list of strings, calls process_item.remote() for "
+        "each one using map, and returns the results"
+    ),
+    (
+        "an app with a web endpoint that accepts a list of URLs, spawns "
+        "a separate @app.function for each URL that returns the HTTP status "
+        "code (using the requests library), collects results via .map(), "
+        "and returns a JSON mapping of url -> status_code"
+    ),
+    # ── @app.cls (class-based) ──
+    (
+        "a class-based Modal app using @app.cls() with an @modal.enter() "
+        "method that loads a list of facts into memory, and a "
+        "@modal.fastapi_endpoint() method that returns a random fact"
+    ),
+    (
+        "a class-based Modal app using @app.cls() with a web endpoint that "
+        "maintains an in-memory counter via @modal.enter(), increments it on "
+        "each request, and returns the count"
+    ),
+    # ── Multi-endpoint apps ──
+    (
+        "an app with three web endpoints: POST /items to add an item (stored "
+        "in a modal.Volume as JSON), GET /items to list all items, and "
+        "DELETE /items/{id} to remove an item by ID"
+    ),
+    (
+        "a unit conversion API with three web endpoints: "
+        "GET /convert/temperature?value=100&from=C&to=F, "
+        "GET /convert/length?value=10&from=km&to=miles, and "
+        "GET /convert/weight?value=5&from=kg&to=lbs. Each endpoint "
+        "performs the conversion and returns JSON"
+    ),
+    # ── Image builds with system packages ──
+    (
+        "a web endpoint that accepts an image URL, downloads it using "
+        "the requests library, generates a thumbnail using Pillow "
+        "(PIL), and returns the thumbnail dimensions. "
+        "Install pillow, requests, and fastapi[standard] on the image"
+    ),
+    (
+        "a web endpoint that accepts text and returns a word frequency "
+        "analysis: the top 10 most common words with their counts, using "
+        "Python's collections.Counter. Return as sorted JSON"
+    ),
+    # ── Error handling / validation ──
+    (
+        "a JSON schema validator web endpoint. Accept a POST with "
+        "'schema' and 'data' fields. Use the jsonschema library to validate "
+        "the data against the schema and return whether it's valid plus any "
+        "error messages. Install jsonschema and fastapi[standard]"
+    ),
+    (
+        "a base64 encoding/decoding service with two endpoints: "
+        "POST /encode accepts text and returns base64, "
+        "POST /decode accepts base64 and returns text. "
+        "Handle invalid base64 input gracefully with error responses"
+    ),
 ]
 
 SYSTEM_PROMPT = (
@@ -87,20 +182,36 @@ SYSTEM_PROMPT = (
     '- Scheduled jobs: `@app.function(schedule=modal.Cron("0 * * * *"))` '
     "or `modal.Period(hours=1)`\n"
     '- Custom images: `modal.Image.debian_slim(python_version="3.12").'
-    'pip_install("package")`\n'
+    'pip_install("pkg1", "pkg2")`\n'
     '- GPU functions: `@app.function(gpu="A10G")` or `gpu="H100"`\n'
     '- Volumes: `vol = modal.Volume.from_name("my-vol", '
-    'create_if_missing=True)` with `volumes={"/data": vol}`\n\n'
-    "Example of a working Modal app:\n"
+    'create_if_missing=True)` with `volumes={"/data": vol}`\n'
+    "- Fan-out: call `fn.remote(arg)` or `list(fn.map(args))` from "
+    "another Modal function\n"
+    "- Classes: `@app.cls()` with `@modal.enter()` for setup and "
+    "`@modal.fastapi_endpoint()` for serving\n"
+    "- Multiple endpoints: define several `@app.function` / "
+    "`@modal.fastapi_endpoint` in one app\n\n"
+    "Example — a Volume-backed counter web endpoint:\n"
     "```python\n"
-    "import modal\n\n"
-    'app = modal.App("example-app")\n\n'
+    "import json, modal\n\n"
+    'app = modal.App("counter-app")\n'
+    'vol = modal.Volume.from_name("counter-vol", create_if_missing=True)\n'
     'image = modal.Image.debian_slim(python_version="3.12").pip_install('
     '"fastapi[standard]")\n\n'
-    "@app.function(image=image)\n"
+    '@app.function(image=image, volumes={"/data": vol})\n'
     "@modal.fastapi_endpoint()\n"
-    "def hello():\n"
-    '    return {"message": "Hello, World!"}\n'
+    "def count():\n"
+    '    path = "/data/count.json"\n'
+    "    try:\n"
+    "        vol.reload()\n"
+    '        n = json.loads(open(path).read())["n"]\n'
+    "    except Exception:\n"
+    "        n = 0\n"
+    "    n += 1\n"
+    '    open(path, "w").write(json.dumps({"n": n}))\n'
+    "    vol.commit()\n"
+    '    return {"count": n}\n'
     "```\n\n"
     "Write ONLY a single Python file inside a ```python code fence. "
     "The code must be complete and deployable with `modal deploy`. "
