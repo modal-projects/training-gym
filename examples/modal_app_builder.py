@@ -1,8 +1,12 @@
 """Train Qwen3-8B to write deployable Modal apps via GRPO.
 
 Synthetically generates app-building prompts from a fixed idea list and
-trains the model with a sandbox-backed reward function that runs
-``modal deploy`` on the generated code.
+trains the model with a two-stage reward function:
+
+1. **Deploy check** — runs ``modal deploy`` in a sandbox to verify the
+   code is syntactically valid and creates a working Modal app.
+2. **LLM judge** — a separate model evaluates whether the deployed app
+   actually implements the requested functionality (not just a thin stub).
 
 Setup:
     export MODAL_TOKEN_ID=<your-token-id>
@@ -38,6 +42,10 @@ from modal_training_gym import (
 _MODAL_TOKEN_ID = os.environ.get("MODAL_TOKEN_ID", "")
 _MODAL_TOKEN_SECRET = os.environ.get("MODAL_TOKEN_SECRET", "")
 _MODAL_ENVIRONMENT = os.environ.get("MODAL_ENVIRONMENT", "joy-agent-dev")
+
+# Judge model URL — set by deploy_judge() before training starts.
+# The reward function calls this endpoint to grade code quality.
+_JUDGE_URL: str = ""
 
 # ── Fixed list of Modal app ideas ─────────────────────────────────────────
 
@@ -155,7 +163,64 @@ class ModalAppDataset(DatasetConfig):
         return self._generate_rows()
 
 
-# ── Reward function: sandbox-backed modal deploy ──────────────────────────
+# ── LLM judge for code quality ────────────────────────────────────────────
+
+JUDGE_PROMPT = (
+    "You are evaluating a Modal app that was generated for this task:\n"
+    "{task}\n\n"
+    "Here is the generated code:\n"
+    "```python\n{code}\n```\n\n"
+    "Score the code from 0 to 10 based on whether it ACTUALLY implements "
+    "the requested functionality:\n"
+    "- 0-2: Trivial stub that ignores the task (e.g. returns hardcoded "
+    "'Hello World' for a Fibonacci task, or is a near-copy of the example).\n"
+    "- 3-5: Partially implements the task but with major gaps or wrong logic.\n"
+    "- 6-8: Implements the core functionality with minor issues.\n"
+    "- 9-10: Fully and correctly implements the requested functionality.\n\n"
+    'Respond with ONLY a JSON object: {{"score": <int>, "reason": "<brief>"}}'  # noqa: E501
+)
+
+
+def judge_code_quality(code: str, task: str) -> tuple[float, dict]:
+    """Call the LLM judge to evaluate code quality.
+
+    Returns ``(normalized_score, metadata)`` where score is 0.0-1.0.
+    Falls back to 1.0 (no penalty) if the judge is unavailable.
+    """
+    import requests
+
+    if not _JUDGE_URL:
+        return 1.0, {"judge": "skipped", "reason": "no judge URL configured"}
+
+    prompt = JUDGE_PROMPT.format(task=task, code=code)
+    body = {
+        "model": "judge",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.0,
+        "max_tokens": 256,
+    }
+    try:
+        resp = requests.post(
+            f"{_JUDGE_URL}/v1/chat/completions",
+            json=body,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+        # Strip thinking tags if present
+        if "</think>" in content:
+            content = content.split("</think>", 1)[-1]
+        content = content.strip()
+        parsed = json.loads(content)
+        raw_score = int(parsed["score"])
+        reason = parsed.get("reason", "")
+        normalized = max(0.0, min(1.0, raw_score / 10.0))
+        return normalized, {"judge_score": raw_score, "judge_reason": reason}
+    except Exception as e:
+        return 1.0, {"judge": "error", "detail": str(e)[:200]}
+
+
+# ── Reward function: sandbox-backed modal deploy + LLM judge ──────────────
 
 _CODE_FENCE_RE = re.compile(r"```(?:python)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 
@@ -176,12 +241,17 @@ def extract_python_code(text: str) -> str:
 def score_modal_deploy(
     response: str,
     *,
+    task: str = "",
     timeout_sec: int = 120,
 ) -> tuple[float, dict]:
-    """Score by attempting ``modal deploy`` inside a Modal sandbox.
+    """Score by deploying in a sandbox then grading with an LLM judge.
 
-    MODAL_TOKEN_ID / MODAL_TOKEN_SECRET are injected as sandbox secrets so
-    the CLI inside the sandbox can authenticate with Modal.
+    Stage 1 — deploy: ``modal deploy`` runs inside a Modal sandbox.
+    Stage 2 — judge: an LLM evaluates whether the code actually
+    implements the requested functionality (not just a thin wrapper).
+
+    Final score = deploy_score * judge_score.  If deploy fails the
+    judge is skipped and the score is 0.0.
     """
     import modal as _modal
 
@@ -269,21 +339,33 @@ def score_modal_deploy(
         return 0.0, {"error": "json_decode_error", "stdout": stdout[:200]}
 
     if result.get("returncode") == 0:
-        return 1.0, {"deployed": True, **result}
+        judge_score, judge_meta = judge_code_quality(code, task)
+        final_score = round(judge_score, 2)
+        return final_score, {"deployed": True, **judge_meta, **result}
 
     stderr = result.get("stderr", "")
     if "Error" in stderr and "SyntaxError" not in stderr:
-        return 0.3, {"deployed": False, "partial_credit": True, **result}
+        return 0.1, {"deployed": False, "partial_credit": True, **result}
     return 0.0, {"deployed": False, **result}
 
 
 async def modal_deploy_rm(args, sample, **kwargs) -> float:
-    """Reward model for slime: score by ``modal deploy`` success."""
+    """Reward model for slime: deploy + LLM judge scoring."""
     import asyncio
+
+    # Extract the task description from the label metadata.
+    task = ""
+    label_raw = getattr(sample, "label", None) or ""
+    if isinstance(label_raw, str):
+        try:
+            task = json.loads(label_raw).get("task", "")
+        except (json.JSONDecodeError, ValueError):
+            pass
 
     reward, meta = await asyncio.to_thread(
         score_modal_deploy,
         sample.response,
+        task=task,
     )
     sample.metadata = {**(getattr(sample, "metadata", None) or {}), "deploy": meta}
     return float(reward)
@@ -301,7 +383,7 @@ def modal_eval_fn(
     deployment: ModelDeployment,
     example: dict,
 ) -> EvalRowResult:
-    """Eval function that includes the system prompt in the messages.
+    """Eval function that includes the system prompt and LLM judge.
 
     Training uses the full ``messages`` field (system + user prompt) via
     chat-template application, but ``EvalConfig.build_prompt`` only sends
@@ -310,6 +392,13 @@ def modal_eval_fn(
     that the system prompt context is present at eval time.
     """
     prompt = example.get("prompt", "")
+    task = ""
+    label_raw = example.get("label", "")
+    if isinstance(label_raw, str):
+        try:
+            task = json.loads(label_raw).get("task", "")
+        except (json.JSONDecodeError, ValueError):
+            pass
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt},
@@ -320,11 +409,29 @@ def modal_eval_fn(
         messages=messages,
         chat_template_kwargs={"enable_thinking": False},
     )
-    score, metadata = score_modal_deploy(text)
+    score, metadata = score_modal_deploy(text, task=task)
     return EvalRowResult(score=score, response=text, metadata=metadata)
 
 
+def deploy_judge(app_name: str = "modal-app-judge") -> str:
+    """Deploy the base Qwen3-8B as a judge model and return its URL."""
+    global _JUDGE_URL  # noqa: PLW0603
+
+    judge_deployment = DeploymentConfig(
+        model=Qwen3_8B(),
+        checkpoint=None,
+        app_name=app_name,
+        served_model_name="judge",
+    ).serve()
+    _JUDGE_URL = judge_deployment.url
+    print(f"Judge model deployed at {_JUDGE_URL}")
+    return _JUDGE_URL
+
+
 if __name__ == "__main__":
+    # Deploy the judge model first so the reward function can call it.
+    deploy_judge()
+
     dataset = ModalAppDataset(n_repeats=5, always_prepare=True)
 
     training_run = TrainConfig(
