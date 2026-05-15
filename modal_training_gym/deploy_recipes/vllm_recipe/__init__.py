@@ -1,4 +1,10 @@
 from modal_training_gym.deploy_recipes.vllm_recipe.recipe import VllmRecipe
+from modal_training_gym.deploy_recipes.vllm_recipe.glm_4_7 import (
+    GLM_4_7_VllmRecipe,
+)
+from modal_training_gym.deploy_recipes.vllm_recipe.glm_4_7_flash import (
+    GLM_4_7_Flash_VllmRecipe,
+)
 from modal_training_gym.deploy_recipes.vllm_recipe.qwen3_0_6b import (
     Qwen3_0_6b_VllmRecipe,
 )
@@ -12,6 +18,8 @@ from modal_training_gym.deploy_recipes.vllm_recipe.qwen3_30b import Qwen3_30b_Vl
 from modal_training_gym.deploy_recipes.vllm_recipe.qwen3_32b import Qwen3_32b_VllmRecipe
 
 __all__ = [
+    "GLM_4_7_VllmRecipe",
+    "GLM_4_7_Flash_VllmRecipe",
     "VllmRecipe",
     "Qwen3_0_6b_VllmRecipe",
     "Qwen3_1_7b_VllmRecipe",

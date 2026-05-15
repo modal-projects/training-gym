@@ -75,6 +75,13 @@ class ModelArchitecture:
     use_rotary_position_embeddings: bool = True
     rotary_base: int = 10000
 
+    # MoE (Mixture of Experts)
+    num_experts: int = 0
+    moe_router_topk: int = 0
+    moe_ffn_hidden_size: int = 0
+    num_shared_experts: int = 0
+    first_k_dense_replace: int = 0
+
     def to_megatron_args(self) -> list[str]:
         """Generate Megatron-LM CLI flags from this architecture spec."""
         args: list[str] = []
@@ -111,6 +118,16 @@ class ModelArchitecture:
             args += ["--position-embedding-type", "rope"]
             if self.rotary_base != 10000:
                 args += ["--rotary-base", str(self.rotary_base)]
+        if self.num_experts:
+            args += ["--num-experts", str(self.num_experts)]
+        if self.moe_router_topk:
+            args += ["--moe-router-topk", str(self.moe_router_topk)]
+        if self.moe_ffn_hidden_size:
+            args += ["--moe-ffn-hidden-size", str(self.moe_ffn_hidden_size)]
+        if self.num_shared_experts:
+            args += ["--num-shared-experts", str(self.num_shared_experts)]
+        if self.first_k_dense_replace:
+            args += ["--first-k-dense-replace", str(self.first_k_dense_replace)]
         return args
 
 

@@ -10,6 +10,8 @@ _EXPORTS = {
     "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
     "EvalResult": ("modal_training_gym.common.eval", "EvalResult"),
     "EvalRowResult": ("modal_training_gym.common.eval", "EvalRowResult"),
+    "GLM_4_7": ("modal_training_gym.common.models", "GLM_4_7"),
+    "GLM_4_7_Flash": ("modal_training_gym.common.models", "GLM_4_7_Flash"),
     "HFModelConfiguration": (
         "modal_training_gym.common.models",
         "HFModelConfiguration",
@@ -60,6 +62,8 @@ __all__ = [
     "ModelConfig",
     "ModelDeployment",
     "MultiTurn",
+    "GLM_4_7",
+    "GLM_4_7_Flash",
     "Qwen3_0_6B",
     "Qwen3_1_7B",
     "Qwen3_4B",

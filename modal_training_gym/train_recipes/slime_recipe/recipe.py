@@ -115,6 +115,25 @@ class SlimeRecipe(BaseTrainRecipe):
     adam_beta2: float = 0.98
     optimizer: str = "adam"
 
+    # ── MoE parallelism ──────────────────────────────────────────────────────
+    expert_model_parallel_size: int = 1
+    expert_tensor_parallel_size: int = 1
+    pipeline_model_parallel_size: int = 1
+    context_parallel_size: int = 1
+    moe_token_dispatcher_type: str | None = None
+    moe_enable_deepep: bool = False
+
+    # ── Multi-token prediction (MTP) ─────────────────────────────────────
+    enable_mtp_training: bool = False
+    mtp_num_layers: int = 0
+    mtp_loss_scaling_factor: float = 0.0
+
+    # ── Optimizer offloading ──────────────────────────────────────────────
+    optimizer_cpu_offload: bool = False
+    overlap_cpu_optimizer_d2h_h2d: bool = False
+    use_precision_aware_optimizer: bool = False
+    attention_backend: str | None = None
+
     # ── Memory and precision ────────────────────────────────────────────────
     attention_dropout: float = 0.0
     hidden_dropout: float = 0.0
@@ -252,7 +271,7 @@ class SlimeRecipe(BaseTrainRecipe):
     @staticmethod
     def _model_to_fields(m: "ModelConfig") -> dict[str, Any]:
         arch = SlimeRecipe._validate_custom_model_architecture(m)
-        return {
+        fields = {
             "hf_checkpoint": m.model_path or m.model_name,
             "num_layers": arch.num_layers,
             "hidden_size": arch.hidden_size,
@@ -271,6 +290,17 @@ class SlimeRecipe(BaseTrainRecipe):
             "use_rotary_position_embeddings": arch.use_rotary_position_embeddings,
             "rotary_base": arch.rotary_base,
         }
+        if arch.num_experts:
+            fields["num_experts"] = arch.num_experts
+        if arch.moe_router_topk:
+            fields["moe_router_topk"] = arch.moe_router_topk
+        if arch.moe_ffn_hidden_size:
+            fields["moe_ffn_hidden_size"] = arch.moe_ffn_hidden_size
+        if arch.num_shared_experts:
+            fields["num_shared_experts"] = arch.num_shared_experts
+        if arch.first_k_dense_replace:
+            fields["first_k_dense_replace"] = arch.first_k_dense_replace
+        return fields
 
     @staticmethod
     def _wandb_to_fields(w: "WandbConfig") -> dict[str, Any]:
@@ -388,4 +418,16 @@ class SlimeRecipe(BaseTrainRecipe):
             return Qwen3_14b_Recipe()
         if model_config.model_name == "Qwen/Qwen3-32B":
             return Qwen3_32b_Recipe()
+        if model_config.model_name == "zai-org/GLM-4.7":
+            from modal_training_gym.train_recipes.slime_recipe.glm_4_7 import (
+                GLM_4_7_Recipe,
+            )
+
+            return GLM_4_7_Recipe()
+        if model_config.model_name == "zai-org/GLM-4.7-Flash":
+            from modal_training_gym.train_recipes.slime_recipe.glm_4_7_flash import (
+                GLM_4_7_Flash_Recipe,
+            )
+
+            return GLM_4_7_Flash_Recipe()
         return None
