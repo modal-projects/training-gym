@@ -55,9 +55,12 @@ def eval_response_fn(_example: dict, response: str) -> EvalRowResult:
 # 1. **Thinking mode is on** — the model emits internal reasoning before the answer, so the response is never just a number.
 # 2. **No format instruction** — even without thinking, the model wraps the answer in natural language.
 #
-# Training on a reward function that always returns 0 teaches the model nothing. Let's fix both issues:
-# - Disable thinking via `generate_kwargs`.
-# - Update the system prompt to demand a bare integer.
+# Training on a reward function that always returns 0 teaches the model nothing. Let's fix all three:
+# - Disable thinking via `generate_kwargs` and cap `max_tokens` to keep responses short.
+# - Embed the format instruction in `prompt_template` so it reaches the model at inference time. (Note: `system_prompt` only affects training data preparation — it isn't sent during `generate()` calls.)
+# - Extract the first integer from the response with a regex instead of requiring an exact string match.
+
+import re
 
 class FixedIntDivisionDataset(HuggingFaceDataset):
     hf_repo = "Onlydrinkwater/int_division"
@@ -65,13 +68,14 @@ class FixedIntDivisionDataset(HuggingFaceDataset):
     output_column = "label"
     output_format = "jsonl"
     apply_chat_template = True
-    # This is new!
-    system_prompt = (
-        "You are a math problem solver. Output the answer to the given math problem, and nothing else. Your response must be a valid integer."
+    prompt_template = (
+        "Solve this math problem. Reply with ONLY the integer answer, nothing else.\n\n{input}"
     )
 
 def new_eval_response_fn(_example: dict, response: str) -> EvalRowResult:
-    if _example["label"] == response:
+    match = re.search(r"-?\d+", response)
+    extracted = match.group() if match else ""
+    if _example["label"] == extracted:
         return EvalRowResult(score=1.0, response=response)
     else:
         return EvalRowResult(score=0.0, response=response)
@@ -120,7 +124,10 @@ def _main_impl() -> None:
     new_eval_config = EvalConfig(
         dataset=FixedIntDivisionDataset(),
         eval_response_fn=new_eval_response_fn,
-        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+        generate_kwargs={
+            "chat_template_kwargs": {"enable_thinking": False},
+            "max_tokens": 20,
+        },
     )
 
     print("——— Running fixed eval... ———")
