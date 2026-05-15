@@ -199,7 +199,7 @@ def score_modal_deploy(
     deploy_script = (
         "\n".join(
             [
-                "import subprocess, sys, os, json, tempfile",
+                "import subprocess, sys, os, json, tempfile, re",
                 f"code = {json.dumps(code)}",
                 "with tempfile.NamedTemporaryFile("
                 "    mode='w', suffix='.py', delete=False, dir='/tmp'"
@@ -211,6 +211,16 @@ def score_modal_deploy(
                 "    capture_output=True, text=True, timeout=90,",
                 "    env={**os.environ},",
                 ")",
+                "# Clean up: stop the deployed app so it doesn't linger",
+                "app_name = None",
+                "m = re.search(r'modal\\.App\\([\"\\']([^\"\\']*)[\"\\'\\)]', code)",
+                "if m:",
+                "    app_name = m.group(1)",
+                "if app_name and result.returncode == 0:",
+                "    subprocess.run(",
+                "        ['modal', 'app', 'stop', app_name],",
+                "        capture_output=True, text=True, timeout=30,",
+                "    )",
                 "output = {",
                 "    'returncode': result.returncode,",
                 "    'stdout': result.stdout[-500:] if result.stdout else '',",
