@@ -1,7 +1,7 @@
-"""Tutorial source for `000_rl_basics` — parsed by generate_tutorial.py."""
+"""Tutorial source for `000_setup_gym` — parsed by generate_tutorial.py."""
 
 TUTORIAL_METADATA = {
-    "summary": "Setup the training-gym",
+    "summary": "Install the training-gym package and deploy the observability dashboard to your Modal account.",
     "difficulty": "Beginner",
     "order": 10,
     "api_classes": [
@@ -18,7 +18,7 @@ def _intro():
     """
     # Setup the training-gym
 
-    This tutorial shows you how to setup the training-gym.
+    In this tutorial you'll install `modal-training-gym` and deploy the observability dashboard that tracks your training runs, deployments, and evals.
     """
 
 
@@ -28,7 +28,7 @@ def _install():
     pass
 
 @notebook_only
-@shell("training-gym setup")
+@shell("! training-gym setup")
 def _setup():
     pass
 
@@ -36,10 +36,9 @@ def _setup():
 @markdown
 def _setup_results():
     """
-    The training-gym dashboard is now deployed to your Modal account.
-    You can access it at the URL printed above.
+    The training-gym dashboard is now deployed to your Modal account — open the URL printed above to see it.
 
-    If you want to deploy it to a different environment, you can run the following command:
+    To deploy to a different Modal environment:
     ```bash
     MODAL_ENVIRONMENT=<environment> training-gym setup
     ```
@@ -49,5 +48,5 @@ def _setup_results():
 @markdown
 def _congrats():
     """
-    Congratulations! You have successfully setup the training-gym.
+    You're all set! The dashboard will automatically discover training runs, deployments, and evals as you work through the next tutorials.
     """

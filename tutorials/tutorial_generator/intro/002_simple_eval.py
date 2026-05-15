@@ -1,9 +1,9 @@
-"""Tutorial source for `000_rl_basics` — parsed by generate_tutorial.py."""
+"""Tutorial source for `002_simple_eval` — parsed by generate_tutorial.py."""
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 1×H100",
-    "summary": "Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare",
+    "summary": "Build a math eval with a scoring function, run it against a base model, and iterate on the prompt until scores improve.",
     "difficulty": "Beginner",
     "order": 10,
     "api_classes": [
@@ -21,11 +21,10 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Writing an Eval on Training Gym
-    Now that we have a basic model deployed, we can write an eval to see how it performs.
+    # Writing an eval
 
-    Evals are important before you train a model, because they give you a baseline that your trained model can be compared to.
-    They also help you figure out if your reward function is too lenient or too strict.
+    Before training, you need a baseline: how well does the untrained model already perform on your task?
+    An eval answers that question and doubles as a sanity check for your reward function — if the base model scores 0% or 100%, something is off.
     """
 
 @py_only
@@ -60,7 +59,7 @@ def _serve_base_intro():
     """
     ## Serve the base model
 
-    As always, let's start by serving the base model.
+    First, deploy the model just like in the previous tutorial.
     """
 
 
@@ -75,13 +74,9 @@ def _serve_base_model():
 @markdown
 def _scoring_intro():
     """
-    In this example, we are going to ask our model to solve math problems, and evaluate how well it does on that.
+    ## Define the eval dataset
 
-    To first define an eval, we should define a dataset that contains the problems we want to solve.
-
-    We will use `Onlydrinkwater/int_division` from HuggingFace as our dataset.
-    Each row has a `question` and a `label`.
-    We can use this dataset to evaluate our model.
+    We'll use [`Onlydrinkwater/int_division`](https://huggingface.co/datasets/Onlydrinkwater/int_division) — a HuggingFace dataset of integer division problems. Each row has a `question` (the problem) and a `label` (the correct answer). Subclass `HuggingFaceDataset` to point at it.
     """
 @code
 def _define_dataset_code():
@@ -114,9 +109,9 @@ def _eval_dataset_head_code():
 @markdown
 def _grade_haiku_into_eval():
     """
-    Let's now specify a scoring function, which is that the model's response should be the same as the label.
+    ## Define a scoring function
 
-    Here, _example is a dictionary that contains the dataset row, and response is the model's response.
+    The scoring function receives each dataset row and the model's response, then returns an `EvalRowResult` with a score. Here we do a simple exact-match: score 1.0 if the response equals the label, 0.0 otherwise.
     """
 
 @code
@@ -136,14 +131,15 @@ def _eval_base_model():
 def _eval_base_model_code():
     print("——— Running base model evaluation... ———")
     base_eval = eval_config.evaluate(base_model_deployment, debug=True)
-    print(f"Average haiku score: {base_eval.mean:.1f}")
+    print(f"Average score: {base_eval.mean:.1f}")
     print("——— Base model evaluation complete ———")
 
 @markdown
 def _eval_base_model_results():
     """
-    Why did we get a score of 0.0?
-    Well, the model's response is not the same as the label. What is it then? We can check the dashboard url to debug this or we can just print the response.
+    ## Debugging a zero score
+
+    A score of 0.0 means none of the responses matched the labels exactly. Let's inspect a response to understand why.
     """
 
 @code
@@ -154,18 +150,15 @@ def _eval_base_model_results_code():
 @markdown
 def _debug_eval_results():
     """
-    There are several issues with our eval:
-    - We did not disable thinking, so the model is thinking about the problem and then answering.
-    - The model did not output an exact number, so it would never be perfectly equivalent to the label.
+    ## Fixing the eval
 
-    If we immediately trained on this dataset with this reward function above, it would be extremely difficult for our model
-    to learn to solve the problems correctly.
+    Two problems:
+    1. **Thinking mode is on** — the model emits internal reasoning before the answer, so the response is never just a number.
+    2. **No format instruction** — even without thinking, the model wraps the answer in natural language.
 
-    Let's fix both of these issues.
-    - First, we will disable thinking using the `generate_kwargs` parameter.
-    - Second, we will update the system prompt to instruct the model to output only the answer.
-
-    Let's see how this works.
+    Training on a reward function that always returns 0 teaches the model nothing. Let's fix both issues:
+    - Disable thinking via `generate_kwargs`.
+    - Update the system prompt to demand a bare integer.
     """
 
 @code

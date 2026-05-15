@@ -1,9 +1,9 @@
-"""Tutorial source for `000_rl_basics` — parsed by generate_tutorial.py."""
+"""Tutorial source for `001_deploy_base_model` — parsed by generate_tutorial.py."""
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 1×H100",
-    "summary": "Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare",
+    "summary": "Deploy a model to a Modal inference endpoint and send it your first generation request.",
     "difficulty": "Beginner",
     "order": 10,
     "api_classes": [
@@ -19,10 +19,9 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Deploy the base model
+    # Deploy a base model
 
-    This tutorial shows you how to deploy a base model on Modal to use for evaluation. Here, we will use Qwen3-4B as the base model, but
-    you can use any other model that is supported by the training-gym, or configure your own.
+    Before training or evaluating, you need a running inference endpoint. In this tutorial you'll deploy Qwen3-4B to Modal using `DeploymentConfig` and send it a generation request. Any model in the training-gym catalog works — Qwen3-4B is just a convenient default.
     """
 
 @py_only
@@ -54,7 +53,7 @@ def _serve_base_intro():
     """
     ## Serve the base model
 
-    To deploy the base model, we can use the `DeploymentConfig` class. This allows us to deploy the model on Modal and get a handle to the deployed model.
+    `DeploymentConfig.serve()` launches an SGLang inference server on Modal and returns a deployment handle you can call directly.
     """
 
 
@@ -70,9 +69,7 @@ def _serve_base_model():
 @markdown
 def _qualitative_eval_of_base_model():
     """
-    Now that the model has come alive, we can request it to generate text.
-
-    Note that this is creating an SGLang server app and starting it up, then sending a request, so the first request should take a few minutes to complete.
+    The first call cold-starts the SGLang server, so expect it to take a few minutes. Subsequent requests are fast.
     """
 
 @notebook_only
@@ -86,8 +83,9 @@ def _qualitative_eval_of_base_model_code():
 @markdown
 def _chat_template_kwargs():
     """
-    The `chat_template_kwargs` parameter allows us to pass in a dictionary of kwargs to the chat template.
-    This is useful for passing in additional parameters to the chat template, such as the enable_thinking parameter.
+    ## Disabling thinking mode
+
+    Qwen3 defaults to "thinking" mode, where the model reasons internally before answering. Pass `enable_thinking=False` via `chat_template_kwargs` to get a direct response instead.
     """
 
 @notebook_only
@@ -101,11 +99,12 @@ def _qualitative_eval_of_base_model_code():
 
 
 @notebook_only
-@code
+@markdown
 def _look_at_dashboard():
     """
-    Remember the training gym dashboard you deployed in the previous tutorial?
-    We can now see the base model deployment in the dashboard.
+    ## Check the dashboard
+
+    Your deployment should now be visible in the training-gym dashboard you set up earlier.
     """
 
 @notebook_only
