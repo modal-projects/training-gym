@@ -72,6 +72,7 @@ rest of the cells run as-is.
 |---|---|---|---|---|
 | [`000_setup_gym`](tutorials/intro/000_setup_gym/000_setup_gym.ipynb) | Setup the training-gym | Beginner | — | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/000_setup_gym/000_setup_gym.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`001_deploy_base_model`](tutorials/intro/001_deploy_base_model/001_deploy_base_model.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/001_deploy_base_model/001_deploy_base_model.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`002_simple_eval`](tutorials/intro/002_simple_eval/002_simple_eval.ipynb) | Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare | Beginner | `slime` | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/intro/002_simple_eval/002_simple_eval.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### RL
 

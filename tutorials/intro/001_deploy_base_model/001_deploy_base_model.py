@@ -17,15 +17,9 @@
 
 import modal
 
-import re
-
 from modal_training_gym import (
     DeploymentConfig,
-    EvalConfig,
-    EvalRowResult,
-    HuggingFaceDataset,
     Qwen3_4B,
-    SlimeRecipe,
 )
 
 # The `chat_template_kwargs` parameter allows us to pass in a dictionary of kwargs to the chat template.

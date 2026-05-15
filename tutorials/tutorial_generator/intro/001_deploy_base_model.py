@@ -9,11 +9,6 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "Qwen3_4B",
         "DeploymentConfig",
-        "EvalConfig",
-        "EvalRowResult",
-        "TrainConfig",
-        "SlimeRecipe",
-        "TrainResult",
     ],
 }
 
@@ -48,15 +43,9 @@ def _install():
 
 @code
 def _imports():
-    import re
-
     from modal_training_gym import (
         DeploymentConfig,
-        EvalConfig,
-        EvalRowResult,
-        HuggingFaceDataset,
         Qwen3_4B,
-        SlimeRecipe,
     )
 
 
