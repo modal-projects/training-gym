@@ -74,7 +74,7 @@ from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 #
 # We use a simple math dataset containing competition problems that the LLM is tasked
 # with answering via a `Answer: \boxed{N}` response. This simple format allows
-# for determnistic evaluation!
+# for deterministic evaluation!
 #
 # [Here's the link to `zhuzilin/dapo-math-17k`](https://huggingface.co/datasets/zhuzilin/dapo-math-17k)
 #
@@ -136,17 +136,15 @@ def math_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
 # ## Reward function
 #
 # OPD uses "reverse" KL divergence to grade the student model's output. Remember,
-# KL divergence D_kl(P || Q) is Sigma_x P(x) * log ()P(x) / Q(x)), where P is ground-truth.
-# While the student is supposed to be learning off of the Teacher, we use the "reverse"
-# KL divergence where P is the student's probability distribution, allowing us to apply
-# a teacher penalty to modes only valued by the student model. In the "reverse" case,
-# where P is the teacher's probability distribution, we apply a penalty to modes that 
-# the teacher thinks is valuable but may be out of distribution for the student model.
+# KL divergence D_kl(P || Q) is Sigma_x P(x) * log(P(x) / Q(x)), where P is ground-truth.
+# In forward KL divergence, we would treat the teacher model as ground-truth P and the student model as Q.
+# However, the log(P(x) / Q(x)) term would then be weighted by the teacher model's probability distribution P,
+# making the result being high surprisal on modes unfamiliar to the student model.
 #
-# Additionally, we apply a determnistic reward signal from the evaluation function to
-# better improve our model on producing the right answer. By using Modal Training Gym
-# with Slime, we can specify a custom reward function that wraps the out-of-the-box 
-# for Slime and combines the reverse KL divergence with a binary integer reward signal.
+# Instead, we want to use the reverse KL divergence D_kl(Student || Teacher), where our student model
+# is treated as "ground-truth" and the teacher model is Q. When the teacher has high surprisal on a 
+# student mode, the term log(P(x)) - log(Q(x)) will yield a high positive KL divergence to penalize the student model. 
+# Now, the student model only gets penalized on modes relevant to itself.
 
 async def math_opd_rm(args, sample, **kwargs):
     """Collect teacher log-probs AND compute math correctness reward.
@@ -185,7 +183,7 @@ def math_opd_post_process(args, samples, **kwargs):
 # ## Next steps
 #
 # Some cool ways to extend and improve this example:
-# 1. Use a bigger teacher: Qwen3 offers models in the 32B paramter range. 
+# 1. Use a bigger teacher: Qwen3 offers models in the 32B parameter range. 
 # This model will fit on a 4xH100 GPU setup and can show measurable improvements
 # on the student model evaluation delta.
 # 2. Tweak the composite reward signal: Try applying a coefficient like *2* to the
@@ -193,7 +191,7 @@ def math_opd_post_process(args, samples, **kwargs):
 # over student-teacher alignment.
 # 3. Try cross-family distillation: Use a teacher from a different model family (e.g. Kimi K2)
 # to train our Qwen3-4B student model. You may run into cross-tokenizer differences, so
-# be careful to only grade logprobs on tokens that exist in both models vocabularies and
+# be careful to only grade logprobs on tokens that exist in both models' vocabularies and
 # align 1:1 on a per-character basis. 
 
 import modal
