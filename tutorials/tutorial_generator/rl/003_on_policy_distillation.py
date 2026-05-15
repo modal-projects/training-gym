@@ -295,13 +295,13 @@ def _rm_intro():
     ## Reward function
 
     OPD uses "reverse" KL divergence to grade the student model's output. Remember,
-    KL divergence D_kl(P || Q) is Sigma_x P(x) * log(P(x) / Q(x)), where P is ground-truth.
-    In forward KL divergence, we would treat the teacher model as ground-truth P and the student model as Q.
+    KL divergence D_kl(P || Q) is Sigma_x P(x) * log(P(x) / Q(x)), where P is the behavior distribution
+    and Q is the target distribution. Forward KL treats the teacher model as P and the student model as Q.
     However, the log(P(x) / Q(x)) term would then be weighted by the teacher model's probability distribution P,
     making the result being high surprisal on modes unfamiliar to the student model.
 
     Instead, we want to use the reverse KL divergence D_kl(Student || Teacher), where our student model
-    is treated as "ground-truth" and the teacher model is Q. When the teacher has high surprisal on a 
+    is treated as the behavior distribution and the teacher model is our target distribution. When the teacher has high surprisal on a 
     student mode, the term log(P(x)) - log(Q(x)) will yield a high positive KL divergence to penalize the student model. 
     Now, the student model only gets penalized on modes relevant to itself. 
     """
