@@ -26,6 +26,7 @@ from modal_training_gym import (
     DeploymentConfig,
     EvalConfig,
     EvalRowResult,
+    ModelDeployment,
     Qwen3_8B,
     SlimeRecipe,
     TrainConfig,
@@ -296,6 +297,33 @@ def eval_response_fn(example: dict, response: str) -> EvalRowResult:
     return EvalRowResult(score=score, response=response, metadata=metadata)
 
 
+def modal_eval_fn(
+    deployment: ModelDeployment,
+    example: dict,
+) -> EvalRowResult:
+    """Eval function that includes the system prompt in the messages.
+
+    Training uses the full ``messages`` field (system + user prompt) via
+    chat-template application, but ``EvalConfig.build_prompt`` only sends
+    the bare ``prompt`` column as a user message.  This custom eval_fn
+    recreates the same message structure the model saw during training so
+    that the system prompt context is present at eval time.
+    """
+    prompt = example.get("prompt", "")
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+    text = deployment.generate(
+        prompt,
+        ensure_ready=False,
+        messages=messages,
+        chat_template_kwargs={"enable_thinking": False},
+    )
+    score, metadata = score_modal_deploy(text)
+    return EvalRowResult(score=score, response=text, metadata=metadata)
+
+
 if __name__ == "__main__":
     dataset = ModalAppDataset(n_repeats=5, always_prepare=True)
 
@@ -343,9 +371,7 @@ if __name__ == "__main__":
 
     eval_config = EvalConfig(
         dataset=dataset,
-        eval_response_fn=eval_response_fn,
-        prompt_column="prompt",
-        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+        eval_fn=modal_eval_fn,
     )
     trained_eval = eval_config.evaluate(trained_deployment, debug=True)
     print(f"Trained mean reward: {trained_eval.mean:.4f}")
