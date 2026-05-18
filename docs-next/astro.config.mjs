@@ -82,6 +82,10 @@ export default defineConfig({
               label: 'Reinforcement Learning',
               autogenerate: { directory: 'tutorials/rl' },
             },
+            {
+              label: 'Agents',
+              autogenerate: { directory: 'tutorials/agent' },
+            },
           ],
         },
         {
