@@ -9,7 +9,10 @@ _DEEPSEEK_V4_FLASH_DEFAULTS = {
     "mem_fraction_static": 0.80,
     "chunked_prefill_size": 8192,
     "max_running_requests": 16,
-    "extra_server_args": {"--trust-remote-code": ""},
+    "extra_server_args": {
+        "--trust-remote-code": "",
+        "--moe-a2a-backend": "deepep",
+    },
 }
 
 
