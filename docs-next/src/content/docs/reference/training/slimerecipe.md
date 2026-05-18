@@ -75,9 +75,10 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 | `megatron_to_hf_mode` | `str` | `"bridge"` |  |
 | `use_fault_tolerance` | `bool` | `True` |  |
 | `rm_type` | `str \| None` | `None` |  |
-| `custom_rm_path` | `str` | `""` |  |
 | `custom_rm_function` | `collections.abc.Callable \| None` | `None` |  |
 | `custom_generate_function` | `collections.abc.Callable \| None` | `None` |  |
+| `rollout_function` | `collections.abc.Callable \| str \| None` | `None` |  |
+| `custom_megatron_before_train_step_hook` | `collections.abc.Callable \| str \| None` | `None` |  |
 | `extra_config` | `dict \| None` | `None` |  |
 | `sglang_config` | `dict \| None` | `None` |  |
 | `apply_chat_template_kwargs` | `str` | `""` |  |
@@ -93,5 +94,6 @@ Recipe dataclass for configuring slime GRPO training on Modal.
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
 - [Code RL with Harbor hello-world and sandboxed verification](/tutorials/rl/001_sandboxes/)
 - [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn/)
+- [On-policy distillation on math — Qwen3-8B teacher, Qwen3-4B student](/tutorials/rl/003_on_policy_distillation/)
 
 **Source:** [`modal_training_gym/train_recipes/slime_recipe/recipe.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/train_recipes/slime_recipe/recipe.py)

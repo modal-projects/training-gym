@@ -17,6 +17,7 @@ Dataset configuration shared across training frameworks.
 | `input_key` | `str` | `""` |  |
 | `label_key` | `str` | `""` |  |
 | `apply_chat_template` | `bool` | `True` |  |
+| `always_prepare` | `bool` | `False` |  |
 
 ## Methods
 

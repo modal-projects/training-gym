@@ -30,5 +30,6 @@ Download or materialize weights into the model volume.
 - [Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare](/tutorials/rl/000_rl_basics/)
 - [Code RL with Harbor hello-world and sandboxed verification](/tutorials/rl/001_sandboxes/)
 - [Multi-turn number-guessing RL with custom generate and reward functions](/tutorials/rl/002_multiturn/)
+- [On-policy distillation on math — Qwen3-8B teacher, Qwen3-4B student](/tutorials/rl/003_on_policy_distillation/)
 
 **Source:** [`modal_training_gym/common/models/qwen3_4b.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/models/qwen3_4b.py)

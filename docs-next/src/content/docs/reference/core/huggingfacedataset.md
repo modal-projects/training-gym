@@ -19,6 +19,7 @@ Dataset backed by a HuggingFace `datasets` repo.
 | `input_key` | `str` | `""` |  |
 | `label_key` | `str` | `"label"` |  |
 | `apply_chat_template` | `bool` | `True` |  |
+| `always_prepare` | `bool` | `False` |  |
 | `hf_repo` | `str` | `""` |  |
 | `hf_split` | `str` | `"train"` |  |
 | `hf_config` | `str \| None` | `None` |  |

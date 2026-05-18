@@ -40,23 +40,31 @@ from modal_training_gym import (
 [Harbor Hub](https://hub.harborframework.com). Each task has:
 - `instruction.md` — the problem statement (prompt)
 - `task.toml` — metadata (difficulty, category)
-- `tests/` — input/output test pairs for verification
+- `tests/` — verification tests (format varies by task)
 
-Setting `test_data_dir="tests"` reads `*.in`/`*.out` file pairs and
-embeds them in each sample's label so the reward function can verify
-solutions without filesystem access.
+The hello-world task uses pytest-based verification rather than
+`*.in`/`*.out` file pairs, so we define stdin/stdout test cases
+inline and pass them directly to the sandbox scorer.
 
 A single dataset instance handles both training and eval —
 `prepare()` writes train and eval splits to the volume,
 while `load()` returns all tasks for offline evaluation.
 
 ```python
+HELLO_WORLD_TESTS = [{"input": "", "expected_output": "Hello, world!\n"}]
+
 dataset = HarborDataset(
     dataset_name="harbor/hello-world",
     label_metadata_path="task.toml",
-    test_data_dir="tests",
     train_repeats=20,
     always_prepare=True, # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
+    system_prompt=(
+        "You are an expert Python programmer. "
+        "Solve the given problem by writing a complete Python program. "
+        "Your program must print the answer to stdout using print(). "
+        "Do not create or write any files. "
+        "Put your solution in a ```python code fence."
+    ),
 )
 ```
 
@@ -141,16 +149,9 @@ def score_usaco_with_sandbox(
 
 async def usaco_rm(args, sample, **kwargs) -> float:
     import asyncio
-    import json
-
-    raw = getattr(sample, "label", None)
-    label = json.loads(raw) if isinstance(raw, str) else (raw or {})
-    test_cases = label.get("test_cases", [])
-    if not test_cases:
-        return 0.0
 
     reward, meta = await asyncio.to_thread(
-        score_usaco_with_sandbox, sample.response, test_cases=test_cases,
+        score_usaco_with_sandbox, sample.response, test_cases=HELLO_WORLD_TESTS,
     )
     sample.metadata = {**(getattr(sample, "metadata", None) or {}), "usaco": meta}
     return float(reward)
@@ -163,15 +164,22 @@ base_model = Qwen3_4B()
 base_deployment: ModelDeployment = DeploymentConfig(model=base_model).serve()
 print(f"Base model URL: {base_deployment.url}")
 
-def eval_response_fn(example: dict, response: str) -> EvalRowResult:
-    test_cases = example.get("label", {}).get("test_cases", [])
-    score, metadata = score_usaco_with_sandbox(response, test_cases=test_cases)
+def eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
+    prompt = example.get("instruction", "")
+    response = deployment.generate(
+        prompt,
+        ensure_ready=False,
+        messages=[
+            {"role": "system", "content": dataset.system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    score, metadata = score_usaco_with_sandbox(response, test_cases=HELLO_WORLD_TESTS)
     return EvalRowResult(score=score, response=response, metadata=metadata)
 
 eval_config = EvalConfig(
     dataset=dataset,
-    eval_response_fn=eval_response_fn,
-    generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
+    eval_fn=eval_fn,
 )
 print("Running base eval...")
 base_eval = eval_config.evaluate(base_deployment, debug=True)
@@ -204,7 +212,6 @@ training_run = TrainConfig(
         n_samples_per_eval_prompt=8,
         max_tokens_per_gpu=4096,
         save_interval=10,
-        apply_chat_template_kwargs='{"enable_thinking": false}',
         image_overlay=lambda image: image.run_commands(
             "uv pip install --system modal>=1.2.0",
         ),
