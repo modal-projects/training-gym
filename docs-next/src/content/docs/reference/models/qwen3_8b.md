@@ -25,4 +25,8 @@ Qwen3-8B (8 billion parameters) from Alibaba.
 
 Download or materialize weights into the model volume.
 
+## Related Tutorials
+
+- [On-policy distillation on math — Qwen3-8B teacher, Qwen3-4B student](/tutorials/rl/003_on_policy_distillation/)
+
 **Source:** [`modal_training_gym/common/models/qwen3_8b.py`](https://github.com/modal-projects/training-gym/blob/main/modal_training_gym/common/models/qwen3_8b.py)
