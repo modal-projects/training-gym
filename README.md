@@ -7,6 +7,12 @@ Pick a base model, a dataset, and an RL framework (GRPO, PPO, custom reward / ge
 
 ## Quickstart
 
+> [!NOTE]
+> **Python 3.12 is required.** Modal's `serialized=True` functions use
+> cloudpickle, which requires the local Python version to exactly match the
+> remote container's. All framework images ship Python 3.12, so running from
+> 3.11 or 3.13 will fail at app build time.
+
 Install with pip:
 
 ```bash

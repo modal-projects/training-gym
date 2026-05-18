@@ -45,6 +45,8 @@ def build_sglang_serve_app(
             " /sgl-workspace/sglang/python/sglang/srt/entrypoints/http_server.py",
             "rm -rf /root/.cache/huggingface",
         )
+        # pydantic_core in the nightly image needs typing_extensions>=4.13 (Sentinel)
+        .uv_pip_install("typing_extensions>=4.13")
         .env(
             {
                 "HF_HUB_CACHE": "/root/.cache/huggingface",
