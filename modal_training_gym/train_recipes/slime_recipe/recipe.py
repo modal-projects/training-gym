@@ -40,6 +40,7 @@ _SLIME_SKIP = {
     "custom_generate_function",
     "rollout_function",
     "custom_megatron_before_train_step_hook",
+    "sglang_request_params",
 }
 
 YAML_CONFIG_FIELDS = ("eval_config", "extra_config", "sglang_config")
@@ -153,6 +154,7 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── SGLang / config overrides ───────────────────────────────────────────
     extra_config: dict | None = None
     sglang_config: dict | None = None
+    sglang_request_params: dict | None = None
     apply_chat_template_kwargs: str = ""
 
     # ── Validators ───────────────────────────────────────────────────────────

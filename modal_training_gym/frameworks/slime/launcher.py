@@ -253,6 +253,20 @@ def build_slime_app(
     if slime.custom_generate_function is not None and _get_custom_generate_path():
         object.__setattr__(slime, "custom_generate_function", None)
 
+    # ── SGLang request params auto-wiring ─────────────────────────────────
+    if slime.sglang_request_params:
+        cfg = dict(slime.extra_config or {})
+        cfg["sglang_request_params"] = slime.sglang_request_params
+        if "custom_rm_path" not in cfg:
+            cfg["custom_rm_path"] = (
+                "modal_training_gym.frameworks.slime.opd_reward.reward_func"
+            )
+        if "custom_reward_post_process_path" not in cfg:
+            cfg["custom_reward_post_process_path"] = (
+                "modal_training_gym.frameworks.slime.opd_reward.post_process_rewards"
+            )
+        object.__setattr__(slime, "extra_config", cfg)
+
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
     data_volume = Volume.from_name(f"{app_name}-data", create_if_missing=True)
