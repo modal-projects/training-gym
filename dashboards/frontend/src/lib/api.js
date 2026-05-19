@@ -201,3 +201,11 @@ export async function fetchTrainResult(trainingRunId) {
   if (!res.ok) return null;
   return await res.json();
 }
+
+export async function fetchEvalDetail(evalId) {
+  const res = await fetch(
+    `${SERVER}/evals/${encodeURIComponent(evalId)}`
+  );
+  if (!res.ok) return null;
+  return await res.json();
+}
