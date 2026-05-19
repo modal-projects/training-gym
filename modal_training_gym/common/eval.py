@@ -56,6 +56,7 @@ class EvalRowResult(BaseModel):
 
     score: float
     response: str = ""  # TODO, this doesn't have to be a string
+    prompt: str = ""
     metadata: dict[str, Any] = Field(
         default_factory=dict
     )  # metadata that user can inject about the evaluation result
@@ -170,8 +171,9 @@ class EvalConfig:
             deployment: ModelDeployment,
             example: DatasetRow,
         ) -> EvalRowResult:
+            prompt = self.build_prompt(example)
             text = deployment.generate(
-                self.build_prompt(example),
+                prompt,
                 ensure_ready=False,
                 **self.generate_kwargs,
             )
@@ -179,6 +181,7 @@ class EvalConfig:
             return EvalRowResult(
                 score=result.score,
                 response=text,
+                prompt=prompt,
                 metadata=result.metadata,
             )
 

@@ -1,8 +1,17 @@
 <script>
-  import { ChevronDown, Filter, Search } from "lucide-svelte";
+  import {
+    ChevronDown,
+    ChevronRight,
+    ExternalLink,
+    Filter,
+    PanelRightClose,
+    Search,
+  } from "lucide-svelte";
+  import Drawer from "../components/Drawer.svelte";
   import MinimalTable from "../components/MinimalTable.svelte";
   import MinimalTableSkeleton from "../components/MinimalTableSkeleton.svelte";
   import StatusPill from "../components/StatusPill.svelte";
+  import TimeAgo from "../components/TimeAgo.svelte";
 
   let {
     allEvals,
@@ -13,6 +22,9 @@
     loading,
     error,
     evalConfigGroups,
+    fetchEvalDetail,
+    getEvalStatus,
+    evalConfigMeta,
     onOpenTrainingRun,
     onOpenDeployment,
   } = $props();
@@ -305,6 +317,106 @@
     datasetFilter = dataset;
     datasetMenuOpen = false;
   }
+
+  let selectedEval = $state(null);
+  let selectedEvalDetail = $state(null);
+  let loadingDetail = $state(false);
+  let exampleSearch = $state("");
+
+  let expandedExamples = $state(new Set());
+
+  function scoreColor(score) {
+    if (score >= 0.8) return "var(--color-c-green-80)";
+    if (score > 0) return "var(--color-c-orange-80)";
+    return "var(--color-c-red-80)";
+  }
+
+  function examplePromptText(row) {
+    return row.prompt || row.metadata?.prompt || row.metadata?.question || row.metadata?.instruction || row.metadata?.input || "";
+  }
+
+  async function openEvalDrawer(run, group) {
+    selectedEval = { run, group };
+    selectedEvalDetail = null;
+    loadingDetail = true;
+    exampleSearch = "";
+
+    expandedExamples = new Set();
+    const evalId = run.eval.eval_id;
+    if (evalId && fetchEvalDetail) {
+      try {
+        const detail = await fetchEvalDetail(evalId);
+        if (selectedEval?.run?.eval?.eval_id === evalId) {
+          selectedEvalDetail = detail;
+        }
+      } catch {
+        // detail fetch failed — drawer still shows summary info
+      }
+    }
+    loadingDetail = false;
+  }
+
+  function closeEvalDrawer() {
+    selectedEval = null;
+    selectedEvalDetail = null;
+  }
+
+  function toggleExample(index) {
+    const next = new Set(expandedExamples);
+    if (next.has(index)) next.delete(index);
+    else next.add(index);
+    expandedExamples = next;
+  }
+
+  let drawerRows = $derived.by(() => {
+    const rows = selectedEvalDetail?.rows || [];
+    const query = exampleSearch.trim().toLowerCase();
+    return rows
+      .map((row, index) => ({ ...row, _index: index }))
+      .filter((row) => {
+        if (query) {
+          const text = examplePromptText(row).toLowerCase();
+          if (!text.includes(query) && !(row.response || "").toLowerCase().includes(query)) return false;
+        }
+        return true;
+      });
+  });
+
+  const HISTOGRAM_BINS = 10;
+
+  let scoreHistogram = $derived.by(() => {
+    const rows = selectedEvalDetail?.rows || [];
+    if (!rows.length) return null;
+    const bins = Array.from({ length: HISTOGRAM_BINS }, (_, i) => ({
+      min: i / HISTOGRAM_BINS,
+      max: (i + 1) / HISTOGRAM_BINS,
+      count: 0,
+    }));
+    for (const row of rows) {
+      const idx = Math.min(Math.floor(row.score * HISTOGRAM_BINS), HISTOGRAM_BINS - 1);
+      bins[idx].count++;
+    }
+    const maxCount = Math.max(...bins.map((b) => b.count));
+    return { bins, maxCount, total: rows.length };
+  });
+
+  let drawerMeta = $derived.by(() => {
+    if (!selectedEval) return null;
+    const { run, group } = selectedEval;
+    const ev = run.eval;
+    const meta = evalConfigMeta(group.config, ev);
+    return {
+      evalId: ev.eval_id || "",
+      status: getEvalStatus(ev),
+      model: nonPlaceholderText(meta.model) || "—",
+      config: nonPlaceholderText(meta.dataset) || "—",
+      grading: nonPlaceholderText(meta.evalFn || meta.judge) || "—",
+      avgScore: run.avgScore,
+      totalRows: run.totalRows,
+      createdAt: run.createdAt,
+      modalAppUrl: ev.modal_app_url || null,
+    };
+  });
 </script>
 
 <svelte:window
@@ -483,7 +595,14 @@
                       {@const deploymentRef = deploymentRefValue(linkedDeployment)}
                       {@const trainingRunId = linkedTrainingRunId(linkedDeployment)}
                       {@const baseModel = evalBaseModel(run, group, linkedDeployment)}
-                      <tr>
+                      <tr
+                        class="eval-row-clickable"
+                        class:row-selected={selectedEval?.run?.eval?.eval_id === run.eval.eval_id}
+                        onclick={(event) => {
+                          if (event.target.closest(".cross-link")) return;
+                          openEvalDrawer(run, group);
+                        }}
+                      >
                         <td class="mono name-cell" title={deploymentName}>
                           {#if deploymentRef}
                             <button
@@ -530,6 +649,179 @@
     {/if}
   </div>
 </section>
+
+{#if selectedEval && drawerMeta}
+  <Drawer open={!!selectedEval} onclose={closeEvalDrawer} width="720px">
+    <div class="eval-drawer">
+      <div class="drawer-header">
+        <div class="drawer-header-left">
+          <span class="drawer-eyebrow">Eval</span>
+          <div class="drawer-title-row">
+            <h2 class="drawer-title">{drawerMeta.evalId}</h2>
+            <StatusPill status={drawerMeta.status} />
+          </div>
+        </div>
+        <div class="drawer-actions">
+          {#if drawerMeta.modalAppUrl}
+            <a
+              class="drawer-open-modal"
+              href={drawerMeta.modalAppUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span>Open in Modal</span>
+              <ExternalLink size={12} />
+            </a>
+          {/if}
+          <button class="drawer-close" onclick={closeEvalDrawer} aria-label="Close drawer">
+            <PanelRightClose size={20} />
+          </button>
+        </div>
+      </div>
+
+      <section class="drawer-meta">
+        <div class="drawer-meta-row">
+          <span class="drawer-meta-key">Model</span>
+          <span class="drawer-meta-value">{drawerMeta.model}</span>
+        </div>
+        <div class="drawer-meta-row">
+          <span class="drawer-meta-key">Config</span>
+          <span class="drawer-meta-value mono">{drawerMeta.config}</span>
+        </div>
+        <div class="drawer-meta-row">
+          <span class="drawer-meta-key">Grading</span>
+          <span class="drawer-meta-value">{drawerMeta.grading}</span>
+        </div>
+        <div class="drawer-meta-row">
+          <span class="drawer-meta-key">Avg score</span>
+          <span class="drawer-meta-value" style:color="var(--color-c-green-100)">
+            {drawerMeta.avgScore.toFixed(3)}
+          </span>
+        </div>
+        <div class="drawer-meta-row">
+          <span class="drawer-meta-key">Created</span>
+          <span class="drawer-meta-value">
+            <TimeAgo timestamp={drawerMeta.createdAt} showJustNow falsyRepresentation="—" />
+          </span>
+        </div>
+      </section>
+
+      <div class="drawer-divider"></div>
+
+      {#if scoreHistogram}
+        <section class="drawer-histogram">
+          <span class="histogram-title">Score distribution</span>
+          <div class="histogram-chart">
+            {#each scoreHistogram.bins as bin, i (i)}
+              <div class="histogram-bar-wrap" title="{bin.min.toFixed(1)}–{bin.max.toFixed(1)}: {bin.count}">
+                <div
+                  class="histogram-bar"
+                  style:height="{scoreHistogram.maxCount > 0 ? (bin.count / scoreHistogram.maxCount) * 100 : 0}%"
+                ></div>
+              </div>
+            {/each}
+          </div>
+          <div class="histogram-labels">
+            <span>0</span>
+            <span>0.5</span>
+            <span>1.0</span>
+          </div>
+        </section>
+      {/if}
+
+      <div class="drawer-divider"></div>
+
+      <section class="drawer-examples">
+        <div class="examples-header">
+          <div class="examples-title-row">
+            <span class="examples-title">Examples</span>
+            {#if drawerMeta.totalRows}
+              <span class="examples-count-tag">{drawerMeta.totalRows} examples</span>
+            {/if}
+          </div>
+        </div>
+
+        <div class="examples-controls">
+          <label class="examples-search" aria-label="Search prompts">
+            <span class="examples-search-icon"><Search size={16} /></span>
+            <input
+              type="search"
+              class="examples-search-input"
+              placeholder="Search prompts"
+              bind:value={exampleSearch}
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+        </div>
+
+        {#if loadingDetail}
+          <div class="examples-loading">Loading examples...</div>
+        {:else if !selectedEvalDetail?.rows?.length}
+          <div class="examples-empty">No example data available for this eval.</div>
+        {:else if !drawerRows.length}
+          <div class="examples-empty">No examples match the current filter.</div>
+        {:else}
+          <div class="examples-list">
+            {#each drawerRows as row (row._index)}
+              {@const promptText = examplePromptText(row)}
+              <div class="example-card">
+                <button class="example-row" onclick={() => toggleExample(row._index)}>
+                  <span class="example-chevron">
+                    {#if expandedExamples.has(row._index)}
+                      <ChevronDown size={16} />
+                    {:else}
+                      <ChevronRight size={16} />
+                    {/if}
+                  </span>
+                  <span class="example-index">{row._index}</span>
+                  {#if promptText}
+                    <span class="example-prompt">{promptText}</span>
+                  {:else}
+                    <span class="example-prompt example-prompt-fallback">
+                      {row.response ? row.response.slice(0, 80) : `Example ${row._index}`}
+                    </span>
+                  {/if}
+                  <span class="example-score" style:color={scoreColor(row.score)}>
+                    {row.score.toFixed(2)}
+                  </span>
+                </button>
+                {#if expandedExamples.has(row._index)}
+                  <div class="example-expanded">
+                    {#if promptText}
+                      <div class="example-section">
+                        <span class="example-section-label">Prompt</span>
+                        <pre class="example-section-text">{promptText}</pre>
+                      </div>
+                    {/if}
+                    {#if row.response}
+                      <div class="example-section">
+                        <span class="example-section-label">Response</span>
+                        <pre class="example-section-text">{row.response}</pre>
+                      </div>
+                    {/if}
+                    <div class="example-section">
+                      <span class="example-section-label">Score</span>
+                      <span class="example-section-score" style:color={scoreColor(row.score)}>
+                        {row.score.toFixed(4)}
+                      </span>
+                    </div>
+                    {#if row.metadata && Object.keys(row.metadata).length}
+                      <div class="example-section">
+                        <span class="example-section-label">Metadata</span>
+                        <pre class="example-section-text">{JSON.stringify(row.metadata, null, 2)}</pre>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </section>
+    </div>
+  </Drawer>
+{/if}
 
 <style>
   .summary-row {
@@ -855,6 +1147,382 @@
     }
   }
 
+  :global(table.evals-runs-table tbody tr.eval-row-clickable) {
+    cursor: pointer;
+  }
+
+  :global(table.evals-runs-table tr.row-selected td) {
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+  }
+
+  :global(table.evals-runs-table tbody tr.eval-row-clickable:hover td) {
+    background: color-mix(in srgb, var(--text-bright) 3%, transparent);
+  }
+
+  .eval-drawer {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .drawer-header {
+    padding: 24px 24px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .drawer-header-left {
+    min-width: 0;
+  }
+
+  .drawer-eyebrow {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .drawer-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .drawer-title {
+    color: var(--text-bright);
+    font-family: var(--font-mono);
+    font-size: 20px;
+    font-weight: 400;
+    line-height: 32px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .drawer-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  .drawer-open-modal {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--color-c-gray-20);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: var(--color-c-gray-80);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .drawer-open-modal:hover {
+    border-color: var(--border-strong);
+    color: var(--text-bright);
+  }
+
+  .drawer-close {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    padding: 0;
+  }
+
+  .drawer-close:hover {
+    color: var(--text-bright);
+  }
+
+  .drawer-meta {
+    padding: 0 24px 16px;
+  }
+
+  .drawer-meta-row {
+    display: grid;
+    grid-template-columns: 100px minmax(0, 1fr);
+    gap: 4px;
+    align-items: center;
+    height: 32px;
+  }
+
+  .drawer-meta-key {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .drawer-meta-value {
+    color: var(--text);
+    font-size: 14px;
+    line-height: 24px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .drawer-divider {
+    height: 1px;
+    background: var(--color-c-surface-highlight-gray-transparent);
+    margin: 0 24px;
+  }
+
+  .drawer-histogram {
+    padding: 16px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .histogram-title {
+    color: var(--text-bright);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+  }
+
+  .histogram-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 64px;
+    padding: 0 1px;
+  }
+
+  .histogram-bar-wrap {
+    flex: 1;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+  }
+
+  .histogram-bar {
+    width: 100%;
+    min-height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--color-c-gray-30);
+  }
+
+  .histogram-labels {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 16px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .drawer-examples {
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .examples-header {
+    padding-top: 4px;
+  }
+
+  .examples-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .examples-title {
+    color: var(--text-bright);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+  }
+
+  .examples-count-tag {
+    background: var(--color-surface-secondary);
+    border-radius: 4px;
+    padding: 4px 6px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 12px;
+  }
+
+  .examples-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .examples-search {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--color-c-gray-10);
+    border-radius: 6px;
+    background: transparent;
+    width: 260px;
+    height: 32px;
+    padding: 6px 8px;
+  }
+
+  .examples-search-icon {
+    display: inline-flex;
+    color: var(--muted-strong);
+    flex-shrink: 0;
+  }
+
+  .examples-search-input {
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text);
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+    font-size: 14px;
+  }
+
+  .examples-search-input::placeholder {
+    color: var(--muted-strong);
+  }
+
+
+  .examples-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .example-card {
+    background: var(--color-c-gray-5);
+    border: 1px solid var(--color-c-gray-10);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .example-row {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+  }
+
+  .example-row:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .example-chevron {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    padding: 8px 12px;
+    color: var(--muted);
+    flex-shrink: 0;
+    align-self: stretch;
+  }
+
+  .example-index {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 16px;
+    flex-shrink: 0;
+    width: 20px;
+  }
+
+  .example-prompt {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-bright);
+    font-size: 14px;
+    line-height: 20px;
+    padding: 8px 0 8px 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .example-prompt-fallback {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .example-score {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 16px;
+    padding: 8px 16px;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .example-expanded {
+    border-top: 1px solid var(--color-c-gray-10);
+    padding: 12px 16px 12px 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .example-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .example-section-label {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 16px;
+  }
+
+  .example-section-text {
+    color: var(--text);
+    font-size: 13px;
+    line-height: 20px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+    padding: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .example-section-score {
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .examples-loading,
+  .examples-empty {
+    padding: 24px;
+    color: var(--muted);
+    text-align: center;
+    font-size: 14px;
+  }
+
   @media (max-width: 900px) {
     .summary-row {
       grid-template-columns: 1fr;
@@ -866,6 +1534,15 @@
     }
 
     .search-wrap {
+      width: 100%;
+    }
+
+    .examples-controls {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .examples-search {
       width: 100%;
     }
   }

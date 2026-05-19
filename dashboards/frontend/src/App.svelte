@@ -7,7 +7,7 @@
   import TrainingPage from "./pages/TrainingPage.svelte";
   import DeploymentsPage from "./pages/DeploymentsPage.svelte";
   import EvalsPage from "./pages/EvalsPage.svelte";
-  import { fetchRuns, fetchEvals, fetchDeployments } from "./lib/api.js";
+  import { fetchRuns, fetchEvals, fetchDeployments, fetchEvalDetail } from "./lib/api.js";
   import logoSvg from "./lib/logo.svg";
   import { fmtDuration, truncateId } from "./lib/format.js";
 
@@ -688,6 +688,9 @@
         loading={loadingEvals}
         {error}
         {evalConfigGroups}
+        {fetchEvalDetail}
+        {getEvalStatus}
+        {evalConfigMeta}
         onOpenTrainingRun={openTrainingRun}
         onOpenDeployment={openDeployment}
       />

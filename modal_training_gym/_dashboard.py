@@ -298,6 +298,19 @@ def fastapi_app():
             data = []
         return JSONResponse(data)
 
+    @web.get("/api/evals/{eval_id}")
+    async def eval_detail(eval_id: str):
+        try:
+            data = await run_in_threadpool(
+                vol_get, MetadataStore.EVAL_RESULTS, eval_id
+            )
+            return JSONResponse(data)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"EvalResult {eval_id!r} not found",
+            )
+
     # ── Deployments ──────────────────────────────────────────────────────
 
     @web.get("/api/deployments")

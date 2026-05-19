@@ -1,14 +1,16 @@
 <script>
-  import { CheckCircle2, CircleX, Loader2, OctagonX } from "lucide-svelte";
+  import { CheckCircle2, CircleX, Loader2, OctagonX, MinusCircle } from "lucide-svelte";
 
   let { status, iconOnly = false } = $props();
 
   const STATUS_MAP = {
     completed: "Completed",
+    ready: "Ready",
     pending: "Pending",
     running: "Pending",
     stopped: "Stopped",
     failed: "Failed",
+    inactive: "Inactive",
   };
 
   let normalizedStatus = $derived.by(() => {
@@ -17,24 +19,26 @@
     return s in STATUS_MAP ? s : "pending";
   });
 
-  let label = $derived(STATUS_MAP[normalizedStatus] ?? "Running");
+  let label = $derived(STATUS_MAP[normalizedStatus] ?? "Pending");
 </script>
 
 <div
   class="status-pill"
   class:icon-only={iconOnly}
   class:status-completed={normalizedStatus === "completed"}
+  class:status-ready={normalizedStatus === "ready"}
   class:status-running={normalizedStatus === "running"}
   class:status-pending={normalizedStatus === "pending"}
   class:status-stopped={normalizedStatus === "stopped"}
   class:status-failed={normalizedStatus === "failed"}
+  class:status-inactive={normalizedStatus === "inactive"}
   aria-label={label}
 >
-  {#if normalizedStatus === "completed"}
+  {#if normalizedStatus === "completed" || normalizedStatus === "ready"}
     <CheckCircle2 size={14} />
   {:else if normalizedStatus === "stopped"}
     <OctagonX size={14} />
-  {:else if normalizedStatus === "failed"}
+  {:else if normalizedStatus === "failed" || normalizedStatus === "inactive"}
     <CircleX size={14} />
   {:else}
     <span class="live-spinner">
@@ -81,7 +85,8 @@
     border-color: #3b2a37;
   }
 
-  .status-completed {
+  .status-completed,
+  .status-ready {
     background: #273823;
     color: #6ac355;
     border-color: #2d4327;
@@ -93,7 +98,8 @@
     border-color: #5d442d;
   }
 
-  .status-failed {
+  .status-failed,
+  .status-inactive {
     background: #3b2020;
     color: #f87171;
     border-color: #5b3333;

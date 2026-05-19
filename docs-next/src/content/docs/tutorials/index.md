@@ -1,6 +1,6 @@
 ---
 title: Tutorials
-description: Runnable Modal examples across RL, SFT, and agent walkthroughs.
+description: Runnable Modal training examples across intro, RL, SFT, and infrastructure-focused walkthroughs.
 editUrl: https://github.com/modal-projects/training-gym/edit/main/tutorials/README.md
 ---
 
