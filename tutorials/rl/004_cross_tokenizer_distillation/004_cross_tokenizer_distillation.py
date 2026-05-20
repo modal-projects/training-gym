@@ -89,6 +89,8 @@ class BFCLDataset(DatasetConfig):
         self.input_key = "prompt"
         self.label_key = "label"
 
+    _UPSAMPLE = {"parallel": 2, "parallel_multiple": 2}
+
     def _load_rows(self):
         from huggingface_hub import hf_hub_download as dl
         rows = []
@@ -106,7 +108,9 @@ class BFCLDataset(DatasetConfig):
             if self._split == "eval":
                 rows.extend(cat_rows[-self._eval_per_cat:])
             else:
-                rows.extend(cat_rows[:-self._eval_per_cat])
+                train_rows = cat_rows[:-self._eval_per_cat]
+                repeat = self._UPSAMPLE.get(cat, 1)
+                rows.extend(train_rows * repeat)
         return rows
 
     def load(self):
@@ -267,18 +271,21 @@ def bfcl_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
 # ## Cross-tokenizer alignment via SimCT Minimally Aligned Units (MTUs)
 #
 # To solve the problem of cross-tokenizer misalignment, where two tokenizers may not share the same token vocabularies or
-# may merge tokens differently, we employ an algorithm called SimCT (https://arxiv.org/abs/2605.07711) that averages the logprobs
-# of subtokens in a misaligned sequence (span) and includes this single scalar in the KL divergence calculation. 
+# may merge tokens differently, we employ an algorithm called SimCT (https://arxiv.org/abs/2605.07711) that constructs
+# Minimally Aligned Units (MAUs) — the finest text segments where both tokenizers have aligned character boundaries.
 #
-# Here's an example where SimCT would create a Minimally Aligned Unit (MAU) for normalizing both model's different vocabularies:
+# Here's an example where SimCT would create a MAU for normalizing both model's different vocabularies:
 # For the sentence "I am happy", the student model tokenizes it as ["I", "am", "ha", "pp", "y"] and the teacher model tokenizes it as 
 # ["I", "am", "hap", "py"]. The "I" and "am" tokens match up perfectly, but the word "happy" is split across multiple tokens.
 #
-# SimCT loops through the tokens. When it comes across two tokens in a sequence that are not the same (in this case "hap" and "ha"),
-# it marks the start of a span. The greedy algorithm loops through until it finds tokens that match up and form the culmulative preceding string ("happy"). 
-# In this case, the MAU would be "happy" and span the tokens ["ha", "pp", "y"] for model 1 and ["hap", "py"] for model 2. The algorithm
-# computes the mean of the logprobs (geometric mean) and uses that as the logprob for the MAU. This MAU logprob is included in the KL divergence
-# calculation over the top-k tokens at each position.
+# SimCT finds shared character boundaries between both tokenizations. Where boundaries don't align (the word "happy"),
+# it groups the tokens into a MAU spanning ["ha", "pp", "y"] for the student and ["hap", "py"] for the teacher.
+# The MAU log-probability is the sum of its constituent token logprobs (joint probability in log space).
+# To integrate with slime's per-token KL, we distribute the teacher's MAU logprob sum equally across student tokens
+# in the MAU, so that slime's per-token summation reconstructs the correct MAU-level reverse KL.
+#
+# Special tokens are excluded from alignment via `skip_special_tokens=True` during decoding, ensuring the
+# character-level alignment only operates on actual content where the teacher's logprobs are meaningful.
 
 def align_cross_tokenizer(
     teacher_token_texts: list[str],
@@ -286,14 +293,14 @@ def align_cross_tokenizer(
     teacher_top_logprobs: list,
     student_token_texts: list[str],
 ):
-    """SimCT alignment with top-k entropy weighting.
+    """SimCT alignment: find MAUs via shared character boundaries.
 
-    For each MAU, uses the teacher's top-k distribution to weight the
-    logprob contribution: confident positions (peaked distribution)
-    contribute more to the KL signal, uncertain positions less.
+    For each MAU, sums the teacher logprobs (joint probability in log
+    space) and divides by the number of student tokens in the MAU.
+    This ensures slime's per-token KL summation reconstructs the
+    correct MAU-level reverse KL.
     """
     import torch
-    import math
 
     def _offsets(texts):
         out, pos = [], 0
@@ -301,21 +308,6 @@ def align_cross_tokenizer(
             out.append((pos, pos + len(t)))
             pos += len(t)
         return out
-
-    def _confidence(top_k_entry):
-        """1 - normalized_entropy: high when teacher is confident."""
-        if not top_k_entry:
-            return 1.0
-        lps = [e[0] for e in top_k_entry if e and e[0] is not None]
-        if not lps:
-            return 1.0
-        max_lp = max(lps)
-        probs = [math.exp(lp - max_lp) for lp in lps]
-        total = sum(probs)
-        probs = [p / total for p in probs]
-        entropy = -sum(p * math.log(p + 1e-10) for p in probs)
-        max_ent = math.log(len(probs) + 1e-10)
-        return 1.0 - (entropy / max_ent) if max_ent > 0 else 1.0
 
     t_off = _offsets(teacher_token_texts)
     s_off = _offsets(student_token_texts)
@@ -329,14 +321,10 @@ def align_cross_tokenizer(
         t_idx = [j for j, (s, e) in enumerate(t_off) if s >= lo and e <= hi]
         s_idx = [j for j, (s, e) in enumerate(s_off) if s >= lo and e <= hi]
         if t_idx and s_idx:
-            weights = [_confidence(teacher_top_logprobs[j] if j < len(teacher_top_logprobs) else None) for j in t_idx]
-            total_w = sum(weights)
-            if total_w > 0:
-                mau_lp = sum(weights[k] * teacher_logprobs[j] for k, j in enumerate(t_idx)) / total_w
-            else:
-                mau_lp = sum(teacher_logprobs[j] for j in t_idx) / len(t_idx)
+            mau_lp_sum = sum(teacher_logprobs[j] for j in t_idx)
+            per_student_token = mau_lp_sum / len(s_idx)
             for j in s_idx:
-                result[j] = mau_lp
+                result[j] = per_student_token
     return result
 
 # ## Reward function
@@ -362,7 +350,7 @@ async def cross_tokenizer_reward(args, sample, **kwargs):
     import asyncio
 
     tokenizer = _get_student_tokenizer()
-    full_text = tokenizer.decode(sample.tokens, skip_special_tokens=False)
+    full_text = tokenizer.decode(sample.tokens, skip_special_tokens=True)
 
     payload = {
         "text": full_text,
@@ -400,14 +388,14 @@ def cross_tokenizer_post_process(args, samples, **kwargs):
 
     for sample, reward in zip(samples, raw_rewards):
         meta = reward.get("meta_info", {})
-        entries = meta.get("input_token_logprobs", [])
-        top_entries = meta.get("input_top_logprobs", [])
+        entries = meta.get("input_token_logprobs", [])[1:]
+        top_entries = meta.get("input_top_logprobs", [])[1:]
 
         t_lps = [e[0] if e[0] is not None else 0.0 for e in entries if e is not None]
         t_texts = [e[2] if len(e) > 2 else "" for e in entries if e is not None]
         t_top = [top_entries[i] if i < len(top_entries) else None for i, e in enumerate(entries) if e is not None]
 
-        s_texts = [tokenizer.decode([tid], skip_special_tokens=False) for tid in sample.tokens]
+        s_texts = [tokenizer.decode([tid], skip_special_tokens=True) for tid in sample.tokens]
         aligned = align_cross_tokenizer(t_texts, t_lps, t_top, s_texts)
         sample.teacher_log_probs = aligned[-sample.response_length:]
 
