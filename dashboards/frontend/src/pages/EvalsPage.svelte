@@ -405,6 +405,8 @@
     const { run, group } = selectedEval;
     const ev = run.eval;
     const meta = evalConfigMeta(group.config, ev);
+    const linkedDeployment = findDeploymentRow(run, group);
+    const depRef = deploymentRefValue(linkedDeployment);
     return {
       evalId: ev.eval_id || "",
       status: getEvalStatus(ev),
@@ -415,6 +417,8 @@
       totalRows: run.totalRows,
       createdAt: run.createdAt,
       modalAppUrl: ev.modal_app_url || null,
+      deploymentName: evalDeploymentName(run, linkedDeployment),
+      deploymentRef: depRef,
     };
   });
 </script>
@@ -531,7 +535,7 @@
       <div class="table-wrap">
         <MinimalTableSkeleton
           class="runs-table"
-          columns={["Name", "Training run", "Base model", "Status", "Average score", "Examples"]}
+          columns={["Name", "Deployment", "Training run", "Base model", "Status", "Average score", "Examples"]}
           rows={6}
         />
       </div>
@@ -572,6 +576,7 @@
                 <MinimalTable class="runs-table evals-runs-table">
                   <colgroup>
                     <col class="col-name" />
+                    <col class="col-deployment" />
                     <col class="col-training" />
                     <col class="col-model" />
                     <col class="col-status" />
@@ -581,6 +586,7 @@
                   <thead>
                     <tr>
                       <th>Name</th>
+                      <th>Deployment</th>
                       <th>Training run</th>
                       <th>Base model</th>
                       <th>Status</th>
@@ -604,16 +610,10 @@
                         }}
                       >
                         <td class="mono name-cell" title={deploymentName}>
-                          {#if deploymentRef}
-                            <button
-                              class="cross-link mono truncate-text"
-                              onclick={() => onOpenDeployment?.(deploymentRef)}
-                            >
-                              {deploymentName}
-                            </button>
-                          {:else}
-                            <span class="truncate-text">{deploymentName}</span>
-                          {/if}
+                          <span class="truncate-text">{deploymentName}</span>
+                        </td>
+                        <td class="mono deployment-cell" title={deploymentRef || "—"}>
+                          <span class="truncate-text">{deploymentRef || "—"}</span>
                         </td>
                         <td class="training-run-cell" title={trainingRunId || "—"}>
                           {#if trainingRunId}
@@ -680,6 +680,21 @@
       </div>
 
       <section class="drawer-meta">
+        <div class="drawer-meta-row">
+          <span class="drawer-meta-key">Deployment</span>
+          <span class="drawer-meta-value">
+            {#if drawerMeta.deploymentRef}
+              <button
+                class="cross-link mono"
+                onclick={() => onOpenDeployment?.(drawerMeta.deploymentRef)}
+              >
+                {drawerMeta.deploymentName}
+              </button>
+            {:else}
+              {drawerMeta.deploymentName || "—"}
+            {/if}
+          </span>
+        </div>
         <div class="drawer-meta-row">
           <span class="drawer-meta-key">Model</span>
           <span class="drawer-meta-value">{drawerMeta.model}</span>
@@ -1066,19 +1081,23 @@
   }
 
   :global(table.evals-runs-table col.col-name) {
-    width: 27%;
-  }
-
-  :global(table.evals-runs-table col.col-training) {
-    width: 19%;
-  }
-
-  :global(table.evals-runs-table col.col-model) {
     width: 20%;
   }
 
+  :global(table.evals-runs-table col.col-deployment) {
+    width: 15%;
+  }
+
+  :global(table.evals-runs-table col.col-training) {
+    width: 15%;
+  }
+
+  :global(table.evals-runs-table col.col-model) {
+    width: 18%;
+  }
+
   :global(table.evals-runs-table col.col-status) {
-    width: 14%;
+    width: 12%;
   }
 
   :global(table.evals-runs-table col.col-score) {
@@ -1096,6 +1115,19 @@
   }
 
   .name-cell .truncate-text {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .deployment-cell {
+    max-width: 0;
+  }
+
+  .deployment-cell .truncate-text {
     display: block;
     width: 100%;
     min-width: 0;
