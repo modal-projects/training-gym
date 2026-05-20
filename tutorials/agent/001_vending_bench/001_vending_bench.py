@@ -84,7 +84,16 @@ _SYSTEM_PROMPT = (
     "Do not accept the first offer — always counter at least once."
 )
 
-TRAIN_PRODUCTS = PRODUCTS[:8]
+TRAIN_PRODUCTS = [
+    {"product": "Coca-Cola 12oz can", "vend_price": 2.50, "quote": 1.50, "floor": 0.45},
+    {"product": "Pepsi 12oz can", "vend_price": 2.50, "quote": 1.50, "floor": 0.45},
+    {"product": "Lays BBQ chips 1.5oz", "vend_price": 2.50, "quote": 1.35, "floor": 0.55},
+    {"product": "Doritos Nacho Cheese 1.5oz", "vend_price": 2.50, "quote": 1.35, "floor": 0.55},
+    {"product": "Snickers bar", "vend_price": 2.50, "quote": 1.65, "floor": 0.60},
+    {"product": "KitKat bar", "vend_price": 2.50, "quote": 1.65, "floor": 0.60},
+    {"product": "Bottled water 16.9oz", "vend_price": 3.00, "quote": 1.80, "floor": 0.30},
+    {"product": "Monster Energy 16oz", "vend_price": 4.00, "quote": 3.50, "floor": 1.40},
+]
 
 class NegotiationDataset(DatasetConfig):
     input_key = "messages"
@@ -514,22 +523,12 @@ def _main_impl() -> None:
             "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
         ) from e
 
-    PRODUCTS = [
-        {"product": "Coca-Cola 12oz can", "vend_price": 2.50, "quote": 1.50, "floor": 0.45},
-        {"product": "Pepsi 12oz can", "vend_price": 2.50, "quote": 1.50, "floor": 0.45},
-        {"product": "Lays BBQ chips 1.5oz", "vend_price": 2.50, "quote": 1.35, "floor": 0.55},
-        {"product": "Doritos Nacho Cheese 1.5oz", "vend_price": 2.50, "quote": 1.35, "floor": 0.55},
-        {"product": "Snickers bar", "vend_price": 2.50, "quote": 1.65, "floor": 0.60},
-        {"product": "KitKat bar", "vend_price": 2.50, "quote": 1.65, "floor": 0.60},
-        {"product": "Bottled water 16.9oz", "vend_price": 3.00, "quote": 1.80, "floor": 0.30},
-        {"product": "Monster Energy 16oz", "vend_price": 4.00, "quote": 3.50, "floor": 1.40},
+    EVAL_PRODUCTS = [
         {"product": "Pringles Original 2.5oz", "vend_price": 3.00, "quote": 1.75, "floor": 0.70},
         {"product": "M&Ms Peanut 1.74oz", "vend_price": 2.50, "quote": 1.45, "floor": 0.55},
         {"product": "Gatorade 20oz", "vend_price": 3.50, "quote": 2.20, "floor": 0.80},
         {"product": "Reese's Cups 1.5oz", "vend_price": 2.50, "quote": 1.55, "floor": 0.60},
     ]
-
-    EVAL_PRODUCTS = PRODUCTS[8:]
 
     train_dataset = NegotiationDataset(products=TRAIN_PRODUCTS, repeats=20)
     eval_dataset = NegotiationDataset(products=EVAL_PRODUCTS)
