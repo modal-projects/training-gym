@@ -86,7 +86,7 @@ rest of the cells run as-is.
 | Tutorial | Summary | Difficulty | Framework | Launch |
 |---|---|---|---|---|
 | [`000_agent_sandbox`](tutorials/agent/000_agent_sandbox/000_agent_sandbox.ipynb) | Build an LLM agent harness with a self-hosted model and Modal Sandbox tool execution | Beginner | Modal Sandbox | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/agent/000_agent_sandbox/000_agent_sandbox.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`001_pi_dev`](tutorials/agent/001_pi_dev/001_pi_dev.ipynb) | Wikipedia Speedrun — pi.dev agent with custom tools and self-hosted model evaluation | Intermediate | pi.dev + Modal Sandbox | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/agent/001_pi_dev/001_pi_dev.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`001_vending_bench`](tutorials/agent/001_vending_bench/001_vending_bench.ipynb) | Multi-turn supplier negotiation RL for Vending-Bench 2 with Qwen3-30B-A3B | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/agent/001_vending_bench/001_vending_bench.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
 See [`tutorials/README.md`](tutorials/README.md) for how to run the `.py`

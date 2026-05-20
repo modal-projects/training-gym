@@ -1,0 +1,715 @@
+# pyright: reportUndefinedVariable=false, reportMissingImports=false
+"""Tutorial source for `001_vending_bench` — parsed by generate_tutorial.py."""
+
+TUTORIAL_METADATA = {
+    "framework": "`slime`",
+    "cluster_shape": "1 × 1×H100",
+    "summary": "Multi-turn supplier negotiation RL for Vending-Bench 2 with Qwen3-30B-A3B",
+    "difficulty": "Advanced",
+    "order": 20,
+    "api_classes": [
+        "DatasetConfig",
+        "DeploymentConfig",
+        "EvalConfig",
+        "EvalRowResult",
+        "ModelDeployment",
+        "Qwen3_30B",
+        "SlimeRecipe",
+        "TrainConfig",
+    ],
+}
+
+
+from tutorial_generator import code, markdown, notebook_only, py_only, shell
+
+
+@markdown
+def _intro():
+    """
+    # Training Qwen3-30B for Vending-Bench 2
+
+    [Vending-Bench 2](https://andonlabs.com/evals/vending-bench-2) measures how well
+    an LLM can run a simulated vending machine business over a year. The model must
+    email suppliers, negotiate wholesale prices, manage inventory, set vending prices,
+    and stay profitable — all via tool calls across thousands of turns.
+
+    Top-performing models share two traits:
+    1. **Persistent negotiation** — they push back on high quotes and seek alternatives.
+    2. **Long-horizon coherence** — they maintain a consistent strategy over 3 000–6 000 messages.
+
+    This tutorial trains **Qwen3-30B-A3B** (a 30B MoE, ~3B active) on a simplified
+    supplier-negotiation environment that exercises both skills. The setup:
+
+    - A dataset of product sourcing scenarios (each with a target wholesale price).
+    - A multi-turn rollout where the model emails a simulated supplier, counter-offers,
+      and decides whether to accept or walk away.
+    - A reward based on how far below the initial quote the model negotiates.
+
+    We use **Qwen3-30B-A3B** because its MoE architecture makes it practical for RL
+    while retaining strong reasoning capacity — and because Qwen 3 models already
+    appear on the Vending-Bench 2 leaderboard, so there is a clear baseline to beat.
+
+    Workflow:
+    1. Define a negotiation dataset and simulated supplier environment.
+    2. Serve the base model and measure its negotiation skill.
+    3. GRPO-train with the multi-turn negotiation reward.
+    4. Serve the trained model and compare.
+    """
+
+
+@py_only
+@markdown
+def _run_instructions():
+    """
+    Run with:
+    ```
+    uv run python tutorials/agent/001_vending_bench/001_vending_bench.py
+    ```
+    """
+
+
+@notebook_only
+@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
+def _install():
+    pass
+
+
+@code
+def _imports():
+    import json
+    import random
+    import re
+
+    from modal_training_gym import (
+        DatasetConfig,
+        DeploymentConfig,
+        EvalConfig,
+        EvalRowResult,
+        ModelDeployment,
+        Qwen3_30B,
+        SlimeRecipe,
+        TrainConfig,
+        list_checkpoints,
+    )
+
+
+# ── Dataset ──────────────────────────────────────────────────────────────
+
+
+@markdown
+def _dataset_intro():
+    """
+    ## Negotiation dataset
+
+    Each row represents a product the model must source from a supplier.
+    The label carries the supplier's hidden parameters: a **starting quote**
+    (what the supplier opens with) and a **floor price** (their walk-away
+    minimum). The model doesn't see these — it only sees the product
+    name and a vending-machine price to beat.
+
+    The reward is higher when the model negotiates closer to (or below) the
+    floor, and negative when it accepts a price above the vending price
+    (which means selling at a loss).
+    """
+
+
+@code
+def _dataset():
+    _MAX_TURNS = 5
+
+    _SYSTEM_PROMPT = (
+        "You are Charles Paxton, an AI agent managing a vending machine "
+        "business. You are negotiating with a wholesale supplier by email "
+        "to buy products for your vending machine. Your goal is to get "
+        "the lowest possible price.\n\n"
+        "In each turn, you MUST respond with exactly one of:\n"
+        '  <offer>$X.XX</offer>  — counter-offer a price\n'
+        '  <accept/>            — accept the supplier\'s last quote\n'
+        '  <reject/>            — walk away from this deal\n\n'
+        "Negotiate hard. Wholesale prices should be well below retail. "
+        "Do not accept the first offer — always counter at least once."
+    )
+
+    PRODUCTS = [
+        {"product": "Coca-Cola 12oz can", "vend_price": 2.50, "quote": 1.50, "floor": 0.45},
+        {"product": "Pepsi 12oz can", "vend_price": 2.50, "quote": 1.50, "floor": 0.45},
+        {"product": "Lays BBQ chips 1.5oz", "vend_price": 2.50, "quote": 1.35, "floor": 0.55},
+        {"product": "Doritos Nacho Cheese 1.5oz", "vend_price": 2.50, "quote": 1.35, "floor": 0.55},
+        {"product": "Snickers bar", "vend_price": 2.50, "quote": 1.65, "floor": 0.60},
+        {"product": "KitKat bar", "vend_price": 2.50, "quote": 1.65, "floor": 0.60},
+        {"product": "Bottled water 16.9oz", "vend_price": 3.00, "quote": 1.80, "floor": 0.30},
+        {"product": "Monster Energy 16oz", "vend_price": 4.00, "quote": 3.50, "floor": 1.40},
+        {"product": "Pringles Original 2.5oz", "vend_price": 3.00, "quote": 1.75, "floor": 0.70},
+        {"product": "M&Ms Peanut 1.74oz", "vend_price": 2.50, "quote": 1.45, "floor": 0.55},
+        {"product": "Gatorade 20oz", "vend_price": 3.50, "quote": 2.20, "floor": 0.80},
+        {"product": "Reese's Cups 1.5oz", "vend_price": 2.50, "quote": 1.55, "floor": 0.60},
+    ]
+
+    TRAIN_PRODUCTS = PRODUCTS[:8]
+    EVAL_PRODUCTS = PRODUCTS[8:]
+
+    class NegotiationDataset(DatasetConfig):
+        input_key = "messages"
+        label_key = "label"
+        apply_chat_template = True
+        input_column = "prompt"
+        always_prepare = True
+
+        def __init__(self, products=None, repeats=1, **kwargs):
+            self._products = products or TRAIN_PRODUCTS
+            self._repeats = repeats
+            super().__init__(**kwargs)
+
+        def _make_prompt(self, p: dict) -> str:
+            return (
+                f"You need to source {p['product']} for your vending machine. "
+                f"You sell it at ${p['vend_price']:.2f}, so you need a good wholesale deal. "
+                f"A supplier has offered ${p['quote']:.2f} per unit. "
+                f"Negotiate the best price you can."
+            )
+
+        def load(self):
+            return [
+                {
+                    "prompt": self._make_prompt(p),
+                    "product": p["product"],
+                    "vend_price": p["vend_price"],
+                    "quote": p["quote"],
+                    "floor": p["floor"],
+                }
+                for p in self._products
+            ]
+
+        def prepare(self, path, eval_paths=None):
+            import os
+            from datasets import Dataset
+
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            rows = []
+            for p in self._products:
+                for _ in range(self._repeats):
+                    rows.append({
+                        "messages": [{"role": "user", "content": self._make_prompt(p)}],
+                        "label": json.dumps({
+                            "product": p["product"],
+                            "vend_price": p["vend_price"],
+                            "quote": p["quote"],
+                            "floor": p["floor"],
+                        }),
+                    })
+            Dataset.from_list(rows).to_parquet(path)
+            if eval_paths:
+                eval_rows = [
+                    {
+                        "messages": [{"role": "user", "content": self._make_prompt(p)}],
+                        "label": json.dumps({
+                            "product": p["product"],
+                            "vend_price": p["vend_price"],
+                            "quote": p["quote"],
+                            "floor": p["floor"],
+                        }),
+                    }
+                    for p in self._products
+                ]
+                for eval_path in eval_paths.values():
+                    os.makedirs(os.path.dirname(eval_path), exist_ok=True)
+                    Dataset.from_list(eval_rows).to_parquet(eval_path)
+
+    train_dataset = NegotiationDataset(products=TRAIN_PRODUCTS, repeats=20)
+    eval_dataset = NegotiationDataset(products=EVAL_PRODUCTS)
+
+
+# ── Multi-turn environment ───────────────────────────────────────────────
+
+
+@markdown
+def _env_intro():
+    """
+    ## Simulated supplier + reward
+
+    The supplier follows a simple strategy: it starts at the quote price
+    and concedes linearly toward its floor as the model pushes back.
+    Each counter-offer from the model moves the supplier closer to its
+    floor — but the supplier never goes below the floor.
+
+    The reward function scores the final agreed price:
+    - **+2.0** if the model gets the floor price or below
+    - **proportional** between 0 and 2 based on how close to floor
+    - **-1.0** if the model accepts above the vend price (guaranteed loss)
+    - **-0.5** if the model walks away (missed opportunity)
+    - **-2.0** for format errors (unparseable response)
+    """
+
+
+@code
+def _env_and_reward():
+    _OFFER_RE = re.compile(r"<offer>\s*\$?([\d.]+)\s*</offer>", re.IGNORECASE)
+    _ACCEPT_RE = re.compile(r"<accept\s*/>", re.IGNORECASE)
+    _REJECT_RE = re.compile(r"<reject\s*/>", re.IGNORECASE)
+
+    def _parse_action(text: str) -> tuple[str, float | None]:
+        if m := _ACCEPT_RE.search(text):
+            return "accept", None
+        if m := _REJECT_RE.search(text):
+            return "reject", None
+        if m := _OFFER_RE.search(text):
+            return "offer", float(m.group(1))
+        return "invalid", None
+
+    def _parse_label(sample) -> dict:
+        raw = getattr(sample, "label", None)
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+    def _supplier_respond(
+        model_offer: float,
+        current_price: float,
+        floor: float,
+        turn: int,
+        max_turns: int,
+    ) -> tuple[float, str]:
+        concession_rate = 0.3 + 0.1 * turn
+        new_price = current_price - concession_rate * (current_price - floor)
+        new_price = max(new_price, floor)
+
+        if model_offer >= new_price:
+            return model_offer, (
+                f"Thank you for your offer of ${model_offer:.2f}. "
+                f"We can agree to that price. Deal confirmed at ${model_offer:.2f} per unit."
+            )
+
+        if new_price <= floor * 1.05:
+            return new_price, (
+                f"I appreciate your offer of ${model_offer:.2f}, but that's below our cost. "
+                f"The absolute best I can do is ${new_price:.2f} per unit. "
+                f"This is our final offer."
+            )
+
+        return new_price, (
+            f"I understand you'd like ${model_offer:.2f}, but we can't go that low. "
+            f"How about ${new_price:.2f} per unit? "
+            f"That's a significant discount from our original quote."
+        )
+
+    async def negotiation_generate(args, sample, sampling_params):
+        from slime.rollout.sglang_rollout import GenerateState
+        from slime.utils.http_utils import post
+        from slime.utils.types import Sample
+
+        label = _parse_label(sample)
+        quote = float(label.get("quote", 1.50))
+        floor = float(label.get("floor", 0.50))
+        vend_price = float(label.get("vend_price", 2.50))
+        max_turns = int(getattr(args, "max_turns", _MAX_TURNS))
+
+        state = GenerateState(args)
+        url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
+
+        prompt_ids = state.tokenizer(sample.prompt, add_special_tokens=False)["input_ids"]
+        trajectory_text = ""
+        response_segments: list[tuple[str, int]] = []
+
+        current_price = quote
+        final_price = None
+        outcome = "timeout"
+        turns_taken = max_turns
+        final_status = Sample.Status.COMPLETED
+
+        for turn in range(max_turns):
+            output = await post(
+                url,
+                {
+                    "text": f"{sample.prompt}\n{trajectory_text}".strip(),
+                    "sampling_params": sampling_params,
+                },
+            )
+            finish_type = output["meta_info"]["finish_reason"]["type"]
+            if finish_type == "abort":
+                sample.status = Sample.Status.ABORTED
+                return sample
+
+            model_text = output["text"]
+            trajectory_text += model_text
+            response_segments.append((model_text, 1))
+
+            action, offer_amount = _parse_action(model_text)
+
+            if action == "accept":
+                final_price = current_price
+                outcome = "accepted"
+                turns_taken = turn + 1
+                break
+
+            if action == "reject":
+                outcome = "rejected"
+                turns_taken = turn + 1
+                break
+
+            if action == "offer" and offer_amount is not None:
+                new_price, supplier_reply = _supplier_respond(
+                    offer_amount, current_price, floor, turn, max_turns,
+                )
+                if offer_amount >= new_price:
+                    final_price = offer_amount
+                    outcome = "deal"
+                    turns_taken = turn + 1
+                    env_text = f"\n<supplier>{supplier_reply}</supplier>\n"
+                    trajectory_text += env_text
+                    response_segments.append((env_text, 0))
+                    break
+                else:
+                    current_price = new_price
+                    env_text = f"\n<supplier>{supplier_reply}</supplier>\n"
+                    trajectory_text += env_text
+                    response_segments.append((env_text, 0))
+            else:
+                outcome = "format_error"
+                turns_taken = turn + 1
+                break
+
+            if finish_type == "length":
+                final_status = Sample.Status.TRUNCATED
+                break
+
+        response_token_ids: list[int] = []
+        loss_masks: list[int] = []
+        for segment_text, trainable in response_segments:
+            token_ids = state.tokenizer(
+                segment_text, add_special_tokens=False,
+            )["input_ids"]
+            response_token_ids += token_ids
+            loss_masks += [trainable] * len(token_ids)
+
+        sample.tokens = prompt_ids + response_token_ids
+        sample.response_length = len(response_token_ids)
+        sample.response = trajectory_text
+        sample.loss_mask = loss_masks
+        sample.status = final_status
+
+        sample_metadata = getattr(sample, "metadata", None)
+        if not isinstance(sample_metadata, dict):
+            sample_metadata = {}
+        sample_metadata["negotiation"] = {
+            "outcome": outcome,
+            "final_price": final_price,
+            "floor": floor,
+            "quote": quote,
+            "vend_price": vend_price,
+            "turns_taken": turns_taken,
+        }
+        sample.metadata = sample_metadata
+        return sample
+
+    def _negotiation_reward(
+        outcome: str,
+        final_price: float | None,
+        floor: float,
+        quote: float,
+        vend_price: float,
+    ) -> float:
+        if outcome == "format_error":
+            return -2.0
+        if outcome == "rejected":
+            return -0.5
+        if outcome == "timeout":
+            return -0.5
+        if final_price is None:
+            return -1.0
+        if final_price > vend_price:
+            return -1.0
+        margin = (quote - final_price) / (quote - floor) if quote > floor else 0.0
+        return min(2.0, margin * 2.0)
+
+    async def negotiation_rm(args, sample, **kwargs) -> float:
+        meta = getattr(sample, "metadata", None)
+        neg = meta.get("negotiation", {}) if isinstance(meta, dict) else {}
+        return _negotiation_reward(
+            outcome=neg.get("outcome", "timeout"),
+            final_price=neg.get("final_price"),
+            floor=float(neg.get("floor", 0.50)),
+            quote=float(neg.get("quote", 1.50)),
+            vend_price=float(neg.get("vend_price", 2.50)),
+        )
+
+
+# ── Evaluation ───────────────────────────────────────────────────────────
+
+
+@markdown
+def _eval_intro():
+    """
+    ## Offline negotiation evaluator
+
+    We run the full multi-turn negotiation loop against the deployed model
+    and score the outcome. This lets us compare base vs. trained behavior.
+    """
+
+
+@code
+def _eval_helpers():
+    def run_negotiation(
+        deployment: ModelDeployment,
+        *,
+        product: str,
+        quote: float,
+        floor: float,
+        vend_price: float,
+        max_turns: int = _MAX_TURNS,
+    ) -> dict:
+        current_price = quote
+        prompt = (
+            f"You need to source {product} for your vending machine. "
+            f"You sell it at ${vend_price:.2f}, so you need a good wholesale deal. "
+            f"A supplier has offered ${quote:.2f} per unit. "
+            f"Negotiate the best price you can."
+        )
+        trace = ""
+        for turn in range(max_turns):
+            full_prompt = f"{prompt}\n{trace}".strip()
+            response = deployment.generate(
+                full_prompt,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": full_prompt},
+                ],
+                chat_template_kwargs={"enable_thinking": False},
+            )
+            action, offer_amount = _parse_action(response)
+            if action == "accept":
+                return {
+                    "outcome": "accepted",
+                    "final_price": current_price,
+                    "turns_taken": turn + 1,
+                    "response": trace + response,
+                }
+            if action == "reject":
+                return {
+                    "outcome": "rejected",
+                    "final_price": None,
+                    "turns_taken": turn + 1,
+                    "response": trace + response,
+                }
+            if action == "offer" and offer_amount is not None:
+                new_price, supplier_reply = _supplier_respond(
+                    offer_amount, current_price, floor, turn, max_turns,
+                )
+                if offer_amount >= new_price:
+                    return {
+                        "outcome": "deal",
+                        "final_price": offer_amount,
+                        "turns_taken": turn + 1,
+                        "response": trace + response,
+                    }
+                current_price = new_price
+                trace += f"{response}\n<supplier>{supplier_reply}</supplier>\n"
+            else:
+                return {
+                    "outcome": "format_error",
+                    "final_price": None,
+                    "turns_taken": turn + 1,
+                    "response": trace + response,
+                }
+        return {
+            "outcome": "timeout",
+            "final_price": None,
+            "turns_taken": max_turns,
+            "response": trace,
+        }
+
+    def negotiation_eval_fn(
+        deployment: ModelDeployment,
+        example: dict,
+    ) -> EvalRowResult:
+        label = example.get("label", "{}")
+        if isinstance(label, str):
+            label = json.loads(label)
+        product = label.get("product", example.get("product", "unknown"))
+        quote = float(label.get("quote", example.get("quote", 1.50)))
+        floor = float(label.get("floor", example.get("floor", 0.50)))
+        vend_price = float(label.get("vend_price", example.get("vend_price", 2.50)))
+
+        result = run_negotiation(
+            deployment,
+            product=product,
+            quote=quote,
+            floor=floor,
+            vend_price=vend_price,
+        )
+        reward = _negotiation_reward(
+            outcome=result["outcome"],
+            final_price=result.get("final_price"),
+            floor=floor,
+            quote=quote,
+            vend_price=vend_price,
+        )
+        return EvalRowResult(
+            score=reward,
+            response=result["response"],
+            metadata={
+                "outcome": result["outcome"],
+                "final_price": result.get("final_price"),
+                "turns_taken": result["turns_taken"],
+                "product": product,
+            },
+        )
+
+    def summarize_eval(eval_result) -> dict:
+        rows = eval_result.rows
+        deal_rows = [r for r in rows if r.metadata.get("outcome") in ("deal", "accepted")]
+        deal_rate = len(deal_rows) / max(len(rows), 1)
+        avg_price = (
+            sum(r.metadata["final_price"] for r in deal_rows) / len(deal_rows)
+            if deal_rows
+            else 0.0
+        )
+        return {
+            "deal_rate": deal_rate,
+            "avg_negotiated_price": avg_price,
+            "mean_reward": eval_result.mean,
+        }
+
+
+# ── Serve and evaluate base model ────────────────────────────────────────
+
+
+@markdown
+def _serve_base_intro():
+    """
+    ## Serve and evaluate the base model
+
+    We deploy Qwen3-30B-A3B and run the negotiation eval to get a baseline.
+    """
+
+
+@code
+def _serve_base():
+    base_model = Qwen3_30B()
+    base_deployment = DeploymentConfig(model=base_model).serve()
+    print(f"Base model URL: {base_deployment.url}")
+
+    eval_config = EvalConfig(
+        dataset=eval_dataset,
+        eval_fn=negotiation_eval_fn,
+    )
+    print("Running base negotiation eval...")
+    base_eval = eval_config.evaluate(base_deployment, debug=True)
+    base_summary = summarize_eval(base_eval)
+    print(f"Base deal rate:   {base_summary['deal_rate']:.0%}")
+    print(f"Base avg price:   ${base_summary['avg_negotiated_price']:.2f}")
+    print(f"Base mean reward: {base_summary['mean_reward']:.3f}")
+
+
+# ── Train ────────────────────────────────────────────────────────────────
+
+
+@markdown
+def _train_intro():
+    """
+    ## Train with multi-turn negotiation reward
+
+    We use `SlimeRecipe` with the Qwen3-30B-A3B model. Key settings:
+
+    - **TP4 + sequence parallel** — the 30B MoE model needs tensor parallelism
+      across 4 GPUs to fit in memory during training.
+    - **`colocate=True`** — shares GPUs between sglang rollout and Megatron training.
+    - **`custom_generate_function`** — runs the multi-turn negotiation loop
+      during rollouts, with loss masking so only the model's messages are trained.
+    - **`custom_rm_function`** — scores the deal outcome.
+    - **`rollout_max_response_len=512`** — negotiation turns are short.
+    - **`max_turns=5`** — caps the conversation length.
+    """
+
+
+@code
+def _train():
+    training_run = TrainConfig(
+        model=Qwen3_30B(),
+        dataset=train_dataset,
+        recipe=SlimeRecipe(
+            custom_generate_function=negotiation_generate,
+            custom_rm_function=negotiation_rm,
+            extra_config={
+                "max_turns": _MAX_TURNS,
+                "log_multi_turn": True,
+            },
+
+            gpu_type="H100",
+            colocate=True,
+            tensor_model_parallel_size=4,
+            sequence_parallel=True,
+            rollout_num_gpus_per_engine=4,
+
+            num_rollout=20,
+            rollout_batch_size=4,
+            n_samples_per_prompt=8,
+            rollout_max_response_len=512,
+            rollout_temperature=1.0,
+            sglang_mem_fraction_static=0.60,
+
+            global_batch_size=16,
+            save_interval=10,
+            apply_chat_template_kwargs='{"enable_thinking": false}',
+        ),
+    )
+    print("Starting negotiation training...")
+    train_result = training_run.train()
+    print(f"Training run id: {train_result.training_run_id}")
+
+
+# ── Evaluate trained model ───────────────────────────────────────────────
+
+
+@markdown
+def _trained_eval_intro():
+    """
+    ## Evaluate the trained checkpoint
+
+    Serve the final checkpoint and run the same negotiation eval.
+    """
+
+
+@code
+def _trained_eval():
+    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+    trained_deployment = DeploymentConfig(
+        model=Qwen3_30B(),
+        checkpoint=checkpoint,
+        app_name="qwen3-30b-vending-bench-serve",
+        served_model_name="qwen3-30b-vending-bench",
+    ).serve()
+    print(f"Trained model URL: {trained_deployment.url}")
+
+    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
+    trained_summary = summarize_eval(trained_eval)
+    print(f"\n{'='*50}")
+    print(f"{'Metric':<25} {'Base':>10} {'Trained':>10}")
+    print(f"{'='*50}")
+    print(f"{'Deal rate':<25} {base_summary['deal_rate']:>9.0%} {trained_summary['deal_rate']:>9.0%}")
+    print(f"{'Avg negotiated price':<25} ${base_summary['avg_negotiated_price']:>8.2f} ${trained_summary['avg_negotiated_price']:>8.2f}")
+    print(f"{'Mean reward':<25} {base_summary['mean_reward']:>10.3f} {trained_summary['mean_reward']:>10.3f}")
+    print(f"{'='*50}")
+
+
+@markdown
+def _conclusion():
+    """
+    ## Next steps
+
+    This tutorial exercises the negotiation skills that matter most for
+    Vending-Bench 2. To push scores further:
+
+    - **Add more product categories** and supplier personalities to the
+      training set for broader generalization.
+    - **Increase `num_rollout`** for longer training runs.
+    - **Chain with inventory management** — train a second stage where
+      the model decides which products to stock and at what vend prices.
+    - **Run the full Vending-Bench 2 eval** at
+      [andonlabs.com/evals/vending-bench-2](https://andonlabs.com/evals/vending-bench-2)
+      to measure end-to-end improvement.
+    """
