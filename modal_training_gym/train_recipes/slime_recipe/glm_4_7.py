@@ -7,16 +7,24 @@ from pydantic.dataclasses import dataclass
 from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 
+_TOKENIZER_PATCH = r"""
+import pathlib
+p = pathlib.Path("/root/slime/slime/utils/processing_utils.py")
+old = "    return AutoTokenizer.from_pretrained(name_or_path, **kwargs)"
+new = (
+    '    import os as _os\n'
+    '    _tf = _os.path.join(name_or_path, "tokenizer.json")\n'
+    '    if _os.path.isfile(_tf):\n'
+    '        from transformers import PreTrainedTokenizerFast\n'
+    '        return PreTrainedTokenizerFast(tokenizer_file=_tf)\n'
+    '    return AutoTokenizer.from_pretrained(name_or_path, **kwargs)'
+)
+p.write_text(p.read_text().replace(old, new))
+"""
+
+
 def _glm_image_overlay(image: modal.Image) -> modal.Image:
-    return image.run_commands(
-        # GLM-4.7 tokenizer.json is incompatible with the bundled tokenizers
-        # library, so we patch load_tokenizer to skip the fast-tokenizer path.
-        "sed -i"
-        " 's/AutoTokenizer.from_pretrained(name_or_path,"
-        " \\*\\*kwargs)/AutoTokenizer.from_pretrained(name_or_path,"
-        " use_fast=False, **kwargs)/'"
-        " /root/slime/slime/utils/processing_utils.py",
-    )
+    return image.run_commands(f"python3 -c {_TOKENIZER_PATCH!r}")
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
