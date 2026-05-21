@@ -1,13 +1,21 @@
+from collections.abc import Callable
+
+import modal
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 
+def _glm_image_overlay(image: modal.Image) -> modal.Image:
+    return image.run_commands("uv pip install --system 'transformers>=4.51'")
+
+
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class GLM_4_7_Recipe(SlimeRecipe):
     """GLM-4.7 (355B-A32B MoE) on 8x8xH200, colocated GSPO."""
 
+    image_overlay: Callable[[modal.Image], modal.Image] | None = _glm_image_overlay
     gpu_type: str = "H200"
     colocate: bool = True
     tensor_model_parallel_size: int = 8
@@ -71,6 +79,4 @@ class GLM_4_7_Recipe(SlimeRecipe):
 
     def __post_init__(self) -> None:
         if self.rollout_stop_token_ids is None:
-            object.__setattr__(
-                self, "rollout_stop_token_ids", [151329, 151336, 151338]
-            )
+            object.__setattr__(self, "rollout_stop_token_ids", [151329, 151336, 151338])
