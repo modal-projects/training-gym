@@ -67,10 +67,73 @@ class SGLangEndpoint:
             if value == "":
                 cmd.append(key)
             else:
-                cmd.extend([key, *value.split()])
+                cmd.extend([key, value])
         return cmd
 
+    def _rewrite_chat_template_kwargs(self) -> None:
+        """Convert ``--chat-template-kwargs`` to ``--chat-template``.
+
+        SGLang doesn't expose ``--chat-template-kwargs`` as a CLI flag
+        (it's a per-request API parameter only).  Work around this by
+        downloading the model's chat template from its tokenizer config,
+        prepending Jinja ``{% set %}`` statements for the requested
+        kwargs, and pointing sglang at the modified template file.
+        """
+        raw = self.extra_server_args.pop("--chat-template-kwargs", None)
+        if raw is None:
+            return
+
+        kwargs = json.loads(raw) if isinstance(raw, str) else raw
+
+        template = self._load_chat_template()
+        if not template:
+            print(
+                "[sglang] warning: could not load chat template from model; "
+                "ignoring --chat-template-kwargs"
+            )
+            return
+
+        prefix = "\n".join(
+            f"{{% set {k} = {json.dumps(v)} %}}" for k, v in kwargs.items()
+        )
+        path = "/tmp/_sglang_chat_template.jinja"
+        with open(path, "w") as f:
+            f.write(prefix + "\n" + template)
+
+        self.extra_server_args["--chat-template"] = path
+        print(f"[sglang] rewrote --chat-template-kwargs as --chat-template {path}")
+
+    def _load_chat_template(self) -> str:
+        """Return the model's Jinja chat template string, or ``""``."""
+        import os
+
+        config = None
+        # Local checkpoint path
+        local = os.path.join(self.model_path, "tokenizer_config.json")
+        if os.path.isfile(local):
+            with open(local) as f:
+                config = json.load(f)
+        else:
+            try:
+                from huggingface_hub import hf_hub_download
+
+                path = hf_hub_download(self.model_path, "tokenizer_config.json")
+                with open(path) as f:
+                    config = json.load(f)
+            except Exception as exc:
+                print(f"[sglang] failed to download tokenizer_config.json: {exc}")
+                return ""
+
+        template = config.get("chat_template", "")
+        if isinstance(template, list):
+            template = next(
+                (t["template"] for t in template if t.get("name") == "default"),
+                template[0]["template"] if template else "",
+            )
+        return template
+
     def start(self) -> None:
+        self._rewrite_chat_template_kwargs()
         cmd = self._build_cmd()
         print(f"[sglang] starting: {shlex.join(cmd)}")
         self._proc = subprocess.Popen(cmd)

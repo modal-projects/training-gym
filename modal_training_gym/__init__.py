@@ -10,6 +10,8 @@ _EXPORTS = {
     "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
     "EvalResult": ("modal_training_gym.common.eval", "EvalResult"),
     "EvalRowResult": ("modal_training_gym.common.eval", "EvalRowResult"),
+    "GLM_4_7": ("modal_training_gym.common.models", "GLM_4_7"),
+    "GLM_4_7_Flash": ("modal_training_gym.common.models", "GLM_4_7_Flash"),
     "HFModelConfiguration": (
         "modal_training_gym.common.models",
         "HFModelConfiguration",
@@ -45,6 +47,8 @@ _EXPORTS = {
 
 __all__ = [
     "DatasetConfig",
+    "GLM_4_7",
+    "GLM_4_7_Flash",
     "HarborDataset",
     "DeploymentConfig",
     "EvalConfig",

@@ -3,6 +3,8 @@ from .base import (
     ModelArchitecture,
     ModelConfig,
 )
+from .glm_4_7 import GLM_4_7
+from .glm_4_7_flash import GLM_4_7_Flash
 from .qwen3_0_6b import Qwen3_0_6B
 from .qwen3_1_7b import Qwen3_1_7B
 from .qwen3_4b import Qwen3_4B
@@ -15,6 +17,8 @@ __all__ = [
     "HFModelConfiguration",
     "ModelArchitecture",
     "ModelConfig",
+    "GLM_4_7",
+    "GLM_4_7_Flash",
     "Qwen3_0_6B",
     "Qwen3_1_7B",
     "Qwen3_4B",

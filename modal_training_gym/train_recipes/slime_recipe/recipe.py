@@ -268,6 +268,8 @@ class SlimeRecipe(BaseTrainRecipe):
             "disable_bias_linear": arch.disable_bias_linear,
             "qk_layernorm": arch.qk_layernorm,
             "untie_embeddings_and_output_weights": arch.untie_embeddings_and_output_weights,
+            "num_experts": arch.num_experts,
+            "moe_router_topk": arch.moe_router_topk,
             "use_rotary_position_embeddings": arch.use_rotary_position_embeddings,
             "rotary_base": arch.rotary_base,
         }
@@ -362,6 +364,12 @@ class SlimeRecipe(BaseTrainRecipe):
 
     @classmethod
     def get_base_recipe(cls, model_config: ModelConfig) -> "SlimeRecipe | None":
+        from modal_training_gym.train_recipes.slime_recipe.glm_4_7 import (
+            GLM_4_7_Recipe,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.glm_4_7_flash import (
+            GLM_4_7_Flash_Recipe,
+        )
         from modal_training_gym.train_recipes.slime_recipe.qwen3_1_7b import (
             Qwen3_1_7b_Recipe,
         )
@@ -378,6 +386,10 @@ class SlimeRecipe(BaseTrainRecipe):
             Qwen3_4b_Recipe,
         )
 
+        if model_config.model_name == "zai-org/GLM-4.7":
+            return GLM_4_7_Recipe()
+        if model_config.model_name == "zai-org/GLM-4.7-Flash":
+            return GLM_4_7_Flash_Recipe()
         if model_config.model_name == "Qwen/Qwen3-1.7B":
             return Qwen3_1_7b_Recipe()
         if model_config.model_name == "Qwen/Qwen3-4B":

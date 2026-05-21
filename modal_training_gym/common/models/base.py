@@ -50,6 +50,13 @@ class ModelArchitecture:
         Use separate output projection weights instead of tying to token
         embeddings. Default ``False``.
 
+    ## Mixture of Experts
+
+    num_experts : int | None
+        Number of routed experts. ``None`` for dense models. Default ``None``.
+    moe_router_topk : int | None
+        Number of experts activated per token. Default ``None``.
+
     ## Position Encoding
 
     use_rotary_position_embeddings : bool
@@ -72,6 +79,8 @@ class ModelArchitecture:
     disable_bias_linear: bool = True
     qk_layernorm: bool = True
     untie_embeddings_and_output_weights: bool = False
+    num_experts: int | None = None
+    moe_router_topk: int | None = None
     use_rotary_position_embeddings: bool = True
     rotary_base: int = 10000
 
@@ -107,6 +116,10 @@ class ModelArchitecture:
             args.append("--qk-layernorm")
         if self.untie_embeddings_and_output_weights:
             args.append("--untie-embeddings-and-output-weights")
+        if self.num_experts is not None:
+            args += ["--num-experts", str(self.num_experts)]
+        if self.moe_router_topk is not None:
+            args += ["--moe-router-topk", str(self.moe_router_topk)]
         if self.use_rotary_position_embeddings:
             args += ["--position-embedding-type", "rope"]
             if self.rotary_base != 10000:
