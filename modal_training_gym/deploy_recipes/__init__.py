@@ -11,6 +11,7 @@ from modal_training_gym.deploy_recipes.vllm_recipe import (
 )
 from modal_training_gym.deploy_recipes.sglang_recipe import (
     SglangRecipe,
+    DeepSeek_V4_Flash_SglangRecipe,
     Qwen3_0_6b_SglangRecipe,
     Qwen3_1_7b_SglangRecipe,
     Qwen3_4b_SglangRecipe,
@@ -22,6 +23,7 @@ from modal_training_gym.deploy_recipes.sglang_recipe import (
 
 __all__ = [
     "BaseDeployRecipe",
+    "DeepSeek_V4_Flash_SglangRecipe",
     "DeployRecipeType",
     "Qwen3_0_6b_SglangRecipe",
     "Qwen3_0_6b_VllmRecipe",
