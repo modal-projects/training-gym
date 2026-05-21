@@ -9,7 +9,8 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 def _glm_image_overlay(image: modal.Image) -> modal.Image:
     return image.run_commands(
-        "uv pip install --system 'transformers>=4.57.3,<5' tiktoken sentencepiece"
+        "uv pip install --system tiktoken sentencepiece",
+        "uv pip install --system --no-deps 'tokenizers>=0.22,<0.24'",
     )
 
 
