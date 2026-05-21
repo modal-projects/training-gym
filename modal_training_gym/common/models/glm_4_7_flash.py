@@ -28,6 +28,8 @@ class GLM_4_7_Flash(HFModelConfiguration):
         disable_bias_linear=True,
         qk_layernorm=True,
         untie_embeddings_and_output_weights=True,
+        num_experts=64,
+        moe_router_topk=4,
         use_rotary_position_embeddings=True,
         rotary_base=1000000,
     )

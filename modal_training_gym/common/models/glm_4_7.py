@@ -28,6 +28,8 @@ class GLM_4_7(HFModelConfiguration):
         disable_bias_linear=False,
         qk_layernorm=True,
         untie_embeddings_and_output_weights=True,
+        num_experts=160,
+        moe_router_topk=8,
         use_rotary_position_embeddings=True,
         rotary_base=1000000,
     )

@@ -268,6 +268,8 @@ class SlimeRecipe(BaseTrainRecipe):
             "disable_bias_linear": arch.disable_bias_linear,
             "qk_layernorm": arch.qk_layernorm,
             "untie_embeddings_and_output_weights": arch.untie_embeddings_and_output_weights,
+            "num_experts": arch.num_experts,
+            "moe_router_topk": arch.moe_router_topk,
             "use_rotary_position_embeddings": arch.use_rotary_position_embeddings,
             "rotary_base": arch.rotary_base,
         }
