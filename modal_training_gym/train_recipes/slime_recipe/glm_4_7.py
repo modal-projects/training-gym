@@ -1,3 +1,4 @@
+import base64
 from collections.abc import Callable
 
 import modal
@@ -6,25 +7,29 @@ from pydantic.dataclasses import dataclass
 
 from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
-
-_TOKENIZER_PATCH = r"""
-import pathlib
-p = pathlib.Path("/root/slime/slime/utils/processing_utils.py")
-old = "    return AutoTokenizer.from_pretrained(name_or_path, **kwargs)"
-new = (
-    '    import os as _os\n'
-    '    _tf = _os.path.join(name_or_path, "tokenizer.json")\n'
-    '    if _os.path.isfile(_tf):\n'
-    '        from transformers import PreTrainedTokenizerFast\n'
-    '        return PreTrainedTokenizerFast(tokenizer_file=_tf)\n'
-    '    return AutoTokenizer.from_pretrained(name_or_path, **kwargs)'
-)
-p.write_text(p.read_text().replace(old, new))
-"""
+# GLM-4.7 tokenizer.json is incompatible with the bundled tokenizers library
+# (TokenizerFast.from_file silently fails), so we patch load_tokenizer to load
+# tokenizer.json directly via PreTrainedTokenizerFast when the file exists.
+_TOKENIZER_PATCH_B64 = base64.b64encode(
+    b"import pathlib\n"
+    b'p = pathlib.Path("/root/slime/slime/utils/processing_utils.py")\n'
+    b'old = "    return AutoTokenizer.from_pretrained(name_or_path, **kwargs)"\n'
+    b"new = (\n"
+    b'    "    import os as _os\\n"\n'
+    b'    "    _tf = _os.path.join(name_or_path, \\"tokenizer.json\\")\\n"\n'
+    b'    "    if _os.path.isfile(_tf):\\n"\n'
+    b'    "        from transformers import PreTrainedTokenizerFast\\n"\n'
+    b'    "        return PreTrainedTokenizerFast(tokenizer_file=_tf)\\n"\n'
+    b'    "    return AutoTokenizer.from_pretrained(name_or_path, **kwargs)"\n'
+    b")\n"
+    b"p.write_text(p.read_text().replace(old, new))\n"
+).decode()
 
 
 def _glm_image_overlay(image: modal.Image) -> modal.Image:
-    return image.run_commands(f"python3 -c {_TOKENIZER_PATCH!r}")
+    return image.run_commands(
+        f"echo {_TOKENIZER_PATCH_B64} | base64 -d | python3",
+    )
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
