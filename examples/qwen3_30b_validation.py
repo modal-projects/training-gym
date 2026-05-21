@@ -1,8 +1,8 @@
 # Qwen3-30B-A3B validation example
 #
 # Validates that:
-# 1. SGLang serves the Qwen3-30B-A3B MoE model correctly (tp=2)
-# 2. SlimeRecipe trains the model with GRPO
+# 1. SGLang serves the Qwen3-30B-A3B MoE model correctly (tp=4)
+# 2. SlimeRecipe trains the model with GRPO on 1×8×H100
 #
 # Qwen3-30B-A3B is a Mixture-of-Experts model:
 #   - 30B total params, ~3B active per token
@@ -115,15 +115,15 @@ def main() -> None:
             "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
         ) from e
 
-    # ── 1. Serve Qwen3-30B-A3B with SGLang (TP=2 for 30B MoE) ───────────
+    # ── 1. Serve Qwen3-30B-A3B with SGLang (TP=4 for 30B MoE) ───────────
     print("=" * 60)
-    print("STEP 1: Deploying Qwen3-30B-A3B with SGLang (tp=2)")
+    print("STEP 1: Deploying Qwen3-30B-A3B with SGLang (tp=4)")
     print("=" * 60)
 
     base_model = Qwen3_30B()
     base_model_deployment = DeploymentConfig(
         model=base_model,
-        recipe=SglangRecipe(tp=2),
+        recipe=SglangRecipe(tp=4),
     ).serve()
     print(f"Base model deployed to {base_model_deployment.url}")
 
@@ -150,11 +150,11 @@ def main() -> None:
 
     # ── 3. Train with SlimeRecipe (validates GRPO on 30B MoE) ────────────
     #
-    # Qwen3-30B-A3B is MoE (128 experts, top-8). We use:
-    #   - TP2 + sequence parallelism for the dense attention layers
-    #   - rollout_num_gpus_per_engine=2 to match TP
+    # Qwen3-30B-A3B is MoE (128 experts, top-8). Config mirrors Qwen3_32b_Recipe:
+    #   - TP4 on 1×8×H100 (30B total params needs 4-way tensor parallelism)
+    #   - rollout_num_gpus_per_engine=4 to match TP
     #   - colocate=True to share GPUs between training and rollout
-    #   - Small num_rollout (5) for a quick validation run
+    #   - num_rollout=1 for single rollout engine
     print("=" * 60)
     print("STEP 3: Training Qwen3-30B-A3B with SlimeRecipe (GRPO)")
     print("=" * 60)
@@ -166,16 +166,16 @@ def main() -> None:
             custom_rm_function=haiku_rm,
             gpu_type="H100",
             colocate=True,
-            tensor_model_parallel_size=2,
+            tensor_model_parallel_size=4,
             sequence_parallel=True,
-            rollout_num_gpus_per_engine=2,
-            num_rollout=5,
-            rollout_batch_size=8,
+            rollout_num_gpus_per_engine=4,
+            num_rollout=1,
+            rollout_batch_size=4,
             rollout_max_response_len=4096,
             rollout_temperature=1.0,
-            sglang_mem_fraction_static=0.70,
+            sglang_mem_fraction_static=0.65,
             save_interval=5,
-            n_samples_per_prompt=2,
+            n_samples_per_prompt=8,
             lr=5e-7,
             max_tokens_per_gpu=4096,
             apply_chat_template_kwargs='{"enable_thinking": false}',
@@ -200,7 +200,7 @@ def main() -> None:
     trained_deployment = DeploymentConfig(
         model=Qwen3_30B(),
         checkpoint=checkpoint,
-        recipe=SglangRecipe(tp=2),
+        recipe=SglangRecipe(tp=4),
         app_name="qwen3-30b-a3b-haiku-serve",
         served_model_name="qwen3-30b-a3b-haiku",
     ).serve()
@@ -215,8 +215,8 @@ def main() -> None:
     print("VALIDATION SUMMARY")
     print("=" * 60)
     print("Model:          Qwen3-30B-A3B (MoE, 128 experts, top-8)")
-    print("SGLang config:  tp=2, sglang_image=v0.5.12-cu130")
-    print("SlimeRecipe:    tp=2, colocate, GRPO")
+    print("SGLang config:  tp=4, sglang_image=v0.5.12-cu130")
+    print("SlimeRecipe:    tp=4, colocate, 1x8xH100, GRPO")
     print(f"Base score:     {base_eval.mean:.1f}")
     print(f"Trained score:  {trained_eval.mean:.1f}")
     print(f"Delta:          {trained_eval.mean - base_eval.mean:+.1f}")
