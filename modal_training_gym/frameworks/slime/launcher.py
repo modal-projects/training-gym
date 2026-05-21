@@ -619,6 +619,7 @@ def build_slime_app(
                 nonlocal _hf_path
                 if _hf_path is None:
                     from huggingface_hub import snapshot_download as _snap
+
                     _hf_path = (
                         str(model.model_path)
                         if model.model_path
