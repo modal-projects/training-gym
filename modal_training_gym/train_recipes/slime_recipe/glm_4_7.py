@@ -8,7 +8,9 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 
 def _glm_image_overlay(image: modal.Image) -> modal.Image:
-    return image.run_commands("uv pip install --system 'transformers>=5'")
+    return image.run_commands(
+        "uv pip install --system 'transformers>=5' 'tokenizers>=0.21'"
+    )
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
