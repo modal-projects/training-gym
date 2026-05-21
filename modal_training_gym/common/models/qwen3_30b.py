@@ -26,6 +26,7 @@ class Qwen3_30B(HFModelConfiguration):
         swiglu=True,
         disable_bias_linear=True,
         qk_layernorm=True,
+        untie_embeddings_and_output_weights=True,
         use_rotary_position_embeddings=True,
         rotary_base=1000000,
     )
