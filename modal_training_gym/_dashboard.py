@@ -301,9 +301,7 @@ def fastapi_app():
     @web.get("/api/evals/{eval_id}")
     async def eval_detail(eval_id: str):
         try:
-            data = await run_in_threadpool(
-                vol_get, MetadataStore.EVAL_RESULTS, eval_id
-            )
+            data = await run_in_threadpool(vol_get, MetadataStore.EVAL_RESULTS, eval_id)
             return JSONResponse(data)
         except KeyError:
             raise HTTPException(
