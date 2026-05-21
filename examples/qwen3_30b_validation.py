@@ -179,6 +179,7 @@ def main() -> None:
             lr=5e-7,
             max_tokens_per_gpu=2048,
             apply_chat_template_kwargs='{"enable_thinking": false}',
+            extra_config={"train_memory_margin_bytes": 536870912},
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp nltk>=3.8.0",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
