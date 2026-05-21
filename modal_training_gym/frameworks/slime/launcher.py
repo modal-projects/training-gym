@@ -482,6 +482,7 @@ def build_slime_app(
     ):
         modal_app_id = modal_app_id or os.environ.get("MODAL_APP_ID", "")
         modal_app_url = modal_app_url or modal_app_dashboard_url(modal_app_id)
+
         await asyncio.gather(
             hf_cache_volume.reload.aio(),
             data_volume.reload.aio(),
@@ -610,47 +611,85 @@ def build_slime_app(
             )
             print(f"Command: {cmd}, runtime_env: {runtime_env}")
 
-            async with cluster.forward_dashboard() as tunnel:
-                print(f"Ray dashboard: {tunnel.url}")
-                await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
+            _convert_procs: list[tuple[str, subprocess.Popen]] = []
+            _converted: set[str] = set()
+            _hf_path: str | None = None
 
-            if model and slime.megatron_to_hf_mode == "bridge":
-                from huggingface_hub import snapshot_download as _snap
+            def _resolve_hf_path() -> str:
+                nonlocal _hf_path
+                if _hf_path is None:
+                    from huggingface_hub import snapshot_download as _snap
 
-                hf_path = (
-                    str(model.model_path)
-                    if model.model_path
-                    else _snap(model.model_name, local_files_only=True)
-                )
-                prefix = _get_slime_checkpoint_prefix()
-                ckpt_dirs = (
-                    sorted(
-                        (
-                            d
-                            for d in os.scandir(save_root)
-                            if d.is_dir()
-                            and d.name.startswith(prefix)
-                            and not d.name.endswith("_hf")
-                        ),
-                        key=lambda d: d.name,
+                    _hf_path = (
+                        str(model.model_path)
+                        if model.model_path
+                        else _snap(model.model_name, local_files_only=True)
                     )
-                    if prefix
-                    else []
-                )
+                return _hf_path
 
-                for entry in ckpt_dirs:
-                    hf_dir = f"{entry.path}_hf"
-                    if not os.path.exists(hf_dir):
-                        cmd = (
+            def _start_conversions() -> None:
+                """Scan for new complete checkpoints and start converting them."""
+                if not (model and slime.megatron_to_hf_mode == "bridge"):
+                    return
+                prefix = _get_slime_checkpoint_prefix()
+                if not prefix:
+                    return
+                tracker = os.path.join(save_root, "latest_checkpointed_iteration.txt")
+                try:
+                    with open(tracker) as f:
+                        latest = int(f.read().strip())
+                except (OSError, ValueError):
+                    return
+                for entry in os.scandir(save_root):
+                    if (
+                        entry.is_dir()
+                        and entry.name.startswith(prefix)
+                        and not entry.name.endswith("_hf")
+                        and entry.name not in _converted
+                    ):
+                        iter_num = entry.name.replace(prefix, "").lstrip("_")
+                        if not iter_num.isdigit() or int(iter_num) > latest:
+                            continue
+                        hf_dir = f"{entry.path}_hf"
+                        if os.path.exists(hf_dir):
+                            _converted.add(entry.name)
+                            continue
+                        hf_path = _resolve_hf_path()
+                        convert_cmd = (
                             f"python {SLIME_ROOT}/tools/convert_torch_dist_to_hf.py "
                             f"--input-dir {shlex.quote(entry.path)} "
                             f"--output-dir {shlex.quote(hf_dir)} "
                             f"--origin-hf-dir {shlex.quote(hf_path)} "
                             f"--force"
                         )
-                        print(f"Converting {entry.name} → HF: {cmd}")
-                        subprocess.run(["bash", "-c", cmd], check=True)
-                        print(f"Converted {entry.name} → {hf_dir}")
+                        print(f"[bg-convert] Starting: {entry.name} → HF")
+                        proc = subprocess.Popen(["bash", "-c", convert_cmd])
+                        _convert_procs.append((entry.name, proc))
+                        _converted.add(entry.name)
+
+            async def _background_converter():
+                while not _stop_converter.is_set():
+                    _start_conversions()
+                    await asyncio.sleep(15)
+
+            _stop_converter = asyncio.Event()
+            converter_task = asyncio.ensure_future(_background_converter())
+
+            async with cluster.forward_dashboard() as tunnel:
+                print(f"Ray dashboard: {tunnel.url}")
+                await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
+
+            _stop_converter.set()
+            await converter_task
+            _start_conversions()
+
+            for name, proc in _convert_procs:
+                proc.wait()
+                if proc.returncode != 0:
+                    raise RuntimeError(
+                        f"Checkpoint conversion failed for {name} (exit {proc.returncode})"
+                    )
+                print(f"[bg-convert] Converted {name}")
 
             result_kwargs = {
                 "app_name": app_name,
