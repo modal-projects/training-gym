@@ -150,11 +150,10 @@ def main() -> None:
 
     # ── 3. Train with SlimeRecipe (validates GRPO on 30B MoE) ────────────
     #
-    # Qwen3-30B-A3B is MoE (128 experts, top-8). Config mirrors Qwen3_32b_Recipe:
-    #   - TP4 on 1×8×H100 (30B total params needs 4-way tensor parallelism)
-    #   - rollout_num_gpus_per_engine=4 to match TP
-    #   - colocate=True to share GPUs between training and rollout
-    #   - num_rollout=1 for single rollout engine
+    # Qwen3-30B-A3B is MoE (128 experts, top-8).
+    # colocate=False: 30B MoE needs dedicated training GPUs — the 128 expert
+    # parameters + optimizer states exceed GPU capacity when sharing with SGLang.
+    # Uses 2×8×H100 (8 for training TP4, 4+ for rollout).
     print("=" * 60)
     print("STEP 3: Training Qwen3-30B-A3B with SlimeRecipe (GRPO)")
     print("=" * 60)
@@ -165,7 +164,7 @@ def main() -> None:
         recipe=SlimeRecipe(
             custom_rm_function=haiku_rm,
             gpu_type="H100",
-            colocate=True,
+            colocate=False,
             tensor_model_parallel_size=4,
             sequence_parallel=True,
             rollout_num_gpus_per_engine=4,
@@ -173,13 +172,12 @@ def main() -> None:
             rollout_batch_size=4,
             rollout_max_response_len=4096,
             rollout_temperature=1.0,
-            sglang_mem_fraction_static=0.50,
+            sglang_mem_fraction_static=0.75,
             save_interval=5,
             n_samples_per_prompt=8,
             lr=5e-7,
-            max_tokens_per_gpu=2048,
+            max_tokens_per_gpu=4096,
             apply_chat_template_kwargs='{"enable_thinking": false}',
-            extra_config={"train_memory_margin_bytes": 536870912},
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp nltk>=3.8.0",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
