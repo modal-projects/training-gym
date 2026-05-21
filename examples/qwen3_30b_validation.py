@@ -173,11 +173,11 @@ def main() -> None:
             rollout_batch_size=4,
             rollout_max_response_len=4096,
             rollout_temperature=1.0,
-            sglang_mem_fraction_static=0.65,
+            sglang_mem_fraction_static=0.50,
             save_interval=5,
             n_samples_per_prompt=8,
             lr=5e-7,
-            max_tokens_per_gpu=4096,
+            max_tokens_per_gpu=2048,
             apply_chat_template_kwargs='{"enable_thinking": false}',
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp nltk>=3.8.0",
