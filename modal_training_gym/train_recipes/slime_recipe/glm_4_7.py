@@ -9,8 +9,13 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 def _glm_image_overlay(image: modal.Image) -> modal.Image:
     return image.run_commands(
-        "uv pip install --system tiktoken sentencepiece",
-        "uv pip install --system --no-deps 'tokenizers>=0.22,<0.24'",
+        # GLM-4.7 tokenizer.json is incompatible with the bundled tokenizers
+        # library, so we patch load_tokenizer to skip the fast-tokenizer path.
+        "sed -i"
+        " 's/AutoTokenizer.from_pretrained(name_or_path,"
+        " \\*\\*kwargs)/AutoTokenizer.from_pretrained(name_or_path,"
+        " use_fast=False, **kwargs)/'"
+        " /root/slime/slime/utils/processing_utils.py",
     )
 
 
