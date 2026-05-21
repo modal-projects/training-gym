@@ -34,10 +34,10 @@ def _glm_image_overlay(image: modal.Image) -> modal.Image:
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class GLM_4_7_Recipe(SlimeRecipe):
-    """GLM-4.7 (355B-A32B MoE) on 8x8xH200, colocated GSPO."""
+    """GLM-4.7 (355B-A32B MoE) on 8x8xB200, colocated GSPO."""
 
     image_overlay: Callable[[modal.Image], modal.Image] | None = _glm_image_overlay
-    gpu_type: str = "H200"
+    gpu_type: str = "B200"
     colocate: bool = True
     tensor_model_parallel_size: int = 8
     sequence_parallel: bool = True
