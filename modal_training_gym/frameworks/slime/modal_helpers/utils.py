@@ -2,6 +2,7 @@
 
 import os
 import shlex
+from os import PathLike
 
 # (attr_name_on_slime_cfg, cli_flag) — optional per-rank conversion args
 _CONVERSION_EXTRA_ARGS = [
@@ -10,6 +11,26 @@ _CONVERSION_EXTRA_ARGS = [
     ("mtp_num_layers", "mtp-num-layers"),
     ("make_vocab_size_divisible_by", "make-vocab-size-divisible-by"),
 ]
+
+
+def is_local_checkpoint_ref(ref: str | PathLike) -> bool:
+    """Return True when a checkpoint ref is already a mounted local path."""
+    return str(ref).startswith("/")
+
+
+def resolve_checkpoint_ref(
+    ref: str | PathLike,
+    *,
+    local_files_only: bool = True,
+) -> str:
+    """Resolve an absolute path or Hugging Face repo ID to a local path."""
+    ref_str = str(ref)
+    if is_local_checkpoint_ref(ref_str):
+        return ref_str
+
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(ref_str, local_files_only=local_files_only)
 
 
 def get_checkpoint_conversion_policy(
@@ -171,7 +192,6 @@ def get_modal_cluster_context(n_nodes: int) -> tuple[int, str, str, int]:
 
 def prepare_slime_config(slime_cfg, model, tmpdir: str) -> None:
     """Resolve HF repo IDs to local paths and materialize inline YAML configs."""
-    from huggingface_hub import snapshot_download
     import yaml
 
     from modal_training_gym.train_recipes.slime_recipe.recipe import YAML_CONFIG_FIELDS
@@ -182,13 +202,11 @@ def prepare_slime_config(slime_cfg, model, tmpdir: str) -> None:
         and model.model_name
         and not str(model.model_name).startswith("/")
     ):
-        model.model_path = snapshot_download(model.model_name, local_files_only=True)
+        model.model_path = resolve_checkpoint_ref(model.model_name)
 
-    for attr in ("ref_load", "critic_load"):
+    for attr in ("load", "ref_load", "critic_load"):
         if (val := getattr(slime_cfg, attr, None)) and not str(val).startswith("/"):
-            object.__setattr__(
-                slime_cfg, attr, snapshot_download(val, local_files_only=True)
-            )
+            object.__setattr__(slime_cfg, attr, resolve_checkpoint_ref(val))
 
     for field in YAML_CONFIG_FIELDS:
         if isinstance(val := getattr(slime_cfg, field, None), dict):
@@ -200,8 +218,15 @@ def prepare_slime_config(slime_cfg, model, tmpdir: str) -> None:
 
 
 def build_train_cmd(slime_cfg, slime_root: str, model=None, dataset=None) -> str:
-    """Build the Ray job entrypoint."""
+    """Build the Ray job entrypoint, sourcing model arch args if needed."""
     train_script = (
         f"{slime_root}/{'train_async.py' if slime_cfg.async_mode else 'train.py'}"
     )
-    return f"python3 {train_script} {shlex.join(slime_cfg.cli_args(dataset=dataset, model=model))}"
+    args = shlex.join(slime_cfg.cli_args(dataset=dataset, model=model))
+    if getattr(slime_cfg, "slime_model_script", ""):
+        inner = (
+            f"source {slime_root}/{slime_cfg.slime_model_script} && "
+            f"python3 {train_script} ${{MODEL_ARGS[@]}} {args}"
+        )
+        return f"bash -c {shlex.quote(inner)}"
+    return f"python3 {train_script} {args}"

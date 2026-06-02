@@ -1,6 +1,6 @@
 # Models
 
-Built-in `ModelConfig` presets shipped with Training Gym (Qwen3 family, etc.).
+Built-in `ModelConfig` presets shipped with Training Gym (Qwen3 family, Kimi, etc.).
 Each preset declares its HuggingFace repo, tokenizer config, and framework-
 specific training presets (e.g. `SlimePreset`) with tuned parallelism and GPU
 defaults that framework configs apply during `__post_init__`.

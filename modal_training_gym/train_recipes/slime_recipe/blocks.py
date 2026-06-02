@@ -31,7 +31,7 @@ class MultiTurn:
         if self.max_turns is not None and self.max_turns < 1:
             raise ValueError("max_turns must be >= 1")
 
-        custom_config = dict(recipe.custom_config_path or {})
+        custom_config = dict(recipe.extra_config or {})
         if self.max_turns is not None:
             custom_config["max_turns"] = int(self.max_turns)
         if self.log_multi_turn is not None:
@@ -40,7 +40,7 @@ class MultiTurn:
 
         overrides: dict[str, Any] = {
             "custom_generate_function": self.generate_function,
-            "custom_config_path": custom_config,
+            "extra_config": custom_config,
         }
         if self.reward_function is not None:
             overrides["custom_rm_function"] = self.reward_function

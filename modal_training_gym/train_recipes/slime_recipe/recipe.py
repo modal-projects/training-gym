@@ -1,3 +1,4 @@
+import json
 import math
 import os
 from collections.abc import Callable
@@ -35,15 +36,26 @@ _SLIME_SKIP = {
     "app_tags",
     "image_overlay",
     "local_slime",
+    "memory",
+    "cloud",
+    "region",
     "checkpoint",
     "custom_rm_function",
     "custom_generate_function",
     "rollout_function",
     "custom_megatron_before_train_step_hook",
     "sglang_request_params",
+    "slime_model_script",
+    "source_hf_checkpoint",
+    "megatron_conversion_hf_checkpoint",
+    "patch_files",
+    "image_run_commands",
+    "image_env",
+    "train_function_kwargs",
 }
 
 YAML_CONFIG_FIELDS = ("eval_config", "extra_config", "sglang_config")
+JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimodal_keys")
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
@@ -83,6 +95,16 @@ class SlimeRecipe(BaseTrainRecipe):
     wandb: WandbConfig | None = None
     image_overlay: Callable[[modal.Image], modal.Image] | None = None
     local_slime: str | None = None
+    memory: int | tuple[int, int] | None = None
+    cloud: str | None = None
+    region: str | None = None
+    slime_model_script: str = ""
+    source_hf_checkpoint: str | None = None
+    megatron_conversion_hf_checkpoint: str | None = None
+    patch_files: list[str] = field(default_factory=list)
+    image_run_commands: list[str] = field(default_factory=list)
+    image_env: dict[str, str] = field(default_factory=dict)
+    train_function_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # ── Cluster and parallelism (optional) ─────────────────────────────────
     actor_num_nodes: int = 1
@@ -165,7 +187,9 @@ class SlimeRecipe(BaseTrainRecipe):
     extra_config: dict | None = None
     sglang_config: dict | None = None
     sglang_request_params: dict | None = None
-    apply_chat_template_kwargs: str = ""
+    apply_chat_template_kwargs: dict | str = ""
+    train_env_vars: dict | str | None = None
+    multimodal_keys: dict | str | None = None
 
     # ── Validators ───────────────────────────────────────────────────────────
 
@@ -387,6 +411,8 @@ class SlimeRecipe(BaseTrainRecipe):
             flag = f"--{key.replace('_', '-')}"
             if val is True:
                 out.append(flag)
+            elif isinstance(val, dict) and key in JSON_CONFIG_FIELDS:
+                out += [flag, json.dumps(val)]
             elif isinstance(val, list):
                 out += [flag] + [str(v) for v in val]
             else:

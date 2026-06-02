@@ -1019,7 +1019,7 @@ requires-dist = [
     { name = "cloudpickle" },
     { name = "datasets" },
     { name = "fastapi" },
-    { name = "modal" },
+    { name = "modal", specifier = ">=1.4.0" },
     { name = "msgspec" },
     { name = "openai" },
     { name = "pydantic" },
