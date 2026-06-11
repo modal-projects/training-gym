@@ -490,7 +490,14 @@ class TrainConfig:
             flush as flush_status_reporter,
         )
 
+        from modal_training_gym.setup import ensure_dashboard_deployed
+
         training_run_id = self.training_run_id
+
+        # Auto-provision the observability dashboard the first time anyone
+        # runs a training job. Idempotent and best-effort — a deploy failure
+        # only costs status reporting, not the run itself.
+        ensure_dashboard_deployed()
 
         # Resolve the dashboard URL locally so we can pass it into the
         # container — the toml lives on the user's machine, not in Modal.

@@ -309,8 +309,12 @@ class EvalConfig:
         debug: bool = False,
         max_concurrency: int = 1,
     ) -> EvalResult:
+        from modal_training_gym.setup import ensure_dashboard_deployed
+
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be >= 1")
+
+        ensure_dashboard_deployed()
 
         self.save()
         deployment.wait_until_ready()
