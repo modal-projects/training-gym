@@ -530,13 +530,19 @@ class TrainConfig:
                 )
                 # Initial write is synchronous so the record exists before any
                 # downstream HTTP status updates try to update it.
-                run_record.save()
-                framework_status_token = _secrets.token_urlsafe(32)
-                vol_put(
-                    MetadataStore.FRAMEWORK_STATUS_TOKENS,
-                    training_run_id,
-                    {"token": framework_status_token},
-                )
+                try:
+                    run_record.save()
+                except RuntimeError:
+                    pass
+                try:
+                    framework_status_token = _secrets.token_urlsafe(32)
+                    vol_put(
+                        MetadataStore.FRAMEWORK_STATUS_TOKENS,
+                        training_run_id,
+                        {"token": framework_status_token},
+                    )
+                except RuntimeError:
+                    framework_status_token = ""
                 print(f"TrainingRun recorded: {training_run_id}")
 
                 # Mid-flight status bumps are fire-and-forget HTTP posts to
