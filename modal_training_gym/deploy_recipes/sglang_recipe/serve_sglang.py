@@ -110,7 +110,7 @@ def build_sglang_serve_app(
         include_source=False,
         port=sglang_port,
         exit_grace_period=25,
-        proxy_regions=["us-east"],
+        routing_region="us-east",
         target_concurrency=8,
     )
     class SGLangEndpoint:
