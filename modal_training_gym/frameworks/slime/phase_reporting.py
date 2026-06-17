@@ -38,6 +38,45 @@ CUSTOM_BEFORE_TRAIN_STEP_HOOK_PATH_KEY = (
     "training_gym_custom_megatron_before_train_step_hook_path"
 )
 
+
+def install_base64_log_eliding() -> None:
+    """Elide long base64 blobs from every log message (idempotent, process-wide).
+
+    Multimodal rollouts keep their media as a ``data:...;base64,<...>`` data-URI on
+    the sample prompt (so it can reach the engine and the dashboard player), and
+    slime logs the whole prompt — e.g. ``sglang_rollout.py``'s "Finish rollout:
+    [...]" line dumps megabytes of base64 per rollout. We wrap ``logging.Handler``
+    so any record's formatted message has long base64 runs replaced with
+    ``<elided>`` before it's emitted, no matter which logger/handler produced it
+    (slime/ray configure logging after this runs, so a logger- or handler-level
+    filter would miss them). Text-only runs have no base64, so this is a no-op for
+    them.
+    """
+    import logging
+    import re
+
+    if getattr(logging.Handler, "_tg_base64_elided", False):
+        return
+
+    # Only the payload after ``base64,`` is replaced, so the data-URI scheme stays
+    # readable. 64+ chars avoids touching short legitimately-base64-looking tokens.
+    data_uri_re = re.compile(r"(base64,)[A-Za-z0-9+/=]{64,}")
+    original_handle = logging.Handler.handle
+
+    def handle(self, record: "logging.LogRecord") -> Any:
+        try:
+            message = record.getMessage()
+            if "base64," in message:
+                record.msg = data_uri_re.sub(r"\1<elided>", message)
+                record.args = None
+        except Exception:  # noqa: BLE001 — logging must never raise
+            pass
+        return original_handle(self, record)
+
+    logging.Handler.handle = handle  # type: ignore[method-assign]
+    logging.Handler._tg_base64_elided = True  # type: ignore[attr-defined]
+
+
 # Internal queue entry: each item is {"_url": str, "_timeout": float, **payload}.
 # Status reports use the SLIME_PHASE_REPORT_URL with a short 1s timeout;
 # rollout-data reports derive a /api/training-rollouts URL from the same base
