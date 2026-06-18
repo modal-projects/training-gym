@@ -38,6 +38,12 @@
   // gates the cold-start skeleton.
   let refreshing = $state(false);
   let runsRequestId = 0;
+  // The /runs endpoint reads from a Modal volume that can momentarily list
+  // empty mid-reload, returning a 200 with []. Treat a short run of empty
+  // responses as transient and keep the rows we already have, rather than
+  // flashing "No training runs found yet." and repopulating on the next poll.
+  let consecutiveEmptyRuns = 0;
+  const EMPTY_RUNS_TOLERANCE = 3;
   let evalsRequestId = 0;
   let deploymentsRequestId = 0;
   let hasLoadedEvals = $state(false);
@@ -238,6 +244,18 @@
     try {
       const runs = await fetchWithTimeout(fetchRuns, 30000, "runs");
       if (isStale()) return;
+      // A lone empty response while we already have runs is almost always a
+      // transient backend reload, not a real "all runs gone" — ignore it for a
+      // few polls so the list doesn't flicker. Accept the empty only if it
+      // persists (real reset) or we never had data (genuine cold-empty).
+      if (!runs.length && allRuns.length) {
+        consecutiveEmptyRuns += 1;
+        if (consecutiveEmptyRuns < EMPTY_RUNS_TOLERANCE) {
+          loading = false;
+          return;
+        }
+      }
+      consecutiveEmptyRuns = 0;
       allRuns = runs;
       // Auto-enable newly-seen recipes/statuses without resetting the user's
       // current filter selection on every refresh.
