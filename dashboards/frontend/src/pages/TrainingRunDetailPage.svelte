@@ -7,6 +7,7 @@
   import SampleTimeline from "../components/SampleTimeline.svelte";
   import ConversationView from "../components/ConversationView.svelte";
   import { fetchRunRollouts, fetchRollout } from "../lib/api.js";
+  import { parseAnsi } from "../lib/ansi.js";
 
   let {
     runId,
@@ -25,9 +26,25 @@
     embedded = false,
   } = $props();
 
-  let run = $derived.by(() =>
-    (allRuns || []).find((r) => r.run_id === runId) || null
-  );
+  // `run` is looked up from the parent's `allRuns`, which is replaced wholesale
+  // every 5s by the auto-refresh. A transient poll that doesn't include this
+  // run (pagination, a flaky fetch, the run briefly aging out) would otherwise
+  // flip `run` to null — flashing "Loading run …" and tearing down the live log
+  // stream. Latch the last resolved run instead: only drop to null when the
+  // *runId itself* changes to one we haven't resolved yet.
+  let run = $state(null);
+  let latchedRunId = null; // plain (non-reactive) so the effect doesn't self-trigger
+  $effect(() => {
+    const id = runId;
+    const match = (allRuns || []).find((r) => r.run_id === id) || null;
+    if (match) {
+      run = match; // fresh data for this run
+      latchedRunId = id;
+    } else if (latchedRunId !== id) {
+      run = null; // navigated to a different run we haven't loaded yet
+    }
+    // match == null but we already latched this runId → keep the latched copy.
+  });
 
   // Status as a primitive so effects depending on it don't re-run every time
   // the auto-refresh hands us a new `run` object with the same status (which
@@ -352,7 +369,14 @@
       `/api/runs/${encodeURIComponent(id)}/logs/stream` +
       (qs ? `?${qs}` : "");
 
-    const es = new EventSource(url);
+    let es;
+    try {
+      es = new EventSource(url);
+    } catch (err) {
+      logError = String(err?.message || err || "could not open log stream");
+      logState = "error";
+      return;
+    }
     logState = "streaming";
 
     es.onopen = () => {
@@ -374,7 +398,9 @@
         const ts = payload.ts || Date.now();
         for (const p of parts) {
           if (!p.length) continue;
-          pendingLogLines.push({ id: logSeq++, task_id, line: p, ts });
+          // Parse ANSI color/style codes once at ingestion so the render path
+          // stays cheap (lines are immutable once buffered).
+          pendingLogLines.push({ id: logSeq++, task_id, line: p, ts, segments: parseAnsi(p) });
         }
         if (pendingLogLines.length > LOG_BUFFER_MAX) {
           pendingLogLines = pendingLogLines.slice(-LOG_BUFFER_MAX);
@@ -981,7 +1007,7 @@
           {#each logLines as entry (entry.id)}
             <div class="log-row">
               <span class="log-task">{entry.task_id || ""}</span>
-              <span class="log-line">{entry.line}</span>
+              <span class="log-line">{#each entry.segments as seg, i (i)}<span style={seg.style}>{seg.text}</span>{/each}</span>
             </div>
           {/each}
         </div>
