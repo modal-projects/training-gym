@@ -133,7 +133,6 @@ class TrainResult:
         return str(item.get("training_run_id", ""))
 
     def save(self) -> None:
-        """Persist this result to the shared metadata volume."""
         payload = self._to_dict()
         vol_put(MetadataStore.TRAIN_RESULTS, self.training_run_id, payload)
         vol_upsert_summary_item(
@@ -145,7 +144,6 @@ class TrainResult:
         )
 
     async def save_async(self) -> None:
-        """Async variant of :meth:`save`. Use from inside an event loop."""
         payload = self._to_dict()
         await vol_put_async(MetadataStore.TRAIN_RESULTS, self.training_run_id, payload)
         await vol_upsert_summary_item_async(
@@ -204,7 +202,6 @@ class TrainResult:
         return Volume.from_name(volume_name, create_if_missing=True)
 
     def dashboard_url(self) -> str:
-        """URL for browsing the checkpoints volume in the Modal dashboard."""
         return self.volume().get_dashboard_url()
 
     @property
