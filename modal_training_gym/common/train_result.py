@@ -161,8 +161,6 @@ class TrainResult:
         parsed = dict(d)
         mc = parsed.get("model_config")
         if isinstance(mc, dict):
-            from modal_training_gym.common.models import ModelConfig
-
             parsed["model_config"] = ModelConfig(**mc)
         valid_fields = {f.name for f in fields(TrainResult)}
         unknown = {k: v for k, v in parsed.items() if k not in valid_fields}
