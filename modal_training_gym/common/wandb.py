@@ -79,22 +79,3 @@ def preflight_wandb(wandb_cfg: WandbConfig) -> str:
             "drop wandb= to disable logging."
         ) from exc
     return entity
-
-
-def append_megatron_wandb_args(
-    argv: list[str], wandb: "WandbConfig | None"
-) -> list[str]:
-    """Append Megatron W&B CLI args for a configured run."""
-    if wandb is None:
-        return argv
-
-    argv.append("--use-wandb")
-    if wandb.project:
-        argv.extend(["--wandb-project", wandb.project])
-    if wandb.group:
-        argv.extend(["--wandb-group", wandb.group])
-    if wandb.key:
-        argv.extend(["--wandb-key", wandb.key])
-    if wandb.disable_random_suffix:
-        argv.append("--disable-wandb-random-suffix")
-    return argv

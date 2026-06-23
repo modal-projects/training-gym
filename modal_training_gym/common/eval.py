@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from modal_training_gym.common.dataset import DatasetRow
 from modal_training_gym.common.ids import create_hash
-from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_list, vol_put
+from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_put
 
 from modal_training_gym.common.sample import Sample
 
@@ -55,10 +55,6 @@ class EvalConfigDurable(BaseModel):
     @classmethod
     def from_id(cls, eval_config_id: str) -> "EvalConfigDurable":
         return cls.model_validate(vol_get(MetadataStore.EVAL_CONFIGS, eval_config_id))
-
-    @classmethod
-    def list_configs(cls) -> list["EvalConfigDurable"]:
-        return [cls.model_validate(v) for v in vol_list(MetadataStore.EVAL_CONFIGS)]
 
 
 # An eval row is just a Sample. Kept as an alias for the public API / existing
@@ -191,10 +187,6 @@ class EvalResult(BaseModel):
     @classmethod
     def from_id(cls, eval_id: str) -> "EvalResult":
         return cls.model_validate(vol_get(MetadataStore.EVAL_RESULTS, eval_id))
-
-    @classmethod
-    def list_results(cls) -> list["EvalResult"]:
-        return [cls.model_validate(v) for v in vol_list(MetadataStore.EVAL_RESULTS)]
 
 
 Response = str

@@ -36,15 +36,15 @@ class Checkpoint:
     checkpoints_mount_path: str = ""
 
 
-CheckpointConfig = Checkpoint
-
-
 def list_checkpoints(training_run_id: str) -> list[Checkpoint]:
     result = TrainResult.from_training_run_id(training_run_id)
-    if result.framework in {Framework.SLIME, Framework.SLIME.value}:
-        return _list_checkpoints_for_slime(result)
-    if result.framework in {Framework.MILES, Framework.MILES.value}:
-        return _list_checkpoints_for_slime(result)
+    if result.framework in {
+        Framework.SLIME,
+        Framework.SLIME.value,
+        Framework.MILES,
+        Framework.MILES.value,
+    }:
+        return _list_checkpoints(result)
     raise ValueError(f"Unsupported framework: {result.framework}")
 
 
@@ -68,7 +68,7 @@ def _to_volume_path(checkpoint_dir: str, checkpoints_mount_path: str) -> str:
     return checkpoint_dir_norm.lstrip("/")
 
 
-def _list_checkpoints_for_slime(train_result: "TrainResult") -> list[Checkpoint]:
+def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
     checkpoint_dir = train_result.checkpoint_dir.rstrip("/")
     if not checkpoint_dir:
         return []

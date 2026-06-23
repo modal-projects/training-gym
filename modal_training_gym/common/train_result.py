@@ -54,7 +54,6 @@ from modal_training_gym.common.framework import Framework
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get,
-    vol_list,
     vol_put,
     vol_put_async,
     vol_upsert_summary_item,
@@ -188,21 +187,11 @@ class TrainResult:
     def load(cls, training_run_id: str) -> "TrainResult":
         return cls.from_training_run_id(training_run_id)
 
-    @classmethod
-    def list_results(cls) -> list["TrainResult"]:
-        return [
-            cls(**cls._parse_model_config(r))
-            for r in vol_list(MetadataStore.TRAIN_RESULTS)
-        ]
-
     # ── Volume lookup ────────────────────────────────────────────────────
 
     def volume(self) -> "Volume":
         volume_name = self.checkpoints_volume_name or f"{self.app_name}-checkpoints"
         return Volume.from_name(volume_name, create_if_missing=True)
-
-    def dashboard_url(self) -> str:
-        return self.volume().get_dashboard_url()
 
     @property
     def model(self) -> "ModelConfig":

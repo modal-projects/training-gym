@@ -17,9 +17,7 @@ from pydantic import BaseModel, Field
 from modal_training_gym.common.sample import Sample
 from modal_training_gym.utils.metadata import (
     MetadataStore,
-    vol_get,
     vol_get_summary_items,
-    vol_list,
     vol_put,
     vol_put_async,
     vol_upsert_summary_item,
@@ -62,7 +60,7 @@ class TrainingRolloutResult(BaseModel):
     @property
     def storage_key(self) -> str:
         # One canonical file per (run, rollout). Zero-padded rollout id so
-        # `vol_list` returns them in step order without needing a sort.
+        # listings return them in step order without needing a sort.
         return f"{self.training_run_id}__{self.rollout_id:08d}"
 
     @property
@@ -161,27 +159,6 @@ class TrainingRolloutResult(BaseModel):
             sort_key=self._summary_sort_key,
             reverse=False,
         )
-
-    @classmethod
-    def from_storage_key(cls, key: str) -> "TrainingRolloutResult":
-        return cls.model_validate(vol_get(MetadataStore.TRAINING_ROLLOUTS, key))
-
-    @classmethod
-    def list_for_run(cls, training_run_id: str) -> list["TrainingRolloutResult"]:
-        """All rollouts for one training run, sorted by rollout_id."""
-        items = vol_list(MetadataStore.TRAINING_ROLLOUTS)
-        out: list[TrainingRolloutResult] = []
-        for raw in items:
-            if not isinstance(raw, dict):
-                continue
-            if raw.get("training_run_id") != training_run_id:
-                continue
-            try:
-                out.append(cls.model_validate(raw))
-            except Exception:
-                continue
-        out.sort(key=lambda r: r.rollout_id)
-        return out
 
     @classmethod
     def list_summaries_for_run(cls, training_run_id: str) -> list[dict[str, Any]]:

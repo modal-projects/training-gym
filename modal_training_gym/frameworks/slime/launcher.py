@@ -17,7 +17,6 @@ Then: `uv run modal run <tutorial_file>.py::train`.
 
 import asyncio
 import base64
-import dataclasses as _dc
 import inspect
 import os
 import secrets as _secrets
@@ -250,13 +249,6 @@ def _serialize_slime_params(
     return {
         key: _serialize_slime_param_value(key, value)
         for key, value in recipe._fields(dataset=dataset, model=model).items()
-    }
-
-
-def _serialize_recipe_fields(recipe: SlimeRecipe) -> dict[str, Any]:
-    return {
-        field.name: _serialize_recipe_value(getattr(recipe, field.name))
-        for field in _dc.fields(recipe)
     }
 
 

@@ -17,7 +17,6 @@ from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get,
     vol_get_async,
-    vol_list,
     vol_put,
     vol_put_async,
     vol_upsert_summary_item,
@@ -93,7 +92,3 @@ class TrainingRun(BaseModel):
     async def from_id_async(cls, run_id: str) -> "TrainingRun":
         data = await vol_get_async(MetadataStore.TRAINING_RUNS, run_id)
         return cls.model_validate(data)
-
-    @classmethod
-    def list_runs(cls) -> list["TrainingRun"]:
-        return [cls.model_validate(r) for r in vol_list(MetadataStore.TRAINING_RUNS)]

@@ -34,7 +34,6 @@ from modal.experimental import list_deployed_apps
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get,
-    vol_list,
     vol_put,
     vol_upsert_summary_item,
 )
@@ -367,44 +366,6 @@ class ModelDeployment(BaseModel):
             ),
             reverse=True,
         )
-
-    @property
-    def live_status(self) -> str:
-        """Poll endpoint + Modal API to determine real-time status."""
-        import requests
-
-        try:
-            response = requests.get(
-                f"{self.url}/v1/models",
-                timeout=5,
-                headers=_modal_proxy_auth_headers(),
-            )
-            if response.ok and response.json().get("data"):
-                return DeploymentStatus.READY.value
-        except Exception:
-            pass
-
-        try:
-            apps = list_deployed_apps()
-            if inspect.isawaitable(apps):
-                apps = asyncio.run(apps)
-            for app in apps:
-                if (
-                    app.app_id == self.modal_app_id
-                    or app.name == self.deployment_config.app_name
-                ):
-                    return DeploymentStatus.INITIALIZING.value
-        except Exception:
-            pass
-
-        return DeploymentStatus.INACTIVE.value
-
-    @classmethod
-    def list_deployments(cls) -> dict[str, "ModelDeployment"]:
-        return {
-            d["deployment_id"]: cls.model_validate(d)
-            for d in vol_list(MetadataStore.DEPLOYMENTS)
-        }
 
     def _start_log_tailer(self) -> "threading.Thread | None":
         """Spawn a daemon thread that streams deployed-app logs to stdout.
