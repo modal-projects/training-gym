@@ -1,13 +1,15 @@
 """Drive the real ``save()`` chain to completion without Modal or a GPU.
 
-``TrainingRun.save()`` and ``TrainResult.save()`` are exercised against an
-in-memory ``FakeVolume`` (see ``conftest.py``) so the full serialize-and-write
-path is covered in CI: the payload must stay JSON-serializable, and ``save()``
-must complete even when ``Volume.reload()`` is unavailable.
+``TrainingRun.save()``, ``TrainResult.save()``, and
+``TrainingRolloutResult.save_async()`` are exercised against an in-memory
+``FakeVolume`` (see ``conftest.py``) so the full serialize-and-write path is
+covered in CI: the payload must stay JSON-serializable, and ``save()`` /
+``save_async()`` must complete even when ``Volume.reload()`` is unavailable.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 
@@ -16,6 +18,7 @@ import pytest
 from modal_training_gym.common import run as run_mod
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.train_result import TrainResult
+from modal_training_gym.common.training_rollout import TrainingRolloutResult
 from modal_training_gym.utils.metadata import MetadataStore
 
 
@@ -35,6 +38,26 @@ def test_train_result_save_survives_unmounted_volume(fake_volume, fw):
 
     blob = fake_volume.files[f"{MetadataStore.TRAIN_RESULTS.value}/t2.json"]
     assert json.loads(blob)["framework"] == fw.value
+
+
+def test_rollout_save_async_survives_unmounted_volume(fake_volume):
+    """TrainingRolloutResult.save_async() completes when reload() raises."""
+    asyncio.run(
+        TrainingRolloutResult(
+            training_run_id="t3",
+            rollout_id=0,
+            samples=[{"score": 1.0, "prompt": "p", "response": "r"}],
+        ).save_async()
+    )
+
+    blob = fake_volume.files[
+        f"{MetadataStore.TRAINING_ROLLOUTS.value}/t3__00000000.json"
+    ]
+    assert json.loads(blob)["rollout_id"] == 0
+    summary = fake_volume.files[
+        f"{MetadataStore.TRAINING_ROLLOUTS_SUMMARY.value}/summary.json"
+    ]
+    assert json.loads(summary)["items"][0]["summary_key"] == "t3__00000000"
 
 
 @pytest.mark.parametrize("fw", list(Framework))
