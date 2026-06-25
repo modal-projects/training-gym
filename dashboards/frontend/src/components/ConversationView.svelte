@@ -228,12 +228,19 @@
     return { assistant: "Assistant", user: "User", tool: "Tool Result", system: "System", developer: "Developer" }[role] || role;
   }
 
-  // Resolve turns: prefer structured messages, fall back to response parsing
+  // Resolve turns: prefer structured messages, then multi-turn response
+  // parsing, and finally render a plain single-turn response as one assistant
+  // turn.
   let parsed = $derived.by(() => {
     if (Array.isArray(messages) && messages.length > 0) {
       return messages.map(parseStructuredMessage);
     }
-    return parseFlatResponse(response);
+    const turns = parseFlatResponse(response);
+    if (turns.length) return turns;
+    if (response) {
+      return [parseStructuredMessage({ role: "assistant", content: response })];
+    }
+    return [];
   });
 
   let thinkingOpen = $state({});
