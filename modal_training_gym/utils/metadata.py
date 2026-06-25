@@ -127,6 +127,13 @@ def _safe_reload(vol) -> None:
         pass
 
 
+async def _safe_reload_async(vol) -> None:
+    try:
+        await vol.reload.aio()
+    except RuntimeError:
+        pass
+
+
 def _store_path(store: MetadataStore | str) -> str:
     if isinstance(store, MetadataStore):
         return store.value
@@ -192,7 +199,7 @@ async def vol_get_async(store: MetadataStore | str, key: str) -> dict[str, Any]:
         chunks = [chunk async for chunk in vol.read_file.aio(path)]
         return json.loads(b"".join(chunks))
     except FileNotFoundError:
-        await vol.reload.aio()
+        await _safe_reload_async(vol)
     try:
         chunks = [chunk async for chunk in vol.read_file.aio(path)]
         return json.loads(b"".join(chunks))
@@ -226,7 +233,7 @@ def vol_list(store: MetadataStore | str) -> list[dict[str, Any]]:
 
 async def vol_list_async(store: MetadataStore | str) -> list[dict[str, Any]]:
     vol = _metadata_volume()
-    await vol.reload.aio()
+    await _safe_reload_async(vol)
     results = []
     try:
         async for entry in vol.iterdir.aio(_store_path(store)):
@@ -321,10 +328,7 @@ async def vol_get_summary_items_async(
     payload_key: str = SUMMARY_ITEMS_KEY,
 ) -> list[dict[str, Any]] | None:
     vol = _metadata_volume()
-    try:
-        await vol.reload.aio()
-    except (RuntimeError, Exception):
-        pass
+    await _safe_reload_async(vol)
     try:
         payload = await vol_get_async(store, key)
     except KeyError:
