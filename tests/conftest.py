@@ -10,7 +10,7 @@ from modal_training_gym.utils import metadata
 
 
 class _Method:
-    """A Modal Volume method exposing a sync call and an ``.aio`` async form. """
+    """A Modal Volume method exposing a sync call and an ``.aio`` async form."""
 
     def __init__(self, sync_fn, async_fn):
         self._sync_fn = sync_fn
