@@ -586,6 +586,7 @@ def build_slime_app(
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
         "_modal_framework": "slime",
+        "_modal_model_name": model.model_name,
         **slime.app_tags,
     }
     if slime.wandb is not None:

@@ -251,6 +251,7 @@ def build_miles_app(
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
         "_modal_framework": "miles",
+        "_modal_model_name": model.model_name,
         **miles.app_tags,
     }
     if miles.wandb is not None:
