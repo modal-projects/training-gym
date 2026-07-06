@@ -860,7 +860,7 @@ def report_advantage_distribution(
     loss_masks = rollout_data.get("loss_masks")
     response_lengths = rollout_data.get("response_lengths")
     total_lengths = rollout_data.get("total_lengths")
-    if not advantages or loss_masks is None:
+    if advantages is None or loss_masks is None:
         return
     if response_lengths is None or total_lengths is None:
         return

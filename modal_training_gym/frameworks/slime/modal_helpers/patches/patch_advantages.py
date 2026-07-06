@@ -46,16 +46,13 @@ new = """\
         else:
             _dev = loss_masks[0].device if loss_masks else torch.cuda.current_device()
             from slime.backends.megatron_utils.cp_utils import slice_log_prob_with_cp as _tg_cp_slice
-            _tg_msl = rollout_data.get("max_seq_lens", None)
             kl = [
                 _tg_cp_slice(
                     torch.zeros(rl, dtype=torch.float32, device=_dev),
                     tl,
                     rl,
-                    args.qkv_format,
-                    (_tg_msl[_i] if _tg_msl is not None else None),
                 )
-                for _i, (rl, tl) in enumerate(zip(response_lengths, total_lengths))
+                for rl, tl in zip(response_lengths, total_lengths)
             ]"""
 
 if old in src:
