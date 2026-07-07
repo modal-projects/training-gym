@@ -207,7 +207,7 @@ class _TrainStatusDisplay:
 
             from rich.style import Style
             from rich.text import Text
-            
+
             self._get_console().print(
                 Text.assemble(
                     ("Modal app:", "dim"),
