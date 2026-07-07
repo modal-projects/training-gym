@@ -155,6 +155,7 @@ class _TrainStatusDisplay:
 
     def print_banner(self) -> None:
         from rich.panel import Panel
+        from rich.style import Style
         from rich.table import Table
         from rich.text import Text
 
@@ -173,11 +174,12 @@ class _TrainStatusDisplay:
             base = self.framework_status_url.replace(
                 "/api/framework-status", ""
             ).rstrip("/")
+            run_url = f"{base}/training/{self.run_id}"
             body.add_row(
                 "Dashboard",
                 Text(
-                    f"{base}/training/{self.run_id}",
-                    style="underline blue",
+                    run_url,
+                    style=Style(color="blue", underline=True, link=run_url),
                 ),
             )
         else:
