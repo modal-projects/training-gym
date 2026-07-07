@@ -204,8 +204,16 @@ class _TrainStatusDisplay:
     def set_modal_app_url(self, url: str) -> None:
         if url and url != self._modal_app_url:
             self._modal_app_url = url
+
+            from rich.style import Style
+            from rich.text import Text
+            
             self._get_console().print(
-                f"[dim]Modal app:[/dim] [blue underline]{url}[/blue underline]"
+                Text.assemble(
+                    ("Modal app:", "dim"),
+                    " ",
+                    (url, Style(color="blue", underline=True, link=url)),
+                )
             )
 
     def emit_stage(self, stage: str, detail: str = "") -> None:
