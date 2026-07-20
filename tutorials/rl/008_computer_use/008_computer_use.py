@@ -325,9 +325,9 @@ def _main_impl() -> None:
     #   teaching the decoder to *read out* coordinates from features the ViT already
     #   provides. It's also cheaper — no optimizer state or backward pass for the ViT.
     # - Padded (bshd) batches for the vision encoder
-    # - TP=2 for the 8B model across 8 H100s
+    # - TP=4 for the 8B model across 8 H100s
     # - Short response cap (256 tokens — coordinates are brief)
-    # - Lower SGLang memory fraction (vision tower uses VRAM)
+    # - A high SGLang KV-cache fraction (0.75) for fast colocated rollouts
     #
     # This tutorial runs 15 rollouts as a quick demo. For a more meaningful
     # accuracy gain, increase `num_rollout`.
@@ -345,10 +345,11 @@ def _main_impl() -> None:
             num_rollout=15,
             rollout_batch_size=8,
             n_samples_per_prompt=4,
-            rollout_max_response_len=256,
+            rollout_max_response_len=64,
             global_batch_size=16,
             lr=1e-6,
-            save_interval=10,
+            save_interval=15,
+            no_save_optim=True,
             wandb=WandbConfig(project="computer-use-grounding"),
         ),
     )
