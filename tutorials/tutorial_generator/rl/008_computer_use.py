@@ -399,7 +399,7 @@ def _train_intro():
       provides. It's also cheaper — no optimizer state or backward pass for the ViT.
     - Padded (bshd) batches for the vision encoder
     - TP=4 for the 8B model across 8 H100s
-    - Short response cap (256 tokens — coordinates are brief)
+    - Short response cap (64 tokens — coordinates are brief)
     - A high SGLang KV-cache fraction (0.75) for fast colocated rollouts
 
     This tutorial runs 15 rollouts as a quick demo. For a more meaningful
