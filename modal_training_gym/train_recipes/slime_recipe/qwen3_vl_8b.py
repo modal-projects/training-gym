@@ -14,7 +14,7 @@ class Qwen3_VL_8b_Recipe(SlimeRecipe):
 
     gpu_type: str = "H100"
     colocate: bool = True
-    tensor_model_parallel_size: int = 4
+    tensor_model_parallel_size: int = 2
     sequence_parallel: bool = True
     rollout_num_gpus_per_engine: int = 1
 
@@ -26,7 +26,7 @@ class Qwen3_VL_8b_Recipe(SlimeRecipe):
     n_samples_per_prompt: int = 4
     rollout_max_response_len: int = 256
     rollout_temperature: float = 1.0
-    sglang_mem_fraction_static: float = 0.75
+    sglang_mem_fraction_static: float = 0.55
 
     global_batch_size: int = 16
     lr: float = 1e-6
