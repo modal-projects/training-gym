@@ -326,7 +326,7 @@ def _main_impl() -> None:
     #   provides. It's also cheaper — no optimizer state or backward pass for the ViT.
     # - Padded (bshd) batches for the vision encoder
     # - TP=4 for the 8B model across 8 H100s
-    # - Short response cap (256 tokens — coordinates are brief)
+    # - Short response cap (64 tokens — coordinates are brief)
     # - A high SGLang KV-cache fraction (0.75) for fast colocated rollouts
     #
     # This tutorial runs 15 rollouts as a quick demo. For a more meaningful
@@ -341,11 +341,13 @@ def _main_impl() -> None:
         model=base_model,
         dataset=train_dataset,
         recipe=Qwen3_VL_8b_Recipe(
+            tensor_model_parallel_size=4,
             custom_rm_function=grounding_reward,
             num_rollout=15,
             rollout_batch_size=8,
             n_samples_per_prompt=4,
             rollout_max_response_len=64,
+            sglang_mem_fraction_static=0.75,
             global_batch_size=16,
             lr=1e-6,
             save_interval=15,
