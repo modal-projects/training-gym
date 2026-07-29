@@ -55,6 +55,19 @@ class TimingModel(BaseModel):
         return value
 
 
+class PhaseTimingInterval(TimingModel):
+    started_at_unix_s: float = Field(ge=0)
+    duration_s: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> PhaseTimingInterval:
+        if not all(
+            math.isfinite(value) for value in (self.started_at_unix_s, self.duration_s)
+        ):
+            raise ValueError("timing interval values must be finite")
+        return self
+
+
 class TrainingAttemptStarted(TimingModel):
     schema_version: Literal[1] = SUBSTEP_TIMING_SCHEMA_VERSION
     training_run_id: str = Field(min_length=1)
@@ -81,6 +94,7 @@ class PhaseTiming(TimingModel):
     started_at_unix_s: float = Field(ge=0)
     duration_s: float = Field(ge=0)
     count: int = Field(gt=0)
+    intervals: tuple[PhaseTimingInterval, ...] = ()
 
     @model_validator(mode="after")
     def validate_durations(self) -> PhaseTiming:
@@ -170,25 +184,38 @@ def aggregate_timing_intervals(
             phase_intervals,
             key=lambda interval: interval.started_at_monotonic_s,
         )
-        active_s = 0.0
         range_start = ordered[0].started_at_monotonic_s
         range_end = ordered[0].ended_at_monotonic_s
+        range_start_unix_s = ordered[0].started_at_unix_s
+        merged_intervals: list[PhaseTimingInterval] = []
         for interval in ordered[1:]:
             if interval.started_at_monotonic_s > range_end:
-                active_s += range_end - range_start
+                merged_intervals.append(
+                    PhaseTimingInterval(
+                        started_at_unix_s=range_start_unix_s,
+                        duration_s=range_end - range_start,
+                    )
+                )
                 range_start = interval.started_at_monotonic_s
                 range_end = interval.ended_at_monotonic_s
+                range_start_unix_s = interval.started_at_unix_s
             else:
                 range_end = max(range_end, interval.ended_at_monotonic_s)
-        active_s += range_end - range_start
+        merged_intervals.append(
+            PhaseTimingInterval(
+                started_at_unix_s=range_start_unix_s,
+                duration_s=range_end - range_start,
+            )
+        )
         aggregated.append(
             PhaseTiming(
                 phase=phase,
                 started_at_unix_s=min(
-                    interval.started_at_unix_s for interval in ordered
+                    interval.started_at_unix_s for interval in merged_intervals
                 ),
-                duration_s=active_s,
+                duration_s=sum(interval.duration_s for interval in merged_intervals),
                 count=len(ordered),
+                intervals=tuple(merged_intervals),
             )
         )
     return tuple(sorted(aggregated, key=lambda timing: timing.started_at_unix_s))

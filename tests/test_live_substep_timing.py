@@ -21,6 +21,10 @@ def test_aggregate_timing_intervals_tracks_active_time() -> None:
 
     assert timing.duration_s == 5.0
     assert timing.count == 3
+    assert [
+        (interval.started_at_unix_s, interval.duration_s)
+        for interval in timing.intervals
+    ] == [(10.0, 4.0), (15.0, 1.0)]
 
 
 def test_collector_replaces_a_retried_role_before_step_closes() -> None:

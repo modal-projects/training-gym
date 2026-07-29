@@ -61,6 +61,7 @@
   const MAX_ZOOM = 64;
   const ZOOM_BTN_FACTOR = 1.5;
   const WHEEL_SENSITIVITY = 0.0015;
+  const TIME_TICKS = [0, 0.25, 0.5, 0.75, 1];
 
   const ROLE_ORDER = ["rollout", "driver", "actor", "critic", "step"];
 
@@ -112,15 +113,18 @@
       const st = (stepTimes || {})[k] || null;
       const subs = (substepTimes || {})[k] || {};
       const substeps = Object.entries(subs)
-        .map(([name, v]) => {
+        .flatMap(([name, v]) => {
           const { phase, role } = parseSubstepName(name);
-          return {
-            name,
+          const intervals = v?.intervals?.length
+            ? v.intervals
+            : [{ started_at_unix_s: v?.start, duration_s: v?.duration_s }];
+          return intervals.map((interval, index) => ({
+            name: intervals.length > 1 ? `${name}:${index}` : name,
             phase,
             role,
-            start: v?.start ?? null,
-            duration: v?.duration_s ?? null,
-          };
+            start: interval?.started_at_unix_s ?? null,
+            duration: interval?.duration_s ?? null,
+          }));
         })
         .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
       const roleNames = Array.from(
@@ -193,7 +197,7 @@
         })),
     );
     if (!capturedSubsteps.length) {
-      return { duration: 0, roleLanes: [], stepBands: [] };
+      return { start: 0, duration: 0, roleLanes: [], stepBands: [] };
     }
     const start = Math.min(
       ...capturedSubsteps.map((substep) => Number(substep.start)),
@@ -210,7 +214,7 @@
           ...substep,
           left: Math.max(0, Math.min(100, position(Number(substep.start)))),
           width: Math.max(
-            0.15,
+            0,
             Math.min(
               100 - position(Number(substep.start)),
               (Number(substep.duration) / duration) * 100,
@@ -231,12 +235,12 @@
         return {
           step: step.n,
           left: position(bandStart),
-          width: Math.max(0.15, ((bandEnd - bandStart) / duration) * 100),
+          width: Math.max(0, ((bandEnd - bandStart) / duration) * 100),
           duration: step.duration,
         };
       })
       .filter(Boolean);
-    return { duration, roleLanes, stepBands };
+    return { start, duration, roleLanes, stepBands };
   });
 
   let legend = $derived.by(() => {
@@ -271,7 +275,7 @@
         }
         const left = Math.max(0, Math.min(100, ((substepStart - start) / duration) * 100));
         const width = Math.max(
-          0.4,
+          0,
           Math.min(100 - left, (substepDuration / duration) * 100),
         );
         return { ...substep, left, width };
@@ -475,6 +479,17 @@
           </div>
           <div class="timeline">
             <div class="timeline-head">
+              {#each TIME_TICKS as tick (tick)}
+                <span
+                  class="time-tick"
+                  class:tick-first={tick === 0}
+                  class:tick-last={tick === 1}
+                  style:left={`${tick * 100}%`}
+                  title={new Date(timeline.start * 1000 + timeline.duration * tick * 1000).toISOString()}
+                >
+                  +{fmtSecs(timeline.duration * tick)}
+                </span>
+              {/each}
               {#each timeline.stepBands as band, index (`${band.step}:${band.left}`)}
                 <span
                   class="step-marker"
@@ -488,6 +503,9 @@
               {/each}
             </div>
             <div class="timeline-lanes">
+              {#each TIME_TICKS as tick (tick)}
+                <div class="time-grid-line" style:left={`${tick * 100}%`}></div>
+              {/each}
               {#each timeline.stepBands as band, index (`${band.step}:${band.left}`)}
                 <div
                   class="step-band"
@@ -646,7 +664,6 @@
   .seg {
     position: absolute;
     top: 0;
-    min-width: 2px;
     height: 100%;
     cursor: pointer;
     border-left: 1px solid color-mix(in srgb, #000 35%, transparent);
@@ -750,7 +767,7 @@
   }
 
   .role-axis-head {
-    height: 17px;
+    height: 30px;
   }
 
   .role-axis-label {
@@ -771,15 +788,33 @@
   .timeline-head {
     position: relative;
     box-sizing: border-box;
-    height: 17px;
+    height: 30px;
     overflow: hidden;
     border-bottom: 1px solid var(--border, #2f2f2f);
   }
 
+  .time-tick {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    color: var(--muted);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+    line-height: 13px;
+    white-space: nowrap;
+  }
+
+  .time-tick.tick-first {
+    transform: none;
+  }
+
+  .time-tick.tick-last {
+    transform: translateX(-100%);
+  }
+
   .step-marker {
     position: absolute;
-    top: 1px;
-    transform: translateX(3px);
+    top: 14px;
     color: var(--muted);
     font-size: 9px;
     font-variant-numeric: tabular-nums;
@@ -823,6 +858,14 @@
     z-index: 0;
     border-left: 1px solid;
     border-right: 1px solid;
+  }
+
+  .time-grid-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 0;
+    border-left: 1px solid color-mix(in srgb, var(--muted) 15%, transparent);
   }
 
   .band-even {

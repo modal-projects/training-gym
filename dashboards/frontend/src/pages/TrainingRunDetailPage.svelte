@@ -208,6 +208,7 @@
             start: phase.started_at_unix_s,
             end: phase.started_at_unix_s + phase.duration_s,
             duration_s: phase.duration_s,
+            intervals: phase.intervals || [],
           };
         }
       }
@@ -1451,7 +1452,7 @@
           {/if}
           {#if displayedStepTimes || displayedSubstepTimes}
             <div class="rollout-chart">
-              <div class="rollout-chart-title">Step &amp; substep timeline</div>
+              <div class="rollout-chart-title">Framework activity timeline</div>
               <div class="chart-scroll">
                 <StepTimings
                   stepTimes={displayedStepTimes}
