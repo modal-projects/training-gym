@@ -349,7 +349,7 @@ def vol_list_tree(
     _safe_reload(vol)
     results: list[dict[str, object]] = []
     try:
-        for entry in vol.iterdir(f"{_store_path(store)}/{key}"):
+        for entry in vol.iterdir(f"{_store_path(store)}/{key}", recursive=True):
             if not entry.path.endswith(".json"):
                 continue
             value = json.loads(b"".join(vol.read_file(entry.path)))

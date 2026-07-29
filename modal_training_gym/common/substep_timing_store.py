@@ -130,7 +130,7 @@ def list_attempt_boundaries(
     directory = f"{MetadataStore.TRAINING_ATTEMPTS.value}/{training_run_id}"
     boundaries: list[TrainingAttemptBoundary] = []
     try:
-        for entry in volume.iterdir(directory):
+        for entry in volume.iterdir(directory, recursive=True):
             if not entry.path.endswith("/boundary.json"):
                 continue
             data = b"".join(volume.read_file(entry.path))
@@ -148,7 +148,7 @@ def latest_recorded_attempt(training_run_id: str) -> int:
     directory = f"{MetadataStore.TRAINING_ATTEMPTS.value}/{training_run_id}"
     attempts: list[int] = []
     try:
-        for entry in volume.iterdir(directory):
+        for entry in volume.iterdir(directory, recursive=True):
             if not entry.path.endswith("/started.json"):
                 continue
             data = b"".join(volume.read_file(entry.path))
