@@ -62,20 +62,21 @@
   const ZOOM_BTN_FACTOR = 1.5;
   const WHEEL_SENSITIVITY = 0.0015;
 
-  function labelFor(name) {
+  const ROLE_ORDER = ["rollout", "driver", "actor", "critic", "step"];
+
+  function parseSubstepName(name) {
     const match = name.match(/^(.*) \((.*)\)$/);
-    const phase = match?.[1] || name;
-    const label = SUBSTEP_LABELS[phase] || phase.replace(/_/g, " ");
-    return match ? `${label} (${match[2]})` : label;
+    return {
+      phase: match?.[1] || name,
+      role: match?.[2] || "step",
+    };
   }
 
-  function colorFor(name) {
-    const match = name.match(/^(.*) \((.*)\)$/);
-    const phase = match?.[1] || name;
-    const role = match?.[2] || "";
-    if (role === "actor") return "#34d399";
-    if (role === "critic") return "#a78bfa";
-    if (role === "rollout") return SUBSTEP_COLORS[phase] || "#38bdf8";
+  function labelFor(phase) {
+    return SUBSTEP_LABELS[phase] || phase.replace(/_/g, " ");
+  }
+
+  function colorFor(phase) {
     return SUBSTEP_COLORS[phase] || "#fb923c";
   }
 
@@ -111,17 +112,52 @@
       const st = (stepTimes || {})[k] || null;
       const subs = (substepTimes || {})[k] || {};
       const substeps = Object.entries(subs)
-        .map(([name, v]) => ({
-          name,
-          start: v?.start ?? null,
-          duration: v?.duration_s ?? null,
-        }))
+        .map(([name, v]) => {
+          const { phase, role } = parseSubstepName(name);
+          return {
+            name,
+            phase,
+            role,
+            start: v?.start ?? null,
+            duration: v?.duration_s ?? null,
+          };
+        })
         .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+      const roleNames = Array.from(
+        new Set(substeps.map((substep) => substep.role)),
+      ).sort((a, b) => {
+        const aIndex = ROLE_ORDER.indexOf(a);
+        const bIndex = ROLE_ORDER.indexOf(b);
+        return (aIndex < 0 ? ROLE_ORDER.length : aIndex)
+          - (bIndex < 0 ? ROLE_ORDER.length : bIndex);
+      });
+      const roles = roleNames.map((role) => ({
+        role,
+        substeps: substeps.filter((substep) => substep.role === role),
+      }));
+      const phaseStarts = substeps
+        .map((substep) => Number(substep.start))
+        .filter(Number.isFinite);
+      const phaseEnds = substeps
+        .map((substep) => Number(substep.start) + Number(substep.duration))
+        .filter(Number.isFinite);
+      const timelineStart = phaseStarts.length
+        ? Math.min(...phaseStarts)
+        : st?.start ?? null;
+      const timelineEnd = phaseEnds.length
+        ? Math.max(...phaseEnds)
+        : st?.end ?? null;
       return {
         key: k,
         n: Number.isFinite(Number(k)) ? Number(k) : k,
+        timelineStart,
+        timelineDuration:
+          timelineStart != null && timelineEnd != null
+            ? Math.max(timelineEnd - timelineStart, 0)
+            : st?.duration_s ?? null,
         duration: st?.duration_s ?? null,
         substeps,
+        roles,
       };
     });
     out.sort((a, b) => (Number(a.key) || 0) - (Number(b.key) || 0));
@@ -132,12 +168,10 @@
 
   let legend = $derived.by(() => {
     const seen = new Set();
-    for (const s of steps) for (const sub of s.substeps) seen.add(sub.name);
+    for (const s of steps) for (const sub of s.substeps) seen.add(sub.phase);
     return Array.from(seen).sort((a, b) => {
-      const aPhase = a.replace(/ \([^)]*\)$/, "");
-      const bPhase = b.replace(/ \([^)]*\)$/, "");
-      const aIndex = ORDER.indexOf(aPhase);
-      const bIndex = ORDER.indexOf(bPhase);
+      const aIndex = ORDER.indexOf(a);
+      const bIndex = ORDER.indexOf(b);
       return (aIndex < 0 ? ORDER.length : aIndex)
         - (bIndex < 0 ? ORDER.length : bIndex);
     });
@@ -151,10 +185,51 @@
   let viewport = $state(null);
 
   function stepWeight(step) {
-    const subTotal = step.substeps.reduce((acc, s) => acc + (s.duration ?? 0), 0);
-    if (subTotal > 0) return subTotal;
-    if (step.duration != null && step.duration > 0) return step.duration;
+    if (step.timelineDuration != null && step.timelineDuration > 0) {
+      return step.timelineDuration;
+    }
+    const roleDuration = Math.max(
+      0,
+      ...step.roles.map((role) =>
+        role.substeps.reduce((total, substep) => total + (substep.duration ?? 0), 0),
+      ),
+    );
+    if (roleDuration > 0) return roleDuration;
     return 1;
+  }
+
+  function positionedSubsteps(step, role) {
+    const duration = Number(step.timelineDuration);
+    const start = Number(step.timelineStart);
+    const hasWallClockBounds =
+      Number.isFinite(duration) && duration > 0 && Number.isFinite(start);
+    if (hasWallClockBounds) {
+      return role.substeps.map((substep) => {
+        const substepStart = Number(substep.start);
+        const substepDuration = Number(substep.duration);
+        if (!Number.isFinite(substepStart) || !Number.isFinite(substepDuration)) {
+          return { ...substep, left: 0, width: 2 };
+        }
+        const left = Math.max(0, Math.min(100, ((substepStart - start) / duration) * 100));
+        const width = Math.max(
+          0.4,
+          Math.min(100 - left, (substepDuration / duration) * 100),
+        );
+        return { ...substep, left, width };
+      });
+    }
+    const total = role.substeps.reduce(
+      (sum, substep) => sum + Math.max(Number(substep.duration) || 0, 0),
+      0,
+    );
+    let elapsed = 0;
+    return role.substeps.map((substep) => {
+      const substepDuration = Math.max(Number(substep.duration) || 0, 0);
+      const left = total > 0 ? (elapsed / total) * 100 : 0;
+      const width = total > 0 ? (substepDuration / total) * 100 : 100;
+      elapsed += substepDuration;
+      return { ...substep, left, width };
+    });
   }
 
   function setZoom(next, anchorX = null) {
@@ -192,12 +267,20 @@
   }
 
   function isActive(step, sub) {
-    return tip && tip.step === step.n && tip.name === sub.name;
+    return tip && tip.step === step.n && tip.name === sub.name && tip.role === sub.role;
   }
 
   function showTip(e, step, sub) {
     if (pinned) return;
-    tip = { x: e.clientX, y: e.clientY, step: step.n, name: sub.name, dur: sub.duration };
+    tip = {
+      x: e.clientX,
+      y: e.clientY,
+      step: step.n,
+      name: sub.name,
+      phase: sub.phase,
+      role: sub.role,
+      dur: sub.duration,
+    };
   }
 
   function moveTip(e) {
@@ -218,7 +301,15 @@
       return;
     }
     pinned = true;
-    tip = { x: e.clientX, y: e.clientY, step: step.n, name: sub.name, dur: sub.duration };
+    tip = {
+      x: e.clientX,
+      y: e.clientY,
+      step: step.n,
+      name: sub.name,
+      phase: sub.phase,
+      role: sub.role,
+      dur: sub.duration,
+    };
   }
 
   function clearPin() {
@@ -235,8 +326,9 @@
     class="seg"
     class:seg-null={sub.duration == null}
     class:active={pinned && isActive(step, sub)}
-    style:flex-grow={sub.duration == null ? undefined : Math.max(sub.duration, 0.01)}
-    style:background={sub.duration == null ? undefined : colorFor(sub.name)}
+    style:left={`${sub.left}%`}
+    style:width={`${sub.width}%`}
+    style:background={sub.duration == null ? undefined : colorFor(sub.phase)}
     role="button"
     tabindex="0"
     onmouseenter={(e) => showTip(e, step, sub)}
@@ -257,10 +349,10 @@
     {#if legend.length || layout === "timeline"}
       <div class="legend-row">
         <div class="legend">
-          {#each legend as name (name)}
+          {#each legend as phase (phase)}
             <span class="legend-item">
-              <span class="swatch" style:background={colorFor(name)}></span>
-              {labelFor(name)}
+              <span class="swatch" style:background={colorFor(phase)}></span>
+              {labelFor(phase)}
             </span>
           {/each}
         </div>
@@ -308,16 +400,33 @@
     {#if layout === "timeline"}
       <div class="tl-viewport" bind:this={viewport} use:wheelZoom>
         <div class="tl-track" style:width={`${zoom * 100}%`}>
-          {#each steps as step (step.key)}
-            <div class="tl-step" style:flex-grow={stepWeight(step)}>
+          {#each steps as step, index (step.key)}
+            <div
+              class="tl-step"
+              class:step-even={index % 2 === 0}
+              class:step-odd={index % 2 !== 0}
+              style:flex-grow={stepWeight(step)}
+            >
               <div class="tl-step-head">
                 <span class="tl-step-name">Step {step.n}</span>
-                <span class="tl-step-dur">{fmtSecs(step.duration)}</span>
+                <span class="tl-step-dur">
+                  {fmtSecs(step.duration)}
+                  {#if step.timelineDuration > step.duration * 1.05}
+                    · {fmtSecs(step.timelineDuration)} span
+                  {/if}
+                </span>
               </div>
-              {#if step.substeps.length}
-                <div class="bar tl-bar">
-                  {#each step.substeps as sub (sub.name)}
-                    {@render segment(step, sub)}
+              {#if step.roles.length}
+                <div class="role-lanes">
+                  {#each step.roles as role (role.role)}
+                    <div class="role-lane">
+                      <span class="role-label">{role.role === "step" ? "Timing" : role.role}</span>
+                      <div class="bar tl-bar">
+                        {#each positionedSubsteps(step, role) as sub (sub.name)}
+                          {@render segment(step, sub)}
+                        {/each}
+                      </div>
+                    </div>
                   {/each}
                 </div>
               {:else}
@@ -329,16 +438,28 @@
       </div>
       <div class="tl-hint">Scroll to zoom · shift-scroll or drag the scrollbar to pan</div>
     {:else}
-      {#each steps as step (step.key)}
-        <div class="step-row">
+      {#each steps as step, index (step.key)}
+        <div class="step-row" class:step-even={index % 2 === 0} class:step-odd={index % 2 !== 0}>
           <div class="step-head">
             <span class="step-name">Step {step.n}</span>
-            <span class="step-dur">{fmtSecs(step.duration)}</span>
+            <span class="step-dur">
+              {fmtSecs(step.duration)}
+              {#if step.timelineDuration > step.duration * 1.05}
+                · {fmtSecs(step.timelineDuration)} span
+              {/if}
+            </span>
           </div>
-          {#if step.substeps.length}
-            <div class="bar">
-              {#each step.substeps as sub (sub.name)}
-                {@render segment(step, sub)}
+          {#if step.roles.length}
+            <div class="role-lanes">
+              {#each step.roles as role (role.role)}
+                <div class="role-lane">
+                  <span class="role-label">{role.role === "step" ? "Timing" : role.role}</span>
+                  <div class="bar">
+                    {#each positionedSubsteps(step, role) as sub (sub.name)}
+                      {@render segment(step, sub)}
+                    {/each}
+                  </div>
+                </div>
               {/each}
             </div>
           {:else}
@@ -352,7 +473,7 @@
   {#if tip}
     <div class="tg-tip" class:pinned style:left={`${tip.x}px`} style:top={`${tip.y}px`}>
       <span class="tg-tip-step">Step {tip.step}</span>
-      <span class="tg-tip-name">{labelFor(tip.name)}</span>
+      <span class="tg-tip-name">{labelFor(tip.phase)} ({tip.role})</span>
       <span class="tg-tip-dur">
         {tip.dur == null ? "unknown (report dropped)" : fmtSecs(tip.dur)}
       </span>
@@ -419,6 +540,18 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+    padding: 8px;
+    border-radius: 5px;
+  }
+
+  .step-even {
+    background: color-mix(in srgb, var(--accent, #60a5fa) 5%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--accent, #60a5fa) 20%, transparent);
+  }
+
+  .step-odd {
+    background: color-mix(in srgb, #a78bfa 6%, transparent);
+    border-top: 1px solid color-mix(in srgb, #a78bfa 22%, transparent);
   }
 
   .step-head {
@@ -440,12 +573,12 @@
   }
 
   .bar {
-    display: flex;
+    position: relative;
+    flex: 1;
     height: 14px;
     border-radius: 3px;
     overflow: hidden;
     background: var(--color-c-gray-08, #1c1c1c);
-    gap: 1px;
   }
 
   .bar-empty {
@@ -453,9 +586,12 @@
   }
 
   .seg {
+    position: absolute;
+    top: 0;
     min-width: 2px;
     height: 100%;
     cursor: pointer;
+    border-left: 1px solid color-mix(in srgb, #000 35%, transparent);
     transition: filter 0.1s ease;
   }
 
@@ -471,7 +607,6 @@
 
   /* Dropped substep: visible but doesn't distort the proportional widths. */
   .seg-null {
-    flex: 0 0 16px;
     background: repeating-linear-gradient(
       45deg,
       var(--color-c-gray-20, #3a3a3a),
@@ -550,6 +685,8 @@
     gap: 3px;
     flex-basis: 0;
     overflow: hidden;
+    padding: 4px;
+    border-radius: 4px;
   }
 
   @media (max-width: 900px) {
@@ -579,7 +716,53 @@
   }
 
   .tl-bar {
-    height: 18px;
+    height: 16px;
+  }
+
+  .role-lanes {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .role-lane {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .role-label {
+    flex: 0 0 45px;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 14px;
+    text-align: right;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .tl-step .role-lane {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tl-step .role-label {
+    position: absolute;
+    z-index: 2;
+    width: auto;
+    max-width: calc(100% - 8px);
+    margin-left: 3px;
+    color: rgba(255, 255, 255, 0.82);
+    line-height: 16px;
+    text-align: left;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+    pointer-events: none;
   }
 
   .tl-hint {
