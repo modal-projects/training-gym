@@ -825,7 +825,14 @@ def fastapi_app():
             and update.training_attempt < _current_attempt(run)
         ):
             return JSONResponse({"status": "stale"})
-        if update.timing_protocol == SUBSTEP_TIMING_PROTOCOL:
+        boundary = (
+            update.training_attempt,
+            update.first_rollout_id,
+            update.rollout_id_stop_exclusive,
+        )
+        if update.timing_protocol == SUBSTEP_TIMING_PROTOCOL and all(
+            value is not None for value in boundary
+        ):
             await _store_boundary(
                 update.training_run_id,
                 update.training_attempt,
