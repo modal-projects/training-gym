@@ -43,7 +43,24 @@ from modal_training_gym.common.run_summary import (
     RunSummary,
     build_run_summaries,
 )
-from modal_training_gym.common.training_rollout import TrainingRolloutResult
+from modal_training_gym.common.substep_timing import (
+    SUBSTEP_TIMING_PROTOCOL,
+    SUBSTEP_TIMING_SCHEMA_VERSION,
+    SubstepTiming,
+    SubstepTimingQuery,
+    TrainingAttemptBoundary,
+)
+from modal_training_gym.common.substep_timing_store import (
+    StoredValueConflictError,
+    list_attempt_boundaries,
+    read_substep_timings,
+    store_attempt_boundary,
+    store_substep_timing,
+)
+from modal_training_gym.common.training_rollout import (
+    TrainingRolloutResult,
+    select_rollout_summaries,
+)
 
 SummaryLoader = Callable[[], Awaitable[list[JsonDict]]]
 
@@ -116,6 +133,7 @@ DASHBOARD_PASSWORD_SECRET_NAME = "_training-gym-dashboard-password"
 PASSWORD_EXEMPT_PATHS = frozenset(
     {
         "/api/framework-status",
+        "/api/timing-events",
         "/api/training-rollouts",
         "/api/advantage-distributions",
     }
@@ -743,6 +761,46 @@ def fastapi_app():
                 detail=f"TrainingRun {training_run_id!r} not found",
             )
 
+    def _current_attempt(run: TrainingRun) -> int:
+        try:
+            return int((run.metadata or {}).get("attempt_count") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    async def _store_boundary(
+        training_run_id: str,
+        training_attempt: int | None,
+        first_rollout_id: int | None,
+        rollout_id_stop_exclusive: int | None,
+    ) -> None:
+        values = (
+            training_attempt,
+            first_rollout_id,
+            rollout_id_stop_exclusive,
+        )
+        if all(value is None for value in values):
+            return
+        if any(value is None for value in values):
+            raise HTTPException(
+                status_code=422,
+                detail="Attempt-scoped reports require a complete boundary",
+            )
+        assert training_attempt is not None
+        assert first_rollout_id is not None
+        assert rollout_id_stop_exclusive is not None
+        try:
+            await run_in_threadpool(
+                store_attempt_boundary,
+                TrainingAttemptBoundary(
+                    training_run_id=training_run_id,
+                    training_attempt=training_attempt,
+                    first_rollout_id=first_rollout_id,
+                    rollout_id_stop_exclusive=rollout_id_stop_exclusive,
+                ),
+            )
+        except StoredValueConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
     # ── Training runs ────────────────────────────────────────────────────
 
     @web.get("/api/runs", response_model=list[RunSummary])
@@ -762,6 +820,18 @@ def fastapi_app():
     ):
         run = await _get_run_or_404(update.training_run_id)
         await _require_framework_status_token(update.training_run_id, authorization)
+        if (
+            update.training_attempt is not None
+            and update.training_attempt < _current_attempt(run)
+        ):
+            return JSONResponse({"status": "stale"})
+        if update.timing_protocol == SUBSTEP_TIMING_PROTOCOL:
+            await _store_boundary(
+                update.training_run_id,
+                update.training_attempt,
+                update.first_rollout_id,
+                update.rollout_id_stop_exclusive,
+            )
 
         status = await run_in_threadpool(run.apply_framework_status, update)
         if status is None:
@@ -776,6 +846,43 @@ def fastapi_app():
         invalidate_cache("runs")
         return JSONResponse({"status": "ok", "framework_status": status.value})
 
+    @web.get("/api/timing-events")
+    async def timing_events_capability():
+        return JSONResponse(
+            {
+                "protocol": SUBSTEP_TIMING_PROTOCOL,
+                "schema_version": SUBSTEP_TIMING_SCHEMA_VERSION,
+            }
+        )
+
+    @web.post("/api/timing-events")
+    async def timing_event(
+        timing: SubstepTiming,
+        authorization: str | None = Header(default=None),
+    ):
+        run = await _get_run_or_404(timing.training_run_id)
+        await _require_framework_status_token(timing.training_run_id, authorization)
+        if timing.training_attempt < _current_attempt(run):
+            return JSONResponse({"status": "stale"})
+        try:
+            result = await run_in_threadpool(store_substep_timing, timing)
+        except StoredValueConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        return JSONResponse({"status": result.value})
+
+    @web.post("/api/runs/{training_run_id}/substep-timings/query")
+    async def query_substep_timings(
+        training_run_id: str,
+        query: SubstepTimingQuery,
+    ):
+        await _get_run_or_404(training_run_id)
+        timings = await run_in_threadpool(
+            read_substep_timings,
+            training_run_id,
+            query.keys,
+        )
+        return JSONResponse([timing.model_dump(mode="json") for timing in timings])
+
     # ── Training rollouts ────────────────────────────────────────────────
 
     @web.post("/api/training-rollouts")
@@ -785,10 +892,22 @@ def fastapi_app():
     ):
         run = await _get_run_or_404(result.training_run_id)
         await _require_framework_status_token(result.training_run_id, authorization)
+        if (
+            result.training_attempt is not None
+            and result.training_attempt < _current_attempt(run)
+        ):
+            return JSONResponse({"status": "stale"})
+        await _store_boundary(
+            result.training_run_id,
+            result.training_attempt,
+            result.first_rollout_id,
+            result.rollout_id_stop_exclusive,
+        )
 
         await result.save(is_async=True)
-        run.record_latest_rollout(result)
-        await run.save(is_async=True)
+        if result.training_attempt is None:
+            run.record_latest_rollout(result)
+            await run.save(is_async=True)
         invalidate_cache("runs")
 
         return JSONResponse(
@@ -800,11 +919,30 @@ def fastapi_app():
         summaries = await run_in_threadpool(
             TrainingRolloutResult.list_summaries_for_run, training_run_id
         )
-        return JSONResponse(summaries)
+        boundaries = await run_in_threadpool(list_attempt_boundaries, training_run_id)
+        selected = select_rollout_summaries(
+            summaries,
+            [
+                (
+                    boundary.training_attempt,
+                    boundary.first_rollout_id,
+                    boundary.rollout_id_stop_exclusive,
+                )
+                for boundary in boundaries
+            ],
+        )
+        return JSONResponse(selected)
 
     @web.get("/api/runs/{training_run_id}/rollouts/{rollout_id}")
-    async def get_run_rollout(training_run_id: str, rollout_id: int):
-        key = f"{training_run_id}__{int(rollout_id):08d}"
+    async def get_run_rollout(
+        training_run_id: str,
+        rollout_id: int,
+        training_attempt: int | None = None,
+    ):
+        if training_attempt is None:
+            key = f"{training_run_id}__{int(rollout_id):08d}"
+        else:
+            key = f"{training_run_id}/{training_attempt:08d}/{int(rollout_id):08d}"
         try:
             data = await run_in_threadpool(
                 vol_get, MetadataStore.TRAINING_ROLLOUTS, key

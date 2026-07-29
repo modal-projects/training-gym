@@ -16,6 +16,7 @@ from pydantic import BaseModel, PrivateAttr, computed_field, field_validator
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.status import FrameworkStatus, resolve_framework_status
 from modal_training_gym.common.step_timing import record_step_time_event
+from modal_training_gym.common.substep_timing import SUBSTEP_TIMING_PROTOCOL
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     _step_times_dict,
@@ -51,9 +52,19 @@ class FrameworkStatusUpdate(BaseModel):
     # Client-side timestamp of the event (time.time() in the reporting
     # process); step timings use it so queue/network latency doesn't skew them.
     event_ts: float | None = None
+    training_attempt: int | None = None
+    timing_protocol: str = ""
+    first_rollout_id: int | None = None
+    rollout_id_stop_exclusive: int | None = None
 
     @field_validator(
-        "progress_current", "progress_total", "rollout_id", "step_id", mode="before"
+        "progress_current",
+        "progress_total",
+        "rollout_id",
+        "step_id",
+        "first_rollout_id",
+        "rollout_id_stop_exclusive",
+        mode="before",
     )
     @classmethod
     def _non_negative_int_or_none(cls, value: object) -> int | None:
@@ -64,6 +75,17 @@ class FrameworkStatusUpdate(BaseModel):
         except ValueError:
             return None
         return parsed if parsed >= 0 else None
+
+    @field_validator("training_attempt", mode="before")
+    @classmethod
+    def _positive_int_or_none(cls, value: object) -> int | None:
+        if not isinstance(value, (int, float, str)):
+            return None
+        try:
+            parsed = int(value)
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
 
 
 class TrainingRunStatus(Enum):
@@ -226,15 +248,16 @@ class TrainingRun(BaseModel):
         metadata["framework_progress"] = progress
         self.metadata = metadata
 
-        current_step = progress.get("current")
-        record_step_time_event(
-            cast(MutableMapping[str, Any], _step_times_dict()),
-            self.training_run_id,
-            current_step,
-            status.value,
-            update.step_event.strip(),
-            update.event_ts or time.time(),
-        )
+        if update.timing_protocol != SUBSTEP_TIMING_PROTOCOL:
+            current_step = progress.get("current")
+            record_step_time_event(
+                cast(MutableMapping[str, object], _step_times_dict()),
+                self.training_run_id,
+                current_step,
+                status.value,
+                update.step_event.strip(),
+                update.event_ts or time.time(),
+            )
         return status
 
     def record_latest_rollout(self, rollout: TrainingRolloutResult) -> None:
@@ -360,10 +383,17 @@ def mark_training_attempt_started(
     run: TrainingRun,
     *,
     started_at: int,
+    minimum_previous_attempt: int = 0,
 ) -> int:
     metadata = dict(run.metadata or {})
     try:
-        attempt_count = int(metadata.get("attempt_count") or 0) + 1
+        attempt_count = (
+            max(
+                int(metadata.get("attempt_count") or 0),
+                minimum_previous_attempt,
+            )
+            + 1
+        )
     except (TypeError, ValueError):
         attempt_count = 1
 

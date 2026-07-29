@@ -10,6 +10,7 @@ from modal_training_gym.utils.metadata import (
     vol_get_summary_items,
     vol_put_summary_items,
     vol_remove,
+    vol_remove_tree,
 )
 
 TERMINAL_STATUSES = frozenset({TrainingRunStatus.FAILED, TrainingRunStatus.CANCELLED})
@@ -65,6 +66,13 @@ def cleanup(*, older_than_days: int = 7, dry_run: bool = False) -> None:
         if vol_remove(MetadataStore.TRAINING_RUNS, rid):
             deleted_runs += 1
         vol_remove(MetadataStore.FRAMEWORK_STATUS_TOKENS, rid)
+        for store in (
+            MetadataStore.TRAINING_ROLLOUTS,
+            MetadataStore.TRAINING_ROLLOUTS_SUMMARY,
+            MetadataStore.TRAINING_ATTEMPTS,
+            MetadataStore.SUBSTEP_TIMING,
+        ):
+            vol_remove_tree(store, rid)
         deleted_tokens += 1
 
     rollout_summary = (

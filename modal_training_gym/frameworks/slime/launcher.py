@@ -65,6 +65,11 @@ from modal_training_gym.common.launcher_helpers import (
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.status import SlimeStatus
 from modal_training_gym.common.step_timing import Substep
+from modal_training_gym.common.substep_timing import TrainingAttemptStarted
+from modal_training_gym.common.substep_timing_store import (
+    latest_recorded_attempt,
+    store_attempt_started,
+)
 
 from modal_training_gym.train_recipes.slime_recipe.recipe import (
     CHECKPOINTS_PATH,
@@ -79,6 +84,7 @@ from .modal_helpers.utils import (
     prepare_slime_config,
     resolve_checkpoint_ref,
 )
+from .substep_timing import supports_substep_timing
 from modal_training_gym.common.patches import encode_patch
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.framework import Framework
@@ -127,6 +133,7 @@ _PATCH_QWEN3_VL_TORCH_DIST_B64 = encode_patch(
 _PATCH_ROLLOUT_STATUS_B64 = encode_patch(
     "patch_rollout_status_reporting", _SLIME_PATCHES
 )
+_PATCH_SUBSTEP_TIMING_B64 = encode_patch("patch_substep_timing", _SLIME_PATCHES)
 _PATCH_ADVANTAGE_DIST_B64 = encode_patch("patch_advantage_distribution", _SLIME_PATCHES)
 _PATCH_LOG_ELIDE_B64 = encode_patch("patch_log_elide", _SLIME_PATCHES)
 # Backport of NVIDIA/Megatron-LM #3845: dequantize quantized CUDA tensors in the
@@ -158,6 +165,7 @@ def _build_slime_base_image() -> "Image":
             f"echo {_PATCH_QWEN3_VL_EXPORT_B64} | base64 -d | python3",
             f"echo {_PATCH_QWEN3_VL_TORCH_DIST_B64} | base64 -d | python3",
             f"echo {_PATCH_ROLLOUT_STATUS_B64} | base64 -d | python3",
+            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
             f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
             f"echo {_PATCH_LOG_ELIDE_B64} | base64 -d | python3",
             f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
@@ -1078,6 +1086,18 @@ def build_slime_app(
             "lr": slime.lr,
             "global_batch_size": slime.global_batch_size,
         }
+        substep_timing_enabled = await asyncio.to_thread(
+            supports_substep_timing, framework_status_url
+        )
+        previous_attempt = 0
+        if substep_timing_enabled:
+            try:
+                previous_attempt = await asyncio.to_thread(
+                    latest_recorded_attempt, training_run_id
+                )
+            except Exception:
+                substep_timing_enabled = False
+
         (
             run_record,
             wandb_run_id,
@@ -1092,7 +1112,21 @@ def build_slime_app(
             wandb_cfg=slime.wandb,
             wandb_entity=wandb_entity,
             framework_status_token=framework_status_token,
+            minimum_previous_attempt=previous_attempt,
         )
+        training_attempt = int((run_record.metadata or {}).get("attempt_count") or 1)
+        if substep_timing_enabled:
+            try:
+                await asyncio.to_thread(
+                    store_attempt_started,
+                    TrainingAttemptStarted(
+                        training_run_id=training_run_id,
+                        training_attempt=training_attempt,
+                        started_at_unix_s=time.time(),
+                    ),
+                )
+            except Exception:
+                substep_timing_enabled = False
 
         try:  # Wraps all post-setup work so any failure marks the run terminal.
             # In-flight status updates are fire-and-forget via the dashboard's
@@ -1232,6 +1266,12 @@ def build_slime_app(
                     "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(slime.num_rollout),
+                    "TRAINING_GYM_SUBSTEP_TIMING": (
+                        "1" if substep_timing_enabled else ""
+                    ),
+                    "TRAINING_GYM_TRAINING_ATTEMPT": (
+                        str(training_attempt) if substep_timing_enabled else ""
+                    ),
                     "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
                     "TRAINING_GYM_CAPTURE_TRACE": (
                         "1" if getattr(slime, "capture_trace", False) else ""
@@ -1304,7 +1344,7 @@ def build_slime_app(
             )
 
             step_times_read = False
-            if not slime.async_mode:
+            if not slime.async_mode and not substep_timing_enabled:
                 try:
                     (
                         latest_run_record.step_times,

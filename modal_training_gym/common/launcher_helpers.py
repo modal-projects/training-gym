@@ -237,6 +237,7 @@ async def init_training_run_record(
     wandb_cfg: "WandbConfig | None",
     wandb_entity: str,
     framework_status_token: str,
+    minimum_previous_attempt: int = 0,
 ) -> tuple[Any, str, str]:
     """Create or resume the ``TrainingRun`` record for this attempt and persist
     the framework-status token. Returns
@@ -265,7 +266,9 @@ async def init_training_run_record(
             started_at=created_at,
         )
     attempt_count = mark_training_attempt_started(
-        run_record, started_at=int(time.time())
+        run_record,
+        started_at=int(time.time()),
+        minimum_previous_attempt=minimum_previous_attempt,
     )
     wandb_run_id = ""
     if wandb_cfg is not None:

@@ -18,6 +18,18 @@
     offload_train: "Offload train",
     weight_sync: "Weight sync",
     evaluate_rollouts_end: "Eval (after)",
+    full_step: "Full step",
+    wait_for_rollout: "Wait for rollout",
+    offload_rollout: "Offload rollout",
+    train_models: "Train models",
+    train_model: "Train model",
+    forward_backward: "Forward/backward",
+    training_cleanup: "Training cleanup",
+    wait_for_next_rollout: "Wait for next rollout",
+    custom_reward: "Custom reward",
+    custom_reward_post_process: "Reward post-process",
+    evaluate_rollouts_before: "Eval (before)",
+    evaluate_rollouts_after: "Eval (after)",
   };
 
   const SUBSTEP_COLORS = {
@@ -30,6 +42,17 @@
     checkpoint_save: "#f472b6",
     offload_train: "#c084fc",
     evaluate_rollouts_end: "#818cf8",
+    full_step: "#64748b",
+    wait_for_rollout: "#38bdf8",
+    train_models: "#4ade80",
+    train_model: "#4ade80",
+    forward_backward: "#22c55e",
+    training_cleanup: "#c084fc",
+    wait_for_next_rollout: "#0ea5e9",
+    custom_reward: "#f59e0b",
+    custom_reward_post_process: "#fbbf24",
+    evaluate_rollouts_before: "#60a5fa",
+    evaluate_rollouts_after: "#818cf8",
   };
 
   const ORDER = Object.keys(SUBSTEP_LABELS);
@@ -41,11 +64,20 @@
   const WHEEL_SENSITIVITY = 0.0015;
 
   function labelFor(name) {
-    return SUBSTEP_LABELS[name] || name.replace(/_/g, " ");
+    const match = name.match(/^(.*) \((.*)\)$/);
+    const phase = match?.[1] || name;
+    const label = SUBSTEP_LABELS[phase] || phase.replace(/_/g, " ");
+    return match ? `${label} (${match[2]})` : label;
   }
 
   function colorFor(name) {
-    return SUBSTEP_COLORS[name] || "var(--color-c-gray-40, #5e5e5e)";
+    const match = name.match(/^(.*) \((.*)\)$/);
+    const phase = match?.[1] || name;
+    const role = match?.[2] || "";
+    if (role === "actor") return "#34d399";
+    if (role === "critic") return "#a78bfa";
+    if (role === "rollout") return SUBSTEP_COLORS[phase] || "#38bdf8";
+    return SUBSTEP_COLORS[phase] || "#fb923c";
   }
 
   // Durations are float seconds; keep up to 3 decimals (trailing zeros trimmed).
@@ -102,7 +134,14 @@
   let legend = $derived.by(() => {
     const seen = new Set();
     for (const s of steps) for (const sub of s.substeps) seen.add(sub.name);
-    return ORDER.filter((n) => seen.has(n));
+    return Array.from(seen).sort((a, b) => {
+      const aPhase = a.replace(/ \([^)]*\)$/, "");
+      const bPhase = b.replace(/ \([^)]*\)$/, "");
+      const aIndex = ORDER.indexOf(aPhase);
+      const bIndex = ORDER.indexOf(bPhase);
+      return (aIndex < 0 ? ORDER.length : aIndex)
+        - (bIndex < 0 ? ORDER.length : bIndex);
+    });
   });
 
   let tip = $state(null);

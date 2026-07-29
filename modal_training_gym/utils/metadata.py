@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from enum import Enum
 from functools import partial
 from typing import Any
@@ -21,6 +21,8 @@ class MetadataStore(Enum):
     TRAIN_RESULTS_SUMMARY = "train-results-summary"
     TRAINING_ROLLOUTS = "training-rollouts"
     TRAINING_ROLLOUTS_SUMMARY = "training-rollouts-summary"
+    TRAINING_ATTEMPTS = "training-attempts"
+    SUBSTEP_TIMING = "substep-timing"
     # Per-step, per-group advantage distributions. slime only logs the mean
     # advantage per step; this store keeps the full per-sample distribution so
     # the dashboard can render per-group spread. Written one shard file per
@@ -170,6 +172,22 @@ def vol_remove(store: MetadataStore | str, key: str) -> bool:
         raise
 
 
+def vol_remove_tree(store: MetadataStore | str, key: str) -> bool:
+    from modal.exception import InvalidError, NotFoundError
+
+    vol = _metadata_volume()
+    path = f"{_store_path(store)}/{key}"
+    try:
+        vol.remove_file(path, recursive=True)
+        return True
+    except (FileNotFoundError, NotFoundError):
+        return False
+    except InvalidError as exc:
+        if "No such file or directory" in str(exc):
+            return False
+        raise
+
+
 def vol_put(
     store: MetadataStore | str,
     key: str,
@@ -193,6 +211,33 @@ def vol_put(
         return _run()
     with vol.batch_upload(force=True) as batch:
         batch.put_file(io.BytesIO(data), path)
+
+
+def vol_put_items(
+    items: list[tuple[MetadataStore | str, str, Mapping[str, object]]],
+    *,
+    is_async: bool = False,
+) -> None | Awaitable[None]:
+    vol = _metadata_volume()
+    uploads = [
+        (
+            json.dumps(value).encode(),
+            f"{_store_path(store)}/{key}.json",
+        )
+        for store, key, value in items
+    ]
+    if is_async:
+
+        async def _run() -> None:
+            async with vol.batch_upload(force=True) as batch:
+                for data, path in uploads:
+                    batch.put_file(io.BytesIO(data), path)
+
+        return _run()
+    with vol.batch_upload(force=True) as batch:
+        for data, path in uploads:
+            batch.put_file(io.BytesIO(data), path)
+    return None
 
 
 def vol_get(
@@ -289,6 +334,27 @@ def vol_list_prefix(store: MetadataStore | str, prefix: str) -> list[dict[str, A
             if not name.startswith(prefix):
                 continue
             results.append(json.loads(b"".join(vol.read_file(entry.path))))
+    except (FileNotFoundError, NotFoundError):
+        return results
+    return results
+
+
+def vol_list_tree(
+    store: MetadataStore | str,
+    key: str,
+) -> list[dict[str, object]]:
+    from modal.exception import NotFoundError
+
+    vol = _metadata_volume()
+    _safe_reload(vol)
+    results: list[dict[str, object]] = []
+    try:
+        for entry in vol.iterdir(f"{_store_path(store)}/{key}"):
+            if not entry.path.endswith(".json"):
+                continue
+            value = json.loads(b"".join(vol.read_file(entry.path)))
+            if isinstance(value, dict):
+                results.append(value)
     except (FileNotFoundError, NotFoundError):
         return results
     return results
@@ -528,11 +594,14 @@ __all__ = [
     "vol_get",
     "vol_list",
     "vol_list_prefix",
+    "vol_list_tree",
     "vol_count_items",
     "compact_summary_store",
     "vol_get_summary_items_healed",
     "vol_put",
+    "vol_put_items",
     "vol_remove",
+    "vol_remove_tree",
     "vol_get_summary_items",
     "vol_put_summary_items",
     "vol_put_with_summary",

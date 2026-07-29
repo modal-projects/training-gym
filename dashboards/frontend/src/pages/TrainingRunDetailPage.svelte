@@ -21,6 +21,7 @@
     fetchRunAdvantages,
     fetchRunAdvantageStep,
     fetchRunLogs,
+    fetchSubstepTimings,
   } from "../lib/api.js";
 
   // Number of historical log lines requested per page.
@@ -136,8 +137,8 @@
   // Map a rollout to its step timing. Step keys are 1-indexed; rollout ids are
   // 0-indexed, so step N corresponds to rollout N-1 (fall back to a direct match).
   function stepTimingForRollout(rolloutId) {
-    const st = run?.step_times || null;
-    const sub = run?.substep_times || null;
+    const st = displayedStepTimes;
+    const sub = displayedSubstepTimes;
     if (!st && !sub) return null;
     const candidates = [String(Number(rolloutId) + 1), String(rolloutId)];
     const key = candidates.find((k) => (st && st[k]) || (sub && sub[k]));
@@ -165,11 +166,98 @@
 
   // ── Rollouts (auto-refresh while run is running) ─────────────────────
   let rolloutSummaries = $state([]);
+  let substepTimingByAttemptAndRollout = $state({});
+  let rolloutLoadVersion = 0;
   let rolloutsLoading = $state(false);
   let rolloutsError = $state("");
   let expandedRolloutId = $state(null);
+  let expandedRolloutAttempt = $state(null);
   let expandedRollout = $state(null);
   let expandedRolloutLoading = $state(false);
+  let liveStepTimes = $derived.by(() => {
+    const steps = {};
+    for (const rollout of rolloutSummaries) {
+      const timing =
+        substepTimingByAttemptAndRollout[
+          `${rollout.training_attempt}:${rollout.rollout_id}`
+        ];
+      if (!timing) continue;
+      const key = String(Number(rollout.rollout_id) + 1);
+      steps[key] = {
+        start: timing.started_at_unix_s,
+        end: timing.started_at_unix_s + timing.duration_s,
+        duration_s: timing.duration_s,
+      };
+    }
+    return steps;
+  });
+  let liveSubstepTimes = $derived.by(() => {
+    const steps = {};
+    for (const rollout of rolloutSummaries) {
+      const timing =
+        substepTimingByAttemptAndRollout[
+          `${rollout.training_attempt}:${rollout.rollout_id}`
+        ];
+      if (!timing) continue;
+      const phases = {};
+      for (const role of timing.roles || []) {
+        for (const phase of role.phases || []) {
+          if (phase.phase === "full_step") continue;
+          phases[`${phase.phase} (${role.role})`] = {
+            start: phase.started_at_unix_s,
+            end: phase.started_at_unix_s + phase.duration_s,
+            duration_s: phase.duration_s,
+          };
+        }
+      }
+      steps[String(Number(rollout.rollout_id) + 1)] = phases;
+    }
+    return steps;
+  });
+  let visibleLegacyTimingKeys = $derived.by(() => {
+    const hasAttemptScopedRollouts = rolloutSummaries.some(
+      (rollout) => rollout.training_attempt != null,
+    );
+    const retryHasNoVisibleRollouts =
+      rolloutSummaries.length === 0 &&
+      Number(run?.resume_state?.attempt_count) > 1;
+    if (!hasAttemptScopedRollouts && !retryHasNoVisibleRollouts) return null;
+    const keys = new Set();
+    for (const rollout of rolloutSummaries) {
+      if (rollout.training_attempt != null) continue;
+      const nextKey = String(Number(rollout.rollout_id) + 1);
+      const directKey = String(rollout.rollout_id);
+      if (run?.step_times?.[nextKey] || run?.substep_times?.[nextKey]) {
+        keys.add(nextKey);
+      } else if (
+        run?.step_times?.[directKey] ||
+        run?.substep_times?.[directKey]
+      ) {
+        keys.add(directKey);
+      }
+    }
+    return keys;
+  });
+  let displayedStepTimes = $derived.by(() => {
+    const legacy = Object.fromEntries(
+      Object.entries(run?.step_times || {}).filter(
+        ([key]) =>
+          visibleLegacyTimingKeys === null || visibleLegacyTimingKeys.has(key),
+      ),
+    );
+    const merged = { ...legacy, ...liveStepTimes };
+    return Object.keys(merged).length ? merged : null;
+  });
+  let displayedSubstepTimes = $derived.by(() => {
+    const legacy = Object.fromEntries(
+      Object.entries(run?.substep_times || {}).filter(
+        ([key]) =>
+          visibleLegacyTimingKeys === null || visibleLegacyTimingKeys.has(key),
+      ),
+    );
+    const merged = { ...legacy, ...liveSubstepTimes };
+    return Object.keys(merged).length ? merged : null;
+  });
   const rolloutColumns = [
     { key: "step", label: "Step", width: 72, minWidth: 56 },
     { key: "mean", label: "Mean reward", width: 118, minWidth: 96 },
@@ -319,11 +407,60 @@
 
   async function loadRollouts(signal) {
     if (!runId) return;
+    const loadVersion = ++rolloutLoadVersion;
     try {
       const wasEmpty = rolloutSummaries.length === 0;
       const rows = await fetchRunRollouts(runId, { signal });
-      if (signal?.aborted) return;
+      if (signal?.aborted || loadVersion !== rolloutLoadVersion) return;
       rolloutSummaries = rows;
+      if (expandedRolloutId !== null) {
+        const selected = rows.find(
+          (row) => row.rollout_id === expandedRolloutId,
+        );
+        if (!selected) {
+          expandedRolloutId = null;
+          expandedRolloutAttempt = null;
+          expandedRollout = null;
+        } else if (
+          (selected.training_attempt ?? null) !== expandedRolloutAttempt
+        ) {
+          void loadExpandedRollout(
+            expandedRolloutId,
+            selected.training_attempt,
+          );
+        }
+      }
+      const missing = rows
+        .filter((row) => row.training_attempt != null)
+        .filter(
+          (row) =>
+            !substepTimingByAttemptAndRollout[
+              `${row.training_attempt}:${row.rollout_id}`
+            ],
+        )
+        .map((row) => ({
+          training_attempt: row.training_attempt,
+          rollout_id: row.rollout_id,
+        }));
+      for (let offset = 0; offset < missing.length; offset += 512) {
+        const timings = await fetchSubstepTimings(
+          runId,
+          missing.slice(offset, offset + 512),
+          { signal },
+        );
+        if (signal?.aborted || loadVersion !== rolloutLoadVersion) return;
+        if (timings.length) {
+          substepTimingByAttemptAndRollout = {
+            ...substepTimingByAttemptAndRollout,
+            ...Object.fromEntries(
+              timings.map((timing) => [
+                `${timing.training_attempt}:${timing.rollout_id}`,
+                timing,
+              ]),
+            ),
+          };
+        }
+      }
       rolloutsError = "";
 
       // Reveal the first rollout
@@ -331,13 +468,13 @@
         toggleRolloutDetail(rolloutSummaries[0].rollout_id);
       }
     } catch (err) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || loadVersion !== rolloutLoadVersion) return;
       // Keep the rollouts we already have on a transient poll failure — only
       // surface the error when there's nothing to show, so the charts/table
       // don't flip to an error message (and back) every flaky 5s poll.
       if (!rolloutSummaries.length) rolloutsError = String(err?.message || err);
     } finally {
-      rolloutsLoading = false;
+      if (loadVersion === rolloutLoadVersion) rolloutsLoading = false;
     }
   }
 
@@ -357,9 +494,12 @@
   // so flipping between the summary/rollouts tabs doesn't clear what's loaded).
   $effect(() => {
     runId;
+    rolloutLoadVersion += 1;
     rolloutSummaries = [];
+    substepTimingByAttemptAndRollout = {};
     rolloutsError = "";
     expandedRolloutId = null;
+    expandedRolloutAttempt = null;
     expandedRollout = null;
     advantageSteps = [];
     closeBucket();
@@ -413,25 +553,40 @@
     if (!runId) return;
     if (expandedRolloutId === rolloutId) {
       expandedRolloutId = null;
+      expandedRolloutAttempt = null;
       expandedRollout = null;
       closeBucket();
       return;
     }
     expandedRolloutId = rolloutId;
+    const summary = rolloutSummaries.find(
+      (rollout) => rollout.rollout_id === rolloutId,
+    );
+    await loadExpandedRollout(rolloutId, summary?.training_attempt);
+  }
+
+  async function loadExpandedRollout(rolloutId, trainingAttempt) {
+    if (!runId || expandedRolloutId !== rolloutId) return;
+    expandedRolloutAttempt = trainingAttempt ?? null;
     expandedRollout = null;
     closeBucket();
     expandedRolloutLoading = true;
     try {
-      const detail = await fetchRollout(runId, rolloutId);
-      if (expandedRolloutId === rolloutId) {
+      const detail = await fetchRollout(runId, rolloutId, trainingAttempt);
+      if (
+        expandedRolloutId === rolloutId &&
+        expandedRolloutAttempt === (trainingAttempt ?? null)
+      ) {
         expandedRollout = detail;
-        // Preselect the first populated bucket so a sample is shown right away.
         const d = sampleDist;
         const first = d ? d.buckets.findIndex((b) => b.length > 0) : -1;
         if (first >= 0) openBucket(first);
       }
     } finally {
-      if (expandedRolloutId === rolloutId) {
+      if (
+        expandedRolloutId === rolloutId &&
+        expandedRolloutAttempt === (trainingAttempt ?? null)
+      ) {
         expandedRolloutLoading = false;
       }
     }
@@ -1132,8 +1287,17 @@
     let cancelled = false;
     (async () => {
       try {
-        const first = await fetchRollout(id, fId);
-        const last = fId === lId ? first : await fetchRollout(id, lId);
+        const firstAttempt = rolloutSummaries.find(
+          (rollout) => rollout.rollout_id === fId,
+        )?.training_attempt;
+        const lastAttempt = rolloutSummaries.find(
+          (rollout) => rollout.rollout_id === lId,
+        )?.training_attempt;
+        const first = await fetchRollout(id, fId, firstAttempt);
+        const last =
+          fId === lId
+            ? first
+            : await fetchRollout(id, lId, lastAttempt);
         if (cancelled) return;
         scoreDist = buildScoreDist(first?.samples || [], last?.samples || [], fId, lId);
       } catch {
@@ -1259,13 +1423,13 @@
               <pre class="[border:1px_solid_color-mix(in_srgb,var(--red,#f87171)_45%,transparent)] rounded-[8px] bg-[color-mix(in_srgb,var(--red,#f87171)_12%,transparent)] text-(--red,#f87171) [font-family:var(--font-mono)] text-[12px] leading-[17px] m-0 max-h-[320px] overflow-auto p-[12px_14px] whitespace-pre-wrap [word-break:break-word]">{run.error_message}</pre>
             </div>
           {/if}
-          {#if run.step_times || run.substep_times}
+          {#if displayedStepTimes || displayedSubstepTimes}
             <div class="rollout-chart">
               <div class="rollout-chart-title">Step &amp; substep timeline</div>
               <div class="chart-scroll">
                 <StepTimings
-                  stepTimes={run.step_times}
-                  substepTimes={run.substep_times}
+                  stepTimes={displayedStepTimes}
+                  substepTimes={displayedSubstepTimes}
                   layout="timeline"
                   downloadName={`step_substep_times_${runId}.json`}
                 />
@@ -1873,4 +2037,3 @@
     {/if}
   {/if}
 </section>
-

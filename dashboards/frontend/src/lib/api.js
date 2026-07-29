@@ -122,6 +122,7 @@ export async function fetchRunRollouts(trainingRunId, { signal } = {}) {
     .filter((item) => item && typeof item === "object")
     .map((item) => ({
       rollout_id: Number(item.rollout_id) || 0,
+      training_attempt: Number(item.training_attempt) || null,
       created_at: Number(item.created_at) || 0,
       total: Number(item.total) || 0,
       mean: typeof item.mean === "number" ? item.mean : Number(item.mean) || 0,
@@ -134,12 +135,31 @@ export async function fetchRunRollouts(trainingRunId, { signal } = {}) {
     .sort((a, b) => a.rollout_id - b.rollout_id);
 }
 
-export async function fetchRollout(trainingRunId, rolloutId) {
+export async function fetchRollout(trainingRunId, rolloutId, trainingAttempt = null) {
+  const query = trainingAttempt == null
+    ? ""
+    : `?training_attempt=${encodeURIComponent(trainingAttempt)}`;
   const res = await fetch(
-    `${SERVER}/runs/${encodeURIComponent(trainingRunId)}/rollouts/${encodeURIComponent(rolloutId)}`,
+    `${SERVER}/runs/${encodeURIComponent(trainingRunId)}/rollouts/${encodeURIComponent(rolloutId)}${query}`,
   );
   if (!res.ok) return null;
   return await res.json();
+}
+
+export async function fetchSubstepTimings(trainingRunId, keys, { signal } = {}) {
+  if (!keys.length) return [];
+  const res = await fetch(
+    `${SERVER}/runs/${encodeURIComponent(trainingRunId)}/substep-timings/query`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keys }),
+      signal,
+    },
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
 
 // Historical Modal logs for a run, served from the durable storage.

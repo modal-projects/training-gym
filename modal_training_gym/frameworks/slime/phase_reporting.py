@@ -15,6 +15,7 @@ This module keeps the reporting entry points (``report_*``, ``log_*``,
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -53,6 +54,7 @@ from .sample_extraction import (
     _trace_sample_limit,
     _trajectory_sample_limit,
 )
+from .substep_timing import transition_driver_phase
 from .sample_extraction import (
     CAPTURE_TRACE_ENV as CAPTURE_TRACE_ENV,
     IMAGE_SAMPLE_LIMIT_ENV as IMAGE_SAMPLE_LIMIT_ENV,
@@ -282,6 +284,10 @@ def report_step_event(
     ``status`` may be a plain string — the patched slime train.py passes phase
     names as literals so the injected code stays stdlib-only.
     """
+    transition_driver_phase(
+        status.value if isinstance(status, SlimeStatus) else str(status),
+        step_event,
+    )
     payload = {
         **_run_context(args),
         "phase": status.value if isinstance(status, SlimeStatus) else str(status),
@@ -291,6 +297,10 @@ def report_step_event(
     }
     if step_event:
         payload["step_event"] = step_event
+    if os.environ.get("TRAINING_GYM_SUBSTEP_TIMING") == "1":
+        if step_event in {"start", "substep_finish"}:
+            _post_framework_status(payload, _STEP_EVENT_TIMEOUT_SECONDS)
+        return
     match step_event:
         case "start":
             _post_framework_status(payload, _STEP_EVENT_TIMEOUT_SECONDS)

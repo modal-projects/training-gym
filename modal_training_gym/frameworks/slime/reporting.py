@@ -16,6 +16,8 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from modal_training_gym.common.substep_timing import SUBSTEP_TIMING_PROTOCOL
+
 PHASE_REPORT_URL_ENV = "SLIME_PHASE_REPORT_URL"
 PHASE_REPORT_TOKEN_ENV = "SLIME_PHASE_REPORT_TOKEN"
 
@@ -49,7 +51,7 @@ def _arg_value(args: Any, key: str) -> Any:
 
 
 def _run_context(args: Any) -> dict[str, Any]:
-    return {
+    context = {
         "training_run_id": _arg_value(args, "training_run_id")
         or _arg_value(args, "training_gym_training_run_id")
         or os.environ.get("TRAINING_GYM_TRAINING_RUN_ID", "")
@@ -60,6 +62,23 @@ def _run_context(args: Any) -> dict[str, Any]:
         or "",
         "modal_app_id": os.environ.get("MODAL_APP_ID", ""),
     }
+    if os.environ.get("TRAINING_GYM_SUBSTEP_TIMING") == "1":
+        context.update(
+            {
+                "training_attempt": os.environ.get("TRAINING_GYM_TRAINING_ATTEMPT"),
+                "timing_protocol": SUBSTEP_TIMING_PROTOCOL,
+            }
+        )
+        if _arg_value(args, "training_gym_timing_boundary_ready"):
+            context.update(
+                {
+                    "first_rollout_id": _arg_value(args, "first_rollout_id"),
+                    "rollout_id_stop_exclusive": _arg_value(
+                        args, "rollout_id_stop_exclusive"
+                    ),
+                }
+            )
+    return context
 
 
 def _positive_int(value: Any) -> int | None:

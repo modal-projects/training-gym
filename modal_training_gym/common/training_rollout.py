@@ -13,13 +13,15 @@ import time
 from collections.abc import Awaitable
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from modal_training_gym.common.coerce import safe_int
 from modal_training_gym.common.sample import Sample
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get_summary_items,
+    vol_list_tree,
+    vol_put_items,
     vol_put_with_summary,
 )
 
@@ -75,10 +77,32 @@ class TrainingRolloutResult(BaseModel):
 
     training_run_id: str
     rollout_id: int
+    training_attempt: int | None = Field(default=None, gt=0)
+    first_rollout_id: int | None = Field(default=None, ge=0)
+    rollout_id_stop_exclusive: int | None = Field(default=None, ge=0)
     created_at: int = 0
     samples: list[Sample] = Field(default_factory=list)
     metrics: dict[str, Any] = Field(default_factory=dict)
     rollout_time: float | None = None
+
+    @model_validator(mode="after")
+    def validate_attempt_boundary(self) -> TrainingRolloutResult:
+        values = (
+            self.training_attempt,
+            self.first_rollout_id,
+            self.rollout_id_stop_exclusive,
+        )
+        if all(value is None for value in values):
+            return self
+        if any(value is None for value in values):
+            raise ValueError("attempt-scoped rollouts require a complete boundary")
+        assert self.first_rollout_id is not None
+        assert self.rollout_id_stop_exclusive is not None
+        if not (
+            self.first_rollout_id <= self.rollout_id < self.rollout_id_stop_exclusive
+        ):
+            raise ValueError("rollout_id is outside the attempt boundary")
+        return self
 
     @property
     def total(self) -> int:
@@ -92,8 +116,11 @@ class TrainingRolloutResult(BaseModel):
 
     @property
     def storage_key(self) -> str:
-        # One canonical file per (run, rollout). Zero-padded rollout id so
-        # listings return them in step order without needing a sort.
+        if self.training_attempt is not None:
+            return (
+                f"{self.training_run_id}/{self.training_attempt:08d}/"
+                f"{self.rollout_id:08d}"
+            )
         return f"{self.training_run_id}__{self.rollout_id:08d}"
 
     @property
@@ -159,6 +186,12 @@ class TrainingRolloutResult(BaseModel):
             "total": self.total,
             "mean": self.mean,
         }
+        if self.training_attempt is not None:
+            summary["training_attempt"] = self.training_attempt
+        if self.first_rollout_id is not None:
+            summary["first_rollout_id"] = self.first_rollout_id
+        if self.rollout_id_stop_exclusive is not None:
+            summary["rollout_id_stop_exclusive"] = self.rollout_id_stop_exclusive
         if self.rollout_time is not None:
             summary["rollout_time"] = self.rollout_time
         err = self.error_summary
@@ -186,6 +219,22 @@ class TrainingRolloutResult(BaseModel):
 
     def save(self, *, is_async: bool = False) -> None | Awaitable[None]:
         self._touch_created_at()
+        if self.training_attempt is not None:
+            return vol_put_items(
+                [
+                    (
+                        MetadataStore.TRAINING_ROLLOUTS,
+                        self.storage_key,
+                        self.model_dump(mode="json"),
+                    ),
+                    (
+                        MetadataStore.TRAINING_ROLLOUTS_SUMMARY,
+                        self.storage_key,
+                        self._summary_item(),
+                    ),
+                ],
+                is_async=is_async,
+            )
         return vol_put_with_summary(
             MetadataStore.TRAINING_ROLLOUTS,
             self.storage_key,
@@ -200,8 +249,13 @@ class TrainingRolloutResult(BaseModel):
 
     @classmethod
     def list_summaries_for_run(cls, training_run_id: str) -> list[dict[str, Any]]:
-        """Lightweight per-rollout summaries for one run, sorted by rollout_id."""
-        items = vol_get_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY) or []
+        items = [
+            *(vol_get_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY) or []),
+            *vol_list_tree(
+                MetadataStore.TRAINING_ROLLOUTS_SUMMARY,
+                training_run_id,
+            ),
+        ]
         return sorted(
             (
                 item
@@ -211,3 +265,47 @@ class TrainingRolloutResult(BaseModel):
             ),
             key=lambda item: int(item.get("rollout_id", 0) or 0),
         )
+
+
+def select_rollout_summaries(
+    summaries: list[dict[str, object]],
+    boundaries: list[tuple[int, int, int]],
+) -> list[dict[str, object]]:
+    if not boundaries:
+        return [
+            summary for summary in summaries if summary.get("training_attempt") is None
+        ]
+
+    selected: dict[int, dict[str, object]] = {}
+    for summary in summaries:
+        rollout_id = _summary_int(summary.get("rollout_id"))
+        if rollout_id is None:
+            continue
+        attempt_value = summary.get("training_attempt")
+        training_attempt = _summary_int(attempt_value)
+        if attempt_value is not None and training_attempt is None:
+            continue
+        controlling_attempt = max(
+            (
+                attempt
+                for attempt, first_rollout_id, rollout_id_stop_exclusive in boundaries
+                if first_rollout_id <= rollout_id < rollout_id_stop_exclusive
+            ),
+            default=None,
+        )
+        if (
+            training_attempt == controlling_attempt
+            or training_attempt is None
+            and controlling_attempt is None
+        ):
+            selected[rollout_id] = summary
+    return [selected[rollout_id] for rollout_id in sorted(selected)]
+
+
+def _summary_int(value: object) -> int | None:
+    if not isinstance(value, (int, float, str)):
+        return None
+    try:
+        return int(value)
+    except (OverflowError, ValueError):
+        return None
