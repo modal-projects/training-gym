@@ -167,6 +167,7 @@
   // ── Rollouts (auto-refresh while run is running) ─────────────────────
   let rolloutSummaries = $state([]);
   let substepTimingByAttemptAndRollout = $state({});
+  let pendingSubstepTimingKeys = new Set();
   let rolloutLoadVersion = 0;
   let rolloutsLoading = $state(false);
   let rolloutsError = $state("");
@@ -409,9 +410,9 @@
     if (!runId) return;
     const loadVersion = ++rolloutLoadVersion;
     try {
-      const wasEmpty = rolloutSummaries.length === 0;
       const rows = await fetchRunRollouts(runId, { signal });
       if (signal?.aborted || loadVersion !== rolloutLoadVersion) return;
+      const wasEmpty = rolloutSummaries.length === 0;
       rolloutSummaries = rows;
       if (expandedRolloutId !== null) {
         const selected = rows.find(
@@ -428,37 +429,6 @@
             expandedRolloutId,
             selected.training_attempt,
           );
-        }
-      }
-      const missing = rows
-        .filter((row) => row.training_attempt != null)
-        .filter(
-          (row) =>
-            !substepTimingByAttemptAndRollout[
-              `${row.training_attempt}:${row.rollout_id}`
-            ],
-        )
-        .map((row) => ({
-          training_attempt: row.training_attempt,
-          rollout_id: row.rollout_id,
-        }));
-      for (let offset = 0; offset < missing.length; offset += 512) {
-        const timings = await fetchSubstepTimings(
-          runId,
-          missing.slice(offset, offset + 512),
-          { signal },
-        );
-        if (signal?.aborted || loadVersion !== rolloutLoadVersion) return;
-        if (timings.length) {
-          substepTimingByAttemptAndRollout = {
-            ...substepTimingByAttemptAndRollout,
-            ...Object.fromEntries(
-              timings.map((timing) => [
-                `${timing.training_attempt}:${timing.rollout_id}`,
-                timing,
-              ]),
-            ),
-          };
         }
       }
       rolloutsError = "";
@@ -497,6 +467,7 @@
     rolloutLoadVersion += 1;
     rolloutSummaries = [];
     substepTimingByAttemptAndRollout = {};
+    pendingSubstepTimingKeys = new Set();
     rolloutsError = "";
     expandedRolloutId = null;
     expandedRolloutAttempt = null;
@@ -547,6 +518,61 @@
       controller.abort();
       window.clearInterval(interval);
     };
+  });
+
+  $effect(() => {
+    const id = runId;
+    const pendingKeys = pendingSubstepTimingKeys;
+    const missing = rolloutSummaries
+      .filter((rollout) => rollout.training_attempt != null)
+      .filter(
+        (rollout) =>
+          !substepTimingByAttemptAndRollout[
+            `${rollout.training_attempt}:${rollout.rollout_id}`
+          ] &&
+          !pendingKeys.has(
+            `${rollout.training_attempt}:${rollout.rollout_id}`,
+          ),
+      )
+      .map((rollout) => ({
+        key: `${rollout.training_attempt}:${rollout.rollout_id}`,
+        training_attempt: rollout.training_attempt,
+        rollout_id: rollout.rollout_id,
+      }));
+    if (!id || !missing.length) return;
+
+    for (const item of missing) pendingKeys.add(item.key);
+    void (async () => {
+      try {
+        const requests = [];
+        for (let offset = 0; offset < missing.length; offset += 512) {
+          requests.push(
+            fetchSubstepTimings(
+              id,
+              missing.slice(offset, offset + 512).map((item) => ({
+                training_attempt: item.training_attempt,
+                rollout_id: item.rollout_id,
+              })),
+            ),
+          );
+        }
+        const timings = (await Promise.all(requests)).flat();
+        if (id !== runId || !timings.length) return;
+        substepTimingByAttemptAndRollout = {
+          ...substepTimingByAttemptAndRollout,
+          ...Object.fromEntries(
+            timings.map((timing) => [
+              `${timing.training_attempt}:${timing.rollout_id}`,
+              timing,
+            ]),
+          ),
+        };
+      } catch {
+        return;
+      } finally {
+        for (const item of missing) pendingKeys.delete(item.key);
+      }
+    })();
   });
 
   async function toggleRolloutDetail(rolloutId) {

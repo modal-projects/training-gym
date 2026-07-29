@@ -20,7 +20,6 @@
     evaluate_rollouts_end: "Eval (after)",
     full_step: "Full step",
     wait_for_rollout: "Wait for rollout",
-    offload_rollout: "Offload rollout",
     train_models: "Train models",
     train_model: "Train model",
     forward_backward: "Forward/backward",
