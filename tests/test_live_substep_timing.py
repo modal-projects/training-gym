@@ -1,5 +1,7 @@
 from modal_training_gym.common.substep_timing import (
     RoleTiming,
+    TimelineGroup,
+    TimingActivityKind,
     TimingCaptureStatus,
     TimingInterval,
     TimingPhase,
@@ -7,7 +9,10 @@ from modal_training_gym.common.substep_timing import (
     aggregate_timing_intervals,
 )
 from modal_training_gym.common.training_rollout import select_rollout_summaries
-from modal_training_gym.frameworks.slime.substep_timing import StepTimingCollector
+from modal_training_gym.frameworks.slime.substep_timing import (
+    RoleTimingRecorder,
+    StepTimingCollector,
+)
 
 
 def test_aggregate_timing_intervals_tracks_active_time() -> None:
@@ -27,19 +32,38 @@ def test_aggregate_timing_intervals_tracks_active_time() -> None:
     ] == [(10.0, 4.0), (15.0, 1.0)]
 
 
-def test_collector_replaces_a_retried_role_before_step_closes() -> None:
+def test_role_timing_includes_framework_activity_presentation() -> None:
+    recorder = RoleTimingRecorder(TimingRole.ACTOR)
+    with recorder.phase(TimingPhase.TRAIN_MODEL):
+        pass
+    with recorder.phase(TimingPhase.FORWARD_BACKWARD):
+        pass
+
+    phases = {phase.phase: phase for phase in recorder.result().phases}
+
+    assert phases[TimingPhase.TRAIN_MODEL].timeline_group is TimelineGroup.TRAINING
+    assert phases[TimingPhase.TRAIN_MODEL].activity_kind is TimingActivityKind.ACTIVITY
+    assert phases[TimingPhase.TRAIN_MODEL].display_name == "Train model"
+    assert phases[TimingPhase.FORWARD_BACKWARD].parent_phase is TimingPhase.TRAIN_MODEL
+
+
+def test_collector_rejects_a_late_execution_after_retry_starts() -> None:
     collector = StepTimingCollector()
+    first_sequence, _ = collector.begin_role_timing(4, TimingRole.ACTOR.value)
     first = RoleTiming(
         role=TimingRole.ACTOR,
         status=TimingCaptureStatus.UNAVAILABLE,
+        execution_sequence=first_sequence,
     )
+    assert collector.record_role_timing(4, first_sequence, first.model_dump_json())
+    retry_sequence, _ = collector.begin_role_timing(4, TimingRole.ACTOR.value)
     retried = RoleTiming(
         role=TimingRole.ACTOR,
         status=TimingCaptureStatus.NOT_RUN,
+        execution_sequence=retry_sequence,
     )
-
-    assert collector.record_role_timing(4, first.model_dump_json())
-    assert collector.record_role_timing(4, retried.model_dump_json())
+    assert collector.record_role_timing(4, retry_sequence, retried.model_dump_json())
+    assert not collector.record_role_timing(4, first_sequence, first.model_dump_json())
     assert (
         collector.read_step_timings(4)[TimingRole.ACTOR.value]
         == retried.model_dump_json()
@@ -47,7 +71,9 @@ def test_collector_replaces_a_retried_role_before_step_closes() -> None:
 
     collector.close_step(4)
 
-    assert not collector.record_role_timing(4, first.model_dump_json())
+    assert not collector.record_role_timing(
+        4, retry_sequence, retried.model_dump_json()
+    )
     assert collector.read_step_timings(4) == {}
 
 

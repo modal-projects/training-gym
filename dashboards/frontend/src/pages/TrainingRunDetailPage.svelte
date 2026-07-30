@@ -209,6 +209,22 @@
             end: phase.started_at_unix_s + phase.duration_s,
             duration_s: phase.duration_s,
             intervals: phase.intervals || [],
+            timeline_group: phase.timeline_group,
+            activity_kind: phase.activity_kind,
+            display_name: phase.display_name,
+            parent_phase: phase.parent_phase,
+            activity_rollout_id:
+              role.role === "rollout"
+                ? timing.source_rollout_id ?? timing.rollout_id
+                : timing.training_rollout_id ?? timing.rollout_id,
+            activity_rollout_kind:
+              role.role === "rollout" ? "source" : "training",
+            source_rollout_id:
+              timing.source_rollout_id ?? timing.rollout_id,
+            training_rollout_id:
+              timing.training_rollout_id ?? timing.rollout_id,
+            clock_uncertainty_s: role.clock_uncertainty_s,
+            execution_sequence: role.execution_sequence,
           };
         }
       }
@@ -1457,6 +1473,7 @@
                 <StepTimings
                   stepTimes={displayedStepTimes}
                   substepTimes={displayedSubstepTimes}
+                  rolloutStats={rolloutSummaries}
                   layout="timeline"
                   downloadName={`step_substep_times_${runId}.json`}
                 />

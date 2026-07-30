@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -23,6 +23,18 @@ class TimingCaptureStatus(str, Enum):
     CAPTURED = "captured"
     NOT_RUN = "not_run"
     UNAVAILABLE = "unavailable"
+
+
+class TimelineGroup(str, Enum):
+    ROLLOUT = "rollout"
+    TRAINING = "training"
+    SYSTEM = "system"
+
+
+class TimingActivityKind(str, Enum):
+    ACTIVITY = "activity"
+    WAIT = "wait"
+    CONTAINER = "container"
 
 
 class TimingPhase(str, Enum):
@@ -91,6 +103,10 @@ class TrainingAttemptBoundary(TimingModel):
 
 class PhaseTiming(TimingModel):
     phase: TimingPhase
+    timeline_group: TimelineGroup | None = None
+    activity_kind: TimingActivityKind | None = None
+    display_name: str | None = None
+    parent_phase: TimingPhase | None = None
     started_at_unix_s: float = Field(ge=0)
     duration_s: float = Field(ge=0)
     count: int = Field(gt=0)
@@ -109,9 +125,15 @@ class RoleTiming(TimingModel):
     role: TimingRole
     status: TimingCaptureStatus
     phases: tuple[PhaseTiming, ...] = ()
+    execution_sequence: int | None = Field(default=None, gt=0)
+    clock_uncertainty_s: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_capture(self) -> RoleTiming:
+        if self.clock_uncertainty_s is not None and not math.isfinite(
+            self.clock_uncertainty_s
+        ):
+            raise ValueError("clock uncertainty must be finite")
         if self.status is TimingCaptureStatus.CAPTURED and not self.phases:
             raise ValueError("captured roles require phase timings")
         if self.status is not TimingCaptureStatus.CAPTURED and self.phases:
@@ -122,6 +144,35 @@ class RoleTiming(TimingModel):
         return self
 
 
+@dataclass(frozen=True)
+class TimingLease:
+    execution_sequence: int
+    clock_offset_s: float
+    clock_uncertainty_s: float
+
+
+class TimingCollectorClient(Protocol):
+    def begin_role(
+        self,
+        rollout_id: int,
+        role: TimingRole,
+    ) -> TimingLease: ...
+
+    def record_role(
+        self,
+        rollout_id: int,
+        lease: TimingLease,
+        timing: RoleTiming,
+    ) -> bool: ...
+
+    def read_step(
+        self,
+        rollout_id: int,
+    ) -> dict[TimingRole, RoleTiming]: ...
+
+    def close_step(self, rollout_id: int) -> None: ...
+
+
 class SubstepTiming(TimingModel):
     schema_version: Literal[1] = SUBSTEP_TIMING_SCHEMA_VERSION
     event_type: Literal["substep_timing"] = "substep_timing"
@@ -130,6 +181,8 @@ class SubstepTiming(TimingModel):
     first_rollout_id: int = Field(ge=0)
     rollout_id_stop_exclusive: int = Field(ge=0)
     rollout_id: int = Field(ge=0)
+    source_rollout_id: int | None = Field(default=None, ge=0)
+    training_rollout_id: int | None = Field(default=None, ge=0)
     started_at_unix_s: float = Field(ge=0)
     duration_s: float = Field(ge=0)
     roles: tuple[RoleTiming, ...]
