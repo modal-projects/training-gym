@@ -171,6 +171,21 @@ def build_app_tags(
     return tags
 
 
+_SENSITIVE_ENV_SUFFIXES = ("_TOKEN", "_SECRET", "_KEY", "_PASSWORD")
+
+
+def redact_env_values(env: dict[str, Any]) -> dict[str, Any]:
+    """Copy ``env`` with credential-shaped values masked, for safe printing.
+
+    Launchers echo the Ray ``runtime_env`` into logs, and it carries the run's
+    status token.
+    """
+    return {
+        key: "***" if str(key).upper().endswith(_SENSITIVE_ENV_SUFFIXES) else value
+        for key, value in env.items()
+    }
+
+
 def run_download_phase(
     *,
     training_run_id: str,

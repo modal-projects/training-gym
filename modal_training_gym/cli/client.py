@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import base64
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import TracebackType
 from typing import Any, Self
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 import httpx
 
 from modal_training_gym.common.config import get_dashboard_url
+from modal_training_gym.common.proxy_auth import modal_proxy_auth_headers
 
 from .errors import CLIError, ExitCode
 
@@ -18,6 +20,46 @@ from .errors import CLIError, ExitCode
 DASHBOARD_PASSWORD_ENV = "TRAINING_GYM_DASHBOARD_PASSWORD"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 QueryParams = Mapping[str, str | int | float | bool | None]
+
+_CREDENTIAL_HEADERS = ("Authorization", "Modal-Key", "Modal-Secret")
+
+
+def _origin(parsed: SplitResult) -> tuple[str, str, int | None]:
+    """(scheme, host, port) with default ports normalized to ``None``,
+    matching how ``httpx.URL`` reports them."""
+    port = parsed.port
+    if (parsed.scheme, port) in {("http", 80), ("https", 443)}:
+        port = None
+    return (parsed.scheme, parsed.hostname or "", port)
+
+
+def _credential_hook(
+    origin: tuple[str, str, int | None],
+    password: str,
+    proxy_headers: Mapping[str, str],
+) -> Callable[[httpx.Request], None]:
+    """Attach the dashboard password and proxy-auth pair, on-origin only.
+
+    A request hook rather than an ``httpx.Auth`` flow because it has to run on
+    *every* redirect hop: httpx drops ``Authorization`` when the origin
+    changes but copies custom headers along, so the pair needs its own
+    boundary.
+    """
+    encoded = base64.b64encode(f"training-gym:{password}".encode()).decode("ascii")
+    basic_header = f"Basic {encoded}" if password else ""
+
+    def _apply(request: httpx.Request) -> None:
+        if (request.url.scheme, request.url.host, request.url.port) == origin:
+            if basic_header:
+                request.headers["Authorization"] = basic_header
+            for name, value in proxy_headers.items():
+                request.headers[name] = value
+        else:
+            for name in _CREDENTIAL_HEADERS:
+                if name in request.headers:
+                    del request.headers[name]
+
+    return _apply
 
 
 class DashboardClient:
@@ -49,16 +91,16 @@ class DashboardClient:
         dashboard_password = (
             os.environ.get(DASHBOARD_PASSWORD_ENV, "") if password is None else password
         )
-        auth = (
-            httpx.BasicAuth("training-gym", dashboard_password)
-            if dashboard_password
-            else None
+        credential_hook = _credential_hook(
+            _origin(parsed),
+            dashboard_password,
+            modal_proxy_auth_headers(configured_url),
         )
         self._client = httpx.Client(
             base_url=configured_url.rstrip("/") + "/",
-            auth=auth,
             timeout=DEFAULT_TIMEOUT_SECONDS,
             follow_redirects=True,
+            event_hooks={"request": [credential_hook]},
         )
 
     def get_json(
@@ -117,7 +159,12 @@ class DashboardClient:
                 "Dashboard authentication was rejected.",
                 error="authentication_failed",
                 exit_code=ExitCode.AUTH,
-                hint="training-gym set-password",
+                hint=(
+                    "training-gym set-password; for a dashboard deployed with "
+                    "TRAINING_GYM_DASHBOARD_REQUIRES_PROXY_AUTH=1, configure the "
+                    "Modal proxy-auth pair via training-gym setup or "
+                    "MODAL_KEY/MODAL_SECRET"
+                ),
             )
         if status_code == 404:
             raise CLIError(

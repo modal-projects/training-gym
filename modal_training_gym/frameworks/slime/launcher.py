@@ -56,6 +56,7 @@ from modal_training_gym.common.launcher_helpers import (
     init_training_run_record,
     mark_run_failed,
     mark_run_stopped,
+    redact_env_values,
     resolve_caller_context,
     resolve_checkpoint_volumes,
     run_download_phase,
@@ -675,7 +676,9 @@ def build_slime_app(
             checkpoints_mount_path: checkpoints_volume,
         },
         timeout=6 * 60 * 60,
-        secrets=hf_secrets(),
+        # proxy_auth_secrets: this phase reports status to the dashboard,
+        # which may require proxy auth.
+        secrets=[*hf_secrets(), *proxy_auth_secrets()],
         serialized=True,
         name="download",
     )
@@ -714,6 +717,8 @@ def build_slime_app(
         region=slime.region,
         volumes=all_volumes,
         timeout=4 * 60 * 60,
+        # See download: status reports must pass the dashboard's proxy auth.
+        secrets=proxy_auth_secrets(),
         experimental_options={"efa_enabled": True},
         serialized=True,
         name="convert_checkpoint",
@@ -1257,7 +1262,11 @@ def build_slime_app(
                 f"Training {app_name} — {slime.total_nodes} node(s) × {gpu_spec}  ({mode})"
             )
             print(slime.gpu_allocation.summary())
-            print(f"Command: {cmd}, runtime_env: {runtime_env}")
+            printable_env = {
+                **runtime_env,
+                "env_vars": redact_env_values(runtime_env["env_vars"]),
+            }
+            print(f"Command: {cmd}, runtime_env: {printable_env}")
 
             await _set_framework_status_async(SlimeStatus.ROLLOUT_INITIALIZING)
             async with cluster.forward_dashboard() as tunnel:

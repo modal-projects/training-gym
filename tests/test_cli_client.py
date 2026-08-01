@@ -11,15 +11,22 @@ from modal_training_gym.cli.client import (
     DashboardClient,
 )
 from modal_training_gym.cli.errors import CLIError, ExitCode
+from modal_training_gym.common import config as config_module
 
 
 @pytest.fixture(autouse=True)
-def configured_dashboard_url(monkeypatch):
+def configured_dashboard_url(monkeypatch, tmp_path):
     monkeypatch.setattr(
         client_module,
         "get_dashboard_url",
         lambda: "https://example.test",
     )
+    # Keep the client hermetic: never read the developer's real
+    # ~/.training-gym.toml (it may hold a proxy-auth pair) or env pair.
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "training-gym.toml")
+    monkeypatch.delenv("MODAL_KEY", raising=False)
+    monkeypatch.delenv("MODAL_SECRET", raising=False)
+    monkeypatch.delenv("TRAINING_GYM_PROXY_AUTH_HOSTS", raising=False)
 
 
 @pytest.fixture
@@ -96,6 +103,45 @@ def test_does_not_forward_basic_auth_to_redirected_host(monkeypatch, mock_transp
 
     assert requests[0].headers["authorization"].startswith("Basic ")
     assert "authorization" not in requests[1].headers
+
+
+@pytest.mark.parametrize(
+    ("location", "still_credentialed"),
+    [
+        ("https://other.test/api/items", False),
+        ("https://example.test/api/items/", True),
+    ],
+    ids=["cross-origin", "same-origin"],
+)
+def test_proxy_pair_follows_only_same_origin_redirects(
+    monkeypatch, mock_transport, location, still_credentialed
+):
+    """httpx drops ``Authorization`` when a redirect changes origin but copies
+    custom headers along unchanged, so the pair needs its own boundary — and
+    that boundary must not be so eager it strips the dashboard's own trailing
+    slash redirects."""
+    monkeypatch.setenv("MODAL_KEY", "wk-key")
+    monkeypatch.setenv("MODAL_SECRET", "ws-secret")
+    # Allowlisted so the egress guard releases the pair to the mock host.
+    monkeypatch.setenv("TRAINING_GYM_PROXY_AUTH_HOSTS", "example.test")
+    monkeypatch.setenv("TRAINING_GYM_DASHBOARD_PASSWORD", "secret")
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if str(request.url) == "https://example.test/api/items":
+            return httpx.Response(302, headers={"location": location})
+        return httpx.Response(200, json={})
+
+    mock_transport(respond)
+    with DashboardClient() as client:
+        client.get_json("/api/items")
+
+    assert requests[0].headers["modal-key"] == "wk-key"
+    redirected = requests[1].headers
+    assert ("modal-key" in redirected) is still_credentialed
+    assert ("modal-secret" in redirected) is still_credentialed
+    assert ("authorization" in redirected) is still_credentialed
 
 
 def test_omits_auth_when_password_is_absent(monkeypatch, mock_transport):

@@ -51,6 +51,28 @@ Modal prints a URL where you can watch jobs in progress.
 
 ![Gym Observability Dashboard](./assets/observability_dashboard_1.png)
 
+### Locking the dashboard down (optional)
+
+The dashboard deploys open. Two opt-in layers, usable together:
+
+- **`training-gym set-password`** puts HTTP Basic in front of the UI and read
+  APIs. Browser-friendly; ingestion POSTs keep using their per-run tokens.
+- **`TRAINING_GYM_DASHBOARD_REQUIRES_PROXY_AUTH=1`** in the shell running
+  `training-gym setup` (or `modal deploy dashboards/app.py`) turns on
+  [Modal proxy auth](https://modal.com/docs/guide/webhook-proxy-auth), so
+  Modal's edge drops anonymous requests before they reach the app — what
+  `DeploymentConfig(unauthenticated=False)` already does for serving
+  endpoints. Callers need a workspace `wk-`/`ws-` pair: the CLI and the status
+  reporters send it whenever `MODAL_KEY`/`MODAL_SECRET` are set (persist them
+  with `training-gym setup`; launchers forward them into training containers),
+  and browsers cannot send it at all, which is what the password is for. Read
+  at deploy time, so changing it means redeploying. The choice is sticky —
+  saved to `~/.training-gym.toml`, so a redeploy without the variable keeps
+  it; deploying open again takes an explicit `=0`. Because the pair is a
+  workspace-wide credential, clients only send it to `https` Modal-served
+  hostnames (`*.modal.run`, `*.modal.direct`); name a custom `https` domain in
+  `TRAINING_GYM_PROXY_AUTH_HOSTS` (comma-separated) to allow it.
+
 
 ## Tutorials
 

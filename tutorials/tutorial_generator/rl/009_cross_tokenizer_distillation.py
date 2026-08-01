@@ -724,7 +724,7 @@ def _teacher_reward():
                     async with aiohttp.ClientSession() as session:
                         async with session.post(
                             args.rm_url, json=payload,
-                            headers=_modal_proxy_auth_headers(),
+                            headers=_modal_proxy_auth_headers(args.rm_url),
                             timeout=aiohttp.ClientTimeout(total=request_timeout),
                         ) as resp:
                             resp.raise_for_status()

@@ -42,6 +42,7 @@ from modal_training_gym.common.launcher_helpers import (
     init_training_run_record,
     mark_run_failed,
     mark_run_stopped,
+    redact_env_values,
     resolve_caller_context,
     resolve_checkpoint_volumes,
     run_download_phase,
@@ -214,7 +215,9 @@ def build_miles_app(
             checkpoints_mount_path: checkpoints_volume,
         },
         timeout=4 * 60 * 60,
-        secrets=hf_secrets(),
+        # proxy_auth_secrets: this phase reports status to the dashboard,
+        # which may require proxy auth.
+        secrets=[*hf_secrets(), *proxy_auth_secrets()],
         serialized=True,
         name="download",
     )
@@ -256,6 +259,8 @@ def build_miles_app(
         gpu=gpu_spec,
         volumes=all_volumes,
         timeout=4 * 60 * 60,
+        # See download: status reports must pass the dashboard's proxy auth.
+        secrets=proxy_auth_secrets(),
         experimental_options={"efa_enabled": True} if convert_multi_node else {},
         serialized=True,
         name="convert_checkpoint",
@@ -648,7 +653,11 @@ def build_miles_app(
                 f"Training {app_name} - {miles.total_nodes} node(s) x {gpu_spec} ({mode})"
             )
             print(miles.gpu_allocation.summary())
-            print(f"Command: {cmd}, runtime_env: {runtime_env}")
+            printable_env = {
+                **runtime_env,
+                "env_vars": redact_env_values(runtime_env["env_vars"]),
+            }
+            print(f"Command: {cmd}, runtime_env: {printable_env}")
 
             await _set_framework_status(MilesStatus.TRAINING)
             async with cluster.forward_dashboard() as tunnel:

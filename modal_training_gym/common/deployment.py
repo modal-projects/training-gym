@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import os
 import threading
 import warnings
 from dataclasses import dataclass
@@ -32,6 +31,12 @@ from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.proxy_auth import (
+    PROXY_AUTH_HOSTS_ENV,
+    _configured_pair,
+    modal_proxy_auth_headers,
+    proxy_auth_url_allowed,
+)
 from modal_training_gym.deploy_recipes.base import DeployRecipeType
 from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 from modal_training_gym.deploy_recipes.vllm_recipe import VllmRecipe
@@ -76,24 +81,9 @@ def _run_coro(coro):
     return result["value"]
 
 
-def _modal_proxy_auth_headers() -> dict[str, str]:
-    """Headers to authenticate against Modal endpoints behind proxy auth.
-
-    Reads the Modal proxy-auth token pair (``wk-``/``ws-``) from ``MODAL_KEY`` /
-    ``MODAL_SECRET`` and returns them as ``Modal-Key`` / ``Modal-Secret`` headers.
-    Falls back to the pair persisted in ``~/.training-gym.toml`` (written by
-    ``training-gym setup``) when the env vars are unset. Returns an empty dict
-    when neither source provides them, so endpoints without proxy auth are
-    unaffected.
-    """
-    from modal_training_gym.common.config import load_proxy_auth
-
-    load_proxy_auth()
-    key = os.environ.get("MODAL_KEY", "").strip()
-    secret = os.environ.get("MODAL_SECRET", "").strip()
-    if key and secret:
-        return {"Modal-Key": key, "Modal-Secret": secret}
-    return {}
+# Shared with the dashboard clients (status reporters, CLI); see that module
+# for resolution rules.
+_modal_proxy_auth_headers = modal_proxy_auth_headers
 
 
 def _raise_for_proxy_auth(status_code: int, url: str) -> None:
@@ -102,29 +92,37 @@ def _raise_for_proxy_auth(status_code: int, url: str) -> None:
     SGLang endpoints are public by default (``unauthenticated=True``). When
     an endpoint was served with ``unauthenticated=False``, a 401 almost
     always means the ``MODAL_KEY`` / ``MODAL_SECRET`` proxy-auth token pair
-    is missing from the environment (so :func:`_modal_proxy_auth_headers`
-    returned no headers) rather than a real authorization problem — surface
-    that instead of a bare ``HTTPError``/``TimeoutError``. No-op for any
-    other status.
+    never reached it — unset, or withheld from a non-Modal URL by the egress
+    guard — rather than a real authorization problem; surface which, instead
+    of a bare ``HTTPError``/``TimeoutError``. No-op for any other status.
     """
     if status_code != 401:
         return
-    sent_auth = bool(_modal_proxy_auth_headers())
-    detail = (
-        "the MODAL_KEY / MODAL_SECRET proxy-auth tokens are not set in this environment"
-        if not sent_auth
-        else "the MODAL_KEY / MODAL_SECRET tokens were sent but rejected (expired "
-        "or wrong workspace)"
-    )
+    key, secret = _configured_pair()
+    if key and secret and not proxy_auth_url_allowed(url):
+        detail = (
+            "the configured MODAL_KEY / MODAL_SECRET pair was withheld from "
+            f"this non-Modal URL; set {PROXY_AUTH_HOSTS_ENV}=<host> to send it"
+        )
+    elif not (key and secret):
+        detail = (
+            "the MODAL_KEY / MODAL_SECRET proxy-auth tokens are not set in "
+            "this environment. Create a proxy-auth token pair at "
+            "https://modal.com/settings/proxy-auth-tokens and export MODAL_KEY "
+            "(wk-…) and MODAL_SECRET (ws-…) in the shell that runs the "
+            "eval/serve. For calls issued from remote workers (e.g. a custom "
+            "rm/reward function), also forward the pair into the worker via a "
+            "modal.Secret"
+        )
+    else:
+        detail = (
+            "the MODAL_KEY / MODAL_SECRET tokens were sent but rejected "
+            "(expired or wrong workspace)"
+        )
     raise RuntimeError(
         f"401 Unauthorized from {url} — this endpoint is behind Modal proxy auth "
-        f"and {detail}. Create a proxy-auth token pair at "
-        "https://modal.com/settings/proxy-auth-tokens and export MODAL_KEY (wk-…) "
-        "and MODAL_SECRET (ws-…) in the shell that runs the eval/serve. For calls "
-        "issued from remote workers (e.g. a custom rm/reward function), also "
-        "forward the pair into the worker via a modal.Secret. SGLang endpoints "
-        "are public by default; pass DeploymentConfig(unauthenticated=False) to "
-        "require proxy auth."
+        f"and {detail}. SGLang endpoints are public by default; pass "
+        "DeploymentConfig(unauthenticated=False) to require proxy auth."
     )
 
 
@@ -494,7 +492,7 @@ class ModelDeployment(BaseModel):
                     f"{self.url}/v1/chat/completions",
                     json=body,
                     timeout=timeout,
-                    headers=_modal_proxy_auth_headers(),
+                    headers=_modal_proxy_auth_headers(self.url),
                 )
                 if (
                     resp.status_code in transient_status_codes
@@ -642,7 +640,7 @@ class ModelDeployment(BaseModel):
                     resp = requests.get(
                         f"{self.url}/v1/models",
                         timeout=10,
-                        headers=_modal_proxy_auth_headers(),
+                        headers=_modal_proxy_auth_headers(self.url),
                     )
                     if resp.ok and resp.json().get("data"):
                         return

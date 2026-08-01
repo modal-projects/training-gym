@@ -45,9 +45,29 @@ def setup(interactive: bool = True) -> str:
     import modal
 
     from modal_training_gym._dashboard import app, fastapi_app
-    from modal_training_gym.common.config import CONFIG_PATH, save_dashboard_url
+    from modal_training_gym.common.config import (
+        CONFIG_PATH,
+        get_dashboard_requires_proxy_auth,
+        save_dashboard_url,
+    )
 
     ensure_proxy_auth(interactive=interactive)
+
+    # The decorator resolved the sticky flag at import; say which way it went,
+    # so neither a redeploy that stays closed despite an unset env var nor a
+    # machine without the persisted choice deploying open is ever a surprise.
+    if get_dashboard_requires_proxy_auth():
+        print(
+            "Dashboard edge auth: on — Modal rejects anonymous requests at its "
+            "edge. Sticky across redeploys; export "
+            "TRAINING_GYM_DASHBOARD_REQUIRES_PROXY_AUTH=0 to deploy open."
+        )
+    else:
+        print(
+            "Dashboard edge auth: off — Modal's edge forwards anonymous "
+            "requests to the dashboard. Export "
+            "TRAINING_GYM_DASHBOARD_REQUIRES_PROXY_AUTH=1 to reject them there."
+        )
 
     if not ensure_creds_secret(interactive=interactive):
         print(

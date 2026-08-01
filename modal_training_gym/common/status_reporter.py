@@ -24,8 +24,15 @@ import os
 import threading
 from queue import Queue
 from typing import Any
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import Request
+
+from modal_training_gym.common.proxy_auth import (
+    NO_REDIRECT_OPENER,
+    modal_proxy_auth_headers,
+    warn_auth_rejected,
+    warn_redirect_refused,
+)
 
 
 # Shared with slime's phase_reporting, whose rollout payloads can be 100KB+ —
@@ -92,6 +99,7 @@ def _post(item: dict[str, Any]) -> None:
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    headers.update(modal_proxy_auth_headers(url))
     request = Request(
         url,
         data=body,
@@ -99,8 +107,14 @@ def _post(item: dict[str, Any]) -> None:
         method="POST",
     )
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with NO_REDIRECT_OPENER.open(request, timeout=timeout) as response:
             response.read()
+    except HTTPError as exc:
+        if exc.code in (401, 403):
+            warn_auth_rejected(exc.code, url)
+        elif 300 <= exc.code < 400:
+            warn_redirect_refused(exc.code, url)
+        return
     except (OSError, URLError):
         return
 

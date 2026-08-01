@@ -7,6 +7,7 @@ caller) to look up where to POST phase reports and other client-side defaults.
 from __future__ import annotations
 
 import os
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,30 @@ def load_config() -> dict[str, Any]:
         return {}
 
 
+def _write_config(config: dict[str, Any]) -> None:
+    """Write atomically, owner-only: the file can hold the proxy-auth pair.
+
+    The temporary name is unique per call. A fixed one is not safe here:
+    ``save_dashboard_url`` and ``save_proxy_auth`` can run concurrently (two
+    parallel deploys, or ``setup`` beside one), and a shared temp path lets one
+    writer rename the other's half-written file into place — or delete it out
+    from under the other's ``os.replace``.
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        dir=CONFIG_PATH.parent, prefix=CONFIG_PATH.name + ".", suffix=".tmp"
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        # mkstemp already creates 0600; the mode matters because this file can
+        # hold a workspace credential.
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(_render(config))
+        os.replace(tmp_path, CONFIG_PATH)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def save_dashboard_url(url: str) -> None:
     """Persist the deployed dashboard URL under ``[dashboard].url``."""
     config = load_config()
@@ -37,7 +62,27 @@ def save_dashboard_url(url: str) -> None:
         dashboard = {}
     dashboard["url"] = url
     config["dashboard"] = dashboard
-    CONFIG_PATH.write_text(_render(config))
+    _write_config(config)
+
+
+def get_dashboard_requires_proxy_auth() -> bool:
+    """Return the persisted dashboard edge-auth choice (default ``False``)."""
+    dashboard = load_config().get("dashboard")
+    if isinstance(dashboard, dict):
+        return dashboard.get("requires_proxy_auth") is True
+    return False
+
+
+def save_dashboard_requires_proxy_auth(value: bool) -> None:
+    """Persist the dashboard edge-auth choice under
+    ``[dashboard].requires_proxy_auth``."""
+    config = load_config()
+    dashboard = config.get("dashboard")
+    if not isinstance(dashboard, dict):
+        dashboard = {}
+    dashboard["requires_proxy_auth"] = bool(value)
+    config["dashboard"] = dashboard
+    _write_config(config)
 
 
 def get_dashboard_url() -> str | None:
@@ -70,7 +115,7 @@ def save_proxy_auth(key: str, secret: str) -> None:
     """Persist the proxy-auth token pair under ``[proxy_auth]``."""
     config = load_config()
     config[PROXY_AUTH_SECTION] = {"key": key.strip(), "secret": secret.strip()}
-    CONFIG_PATH.write_text(_render(config))
+    _write_config(config)
 
 
 def load_proxy_auth() -> bool:
