@@ -128,6 +128,9 @@ PASSWORD_EXEMPT_PATHS = frozenset(
     }
 )
 
+# Only ever the *expected* side of a comparison, so publishing it is safe.
+_MISSING_TOKEN_DUMMY = "training-gym-missing-token-dummy-never-issued"
+
 
 def _is_local() -> bool:
     """True when we're not running inside a Modal container."""
@@ -684,6 +687,12 @@ def fastapi_app():
     async def _require_framework_status_token(
         training_run_id: str, authorization: str | None
     ) -> None:
+        """403 unless ``authorization`` carries the run's status token.
+
+        Handlers must call this *before* any lookup that can 404, or the
+        status code tells an anonymous caller which run ids exist. For the
+        same reason an unknown run is indistinguishable from a wrong token.
+        """
         try:
             expected_token = str(
                 (
@@ -696,9 +705,13 @@ def fastapi_app():
             )
         except KeyError:
             expected_token = ""
-        if not expected_token or not _secrets.compare_digest(
-            _bearer_token(authorization), expected_token
-        ):
+        supplied = _bearer_token(authorization)
+        if not expected_token:
+            # Spend the same comparison an existing token would, then refuse
+            # regardless of its outcome.
+            _secrets.compare_digest(supplied, _MISSING_TOKEN_DUMMY)
+            raise HTTPException(status_code=403, detail="Invalid status token")
+        if not _secrets.compare_digest(supplied, expected_token):
             raise HTTPException(status_code=403, detail="Invalid status token")
 
     async def _get_run_or_404(training_run_id: str) -> TrainingRun:
@@ -764,8 +777,8 @@ def fastapi_app():
         update: FrameworkStatusUpdate,
         authorization: str | None = Header(default=None),
     ):
-        run = await _get_run_or_404(update.training_run_id)
         await _require_framework_status_token(update.training_run_id, authorization)
+        run = await _get_run_or_404(update.training_run_id)
 
         status = await run_in_threadpool(run.apply_framework_status, update)
         if status is None:
@@ -787,8 +800,8 @@ def fastapi_app():
         result: TrainingRolloutResult,
         authorization: str | None = Header(default=None),
     ):
-        run = await _get_run_or_404(result.training_run_id)
         await _require_framework_status_token(result.training_run_id, authorization)
+        run = await _get_run_or_404(result.training_run_id)
 
         await result.save(is_async=True)
         run.record_latest_rollout(result)
@@ -831,8 +844,8 @@ def fastapi_app():
         shard: AdvantageDistribution,
         authorization: str | None = Header(default=None),
     ):
-        await _get_run_or_404(shard.training_run_id)
         await _require_framework_status_token(shard.training_run_id, authorization)
+        await _get_run_or_404(shard.training_run_id)
 
         await shard.save(is_async=True)
         return JSONResponse(
