@@ -237,6 +237,21 @@ class SlimeRecipe(BaseTrainRecipe):
     rollout_stop_token_ids : list[int] | None
         Extra token ids that terminate generation.
 
+    ## Fault Tolerance and Health Checks
+    use_fault_tolerance : bool
+        Enable slime's fault tolerance so the run can recover from worker
+        failures.
+    rollout_health_check_interval : int
+        Interval in seconds between rollout engine /health_generate checks
+        during generate/eval.
+    rollout_health_check_timeout : int
+        Timeout in seconds to wait for a rollout engine /health_generate
+        response before killing it.
+    rollout_health_check_first_wait : int
+        Initial grace period (in seconds) before starting health checks. This
+        allows time for model compilation and initialization. Increase this
+        value significantly when using deepgemm.
+
     ## Checkpointing
 
     save : str
@@ -251,9 +266,6 @@ class SlimeRecipe(BaseTrainRecipe):
     megatron_to_hf_mode : str
         Mode used to export saved Megatron checkpoints back to HF format;
         empty disables the export step.
-    use_fault_tolerance : bool
-        Enable slime's fault tolerance so the run can recover from worker
-        failures.
     freeze_params_name_list : list[str] | None
         Regex patterns (matched with ``re.search``) of parameter names to
         freeze, e.g. a VL model's vision tower so RL only updates the
@@ -535,6 +547,12 @@ class SlimeRecipe(BaseTrainRecipe):
     rollout_stop_token_ids: list[int] | None = None
     sglang_mem_fraction_static: float = 0.75
 
+    # ── Fault Tolerance and Health Checks ───────────────────────────────────
+    use_fault_tolerance: bool = True
+    rollout_health_check_interval: int = 30
+    rollout_health_check_timeout: int = 30
+    rollout_health_check_first_wait: int = 300
+
     # ── Training ────────────────────────────────────────────────────────────
     global_batch_size: int = 16
     lr: float = 1e-6
@@ -576,7 +594,6 @@ class SlimeRecipe(BaseTrainRecipe):
     load: str = ""
     no_save_optim: bool = False
     megatron_to_hf_mode: str = ""
-    use_fault_tolerance: bool = True
 
     # Regex patterns of parameter names to freeze (slime's
     # --freeze-params-name-list, matched with re.search). Used e.g. to freeze a
