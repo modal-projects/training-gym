@@ -187,6 +187,7 @@ export default defineConfig({
                 },
                 { label: 'Qwen3.6-35B-A3B', link: '/reference/models/qwen3_6_35b/' },
                 { label: 'Qwen3.6-27B', link: '/reference/models/qwen3_6_27b/' },
+                { label: 'Qwen3.8-27B', link: '/reference/models/qwen3_8_27b/' },
               ],
             },
             {
@@ -205,6 +206,7 @@ export default defineConfig({
                 },
                 { label: 'Qwen3_6_35b_Recipe', link: '/reference/training/qwen3_6_35b_recipe/' },
                 { label: 'Qwen3_6_27b_Recipe', link: '/reference/training/qwen3_6_27b_recipe/' },
+                { label: 'Qwen3_8_27b_Recipe', link: '/reference/training/qwen3_8_27b_recipe/' },
               ],
             },
             {
