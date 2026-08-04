@@ -52,6 +52,7 @@ class MilesValidationResult:
     training_run_id: str
     training_run_status: TrainingRunStatus
     total_duration_s: float
+    error_message: str | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -67,6 +68,8 @@ class MilesValidationResult:
         print("Result:")
         print(f"Training run status: {self.training_run_status}")
         print(f"Total duration (s): {self.total_duration_s}")
+        if self.error_message:
+            print(f"Error: {self.error_message}")
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -84,6 +87,7 @@ class MilesValidationResult:
             training_run_id=data["training_run_id"],
             training_run_status=TrainingRunStatus(data["training_run_status"]),
             total_duration_s=data["total_duration_s"],
+            error_message=data.get("error_message"),
         )
 
 
@@ -171,17 +175,33 @@ def run_base_training_on_miles(
         recipe=train_recipe,
     )
 
-    train_result = train_config.train()
-    training_run = TrainingRun.from_id(train_result.training_run_id)
+    # launch() + result() rather than train(): a failed run raises out of
+    # result(), and this way the run id is already in hand, so the failure
+    # still produces a result record for the summary table.
+    launched = train_config.launch(prepare_inputs=True)
+    training_run_id = launched.training_run_id
+    error: Exception | None = None
+    try:
+        launched.result(stop_app_on_success=train_config.detach)
+    except Exception as exc:  # noqa: BLE001 — reported, then re-derived below
+        error = exc
+        print(f"Training run {training_run_id} raised: {exc}")
+
+    training_run = TrainingRun.from_id(training_run_id)
+    status = training_run.status
+    if error is not None and status == TrainingRunStatus.COMPLETED:
+        # The run record can lag a crash on the driver side; trust the raise.
+        status = TrainingRunStatus.FAILED
 
     return MilesValidationResult(
         base_model_name=name,
         recipe_name=recipe_cls.__name__,
         docker_image=train_recipe.docker_image,
         step_count=step_count,
-        training_run_id=train_result.training_run_id,
-        training_run_status=training_run.status,
+        training_run_id=training_run_id,
+        training_run_status=status,
         total_duration_s=float(training_run.duration_seconds or 0.0),
+        error_message=str(error) if error is not None else training_run.error_message,
     )
 
 
@@ -202,6 +222,7 @@ def _training_run_link(training_run_id: str, dashboard_url: str | None) -> str:
 def summarize_results(results_dir: str, dashboard_url: str | None = None) -> str:
     """Render a markdown table from result JSON files written by ``check -o``."""
     rows = []
+    failures: list[str] = []
     for path in sorted(Path(results_dir).glob("*.json")):
         result = MilesValidationResult.from_dict(json.loads(path.read_text()))
         rows.append(
@@ -210,6 +231,20 @@ def summarize_results(results_dir: str, dashboard_url: str | None = None) -> str
             f"| {_fmt_secs(result.total_duration_s)} | {result.step_count} "
             f"| {_training_run_link(result.training_run_id, dashboard_url)} |"
         )
+        if not result.succeeded and result.error_message:
+            failures.extend(
+                [
+                    "<details>",
+                    f"<summary>{result.base_model_name} — failure</summary>",
+                    "",
+                    "```",
+                    result.error_message,
+                    "```",
+                    "",
+                    "</details>",
+                    "",
+                ]
+            )
 
     lines = [
         COMMENT_MARKER,
@@ -219,6 +254,9 @@ def summarize_results(results_dir: str, dashboard_url: str | None = None) -> str
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     lines.extend(rows or ["| _no results_ | | | | | | |"])
+    if failures:
+        lines.extend(["", "### Failures", ""])
+        lines.extend(failures)
     return "\n".join(lines).rstrip() + "\n"
 
 
