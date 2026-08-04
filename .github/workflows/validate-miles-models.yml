@@ -1,0 +1,176 @@
+name: Validate Miles Models
+
+# Miles counterpart of validate-models.yml. The PR-triggered matrix is empty
+# today: every miles recipe is Kimi on 16 x 8 H200, too large to launch per PR
+# (see MILES_VALIDATABLE_MODELS). Use workflow_dispatch to validate a model —
+# e.g. to confirm a miles image bump still trains Kimi.
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Comma-separated miles model names to validate (blank = CI set)"
+        required: false
+        default: ""
+      num_steps:
+        description: "Number of training steps (rollouts) per model"
+        required: false
+        default: "1"
+      docker_image:
+        description: "Miles image override (blank = the recipe's default)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-miles-models-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  list-models:
+    runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.list.outputs.models }}
+    env:
+      UV_CACHE_DIR: /tmp/uv-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync --group ci --group dev
+
+      - name: Determine models to validate
+        id: list
+        env:
+          MODELS_INPUT: ${{ github.event.inputs.models }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            models=$(git diff "${{ github.event.pull_request.base.sha }}...HEAD" \
+              | uv run scripts/diff_impact.py --miles-models)
+          elif [ -n "$MODELS_INPUT" ]; then
+            models=$(printf '%s' "$MODELS_INPUT" \
+              | uv run python -c "import json,sys; print(json.dumps([m.strip() for m in sys.stdin.read().split(',') if m.strip()]))")
+          else
+            models=$(uv run scripts/validate_miles_model_configs.py list)
+          fi
+          echo "Selected models: $models"
+          echo "models=$models" >> "$GITHUB_OUTPUT"
+
+  validate:
+    needs: list-models
+    if: needs.list-models.outputs.models != '[]'
+    runs-on: ubuntu-latest
+    environment: modal
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJSON(needs.list-models.outputs.models) }}
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: training-gym
+      UV_CACHE_DIR: /tmp/uv-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync --group ci --group dev
+
+      - name: Compute artifact name
+        id: artifact
+        env:
+          MODEL: ${{ matrix.model }}
+        run: echo "name=validate-miles-result-$(printf '%s' "$MODEL" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Validate ${{ matrix.model }}
+        env:
+          DOCKER_IMAGE: ${{ github.event.inputs.docker_image }}
+        run: |
+          args=()
+          if [ -n "$DOCKER_IMAGE" ]; then
+            args+=(--docker-image "$DOCKER_IMAGE")
+          fi
+          uv run scripts/validate_miles_model_configs.py check \
+            --model "${{ matrix.model }}" \
+            --num_steps "${{ github.event.inputs.num_steps || '1' }}" \
+            "${args[@]}" \
+            --output "${{ steps.artifact.outputs.name }}.json"
+
+      - name: Upload result
+        if: always() && hashFiles(format('{0}.json', steps.artifact.outputs.name)) != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ steps.artifact.outputs.name }}.json
+
+  comment:
+    needs: validate
+    if: >-
+      always() && github.event_name == 'pull_request' &&
+      (needs.validate.result == 'success' || needs.validate.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    env:
+      UV_CACHE_DIR: /tmp/uv-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync --group ci --group dev
+
+      - name: Download results
+        uses: actions/download-artifact@v4
+        with:
+          path: results
+          pattern: validate-miles-result-*
+          merge-multiple: true
+
+      - name: Build comment body
+        run: >-
+          uv run scripts/validate_miles_model_configs.py summarize
+          --results-dir results
+          --dashboard-url "${{ vars.VALIDATION_DASHBOARD_URL }}"
+          > comment.md
+
+      - name: Post comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('comment.md', 'utf8');
+            const marker = '<!-- validate-miles-models-comment -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

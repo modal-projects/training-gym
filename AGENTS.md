@@ -43,6 +43,9 @@ uv run modal deploy dashboards/app.py                  # observability dashboard
 # Validate model configs / map a diff to affected tutorials
 uv run scripts/validate_model_configs.py list
 uv run scripts/validate_model_configs.py check -m qwen3-4b
+# miles equivalent (CI set is empty; check runs on demand, e.g. a miles bump)
+uv run scripts/validate_miles_model_configs.py list-runnable
+uv run scripts/validate_miles_model_configs.py check -m Kimi-K2.5 --docker-image radixark/miles:dev-<tag>
 git diff | uv run scripts/diff_impact.py
 ```
 
