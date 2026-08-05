@@ -27,7 +27,7 @@ from modal_training_gym.common.models.miles_validation import (
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.train import TrainConfig
-from modal_training_gym.train_recipes.miles_recipe import MilesConfig
+from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
 COMMENT_MARKER = "<!-- validate-miles-models-comment -->"
 
@@ -152,7 +152,7 @@ def run_base_training_on_miles(
     ]
     model_short_name = model_config.model_name.rsplit("/", 1)[-1]
 
-    train_recipe: MilesConfig = recipe_cls()
+    train_recipe: MilesRecipe = recipe_cls()
     train_recipe.num_rollout = step_count
     if docker_image is not None:
         train_recipe.docker_image = docker_image

@@ -8,14 +8,14 @@ base miles recipe rather than a slime one.
 from modal_training_gym.train_recipes.miles_recipe import (
     Kimi_K2_5_LoRA_Recipe,
     Kimi_K2_6_LoRA_Recipe,
-    MilesConfig,
+    MilesRecipe,
 )
 
 from .base import ModelConfig
 from .kimi_k2_5 import Kimi_K2_5
 from .kimi_k2_6 import Kimi_K2_6
 
-MilesModelEntry = tuple[str, type[ModelConfig], type[MilesConfig]]
+MilesModelEntry = tuple[str, type[ModelConfig], type[MilesRecipe]]
 
 # Every model with a base miles recipe. Runnable by name with
 # ``scripts/validate_miles_model_configs.py check --model <name>``.
