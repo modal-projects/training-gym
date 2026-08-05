@@ -1,12 +1,8 @@
 name: Validate Miles Models
 
-# Miles counterpart of validate-models.yml. It validates nothing today:
-# MILES_VALIDATABLE_MODELS is empty because every miles recipe is Kimi on
-# 16 x 8 H200, far too large to launch from a PR, so `list` returns [] and the
-# matrix is skipped. Use workflow_dispatch with an explicit model to run one —
-# e.g. to confirm a miles image bump still trains Kimi. Once a miles model is
-# cheap enough to gate PRs on, add it to MILES_VALIDATABLE_MODELS and select it
-# per-PR through diff_impact.py the way validate-models.yml does.
+# Miles counterpart of validate-models.yml. The model set lives in
+# MILES_VALIDATABLE_MODELS; workflow_dispatch can also name a model directly,
+# e.g. to confirm a miles image bump still trains Kimi.
 
 on:
   pull_request:

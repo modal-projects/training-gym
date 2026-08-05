@@ -19,5 +19,6 @@ MILES_MODELS: tuple[tuple[str, type[ModelConfig]], ...] = (
 # Models the miles validation workflow runs on its own. Deliberately empty:
 # the only miles recipes today are Kimi on 16 x 8 H200, far too large to launch
 # from every PR, so miles validation stays opt-in (workflow_dispatch or the
-# CLI). Add a model here once it is cheap enough to gate PRs on.
+# CLI). Add a model here once it is cheap enough to gate PRs on, and the
+# workflow starts validating it with no other change.
 MILES_VALIDATABLE_MODELS: tuple[tuple[str, type[ModelConfig]], ...] = ()

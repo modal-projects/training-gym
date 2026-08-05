@@ -1,9 +1,8 @@
 """Validate a miles model config by running base training on miles.
 
-The miles counterpart of ``validate_model_configs.py``. Miles models are big
-(Kimi is 16 x 8 H200), so nothing is wired into the PR matrix yet — ``list``
-returns the CI set, which is currently empty, while ``check`` can run any
-model in ``MILES_MODELS`` on demand.
+The miles counterpart of ``validate_model_configs.py``. ``list`` returns the
+CI set (``MILES_VALIDATABLE_MODELS``); ``check`` runs any model in
+``MILES_MODELS`` on demand.
 
 Usage:
     uv run scripts/validate_miles_model_configs.py list
@@ -122,11 +121,7 @@ def _model_for_name(model_name: str) -> tuple[str, ModelConfig]:
 
 
 def get_base_recipe(model_config: ModelConfig) -> MilesRecipe:
-    """The model's base miles recipe.
-
-    ``MilesRecipe.get_base_recipe`` returns None for a model miles has no
-    recipe for; validation has nothing to run in that case.
-    """
+    """The model's base miles recipe."""
     recipe = MilesRecipe.get_base_recipe(model_config)
     if recipe is None:
         raise TrainingGymConfigError(
@@ -136,8 +131,7 @@ def get_base_recipe(model_config: ModelConfig) -> MilesRecipe:
 
 
 def available_model_names() -> list[str]:
-    """Sorted model names validated by CI — empty until a miles model is cheap
-    enough to gate PRs on (see ``MILES_VALIDATABLE_MODELS``)."""
+    """Sorted model names validated by CI."""
     return sorted(name for name, _ in MILES_VALIDATABLE_MODELS)
 
 
