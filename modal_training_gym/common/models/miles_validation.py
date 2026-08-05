@@ -21,4 +21,8 @@ MILES_MODELS: tuple[tuple[str, type[ModelConfig]], ...] = (
 # from every PR, so miles validation stays opt-in (workflow_dispatch or the
 # CLI). Add a model here once it is cheap enough to gate PRs on, and the
 # workflow starts validating it with no other change.
-MILES_VALIDATABLE_MODELS: tuple[tuple[str, type[ModelConfig]], ...] = ()
+MILES_VALIDATABLE_MODELS: tuple[tuple[str, type[ModelConfig]], ...] = (
+    # TEMPORARY — remove before merge. Only here to prove the workflow fires;
+    # a PR that reaches the Validate step launches Kimi on 16 x 8 H200.
+    ("Kimi-K2.5", Kimi_K2_5),
+)
