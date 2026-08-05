@@ -48,18 +48,6 @@ MODEL_VALIDATION_HARNESS_PATHS = frozenset(
     }
 )
 
-# Same, for the miles validation harness.
-MILES_MODEL_VALIDATION_HARNESS_PATHS = frozenset(
-    {
-        REPO_ROOT / "scripts" / "validate_miles_model_configs.py",
-        REPO_ROOT / "scripts" / "diff_impact.py",
-        REPO_ROOT / "modal_training_gym" / "common" / "models" / "miles_validation.py",
-        REPO_ROOT / "modal_training_gym" / "frameworks" / "miles" / "launcher.py",
-        REPO_ROOT / "modal_training_gym" / "common" / "train.py",
-        REPO_ROOT / "modal_training_gym" / "common" / "train_result.py",
-    }
-)
-
 
 @dataclass(frozen=True)
 class TutorialInfo:
@@ -189,49 +177,6 @@ def affected_models(diff_text: str) -> tuple[str, ...]:
     class_to_models, all_models = _model_index()
 
     if any(path in MODEL_VALIDATION_HARNESS_PATHS for path in changed_paths):
-        return tuple(sorted(all_models))
-
-    report = analyze_diff(diff_text)
-    models: set[str] = set()
-    for class_name in report.affected_classes:
-        models.update(class_to_models.get(class_name, frozenset()))
-    return tuple(sorted(models))
-
-
-@lru_cache(maxsize=1)
-def _miles_model_index() -> tuple[dict[str, frozenset[str]], frozenset[str]]:
-    """Miles counterpart of ``_model_index``.
-
-    Both the model's ``ModelConfig`` subclass and its miles recipe class gate
-    that model. Only models in ``MILES_VALIDATABLE_MODELS`` are tracked — the
-    miles workflow validates that set, which is empty today.
-    """
-    from modal_training_gym.common.models.miles_validation import (
-        MILES_VALIDATABLE_MODELS,
-    )
-    from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
-
-    class_to_models: dict[str, set[str]] = defaultdict(set)
-    all_models: set[str] = set()
-    for model_name, model_config in MILES_VALIDATABLE_MODELS:
-        all_models.add(model_name)
-        class_to_models[model_config.__name__].add(model_name)
-        recipe = MilesRecipe.get_base_recipe(model_config())
-        if recipe is not None:
-            class_to_models[type(recipe).__name__].add(model_name)
-
-    return (
-        {name: frozenset(models) for name, models in class_to_models.items()},
-        frozenset(all_models),
-    )
-
-
-def affected_miles_models(diff_text: str) -> tuple[str, ...]:
-    """Miles model names (validate ``--model`` args) impacted by a diff."""
-    changed_paths = _paths_from_diff(diff_text)
-    class_to_models, all_models = _miles_model_index()
-
-    if any(path in MILES_MODEL_VALIDATION_HARNESS_PATHS for path in changed_paths):
         return tuple(sorted(all_models))
 
     report = analyze_diff(diff_text)
@@ -456,12 +401,6 @@ def main(argv: Iterable[str] | None = None) -> int:
         help="Emit a JSON array of model names affected by the diff, "
         "compatible with scripts/validate_model_configs.py check --model.",
     )
-    parser.add_argument(
-        "--miles-models",
-        action="store_true",
-        help="Emit a JSON array of miles model names affected by the diff, "
-        "compatible with scripts/validate_miles_model_configs.py check --model.",
-    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.diff_file is not None:
@@ -471,10 +410,6 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     if args.models:
         print(json.dumps(list(affected_models(diff_text))))
-        return 0
-
-    if args.miles_models:
-        print(json.dumps(list(affected_miles_models(diff_text))))
         return 0
 
     report = analyze_diff(diff_text)

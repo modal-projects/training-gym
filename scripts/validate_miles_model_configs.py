@@ -32,6 +32,9 @@ from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
 COMMENT_MARKER = "<!-- validate-miles-models-comment -->"
 
+# Prompt rows to materialize. Must cover one rollout batch (Kimi's is 32).
+VALIDATION_PROMPT_ROWS = 64
+
 
 def _fmt_secs(seconds: float | int | None) -> str:
     if seconds is None:
@@ -53,7 +56,6 @@ class MilesValidationResult:
     training_run_id: str
     training_run_status: TrainingRunStatus
     total_duration_s: float
-    error_message: str | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -69,8 +71,6 @@ class MilesValidationResult:
         print("Result:")
         print(f"Training run status: {self.training_run_status}")
         print(f"Total duration (s): {self.total_duration_s}")
-        if self.error_message:
-            print(f"Error: {self.error_message}")
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -88,7 +88,6 @@ class MilesValidationResult:
             training_run_id=data["training_run_id"],
             training_run_status=TrainingRunStatus(data["training_run_status"]),
             total_duration_s=data["total_duration_s"],
-            error_message=data.get("error_message"),
         )
 
 
@@ -105,13 +104,13 @@ class DapoMath17kDataset(HuggingFaceDataset):
     always_prepare = True
 
 
-def pick_dataset(n_rows: int) -> DatasetConfig:
+def pick_dataset() -> DatasetConfig:
     """Validation dataset for miles models.
 
     Every miles recipe today is a math-RL recipe scored by ``deepscaler``, so
     they all validate against DAPO-Math-17k.
     """
-    return DapoMath17kDataset(n_rows=n_rows)
+    return DapoMath17kDataset(n_rows=VALIDATION_PROMPT_ROWS)
 
 
 def _model_for_name(model_name: str) -> tuple[str, ModelConfig]:
@@ -151,7 +150,6 @@ def run_base_training_on_miles(
     model_name: str,
     step_count: int = 1,
     docker_image: str | None = None,
-    n_rows: int = 64,
     wandb_project: str | None = None,
     wandb_group: str | None = None,
     wandb_secret_name: str = "wandb-secret",
@@ -159,7 +157,7 @@ def run_base_training_on_miles(
     save_interval: int | None = None,
 ) -> MilesValidationResult:
     name, model_config = _model_for_name(model_name)
-    dataset = pick_dataset(n_rows)
+    dataset = pick_dataset()
     dataset_name = getattr(dataset, "hf_repo", type(dataset).__name__).rsplit("/", 1)[
         -1
     ]
@@ -188,39 +186,17 @@ def run_base_training_on_miles(
         recipe=train_recipe,
     )
 
-    # launch() + result() rather than train(): a failed run raises out of
-    # result(), and this way the run id is already in hand, so the failure
-    # still produces a result record for the summary table. Otherwise this
-    # mirrors TrainConfig.train() — including tearing the app down on failure,
-    # so a validation run never leaves a cluster up.
-    from modal_training_gym.common.modal_lifecycle import stop_app
-
-    launched = train_config.launch(prepare_inputs=True)
-    training_run_id = launched.training_run_id
-    error: Exception | None = None
-    try:
-        launched.result(stop_app_on_success=True)
-    except Exception as exc:  # noqa: BLE001 — reported, then re-derived below
-        error = exc
-        print(f"Training run {training_run_id} raised: {exc}")
-        if not train_config.detach and launched.modal_app_id:
-            stop_app(launched.modal_app_id)
-
-    training_run = TrainingRun.from_id(training_run_id)
-    status = training_run.status
-    if error is not None and status == TrainingRunStatus.COMPLETED:
-        # The run record can lag a crash on the driver side; trust the raise.
-        status = TrainingRunStatus.FAILED
+    train_result = train_config.train()
+    training_run = TrainingRun.from_id(train_result.training_run_id)
 
     return MilesValidationResult(
         base_model_name=name,
         recipe_name=type(train_recipe).__name__,
         docker_image=train_recipe.docker_image,
         step_count=step_count,
-        training_run_id=training_run_id,
-        training_run_status=status,
+        training_run_id=train_result.training_run_id,
+        training_run_status=training_run.status,
         total_duration_s=float(training_run.duration_seconds or 0.0),
-        error_message=str(error) if error is not None else training_run.error_message,
     )
 
 
@@ -241,7 +217,6 @@ def _training_run_link(training_run_id: str, dashboard_url: str | None) -> str:
 def summarize_results(results_dir: str, dashboard_url: str | None = None) -> str:
     """Render a markdown table from result JSON files written by ``check -o``."""
     rows = []
-    failures: list[str] = []
     for path in sorted(Path(results_dir).glob("*.json")):
         result = MilesValidationResult.from_dict(json.loads(path.read_text()))
         rows.append(
@@ -250,20 +225,6 @@ def summarize_results(results_dir: str, dashboard_url: str | None = None) -> str
             f"| {_fmt_secs(result.total_duration_s)} | {result.step_count} "
             f"| {_training_run_link(result.training_run_id, dashboard_url)} |"
         )
-        if not result.succeeded and result.error_message:
-            failures.extend(
-                [
-                    "<details>",
-                    f"<summary>{result.base_model_name} — failure</summary>",
-                    "",
-                    "```",
-                    result.error_message,
-                    "```",
-                    "",
-                    "</details>",
-                    "",
-                ]
-            )
 
     lines = [
         COMMENT_MARKER,
@@ -273,9 +234,6 @@ def summarize_results(results_dir: str, dashboard_url: str | None = None) -> str
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     lines.extend(rows or ["| _no results_ | | | | | | |"])
-    if failures:
-        lines.extend(["", "### Failures", ""])
-        lines.extend(failures)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -305,12 +263,6 @@ def __main__():
         "--docker-image",
         default=None,
         help="Override the recipe's miles image, e.g. to test a miles bump.",
-    )
-    check_parser.add_argument(
-        "--n-rows",
-        type=int,
-        default=64,
-        help="Prompt rows to materialize. Must cover one rollout batch. Defaults to 64.",
     )
     check_parser.add_argument(
         "--eval-interval",
@@ -359,10 +311,6 @@ def __main__():
     subparsers.add_parser(
         "list", help="Print CI-validated model names as a JSON array and exit."
     )
-    subparsers.add_parser(
-        "list-runnable",
-        help="Print every model `check` accepts as a JSON array and exit.",
-    )
 
     summarize_parser = subparsers.add_parser(
         "summarize",
@@ -385,10 +333,6 @@ def __main__():
         print(json.dumps(available_model_names()))
         return
 
-    if args.command == "list-runnable":
-        print(json.dumps(runnable_model_names()))
-        return
-
     if args.command == "summarize":
         print(summarize_results(args.results_dir, args.dashboard_url))
         return
@@ -397,7 +341,6 @@ def __main__():
         args.model,
         args.num_steps,
         docker_image=args.docker_image,
-        n_rows=args.n_rows,
         wandb_project=None if args.no_wandb else args.wandb_project,
         wandb_group=args.wandb_group,
         wandb_secret_name=args.wandb_secret_name,

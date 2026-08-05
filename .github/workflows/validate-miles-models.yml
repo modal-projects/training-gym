@@ -1,9 +1,12 @@
 name: Validate Miles Models
 
-# Miles counterpart of validate-models.yml. The PR-triggered matrix is empty
-# today: every miles recipe is Kimi on 16 x 8 H200, too large to launch per PR
-# (see MILES_VALIDATABLE_MODELS). Use workflow_dispatch to validate a model —
-# e.g. to confirm a miles image bump still trains Kimi.
+# Miles counterpart of validate-models.yml. It validates nothing today:
+# MILES_VALIDATABLE_MODELS is empty because every miles recipe is Kimi on
+# 16 x 8 H200, far too large to launch from a PR, so `list` returns [] and the
+# matrix is skipped. Use workflow_dispatch with an explicit model to run one —
+# e.g. to confirm a miles image bump still trains Kimi. Once a miles model is
+# cheap enough to gate PRs on, add it to MILES_VALIDATABLE_MODELS and select it
+# per-PR through diff_impact.py the way validate-models.yml does.
 
 on:
   pull_request:
@@ -38,8 +41,6 @@ jobs:
       UV_CACHE_DIR: /tmp/uv-cache
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -55,10 +56,7 @@ jobs:
         env:
           MODELS_INPUT: ${{ github.event.inputs.models }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            models=$(git diff "${{ github.event.pull_request.base.sha }}...HEAD" \
-              | uv run scripts/diff_impact.py --miles-models)
-          elif [ -n "$MODELS_INPUT" ]; then
+          if [ -n "$MODELS_INPUT" ]; then
             models=$(printf '%s' "$MODELS_INPUT" \
               | uv run python -c "import json,sys; print(json.dumps([m.strip() for m in sys.stdin.read().split(',') if m.strip()]))")
           else
