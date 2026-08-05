@@ -19,10 +19,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from modal_training_gym.common.dataset import DatasetConfig, HuggingFaceDataset
+from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.models.miles_validation import (
     MILES_MODELS,
     MILES_VALIDATABLE_MODELS,
-    MilesModelEntry,
 )
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.wandb import WandbConfig
@@ -113,24 +114,37 @@ def pick_dataset(n_rows: int) -> DatasetConfig:
     return DapoMath17kDataset(n_rows=n_rows)
 
 
-def _entry_for_model_name(model_name: str) -> MilesModelEntry:
-    for entry in MILES_MODELS:
-        name, model_config, _ = entry
-        if model_name.lower() in (name.lower(), model_config.model_name.lower()):
-            return entry
-    available = ", ".join(name for name, _, _ in MILES_MODELS)
+def _model_for_name(model_name: str) -> tuple[str, ModelConfig]:
+    for name, model_config_cls in MILES_MODELS:
+        if model_name.lower() in (name.lower(), model_config_cls.model_name.lower()):
+            return name, model_config_cls()
+    available = ", ".join(name for name, _ in MILES_MODELS)
     raise ValueError(f"unknown miles model {model_name!r}; available: {available}")
+
+
+def get_base_recipe(model_config: ModelConfig) -> MilesRecipe:
+    """The model's base miles recipe.
+
+    ``MilesRecipe.get_base_recipe`` returns None for a model miles has no
+    recipe for; validation has nothing to run in that case.
+    """
+    recipe = MilesRecipe.get_base_recipe(model_config)
+    if recipe is None:
+        raise TrainingGymConfigError(
+            f"no base miles recipe for model {model_config.model_name!r}"
+        )
+    return recipe
 
 
 def available_model_names() -> list[str]:
     """Sorted model names validated by CI — empty until a miles model is cheap
     enough to gate PRs on (see ``MILES_VALIDATABLE_MODELS``)."""
-    return sorted(name for name, _, _ in MILES_VALIDATABLE_MODELS)
+    return sorted(name for name, _ in MILES_VALIDATABLE_MODELS)
 
 
 def runnable_model_names() -> list[str]:
     """Sorted model names ``check --model`` accepts."""
-    return sorted(name for name, _, _ in MILES_MODELS)
+    return sorted(name for name, _ in MILES_MODELS)
 
 
 def run_base_training_on_miles(
@@ -144,15 +158,14 @@ def run_base_training_on_miles(
     eval_interval: int | None = None,
     save_interval: int | None = None,
 ) -> MilesValidationResult:
-    name, model_config_cls, recipe_cls = _entry_for_model_name(model_name)
-    model_config = model_config_cls()
+    name, model_config = _model_for_name(model_name)
     dataset = pick_dataset(n_rows)
     dataset_name = getattr(dataset, "hf_repo", type(dataset).__name__).rsplit("/", 1)[
         -1
     ]
     model_short_name = model_config.model_name.rsplit("/", 1)[-1]
 
-    train_recipe: MilesRecipe = recipe_cls()
+    train_recipe = get_base_recipe(model_config)
     train_recipe.num_rollout = step_count
     if docker_image is not None:
         train_recipe.docker_image = docker_image
@@ -177,15 +190,21 @@ def run_base_training_on_miles(
 
     # launch() + result() rather than train(): a failed run raises out of
     # result(), and this way the run id is already in hand, so the failure
-    # still produces a result record for the summary table.
+    # still produces a result record for the summary table. Otherwise this
+    # mirrors TrainConfig.train() — including tearing the app down on failure,
+    # so a validation run never leaves a cluster up.
+    from modal_training_gym.common.modal_lifecycle import stop_app
+
     launched = train_config.launch(prepare_inputs=True)
     training_run_id = launched.training_run_id
     error: Exception | None = None
     try:
-        launched.result(stop_app_on_success=train_config.detach)
+        launched.result(stop_app_on_success=True)
     except Exception as exc:  # noqa: BLE001 — reported, then re-derived below
         error = exc
         print(f"Training run {training_run_id} raised: {exc}")
+        if not train_config.detach and launched.modal_app_id:
+            stop_app(launched.modal_app_id)
 
     training_run = TrainingRun.from_id(training_run_id)
     status = training_run.status
@@ -195,7 +214,7 @@ def run_base_training_on_miles(
 
     return MilesValidationResult(
         base_model_name=name,
-        recipe_name=recipe_cls.__name__,
+        recipe_name=type(train_recipe).__name__,
         docker_image=train_recipe.docker_image,
         step_count=step_count,
         training_run_id=training_run_id,

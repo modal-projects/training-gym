@@ -209,13 +209,16 @@ def _miles_model_index() -> tuple[dict[str, frozenset[str]], frozenset[str]]:
     from modal_training_gym.common.models.miles_validation import (
         MILES_VALIDATABLE_MODELS,
     )
+    from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
     class_to_models: dict[str, set[str]] = defaultdict(set)
     all_models: set[str] = set()
-    for model_name, model_config, recipe in MILES_VALIDATABLE_MODELS:
+    for model_name, model_config in MILES_VALIDATABLE_MODELS:
         all_models.add(model_name)
         class_to_models[model_config.__name__].add(model_name)
-        class_to_models[recipe.__name__].add(model_name)
+        recipe = MilesRecipe.get_base_recipe(model_config())
+        if recipe is not None:
+            class_to_models[type(recipe).__name__].add(model_name)
 
     return (
         {name: frozenset(models) for name, models in class_to_models.items()},
