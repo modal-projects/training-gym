@@ -31,9 +31,6 @@ from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
 COMMENT_MARKER = "<!-- validate-miles-models-comment -->"
 
-# Prompt rows to materialize. Must cover one rollout batch (Kimi's is 32).
-VALIDATION_PROMPT_ROWS = 64
-
 
 def _fmt_secs(seconds: float | int | None) -> str:
     if seconds is None:
@@ -103,13 +100,13 @@ class DapoMath17kDataset(HuggingFaceDataset):
     always_prepare = True
 
 
-def pick_dataset() -> DatasetConfig:
+def pick_dataset(n_rows: int) -> DatasetConfig:
     """Validation dataset for miles models.
 
     Every miles recipe today is a math-RL recipe scored by ``deepscaler``, so
     they all validate against DAPO-Math-17k.
     """
-    return DapoMath17kDataset(n_rows=VALIDATION_PROMPT_ROWS)
+    return DapoMath17kDataset(n_rows=n_rows)
 
 
 def _model_for_name(model_name: str) -> tuple[str, ModelConfig]:
@@ -151,14 +148,16 @@ def run_base_training_on_miles(
     save_interval: int | None = None,
 ) -> MilesValidationResult:
     name, model_config = _model_for_name(model_name)
-    dataset = pick_dataset()
+    train_recipe = get_base_recipe(model_config)
+    train_recipe.num_rollout = step_count
+
+    # Every rollout step consumes rollout_batch_size prompts, so materialize
+    # enough for the whole run rather than assuming the loader wraps epochs.
+    dataset = pick_dataset(train_recipe.rollout_batch_size * step_count)
     dataset_name = getattr(dataset, "hf_repo", type(dataset).__name__).rsplit("/", 1)[
         -1
     ]
     model_short_name = model_config.model_name.rsplit("/", 1)[-1]
-
-    train_recipe = get_base_recipe(model_config)
-    train_recipe.num_rollout = step_count
     if docker_image is not None:
         train_recipe.docker_image = docker_image
     if eval_interval is not None:
