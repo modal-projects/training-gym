@@ -56,10 +56,13 @@ def _remove_if_invalid(path: str | Path) -> bool:
 class _KimiK2Recipe(MilesRecipe):
     gpu_type: str = "H200"
     memory: tuple[int, int] = (1024, int(2 * 1024 * 1024))
+    # Note: earlier images shipped cudnn 9 both system-wide and as a pip wheel,
+    # and this deleted the wheel copy so torch loaded the system one. Images
+    # from 2026-08 ship it only as the wheel, so deleting it leaves torch with
+    # no libcudnn.so.9 at all — every Kimi run then dies in INT4 conversion.
     image_run_commands: list[str] = field(
         default_factory=lambda: [
             "rm -rf /root/.cache/huggingface 2>/dev/null || true",
-            "rm -rf /usr/local/lib/python3.12/dist-packages/nvidia/cudnn/ 2>/dev/null || true",
         ]
     )
     image_env: dict[str, str] = field(
