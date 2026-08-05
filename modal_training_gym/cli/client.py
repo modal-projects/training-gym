@@ -96,6 +96,41 @@ class DashboardClient:
         timeout: float | httpx.Timeout | None = None,
     ) -> Any:
         """GET a dashboard-relative path and decode its JSON response."""
+        return self._request_json(
+            "GET",
+            path,
+            params=params,
+            not_found_error=not_found_error,
+            timeout=timeout,
+        )
+
+    def post_json(
+        self,
+        path: str,
+        *,
+        json: Mapping[str, Any] | None = None,
+        not_found_error: CLIError | None = None,
+        timeout: float | httpx.Timeout | None = None,
+    ) -> Any:
+        """POST to a dashboard-relative path and decode its JSON response."""
+        return self._request_json(
+            "POST",
+            path,
+            json=json,
+            not_found_error=not_found_error,
+            timeout=timeout,
+        )
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: QueryParams | None = None,
+        json: Mapping[str, Any] | None = None,
+        not_found_error: CLIError | None = None,
+        timeout: float | httpx.Timeout | None = None,
+    ) -> Any:
         parsed_path = urlsplit(path)
         if parsed_path.scheme or parsed_path.netloc:
             raise CLIError(
@@ -109,10 +144,13 @@ class DashboardClient:
             else None
         )
         try:
-            response = self._client.get(
+            response = self._client.request(
+                method,
                 path.lstrip("/"),
                 params=query,
+                json=json,
                 timeout=DEFAULT_TIMEOUT_SECONDS if timeout is None else timeout,
+                follow_redirects=method == "GET",
             )
         except httpx.TimeoutException as exc:
             raise CLIError(
@@ -128,6 +166,13 @@ class DashboardClient:
                 hint="training-gym setup",
             ) from exc
 
+        if method != "GET" and response.is_redirect:
+            raise CLIError(
+                "Dashboard redirected a mutation request.",
+                error="dashboard_redirect",
+                exit_code=ExitCode.BACKEND,
+                hint="training-gym setup",
+            )
         if response.status_code == 404 and not_found_error is not None:
             raise not_found_error
 

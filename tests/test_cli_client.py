@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import httpx
 import pytest
@@ -81,6 +82,22 @@ def test_get_json_supports_per_request_timeout(mock_transport):
     }
 
 
+def test_post_json_sends_json_body(mock_transport):
+    seen = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    mock_transport(respond)
+    with DashboardClient() as client:
+        result = client.post_json("/api/runs/run-1/kill", json={"force": True})
+
+    assert result == {"status": "ok"}
+    assert seen[0].method == "POST"
+    assert json.loads(seen[0].content) == {"force": True}
+
+
 def test_sends_basic_auth_when_password_exists(monkeypatch, mock_transport):
     monkeypatch.setenv("TRAINING_GYM_DASHBOARD_PASSWORD", "secret")
     requests = []
@@ -142,6 +159,25 @@ def test_does_not_forward_proxy_auth_to_redirected_host(monkeypatch, mock_transp
     assert requests[0][1]["modal-secret"] == "ws-test"
     assert "modal-key" not in requests[1][1]
     assert "modal-secret" not in requests[1][1]
+
+
+def test_post_json_rejects_redirect_without_reissuing_request(mock_transport):
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(302, headers={"location": "/api/runs/run-1/kill/"})
+
+    mock_transport(respond)
+    with DashboardClient() as client:
+        with pytest.raises(CLIError) as exc_info:
+            client.post_json("/api/runs/run-1/kill")
+
+    assert exc_info.value.error == "dashboard_redirect"
+    assert exc_info.value.exit_code == ExitCode.BACKEND
+    assert [(request.method, str(request.url)) for request in requests] == [
+        ("POST", "https://example.test/api/runs/run-1/kill")
+    ]
 
 
 def test_omits_auth_when_password_is_absent(monkeypatch, mock_transport):

@@ -9,7 +9,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 from urllib.parse import quote
 
 import click
@@ -21,6 +21,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from modal_training_gym.common.modal_lifecycle import app_live_status
+from modal_training_gym.common.run import TrainingRunStatus
 from modal_training_gym.common.run_list import run_list_field_metadata
 from modal_training_gym.common.run_summary import RunSummary
 from modal_training_gym.common.time import parse_time
@@ -46,6 +48,19 @@ CLI_FIELD_NAMES = {
     "group_id": "group",
     "updated_at": "last_updated_at",
 }
+
+
+class _KillRunReport(TypedDict):
+    run_id: str
+    modal_app_id: str | None
+    modal_app_live: bool | None
+    status: str
+    current_step: int | None
+    total_steps: int | None
+    step_unit: str
+    duration_seconds: int | None
+    action: Literal["would_kill", "skipped", "killed"]
+    skip_reason: str | None
 
 
 def _run_filter_options(function: Callable[..., Any]) -> Callable[..., Any]:
@@ -434,12 +449,184 @@ def download_run_traces(
         click.echo(str(output_path))
 
 
-def _format_step(summary: RunSummary) -> str:
-    current, total, unit = _current_step(summary)
+def _format_step(current: int | None, total: int | None, unit: str) -> str:
     if current is None:
         return "—"
     value = f"{current} / {total}" if total is not None else str(current)
     return f"{value} {unit}".strip()
+
+
+def _print_kill_skips(runs: list[_KillRunReport]) -> None:
+    for run in runs:
+        if run["action"] == "skipped":
+            reason = (run["skip_reason"] or "not terminated").replace("_", " ")
+            click.echo(f"Skipped {run['run_id']}: {reason}")
+
+
+def _print_kill_preview(runs: list[_KillRunReport]) -> None:
+    runs_to_kill = [run for run in runs if run["action"] == "would_kill"]
+    if runs_to_kill:
+        run_word = "run" if len(runs_to_kill) == 1 else "runs"
+        click.echo(f"Would terminate {len(runs_to_kill)} {run_word}:")
+        for run in runs_to_kill:
+            click.echo(f"  {run['run_id']}")
+    else:
+        click.echo("No active runs to terminate.")
+    _print_kill_skips(runs)
+
+
+def _print_kill_result(runs: list[_KillRunReport]) -> None:
+    killed_runs = [run for run in runs if run["action"] == "killed"]
+    if killed_runs:
+        run_word = "run" if len(killed_runs) == 1 else "runs"
+        click.echo(f"Terminated {len(killed_runs)} {run_word}:")
+        for run in killed_runs:
+            click.echo(f"  {run['run_id']}")
+    else:
+        click.echo("No active runs to terminate.")
+    _print_kill_skips(runs)
+
+
+def _build_kill_run_report(
+    summary: RunSummary,
+    *,
+    now: float,
+    modal_app_live: bool | None,
+) -> _KillRunReport:
+    status = summary.status.lower()
+    if status != TrainingRunStatus.RUNNING.value:
+        action, skip_reason = "skipped", "already_terminal"
+    elif not summary.modal_app_id:
+        action, skip_reason = "skipped", "missing_modal_app_id"
+    elif modal_app_live is False:
+        action, skip_reason = "skipped", "modal_app_not_live"
+    else:
+        action, skip_reason = "would_kill", None
+
+    current_step, total_steps, step_unit = _current_step(summary)
+    duration_seconds = summary.duration_seconds
+    if duration_seconds is None and summary.started_at:
+        end = summary.ended_at or now
+        duration_seconds = max(0, int(end - summary.started_at))
+
+    return {
+        "run_id": summary.run_id,
+        "modal_app_id": summary.modal_app_id or None,
+        "modal_app_live": modal_app_live,
+        "status": status,
+        "current_step": current_step,
+        "total_steps": total_steps,
+        "step_unit": step_unit,
+        "duration_seconds": duration_seconds,
+        "action": action,
+        "skip_reason": skip_reason,
+    }
+
+
+def kill_runs(
+    *,
+    run_ids: tuple[str, ...],
+    dry_run: bool,
+    skip_confirmation: bool,
+    json_output: bool,
+) -> None:
+    """Stop the Modal apps underlying one or more training runs."""
+    run_summaries: list[RunSummary] = []
+    with DashboardClient() as client:
+        for run_id in dict.fromkeys(run_ids):
+            encoded_run_id = quote(run_id, safe="")
+            run_summaries.append(
+                _validate_run_summary(
+                    client.get_json(
+                        f"/api/runs/{encoded_run_id}",
+                        params=None,
+                        not_found_error=CLIError(
+                            f"Training run {run_id!r} was not found.",
+                            error="run_not_found",
+                            exit_code=ExitCode.NOT_FOUND,
+                            run_id=run_id,
+                            hint="training-gym run list",
+                        ),
+                    )
+                )
+            )
+
+    now = time.time()
+    run_reports = [
+        _build_kill_run_report(
+            summary,
+            now=now,
+            modal_app_live=(
+                app_live_status(summary.modal_app_id) if summary.modal_app_id else None
+            ),
+        )
+        for summary in run_summaries
+    ]
+    runs_to_kill = [
+        run_report for run_report in run_reports if run_report["action"] == "would_kill"
+    ]
+    error_count = sum(
+        run_report["skip_reason"] not in (None, "already_terminal")
+        for run_report in run_reports
+    )
+    result: dict[str, object] = {
+        "dry_run": dry_run,
+        "kill_count": len(runs_to_kill),
+        "skipped_count": len(run_reports) - len(runs_to_kill),
+        "error_count": error_count,
+        "runs": run_reports,
+    }
+    if dry_run:
+        if json_output:
+            print_json(result)
+        else:
+            _print_kill_preview(run_reports)
+        if error_count:
+            raise click.exceptions.Exit(int(ExitCode.BACKEND))
+        return
+
+    if runs_to_kill and not skip_confirmation:
+        run_word = "run" if len(runs_to_kill) == 1 else "runs"
+        confirm_or_require_yes(
+            f"Terminate {len(runs_to_kill)} {run_word}? This cannot be undone."
+        )
+
+    killed_run_ids: list[str] = []
+    with DashboardClient() as client:
+        for run in runs_to_kill:
+            response = client.post_json(
+                f"/api/runs/{quote(run['run_id'], safe='')}/kill",
+            )
+            if not isinstance(response, dict):
+                raise CLIError(
+                    "Dashboard returned invalid kill data.",
+                    error="invalid_dashboard_response",
+                    exit_code=ExitCode.BACKEND,
+                )
+            action = response.get("action")
+            status = response.get("status")
+            skip_reason = response.get("skip_reason")
+            if action not in {"killed", "skipped"} or not isinstance(status, str):
+                raise CLIError(
+                    "Dashboard returned invalid kill data.",
+                    error="invalid_dashboard_response",
+                    exit_code=ExitCode.BACKEND,
+                )
+            run["action"] = action
+            run["status"] = status
+            run["skip_reason"] = skip_reason if isinstance(skip_reason, str) else None
+            if action == "killed":
+                killed_run_ids.append(run["run_id"])
+
+    result["kill_count"] = len(killed_run_ids)
+    result["skipped_count"] = len(run_reports) - len(killed_run_ids)
+
+    if json_output:
+        print_json(result)
+    else:
+        _print_kill_result(run_reports)
+    if error_count:
+        raise click.exceptions.Exit(int(ExitCode.BACKEND))
 
 
 def _chip(value: str, *, style: str) -> Text:
@@ -465,7 +652,10 @@ def _run_summary_panel(summary: RunSummary) -> Panel:
     reward = summary.latest_rollout.mean if summary.latest_rollout is not None else None
     metrics = Table.grid(padding=(0, 4))
     metrics.add_row(
-        Text.assemble(("Step  ", "dim"), (_format_step(summary), "bold")),
+        Text.assemble(
+            ("Step  ", "dim"),
+            (_format_step(*_current_step(summary)), "bold"),
+        ),
         Text.assemble(("Reward  ", "dim"), (_format_reward(reward), "bold")),
     )
 
@@ -1052,6 +1242,43 @@ def trace_command(
         run_id=run_id,
         out=out,
         step=step,
+        dry_run=dry_run,
+        skip_confirmation=yes,
+        json_output=json_output,
+    )
+
+
+@run_group.command(
+    "kill",
+    help=(
+        "Terminate a run's underlying Modal job. "
+        "This is destructive and cannot be undone."
+    ),
+    epilog=(
+        "Examples:\n"
+        "  training-gym run kill brave-falcon-3fa8 --dry-run\n"
+        "  training-gym run kill brave-falcon-3fa8 --yes"
+    ),
+)
+@click.argument("run_ids", nargs=-1, required=True, metavar="RUN_ID...")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Show what would be killed without terminating any runs.",
+)
+@yes_option
+@json_option
+def kill_command(
+    *,
+    run_ids: tuple[str, ...],
+    dry_run: bool,
+    yes: bool,
+    json_output: bool,
+) -> None:
+    """Terminate one or more runs' underlying Modal jobs."""
+    kill_runs(
+        run_ids=run_ids,
         dry_run=dry_run,
         skip_confirmation=yes,
         json_output=json_output,

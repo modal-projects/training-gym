@@ -37,7 +37,13 @@ from modal_training_gym.common.config import (
     DASHBOARD_PROXY_AUTH_PATH,
     dashboard_requires_proxy_auth,
 )
-from modal_training_gym.common.run import FrameworkStatusUpdate, TrainingRun
+from modal_training_gym.common.modal_lifecycle import app_live_status, stop_app_or_raise
+from modal_training_gym.common.run import (
+    FrameworkStatusUpdate,
+    TrainingRun,
+    TrainingRunStatus,
+    finalize_training_run,
+)
 from modal_training_gym.common.run_list import (
     filter_run_summaries,
     run_list_field_metadata,
@@ -423,6 +429,19 @@ def fastapi_app():
         _user, _, supplied = decoded.partition(":")
         return _secrets.compare_digest(supplied, dashboard_password)
 
+    def _require_mutation_auth(authorization: str | None) -> None:
+        if not dashboard_password:
+            raise HTTPException(
+                status_code=403,
+                detail="Set a dashboard password before using mutation endpoints",
+            )
+        if not _password_ok(authorization):
+            raise HTTPException(
+                status_code=401,
+                detail="Dashboard authentication was rejected",
+                headers={"WWW-Authenticate": 'Basic realm="training-gym"'},
+            )
+
     @web.middleware("http")
     async def require_password(request: Request, call_next):
         if dashboard_password and request.url.path not in PASSWORD_EXEMPT_PATHS:
@@ -737,6 +756,67 @@ def fastapi_app():
         except KeyError:
             result = None
         return build_run_summary(run.model_dump(mode="json"), result)
+
+    @web.post("/api/runs/{training_run_id}/kill")
+    async def kill_run(
+        training_run_id: str,
+        authorization: str | None = Header(default=None),
+    ):
+        _require_mutation_auth(authorization)
+        run = await _get_run_or_404(training_run_id)
+        if run.status != TrainingRunStatus.RUNNING:
+            return JSONResponse(
+                {
+                    "action": "skipped",
+                    "skip_reason": "already_terminal",
+                    "status": run.status.value,
+                }
+            )
+        if not run.modal_app_id:
+            return JSONResponse(
+                {
+                    "action": "skipped",
+                    "skip_reason": "missing_modal_app_id",
+                    "status": run.status.value,
+                }
+            )
+
+        modal_app_live = await run_in_threadpool(
+            app_live_status,
+            run.modal_app_id,
+        )
+        if modal_app_live is False:
+            return JSONResponse(
+                {
+                    "action": "skipped",
+                    "skip_reason": "modal_app_not_live",
+                    "status": run.status.value,
+                }
+            )
+
+        try:
+            await run_in_threadpool(stop_app_or_raise, run.modal_app_id)
+        except Exception:
+            raise HTTPException(
+                status_code=502,
+                detail="Could not stop the Modal app",
+            ) from None
+
+        status = await run_in_threadpool(
+            finalize_training_run,
+            training_run_id,
+            status=TrainingRunStatus.STOPPED,
+            reason="killed_by_cli",
+            ended_at=int(time.time()),
+        )
+        invalidate_cache("runs")
+        return JSONResponse(
+            {
+                "action": "killed",
+                "skip_reason": None,
+                "status": status.value,
+            }
+        )
 
     @web.post("/api/framework-status")
     async def framework_status(

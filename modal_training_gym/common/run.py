@@ -278,6 +278,34 @@ class TrainingRun(BaseModel):
         return cls.model_validate(data)
 
 
+def finalize_training_run(
+    run_id: str,
+    *,
+    status: TrainingRunStatus,
+    reason: str,
+    ended_at: int | None = None,
+) -> TrainingRunStatus:
+    """Persist a terminal status if the canonical run is still running."""
+    run = TrainingRun.from_id(run_id)
+    if not isinstance(run, TrainingRun):
+        raise TypeError("TrainingRun.from_id returned an asynchronous result")
+    if run.status != TrainingRunStatus.RUNNING:
+        return run.status
+
+    finished_at = int(time.time()) if ended_at is None else ended_at
+    metadata = dict(run.metadata or {})
+    metadata["terminal_reason"] = reason
+    run.status = status
+    run.metadata = metadata
+    run.ended_at = finished_at
+    if run.completed_at is None:
+        run.completed_at = finished_at
+    if run.started_at:
+        run.duration_seconds = max(0, finished_at - run.started_at)
+    run.save()
+    return run.status
+
+
 def _resume_checkpoint(path: str, name: str, iteration: int | None) -> dict[str, Any]:
     return {
         "resume_checkpoint_path": path,

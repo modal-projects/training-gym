@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from types import SimpleNamespace
 
@@ -8,14 +9,14 @@ from fastapi.testclient import TestClient
 
 from modal_training_gym import _dashboard
 from modal_training_gym.common.framework import Framework
-from modal_training_gym.common.run import TrainingRun
+from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
 from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import MetadataStore
 
 
-def _client(monkeypatch, tmp_path) -> TestClient:
+def _client(monkeypatch, tmp_path, *, password: str = "") -> TestClient:
     static = tmp_path / "static"
     (static / "assets").mkdir(parents=True)
     (static / "index.html").write_text("ok")
@@ -24,8 +25,15 @@ def _client(monkeypatch, tmp_path) -> TestClient:
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
     )
     monkeypatch.setattr(_dashboard, "STATIC_DIR", str(static))
-    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
-    return TestClient(_dashboard.fastapi_app.local())
+    if password:
+        monkeypatch.setenv("DASHBOARD_PASSWORD", password)
+    else:
+        monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    headers = {}
+    if password:
+        encoded = base64.b64encode(f"training-gym:{password}".encode()).decode()
+        headers["Authorization"] = f"Basic {encoded}"
+    return TestClient(_dashboard.fastapi_app.local(), headers=headers)
 
 
 def _save_records() -> None:
@@ -99,6 +107,65 @@ def test_get_run_route_returns_404_for_unknown_run(fake_volume, monkeypatch, tmp
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Training run 'missing' not found"
+
+
+def test_kill_run_route_requires_dashboard_password(fake_volume, monkeypatch, tmp_path):
+    _save_records()
+
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.post("/api/runs/run-route-1/kill")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "Set a dashboard password before using mutation endpoints"
+    )
+
+
+def test_kill_run_route_stops_app_and_finalizes_metadata(
+    fake_volume, monkeypatch, tmp_path
+):
+    _save_records()
+    stopped = []
+    monkeypatch.setattr(_dashboard, "app_live_status", lambda _app_id: True)
+    monkeypatch.setattr(_dashboard, "stop_app_or_raise", stopped.append)
+
+    with _client(monkeypatch, tmp_path, password="secret") as client:
+        response = client.post("/api/runs/run-route-1/kill")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "action": "killed",
+        "skip_reason": None,
+        "status": "stopped",
+    }
+    assert stopped == ["ap-route"]
+    run = TrainingRun.from_id("run-route-1")
+    assert isinstance(run, TrainingRun)
+    assert run.status.value == "stopped"
+    assert run.metadata["terminal_reason"] == "killed_by_cli"
+
+
+def test_kill_run_route_is_noop_for_terminal_run(fake_volume, monkeypatch, tmp_path):
+    _save_records()
+    run = TrainingRun.from_id("run-route-1")
+    assert isinstance(run, TrainingRun)
+    run.status = TrainingRunStatus.COMPLETED
+    run.save()
+    monkeypatch.setattr(
+        _dashboard,
+        "stop_app_or_raise",
+        lambda _app_id: pytest.fail("terminal app should not be stopped"),
+    )
+
+    with _client(monkeypatch, tmp_path, password="secret") as client:
+        response = client.post("/api/runs/run-route-1/kill")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "action": "skipped",
+        "skip_reason": "already_terminal",
+        "status": "completed",
+    }
 
 
 def test_rollout_route_preserves_raw_text_and_adds_cleaned_text(
