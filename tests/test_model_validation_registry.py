@@ -13,6 +13,8 @@ import pytest
 from modal_training_gym.common.models.validation import (
     VALIDATION_TARGETS,
     ValidationFramework,
+    ValidationTarget,
+    _assert_unique_names,
     find_validation_target,
     validation_targets,
 )
@@ -70,6 +72,49 @@ def test_unknown_model_names_are_rejected():
         find_validation_target("not-a-real-model")
 
 
+def test_registry_names_are_unique():
+    _assert_unique_names(VALIDATION_TARGETS)
+
+
+def test_duplicate_entries_are_rejected():
+    """A copy-pasted entry must fail at import, not silently shadow a model.
+
+    Includes the case the first version of this check missed: two entries that
+    share a name. They compare equal as frozen dataclasses, so only an identity
+    comparison catches them.
+    """
+    first, second = VALIDATION_TARGETS[0], VALIDATION_TARGETS[1]
+
+    verbatim_copy = ValidationTarget(
+        first.name, first.model_config, first.framework, first.gates_prs
+    )
+    assert verbatim_copy == first and verbatim_copy is not first
+    with pytest.raises(ValueError, match="both answer to"):
+        _assert_unique_names((first, verbatim_copy))
+
+    # Same name, different model config — the copy-paste-then-edit mistake.
+    shadowing = ValidationTarget(first.name, second.model_config, second.framework)
+    with pytest.raises(ValueError, match="both answer to"):
+        _assert_unique_names((first, shadowing))
+
+    # Two entries for the same model under different names collide on repo id.
+    aliased = ValidationTarget(
+        first.name + "-alias", first.model_config, first.framework
+    )
+    with pytest.raises(ValueError, match="both answer to"):
+        _assert_unique_names((first, aliased))
+
+
+def test_a_target_named_after_its_repo_id_is_allowed():
+    """One entry registering the same key twice is not a collision."""
+    target = VALIDATION_TARGETS[0]
+    self_named = ValidationTarget(
+        target.model_name, target.model_config, target.framework
+    )
+    assert self_named.name.lower() == self_named.model_name.lower()
+    _assert_unique_names((self_named,))
+
+
 def test_unsupported_override_is_rejected_rather_than_ignored():
     """A framework-only flag must error on the wrong framework, not no-op."""
     slime_target = validation_targets(ValidationFramework.SLIME, gating_only=True)[0]
@@ -103,6 +148,39 @@ def test_list_excludes_non_gating_models_by_default():
     for target in NON_GATING_TARGETS:
         assert target.name not in gating
         assert target.name in everything
+
+
+def test_image_override_lists_only_models_that_accept_one():
+    """What the workflow tells you to run when docker_image is set.
+
+    A dispatch that sets docker_image but leaves models blank would otherwise
+    default to the PR-gating set and be rejected in every matrix job.
+    """
+    from scripts.validate_model_configs import available_model_names
+
+    accepting = set(
+        available_model_names(include_non_gating=True, accepts_override="docker-image")
+    )
+
+    assert accepting, "no model accepts an image override; the workflow hint is empty"
+    for name in accepting:
+        target = find_validation_target(name)
+        backend = backend_for(target.framework)
+        assert "docker_image" in backend.supported_overrides
+
+    rejecting = {
+        target.name
+        for target in VALIDATION_TARGETS
+        if "docker_image" not in backend_for(target.framework).supported_overrides
+    }
+    assert not accepting & rejecting
+
+
+def test_unknown_override_name_is_rejected():
+    from scripts.validate_model_configs import available_model_names
+
+    with pytest.raises(ValueError, match="unknown override"):
+        available_model_names(accepts_override="not-a-flag")
 
 
 @pytest.mark.skipif(not NON_GATING_TARGETS, reason="every target gates PRs")

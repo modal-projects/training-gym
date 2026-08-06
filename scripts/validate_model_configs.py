@@ -16,7 +16,7 @@ Usage:
 
 import argparse
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 try:
@@ -173,17 +173,38 @@ def available_model_names(
     framework: ValidationFramework | None = None,
     *,
     include_non_gating: bool = False,
+    accepts_override: str | None = None,
 ) -> list[str]:
     """Sorted model names, by default only those a PR may launch.
 
     Models with ``gates_prs=False`` (e.g. Kimi on 16 x 8 H200) are excluded
     unless asked for: they stay runnable by name from the CLI or a
     ``workflow_dispatch``, but must never enter a PR matrix.
+
+    ``accepts_override`` narrows to models whose framework honors a given
+    ``check`` flag, e.g. ``"docker-image"``. That is the only argument that
+    loads framework backends; the per-PR path goes through ``diff_impact.py``
+    and never reaches it.
     """
-    return sorted(
-        target.name
-        for target in validation_targets(framework, gating_only=not include_non_gating)
-    )
+    targets = validation_targets(framework, gating_only=not include_non_gating)
+    if accepts_override is not None:
+        field_name = _override_field(accepts_override)
+        targets = tuple(
+            target
+            for target in targets
+            if field_name in backend_for(target.framework).supported_overrides
+        )
+    return sorted(target.name for target in targets)
+
+
+def _override_field(flag: str) -> str:
+    """Map a ``check`` flag spelling ("docker-image") to a RecipeOverrides field."""
+    field_name = flag.strip().lstrip("-").replace("-", "_")
+    known = {field.name for field in fields(RecipeOverrides)}
+    if field_name not in known:
+        available = ", ".join(sorted(name.replace("_", "-") for name in known))
+        raise ValueError(f"unknown override {flag!r}; one of: {available}")
+    return field_name
 
 
 def run_base_training(
@@ -554,6 +575,13 @@ def __main__():
         help="Include models a PR may not launch (gates_prs=False), such as "
         "Kimi on miles. Never use this to build a PR matrix.",
     )
+    list_parser.add_argument(
+        "--accepts-override",
+        default=None,
+        metavar="FLAG",
+        help="Only list models whose framework honors this `check` flag, "
+        "e.g. --accepts-override docker-image.",
+    )
 
     summarize_parser = subparsers.add_parser(
         "summarize",
@@ -583,6 +611,7 @@ def __main__():
                 available_model_names(
                     ValidationFramework(args.framework) if args.framework else None,
                     include_non_gating=args.all,
+                    accepts_override=args.accepts_override,
                 )
             )
         )

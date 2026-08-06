@@ -61,6 +61,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           MODELS_INPUT: ${{ github.event.inputs.models }}
+          DOCKER_IMAGE: ${{ github.event.inputs.docker_image }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
@@ -69,6 +70,18 @@ jobs:
           elif [ -n "$MODELS_INPUT" ]; then
             models=$(printf '%s' "$MODELS_INPUT" \
               | uv run python -c "import json,sys; print(json.dumps([m.strip() for m in sys.stdin.read().split(',') if m.strip()]))")
+          elif [ -n "$DOCKER_IMAGE" ]; then
+            # An image override only means something to a framework that pins an
+            # image, and the default list is the PR-gating (slime) set, which
+            # would reject it in every matrix job. Every such run is also large
+            # enough that it must be asked for by name rather than fanned out
+            # from a blank field, so stop here and say which models qualify.
+            candidates=$(uv run scripts/validate_model_configs.py list \
+              --all --accepts-override docker-image)
+            echo "::error::docker_image was set but models was left blank." \
+              "Re-run and name the model(s) to validate." \
+              "These accept an image override: $candidates"
+            exit 1
           else
             models=$(uv run scripts/validate_model_configs.py list)
           fi

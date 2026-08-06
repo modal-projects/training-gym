@@ -114,21 +114,28 @@ def find_validation_target(name: str) -> ValidationTarget:
     raise ValueError(f"unknown model {name!r}; available: {available}")
 
 
-def _assert_unique_names() -> None:
-    """Guard against two targets answering to the same name.
+def _assert_unique_names(targets: tuple[ValidationTarget, ...]) -> None:
+    """Guard against two entries answering to the same name.
 
     ``find_validation_target`` returns the first match, so a duplicate would
     silently shadow a model rather than fail.
+
+    Keyed on target *identity*, not on the name: a target whose short name is
+    also its repo id registers the same key twice and must be allowed, while
+    two separate entries sharing a name — the copy-paste mistake this is here
+    to catch — must not be, even when the entries are otherwise equal (a frozen
+    dataclass compares by value, so ``is`` is the load-bearing part).
     """
-    seen: dict[str, str] = {}
-    for target in VALIDATION_TARGETS:
+    seen: dict[str, ValidationTarget] = {}
+    for target in targets:
         for key in (target.name.lower(), target.model_name.lower()):
-            if key in seen and seen[key] != target.name:
+            other = seen.get(key)
+            if other is not None and other is not target:
                 raise ValueError(
-                    f"validation targets {seen[key]!r} and {target.name!r} both "
-                    f"answer to {key!r}"
+                    f"validation targets {other.name!r} ({other.model_name}) and "
+                    f"{target.name!r} ({target.model_name}) both answer to {key!r}"
                 )
-            seen[key] = target.name
+            seen[key] = target
 
 
-_assert_unique_names()
+_assert_unique_names(VALIDATION_TARGETS)
