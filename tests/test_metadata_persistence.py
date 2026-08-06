@@ -20,7 +20,7 @@ from modal_training_gym.common import run as run_mod
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
-from modal_training_gym.utils.metadata import MetadataStore
+from modal_training_gym.utils.metadata import MetadataStore, vol_count_items
 
 
 @pytest.mark.parametrize("fw", list(Framework))
@@ -30,6 +30,21 @@ def test_training_run_save_survives_unmounted_volume(fake_volume, fw):
 
     blob = fake_volume.files[f"{MetadataStore.TRAINING_RUNS.value}/t1.json"]
     assert json.loads(blob)["framework"] == fw.value
+
+
+def test_count_items_ignores_files_nested_under_the_store(fake_volume):
+    """Only ``<store>/<id>.json`` counts, so the summary can catch up with it.
+
+    A file nested deeper never reaches a summary, so counting it would hold the
+    count permanently above the summary and make every reader rebuild.
+    """
+    run_mod.TrainingRun(
+        training_run_id="t1", framework=Framework.SLIME, config={}
+    ).save()
+    store = MetadataStore.TRAINING_RUNS.value
+    fake_volume.files[f"{store}/Qwen/Qwen3-4B/notes.json"] = b"{}"
+
+    assert vol_count_items(MetadataStore.TRAINING_RUNS) == 1
 
 
 @pytest.mark.parametrize("fw", list(Framework))

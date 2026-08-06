@@ -62,12 +62,16 @@ class FakeVolume:
             raise FileNotFoundError(path)
         del self.files[path]
 
-    def _iterdir(self, path: str):
+    def _iterdir(self, path: str, *, recursive: bool = True):
         prefix = path.rstrip("/") + "/"
-        return [self._DirEntry(f) for f in self.files if f.startswith(prefix)]
+        return [
+            self._DirEntry(f)
+            for f in self.files
+            if f.startswith(prefix) and (recursive or "/" not in f[len(prefix) :])
+        ]
 
-    async def _iterdir_async(self, path: str):
-        for entry in self._iterdir(path):
+    async def _iterdir_async(self, path: str, *, recursive: bool = True):
+        for entry in self._iterdir(path, recursive=recursive):
             yield entry
 
     def batch_upload(self, force: bool = False):

@@ -378,6 +378,11 @@ def reconcile() -> None:
     min_containers=1,
     secrets=_function_secrets(),
 )
+# Without this a container takes one request at a time, so the SPA's own poll --
+# runs, deployments and evals every five seconds -- queues behind itself, and a
+# held-open log stream blocks every other request for as long as it is open.
+# Requests here wait on the volume and on Modal far more than they compute.
+@modal.concurrent(max_inputs=50, target_inputs=20)
 @modal.asgi_app(requires_proxy_auth=dashboard_requires_proxy_auth())
 def fastapi_app():
     import base64
@@ -389,6 +394,7 @@ def fastapi_app():
         HTTPException,
     )  # Request imported at module scope
     from fastapi.concurrency import run_in_threadpool
+    from fastapi.middleware.gzip import GZipMiddleware
     from fastapi.responses import (
         FileResponse,
         JSONResponse,
@@ -402,11 +408,14 @@ def fastapi_app():
         MetadataStore,
         summary_items_from_payload,
         vol_get,
-        vol_get_summary_items_healed,
+        vol_get_summary_items,
         vol_put_summary_items,
     )
 
     web = FastAPI()
+    # The list endpoints answer with the whole summary, which is mostly repeated
+    # keys and ids and compresses to a fraction of itself.
+    web.add_middleware(GZipMiddleware, minimum_size=500)
 
     # ── Optional password protection ──────────────────────────────────────
     # When DASHBOARD_PASSWORD is set we gate the whole app behind HTTP Basic
@@ -617,7 +626,12 @@ def fastapi_app():
     async def load_list_summary(
         summary_store: MetadataStore,
     ) -> list[JsonDict]:
-        items = await run_in_threadpool(vol_get_summary_items_healed, summary_store)
+        # Deliberately the plain read, not the healing one: a rebuild reads every
+        # canonical file and rewrites the whole summary, which is far too much to
+        # put behind a list request. ``compact_summaries`` already runs it on a
+        # schedule, and a summary that is briefly short of a run costs less than
+        # a list endpoint that can take minutes.
+        items = await run_in_threadpool(vol_get_summary_items, summary_store)
         if not items:
             return []
         items, changed = add_modal_app_urls(items)

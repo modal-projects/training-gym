@@ -80,7 +80,7 @@ def test_get_run_route_returns_one_typed_summary(fake_volume, monkeypatch, tmp_p
     def fail_summary_scan(_store):
         raise AssertionError("single-run route must not scan summary stores")
 
-    monkeypatch.setattr(metadata, "vol_get_summary_items_healed", fail_summary_scan)
+    monkeypatch.setattr(metadata, "vol_get_summary_items", fail_summary_scan)
 
     with _client(monkeypatch, tmp_path) as client:
         response = client.get("/api/runs/run-route-1")
@@ -138,14 +138,14 @@ def test_runs_route_keeps_runs_when_train_result_store_fails(
     fake_volume, monkeypatch, tmp_path
 ):
     _save_records()
-    original = metadata.vol_get_summary_items_healed
+    original = metadata.vol_get_summary_items
 
     def fail_results(store):
         if store is MetadataStore.TRAIN_RESULTS_SUMMARY:
             raise RuntimeError("result store unavailable")
         return original(store)
 
-    monkeypatch.setattr(metadata, "vol_get_summary_items_healed", fail_results)
+    monkeypatch.setattr(metadata, "vol_get_summary_items", fail_results)
 
     with _client(monkeypatch, tmp_path) as client:
         response = client.get("/api/runs")

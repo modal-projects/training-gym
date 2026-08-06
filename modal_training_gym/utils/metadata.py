@@ -323,6 +323,11 @@ def vol_count_items(store: MetadataStore | str) -> int:
     A single directory listing, used to cheaply detect a collapsed summary
     (summary item count < canonical file count) before paying for a full
     rebuild via ``vol_list``.
+
+    Non-recursive, because a store writes its items as ``<store>/<id>.json`` and
+    only those can ever reach a summary. Anything nested under the store counted
+    here instead holds the count permanently above the summary, and every reader
+    then rebuilds the whole summary trying to close a gap that cannot close.
     """
     from modal.exception import NotFoundError
 
@@ -330,7 +335,9 @@ def vol_count_items(store: MetadataStore | str) -> int:
     _safe_reload(vol)
     try:
         return sum(
-            1 for e in vol.iterdir(_store_path(store)) if e.path.endswith(".json")
+            1
+            for e in vol.iterdir(_store_path(store), recursive=False)
+            if e.path.endswith(".json")
         )
     except (FileNotFoundError, NotFoundError):
         return 0
