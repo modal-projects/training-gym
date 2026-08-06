@@ -1,9 +1,17 @@
-"""
-Input: string [ model name ]
-Output: string [ Formatted test result ]
-Optional args:
-    -j: json formatted output
-    -o: output file path
+"""Validate a model config by running base training on its framework.
+
+The model registry (``common/models/validation.py``) says which framework
+trains each model and whether it is cheap enough to gate PRs on; the matching
+backend in ``scripts/validation_backends/`` supplies the recipe and dataset.
+Everything below is framework-agnostic.
+
+Usage:
+    uv run scripts/validate_model_configs.py list
+    uv run scripts/validate_model_configs.py list --all --framework miles
+    uv run scripts/validate_model_configs.py check -m qwen3-4b
+    uv run scripts/validate_model_configs.py check -m Kimi-K2.5 \
+        --docker-image radixark/miles:dev-<new-tag>
+    uv run scripts/validate_model_configs.py summarize -d results
 """
 
 import argparse
@@ -11,20 +19,22 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from modal_training_gym.common.dataset import (
-    DatasetConfig,
-    HuggingFaceDataset,
-    MultimodalDataset,
+try:
+    # Run as a script: sys.path[0] is scripts/, matching download_perf_baseline.
+    from validation_backends import RecipeOverrides, backend_for
+except ImportError:  # imported as scripts.validate_model_configs, e.g. by tests
+    from scripts.validation_backends import RecipeOverrides, backend_for
+
+from modal_training_gym.common.models.validation import (
+    ValidationFramework,
+    find_validation_target,
+    validation_targets,
 )
-from modal_training_gym.common.models.qwen3_asr_1_7b import Qwen3_ASR_1_7B
-from modal_training_gym.common.models.validation import VALIDATABLE_MODELS
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.wandb import WandbConfig
-from modal_training_gym.model import ModelConfig
 from modal_training_gym.train import TrainConfig
-from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 
-VALIDATION_EPHEMERAL_DISK_MIB = 2_097_152
+COMMENT_MARKER = "<!-- validate-models-comment -->"
 
 
 def _fmt_secs(seconds: float | int | None) -> str:
@@ -54,7 +64,7 @@ def _substep_label(name: str) -> str:
     return _SUBSTEP_LABELS.get(name, name.replace("_", " "))
 
 
-def _total_step_time_s(result: "TutorialResult") -> float:
+def _total_step_time_s(result: "ValidationResult") -> float:
     """Sum of per-step durations.
 
     Reported instead of wall clock, which also covers queue, model download and
@@ -66,7 +76,7 @@ def _total_step_time_s(result: "TutorialResult") -> float:
     )
 
 
-def _step_keys(result: "TutorialResult") -> list[str]:
+def _step_keys(result: "ValidationResult") -> list[str]:
     keys = set(result.step_times or {}) | set(result.substep_times or {})
     return sorted(keys, key=lambda k: int(k) if k.isdigit() else k)
 
@@ -84,7 +94,7 @@ def _ordered_substeps(
 
 
 @dataclass
-class TutorialResult:
+class ValidationResult:
     base_model_name: str
     step_count: int
     training_run_id: str
@@ -92,6 +102,9 @@ class TutorialResult:
     total_duration_s: float
     step_times: dict[str, dict[str, int | None]] | None = None
     substep_times: dict[str, dict[str, dict[str, float | None]]] | None = None
+    framework: str = ValidationFramework.SLIME.value
+    recipe_name: str | None = None
+    docker_image: str | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -101,6 +114,11 @@ class TutorialResult:
         print(f"Training run result for {self.training_run_id}")
         print("Parameters:")
         print(f"Base model name: {self.base_model_name}")
+        print(f"Framework: {self.framework}")
+        if self.recipe_name:
+            print(f"Recipe: {self.recipe_name}")
+        if self.docker_image:
+            print(f"Image: {self.docker_image}")
         print(f"Step count: {self.step_count}")
         print("Result:")
         print(f"Training run status: {self.training_run_status}")
@@ -131,7 +149,12 @@ class TutorialResult:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict) -> "TutorialResult":
+    def from_dict(cls, data: dict) -> "ValidationResult":
+        """Rebuild a result, tolerating JSON written before a field existed.
+
+        Baselines are downloaded from artifacts on already-merged PRs, so this
+        reads results produced by older revisions of this script.
+        """
         return cls(
             base_model_name=data["base_model_name"],
             step_count=data["step_count"],
@@ -140,170 +163,49 @@ class TutorialResult:
             total_duration_s=data["total_duration_s"],
             step_times=data.get("step_times"),
             substep_times=data.get("substep_times"),
+            framework=data.get("framework", ValidationFramework.SLIME.value),
+            recipe_name=data.get("recipe_name"),
+            docker_image=data.get("docker_image"),
         )
 
 
-class Gsm8kDataset(HuggingFaceDataset):
-    hf_repo = "openai/gsm8k"
-    hf_config = "main"
-    input_column = "question"
-    output_column = "answer"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
+def available_model_names(
+    framework: ValidationFramework | None = None,
+    *,
+    include_non_gating: bool = False,
+) -> list[str]:
+    """Sorted model names, by default only those a PR may launch.
 
-    def load(self, split: str = "all"):
-        from datasets import load_dataset
-
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        if self.n_rows:
-            ds = ds.select(range(min(self.n_rows, len(ds))))
-        return ds.map(lambda r: {"answer": r["answer"].split("####")[-1].strip()})
-
-
-class LibriSpeechASRDataset(MultimodalDataset):
-    """LibriSpeech ASR rows (prompt + audio data-URI + transcript label).
-
-    Mirrors the 006_audio_asr tutorial dataset: audio models can't train on
-    gsm8k, so they validate against a handful of LibriSpeech clips instead.
+    Models with ``gates_prs=False`` (e.g. Kimi on 16 x 8 H200) are excluded
+    unless asked for: they stay runnable by name from the CLI or a
+    ``workflow_dispatch``, but must never enter a PR matrix.
     """
-
-    modality = "audio"
-    hf_repo = "hf-internal-testing/librispeech_asr_dummy"
-    hf_config = "clean"
-    hf_split = "validation"
-    n_rows = 8
-    always_prepare = True
-    apply_chat_template = False
-
-    _INSTRUCTION = (
-        "<audio>\nTranscribe the speech to text. Respond with only the transcript."
+    return sorted(
+        target.name
+        for target in validation_targets(framework, gating_only=not include_non_gating)
     )
 
-    def __init__(self, **kwargs):
-        super().__init__(rows=[], **kwargs)
 
-    def _build_rows(self) -> list[dict]:
-        import base64 as b64
-        import io
-
-        import soundfile as sf
-        from datasets import Audio, load_dataset
-
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        ds = ds.select(range(min(self.n_rows, len(ds))))
-        ds = ds.cast_column("audio", Audio(decode=False))
-        rows = []
-        for ex in ds:
-            audio = ex["audio"]
-            data = (
-                audio["bytes"]
-                if audio.get("bytes")
-                else open(audio["path"], "rb").read()
-            )
-            arr, sr = sf.read(io.BytesIO(data))
-            buf = io.BytesIO()
-            sf.write(buf, arr, sr, format="WAV")
-            data_uri = "data:audio/wav;base64," + b64.b64encode(buf.getvalue()).decode(
-                "ascii"
-            )
-            rows.append(
-                {
-                    self.input_key: self._INSTRUCTION,
-                    self.media_column: [data_uri],
-                    self.label_key: ex["text"].lower().strip(),
-                }
-            )
-        return rows
-
-    def load(self, split: str = "all") -> list[dict]:
-        return self._build_rows()
-
-    def prepare(self, path, eval_paths=None):
-        rows = self._build_rows()
-        self._write_jsonl(rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_jsonl(rows, eval_path)
-
-
-def pick_dataset(model_config: ModelConfig) -> DatasetConfig:
-    """Pick a validation dataset matching the base model's modality.
-
-    Audio models (Qwen3-ASR) need speech clips, so they get LibriSpeech;
-    everything else defaults to gsm8k.
-    """
-    if isinstance(model_config, Qwen3_ASR_1_7B):
-        return LibriSpeechASRDataset(n_rows=8)
-    return Gsm8kDataset(n_rows=10)
-
-
-def _model_config_registry() -> dict[str, type[ModelConfig]]:
-    """Map normalized model names to their ModelConfig subclass.
-
-    Keys cover both the full HF repo id ("qwen/qwen3-4b") and the short
-    repo name ("qwen3-4b"), all lowercased.
-    """
-    registry: dict[str, type[ModelConfig]] = {}
-    for name, model_config in VALIDATABLE_MODELS:
-        registry[name.lower()] = model_config
-        registry[model_config.model_name.lower()] = model_config
-    return registry
-
-
-def available_model_names() -> list[str]:
-    """Sorted short model names (e.g. "qwen3-4b") validatable on slime.
-
-    The shared registry excludes models with no base slime recipe (e.g. Kimi on
-    miles), since this script only runs base training on slime.
-    """
-    return sorted(name for name, _ in VALIDATABLE_MODELS)
-
-
-def get_model_config_from_model_name(model_name: str) -> ModelConfig:
-    registry = _model_config_registry()
-    config_cls = registry.get(model_name.lower())
-    if config_cls is None:
-        available = sorted({cls.model_name for cls in registry.values()})
-        raise ValueError(
-            f"unknown model {model_name!r}; available: {', '.join(available)}"
-        )
-    return config_cls()
-
-
-def run_base_training_on_slime(
+def run_base_training(
     model_name: str,
     step_count: int = 1,
     wandb_project: str | None = None,
     wandb_group: str | None = None,
     wandb_secret_name: str = "wandb-secret",
-    eval_interval: int | None = None,
-    save_interval: int | None = None,
-    colocate: bool | None = None,
-) -> TutorialResult:
-    model_config = get_model_config_from_model_name(model_name)
-    dataset = pick_dataset(model_config)
+    overrides: RecipeOverrides | None = None,
+) -> ValidationResult:
+    overrides = overrides or RecipeOverrides()
+    target = find_validation_target(model_name)
+    backend = backend_for(target.framework)
+    model_config = target.model_config()
+
+    train_recipe = backend.build_recipe(target, model_config, step_count, overrides)
+    dataset = backend.pick_dataset(target, model_config, train_recipe, step_count)
+
     dataset_name = getattr(dataset, "hf_repo", type(dataset).__name__).rsplit("/", 1)[
         -1
     ]
     model_short_name = model_config.model_name.rsplit("/", 1)[-1]
-    train_recipe = SlimeRecipe.get_base_recipe(model_config)
-    train_recipe.num_rollout = step_count
-    if colocate is not None:
-        train_recipe.colocate = colocate
-    if colocate is False and train_recipe.rollout_num_gpus is None:
-        train_recipe.rollout_num_gpus = (
-            train_recipe.actor_num_nodes * train_recipe.actor_num_gpus_per_node
-        )
-    if eval_interval is not None:
-        train_recipe.eval_interval = eval_interval
-    if save_interval is not None:
-        train_recipe.save_interval = save_interval
-    train_recipe.rm_type = "deepscaler"
-    train_recipe.train_function_kwargs = {
-        **dict(train_recipe.train_function_kwargs or {}),
-        "ephemeral_disk": VALIDATION_EPHEMERAL_DISK_MIB,
-    }
     if wandb_project is not None:
         train_recipe.wandb = WandbConfig(
             project=wandb_project
@@ -321,18 +223,21 @@ def run_base_training_on_slime(
     train_result = train_config.train()
     training_run = TrainingRun.from_id(train_result.training_run_id)
 
-    return TutorialResult(
-        base_model_name=model_name,
+    return ValidationResult(
+        base_model_name=target.name,
         step_count=step_count,
         training_run_id=train_result.training_run_id,
         training_run_status=training_run.status,
         total_duration_s=float(training_run.duration_seconds or 0.0),
         step_times=training_run.step_times,
         substep_times=training_run.substep_times,
+        framework=target.framework.value,
+        recipe_name=type(train_recipe).__name__,
+        docker_image=backend.docker_image(train_recipe),
     )
 
 
-def _status_label(result: TutorialResult) -> str:
+def _status_label(result: ValidationResult) -> str:
     if result.succeeded:
         return "✅ completed"
     return f"❌ {result.training_run_status.value}"
@@ -380,14 +285,14 @@ class BaselineMeta:
 
 
 def _format_duration_delta(
-    result: TutorialResult, baseline_path: Path, dashboard_url: str | None
+    result: ValidationResult, baseline_path: Path, dashboard_url: str | None
 ) -> str:
     """Format the duration change vs a baseline result, naming the baseline
     run, e.g. "+500.0s (+33%) from [`run-id`](https://…/training/run-id)".
     """
     if not baseline_path.is_file():
         return "—"
-    baseline = TutorialResult.from_dict(json.loads(baseline_path.read_text()))
+    baseline = ValidationResult.from_dict(json.loads(baseline_path.read_text()))
     delta = (
         _format_secs_delta(
             _total_step_time_s(result),
@@ -398,10 +303,10 @@ def _format_duration_delta(
     return f"{delta} from {_training_run_link(baseline.training_run_id, dashboard_url)}"
 
 
-def _load_baseline(baseline_path: Path | None) -> TutorialResult | None:
+def _load_baseline(baseline_path: Path | None) -> ValidationResult | None:
     if baseline_path is None or not baseline_path.is_file():
         return None
-    return TutorialResult.from_dict(json.loads(baseline_path.read_text()))
+    return ValidationResult.from_dict(json.loads(baseline_path.read_text()))
 
 
 def _load_baseline_meta(baseline_path: Path | None) -> BaselineMeta | None:
@@ -415,8 +320,8 @@ def _load_baseline_meta(baseline_path: Path | None) -> BaselineMeta | None:
 
 
 def _format_result_details(
-    result: TutorialResult,
-    baseline: TutorialResult | None = None,
+    result: ValidationResult,
+    baseline: ValidationResult | None = None,
     baseline_meta: BaselineMeta | None = None,
     dashboard_url: str | None = None,
 ) -> list[str]:
@@ -427,6 +332,12 @@ def _format_result_details(
         "",
         f"{_training_run_link(result.training_run_id, dashboard_url)} — {_status_label(result)}",
     ]
+    recipe_bits = [f"Framework: {result.framework}"]
+    if result.recipe_name:
+        recipe_bits.append(f"Recipe: `{result.recipe_name}`")
+    if result.docker_image:
+        recipe_bits.append(f"Image: `{result.docker_image}`")
+    lines.append(" · ".join(recipe_bits))
     if baseline is not None:
         baseline_bits = [
             _training_run_link(baseline.training_run_id, dashboard_url),
@@ -504,10 +415,10 @@ def summarize_results(
     rows = []
     details: list[str] = []
     for path in sorted(Path(results_dir).glob("*.json")):
-        result = TutorialResult.from_dict(json.loads(path.read_text()))
+        result = ValidationResult.from_dict(json.loads(path.read_text()))
         status = _status_label(result)
         row = (
-            f"| {result.base_model_name} | {status} "
+            f"| {result.base_model_name} | {result.framework} | {status} "
             f"| {_total_step_time_s(result):.1f}s | {result.step_count} "
             f"| {_training_run_link(result.training_run_id, dashboard_url)} |"
         )
@@ -528,16 +439,16 @@ def summarize_results(
             )
         )
 
-    header = "| Model | Status | Step time | Steps | Run |"
-    divider = "| --- | --- | --- | --- | --- |"
-    empty = "| _no results_ | | | | |"
+    header = "| Model | Framework | Status | Step time | Steps | Run |"
+    divider = "| --- | --- | --- | --- | --- | --- |"
+    empty = "| _no results_ | | | | | |"
     if baseline_dir is not None:
         header += " Delta |"
         divider += " --- |"
         empty += " |"
 
     lines = [
-        "<!-- validate-models-comment -->",
+        COMMENT_MARKER,
         "## Model Validation Results",
         "",
         header,
@@ -552,7 +463,7 @@ def summarize_results(
 
 def __main__():
     parser = argparse.ArgumentParser(
-        description="Validate a model config by running base training on slime."
+        description="Validate a model config by running base training on its framework."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -563,7 +474,8 @@ def __main__():
         "-m",
         "--model",
         required=True,
-        help="Base model name to run training on (e.g. qwen3-4b).",
+        help="Base model name to run training on (e.g. qwen3-4b). One of: "
+        f"{', '.join(available_model_names(include_non_gating=True))}.",
     )
     check_parser.add_argument(
         "-n",
@@ -585,9 +497,15 @@ def __main__():
         help="Override the recipe save_interval (checkpoint every N rollouts).",
     )
     check_parser.add_argument(
+        "--docker-image",
+        default=None,
+        help="Override the recipe's image, e.g. to test a miles bump. "
+        "Only frameworks that pin an image accept this (miles).",
+    )
+    check_parser.add_argument(
         "--non-colocated",
         action="store_true",
-        help="Allocate rollout GPUs separately from trainer GPUs.",
+        help="Allocate rollout GPUs separately from trainer GPUs (slime only).",
     )
     check_parser.add_argument(
         "-o",
@@ -621,8 +539,20 @@ def __main__():
         help="Disable W&B logging for this validator run.",
     )
 
-    subparsers.add_parser(
+    list_parser = subparsers.add_parser(
         "list", help="Print available model names as a JSON array and exit."
+    )
+    list_parser.add_argument(
+        "--framework",
+        choices=[framework.value for framework in ValidationFramework],
+        default=None,
+        help="Only list models validated on this framework.",
+    )
+    list_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Include models a PR may not launch (gates_prs=False), such as "
+        "Kimi on miles. Never use this to build a PR matrix.",
     )
 
     summarize_parser = subparsers.add_parser(
@@ -648,7 +578,14 @@ def __main__():
     args = parser.parse_args()
 
     if args.command == "list":
-        print(json.dumps(available_model_names()))
+        print(
+            json.dumps(
+                available_model_names(
+                    ValidationFramework(args.framework) if args.framework else None,
+                    include_non_gating=args.all,
+                )
+            )
+        )
         return
 
     if args.command == "summarize":
@@ -657,24 +594,27 @@ def __main__():
         )
         return
 
-    tutorial_result = run_base_training_on_slime(
+    result = run_base_training(
         args.model,
         args.num_steps,
         None if args.no_wandb else args.wandb_project,
         args.wandb_group,
         args.wandb_secret_name,
-        eval_interval=args.eval_interval,
-        save_interval=args.save_interval,
-        colocate=False if args.non_colocated else None,
+        overrides=RecipeOverrides(
+            eval_interval=args.eval_interval,
+            save_interval=args.save_interval,
+            docker_image=args.docker_image,
+            non_colocated=args.non_colocated,
+        ),
     )
-    tutorial_result.print_summary()
+    result.print_summary()
 
     if args.output:
-        Path(args.output).write_text(json.dumps(tutorial_result.to_dict()))
+        Path(args.output).write_text(json.dumps(result.to_dict()))
     if args.json:
-        print(json.dumps(tutorial_result.to_dict()))
+        print(json.dumps(result.to_dict()))
 
-    if not tutorial_result.succeeded:
+    if not result.succeeded:
         print("Training run failed")
         exit(1)
     print("Training run completed successfully")

@@ -1,24 +1,39 @@
 name: Validate Models
 
+# One workflow for every framework. Which framework a model trains on lives in
+# the registry (modal_training_gym/common/models/validation.py), not here.
+#
+# Pull requests validate only the models the diff touches, and only those
+# registered with gates_prs=True — diff_impact.py enforces that, so a model too
+# large to gate merges on (Kimi on 16 x 8 H200) can never enter a PR matrix.
+# workflow_dispatch can name any registered model, which is how a miles image
+# bump gets validated.
+
 on:
   pull_request:
   workflow_dispatch:
     inputs:
       models:
-        description: "Comma-separated model names to validate (blank = all)"
+        description: "Comma-separated model names to validate (blank = all PR-gating models)"
         required: false
         default: ""
       num_steps:
         description: "Number of training steps (rollouts) per model"
         required: false
         default: "1"
+      docker_image:
+        description: "Image override for frameworks that pin one, e.g. miles (blank = the recipe's default)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
   group: validate-models-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded PR runs are free to cancel, but a dispatched run may be a
+  # 16 x 8 H200 job, so a second dispatch must never abort one already training.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   list-models:
@@ -44,10 +59,12 @@ jobs:
       - name: Determine models to validate
         id: list
         env:
+          EVENT_NAME: ${{ github.event_name }}
           MODELS_INPUT: ${{ github.event.inputs.models }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            models=$(git diff "${{ github.event.pull_request.base.sha }}...HEAD" \
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            models=$(git diff "$BASE_SHA...HEAD" \
               | uv run scripts/diff_impact.py --models)
           elif [ -n "$MODELS_INPUT" ]; then
             models=$(printf '%s' "$MODELS_INPUT" \
@@ -90,12 +107,26 @@ jobs:
           MODEL: ${{ matrix.model }}
         run: echo "name=validate-result-$(printf '%s' "$MODEL" | tr '/' '-')" >> "$GITHUB_OUTPUT"
 
+      # Every interpolated value reaches the shell as an environment variable:
+      # the matrix model can come from the workflow_dispatch input, so expanding
+      # it into the script would let a crafted value run commands in a job that
+      # holds Modal credentials.
       - name: Validate ${{ matrix.model }}
+        env:
+          MODEL: ${{ matrix.model }}
+          NUM_STEPS: ${{ github.event.inputs.num_steps || '1' }}
+          DOCKER_IMAGE: ${{ github.event.inputs.docker_image }}
+          RESULT_NAME: ${{ steps.artifact.outputs.name }}
         run: |
+          args=()
+          if [ -n "$DOCKER_IMAGE" ]; then
+            args+=(--docker-image "$DOCKER_IMAGE")
+          fi
           uv run scripts/validate_model_configs.py check \
-            --model "${{ matrix.model }}" \
-            --num_steps "${{ github.event.inputs.num_steps || '1' }}" \
-            --output "${{ steps.artifact.outputs.name }}.json"
+            --model "$MODEL" \
+            --num_steps "$NUM_STEPS" \
+            "${args[@]}" \
+            --output "$RESULT_NAME.json"
 
       - name: Upload result
         if: always() && hashFiles(format('{0}.json', steps.artifact.outputs.name)) != ''
