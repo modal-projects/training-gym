@@ -16,8 +16,11 @@ Usage:
 
 import argparse
 import json
+import sys
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
+
+import cloudpickle
 
 try:
     # Run as a script: sys.path[0] is scripts/, matching download_perf_baseline.
@@ -207,6 +210,21 @@ def _override_field(flag: str) -> str:
     return field_name
 
 
+def _ship_dataset_definition(dataset) -> None:
+    """Send the dataset's defining module by value, not by reference.
+
+    ``resolve_caller_context`` only registers the module that calls ``train()``,
+    which leaves a dataset class defined in a backend module pickled by name.
+    Nothing under ``scripts/`` is importable inside the training image, so the
+    container would fail to unpickle it during data preparation. Classes that
+    ship with the package are importable remotely and stay by reference.
+    """
+    module = sys.modules.get(type(dataset).__module__)
+    if module is None or module.__name__.startswith("modal_training_gym"):
+        return
+    cloudpickle.register_pickle_by_value(module)
+
+
 def run_base_training(
     model_name: str,
     step_count: int = 1,
@@ -222,6 +240,7 @@ def run_base_training(
 
     train_recipe = backend.build_recipe(target, model_config, step_count, overrides)
     dataset = backend.pick_dataset(target, model_config, train_recipe, step_count)
+    _ship_dataset_definition(dataset)
 
     dataset_name = getattr(dataset, "hf_repo", type(dataset).__name__).rsplit("/", 1)[
         -1

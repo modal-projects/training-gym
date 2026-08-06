@@ -183,6 +183,62 @@ def test_unknown_override_name_is_rejected():
         available_model_names(accepts_override="not-a-flag")
 
 
+@pytest.mark.parametrize("target", VALIDATION_TARGETS, ids=lambda t: t.name)
+def test_validation_dataset_unpickles_without_the_scripts_directory(target, tmp_path):
+    """Every backend dataset must survive the trip into a training container.
+
+    Backend modules live under ``scripts/``, which is absent from the training
+    image, so a dataset pickled by reference crashes remotely during data
+    preparation. Unpickling in a subprocess whose ``sys.path`` has no
+    ``scripts/`` entry reproduces that container exactly.
+    """
+    import base64
+    import subprocess
+    import sys
+    import textwrap
+
+    import cloudpickle
+
+    from scripts.validate_model_configs import _ship_dataset_definition
+
+    backend = backend_for(target.framework)
+    model_config = target.model_config()
+    recipe = backend.build_recipe(target, model_config, 1, RecipeOverrides())
+    dataset = backend.pick_dataset(target, model_config, recipe, 1)
+
+    _ship_dataset_definition(dataset)
+    payload = cloudpickle.dumps(dataset)
+
+    # Blocking the import is a truer stand-in for the image than trimming
+    # sys.path: modal_training_gym is installed from this same tree, so the
+    # entry that makes the backends importable is the one it needs too.
+    probe = textwrap.dedent("""
+        import base64, pickle, sys
+
+        class Blocked:
+            def find_spec(self, name, path=None, target=None):
+                if name.split(".")[0] in ("scripts", "validation_backends"):
+                    raise ModuleNotFoundError(f"No module named {name!r}")
+                return None
+
+        sys.meta_path.insert(0, Blocked())
+        obj = pickle.loads(base64.b64decode(sys.argv[1]))
+        print(type(obj).__name__)
+    """)
+    result = subprocess.run(
+        [sys.executable, "-c", probe, base64.b64encode(payload).decode()],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, (
+        f"{target.name} dataset does not survive into a training container:\n"
+        f"{result.stderr}"
+    )
+    assert result.stdout.strip() == type(dataset).__name__
+
+
 @pytest.mark.skipif(not NON_GATING_TARGETS, reason="every target gates PRs")
 def test_no_diff_can_select_a_non_gating_model():
     """The load-bearing invariant: PRs never launch a gates_prs=False model.
