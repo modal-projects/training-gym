@@ -30,9 +30,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: validate-models-${{ github.ref }}
-  # Superseded PR runs are free to cancel, but a dispatched run may be a
-  # 16 x 8 H200 job, so a second dispatch must never abort one already training.
+  # PR runs share a per-ref group so a new push supersedes the old run. A dispatch
+  # may be a 16 x 8 H200 job, so it gets a group of its own (run_id is unique per
+  # run): manual validations never abort — nor queue behind — one another.
+  group: validate-models-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
