@@ -167,11 +167,6 @@ def _profiling():
     - **Weight sync**, **Checkpoint save** — bookkeeping that keeps the
       rollout engine on-policy
 
-    Reward functions are timed too. A per-sample reward is drawn as an
-    outlined span from its first call to its last, labeled with the call count
-    and average, so hundreds of sub-millisecond calls can't be mistaken for
-    one long one.
-
     Reading the timeline:
 
     - Every rollout is placed on the **run's shared clock**, so a rollout

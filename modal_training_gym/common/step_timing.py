@@ -15,12 +15,14 @@ from modal_training_gym.utils.metadata import MetadataStore, vol_list, vol_put
 
 
 def is_safe_run_id(value: str) -> bool:
-    allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
     return (
         bool(value)
-        and value not in {".", ".."}
         and value[0] != "."
-        and all(character in allowed for character in value)
+        and all(
+            character
+            in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+            for character in value
+        )
     )
 
 
