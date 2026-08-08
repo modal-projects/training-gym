@@ -1,10 +1,39 @@
 from __future__ import annotations
 
 import threading
+from urllib.error import HTTPError
 
 from modal_training_gym.common import status_reporter
 from modal_training_gym.common import timing_recorder
 from modal_training_gym.common.timing_recorder import RoleRecorder
+
+
+def test_status_reporter_retries_throttled_errors(monkeypatch):
+    def raise_http_error(code):
+        raise HTTPError("https://dashboard.test", code, "test", {}, None)
+
+    for code in (408, 425, 429):
+        monkeypatch.setattr(
+            status_reporter,
+            "urlopen",
+            lambda request, timeout, code=code: raise_http_error(code),
+        )
+        assert (
+            status_reporter._post(
+                {"_url": "https://dashboard.test", "payload": "value"}
+            )
+            == "failed"
+        )
+
+    monkeypatch.setattr(
+        status_reporter,
+        "urlopen",
+        lambda request, timeout: raise_http_error(422),
+    )
+    assert (
+        status_reporter._post({"_url": "https://dashboard.test", "payload": "value"})
+        == "permanent"
+    )
 
 
 def test_missing_timing_route_latches_off_and_warns_for_require(monkeypatch, capsys):

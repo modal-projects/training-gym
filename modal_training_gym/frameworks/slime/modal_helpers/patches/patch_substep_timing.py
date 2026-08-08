@@ -13,6 +13,7 @@ they open a lane at their entry point and the phases below use the module-level
 
 from __future__ import annotations
 
+import ast
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,25 @@ PREAMBLE = (
     "        yield\n"
     "\n"
 )
+
+
+def _inject_preamble(src: str) -> str:
+    tree = ast.parse(src)
+    end_line = 0
+    for index, node in enumerate(tree.body):
+        if (
+            index == 0
+            and isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            end_line = node.end_lineno or node.lineno
+        elif isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            end_line = node.end_lineno or node.lineno
+        else:
+            break
+    lines = src.splitlines(keepends=True)
+    return "".join(lines[:end_line]) + PREAMBLE + "".join(lines[end_line:])
 
 
 ROOT = Path("/root/slime")
@@ -513,7 +533,7 @@ def _patch_package_file(root: Path, target: PackageTarget) -> None:
         src = replace_once(src, block, wrap_block(block, phase, "_tg_time_phase"), path)
     if target.scope is not None:
         src = wrap_scope(src, target.scope, path)  # last: it reindents the body
-    src = PREAMBLE + src
+    src = _inject_preamble(src)
 
     missing = [phase for phase, _ in target.blocks if phase_marker(phase) not in src]
     if missing:
@@ -544,7 +564,7 @@ def _patch_file(path: Path, wraps: list[tuple[str, str]]) -> None:
         print(f"{path.name} already patched for substep timing")
         return
 
-    src = PREAMBLE + src
+    src = _inject_preamble(src)
     for old, phase in wraps:
         src = replace_once(src, old, wrap_block(old, phase), path)
     src = _wrap_bootstrap_sync(src, path)

@@ -170,6 +170,16 @@ def test_patching_twice_is_a_no_op(miles, tmp_path, capsys):
     assert "already patched" in capsys.readouterr().out
 
 
+def test_preamble_stays_below_future_imports(patchers):
+    source = '"""module docs"""\nfrom __future__ import annotations\n\nvalue = 1\n'
+    for patcher in patchers.values():
+        patched = patcher._inject_preamble(source)
+        assert patched.index("from __future__ import annotations") < patched.index(
+            patcher.PREAMBLE_MARKER
+        )
+        compile(patched, "future_module.py", "exec")
+
+
 def test_a_moved_anchor_fails_the_build(miles, tmp_path):
     """Half-instrumented timing is worse than none: a lane would just be absent."""
     work = tmp_path / "train.py"

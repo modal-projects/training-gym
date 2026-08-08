@@ -117,6 +117,8 @@ def _post(item: dict[str, Any]) -> PostResult:
         if 400 <= exc.code < 500:
             if exc.code in {401, 403}:
                 return "failed"
+            if exc.code in {408, 425, 429}:
+                return "failed"
             return "permanent"
         return "failed"
     except (OSError, URLError):
