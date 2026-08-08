@@ -575,12 +575,7 @@ def main() -> None:
     for name, wraps in ENTRYPOINTS.items():
         _patch_entrypoint(ROOT / name, wraps)
     for target in PACKAGE_TARGETS:
-        try:
-            patch_package_file(ROOT, target)
-        except Exception as exc:
-            if os.environ.get("TG_BEST_EFFORT_ENTRYPOINTS") != "1":
-                raise
-            print(f"WARNING: {target} substep timing patch skipped: {exc}")
+        patch_package_file(ROOT, target)
 
 
 if __name__ == "__main__":

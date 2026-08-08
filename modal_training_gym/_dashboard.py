@@ -955,7 +955,9 @@ def fastapi_app():
             return False
         return run_record.status.value in ended_statuses
 
-    async def _read_run_timings(training_run_id: str) -> JsonDict:
+    async def _read_run_timings(
+        training_run_id: str,
+    ) -> tuple[JsonDict, bool]:
         found, had_read_failures = await load_run_async(training_run_id)
         legacy_derived = False
         if not found and not had_read_failures:
@@ -974,7 +976,7 @@ def fastapi_app():
         }
         if legacy_derived:
             timings["metadata"] = {"legacy_derived": True}
-        return timings
+        return timings, had_read_failures
 
     async def _run_timings(training_run_id: str) -> JsonDict:
         entry = timing_cache.get(training_run_id)
@@ -993,9 +995,15 @@ def fastapi_app():
         async with entry.lock:
             if not entry.fresh:
                 entry.dirty = False
-                entry.lanes = await _read_run_timings(training_run_id)
+                entry.lanes, had_read_failures = await _read_run_timings(
+                    training_run_id
+                )
                 entry.read_at = time.monotonic()
-                entry.final = not entry.dirty and await _run_has_ended(training_run_id)
+                entry.final = (
+                    not had_read_failures
+                    and not entry.dirty
+                    and await _run_has_ended(training_run_id)
+                )
             return entry.lanes
 
     @web.get("/api/runs/{training_run_id}/timings")
