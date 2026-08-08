@@ -961,11 +961,16 @@ def fastapi_app():
         found, had_read_failures = await load_run_async(training_run_id)
         legacy_derived = False
         if not found and not had_read_failures:
-            run = await _get_run_or_404(training_run_id)
-            legacy_records = legacy_run_to_records(run.substep_times)
-            legacy_derived = bool(legacy_records)
-            for record in legacy_records:
-                found.setdefault(int(record["rollout_id"]), []).append(record)
+            try:
+                run = await _get_run_or_404(training_run_id)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+            else:
+                legacy_records = legacy_run_to_records(run.substep_times)
+                legacy_derived = bool(legacy_records)
+                for record in legacy_records:
+                    found.setdefault(int(record["rollout_id"]), []).append(record)
         timings = {
             ("pre-loop" if rollout_id is None else str(rollout_id)): rollout_lanes(
                 records
