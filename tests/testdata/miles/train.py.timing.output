@@ -1,0 +1,170 @@
+# PATCHED_TRAINING_GYM_TIMING_PREAMBLE: bootstrap substep-timing recorder
+import sys as _tg_sys
+if '/root' not in _tg_sys.path:
+    _tg_sys.path.insert(0, '/root')
+try:
+    from modal_training_gym.common.timing_recorder import (
+        RoleRecorder as _TgRecorder,
+        recording_lane as _tg_role,
+        recording_lane_on_reporting_rank as _tg_mrec,
+        time_phase as _tg_time_phase,
+    )
+except ImportError:
+    print('WARNING: modal_training_gym not importable; substep timing off')
+    from contextlib import contextmanager as _tg_cm
+
+    class _TgRecorder:
+        def __init__(self, role, rollout_id): pass
+
+        def __enter__(self): return self
+
+        def __exit__(self, *exc): pass
+
+        @_tg_cm
+        def phase(self, name):
+            yield
+
+    @_tg_cm
+    def _tg_role(role, rollout_id):
+        yield _TgRecorder(role, rollout_id)
+
+    @_tg_cm
+    def _tg_mrec(rollout_id, role='actor'):
+        yield _TgRecorder(role, rollout_id)
+
+    @_tg_cm
+    def _tg_time_phase(name):
+        yield
+
+import asyncio
+
+from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
+
+from miles.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
+from miles.utils.arguments import parse_args
+from miles.utils.async_utils import eager_create_task
+from miles.utils.logging_utils import configure_logger
+from miles.utils.misc import should_run_periodic_action
+from miles.utils.tracking_utils import finish_tracking, init_tracking
+
+
+async def train(args):
+    configure_logger()
+    # allocate the GPUs
+    pgs = create_placement_groups(args)
+    init_tracking(args)
+
+    # create the rollout manager, with sglang engines inside.
+    # need to initialize rollout manager first to calculate num_rollout
+    rollout_manager, num_rollout_per_epoch = create_rollout_manager(args, pgs["rollout"])
+
+    # create the actor and critic models
+    actor_model, critic_model = await create_training_models(args, pgs, rollout_manager)
+
+    if args.offload_rollout:
+        await rollout_manager.onload_weights.remote()
+
+    # always update weight first so that sglang has the loaded weights from training.
+    with _tg_role('driver', None) as _tg_rec:
+        with _tg_rec.phase('initial_weight_sync'):
+            await actor_model.update_weights()
+
+    if args.check_weight_update_equal:
+        await rollout_manager.check_weights.remote(action="compare")
+
+    if args.offload_rollout:
+        await rollout_manager.onload_kv.remote()
+
+    # special case for eval-only
+    if args.num_rollout == 0 and args.eval_interval is not None:
+        await rollout_manager.eval.remote(rollout_id=0)
+
+    async def offload_train():
+        if args.offload_train:
+            if args.use_critic:
+                await critic_model.offload()
+                if rollout_id >= args.num_critic_only_steps:
+                    await actor_model.offload()
+            else:
+                await actor_model.offload()
+        else:
+            await actor_model.clear_memory()
+
+    async def save(rollout_id):
+        if (not args.use_critic) or (rollout_id >= args.num_critic_only_steps):
+            await actor_model.save_model(
+                rollout_id,
+                force_sync=rollout_id == args.num_rollout - 1,
+            )
+        if args.use_critic:
+            await critic_model.save_model(
+                rollout_id,
+                force_sync=rollout_id == args.num_rollout - 1,
+            )
+        if args.rollout_global_dataset:
+            await rollout_manager.save.remote(rollout_id)
+
+    # train loop.
+    # note that for async training, one can change the position of the sync operation(ray.get).
+    for rollout_id in range(args.start_rollout_id, args.num_rollout):
+        # PATCHED_TRAINING_GYM_TIMING_RECORDER: driver lane active
+        with _tg_role('driver', rollout_id) as _tg_rec:
+            if args.eval_interval is not None and rollout_id == 0 and not args.skip_eval_before_train:
+                # PATCHED_TRAINING_GYM_TIMING_EVALUATE_ROLLOUTS
+                with _tg_rec.phase('evaluate_rollouts'):
+                    await rollout_manager.eval.remote(rollout_id)
+
+            # PATCHED_TRAINING_GYM_TIMING_GENERATE_ROLLOUTS
+            with _tg_rec.phase('generate_rollouts'):
+                rollout_data_ref = await rollout_manager.generate.remote(rollout_id)
+
+            if args.offload_rollout:
+                # PATCHED_TRAINING_GYM_TIMING_OFFLOAD_ROLLOUT
+                with _tg_rec.phase('offload_rollout'):
+                    offload_tags = [GPU_MEMORY_TYPE_CUDA_GRAPH]
+                    if "kv_cache" in args.offload_rollout_level:
+                        offload_tags.append(GPU_MEMORY_TYPE_KV_CACHE)
+                    if "weight" in args.offload_rollout_level:
+                        offload_tags.append(GPU_MEMORY_TYPE_WEIGHTS)
+                    await rollout_manager.offload.remote(tags=offload_tags)
+
+            # PATCHED_TRAINING_GYM_TIMING_TRAIN_MODELS
+            with _tg_rec.phase('train_models'):
+                if args.use_critic:
+                    critic_task = await eager_create_task(critic_model.train(rollout_id, rollout_data_ref))
+                    if rollout_id >= args.num_critic_only_steps:
+                        await actor_model.train(rollout_id, rollout_data_ref)
+                    await critic_task
+                else:
+                    await actor_model.train(rollout_id, rollout_data_ref)
+
+            if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
+                # PATCHED_TRAINING_GYM_TIMING_CHECKPOINT_SAVE
+                with _tg_rec.phase('checkpoint_save'):
+                    await save(rollout_id)
+
+            # PATCHED_TRAINING_GYM_TIMING_OFFLOAD_TRAIN
+            with _tg_rec.phase('offload_train'):
+                await offload_train()
+            # PATCHED_TRAINING_GYM_TIMING_WEIGHT_SYNC
+            with _tg_rec.phase('weight_sync'):
+                if args.offload_rollout:
+                    await rollout_manager.onload_weights.remote()
+                await actor_model.update_weights()
+                if args.offload_rollout:
+                    await rollout_manager.onload_kv.remote()
+
+            if should_run_periodic_action(rollout_id, args.eval_interval, num_rollout_per_epoch):
+                # PATCHED_TRAINING_GYM_TIMING_EVALUATE_ROLLOUTS_END
+                with _tg_rec.phase('evaluate_rollouts_end'):
+                    await rollout_manager.eval.remote(rollout_id)
+
+    await rollout_manager.dispose.remote()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    try:
+        asyncio.run(train(args))
+    finally:
+        finish_tracking()

@@ -449,14 +449,14 @@
     lines.push(item.name || "span");
     const start = Number(item.start) || 0;
     if (item.end == null) {
-      lines.push(`instant @ ${fmtTime(start)}`);
+      lines.push(`Instant @ ${fmtTime(start)}`);
     } else {
       const end = Number(item.end) || start;
       lines.push(
         `${fmtTime(start)} → ${fmtTime(end)}  (${fmtDur(end - start)})`,
       );
     }
-    if (item.parent) lines.push(`parent: ${item.parent}`);
+    if (item.parent) lines.push(`Parent: ${item.parent}`);
     const attrs = item.attributes || {};
     for (const [k, v] of Object.entries(attrs)) {
       lines.push(`${k}: ${v}`);

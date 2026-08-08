@@ -131,8 +131,8 @@ def _run_detail():
 
     1. **Tabs** — *Summary* (charts and timings), *Rollouts* (generated
        samples per rollout), and *Logs* (streamed container logs).
-    2. **Step & substep timeline** — a per-step breakdown of where wall-clock
-       time goes (more below).
+    2. **Substep timeline** — a per-rollout breakdown of where wall-clock
+       time goes, measured on the worker that ran it (more below).
     3. **Reward chart** — mean reward per step, with min / latest / max. The
        score distribution and advantage charts below it show how rewards are
        spread within each rollout — useful for spotting reward collapse
@@ -149,35 +149,42 @@ def _run_detail():
 @markdown
 def _profiling():
     """
-    ## Profile step and substep timings
+    ## Profile substep timings
 
-    The **Step & substep timeline** (callout 2 above) is the dashboard's
-    built-in profiler. Each training step renders as a horizontal bar,
-    labeled with its total duration and segmented by substep:
+    The **Substep timeline** (callout 2 above) is the dashboard's built-in
+    profiler. Every phase is timed around the code that does the work, on the
+    worker that runs it — the driver, the rollout engine, and the actor each
+    contribute their own measurements:
 
-    - **Generate rollouts** — sampling from the inference engine
+    - **Generate rollouts / Generate samples** — sampling from the inference
+      engine, on the rollout worker
+    - **Wait for rollout** — in async training, the driver blocking on a
+      generation it launched during an earlier step
     - **Offload rollout / Offload train** — moving weights between the
       rollout and training engines
-    - **Compute log probs** — forward passes for the RL objective
-    - **Train model** — the actual gradient steps
-    - **Optimizer step**, **Checkpoint save**, **Weight sync** — bookkeeping
-      that keeps the rollout engine on-policy
-
-    Custom phases emitted by your code (e.g. a custom reward function) appear
-    as their own markers with per-call durations, so you can tell whether a
-    slow step is the framework or your reward.
+    - **Compute log probs**, **Forward/backward**, **Optimizer step** — the
+      actor's work inside *Train models*
+    - **Weight sync**, **Checkpoint save** — bookkeeping that keeps the
+      rollout engine on-policy
 
     Reading the timeline:
 
-    - **Scroll to zoom, shift-scroll or drag the scrollbar to pan** — zoom
-      into a single step to compare substep widths precisely.
-    - A healthy GRPO step is usually dominated by *Generate rollouts* and
-      *Train model*. If *Generate rollouts* keeps growing step over step,
-      look at rollout lengths (responses may be hitting the max length); if
-      *Weight sync* or the offload substeps dominate, the cluster shape is
-      likely misconfigured for the model size.
-    - **Download JSON** exports the raw timing data — every step and substep
-      with start/end timestamps — for offline analysis or regression
+    - Every rollout is placed on the **run's shared clock**, so a rollout
+      drawn under another one began before that one finished. In async
+      training that is the point: a rollout's generation runs during the
+      previous rollout's training.
+    - A bar **inside an outline** ran within the phase outlined; a bar on a
+      **row of its own** overlapped work it is not part of.
+    - A **gap** is time no phase was measured in, not time nothing ran.
+    - **Scroll to zoom, drag to pan**; hover a bar for its exact times, click
+      to pin the tooltip.
+    - A healthy GRPO step is usually dominated by generation and training. If
+      generation keeps growing step over step, look at rollout lengths
+      (responses may be hitting the max length); if *Weight sync* or the
+      offload substeps dominate, the cluster shape is likely misconfigured
+      for the model size.
+    - **Download JSON** exports the raw records — every phase per worker with
+      its start, end, count and totals — for offline analysis or regression
       tracking across runs.
     """
 

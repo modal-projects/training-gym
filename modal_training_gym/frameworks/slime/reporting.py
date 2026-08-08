@@ -30,7 +30,6 @@ _PHASE_PATH = "/api/framework-status"
 _ROLLOUT_PATH = "/api/training-rollouts"
 _ADVANTAGE_PATH = "/api/advantage-distributions"
 _PHASE_TIMEOUT_SECONDS = 1.0
-_STEP_EVENT_TIMEOUT_SECONDS = 5.0
 _ROLLOUT_TIMEOUT_SECONDS = 10.0
 
 
@@ -164,13 +163,6 @@ def _enqueue_rollout(payload: dict[str, Any]) -> None:
         _REPORT_QUEUE.put_nowait(item)
     except Exception:
         pass
-
-
-def _post_framework_status(payload: dict[str, Any], timeout: float) -> None:
-    url = _phase_url()
-    if not url:
-        return
-    _post({"_url": url, "_timeout": timeout, **payload})
 
 
 def _enqueue_advantage(payload: dict[str, Any]) -> None:

@@ -101,6 +101,37 @@ def test_get_run_route_returns_404_for_unknown_run(fake_volume, monkeypatch, tmp
     assert response.json()["detail"] == "Training run 'missing' not found"
 
 
+def test_timings_route_returns_empty_for_unknown_run(
+    fake_volume, monkeypatch, tmp_path
+):
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.get("/api/runs/missing/timings")
+
+    assert response.status_code == 200
+    assert response.json() == {}
+
+
+def test_timings_route_derives_legacy_substeps(fake_volume, monkeypatch, tmp_path):
+    run = TrainingRun(
+        training_run_id="legacy-timing-run",
+        modal_app_id="ap-legacy",
+        framework=Framework.SLIME,
+        config={},
+        substep_times={
+            "0": {
+                "train": {"start": 100.0, "duration_s": 2.0},
+            }
+        },
+    )
+    run.save()
+
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.get("/api/runs/legacy-timing-run/timings")
+
+    assert response.status_code == 200
+    assert response.json()["metadata"]["legacy_derived"] is True
+
+
 def test_rollout_route_preserves_raw_text_and_adds_cleaned_text(
     fake_volume, monkeypatch, tmp_path
 ):
