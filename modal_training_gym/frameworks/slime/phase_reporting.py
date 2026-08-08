@@ -6,6 +6,8 @@ paths import from this module *inside the training container*, so everything
 they reference must stay importable here. The implementation is split across:
 
 - :mod:`.reporting` — HTTP queue/URL/token plumbing + run-context helpers
+- :mod:`modal_training_gym.common.timing_recorder` — substep timing recorder,
+  shared with miles
 - :mod:`.sample_extraction` — trace/image/trajectory extraction from Samples
 - :mod:`.advantage_reporting` — torch/megatron advantage-distribution math
 
@@ -19,16 +21,20 @@ import time
 from typing import Any
 
 from modal_training_gym.common.status import SlimeStatus
+from modal_training_gym.common.timing_recorder import (
+    RoleRecorder as RoleRecorder,
+    recording_lane as recording_lane,
+    recording_lane_on_reporting_rank as recording_lane_on_reporting_rank,
+    time_phase as time_phase,
+)
 
 from .advantage_reporting import (
     _advantage_samples_payload as _advantage_samples_payload,
     report_advantage_distribution as report_advantage_distribution,
 )
 from .reporting import (
-    _STEP_EVENT_TIMEOUT_SECONDS,
     _enqueue,
     _enqueue_rollout,
-    _post_framework_status,
     _run_context,
     _step_progress,
 )
@@ -274,16 +280,19 @@ def before_train_step_hook(
     )
 
 
-def report_step_event(
+def report_rollout_phase(
     status: SlimeStatus | str,
     args: Any = None,
     rollout_id: int | None = None,
-    step_event: str = "",
 ) -> None:
-    """Report one step/substep event tagged with the ``status`` phase.
+    """Report one rollout phase to the dashboard's Stage column.
 
     ``status`` may be a plain string — the patched slime train.py passes phase
     names as literals so the injected code stays stdlib-only.
+
+    Always queued: nothing this reports is worth a millisecond of the training
+    loop, and the step boundaries it used to post inline for cost a full 5s
+    timeout per step on a dashboard that was slow to answer.
     """
     payload = {
         **_run_context(args),
@@ -292,16 +301,7 @@ def report_step_event(
         "rollout_id": rollout_id,
         "event_ts": time.time(),
     }
-    if step_event:
-        payload["step_event"] = step_event
-    match step_event:
-        case "start":
-            _post_framework_status(payload, _STEP_EVENT_TIMEOUT_SECONDS)
-        case "finish":
-            if rollout_id is not None:
-                _post_framework_status(payload, _STEP_EVENT_TIMEOUT_SECONDS)
-        case _:
-            _enqueue(payload)
+    _enqueue(payload)
 
 
 __all__ = [
@@ -310,7 +310,11 @@ __all__ = [
     "report_advantage_distribution",
     "report_phase",
     "report_rollout_samples",
-    "report_step_event",
+    "report_rollout_phase",
     "log_eval_rollout_data",
     "log_rollout_data",
+    "RoleRecorder",
+    "recording_lane",
+    "recording_lane_on_reporting_rank",
+    "time_phase",
 ]

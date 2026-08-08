@@ -9,6 +9,7 @@ Ray job after useful rollout data has already been collected.
 Executed at image-build time via ``python3 <this file>``.
 """
 
+import os
 from pathlib import Path
 
 path = Path("/root/miles/miles/rollout/sglang_rollout.py")
@@ -43,4 +44,8 @@ elif old in src:
     path.write_text(src.replace(old, new, 1))
     print("Patched Miles SGLang abort cleanup")
 else:
-    raise RuntimeError("Could not find Miles SGLang abort block to patch")
+    message = "Could not find Miles SGLang abort block to patch"
+    if os.environ.get("TG_BEST_EFFORT_ENTRYPOINTS") == "1":
+        print(f"WARNING: {message}; continuing without abort patch")
+    else:
+        raise RuntimeError(message)

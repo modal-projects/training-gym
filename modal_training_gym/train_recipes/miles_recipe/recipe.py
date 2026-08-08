@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import modal
 from pydantic import ConfigDict, model_validator
@@ -43,6 +43,7 @@ _MILES_SKIP = {
     "image_env",
     "local_miles",
     "patch_files",
+    "substep_timing",
     "wandb",
     # Callables shipped by value into the containers; the launcher writes the
     # resolved import path into `extra_config` (rm/generate) or back onto the
@@ -56,6 +57,8 @@ _MILES_SKIP = {
     "custom_megatron_before_log_prob_hook",
     "custom_megatron_before_train_step_hook",
 }
+
+DEFAULT_MILES_DOCKER_IMAGE = "radixark/miles:dev-202606111336"
 
 YAML_CONFIG_FIELDS = ("eval_config", "extra_config", "sglang_config")
 
@@ -415,7 +418,7 @@ class MilesRecipe(BaseTrainRecipe):
     recipe_type: RecipeType = RecipeType.MILES
 
     # ── Launcher instructions (not Miles CLI flags) ─────────────────────────
-    docker_image: str = "radixark/miles:dev-202606111336"
+    docker_image: str = DEFAULT_MILES_DOCKER_IMAGE
     gpu_type: str = "H100"
     memory: int | tuple[int, int] | None = None
     cloud: str | None = None
@@ -427,6 +430,8 @@ class MilesRecipe(BaseTrainRecipe):
     image_env: dict[str, str] = field(default_factory=dict)
     local_miles: str | None = None
     patch_files: list[str] = field(default_factory=list)
+
+    substep_timing: Literal["auto", "require", "off"] = "auto"
 
     environment: dict = field(
         default_factory=lambda: {

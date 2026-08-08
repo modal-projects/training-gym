@@ -53,6 +53,7 @@ from modal_training_gym.common.status import MilesStatus
 from modal_training_gym.train_recipes.miles_recipe.recipe import (
     CHECKPOINTS_PATH,
     DATA_PATH,
+    DEFAULT_MILES_DOCKER_IMAGE,
     HF_CACHE_PATH,
     MilesRecipe,
 )
@@ -72,15 +73,22 @@ HARBOR_PKG_VERSION = "0.8.0"
 
 _MILES_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
 _PATCH_SGLANG_ABORT_B64 = encode_patch("patch_sglang_abort", _MILES_PATCHES)
+_PATCH_SUBSTEP_TIMING_B64 = encode_patch("patch_substep_timing", _MILES_PATCHES)
 
 
 def _build_miles_base_image(miles: MilesRecipe) -> Image:
+    patch_prefix = (
+        ""
+        if miles.docker_image == DEFAULT_MILES_DOCKER_IMAGE
+        else "TG_BEST_EFFORT_ENTRYPOINTS=1 "
+    )
     image = (
         Image.from_registry(miles.docker_image)
         .entrypoint([])
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
-            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
+            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | {patch_prefix}python3",
+            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | {patch_prefix}python3",
         )
     )
     if miles.image_env:
@@ -120,6 +128,12 @@ def build_miles_app(
             remote_path=MILES_ROOT,
             copy=True,
             ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
+        )
+        image = image.run_commands(
+            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | "
+            "TG_BEST_EFFORT_ENTRYPOINTS=1 python3",
+            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | "
+            "TG_BEST_EFFORT_ENTRYPOINTS=1 python3",
         )
 
     if miles.image_overlay is not None:
@@ -686,6 +700,11 @@ def build_miles_app(
                 "env_vars": {
                     "no_proxy": f"127.0.0.1,{cluster.head_addr}",
                     "MASTER_ADDR": cluster.head_addr,
+                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
+                    "TRAINING_GYM_FRAMEWORK_STATUS_URL": framework_status_url
+                    or os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL", ""),
+                    "TRAINING_GYM_SUBSTEP_TIMING": miles.substep_timing,
+                    "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                     **wandb_env,
                     **miles.environment,
                 }

@@ -19,6 +19,7 @@ from modal_training_gym.common.dataset import (
 from modal_training_gym.common.models.qwen3_asr_1_7b import Qwen3_ASR_1_7B
 from modal_training_gym.common.models.validation import VALIDATABLE_MODELS
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
+from modal_training_gym.common.step_timing import measured_run_times
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.model import ModelConfig
 from modal_training_gym.train import TrainConfig
@@ -320,6 +321,7 @@ def run_base_training_on_slime(
 
     train_result = train_config.train()
     training_run = TrainingRun.from_id(train_result.training_run_id)
+    step_times, substep_times = measured_run_times(train_result.training_run_id)
 
     return TutorialResult(
         base_model_name=model_name,
@@ -327,8 +329,8 @@ def run_base_training_on_slime(
         training_run_id=train_result.training_run_id,
         training_run_status=training_run.status,
         total_duration_s=float(training_run.duration_seconds or 0.0),
-        step_times=training_run.step_times,
-        substep_times=training_run.substep_times,
+        step_times=step_times,
+        substep_times=substep_times,
     )
 
 

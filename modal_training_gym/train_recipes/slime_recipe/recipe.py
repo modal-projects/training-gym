@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from modal_training_gym.train_recipes.base import (
     BaseTrainRecipe,
@@ -63,6 +63,7 @@ _SLIME_SKIP = {
     "image_run_commands",
     "image_env",
     "train_function_kwargs",
+    "substep_timing",
     "conversion_pipeline_model_parallel_size",
     "conversion_tensor_model_parallel_size",
     "conversion_expert_model_parallel_size",
@@ -504,6 +505,8 @@ class SlimeRecipe(BaseTrainRecipe):
     image_run_commands: list[str] = field(default_factory=list)
     image_env: dict[str, str] = field(default_factory=dict)
     train_function_kwargs: dict[str, Any] = field(default_factory=dict)
+
+    substep_timing: Literal["auto", "require", "off"] = "auto"
 
     # ── Per-sample execution tracing (dashboard timeline) ───────────────────
     # When True, the rollout recorder attaches slime's per-sample trace (the

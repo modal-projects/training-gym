@@ -3,7 +3,7 @@
   import { ArrowLeft, ChevronLeft, ChevronRight, Download, ExternalLink, Minimize2, X } from "lucide-svelte";
   import Tabs from "../components/Tabs.svelte";
   import RunSummary from "../components/RunSummary.svelte";
-  import StepTimings from "../components/StepTimings.svelte";
+  import RunTimeline from "../components/RunTimeline.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
   import InferenceStats from "../components/InferenceStats.svelte";
@@ -19,11 +19,17 @@
     fetchRun,
     fetchRunRollouts,
     fetchRollout,
+    fetchRunTimings,
     fetchRunAdvantages,
     fetchRunAdvantageStep,
     fetchRunLogs,
   } from "../lib/api.js";
   import { groupByRollout, rolloutIndex, rolloutScores } from "../lib/rolloutGrouping.js";
+  import {
+    isLegacyTiming,
+    rolloutIdForTimingKey,
+    timingRunStart,
+  } from "../lib/timing.js";
 
   // Number of historical log lines requested per page.
   const HIST_PAGE = 500;
@@ -193,21 +199,6 @@
     return value.toFixed(3);
   }
 
-  // Map a rollout to its step timing. Step keys are 1-indexed; rollout ids are
-  // 0-indexed, so step N corresponds to rollout N-1 (fall back to a direct match).
-  function stepTimingForRollout(rolloutId) {
-    const st = run?.step_times || null;
-    const sub = run?.substep_times || null;
-    if (!st && !sub) return null;
-    const candidates = [String(Number(rolloutId) + 1), String(rolloutId)];
-    const key = candidates.find((k) => (st && st[k]) || (sub && sub[k]));
-    if (!key) return null;
-    return {
-      stepTimes: st && st[key] ? { [key]: st[key] } : null,
-      substepTimes: sub && sub[key] ? { [key]: sub[key] } : null,
-    };
-  }
-
   function resumeBadge(run) {
     const state = run?.resume_state;
     if (!state) return "";
@@ -251,17 +242,12 @@
     const rollouts = groupByRollout(samples);
     if (!rollouts.length) return null;
     const scores = rolloutScores(samples, rollouts);
-    // Loop instead of Math.min(...arr): a single step's rollout-score array can
-    // exceed the engine's max argument count and make the spread throw a
-    // RangeError (same failure class buildDist avoids).
     let lo = Infinity;
     let hi = -Infinity;
     for (const v of scores) {
       if (v < lo) lo = v;
       if (v > hi) hi = v;
     }
-    // When every rollout scored the same, a single bucket reads clearer than a
-    // lone bar pinned to one edge.
     const count = lo === hi ? 1 : BUCKET_COUNT;
     const span = hi - lo || 1;
     const buckets = Array.from({ length: count }, () => []);
@@ -321,7 +307,6 @@
     activeSamplePos = Math.max(0, Math.min(list.length - 1, activeSamplePos + delta));
   }
 
-  // The rollout currently shown in the viewer (or null when no bucket is open).
   let activeSample = $derived.by(() => {
     const d = sampleDist;
     if (!d || activeBucket == null) return null;
@@ -410,9 +395,6 @@
   async function loadRollouts(signal) {
     if (!runId) return;
     try {
-      // Untracked: the fetch effect calls this synchronously, so a tracked read
-      // here makes the effect depend on the state it is about to write, and
-      // every fetch (which always yields a fresh array) retriggers it forever.
       const wasEmpty = untrack(() => rolloutSummaries.length === 0);
       const rows = await fetchRunRollouts(runId, { signal });
       if (signal?.aborted) return;
@@ -434,6 +416,25 @@
     }
   }
 
+  let timingInFlight = null;
+
+  async function loadTimings(signal) {
+    if (
+      !runId ||
+      (timingInFlight?.runId === runId && !timingInFlight.signal?.aborted)
+    )
+      return;
+    timingInFlight = { runId, signal };
+    try {
+      const timings = await fetchRunTimings(runId, { signal });
+      if (signal?.aborted) return;
+      runTimings = timings;
+    } catch {
+    } finally {
+      if (timingInFlight?.signal === signal) timingInFlight = null;
+    }
+  }
+
   async function loadAdvantages(signal) {
     if (!runId) return;
     try {
@@ -452,6 +453,7 @@
     runId;
     rolloutSummaries = [];
     rolloutsError = "";
+    runTimings = {};
     expandedRolloutId = null;
     expandedRollout = null;
     advantageSteps = [];
@@ -488,12 +490,14 @@
     const controller = new AbortController();
     rolloutsLoading = true;
     void loadRollouts(controller.signal);
+    void loadTimings(controller.signal);
 
     // Poll while the run is active so new rollouts stream in.
     const interval = window.setInterval(() => {
       const status = String(run?.status || "").toLowerCase();
       if (status && status !== "running") return;
       void loadRollouts(controller.signal);
+      void loadTimings(controller.signal);
     }, 5000);
 
     return () => {
@@ -501,6 +505,13 @@
       window.clearInterval(interval);
     };
   });
+
+  let runTimings = $state({});
+  let legacyTiming = $derived(isLegacyTiming(runTimings));
+  let timelineRunOrigin = $derived(timingRunStart(runTimings));
+  let stepTimingIds = $derived(
+    Object.keys(runTimings).filter((id) => rolloutIdForTimingKey(id) !== null),
+  );
 
   async function toggleRolloutDetail(rolloutId) {
     if (!runId) return;
@@ -518,7 +529,6 @@
       const detail = await fetchRollout(runId, rolloutId);
       if (expandedRolloutId === rolloutId) {
         expandedRollout = detail;
-        // Preselect the first populated bucket so a rollout is shown right away.
         const d = sampleDist;
         const first = d ? d.buckets.findIndex((b) => b.length > 0) : -1;
         if (first >= 0) openBucket(first);
@@ -1353,17 +1363,23 @@
               <pre class="[border:1px_solid_color-mix(in_srgb,var(--red,#f87171)_45%,transparent)] rounded-[8px] bg-[color-mix(in_srgb,var(--red,#f87171)_12%,transparent)] text-(--red,#f87171) [font-family:var(--font-mono)] text-[12px] leading-[17px] m-0 max-h-[320px] overflow-auto p-[12px_14px] whitespace-pre-wrap [word-break:break-word]">{run.error_message}</pre>
             </div>
           {/if}
-          {#if run.step_times || run.substep_times}
+          {#if !legacyTiming && stepTimingIds.length}
             <div class="rollout-chart">
-              <div class="rollout-chart-title">Step &amp; substep timeline</div>
-              <div class="chart-scroll">
-                <StepTimings
-                  stepTimes={run.step_times}
-                  substepTimes={run.substep_times}
-                  layout="timeline"
-                  downloadName={`step_substep_times_${runId}.json`}
-                />
+              <div class="rollout-chart-title">
+                Substep Timing ({stepTimingIds.length}
+                {stepTimingIds.length === 1 ? "step" : "steps"})
               </div>
+              <RunTimeline
+                timings={runTimings}
+                runOrigin={timelineRunOrigin}
+                timelineKey={runId}
+                downloadName={`substep_timing_${runId}.json`}
+                rolloutIds={rolloutSummaries.map((r) => r.rollout_id)}
+                onOpenRollout={(id) => {
+                  selectTab("rollouts");
+                  if (expandedRolloutId !== id) void toggleRolloutDetail(id);
+                }}
+              />
             </div>
           {/if}
           {#if rolloutsLoading && !rolloutSummaries.length}
@@ -1539,17 +1555,21 @@
                     {:else if !expandedRollout || !sampleDist}
                       <div class="detail-empty">No rollouts recorded.</div>
                     {:else}
-                      {@const stepTiming = stepTimingForRollout(r.rollout_id)}
-                      {#if stepTiming}
+                      {#if runTimings[r.rollout_id] && !legacyTiming}
                         <div class="rollout-chart">
-                          <div class="rollout-chart-title">Step timing</div>
-                          <div class="chart-scroll">
-                            <StepTimings
-                              stepTimes={stepTiming.stepTimes}
-                              substepTimes={stepTiming.substepTimes}
-                              layout="rows"
-                            />
-                          </div>
+                          <div class="rollout-chart-title">Substep timing</div>
+                          <RunTimeline
+                            timings={{ [r.rollout_id]: runTimings[r.rollout_id] }}
+                            runOrigin={timelineRunOrigin}
+                            showOpenRollout={false}
+                            timelineKey={`${runId}:${r.rollout_id}`}
+                            downloadName={`substep_timing_${runId}_rollout_${r.rollout_id}.json`}
+                            rolloutIds={[r.rollout_id]}
+                            onOpenRollout={(id) => {
+                              selectTab("rollouts");
+                              if (expandedRolloutId !== id) void toggleRolloutDetail(id);
+                            }}
+                          />
                         </div>
                       {/if}
                       {#if expandedRollout.metrics && Object.keys(expandedRollout.metrics).length}
@@ -1969,4 +1989,3 @@
     {/if}
   {/if}
 </section>
-

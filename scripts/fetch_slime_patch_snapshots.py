@@ -13,9 +13,10 @@ import modal
 from modal_training_gym.frameworks.slime.launcher import SLIME_IMAGE
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TESTDATA_DIR = REPO_ROOT / "tests" / "testdata"
+TESTDATA_DIR = REPO_ROOT / "tests" / "testdata" / "slime"
 SLIME_SOURCE_PATHS = {
     "train.py": "/root/slime/train.py",
+    "train_async.py": "/root/slime/train_async.py",
 }
 
 app = modal.App("fetch-slime-snapshots")
@@ -29,6 +30,6 @@ def read_sources() -> dict[str, str]:
 
 @app.local_entrypoint()
 def main() -> None:
-    TESTDATA_DIR.mkdir(exist_ok=True)
+    TESTDATA_DIR.mkdir(parents=True, exist_ok=True)
     for name, source in read_sources.remote().items():
         (TESTDATA_DIR / f"{name}.input").write_text(source)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 from collections.abc import Awaitable, Callable
@@ -10,7 +11,6 @@ from functools import partial
 from typing import Any
 
 METADATA_VOLUME_NAME = "training-gym-metadata"
-STEP_TIMES_DICT_NAME = "training-gym-step-times"
 
 
 class MetadataStore(Enum):
@@ -33,6 +33,7 @@ class MetadataStore(Enum):
     EVAL_CONFIGS = "eval-configs"
     DEPLOYMENTS = "deployments"
     DEPLOYMENTS_SUMMARY = "deployments-summary"
+    SUBSTEP_TIMING = "substep-timing"
 
 
 SUMMARY_KEY = "summary"
@@ -123,12 +124,6 @@ def _metadata_volume():
     import modal
 
     return modal.Volume.from_name(METADATA_VOLUME_NAME, create_if_missing=True)
-
-
-def _step_times_dict():
-    import modal
-
-    return modal.Dict.from_name(STEP_TIMES_DICT_NAME, create_if_missing=True)
 
 
 def _safe_reload(vol, *, is_async: bool = False):
@@ -226,8 +221,15 @@ def vol_get(
 
 
 def vol_list(
-    store: MetadataStore | str, *, is_async: bool = False
-) -> list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]:
+    store: MetadataStore | str,
+    *,
+    is_async: bool = False,
+    return_failures: bool = False,
+) -> (
+    list[dict[str, Any]]
+    | tuple[list[dict[str, Any]], bool]
+    | Awaitable[list[dict[str, Any]] | tuple[list[dict[str, Any]], bool]]
+):
     from modal.exception import NotFoundError
 
     vol = _metadata_volume()
@@ -235,15 +237,56 @@ def vol_list(
 
         async def _run() -> list[dict[str, Any]]:
             await _safe_reload(vol, is_async=True)
-            results: list[dict[str, Any]] = []
+            semaphore = asyncio.Semaphore(16)
+
+            async def _read(path: str) -> dict[str, Any] | None:
+                async with semaphore:
+                    for attempt in range(3):
+                        try:
+                            chunks = [c async for c in vol.read_file.aio(path)]
+                            return json.loads(b"".join(chunks))
+                        except (FileNotFoundError, NotFoundError):
+                            return None
+                        except Exception as exc:
+                            if "rate limit" not in str(exc).lower() or attempt == 2:
+                                raise
+                            await asyncio.sleep(2**attempt)
+
+            for attempt in range(3):
+                try:
+                    paths = [
+                        entry.path
+                        async for entry in vol.iterdir.aio(_store_path(store))
+                        if entry.path.endswith(".json")
+                    ]
+                    break
+                except (FileNotFoundError, NotFoundError):
+                    if return_failures:
+                        return [], False
+                    return ([], False) if return_failures else []
+                except Exception as exc:
+                    if "rate limit" not in str(exc).lower() or attempt == 2:
+                        if return_failures:
+                            return [], True
+                        return []
+                    await asyncio.sleep(2**attempt)
+            else:
+                paths = []
             try:
-                async for entry in vol.iterdir.aio(_store_path(store)):
-                    if entry.path.endswith(".json"):
-                        chunks = [c async for c in vol.read_file.aio(entry.path)]
-                        results.append(json.loads(b"".join(chunks)))
+                results = await asyncio.gather(
+                    *(_read(path) for path in paths), return_exceptions=True
+                )
+                failures = [
+                    result for result in results if isinstance(result, Exception)
+                ]
+                records = [result for result in results if isinstance(result, dict)]
+                if return_failures:
+                    return records, bool(failures)
+                return records
             except (FileNotFoundError, NotFoundError):
-                pass
-            return results
+                if return_failures:
+                    return [], False
+                return []
 
         return _run()
 
@@ -257,16 +300,18 @@ def vol_list(
                 if entry.path.endswith(".json"):
                     data = b"".join(vol.read_file(entry.path))
                     results.append(json.loads(data))
-            return results
+            return (results, False) if return_failures else results
         except (FileNotFoundError, NotFoundError):
-            return results
+            return (results, False) if return_failures else results
         except Exception as exc:
             if "rate limit" in str(exc).lower() and attempt < 2:
                 _time.sleep(2**attempt)
                 results = []
                 continue
-            raise
-    return results
+            if return_failures:
+                return results, True
+            return results
+    return (results, False) if return_failures else results
 
 
 def vol_list_prefix(store: MetadataStore | str, prefix: str) -> list[dict[str, Any]]:
@@ -295,10 +340,6 @@ def vol_list_prefix(store: MetadataStore | str, prefix: str) -> list[dict[str, A
 
 
 def vol_remove_keys_with_prefix(store: MetadataStore | str, prefix: str) -> int:
-    """Delete every item whose key (file basename) starts with ``prefix``.
-
-    Reads directory entries only (unlike vol_list_prefix). Returns the number of items removed.
-    """
     from modal.exception import NotFoundError
 
     vol = _metadata_volume()
@@ -438,7 +479,9 @@ def vol_compact_summary_items(
     summary_items = (
         vol_get_summary_items(summary_store, key=key, payload_key=payload_key) or []
     )
-    canonical_items = vol_list(item_store)
+    canonical_items, had_failures = vol_list(item_store, return_failures=True)
+    if had_failures:
+        return summary_items
 
     items_by_id = {
         item[item_id_key]: item
