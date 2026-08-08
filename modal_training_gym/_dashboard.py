@@ -460,7 +460,7 @@ def fastapi_app():
 
     TIMING_CACHE_MAX_RUNS = 64
     TIMING_TOKEN_CACHE_MAX_RUNS = 64
-    TIMING_CACHE_TTL_S = 5.0
+    TIMING_CACHE_TTL_S = 15.0
     TIMING_CACHE_FINAL_TTL_S = 60.0
     remembered_timing_tokens: dict[str, str] = {}
 

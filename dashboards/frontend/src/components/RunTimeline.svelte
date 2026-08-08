@@ -454,7 +454,7 @@
         {/each}
       </div>
     {/if}
-    {#if showOpenRollout && tip.bar.name === "generate_samples" && tip.bar.kind === "work" && tip.bar.rolloutId != null && rolloutIds.includes(Number(tip.bar.rolloutId)) && onOpenRollout}
+    {#if showOpenRollout && ["generate_samples", "generate_rollouts"].includes(tip.bar.name) && tip.bar.kind === "work" && tip.bar.rolloutId != null && rolloutIds.includes(Number(tip.bar.rolloutId)) && onOpenRollout}
       <button
         class="tg-tip-action"
         onclick={(e) => {
