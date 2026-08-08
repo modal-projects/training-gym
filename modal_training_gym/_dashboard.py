@@ -459,6 +459,7 @@ def fastapi_app():
     }
 
     TIMING_CACHE_MAX_RUNS = 64
+    TIMING_TOKEN_CACHE_MAX_RUNS = 64
     TIMING_CACHE_TTL_S = 5.0
     TIMING_CACHE_FINAL_TTL_S = 60.0
     remembered_timing_tokens: dict[str, str] = {}
@@ -743,7 +744,7 @@ def fastapi_app():
         remembered_timing_tokens[training_run_id] = hashlib.sha256(
             expected_token.encode()
         ).hexdigest()
-        if len(remembered_timing_tokens) > TIMING_CACHE_MAX_RUNS:
+        if len(remembered_timing_tokens) > TIMING_TOKEN_CACHE_MAX_RUNS:
             del remembered_timing_tokens[next(iter(remembered_timing_tokens))]
 
     async def _get_run_or_404(training_run_id: str) -> TrainingRun:

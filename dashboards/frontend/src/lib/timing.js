@@ -476,7 +476,7 @@ function rowsOf(spans, async) {
   return rows;
 }
 
-export function runTimeline(timings) {
+export function runTimeline(timings, asyncOverride = null) {
   const measured = collect(timings);
   if (!measured.length) {
     return { span: 0, runStart: null, async: false, groups: [], steps: [], categories: [] };
@@ -499,11 +499,14 @@ export function runTimeline(timings) {
   const sync = rawSpans.some(
     (span) => span.role === "driver" && span.name === "generate_rollouts",
   );
-  const async = !sync && generationSpans.some((generation) =>
-    stepSpans.some(
-      (step) => generation.start < step.end && step.start < generation.end,
-    ),
-  );
+  const async =
+    asyncOverride ??
+    (!sync &&
+      generationSpans.some((generation) =>
+        stepSpans.some(
+          (step) => generation.start < step.end && step.start < generation.end,
+        ),
+      ));
   const spans = nest(clipStalls(rawSpans, async));
   if (sync) mergeSyncGenerationSpans(spans);
 

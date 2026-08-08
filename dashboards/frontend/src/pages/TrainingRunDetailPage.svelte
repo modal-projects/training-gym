@@ -28,6 +28,7 @@
   import {
     isLegacyTiming,
     rolloutIdForTimingKey,
+    runTimeline,
     timingRunStart,
   } from "../lib/timing.js";
 
@@ -510,6 +511,7 @@
 
   let runTimings = $state({});
   let legacyTiming = $derived(isLegacyTiming(runTimings));
+  let timelineAsync = $derived(runTimeline(runTimings).async);
   let timelineRunOrigin = $derived(timingRunStart(runTimings));
   let stepTimingIds = $derived(
     Object.keys(runTimings).filter((id) => rolloutIdForTimingKey(id) !== null),
@@ -1373,6 +1375,7 @@
               </div>
               <RunTimeline
                 timings={runTimings}
+                asyncOverride={timelineAsync}
                 runOrigin={timelineRunOrigin}
                 timelineKey={runId}
                 downloadName={`substep_timing_${runId}.json`}
@@ -1562,6 +1565,7 @@
                           <div class="rollout-chart-title">Substep timing</div>
                           <RunTimeline
                             timings={{ [r.rollout_id]: runTimings[r.rollout_id] }}
+                            asyncOverride={timelineAsync}
                             runOrigin={timelineRunOrigin}
                             showOpenRollout={false}
                             timelineKey={`${runId}:${r.rollout_id}`}

@@ -19,6 +19,7 @@
     onOpenRollout = null,
     rolloutIds = [],
     runOrigin = null,
+    asyncOverride = null,
     showOpenRollout = true,
   } = $props();
 
@@ -35,7 +36,7 @@
   const STEP_GAP_PX = 8;
   const BAR_GAP_PX = 1;
   let showDetails = $state(false);
-  let timeline = $derived(runTimeline(timings));
+  let timeline = $derived(runTimeline(timings, asyncOverride));
   let intervalOrigin = $derived(runOrigin ?? timeline.runStart);
   let rowHeight = $derived(showDetails ? DETAIL_ROW_HEIGHT_PX : ROW_HEIGHT_PX);
   let groups = $derived(
@@ -45,7 +46,7 @@
     })),
   );
   let legendCategories = $derived(
-    timeline.categories.filter((key) => !(showDetails && key === "idle")),
+    timeline.categories,
   );
   $effect(() => {
     timelineKey;
@@ -185,7 +186,6 @@
         (bar) =>
           !bar.mergedGeneration &&
           !HIDDEN_PHASES.has(bar.name) &&
-          (!showDetails || bar.kind !== "stall") &&
           (showDetails || bar.depth === 0),
       )
   }
@@ -352,6 +352,7 @@
                         <button
                           class="bar"
                           class:stall={bar.kind === "stall"}
+                          class:detail-stall={showDetails && bar.kind === "stall"}
                           class:sampled={bar.kind === "sampled"}
                           class:nested-bar={showDetails && bar.depth > 0}
                           class:outlined={isExpandedParent(bar)}
@@ -747,6 +748,11 @@
     background-size: 100% 2px;
     background-position: center;
     background-repeat: no-repeat;
+  }
+
+  .bar.detail-stall {
+    opacity: 0.35;
+    z-index: 1;
   }
 
   .bar.sampled {
