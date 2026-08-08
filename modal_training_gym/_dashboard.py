@@ -926,16 +926,17 @@ def fastapi_app():
         await record.save(is_async=True)
         entry = timing_cache.get(record.training_run_id)
         if entry is not None:
-            async with entry.lock:
-                entry.dirty = True
-                entry.final = False
+            entry.dirty = True
+            entry.final = False
+            if not entry.lock.locked():
                 rollout_key = (
                     "pre-loop" if record.rollout_id is None else str(record.rollout_id)
                 )
-                lanes = entry.lanes.setdefault(rollout_key, {"roles": {}})
-                lanes["roles"].update(
-                    rollout_lanes([record.model_dump(mode="json")])["roles"]
-                )
+                async with entry.lock:
+                    lanes = entry.lanes.setdefault(rollout_key, {"roles": {}})
+                    lanes["roles"].update(
+                        rollout_lanes([record.model_dump(mode="json")])["roles"]
+                    )
         return JSONResponse({"status": "ok"})
 
     async def _run_has_ended(training_run_id: str) -> bool:

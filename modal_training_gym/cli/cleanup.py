@@ -42,7 +42,6 @@ def cleanup(*, older_than_days: int = 7, dry_run: bool = False) -> None:
         if r.status in TERMINAL_STATUSES
         and (r.created_at or r.started_at or 0) < cutoff
         and (r.created_at or r.started_at or 0) > 0
-        and is_safe_run_id(r.training_run_id)
     ]
 
     if not targets:
@@ -74,7 +73,8 @@ def cleanup(*, older_than_days: int = 7, dry_run: bool = False) -> None:
             MetadataStore.ADVANTAGE_DISTRIBUTIONS,
             AdvantageDistribution.run_prefix(rid),
         )
-        vol_remove_keys_with_prefix(RoleTimingRecord.store(rid), "")
+        if is_safe_run_id(rid):
+            vol_remove_keys_with_prefix(RoleTimingRecord.store(rid), "")
         deleted_tokens += 1
 
     rollout_summary = (

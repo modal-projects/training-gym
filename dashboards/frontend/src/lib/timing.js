@@ -153,9 +153,12 @@ function collect(timings) {
           name,
           category: categoryOf(name),
         };
+        const invocations = Array.isArray(phase?.invocations)
+          ? phase.invocations
+          : [];
         const runs =
-          !SAMPLED.has(name) && Array.isArray(phase?.invocations)
-            ? phase.invocations
+          !SAMPLED.has(name) && invocations.length === count
+            ? invocations
             : [];
         if (runs.length) {
           for (const [from, to] of runs) {
