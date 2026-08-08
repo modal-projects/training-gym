@@ -428,7 +428,9 @@
     try {
       const timings = await fetchRunTimings(runId, { signal });
       if (signal?.aborted) return;
-      runTimings = timings;
+      if (JSON.stringify(timings) !== JSON.stringify(runTimings)) {
+        runTimings = timings;
+      }
     } catch {
     } finally {
       if (timingInFlight?.signal === signal) timingInFlight = null;

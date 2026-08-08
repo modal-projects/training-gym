@@ -75,6 +75,7 @@ class RoleRecorder:
         self._closed = False
         self._post_retries = 0
         self._permanent_reported = False
+        self._permanent_rejected = False
 
     def __enter__(self) -> "RoleRecorder":
         return self
@@ -190,8 +191,11 @@ class RoleRecorder:
                                 flush=True,
                             )
                     elif result == "permanent":
-                        if not self._permanent_reported:
+                        with self._lock:
+                            self._permanent_rejected = True
+                            should_report = not self._permanent_reported
                             self._permanent_reported = True
+                        if should_report:
                             print(
                                 "WARNING: substep timing upload rejected with a "
                                 "permanent client error; dropping snapshot.",
@@ -226,8 +230,9 @@ class RoleRecorder:
                 time.sleep(0.05)
 
     def _publish(self, force: bool = False) -> None:
-        if not self.phases:
-            return
+        with self._lock:
+            if self._permanent_rejected or not self.phases:
+                return
         if os.environ.get(TIMING_MODE_ENV, "auto") == "off":
             return
         url = timing_url()

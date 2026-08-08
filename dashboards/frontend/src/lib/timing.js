@@ -325,14 +325,12 @@ function mergeSyncGenerationSpans(spans) {
       };
     }
     span.mergedGeneration = true;
-    for (const candidate of spans) {
-      let parent = candidate.parent;
-      while (parent) {
-        if (parent === span) {
-          candidate.mergedGeneration = true;
-          break;
-        }
-        parent = parent.parent;
+    const descendants = [...(span.children || [])];
+    while (descendants.length) {
+      const descendant = descendants.pop();
+      descendant.mergedGeneration = true;
+      for (const child of descendant.children || []) {
+        descendants.push(child);
       }
     }
     if (span.parent) {

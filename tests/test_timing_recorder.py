@@ -127,3 +127,37 @@ def test_unknown_run_latches_all_lanes(monkeypatch, capsys):
     assert len(posted) == 2
     assert timing_recorder._UNKNOWN_RUNS == {"deleted-run", "other-run"}
     assert capsys.readouterr().out.count("HTTP 410") == 2
+
+
+def test_permanent_rejection_latches_recorder(monkeypatch, capsys):
+    monkeypatch.setattr(timing_recorder, "_UNSUPPORTED", False)
+    monkeypatch.setattr(timing_recorder, "_NOT_FOUND_COUNT", 0)
+    monkeypatch.setattr(timing_recorder, "_REQUIRE_FAILURE_REPORTED", False)
+    monkeypatch.setattr(timing_recorder, "_UNKNOWN_RUNS", set())
+    monkeypatch.setattr(timing_recorder, "MIN_PUBLISH_INTERVAL_S", 0.0)
+    monkeypatch.setenv("TRAINING_GYM_FRAMEWORK_STATUS_URL", "https://dashboard.test")
+    monkeypatch.setenv("TRAINING_GYM_TRAINING_RUN_ID", "rejected-run")
+
+    posted = []
+    first_post = threading.Event()
+
+    def post_item_result(item):
+        posted.append(item)
+        first_post.set()
+        return "permanent"
+
+    monkeypatch.setattr(status_reporter, "post_item_result", post_item_result)
+
+    recorder = RoleRecorder("driver", 0)
+    with recorder.phase("train"):
+        pass
+    assert first_post.wait(timeout=1)
+    with recorder.phase("forward_backward"):
+        pass
+    recorder.__exit__(None, None, None)
+    if recorder._poster is not None:
+        recorder._poster.join(timeout=1)
+
+    assert len(posted) == 1
+    assert recorder._permanent_rejected
+    assert capsys.readouterr().out.count("permanent client error") == 1
