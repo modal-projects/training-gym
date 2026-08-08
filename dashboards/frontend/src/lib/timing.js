@@ -261,7 +261,7 @@ function nest(spans) {
     const duration = Math.max(span.end - span.start, 0);
     const aggregates = new Map();
     for (const child of span.children) {
-      if (!["reward", "reward_batch", "sample_generation"].includes(child.name)) {
+      if (!SAMPLED.has(child.name)) {
         continue;
       }
       const childDuration = Math.max(child.end - child.start, 0);
@@ -287,7 +287,7 @@ function nest(spans) {
       aggregates.set(child.name, current);
     }
     const children = span.children.filter(
-      (child) => !["reward", "reward_batch", "sample_generation"].includes(child.name),
+      (child) => !SAMPLED.has(child.name),
     );
     for (const child of aggregates.values()) {
       children.push({
