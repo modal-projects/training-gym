@@ -259,10 +259,13 @@ function nest(spans) {
       child.ordinal = occurrence;
     }
     const duration = Math.max(span.end - span.start, 0);
-    const children = new Map();
+    const aggregates = new Map();
     for (const child of span.children) {
+      if (!["reward", "reward_batch", "sample_generation"].includes(child.name)) {
+        continue;
+      }
       const childDuration = Math.max(child.end - child.start, 0);
-      const current = children.get(child.name) ?? {
+      const current = aggregates.get(child.name) ?? {
         name: child.name,
         kind: child.kind,
         category: child.category,
@@ -281,15 +284,19 @@ function nest(spans) {
       current.longest = Math.max(current.longest, child.longest || childDuration);
       current.start = Math.min(current.start, child.start);
       current.end = Math.max(current.end, child.end);
-      children.set(child.name, current);
+      aggregates.set(child.name, current);
     }
-    span.children = [...children.values()].map((child) => {
-      return {
+    const children = span.children.filter(
+      (child) => !["reward", "reward_batch", "sample_generation"].includes(child.name),
+    );
+    for (const child of aggregates.values()) {
+      children.push({
         ...child,
         share: duration > 0 ? child.duration / duration : 0,
         average: child.count ? child.total / child.count : 0,
-      };
-    });
+      });
+    }
+    span.children = children;
     delete span.orderIndex;
   }
   return ordered;
@@ -515,7 +522,7 @@ export function runTimeline(timings) {
       child.insideKey = parent.key;
       child.insideStart = parent.start;
       child.insideEnd = parent.end;
-      child.key = `${parent.key}:child:${child.name}`;
+      child.key ??= `${parent.key}:child:${child.name}`;
       hydrateNestedChildren(child);
     }
   }

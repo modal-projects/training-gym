@@ -441,7 +441,7 @@
     {/if}
     {#if tip.bar.children?.length}
       <div class="tg-tip-children">
-        {#each tip.bar.children.filter((child) => !child.mergedGeneration && !TOOLTIP_HIDDEN_PHASES.has(child.name)) as child (child.name)}
+        {#each tip.bar.children.filter((child) => !child.mergedGeneration && !TOOLTIP_HIDDEN_PHASES.has(child.name)) as child (child.key)}
           <span class="tg-tip-child">
             <span class="tg-tip-child-line">
               {labelFor(child.name, child.rolloutId)}
@@ -731,7 +731,7 @@
   }
 
   .bar.nested-bar {
-    min-width: 1px;
+    min-width: 2px;
     top: 4px;
     height: calc(100% - 8px);
     z-index: 3;
