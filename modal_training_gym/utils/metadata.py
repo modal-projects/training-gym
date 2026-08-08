@@ -263,7 +263,7 @@ def vol_list(
                 except (FileNotFoundError, NotFoundError):
                     if return_failures:
                         return [], False
-                    raise
+                    return []
                 except Exception as exc:
                     if "rate limit" not in str(exc).lower() or attempt == 2:
                         if return_failures:
@@ -288,7 +288,7 @@ def vol_list(
             except (FileNotFoundError, NotFoundError):
                 if return_failures:
                     return [], False
-                raise
+                return []
 
         return _run()
 
@@ -306,7 +306,7 @@ def vol_list(
         except (FileNotFoundError, NotFoundError):
             if return_failures:
                 return results, False
-            raise
+            return results
         except Exception as exc:
             if "rate limit" in str(exc).lower() and attempt < 2:
                 _time.sleep(2**attempt)
