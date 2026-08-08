@@ -28,7 +28,7 @@
   import {
     isLegacyTiming,
     rolloutIdForTimingKey,
-    runTimeline,
+    timingIsAsync,
     timingRunStart,
   } from "../lib/timing.js";
 
@@ -429,7 +429,9 @@
     try {
       const timings = await fetchRunTimings(runId, { signal });
       if (signal?.aborted) return;
-      if (JSON.stringify(timings) !== JSON.stringify(runTimings)) {
+      const serialized = JSON.stringify(timings);
+      if (serialized !== runTimingsSerialized) {
+        runTimingsSerialized = serialized;
         runTimings = timings;
       }
     } catch {
@@ -457,6 +459,7 @@
     rolloutSummaries = [];
     rolloutsError = "";
     runTimings = {};
+    runTimingsSerialized = "{}";
     expandedRolloutId = null;
     expandedRollout = null;
     advantageSteps = [];
@@ -510,8 +513,9 @@
   });
 
   let runTimings = $state({});
+  let runTimingsSerialized = $state("{}");
   let legacyTiming = $derived(isLegacyTiming(runTimings));
-  let timelineAsync = $derived(runTimeline(runTimings).async);
+  let timelineAsync = $derived(timingIsAsync(runTimings));
   let timelineRunOrigin = $derived(timingRunStart(runTimings));
   let stepTimingIds = $derived(
     Object.keys(runTimings).filter((id) => rolloutIdForTimingKey(id) !== null),

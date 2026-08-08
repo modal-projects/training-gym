@@ -45,9 +45,6 @@
       height: HEADER_PX + group.rows.length * (rowHeight + ROW_GAP_PX),
     })),
   );
-  let legendCategories = $derived(
-    timeline.categories,
-  );
   $effect(() => {
     timelineKey;
     pinned = false;
@@ -234,7 +231,7 @@
   {:else}
     <div class="toolbar">
       <div class="legend">
-        {#each legendCategories as key (key)}
+        {#each timeline.categories as key (key)}
           <span class="legend-item">
             <span
               class="swatch"
