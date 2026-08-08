@@ -6,7 +6,7 @@ import time
 
 from modal_training_gym.common.advantage_distribution import AdvantageDistribution
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
-from modal_training_gym.common.step_timing import RoleTimingRecord
+from modal_training_gym.common.step_timing import RoleTimingRecord, is_safe_run_id
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get_summary_items,
@@ -42,6 +42,7 @@ def cleanup(*, older_than_days: int = 7, dry_run: bool = False) -> None:
         if r.status in TERMINAL_STATUSES
         and (r.created_at or r.started_at or 0) < cutoff
         and (r.created_at or r.started_at or 0) > 0
+        and is_safe_run_id(r.training_run_id)
     ]
 
     if not targets:

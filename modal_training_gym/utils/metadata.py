@@ -263,12 +263,12 @@ def vol_list(
                 except (FileNotFoundError, NotFoundError):
                     if return_failures:
                         return [], False
-                    return ([], False) if return_failures else []
+                    raise
                 except Exception as exc:
                     if "rate limit" not in str(exc).lower() or attempt == 2:
                         if return_failures:
                             return [], True
-                        return []
+                        raise
                     await asyncio.sleep(2**attempt)
             else:
                 paths = []
@@ -282,11 +282,13 @@ def vol_list(
                 records = [result for result in results if isinstance(result, dict)]
                 if return_failures:
                     return records, bool(failures)
+                if failures:
+                    raise failures[0]
                 return records
             except (FileNotFoundError, NotFoundError):
                 if return_failures:
                     return [], False
-                return []
+                raise
 
         return _run()
 
@@ -302,7 +304,9 @@ def vol_list(
                     results.append(json.loads(data))
             return (results, False) if return_failures else results
         except (FileNotFoundError, NotFoundError):
-            return (results, False) if return_failures else results
+            if return_failures:
+                return results, False
+            raise
         except Exception as exc:
             if "rate limit" in str(exc).lower() and attempt < 2:
                 _time.sleep(2**attempt)
@@ -310,7 +314,7 @@ def vol_list(
                 continue
             if return_failures:
                 return results, True
-            return results
+            raise
     return (results, False) if return_failures else results
 
 

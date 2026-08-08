@@ -480,8 +480,13 @@ export function runTimeline(timings) {
   if (!measured.length) {
     return { span: 0, runStart: null, async: false, groups: [], steps: [], categories: [] };
   }
-  const runStart = Math.min(...measured.map((span) => span.start));
-  const runEnd = Math.max(...measured.map((span) => span.end));
+  // Avoid spreading one argument per invocation; long runs can exceed the call stack.
+  let runStart = Infinity;
+  let runEnd = -Infinity;
+  for (const span of measured) {
+    runStart = Math.min(runStart, span.start);
+    runEnd = Math.max(runEnd, span.end);
+  }
   const steps = stepsOf(measured);
   const rawSpans = measured;
   const generationSpans = rawSpans.filter((span) => span.role === "rollout");
@@ -553,7 +558,12 @@ export function runTimeline(timings) {
 
 export function timingRunStart(timings) {
   const measured = collect(timings);
-  return measured.length ? Math.min(...measured.map((span) => span.start)) : null;
+  // Avoid spreading one argument per invocation; long runs can exceed the call stack.
+  let start = Infinity;
+  for (const span of measured) {
+    start = Math.min(start, span.start);
+  }
+  return measured.length ? start : null;
 }
 
 export function fmtSecs(s, unit = null) {
