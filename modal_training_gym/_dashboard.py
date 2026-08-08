@@ -8,7 +8,6 @@ it uses the local ``dashboards/frontend`` directory instead.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import os
 import secrets as _secrets
 import time
@@ -412,7 +411,6 @@ def fastapi_app():
         MetadataStore,
         summary_items_from_payload,
         vol_get,
-        vol_get_summary_items,
         vol_get_summary_items_healed,
         vol_put_summary_items,
     )
@@ -459,10 +457,8 @@ def fastapi_app():
     }
 
     TIMING_CACHE_MAX_RUNS = 64
-    TIMING_TOKEN_CACHE_MAX_RUNS = 64
     TIMING_CACHE_TTL_S = 15.0
     TIMING_CACHE_FINAL_TTL_S = 60.0
-    remembered_timing_tokens: dict[str, str] = {}
 
     class TimingEntry:
         def __init__(self) -> None:
@@ -688,16 +684,12 @@ def fastapi_app():
     async def _require_framework_status_token(
         training_run_id: str,
         authorization: str | None,
-        *,
-        allow_deleted: bool = False,
     ) -> None:
         """403 unless ``authorization`` carries the run's status token.
 
         Handlers must call this *before* any lookup that can 404, or the
         status code tells an anonymous caller which run ids exist. For the
         same reason an unknown run is indistinguishable from a wrong token.
-        A 410 requires a matching remembered token hash, never bare run-id
-        recognition.
         """
         try:
             expected_token = str(
@@ -714,38 +706,9 @@ def fastapi_app():
         supplied = _bearer_token(authorization)
         if not expected_token:
             _secrets.compare_digest(supplied, _MISSING_TOKEN_DUMMY)
-            remembered = remembered_timing_tokens.get(training_run_id)
-            supplied_hash = hashlib.sha256(supplied.encode()).hexdigest()
-            if (
-                allow_deleted
-                and remembered is not None
-                and _secrets.compare_digest(supplied_hash, remembered)
-            ):
-                try:
-                    await TrainingRun.from_id(training_run_id, is_async=True)
-                except KeyError:
-                    summaries = await run_in_threadpool(
-                        vol_get_summary_items,
-                        MetadataStore.TRAINING_RUNS_SUMMARY,
-                    )
-                    if not any(
-                        isinstance(item, dict)
-                        and item.get("training_run_id") == training_run_id
-                        for item in (summaries or [])
-                    ):
-                        raise HTTPException(
-                            status_code=410,
-                            detail=f"TrainingRun {training_run_id!r} no longer exists",
-                        ) from None
             raise HTTPException(status_code=403, detail="Invalid status token")
         if not _secrets.compare_digest(supplied, expected_token):
             raise HTTPException(status_code=403, detail="Invalid status token")
-        remembered_timing_tokens.pop(training_run_id, None)
-        remembered_timing_tokens[training_run_id] = hashlib.sha256(
-            expected_token.encode()
-        ).hexdigest()
-        if len(remembered_timing_tokens) > TIMING_TOKEN_CACHE_MAX_RUNS:
-            del remembered_timing_tokens[next(iter(remembered_timing_tokens))]
 
     async def _get_run_or_404(training_run_id: str) -> TrainingRun:
         try:
@@ -918,11 +881,7 @@ def fastapi_app():
         record: RoleTimingRecord,
         authorization: str | None = Header(default=None),
     ):
-        await _require_framework_status_token(
-            record.training_run_id,
-            authorization,
-            allow_deleted=True,
-        )
+        await _require_framework_status_token(record.training_run_id, authorization)
 
         await record.save(is_async=True)
         entry = timing_cache.get(record.training_run_id)

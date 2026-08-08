@@ -26,7 +26,6 @@ PER_SAMPLE_PHASES = frozenset({"reward", "reward_batch", "sample_generation"})
 _CLOSED_POSTERS: list[threading.Thread] = []
 _UNSUPPORTED = False
 _NOT_FOUND_COUNT = 0
-_UNKNOWN_RUNS: set[str] = set()
 _REQUIRE_FAILURE_REPORTED = False
 _UNSUPPORTED_LOCK = threading.Lock()
 
@@ -179,17 +178,6 @@ class RoleRecorder:
                                     "endpoint); redeploy the dashboard to record it."
                                 )
                             print(message, flush=True)
-                    elif result == "unknown_run":
-                        training_run_id = str(snapshot["training_run_id"])
-                        with _UNSUPPORTED_LOCK:
-                            should_report = training_run_id not in _UNKNOWN_RUNS
-                            _UNKNOWN_RUNS.add(training_run_id)
-                        if should_report:
-                            print(
-                                "WARNING: substep timing upload received HTTP 410; "
-                                f"disabling timing for run {training_run_id}.",
-                                flush=True,
-                            )
                     elif result == "permanent":
                         with self._lock:
                             self._permanent_rejected = True
@@ -241,10 +229,7 @@ class RoleRecorder:
             return
         with _UNSUPPORTED_LOCK:
             unsupported = _UNSUPPORTED
-            unknown_run = training_run_id in _UNKNOWN_RUNS
         if unsupported:
-            return
-        if unknown_run:
             return
         if self._publish_gate is not None:
             if self._gate_answer is None:

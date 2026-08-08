@@ -107,41 +107,6 @@ def test_correct_token_still_reaches_the_handler(
     assert response.json()["status"] == "ok"
 
 
-def test_deleted_run_requires_remembered_token(fake_volume, monkeypatch, tmp_path):
-    _save_run()
-    with _client(monkeypatch, tmp_path) as client:
-        response = client.post(
-            "/api/timing-events",
-            json={"training_run_id": RUN_ID, "rollout_id": 1, "role": "driver"},
-            headers={"Authorization": f"Bearer {TOKEN}"},
-        )
-        assert response.status_code == 200
-
-        metadata.vol_remove(MetadataStore.TRAINING_RUNS, RUN_ID)
-        metadata.vol_remove(MetadataStore.TRAINING_RUNS_SUMMARY, metadata.SUMMARY_KEY)
-        metadata.vol_remove(MetadataStore.FRAMEWORK_STATUS_TOKENS, RUN_ID)
-
-        for authorization in (None, "Bearer wrong-token"):
-            response = client.post(
-                "/api/timing-events",
-                json={
-                    "training_run_id": RUN_ID,
-                    "rollout_id": 1,
-                    "role": "driver",
-                },
-                headers={"Authorization": authorization} if authorization else {},
-            )
-            assert response.status_code == 403
-
-        response = client.post(
-            "/api/timing-events",
-            json={"training_run_id": RUN_ID, "rollout_id": 1, "role": "driver"},
-            headers={"Authorization": f"Bearer {TOKEN}"},
-        )
-
-    assert response.status_code == 410
-
-
 @pytest.mark.parametrize("stored", [None, ""], ids=["no-record", "empty-token"])
 def test_run_with_no_token_on_record_refuses_the_dummy(
     fake_volume, monkeypatch, tmp_path, stored

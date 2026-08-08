@@ -35,7 +35,7 @@ _STARTED = False
 _LOCK = threading.Lock()
 _DEFAULT_TIMEOUT_SECONDS = 2.0
 _STATUS_TOKEN_ENV = "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"
-PostResult = Literal["ok", "not_found", "unknown_run", "failed", "permanent"]
+PostResult = Literal["ok", "not_found", "failed", "permanent"]
 
 
 def _resolve_url() -> str:
@@ -112,8 +112,6 @@ def _post(item: dict[str, Any]) -> PostResult:
     except HTTPError as exc:
         if exc.code in {404, 405}:
             return "not_found"
-        if exc.code == 410:
-            return "unknown_run"
         if 400 <= exc.code < 500:
             if exc.code in {401, 403}:
                 return "failed"
