@@ -169,30 +169,30 @@ def _model_index() -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]
     returns from ``get_base_recipe`` gate that model, so a change to either
     re-validates it.
 
-    Only PR-gating targets are indexed. A model registered with
-    ``gates_prs=False`` (e.g. Kimi on 16 x 8 H200) must never reach a PR
+    Only PR-gating entries are indexed. A model registered with
+    ``ci_enabled=False`` (e.g. Kimi on 16 x 8 H200) must never reach a PR
     matrix, so no diff can select it.
     """
     from modal_training_gym.common.models.validation import (
-        ValidationFramework,
-        validation_targets,
+        Framework,
+        _ValidationConfig,
     )
     from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
     from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 
     recipe_classes = {
-        ValidationFramework.SLIME: SlimeRecipe,
-        ValidationFramework.MILES: MilesRecipe,
+        Framework.SLIME: SlimeRecipe,
+        Framework.MILES: MilesRecipe,
     }
 
     class_to_models: dict[str, set[str]] = defaultdict(set)
     framework_to_models: dict[str, set[str]] = defaultdict(set)
-    for target in validation_targets(gating_only=True):
-        class_to_models[target.model_config.__name__].add(target.name)
-        framework_to_models[target.framework.value].add(target.name)
-        recipe = recipe_classes[target.framework].get_base_recipe(target.model_config())
+    for config in _ValidationConfig.select():
+        class_to_models[config.model_config.__name__].add(config.name)
+        framework_to_models[config.framework.value].add(config.name)
+        recipe = recipe_classes[config.framework].get_base_recipe(config.model_config())
         if recipe is not None:
-            class_to_models[type(recipe).__name__].add(target.name)
+            class_to_models[type(recipe).__name__].add(config.name)
 
     return (
         {name: frozenset(models) for name, models in class_to_models.items()},

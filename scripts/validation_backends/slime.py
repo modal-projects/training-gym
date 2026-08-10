@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
-
 from modal_training_gym.common.dataset import (
     DatasetConfig,
     HuggingFaceDataset,
@@ -11,13 +9,7 @@ from modal_training_gym.common.dataset import (
 )
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.models.qwen3_asr_1_7b import Qwen3_ASR_1_7B
-from modal_training_gym.common.models.validation import (
-    ValidationFramework,
-    ValidationTarget,
-)
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-
-from . import RecipeOverrides, ValidationBackend
 
 VALIDATION_EPHEMERAL_DISK_MIB = 2_097_152
 
@@ -106,46 +98,21 @@ class LibriSpeechASRDataset(MultimodalDataset):
                 self._write_jsonl(rows, eval_path)
 
 
-class SlimeValidationBackend(ValidationBackend):
-    framework: ClassVar[ValidationFramework] = ValidationFramework.SLIME
+def build_slime_validation(
+    model_config: ModelConfig, step_count: int
+) -> tuple[SlimeRecipe, DatasetConfig]:
+    """The model's base slime recipe and a dataset matching its modality.
 
-    supported_overrides: ClassVar[frozenset[str]] = frozenset(
-        {"eval_interval", "save_interval", "non_colocated"}
-    )
+    Audio models (Qwen3-ASR) need speech clips, so they get LibriSpeech;
+    everything else validates against gsm8k, scored by ``deepscaler``.
+    """
+    recipe = SlimeRecipe.get_base_recipe(model_config)
+    recipe.rm_type = "deepscaler"
+    recipe.train_function_kwargs = {
+        **dict(recipe.train_function_kwargs or {}),
+        "ephemeral_disk": VALIDATION_EPHEMERAL_DISK_MIB,
+    }
 
-    def _build_recipe(
-        self,
-        target: ValidationTarget,
-        model_config: ModelConfig,
-        step_count: int,
-        overrides: RecipeOverrides,
-    ) -> SlimeRecipe:
-        recipe = SlimeRecipe.get_base_recipe(model_config)
-        if overrides.non_colocated:
-            recipe.colocate = False
-            if recipe.rollout_num_gpus is None:
-                recipe.rollout_num_gpus = (
-                    recipe.actor_num_nodes * recipe.actor_num_gpus_per_node
-                )
-        recipe.rm_type = "deepscaler"
-        recipe.train_function_kwargs = {
-            **dict(recipe.train_function_kwargs or {}),
-            "ephemeral_disk": VALIDATION_EPHEMERAL_DISK_MIB,
-        }
-        return recipe
-
-    def pick_dataset(
-        self,
-        target: ValidationTarget,
-        model_config: ModelConfig,
-        recipe: SlimeRecipe,
-        step_count: int,
-    ) -> DatasetConfig:
-        """Pick a validation dataset matching the base model's modality.
-
-        Audio models (Qwen3-ASR) need speech clips, so they get LibriSpeech;
-        everything else defaults to gsm8k.
-        """
-        if isinstance(model_config, Qwen3_ASR_1_7B):
-            return LibriSpeechASRDataset(n_rows=8)
-        return Gsm8kDataset(n_rows=10)
+    if isinstance(model_config, Qwen3_ASR_1_7B):
+        return recipe, LibriSpeechASRDataset(n_rows=8)
+    return recipe, Gsm8kDataset(n_rows=10)

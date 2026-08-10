@@ -1,9 +1,9 @@
 """Validate a model config by running base training on its framework.
 
 The model registry (``common/models/validation.py``) says which framework
-trains each model and whether it is cheap enough to gate PRs on; the matching
-backend in ``scripts/validation_backends/`` supplies the recipe and dataset.
-Everything below is framework-agnostic.
+trains each model and whether it is cheap enough to gate PRs on;
+``build_recipe_and_dataset`` in ``scripts/validation_backends/`` supplies that
+framework's recipe and dataset. Everything below is framework-agnostic.
 
 Usage:
     uv run scripts/validate_model_configs.py list
@@ -24,14 +24,14 @@ import cloudpickle
 
 try:
     # Run as a script: sys.path[0] is scripts/, matching download_perf_baseline.
-    from validation_backends import RecipeOverrides, backend_for
+    from validation_backends import build_recipe_and_dataset
 except ImportError:  # imported as scripts.validate_model_configs, e.g. by tests
-    from scripts.validation_backends import RecipeOverrides, backend_for
+    from scripts.validation_backends import build_recipe_and_dataset
 
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.models.validation import (
-    ValidationFramework,
-    find_validation_target,
-    validation_targets,
+    Framework,
+    _ValidationConfig,
 )
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.wandb import WandbConfig
@@ -105,7 +105,7 @@ class ValidationResult:
     total_duration_s: float
     step_times: dict[str, dict[str, int | None]] | None = None
     substep_times: dict[str, dict[str, dict[str, float | None]]] | None = None
-    framework: str = ValidationFramework.SLIME.value
+    framework: str = Framework.SLIME.value
     recipe_name: str | None = None
     docker_image: str | None = None
 
@@ -166,48 +166,27 @@ class ValidationResult:
             total_duration_s=data["total_duration_s"],
             step_times=data.get("step_times"),
             substep_times=data.get("substep_times"),
-            framework=data.get("framework", ValidationFramework.SLIME.value),
+            framework=data.get("framework", Framework.SLIME.value),
             recipe_name=data.get("recipe_name"),
             docker_image=data.get("docker_image"),
         )
 
 
 def available_model_names(
-    framework: ValidationFramework | None = None,
-    *,
-    include_non_gating: bool = False,
-    accepts_override: str | None = None,
+    framework: Framework | None = None, *, include_non_gating: bool = False
 ) -> list[str]:
     """Sorted model names, by default only those a PR may launch.
 
-    Models with ``gates_prs=False`` (e.g. Kimi on 16 x 8 H200) are excluded
+    Models with ``ci_enabled=False`` (e.g. Kimi on 16 x 8 H200) are excluded
     unless asked for: they stay runnable by name from the CLI or a
     ``workflow_dispatch``, but must never enter a PR matrix.
-
-    ``accepts_override`` narrows to models whose framework honors a given
-    ``check`` flag, e.g. ``"docker-image"``. That is the only argument that
-    loads framework backends; the per-PR path goes through ``diff_impact.py``
-    and never reaches it.
     """
-    targets = validation_targets(framework, gating_only=not include_non_gating)
-    if accepts_override is not None:
-        field_name = _override_field(accepts_override)
-        targets = tuple(
-            target
-            for target in targets
-            if field_name in backend_for(target.framework).supported_overrides
+    return [
+        config.name
+        for config in _ValidationConfig.select(
+            framework, ci_only=not include_non_gating
         )
-    return sorted(target.name for target in targets)
-
-
-def _override_field(flag: str) -> str:
-    """Map a ``check`` flag spelling ("docker-image") to a RecipeOverrides field."""
-    field_name = flag.strip().lstrip("-").replace("-", "_")
-    known = {field.name for field in fields(RecipeOverrides)}
-    if field_name not in known:
-        available = ", ".join(sorted(name.replace("_", "-") for name in known))
-        raise ValueError(f"unknown override {flag!r}; one of: {available}")
-    return field_name
+    ]
 
 
 def _ship_dataset_definition(dataset) -> None:
@@ -225,21 +204,51 @@ def _ship_dataset_definition(dataset) -> None:
     cloudpickle.register_pickle_by_value(module)
 
 
+def _set_recipe_field(recipe, name: str, value) -> None:
+    """Apply one ``check`` flag to the recipe, erroring if it has no such field.
+
+    Recipes are pydantic dataclasses without ``validate_assignment``, so a bare
+    ``setattr`` for a field the recipe doesn't declare would attach a dead
+    attribute and the flag would silently do nothing — ``--docker-image`` on
+    slime, which pins no image, is the case that matters.
+    """
+    if not any(field.name == name for field in fields(recipe)):
+        raise TrainingGymConfigError(
+            f"--{name.replace('_', '-')} is not a {type(recipe).__name__} field"
+        )
+    setattr(recipe, name, value)
+
+
 def run_base_training(
     model_name: str,
     step_count: int = 1,
     wandb_project: str | None = None,
     wandb_group: str | None = None,
     wandb_secret_name: str = "wandb-secret",
-    overrides: RecipeOverrides | None = None,
+    eval_interval: int | None = None,
+    save_interval: int | None = None,
+    docker_image: str | None = None,
+    non_colocated: bool = False,
 ) -> ValidationResult:
-    overrides = overrides or RecipeOverrides()
-    target = find_validation_target(model_name)
-    backend = backend_for(target.framework)
-    model_config = target.model_config()
+    config = _ValidationConfig.find(model_name)
+    model_config = config.model_config()
 
-    train_recipe = backend.build_recipe(target, model_config, step_count, overrides)
-    dataset = backend.pick_dataset(target, model_config, train_recipe, step_count)
+    train_recipe, dataset = build_recipe_and_dataset(
+        config.framework, model_config, step_count
+    )
+    train_recipe.num_rollout = step_count
+    if eval_interval is not None:
+        train_recipe.eval_interval = eval_interval
+    if save_interval is not None:
+        train_recipe.save_interval = save_interval
+    if docker_image is not None:
+        _set_recipe_field(train_recipe, "docker_image", docker_image)
+    if non_colocated:
+        train_recipe.colocate = False
+        if train_recipe.rollout_num_gpus is None:
+            train_recipe.rollout_num_gpus = (
+                train_recipe.actor_num_nodes * train_recipe.actor_num_gpus_per_node
+            )
     _ship_dataset_definition(dataset)
 
     dataset_name = getattr(dataset, "hf_repo", type(dataset).__name__).rsplit("/", 1)[
@@ -264,16 +273,17 @@ def run_base_training(
     training_run = TrainingRun.from_id(train_result.training_run_id)
 
     return ValidationResult(
-        base_model_name=target.name,
+        base_model_name=config.name,
         step_count=step_count,
         training_run_id=train_result.training_run_id,
         training_run_status=training_run.status,
         total_duration_s=float(training_run.duration_seconds or 0.0),
         step_times=training_run.step_times,
         substep_times=training_run.substep_times,
-        framework=target.framework.value,
+        framework=config.framework.value,
         recipe_name=type(train_recipe).__name__,
-        docker_image=backend.docker_image(train_recipe),
+        # Only frameworks that pin an image have the field to report.
+        docker_image=getattr(train_recipe, "docker_image", None),
     )
 
 
@@ -540,12 +550,12 @@ def __main__():
         "--docker-image",
         default=None,
         help="Override the recipe's image, e.g. to test a miles bump. "
-        "Only frameworks that pin an image accept this (miles).",
+        "Rejected for recipes that pin no image.",
     )
     check_parser.add_argument(
         "--non-colocated",
         action="store_true",
-        help="Allocate rollout GPUs separately from trainer GPUs (slime only).",
+        help="Allocate rollout GPUs separately from trainer GPUs.",
     )
     check_parser.add_argument(
         "-o",
@@ -584,22 +594,15 @@ def __main__():
     )
     list_parser.add_argument(
         "--framework",
-        choices=[framework.value for framework in ValidationFramework],
+        choices=[framework.value for framework in Framework],
         default=None,
         help="Only list models validated on this framework.",
     )
     list_parser.add_argument(
         "--all",
         action="store_true",
-        help="Include models a PR may not launch (gates_prs=False), such as "
+        help="Include models a PR may not launch (ci_enabled=False), such as "
         "Kimi on miles. Never use this to build a PR matrix.",
-    )
-    list_parser.add_argument(
-        "--accepts-override",
-        default=None,
-        metavar="FLAG",
-        help="Only list models whose framework honors this `check` flag, "
-        "e.g. --accepts-override docker-image.",
     )
 
     summarize_parser = subparsers.add_parser(
@@ -628,9 +631,8 @@ def __main__():
         print(
             json.dumps(
                 available_model_names(
-                    ValidationFramework(args.framework) if args.framework else None,
+                    Framework(args.framework) if args.framework else None,
                     include_non_gating=args.all,
-                    accepts_override=args.accepts_override,
                 )
             )
         )
@@ -648,12 +650,10 @@ def __main__():
         None if args.no_wandb else args.wandb_project,
         args.wandb_group,
         args.wandb_secret_name,
-        overrides=RecipeOverrides(
-            eval_interval=args.eval_interval,
-            save_interval=args.save_interval,
-            docker_image=args.docker_image,
-            non_colocated=args.non_colocated,
-        ),
+        eval_interval=args.eval_interval,
+        save_interval=args.save_interval,
+        docker_image=args.docker_image,
+        non_colocated=args.non_colocated,
     )
     result.print_summary()
 
