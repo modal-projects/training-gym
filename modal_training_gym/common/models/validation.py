@@ -24,16 +24,12 @@ from .qwen3_vl_8b import Qwen3_VL_8B
 
 @dataclass(frozen=True)
 class _ValidationConfig:
-    """One model/framework pair the validation harness knows how to run."""
-
+    """One model/framework pair the validation harness runs."""
     # Short name used as ``check --model`` and as the CI matrix entry.
     name: str
-
     model_config: type[ModelConfig]
-
     # Which framework's ``get_base_recipe`` trains this model.
     framework: Framework
-
     # Whether a pull request may launch this run.
     ci_enabled: bool = True
 
