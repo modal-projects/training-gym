@@ -8,8 +8,11 @@ allowed to launch it from a pull request.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 
+# The package's one framework enum. Re-exported here so the harness and the
+# registry compare the same class: dispatch is by identity, and a second
+# same-valued enum would fail every branch.
+from ..framework import Framework
 from .base import ModelConfig
 from .kimi_k2_5 import Kimi_K2_5
 from .kimi_k2_6 import Kimi_K2_6
@@ -20,14 +23,6 @@ from .qwen3_6_35b import Qwen3_6_35B
 from .qwen3_8b import Qwen3_8B
 from .qwen3_asr_1_7b import Qwen3_ASR_1_7B
 from .qwen3_vl_8b import Qwen3_VL_8B
-
-
-class Framework(str, Enum):
-    # ``str`` mixin so a Framework serializes straight to its value in plain
-    # ``json.dumps`` (e.g. TrainResult, whose ``asdict`` payload doesn't coerce
-    # enums) — matching the SlimeStatus/MilesStatus convention.
-    SLIME = "slime"
-    MILES = "miles"
 
 
 @dataclass(frozen=True)

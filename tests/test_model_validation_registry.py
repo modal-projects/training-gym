@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from modal_training_gym.common.models.qwen3_0_6b import Qwen3_0_6B
 from modal_training_gym.common.models.validation import (
     VALIDATION_CONFIGS,
     Framework,
@@ -39,6 +40,23 @@ NON_GATING_CONFIGS = [c for c in ALL_CONFIGS if not c.ci_enabled]
 def test_registry_has_both_frameworks_represented():
     frameworks = {config.framework for config in VALIDATION_CONFIGS}
     assert frameworks == set(Framework)
+
+
+def test_registry_uses_the_packages_one_framework_enum():
+    """A second same-valued enum would fail every dispatch branch.
+
+    ``build_recipe_and_dataset`` and ``diff_impact._base_recipe_for`` both
+    dispatch on identity, so a caller holding ``common.framework.Framework``
+    would fall through to "no validation backend" if the registry declared its
+    own copy — equal by value, a different class.
+    """
+    from modal_training_gym.common.framework import Framework as CanonicalFramework
+
+    assert Framework is CanonicalFramework
+    recipe, dataset = build_recipe_and_dataset(
+        CanonicalFramework.SLIME, Qwen3_0_6B(), step_count=1
+    )
+    assert recipe is not None and dataset is not None
 
 
 def test_registry_names_are_unique():
