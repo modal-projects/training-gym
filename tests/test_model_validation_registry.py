@@ -44,11 +44,18 @@ def test_registry_has_both_frameworks_represented():
 def test_registry_names_are_unique():
     """A copy-pasted entry must fail a test, not silently shadow a model.
 
-    ``_ValidationConfig.find`` returns the first case-insensitive match, so two
-    entries answering to one name would hide whichever came second.
+    ``_ValidationConfig.find`` returns the first case-insensitive match on
+    either spelling, so two entries answering to one name or repo id would hide
+    whichever came second. Keyed on identity, not name: an entry whose short
+    name is also its repo id registers one key twice and is fine.
     """
-    names = [config.name.lower() for config in ALL_CONFIGS]
-    assert len(names) == len(set(names))
+    seen: dict[str, _ValidationConfig] = {}
+    for config in ALL_CONFIGS:
+        for key in (config.name.lower(), config.model_name.lower()):
+            other = seen.setdefault(key, config)
+            assert other is config, (
+                f"{other.name!r} and {config.name!r} both answer to {key!r}"
+            )
 
 
 @pytest.mark.parametrize("config", ALL_CONFIGS, ids=lambda c: c.name)
@@ -56,6 +63,13 @@ def test_config_resolves_by_name_case_insensitively(config):
     assert _ValidationConfig.find(config.name) is config
     assert _ValidationConfig.find(config.name.upper()) is config
     assert _ValidationConfig.find(f"  {config.name.lower()} ") is config
+
+
+@pytest.mark.parametrize("config", ALL_CONFIGS, ids=lambda c: c.name)
+def test_config_resolves_by_hf_repo_id(config):
+    """``check -m Qwen/Qwen3-4B`` must keep working, not just the short name."""
+    assert _ValidationConfig.find(config.model_name) is config
+    assert _ValidationConfig.find(config.model_name.upper()) is config
 
 
 def test_unknown_model_names_are_rejected():
@@ -75,23 +89,6 @@ def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     )
     assert recipe is not None
     assert dataset is not None
-
-
-def test_docker_image_override_is_rejected_on_a_recipe_without_one():
-    """A flag naming a field the recipe lacks must error, not no-op.
-
-    Recipes don't validate assignment, so a bare ``setattr`` would attach a
-    dead attribute and ``--docker-image`` on slime would silently do nothing.
-    """
-    from scripts.validate_model_configs import _set_recipe_field
-
-    slime_config = _ValidationConfig.select(Framework.SLIME)[0]
-    recipe, _ = build_recipe_and_dataset(
-        slime_config.framework, slime_config.model_config(), step_count=1
-    )
-
-    with pytest.raises(Exception, match="--docker-image"):
-        _set_recipe_field(recipe, "docker_image", "example/image:tag")
 
 
 def test_list_excludes_non_gating_models_by_default():

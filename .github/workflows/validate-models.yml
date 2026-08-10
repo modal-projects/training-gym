@@ -6,8 +6,8 @@ name: Validate Models
 # Pull requests validate only the models the diff touches, and only those
 # registered with ci_enabled=True — diff_impact.py enforces that, so a model too
 # large to gate merges on (Kimi on 16 x 8 H200) can never enter a PR matrix.
-# workflow_dispatch can name any registered model, which is how a miles image
-# bump gets validated.
+# workflow_dispatch can name any registered model, which is how a Kimi run or a
+# miles image bump (bump MilesRecipe on a branch, then dispatch) gets validated.
 
 on:
   pull_request:
@@ -21,10 +21,6 @@ on:
         description: "Number of training steps (rollouts) per model"
         required: false
         default: "1"
-      docker_image:
-        description: "Image override for frameworks that pin one, e.g. miles (blank = the recipe's default)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -62,7 +58,6 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           MODELS_INPUT: ${{ github.event.inputs.models }}
-          DOCKER_IMAGE: ${{ github.event.inputs.docker_image }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
@@ -71,16 +66,6 @@ jobs:
           elif [ -n "$MODELS_INPUT" ]; then
             models=$(printf '%s' "$MODELS_INPUT" \
               | uv run python -c "import json,sys; print(json.dumps([m.strip() for m in sys.stdin.read().split(',') if m.strip()]))")
-          elif [ -n "$DOCKER_IMAGE" ]; then
-            # An image override only means something to a recipe that pins an
-            # image, and the default list is the PR-gating (slime) set, which
-            # would reject it in every matrix job. Every such run is also large
-            # enough that it must be asked for by name rather than fanned out
-            # from a blank field, so stop here.
-            candidates=$(uv run scripts/validate_model_configs.py list --all)
-            echo "::error::docker_image was set but models was left blank." \
-              "Re-run and name the model(s) to validate, from: $candidates"
-            exit 1
           else
             models=$(uv run scripts/validate_model_configs.py list)
           fi
@@ -127,17 +112,11 @@ jobs:
         env:
           MODEL: ${{ matrix.model }}
           NUM_STEPS: ${{ github.event.inputs.num_steps || '1' }}
-          DOCKER_IMAGE: ${{ github.event.inputs.docker_image }}
           RESULT_NAME: ${{ steps.artifact.outputs.name }}
         run: |
-          args=()
-          if [ -n "$DOCKER_IMAGE" ]; then
-            args+=(--docker-image "$DOCKER_IMAGE")
-          fi
           uv run scripts/validate_model_configs.py check \
             --model "$MODEL" \
             --num_steps "$NUM_STEPS" \
-            "${args[@]}" \
             --output "$RESULT_NAME.json"
 
       - name: Upload result

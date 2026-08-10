@@ -9,15 +9,14 @@ Usage:
     uv run scripts/validate_model_configs.py list
     uv run scripts/validate_model_configs.py list --all --framework miles
     uv run scripts/validate_model_configs.py check -m qwen3-4b
-    uv run scripts/validate_model_configs.py check -m Kimi-K2.5 \
-        --docker-image radixark/miles:dev-<new-tag>
+    uv run scripts/validate_model_configs.py check -m Kimi-K2.5
     uv run scripts/validate_model_configs.py summarize -d results
 """
 
 import argparse
 import json
 import sys
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import cloudpickle
@@ -28,7 +27,6 @@ try:
 except ImportError:  # imported as scripts.validate_model_configs, e.g. by tests
     from scripts.validation_backends import build_recipe_and_dataset
 
-from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.models.validation import (
     Framework,
     _ValidationConfig,
@@ -204,21 +202,6 @@ def _ship_dataset_definition(dataset) -> None:
     cloudpickle.register_pickle_by_value(module)
 
 
-def _set_recipe_field(recipe, name: str, value) -> None:
-    """Apply one ``check`` flag to the recipe, erroring if it has no such field.
-
-    Recipes are pydantic dataclasses without ``validate_assignment``, so a bare
-    ``setattr`` for a field the recipe doesn't declare would attach a dead
-    attribute and the flag would silently do nothing — ``--docker-image`` on
-    slime, which pins no image, is the case that matters.
-    """
-    if not any(field.name == name for field in fields(recipe)):
-        raise TrainingGymConfigError(
-            f"--{name.replace('_', '-')} is not a {type(recipe).__name__} field"
-        )
-    setattr(recipe, name, value)
-
-
 def run_base_training(
     model_name: str,
     step_count: int = 1,
@@ -227,7 +210,6 @@ def run_base_training(
     wandb_secret_name: str = "wandb-secret",
     eval_interval: int | None = None,
     save_interval: int | None = None,
-    docker_image: str | None = None,
     non_colocated: bool = False,
 ) -> ValidationResult:
     config = _ValidationConfig.find(model_name)
@@ -241,8 +223,6 @@ def run_base_training(
         train_recipe.eval_interval = eval_interval
     if save_interval is not None:
         train_recipe.save_interval = save_interval
-    if docker_image is not None:
-        _set_recipe_field(train_recipe, "docker_image", docker_image)
     if non_colocated:
         train_recipe.colocate = False
         if train_recipe.rollout_num_gpus is None:
@@ -547,12 +527,6 @@ def __main__():
         help="Override the recipe save_interval (checkpoint every N rollouts).",
     )
     check_parser.add_argument(
-        "--docker-image",
-        default=None,
-        help="Override the recipe's image, e.g. to test a miles bump. "
-        "Rejected for recipes that pin no image.",
-    )
-    check_parser.add_argument(
         "--non-colocated",
         action="store_true",
         help="Allocate rollout GPUs separately from trainer GPUs.",
@@ -652,7 +626,6 @@ def __main__():
         args.wandb_secret_name,
         eval_interval=args.eval_interval,
         save_interval=args.save_interval,
-        docker_image=args.docker_image,
         non_colocated=args.non_colocated,
     )
     result.print_summary()

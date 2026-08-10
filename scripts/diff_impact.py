@@ -159,6 +159,27 @@ def _package_public_definitions(package_root: str) -> set[str]:
     return names
 
 
+def _base_recipe_for(framework, model_config):
+    """The framework's base recipe for a model, importing only that framework.
+
+    Same rule as ``validation_backends.build_recipe_and_dataset``: each
+    framework is imported inside its own branch, so indexing the slime models
+    that gate PRs never imports the miles recipes — a broken miles recipe must
+    not be able to fail every pull request.
+    """
+    from modal_training_gym.common.models.validation import Framework
+
+    if framework is Framework.SLIME:
+        from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+
+        return SlimeRecipe.get_base_recipe(model_config)
+    if framework is Framework.MILES:
+        from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
+
+        return MilesRecipe.get_base_recipe(model_config)
+    raise ValueError(f"no base recipe lookup for framework {framework!r}")
+
+
 @lru_cache(maxsize=1)
 def _model_index() -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
     """Map defining classes to the model names they gate, and frameworks to theirs.
@@ -173,24 +194,14 @@ def _model_index() -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]
     ``ci_enabled=False`` (e.g. Kimi on 16 x 8 H200) must never reach a PR
     matrix, so no diff can select it.
     """
-    from modal_training_gym.common.models.validation import (
-        Framework,
-        _ValidationConfig,
-    )
-    from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
-    from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-
-    recipe_classes = {
-        Framework.SLIME: SlimeRecipe,
-        Framework.MILES: MilesRecipe,
-    }
+    from modal_training_gym.common.models.validation import _ValidationConfig
 
     class_to_models: dict[str, set[str]] = defaultdict(set)
     framework_to_models: dict[str, set[str]] = defaultdict(set)
     for config in _ValidationConfig.select():
         class_to_models[config.model_config.__name__].add(config.name)
         framework_to_models[config.framework.value].add(config.name)
-        recipe = recipe_classes[config.framework].get_base_recipe(config.model_config())
+        recipe = _base_recipe_for(config.framework, config.model_config())
         if recipe is not None:
             class_to_models[type(recipe).__name__].add(config.name)
 

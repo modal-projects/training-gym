@@ -45,7 +45,7 @@ uv run scripts/validate_model_configs.py list              # models a PR may lau
 uv run scripts/validate_model_configs.py list --all        # + dispatch-only models
 uv run scripts/validate_model_configs.py check -m qwen3-4b
 # miles models go through the same script; the registry picks the framework
-uv run scripts/validate_model_configs.py check -m Kimi-K2.5 --docker-image radixark/miles:dev-<tag>
+uv run scripts/validate_model_configs.py check -m Kimi-K2.5
 git diff | uv run scripts/diff_impact.py
 ```
 
@@ -76,7 +76,7 @@ One registry, one script, one workflow, across every framework.
 
 `common/models/validation.py` holds `VALIDATION_CONFIGS`: each entry maps a model name to its `ModelConfig`, the framework whose `get_base_recipe` trains it, and `ci_enabled`. The framework has to be declared — `SlimeRecipe.get_base_recipe` returns a recipe for any model it's asked about, so the recipe classes can't answer "is this model mine?".
 
-`scripts/validate_model_configs.py` owns everything framework-agnostic (CLI, result JSON, markdown summary, PR comment, and the `check` flags). `scripts/validation_backends/<framework>.py` owns the only two things that differ: which recipe trains the model and which dataset it trains on, returned as a pair from one `build_*_validation` function. A `check` flag naming a field the recipe doesn't have (`--docker-image` on slime, which pins no image) is an error, never a silent no-op. Adding a framework is one module here plus registry entries.
+`scripts/validate_model_configs.py` owns everything framework-agnostic (CLI, result JSON, markdown summary, PR comment, and the `check` flags). `scripts/validation_backends/<framework>.py` owns the only two things that differ: which recipe trains the model and which dataset it trains on, returned as a pair from one `build_*_validation` function. Recipes are used as `get_base_recipe` returns them, image included — the image a miles model trains on is declared once, in `MilesRecipe`, and validating a candidate image means bumping it on a branch and dispatching, not passing a flag. Adding a framework is one module here plus registry entries.
 
 `ci_enabled=False` marks a model too expensive to launch from a PR (Kimi is 16 x 8 H200): still runnable by name from the CLI or `workflow_dispatch`, but `diff_impact.py` never puts it in a PR matrix. `tests/test_model_validation_registry.py` enforces that. `diff_impact.py` also scopes re-validation per framework, so a miles-only change doesn't re-run the slime set.
 
