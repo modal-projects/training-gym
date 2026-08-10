@@ -25,6 +25,7 @@ from .qwen3_vl_8b import Qwen3_VL_8B
 @dataclass(frozen=True)
 class _ValidationConfig:
     """One model/framework pair the validation harness runs."""
+
     # Short name used as ``check --model`` and as the CI matrix entry.
     name: str
     model_config: type[ModelConfig]
