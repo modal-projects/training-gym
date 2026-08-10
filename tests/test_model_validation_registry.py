@@ -8,6 +8,8 @@ spends real GPU hours on every pull request.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from modal_training_gym.common.models.qwen3_0_6b import Qwen3_0_6B
@@ -139,6 +141,23 @@ def test_blank_dispatch_asks_for_the_pr_only_set():
 
     assert "validate_model_configs.py list --pr-only" in workflow
     assert not unnarrowed, "a `list` in the workflow is missing --pr-only"
+
+
+def test_baselines_are_fetched_only_for_models_that_ran(tmp_path):
+    """Baseline lookup follows the results directory, not the registry.
+
+    Widening ``available_model_names`` to the whole registry would otherwise
+    have the PR comment job scan artifacts for Kimi, which no pull request can
+    ever have produced.
+    """
+    from scripts.download_perf_baseline import models_with_results
+
+    (tmp_path / "validate-result-Qwen3-4B.json").write_text(
+        json.dumps({"base_model_name": "Qwen3-4B", "succeeded": True})
+    )
+
+    assert models_with_results(tmp_path) == ["Qwen3-4B"]
+    assert models_with_results(tmp_path / "missing") == []
 
 
 @pytest.mark.parametrize("config", ALL_CONFIGS, ids=lambda c: c.name)

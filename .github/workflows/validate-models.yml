@@ -164,7 +164,9 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: uv run python scripts/download_perf_baseline.py --baseline-dir baseline
+        run: >-
+          uv run python scripts/download_perf_baseline.py
+          --baseline-dir baseline --results-dir results
 
       - name: Build comment body
         run: >-
