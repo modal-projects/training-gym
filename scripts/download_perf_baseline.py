@@ -14,17 +14,22 @@ Missing or failing artifacts are skipped with a warning so a stale baseline
 never blocks the comment; the baseline directory is created regardless.
 """
 
+from __future__ import annotations
+
 import argparse
 import io
 import json
 import os
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import requests
-from github import Auth, Github
-from github.Artifact import Artifact
-from github.Repository import Repository
+# ``requests`` and PyGithub are only in the ``ci`` dependency group, so they are
+# imported where they are used rather than at module scope: the test job syncs
+# ``dev`` alone and still has to import this module.
+if TYPE_CHECKING:
+    from github.Artifact import Artifact
+    from github.Repository import Repository
 
 ARTIFACT_PREFIX = "validate-result-"
 # Artifacts are inspected newest-first; stop after this many per model so a
@@ -61,6 +66,8 @@ def _fetch_artifact_zip(artifact: Artifact, token: str) -> zipfile.ZipFile:
     ``requests`` follows the API's redirect to blob storage and drops the
     Authorization header across hosts, which the signed URL requires.
     """
+    import requests
+
     response = requests.get(
         artifact.archive_download_url,
         headers={"Authorization": f"Bearer {token}"},
@@ -158,6 +165,8 @@ def models_with_results(results_dir: Path) -> list[str]:
 
 
 def download_baselines(baseline_dir: Path, results_dir: Path) -> None:
+    from github import Auth, Github
+
     token = os.environ["GITHUB_TOKEN"]
     repo_name = os.environ["GITHUB_REPOSITORY"]
 
