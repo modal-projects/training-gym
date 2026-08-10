@@ -1,9 +1,9 @@
 """Invariants of the cross-framework model validation registry.
 
 Before the frameworks shared a harness, a model too large to gate PRs on was
-kept out of CI by living in a different module. Now it is kept out by
-``ci_enabled=False`` alone, so that flag needs a test: a regression here spends
-real GPU hours on every pull request.
+kept out of the PR matrix by living in a different module. Now it is kept out
+by ``run_on_pr=False`` alone, so that flag needs a test: a regression here
+spends real GPU hours on every pull request.
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ def _diff_touching(*repo_relative_paths: str) -> str:
     )
 
 
-ALL_CONFIGS = _ValidationConfig.select(ci_only=False)
-NON_GATING_CONFIGS = [c for c in ALL_CONFIGS if not c.ci_enabled]
+ALL_CONFIGS = _ValidationConfig.select(pr_only=False)
+DISPATCH_ONLY_CONFIGS = [c for c in ALL_CONFIGS if not c.run_on_pr]
 
 
 def test_registry_has_both_frameworks_represented():
@@ -109,16 +109,36 @@ def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     assert dataset is not None
 
 
-def test_list_excludes_non_gating_models_by_default():
+def test_list_shows_every_model_by_default_and_narrows_with_pr_only():
+    """A dev listing models should see the dispatch-only ones without a flag.
+
+    The narrowing is the opt-in, so ``--pr-only`` is what a matrix asks for.
+    """
     from scripts.validate_model_configs import available_model_names
 
-    gating = set(available_model_names())
-    everything = set(available_model_names(include_non_gating=True))
+    everything = set(available_model_names())
+    pr_set = set(available_model_names(pr_only=True))
 
-    assert gating < everything
-    for config in NON_GATING_CONFIGS:
-        assert config.name not in gating
+    assert pr_set < everything
+    for config in DISPATCH_ONLY_CONFIGS:
         assert config.name in everything
+        assert config.name not in pr_set
+
+
+@pytest.mark.skipif(not DISPATCH_ONLY_CONFIGS, reason="every model runs on PRs")
+def test_blank_dispatch_asks_for_the_pr_only_set():
+    """The workflow's blank-models branch must narrow explicitly.
+
+    ``list`` prints the whole registry, so a blank dispatch that dropped
+    ``--pr-only`` would fan out to Kimi on 16 x 8 H200.
+    """
+    import re
+
+    workflow = (REPO_ROOT / ".github/workflows/validate-models.yml").read_text()
+    unnarrowed = re.findall(r"validate_model_configs\.py list(?! --pr-only)", workflow)
+
+    assert "validate_model_configs.py list --pr-only" in workflow
+    assert not unnarrowed, "a `list` in the workflow is missing --pr-only"
 
 
 @pytest.mark.parametrize("config", ALL_CONFIGS, ids=lambda c: c.name)
@@ -174,9 +194,9 @@ def test_validation_dataset_unpickles_without_the_scripts_directory(config, tmp_
     assert result.stdout.strip() == type(dataset).__name__
 
 
-@pytest.mark.skipif(not NON_GATING_CONFIGS, reason="every model is CI-enabled")
-def test_no_diff_can_select_a_non_gating_model():
-    """The load-bearing invariant: PRs never launch a ci_enabled=False model.
+@pytest.mark.skipif(not DISPATCH_ONLY_CONFIGS, reason="every model runs on PRs")
+def test_no_diff_can_select_a_dispatch_only_model():
+    """The load-bearing invariant: PRs never launch a run_on_pr=False model.
 
     The broadest possible trigger — every harness path at once, which forces a
     full re-validation — still must not select one.
@@ -189,8 +209,8 @@ def test_no_diff_can_select_a_non_gating_model():
     )
 
     selected = set(affected_models(diff))
-    assert selected, "a full-harness diff should still select the PR-gating models"
-    for config in NON_GATING_CONFIGS:
+    assert selected, "a full-harness diff should still select the PR-matrix set"
+    for config in DISPATCH_ONLY_CONFIGS:
         assert config.name not in selected
 
 

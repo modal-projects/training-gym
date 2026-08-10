@@ -1,8 +1,8 @@
 """Model configs supported by the CI validation run.
 
 One registry for every framework. Each entry names the model, its
-``ModelConfig``, the framework whose base recipe trains it, and whether CI is
-allowed to launch it from a pull request.
+``ModelConfig``, the framework whose base recipe trains it, and whether a
+pull request fans it out automatically.
 """
 
 from __future__ import annotations
@@ -31,8 +31,10 @@ class _ValidationConfig:
     model_config: type[ModelConfig]
     # Which framework's ``get_base_recipe`` trains this model.
     framework: Framework
-    # Whether a pull request may launch this run.
-    ci_enabled: bool = True
+    # Whether a pull request fans this model out automatically. ``False`` is
+    # not "never in CI" — a workflow_dispatch naming it still runs it; it only
+    # keeps the model out of the diff-driven PR matrix.
+    run_on_pr: bool = True
 
     @property
     def model_name(self) -> str:
@@ -41,15 +43,20 @@ class _ValidationConfig:
 
     @classmethod
     def select(
-        cls, framework: Framework | None = None, *, ci_only: bool = True
+        cls, framework: Framework | None = None, *, pr_only: bool = True
     ) -> list["_ValidationConfig"]:
-        """Registry entries, name-sorted, narrowed to what CI may launch."""
+        """Registry entries, name-sorted, by default only the PR-matrix set.
+
+        Narrow is the default here, unlike the ``list`` CLI: the caller that
+        matters is ``diff_impact``, and a bare ``select()`` that quietly
+        included Kimi would put 16 x 8 H200 on a pull request.
+        """
         return sorted(
             (
                 config
                 for config in VALIDATION_CONFIGS
                 if (framework is None or config.framework is framework)
-                and (config.ci_enabled or not ci_only)
+                and (config.run_on_pr or not pr_only)
             ),
             key=lambda config: config.name,
         )
@@ -61,7 +68,7 @@ class _ValidationConfig:
         for config in VALIDATION_CONFIGS:
             if wanted in (config.name.lower(), config.model_name.lower()):
                 return config
-        available = ", ".join(config.name for config in cls.select(ci_only=False))
+        available = ", ".join(config.name for config in cls.select(pr_only=False))
         raise ValueError(f"unknown model {name!r}; available: {available}")
 
 
@@ -73,8 +80,8 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
     _ValidationConfig("Qwen3-ASR-1.7B", Qwen3_ASR_1_7B, Framework.SLIME),
     _ValidationConfig("Qwen3-VL-8B-Instruct", Qwen3_VL_8B, Framework.SLIME),
     _ValidationConfig("Qwen3.6-35B-A3B", Qwen3_6_35B, Framework.SLIME),
-    # Too large to gate a PR on (16 x 8 H200). Flipping ci_enabled on one of
-    # these is the only change needed to start validating it per-PR.
-    _ValidationConfig("Kimi-K2.5", Kimi_K2_5, Framework.MILES, ci_enabled=False),
-    _ValidationConfig("Kimi-K2.6", Kimi_K2_6, Framework.MILES, ci_enabled=False),
+    # Too large to fan out on a PR (16 x 8 H200), but still dispatchable by
+    # name. Flipping run_on_pr is the only change needed to gate PRs on one.
+    _ValidationConfig("Kimi-K2.5", Kimi_K2_5, Framework.MILES, run_on_pr=False),
+    _ValidationConfig("Kimi-K2.6", Kimi_K2_6, Framework.MILES, run_on_pr=False),
 }

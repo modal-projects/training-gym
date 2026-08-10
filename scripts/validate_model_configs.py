@@ -7,7 +7,7 @@ framework's recipe and dataset. Everything below is framework-agnostic.
 
 Usage:
     uv run scripts/validate_model_configs.py list
-    uv run scripts/validate_model_configs.py list --all --framework miles
+    uv run scripts/validate_model_configs.py list --pr-only --framework slime
     uv run scripts/validate_model_configs.py check -m qwen3-4b
     uv run scripts/validate_model_configs.py check -m Kimi-K2.5
     uv run scripts/validate_model_configs.py summarize -d results
@@ -171,19 +171,16 @@ class ValidationResult:
 
 
 def available_model_names(
-    framework: Framework | None = None, *, include_non_gating: bool = False
+    framework: Framework | None = None, *, pr_only: bool = False
 ) -> list[str]:
-    """Sorted model names, by default only those a PR may launch.
+    """Sorted model names, everything the harness can run unless narrowed.
 
-    Models with ``ci_enabled=False`` (e.g. Kimi on 16 x 8 H200) are excluded
-    unless asked for: they stay runnable by name from the CLI or a
-    ``workflow_dispatch``, but must never enter a PR matrix.
+    Listing is for a human deciding what to dispatch, so it shows the whole
+    registry; ``pr_only=True`` narrows to the set a pull request fans out on
+    its own, which is what builds a matrix.
     """
     return [
-        config.name
-        for config in _ValidationConfig.select(
-            framework, ci_only=not include_non_gating
-        )
+        config.name for config in _ValidationConfig.select(framework, pr_only=pr_only)
     ]
 
 
@@ -505,7 +502,7 @@ def __main__():
         "--model",
         required=True,
         help="Base model name to run training on (e.g. qwen3-4b). One of: "
-        f"{', '.join(available_model_names(include_non_gating=True))}.",
+        f"{', '.join(available_model_names())}.",
     )
     check_parser.add_argument(
         "-n",
@@ -573,10 +570,11 @@ def __main__():
         help="Only list models validated on this framework.",
     )
     list_parser.add_argument(
-        "--all",
+        "--pr-only",
         action="store_true",
-        help="Include models a PR may not launch (ci_enabled=False), such as "
-        "Kimi on miles. Never use this to build a PR matrix.",
+        help="Only models a pull request fans out on its own (run_on_pr=True), "
+        "i.e. what belongs in a PR matrix. The default lists everything, "
+        "including dispatch-only models like Kimi on miles.",
     )
 
     summarize_parser = subparsers.add_parser(
@@ -606,7 +604,7 @@ def __main__():
             json.dumps(
                 available_model_names(
                     Framework(args.framework) if args.framework else None,
-                    include_non_gating=args.all,
+                    pr_only=args.pr_only,
                 )
             )
         )
