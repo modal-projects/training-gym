@@ -76,14 +76,14 @@ class _ValidationConfig:
         raise ValueError(f"unknown model {name!r}; available: {available}")
 
 
-VALIDATION_CONFIGS: set[_ValidationConfig] = {
-    _ValidationConfig("Qwen3-0.6B", Qwen3_0_6B, Framework.SLIME),
-    _ValidationConfig("Qwen3-1.7B", Qwen3_1_7B, Framework.SLIME),
-    _ValidationConfig("Qwen3-4B", Qwen3_4B, Framework.SLIME),
-    _ValidationConfig("Qwen3-8B", Qwen3_8B, Framework.SLIME),
-    _ValidationConfig("Qwen3-ASR-1.7B", Qwen3_ASR_1_7B, Framework.SLIME),
-    _ValidationConfig("Qwen3-VL-8B-Instruct", Qwen3_VL_8B, Framework.SLIME),
-    _ValidationConfig("Qwen3.6-35B-A3B", Qwen3_6_35B, Framework.SLIME),
+    def find(cls, name: str) -> "_ValidationConfig":
+        """Look up an entry by short name or HF repo id, case-insensitively."""
+        wanted = name.strip().lower()
+        for config in VALIDATION_CONFIGS:
+            if wanted in (config.name.lower(), config.model_name.lower()):
+                return config
+        available = ", ".join(config.name for config in cls.select(ci_only=False))
+        raise ValueError(f"unknown model {name!r}; available: {available}")
     _ValidationConfig("Kimi-K2.5", Kimi_K2_5, Framework.MILES, ci_enabled=False),
     _ValidationConfig("Kimi-K2.6", Kimi_K2_6, Framework.MILES, ci_enabled=False),
 }
