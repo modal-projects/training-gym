@@ -31,9 +31,8 @@ class _ValidationConfig:
     model_config: type[ModelConfig]
     # Which framework's ``get_base_recipe`` trains this model.
     framework: Framework
-    # Whether a pull request fans this model out automatically. ``False`` is
-    # not "never in CI" — a workflow_dispatch naming it still runs it; it only
-    # keeps the model out of the diff-driven PR matrix.
+    # Whether a pull request fans this model out automatically.
+    # A workflow_dispatch naming it still runs it.
     run_on_pr: bool = True
 
     @property
