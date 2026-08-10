@@ -1,4 +1,4 @@
-"""Model configs exercised by the CI validation run.
+"""Model configs supported by the CI validation run.
 
 One registry for every framework. Each entry names the model, its
 ``ModelConfig``, the framework whose base recipe trains it, and whether CI is
