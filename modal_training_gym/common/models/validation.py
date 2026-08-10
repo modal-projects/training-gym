@@ -9,9 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# The package's one framework enum. Re-exported here so the harness and the
-# registry compare the same class: dispatch is by identity, and a second
-# same-valued enum would fail every branch.
 from ..framework import Framework
 from .base import ModelConfig
 from .kimi_k2_5 import Kimi_K2_5
