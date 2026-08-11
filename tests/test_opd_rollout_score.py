@@ -7,7 +7,7 @@ maps that onto gym :class:`~modal_training_gym.common.sample.Sample.score`.
 """
 
 from modal_training_gym.common.sample import Sample
-from modal_training_gym.frameworks.slime.sample_extraction import (
+from modal_training_gym.common.sample_extraction import (
     _sample_score,
     _sample_to_dict,
 )

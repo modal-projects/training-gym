@@ -53,6 +53,7 @@ def _summary(**overrides):
     value = {
         "training_run_id": "run-1",
         "run_id": "run-1",
+        "modal_app_id": "ap-test123",
         "status": "failed",
         "display_status": "failed",
         "display_stage": "Training",
@@ -171,6 +172,8 @@ def test_run_get_prints_top_level_status():
     assert "Generating rollouts" in result.stdout
     assert "3 / 10 step" in result.stdout
     assert "0.625" in result.stdout
+    assert "Modal app" in result.stdout
+    assert "ap-test123" in result.stdout
     assert "Field" not in result.stdout
     assert "Value" not in result.stdout
 
@@ -217,6 +220,7 @@ def test_run_get_verbose_json_includes_reward_history_and_rollouts():
         ("/api/runs/run-1/rollouts", None),
     ]
     payload = json.loads(result.stdout)
+    assert payload["modal_app_id"] == "ap-test123"
     assert payload["current_step"] == 4
     assert payload["total_steps"] == 10
     assert payload["current_reward"] == 0.75
@@ -861,3 +865,4 @@ def test_run_list_renders_schema_columns():
         "Last updated",
     ):
         assert heading in result.stdout
+    assert "ap-test123" not in result.stdout

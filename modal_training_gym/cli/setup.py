@@ -23,8 +23,10 @@ from __future__ import annotations
 import os
 import webbrowser
 
-DASHBOARD_APP_NAME = "training-gym-dashboard"
-DASHBOARD_WEB_FUNCTION = "fastapi_app"
+from modal_training_gym.common.dashboard import (
+    DASHBOARD_APP_NAME,
+    deployed_dashboard_url,
+)
 
 
 def _load_dashboard_for_deploy(requires_proxy_auth: bool):
@@ -238,23 +240,6 @@ def open_dashboard() -> str | None:
     print(f"Opening dashboard: {web_url}")
     webbrowser.open(web_url)
     return web_url
-
-
-def deployed_dashboard_url() -> str | None:
-    """Return the live dashboard web URL if its app is deployed, else ``None``.
-
-    Authoritative check against Modal (not the local toml): looks up the
-    deployed ``fastapi_app`` function and returns its web URL. Any lookup
-    failure — not deployed, no credentials, network blip — yields ``None``.
-    """
-    import modal
-
-    try:
-        fn = modal.Function.from_name(DASHBOARD_APP_NAME, DASHBOARD_WEB_FUNCTION)
-        fn.hydrate()
-        return fn.get_web_url()
-    except Exception:
-        return None
 
 
 def ensure_dashboard_deployed() -> str | None:

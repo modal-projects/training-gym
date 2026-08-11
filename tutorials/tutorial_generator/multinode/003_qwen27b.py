@@ -10,6 +10,7 @@ TUTORIAL_METADATA = {
         "Qwen3_6_27B",
         "Qwen3_6_27b_Recipe",
         "TrainConfig",
+        "TrainingRun",
     ],
 }
 
@@ -60,9 +61,6 @@ def _install():
 
 @code
 def _imports():
-    import modal
-
-    from modal_training_gym.common.modal_urls import modal_app_dashboard_url
     from modal_training_gym import (
         HuggingFaceDataset,
         Qwen3_6_27B,
@@ -99,10 +97,15 @@ def _define_dataset():
 @markdown
 def _train_intro():
     """
-    ## Build and launch training
+    ## Launch training
 
-    Build the training config, construct the Modal app, and spawn
-    the training function as a detached call.
+    `TrainConfig.launch()` starts the Modal app **detached** and returns a
+    `TrainingRun` handle as soon as training is spawned. Detached means the run
+    survives this process: closing the notebook, dropping your connection, or
+    hitting Ctrl-C leaves the 4 nodes training on Modal.
+
+    The handle records the Modal app id and the `train` function-call id, so the
+    run can be waited on — or cancelled — from anywhere later.
     """
 
 
@@ -116,13 +119,50 @@ def _build_and_run():
         )
 
     training_run = build_training_config()
-    app = training_run._build_app()
+    run = training_run.launch()
 
-    with modal.enable_output():
-        with app.run():
-            modal_app_id = app.app_id or ""
-            function_call = app.train.spawn(
-                modal_app_id=modal_app_id,
-                modal_app_url=modal_app_dashboard_url(modal_app_id),
-            )
-            print(f"Spawned train function call: {function_call.object_id}")
+    print(f"Training run:  {run.training_run_id}")
+    print(f"Modal app:     {run.modal_app_url}")
+    print(f"Function call: {run.function_call_id}")
+
+
+@markdown
+def _reattach():
+    """
+    ## Reattach later
+
+    A launched run is addressable by id from any process — the handle is
+    reconstructed from the persisted `function_call_id`, so you don't need to
+    keep this session open:
+
+    ```python
+    from modal_training_gym import TrainingRun
+
+    run = TrainingRun.from_id("<training_run_id>")
+    train_result = run.result()  # block for the TrainResult
+
+    # Or stop it early:
+    run.function_call.cancel(terminate_containers=True)
+    ```
+    """
+
+
+@markdown
+def _wait_intro():
+    """
+    ## Wait for the result (optional)
+
+    `run.result()` blocks until training finishes and returns the
+    `TrainResult`. Interrupting the wait does **not** stop the run: a launched
+    run always lives in a detached Modal app, so Ctrl-C here only stops
+    waiting. To actually stop training, cancel the call:
+    `run.function_call.cancel(terminate_containers=True)`.
+
+    Skip this cell entirely if you just want to launch and walk away.
+    """
+
+
+@code
+def _wait_for_result():
+    train_result = run.result()
+    print(f"Training complete: {train_result.training_run_id}")

@@ -70,35 +70,6 @@ API_REFERENCE_MANIFEST = [
         "class_type": "behavior",
         "sidebar_label": "TrainResult",
     },
-    # --- Evaluation ---
-    {
-        "class_name": "EvalConfig",
-        "module": "modal_training_gym.common.eval",
-        "group": "evaluation",
-        "class_type": "config_data",
-        "sidebar_label": "EvalConfig",
-    },
-    {
-        "class_name": "EvalResult",
-        "module": "modal_training_gym.common.eval",
-        "group": "evaluation",
-        "class_type": "behavior",
-        "sidebar_label": "EvalResult",
-    },
-    {
-        "class_name": "EvalRowResult",
-        "module": "modal_training_gym.common.eval",
-        "group": "evaluation",
-        "class_type": "behavior",
-        "sidebar_label": "EvalRowResult",
-    },
-    {
-        "class_name": "HarborEval",
-        "module": "modal_training_gym.common.eval",
-        "group": "evaluation",
-        "class_type": "config_data",
-        "sidebar_label": "HarborEval",
-    },
     # --- Models ---
     {
         "class_name": "ToolCall",
@@ -179,6 +150,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "TrainConfig",
     },
     {
+        "class_name": "TrainingRun",
+        "module": "modal_training_gym.common.run",
+        "group": "training",
+        "class_type": "behavior",
+        "sidebar_label": "TrainingRun",
+    },
+    {
         "class_name": "TrainingGroup",
         "module": "modal_training_gym.common.training_group",
         "group": "training",
@@ -215,6 +193,13 @@ API_REFERENCE_MANIFEST = [
     },
     # --- Deployment ---
     {
+        "class_name": "Endpoint",
+        "module": "modal_training_gym.common.endpoint",
+        "group": "deployment",
+        "class_type": "behavior",
+        "sidebar_label": "Endpoint",
+    },
+    {
         "class_name": "DeploymentConfig",
         "module": "modal_training_gym.common.deployment",
         "group": "deployment",
@@ -246,10 +231,9 @@ API_REFERENCE_MANIFEST = [
 
 GROUPS = {
     "core": {"label": "Core", "order": 1},
-    "evaluation": {"label": "Evaluation", "order": 2},
-    "models": {"label": "Models", "order": 3},
-    "training": {"label": "Training", "order": 4},
-    "deployment": {"label": "Deployment", "order": 5},
+    "models": {"label": "Models", "order": 2},
+    "training": {"label": "Training", "order": 3},
+    "deployment": {"label": "Deployment", "order": 4},
 }
 
 

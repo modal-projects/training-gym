@@ -41,8 +41,6 @@ import re
 
 from modal_training_gym import (
     DeploymentConfig,
-    EvalConfig,
-    EvalRowResult,
     ModelDeployment,
     Qwen3_6_35B,
     TrainConfig,
@@ -68,11 +66,22 @@ from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_35b_Recipe
 
 base_model = Qwen3_6_35B()
 
+# ## Loading BFCL V3 and Defining Train/Eval Split
+#
+# The Berkeley Function Calling Leaderboard contains human-verified, multi-turn tasks with sufficient context to complete
+# tasks. Each tool-call gets processed locally, and the final trajectory is verified against BFCL's terminal evaluation.
+# We save 30 out of the 200 multi-turn base tasks for the held-out evaluation split.
+
+BFCL_EVAL_TAIL = 30
 MAX_TURNS = 16
 CURRICULUM_TAIL_MIN = 1
 EVAL_TAIL_STEPS = CURRICULUM_TAIL_MIN
 STUDENT_ENABLE_THINKING = False
 OPD_SKIP_ON_TEACHER_FAILURE = True
+
+dataset_config = BfclMultiTurnConfig(eval_tail=BFCL_EVAL_TAIL)
+
+eval_dataset = BfclMultiTurnDataset(split="eval", config=dataset_config)
 
 # ## Custom Student Training Curriculum
 #
@@ -306,11 +315,11 @@ def _actions_from_message(msg: dict) -> tuple[str, list[ToolCall]]:
     parsed = base_model.parse_response(content)
     return parsed.content, parsed.tool_calls
 
-def bfcl_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
-    label = json.loads(example.get("label", "{}"))
-    task_id = label.get("task_id", "")
-    N = label.get("total_steps", 1)
-    flattened_calls = label.get("flattened_calls", [])
+def bfcl_eval_fn(deployment: ModelDeployment, example: dict) -> dict:
+    label = json.loads(example["label"])
+    task_id = label["task_id"]
+    N = label["total_steps"]
+    flattened_calls = label["flattened_calls"]
     K = max(0, N - EVAL_TAIL_STEPS)
     expert_call = flattened_calls[K] if K < len(flattened_calls) else {}
 
@@ -346,10 +355,10 @@ def bfcl_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
         EVAL_TAIL_STEPS,
     )
 
-    return EvalRowResult(
-        score=shaped_score,
-        response=episode.final_response,
-        metadata={
+    return {
+        "score": shaped_score,
+        "response": episode.final_response,
+        "metadata": {
             "task": task_id,
             "step_K": K,
             "eval_tail": EVAL_TAIL_STEPS,
@@ -361,23 +370,36 @@ def bfcl_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
             "parsed_call": first_call is not None,
             "tool_match": bool(first_call and first_call.get("name") == expert_call.get("name")),
         },
-    )
+    }
 
-def _print_eval_summary(name: str, result) -> None:
+def run_eval(deployment, *, max_concurrency: int = 4):
+    from concurrent.futures import ThreadPoolExecutor
+
+    deployment.wait_until_ready(timeout=3000)
+
+    def _score_one(example):
+        return bfcl_eval_fn(deployment, example)
+
+    with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+        rows = list(executor.map(_score_one, eval_dataset.load()))
+    mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+    return mean, rows
+
+def _print_eval_summary(name: str, mean: float, rows: list[dict]) -> None:
     def _frac(rows, key):
         if not rows:
             return 0.0
-        return sum(1 for r in rows if r.metadata.get(key)) / len(rows)
+        return sum(1 for r in rows if r["metadata"].get(key)) / len(rows)
 
-    n = len(result.rows)
+    n = len(rows)
     print(f"{'Metric':<25} {name:>10}")
     print("-" * 37)
     print(f"{'Eval rows':<25} {n:>10d}")
-    print(f"{'Shaped reward':<25} {result.mean:>10.3f}")
-    print(f"{'Terminal pass rate':<25} {_frac(result.rows, 'task_passed'):>10.1%}")
+    print(f"{'Shaped reward':<25} {mean:>10.3f}")
+    print(f"{'Terminal pass rate':<25} {_frac(rows, 'task_passed'):>10.1%}")
     if n:
-        print(f"{'Parsed tool call':<25} {_frac(result.rows, 'parsed_call'):>10.1%}")
-        print(f"{'First-call tool match':<25} {_frac(result.rows, 'tool_match'):>10.1%}")
+        print(f"{'Parsed tool call':<25} {_frac(rows, 'parsed_call'):>10.1%}")
+        print(f"{'First-call tool match':<25} {_frac(rows, 'tool_match'):>10.1%}")
 
 # ## Cross-tokenizer alignment via SimCT Minimally Aligned Units (MTUs)
 #
@@ -875,7 +897,7 @@ def cross_tokenizer_post_process(args, samples, **kwargs):
 def _frac(rows, key):
     if not rows:
         return 0.0
-    return sum(1 for r in rows if r.metadata.get(key)) / len(rows)
+    return sum(1 for r in rows if r["metadata"].get(key)) / len(rows)
 
 # ## Example results
 #
@@ -958,30 +980,19 @@ def _main_impl() -> None:
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
     TEACHER_RM_CONCURRENCY = 24
 
-    # ## Loading BFCL V3 and Defining Train/Eval Split
-    #
-    # The Berkeley Function Calling Leaderboard contains human-verified, multi-turn tasks with sufficient context to complete
-    # tasks. Each tool-call gets processed locally, and the final trajectory is verified against BFCL's terminal evaluation.
-    # We save 30 out of the 200 multi-turn base tasks for the held-out evaluation split.
-
-    BFCL_EVAL_TAIL = 30
-
-    dataset_config = BfclMultiTurnConfig(eval_tail=BFCL_EVAL_TAIL)
     dataset = BfclMultiTurnDataset(split="train", config=dataset_config)
-    eval_dataset = BfclMultiTurnDataset(split="eval", config=dataset_config)
 
     student_recipe = Qwen3_6_35b_SglangRecipe(context_length=SERVED_CONTEXT_LEN)
     base_deployment = DeploymentConfig(model=base_model, recipe=student_recipe).serve()
     print(f"Student URL: {base_deployment.url}")
 
-    eval_config = EvalConfig(dataset=eval_dataset, eval_fn=bfcl_eval_fn)
-
-    teacher_eval = None
+    teacher_mean = None
+    teacher_rows = None
     print("--- Evaluating teacher (DeepSeek V4 Flash)... ---")
     try:
-        teacher_eval = eval_config.evaluate(teacher_deployment, max_concurrency=4)
-        print(f"Teacher shaped reward: {teacher_eval.mean:.3f}")
-        _print_eval_summary("Teacher", teacher_eval)
+        teacher_mean, teacher_rows = run_eval(teacher_deployment, max_concurrency=4)
+        print(f"Teacher shaped reward: {teacher_mean:.3f}")
+        _print_eval_summary("Teacher", teacher_mean, teacher_rows)
     except Exception as e:
         print(
             f"[teacher-eval] FAILED ({e!r}) — continuing with student baseline",
@@ -990,24 +1001,25 @@ def _main_impl() -> None:
 
     print("--- Evaluating base student (shaped live reward + terminal verdict metadata)... ---")
     try:
-        base_eval = eval_config.evaluate(base_deployment, max_concurrency=4)
-        print(f"Base shaped reward: {base_eval.mean:.3f}")
-        _print_eval_summary("Base", base_eval)
+        base_mean, base_rows = run_eval(base_deployment, max_concurrency=4)
+        print(f"Base shaped reward: {base_mean:.3f}")
+        _print_eval_summary("Base", base_mean, base_rows)
     except Exception as e:
         print(
             f"[base-eval] FAILED ({e!r}) — skipping baseline, proceeding to training",
             flush=True,
         )
-        base_eval = None
+        base_mean = None
+        base_rows = None
 
-    if teacher_eval is not None and base_eval is not None:
+    if teacher_rows is not None and base_rows is not None:
         def _frac(rows, key):
             if not rows:
                 return 0.0
-            return sum(1 for r in rows if r.metadata.get(key)) / len(rows)
+            return sum(1 for r in rows if r["metadata"].get(key)) / len(rows)
 
-        t_pass = _frac(teacher_eval.rows, "task_passed")
-        b_pass = _frac(base_eval.rows, "task_passed")
+        t_pass = _frac(teacher_rows, "task_passed")
+        b_pass = _frac(base_rows, "task_passed")
         print(
             f"[baseline] teacher pass={t_pass:.1%} student pass={b_pass:.1%} "
             f"(gap={t_pass - b_pass:+.1%})",
@@ -1113,38 +1125,38 @@ def _main_impl() -> None:
     print(f"Trained student URL: {trained_deployment.url}")
 
     print("--- Evaluating trained student (shaped live reward + terminal verdict metadata)... ---")
-    trained_eval = eval_config.evaluate(trained_deployment, max_concurrency=4)
-    print(f"Trained shaped reward: {trained_eval.mean:.3f}")
+    trained_mean, trained_rows = run_eval(trained_deployment, max_concurrency=4)
+    print(f"Trained shaped reward: {trained_mean:.3f}")
 
-    if base_eval is None:
-        n_trained = len(trained_eval.rows)
+    if base_rows is None:
+        n_trained = len(trained_rows)
         print(f"{'Metric':<25} {'Trained':>10}")
         print("-" * 37)
         print(f"{'Eval rows':<25} {n_trained:>10d}")
-        print(f"{'Shaped reward':<25} {trained_eval.mean:>10.3f}")
-        print(f"{'Terminal pass rate':<25} {_frac(trained_eval.rows, 'task_passed'):>10.1%}")
+        print(f"{'Shaped reward':<25} {trained_mean:>10.3f}")
+        print(f"{'Terminal pass rate':<25} {_frac(trained_rows, 'task_passed'):>10.1%}")
         print("(baseline eval was skipped — trained metrics only)")
         return
 
-    n_base = len(base_eval.rows)
-    n_trained = len(trained_eval.rows)
+    n_base = len(base_rows)
+    n_trained = len(trained_rows)
 
     print(f"{'Metric':<25} {'Base':>10} {'Trained':>10} {'Delta':>10}")
     print("-" * 57)
     print(f"{'Eval rows':<25} {n_base:>10d} {n_trained:>10d} {'':>10}")
-    print(f"{'Shaped reward':<25} {base_eval.mean:>10.3f} {trained_eval.mean:>10.3f} {trained_eval.mean - base_eval.mean:>+10.3f}")
+    print(f"{'Shaped reward':<25} {base_mean:>10.3f} {trained_mean:>10.3f} {trained_mean - base_mean:>+10.3f}")
 
-    base_pass_rate = _frac(base_eval.rows, "task_passed")
-    trained_pass_rate = _frac(trained_eval.rows, "task_passed")
+    base_pass_rate = _frac(base_rows, "task_passed")
+    trained_pass_rate = _frac(trained_rows, "task_passed")
     print(f"{'Terminal pass rate':<25} {base_pass_rate:>10.1%} {trained_pass_rate:>10.1%} {trained_pass_rate - base_pass_rate:>+10.1%}")
 
     if n_base and n_trained:
-        base_parse = _frac(base_eval.rows, "parsed_call")
-        trained_parse = _frac(trained_eval.rows, "parsed_call")
+        base_parse = _frac(base_rows, "parsed_call")
+        trained_parse = _frac(trained_rows, "parsed_call")
         print(f"{'Parsed tool call':<25} {base_parse:>10.1%} {trained_parse:>10.1%} {trained_parse - base_parse:>+10.1%}")
 
-        base_match = _frac(base_eval.rows, "tool_match")
-        trained_match = _frac(trained_eval.rows, "tool_match")
+        base_match = _frac(base_rows, "tool_match")
+        trained_match = _frac(trained_rows, "tool_match")
         print(f"{'First-call tool match':<25} {base_match:>10.1%} {trained_match:>10.1%} {trained_match - base_match:>+10.1%}")
     else:
         print("(no eval rows — check the eval dataset / deployment)")

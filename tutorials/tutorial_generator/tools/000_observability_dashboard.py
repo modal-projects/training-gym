@@ -17,7 +17,6 @@ TUTORIAL_METADATA = {
         "TrainConfig",
         "TrainingGroup",
         "DeploymentConfig",
-        "EvalConfig",
     ],
 }
 
@@ -100,8 +99,8 @@ def _runs_overview():
     ![Training runs list with annotated components](/observability_dashboard_1_annotated.png)
 
     1. **Sections** — switch between *Training runs*, *Deployments* (models
-       served with `DeploymentConfig`), and *Evals* (results from
-       `EvalConfig`).
+       served with `DeploymentConfig`), and *Evals* (saved evaluation
+       results written to the metadata volume).
     2. **Status cards** — workspace-wide counts of completed, pending,
        stopped, and failed runs.
     3. **Search and filters** — search by run name and filter by status,

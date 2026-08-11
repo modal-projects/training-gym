@@ -2,7 +2,7 @@
 
 One-stop reference for agents asked to build, modify, or validate tutorials
 and examples in this repo. Pairs with
-[agent-modal-training.md](agent-modal-training.md) (Modal launch/debug) and
+[modal-infrastructure](modal-infrastructure/SKILL.md) (Modal launch/debug) and
 [agent-example-validation.md](agent-example-validation.md) (tiered example
 validation).
 

@@ -37,6 +37,7 @@ from modal_training_gym.common.config import (
     DASHBOARD_PROXY_AUTH_PATH,
     dashboard_requires_proxy_auth,
 )
+from modal_training_gym.common.dashboard import DASHBOARD_APP_NAME
 from modal_training_gym.common.run import FrameworkStatusUpdate, TrainingRun
 from modal_training_gym.common.run_list import (
     filter_run_summaries,
@@ -116,7 +117,7 @@ def _build_image() -> modal.Image:
 
 image = _build_image()
 
-app = modal.App("training-gym-dashboard", image=image)
+app = modal.App(DASHBOARD_APP_NAME, image=image)
 
 STATIC_DIR = "/app/frontend/dist"
 
@@ -377,6 +378,7 @@ def reconcile() -> None:
     min_containers=1,
     secrets=_function_secrets(),
 )
+@modal.concurrent(max_inputs=50, target_inputs=20)
 @modal.asgi_app(requires_proxy_auth=dashboard_requires_proxy_auth())
 def fastapi_app():
     import base64

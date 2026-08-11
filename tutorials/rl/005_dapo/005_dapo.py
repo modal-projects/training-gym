@@ -49,8 +49,6 @@ from typing import Any
 
 from modal_training_gym import (
     DeploymentConfig,
-    EvalConfig,
-    EvalRowResult,
     HuggingFaceDataset,
     ModelDeployment,
     Qwen3_4B,
@@ -91,6 +89,8 @@ class MathDataset(HuggingFaceDataset):
         stop = len(ds) if not self.n_rows else min(start + self.n_rows, len(ds))
         return ds.select(range(start, stop))
 
+eval_dataset = MathDataset(n_rows=100, row_offset=16_000)
+
 def _normalize_answer(answer: str) -> str:
     answer = str(answer).strip()
     answer = answer.split("=")[-1]
@@ -112,11 +112,9 @@ def _check_math(response: str, label: str) -> bool:
         pass
     return pred == gt
 
-def math_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
-    prompt = example.get("prompt", "")
-    if isinstance(prompt, list):
-        prompt = prompt[0]["content"] if prompt else ""
-    label = example.get("label", "")
+def math_eval_fn(deployment: ModelDeployment, example: dict) -> dict:
+    prompt = example["prompt"][0]["content"]
+    label = example["label"]
 
     response = deployment.generate(
         prompt,
@@ -127,11 +125,28 @@ def math_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
     correct = _check_math(response, label)
     pred = _normalize_answer(_extract_answer(response))
 
-    return EvalRowResult(
-        score=1.0 if correct else 0.0,
-        response=response,
-        metadata={"correct": correct, "pred": pred, "label": label},
-    )
+    return {
+        "score": 1.0 if correct else 0.0,
+        "response": response,
+        "correct": correct,
+        "pred": pred,
+        "label": label,
+    }
+
+def run_eval(
+    deployment, *, max_concurrency: int = 2
+) -> tuple[float, list[dict]]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    deployment.wait_until_ready(timeout=3000)
+
+    def _score_one(example):
+        return math_eval_fn(deployment, example)
+
+    with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+        rows = list(executor.map(_score_one, eval_dataset.load()))
+    mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+    return mean, rows
 
 # ## Reward function
 #
@@ -187,7 +202,6 @@ def _main_impl() -> None:
         ) from e
 
     train_dataset = MathDataset(n_rows=2_000)
-    eval_dataset = MathDataset(n_rows=100, row_offset=16_000)
 
     # ## Baseline Eval
     #
@@ -200,12 +214,11 @@ def _main_impl() -> None:
     ).serve()
     print(f"Base model URL: {base_deployment.url}")
 
-    eval_config = EvalConfig(dataset=eval_dataset, eval_fn=math_eval_fn)
     print("--- Evaluating base model... ---")
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    n_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    print(f"Base accuracy: {n_correct}/{len(base_eval.rows)} "
-          f"({base_eval.mean:.1%})")
+    base_mean, base_rows = run_eval(base_deployment)
+    n_correct = sum(1 for r in base_rows if r.get("correct"))
+    print(f"Base accuracy: {n_correct}/{len(base_rows)} "
+          f"({base_mean:.1%})")
 
     # ## Training
     #
@@ -310,21 +323,21 @@ def _main_impl() -> None:
     print(f"Trained model URL: {trained_deployment.url}")
 
     print("--- Evaluating trained model... ---")
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    n_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    print(f"Trained accuracy: {n_correct}/{len(trained_eval.rows)} "
-          f"({trained_eval.mean:.1%})")
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    n_correct = sum(1 for r in trained_rows if r.get("correct"))
+    print(f"Trained accuracy: {n_correct}/{len(trained_rows)} "
+          f"({trained_mean:.1%})")
 
     # ## Results
     #
     # Let's see if our model works better!
 
-    base_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    trained_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    total = len(base_eval.rows)
-    print(f"Base model:    {base_correct}/{total} ({base_eval.mean:.1%})")
-    print(f"Trained model: {trained_correct}/{total} ({trained_eval.mean:.1%})")
-    print(f"Delta:         {trained_eval.mean - base_eval.mean:+.1%}")
+    base_correct = sum(1 for r in base_rows if r.get("correct"))
+    trained_correct = sum(1 for r in trained_rows if r.get("correct"))
+    total = len(base_rows)
+    print(f"Base model:    {base_correct}/{total} ({base_mean:.1%})")
+    print(f"Trained model: {trained_correct}/{total} ({trained_mean:.1%})")
+    print(f"Delta:         {trained_mean - base_mean:+.1%}")
 
 @tutorial_cli_app.local_entrypoint()
 def main() -> None:

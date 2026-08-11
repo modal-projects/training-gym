@@ -1,28 +1,24 @@
 """Post-training handle: look up checkpoints, serve them, write evals.
 
-A :class:`TrainResult` is produced by ``train`` itself — one per call —
-and is also persisted to a shared :class:`modal.Dict` keyed by
-``training_run_id`` so that a *separate* evaluation script can look it up after
-the fact without re-running training.
+A :class:`TrainResult` is produced by ``train`` itself — one per call — and is
+also persisted to the metadata volume keyed by ``training_run_id`` so that a
+*separate* evaluation script can look it up after the fact without re-running
+training.
 
 Typical flow:
 
 .. code-block:: python
 
     # training.py
-    app = TrainConfig(...).build_app()
-
-    # Kick off training:
-    #   modal run --detach training.py::app.train
-    # The train function constructs a TrainResult, writes it to the
-    # shared modal.Dict, and returns it.
+    result = TrainConfig(...).train()          # blocks, returns the TrainResult
+    # or, to launch and walk away:
+    run = TrainConfig(...).launch()            # detached; returns a TrainingRun
+    result = run.result()                      # optional wait
 
     # eval.py (anywhere, any time after `train` finishes):
     from modal_training_gym.common.train_result import TrainResult
 
-    result = TrainResult.load("my-app")                 # latest run
-    # or
-    result = TrainResult.load("my-app", training_run_id="...")   # pinned
+    result = TrainResult.load(training_run_id)
 
     print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
     print(result.latest_checkpoint_path())  # .../iter_0000050
@@ -33,15 +29,15 @@ Typical flow:
 
 Two design invariants:
 
-1. ``TrainResult`` is **not** attached to the ``modal.App`` returned by
-   ``build_app()`` — a training run has no "result" before ``train`` has
-   executed. The ``modal.App`` object is a deployment handle, not a run
-   handle.
+1. ``TrainResult`` is **not** attached to the ``modal.App`` that
+   ``TrainConfig`` builds internally — a training run has no "result" before
+   ``train`` has executed. The ``modal.App`` object is a deployment handle,
+   not a run handle; :class:`TrainingRun` is the run handle.
 2. Every call to ``train`` can produce a *different* result (different
-   ``training_run_id``, different ``checkpoint_dir``). We use a :class:`modal.Dict`
-   named ``{app_name}-train-results`` as the shared store so that eval
-   scripts — which don't import the training closure and don't call
-   ``train()`` — can still retrieve results by ``training_run_id``.
+   ``training_run_id``, different ``checkpoint_dir``). Results live in the
+   shared metadata volume so that eval scripts — which don't import the
+   training closure and don't call ``train()`` — can still retrieve them by
+   ``training_run_id``.
 """
 
 from __future__ import annotations

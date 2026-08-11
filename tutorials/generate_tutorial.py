@@ -48,6 +48,7 @@ _README_END = "<!-- END TUTORIAL TABLE -->"
 _REPO_SLUG = "modal-projects/training-gym"
 _BADGE_IMG = "https://modal-cdn.com/open-in-modal.svg"
 _BRANCH = "main"
+_DOCS_BASE = "https://gym.modal.dev"
 
 _MARKDOWN = "markdown"
 _CODE = "code"
@@ -65,6 +66,7 @@ _BUCKETS = ("intro", "rl", "sft", "singlenode", "agent", "multinode", "misc")
 # Docs-only buckets render on the docs site (scripts/generate_tutorial_pages.py)
 # but produce no runnable tutorials/<bucket>/ outputs and no README table rows.
 _DOCS_ONLY_BUCKETS = ("tools",)
+_DOCS_PAGE_BUCKETS = frozenset({"intro", "rl", "sft", "agent", "misc", "tools"})
 _BUCKET_DISPLAY = {
     "intro": "Intro",
     "rl": "RL",
@@ -666,8 +668,12 @@ def _render_tutorial_table(
         difficulty = str(meta.get("difficulty", "—")).replace("|", r"\|")
         framework = str(meta["framework"]).replace("|", r"\|")
         launch = _render_launch_cell(bucket, name)
+        if bucket in _DOCS_PAGE_BUCKETS:
+            link = f"{_DOCS_BASE}/tutorials/{bucket}/{name}/"
+        else:
+            link = f"tutorials/{bucket}/{name}/{name}.ipynb"
         lines.append(
-            f"| [`{name}`](tutorials/{bucket}/{name}/{name}.ipynb) | {summary} | "
+            f"| [`{name}`]({link}) | {summary} | "
             f"{difficulty} | {framework} | {launch} |"
         )
     return "\n".join(lines)

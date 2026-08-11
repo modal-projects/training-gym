@@ -12,7 +12,6 @@ TUTORIAL_METADATA = {
         "Qwen3_VL_8b_Recipe",
         "MultimodalDataset",
         "DeploymentConfig",
-        "EvalConfig",
         "ModelDeployment",
         "TrainConfig",
         "WandbConfig",
@@ -81,8 +80,6 @@ def _imports():
 
     from modal_training_gym import (
         DeploymentConfig,
-        EvalConfig,
-        ImageEvalRowResult,
         ModelDeployment,
         MultimodalDataset,
         Qwen3_VL_8B,
@@ -295,35 +292,18 @@ def _eval_base_intro():
 
     Let's evaluate the base Qwen3-VL-8B model on our held-out set before
     training to see how well it grounds UI elements out of the box.
-
-    Returning an `ImageEvalRowResult` folds a thumbnail of the screenshot into the row.
     """
 
 
 @code
 def _eval_helpers():
-    def _thumbnail(data_uri: str, max_dim: int = 512) -> str:
-        # Downscale the screenshot to a dashboard-sized thumbnail so the eval
-        # summary stays small (we score on the full-res image, below).
-        import base64
-        import io
-
-        from PIL import Image
-
-        _, _, b64 = data_uri.partition(",")
-        img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
-        img.thumbnail((max_dim, max_dim))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-
     def grounding_eval_fn(
         deployment: ModelDeployment, example: dict
-    ) -> ImageEvalRowResult:
+    ) -> dict:
         # Eval sends the screenshot as a separate image_url, so drop the marker.
-        prompt = example.get("prompt", "").replace("<image>", "").strip()
-        label = example.get("label", "")
-        images = example.get("images", [])
+        prompt = example["prompt"].replace("<image>", "").strip()
+        label = example["label"]
+        images = example["images"]
 
         # Build the OpenAI chat content: text + one image_url part per screenshot.
         content = [
@@ -341,18 +321,29 @@ def _eval_helpers():
             outside = _distance_outside_box(pred[0], pred[1], box)
             inside = outside == 0.0
 
-        return ImageEvalRowResult(
-            score=1.0 if inside else 0.0,
-            response=response,
-            prompt=prompt,
-            image=_thumbnail(images[0]) if images else None,
-            metadata={
-                "inside_box": inside,
-                "dist_outside": round(outside, 4),
-                "pred": f"{pred[0]:.4f},{pred[1]:.4f}" if pred else "PARSE_FAIL",
-                "label": label,
-            },
-        )
+        return {
+            "score": 1.0 if inside else 0.0,
+            "response": response,
+            "inside_box": inside,
+            "dist_outside": round(outside, 4),
+            "pred": f"{pred[0]:.4f},{pred[1]:.4f}" if pred else "PARSE_FAIL",
+            "label": label,
+        }
+
+    def run_eval(
+        deployment, *, max_concurrency: int = 2
+    ) -> tuple[float, list[dict]]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        deployment.wait_until_ready(timeout=3000)
+
+        def _score_one(example):
+            return grounding_eval_fn(deployment, example)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            rows = list(executor.map(_score_one, eval_dataset.load()))
+        mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+        return mean, rows
 
 
 @code
@@ -364,24 +355,23 @@ def _eval_base():
     ).serve()
     print(f"Base model URL: {base_deployment.url}")
 
-    eval_config = EvalConfig(dataset=eval_dataset, eval_fn=grounding_eval_fn)
     print("--- Evaluating base model... ---")
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    n_hits = sum(1 for r in base_eval.rows if r.metadata.get("inside_box"))
+    base_mean, base_rows = run_eval(base_deployment)
+    n_hits = sum(1 for r in base_rows if r.get("inside_box"))
     print(
         f"Base accuracy (clicks inside element): "
-        f"{n_hits}/{len(base_eval.rows)} ({base_eval.mean:.1%})"
+        f"{n_hits}/{len(base_rows)} ({base_mean:.1%})"
     )
 
 
 @notebook_only
 @code
 def _base_examples():
-    for r in base_eval.rows[:3]:
-        status = "HIT" if r.metadata["inside_box"] else "MISS"
-        print(f"[{status}] label={r.metadata['label']}, pred={r.metadata['pred']}")
-        print(f"  dist_outside={r.metadata['dist_outside']:.4f}")
-        print(f"  ...{r.response[-100:]}")
+    for r in base_rows[:3]:
+        status = "HIT" if r["inside_box"] else "MISS"
+        print(f"[{status}] label={r['label']}, pred={r['pred']}")
+        print(f"  dist_outside={r['dist_outside']:.4f}")
+        print(f"  ...{r['response'][-100:]}")
         print()
 
 
@@ -472,27 +462,27 @@ def _eval_trained():
     print(f"Trained model URL: {trained_deployment.url}")
 
     print("--- Evaluating trained model... ---")
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    n_hits = sum(1 for r in trained_eval.rows if r.metadata.get("inside_box"))
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    n_hits = sum(1 for r in trained_rows if r.get("inside_box"))
     print(
         f"Trained accuracy (clicks inside element): "
-        f"{n_hits}/{len(trained_eval.rows)} ({trained_eval.mean:.1%})"
+        f"{n_hits}/{len(trained_rows)} ({trained_mean:.1%})"
     )
 
 
 @notebook_only
 @code
 def _trained_examples():
-    for base_r, trained_r in zip(base_eval.rows[:3], trained_eval.rows[:3]):
-        label = base_r.metadata["label"]
-        b_status = "HIT" if base_r.metadata["inside_box"] else "MISS"
-        t_status = "HIT" if trained_r.metadata["inside_box"] else "MISS"
+    for base_r, trained_r in zip(base_rows[:3], trained_rows[:3]):
+        label = base_r["label"]
+        b_status = "HIT" if base_r["inside_box"] else "MISS"
+        t_status = "HIT" if trained_r["inside_box"] else "MISS"
         print(f"label={label}")
         print(
-            f"  Base:    [{b_status}] pred={base_r.metadata['pred']} dist_outside={base_r.metadata['dist_outside']:.4f}"
+            f"  Base:    [{b_status}] pred={base_r['pred']} dist_outside={base_r['dist_outside']:.4f}"
         )
         print(
-            f"  Trained: [{t_status}] pred={trained_r.metadata['pred']} dist_outside={trained_r.metadata['dist_outside']:.4f}"
+            f"  Trained: [{t_status}] pred={trained_r['pred']} dist_outside={trained_r['dist_outside']:.4f}"
         )
         print()
 
@@ -508,9 +498,9 @@ def _compare_intro():
 
 @code
 def _compare():
-    base_hits = sum(1 for r in base_eval.rows if r.metadata.get("inside_box"))
-    trained_hits = sum(1 for r in trained_eval.rows if r.metadata.get("inside_box"))
-    total = len(base_eval.rows)
-    print(f"Base model:    {base_hits}/{total} ({base_eval.mean:.1%})")
-    print(f"Trained model: {trained_hits}/{total} ({trained_eval.mean:.1%})")
-    print(f"Delta:         {trained_eval.mean - base_eval.mean:+.1%}")
+    base_hits = sum(1 for r in base_rows if r.get("inside_box"))
+    trained_hits = sum(1 for r in trained_rows if r.get("inside_box"))
+    total = len(base_rows)
+    print(f"Base model:    {base_hits}/{total} ({base_mean:.1%})")
+    print(f"Trained model: {trained_hits}/{total} ({trained_mean:.1%})")
+    print(f"Delta:         {trained_mean - base_mean:+.1%}")

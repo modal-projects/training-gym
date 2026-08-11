@@ -10,8 +10,6 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "DatasetConfig",
         "DeploymentConfig",
-        "EvalConfig",
-        "EvalRowResult",
         "ModelDeployment",
         "Qwen3_4B",
         "SlimeRecipe",
@@ -75,8 +73,6 @@ def _imports():
     from modal_training_gym import (
         DatasetConfig,
         DeploymentConfig,
-        EvalConfig,
-        EvalRowResult,
         ModelDeployment,
         Qwen3_4B,
         SlimeRecipe,
@@ -302,8 +298,8 @@ def _eval_intro():
     """
     ## Offline multi-turn trajectory evaluator
 
-    `EvalConfig` supports `eval_fn`, so we can plug in a full
-    multi-turn evaluator per row while still using the standard eval runner.
+    We create a full multi-turn evaluator that aggregates scores in a
+    small loop over the eval dataset.
     """
 
 
@@ -346,26 +342,11 @@ def _eval_helpers():
             "response": trace,
         }
 
-    def _resolve_target(example: dict) -> int:
-        if "target" in example:
-            return int(example["target"])
-
-        raw = example.get("label")
-        if isinstance(raw, dict):
-            return int(raw.get("answer", 1))
-        if isinstance(raw, str):
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                payload = {}
-            return int(payload.get("answer", 1))
-        return 1
-
     def guessing_eval_fn(
         deployment: ModelDeployment,
         example: dict,
-    ) -> EvalRowResult:
-        target = _resolve_target(example)
+    ) -> dict:
+        target = int(example["target"])
         trajectory = run_guessing_trajectory(
             deployment,
             target=target,
@@ -376,29 +357,43 @@ def _eval_helpers():
             format_error=trajectory["format_error"],
             turns_taken=trajectory["turns_taken"],
         )
-        return EvalRowResult(
-            score=reward,
-            response=trajectory["response"],
-            metadata={
+        return {
+            "score": reward,
+            "response": trajectory["response"],
+            "metadata": {
                 "success": trajectory["success"],
                 "format_error": trajectory["format_error"],
                 "turns_taken": trajectory["turns_taken"],
                 "target": target,
             },
-        )
+        }
 
-    def summarize_eval(eval_result) -> dict:
-        rows = eval_result.rows
-        success_rate = sum(1 for row in rows if row.metadata.get("success")) / max(
+    def summarize_eval(rows: list[dict]) -> dict:
+        success_rate = sum(1 for row in rows if row["metadata"].get("success")) / max(
             len(rows), 1
         )
         mean_turns = sum(
-            int(row.metadata.get("turns_taken", _MAX_TURNS)) for row in rows
+            int(row["metadata"].get("turns_taken", _MAX_TURNS)) for row in rows
         ) / max(len(rows), 1)
         return {
             "success_rate": float(success_rate),
             "mean_turns": float(mean_turns),
         }
+
+    def run_eval(
+        deployment, *, max_concurrency: int = 2
+    ) -> tuple[float, list[dict]]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        deployment.wait_until_ready(timeout=3000)
+
+        def _score_one(example):
+            return guessing_eval_fn(deployment, example)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            rows = list(executor.map(_score_one, eval_dataset.load()))
+        mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+        return mean, rows
 
 
 @markdown
@@ -415,14 +410,10 @@ def _serve_base():
         unauthenticated=True,
     ).serve()
     print(f"Base model URL: {base_deployment.url}")
-    eval_config = EvalConfig(
-        dataset=eval_dataset,
-        eval_fn=guessing_eval_fn,
-    )
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    base_summary = summarize_eval(base_eval)
+    base_mean, base_rows = run_eval(base_deployment)
+    base_summary = summarize_eval(base_rows)
     print(f"Base success rate: {base_summary['success_rate']:.2%}")
-    print(f"Base mean reward: {base_eval.mean:.3f}")
+    print(f"Base mean reward: {base_mean:.3f}")
     print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 
 
@@ -516,11 +507,11 @@ def _trained_eval():
     ).serve()
     print(f"Trained model URL: {trained_deployment.url}")
 
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    trained_summary = summarize_eval(trained_eval)
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    trained_summary = summarize_eval(trained_rows)
     print(f"Trained success rate: {trained_summary['success_rate']:.2%}")
-    print(f"Trained mean reward: {trained_eval.mean:.3f}")
+    print(f"Trained mean reward: {trained_mean:.3f}")
     print(f"Trained mean turns:  {trained_summary['mean_turns']:.2f}")
     print(f"Base success rate:    {base_summary['success_rate']:.2%}")
-    print(f"Base mean reward:     {base_eval.mean:.3f}")
+    print(f"Base mean reward:     {base_mean:.3f}")
     print(f"Base mean turns:      {base_summary['mean_turns']:.2f}")

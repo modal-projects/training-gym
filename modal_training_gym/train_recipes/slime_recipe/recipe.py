@@ -591,6 +591,7 @@ class SlimeRecipe(BaseTrainRecipe):
     save: str = "/checkpoints"
     load: str = ""
     no_save_optim: bool = False
+    no_load_optim: bool = False
     megatron_to_hf_mode: str = ""
 
     # Regex patterns of parameter names to freeze (slime's
@@ -855,6 +856,18 @@ class SlimeRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import (
             Qwen3_4b_Recipe,
         )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_5_0_8b import (
+            Qwen3_5_0_8b_Recipe,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_5_2b import (
+            Qwen3_5_2b_Recipe,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_5_4b import (
+            Qwen3_5_4b_Recipe,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_5_9b import (
+            Qwen3_5_9b_Recipe,
+        )
 
         from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import (
             Qwen3_6_35b_Recipe,
@@ -881,6 +894,14 @@ class SlimeRecipe(BaseTrainRecipe):
             return Qwen3_1_7b_Recipe()
         if model_config.model_name == "Qwen/Qwen3-4B":
             return Qwen3_4b_Recipe()
+        if model_config.model_name == "Qwen/Qwen3.5-0.8B":
+            return Qwen3_5_0_8b_Recipe()
+        if model_config.model_name == "Qwen/Qwen3.5-2B":
+            return Qwen3_5_2b_Recipe()
+        if model_config.model_name == "Qwen/Qwen3.5-4B":
+            return Qwen3_5_4b_Recipe()
+        if model_config.model_name == "Qwen/Qwen3.5-9B":
+            return Qwen3_5_9b_Recipe()
         if model_config.model_name == "Qwen/Qwen3-8B":
             return Qwen3_8b_Recipe()
         if model_config.model_name == "Qwen/Qwen3.6-35B-A3B":

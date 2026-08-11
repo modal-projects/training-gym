@@ -16,6 +16,10 @@ from .kimi_k2_6 import Kimi_K2_6
 from .qwen3_0_6b import Qwen3_0_6B
 from .qwen3_1_7b import Qwen3_1_7B
 from .qwen3_4b import Qwen3_4B
+from .qwen3_5_0_8b import Qwen3_5_0_8B
+from .qwen3_5_2b import Qwen3_5_2B
+from .qwen3_5_4b import Qwen3_5_4B
+from .qwen3_5_9b import Qwen3_5_9B
 from .qwen3_6_35b import Qwen3_6_35B
 from .qwen3_8b import Qwen3_8B
 from .qwen3_asr_1_7b import Qwen3_ASR_1_7B
@@ -78,6 +82,10 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
     _ValidationConfig("Qwen3-8B", Qwen3_8B, Framework.SLIME),
     _ValidationConfig("Qwen3-ASR-1.7B", Qwen3_ASR_1_7B, Framework.SLIME),
     _ValidationConfig("Qwen3-VL-8B-Instruct", Qwen3_VL_8B, Framework.SLIME),
+    _ValidationConfig("Qwen3.5-0.8B", Qwen3_5_0_8B, Framework.SLIME),
+    _ValidationConfig("Qwen3.5-2B", Qwen3_5_2B, Framework.SLIME),
+    _ValidationConfig("Qwen3.5-4B", Qwen3_5_4B, Framework.SLIME),
+    _ValidationConfig("Qwen3.5-9B", Qwen3_5_9B, Framework.SLIME),
     _ValidationConfig("Qwen3.6-35B-A3B", Qwen3_6_35B, Framework.SLIME),
     # Too large to fan out on a PR (16 x 8 H200), but still dispatchable by
     # name. Flipping run_on_pr is the only change needed to gate PRs on one.

@@ -116,4 +116,14 @@ Each source declares `TUTORIAL_METADATA` dict with `framework`, `cluster_shape`,
 
 ## Agent skills
 
+- Before acting, inspect the descriptions in `skills/*/SKILL.md` and read every
+  skill that matches the request. Do not assume the explicitly named skills
+  below are the only available skills.
+- For training lifecycle work, read `skills/agent-driven-training/SKILL.md`
+  before acting. This includes launching, monitoring, inspecting, diagnosing,
+  continuing, or promoting a Training Gym run.
+- For raw Modal infrastructure work, read
+  `skills/modal-infrastructure/SKILL.md` before acting. Use it for apps,
+  containers, volumes, scheduling, image builds, caches, and endpoint
+  authentication.
 - For model support work, read `skills/model-support/SKILL.md` before acting. Use it when adding, debugging, validating, or productionizing new model support, especially Slime recipes and model configs.

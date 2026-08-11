@@ -1,7 +1,9 @@
 import dataclasses as _dc
 import secrets as _secrets
+import sys
 import threading
 import time
+import warnings
 from contextlib import nullcontext
 from typing import Any
 from typing import TypeVar
@@ -111,6 +113,32 @@ def _convert_checkpoint_on_cache_miss(
         return False
     app.convert_checkpoint.remote(hf_path=hf_path, **call_kwargs)
     return True
+
+
+def _warn_if_external_build_app() -> None:
+    """Warn when ``_build_app()`` is called from outside the package.
+
+    Hand-rolling ``_build_app()`` + ``app.run()`` + ``app.train.spawn()`` is a
+    trap: the nested ``app.run()`` is ephemeral, so exiting the block (or
+    Ctrl-C) stops the app and kills the spawned run — and ``modal run
+    --detach`` does not help, since it only detaches the CLI's own entrypoint
+    app. ``launch()`` / ``train()`` open the app with ``detach=True`` and
+    persist the function-call id so the run can be waited on from anywhere.
+    """
+    try:
+        caller = sys._getframe(2).f_globals.get("__name__", "")
+    except ValueError:  # no such frame — never block a launch over a warning
+        return
+    if caller.startswith("modal_training_gym"):
+        return
+    warnings.warn(
+        "TrainConfig._build_app() is private and does not start a detached "
+        "app: spawning train() on it yourself means the run dies when the "
+        "enclosing app.run() block exits or is interrupted. Use "
+        "TrainConfig.launch() (returns a TrainingRun handle immediately) or "
+        "TrainConfig.train() (blocks for the TrainResult) instead.",
+        stacklevel=3,
+    )
 
 
 _STAGE_LABELS: dict[str, str] = {
@@ -393,6 +421,7 @@ class TrainConfig:
         )
 
     def _build_app(self, training_run_id: str | None = None):
+        _warn_if_external_build_app()
         if training_run_id is None:
             training_run_id = self._generate_training_run_id()
         recipe_type = self.recipe.recipe_type

@@ -10,7 +10,6 @@ src/content/docs/reference/index.md
 src/content/docs/reference/core/
 src/content/docs/reference/models/
 src/content/docs/reference/deployment/
-src/content/docs/reference/evaluation/
 src/content/docs/reference/training/
 src/content/docs/tutorials/index.md
 src/content/docs/tutorials/rl/

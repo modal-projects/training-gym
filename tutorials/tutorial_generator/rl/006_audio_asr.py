@@ -13,7 +13,6 @@ TUTORIAL_METADATA = {
         "MultimodalDataset",
         "TrainConfig",
         "DeploymentConfig",
-        "EvalConfig",
     ],
     "required_modal_secrets": [
         {"name": "wandb-secret", "key": "WANDB_API_KEY"},
@@ -79,9 +78,7 @@ def _install():
 @code
 def _imports():
     from modal_training_gym import (
-        AudioEvalRowResult,
         DeploymentConfig,
-        EvalConfig,
         ModelDeployment,
         MultimodalDataset,
         Qwen3_ASR_1_7B,
@@ -263,19 +260,12 @@ def _train():
 @markdown
 def _eval_intro():
     """
-    ## Evaluate and watch it on the dashboard
+    ## Evaluate the trained checkpoint
 
-    Evaluation is the same `DeploymentConfig` → `EvalConfig` flow every gym example
-    uses. `DeploymentConfig.serve()` serves the trained checkpoint on SGLang
-    (converting the Megatron checkpoint to HuggingFace first, audio tower included),
-    and `EvalConfig.evaluate()` runs our `eval_fn` over the held-out clips.
-
-    The eval_fn is the read-side twin of the reward: it POSTs each clip to the
-    deployment's `/v1/audio/transcriptions` endpoint, scores word accuracy
-    (`1 − WER`), and returns an `AudioEvalRowResult` carrying a downsampled audio
-    clip + reference + WER. The dashboard's **Evals** panel auto-detects the audio
-    result and renders a player next to the reference and score (run
-    `training-gym setup` to get the dashboard URL).
+    `DeploymentConfig.serve()` serves the trained checkpoint on SGLang
+    (converting the Megatron checkpoint to HuggingFace first, audio tower included).
+    Then we `POST` each clip to `/v1/audio/transcriptions`, scoring word
+    accuracy (`1 − WER`), and print the mean WER and mean accuracy.
     """
 
 
@@ -283,12 +273,11 @@ def _eval_intro():
 def _eval_fn():
     def transcribe_and_score(
         deployment: ModelDeployment, example: dict
-    ) -> AudioEvalRowResult:
+    ) -> dict:
         import base64
         import io
 
         import jiwer
-        import librosa
         import requests
         import soundfile as sf
 
@@ -297,7 +286,6 @@ def _eval_fn():
         b64 = data_uri.split(",", 1)[1] if data_uri.startswith("data:") else data_uri
         arr, sr = sf.read(io.BytesIO(base64.b64decode(b64)))
 
-        # Transcribe the full-resolution clip (WER must reflect the real audio).
         buf = io.BytesIO()
         sf.write(buf, arr, sr, format="WAV")
         buf.seek(0)
@@ -314,27 +302,12 @@ def _eval_fn():
         hypothesis = (resp.json().get("text") or "").lower().strip()
         wer = float(jiwer.wer(reference, hypothesis)) if reference else 0.0
 
-        # Light, downsampled clip (8 kHz mono) for the dashboard audio player.
-        small = librosa.resample(arr.astype("float32"), orig_sr=sr, target_sr=8000)
-        sbuf = io.BytesIO()
-        sf.write(sbuf, small, 8000, format="WAV", subtype="PCM_16")
-        audio_uri = "data:audio/wav;base64," + base64.b64encode(
-            sbuf.getvalue()
-        ).decode()
-
-        # Score is word accuracy (1 − WER) in [0, 1] — higher is better, matching
-        # the dashboard's score model. AudioEvalRowResult folds audio/reference/metrics
-        # into metadata (tagged _metadata_type="audio") so the dashboard renders an
-        # audio cell; the hypothesis stays on `response`, not duplicated. `metrics`
-        # is yours — swap WER for CER/BLEU/MOS/etc. as the task needs.
-        return AudioEvalRowResult(
-            score=max(0.0, 1.0 - wer),
-            response=hypothesis,
-            prompt=example["prompt"],
-            audio=audio_uri,
-            reference=reference,
-            metrics={"wer": wer},
-        )
+        return {
+            "score": max(0.0, 1.0 - wer),
+            "response": hypothesis,
+            "wer": wer,
+            "reference": reference,
+        }
 
 
 @code
@@ -347,12 +320,23 @@ def _eval():
     ).serve()
     print(f"Serving trained model at {deployment.url}")
 
-    eval_config = EvalConfig(dataset=dataset, eval_fn=transcribe_and_score)
-    eval_result = eval_config.evaluate(deployment, debug=True)
-    mean_wer = sum(r.metadata["metrics"]["wer"] for r in eval_result.rows) / len(
-        eval_result.rows
-    )
+    def run_eval(
+        deployment, *, max_concurrency: int = 2
+    ) -> list[dict]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        deployment.wait_until_ready(timeout=3000)
+
+        def _score_one(example):
+            return transcribe_and_score(deployment, example)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            return list(executor.map(_score_one, dataset.load()))
+
+    rows = run_eval(deployment)
+    mean_wer = sum(r["wer"] for r in rows) / len(rows) if rows else float("nan")
+    mean_acc = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
     print(
         f"Eval: mean WER {mean_wer:.3f} "
-        f"(accuracy {eval_result.mean:.3f}) over {eval_result.total} clips"
+        f"(accuracy {mean_acc:.3f}) over {len(rows)} clips"
     )

@@ -1,22 +1,21 @@
 ---
 name: training-gym-overview
 description: >-
-  One-stop reference for the modal-training-gym repo: package layout, core
-  abstractions (ModelConfig, DatasetConfig, framework two-class split,
-  TrainConfig, cloudpickle caller resolution), the tutorial generator system,
-  model catalog, tools/ directory, and common gotchas. Use when working with
-  tutorials, models, frameworks, or any code in this repository.
+  Explains modal-training-gym repository architecture:
+  package layout, TrainConfig, models, datasets, recipes, framework internals,
+  cloudpickle caller resolution, tutorial generation, and shared tools. Use
+  when modifying or explaining repository internals, not for running or
+  debugging a normal training lifecycle.
 when_to_use: >-
   User edits or asks about modal_training_gym/ code, tutorials, framework
-  configs, ModelConfig, DatasetConfig, TrainConfig, the tutorial generator,
-  adding a new model or tutorial, or repo structure questions.
+  configs, shared internals, or repository structure.
 ---
 
 # Training Gym Overview
 
 One-stop reference for agents asked to build, modify, or validate tutorials
 and examples in this repo. Pairs with
-[modal-training](../modal-training/SKILL.md) (Modal launch/debug) and
+[modal-infrastructure](../modal-infrastructure/SKILL.md) (raw Modal debugging) and
 [example-validation](../example-validation/SKILL.md) (tiered example
 validation).
 

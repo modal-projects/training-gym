@@ -1,24 +1,30 @@
 ---
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import CopyPageDropdown from './CopyPageDropdown.astro';
 
 const { entry } = Astro.locals.starlightRoute;
 const pageUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
 
 const currentPath = Astro.url.pathname;
-const sourceUrl =
-  currentPath === '/' || currentPath === ''
-    ? 'https://github.com/modal-projects/training-gym/blob/main/README.md'
-    : currentPath === '/tutorials/' || currentPath === '/tutorials'
-      ? 'https://github.com/modal-projects/training-gym/blob/main/tutorials/README.md'
-      : 'https://github.com/modal-projects/training-gym';
+const repoBlobBase = 'https://github.com/modal-projects/training-gym/blob/main';
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const tutorialMatch = currentPath.match(/^\/tutorials\/(\w+)\/(\w+)\/?$/);
 const useCompactQuickstartHeader =
   currentPath === '/tutorials/intro/quickstart/' ||
   currentPath === '/tutorials/intro/001_quickstart/';
+
+let sourceUrl: string | null = null;
 let notebookUrl: string | null = null;
 if (tutorialMatch) {
-  const githubNbUrl = `https://github.com/modal-projects/training-gym/blob/main/tutorials/${tutorialMatch[1]}/${tutorialMatch[2]}/${tutorialMatch[2]}.ipynb`;
-  notebookUrl = `https://modal.com/notebooks/new/${encodeURIComponent(githubNbUrl)}`;
+  const [, bucket, name] = tutorialMatch;
+  const nestedPyRel = `tutorials/${bucket}/${name}/${name}.py`;
+  if (fs.existsSync(path.join(repoRoot, nestedPyRel))) {
+    sourceUrl = `${repoBlobBase}/${nestedPyRel}`;
+    const githubNbUrl = `${repoBlobBase}/tutorials/${bucket}/${name}/${name}.ipynb`;
+    notebookUrl = `https://modal.com/notebooks/new/${encodeURIComponent(githubNbUrl)}`;
+  }
 }
 
 const bodyMarkdown = typeof entry.body === 'string' ? entry.body.trim() : '';
@@ -38,7 +44,9 @@ const markdownSource = bodyMarkdown ? `${bodyMarkdown}\n` : '';
         Open in Modal Notebook
       </a>
     )}
-    <a class="tg-action-button tg-action-button--ghost" href={sourceUrl}>View on GitHub</a>
+    {sourceUrl && (
+      <a class="tg-action-button tg-action-button--ghost" href={sourceUrl}>View on GitHub</a>
+    )}
     <CopyPageDropdown markdownSource={markdownSource} pageUrl={pageUrl} />
   </div>
   <h1 id="_top">{useCompactQuickstartHeader ? 'Quickstart' : entry.data.title}</h1>

@@ -1140,6 +1140,7 @@ def build_slime_app(
             original_save = slime.save
             original_load = slime.load
             original_ref_load = slime.ref_load
+            original_no_load_optim = slime.no_load_optim
             object.__setattr__(slime, "save", save_root)
 
             # Resolve the local HF snapshot dir (used for bridge-mode load below).
@@ -1166,6 +1167,13 @@ def build_slime_app(
                     "resuming training from last saved iteration."
                 )
                 object.__setattr__(slime, "load", save_root)
+                # Weights-only checkpoints (``no_save_optim``) have no Adam state;
+                # Megatron will KeyError on state_dict["optimizer"] unless we skip it.
+                if slime.no_save_optim and not slime.no_load_optim:
+                    print(
+                        "WARNING: no_save_optim=True — enabling no_load_optim for resume."
+                    )
+                    object.__setattr__(slime, "no_load_optim", True)
             elif (
                 slime.megatron_to_hf_mode == "bridge" and not slime.ref_load and _hf_ref
             ):
@@ -1181,6 +1189,7 @@ def build_slime_app(
                 object.__setattr__(slime, "save", original_save)
                 object.__setattr__(slime, "load", original_load)
                 object.__setattr__(slime, "ref_load", original_ref_load)
+                object.__setattr__(slime, "no_load_optim", original_no_load_optim)
 
             phase_report_url = (
                 os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL")

@@ -1,9 +1,10 @@
-"""Trace / image / trajectory extraction from slime Samples for dashboard
+"""Trace / image / trajectory extraction from framework Samples for dashboard
 rollout reporting.
 
-Split out of :mod:`.phase_reporting` (which re-exports these). Everything here
-is duck-typed so slime need not be importable; heavy optional deps (PIL) are
-imported lazily inside the functions that need them.
+Shared by the slime and miles frameworks (miles is a slime fork; its Sample
+carries the same prompt/response/reward/metadata/multimodal fields). Everything
+here is duck-typed so neither framework need be importable; heavy optional deps
+(PIL) are imported lazily inside the functions that need them.
 """
 
 from __future__ import annotations

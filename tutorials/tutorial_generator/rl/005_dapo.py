@@ -10,8 +10,6 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "Qwen3_4B",
         "DeploymentConfig",
-        "EvalConfig",
-        "EvalRowResult",
         "HuggingFaceDataset",
         "ModelDeployment",
         "SlimeRecipe",
@@ -91,8 +89,6 @@ def _imports():
 
     from modal_training_gym import (
         DeploymentConfig,
-        EvalConfig,
-        EvalRowResult,
         HuggingFaceDataset,
         ModelDeployment,
         Qwen3_4B,
@@ -153,10 +149,7 @@ def _make_datasets():
 def _dataset_peek():
     rows = eval_dataset.load()
     for row in rows.select(range(2)):
-        prompt = row["prompt"]
-        if isinstance(prompt, list):
-            prompt = prompt[0]["content"] if prompt else ""
-        print(prompt[:200])
+        print(row["prompt"][0]["content"][:200])
         print(f"  label: {row['label']}")
         print()
 
@@ -184,11 +177,9 @@ def _eval_helpers():
             pass
         return pred == gt
 
-    def math_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
-        prompt = example.get("prompt", "")
-        if isinstance(prompt, list):
-            prompt = prompt[0]["content"] if prompt else ""
-        label = example.get("label", "")
+    def math_eval_fn(deployment: ModelDeployment, example: dict) -> dict:
+        prompt = example["prompt"][0]["content"]
+        label = example["label"]
 
         response = deployment.generate(
             prompt,
@@ -199,11 +190,28 @@ def _eval_helpers():
         correct = _check_math(response, label)
         pred = _normalize_answer(_extract_answer(response))
 
-        return EvalRowResult(
-            score=1.0 if correct else 0.0,
-            response=response,
-            metadata={"correct": correct, "pred": pred, "label": label},
-        )
+        return {
+            "score": 1.0 if correct else 0.0,
+            "response": response,
+            "correct": correct,
+            "pred": pred,
+            "label": label,
+        }
+
+    def run_eval(
+        deployment, *, max_concurrency: int = 2
+    ) -> tuple[float, list[dict]]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        deployment.wait_until_ready(timeout=3000)
+
+        def _score_one(example):
+            return math_eval_fn(deployment, example)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            rows = list(executor.map(_score_one, eval_dataset.load()))
+        mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+        return mean, rows
 
 
 @markdown
@@ -224,21 +232,20 @@ def _eval_base():
     ).serve()
     print(f"Base model URL: {base_deployment.url}")
 
-    eval_config = EvalConfig(dataset=eval_dataset, eval_fn=math_eval_fn)
     print("--- Evaluating base model... ---")
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    n_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    print(f"Base accuracy: {n_correct}/{len(base_eval.rows)} "
-          f"({base_eval.mean:.1%})")
+    base_mean, base_rows = run_eval(base_deployment)
+    n_correct = sum(1 for r in base_rows if r.get("correct"))
+    print(f"Base accuracy: {n_correct}/{len(base_rows)} "
+          f"({base_mean:.1%})")
 
 
 @notebook_only
 @code
 def _base_examples():
-    for r in base_eval.rows[:3]:
-        status = "CORRECT" if r.metadata["correct"] else "WRONG"
-        print(f"[{status}] label={r.metadata['label']}, pred={r.metadata['pred']}")
-        print(f"  ...{r.response[-150:]}")
+    for r in base_rows[:3]:
+        status = "CORRECT" if r["correct"] else "WRONG"
+        print(f"[{status}] label={r['label']}, pred={r['pred']}")
+        print(f"  ...{r['response'][-150:]}")
         print()
 
 
@@ -407,22 +414,22 @@ def _eval_trained():
     print(f"Trained model URL: {trained_deployment.url}")
 
     print("--- Evaluating trained model... ---")
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    n_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    print(f"Trained accuracy: {n_correct}/{len(trained_eval.rows)} "
-          f"({trained_eval.mean:.1%})")
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    n_correct = sum(1 for r in trained_rows if r.get("correct"))
+    print(f"Trained accuracy: {n_correct}/{len(trained_rows)} "
+          f"({trained_mean:.1%})")
 
 
 @notebook_only
 @code
 def _trained_examples():
-    for base_r, trained_r in zip(base_eval.rows[:3], trained_eval.rows[:3]):
-        label = base_r.metadata["label"]
-        b_status = "CORRECT" if base_r.metadata["correct"] else "WRONG"
-        t_status = "CORRECT" if trained_r.metadata["correct"] else "WRONG"
+    for base_r, trained_r in zip(base_rows[:3], trained_rows[:3]):
+        label = base_r["label"]
+        b_status = "CORRECT" if base_r["correct"] else "WRONG"
+        t_status = "CORRECT" if trained_r["correct"] else "WRONG"
         print(f"label={label}")
-        print(f"  Base:    [{b_status}] pred={base_r.metadata['pred']}")
-        print(f"  Trained: [{t_status}] pred={trained_r.metadata['pred']}")
+        print(f"  Base:    [{b_status}] pred={base_r['pred']}")
+        print(f"  Trained: [{t_status}] pred={trained_r['pred']}")
         print()
 
 
@@ -437,9 +444,9 @@ def _compare_intro():
 
 @code
 def _compare():
-    base_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    trained_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    total = len(base_eval.rows)
-    print(f"Base model:    {base_correct}/{total} ({base_eval.mean:.1%})")
-    print(f"Trained model: {trained_correct}/{total} ({trained_eval.mean:.1%})")
-    print(f"Delta:         {trained_eval.mean - base_eval.mean:+.1%}")
+    base_correct = sum(1 for r in base_rows if r.get("correct"))
+    trained_correct = sum(1 for r in trained_rows if r.get("correct"))
+    total = len(base_rows)
+    print(f"Base model:    {base_correct}/{total} ({base_mean:.1%})")
+    print(f"Trained model: {trained_correct}/{total} ({trained_mean:.1%})")
+    print(f"Delta:         {trained_mean - base_mean:+.1%}")
