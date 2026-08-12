@@ -31,6 +31,10 @@ def _run(**overrides):
                 "project": "training",
                 "group": "smoke",
             },
+            "trackio": {
+                "project": "training",
+                "url": "https://trackio.example/?project=training",
+            },
             "lr": 1e-6,
             "global_batch_size": 32,
         },
@@ -172,6 +176,7 @@ def test_config_summary_fallbacks_and_wandb_defaults():
                 "project": "project",
                 "group": "group",
             },
+            "trackio": {"url": "https://trackio.example/?project=project"},
         },
         "abcdefghijk",
     )
@@ -184,6 +189,7 @@ def test_config_summary_fallbacks_and_wandb_defaults():
     assert summary.global_batch_size == 0
     assert summary.wandb_training_run_id == "abcdefgh"
     assert summary.wandb_url == "https://wandb.ai/entity/project/runs/abcdefgh"
+    assert summary.trackio_url == "https://trackio.example/?project=project"
     assert run_summary_module._config_summary(None, "run-id") == {}
 
 
@@ -336,6 +342,7 @@ def test_build_current_summary_joins_result_and_derives_public_fields():
     assert summary.has_train_result is True
     assert summary.train_result.checkpoint_dir == "/checkpoints/run-1"
     assert summary.modal_app_url == "https://modal.com/id/ap-123"
+    assert summary.trackio_url == "https://trackio.example/?project=training"
     assert summary.resume_state.attempt_count == 2
     assert summary.group_tags.tags[0].key == "recipe.lr"
     assert [link.label for link in summary.wandb_links] == ["W&B a2", "W&B"]

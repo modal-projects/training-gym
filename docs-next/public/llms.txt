@@ -38,6 +38,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [007_param_sweep](https://gym.modal.dev/tutorials/rl/007_param_sweep/): Sweep hyperparameters across runs
 - [008_computer_use](https://gym.modal.dev/tutorials/rl/008_computer_use/): GUI grounding to predict click coordinates
 - [009_cross_tokenizer_distillation](https://gym.modal.dev/tutorials/rl/009_cross_tokenizer_distillation/): Cross-tokenizer agentic distillation on BFCL v3 multi-turn
+- [010_agentic_harbor](https://gym.modal.dev/tutorials/rl/010_agentic_harbor/): Fork-backed multi-turn coding agents on partitioned Harbor tasks
 
 ### Agents
 
@@ -57,6 +58,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [HuggingFaceDataset](https://gym.modal.dev/reference/core/huggingfacedataset/): `HuggingFaceDataset`
 - [HarborDataset](https://gym.modal.dev/reference/core/harbordataset/): `HarborDataset`
 - [WandbConfig](https://gym.modal.dev/reference/core/wandbconfig/): `WandbConfig`
+- [TrackioConfig](https://gym.modal.dev/reference/core/trackioconfig/): `TrackioConfig`
 - [ModalRayCluster](https://gym.modal.dev/reference/core/modalraycluster/): `ModalRayCluster`
 - [TrainResult](https://gym.modal.dev/reference/core/trainresult/): `TrainResult`
 

@@ -16,6 +16,7 @@ Then: `uv run modal run <tutorial_file>.py::train`.
 """
 
 import asyncio
+from contextlib import AsyncExitStack
 import os
 import shlex
 import subprocess
@@ -84,6 +85,11 @@ from .modal_helpers.utils import (
 from modal_training_gym.common.patches import encode_patch
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.framework import Framework
+from modal_training_gym.common.trackio import (
+    TRACKIO_SECRET_NAME,
+    deployed_trackio_url,
+    trackio_project_url,
+)
 
 SLIME_ROOT = "/root/slime"
 # Pin by digest to prevent mutable-tag drift.  Tag: nightly-dev-20260722a
@@ -92,6 +98,7 @@ SLIME_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
 HARBOR_PKG_VERSION = "0.8.0"
+TRACKIO_PKG_VERSION = "0.35.0"
 
 _SLIME_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
 _PATCH_VALIDATION_B64 = encode_patch("patch_validation", _SLIME_PATCHES)
@@ -144,6 +151,39 @@ _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATC
 _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
+_PATCH_TRACKIO_B64 = encode_patch("patch_trackio", _SLIME_PATCHES)
+
+_SLIME_SOURCE_PATCHES_B64 = (
+    _PATCH_MEGATRON_BRIDGE_B64,
+    _PATCH_ADVANTAGES_B64,
+    _PATCH_STOP_TOKEN_DIAG_B64,
+    _PATCH_QWEN3_ASR_EXPORT_B64,
+    _PATCH_QWEN3_VL_EXPORT_B64,
+    _PATCH_QWEN3_VL_TORCH_DIST_B64,
+    _PATCH_ROLLOUT_STATUS_B64,
+    _PATCH_ADVANTAGE_DIST_B64,
+    _PATCH_ZERO_STD_METRICS_B64,
+    _PATCH_SGLANG_PARALLEL_ALIASES_B64,
+)
+_SLIME_BASE_PATCHES_B64 = (
+    _PATCH_MEGATRON_BRIDGE_B64,
+    _PATCH_ADVANTAGES_B64,
+    _PATCH_BRIDGE_NONE_TASK_B64,
+    _PATCH_STOP_TOKEN_DIAG_B64,
+    _PATCH_QWEN3_ASR_EXPORT_B64,
+    _PATCH_QWEN3_VL_EXPORT_B64,
+    _PATCH_QWEN3_VL_TORCH_DIST_B64,
+    _PATCH_ROLLOUT_STATUS_B64,
+    _PATCH_ADVANTAGE_DIST_B64,
+    _PATCH_LOG_ELIDE_B64,
+    _PATCH_DIST_CKPT_QUANTIZED_B64,
+    _PATCH_ZERO_STD_METRICS_B64,
+    _PATCH_SGLANG_PARALLEL_ALIASES_B64,
+)
+
+
+def _patch_commands(patches: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(f"echo {patch} | base64 -d | python3" for patch in patches)
 
 
 def _build_slime_base_image() -> "Image":
@@ -152,21 +192,49 @@ def _build_slime_base_image() -> "Image":
         .entrypoint([])
         .run_commands(
             "rm -rf /root/.cache/huggingface",
-            f"echo {_PATCH_MEGATRON_BRIDGE_B64} | base64 -d | python3",
-            f"echo {_PATCH_ADVANTAGES_B64} | base64 -d | python3",
-            f"echo {_PATCH_BRIDGE_NONE_TASK_B64} | base64 -d | python3",
-            f"echo {_PATCH_STOP_TOKEN_DIAG_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_ASR_EXPORT_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_VL_EXPORT_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_VL_TORCH_DIST_B64} | base64 -d | python3",
-            f"echo {_PATCH_ROLLOUT_STATUS_B64} | base64 -d | python3",
-            f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
-            f"echo {_PATCH_LOG_ELIDE_B64} | base64 -d | python3",
-            f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
-            f"echo {_PATCH_ZERO_STD_METRICS_B64} | base64 -d | python3",
-            f"echo {_PATCH_SGLANG_PARALLEL_ALIASES_B64} | base64 -d | python3",
+            *_patch_commands(_SLIME_BASE_PATCHES_B64),
         )
     )
+
+
+def _slime_git_overlay_command(repository: str, revision: str) -> str:
+    """Build the reproducible image command for a fork source overlay."""
+    repo = shlex.quote(repository)
+    sha = shlex.quote(revision)
+    checkout = "/tmp/training-gym-slime"
+    return (
+        "set -eux; "
+        "command -v git >/dev/null; "
+        f"rm -rf {checkout}; "
+        f"git init {checkout}; "
+        f"git -C {checkout} remote add origin {repo}; "
+        f"git -C {checkout} fetch --depth=1 origin {sha}; "
+        f"git -C {checkout} checkout --detach FETCH_HEAD; "
+        f'test "$(git -C {checkout} rev-parse HEAD)" = {sha}; '
+        f"rm -rf {checkout}/.git {SLIME_ROOT}; "
+        f"mv {checkout} {SLIME_ROOT}"
+    )
+
+
+def _overlay_slime_source(image: "Image", slime: SlimeRecipe) -> "Image":
+    if slime.local_slime:
+        image = image.add_local_dir(
+            slime.local_slime,
+            remote_path=SLIME_ROOT,
+            copy=True,
+            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
+        )
+    elif slime.slime_git_repository and slime.slime_git_revision:
+        image = image.run_commands(
+            _slime_git_overlay_command(
+                slime.slime_git_repository, slime.slime_git_revision
+            )
+        )
+    else:
+        return image
+
+    # The source override replaced /root/slime after the base-image patches ran.
+    return image.run_commands(*_patch_commands(_SLIME_SOURCE_PATCHES_B64))
 
 
 def _build_conversion_config(slime_cfg: Any, model: Any = None) -> dict[str, Any]:
@@ -448,13 +516,10 @@ def build_slime_app(
     if isinstance(dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
-    if slime.local_slime:
-        image = image.add_local_dir(
-            slime.local_slime,
-            remote_path=SLIME_ROOT,
-            copy=True,
-            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
-        )
+    image = _overlay_slime_source(image, slime)
+    if slime.trackio is not None:
+        image = image.run_commands(*_patch_commands((_PATCH_TRACKIO_B64,)))
+        image = image.uv_pip_install(f"trackio=={TRACKIO_PKG_VERSION}")
 
     if slime.image_run_commands:
         image = image.run_commands(*slime.image_run_commands)
@@ -616,7 +681,10 @@ def build_slime_app(
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
+    data_volume = Volume.from_name(
+        slime.data_volume_name or f"{volume_prefix}-data",
+        create_if_missing=True,
+    )
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
         resolve_checkpoint_volumes(
             checkpoint,
@@ -639,6 +707,16 @@ def build_slime_app(
         recipe_app_tags=slime.app_tags,
         wandb=slime.wandb,
     )
+    if slime.slime_git_revision:
+        tags["slime_git_revision"] = slime.slime_git_revision
+    if slime.trackio is not None:
+        tags["_modal_trackio_project"] = slime.trackio.project
+    trackio_url = deployed_trackio_url() if slime.trackio is not None else None
+    if slime.trackio is not None and not trackio_url:
+        raise RuntimeError(
+            "Trackio is configured but the permanent Trackio endpoint is not "
+            "deployed. Run `training-gym setup` to deploy it."
+        )
     app = App(app_name, tags=tags)
     gpu_spec = f"{slime.gpu_type}:{slime.actor_num_gpus_per_node}"
 
@@ -810,17 +888,14 @@ def build_slime_app(
         if model and getattr(model, "architecture", None):
             mmt = getattr(model.architecture, "megatron_model_type", "")
 
-        if num_nodes > 1:
-            spec = importlib.util.find_spec(
-                "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        spec = importlib.util.find_spec(
+            "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        )
+        convert_script = spec.origin if spec is not None else None
+        if not convert_script:
+            raise RuntimeError(
+                "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
             )
-            convert_script = spec.origin if spec is not None else None
-            if not convert_script:
-                raise RuntimeError(
-                    "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
-                )
-        else:
-            convert_script = f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"
         if mmt or slime.slime_model_script:
             model_script = (
                 f"{SLIME_ROOT}/{slime.slime_model_script}"
@@ -845,6 +920,8 @@ def build_slime_app(
         env.pop("NCCL_NVLS_ENABLE", None)
         if num_nodes > 1:
             env["SKIP_RELEASE_RENAME"] = "1"
+        if any(arg.startswith("--pipeline-model-parallel-size ") for arg in extra_args):
+            env["SKIP_PP_AUTOINFLATE"] = "1"
         print(
             f"Conversion layout: nodes={num_nodes}, "
             f"nproc_per_node={nproc_per_node}, node_rank={node_rank}"
@@ -878,9 +955,15 @@ def build_slime_app(
     train_secrets: list[Secret] = []
     if slime.wandb is not None:
         train_secrets.append(Secret.from_name(slime.wandb.modal_wandb_secret_name))
+    if slime.trackio is not None:
+        train_secrets.append(Secret.from_name(TRACKIO_SECRET_NAME))
     # Proxy-auth tokens for any custom_rm / generate hook that calls a
     # CustomDeployment.launch() endpoint (teacher /generate, etc.).
     train_secrets.extend(proxy_auth_secrets())
+    # Credentials (DASHBOARD_USER / DASHBOARD_PASSWORD) for the Basic Auth proxy
+    # that gates the forwarded Ray + Trackio dashboards.
+    if getattr(slime, "dashboard_auth", False):
+        train_secrets.append(Secret.from_name(slime.dashboard_auth_secret_name))
     train_experimental_options: dict[str, Any] = {"efa_enabled": True}
 
     train_function_kwargs = dict(slime.train_function_kwargs or {})
@@ -1035,6 +1118,15 @@ def build_slime_app(
                     "run_id": wandb_run_id,
                 }
                 if slime.wandb
+                else {}
+            ),
+            "trackio": (
+                {
+                    "project": slime.trackio.project,
+                    "run_name": slime.trackio.run_name or training_run_id,
+                    "url": trackio_project_url(trackio_url, slime.trackio.project),
+                }
+                if slime.trackio
                 else {}
             ),
             "dataset": {
@@ -1200,6 +1292,20 @@ def build_slime_app(
             if wandb_entity:
                 wandb_env["WANDB_ENTITY"] = wandb_entity
 
+            trackio_env = {}
+            if slime.trackio is not None:
+                write_token = os.environ.get("TRACKIO_WRITE_TOKEN", "")
+                if not write_token:
+                    raise RuntimeError(
+                        f"{TRACKIO_SECRET_NAME!r} does not define "
+                        "TRACKIO_WRITE_TOKEN; rerun `training-gym setup`."
+                    )
+                trackio_env = {
+                    "TRACKIO_SERVER_URL": trackio_url,
+                    "TRACKIO_WRITE_TOKEN": write_token,
+                    "TRACKIO_RUN_NAME": slime.trackio.run_name or training_run_id,
+                }
+
             runtime_env = {
                 "env_vars": {
                     "no_proxy": f"127.0.0.1,{cluster.head_addr}",
@@ -1216,6 +1322,7 @@ def build_slime_app(
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                     **wandb_env,
+                    **trackio_env,
                     **slime.environment,
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
@@ -1226,11 +1333,56 @@ def build_slime_app(
                 f"Training {app_name} — {slime.total_nodes} node(s) × {gpu_spec}  ({mode})"
             )
             print(slime.gpu_allocation.summary())
-            print(f"Command: {cmd}, runtime_env: {runtime_env}")
+            if trackio_env:
+                # TRACKIO_SERVER_URL carries the server write token.
+                print(f"Command: {cmd}")
+            else:
+                print(f"Command: {cmd}, runtime_env: {runtime_env}")
 
             await _set_framework_status_async(SlimeStatus.ROLLOUT_INITIALIZING)
-            async with cluster.forward_dashboard() as tunnel:
-                print(f"Ray dashboard: {tunnel.url}")
+            async with AsyncExitStack() as stack:
+                import modal
+
+                from modal_training_gym.common.ray_cluster import RAY_DASHBOARD_PORT
+
+                # When dashboard_auth is on, forward the Ray dashboard through
+                # a Basic Auth reverse proxy instead of a public tunnel. If the
+                # secret is missing its credentials we skip forwarding entirely
+                # rather than expose an unauthenticated dashboard.
+                dashboard_user = os.environ.get("DASHBOARD_USER")
+                dashboard_password = os.environ.get("DASHBOARD_PASSWORD")
+                dashboard_auth = bool(getattr(slime, "dashboard_auth", False))
+                if dashboard_auth and not (dashboard_user and dashboard_password):
+                    print(
+                        "WARNING: dashboard_auth is enabled but the "
+                        f"{slime.dashboard_auth_secret_name!r} Modal Secret does not "
+                        "define DASHBOARD_USER/DASHBOARD_PASSWORD; skipping dashboard "
+                        "forwarding so nothing is exposed publicly."
+                    )
+
+                def _forward_authed(target_port: int):
+                    from modal_training_gym.common.auth_proxy import start_auth_proxy
+
+                    proxy_port, stop = start_auth_proxy(
+                        target_host="127.0.0.1",
+                        target_port=target_port,
+                        username=dashboard_user,  # type: ignore[arg-type]
+                        password=dashboard_password,  # type: ignore[arg-type]
+                    )
+                    stack.callback(stop)
+                    return modal.forward(proxy_port)
+
+                if dashboard_auth:
+                    if dashboard_user and dashboard_password:
+                        ray_tunnel = await stack.enter_async_context(
+                            _forward_authed(RAY_DASHBOARD_PORT)
+                        )
+                        print(f"Ray dashboard (password-protected): {ray_tunnel.url}")
+                else:
+                    ray_tunnel = await stack.enter_async_context(
+                        cluster.forward_dashboard()
+                    )
+                    print(f"Ray dashboard: {ray_tunnel.url}")
                 result = await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
                 if not result.is_success:
                     run_record.error_message = result.message

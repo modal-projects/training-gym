@@ -125,6 +125,7 @@
         ? [{ label: "Open in W&B", url: wandbUrl }]
         : [],
   );
+  let trackioUrl = $derived(run?.trackio_url || run?.config_summary?.trackio_url || "");
 
   $effect(() => {
     const id = runId;
@@ -1337,6 +1338,17 @@
           <ExternalLink size={12} strokeWidth={2.1} />
         </a>
       {/each}
+      {#if trackioUrl}
+        <a
+          class="header-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"
+          href={trackioUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span>Trackio</span>
+          <ExternalLink size={12} strokeWidth={2.1} />
+        </a>
+      {/if}
       {#if run?.modal_app_url}
         <a
           class="header-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"

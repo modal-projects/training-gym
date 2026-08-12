@@ -103,10 +103,9 @@ _EXPORTS = {
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_6_27b_Recipe",
     ),
-    "Qwen3_8_27B": ("modal_training_gym.common.models", "Qwen3_8_27B"),
-    "Qwen3_8_27b_Recipe": (
+    "Qwen3_6_27b_Agentic_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
-        "Qwen3_8_27b_Recipe",
+        "Qwen3_6_27b_Agentic_Recipe",
     ),
     "Qwen3_VL_8B": ("modal_training_gym.common.models", "Qwen3_VL_8B"),
     "Qwen3_VL_8b_Recipe": (
@@ -121,6 +120,7 @@ _EXPORTS = {
     "score_in_sandbox": ("modal_training_gym.common.eval", "score_in_sandbox"),
     "SlimeRecipe": ("modal_training_gym.train_recipes.slime_recipe", "SlimeRecipe"),
     "ToolCall": ("modal_training_gym.common.models", "ToolCall"),
+    "TrackioConfig": ("modal_training_gym.common.trackio", "TrackioConfig"),
     "TrainConfig": ("modal_training_gym.common.train", "TrainConfig"),
     "TrainingGymConfigError": (
         "modal_training_gym.common.errors",
@@ -186,6 +186,7 @@ __all__ = [
     "Qwen3_6_35B",
     "Qwen3_6_27B",
     "Qwen3_6_27b_Recipe",
+    "Qwen3_6_27b_Agentic_Recipe",
     "Qwen3_8_27B",
     "Qwen3_8_27b_Recipe",
     "Qwen3_ASR_1_7b_Recipe",
@@ -193,6 +194,7 @@ __all__ = [
     "score_in_sandbox",
     "SlimeRecipe",
     "ToolCall",
+    "TrackioConfig",
     "TrainConfig",
     "TrainingGymConfigError",
     "TrainingGymError",

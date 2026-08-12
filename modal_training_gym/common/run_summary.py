@@ -118,6 +118,7 @@ class ConfigSummary(BaseModel):
     wandb_training_run_id: str = ""
     wandb_url: str | None = None
     wandb_links: list[WandbLink] = Field(default_factory=list)
+    trackio_url: str | None = None
 
 
 class TrainResultSummary(BaseModel):
@@ -200,6 +201,7 @@ class RunSummary(BaseModel):
     config_summary: JsonDict | ConfigSummary = Field(default_factory=dict)
     train_result: TrainResultSummary | None = None
     wandb_links: list[WandbLink] = Field(default_factory=list)
+    trackio_url: str | None = None
     resume_state: ResumeState | None = None
 
     config: JsonDict = Field(default_factory=dict)
@@ -319,6 +321,7 @@ def _config_summary(config: object, training_run_id: str) -> ConfigSummary | Jso
     model = _mapping(config.get("model"))
     recipe = _mapping(config.get("recipe")) or _mapping(config.get("preset"))
     wandb = _mapping(config.get("wandb"))
+    trackio = _mapping(config.get("trackio"))
     dataset = _mapping(config.get("dataset"))
     dataset_name = (
         _text(dataset.get("hf_repo"))
@@ -341,6 +344,7 @@ def _config_summary(config: object, training_run_id: str) -> ConfigSummary | Jso
             group=wandb.get("group"),
             run_id=wandb_run_id if wandb.get("project") and wandb.get("entity") else "",
         ),
+        trackio_url=_text(trackio.get("url")) or None,
     )
 
 
@@ -536,6 +540,11 @@ def build_run_summary(
         result_summary.wandb_links if result_summary else [],
         config_links,
     )
+    trackio_url = (
+        config_summary.trackio_url
+        if isinstance(config_summary, ConfigSummary)
+        else None
+    )
     config_model = (
         config_summary.model_name if isinstance(config_summary, ConfigSummary) else ""
     )
@@ -578,6 +587,7 @@ def build_run_summary(
         config_summary=config_summary,
         train_result=result_summary,
         wandb_links=links,
+        trackio_url=trackio_url,
         resume_state=_resume_state(metadata),
         config=config,
         metadata=metadata or None,

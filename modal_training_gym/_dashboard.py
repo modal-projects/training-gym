@@ -55,6 +55,12 @@ from modal_training_gym.common.training_rollout import (
     TrainingRolloutSummary,
     _apply_parsed,
 )
+from modal_training_gym.common.trackio import (
+    TRACKIO_DATA_PATH,
+    TRACKIO_MOUNT_PATH,
+    TRACKIO_SECRET_NAME,
+    TRACKIO_VOLUME_NAME,
+)
 
 SummaryLoader = Callable[[], Awaitable[list[JsonDict]]]
 
@@ -118,6 +124,16 @@ def _build_image() -> modal.Image:
 image = _build_image()
 
 app = modal.App(DASHBOARD_APP_NAME, image=image)
+
+TRACKIO_VERSION = "0.35.0"
+TRACKIO_SERVER_PORT = 7860
+TRACKIO_PROXY_PORT = 8000
+trackio_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install("modal", "pydantic", f"trackio=={TRACKIO_VERSION}")
+    .add_local_python_source("modal_training_gym", copy=True)
+)
+trackio_volume = modal.Volume.from_name(TRACKIO_VOLUME_NAME, create_if_missing=True)
 
 STATIC_DIR = "/app/frontend/dist"
 
@@ -279,6 +295,29 @@ def ensure_creds_secret(interactive: bool = False) -> bool:
         return False
 
 
+def ensure_trackio_secret() -> bool:
+    """Create the stable write-token Secret used by the Trackio service."""
+    if not _is_local():
+        return True
+    try:
+        modal.Secret.from_name(TRACKIO_SECRET_NAME).hydrate()
+        return True
+    except Exception:
+        pass
+
+    try:
+        modal.Secret.objects.create(
+            TRACKIO_SECRET_NAME,
+            {"TRACKIO_WRITE_TOKEN": _secrets.token_urlsafe(32)},
+            allow_existing=True,
+        )
+        print(f"Provisioned Modal Secret {TRACKIO_SECRET_NAME!r}.")
+        return True
+    except Exception as exc:
+        print(f"WARNING: failed to create Modal Secret {TRACKIO_SECRET_NAME!r}: {exc}")
+        return False
+
+
 def _password_secret_exists() -> bool:
     """True if the operator has configured a dashboard password Secret.
 
@@ -304,6 +343,14 @@ def _function_secrets() -> list[modal.Secret]:
     return secrets
 
 
+def _trackio_secrets() -> list[modal.Secret]:
+    """Secrets mounted on the permanent Trackio web server."""
+    secrets = [modal.Secret.from_name(TRACKIO_SECRET_NAME)]
+    if _password_secret_exists():
+        secrets.append(modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME))
+    return secrets
+
+
 def set_dashboard_password(password: str) -> None:
     """Set (or clear) the dashboard password.
 
@@ -324,6 +371,7 @@ def set_dashboard_password(password: str) -> None:
 # NOT auto-created — no secret means no auth.
 if _is_local():
     ensure_creds_secret(interactive=False)
+    ensure_trackio_secret()
 
 
 def _run_compact_sync() -> None:
@@ -364,6 +412,62 @@ def reconcile() -> None:
             print(f"  {result.training_run_id}: {result.reason}")
     else:
         print("No orphaned runs to reconcile.")
+
+
+@app.function(
+    image=trackio_image,
+    volumes={TRACKIO_MOUNT_PATH: trackio_volume},
+    secrets=_trackio_secrets(),
+    max_containers=1,
+    timeout=24 * 60 * 60,
+)
+@modal.web_server(port=TRACKIO_PROXY_PORT, startup_timeout=60)
+def trackio_dashboard() -> None:
+    """Serve all Trackio projects from one persistent, stable endpoint."""
+    import threading
+
+    import trackio
+
+    from modal_training_gym.common.auth_proxy import start_auth_proxy
+
+    write_token = os.environ["TRACKIO_WRITE_TOKEN"]
+    os.environ.update(
+        {
+            "TRACKIO_DIR": TRACKIO_DATA_PATH,
+            "TRACKIO_SQLITE_JOURNAL_MODE": "delete",
+            "TRACKIO_SQLITE_MMAP_SIZE": "0",
+            "GRADIO_SERVER_PORT": str(TRACKIO_SERVER_PORT),
+        }
+    )
+    os.makedirs(TRACKIO_DATA_PATH, exist_ok=True)
+
+    trackio.show(
+        open_browser=False,
+        block_thread=False,
+        host="127.0.0.1",
+        share=False,
+    )
+    start_auth_proxy(
+        target_host="127.0.0.1",
+        target_port=TRACKIO_SERVER_PORT,
+        username="training-gym",
+        password=os.environ.get("DASHBOARD_PASSWORD", ""),
+        write_token=write_token,
+        realm="Training Gym Trackio",
+        bind_port=TRACKIO_PROXY_PORT,
+    )
+
+    stop_commits = threading.Event()
+
+    def commit_periodically() -> None:
+        while not stop_commits.wait(30):
+            try:
+                trackio_volume.commit()
+            except Exception as exc:
+                print(f"Trackio volume commit: {exc}")
+
+    commit_thread = threading.Thread(target=commit_periodically, daemon=True)
+    commit_thread.start()
 
 
 @app.function(

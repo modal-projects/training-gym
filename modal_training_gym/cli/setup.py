@@ -24,7 +24,6 @@ import os
 import webbrowser
 
 from modal_training_gym.common.dashboard import (
-    DASHBOARD_APP_NAME,
     deployed_dashboard_url,
 )
 
@@ -76,13 +75,20 @@ def setup(require_proxy_auth: bool, interactive: bool = True) -> str:
             "Modal Secret — the dashboard will not be able to stream Modal "
             "app logs."
         )
+    if not dashboard.ensure_trackio_secret():
+        print(
+            "WARNING: continuing without the Trackio write-token Secret — "
+            "the permanent Trackio endpoint may not start."
+        )
 
     with modal.enable_output():
         dashboard.app.deploy()
 
     web_url = dashboard.fastapi_app.get_web_url()
+    trackio_url = dashboard.trackio_dashboard.get_web_url()
     save_dashboard_url(web_url, proxy_auth=require_proxy_auth)
     print(f"\nDashboard deployed: {web_url}")
+    print(f"Trackio deployed: {trackio_url}")
     print(f"Saved dashboard URL to {CONFIG_PATH}")
     return web_url
 
@@ -262,18 +268,18 @@ def ensure_dashboard_deployed() -> str | None:
             get_dashboard_url,
             save_dashboard_url,
         )
+        from modal_training_gym.common.trackio import deployed_trackio_url
 
         web_url = deployed_dashboard_url()
-        if web_url:
+        trackio_url = deployed_trackio_url()
+        if web_url and trackio_url:
             # Already deployed — keep the local toml in sync with the live URL.
             if get_dashboard_url() != web_url:
                 save_dashboard_url(web_url)
             return web_url
 
-        print(
-            f"Training-gym dashboard ({DASHBOARD_APP_NAME!r}) is not deployed — "
-            "deploying it now (this happens once)."
-        )
+        missing = "dashboard" if not web_url else "permanent Trackio endpoint"
+        print(f"Training-gym {missing} is not deployed — deploying it now.")
         return setup(
             interactive=False,
             require_proxy_auth=get_dashboard_proxy_auth() is True,

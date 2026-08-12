@@ -153,6 +153,7 @@ Difficulty is a rough signal for where to start:
 | [`007_param_sweep`](https://gym.modal.dev/tutorials/rl/007_param_sweep/) | Sweep hyperparameters across runs | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F007_param_sweep%2F007_param_sweep.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`008_computer_use`](https://gym.modal.dev/tutorials/rl/008_computer_use/) | GUI grounding to predict click coordinates | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F008_computer_use%2F008_computer_use.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`009_cross_tokenizer_distillation`](https://gym.modal.dev/tutorials/rl/009_cross_tokenizer_distillation/) | Cross-tokenizer agentic distillation on BFCL v3 multi-turn | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F009_cross_tokenizer_distillation%2F009_cross_tokenizer_distillation.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`010_agentic_harbor`](https://gym.modal.dev/tutorials/rl/010_agentic_harbor/) | Fork-backed multi-turn coding agents on partitioned Harbor tasks | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F010_agentic_harbor%2F010_agentic_harbor.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### Single Node
 
@@ -178,3 +179,12 @@ Difficulty is a rough signal for where to start:
 
 > [!IMPORTANT]
 > Single-node training is open to everyone. Multi-node clusters — required for larger models — are still in Beta. [**Contact us on Slack**](https://modal.com/slack) for access.
+
+## Fork-backed Harbor agents
+
+The [`010_agentic_harbor`](tutorials/rl/010_agentic_harbor/010_agentic_harbor.py)
+tutorial uses the normal model/recipe/`TrainConfig` pattern with a pinned Slime
+fork. Run `scripts/partition_harbor_dataset.py prepare` to create the
+`eval`, `train-100`, `train-300`, `train-1000`, and `train-full` subsets, then
+select subset names directly in the tutorial. Its optional `mixed` command
+filters a probed train subset to fully gradeable tasks with mixed outcomes.

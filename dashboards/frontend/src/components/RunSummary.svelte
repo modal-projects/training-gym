@@ -74,6 +74,7 @@
   );
   let groupTags = $derived(getGroupTags(run));
   let wandbLinks = $derived(run?.wandb_links || []);
+  let trackioUrl = $derived(run?.trackio_url || run?.config_summary?.trackio_url || "");
   let attemptMetadata = $derived.by(() => {
     const state = run?.resume_state;
     if (!state) return null;
@@ -264,6 +265,20 @@
             </a>
           {/each}
         </div>
+      </section>
+    {/if}
+
+    {#if trackioUrl}
+      <section class="summary-section">
+        <h3 class="summary-section-title">Trackio</h3>
+        <a
+          class="[border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[999px] text-[12px] leading-[16px] p-[2px_8px] [text-decoration:none] hover:[text-decoration:underline] text-(--accent)"
+          href={trackioUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Open in Trackio
+        </a>
       </section>
     {/if}
 

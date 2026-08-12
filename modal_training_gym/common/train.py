@@ -506,6 +506,13 @@ class TrainConfig:
         recipe = self.recipe
 
         wandb = getattr(recipe, "wandb", None)
+        trackio = getattr(recipe, "trackio", None)
+        if trackio:
+            from modal_training_gym.common.trackio import (
+                deployed_trackio_url,
+                trackio_project_url,
+            )
+
         summary: dict[str, Any] = {
             "model": {"model_name": model.model_name} if model else {},
             "wandb": (
@@ -516,6 +523,15 @@ class TrainConfig:
                     "run_id": training_run_id[:8],
                 }
                 if wandb
+                else {}
+            ),
+            "trackio": (
+                {
+                    "project": trackio.project,
+                    "run_name": trackio.run_name or training_run_id,
+                    "url": trackio_project_url(deployed_trackio_url(), trackio.project),
+                }
+                if trackio
                 else {}
             ),
             "dataset": {

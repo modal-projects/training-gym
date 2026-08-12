@@ -381,6 +381,18 @@
                           <ExternalLink class="training-open-modal-link-icon" size={12} strokeWidth={2.1} />
                         </a>
                       {/each}
+                      {#if run.trackio_url}
+                        <a
+                          class="training-open-modal-link"
+                          href={run.trackio_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onclick={(event) => event.stopPropagation()}
+                        >
+                          <span class="open-modal-link-label">Trackio</span>
+                          <ExternalLink class="training-open-modal-link-icon" size={12} strokeWidth={2.1} />
+                        </a>
+                      {/if}
                     </div>
                   </td>
                 </tr>
