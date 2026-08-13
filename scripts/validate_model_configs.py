@@ -7,9 +7,10 @@ framework's recipe and dataset. Everything below is framework-agnostic.
 
 Usage:
     uv run scripts/validate_model_configs.py list
-    uv run scripts/validate_model_configs.py list --pr-only --framework slime
+    uv run scripts/validate_model_configs.py list --names-only --pr-only
+    uv run scripts/validate_model_configs.py list --framework miles
     uv run scripts/validate_model_configs.py check -m qwen3-4b
-    uv run scripts/validate_model_configs.py check -m Kimi-K2.5
+    uv run scripts/validate_model_configs.py check -m Qwen3.5-4B-Miles
     uv run scripts/validate_model_configs.py summarize -d results
 """
 
@@ -182,6 +183,21 @@ def available_model_names(
     """
     return [
         config.name for config in _ValidationConfig.select(framework, pr_only=pr_only)
+    ]
+
+
+def available_models(
+    framework: Framework | None = None, *, pr_only: bool = False
+) -> list[dict[str, str | bool]]:
+    """Registry details for humans inspecting supported validation models."""
+    return [
+        {
+            "name": config.name,
+            "model_name": config.model_name,
+            "framework": config.framework.value,
+            "run_on_pr": config.run_on_pr,
+        }
+        for config in _ValidationConfig.select(framework, pr_only=pr_only)
     ]
 
 
@@ -566,7 +582,7 @@ def __main__():
     )
 
     list_parser = subparsers.add_parser(
-        "list", help="Print available model names as a JSON array and exit."
+        "list", help="Print available models and their frameworks as JSON."
     )
     list_parser.add_argument(
         "--framework",
@@ -579,7 +595,12 @@ def __main__():
         action="store_true",
         help="Only models a pull request fans out on its own (run_on_pr=True), "
         "i.e. what belongs in a PR matrix. The default lists everything, "
-        "including dispatch-only models like Kimi on miles.",
+        "including dispatch-only models.",
+    )
+    list_parser.add_argument(
+        "--names-only",
+        action="store_true",
+        help="Print only model names as a JSON array, for CI matrix consumers.",
     )
 
     summarize_parser = subparsers.add_parser(
@@ -605,12 +626,12 @@ def __main__():
     args = parser.parse_args()
 
     if args.command == "list":
+        framework = Framework(args.framework) if args.framework else None
         print(
             json.dumps(
-                available_model_names(
-                    Framework(args.framework) if args.framework else None,
-                    pr_only=args.pr_only,
-                )
+                available_model_names(framework, pr_only=args.pr_only)
+                if args.names_only
+                else available_models(framework, pr_only=args.pr_only)
             )
         )
         return

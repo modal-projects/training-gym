@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
 
 # Canonical mount point for `modal_training_gym/tools/` inside every framework
-# image. Framework-agnostic helpers (e.g. `Kimi_K2_5.download`) shell out
-# to scripts at this path, so it must exist on every launcher's image.
+# image. Framework-agnostic helpers shell out to scripts at this path, so it
+# must exist on every launcher's image.
 TOOLS_REMOTE_PATH = "/opt/training-gym/tools"
 
 # Local path to the tools directory. Shipped with the package so
@@ -26,8 +26,8 @@ def mount_tools_dir(image: "Image") -> "Image":
     """Attach `modal_training_gym/tools/` to a Modal image at `TOOLS_REMOTE_PATH`.
 
     Every framework launcher should call this on its training image(s) so
-    cross-framework scripts (e.g. `convert_kimi_int4_to_bf16.py`) resolve at
-    a predictable remote path regardless of the framework image's layout.
+    cross-framework scripts resolve at a predictable remote path regardless of
+    the framework image's layout.
     """
     return image.add_local_dir(
         TOOLS_LOCAL_PATH,

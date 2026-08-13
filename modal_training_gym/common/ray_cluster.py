@@ -327,18 +327,50 @@ class ModalRayCluster:
         _TERMINAL = {"SUCCEEDED", "FAILED", "STOPPED"}
         retry_count = 0
 
-        while retry_count < max_retries:
-            log_stream = self._client.tail_job_logs(job_id)
-            if inspect.isawaitable(log_stream):
-                log_stream = await log_stream
-            if hasattr(log_stream, "__aiter__"):
-                async for line in log_stream:
-                    print(line, end="", flush=True)
-            else:
-                for line in log_stream:
-                    print(line, end="", flush=True)
+        async def _poll_status() -> str | None:
+            try:
+                job_status = self._client.get_job_status(job_id)
+                if inspect.isawaitable(job_status):
+                    job_status = await job_status
+                return job_status.value
+            except Exception as exc:  # noqa: BLE001
+                print(f"\n[ray] Status poll failed; retrying: {exc}", flush=True)
+                return None
 
-            status = self._client.get_job_status(job_id).value
+        while retry_count < max_retries:
+
+            async def _tail_logs() -> None:
+                log_stream = self._client.tail_job_logs(job_id)
+                if inspect.isawaitable(log_stream):
+                    log_stream = await log_stream
+                if hasattr(log_stream, "__aiter__"):
+                    async for line in log_stream:
+                        print(line, end="", flush=True)
+                else:
+                    for line in log_stream:
+                        print(line, end="", flush=True)
+
+            tail_task = asyncio.create_task(_tail_logs())
+            try:
+                while not tail_task.done():
+                    status = await _poll_status()
+                    if status in _TERMINAL:
+                        done, _ = await asyncio.wait({tail_task}, timeout=5)
+                        if done:
+                            await tail_task
+                        break
+                    await asyncio.sleep(2)
+                else:
+                    await tail_task
+                    status = await _poll_status() or "UNKNOWN"
+            finally:
+                if not tail_task.done():
+                    tail_task.cancel()
+                    try:
+                        await tail_task
+                    except asyncio.CancelledError:
+                        pass
+
             if status in _TERMINAL:
                 break
             retry_count += 1
