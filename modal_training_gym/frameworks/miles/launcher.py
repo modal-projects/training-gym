@@ -950,9 +950,7 @@ def build_miles_app(
             original_save = miles.save
             original_load = miles.load
             miles.save = save_root
-            resume_checkpoint = torch_dist_resume_checkpoint(
-                save_root, is_complete=_is_complete_torch_dist_checkpoint
-            )
+            resume_checkpoint = torch_dist_resume_checkpoint(save_root)
             record_resume_checkpoint(run_record, resume_checkpoint)
             await run_record.save(is_async=True)
 
