@@ -714,11 +714,6 @@ body::before {
   margin-top: 0;
 }
 
-.sl-markdown-content > p:first-of-type {
-  color: var(--sl-color-gray-2);
-  font-size: 1.03rem;
-}
-
 .sl-markdown-content h2 {
   color: var(--sl-color-white);
   font-size: var(--sl-text-h2);
