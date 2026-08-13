@@ -63,8 +63,13 @@ if OLD not in src:
         "payload construction has changed. Re-check it before shipping."
     )
 
+old_at = src.index(OLD)
+scope = src[
+    max(src.rfind("\ndef ", 0, old_at), src.rfind("\n    def ", 0, old_at)) + 1 : old_at
+]
+
 # Matching OLD says nothing about the `state` binding the injected branch reads.
-if "state = GenerateState(args)" not in src:
+if "state = GenerateState(args)" not in scope:
     raise SystemExit(
         "Gemma-4 VL rollout text patch expects a local `state = GenerateState(args)` "
         "in miles' sglang_rollout.py; it is gone, so the injected branch would never "
@@ -73,8 +78,7 @@ if "state = GenerateState(args)" not in src:
 
 # The gate also reads payload["image_data"], which must already be assigned where
 # the replaced block sits.
-image_data_at = src.find('payload["image_data"]')
-if image_data_at == -1 or image_data_at > src.index(OLD):
+if 'payload["image_data"]' not in scope:
     raise SystemExit(
         'Gemma-4 VL rollout text patch expects payload["image_data"] to be set '
         "before the token block it replaces in miles' sglang_rollout.py; it is not, "
