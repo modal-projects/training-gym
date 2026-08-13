@@ -798,6 +798,7 @@ class SlimeRecipe(BaseTrainRecipe):
         }
 
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
+        super().validate_model_parallelism(model)
         validate_num_experts_divisible_by_expert_parallel_size(self, model)
 
     # ── Internal ──────────────────────────────────────────────────────────────

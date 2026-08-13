@@ -133,6 +133,7 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     rollout_temperature: float = 1.0
     # None so text mode omits the flag and miles keeps its default; vision mode sets it.
     rollout_top_p: float | None = None
+    rollout_top_k: int | None = None
     # generation_config.json's eos_token_id: <eos>, <turn|>, <|tool_response>.
     rollout_stop_token_ids: list[int] | None = field(
         default_factory=lambda: [1, 106, 50]
