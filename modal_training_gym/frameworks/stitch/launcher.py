@@ -31,13 +31,16 @@ import time
 import uuid
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
+from typing import cast
 
 import cloudpickle
 import modal
 import modal.experimental
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS, modal_tag_value
+from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework, resolve_caller_module
 from modal_training_gym.common.modal_refs import register_modal_cloudpickle_reducers
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
@@ -201,7 +204,11 @@ def _record_run_started(
     Volume so the disagg run shows up in the dashboard (the deployed app is
     already tagged for auto-discovery; this adds the run record miles writes for
     itself in the colocated flow). Best-effort: a metadata hiccup must never take
-    down the training run, so failures are logged and swallowed."""
+    down the training run, so failures are logged and swallowed.
+
+    The launching client writes the record first (sweep metadata, initializing
+    phase), so this loads and mutates it rather than replacing it — a fresh
+    record would drop the group id and blank the phase."""
     try:
         modal_app_id = modal_app_id or _resolve_container_app_id()
         wandb_block: dict = {}
@@ -235,16 +242,24 @@ def _record_run_started(
             "global_batch_size": recipe.train.global_batch_size,
         }
         created_at = int(time.time())
-        run_record = TrainingRun(
-            training_run_id=run_id,
-            modal_app_id=modal_app_id,
-            modal_app_url=modal_app_dashboard_url(modal_app_id),
-            framework=Framework.STITCH,
-            config=config_summary,
-            status=TrainingRunStatus.RUNNING,
-            created_at=created_at,
-            started_at=created_at,
-        )
+        try:
+            run_record = cast(TrainingRun, TrainingRun.from_id(run_id))
+            run_record.modal_app_id = modal_app_id
+            run_record.modal_app_url = modal_app_dashboard_url(modal_app_id)
+            run_record.config = config_summary
+            run_record.status = TrainingRunStatus.RUNNING
+            run_record.started_at = run_record.started_at or created_at
+        except KeyError:
+            run_record = TrainingRun(
+                training_run_id=run_id,
+                modal_app_id=modal_app_id,
+                modal_app_url=modal_app_dashboard_url(modal_app_id),
+                framework=Framework.STITCH,
+                config=config_summary,
+                status=TrainingRunStatus.RUNNING,
+                created_at=created_at,
+                started_at=created_at,
+            )
         if wandb_block:
             record_wandb_attempt(
                 run_record,
@@ -289,6 +304,7 @@ def build_stitch_app(
     training_run_id: str = "",
     name: str | None = None,
     group_id: str | None = None,
+    checkpoint: Checkpoint | None = None,
 ) -> modal.App:
     """Build the Modal App for disaggregated miles training.
 
@@ -299,6 +315,17 @@ def build_stitch_app(
     drives miles; :class:`~modal_training_gym.common.train.TrainConfig` calls it
     for :class:`StitchRecipe` recipes.
     """
+    if checkpoint is not None:
+        # Resuming would have to move both halves at once: the trainer's load
+        # path and the pool's served baseline (every delta applies against it),
+        # which for a quantized run means re-running the conversion off the
+        # checkpoint. Rejected rather than silently starting from the base model.
+        raise TrainingGymConfigError(
+            "resuming from a checkpoint is not supported for stitch runs: the "
+            "rollout pool's served baseline is built by prepare_checkpoints "
+            "from the recipe's source checkpoint, so a resumed trainer and the "
+            "pool would disagree on the delta baseline"
+        )
     StitchRecipe._resolve_data_paths(dataset)  # validate dataset paths resolve
 
     # Serialize the caller's module by value so inline ModelConfig/DatasetConfig
@@ -534,6 +561,28 @@ def build_stitch_app(
         ray_cluster.start_ray_head(my_ip, n_train_nodes, ray_port=RAY_PORT)
         for volume in (hf_cache_volume, data_volume, checkpoints_volume):
             volume.reload()
+        # ``launch(prepare_inputs=False)`` (the default, and what a sweep uses)
+        # skips the client-side prep calls, so the trainer prepares its own
+        # inputs when they're missing rather than failing on a cold volume.
+        prompt_data, eval_paths = StitchRecipe._resolve_data_paths(dataset)
+        if not Path(prompt_data).exists():
+            print(f"Preparing dataset ({prompt_data})...")
+            dataset.prepare(prompt_data, eval_paths)
+            data_volume.commit()
+        if not trainer_helpers.model_is_cached(model):
+            print(f"Downloading model {model.model_name}...")
+            model.download()
+            train_recipe.download_model()
+            hf_cache_volume.commit()
+        # The served baseline is the one input the trainer can't build here: the
+        # conversion wants its own GPU function (prepare_checkpoints).
+        for path in (train_recipe.hf_checkpoint, train_recipe.bf16_checkpoint_path):
+            if str(path).startswith("/") and not Path(path).exists():
+                raise RuntimeError(
+                    f"prepared checkpoint {path} is missing — run the app's "
+                    "prepare_checkpoints function (TrainConfig.train(), or "
+                    "launch(prepare_inputs=True)) before training"
+                )
 
         payload = recipe.to_payload(model=model, dataset=dataset)
         cfg = _MilesArgs(
@@ -771,7 +820,11 @@ def smoke_flash_pool(
     trainer_helpers.smoke_flash_pool(
         app_name=app_name,
         cls_name="Server",
-        model_name=model.model_path or model.model_name,
+        # The same string the pool booted with (--served-model-name): for a
+        # quantized run that is the prepared baseline, not the HF repo id.
+        model_name=recipe.serve.served_checkpoint_path
+        or model.model_path
+        or model.model_name,
         weight_version=weight_version,
         expect_min_containers=recipe.serve.min_containers,
         timeout_seconds=timeout_seconds,

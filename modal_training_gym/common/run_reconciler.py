@@ -7,10 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from modal_training_gym.common.modal_lifecycle import (
-    app_live_status,
-    get_app_lifecycle_state,
-)
+from modal_training_gym.common.modal_lifecycle import resolve_app_liveness
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.utils.metadata import (
     MetadataStore,
@@ -21,6 +18,11 @@ from modal_training_gym.utils.metadata import (
 
 PRE_APP_TIMEOUT_SECONDS = 90 * 60
 QUEUED_STAGE_TIMEOUT_SECONDS = 4 * 3600
+# Backstop for an active run whose Modal app can't be queried (persistent API
+# failures returning ``app_live is None``): without this, a run that made it
+# past the queued stages could sit in ``running`` forever. A dead app
+# (``app_live is False``) is caught immediately by ``stale_modal_app_terminated``;
+# this only covers the never-resolves-either-way case, so the window is long.
 STALE_ACTIVE_TIMEOUT_SECONDS = 24 * 3600
 
 QUEUEABLE_STAGES = frozenset({"initializing", "download_model", "convert_model"})
@@ -94,7 +96,6 @@ def reconcile_decision(
     if has_train_result:
         return ReconcileDecision(False)
 
-    last_activity = _run_last_activity(run)
     app_id = str(run.modal_app_id or "").strip()
 
     if app_id and app_live is False:
@@ -123,10 +124,14 @@ def reconcile_decision(
         if queued_at and now - queued_at >= QUEUED_STAGE_TIMEOUT_SECONDS:
             return ReconcileDecision(True, reason="stale_queued_stage")
 
-    if last_activity and now - last_activity >= STALE_ACTIVE_TIMEOUT_SECONDS:
-        if not app_id:
-            return ReconcileDecision(True, reason="stale_running_no_update")
-        if app_live is False:
+    # Active run (past the queued stages) whose Modal app can't be queried and
+    # has shown no activity for a very long window. The queued-stage and
+    # unreachable-while-queued heuristics above only fire while still queued, so
+    # this is the last-resort backstop for a run that resolves neither live nor
+    # dead. Scoped to ``app_live is None`` so a live app is never reconciled.
+    if app_id and app_live is None:
+        last_activity = _run_last_activity(run)
+        if last_activity and now - last_activity >= STALE_ACTIVE_TIMEOUT_SECONDS:
             return ReconcileDecision(
                 True,
                 reason="stale_running_no_update",
@@ -181,22 +186,20 @@ def reconcile_orphan_runs(
     *,
     dry_run: bool = False,
     now: int | None = None,
-    check_app_live: Callable[[str], bool | None] | None = None,
+    get_lifecycle_state: Callable[[str], int | None] | None = None,
     has_train_result: Callable[[str], bool] | None = None,
 ) -> list[ReconcileResult]:
     """Terminalize orphaned ``running`` runs. Returns reconciled run summaries."""
     now_ts = int(now if now is not None else time.time())
-    check_live = check_app_live or app_live_status
     has_result = has_train_result or _default_has_train_result
 
     results: list[ReconcileResult] = []
     for run in _load_running_runs():
         app_id = str(run.modal_app_id or "").strip()
-        modal_app_state: int | None = None
-        app_live: bool | None = None
-        if app_id:
-            modal_app_state = get_app_lifecycle_state(app_id)
-            app_live = check_live(app_id)
+        modal_app_state, app_live = resolve_app_liveness(
+            app_id,
+            get_lifecycle_state=get_lifecycle_state,
+        )
 
         decision = reconcile_decision(
             run,
@@ -224,17 +227,21 @@ def reconcile_orphan_runs(
         if run.started_at:
             run.duration_seconds = max(0, finished_at - run.started_at)
 
-        results.append(
-            ReconcileResult(
-                training_run_id=run.training_run_id,
-                reason=decision.reason,
-                previous_status=previous_status,
-            )
+        result = ReconcileResult(
+            training_run_id=run.training_run_id,
+            reason=decision.reason,
+            previous_status=previous_status,
         )
-        if not dry_run:
-            try:
-                run.save()
-            except Exception as exc:
-                print(f"WARNING: failed to reconcile {run.training_run_id}: {exc}")
+        if dry_run:
+            results.append(result)
+            continue
+
+        try:
+            run.save()
+        except Exception as exc:
+            print(f"WARNING: failed to reconcile {run.training_run_id}: {exc}")
+            continue
+
+        results.append(result)
 
     return results

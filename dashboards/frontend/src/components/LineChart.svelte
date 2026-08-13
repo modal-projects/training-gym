@@ -91,14 +91,14 @@
   });
 </script>
 
-<div class="chart">
+<div class="min-w-0">
   {#if title}
-    <div class="chart-title">{title}</div>
+    <div class="text-(--text-bright) text-[12px] font-[600] mb-[6px]">{title}</div>
   {/if}
 
   {#if rows.length}
     <div
-      class="chart-frame"
+      class="relative bg-(--color-c-gray-08,#1c1c1c) rounded-[6px] cursor-crosshair"
       bind:this={chartEl}
       style:height={`${height}px`}
       role="img"
@@ -106,7 +106,7 @@
       onpointermove={onPointerMove}
       onpointerleave={onPointerLeave}
     >
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <svg class="block w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {#if rows.length > 1}
           <path d={path} fill="none" stroke={color} stroke-width="1.5" vector-effect="non-scaling-stroke" />
         {:else}
@@ -118,7 +118,7 @@
             x2={hoveredPoint.x}
             y1="0"
             y2="100"
-            class="hover-line"
+            class="stroke-[rgba(255,255,255,0.22)] [stroke-width:1]"
             vector-effect="non-scaling-stroke"
           />
         {/if}
@@ -136,7 +136,7 @@
 
       {#if hoveredPoint}
         <span
-          class="point-dot hover-dot"
+          class="point-dot z-[2]! w-[8px]! h-[8px]!"
           style:left={`${hoveredPoint.x}%`}
           style:top={`${hoveredPoint.y}%`}
           style:background={color}
@@ -149,96 +149,12 @@
           class:reverse={reverseTooltip}
           style:left={`${hoveredPoint.x}%`}
         >
-          <div class="tooltip-title">{formatX(hoveredRow)}</div>
-          <div class="tooltip-value">{formatY(hoveredRow.y, hoveredRow)}</div>
+          <div class="text-[rgba(255,255,255,0.72)]">{formatX(hoveredRow)}</div>
+          <div class="[color:white] font-[600] [font-variant-numeric:tabular-nums]">{formatY(hoveredRow.y, hoveredRow)}</div>
         </div>
       {/if}
     </div>
   {:else}
-    <div class="chart-empty">No data.</div>
+    <div class="text-(--muted) text-[12px] leading-[16px]">No data.</div>
   {/if}
 </div>
-
-<style>
-  .chart {
-    min-width: 0;
-  }
-
-  .chart-title {
-    color: var(--text-bright);
-    font-size: 12px;
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-
-  .chart-frame {
-    position: relative;
-    background: var(--color-c-gray-08, #1c1c1c);
-    border-radius: 6px;
-    cursor: crosshair;
-  }
-
-  svg {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-
-  .hover-line {
-    stroke: rgba(255, 255, 255, 0.22);
-    stroke-width: 1;
-  }
-
-  .point-dot {
-    position: absolute;
-    z-index: 1;
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    pointer-events: none;
-    transform: translate(-50%, -50%);
-    box-shadow: 0 0 0 2px var(--color-c-gray-08, #1c1c1c);
-  }
-
-  .hover-dot {
-    z-index: 2;
-    width: 8px;
-    height: 8px;
-  }
-
-  .chart-tooltip {
-    position: absolute;
-    top: 8px;
-    z-index: 2;
-    pointer-events: none;
-    transform: translateX(12px);
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.82);
-    color: white;
-    padding: 5px 7px;
-    font-size: 12px;
-    line-height: 16px;
-    white-space: nowrap;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
-  }
-
-  .chart-tooltip.reverse {
-    transform: translateX(calc(-100% - 12px));
-  }
-
-  .tooltip-title {
-    color: rgba(255, 255, 255, 0.72);
-  }
-
-  .tooltip-value {
-    color: white;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .chart-empty {
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 16px;
-  }
-</style>

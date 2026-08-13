@@ -18,7 +18,7 @@ else:
     src = rollout_path.read_text()
     marker = "PATCHED_STOP_TOKEN_DIAGNOSTIC"
     if marker in src:
-        print("sglang_rollout.py already patched for stop-token diagnostics")
+        print("sglang_rollout.py already patched for stop-token state diagnostics")
     else:
         # --- Patch GenerateState.__init__ to log stop_token_ids ---
         old_init = "self.sampling_params: dict[str, Any] = dict("
@@ -53,24 +53,28 @@ else:
         else:
             src = src.replace(old_after, new_after, 1)
 
-        # --- Patch generate() to log the HTTP POST payload ---
-        old_payload = 'payload = {\n            "sampling_params": sampling_params,'
+    # --- Patch generate() to log the HTTP POST payload ---
+    payload_marker = "PATCHED_STOP_TOKEN_PAYLOAD_DIAGNOSTIC"
+    if payload_marker in src:
+        print("sglang_rollout.py already patched for stop-token payload diagnostics")
+    else:
+        old_payload = '    payload = {\n        "sampling_params": sampling_params,'
         new_payload = (
-            f"# {marker}: log payload stop_token_ids\n"
-            "        import logging as _stlog2\n"
-            "        _stlog2.getLogger('stop_token_diagnostic').info(\n"
-            "            f'[STOP_TOKEN_DIAG] generate() payload: '\n"
-            '            f\'sampling_params["stop_token_ids"]={sampling_params.get("stop_token_ids", "KEY_MISSING")}\'\n'
-            "        )\n"
-            '        payload = {\n            "sampling_params": sampling_params,'
+            f"    # {payload_marker}: log payload stop_token_ids\n"
+            "    import logging as _stlog2\n"
+            "    _stlog2.getLogger('stop_token_diagnostic').info(\n"
+            "        f'[STOP_TOKEN_DIAG] generate() payload: '\n"
+            '        f\'sampling_params["stop_token_ids"]={sampling_params.get("stop_token_ids", "KEY_MISSING")}\'\n'
+            "    )\n"
+            '    payload = {\n        "sampling_params": sampling_params,'
         )
         if old_payload not in src:
             print("WARNING: Could not find payload construction pattern")
         else:
             src = src.replace(old_payload, new_payload, 1)
 
-        rollout_path.write_text(src)
-        print("Patched sglang_rollout.py with stop-token diagnostics")
+    rollout_path.write_text(src)
+    print("Patched sglang_rollout.py with stop-token diagnostics")
 
 # ── Patch 2: post() in http_utils.py — log the actual JSON body ─────────────
 http_path = pathlib.Path("/root/slime/slime/utils/http_utils.py")

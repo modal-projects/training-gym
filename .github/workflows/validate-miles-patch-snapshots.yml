@@ -1,0 +1,40 @@
+name: Validate Miles patch snapshots
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/validate-miles-patch-snapshots.yml"
+      - "modal_training_gym/frameworks/miles/launcher.py"
+      - "modal_training_gym/train_recipes/miles_recipe/recipe.py"
+      - "scripts/fetch_miles_patch_snapshots.py"
+      - "tests/testdata/miles/*.input"
+
+jobs:
+  validate-snapshot:
+    runs-on: ubuntu-latest
+    environment: modal
+    permissions:
+      contents: read
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: training-gym
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Fetch source from pinned Miles image
+        run: uv run modal run scripts/fetch_miles_patch_snapshots.py
+
+      - name: Verify committed snapshot is current
+        run: |
+          git add -A -- tests/testdata/miles
+          git diff --cached --exit-code -- tests/testdata/miles

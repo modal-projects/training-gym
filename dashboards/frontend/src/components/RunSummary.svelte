@@ -1,15 +1,16 @@
 <script>
+  import { onDestroy } from "svelte";
+  import { Search } from "lucide-svelte";
   import StatusPill from "./StatusPill.svelte";
   import FrameworkStageProgress from "./FrameworkStageProgress.svelte";
   import TimeAgo from "./TimeAgo.svelte";
-  import { formatTagValue, getGroupTags, smoothedStageLabel } from "../lib/format.js";
+  import { formatTagValue, getGroupTags } from "../lib/format.js";
 
   // The run-summary block shared by the list drawer and the detail page's
   // Summary tab, so both render identical metadata: status, stage, model,
   // dataset, recipe, timing, the full Slime parameter dump, and the tuned
   // recipe fields.
-  let { run, getStatus, showFrameworkStatus, getFrameworkStatus, modelName, fmtDuration } =
-    $props();
+  let { run, getStatus, showFrameworkStatus, modelName, fmtDuration } = $props();
 
   let recipe = $derived.by(() => run?.config?.recipe || run?.config?.preset || {});
   let recipeEntries = $derived.by(() =>
@@ -17,8 +18,55 @@
       ([, value]) => value !== undefined && value !== null && String(value) !== "",
     ),
   );
+  let recipeParams = $derived.by(() =>
+    recipeEntries.map(([key, value]) => {
+      let fullValue;
+      if (typeof value === "number") {
+        fullValue = Number.isInteger(value) ? String(value) : value.toExponential(1);
+      } else if (typeof value === "object") {
+        fullValue = JSON.stringify(value);
+      } else {
+        fullValue = String(value);
+      }
+      return {
+        key,
+        label: key.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase()),
+        fullValue,
+        displayValue: fullValue.length <= 72 ? fullValue : `${fullValue.slice(0, 71)}…`,
+      };
+    }),
+  );
   let recipeJson = $derived.by(() =>
-    Object.keys(recipe).length ? JSON.stringify(recipe, null, 2) : "",
+    recipeEntries.length ? JSON.stringify(Object.fromEntries(recipeEntries), null, 2) : "",
+  );
+  let paramFilter = $state("");
+  let copiedRecipeJson = $state(false);
+  let copyFailed = $state(false);
+  let copyResetTimer = null;
+
+  $effect(() => {
+    run?.run_id;
+    paramFilter = "";
+    copiedRecipeJson = false;
+    copyFailed = false;
+    if (copyResetTimer) {
+      clearTimeout(copyResetTimer);
+      copyResetTimer = null;
+    }
+  });
+  let filteredRecipeParams = $derived.by(() => {
+    const q = paramFilter.trim().toLowerCase();
+    if (!q) return recipeParams;
+    return recipeParams.filter(
+      (row) =>
+        row.key.toLowerCase().includes(q) ||
+        row.label.toLowerCase().includes(q) ||
+        row.fullValue.toLowerCase().includes(q),
+    );
+  });
+  let showParamFilter = $derived(recipeParams.length > 8 || Boolean(paramFilter.trim()));
+  let recipeSectionTitle = $derived(
+    String(run?.framework || "").toLowerCase() === "slime" ? "Slime parameters" : "Training recipe",
   );
   let modalAppUrl = $derived.by(() =>
     run?.modal_app_url ||
@@ -27,38 +75,19 @@
   let groupTags = $derived(getGroupTags(run));
   let wandbLinks = $derived(run?.wandb_links || []);
   let attemptMetadata = $derived.by(() => {
-    const metadata = run?.metadata;
-    if (!metadata || typeof metadata !== "object") return null;
-    const attemptCount = Number(metadata.attempt_count) || 0;
-    const lastAttemptStartedAt = Number(metadata.last_attempt_started_at) || 0;
-    const lastAttemptStatus = String(metadata.last_attempt_status || "");
-    const resumeCheckpointPath = String(metadata.resume_checkpoint_path || "");
-    const resumeCheckpointName = String(metadata.resume_checkpoint_name || "");
-    const resumeFromIteration = Number(metadata.resume_from_iteration);
-    const resumedFromCheckpoint =
-      metadata.resumed_from_checkpoint === true || Boolean(resumeCheckpointPath);
-    if (
-      !attemptCount &&
-      !lastAttemptStartedAt &&
-      !lastAttemptStatus &&
-      !resumedFromCheckpoint
-    ) {
-      return null;
-    }
+    const state = run?.resume_state;
+    if (!state) return null;
     return {
-      attemptCount,
-      lastAttemptStartedAt,
-      lastAttemptStatus,
-      resumedFromCheckpoint,
-      resumeCheckpointPath,
-      resumeCheckpointName,
-      resumeFromIteration: Number.isFinite(resumeFromIteration) ? resumeFromIteration : null,
+      attemptCount: Number(state.attempt_count) || 0,
+      lastAttemptStartedAt: Number(state.last_attempt_started_at) || 0,
+      lastAttemptStatus: String(state.last_attempt_status || ""),
+      resumedFromCheckpoint: state.resumed_from_checkpoint === true,
+      resumeCheckpointPath: String(state.resume_checkpoint_path || ""),
+      resumeCheckpointName: String(state.resume_checkpoint_name || ""),
+      resumeFromIteration:
+        state.resume_from_iteration == null ? null : Number(state.resume_from_iteration),
     };
   });
-
-  function isSlimeRun() {
-    return String(run?.framework || "").toLowerCase() === "slime";
-  }
 
   function frameworkProgress() {
     const p = run?.framework_progress;
@@ -71,10 +100,6 @@
       total,
       unit: p.unit || "step",
     };
-  }
-
-  function frameworkStatusLabel() {
-    return smoothedStageLabel(getFrameworkStatus?.(run), run?.framework_progress);
   }
 
   function progressLabel(progress) {
@@ -93,17 +118,27 @@
     return "—";
   }
 
-  function formatFieldLabel(field) {
-    return field.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  async function copyRecipeJson() {
+    if (!recipeJson) return;
+    try {
+      await navigator.clipboard.writeText(recipeJson);
+      copiedRecipeJson = true;
+      copyFailed = false;
+    } catch {
+      copiedRecipeJson = false;
+      copyFailed = true;
+    }
+    if (copyResetTimer) clearTimeout(copyResetTimer);
+    copyResetTimer = setTimeout(() => {
+      copiedRecipeJson = false;
+      copyFailed = false;
+      copyResetTimer = null;
+    }, 1200);
   }
 
-  function formatFieldValue(value) {
-    if (typeof value === "number") {
-      return Number.isInteger(value) ? String(value) : value.toExponential(1);
-    }
-    if (typeof value === "object") return JSON.stringify(value);
-    return String(value);
-  }
+  onDestroy(() => {
+    if (copyResetTimer) clearTimeout(copyResetTimer);
+  });
 </script>
 
 {#if run}
@@ -113,14 +148,14 @@
         <span class="kv-key">Status</span>
         <StatusPill status={getStatus(run)} />
       </div>
-      {#if showFrameworkStatus(run) && frameworkStatusLabel()}
+      {#if showFrameworkStatus(run) && run.display_stage}
         {@const progress = frameworkProgress()}
         <div class="kv">
           <span class="kv-key">Stage</span>
           <FrameworkStageProgress
             {progress}
             progressLabel={progressLabel(progress)}
-            stageLabel={frameworkStatusLabel()}
+            stageLabel={run.display_stage}
             active={getStatus(run).toLowerCase() === "pending"}
           />
         </div>
@@ -131,17 +166,17 @@
       </div>
       <div class="kv">
         <span class="kv-key">Dataset</span>
-        <span class="kv-value">{run.config_summary?.dataset_name || "—"}</span>
+        <span class="kv-value">{run.dataset || "—"}</span>
       </div>
       <div class="kv">
         <span class="kv-key">Recipe</span>
-        <span class="kv-value">{run.framework || "—"}</span>
+        <span class="kv-value">{run.recipe || "—"}</span>
       </div>
       {#if modalAppUrl}
         <div class="kv">
           <span class="kv-key">Modal app</span>
           <a
-            class="kv-link kv-value-mono"
+            class="text-(--accent) [overflow-wrap:anywhere] [text-decoration:none] hover:[text-decoration:underline] kv-value-mono"
             href={modalAppUrl}
             target="_blank"
             rel="noopener noreferrer"
@@ -216,10 +251,10 @@
     {#if wandbLinks.length}
       <section class="summary-section">
         <h3 class="summary-section-title">W&B</h3>
-        <div class="link-chip-list">
+        <div class="flex flex-wrap gap-[6px]">
           {#each wandbLinks as link (link.url)}
             <a
-              class="link-chip wandb-chip"
+              class="[border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[999px] text-(--accent) text-[12px] leading-[16px] p-[2px_8px] [text-decoration:none] hover:[text-decoration:underline] [border-color:color-mix(in_srgb,var(--yellow,#fbbf24)_45%,transparent)] text-(--yellow,#fbbf24)!"
               href={link.url}
               target="_blank"
               rel="noopener noreferrer"
@@ -242,21 +277,21 @@
         {#if groupTags.axes.length}
           <div class="kv">
             <span class="kv-key">Customized params</span>
-            <div class="tag-chip-list">
+            <div class="flex flex-wrap gap-[6px] min-w-0">
               {#each groupTags.axes as axis (axis)}
-                <span class="tag-chip kv-value-mono">{axis}</span>
+                <span class="[border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[999px] text-(--text) bg-[color-mix(in_srgb,var(--panel-alt)_74%,black)] p-[2px_8px] kv-value-mono">{axis}</span>
               {/each}
             </div>
           </div>
         {/if}
         {#if groupTags.tags.length}
-          <div class="kv kv-block">
+          <div class="kv items-start!">
             <span class="kv-key">This run differs by</span>
-            <div class="tag-table">
+            <div class="grid gap-[6px] min-w-0">
               {#each groupTags.tags as tag (tag.key)}
-                <div class="tag-row">
-                  <span class="tag-key kv-value-mono">{tag.key}</span>
-                  <span class="tag-value">{formatTagValue(tag.value)}</span>
+                <div class="grid grid-cols-[minmax(0,1fr)_max-content] gap-[8px] items-baseline min-w-0">
+                  <span class="text-(--muted) [overflow-wrap:anywhere] kv-value-mono">{tag.key}</span>
+                  <span class="text-(--text) text-[12px] leading-[16px] [overflow-wrap:anywhere]">{formatTagValue(tag.value)}</span>
                 </div>
               {/each}
             </div>
@@ -265,176 +300,62 @@
       </section>
     {/if}
 
-    {#if isSlimeRun() && recipeJson}
-      <section class="summary-section">
-        <h3 class="summary-section-title">Full Slime parameters</h3>
-        <pre class="summary-json">{recipeJson}</pre>
-      </section>
-    {/if}
-
     <section class="summary-section">
-      <h3 class="summary-section-title">Training recipe</h3>
-      {#if recipeEntries.length}
-        {#each recipeEntries as [field, value] (field)}
-          <div class="kv">
-            <span class="kv-key">{formatFieldLabel(field)}</span>
-            <span class="kv-value kv-value-mono">{formatFieldValue(value)}</span>
+      <div class="recipe-params-header">
+        <h3 class="summary-section-title recipe-params-title">{recipeSectionTitle}</h3>
+        {#if recipeParams.length}
+          <span class="recipe-params-count">{recipeParams.length}</span>
+          {#if recipeJson}
+            <button
+              type="button"
+              class="recipe-params-copy"
+              onclick={copyRecipeJson}
+              title="Copy recipe JSON"
+              aria-label="Copy recipe JSON"
+            >
+              {#if copiedRecipeJson}
+                Copied
+              {:else if copyFailed}
+                Copy failed
+              {:else}
+                Copy JSON
+              {/if}
+            </button>
+          {/if}
+        {/if}
+      </div>
+      {#if recipeParams.length}
+        {#if showParamFilter}
+          <label
+            class="recipe-params-search"
+            aria-label="Filter recipe parameters"
+          >
+            <span class="search-icon">
+              <Search size={13} />
+            </span>
+            <input
+              type="search"
+              class="search-input"
+              placeholder="Filter parameters"
+              bind:value={paramFilter}
+            />
+          </label>
+        {/if}
+        {#if filteredRecipeParams.length}
+          <div class="recipe-params-list">
+            {#each filteredRecipeParams as row (row.key)}
+              <div class="kv">
+                <span class="kv-key" title={row.key}>{row.label}</span>
+                <span class="kv-value kv-value-mono" title={row.fullValue}>{row.displayValue}</span>
+              </div>
+            {/each}
           </div>
-        {/each}
+        {:else}
+          <div class="text-(--muted) text-[12px] leading-[16px]">No parameters match "{paramFilter.trim()}".</div>
+        {/if}
       {:else}
-        <div class="summary-empty">No recipe values found for this run.</div>
+        <div class="text-(--muted) text-[12px] leading-[16px]">No recipe values found for this run.</div>
       {/if}
     </section>
   </div>
 {/if}
-
-<style>
-  .summary-section {
-    border-bottom: 1px solid var(--color-c-gray-10, #2f2f2f);
-    padding: 16px 0;
-  }
-
-  .summary-section:first-child {
-    padding-top: 0;
-  }
-
-  .summary-section:last-child {
-    border-bottom: 0;
-  }
-
-  .summary-section-title {
-    color: var(--text-bright);
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 20px;
-    margin-bottom: 8px;
-  }
-
-  .kv {
-    display: grid;
-    grid-template-columns: 100px minmax(0, 1fr);
-    align-items: baseline;
-    gap: 8px;
-    padding: 4px 0;
-  }
-
-  .kv-key {
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 16px;
-  }
-
-  .kv-value {
-    color: var(--text);
-    font-size: 14px;
-    line-height: 20px;
-    overflow-wrap: anywhere;
-  }
-
-  .kv-value-mono {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 16px;
-  }
-
-  .kv-link {
-    color: var(--accent);
-    overflow-wrap: anywhere;
-    text-decoration: none;
-  }
-
-  .kv-link:hover {
-    text-decoration: underline;
-  }
-
-  .kv-block {
-    align-items: start;
-  }
-
-  .tag-chip-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .tag-chip {
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 999px;
-    color: var(--text);
-    background: color-mix(in srgb, var(--panel-alt) 74%, black);
-    padding: 2px 8px;
-  }
-
-  .link-chip-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .link-chip {
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 999px;
-    color: var(--accent);
-    font-size: 12px;
-    line-height: 16px;
-    padding: 2px 8px;
-    text-decoration: none;
-  }
-
-  .link-chip:hover {
-    text-decoration: underline;
-  }
-
-  .wandb-chip {
-    border-color: color-mix(in srgb, var(--yellow, #fbbf24) 45%, transparent);
-    color: var(--yellow, #fbbf24);
-  }
-
-  .tag-table {
-    display: grid;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .tag-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content;
-    gap: 8px;
-    align-items: baseline;
-    min-width: 0;
-  }
-
-  .tag-key {
-    color: var(--muted);
-    overflow-wrap: anywhere;
-  }
-
-  .tag-value {
-    color: var(--text);
-    font-size: 12px;
-    line-height: 16px;
-    overflow-wrap: anywhere;
-  }
-
-  .summary-empty {
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 16px;
-  }
-
-  .summary-json {
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--panel-alt) 74%, black);
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    line-height: 16px;
-    margin: 0;
-    max-height: 360px;
-    overflow: auto;
-    padding: 10px;
-    white-space: pre;
-  }
-</style>

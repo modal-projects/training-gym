@@ -142,9 +142,9 @@
 
 {#if model}
   {#if showLegend && model.multi}
-    <div class="cbc-legend">
+    <div class="flex flex-wrap gap-[16px] mb-[8px] text-[11px] text-(--muted)">
       {#each model.series as s (s.name)}
-        <span class="cbc-legend-item">
+        <span class="inline-flex items-center gap-[6px]">
           <span class="cbc-swatch" style:background={s.color}></span>
           {s.name}
         </span>
@@ -163,15 +163,15 @@
   >
     <div class="cbc-baseline" style:top={`${model.zeroPct}%`}></div>
 
-    <div class="cbc-clusters">
+    <div class="absolute inset-0 flex items-stretch gap-[3px]">
       {#each model.clusters as cluster (cluster.ci)}
         <div class="cbc-cluster" class:dim={hover && hover.ci !== cluster.ci}>
           {#each cluster.bars as bar (bar.si)}
-            <div class="cbc-slot">
+            <div class="relative flex-[1_1_0] min-w-0">
               <div
                 class="cbc-bar"
                 class:negative={!bar.positive}
-                class:active={hover && hover.ci === cluster.ci && hover.si === bar.si}
+                class:cbar-active={hover && hover.ci === cluster.ci && hover.si === bar.si}
                 style:background={bar.color}
                 style:top={`${bar.topPct}%`}
                 style:height={`${bar.heightPct}%`}
@@ -180,7 +180,7 @@
                 onpointerenter={() => enterBar(cluster.ci, bar.si)}
               >
                 {#if showValueLabels && bar.value !== 0}
-                  <span class="cbc-value-label">{format(bar.value)}</span>
+                  <span class="absolute top-[-14px] left-[50%] [transform:translateX(-50%)] text-[9px] text-(--muted) [font-variant-numeric:tabular-nums] whitespace-nowrap pointer-events-none">{format(bar.value)}</span>
                 {/if}
               </div>
             </div>
@@ -190,13 +190,13 @@
     </div>
 
     {#if tip}
-      <div class="cbc-tooltip" style:left={`${tip.left}px`} style:top={`${tip.top}px`}>
-        <div class="cbc-tip-label">{tip.label}</div>
+      <div class="absolute z-[5] [transform:translateY(-50%)] min-w-[120px] max-w-[168px] p-[6px_8px] rounded-[6px] bg-[rgba(10,14,20,0.94)] [border:1px_solid_var(--border-strong,#464646)] [box-shadow:0_4px_14px_rgba(0,0,0,0.4)] pointer-events-none text-[11px]" style:left={`${tip.left}px`} style:top={`${tip.top}px`}>
+        <div class="[color:var(--text-bright,#fff)] font-[600] mb-[4px] [font-variant-numeric:tabular-nums]">{tip.label}</div>
         {#each tip.rows as row (row.name)}
-          <div class="cbc-tip-row" class:active={row.active}>
+          <div class="cbc-tip-row" class:cbar-active={row.active}>
             <span class="cbc-swatch" style:background={row.color}></span>
-            <span class="cbc-tip-name">{row.name}</span>
-            <span class="cbc-tip-value">{row.value}</span>
+            <span class="flex-[1_1_auto] overflow-hidden text-ellipsis whitespace-nowrap">{row.name}</span>
+            <span class="[font-variant-numeric:tabular-nums]">{row.value}</span>
           </div>
         {/each}
       </div>
@@ -204,179 +204,15 @@
   </div>
 
   {#if showCategoryLabels}
-    <div class="cbc-xaxis">
+    <div class="flex gap-[3px] mt-[4px]">
       {#each model.clusters as cluster (cluster.ci)}
-        <span class="cbc-xlabel" title={cluster.label}>{cluster.label}</span>
+        <span class="flex-[1_1_0] min-w-0 text-center text-[10px] text-(--muted) overflow-hidden text-ellipsis whitespace-nowrap p-[0_1px]" title={cluster.label}>{cluster.label}</span>
       {/each}
     </div>
   {/if}
   {#if axisLabel}
-    <div class="cbc-axis-caption">{axisLabel}</div>
+    <div class="mt-[2px] text-center text-[10px] uppercase tracking-[0.04em] text-(--muted)">{axisLabel}</div>
   {/if}
 {:else}
-  <div class="cbc-empty">{emptyText}</div>
+  <div class="plot-empty">{emptyText}</div>
 {/if}
-
-<style>
-  .cbc-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    margin-bottom: 8px;
-    font-size: 11px;
-    color: var(--muted);
-  }
-  .cbc-legend-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .cbc-swatch {
-    width: 10px;
-    height: 10px;
-    border-radius: 2px;
-    flex: 0 0 auto;
-  }
-
-  .cbc-plot {
-    position: relative;
-    width: 100%;
-    border-bottom: 1px solid var(--border, #2f2f2f);
-  }
-  /* When the data straddles zero, the baseline floats inside the plot, so give
-     it its own visible rule instead of leaning on the bottom border. */
-  .cbc-baseline {
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 0;
-    border-top: 1px dashed color-mix(in srgb, var(--muted) 50%, transparent);
-    opacity: 0;
-    pointer-events: none;
-  }
-  .cbc-plot.has-negative .cbc-baseline {
-    opacity: 1;
-  }
-
-  .cbc-clusters {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: stretch;
-    gap: 3px;
-  }
-  .cbc-cluster {
-    position: relative;
-    flex: 1 1 0;
-    display: flex;
-    gap: 2px;
-    min-width: 0;
-    transition: opacity 0.1s ease;
-  }
-  .cbc-cluster.dim {
-    opacity: 0.45;
-  }
-  .cbc-slot {
-    position: relative;
-    flex: 1 1 0;
-    min-width: 0;
-  }
-  .cbc-bar {
-    position: absolute;
-    left: 0;
-    right: 0;
-    min-height: 1px;
-    border-radius: 3px 3px 0 0;
-    transition:
-      filter 0.1s ease,
-      box-shadow 0.1s ease;
-  }
-  .cbc-bar.negative {
-    border-radius: 0 0 3px 3px;
-  }
-  .cbc-bar.active {
-    filter: brightness(1.15);
-    box-shadow: 0 0 0 2px var(--surface, #2f2f2f);
-  }
-  .cbc-value-label {
-    position: absolute;
-    top: -14px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 9px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    pointer-events: none;
-  }
-
-  .cbc-tooltip {
-    position: absolute;
-    z-index: 5;
-    transform: translateY(-50%);
-    min-width: 120px;
-    max-width: 168px;
-    padding: 6px 8px;
-    border-radius: 6px;
-    background: rgba(10, 14, 20, 0.94);
-    border: 1px solid var(--border-strong, #464646);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-    pointer-events: none;
-    font-size: 11px;
-  }
-  .cbc-tip-label {
-    color: var(--text-bright, #fff);
-    font-weight: 600;
-    margin-bottom: 4px;
-    font-variant-numeric: tabular-nums;
-  }
-  .cbc-tip-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--muted);
-    line-height: 16px;
-  }
-  .cbc-tip-row.active {
-    color: var(--text-bright, #fff);
-  }
-  .cbc-tip-name {
-    flex: 1 1 auto;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .cbc-tip-value {
-    font-variant-numeric: tabular-nums;
-  }
-
-  .cbc-xaxis {
-    display: flex;
-    gap: 3px;
-    margin-top: 4px;
-  }
-  .cbc-xlabel {
-    flex: 1 1 0;
-    min-width: 0;
-    text-align: center;
-    font-size: 10px;
-    color: var(--muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding: 0 1px;
-  }
-  .cbc-axis-caption {
-    margin-top: 2px;
-    text-align: center;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--muted);
-  }
-  .cbc-empty {
-    color: var(--muted);
-    font-size: 12px;
-    padding: 8px 0;
-  }
-</style>

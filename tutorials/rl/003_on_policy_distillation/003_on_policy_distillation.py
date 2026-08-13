@@ -3,8 +3,8 @@
 
 # # On-policy distillation: Teacher model trains a student model
 #
-# In this tutorial, we take two models, Qwen3-8B and Qwen3-4B, and use 
-# the larger 8B model to teach the smaller 4B model on its generation logprobs.
+# In this tutorial, we take two models, Qwen3.5-9B and Qwen3.5-4B, and use 
+# the larger 9B model to teach the smaller 4B model on its generation logprobs.
 #
 # Using the Slime framework and Modal Training Gym, we can easily self-host the
 # teacher model on a H100 machine, hit the /generate endpoint with "return_logprob=True",
@@ -12,9 +12,9 @@
 #
 # The tutorial follows these steps:
 #
-# 1. **Deploy the teacher** (Qwen3-8B) on an SGLang server with `DeploymentConfig`.
+# 1. **Deploy the teacher** (Qwen3.5-9B) on an SGLang server with `CustomDeployment`.
 # 2. **Load a math dataset** (`dapo-math-17k`) and define a verifiable eval that checks `Answer: \boxed{N}`.
-# 3. **Evaluate the base student** (Qwen3-4B) to get a baseline accuracy.
+# 3. **Evaluate the base student** (Qwen3.5-4B) to get a baseline accuracy.
 # 4. **Define a reward function** that calls the teacher's `/generate` endpoint with `return_logprob=True` and combines the teacher log-probs with a math correctness score.
 # 5. **Train with GRPO + OPD** using `SlimeRecipe` — slime applies a per-token reverse KL penalty from the teacher log-probs on top of the GRPO advantage.
 # 6. **Evaluate the trained student** and compare accuracy before vs after.
@@ -44,7 +44,7 @@
 # number matches.
 # Run with:
 # ```
-# uv run python tutorials/rl/003_on_policy_distillation/003_on_policy_distillation.py
+# uv run tutorials/rl/003_on_policy_distillation/003_on_policy_distillation.py
 # ```
 # ## Prerequisites
 #
@@ -57,13 +57,10 @@ import modal
 import re
 
 from modal_training_gym import (
-    DeploymentConfig,
-    EvalConfig,
-    EvalRowResult,
+    CustomDeployment,
     HuggingFaceDataset,
-    ModelDeployment,
-    Qwen3_4B,
-    Qwen3_8B,
+    Qwen3_5_4B,
+    Qwen3_5_9B,
     SlimeRecipe,
     TrainConfig,
     list_checkpoints,
@@ -91,6 +88,8 @@ class MathDataset(HuggingFaceDataset):
     output_format = "jsonl"
     apply_chat_template = False
 
+eval_dataset = MathDataset(n_rows=20)
+
 def _normalize_answer(answer: str) -> str:
     answer = str(answer).strip()
     answer = answer.split("=")[-1]
@@ -112,11 +111,9 @@ def _check_math(response: str, label: str) -> bool:
         pass
     return pred == gt
 
-def math_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
-    prompt = example.get("prompt", "")
-    if isinstance(prompt, list):
-        prompt = prompt[0]["content"] if prompt else ""
-    label = example.get("label", "")
+def math_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+    prompt = example["prompt"][0]["content"]
+    label = example["label"]
 
     response = deployment.generate(
         prompt,
@@ -127,11 +124,28 @@ def math_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
     correct = _check_math(response, label)
     pred = _normalize_answer(_extract_answer(response))
 
-    return EvalRowResult(
-        score=1.0 if correct else 0.0,
-        response=response,
-        metadata={"correct": correct, "pred": pred, "label": label},
-    )
+    return {
+        "score": 1.0 if correct else 0.0,
+        "response": response,
+        "correct": correct,
+        "pred": pred,
+        "label": label,
+    }
+
+def run_eval(
+    deployment, *, max_concurrency: int = 2
+) -> tuple[float, list[dict]]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    deployment.wait_until_ready(timeout=3000)
+
+    def _score_one(example):
+        return math_eval_fn(deployment, example)
+
+    with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+        rows = list(executor.map(_score_one, eval_dataset.load()))
+    mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+    return mean, rows
 
 # ## Reward function
 #
@@ -183,14 +197,14 @@ def math_opd_post_process(args, samples, **kwargs):
 # ## Next steps
 #
 # Some cool ways to extend and improve this example:
-# 1. Use a bigger teacher: Qwen3 offers models in the 32B parameter range. 
-# This model will fit on a 4xH100 GPU setup and can show measurable improvements
+# 1. Use a bigger teacher: Qwen3.5 offers larger MoE variants, up to 35B. 
+# A bigger model will fit on a 4xH100 GPU setup and can show measurable improvements
 # on the student model evaluation delta.
 # 2. Tweak the composite reward signal: Try applying a coefficient like *2* to the
 # binary integer reward signal used in the custom reward function to value correct answers
 # over student-teacher alignment.
 # 3. Try cross-family distillation: Use a teacher from a different model family (e.g. Kimi K2)
-# to train our Qwen3-4B student model. You may run into cross-tokenizer differences, so
+# to train our Qwen3.5-4B student model. You may run into cross-tokenizer differences, so
 # be careful to only grade logprobs on tokens that exist in both models' vocabularies and
 # align 1:1 on a per-character basis. 
 
@@ -211,41 +225,43 @@ def _main_impl() -> None:
     #
     # We borrow a recipe from Modal's Training Gym repo to deploy our teacher model on an SGLang server.
 
-    teacher_model = Qwen3_8B()
-    teacher_deployment = DeploymentConfig(
-        model=teacher_model,
+    teacher_model = Qwen3_5_9B()
+    teacher_deployment = CustomDeployment.launch(
+        teacher_model,
         recipe=SglangRecipe(gpu="H100"),
-        app_name="opd-teacher-qwen3-8b",
-        served_model_name="qwen3-8b-teacher",
-    ).serve()
+        app_name="opd-teacher-qwen3-5-9b",
+        served_model_name="qwen3-5-9b-teacher",
+        unauthenticated=True,
+    )
     print(f"Teacher URL: {teacher_deployment.url}")
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 
     train_dataset = MathDataset(n_rows=100)
-    eval_dataset = MathDataset(n_rows=20)
 
     # ## Baseline Eval
     #
     # Let's run the math eval on our base serving model. Thankfully, our dataset requires
     # simple-enough answers that a tiny, 4B model should not cause issues for our deterministic parser.
     # In our own experience, requiring a strict JSON output format can cause evaluation issues!
-    # See [this LoRA adapter for making Qwen3-4B successful at structured output](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora).
+    # See [this LoRA adapter for making Qwen3-4B successful at structured output](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora) for an example of adapting a small Qwen model to strict output formats.
 
-    base_model = Qwen3_4B()
-    base_deployment = DeploymentConfig(model=base_model).serve()
+    base_model = Qwen3_5_4B()
+    base_deployment = CustomDeployment.launch(
+        base_model,
+        unauthenticated=True,
+    )
     print(f"Student URL: {base_deployment.url}")
 
-    eval_config = EvalConfig(dataset=eval_dataset, eval_fn=math_eval_fn)
     print("--- Evaluating base student... ---")
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    n_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    print(f"Base accuracy: {n_correct}/{len(base_eval.rows)} "
-          f"({base_eval.mean:.1%})")
+    base_mean, base_rows = run_eval(base_deployment)
+    n_correct = sum(1 for r in base_rows if r.get("correct"))
+    print(f"Base accuracy: {n_correct}/{len(base_rows)} "
+          f"({base_mean:.1%})")
 
     # ## Training
     #
-    # The training recipe uses 1 H100 GPU per actor and rollout engine. The actor engine
+    # The training recipe uses one 8×H100 node. The actor engine
     # runs the training and the rollout engine runs the model for inference/forward passes.
     # You may want to tune the batch size for fitting the memory requirements of your GPU
     # and increase the samples per prompt parameter for generating more variants per group.
@@ -297,7 +313,7 @@ def _main_impl() -> None:
 
     print("--- Starting OPD training... ---")
     print(f"  Teacher: {teacher_deployment.url}")
-    print(f"  Student: Qwen3-4B")
+    print(f"  Student: Qwen3.5-4B")
     print(f"  Dataset: dapo-math-17k (100 problems)")
     train_result = training_run.train()
     print(f"Training run id: {train_result.training_run_id}")
@@ -311,30 +327,31 @@ def _main_impl() -> None:
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-opd-trained-serve",
-        served_model_name="qwen3-4b-opd",
-    ).serve()
+        app_name="qwen3-5-4b-opd-trained-serve",
+        served_model_name="qwen3-5-4b-opd",
+        unauthenticated=True,
+    )
     print(f"Trained student URL: {trained_deployment.url}")
 
     print("--- Evaluating trained student... ---")
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    n_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    print(f"Trained accuracy: {n_correct}/{len(trained_eval.rows)} "
-          f"({trained_eval.mean:.1%})")
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    n_correct = sum(1 for r in trained_rows if r.get("correct"))
+    print(f"Trained accuracy: {n_correct}/{len(trained_rows)} "
+          f"({trained_mean:.1%})")
 
     # ## Results
     #
     # Let's hope you see a positive delta on your eval performance!
 
-    base_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    trained_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    total = len(base_eval.rows)
-    print(f"Base student:    {base_correct}/{total} ({base_eval.mean:.1%})")
-    print(f"Trained student: {trained_correct}/{total} ({trained_eval.mean:.1%})")
-    print(f"Delta:           {trained_eval.mean - base_eval.mean:+.1%}")
+    base_correct = sum(1 for r in base_rows if r.get("correct"))
+    trained_correct = sum(1 for r in trained_rows if r.get("correct"))
+    total = len(base_rows)
+    print(f"Base student:    {base_correct}/{total} ({base_mean:.1%})")
+    print(f"Trained student: {trained_correct}/{total} ({trained_mean:.1%})")
+    print(f"Delta:           {trained_mean - base_mean:+.1%}")
 
 @tutorial_cli_app.local_entrypoint()
 def main() -> None:

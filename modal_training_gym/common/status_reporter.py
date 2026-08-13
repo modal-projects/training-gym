@@ -28,7 +28,9 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 
-_QUEUE: Queue[dict[str, Any] | None] = Queue(maxsize=256)
+# Shared with slime's phase_reporting, whose rollout payloads can be 100KB+ —
+# size the queue for bursts of per-step rollout/advantage items.
+_QUEUE: Queue[dict[str, Any] | None] = Queue(maxsize=512)
 _STARTED = False
 _LOCK = threading.Lock()
 _DEFAULT_TIMEOUT_SECONDS = 2.0
@@ -81,11 +83,20 @@ def _post(item: dict[str, Any]) -> None:
     timeout = float(
         item.pop("_timeout", _DEFAULT_TIMEOUT_SECONDS) or _DEFAULT_TIMEOUT_SECONDS
     )
-    token = str(item.pop("_token", "") or "").strip() or _resolve_token()
+    # The token is resolved once at enqueue time (enqueue_framework_status /
+    # enqueue_item callers); don't re-resolve it here.
+    token = str(item.pop("_token", "") or "").strip()
     if not url:
         return
     body = json.dumps(item, default=str).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
+
+    from modal_training_gym.common.config import modal_proxy_auth_headers
+
+    headers = {
+        "Content-Type": "application/json",
+        **modal_proxy_auth_headers(),
+    }
+
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = Request(
@@ -99,6 +110,25 @@ def _post(item: dict[str, Any]) -> None:
             response.read()
     except (OSError, URLError):
         return
+
+
+def enqueue_item(item: dict[str, Any]) -> None:
+    """Queue a pre-resolved ``{"_url", "_timeout", "_token", **payload}`` item
+    for the background poster (best-effort; drops when the queue is full).
+    Callers must resolve the URL and token before enqueueing."""
+    if not item.get("_url"):
+        return
+    _ensure_worker()
+    try:
+        _QUEUE.put_nowait(item)
+    except Exception:
+        pass
+
+
+def post_item(item: dict[str, Any]) -> None:
+    """Synchronously POST a pre-resolved item (same shape as ``enqueue_item``),
+    blocking up to the item's ``_timeout``. Failures are swallowed."""
+    _post(item)
 
 
 def enqueue_framework_status(

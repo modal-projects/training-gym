@@ -1,0 +1,106 @@
+# Modal Training Gym
+
+> Python SDK for RL post-training on Modal. Compose a model, dataset, and
+> recipe (`SlimeRecipe` / Miles) via `TrainConfig`, then call `.train()` /
+> `.launch()` — cluster topology, Ray/NCCL, volumes, and checkpointing are handled.
+
+Requires Python 3.12. Install the package as `modal-training-gym`
+(import as `modal_training_gym`). Prefer `TrainConfig` + recipe over older
+framework-specific launcher APIs.
+
+Docs: https://gym.modal.dev/
+Repo: https://github.com/modal-projects/training-gym
+
+## Docs
+
+- [Overview](https://gym.modal.dev/): Product overview and getting started
+- [All Tutorials](https://gym.modal.dev/tutorials/): Tutorial catalog
+- [API Reference](https://gym.modal.dev/reference/): Public class reference
+- [CLI Reference](https://gym.modal.dev/reference/cli/): `modal-training-gym` CLI
+- [Support](https://gym.modal.dev/support/): Support and contribution notes
+
+## Tutorials
+
+### Reinforcement Learning
+
+- [000_rl_basics](https://gym.modal.dev/tutorials/rl/000_rl_basics/): Haiku evaluation with verifiable rewards
+- [001_sandboxes](https://gym.modal.dev/tutorials/rl/001_sandboxes/): Code RL with Harbor sandboxed evals
+- [002_multiturn](https://gym.modal.dev/tutorials/rl/002_multiturn/): Multi-turn number-guessing RL with custom generate and reward functions
+- [003_on_policy_distillation](https://gym.modal.dev/tutorials/rl/003_on_policy_distillation/): On-policy distillation on math
+- [005_dapo](https://gym.modal.dev/tutorials/rl/005_dapo/): DAPO on math
+- [006_audio_asr](https://gym.modal.dev/tutorials/rl/006_audio_asr/): Audio GRPO for transcribing LibriSpeech
+- [007_param_sweep](https://gym.modal.dev/tutorials/rl/007_param_sweep/): Sweep hyperparameters across runs
+- [008_computer_use](https://gym.modal.dev/tutorials/rl/008_computer_use/): GUI grounding to predict click coordinates
+- [009_cross_tokenizer_distillation](https://gym.modal.dev/tutorials/rl/009_cross_tokenizer_distillation/): Cross-tokenizer agentic distillation on BFCL v3 multi-turn
+
+### Agents
+
+- [000_agent_sandbox](https://gym.modal.dev/tutorials/agent/000_agent_sandbox/): Build an LLM agent harness with a self-hosted model and Modal Sandbox tool execution
+
+### Tools
+
+- [000_observability_dashboard](https://gym.modal.dev/tutorials/tools/000_observability_dashboard/): Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings
+- [001_wandb_integration](https://gym.modal.dev/tutorials/tools/001_wandb_integration/): Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links
+
+## API Reference
+
+- [Overview](https://gym.modal.dev/reference/): Index of public classes
+- [CLI Reference](https://gym.modal.dev/reference/cli/): CLI commands and flags
+
+### Core
+
+- [ModelConfig](https://gym.modal.dev/reference/core/modelconfig/): `ModelConfig`
+- [HFModelConfiguration](https://gym.modal.dev/reference/core/hfmodelconfiguration/): `HFModelConfiguration`
+- [ModelArchitecture](https://gym.modal.dev/reference/core/modelarchitecture/): `ModelArchitecture`
+- [DatasetConfig](https://gym.modal.dev/reference/core/datasetconfig/): `DatasetConfig`
+- [HuggingFaceDataset](https://gym.modal.dev/reference/core/huggingfacedataset/): `HuggingFaceDataset`
+- [HarborDataset](https://gym.modal.dev/reference/core/harbordataset/): `HarborDataset`
+- [WandbConfig](https://gym.modal.dev/reference/core/wandbconfig/): `WandbConfig`
+- [ModalRayCluster](https://gym.modal.dev/reference/core/modalraycluster/): `ModalRayCluster`
+- [TrainResult](https://gym.modal.dev/reference/core/trainresult/): `TrainResult`
+
+### Models
+
+- [ToolCall](https://gym.modal.dev/reference/models/toolcall/): `ToolCall`
+- [ParsedResponse](https://gym.modal.dev/reference/models/parsedresponse/): `ParsedResponse`
+- [parse_qwen3_response](https://gym.modal.dev/reference/models/parse_qwen3_response/): `parse_qwen3_response`
+- [Qwen3-0.6B](https://gym.modal.dev/reference/models/qwen3_0_6b/): `Qwen3_0_6B`
+- [Qwen3-1.7B](https://gym.modal.dev/reference/models/qwen3_1_7b/): `Qwen3_1_7B`
+- [Qwen3-4B](https://gym.modal.dev/reference/models/qwen3_4b/): `Qwen3_4B`
+- [Qwen3-8B](https://gym.modal.dev/reference/models/qwen3_8b/): `Qwen3_8B`
+- [Qwen3.5-0.8B](https://gym.modal.dev/reference/models/qwen3_5_0_8b/): `Qwen3_5_0_8B`
+- [Qwen3.5-2B](https://gym.modal.dev/reference/models/qwen3_5_2b/): `Qwen3_5_2B`
+- [Qwen3.5-4B](https://gym.modal.dev/reference/models/qwen3_5_4b/): `Qwen3_5_4B`
+- [Qwen3.5-9B](https://gym.modal.dev/reference/models/qwen3_5_9b/): `Qwen3_5_9B`
+- [Qwen3-30B-A3B](https://gym.modal.dev/reference/models/qwen3_30b/): `Qwen3_30B`
+- [Qwen3.6-35B-A3B](https://gym.modal.dev/reference/models/qwen3_6_35b/): `Qwen3_6_35B`
+- [Qwen3.6-27B](https://gym.modal.dev/reference/models/qwen3_6_27b/): `Qwen3_6_27B`
+
+### Training
+
+- [TrainConfig](https://gym.modal.dev/reference/training/trainconfig/): `TrainConfig`
+- [TrainingRun](https://gym.modal.dev/reference/training/trainingrun/): `TrainingRun`
+- [TrainingGroup](https://gym.modal.dev/reference/training/traininggroup/): `TrainingGroup`
+- [SlimeRecipe](https://gym.modal.dev/reference/training/slimerecipe/): `SlimeRecipe`
+- [MilesRecipe](https://gym.modal.dev/reference/training/milesrecipe/): `MilesRecipe`
+- [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe/): `Qwen3_6_35b_Recipe`
+- [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe/): `Qwen3_6_27b_Recipe`
+- [Qwen3.5-0.8b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_0_8b_recipe/): `Qwen3_5_0_8b_Recipe`
+- [Qwen3.5-2b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_2b_recipe/): `Qwen3_5_2b_Recipe`
+- [Qwen3.5-4b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_recipe/): `Qwen3_5_4b_Recipe`
+- [Qwen3.5-9b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_9b_recipe/): `Qwen3_5_9b_Recipe`
+
+### Deployment
+
+- [Endpoint](https://gym.modal.dev/reference/deployment/endpoint/): `Endpoint`
+- [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment/): `CustomDeployment`
+- [SglangRecipe](https://gym.modal.dev/reference/deployment/sglangrecipe/): `SglangRecipe`
+- [VllmRecipe](https://gym.modal.dev/reference/deployment/vllmrecipe/): `VllmRecipe`
+
+## Optional
+
+- [AGENTS.md](https://github.com/modal-projects/training-gym/blob/main/AGENTS.md): Agent working rules for this repo
+- [skills/](https://github.com/modal-projects/training-gym/tree/main/skills): Packaged agent skills (model-support, etc.)
+- [examples/quickstart.py](https://github.com/modal-projects/training-gym/blob/main/examples/quickstart.py): Minimal TrainConfig example
+
+<!-- Generated by scripts/generate_llms_txt.py; do not edit by hand. -->

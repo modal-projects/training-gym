@@ -1,3 +1,3 @@
 # Tutorials
 
-Each tutorial also includes a "Open in Modal Notebook" button that you can click to transform the code walkthrough into a runnable notebook tutorial that train models.
+End-to-end walkthroughs for the Training Gym SDK, ordered from RL basics to full multi-node runs. Each tutorial includes an "Open in Modal Notebook" button that turns the code walkthrough into a runnable notebook.

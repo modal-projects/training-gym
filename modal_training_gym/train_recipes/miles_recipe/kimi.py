@@ -4,13 +4,17 @@ import fcntl
 import shlex
 import shutil
 import subprocess
+from dataclasses import field
 from pathlib import Path
+
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     resolve_checkpoint_ref,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.train_recipes.miles_recipe.recipe import MilesConfig
+from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 
 
 def _valid_safetensors(path: Path) -> bool:
@@ -48,25 +52,26 @@ def _remove_if_invalid(path: str | Path) -> bool:
     return False
 
 
-class _KimiK2Recipe(MilesConfig):
+@dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
+class _KimiK2Recipe(MilesRecipe):
     gpu_type: str = "H200"
     memory: tuple[int, int] = (1024, int(2 * 1024 * 1024))
-    image_run_commands: list[str] = [
-        "rm -rf /root/.cache/huggingface 2>/dev/null || true",
-        "rm -rf /usr/local/lib/python3.12/dist-packages/nvidia/cudnn/ 2>/dev/null || true",
-    ]
-    image_env: dict[str, str] = {
-        "LD_LIBRARY_PATH": "/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
-    }
+    image_run_commands: list[str] = field(
+        default_factory=lambda: [
+            "rm -rf /root/.cache/huggingface 2>/dev/null || true",
+        ]
+    )
     miles_model_script: str = "scripts/models/kimi-k2-thinking.sh"
-    environment: dict[str, str] = {
-        "PYTHONPATH": "/root/Megatron-LM/",
-        "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-        "NCCL_NVLS_ENABLE": "1",
-        "NCCL_TIMEOUT": "3600",
-        "OPEN_TRAINING_INT4_FAKE_QAT_FLAG": "1",
-        "OPEN_TRAINING_INT4_GROUP_SIZE": "32",
-    }
+    environment: dict[str, str] = field(
+        default_factory=lambda: {
+            "PYTHONPATH": "/root/Megatron-LM/",
+            "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+            "NCCL_NVLS_ENABLE": "1",
+            "NCCL_TIMEOUT": "3600",
+            "OPEN_TRAINING_INT4_FAKE_QAT_FLAG": "1",
+            "OPEN_TRAINING_INT4_GROUP_SIZE": "32",
+        }
+    )
 
     actor_num_nodes: int = 16
     actor_num_gpus_per_node: int = 8
@@ -88,7 +93,9 @@ class _KimiK2Recipe(MilesConfig):
     n_samples_per_prompt: int = 8
     rollout_max_response_len: int = 16384
     rollout_temperature: float = 1.0
-    sglang_cuda_graph_bs: list[int] = [1, 2, 4, 8] + list(range(16, 129, 8))
+    sglang_cuda_graph_bs: list[int] = field(
+        default_factory=lambda: [1, 2, 4, 8] + list(range(16, 129, 8))
+    )
     global_batch_size: int = 256
 
     advantage_estimator: str = "grpo"
@@ -144,6 +151,12 @@ class _KimiK2Recipe(MilesConfig):
 
     rollout_num_gpus_per_engine: int = 8
     sglang_mem_fraction_static: float = 0.7
+    # sglang's 'auto' MoE runner picks the marlin kernel for this INT4
+    # checkpoint, and marlin's LoRA MoE path (lora_moe_runner_marlin.py ->
+    # moe_wna16_marlin.cuh:812) hits an illegal memory access while capturing
+    # decode CUDA graphs, at every batch size. Triton is the backend miles uses
+    # for MoE LoRA elsewhere and captures cleanly.
+    sglang_moe_runner_backend: str | None = "triton"
     sglang_ep_size: int = 8
     sglang_server_concurrency: int = 1024
     use_rollout_routing_replay: bool = True
@@ -234,12 +247,14 @@ class _KimiK2Recipe(MilesConfig):
                 subprocess.run(bf16_cmd, check=True)
 
 
+@dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Kimi_K2_5_LoRA_Recipe(_KimiK2Recipe):
     source_hf_checkpoint: str = "moonshotai/Kimi-K2.5"
     hf_checkpoint: str = "/checkpoints/Kimi-K2.5-int4"
     ref_load: str = "/checkpoints/Kimi-K2.5-bf16"
 
 
+@dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Kimi_K2_6_LoRA_Recipe(_KimiK2Recipe):
     source_hf_checkpoint: str = "moonshotai/Kimi-K2.6"
     hf_checkpoint: str = "/checkpoints/Kimi-K2.6-int4"

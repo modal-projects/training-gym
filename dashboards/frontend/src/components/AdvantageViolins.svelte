@@ -213,41 +213,41 @@
 </script>
 
 {#if model}
-  <div class="violin-legend">
-    <span class="violin-legend-item"><span class="vsw fill"></span>sample density</span>
-    <span class="violin-legend-item"><span class="vsw median"></span>median</span>
+  <div class="flex items-center gap-[12px] mb-[8px] text-[11px] text-(--muted)">
+    <span class="chart-legend-item"><span class="vsw fill"></span>sample density</span>
+    <span class="chart-legend-item"><span class="vsw median"></span>median</span>
   </div>
-  <div class="violin-chart">
-    <div class="y-col">
-      <span class="y-axis-title">advantage</span>
-      <div class="y-axis">
+  <div class="flex items-stretch">
+    <div class="flex flex-[0_0_56px] w-[56px] h-[210px]">
+      <span class="[writing-mode:vertical-rl] [transform:rotate(180deg)] self-center w-[14px] text-center text-[10px] tracking-[0.04em] uppercase text-(--muted)">advantage</span>
+      <div class="relative flex-1 h-full">
         {#each model.ticks as t (t.val)}
-          <span class="y-tick" style:top={t.y + "px"}>{fmt(t.val)}</span>
+          <span class="absolute right-[4px] [transform:translateY(-50%)] text-[10px] text-(--muted) [font-variant-numeric:tabular-nums] whitespace-nowrap" style:top={t.y + "px"}>{fmt(t.val)}</span>
         {/each}
       </div>
     </div>
     <div
-      class="plot"
+      class="relative flex-1 min-w-0 h-[210px]"
       role="presentation"
       onpointermove={onPlotMove}
       onpointerleave={onPlotLeave}
     >
-      <svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
+      <svg class="w-full h-[210px] block bg-[#0a0e14] rounded-[4px]" viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
         {#each model.ticks as t (t.val)}
-          <line class="gridline" x1="0" x2={W} y1={t.y} y2={t.y} />
+          <line class="stroke-[#fff] [stroke-opacity:0.08] [stroke-width:0.5]" x1="0" x2={W} y1={t.y} y2={t.y} />
         {/each}
         {#if model.zeroY != null}
-          <line class="zeroline" x1="0" x2={W} y1={model.zeroY} y2={model.zeroY} />
+          <line class="stroke-[#fff] [stroke-opacity:0.35] [stroke-width:0.75] [stroke-dasharray:4_4]" x1="0" x2={W} y1={model.zeroY} y2={model.zeroY} />
         {/if}
         {#each model.violins as v (v.x)}
-          <path class="violin" d={v.path} />
+          <path class="fill-(--accent) [fill-opacity:0.35] stroke-(--accent) [stroke-width:1] [stroke-opacity:0.9] [vector-effect:non-scaling-stroke] [transition:fill-opacity_0.08s_ease]" d={v.path} />
           <line class="median" x1={v.medX1} x2={v.medX2} y1={v.medY} y2={v.medY} />
         {/each}
       </svg>
       {#if hover}
-        <div class="crosshair" style:top={hover.top + "px"}></div>
+        <div class="absolute left-0 w-full h-0 [border-top:1px_dashed_rgba(255,255,255,0.5)] pointer-events-none" style:top={hover.top + "px"}></div>
         <div
-          class="cursor-readout"
+          class="absolute [transform:translate(10px,-50%)] p-[1px_6px] rounded-[4px] bg-[rgba(10,14,20,0.92)] [border:1px_solid_var(--accent)] [color:var(--text-bright,#fff)] text-[10px] [font-variant-numeric:tabular-nums] whitespace-nowrap pointer-events-none z-[2]"
           style:top={hover.top + "px"}
           style:left={hover.left + "px"}
         >
@@ -256,16 +256,16 @@
       {/if}
     </div>
   </div>
-  <div class="below">
+  <div class="pl-[56px]">
     <div class="fan-meta">
       <span>min {fmt(model.yLo)}</span>
       <span>latest median {fmt(model.latestMedian)}</span>
       <span>max {fmt(model.yHi)}</span>
     </div>
     {#if model.showEachLabel}
-      <div class="violin-labels" style:grid-template-columns={`repeat(${model.violins.length}, 1fr)`}>
+      <div class="grid mt-[2px] text-[10px] text-(--muted)" style:grid-template-columns={`repeat(${model.violins.length}, 1fr)`}>
         {#each model.violins as v, i (v.x)}
-          <span title={labelFor(v, i)}>{labelFor(v, i)}</span>
+          <span class="text-center overflow-hidden text-ellipsis whitespace-nowrap p-[0_2px]" title={labelFor(v, i)}>{labelFor(v, i)}</span>
         {/each}
       </div>
     {:else}
@@ -277,169 +277,5 @@
     {/if}
   </div>
 {:else}
-  <div class="empty">Advantage distribution needs ≥1 step of data.</div>
+  <div class="plot-empty">Advantage distribution needs ≥1 step of data.</div>
 {/if}
-
-<style>
-  svg {
-    width: 100%;
-    height: 210px;
-    display: block;
-    background: #0a0e14;
-    border-radius: 4px;
-  }
-  .violin-chart {
-    display: flex;
-    align-items: stretch;
-  }
-  .y-col {
-    display: flex;
-    flex: 0 0 56px;
-    width: 56px;
-    height: 210px;
-  }
-  .y-axis-title {
-    writing-mode: vertical-rl;
-    transform: rotate(180deg);
-    align-self: center;
-    width: 14px;
-    text-align: center;
-    font-size: 10px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  .y-axis {
-    position: relative;
-    flex: 1;
-    height: 100%;
-  }
-  .y-tick {
-    position: absolute;
-    right: 4px;
-    transform: translateY(-50%);
-    font-size: 10px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-  .plot {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    height: 210px;
-  }
-  .gridline {
-    stroke: #fff;
-    stroke-opacity: 0.08;
-    stroke-width: 0.5;
-  }
-  .zeroline {
-    stroke: #fff;
-    stroke-opacity: 0.35;
-    stroke-width: 0.75;
-    stroke-dasharray: 4 4;
-  }
-  .violin {
-    fill: var(--accent);
-    fill-opacity: 0.35;
-    stroke: var(--accent);
-    stroke-width: 1;
-    stroke-opacity: 0.9;
-    vector-effect: non-scaling-stroke;
-    transition: fill-opacity 0.08s ease;
-  }
-  .median {
-    stroke: #fff;
-    stroke-width: 1.5;
-    stroke-opacity: 0.85;
-  }
-  .crosshair {
-    position: absolute;
-    left: 0;
-    width: 100%;
-    height: 0;
-    border-top: 1px dashed rgba(255, 255, 255, 0.5);
-    pointer-events: none;
-  }
-  .cursor-readout {
-    position: absolute;
-    transform: translate(10px, -50%);
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: rgba(10, 14, 20, 0.92);
-    border: 1px solid var(--accent);
-    color: var(--text-bright, #fff);
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    pointer-events: none;
-    z-index: 2;
-  }
-  .below {
-    padding-left: 56px;
-  }
-  .violin-legend {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 8px;
-    font-size: 11px;
-    color: var(--muted);
-  }
-  .violin-legend-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
-  .vsw {
-    width: 12px;
-    height: 10px;
-    border-radius: 2px;
-  }
-  .vsw.fill {
-    background: color-mix(in srgb, var(--accent) 40%, transparent);
-    border: 1px solid var(--accent);
-  }
-  .vsw.median {
-    height: 2px;
-    background: #fff;
-    opacity: 0.85;
-  }
-  .fan-meta {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--muted);
-  }
-  .violin-labels {
-    display: grid;
-    margin-top: 2px;
-    font-size: 10px;
-    color: var(--muted);
-  }
-  .violin-labels span {
-    text-align: center;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding: 0 2px;
-  }
-  .fan-axis {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 2px;
-    font-size: 10px;
-    color: var(--muted);
-  }
-  .fan-axis-label {
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .empty {
-    color: var(--muted);
-    font-size: 12px;
-    padding: 8px 0;
-  }
-</style>

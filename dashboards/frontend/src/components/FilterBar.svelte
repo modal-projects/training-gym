@@ -1,5 +1,6 @@
 <script>
   import { Check, ChevronDown, Filter, Search } from "lucide-svelte";
+  import FilterBulkActions from "./FilterBulkActions.svelte";
 
   let {
     recipes,
@@ -9,17 +10,22 @@
     statuses,
     statusCounts,
     activeStatuses,
+    allStatusesActive,
     groups,
     groupCounts,
     activeGroups,
     allGroupsActive,
-    totalRuns,
     search = $bindable(),
+    groupBy = $bindable(),
     onToggleRecipe,
-    onToggleAllRecipes,
+    onSelectAllRecipes,
+    onClearRecipes,
     onToggleStatus,
+    onSelectAllStatuses,
+    onClearStatuses,
     onToggleGroup,
-    onToggleAllGroups,
+    onSelectAllGroups,
+    onClearGroups,
   } = $props();
 
   let openMenu = $state(null);
@@ -27,12 +33,23 @@
   function toggleMenu(menu) {
     openMenu = openMenu === menu ? null : menu;
   }
+
+  const groupByOptions = [
+    { value: "none", label: "None" },
+    { value: "group", label: "Group" },
+    { value: "dataset", label: "Dataset" },
+    { value: "model", label: "Model" },
+  ];
+
+  let groupByLabel = $derived(
+    groupByOptions.find((option) => option.value === groupBy)?.label ?? "None",
+  );
 </script>
 
 <svelte:window onclick={() => (openMenu = null)} />
 
-<nav class="filters">
-  <label class="search-wrap" aria-label="Search training runs by name">
+<nav class="p-0 flex items-center gap-[0.5rem] relative flex-wrap max-[900px]:[align-items:stretch]">
+  <label class="inline-flex items-center gap-[8px] [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[6px] [background:transparent] w-[260px] p-[6px_8px] max-[900px]:w-full" aria-label="Search training runs by name">
     <span class="search-icon">
       <Search size={13} />
     </span>
@@ -46,10 +63,10 @@
     />
   </label>
 
-  <div class="menu-wrap">
+  <div class="filterbar-menu-wrap">
     <button
-      class="filter-button"
-      class:open={openMenu === "status"}
+      class="filter-button ghost-hover"
+      class:filterbar-open={openMenu === "status"}
       onclick={(event) => {
         event.stopPropagation();
         toggleMenu("status");
@@ -65,6 +82,12 @@
     </button>
     {#if openMenu === "status"}
       <div class="menu">
+        <FilterBulkActions
+          allSelected={allStatusesActive}
+          noneSelected={activeStatuses.size === 0}
+          onSelectAll={onSelectAllStatuses}
+          onDeselectAll={onClearStatuses}
+        />
         {#each statuses as st (st)}
           <button
             class="menu-item"
@@ -78,7 +101,7 @@
                 <Check size={11} />
               {/if}
             </span>
-            <span class="item-label">{st}</span>
+            <span class="item-label capitalize">{st}</span>
             <span class="item-count">{statusCounts[st] || 0}</span>
           </button>
         {/each}
@@ -86,10 +109,10 @@
     {/if}
   </div>
 
-  <div class="menu-wrap">
+  <div class="filterbar-menu-wrap">
     <button
-      class="filter-button"
-      class:open={openMenu === "recipes"}
+      class="filter-button ghost-hover"
+      class:filterbar-open={openMenu === "recipes"}
       onclick={(event) => {
         event.stopPropagation();
         toggleMenu("recipes");
@@ -105,21 +128,12 @@
     </button>
     {#if openMenu === "recipes"}
       <div class="menu">
-        <button
-          class="menu-item"
-          onclick={(event) => {
-            event.stopPropagation();
-            onToggleAllRecipes();
-          }}
-        >
-          <span class="checkmark" class:checked={allRecipesActive}>
-            {#if allRecipesActive}
-              <Check size={11} />
-            {/if}
-          </span>
-          <span class="item-label">All</span>
-          <span class="item-count">{totalRuns}</span>
-        </button>
+        <FilterBulkActions
+          allSelected={allRecipesActive}
+          noneSelected={activeRecipes.size === 0}
+          onSelectAll={onSelectAllRecipes}
+          onDeselectAll={onClearRecipes}
+        />
         {#each recipes as recipe (recipe)}
           <button
             class="menu-item"
@@ -141,10 +155,10 @@
     {/if}
   </div>
 
-  <div class="menu-wrap">
+  <div class="filterbar-menu-wrap">
     <button
-      class="filter-button"
-      class:open={openMenu === "groups"}
+      class="filter-button ghost-hover"
+      class:filterbar-open={openMenu === "groups"}
       onclick={(event) => {
         event.stopPropagation();
         toggleMenu("groups");
@@ -160,21 +174,12 @@
     </button>
     {#if openMenu === "groups"}
       <div class="menu">
-        <button
-          class="menu-item"
-          onclick={(event) => {
-            event.stopPropagation();
-            onToggleAllGroups();
-          }}
-        >
-          <span class="checkmark" class:checked={allGroupsActive}>
-            {#if allGroupsActive}
-              <Check size={11} />
-            {/if}
-          </span>
-          <span class="item-label">All</span>
-          <span class="item-count">{totalRuns}</span>
-        </button>
+        <FilterBulkActions
+          allSelected={allGroupsActive}
+          noneSelected={activeGroups.size === 0}
+          onSelectAll={onSelectAllGroups}
+          onDeselectAll={onClearGroups}
+        />
         {#each groups as group (group)}
           <button
             class="menu-item"
@@ -195,169 +200,45 @@
       </div>
     {/if}
   </div>
+
+  <div class="filterbar-menu-wrap ml-auto">
+    <button
+      class="group-by-button ghost-hover"
+      class:filterbar-open={openMenu === "groupBy"}
+      aria-haspopup="listbox"
+      aria-expanded={openMenu === "groupBy"}
+      onclick={(event) => {
+        event.stopPropagation();
+        toggleMenu("groupBy");
+      }}
+    >
+      <span>Group by:</span>
+      <span class="group-by-value">{groupByLabel}</span>
+      <span class="chevron" class:rotated={openMenu === "groupBy"}>
+        <ChevronDown size={12} />
+      </span>
+    </button>
+    {#if openMenu === "groupBy"}
+      <div class="menu menu-right group-by-menu" role="listbox">
+        {#each groupByOptions as option (option.value)}
+          <button
+            class="menu-item"
+            role="option"
+            aria-selected={groupBy === option.value}
+            onclick={() => {
+              groupBy = option.value;
+              openMenu = null;
+            }}
+          >
+            <span class="w-[14px] h-[14px] flex justify-center items-center">
+              {#if groupBy === option.value}
+                <Check size={11} />
+              {/if}
+            </span>
+            <span class="item-label">{option.label}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
 </nav>
-
-<style>
-  .filters {
-    padding: 0;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    position: relative;
-    flex-wrap: wrap;
-  }
-
-  .search-wrap {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    background: transparent;
-    width: 260px;
-    padding: 6px 8px;
-  }
-
-  .search-icon {
-    display: inline-flex;
-    color: var(--muted);
-  }
-
-  .search-input {
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: var(--text);
-    width: 100%;
-    min-width: 0;
-    font: inherit;
-    font-size: 14px;
-  }
-
-  .search-input::placeholder {
-    color: var(--color-foreground-tertiary, #747474);
-  }
-
-  .menu-wrap {
-    position: relative;
-  }
-
-  .filter-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--text);
-    font: inherit;
-    font-size: 14px;
-    font-weight: 500;
-    padding: 6px 8px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .filter-button:hover {
-    color: var(--text-bright);
-    border-color: var(--border-strong);
-  }
-
-  .filter-button.open {
-    border-color: var(--border-strong);
-    background: var(--panel-alt);
-    color: var(--text-bright);
-  }
-
-  .button-icon {
-    display: inline-flex;
-    color: var(--muted);
-  }
-
-  .filter-button.open .button-icon {
-    color: var(--text-bright);
-  }
-
-  .chevron {
-    color: var(--muted);
-    transition: transform 0.14s ease;
-  }
-
-  .chevron.rotated {
-    transform: rotate(180deg);
-  }
-
-  .menu {
-    position: absolute;
-    top: calc(100% + 0.3rem);
-    left: 0;
-    z-index: 20;
-    width: max-content;
-    min-width: 210px;
-    max-height: 280px;
-    overflow: auto;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--panel);
-    box-shadow: 0 12px 26px color-mix(in srgb, black 55%, transparent);
-    padding: 0.25rem;
-  }
-
-  .menu-item {
-    width: 100%;
-    display: grid;
-    grid-template-columns: 16px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 0.42rem;
-    border: 0;
-    background: transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: 0.73rem;
-    text-align: left;
-    padding: 0.3rem 0.38rem;
-    border-radius: 7px;
-    cursor: pointer;
-  }
-
-  .menu-item:hover {
-    background: color-mix(in srgb, var(--text-bright) 6%, transparent);
-    color: var(--text-bright);
-  }
-
-  .checkmark {
-    width: 14px;
-    height: 14px;
-    border-radius: 4px;
-    border: 1px solid var(--border-strong);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent);
-    background: color-mix(in srgb, var(--panel-alt) 90%, black);
-  }
-
-  .checkmark.checked {
-    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-    background: color-mix(in srgb, var(--accent) 16%, transparent);
-  }
-
-  .item-label {
-    color: inherit;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .item-count {
-    color: var(--muted);
-    font-size: 0.67rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  @media (max-width: 980px) {
-    .menu {
-      min-width: 180px;
-    }
-  }
-</style>

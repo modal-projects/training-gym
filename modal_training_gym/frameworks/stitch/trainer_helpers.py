@@ -41,6 +41,20 @@ def prepare_config(cfg: Any, tmpdir: str, yaml_config_fields: Iterable[str]) -> 
             setattr(cfg, field, path)
 
 
+def model_is_cached(model: Any) -> bool:
+    """Whether the HF cache already holds the model's weights, so ``train`` can
+    self-heal a launch that skipped the client-side download step."""
+    from huggingface_hub import snapshot_download
+
+    if path := getattr(model, "model_path", ""):
+        return os.path.isdir(path) and bool(os.listdir(path))
+    try:
+        snapshot_download(model.model_name, local_files_only=True)
+    except Exception:  # noqa: BLE001 — any cache miss means "download it"
+        return False
+    return True
+
+
 def materialize_node_local_yaml(
     cfg: Any, field: str, dest_dir: str = "/root/.node_yaml"
 ) -> None:

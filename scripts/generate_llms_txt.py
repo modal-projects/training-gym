@@ -1,0 +1,179 @@
+"""Generate docs-next/public/llms.txt from tutorial + API catalogs.
+
+uv run scripts/generate_llms_txt.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+from api_reference_manifest import (
+    API_REFERENCE_MANIFEST,
+    CLASS_REFERENCE_PATHS,
+    GROUPS,
+)
+from generate_tutorial_pages import BUCKET_LABELS, BUCKETS, extract_metadata
+
+ROOT = Path(__file__).resolve().parents[1]
+TUTORIAL_SRC_DIR = ROOT / "tutorials" / "tutorial_generator"
+DEFAULT_OUTPUT = ROOT / "docs-next" / "public" / "llms.txt"
+
+SITE = "https://gym.modal.dev"
+REPO = "https://github.com/modal-projects/training-gym"
+
+
+def _collect_tutorials() -> list[tuple[str, str, dict]]:
+    """Return (bucket, name, metadata) sorted by bucket, order, name."""
+    entries: list[tuple[str, str, dict]] = []
+    for bucket in BUCKETS:
+        bucket_dir = TUTORIAL_SRC_DIR / bucket
+        if not bucket_dir.is_dir():
+            continue
+        for source_path in sorted(bucket_dir.glob("*.py")):
+            if source_path.name.startswith("_") or source_path.name == "__init__.py":
+                continue
+            metadata = extract_metadata(source_path)
+            if metadata is None:
+                print(
+                    f"  SKIP {source_path.name}: no TUTORIAL_METADATA", file=sys.stderr
+                )
+                continue
+            entries.append((bucket, source_path.stem, metadata))
+
+    bucket_rank = {b: i for i, b in enumerate(BUCKETS)}
+    entries.sort(
+        key=lambda item: (
+            bucket_rank.get(item[0], len(BUCKETS)),
+            item[2].get("order", 10_000),
+            item[1],
+        )
+    )
+    return entries
+
+
+def _render(tutorials: list[tuple[str, str, dict]]) -> str:
+    lines: list[str] = [
+        "# Modal Training Gym",
+        "",
+        "> Python SDK for RL post-training on Modal. Compose a model, dataset, and",
+        "> recipe (`SlimeRecipe` / Miles) via `TrainConfig`, then call `.train()` /",
+        "> `.launch()` — cluster topology, Ray/NCCL, volumes, and checkpointing are handled.",
+        "",
+        "Requires Python 3.12. Install the package as `modal-training-gym`",
+        "(import as `modal_training_gym`). Prefer `TrainConfig` + recipe over older",
+        "framework-specific launcher APIs.",
+        "",
+        f"Docs: {SITE}/",
+        f"Repo: {REPO}",
+        "",
+        "## Docs",
+        "",
+        f"- [Overview]({SITE}/): Product overview and getting started",
+        f"- [All Tutorials]({SITE}/tutorials/): Tutorial catalog",
+        f"- [API Reference]({SITE}/reference/): Public class reference",
+        f"- [CLI Reference]({SITE}/reference/cli/): `modal-training-gym` CLI",
+        f"- [Support]({SITE}/support/): Support and contribution notes",
+        "",
+        "## Tutorials",
+        "",
+    ]
+
+    by_bucket: dict[str, list[tuple[str, dict]]] = defaultdict(list)
+    for bucket, name, metadata in tutorials:
+        by_bucket[bucket].append((name, metadata))
+
+    for bucket in BUCKETS:
+        items = by_bucket.get(bucket)
+        if not items:
+            continue
+        label = BUCKET_LABELS.get(bucket, bucket.title())
+        lines.append(f"### {label}")
+        lines.append("")
+        for name, metadata in items:
+            summary = str(metadata.get("summary") or name).strip()
+            # Keep one line; llms.txt link descriptions should stay scannable.
+            summary = " ".join(summary.split())
+            url = f"{SITE}/tutorials/{bucket}/{name}/"
+            lines.append(f"- [{name}]({url}): {summary}")
+        lines.append("")
+
+    lines.extend(
+        [
+            "## API Reference",
+            "",
+            f"- [Overview]({SITE}/reference/): Index of public classes",
+            f"- [CLI Reference]({SITE}/reference/cli/): CLI commands and flags",
+            "",
+        ]
+    )
+
+    by_group: dict[str, list[dict]] = defaultdict(list)
+    for entry in API_REFERENCE_MANIFEST:
+        by_group[entry["group"]].append(entry)
+
+    for group_key, group_meta in sorted(
+        GROUPS.items(), key=lambda item: item[1]["order"]
+    ):
+        entries = by_group.get(group_key)
+        if not entries:
+            continue
+        lines.append(f"### {group_meta['label']}")
+        lines.append("")
+        for entry in entries:
+            class_name = entry["class_name"]
+            label = entry.get("sidebar_label") or class_name
+            path = CLASS_REFERENCE_PATHS[class_name]
+            lines.append(f"- [{label}]({SITE}{path}): `{class_name}`")
+        lines.append("")
+
+    lines.extend(
+        [
+            "## Optional",
+            "",
+            f"- [AGENTS.md]({REPO}/blob/main/AGENTS.md): Agent working rules for this repo",
+            f"- [skills/]({REPO}/tree/main/skills): Packaged agent skills (model-support, etc.)",
+            f"- [examples/quickstart.py]({REPO}/blob/main/examples/quickstart.py): Minimal TrainConfig example",
+            "",
+            "<!-- Generated by scripts/generate_llms_txt.py; do not edit by hand. -->",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate docs-next/public/llms.txt from catalogs."
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+        help="Output path for llms.txt",
+    )
+    args = parser.parse_args()
+
+    tutorials = _collect_tutorials()
+    if not tutorials:
+        raise SystemExit("No tutorials with TUTORIAL_METADATA found")
+
+    text = _render(tutorials)
+    out_path: Path = args.output
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(text)
+
+    n_api = len(API_REFERENCE_MANIFEST)
+    try:
+        display_path = out_path.relative_to(ROOT)
+    except ValueError:
+        display_path = out_path
+    print(f"Wrote {display_path}")
+    print(f"  tutorials: {len(tutorials)}")
+    print(f"  api classes: {n_api}")
+
+
+if __name__ == "__main__":
+    main()

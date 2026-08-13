@@ -1,11 +1,12 @@
-import asyncio
 import dataclasses as _dc
 import secrets as _secrets
+import sys
 import threading
 import time
+import warnings
 from contextlib import nullcontext
-from enum import Enum
 from typing import Any
+from typing import TypeVar
 from typing import cast
 
 from modal_training_gym.common.dataset import DatasetConfig
@@ -21,69 +22,21 @@ from modal_training_gym.common.status import (
     SlimeStatus,
 )
 from modal_training_gym.common.train_result import TrainResult
-from modal_training_gym.common.modal_lifecycle import stop_app
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
 from modal_training_gym.frameworks.miles import build_miles_app
 from modal_training_gym.frameworks.slime import build_slime_app
 from modal_training_gym.train_recipes.base import BaseTrainRecipe, RecipeType
-from modal_training_gym.train_recipes.miles_recipe import MilesConfig
+from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 
-@_dc.dataclass(frozen=True)
-class TrainLaunch:
-    training_run_id: str
-    modal_app_id: str
-    modal_app_url: str
-    function_call_id: str
-    group_id: str | None = None
-    _function_call: Any | None = _dc.field(default=None, repr=False, compare=False)
-    _status_display: Any | None = _dc.field(default=None, repr=False, compare=False)
-
-    @property
-    def function_call(self):
-        if self._function_call is not None:
-            return self._function_call
-        import modal
-
-        return modal.FunctionCall.from_id(self.function_call_id)
-
-    def result(
-        self,
-        *,
-        timeout: float | None = None,
-        stop_app_on_success: bool = True,
-    ) -> TrainResult:
-        from modal_training_gym.common.status_reporter import (
-            flush as flush_status_reporter,
-        )
-
-        if self._status_display is not None:
-            self._status_display.start_polling(self.training_run_id)
-        try:
-            result_dict = self.function_call.get(timeout=timeout)
-        finally:
-            if self._status_display is not None:
-                self._status_display.stop_polling()
-            flush_status_reporter(timeout_seconds=2.0)
-
-        if stop_app_on_success and self.modal_app_id:
-            stop_app(self.modal_app_id)
-        result = TrainResult(**TrainResult._parse_model_config(result_dict))
-        print(f"Training complete: {result.training_run_id}")
-        return result
-
-    def __await__(self):
-        async def _wait() -> TrainResult:
-            return await asyncio.to_thread(self.result)
-
-        return _wait().__await__()
+_RecipeT = TypeVar("_RecipeT", bound=BaseTrainRecipe)
 
 
-def _merge_recipe(base: SlimeRecipe, overrides: SlimeRecipe) -> SlimeRecipe:
+def _merge_recipe(base: BaseTrainRecipe, overrides: BaseTrainRecipe) -> BaseTrainRecipe:
     base_fields = {f.name: getattr(base, f.name) for f in _dc.fields(base)}
 
     # Fields that a recipe *subclass* declares in its own body are intentional
@@ -92,7 +45,7 @@ def _merge_recipe(base: SlimeRecipe, overrides: SlimeRecipe) -> SlimeRecipe:
     # context_parallel_size=1, or disabling use_kl_loss). We collect those by
     # walking the MRO from the concrete recipe down to — but not including — the
     # framework's base recipe class (the immediate subclass of BaseTrainRecipe,
-    # e.g. SlimeRecipe / MilesConfig). For a plain base recipe (no subclass
+    # e.g. SlimeRecipe / MilesRecipe). For a plain base recipe (no subclass
     # layer) this set is empty, so we fall back to "value differs from default"
     # — which keeps an untouched recipe from clobbering the preset with bare
     # defaults (e.g. a preset's n_samples_per_prompt=8 vs default 2).
@@ -120,56 +73,89 @@ def _field_default(field: _dc.Field) -> Any:
     return _dc.MISSING
 
 
-def _resolve_slime_recipe(
+def _try_validate_model_parallelism(
+    recipe: BaseTrainRecipe, model: ModelConfig
+) -> None:
+    # Not every framework recipe implements this preflight.
+    if validate := getattr(recipe, "validate_model_parallelism", None):
+        validate(model)
+
+
+def _resolve_recipe(
     model: ModelConfig,
-    recipe: SlimeRecipe,
+    recipe: _RecipeT,
     *,
     merge_model_recipe: bool,
-) -> SlimeRecipe:
-    if not merge_model_recipe:
-        recipe.validate_model_parallelism(model)
-        return recipe
-    base_recipe = SlimeRecipe.get_base_recipe(model)
+) -> _RecipeT:
+    base_recipe = type(recipe).get_base_recipe(model) if merge_model_recipe else None
     if base_recipe is None:
-        recipe.validate_model_parallelism(model)
+        _try_validate_model_parallelism(recipe, model)
         return recipe
-    resolved = _merge_recipe(base_recipe, recipe)
-    resolved.validate_model_parallelism(model)
+    resolved = cast(_RecipeT, _merge_recipe(base_recipe, recipe))
+    _try_validate_model_parallelism(resolved, model)
     return resolved
 
 
-class TrainStepStatus(Enum):
-    INITIALIZING = "initializing"
-    DOWNLOAD_MODEL = "download_model"
-    CONVERT_MODEL = "convert_model"
-    PREPARE_DATASET = "prepare_dataset"
-    ROLLOUT_INITIALIZING = "initialize_rollouts"
-    ROLLOUT_LOGGING = "generate_rollouts"
-    EVAL_ROLLOUT_LOGGING = "evaluate_rollouts"
-    COMPUTE_LOG_PROBS = "compute_log_probs"
-    OPTIMIZER_STEP = "optimizer_step"
-    WEIGHT_SYNC = "weight_sync"
-    OFFLOAD_ROLLOUT = "offload_rollout"
-    OFFLOAD_TRAIN = "offload_train"
-    CHECKPOINT_SAVE = "checkpoint_save"
-    TRAINING = "training"
+def _convert_checkpoint_on_cache_miss(
+    app: Any,
+    *,
+    training_run_id: str,
+    framework_status_url: str,
+    framework_status_token: str,
+) -> bool:
+    call_kwargs = {
+        "training_run_id": training_run_id,
+        "framework_status_url": framework_status_url,
+        "framework_status_token": framework_status_token,
+    }
+    hf_path = app.resolve_checkpoint.remote(**call_kwargs)
+    if hf_path is None:
+        return False
+    app.convert_checkpoint.remote(hf_path=hf_path, **call_kwargs)
+    return True
+
+
+def _warn_if_external_build_app() -> None:
+    """Warn when ``_build_app()`` is called from outside the package.
+
+    Hand-rolling ``_build_app()`` + ``app.run()`` + ``app.train.spawn()`` is a
+    trap: the nested ``app.run()`` is ephemeral, so exiting the block (or
+    Ctrl-C) stops the app and kills the spawned run — and ``modal run
+    --detach`` does not help, since it only detaches the CLI's own entrypoint
+    app. ``launch()`` / ``train()`` open the app with ``detach=True`` and
+    persist the function-call id so the run can be waited on from anywhere.
+    """
+    try:
+        caller = sys._getframe(2).f_globals.get("__name__", "")
+    except ValueError:  # no such frame — never block a launch over a warning
+        return
+    if caller.startswith("modal_training_gym"):
+        return
+    warnings.warn(
+        "TrainConfig._build_app() is private and does not start a detached "
+        "app: spawning train() on it yourself means the run dies when the "
+        "enclosing app.run() block exits or is interrupted. Use "
+        "TrainConfig.launch() (returns a TrainingRun handle immediately) or "
+        "TrainConfig.train() (blocks for the TrainResult) instead.",
+        stacklevel=3,
+    )
 
 
 _STAGE_LABELS: dict[str, str] = {
-    TrainStepStatus.INITIALIZING.value: "Initializing",
-    TrainStepStatus.DOWNLOAD_MODEL.value: "Downloading model",
-    TrainStepStatus.CONVERT_MODEL.value: "Converting model",
-    TrainStepStatus.PREPARE_DATASET.value: "Preparing dataset",
-    TrainStepStatus.ROLLOUT_INITIALIZING.value: "Initializing rollouts",
-    TrainStepStatus.ROLLOUT_LOGGING.value: "Generating rollouts",
-    TrainStepStatus.EVAL_ROLLOUT_LOGGING.value: "Evaluating rollouts",
-    TrainStepStatus.COMPUTE_LOG_PROBS.value: "Computing log probs",
-    TrainStepStatus.OPTIMIZER_STEP.value: "Optimizer step",
-    TrainStepStatus.WEIGHT_SYNC.value: "Weight sync",
-    TrainStepStatus.OFFLOAD_ROLLOUT.value: "Offload rollout",
-    TrainStepStatus.OFFLOAD_TRAIN.value: "Offload train",
-    TrainStepStatus.CHECKPOINT_SAVE.value: "Saving checkpoint",
-    TrainStepStatus.TRAINING.value: "Training",
+    SlimeStatus.INITIALIZING.value: "Initializing",
+    SlimeStatus.DOWNLOAD_MODEL.value: "Downloading model",
+    SlimeStatus.CONVERT_MODEL.value: "Converting model",
+    SlimeStatus.PREPARE_DATASET.value: "Preparing dataset",
+    SlimeStatus.ROLLOUT_INITIALIZING.value: "Initializing rollouts",
+    SlimeStatus.ROLLOUT_LOGGING.value: "Generating rollouts",
+    SlimeStatus.EVAL_ROLLOUT_LOGGING.value: "Evaluating rollouts",
+    SlimeStatus.COMPUTE_LOG_PROBS.value: "Computing log probs",
+    SlimeStatus.OPTIMIZER_STEP.value: "Optimizer step",
+    SlimeStatus.WEIGHT_SYNC.value: "Weight sync",
+    SlimeStatus.OFFLOAD_ROLLOUT.value: "Offload rollout",
+    SlimeStatus.OFFLOAD_TRAIN.value: "Offload train",
+    SlimeStatus.CHECKPOINT_SAVE.value: "Saving checkpoint",
+    SlimeStatus.TRAINING.value: "Training",
 }
 
 
@@ -225,6 +211,7 @@ class _TrainStatusDisplay:
 
     def print_banner(self) -> None:
         from rich.panel import Panel
+        from rich.style import Style
         from rich.table import Table
         from rich.text import Text
 
@@ -243,11 +230,12 @@ class _TrainStatusDisplay:
             base = self.framework_status_url.replace(
                 "/api/framework-status", ""
             ).rstrip("/")
+            run_url = f"{base}/training/{self.run_id}"
             body.add_row(
                 "Dashboard",
                 Text(
-                    f"{base}/training/{self.run_id}",
-                    style="underline blue",
+                    run_url,
+                    style=Style(color="blue", underline=True, link=run_url),
                 ),
             )
         else:
@@ -272,8 +260,16 @@ class _TrainStatusDisplay:
     def set_modal_app_url(self, url: str) -> None:
         if url and url != self._modal_app_url:
             self._modal_app_url = url
+
+            from rich.style import Style
+            from rich.text import Text
+
             self._get_console().print(
-                f"[dim]Modal app:[/dim] [blue underline]{url}[/blue underline]"
+                Text.assemble(
+                    ("Modal app:", "dim"),
+                    " ",
+                    (url, Style(color="blue", underline=True, link=url)),
+                )
             )
 
     def emit_stage(self, stage: str, detail: str = "") -> None:
@@ -348,7 +344,52 @@ class _TrainStatusDisplay:
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class TrainConfig:
-    """Compose dataset, model, and recipe into one training entrypoint."""
+    """Compose dataset, model, and recipe into one training entrypoint.
+
+    ## Fields
+
+    dataset : DatasetConfig
+        The training dataset. ``train()`` materializes it into the
+        framework's ``/data`` volume before training if it isn't already
+        present.
+    model : ModelConfig
+        The model to train. Carries model identity (``model_name``) and
+        weight-download logic; weights are downloaded into the shared
+        HuggingFace cache volume on first use and reused across runs.
+    recipe : BaseTrainRecipe
+        Framework recipe (``SlimeRecipe`` or ``MilesRecipe``). Selects the
+        training framework and carries Modal infra settings (GPU type, node
+        count, image) plus framework CLI flags.
+    checkpoint : Checkpoint | None
+        Checkpoint to resume training from. When ``None``, training starts
+        from the base model weights. Default ``None``.
+    merge_model_recipe : bool
+        When ``True``, merges the known-model preset recipe (e.g.
+        ``Qwen3_4b_Recipe``) onto recipe fields you left unset. Set
+        ``False`` to run the recipe exactly as written, with no preset
+        defaults. Default ``True``.
+    detach : bool
+        Whether the training app should outlive the local client. The Modal
+        app is always started detached so a dropped connection can't kill a
+        multi-hour run; ``detach`` controls what ``train()`` does when its
+        wait for the result is interrupted (Ctrl-C, a crashed driver):
+        ``True`` leaves the run going on Modal, ``False`` stops the app on
+        the way out. ``launch()`` always leaves the run going, since it
+        returns before training finishes. Default ``True``.
+    group_id : str | None
+        Shared sweep id. Set by ``TrainingGroup`` so every run in a sweep
+        carries the same id, letting the dashboard group variants together.
+        Not usually set by hand. Default ``None``.
+    group_overrides : dict[str, Any] | None
+        Per-variant parameter overrides applied by ``TrainingGroup``, keyed
+        by dotted field path (e.g. ``{"recipe.lr": 1e-5}``). Recorded in
+        run metadata so the dashboard can label each variant. Default
+        ``None``.
+    group_axes : list[str] | None
+        Names of the swept parameter paths in a ``TrainingGroup`` grid.
+        Recorded in run metadata for dashboard grouping; falls back to the
+        keys of ``group_overrides`` when unset. Default ``None``.
+    """
 
     # ── Composed configs (required) ─────────────────────────────────────────
     dataset: DatasetConfig
@@ -357,48 +398,49 @@ class TrainConfig:
     checkpoint: Checkpoint | None = None
     # Known-model recipes are presets by default; complete recipes can opt out.
     merge_model_recipe: bool = True
-    # Run the training app detached so it keeps running on Modal even if the
-    # local client disconnects (terminal closed, laptop asleep). The CLI's
-    # ``modal run --detach`` only detaches the entrypoint, not the nested
-    # ``app.run()`` the driver opens — so we detach it here. Set False for an
-    # attached run that Ctrl-C stops.
+    # Whether a run outlives the local client. The app itself is always started
+    # detached (the CLI's ``modal run --detach`` only detaches the entrypoint,
+    # not the nested ``app.run()`` the driver opens), so this only decides
+    # whether an interrupted ``train()`` stops the app on its way out.
     detach: bool = True
     # Set by TrainingGroup so every run in a sweep shares one id — written into
     # the TrainingRun record so the dashboard can group variants together.
     group_id: str | None = None
     group_overrides: dict[str, Any] | None = None
     group_axes: list[str] | None = None
-    _stable_id: str | None = _dc.field(default=None, init=False, repr=False)
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    def _generate_training_run_id(self) -> str:
+        """Mint a new run id. ``launch()`` calls this once per invocation, so
+        each launch of the same config gets its own TrainingRun record."""
+        return create_hash(
+            self.model.model_name,
+            self.checkpoint.path if self.checkpoint is not None else "",
+            f"{type(self.recipe).__name__}:{self.recipe.recipe_type.value}",
+            self.dataset.dataset_id,
+            self.model.model_path or "",
+        )
 
-    @property
-    def training_run_id(self) -> str:
-        # Maintain same stable id, cannot change across calls on one TrainConfig.
-        if self._stable_id is None:
-            self._stable_id = create_hash(
-                self.model.model_name,
-                self.checkpoint.path if self.checkpoint is not None else "",
-                f"{type(self.recipe).__name__}:{self.recipe.recipe_type.value}",
-                self.dataset.dataset_id,
-                self.model.model_path or "",
-            )
-        return self._stable_id
-
-    def _build_app(self):
+    def _build_app(self, training_run_id: str | None = None):
+        _warn_if_external_build_app()
+        if training_run_id is None:
+            training_run_id = self._generate_training_run_id()
         recipe_type = self.recipe.recipe_type
         if recipe_type == RecipeType.MILES:
-            if not isinstance(self.recipe, MilesConfig):
+            if not isinstance(self.recipe, MilesRecipe):
                 raise TrainingGymConfigError(
-                    f"Recipe type {recipe_type} requires MilesConfig, got {type(self.recipe).__name__}"
+                    f"Recipe type {recipe_type} requires MilesRecipe, got {type(self.recipe).__name__}"
                 )
             return build_miles_app(
-                training_run_id=self.training_run_id,
-                miles=cast(MilesConfig, self.recipe),
+                training_run_id=training_run_id,
+                miles=_resolve_recipe(
+                    self.model,
+                    cast(MilesRecipe, self.recipe),
+                    merge_model_recipe=self.merge_model_recipe,
+                ),
                 model=self.model,
                 dataset=self.dataset,
                 checkpoint=self.checkpoint,
-                name=self.training_run_id,
+                name=training_run_id,
                 group_id=self.group_id,
             )
         if recipe_type == RecipeType.SLIME:
@@ -406,18 +448,18 @@ class TrainConfig:
                 raise TrainingGymConfigError(
                     f"Recipe type {recipe_type} requires SlimeRecipe, got {type(self.recipe).__name__}"
                 )
-            combined = _resolve_slime_recipe(
+            combined = _resolve_recipe(
                 self.model,
                 cast(SlimeRecipe, self.recipe),
                 merge_model_recipe=self.merge_model_recipe,
             )
             return build_slime_app(
-                training_run_id=self.training_run_id,
+                training_run_id=training_run_id,
                 slime=combined,
                 model=self.model,
                 dataset=self.dataset,
                 checkpoint=self.checkpoint,
-                name=self.training_run_id,
+                name=training_run_id,
                 group_id=self.group_id,
             )
         if recipe_type == RecipeType.STITCH:
@@ -431,21 +473,23 @@ class TrainConfig:
                     f"Recipe type {recipe_type} requires StitchRecipe, got {type(self.recipe).__name__}"
                 )
             return build_stitch_app(
-                training_run_id=self.training_run_id,
+                training_run_id=training_run_id,
                 recipe=cast(StitchRecipe, self.recipe),
                 model=self.model,
                 dataset=self.dataset,
-                name=self.training_run_id,
+                checkpoint=self.checkpoint,
+                name=training_run_id,
                 group_id=self.group_id,
             )
         raise TrainingGymConfigError(f"Unknown recipe type: {recipe_type}")
 
     # ── Run-record helpers ─────────────────────────────────────────────────
 
-    def _framework(self) -> Framework:
+    @property
+    def framework(self) -> Framework:
         if isinstance(self.recipe, SlimeRecipe):
             return Framework.SLIME
-        if isinstance(self.recipe, MilesConfig):
+        if isinstance(self.recipe, MilesRecipe):
             return Framework.MILES
         if self.recipe.recipe_type == RecipeType.STITCH:
             return Framework.STITCH
@@ -455,7 +499,7 @@ class TrainConfig:
 
     def _initializing_status(self) -> FrameworkStatus:
         # stitch runs miles in the trainer, so it reports miles' phases too.
-        if isinstance(self.recipe, MilesConfig) or (
+        if isinstance(self.recipe, MilesRecipe) or (
             self.recipe.recipe_type == RecipeType.STITCH
         ):
             return MilesStatus.INITIALIZING
@@ -465,7 +509,7 @@ class TrainConfig:
             f"Unknown recipe type: {type(self.recipe).__name__}"
         )
 
-    def _build_config_summary(self) -> dict[str, Any]:
+    def _build_config_summary(self, training_run_id: str) -> dict[str, Any]:
         """Framework-specific TrainingRun.config summary."""
         model = self.model
         dataset = self.dataset
@@ -479,7 +523,7 @@ class TrainConfig:
                     "project": wandb.project,
                     "entity": getattr(wandb, "entity", ""),
                     "group": wandb.group,
-                    "run_id": self.training_run_id[:8],
+                    "run_id": training_run_id[:8],
                 }
                 if wandb
                 else {}
@@ -492,24 +536,20 @@ class TrainConfig:
             "global_batch_size": getattr(recipe, "global_batch_size", None),
         }
 
-        if isinstance(recipe, SlimeRecipe):
-            from modal_training_gym.frameworks.slime.launcher import (
-                _serialize_slime_params,
+        if isinstance(recipe, SlimeRecipe | MilesRecipe):
+            from modal_training_gym.common.launcher_utils import (
+                serialize_recipe_params,
             )
 
-            combined = _resolve_slime_recipe(
-                model,
-                cast(SlimeRecipe, recipe),
-                merge_model_recipe=self.merge_model_recipe,
+            combined = _resolve_recipe(
+                model, recipe, merge_model_recipe=self.merge_model_recipe
             )
-            summary["recipe"] = _serialize_slime_params(
-                combined, dataset=dataset, model=model
-            )
-        elif isinstance(recipe, MilesConfig):
             summary["recipe"] = {
-                "gpu_type": recipe.gpu_type,
-                "actor_num_nodes": recipe.actor_num_nodes,
-                "actor_num_gpus_per_node": recipe.actor_num_gpus_per_node,
+                # gpu_type is a launcher-only field (in _MILES_SKIP) so it is
+                # absent from serialize_recipe_params for miles; the dashboard
+                # cluster column reads recipe.gpu_type, so keep it here too.
+                "gpu_type": getattr(combined, "gpu_type", None),
+                **serialize_recipe_params(combined, dataset=dataset, model=model),
             }
         elif recipe.recipe_type == RecipeType.STITCH:
             from modal_training_gym.train_recipes.stitch_recipe.recipe import (
@@ -567,7 +607,7 @@ class TrainConfig:
             )
         return _TrainStatusDisplay(
             run_id=training_run_id,
-            framework=self._framework().value,
+            framework=self.framework.value,
             model_name=getattr(self.model, "model_name", "") if self.model else "",
             dataset_name=dataset_name,
             framework_status_url=framework_status_url,
@@ -575,15 +615,12 @@ class TrainConfig:
         )
 
     def _resolved_recipe_for_logging(self) -> BaseTrainRecipe:
-        if isinstance(self.recipe, SlimeRecipe):
-            return _resolve_slime_recipe(
-                self.model,
-                cast(SlimeRecipe, self.recipe),
-                merge_model_recipe=self.merge_model_recipe,
-            )
-        return self.recipe
+        return _resolve_recipe(
+            self.model, self.recipe, merge_model_recipe=self.merge_model_recipe
+        )
 
     def context_plan_line(self) -> str | None:
+        """One-line summary of the effective training context length and parallelism plan."""
         recipe = self._resolved_recipe_for_logging()
         max_tokens_per_gpu = getattr(recipe, "max_tokens_per_gpu", None)
         if max_tokens_per_gpu is None:
@@ -601,15 +638,22 @@ class TrainConfig:
 
     def train(self, *, show_output: bool = True) -> TrainResult:
         """Build the app, run training, and return the TrainResult."""
+        from modal_training_gym.common.modal_lifecycle import stop_app
+
         launch = self.launch(show_output=show_output, prepare_inputs=True)
-        return launch.result(stop_app_on_success=self.detach)
+        try:
+            return launch.result(stop_app_on_success=True)
+        except BaseException:
+            if not self.detach and launch.modal_app_id:
+                stop_app(launch.modal_app_id)
+            raise
 
     def launch(
         self,
         *,
         show_output: bool = True,
         prepare_inputs: bool = False,
-    ) -> TrainLaunch:
+    ) -> TrainingRun:
         """Start training in a detached Modal app and return immediately."""
         import modal
 
@@ -618,9 +662,9 @@ class TrainConfig:
             get_framework_status_url,
         )
         from modal_training_gym.common.status_reporter import enqueue_framework_status
-        from modal_training_gym.setup import ensure_dashboard_deployed
+        from modal_training_gym.cli.setup import ensure_dashboard_deployed
 
-        training_run_id = self.training_run_id
+        training_run_id = self._generate_training_run_id()
         ensure_dashboard_deployed()
         framework_status_url = get_framework_status_url() or ""
         framework_status_token = _secrets.token_urlsafe(32)
@@ -638,8 +682,8 @@ class TrainConfig:
             training_run_id=training_run_id,
             modal_app_id="",
             modal_app_url="",
-            framework=self._framework(),
-            config=self._build_config_summary(),
+            framework=self.framework,
+            config=self._build_config_summary(training_run_id),
             framework_status=self._initializing_status(),
             created_at=created_at,
             started_at=created_at,
@@ -656,7 +700,7 @@ class TrainConfig:
             framework_status_token = ""
         print(f"TrainingRun recorded: {training_run_id}")
 
-        app = self._build_app()
+        app = self._build_app(training_run_id)
         output_context = modal.enable_output() if show_output else nullcontext()
         with output_context:
             with app.run(detach=True):
@@ -697,7 +741,8 @@ class TrainConfig:
                         )
                         if needs_conversion:
                             _set_status(SlimeStatus.CONVERT_MODEL, is_active=False)
-                            app.convert_checkpoint.remote(
+                            _convert_checkpoint_on_cache_miss(
+                                app,
                                 training_run_id=training_run_id,
                                 framework_status_url=framework_status_url,
                                 framework_status_token=framework_status_token,
@@ -713,7 +758,7 @@ class TrainConfig:
                         app.prepare_dataset.remote()
                         _set_status(MilesStatus.CONVERT_MODEL, is_active=False)
                         app.prepare_checkpoints.remote()
-                    elif isinstance(self.recipe, MilesConfig) and needs_conversion:
+                    elif isinstance(self.recipe, MilesRecipe) and needs_conversion:
                         _set_status(MilesStatus.DOWNLOAD_MODEL, is_active=False)
                         app.download.remote(
                             training_run_id=training_run_id,
@@ -721,7 +766,8 @@ class TrainConfig:
                             framework_status_token=framework_status_token,
                         )
                         _set_status(MilesStatus.CONVERT_MODEL, is_active=False)
-                        app.convert_checkpoint.remote(
+                        _convert_checkpoint_on_cache_miss(
+                            app,
                             training_run_id=training_run_id,
                             framework_status_url=framework_status_url,
                             framework_status_token=framework_status_token,
@@ -734,17 +780,15 @@ class TrainConfig:
                     framework_status_token=framework_status_token,
                 )
 
-        launch = TrainLaunch(
-            training_run_id=training_run_id,
-            modal_app_id=modal_app_id,
-            modal_app_url=modal_app_url,
-            function_call_id=function_call.object_id,
-            group_id=self.group_id,
-            _function_call=function_call,
-            _status_display=status_display if show_output else None,
-        )
+        run_record.function_call_id = function_call.object_id
+        run_record._function_call = function_call
+        run_record._status_display = status_display if show_output else None
+        try:
+            run_record.save()
+        except RuntimeError:
+            pass
         print(
-            f"Launched training {launch.training_run_id}: "
-            f"app={launch.modal_app_id}, function_call={launch.function_call_id}"
+            f"Launched training {run_record.training_run_id}: "
+            f"app={run_record.modal_app_id}, function_call={run_record.function_call_id}"
         )
-        return launch
+        return run_record

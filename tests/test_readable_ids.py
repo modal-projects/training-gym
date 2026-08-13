@@ -36,7 +36,7 @@ def test_create_hash_suffix_differs_for_different_parts(monkeypatch) -> None:
     assert first.rsplit("-", 1)[-1] != second.rsplit("-", 1)[-1]
 
 
-def test_train_config_keeps_stable_training_run_id(monkeypatch) -> None:
+def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
     class DummyDataset(DatasetConfig):
         label_key = "label"
 
@@ -49,7 +49,7 @@ def test_train_config_keeps_stable_training_run_id(monkeypatch) -> None:
     def fake_create_hash(*parts: str) -> str:
         nonlocal calls
         calls += 1
-        return "brisk-river-deadbeef"
+        return f"brisk-river-{calls:08x}"
 
     monkeypatch.setattr(
         "modal_training_gym.common.train.create_hash",
@@ -62,9 +62,10 @@ def test_train_config_keeps_stable_training_run_id(monkeypatch) -> None:
         recipe=DummyRecipe(),
     )
 
-    assert config.training_run_id == "brisk-river-deadbeef"
-    assert config.training_run_id == "brisk-river-deadbeef"
-    assert calls == 1
+    first = config._generate_training_run_id()
+    second = config._generate_training_run_id()
+    assert first != second
+    assert calls == 2
 
 
 def test_train_config_can_skip_model_recipe_merge() -> None:
@@ -90,7 +91,7 @@ def test_train_config_can_skip_model_recipe_merge() -> None:
         dataset=dataset,
         model=Qwen3_4B(),
         recipe=recipe,
-    )._build_config_summary()
+    )._build_config_summary("brisk-river-deadbeef")
     assert merged["recipe"]["n_samples_per_prompt"] == 8
     assert merged["recipe"]["lr"] == 5e-7
 
@@ -99,6 +100,6 @@ def test_train_config_can_skip_model_recipe_merge() -> None:
         model=Qwen3_4B(),
         recipe=recipe,
         merge_model_recipe=False,
-    )._build_config_summary()
+    )._build_config_summary("brisk-river-deadbeef")
     assert unmerged["recipe"]["n_samples_per_prompt"] == 2
     assert unmerged["recipe"]["lr"] == 1e-6

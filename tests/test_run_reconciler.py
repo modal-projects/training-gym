@@ -11,7 +11,6 @@ from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.run_reconciler import (
     PRE_APP_TIMEOUT_SECONDS,
     QUEUED_STAGE_TIMEOUT_SECONDS,
-    STALE_ACTIVE_TIMEOUT_SECONDS,
     _load_running_runs,
     reconcile_decision,
     reconcile_orphan_runs,
@@ -183,22 +182,22 @@ def test_active_queued_stage_is_not_cancelled():
     assert decision.should_terminalize is False
 
 
-def test_stale_running_no_update_when_modal_app_is_dead():
+def test_very_stale_run_with_dead_modal_app_is_cancelled():
     now = 2_000_000_000
     run = _run(
         modal_app_id="ap-dead",
-        updated_at=now - STALE_ACTIVE_TIMEOUT_SECONDS - 60,
+        updated_at=now - 24 * 3600 - 60,
     )
     decision = reconcile_decision(run, now=now, has_train_result=False, app_live=False)
     assert decision.should_terminalize is True
     assert decision.reason == "stale_modal_app_terminated"
 
 
-def test_stale_running_no_update_with_live_modal_app_is_not_cancelled():
+def test_very_stale_run_with_live_modal_app_is_not_cancelled():
     now = 2_000_000_000
     run = _run(
         modal_app_id="ap-live",
-        updated_at=now - STALE_ACTIVE_TIMEOUT_SECONDS - 60,
+        updated_at=now - 24 * 3600 - 60,
     )
     decision = reconcile_decision(run, now=now, has_train_result=False, app_live=True)
     assert decision.should_terminalize is False
@@ -235,7 +234,7 @@ def test_reconcile_orphan_runs_persists_cancelled_status(fake_volume, monkeypatc
 
     results = reconcile_orphan_runs(
         now=now,
-        check_app_live=lambda _app_id: None,
+        get_lifecycle_state=lambda _app_id: None,
         has_train_result=lambda _run_id: False,
     )
     assert len(results) == 1
@@ -264,7 +263,7 @@ def test_reconcile_orphan_runs_skips_run_with_train_result(fake_volume):
 
     results = reconcile_orphan_runs(
         now=now,
-        check_app_live=lambda _app_id: False,
+        get_lifecycle_state=lambda _app_id: 99,
         has_train_result=lambda run_id: run_id == "orphan-2",
     )
     assert results == []

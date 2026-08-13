@@ -35,6 +35,8 @@ class GLM_4_7_Recipe(SlimeRecipe):
     sglang_mem_fraction_static: float = 0.7
 
     save_interval: int = 10
+    async_save: bool = True
+    use_persistent_ckpt_worker: bool = True
 
     actor_num_nodes: int = 8
     n_samples_per_prompt: int = 8

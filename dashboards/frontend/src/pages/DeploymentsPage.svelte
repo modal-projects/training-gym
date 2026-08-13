@@ -1,5 +1,6 @@
 <script>
   import {
+    Check,
     ChevronDown,
     ExternalLink,
     Filter,
@@ -7,6 +8,7 @@
     Search,
   } from "lucide-svelte";
   import Drawer from "../components/Drawer.svelte";
+  import FilterBulkActions from "../components/FilterBulkActions.svelte";
   import MinimalTableSkeleton from "../components/MinimalTableSkeleton.svelte";
   import ResizableTable from "../components/ResizableTable.svelte";
   import StatusPill from "../components/StatusPill.svelte";
@@ -27,7 +29,7 @@
   } = $props();
 
   let search = $state("");
-  let selectedStatus = $state("all");
+  let activeStatuses = $state(new Set(["Ready", "Pending", "Inactive"]));
   let statusMenuOpen = $state(false);
   let selectedDeploymentKey = $state(null);
   let relatedRunExpanded = $state(true);
@@ -114,7 +116,7 @@
       return "Inactive";
     }
     if (endpointCreationTimedOut) return "Inactive";
-    if (row.run && getStatus(row.run) === "Failed") return "Inactive";
+    if (row.run && getStatus(row.run) === "failed") return "Inactive";
     return "Pending";
   }
 
@@ -242,6 +244,7 @@
   );
 
   let statusFilters = $derived.by(() => ["Ready", "Pending", "Inactive"]);
+  let allStatusesActive = $derived(activeStatuses.size === statusFilters.length);
 
   let readyDeployments = $derived(statusCounts.Ready || 0);
   let pendingDeployments = $derived(statusCounts.Pending || 0);
@@ -249,7 +252,7 @@
   let filteredRows = $derived.by(() => {
     const query = search.trim().toLowerCase();
     return enrichedRows.filter((row) => {
-      if (selectedStatus !== "all" && row.status !== selectedStatus) return false;
+      if (!activeStatuses.has(row.status)) return false;
       return matchesSearch(row, query);
     });
   });
@@ -291,15 +294,25 @@
     selectedDeploymentKey = null;
   }
 
-  function switchStatusFilter(status) {
-    selectedStatus = status;
-    statusMenuOpen = false;
+  function toggleStatusFilter(status) {
+    const next = new Set(activeStatuses);
+    if (next.has(status)) next.delete(status);
+    else next.add(status);
+    activeStatuses = next;
+  }
+
+  function selectAllStatuses() {
+    activeStatuses = new Set(statusFilters);
+  }
+
+  function clearStatuses() {
+    activeStatuses = new Set();
   }
 </script>
 
 <svelte:window onclick={() => (statusMenuOpen = false)} />
 
-<section class="summary-row">
+<section class="summary-sticky grid [grid-template-columns:repeat(3,minmax(0,1fr))] gap-[14px] p-[0_24px] mb-[24px] max-[1080px]:[grid-template-columns:repeat(2,minmax(0,1fr))]">
   <article class="summary-card">
     <span class="summary-label">Total deployments</span>
     <strong>{allDeployments.length}</strong>
@@ -314,10 +327,10 @@
   </article>
 </section>
 
-<section class="deployments-layout">
-  <div class="table-pane">
-    <div class="filters-row">
-      <label class="search-wrap" aria-label="Search deployments">
+<section class="[border:0] [background:transparent] grid [grid-template-columns:minmax(0,1fr)] min-h-[520px] p-[0_24px_16px] max-[900px]:pb-[24px]">
+  <div class="min-w-0">
+    <div class="[border-bottom:0] p-[0_0_24px] flex items-center gap-[0.4rem] max-[900px]:flex-col max-[900px]:items-stretch">
+      <label class="inline-flex items-center gap-[8px] [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[6px] [background:transparent] w-[260px] p-[6px_8px] max-[900px]:w-full" aria-label="Search deployments">
         <span class="search-icon"><Search size={13} /></span>
         <input
           type="search"
@@ -328,10 +341,10 @@
           spellcheck="false"
         />
       </label>
-      <div class="menu-wrap">
+      <div class="relative">
         <button
-          class="status-filter"
-          class:open={statusMenuOpen}
+          class="deploy-status-filter"
+          class:deploy-open={statusMenuOpen}
           onclick={(event) => {
             event.stopPropagation();
             statusMenuOpen = !statusMenuOpen;
@@ -346,13 +359,26 @@
         </button>
         {#if statusMenuOpen}
           <div class="status-menu">
-            <button class="status-item" onclick={() => switchStatusFilter("all")}>
-              <span>All</span>
-              <span class="status-count">{allDeployments.length}</span>
-            </button>
+            <FilterBulkActions
+              allSelected={allStatusesActive}
+              noneSelected={activeStatuses.size === 0}
+              onSelectAll={selectAllStatuses}
+              onDeselectAll={clearStatuses}
+            />
             {#each statusFilters as status (status)}
-              <button class="status-item" onclick={() => switchStatusFilter(status)}>
-                <span>{status}</span>
+              <button
+                class="status-item"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  toggleStatusFilter(status);
+                }}
+              >
+                <span class="checkmark" class:checked={activeStatuses.has(status)}>
+                  {#if activeStatuses.has(status)}
+                    <Check size={11} />
+                  {/if}
+                </span>
+                <span class="item-label">{status}</span>
                 <span class="status-count">{statusCounts[status] || 0}</span>
               </button>
             {/each}
@@ -361,9 +387,9 @@
       </div>
     </div>
 
-    <div class="runs-body">
+    <div class="p-0">
     {#if loading}
-      <div class="table-wrap">
+      <div class="table-wrap freeze-header">
         <MinimalTableSkeleton
           class="deployments-table"
           columns={["Name", "Training run name", "Status", "Base model", "Created", ""]}
@@ -371,11 +397,11 @@
         />
       </div>
     {:else if error}
-      <div class="empty">Failed to load: {error}</div>
+      <div class="page-empty">Failed to load: {error}</div>
     {:else if !allDeployments.length}
-      <div class="empty">No deployments recorded yet.</div>
+      <div class="page-empty">No deployments recorded yet.</div>
     {:else}
-      <div class="table-wrap">
+      <div class="table-wrap freeze-header">
         <ResizableTable class="deployments-table" columns={deploymentColumns} stickyFirstColumn>
           <tbody>
             {#each filteredRows as row (row.key)}
@@ -388,13 +414,13 @@
                 class:row-selected={selectedDeployment?.key === row.key}
                 onclick={() => selectDeployment(row)}
               >
-                <td class="name-cell">
-                  <div class="run-name" title={deploymentName}>{deploymentName}</div>
+                <td class="min-w-0">
+                  <div class="text-(--text-bright) [font-family:var(--font-mono)] text-[0.73rem] whitespace-nowrap overflow-hidden text-ellipsis" title={deploymentName}>{deploymentName}</div>
                   {#if deploymentAppName}
-                    <div class="subtle" title={deploymentAppName}>{deploymentAppName}</div>
+                    <div class="text-(--muted-strong) text-[0.7rem] mt-[0.1rem] whitespace-nowrap overflow-hidden text-ellipsis" title={deploymentAppName}>{deploymentAppName}</div>
                   {/if}
                 </td>
-                <td class="training-cell">
+                <td class="min-w-0">
                   {#if row.run}
                     <button
                       class="cross-link"
@@ -413,16 +439,16 @@
                 <td>
                   <StatusPill status={row.status} />
                 </td>
-                <td class="model-cell" title={row.baseModel}>
+                <td class="max-w-0 overflow-hidden text-ellipsis whitespace-nowrap" title={row.baseModel}>
                   {row.baseModel}
                 </td>
                 <td class="created-cell">
                   <TimeAgo timestamp={row.deployment.created_at || row.run?.created_at} showJustNow falsyRepresentation="—" />
                 </td>
-                <td class="open-link-cell">
+                <td class="min-w-0">
                   {#if row.deployment.modal_app_url || row.run?.modal_app_url}
                     <a
-                      class="open-modal-link"
+                      class="deploy-open-modal-link ghost-hover"
                       href={row.deployment.modal_app_url || row.run?.modal_app_url}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -432,7 +458,7 @@
                       <ExternalLink size={12} />
                     </a>
                   {:else}
-                    <span class="open-modal-link open-modal-link-disabled">
+                    <span class="deploy-open-modal-link ghost-hover open-modal-link-disabled">
                       <span>Open in Modal</span>
                       <ExternalLink size={12} />
                     </span>
@@ -449,16 +475,16 @@
 
   {#if selectedDeployment}
     <Drawer open={!!selectedDeployment} onclose={closeDetails}>
-      <div class="deployment-drawer">
-      <div class="details-header">
+      <div class="w-[min(420px,calc(100vw_-_24px))] h-full">
+      <div class="drawer-panel-header">
         <div>
-          <div class="details-eyebrow">Deployment</div>
-          <h2>{selectedDeployment.deployment.deployment_id || deploymentLabel(selectedDeployment.deployment)}</h2>
+          <div class="drawer-panel-eyebrow">Deployment</div>
+          <h2 class="text-(--text-bright) text-[16px] font-medium [font-family:var(--font-mono)] leading-[24px] overflow-hidden text-ellipsis">{selectedDeployment.deployment.deployment_id || deploymentLabel(selectedDeployment.deployment)}</h2>
         </div>
-        <div class="details-actions">
+        <div class="flex items-center gap-[8px]">
           {#if selectedDeployment.deployment.modal_app_url || selectedDeployment.run?.modal_app_url}
             <a
-              class="open-modal-link"
+              class="deploy-open-modal-link ghost-hover"
               href={selectedDeployment.deployment.modal_app_url || selectedDeployment.run?.modal_app_url}
               target="_blank"
               rel="noopener noreferrer"
@@ -467,13 +493,13 @@
               <ExternalLink size={12} />
             </a>
           {/if}
-          <button class="close-panel" onclick={closeDetails} aria-label="Close deployment details">
+          <button class="drawer-panel-close ghost-hover" onclick={closeDetails} aria-label="Close deployment details">
             <PanelRightClose size={15} />
           </button>
         </div>
       </div>
 
-      <section class="details-meta">
+      <section class="p-[16px_20px] [border-bottom:1px_solid_var(--color-c-gray-10,#2f2f2f)]">
         <div class="meta-row">
           <span class="meta-key">Status</span>
           <StatusPill status={selectedDeployment.status} />
@@ -485,7 +511,7 @@
         <div class="meta-row">
           <span class="meta-key">Training run</span>
           <span
-            class="meta-value training-run-id-value"
+            class="meta-value [overflow-wrap:normal]! overflow-hidden text-ellipsis whitespace-nowrap"
             title={selectedDeployment.run?.run_id || ""}
           >
             {selectedDeployment.run?.run_id || "—"}
@@ -500,7 +526,7 @@
         </div>
         <div class="meta-row">
           <span class="meta-key">Endpoint</span>
-          <span class="meta-value endpoint-value">
+          <span class="meta-value [font-family:var(--font-mono)] text-[12px]! leading-[16px]!">
             {endpointHost(selectedDeployment.deployment.url)}
           </span>
         </div>
@@ -530,11 +556,11 @@
           </button>
           {#if relatedRunExpanded}
             <button
-              class="related-run-row"
+              class="w-full mt-[8px] [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[6px] [background:transparent] text-(--text) p-[8px_12px] flex items-center gap-[8px] cursor-pointer text-left ghost-hover"
               onclick={() => onOpenTrainingRun(selectedDeployment.run.run_id)}
             >
               <StatusPill status={getStatus(selectedDeployment.run)} />
-              <span class="mono related-run-id" title={selectedDeployment.run.run_id}>
+              <span class="deploy-mono min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" title={selectedDeployment.run.run_id}>
                 {selectedDeployment.run.run_id}
               </span>
             </button>
@@ -555,14 +581,14 @@
             />
           </button>
           {#if relatedEvalsExpanded}
-            <div class="eval-list">
+            <div class="mt-[8px] flex flex-col gap-[4px]">
               {#each selectedDeploymentEvals as evalRun, evalIndex (`${evalRun.dataset}-${evalRun.evalId || "eval"}-${evalRun.createdAt || 0}-${evalIndex}`)}
-                <div class="eval-row">
-                  <div class="eval-left">
-                    <span class="eval-chip">{evalRun.dataset}</span>
-                    <span class="mono">{truncateId(evalRun.evalId)}</span>
+                <div class="[border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[6px] p-[6px_8px] flex items-center justify-between gap-[8px] [background:rgba(255,255,255,0.03)]">
+                  <div class="min-w-0 flex items-center gap-[6px] overflow-hidden">
+                    <span class="rounded-[4px] [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] [background:transparent] text-(--muted) p-[2px_6px] text-[11px] leading-[14px] whitespace-nowrap">{evalRun.dataset}</span>
+                    <span class="deploy-mono">{truncateId(evalRun.evalId)}</span>
                   </div>
-                  <span class="eval-score">{(evalRun.score * 100).toFixed(1)}%</span>
+                  <span class="text-(--yellow) text-[12px] leading-[16px] [font-variant-numeric:tabular-nums]">{(evalRun.score * 100).toFixed(1)}%</span>
                 </div>
               {/each}
             </div>
@@ -574,478 +600,3 @@
   {/if}
 </section>
 
-<style>
-  .summary-row {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-    margin-bottom: 24px;
-  }
-
-  .summary-card {
-    border: 0;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.03);
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    height: 80px;
-  }
-
-  .summary-label {
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 16px;
-  }
-
-  .summary-card strong {
-    color: var(--text-bright);
-    font-size: 20px;
-    font-weight: 500;
-    line-height: 32px;
-  }
-
-  .deployments-layout {
-    border: 0;
-    background: transparent;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    min-height: 520px;
-    padding: 0;
-  }
-
-  .table-pane {
-    min-width: 0;
-  }
-
-  .filters-row {
-    border-bottom: 0;
-    padding: 0 0 24px;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-
-  .search-wrap {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    background: transparent;
-    width: 260px;
-    padding: 6px 8px;
-  }
-
-  .search-icon {
-    display: inline-flex;
-    color: var(--muted);
-  }
-
-  .search-input {
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: var(--text);
-    width: 100%;
-    min-width: 0;
-    font: inherit;
-    font-size: 14px;
-  }
-
-  .search-input::placeholder {
-    color: var(--color-foreground-tertiary, #747474);
-  }
-
-  .menu-wrap {
-    position: relative;
-  }
-
-  .status-filter {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--text);
-    font: inherit;
-    font-size: 14px;
-    font-weight: 500;
-    padding: 6px 8px;
-    cursor: pointer;
-  }
-
-  .status-filter.open {
-    border-color: var(--border-strong);
-    background: var(--panel-alt);
-    color: var(--text-bright);
-  }
-
-  .status-menu {
-    position: absolute;
-    top: calc(100% + 0.3rem);
-    left: 0;
-    z-index: 10;
-    width: 175px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--panel);
-    box-shadow: 0 10px 24px color-mix(in srgb, black 55%, transparent);
-    padding: 0.25rem;
-  }
-
-  .status-item {
-    width: 100%;
-    border: 0;
-    background: transparent;
-    color: var(--text);
-    padding: 0.34rem 0.4rem;
-    border-radius: 7px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font: inherit;
-    font-size: 0.74rem;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .status-item:hover {
-    background: color-mix(in srgb, var(--text-bright) 6%, transparent);
-    color: var(--text-bright);
-  }
-
-  .status-count {
-    color: var(--muted);
-    font-size: 0.68rem;
-  }
-
-  .runs-body {
-    padding: 0;
-  }
-
-  .table-wrap {
-    max-width: 100%;
-    overflow: auto hidden;
-    overscroll-behavior-x: contain;
-    overscroll-behavior-y: auto;
-    -webkit-overflow-scrolling: auto;
-  }
-
-  :global(table.deployments-table) {
-    border: 0;
-    border-radius: 0;
-  }
-
-  :global(table.deployments-table tbody tr) {
-    cursor: pointer;
-  }
-
-  :global(table.deployments-table tr.row-selected td) {
-    background: color-mix(in srgb, var(--accent) 7%, transparent);
-  }
-
-  .name-cell {
-    min-width: 0;
-  }
-
-  .training-cell {
-    min-width: 0;
-  }
-
-  .model-cell {
-    max-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .run-name {
-    color: var(--text-bright);
-    font-family: var(--font-mono);
-    font-size: 0.73rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .subtle {
-    color: var(--muted-strong);
-    font-size: 0.7rem;
-    margin-top: 0.1rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .cross-link {
-    border: 0;
-    background: transparent;
-    color: color-mix(in srgb, var(--text) 86%, white);
-    padding: 0;
-    font: inherit;
-    font-size: 0.74rem;
-    cursor: pointer;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
-  }
-
-  .cross-link:hover {
-    color: var(--text-bright);
-  }
-
-  .open-link-cell {
-    min-width: 0;
-  }
-
-  .open-modal-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    padding: 4px 8px;
-    text-decoration: none;
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-    white-space: nowrap;
-    background: transparent;
-  }
-
-  .open-modal-link:hover {
-    border-color: var(--border-strong);
-    color: var(--text-bright);
-  }
-
-  .open-modal-link-disabled {
-    opacity: 0.5;
-    pointer-events: none;
-  }
-
-  .deployment-drawer {
-    width: min(420px, calc(100vw - 24px));
-    height: 100%;
-  }
-
-  .details-header {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--color-c-gray-10, #2f2f2f);
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .details-eyebrow {
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 16px;
-    margin-bottom: 4px;
-  }
-
-  h2 {
-    color: var(--text-bright);
-    font-size: 16px;
-    font-weight: 500;
-    font-family: var(--font-mono);
-    line-height: 24px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .details-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .close-panel {
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--muted);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px;
-    cursor: pointer;
-  }
-
-  .close-panel:hover {
-    border-color: var(--border-strong);
-    color: var(--text-bright);
-  }
-
-  .details-meta {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--color-c-gray-10, #2f2f2f);
-  }
-
-  .meta-row {
-    display: grid;
-    grid-template-columns: 100px minmax(0, 1fr);
-    gap: 8px;
-    align-items: baseline;
-    padding: 4px 0;
-  }
-
-  .meta-key {
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 16px;
-  }
-
-  .meta-value {
-    color: var(--text);
-    font-size: 14px;
-    line-height: 20px;
-    overflow-wrap: anywhere;
-  }
-
-  .training-run-id-value {
-    overflow-wrap: normal;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .endpoint-value {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 16px;
-  }
-
-  .details-section {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--color-c-gray-10, #2f2f2f);
-  }
-
-  .section-toggle {
-    width: 100%;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--text-bright);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 8px;
-    font: inherit;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-  }
-
-  .related-run-row {
-    width: 100%;
-    margin-top: 8px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text);
-    padding: 8px 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .related-run-row:hover {
-    border-color: var(--border-strong);
-    color: var(--text-bright);
-  }
-
-  .mono {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 16px;
-  }
-
-  .related-run-id {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .eval-list {
-    margin-top: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .eval-row {
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    padding: 6px 8px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  .eval-left {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    overflow: hidden;
-  }
-
-  .eval-chip {
-    border-radius: 4px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    background: transparent;
-    color: var(--muted);
-    padding: 2px 6px;
-    font-size: 11px;
-    line-height: 14px;
-    white-space: nowrap;
-  }
-
-  .eval-score {
-    color: var(--yellow);
-    font-size: 12px;
-    line-height: 16px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .empty {
-    padding: 24px;
-    color: var(--muted);
-    text-align: center;
-    font-size: 0.84rem;
-  }
-
-  @media (max-width: 1080px) {
-    .summary-row {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 760px) {
-    .summary-row {
-      grid-template-columns: 1fr;
-    }
-
-    .filters-row {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .search-wrap {
-      width: 100%;
-    }
-  }
-</style>

@@ -7,16 +7,19 @@ it uses the local ``dashboards/frontend`` directory instead.
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import os
-import re
 import secrets as _secrets
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict
 
 import modal
+
+if TYPE_CHECKING:
+    from google.protobuf.timestamp_pb2 import Timestamp
+    from modal.client import _Client
+    from modal_proto import api_pb2
 
 # Imported at module scope so FastAPI can resolve the ``request: Request``
 # annotation in stream_run_logs(). Under ``from __future__ import
@@ -27,8 +30,48 @@ import modal
 # for a query string and 422s with ``{"loc": ["query", "request"]}``.
 from starlette.requests import Request
 
+# Used as endpoint parameter annotations, so — like ``Request`` above — these
+# must resolve from this module's globals.
+from modal_training_gym.common.advantage_distribution import AdvantageDistribution
+from modal_training_gym.common.config import (
+    DASHBOARD_PROXY_AUTH_PATH,
+    dashboard_requires_proxy_auth,
+)
+from modal_training_gym.common.dashboard import DASHBOARD_APP_NAME
+from modal_training_gym.common.run import FrameworkStatusUpdate, TrainingRun
+from modal_training_gym.common.run_list import (
+    filter_run_summaries,
+    run_list_field_metadata,
+)
+from modal_training_gym.common.run_summary import (
+    JsonDict,
+    RunSummary,
+    build_run_summary,
+    build_run_summaries,
+)
+from modal_training_gym.common.time import parse_time as _parse_log_time
+from modal_training_gym.common.training_rollout import (
+    TrainingRolloutResult,
+    TrainingRolloutSummary,
+    _apply_parsed,
+)
+
+SummaryLoader = Callable[[], Awaitable[list[JsonDict]]]
+
+
+# A single historical log line from ``AppFetchLogs``
+class LogEntry(TypedDict):
+    task_id: str
+    line: str
+    fd: int
+    ts: float | None
+    ts_ns: int | None
+
+
 REPO_URL = "https://github.com/modal-projects/training-gym.git"
 REPO_BRANCH = "main"
+
+DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
 
 _repo_frontend = Path(__file__).resolve().parents[1] / "dashboards" / "frontend"
 _has_local_frontend = _repo_frontend.is_dir()
@@ -59,14 +102,22 @@ def _build_image() -> modal.Image:
             "rm -rf /tmp/training-gym",
         )
 
-    return base.add_local_python_source("modal_training_gym", copy=True).run_commands(
-        "cd /app/frontend && npm install && npm run build",
+    return (
+        base.run_commands("cd /app/frontend && npm install && npm run build")
+        .add_local_python_source("modal_training_gym", copy=True)
+        .env(
+            {
+                DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY: "true"
+                if dashboard_requires_proxy_auth()
+                else "false"
+            }
+        )
     )
 
 
 image = _build_image()
 
-app = modal.App("training-gym-dashboard", image=image)
+app = modal.App(DASHBOARD_APP_NAME, image=image)
 
 STATIC_DIR = "/app/frontend/dist"
 
@@ -80,21 +131,94 @@ MODAL_CREDS_SECRET_NAME = "_training-gym-modal-creds"
 # Set a real value via ``training-gym set-password``.
 DASHBOARD_PASSWORD_SECRET_NAME = "_training-gym-dashboard-password"
 
-# Write endpoints authenticated by their own per-run bearer token. They're
-# exempt from Basic Auth so launchers (which send ``Authorization: Bearer``)
-# keep working even when a dashboard password is set.
+# Routes that must bypass Basic Auth. Write endpoints authenticate with their
+# own per-run bearer token; the proxy-auth status route must report only the
+# Modal-layer setting, independent of dashboard password protection.
 PASSWORD_EXEMPT_PATHS = frozenset(
     {
+        DASHBOARD_PROXY_AUTH_PATH,
         "/api/framework-status",
         "/api/training-rollouts",
         "/api/advantage-distributions",
     }
 )
 
+# Only ever the *expected* side of a comparison, so publishing it is safe.
+_MISSING_TOKEN_DUMMY = "training-gym-missing-token-dummy-never-issued"
+
 
 def _is_local() -> bool:
     """True when we're not running inside a Modal container."""
     return not os.environ.get("MODAL_IS_REMOTE")
+
+
+def _resolve_log_window(
+    since_ts: float | None,
+    until_ts: float | None,
+    *,
+    default_since: float,
+    default_until: float,
+    now: float,
+) -> tuple[float, float]:
+    """Resolve the ``[since, until]`` log window to concrete epoch seconds.
+
+    ``since_ts`` / ``until_ts`` are the already-parsed request bounds (``None``
+    when the caller didn't supply one). Unset bounds fall back to
+    ``default_since`` / ``default_until`` (typically the run's lifetime), and
+    ``until`` defaults to ``now`` whenever it resolves to a non-positive value
+    (e.g. the run hasn't ended). ``since`` is floored at 0 so a negative
+    relative age can't reach before the epoch.
+    """
+    if since_ts is None:
+        since_ts = float(default_since)
+    if until_ts is None:
+        until_ts = float(default_until)
+    if until_ts <= 0:
+        until_ts = now
+    return max(0.0, since_ts), until_ts
+
+
+def _to_timestamp(secs: float) -> Timestamp:
+    """Convert epoch seconds (with fractional part) to a protobuf ``Timestamp``."""
+    from google.protobuf.timestamp_pb2 import Timestamp
+
+    ts = Timestamp()
+    ts.seconds = int(secs)
+    ts.nanos = int((secs - int(secs)) * 1e9)
+    return ts
+
+
+def _parse_log_batches(batches: Iterable[api_pb2.TaskLogsBatch]) -> list[LogEntry]:
+    """Flatten Modal ``AppFetchLogs`` batches into ``LogEntry`` dicts."""
+    logs: list[LogEntry] = []
+    for batch in batches:
+        for item in batch.items:
+            if not item.data:
+                continue
+            ts = float(getattr(item, "timestamp", 0) or 0)
+            ts_ns = int(getattr(item, "timestamp_ns", 0) or 0)
+            entry: LogEntry = {
+                "task_id": batch.task_id,
+                "line": item.data,
+                "fd": int(getattr(item, "file_descriptor", 0) or 0),
+                "ts": ts or None,
+                "ts_ns": ts_ns or None,
+            }
+            logs.append(entry)
+    return logs
+
+
+def _compute_next_page(logs: list[LogEntry], limit: int) -> tuple[bool, float | None]:
+    """Derive ``(has_more, next_until)`` for keyset pagination."""
+    has_more = len(logs) >= limit
+    next_until: float | None = None
+    if has_more and logs:
+        oldest = logs[0]
+        oldest_ns = oldest.get("ts_ns") or int(
+            (oldest.get("ts") or 0.0) * 1_000_000_000
+        )
+        next_until = (oldest_ns - 1) / 1_000_000_000
+    return has_more, next_until
 
 
 def ensure_creds_secret(interactive: bool = False) -> bool:
@@ -217,32 +341,45 @@ def _run_compact_sync() -> None:
         compact_summary_store(summary_store)
 
 
-@app.function(schedule=modal.Cron("*/30 * * * *"))
+@app.function(schedule=modal.Cron("*/30 * * * *"), retries=3, timeout=1800)
 def compact_summaries() -> None:
     """Scheduled compaction of summary stores (every 30 min)."""
     _run_compact_sync()
     print("Compaction complete.")
 
 
-@app.function(schedule=modal.Cron("*/30 * * * *"), secrets=_function_secrets())
-def reconcile_orphan_training_runs() -> None:
-    """Reconcile orphaned pending training runs every 30 minutes."""
-    from modal_training_gym.common.run_reconciler import reconcile_orphan_runs
+@app.function(
+    schedule=modal.Cron("*/30 * * * *"),
+    secrets=_function_secrets(),
+    retries=3,
+    timeout=1800,
+)
+def reconcile() -> None:
+    """Reconcile orphaned training runs and deployments every 30 minutes."""
+    from modal_training_gym.common.reconcile import reconcile as _reconcile
 
-    results = reconcile_orphan_runs()
-    if results:
-        print(f"Reconciled {len(results)} orphaned run(s):")
-        for result in results:
+    outcome = _reconcile()
+    if outcome.runs:
+        print(f"Reconciled {len(outcome.runs)} orphaned run(s):")
+        for result in outcome.runs:
             print(f"  {result.training_run_id}: {result.reason}")
     else:
         print("No orphaned runs to reconcile.")
+
+    if outcome.deployments:
+        print(f"Reconciled {len(outcome.deployments)} orphaned deployment(s):")
+        for result in outcome.deployments:
+            print(f"  {result.deployment_id}: {result.reason}")
+    else:
+        print("No orphaned deployments to reconcile.")
 
 
 @app.function(
     min_containers=1,
     secrets=_function_secrets(),
 )
-@modal.asgi_app()
+@modal.concurrent(max_inputs=50, target_inputs=20)
+@modal.asgi_app(requires_proxy_auth=dashboard_requires_proxy_auth())
 def fastapi_app():
     import base64
     import binascii
@@ -261,17 +398,13 @@ def fastapi_app():
     )
     from fastapi.staticfiles import StaticFiles
 
-    from modal_training_gym.common.advantage_distribution import AdvantageDistribution
     from modal_training_gym.common.modal_urls import modal_app_dashboard_url
-    from modal_training_gym.common.run import TrainingRun
-    from modal_training_gym.common.status import MilesStatus, SlimeStatus
-    from modal_training_gym.common.training_rollout import TrainingRolloutResult
     from modal_training_gym.utils.metadata import (
         MetadataStore,
+        summary_items_from_payload,
         vol_get,
         vol_get_summary_items_healed,
         vol_put_summary_items,
-        _step_times_dict,
     )
 
     web = FastAPI()
@@ -302,32 +435,60 @@ def fastapi_app():
                 )
         return await call_next(request)
 
+    @web.get(DASHBOARD_PROXY_AUTH_PATH)
+    async def proxy_auth_status() -> bool:
+        return os.environ.get(DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY, "false") == "true"
+
     cache_ttl_seconds = 30.0
-    eval_summary_store = MetadataStore.EVALS
-    eval_summary_key = "summary"
-    eval_summary_payload_key = "summaries"
+    cache_keys = ("runs", "train_results", "evals", "deployments")
     # Each entry holds (expires_at, values, loaded_at). ``loaded_at == 0.0``
     # means "never successfully loaded", which lets the very first request block
     # for real data instead of flashing an empty list.
-    cache_entries: dict[str, tuple[float, list[dict[str, Any]], float]] = {
-        "runs": (0.0, [], 0.0),
-        "train_results": (0.0, [], 0.0),
-        "evals": (0.0, [], 0.0),
-        "deployments": (0.0, [], 0.0),
+    cache_entries: dict[str, tuple[float, list[JsonDict], float]] = {
+        key: (0.0, [], 0.0) for key in cache_keys
     }
-    cache_locks = {
-        "runs": asyncio.Lock(),
-        "train_results": asyncio.Lock(),
-        "evals": asyncio.Lock(),
-        "deployments": asyncio.Lock(),
-    }
+    cache_locks = {key: asyncio.Lock() for key in cache_keys}
     # Hold strong refs to background refresh tasks so they aren't GC'd mid-flight.
-    refresh_tasks: set[asyncio.Task] = set()
+    refresh_tasks: set[asyncio.Task[list[JsonDict]]] = set()
     web.mount("/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets")
 
-    async def refresh_cache(
-        key: str, loader: Callable[[], Awaitable[list[dict[str, Any]]]]
-    ) -> list[dict[str, Any]]:
+    # ── Shared Modal client ───────────────────────────────────────────────
+    # Opens a client at startup and reuses it across all requests.
+    modal_client: _Client | None = None
+    modal_client_lock = asyncio.Lock()
+
+    async def get_modal_client() -> _Client | None:
+        """Return the shared, connection-open Modal client.
+
+        Creates it once (guarded by a lock) and reuses it thereafter. Returns
+        ``None`` when no credentials are configured.
+        """
+        nonlocal modal_client
+        if modal_client is not None:
+            return modal_client
+
+        token_id = os.environ.get("MODAL_TOKEN_ID", "")
+        token_secret = os.environ.get("MODAL_TOKEN_SECRET", "")
+        if not token_id or not token_secret:
+            return None
+
+        from modal.client import _Client
+
+        async with modal_client_lock:
+            if modal_client is None:
+                modal_client = await _Client.from_credentials(token_id, token_secret)
+            return modal_client
+
+    @web.on_event("startup")
+    async def _open_modal_client() -> None:
+        # Warm the shared client at startup. Failures here are non-fatal:
+        # endpoints fall back to lazy init and surface error if creds are missing.
+        try:
+            await get_modal_client()
+        except Exception:
+            pass
+
+    async def refresh_cache(key: str, loader: SummaryLoader) -> list[JsonDict]:
         async with cache_locks[key]:
             now = time.monotonic()
             expires_at, values, loaded_at = cache_entries[key]
@@ -350,9 +511,7 @@ def fastapi_app():
         _expires_at, values, loaded_at = cache_entries[key]
         cache_entries[key] = (0.0, values, loaded_at)
 
-    async def get_cached_list(
-        key: str, loader: Callable[[], Awaitable[list[dict[str, Any]]]]
-    ) -> list[dict[str, Any]]:
+    async def get_cached_list(key: str, loader: SummaryLoader) -> list[JsonDict]:
         now = time.monotonic()
         expires_at, values, loaded_at = cache_entries[key]
         if now < expires_at:
@@ -372,23 +531,10 @@ def fastapi_app():
             task.add_done_callback(refresh_tasks.discard)
         return values
 
-    def list_from_payload(
-        payload: Any,
-        *,
-        payload_key: str,
-    ) -> list[dict[str, Any]]:
-        if isinstance(payload, list):
-            return [item for item in payload if isinstance(item, dict)]
-        if isinstance(payload, dict):
-            items = payload.get(payload_key, [])
-            if isinstance(items, list):
-                return [item for item in items if isinstance(item, dict)]
-        return []
-
     def add_modal_app_urls(
-        items: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], bool]:
-        updated = []
+        items: list[JsonDict],
+    ) -> tuple[list[JsonDict], bool]:
+        updated: list[JsonDict] = []
         changed = False
         for item in items:
             new_item = dict(item)
@@ -400,105 +546,78 @@ def fastapi_app():
             updated.append(new_item)
         return updated, changed
 
-    async def load_eval_summaries() -> list[dict[str, Any]]:
+    def merge_missing_fields(
+        merged: JsonDict, source: JsonDict, fields: tuple[str, ...]
+    ) -> None:
+        for field in fields:
+            value = source.get(field)
+            if field not in merged and value is not None:
+                merged[field] = value
+
+    async def fetch_by_id(
+        store: MetadataStore, key: str
+    ) -> tuple[str, JsonDict | None]:
         try:
-            payload = await run_in_threadpool(
-                vol_get, eval_summary_store, eval_summary_key
-            )
+            return key, await run_in_threadpool(vol_get, store, key)
+        except KeyError:
+            return key, None
+
+    async def fetch_all_by_id(
+        store: MetadataStore, keys: list[str]
+    ) -> dict[str, JsonDict]:
+        fetched = await asyncio.gather(*(fetch_by_id(store, key) for key in keys))
+        return {key: value for key, value in fetched if value is not None}
+
+    async def load_eval_summaries() -> list[JsonDict]:
+        try:
+            payload = await run_in_threadpool(vol_get, MetadataStore.EVALS, "summary")
         except KeyError:
             return []
 
-        summaries = list_from_payload(payload, payload_key=eval_summary_payload_key)
+        summaries = summary_items_from_payload(payload, payload_key="summaries")
         if not summaries:
             return []
 
-        eval_ids = [
-            str(s.get("eval_id", ""))
-            for s in summaries
-            if isinstance(s, dict) and s.get("eval_id")
-        ]
-
-        async def fetch_result(eval_id: str) -> tuple[str, dict | None]:
-            try:
-                r = await run_in_threadpool(
-                    vol_get, MetadataStore.EVAL_RESULTS, eval_id
-                )
-                return eval_id, r
-            except KeyError:
-                return eval_id, None
-
-        fetched = await asyncio.gather(*(fetch_result(eid) for eid in eval_ids))
-        results_by_id = {eid: r for eid, r in fetched if r is not None}
-
-        eval_config_ids = [
-            str(s.get("eval_config_id", ""))
-            for s in summaries
-            if isinstance(s, dict) and s.get("eval_config_id")
-        ]
-
-        async def fetch_eval_config(
-            eval_config_id: str,
-        ) -> tuple[str, dict | None]:
-            try:
-                cfg = await run_in_threadpool(
-                    vol_get, MetadataStore.EVAL_CONFIGS, eval_config_id
-                )
-                return eval_config_id, cfg
-            except KeyError:
-                return eval_config_id, None
-
-        fetched_configs = await asyncio.gather(
-            *(fetch_eval_config(cfg_id) for cfg_id in eval_config_ids)
+        results_by_id = await fetch_all_by_id(
+            MetadataStore.EVAL_RESULTS,
+            [str(s.get("eval_id") or "") for s in summaries if s.get("eval_id")],
         )
-        configs_by_id = {
-            cfg_id: cfg for cfg_id, cfg in fetched_configs if cfg is not None
-        }
+        configs_by_id = await fetch_all_by_id(
+            MetadataStore.EVAL_CONFIGS,
+            [
+                str(s.get("eval_config_id") or "")
+                for s in summaries
+                if s.get("eval_config_id")
+            ],
+        )
 
-        enriched: list[dict[str, Any]] = []
+        enriched: list[JsonDict] = []
         for summary in summaries:
-            if not isinstance(summary, dict):
-                continue
-            eval_id = str(summary.get("eval_id", ""))
-            eval_config_id = str(summary.get("eval_config_id", ""))
-            result = results_by_id.get(eval_id)
-            eval_config = configs_by_id.get(eval_config_id)
-            if not result:
-                merged = dict(summary)
-                if eval_config:
-                    merged["eval_config"] = eval_config
-                    for field in (
+            merged = dict(summary)
+            result = results_by_id.get(str(summary.get("eval_id") or ""))
+            if result:
+                merge_missing_fields(
+                    merged, result, ("deployment_id", "config", "status")
+                )
+            eval_config = configs_by_id.get(str(summary.get("eval_config_id") or ""))
+            if eval_config:
+                merged["eval_config"] = eval_config
+                merge_missing_fields(
+                    merged,
+                    eval_config,
+                    (
                         "dataset_name",
                         "eval_fn_name",
                         "prompt_column",
                         "generate_kwargs",
-                    ):
-                        value = eval_config.get(field)
-                        if field not in merged and value is not None:
-                            merged[field] = value
-                enriched.append(merged)
-                continue
-            merged = dict(summary)
-            for field in ("deployment_id", "config", "status"):
-                value = result.get(field)
-                if field not in merged and value is not None:
-                    merged[field] = value
-            if eval_config:
-                merged["eval_config"] = eval_config
-                for field in (
-                    "dataset_name",
-                    "eval_fn_name",
-                    "prompt_column",
-                    "generate_kwargs",
-                ):
-                    value = eval_config.get(field)
-                    if field not in merged and value is not None:
-                        merged[field] = value
+                    ),
+                )
             enriched.append(merged)
         return enriched
 
     async def load_list_summary(
         summary_store: MetadataStore,
-    ) -> list[dict[str, Any]]:
+    ) -> list[JsonDict]:
         items = await run_in_threadpool(vol_get_summary_items_healed, summary_store)
         if not items:
             return []
@@ -507,94 +626,25 @@ def fastapi_app():
             await run_in_threadpool(vol_put_summary_items, summary_store, items)
         return items
 
-    async def load_runs() -> list[dict[str, Any]]:
-        return await load_list_summary(MetadataStore.TRAINING_RUNS_SUMMARY)
+    async def load_runs() -> list[JsonDict]:
+        run_records = await load_list_summary(MetadataStore.TRAINING_RUNS_SUMMARY)
+        try:
+            result_records = await load_list_summary(
+                MetadataStore.TRAIN_RESULTS_SUMMARY
+            )
+        except Exception:
+            # A result-store outage must not hide otherwise healthy run records.
+            result_records = []
+        return [
+            summary.model_dump(mode="json")
+            for summary in build_run_summaries(run_records, result_records)
+        ]
 
-    async def load_train_results() -> list[dict[str, Any]]:
+    async def load_train_results() -> list[JsonDict]:
         return await load_list_summary(MetadataStore.TRAIN_RESULTS_SUMMARY)
 
-    async def load_deployments() -> list[dict[str, Any]]:
+    async def load_deployments() -> list[JsonDict]:
         return await load_list_summary(MetadataStore.DEPLOYMENTS_SUMMARY)
-
-    def _resolve_framework_status(phase: str, framework: str) -> Any | None:
-        phase = phase.strip()
-        framework = framework.strip().lower()
-        if framework == "miles":
-            try:
-                return MilesStatus(phase)
-            except ValueError:
-                return None
-        try:
-            return SlimeStatus(phase)
-        except ValueError:
-            try:
-                return MilesStatus(phase)
-            except ValueError:
-                return None
-
-    def _optional_int(value: Any) -> int | None:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return None
-        return parsed if parsed >= 0 else None
-
-    # ── Response display ──────────────────────────────────────────────────
-    # Responses are parsed at write time (slime recorder for rollouts, the eval
-    # harness for evals) and stored as ``parsed_response``. Here we just surface
-    # that cleaned content for display, keeping the raw under ``raw_response``.
-    def _clean_prompt(text: str) -> str:
-        """Make a chat-templated prompt readable for display.
-
-        Dataset prompts often arrive as a chat template wrapping a Python repr
-        of the messages list (e.g. ``<|im_start|>user\\n[{'content': '...',
-        'role': 'user'}]<|im_end|>...``) plus a leaked reference/assistant turn.
-        Pull the message content out and drop the template scaffolding; fall
-        back to stripping special tokens when there's no messages repr.
-        """
-        start, end = text.find("[{"), text.rfind("}]")
-        if start != -1 and end > start:
-            try:
-                data = ast.literal_eval(text[start : end + 2])
-                if isinstance(data, list):
-                    parts = [
-                        str(m["content"])
-                        for m in data
-                        if isinstance(m, dict) and m.get("content")
-                    ]
-                    if parts:
-                        return "\n\n".join(parts).strip()
-            except (ValueError, SyntaxError):
-                pass
-        cleaned = re.sub(r"<\|[^|]*\|>", "", text)
-        cleaned = re.sub(r"</?think>", "", cleaned)
-        # Drop standalone role-header lines left behind by the template.
-        cleaned = re.sub(r"(?m)^(system|user|assistant)\s*$\n?", "", cleaned)
-        return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-
-    def _apply_parsed(rows: Any) -> None:
-        if not isinstance(rows, list):
-            return
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            parsed = row.get("parsed_response")
-            if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
-                raw = row.get("response")
-                if isinstance(raw, str):
-                    row["raw_response"] = raw
-                row["response"] = parsed.get("content") or ""
-                if parsed.get("thinking"):
-                    row["thinking"] = parsed["thinking"]
-                if parsed.get("tool_calls"):
-                    row["tool_calls"] = parsed["tool_calls"]
-            # Clean the (chat-templated) prompt for display, keeping the raw.
-            raw_prompt = row.get("prompt")
-            if isinstance(raw_prompt, str) and raw_prompt:
-                cleaned_prompt = _clean_prompt(raw_prompt)
-                if cleaned_prompt and cleaned_prompt != raw_prompt:
-                    row["raw_prompt"] = raw_prompt
-                    row["prompt"] = cleaned_prompt
 
     def _bearer_token(authorization: str | None) -> str:
         scheme, _, token = (authorization or "").partition(" ")
@@ -605,6 +655,12 @@ def fastapi_app():
     async def _require_framework_status_token(
         training_run_id: str, authorization: str | None
     ) -> None:
+        """403 unless ``authorization`` carries the run's status token.
+
+        Handlers must call this *before* any lookup that can 404, or the
+        status code tells an anonymous caller which run ids exist. For the
+        same reason an unknown run is indistinguishable from a wrong token.
+        """
         try:
             expected_token = str(
                 (
@@ -617,97 +673,91 @@ def fastapi_app():
             )
         except KeyError:
             expected_token = ""
-        if not expected_token or not _secrets.compare_digest(
-            _bearer_token(authorization), expected_token
-        ):
+        supplied = _bearer_token(authorization)
+        if not expected_token:
+            # Spend the same comparison an existing token would, then refuse
+            # regardless of its outcome.
+            _secrets.compare_digest(supplied, _MISSING_TOKEN_DUMMY)
+            raise HTTPException(status_code=403, detail="Invalid status token")
+        if not _secrets.compare_digest(supplied, expected_token):
             raise HTTPException(status_code=403, detail="Invalid status token")
 
-    # ── Training runs ────────────────────────────────────────────────────
-
-    @web.get("/api/runs")
-    async def runs():
+    async def _get_run_or_404(training_run_id: str) -> TrainingRun:
         try:
-            data = await get_cached_list("runs", load_runs)
-        except Exception:
-            data = []
-        return JSONResponse(data)
-
-    @web.post("/api/framework-status")
-    async def framework_status(
-        payload: dict[str, Any],
-        authorization: str | None = Header(default=None),
-    ):
-        training_run_id = str(payload.get("training_run_id", "") or "").strip()
-        phase = str(payload.get("phase", "") or "").strip()
-        if not training_run_id or not phase:
-            raise HTTPException(
-                status_code=400,
-                detail="training_run_id and phase are required",
-            )
-
-        try:
-            run = await run_in_threadpool(TrainingRun.from_id, training_run_id)
+            return await TrainingRun.from_id(training_run_id, is_async=True)
         except KeyError:
             raise HTTPException(
                 status_code=404,
                 detail=f"TrainingRun {training_run_id!r} not found",
             )
-        await _require_framework_status_token(training_run_id, authorization)
 
-        status = _resolve_framework_status(phase, str(run.framework.value))
+    # ── Training runs ────────────────────────────────────────────────────
+
+    @web.get("/api/runs", response_model=list[RunSummary])
+    async def runs(
+        request: Request,
+        since: int | None = None,
+        limit: int | None = None,
+    ):
+        if limit is not None and limit < 1:
+            raise HTTPException(status_code=400, detail="Limit must be positive")
+        try:
+            data = await get_cached_list("runs", load_runs)
+        except Exception:
+            data = []
+        summaries = [
+            RunSummary.model_validate(item) for item in data if isinstance(item, dict)
+        ]
+        filters = {
+            name: request.query_params.get(name, "")
+            for name, metadata in run_list_field_metadata().items()
+            if metadata.get("filterable")
+        }
+        filtered = filter_run_summaries(
+            summaries,
+            filters=filters,
+            since=since,
+            limit=limit,
+        )
+        return filtered
+
+    @web.get("/api/runs/{training_run_id}", response_model=RunSummary)
+    async def get_run(training_run_id: str):
+        try:
+            run = await TrainingRun.from_id(training_run_id, is_async=True)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Training run {training_run_id!r} not found",
+            )
+        try:
+            result = await vol_get(
+                MetadataStore.TRAIN_RESULTS,
+                training_run_id,
+                is_async=True,
+            )
+        except KeyError:
+            result = None
+        return build_run_summary(run.model_dump(mode="json"), result)
+
+    @web.post("/api/framework-status")
+    async def framework_status(
+        update: FrameworkStatusUpdate,
+        authorization: str | None = Header(default=None),
+    ):
+        await _require_framework_status_token(update.training_run_id, authorization)
+        run = await _get_run_or_404(update.training_run_id)
+
+        status = await run_in_threadpool(run.apply_framework_status, update)
         if status is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported framework status {phase!r} for {run.framework.value}",
+                detail=(
+                    f"Unsupported framework status {update.phase!r} "
+                    f"for {run.framework.value}"
+                ),
             )
-
-        run.framework_status = status
-        metadata = dict(run.metadata or {})
-        progress = {
-            "phase": status.value,
-            "updated_at": int(time.time()),
-        }
-        # is_active: True = stage is actually running on hardware; False =
-        # we've marked the stage but it's queuing for a GPU. Sent by the
-        # orchestration code in common/train.py (queue=False) and by the
-        # Modal function itself when its body starts executing (active=True).
-        if "is_active" in payload:
-            progress["is_active"] = bool(payload.get("is_active"))
-        for src, dst in (
-            ("progress_current", "current"),
-            ("progress_total", "total"),
-            ("progress_unit", "unit"),
-            ("rollout_id", "rollout_id"),
-            ("step_id", "step_id"),
-        ):
-            if src not in payload:
-                continue
-            value = payload.get(src)
-            if dst in ("current", "total", "rollout_id", "step_id"):
-                value = _optional_int(value)
-                if value is None:
-                    continue
-            progress[dst] = value
-        existing_progress = metadata.get("framework_progress")
-        if isinstance(existing_progress, dict):
-            # Drop the existing is_active when we get a fresh transition into
-            # a different phase — it shouldn't bleed across stage changes.
-            if existing_progress.get("phase") != progress.get("phase"):
-                existing_progress = {
-                    k: v for k, v in existing_progress.items() if k != "is_active"
-                }
-            progress = {**existing_progress, **progress}
-        metadata["framework_progress"] = progress
-        run.metadata = metadata
-        current_step = progress.get("current")
-        step_event = str(payload.get("step_event", "") or "").strip()
-        if isinstance(current_step, int) and current_step > 0:
-            step_times = _step_times_dict()
-            if step_event == "start":
-                step_times[f"{training_run_id}:{current_step}:start"] = time.time()
-            elif step_event == "finish":
-                step_times[f"{training_run_id}:{current_step}:finish"] = time.time()
-        await run.save_async()
+        await run.save(is_async=True)
         invalidate_cache("runs")
         return JSONResponse({"status": "ok", "framework_status": status.value})
 
@@ -715,69 +765,29 @@ def fastapi_app():
 
     @web.post("/api/training-rollouts")
     async def training_rollout(
-        payload: dict[str, Any],
+        result: TrainingRolloutResult,
         authorization: str | None = Header(default=None),
     ):
-        training_run_id = str(payload.get("training_run_id", "") or "").strip()
-        rollout_id_raw = payload.get("rollout_id")
-        if not training_run_id or rollout_id_raw is None:
-            raise HTTPException(
-                status_code=400,
-                detail="training_run_id and rollout_id are required",
-            )
-        try:
-            rollout_id = int(rollout_id_raw)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="rollout_id must be an integer")
+        await _require_framework_status_token(result.training_run_id, authorization)
+        run = await _get_run_or_404(result.training_run_id)
 
-        samples_raw = payload.get("samples") or []
-        if not isinstance(samples_raw, list):
-            raise HTTPException(status_code=400, detail="samples must be a list")
-
-        try:
-            run = await run_in_threadpool(TrainingRun.from_id, training_run_id)
-        except KeyError:
-            raise HTTPException(
-                status_code=404,
-                detail=f"TrainingRun {training_run_id!r} not found",
-            )
-        await _require_framework_status_token(training_run_id, authorization)
-
-        result = TrainingRolloutResult(
-            training_run_id=training_run_id,
-            rollout_id=rollout_id,
-            created_at=_optional_int(payload.get("created_at")) or int(time.time()),
-            samples=samples_raw,
-            metrics=payload.get("metrics") or {},
-            rollout_time=(
-                float(payload["rollout_time"])
-                if isinstance(payload.get("rollout_time"), (int, float))
-                else None
-            ),
-        )
-        await result.save_async()
-
-        metadata = dict(run.metadata or {})
-        metadata["latest_rollout"] = {
-            "rollout_id": result.rollout_id,
-            "mean": result.mean,
-            "total": result.total,
-            "created_at": result.created_at,
-        }
-        run.metadata = metadata
-        await run.save_async()
+        await run_in_threadpool(result.save)
+        run.record_latest_rollout(result)
+        await run.save(is_async=True)
         invalidate_cache("runs")
 
         return JSONResponse(
             {"status": "ok", "rollout_id": result.rollout_id, "mean": result.mean}
         )
 
-    @web.get("/api/runs/{training_run_id}/rollouts")
+    @web.get(
+        "/api/runs/{training_run_id}/rollouts",
+        response_model=list[TrainingRolloutSummary],
+    )
     async def list_run_rollouts(training_run_id: str):
-        summaries = await run_in_threadpool(
+        return await run_in_threadpool(
             TrainingRolloutResult.list_summaries_for_run, training_run_id
         )
-        return JSONResponse(summaries)
 
     @web.get("/api/runs/{training_run_id}/rollouts/{rollout_id}")
     async def get_run_rollout(training_run_id: str, rollout_id: int):
@@ -791,6 +801,7 @@ def fastapi_app():
                 status_code=404,
                 detail=f"Rollout {rollout_id} for run {training_run_id!r} not found",
             )
+
         if isinstance(data, dict):
             _apply_parsed(data.get("samples"))
         return JSONResponse(data)
@@ -799,48 +810,17 @@ def fastapi_app():
 
     @web.post("/api/advantage-distributions")
     async def advantage_distribution(
-        payload: dict[str, Any],
+        shard: AdvantageDistribution,
         authorization: str | None = Header(default=None),
     ):
-        training_run_id = str(payload.get("training_run_id", "") or "").strip()
-        rollout_id_raw = payload.get("rollout_id")
-        if not training_run_id or rollout_id_raw is None:
-            raise HTTPException(
-                status_code=400,
-                detail="training_run_id and rollout_id are required",
-            )
-        try:
-            rollout_id = int(rollout_id_raw)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="rollout_id must be an integer")
+        await _require_framework_status_token(shard.training_run_id, authorization)
+        await _get_run_or_404(shard.training_run_id)
 
-        samples_raw = payload.get("samples") or []
-        if not isinstance(samples_raw, list):
-            raise HTTPException(status_code=400, detail="samples must be a list")
-
-        try:
-            await run_in_threadpool(TrainingRun.from_id, training_run_id)
-        except KeyError:
-            raise HTTPException(
-                status_code=404,
-                detail=f"TrainingRun {training_run_id!r} not found",
-            )
-        await _require_framework_status_token(training_run_id, authorization)
-
-        shard = AdvantageDistribution(
-            training_run_id=training_run_id,
-            rollout_id=rollout_id,
-            dp_rank=_optional_int(payload.get("dp_rank")) or 0,
-            n_samples_per_prompt=_optional_int(payload.get("n_samples_per_prompt"))
-            or 1,
-            created_at=_optional_int(payload.get("created_at")) or int(time.time()),
-            samples=samples_raw,
-        )
-        await shard.save_async()
+        await shard.save(is_async=True)
         return JSONResponse(
             {
                 "status": "ok",
-                "rollout_id": rollout_id,
+                "rollout_id": shard.rollout_id,
                 "dp_rank": shard.dp_rank,
                 "samples": len(shard.samples),
             }
@@ -892,16 +872,9 @@ def fastapi_app():
         """
         import json
 
-        from modal.client import _Client
         from modal_proto import api_pb2
 
-        try:
-            run = await TrainingRun.from_id_async(training_run_id)
-        except KeyError:
-            raise HTTPException(
-                status_code=404,
-                detail=f"TrainingRun {training_run_id!r} not found",
-            )
+        run = await _get_run_or_404(training_run_id)
 
         app_id = (run.modal_app_id or "").strip()
         if not app_id:
@@ -918,19 +891,17 @@ def fastapi_app():
 
         async def event_stream():
             try:
-                token_id = os.environ.get("MODAL_TOKEN_ID", "")
-                token_secret = os.environ.get("MODAL_TOKEN_SECRET", "")
-                if not token_id or not token_secret:
-                    yield (
-                        "event: error\n"
-                        f"data: {json.dumps({'error': 'No Modal credentials configured. Run training-gym setup.'})}\n\n"
-                    )
-                    return
-                client = await _Client.from_credentials(token_id, token_secret)
+                client = await get_modal_client()
             except Exception as exc:
                 yield (
                     "event: error\n"
                     f"data: {json.dumps({'error': f'auth failed: {exc!s}'})}\n\n"
+                )
+                return
+            if client is None:
+                yield (
+                    "event: error\n"
+                    f"data: {json.dumps({'error': 'No Modal credentials configured. Run training-gym setup.'})}\n\n"
                 )
                 return
 
@@ -949,79 +920,73 @@ def fastapi_app():
                 window_dropped = 0
                 return f"event: dropped\ndata: {json.dumps(payload)}\n\n"
 
-            try:
-                while True:
-                    if await request.is_disconnected():
-                        return
-                    req = api_pb2.AppGetLogsRequest(
-                        app_id=app_id,
-                        timeout=55,
-                        last_entry_id=last_entry_id,
-                    )
-                    try:
-                        async for log_batch in client.stub.AppGetLogs.unary_stream(req):
-                            if await request.is_disconnected():
-                                return
-                            consecutive_errors = 0
-                            if log_batch.entry_id:
-                                last_entry_id = log_batch.entry_id
-                            for log in log_batch.items:
-                                if not log.data:
-                                    continue
-                                if (
-                                    search_lower
-                                    and search_lower not in log.data.lower()
-                                ):
-                                    continue
+            while True:
+                if await request.is_disconnected():
+                    return
+                req = api_pb2.AppGetLogsRequest(
+                    app_id=app_id,
+                    timeout=55,
+                    last_entry_id=last_entry_id,
+                )
+                try:
+                    async for log_batch in client.stub.AppGetLogs.unary_stream(req):
+                        if await request.is_disconnected():
+                            return
+                        consecutive_errors = 0
+                        if log_batch.entry_id:
+                            last_entry_id = log_batch.entry_id
+                        for log in log_batch.items:
+                            if not log.data:
+                                continue
+                            if search_lower and search_lower not in log.data.lower():
+                                continue
 
-                                now = time.monotonic()
-                                if now - window_start >= 1.0:
-                                    drop_event = _drain_drop_event()
-                                    if drop_event:
-                                        yield drop_event
-                                    window_start = now
-                                    window_emitted = 0
-
-                                if rate_cap and window_emitted >= rate_cap:
-                                    window_dropped += 1
-                                    continue
-
-                                window_emitted += 1
-                                payload = {
-                                    "task_id": log_batch.task_id,
-                                    "line": log.data,
-                                }
-                                ts = getattr(log, "timestamp", 0) or 0
-                                if ts:
-                                    payload["ts"] = ts
-                                yield f"data: {json.dumps(payload)}\n\n"
-                            if log_batch.app_done:
+                            now = time.monotonic()
+                            if now - window_start >= 1.0:
                                 drop_event = _drain_drop_event()
                                 if drop_event:
                                     yield drop_event
-                                yield "event: done\ndata: {}\n\n"
-                                return
+                                window_start = now
+                                window_emitted = 0
+
+                            if rate_cap and window_emitted >= rate_cap:
+                                window_dropped += 1
+                                continue
+
+                            window_emitted += 1
+                            payload: dict[str, str | float] = {
+                                "task_id": log_batch.task_id,
+                                "line": log.data,
+                            }
+                            ts = getattr(log, "timestamp", 0) or 0
+                            if ts:
+                                payload["ts"] = ts
+                            yield f"data: {json.dumps(payload)}\n\n"
+                        if log_batch.app_done:
+                            drop_event = _drain_drop_event()
+                            if drop_event:
+                                yield drop_event
+                            yield "event: done\ndata: {}\n\n"
+                            return
+                except asyncio.CancelledError:
+                    return
+                except Exception as exc:
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        yield (
+                            "event: error\n"
+                            f"data: {json.dumps({'error': f'log stream failed after {consecutive_errors} retries: {exc!s}'})}\n\n"
+                        )
+                        return
+                    backoff = min(2 ** (consecutive_errors - 1), 10)
+                    yield (
+                        "event: reconnect\n"
+                        f"data: {json.dumps({'reason': str(exc)})}\n\n"
+                    )
+                    try:
+                        await asyncio.sleep(backoff)
                     except asyncio.CancelledError:
                         return
-                    except Exception as exc:
-                        consecutive_errors += 1
-                        if consecutive_errors >= max_consecutive_errors:
-                            yield (
-                                "event: error\n"
-                                f"data: {json.dumps({'error': f'log stream failed after {consecutive_errors} retries: {exc!s}'})}\n\n"
-                            )
-                            return
-                        backoff = min(2 ** (consecutive_errors - 1), 10)
-                        yield (
-                            "event: reconnect\n"
-                            f"data: {json.dumps({'reason': str(exc)})}\n\n"
-                        )
-                        try:
-                            await asyncio.sleep(backoff)
-                        except asyncio.CancelledError:
-                            return
-            finally:
-                pass
 
         return StreamingResponse(
             event_stream(),
@@ -1031,6 +996,109 @@ def fastapi_app():
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
             },
+        )
+
+    # ── Historical Modal logs ──────────────
+
+    @web.get("/api/runs/{training_run_id}/logs")
+    async def get_run_logs(
+        training_run_id: str,
+        since: str = "",
+        until: str = "",
+        max_lines: int = 100,
+        search: str = "",
+    ):
+        """Historical log fetch for a run, backed by Modal's ``AppFetchLogs``.
+
+        Returns the most recent ``max_lines`` entries within the ``[since, until]``
+        window, oldest-first.
+
+        Query params:
+          - ``since`` / ``until``: window bounds as epoch seconds, ISO 8601, or a
+            relative age (``30m`` / ``2h`` / ``1d`` / ``45s`` = "N ago").
+            ``since`` is exclusive and ``until`` is inclusive. Defaults to the run's
+            lifetime.
+          - ``max_lines``: max entries to return (default 100). Throws if negative or too large.
+            These are the newest entries in the window (ClickHouse caps a single
+            fetch at 20000).
+          - ``search``: case-insensitive substring filter.
+
+        Returns a JSON object with the following fields:
+          - ``logs``: a list of log entries
+          - ``has_more``: whether there are more log entries to fetch
+          - ``next_until``: the timestamp of the next log entry to fetch
+        """
+        from modal_proto import api_pb2
+
+        if max_lines < 0:
+            raise HTTPException(status_code=400, detail="max_lines must be positive")
+
+        run = await _get_run_or_404(training_run_id)
+
+        app_id = (run.modal_app_id or "").strip()
+        if not app_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"TrainingRun {training_run_id!r} has no modal_app_id "
+                    "yet — logs not available."
+                ),
+            )
+
+        now = time.time()
+        since_ts = _parse_log_time(since, now)
+        until_ts = _parse_log_time(until, now)
+        for value, parsed, name in (
+            (since, since_ts, "since"),
+            (until, until_ts, "until"),
+        ):
+            if value and parsed is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{name} must be epoch seconds, ISO 8601, "
+                        "or a relative time such as 24h"
+                    ),
+                )
+        since_ts, until_ts = _resolve_log_window(
+            since_ts,
+            until_ts,
+            default_since=run.started_at or run.created_at or 0,
+            default_until=run.ended_at or run.completed_at or 0,
+            now=now,
+        )
+
+        try:
+            client = await get_modal_client()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Modal auth: {exc!s}")
+        if client is None:
+            raise HTTPException(
+                status_code=503,
+                detail="No Modal credentials configured. Run training-gym setup.",
+            )
+
+        req = api_pb2.AppFetchLogsRequest(
+            app_id=app_id,
+            since=_to_timestamp(since_ts),
+            until=_to_timestamp(until_ts),
+            limit=max_lines,
+            search_text=search.strip(),
+        )
+        try:
+            resp = await client.stub.AppFetchLogs(req)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"AppFetchLogs: {exc!s}")
+
+        logs = _parse_log_batches(resp.batches)
+        has_more, next_until = _compute_next_page(logs, max_lines)
+
+        return JSONResponse(
+            {
+                "logs": logs,
+                "has_more": has_more,
+                "next_until": next_until,
+            }
         )
 
     # ── Train results ────────────────────────────────────────────────────
@@ -1089,17 +1157,15 @@ def fastapi_app():
             data = []
         return JSONResponse(data)
 
-    # ── Compaction (on-demand repair) ─────────────────────────────────────
-
-    @web.post("/api/compact")
-    async def compact():
-        """Trigger an on-demand compaction (the scheduled cron is the primary path)."""
-        await run_in_threadpool(_run_compact_sync)
-        return JSONResponse({"status": "compacted"})
-
     @web.get("/favicon.svg", include_in_schema=False)
     async def favicon():
         return FileResponse(f"{STATIC_DIR}/favicon.svg", media_type="image/svg+xml")
+
+    @web.get("/apple-touch-icon.png", include_in_schema=False)
+    async def apple_touch_icon():
+        return FileResponse(
+            f"{STATIC_DIR}/apple-touch-icon.png", media_type="image/png"
+        )
 
     # ── SPA fallback ─────────────────────────────────────────────────────
 

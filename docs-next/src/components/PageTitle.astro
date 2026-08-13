@@ -1,18 +1,34 @@
 ---
-const { editUrl, entry } = Astro.locals.starlightRoute;
-const sourceUrl = editUrl
-  ? editUrl.toString().replace('/edit/', '/blob/')
-  : 'https://github.com/modal-projects/training-gym';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import CopyPageDropdown from './CopyPageDropdown.astro';
+
+const { entry } = Astro.locals.starlightRoute;
 const pageUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
 
 const currentPath = Astro.url.pathname;
+const repoBlobBase = 'https://github.com/modal-projects/training-gym/blob/main';
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const tutorialMatch = currentPath.match(/^\/tutorials\/(\w+)\/(\w+)\/?$/);
 const useCompactQuickstartHeader =
   currentPath === '/tutorials/intro/quickstart/' ||
   currentPath === '/tutorials/intro/001_quickstart/';
-const notebookUrl = tutorialMatch
-  ? `https://modal.com/notebooks/new/https://github.com/modal-projects/training-gym/blob/main/tutorials/${tutorialMatch[1]}/${tutorialMatch[2]}/${tutorialMatch[2]}.ipynb`
-  : null;
+
+let sourceUrl: string | null = null;
+let notebookUrl: string | null = null;
+if (tutorialMatch) {
+  const [, bucket, name] = tutorialMatch;
+  const nestedPyRel = `tutorials/${bucket}/${name}/${name}.py`;
+  if (fs.existsSync(path.join(repoRoot, nestedPyRel))) {
+    sourceUrl = `${repoBlobBase}/${nestedPyRel}`;
+    const githubNbUrl = `${repoBlobBase}/tutorials/${bucket}/${name}/${name}.ipynb`;
+    notebookUrl = `https://modal.com/notebooks/new/${encodeURIComponent(githubNbUrl)}`;
+  }
+}
+
+const bodyMarkdown = typeof entry.body === 'string' ? entry.body.trim() : '';
+const markdownSource = bodyMarkdown ? `${bodyMarkdown}\n` : '';
 ---
 
 <div class="tg-page-head">
@@ -28,40 +44,13 @@ const notebookUrl = tutorialMatch
         Open in Modal Notebook
       </a>
     )}
-    <a class="tg-action-button tg-action-button--ghost" href={sourceUrl}>View on GitHub</a>
-    <button class="tg-action-button tg-copy-button" type="button" data-copy-page={pageUrl}>
-      Copy page
-    </button>
+    {sourceUrl && (
+      <a class="tg-action-button tg-action-button--ghost" href={sourceUrl}>View on GitHub</a>
+    )}
+    <CopyPageDropdown markdownSource={markdownSource} pageUrl={pageUrl} />
   </div>
   <h1 id="_top">{useCompactQuickstartHeader ? 'Quickstart' : entry.data.title}</h1>
   {!useCompactQuickstartHeader && entry.data.description && (
     <p class="tg-page-head__dek">{entry.data.description}</p>
   )}
 </div>
-
-<script is:inline>
-  document.addEventListener('click', async (event) => {
-    if (!(event.target instanceof Element)) return;
-
-    const button = event.target.closest('[data-copy-page]');
-    if (!(button instanceof HTMLButtonElement)) return;
-
-    const copyUrl = button.dataset.copyPage;
-    if (!copyUrl) return;
-
-    const originalLabel = button.textContent;
-
-    try {
-      await navigator.clipboard.writeText(copyUrl);
-      button.textContent = 'Copied';
-      button.classList.add('is-copied');
-      window.setTimeout(() => {
-        button.textContent = originalLabel;
-        button.classList.remove('is-copied');
-      }, 1600);
-    } catch {
-      button.textContent = copyUrl;
-      button.classList.add('is-copied');
-    }
-  });
-</script>

@@ -11,7 +11,7 @@
 # isolated container with its own filesystem.
 #
 # What you'll learn:
-# 1. Deploy a model with `DeploymentConfig` and get an
+# 1. Deploy a model with `CustomDeployment` and get an
 #    OpenAI-compatible endpoint.
 # 2. Use the OpenAI Python SDK pointed at your self-hosted
 #    endpoint (no API key needed).
@@ -25,7 +25,8 @@
 # and the sandbox — so you control cost, latency, and data privacy.
 # Run with:
 # ```
-# uv run python tutorials/misc/000_agent_sandbox/000_agent_sandbox.py
+# uv run --with openai \
+#   python tutorials/agent/000_agent_sandbox/000_agent_sandbox.py
 # ```
 # ## Prerequisites
 #
@@ -41,8 +42,8 @@ import modal
 import openai
 
 from modal_training_gym import (
-    DeploymentConfig,
-    Qwen3_8B,
+    CustomDeployment,
+    Qwen3_5_9B,
 )
 from modal_training_gym.deploy_recipes import SglangRecipe
 
@@ -77,8 +78,8 @@ def dispatch_tool(sb, name: str, arguments: str) -> str:
 # - **Add a `write_file` tool** using
 #   `sandbox.filesystem.write_text` so the agent can modify
 #   code.
-# - **Swap models** — try `Qwen3_8B` for harder tasks, or
-#   `Qwen3_4B` for lower cost.
+# - **Swap models** — try `Qwen3_6_27B` for harder tasks, or
+#   `Qwen3_5_4B` for lower cost.
 # - **Snapshot the filesystem** with
 #   `sandbox.snapshot_filesystem()` to create a reusable
 #   `modal.Image` from the sandbox state.
@@ -148,23 +149,28 @@ def _main_impl() -> None:
 
     # ## Deploy the model
     #
-    # `DeploymentConfig.serve()` launches an sglang-backed inference
-    # server on Modal and returns a `ModelDeployment` with a live URL.
+    # `CustomDeployment.launch()` launches an sglang-backed inference
+    # server on Modal and returns a `CustomDeployment` with a live URL.
     # The server exposes an **OpenAI-compatible** `/v1/chat/completions`
     # endpoint, so we point the standard OpenAI Python SDK at it.
     #
-    # We pass `extra_server_args={"--tool-call-parser": "qwen25"}` to
-    # the `SglangRecipe` so the server parses Qwen3's tool-call
-    # format into structured `tool_calls` in the response. Without
-    # this, the model emits tool calls as raw text.
+    # We pass `extra_server_args={"--tool-call-parser": "qwen3_coder",
+    # "--reasoning-parser": "qwen3"}` to the `SglangRecipe` so the server
+    # parses Qwen3.5's XML-style tool-call format and strips any inline
+    # thinking blocks before returning structured `tool_calls`.
+    # Without this, the model emits tool calls as raw text.
 
     recipe = SglangRecipe(
-        extra_server_args={"--tool-call-parser": "qwen25"},
+        extra_server_args={
+            "--tool-call-parser": "qwen3_coder",
+            "--reasoning-parser": "qwen3",
+        },
     )
-    deployment = DeploymentConfig(
-        model=Qwen3_8B(),
+    deployment = CustomDeployment.launch(
+        Qwen3_5_9B(),
         recipe=recipe,
-    ).serve()
+        unauthenticated=True,
+    )
     deployment.wait_until_ready()
     print(f"Model URL: {deployment.url}")
 
@@ -242,11 +248,17 @@ def _main_impl() -> None:
     # 3. Repeat until the model produces a final text response.
     #
     # We cap iterations at 10 to avoid runaway loops. We also pass
-    # `enable_thinking=False` in `chat_template_kwargs` so Qwen3
+    # `enable_thinking=False` in `chat_template_kwargs` so Qwen3.5
     # skips its internal chain-of-thought block and responds
     # directly — this keeps tool-call parsing clean.
+    #
+    # That's only a chat-template hint, though, and `--reasoning-parser
+    # qwen3` routes any thinking that does slip through into
+    # `reasoning_content` instead of `content`. We read `content` first
+    # and fall back to `reasoning_content` so a thinking-only turn still
+    # prints an answer.
 
-    MODEL = deployment.deployment_config.served_model_name
+    MODEL = deployment.served_model_name
     MAX_ITERATIONS = 10
 
     messages = [
@@ -275,7 +287,15 @@ def _main_impl() -> None:
         choice = response.choices[0]
 
         if choice.finish_reason == "stop":
-            print(f"Agent response:\n{choice.message.content}")
+            # `--reasoning-parser qwen3` splits any <think> block out of
+            # `content` and into `reasoning_content`. `enable_thinking=False`
+            # above should keep thinking off entirely, but that's a chat-template
+            # hint the server is free to ignore — fall back so a thinking-only
+            # turn still prints something instead of `None`.
+            final = choice.message.content or getattr(
+                choice.message, "reasoning_content", None
+            )
+            print(f"Agent response:\n{final}")
             break
 
         messages.append(choice.message)

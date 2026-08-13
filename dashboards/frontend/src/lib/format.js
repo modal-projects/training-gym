@@ -78,7 +78,7 @@ export function truncateId(id) {
 }
 
 export function getGroupTags(run) {
-  const tags = run?.metadata?.group_tags;
+  const tags = run?.group_tags || run?.metadata?.group_tags;
   const groupId = tags?.group_id || run?.group_id || run?.metadata?.group_id || "";
   if (!groupId && (!tags || typeof tags !== "object")) return null;
 
@@ -106,59 +106,4 @@ export function formatTagValue(value) {
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
-}
-
-const STAGE_LABELS = {
-  initializing: "Initializing",
-  download_model: "Downloading model",
-  convert_model: "Converting model",
-  prepare_dataset: "Preparing dataset",
-  initialize_rollouts: "Initializing rollouts",
-  generate_rollouts: "Generating rollouts",
-  evaluate_rollouts: "Evaluating rollouts",
-  compute_log_probs: "Computing log probs",
-  optimizer_step: "Optimizer step",
-  weight_sync: "Weight sync",
-  offload_rollout: "Offload rollout",
-  offload_train: "Offload train",
-  checkpoint_save: "Saving checkpoint",
-  training: "Training",
-};
-
-export function formatStageLabel(status) {
-  const raw = String(status || "").trim();
-  if (!raw) return "";
-  const normalized = raw.toLowerCase();
-  return (
-    STAGE_LABELS[normalized] ||
-    normalized.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-  );
-}
-
-// Stages where common/train.py marks the stage *before* the Modal function
-// runs; the dashboard distinguishes "queuing for a GPU" from "actually
-// running" via metadata.framework_progress.is_active.
-const QUEUEABLE_STAGES = new Set(["download_model", "convert_model"]);
-
-export function isQueuingStage(status, progress) {
-  if (!QUEUEABLE_STAGES.has(String(status || "").toLowerCase())) return false;
-  if (!progress || typeof progress !== "object") return false;
-  // Explicit false from server; treat undefined as "running" so legacy data
-  // doesn't suddenly start showing "Queuing".
-  return progress.is_active === false;
-}
-
-// Top-level stage label. We surface the *actual* framework stage — including
-// inner-loop phases like "Weight sync" / "Optimizer step" — rather than
-// collapsing them behind a generic "Training" label, so the user can see
-// exactly what the run is doing. The per-step progress bar/counter is shown
-// alongside this (via framework_progress), so the granular stage and the
-// overall step progress are both visible. Still surfaces "Queuing for GPU"
-// when a download/convert stage is marked but the Modal function hasn't
-// started executing yet.
-export function smoothedStageLabel(status, progress) {
-  if (isQueuingStage(status, progress)) {
-    return `Queuing for GPU — ${formatStageLabel(status)}`;
-  }
-  return formatStageLabel(status);
 }

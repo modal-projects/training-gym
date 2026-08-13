@@ -109,6 +109,7 @@
 </script>
 
 <tr
+  class="framework-run-row"
   class:clickable={!!modalAppUrl}
   onclick={openModalApp}
   onkeydown={onRowKeydown}
@@ -116,33 +117,33 @@
   tabindex={modalAppUrl ? "0" : undefined}
   aria-label={modalAppUrl ? `Open Modal app for training run ${run.run_id}` : undefined}
 >
-  <td class="run-id" title={run.run_id}>
-    <div class="mono">{truncateId(run.run_id)}</div>
+  <td class="[font-family:var(--font-mono)] text-[0.78rem] text-[color-mix(in_srgb,var(--accent)_78%,white)] cursor-default" title={run.run_id}>
+    <div class="run-row-mono">{truncateId(run.run_id)}</div>
     {#if run.modal_app_id}
-      <div class="app-id" title={run.modal_app_id}>{truncateId(run.modal_app_id)}</div>
+      <div class="text-(--muted-strong) text-[0.72rem] [font-family:var(--font-mono)] mt-[0.1rem]" title={run.modal_app_id}>{truncateId(run.modal_app_id)}</div>
     {/if}
   </td>
-  <td class="training-run-id-cell">
+  <td class="whitespace-nowrap">
     {#if trainingRunId}
       <button
         type="button"
-        class="copy-chip mono"
+        class="inline-flex items-center gap-[0.35rem] p-[0.16rem_0.45rem] [border:1px_solid_var(--border)] rounded-[6px] bg-(--panel-alt) text-(--text) text-[0.66rem] cursor-copy hover:border-(--accent-border) hover:bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] run-row-mono"
         title={`Click to copy ${trainingRunId}`}
         aria-label={`Copy training run id ${trainingRunId}`}
         onclick={copyTrainingRunId}
       >
         <span>{truncateId(trainingRunId)}</span>
-        <span class="copy-chip-state">{copiedTrainingRunId ? "Copied" : "Copy"}</span>
+        <span class="text-(--muted-strong) text-[0.64rem] uppercase tracking-[0.04em]">{copiedTrainingRunId ? "Copied" : "Copy"}</span>
       </button>
     {:else}
       —
     {/if}
   </td>
   <td>
-    <div class="model-name">{summary.model_name || "—"}</div>
+    <div class="font-medium text-(--text-bright)">{summary.model_name || "—"}</div>
   </td>
-  <td class="cluster">{fmtCluster(summary)}</td>
-  <td class="config-details">
+  <td class="text-[0.75rem] whitespace-nowrap text-(--text)">{fmtCluster(summary)}</td>
+  <td class="flex flex-wrap gap-[0.25rem]">
     {#if summary.lr}
       <span class="config-tag">lr {fmtLr(summary.lr)}</span>
     {/if}
@@ -153,37 +154,37 @@
       <span class="config-tag">{summary.wandb_group}</span>
     {/if}
   </td>
-  <td class="result-cell">
+  <td class="whitespace-nowrap">
     {#if result}
-      <span class="result-badge result-completed">Completed</span>
-      <div class="result-meta mono" title={result.training_run_id}>
+      <span class="result-badge border-(--accent-border) bg-(--accent-soft) text-(--green)">Completed</span>
+      <div class="result-meta run-row-mono" title={result.training_run_id}>
         TrainResult {truncateId(result.training_run_id)}
       </div>
       {#if result.checkpoint_dir}
-        <div class="result-meta mono" title={result.checkpoint_dir}>
+        <div class="result-meta run-row-mono" title={result.checkpoint_dir}>
           {truncateId(result.checkpoint_dir)}
         </div>
       {/if}
       {#if resumeState}
-        <div class="result-meta retry-meta">
+        <div class="result-meta text-(--yellow)!">
           {resumeState.attempt_count > 1 ? `attempt ${resumeState.attempt_count}` : ""}
           {resumeState.resumed_from_checkpoint ? " resumed" : ""}
         </div>
       {/if}
     {:else if run.status === "stopped" || run.status === "failed"}
-      <span class="result-badge result-stopped">No result</span>
+      <span class="result-badge border-[color-mix(in_srgb,#f87171_45%,transparent)] bg-[color-mix(in_srgb,#f87171_10%,transparent)] text-[#f87171]">No result</span>
     {:else}
       <span class="result-badge result-pending">Pending</span>
     {/if}
   </td>
-  <td class="deployment-cell">
+  <td class="whitespace-nowrap">
     {#if deployment}
-      <div class="deployment-name">
+      <div class="font-medium text-(--text-bright) mb-[0.15rem]">
         {deployment.app_name || deployment.served_model_name || deployment.model_name || "Deployment"}
       </div>
       {#if deployment.url}
         <a
-          class="pill-link pill-deploy"
+          class="pill-link text-(--green) [border:1px_solid_var(--accent-border)] bg-(--accent-soft) hover:bg-[color-mix(in_srgb,var(--accent)_18%,transparent)]"
           href={deployment.url}
           target="_blank"
           rel="noopener noreferrer"
@@ -197,7 +198,7 @@
   <td>
     {#if modalAppUrl}
       <a
-        class="pill-link pill-modal"
+        class="pill-link text-(--accent) [border:1px_solid_var(--accent-border)] bg-(--accent-soft) hover:bg-[color-mix(in_srgb,var(--accent)_18%,transparent)]"
         href={modalAppUrl}
         target="_blank"
         rel="noopener noreferrer"
@@ -206,7 +207,7 @@
     {/if}
     {#each wandbLinks as link (link.url)}
       <a
-        class="pill-link pill-wandb"
+        class="pill-link text-(--yellow) [border:1px_solid_color-mix(in_srgb,var(--yellow)_45%,transparent)] bg-[color-mix(in_srgb,var(--yellow)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--yellow)_18%,transparent)]"
         href={link.url}
         target="_blank"
         rel="noopener noreferrer"
@@ -220,188 +221,3 @@
     {/if}
   </td>
 </tr>
-
-<style>
-  td {
-    padding: 0.5rem 0.8rem;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-    vertical-align: top;
-    font-size: 0.79rem;
-  }
-  tr:hover td {
-    background: color-mix(in srgb, var(--text) 4%, transparent);
-  }
-  .clickable td {
-    cursor: pointer;
-  }
-  .clickable:focus-visible td {
-    outline: 1px solid var(--accent-border);
-    outline-offset: -1px;
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
-  }
-  tr:last-child td {
-    border-bottom: none;
-  }
-  .run-id {
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    color: color-mix(in srgb, var(--accent) 78%, white);
-    cursor: default;
-  }
-  .mono {
-    font-family: var(--font-mono);
-  }
-  .training-run-id-cell {
-    white-space: nowrap;
-  }
-  .copy-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.16rem 0.45rem;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--panel-alt);
-    color: var(--text);
-    font-size: 0.66rem;
-    cursor: copy;
-  }
-  .copy-chip:hover {
-    border-color: var(--accent-border);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
-  }
-  .copy-chip-state {
-    color: var(--muted-strong);
-    font-size: 0.64rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .model-name {
-    font-weight: 500;
-    color: var(--text-bright);
-  }
-  .app-id {
-    color: var(--muted-strong);
-    font-size: 0.72rem;
-    font-family: var(--font-mono);
-    margin-top: 0.1rem;
-  }
-  .cluster {
-    font-size: 0.75rem;
-    white-space: nowrap;
-    color: var(--text);
-  }
-  .config-details {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-  }
-  .config-tag {
-    display: inline-block;
-    padding: 0.12rem 0.4rem;
-    background: var(--panel-alt);
-    border: 1px solid var(--border);
-    border-radius: 9999px;
-    font-size: 0.67rem;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-  .result-cell,
-  .deployment-cell {
-    white-space: nowrap;
-  }
-  .result-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.12rem 0.55rem;
-    border-radius: 9999px;
-    font-size: 0.71rem;
-    font-weight: 500;
-    border: 1px solid transparent;
-  }
-  .result-badge::before {
-    content: "";
-    width: 0.38rem;
-    height: 0.38rem;
-    border-radius: 9999px;
-    background: currentColor;
-  }
-  .result-completed {
-    border-color: var(--accent-border);
-    background: var(--accent-soft);
-    color: var(--green);
-  }
-  .result-pending {
-    border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
-    background: color-mix(in srgb, var(--yellow) 10%, transparent);
-    color: var(--yellow);
-  }
-  .result-stopped {
-    border-color: color-mix(in srgb, #f87171 45%, transparent);
-    background: color-mix(in srgb, #f87171 10%, transparent);
-    color: #f87171;
-  }
-  .result-meta {
-    margin-top: 0.18rem;
-    font-size: 0.7rem;
-    color: var(--muted-strong);
-  }
-  .retry-meta {
-    color: var(--yellow);
-  }
-  .deployment-name {
-    font-weight: 500;
-    color: var(--text-bright);
-    margin-bottom: 0.15rem;
-  }
-  .tag {
-    display: inline-block;
-    padding: 0.12rem 0.45rem;
-    margin: 0 0.2rem 0.15rem 0;
-    background: var(--panel-alt);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.68rem;
-    color: var(--muted);
-    cursor: default;
-  }
-  .tag strong {
-    color: var(--text-bright);
-    font-weight: 500;
-  }
-  .pill-link {
-    display: inline-block;
-    padding: 0.14rem 0.48rem;
-    margin-right: 0.3rem;
-    border-radius: 6px;
-    font-size: 0.68rem;
-    font-weight: 500;
-    text-decoration: none;
-  }
-  .pill-modal {
-    color: var(--accent);
-    border: 1px solid var(--accent-border);
-    background: var(--accent-soft);
-  }
-  .pill-modal:hover {
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
-  }
-  .pill-wandb {
-    color: var(--yellow);
-    border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
-    background: color-mix(in srgb, var(--yellow) 10%, transparent);
-  }
-  .pill-wandb:hover {
-    background: color-mix(in srgb, var(--yellow) 18%, transparent);
-  }
-  .pill-deploy {
-    color: var(--green);
-    border: 1px solid var(--accent-border);
-    background: var(--accent-soft);
-  }
-  .pill-deploy:hover {
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
-  }
-</style>

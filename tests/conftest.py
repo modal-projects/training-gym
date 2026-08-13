@@ -25,8 +25,8 @@ class FakeVolume:
 
     ``reload()`` raises like a real unattached/local volume (both sync and via
     ``.aio()``); reads and writes operate on an in-memory dict. A correct
-    metadata layer must still complete a ``save()`` / ``save_async()`` against
-    this — reload is only a freshness hint.
+    metadata layer must still complete a ``save()`` (sync or ``is_async=True``)
+    against this — reload is only a freshness hint.
     """
 
     class _DirEntry:
@@ -98,3 +98,12 @@ def fake_volume(monkeypatch) -> FakeVolume:
     vol = FakeVolume()
     monkeypatch.setattr(metadata, "_metadata_volume", lambda: vol)
     return vol
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--rewrite",
+        action="store_true",
+        default=False,
+        help="Rewrite golden .output files in tests/testdata/ instead of asserting",
+    )

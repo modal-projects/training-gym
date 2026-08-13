@@ -1,51 +1,49 @@
 """Post-training handle: look up checkpoints, serve them, write evals.
 
-A :class:`TrainResult` is produced by ``train`` itself — one per call —
-and is also persisted to a shared :class:`modal.Dict` keyed by
-``training_run_id`` so that a *separate* evaluation script can look it up after
-the fact without re-running training.
+A :class:`TrainResult` is produced by ``train`` itself — one per call — and is
+also persisted to the metadata volume keyed by ``training_run_id`` so that a
+*separate* evaluation script can look it up after the fact without re-running
+training.
 
 Typical flow:
 
 .. code-block:: python
 
     # training.py
-    app = TrainConfig(...).build_app()
-
-    # Kick off training:
-    #   modal run --detach training.py::app.train
-    # The train function constructs a TrainResult, writes it to the
-    # shared modal.Dict, and returns it.
+    result = TrainConfig(...).train()          # blocks, returns the TrainResult
+    # or, to launch and walk away:
+    run = TrainConfig(...).launch()            # detached; returns a TrainingRun
+    result = run.result()                      # optional wait
 
     # eval.py (anywhere, any time after `train` finishes):
     from modal_training_gym.common.train_result import TrainResult
 
-    result = TrainResult.load("my-app")                 # latest run
-    # or
-    result = TrainResult.load("my-app", training_run_id="...")   # pinned
+    result = TrainResult.load(training_run_id)
 
     print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
     print(result.latest_checkpoint_path())  # .../iter_0000050
 
-    from modal_training_gym.common.deployment import DeploymentConfig
-    deployment = DeploymentConfig(model=result.model).serve()
+    from modal_training_gym import CustomDeployment
+    from modal_training_gym.deploy_recipes import SglangRecipe
+    deployment = CustomDeployment.launch(result.model, recipe=SglangRecipe())
     print(deployment.url)
 
 Two design invariants:
 
-1. ``TrainResult`` is **not** attached to the ``modal.App`` returned by
-   ``build_app()`` — a training run has no "result" before ``train`` has
-   executed. The ``modal.App`` object is a deployment handle, not a run
-   handle.
+1. ``TrainResult`` is **not** attached to the ``modal.App`` that
+   ``TrainConfig`` builds internally — a training run has no "result" before
+   ``train`` has executed. The ``modal.App`` object is a deployment handle,
+   not a run handle; :class:`TrainingRun` is the run handle.
 2. Every call to ``train`` can produce a *different* result (different
-   ``training_run_id``, different ``checkpoint_dir``). We use a :class:`modal.Dict`
-   named ``{app_name}-train-results`` as the shared store so that eval
-   scripts — which don't import the training closure and don't call
-   ``train()`` — can still retrieve results by ``training_run_id``.
+   ``training_run_id``, different ``checkpoint_dir``). Results live in the
+   shared metadata volume so that eval scripts — which don't import the
+   training closure and don't call ``train()`` — can still retrieve them by
+   ``training_run_id``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import asdict, dataclass, field, fields
 import copy
 from typing import TYPE_CHECKING, Any
@@ -54,10 +52,7 @@ from modal_training_gym.common.framework import Framework
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get,
-    vol_put,
-    vol_put_async,
-    vol_upsert_summary_item,
-    vol_upsert_summary_item_async,
+    vol_put_with_summary,
 )
 
 if TYPE_CHECKING:
@@ -137,26 +132,16 @@ class TrainResult:
     def _summary_sort_key(item: dict[str, Any]) -> str:
         return str(item.get("training_run_id", ""))
 
-    def save(self) -> None:
-        payload = self._to_dict()
-        vol_put(MetadataStore.TRAIN_RESULTS, self.training_run_id, payload)
-        vol_upsert_summary_item(
-            MetadataStore.TRAIN_RESULTS_SUMMARY,
-            payload,
+    def save(self, *, is_async: bool = False) -> None | Awaitable[None]:
+        return vol_put_with_summary(
+            MetadataStore.TRAIN_RESULTS,
+            self.training_run_id,
+            self._to_dict(),
+            summary_store=MetadataStore.TRAIN_RESULTS_SUMMARY,
             item_id_key="training_run_id",
             sort_key=self._summary_sort_key,
             reverse=True,
-        )
-
-    async def save_async(self) -> None:
-        payload = self._to_dict()
-        await vol_put_async(MetadataStore.TRAIN_RESULTS, self.training_run_id, payload)
-        await vol_upsert_summary_item_async(
-            MetadataStore.TRAIN_RESULTS_SUMMARY,
-            payload,
-            item_id_key="training_run_id",
-            sort_key=self._summary_sort_key,
-            reverse=True,
+            is_async=is_async,
         )
 
     @staticmethod

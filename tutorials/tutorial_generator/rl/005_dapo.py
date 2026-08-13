@@ -4,16 +4,13 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 8×H100",
-    "summary": "DAPO on math with Qwen3-4B",
+    "summary": "DAPO on math",
     "difficulty": "Advanced",
     "order": 35,
     "api_classes": [
-        "Qwen3_4B",
-        "DeploymentConfig",
-        "EvalConfig",
-        "EvalRowResult",
+        "Qwen3_5_4B",
+        "CustomDeployment",
         "HuggingFaceDataset",
-        "ModelDeployment",
         "SlimeRecipe",
         "TrainConfig",
         "list_checkpoints",
@@ -28,7 +25,7 @@ def _intro():
     """
     # Decoupled Clip and Dynamic Sampling Policy Optimization (DAPO)
 
-    This tutorial trains **Qwen3-4B** according to DAPO as presented in Yu et al.,
+    This tutorial trains **Qwen3.5-4B** according to DAPO as presented in Yu et al.,
     2025 on the provided dataset `zhuzilin/dapo-math-17k`.
 
     DAPO presents four changes to the vanilla GRPO recipe aimed to improve long
@@ -60,7 +57,7 @@ def _run_instructions():
     ```
     cd training-gym
     uv sync
-    uv run python tutorials/rl/005_dapo/005_dapo.py
+    uv run tutorials/rl/005_dapo/005_dapo.py
     ```
 
     To detach and watch it from the Modal dashboard instead:
@@ -90,12 +87,9 @@ def _imports():
     from typing import Any
 
     from modal_training_gym import (
-        DeploymentConfig,
-        EvalConfig,
-        EvalRowResult,
+        CustomDeployment,
         HuggingFaceDataset,
-        ModelDeployment,
-        Qwen3_4B,
+        Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
         list_checkpoints,
@@ -152,11 +146,8 @@ def _make_datasets():
 @code
 def _dataset_peek():
     rows = eval_dataset.load()
-    for row in rows[:2]:
-        prompt = row["prompt"]
-        if isinstance(prompt, list):
-            prompt = prompt[0]["content"] if prompt else ""
-        print(prompt[:200])
+    for row in rows.select(range(2)):
+        print(row["prompt"][0]["content"][:200])
         print(f"  label: {row['label']}")
         print()
 
@@ -184,11 +175,9 @@ def _eval_helpers():
             pass
         return pred == gt
 
-    def math_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
-        prompt = example.get("prompt", "")
-        if isinstance(prompt, list):
-            prompt = prompt[0]["content"] if prompt else ""
-        label = example.get("label", "")
+    def math_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+        prompt = example["prompt"][0]["content"]
+        label = example["label"]
 
         response = deployment.generate(
             prompt,
@@ -199,11 +188,28 @@ def _eval_helpers():
         correct = _check_math(response, label)
         pred = _normalize_answer(_extract_answer(response))
 
-        return EvalRowResult(
-            score=1.0 if correct else 0.0,
-            response=response,
-            metadata={"correct": correct, "pred": pred, "label": label},
-        )
+        return {
+            "score": 1.0 if correct else 0.0,
+            "response": response,
+            "correct": correct,
+            "pred": pred,
+            "label": label,
+        }
+
+    def run_eval(
+        deployment, *, max_concurrency: int = 2
+    ) -> tuple[float, list[dict]]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        deployment.wait_until_ready(timeout=3000)
+
+        def _score_one(example):
+            return math_eval_fn(deployment, example)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            rows = list(executor.map(_score_one, eval_dataset.load()))
+        mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+        return mean, rows
 
 
 @markdown
@@ -217,25 +223,27 @@ def _eval_base_intro():
 
 @code
 def _eval_base():
-    base_model = Qwen3_4B()
-    base_deployment = DeploymentConfig(model=base_model).serve()
+    base_model = Qwen3_5_4B()
+    base_deployment = CustomDeployment.launch(
+        base_model,
+        unauthenticated=True,
+    )
     print(f"Base model URL: {base_deployment.url}")
 
-    eval_config = EvalConfig(dataset=eval_dataset, eval_fn=math_eval_fn)
     print("--- Evaluating base model... ---")
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    n_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    print(f"Base accuracy: {n_correct}/{len(base_eval.rows)} "
-          f"({base_eval.mean:.1%})")
+    base_mean, base_rows = run_eval(base_deployment)
+    n_correct = sum(1 for r in base_rows if r.get("correct"))
+    print(f"Base accuracy: {n_correct}/{len(base_rows)} "
+          f"({base_mean:.1%})")
 
 
 @notebook_only
 @code
 def _base_examples():
-    for r in base_eval.rows[:3]:
-        status = "CORRECT" if r.metadata["correct"] else "WRONG"
-        print(f"[{status}] label={r.metadata['label']}, pred={r.metadata['pred']}")
-        print(f"  ...{r.response[-150:]}")
+    for r in base_rows[:3]:
+        status = "CORRECT" if r["correct"] else "WRONG"
+        print(f"[{status}] label={r['label']}, pred={r['pred']}")
+        print(f"  ...{r['response'][-150:]}")
         print()
 
 
@@ -291,7 +299,7 @@ def _train_intro():
     """
     ## Training
 
-    The recipe below is slime's reference Qwen3-4B layout (TP=2, 8192-token
+    The recipe below is slime's reference Qwen3.5-4B layout (TP=2, 8192-token
     responses, `max_tokens_per_gpu=9216`) with the DAPO modifications  on
     top of GRPO. We follow ([the paper's recipe](https://arxiv.org/abs/2503.14476)) for the most part, 
     but with some modifications for speed:
@@ -394,31 +402,32 @@ def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-dapo-serve",
-        served_model_name="qwen3-4b-dapo",
-    ).serve()
+        app_name="qwen3-5-4b-dapo-serve",
+        served_model_name="qwen3-5-4b-dapo",
+        unauthenticated=True,
+    )
     print(f"Trained model URL: {trained_deployment.url}")
 
     print("--- Evaluating trained model... ---")
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    n_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    print(f"Trained accuracy: {n_correct}/{len(trained_eval.rows)} "
-          f"({trained_eval.mean:.1%})")
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    n_correct = sum(1 for r in trained_rows if r.get("correct"))
+    print(f"Trained accuracy: {n_correct}/{len(trained_rows)} "
+          f"({trained_mean:.1%})")
 
 
 @notebook_only
 @code
 def _trained_examples():
-    for base_r, trained_r in zip(base_eval.rows[:3], trained_eval.rows[:3]):
-        label = base_r.metadata["label"]
-        b_status = "CORRECT" if base_r.metadata["correct"] else "WRONG"
-        t_status = "CORRECT" if trained_r.metadata["correct"] else "WRONG"
+    for base_r, trained_r in zip(base_rows[:3], trained_rows[:3]):
+        label = base_r["label"]
+        b_status = "CORRECT" if base_r["correct"] else "WRONG"
+        t_status = "CORRECT" if trained_r["correct"] else "WRONG"
         print(f"label={label}")
-        print(f"  Base:    [{b_status}] pred={base_r.metadata['pred']}")
-        print(f"  Trained: [{t_status}] pred={trained_r.metadata['pred']}")
+        print(f"  Base:    [{b_status}] pred={base_r['pred']}")
+        print(f"  Trained: [{t_status}] pred={trained_r['pred']}")
         print()
 
 
@@ -433,9 +442,9 @@ def _compare_intro():
 
 @code
 def _compare():
-    base_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    trained_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    total = len(base_eval.rows)
-    print(f"Base model:    {base_correct}/{total} ({base_eval.mean:.1%})")
-    print(f"Trained model: {trained_correct}/{total} ({trained_eval.mean:.1%})")
-    print(f"Delta:         {trained_eval.mean - base_eval.mean:+.1%}")
+    base_correct = sum(1 for r in base_rows if r.get("correct"))
+    trained_correct = sum(1 for r in trained_rows if r.get("correct"))
+    total = len(base_rows)
+    print(f"Base model:    {base_correct}/{total} ({base_mean:.1%})")
+    print(f"Trained model: {trained_correct}/{total} ({trained_mean:.1%})")
+    print(f"Delta:         {trained_mean - base_mean:+.1%}")

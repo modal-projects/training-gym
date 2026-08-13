@@ -41,6 +41,8 @@ from modal_training_gym.common.environments.base import (
     SandboxEnvironmentPool,
     StepResult,
     ToolCall,
+    render_tool_catalog as render_tool_catalog,
+    tool_schemas_to_openai as tool_schemas_to_openai,
 )
 
 # MCP servers whose state is confined to the agent workspace (snapshot-safe "Tier A").
@@ -545,18 +547,6 @@ class ToolathlonEnvPool(SandboxEnvironmentPool):
         _await_gateway(sandbox, self.config, attempts=40)
         return ToolathlonEnvironment(sandbox, self.config, task_name)
 
-    def acquire_fresh(self, task_name: str) -> ToolathlonEnvironment:
-        """A pristine (step-0) episode seeded from scratch — no snapshot catalog.
-
-        Runs Toolathlon's ``container_preprocess`` directly in a new sandbox
-        (seeds the workspace + synthesizes the eval dump_line + starts the
-        gateway), so live RL rollouts don't depend on a pre-built snapshot
-        library. Use :meth:`acquire` when starting mid-trajectory (curriculum).
-        """
-        sandbox = self.create_sandbox(timeout=60 * 30, cpu=2.0, memory=4096)
-        _seed_workspace(sandbox, self.config, f"finalpool/{task_name}")
-        return ToolathlonEnvironment(sandbox, self.config, task_name)
-
 
 # Lazily-created module-level pool, shared across rollouts in a worker.
 _ENV_POOL_CACHE: dict[ToolathlonEnvConfig, ToolathlonEnvPool] = {}
@@ -688,6 +678,7 @@ class ToolathlonTrajectoryDataset(DatasetConfig):
     label_key = "label"
     output_format = "jsonl"
     apply_chat_template = True
+    writes_eval_paths = False
 
     hf_repo: str = "hkust-nlp/Toolathlon-Trajectories"
     source_file: str = "deepseek-v3.2-exp_1.jsonl"
@@ -833,8 +824,10 @@ class ToolathlonTrajectoryDataset(DatasetConfig):
         }
 
     def prepare(self, path: str, eval_paths: dict | None = None) -> None:
+        """Write this instance's split to ``path``. ``eval_paths`` is ignored."""
         import os
 
+        del eval_paths
         rows = self._load_split()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
@@ -869,67 +862,10 @@ train-ticket-plan.json
 Use the actual tool name, parameters, and full (untruncated) values required by your task; the call above is only an illustration of the wire format."""
 
 
-def render_tool_catalog(tool_schemas: dict, desc_chars: int = 160) -> str:
-    """Render the available-tools catalog the agent must choose from.
-
-    The agent can't query the MCP servers itself (that's the host loop's job via tools/list + the
-    OpenAI tools= param), so we surface the exact catalog the expert saw. Compact: one line per tool —
-    ``name(arg, required*)`` + a short description.
-    """
-    lines = []
-    for name in sorted(tool_schemas or {}):
-        spec = tool_schemas[name]
-        # tolerate both {description, parameters} and bare parameters (older cached rows)
-        if isinstance(spec, dict) and ("parameters" in spec or "description" in spec):
-            desc, params = spec.get("description", ""), spec.get("parameters", {})
-        else:
-            desc, params = "", spec
-        props = (params or {}).get("properties", {}) if isinstance(params, dict) else {}
-        required = (
-            set((params or {}).get("required", []) or [])
-            if isinstance(params, dict)
-            else set()
-        )
-        sig = ", ".join(f"{k}*" if k in required else k for k in props)
-        desc = " ".join(str(desc).split())[:desc_chars]
-        lines.append(f"- {name}({sig})" + (f": {desc}" if desc else ""))
-    return "\n".join(lines)
-
-
 def default_system_prompt(tool_schemas: dict) -> str:
     """Behavioral rules only — the tool catalog travels via the chat template's
     ``tools=`` parameter (see :func:`tool_schemas_to_openai`), not prompt text."""
     return DEFAULT_SYSTEM_PROMPT
-
-
-def tool_schemas_to_openai(tool_schemas: dict) -> list[dict]:
-    """Convert the dataset's ``{name: {description, parameters}}`` map into the
-    OpenAI/HF ``tools=`` list.
-
-    Pass the result to ``tokenizer.apply_chat_template(..., tools=...)`` (training
-    rollouts) or as the ``tools`` field of a chat-completions request (eval), so the
-    model sees the catalog in its NATIVE tool-calling format instead of a hand-rendered
-    text catalog, and emits calls in the wire format its template was trained on.
-    """
-    tools = []
-    for name in sorted(tool_schemas or {}):
-        spec = tool_schemas[name]
-        # tolerate both {description, parameters} and bare parameters (older cached rows)
-        if isinstance(spec, dict) and ("parameters" in spec or "description" in spec):
-            desc, params = spec.get("description", ""), spec.get("parameters", {})
-        else:
-            desc, params = "", spec
-        tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": desc,
-                    "parameters": params or {"type": "object", "properties": {}},
-                },
-            }
-        )
-    return tools
 
 
 def build_prefix_messages(

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from modal_training_gym.common.errors import GpuAllocationError
-from modal_training_gym.train_recipes.miles_recipe.recipe import MilesConfig
+from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 from modal_training_gym.train_recipes.gpu_allocation import (
     resolve_gpu_allocation,
     validate_megatron_actor_parallelism,
@@ -69,7 +69,7 @@ def test_large_rollout_allocation_warns() -> None:
 def test_miles_uses_same_gpu_allocation_math() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        config = MilesConfig(
+        config = MilesRecipe(
             colocate=False,
             rollout_num_gpus=8,
             rollout_num_gpus_per_engine=4,
@@ -82,9 +82,12 @@ def test_miles_uses_same_gpu_allocation_math() -> None:
     assert config.total_nodes == 2
 
 
-def test_miles_raises_training_gym_error_for_bad_gpu_count_type() -> None:
-    with pytest.raises(GpuAllocationError, match="actor_num_gpus_per_node"):
-        MilesConfig(actor_num_gpus_per_node=8.5)
+def test_miles_rejects_bad_gpu_count_type() -> None:
+    # Pydantic's field validation rejects the fractional GPU count before
+    # resolve_gpu_allocation runs; both ValidationError and GpuAllocationError
+    # are ValueError subclasses.
+    with pytest.raises(ValueError, match="actor_num_gpus_per_node"):
+        MilesRecipe(actor_num_gpus_per_node=8.5)
 
 
 @pytest.mark.parametrize("value", [True, 8.0, "8"])
@@ -150,3 +153,38 @@ def test_num_experts_validation_skips_dense_models() -> None:
     model = SimpleNamespace(architecture=SimpleNamespace(num_experts=0))
 
     validate_num_experts_divisible_by_expert_parallel_size(config, model)
+
+
+def test_num_experts_validation_skips_unset_expert_parallel_size() -> None:
+    # An unset EP falls back to the framework default of 1, which always divides.
+    config = SimpleNamespace(expert_model_parallel_size=None)
+    model = SimpleNamespace(architecture=SimpleNamespace(num_experts=160))
+
+    validate_num_experts_divisible_by_expert_parallel_size(config, model)
+
+
+def _moe_model(num_experts: int) -> SimpleNamespace:
+    return SimpleNamespace(architecture=SimpleNamespace(num_experts=num_experts))
+
+
+def test_miles_validates_num_experts_against_expert_parallel_size() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        recipe = MilesRecipe(expert_model_parallel_size=4)
+
+    with pytest.raises(
+        GpuAllocationError,
+        match=r"num_experts=10.*expert_model_parallel_size=4",
+    ):
+        recipe.validate_model_parallelism(_moe_model(10))
+
+    recipe.validate_model_parallelism(_moe_model(8))
+
+
+def test_miles_num_experts_validation_allows_unset_expert_parallel_size() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        recipe = MilesRecipe()
+
+    assert recipe.expert_model_parallel_size is None
+    recipe.validate_model_parallelism(_moe_model(160))

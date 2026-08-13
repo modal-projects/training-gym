@@ -10,14 +10,22 @@
 
 import asyncio
 import inspect
+import os
 import subprocess
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from modal.experimental import clustered
 
 RAY_PORT = 6379
 RAY_DASHBOARD_PORT = 8265
+
+_GCS_HEALTH_CHECK_ENV = {
+    "RAY_health_check_period_ms": "10000",
+    "RAY_health_check_timeout_ms": "20000",
+    "RAY_health_check_failure_threshold": "60",
+}
 
 # GPU families with an RDMA/EFA fabric; other types don't support it and would fail
 # if it were forced on.
@@ -72,7 +80,8 @@ def start_ray_head(
     ]
     if extra_start_args:
         cmd.extend(extra_start_args)
-    subprocess.Popen(cmd)
+    head_env = {**os.environ, **_GCS_HEALTH_CHECK_ENV}
+    subprocess.Popen(cmd, env=head_env)
 
     for _ in range(init_retries):
         try:
@@ -111,6 +120,29 @@ def start_ray_worker(
     if extra_start_args:
         cmd.extend(extra_start_args)
     subprocess.Popen(cmd)
+
+
+def _with_container_pythonpath(runtime_env: dict) -> dict:
+    container_pythonpath = os.environ.get("PYTHONPATH", "")
+    if not container_pythonpath:
+        return runtime_env
+
+    env_vars = dict(runtime_env.get("env_vars") or {})
+    entries = [
+        entry for entry in env_vars.get("PYTHONPATH", "").split(os.pathsep) if entry
+    ]
+    for entry in container_pythonpath.split(os.pathsep):
+        if entry and entry not in entries:
+            entries.append(entry)
+    env_vars["PYTHONPATH"] = os.pathsep.join(entries)
+    return {**runtime_env, "env_vars": env_vars}
+
+
+@dataclass
+class ModalRayJobResult:
+    status: str
+    is_success: bool
+    message: str | None = None
 
 
 class ModalRayCluster:
@@ -281,14 +313,14 @@ class ModalRayCluster:
         *,
         runtime_env: dict | None = None,
         max_retries: int = 35,
-    ) -> str:
+    ) -> ModalRayJobResult:
         """Submit a Ray job, stream its logs to stdout, and return the final status."""
         if not self.is_head:
             raise RuntimeError("submit_and_tail is only valid on the head node")
         assert self._client is not None
         job_id = self._client.submit_job(
             entrypoint=entrypoint,
-            runtime_env=runtime_env or {},
+            runtime_env=_with_container_pythonpath(runtime_env or {}),
         )
         print(f"Submitted Ray job: {job_id}")
 
@@ -323,8 +355,23 @@ class ModalRayCluster:
 
         print(f"\nFinal Ray job status: {status}")
         if status != "SUCCEEDED":
-            raise RuntimeError(f"Ray job {job_id} finished with status: {status}")
-        return status
+            # Surface Ray's recorded driver failure message in the exception
+            # itself: the real traceback is streamed above but is easily buried
+            # in rollout logs and is lost once logs roll off after termination.
+            message = None
+            try:
+                info = self._client.get_job_info(job_id)
+                if inspect.isawaitable(info):
+                    info = await info
+                message = getattr(info, "message", None) or None
+            except Exception:  # noqa: BLE001 — best-effort enrichment
+                pass
+            suffix = f": {message}" if message else ""
+            print(f"Ray job {job_id} finished with status: {status}{suffix}")
+            return ModalRayJobResult(
+                status=status, is_success=status == "SUCCEEDED", message=message
+            )
+        return ModalRayJobResult(status=status, is_success=status == "SUCCEEDED")
 
     async def wait_forever(self, poll_seconds: float = 10) -> None:
         """Keep a worker container alive until the head terminates the cluster."""

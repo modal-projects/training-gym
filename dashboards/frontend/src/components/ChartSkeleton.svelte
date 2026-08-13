@@ -28,9 +28,9 @@
   );
 </script>
 
-<div class="cs" aria-hidden="true">
+<div class="w-full" aria-hidden="true">
   {#if showTitle}
-    <span class="cs-pulse cs-title"></span>
+    <span class="cs-pulse w-[40%] max-w-[160px] h-[12px] mb-[8px]"></span>
   {/if}
   <div class="cs-plot" class:bordered={variant !== "line"} style:height={`${height}px`}>
     {#if variant === "line"}
@@ -52,93 +52,3 @@
     {/if}
   </div>
 </div>
-
-<style>
-  .cs {
-    width: 100%;
-  }
-  .cs-pulse {
-    display: block;
-    background: #2f2f2f;
-    border-radius: 6px;
-    animation: chart-skeleton-pulse 1.2s ease-in-out infinite;
-  }
-  .cs-title {
-    width: 40%;
-    max-width: 160px;
-    height: 12px;
-    margin-bottom: 8px;
-  }
-  .cs-plot {
-    position: relative;
-    width: 100%;
-  }
-  .cs-plot.bordered {
-    border-bottom: 1px solid var(--border, #2f2f2f);
-  }
-
-  /* line / area */
-  .cs-grid {
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: color-mix(in srgb, var(--muted, #a3a3a3) 18%, transparent);
-  }
-  .cs-area {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 58%;
-    border-radius: 8px 8px 0 0;
-    opacity: 0.5;
-  }
-
-  /* bars / violins */
-  .cs-marks {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 3px;
-  }
-  .cs-bar {
-    flex: 1 1 0;
-    min-width: 0;
-    border-radius: 3px 3px 0 0;
-  }
-  .cs-violin {
-    flex: 1 1 0;
-    min-width: 0;
-    max-width: 22px;
-    margin: auto 0;
-    border-radius: 999px;
-    opacity: 0.65;
-  }
-
-  /* Stagger the marks so the row shimmers rather than blinking in unison. */
-  .cs-marks .cs-pulse:nth-child(3n + 2) {
-    animation-delay: 0.2s;
-  }
-  .cs-marks .cs-pulse:nth-child(3n) {
-    animation-delay: 0.4s;
-  }
-
-  @keyframes chart-skeleton-pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.45;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .cs-pulse {
-      animation: none;
-      opacity: 0.7;
-    }
-  }
-</style>

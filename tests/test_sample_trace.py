@@ -123,6 +123,70 @@ def test_extract_trace_from_attr_metadata_and_dict():
     assert pr._extract_trace(SimpleNamespace(prompt="x")) is None
 
 
+# ── inference metadata ───────────────────────────────────────────────────────
+
+
+def test_sample_to_dict_extracts_prefix_cache_info():
+    sample = SimpleNamespace(
+        prompt="prompt",
+        response="response",
+        reward=1.0,
+        response_length=80,
+        prefix_cache_info=SimpleNamespace(
+            total_prompt_tokens=1_000,
+            cached_tokens=250,
+        ),
+    )
+
+    recorded = pr._sample_to_dict(sample)
+
+    assert recorded["metadata"]["inference"] == {
+        "tokens_in": 1_000,
+        "tokens_out": 80,
+        "cached_tokens": 250,
+        "new_tokens": 750,
+        "cache_hit_rate": 0.25,
+    }
+
+
+def test_sample_to_dict_100_percent_cache_hit():
+    """All prompt tokens cached → cache_hit_rate is 1.0, new_tokens is 0."""
+    sample = SimpleNamespace(
+        prompt="prompt",
+        response="response",
+        reward=1.0,
+        response_length=120,
+        prefix_cache_info=SimpleNamespace(
+            total_prompt_tokens=500,
+            cached_tokens=500,
+        ),
+    )
+
+    recorded = pr._sample_to_dict(sample)
+
+    assert recorded["metadata"]["inference"] == {
+        "tokens_in": 500,
+        "tokens_out": 120,
+        "cached_tokens": 500,
+        "new_tokens": 0,
+        "cache_hit_rate": 1.0,
+    }
+
+
+def test_sample_to_dict_no_inference_without_prefix_cache_info():
+    """Samples without prefix_cache_info (e.g. custom rollouts) get no inference key."""
+    sample = SimpleNamespace(
+        prompt="prompt",
+        response="response",
+        reward=0.0,
+        response_length=4,
+    )
+
+    recorded = pr._sample_to_dict(sample)
+
+    assert "inference" not in recorded["metadata"]
+
+
 # ── capture gate + sampling ──────────────────────────────────────────────────
 
 

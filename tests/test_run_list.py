@@ -1,0 +1,173 @@
+from __future__ import annotations
+
+import pytest
+
+from modal_training_gym.common.run_list import (
+    filter_run_summaries,
+    run_list_field_metadata,
+)
+from modal_training_gym.common.run_summary import RunSummary
+
+
+def _summary(**overrides) -> RunSummary:
+    values = {
+        "training_run_id": "run-1",
+        "run_id": "run-1",
+        "status": "running",
+        "display_status": "pending",
+        "display_stage": "Training",
+        "framework_status": "training",
+        "model": "org/model",
+        "dataset": "org/data",
+        "recipe": "slime",
+        "group_id": "nightly",
+        "created_at": 100,
+        "updated_at": 200,
+    }
+    values.update(overrides)
+    return RunSummary(**values)
+
+
+def test_schema_metadata_drives_columns_and_filters():
+    fields = run_list_field_metadata()
+
+    assert list(fields) == [
+        "run_id",
+        "display_status",
+        "display_stage",
+        "model",
+        "dataset",
+        "recipe",
+        "group_id",
+        "created_at",
+        "updated_at",
+    ]
+    assert {name for name, metadata in fields.items() if metadata["filterable"]} == {
+        "display_status",
+        "model",
+        "dataset",
+        "recipe",
+        "group_id",
+    }
+
+
+def test_filtering_uses_projection_values_and_update_recency():
+    older = _summary(run_id="older", training_run_id="older")
+    newer = _summary(
+        run_id="newer",
+        training_run_id="newer",
+        status="failed",
+        display_status="failed",
+        created_at=250,
+        updated_at=300,
+    )
+
+    assert filter_run_summaries(
+        [older, newer],
+        filters={"display_status": "FAILED"},
+    ) == [newer]
+    assert filter_run_summaries([older, newer], since=225, limit=1) == [newer]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("display_status", "failed"),
+        ("model", "org/model"),
+        ("dataset", "org/data"),
+        ("recipe", "slime"),
+        ("group_id", "nightly"),
+    ],
+)
+def test_each_filterable_field_matches_case_insensitively(field, value):
+    matching = _summary(
+        run_id="matching",
+        training_run_id="matching",
+        **{field: value},
+    )
+    nonmatching = _summary(
+        run_id="nonmatching",
+        training_run_id="nonmatching",
+        **{field: "different"},
+    )
+
+    assert filter_run_summaries(
+        [nonmatching, matching],
+        filters={field: f" {value.upper()} "},
+    ) == [matching]
+
+
+def test_multiple_filters_use_intersection_semantics():
+    matching = _summary(
+        run_id="matching",
+        training_run_id="matching",
+        display_status="failed",
+        model="org/model",
+        dataset="org/data",
+        recipe="slime",
+        group_id="nightly",
+    )
+    wrong_model = _summary(
+        run_id="wrong-model",
+        training_run_id="wrong-model",
+        display_status="failed",
+        model="other/model",
+    )
+    wrong_group = _summary(
+        run_id="wrong-group",
+        training_run_id="wrong-group",
+        display_status="failed",
+        group_id="daytime",
+    )
+
+    assert filter_run_summaries(
+        [wrong_model, matching, wrong_group],
+        filters={
+            "display_status": "failed",
+            "model": "org/model",
+            "dataset": "org/data",
+            "recipe": "slime",
+            "group_id": "nightly",
+        },
+    ) == [matching]
+
+
+def test_empty_and_nonfilterable_filters_are_ignored():
+    first = _summary(run_id="a", training_run_id="a", updated_at=100)
+    second = _summary(run_id="b", training_run_id="b", updated_at=200)
+
+    assert filter_run_summaries(
+        [first, second],
+        filters={"model": " ", "run_id": "not-a-filter"},
+    ) == [second, first]
+
+
+def test_since_uses_created_or_updated_time_inclusively_before_limiting():
+    recently_created = _summary(
+        run_id="recently-created",
+        training_run_id="recently-created",
+        created_at=300,
+        updated_at=100,
+    )
+    recently_updated = _summary(
+        run_id="recently-updated",
+        training_run_id="recently-updated",
+        created_at=100,
+        updated_at=300,
+    )
+    old = _summary(
+        run_id="old",
+        training_run_id="old",
+        created_at=299,
+        updated_at=299,
+    )
+
+    assert filter_run_summaries(
+        [old, recently_created, recently_updated],
+        since=300,
+    ) == [recently_updated, recently_created]
+    assert filter_run_summaries(
+        [old, recently_created, recently_updated],
+        since=300,
+        limit=1,
+    ) == [recently_updated]

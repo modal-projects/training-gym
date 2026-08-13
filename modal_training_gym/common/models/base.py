@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -166,6 +167,10 @@ class ModelConfig:
     ``architecture``) as class attributes, then override ``download()``
     to materialize weights into the shared model volume.
 
+    ``model_path`` is the directory the weights load from. Launchers point it
+    at a resumed checkpoint, so ``download()`` must leave a populated
+    ``model_path`` as it found it.
+
     Set ``response_parser`` to a function that converts raw model output
     into a :class:`ParsedResponse`.  For example, Qwen3 models set
     ``response_parser = parse_qwen3_response``.
@@ -195,11 +200,20 @@ class ModelConfig:
         return ParsedResponse(content=text)
 
 
+def _is_populated(path: str) -> bool:
+    if not os.path.isdir(path):
+        return False
+    with os.scandir(path) as entries:
+        return any(entries)
+
+
 class HFModelConfiguration(ModelConfig):
     """ModelConfig for models hosted on HuggingFace.
 
     Implements ``download()`` via ``huggingface_hub.snapshot_download``
-    using ``self.model_name`` as the repo ID.
+    using ``self.model_name`` as the repo ID. An empty ``model_path`` is
+    seeded from the snapshot; a populated one already holds the weights to
+    load and is left untouched.
     """
 
     def download(self) -> None:
@@ -212,12 +226,30 @@ class HFModelConfiguration(ModelConfig):
         # forces a re-download. Populating the cache keeps base models
         # reusable across runs.
         snapshot_dir = snapshot_download(repo_id=self.model_name)
-        if self.model_path and str(self.model_path) != snapshot_dir:
-            # An explicit model_path was requested: mirror the cached snapshot
-            # into it from the local cache (no second network download).
+        if self.model_path and not _is_populated(str(self.model_path)):
             import shutil
 
             shutil.copytree(snapshot_dir, str(self.model_path), dirs_exist_ok=True)
+
+
+def disable_mtp_in_config(snapshot_dir: str, log_prefix: str) -> None:
+    """Zero ``num_nextn_predict_layers`` in a snapshot's config.json.
+
+    Megatron-side loaders read this field from config.json and create MTP
+    (multi-token-prediction) layers that break multi-rank checkpoint
+    save/load (the MTP head duplicates the embedding across pipeline
+    stages). Callers pass ``log_prefix`` (e.g. the model module name) to
+    tag the patch log line. No-op when the field is already 0.
+    """
+    cfg_path = os.path.join(snapshot_dir, "config.json")
+    with open(cfg_path) as f:
+        cfg = json.load(f)
+    if cfg.get("num_nextn_predict_layers", 0) == 0:
+        return
+    cfg["num_nextn_predict_layers"] = 0
+    with open(cfg_path, "w") as f:
+        json.dump(cfg, f, indent=2)
+    print(f"[{log_prefix}] Patched config.json: num_nextn_predict_layers → 0")
 
 
 def _split_thinking(text: str) -> tuple[str | None, str]:
@@ -299,11 +331,8 @@ def _parse_qwen_chat(
         text = text.rsplit("<|im_start|>assistant", 1)[-1]
     text = text.replace("<|im_end|>", "")
 
-    thinking: str | None = None
-    if "</think>" in text:
-        parts = text.split("</think>", 1)
-        thinking = parts[0].replace("<think>", "").strip() or None
-        text = parts[1]
+    thinking, text = _split_thinking(text)
+    # Strip a stray unterminated <think> too (no closing tag emitted yet).
     text = text.replace("<think>", "")
 
     tool_calls: list[ToolCall] = []

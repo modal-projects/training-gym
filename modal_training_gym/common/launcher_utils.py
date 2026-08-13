@@ -1,0 +1,389 @@
+"""Framework-agnostic Modal launcher utilities shared by slime and miles.
+
+Both frameworks' ``modal_helpers/utils.py`` are thin wrappers over these
+implementations; they pass framework-specific parametrization (extended MoE
+conversion args, the model-script attribute name, single-rank MTP handling) so
+the shared logic stays in one place.
+"""
+
+from __future__ import annotations
+
+import os
+import shlex
+from enum import Enum
+from os import PathLike
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+# (attr_name_on_cfg, cli_flag) — optional per-rank conversion args
+_CONVERSION_EXTRA_ARGS = [
+    ("decoder_first_pipeline_num_layers", "decoder-first-pipeline-num-layers"),
+    ("decoder_last_pipeline_num_layers", "decoder-last-pipeline-num-layers"),
+    ("mtp_num_layers", "mtp-num-layers"),
+    ("make_vocab_size_divisible_by", "make-vocab-size-divisible-by"),
+]
+
+# Architecture fields emitted as CLI flags for every framework.
+_ARCH_VALUE_FIELDS = [
+    ("num_layers", "num-layers"),
+    ("hidden_size", "hidden-size"),
+    ("ffn_hidden_size", "ffn-hidden-size"),
+    ("num_attention_heads", "num-attention-heads"),
+    ("num_query_groups", "num-query-groups"),
+    ("kv_channels", "kv-channels"),
+    ("vocab_size", "vocab-size"),
+    ("norm_epsilon", "norm-epsilon"),
+    ("rotary_base", "rotary-base"),
+]
+
+
+def is_local_checkpoint_ref(ref: str | PathLike) -> bool:
+    """Return True when a checkpoint ref is already a mounted local path."""
+    return str(ref).startswith("/")
+
+
+def resolve_checkpoint_ref(
+    ref: str | PathLike,
+    *,
+    local_files_only: bool = True,
+) -> str:
+    """Resolve an absolute path or Hugging Face repo ID to a local path."""
+    ref_str = str(ref)
+    if is_local_checkpoint_ref(ref_str):
+        return ref_str
+
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(ref_str, local_files_only=local_files_only)
+
+
+def _append_common_arch_args(extra_args: list[str], arch: Any) -> None:
+    for attr, flag in _ARCH_VALUE_FIELDS:
+        val = getattr(arch, attr, 0)
+        if val:
+            extra_args.append(f"--{flag} {val}")
+    if arch.group_query_attention:
+        extra_args.append("--group-query-attention")
+    if arch.swiglu:
+        extra_args.append("--swiglu")
+    if arch.disable_bias_linear:
+        extra_args.append("--disable-bias-linear")
+    if arch.qk_layernorm:
+        extra_args.append("--qk-layernorm")
+    if arch.untie_embeddings_and_output_weights:
+        extra_args.append("--untie-embeddings-and-output-weights")
+    if arch.normalization and arch.normalization != "LayerNorm":
+        extra_args.append(f"--normalization {arch.normalization}")
+
+
+def _append_extended_arch_args(extra_args: list[str], arch: Any) -> None:
+    if arch.num_experts:
+        extra_args.append(f"--num-experts {arch.num_experts}")
+    if arch.moe_ffn_hidden_size:
+        extra_args.append(f"--moe-ffn-hidden-size {arch.moe_ffn_hidden_size}")
+    if arch.moe_shared_expert_intermediate_size:
+        extra_args.append(
+            f"--moe-shared-expert-intermediate-size {arch.moe_shared_expert_intermediate_size}"
+        )
+    if arch.moe_grouped_gemm:
+        extra_args.append("--moe-grouped-gemm")
+    if arch.moe_shared_expert_gate:
+        extra_args.append("--moe-shared-expert-gate")
+    if arch.moe_router_topk:
+        extra_args.append(f"--moe-router-topk {arch.moe_router_topk}")
+    if arch.moe_router_score_function:
+        extra_args.append(
+            f"--moe-router-score-function {arch.moe_router_score_function}"
+        )
+    if arch.moe_token_drop_policy:
+        extra_args.append(f"--moe-token-drop-policy {arch.moe_token_drop_policy}")
+    if arch.moe_router_dtype:
+        extra_args.append(f"--moe-router-dtype {arch.moe_router_dtype}")
+    if arch.moe_permute_fusion:
+        extra_args.append("--moe-permute-fusion")
+    if arch.moe_aux_loss_coeff is not None:
+        extra_args.append(f"--moe-aux-loss-coeff {arch.moe_aux_loss_coeff}")
+    if arch.megatron_spec:
+        extra_args.append(f"--spec {' '.join(arch.megatron_spec)}")
+    if arch.apply_layernorm_1p:
+        extra_args.append("--apply-layernorm-1p")
+    if arch.use_gated_attention:
+        extra_args.append("--use-gated-attention")
+    if arch.attention_output_gate:
+        extra_args.append("--attention-output-gate")
+
+
+def get_checkpoint_conversion_policy(
+    cfg: Any,
+    *,
+    model: Any = None,
+    single_rank_mtp: bool = False,
+    extended_arch_args: bool = False,
+    arch_args_model_script_attr: str | None = None,
+) -> tuple[int, int, list[str]]:
+    """Return (num_nodes, nproc_per_node, extra_args) for checkpoint conversion.
+
+    ``single_rank_mtp`` forces a single-rank (tp=pp=world=1) layout for MTP/EAGLE
+    checkpoints so the duplicated MTP head embedding/output isn't sharded (which
+    corrupts the saved sharded state dict); training reshards on load.
+    ``extended_arch_args`` emits the full MoE/attention arch flag set; when
+    ``arch_args_model_script_attr`` is set, arch flags are skipped if that
+    attribute is populated (the model script already sources them).
+    """
+    gpus_per_node = getattr(cfg, "actor_num_gpus_per_node", 8)
+    actor_nodes = getattr(cfg, "actor_num_nodes", 1)
+    # torch_dist is reshard-friendly, so conversion parallelism is independent of
+    # the training layout.
+    tp = getattr(cfg, "conversion_tensor_model_parallel_size", None) or getattr(
+        cfg, "tensor_model_parallel_size", 1
+    )
+    pp = getattr(cfg, "conversion_pipeline_model_parallel_size", None) or getattr(
+        cfg, "pipeline_model_parallel_size", 1
+    )
+
+    if single_rank_mtp and tp == 1 and pp == 1 and getattr(cfg, "mtp_num_layers", 0):
+        world_size = 1
+    else:
+        world_size = tp * pp if (tp > 1 or pp > 1) else gpus_per_node
+    max_world_size = actor_nodes * gpus_per_node
+    if world_size > max_world_size:
+        raise ValueError(
+            f"checkpoint conversion world_size={world_size} exceeds actor cluster capacity "
+            f"{actor_nodes}x{gpus_per_node}={max_world_size}"
+        )
+
+    for num_nodes in range(1, actor_nodes + 1):
+        if world_size % num_nodes != 0:
+            continue
+        nproc_per_node = world_size // num_nodes
+        if nproc_per_node > gpus_per_node:
+            continue
+
+        extra_args: list[str] = []
+        if tp > 1 or pp > 1:
+            extra_args += [
+                f"--tensor-model-parallel-size {tp}",
+                f"--pipeline-model-parallel-size {pp}",
+            ]
+        for attr, flag in _CONVERSION_EXTRA_ARGS:
+            if x := getattr(cfg, attr, None):
+                extra_args.append(f"--{flag} {x}")
+
+        emit_arch = bool(model and getattr(model, "architecture", None))
+        if emit_arch and arch_args_model_script_attr:
+            emit_arch = not getattr(cfg, arch_args_model_script_attr, "")
+        if emit_arch:
+            arch = model.architecture
+            _append_common_arch_args(extra_args, arch)
+            if extended_arch_args:
+                _append_extended_arch_args(extra_args, arch)
+            if arch.use_rotary_position_embeddings:
+                extra_args.append("--use-rotary-position-embeddings")
+                extra_args.append("--position-embedding-type rope")
+                if extended_arch_args and arch.rotary_percent != 1.0:
+                    extra_args.append(f"--rotary-percent {arch.rotary_percent}")
+
+        return num_nodes, nproc_per_node, extra_args
+
+    raise ValueError(
+        f"cannot find checkpoint conversion layout for world_size={world_size} "
+        f"with actor_num_nodes={actor_nodes}, actor_num_gpus_per_node={gpus_per_node}"
+    )
+
+
+def serialize_recipe_value(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path | PurePosixPath):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): serialize_recipe_value(v) for k, v in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [serialize_recipe_value(v) for v in value]
+    if callable(value):
+        module = getattr(value, "__module__", "")
+        name = getattr(value, "__qualname__", getattr(value, "__name__", ""))
+        return f"{module}.{name}" if module and name else repr(value)
+    return repr(value)
+
+
+REDACTED = "[redacted]"
+
+# Substrings that mark a name as credential-bearing. Matched against the
+# lowercased name, so upper-case env var names in ``train_env_vars``
+# (``HF_TOKEN``, ``AWS_SECRET_ACCESS_KEY``) and header keys in
+# ``sglang_request_params`` (``Authorization``) are covered too.
+#
+# Deliberately substring rather than exact: the recipe dataclasses declare no
+# credential fields at all today (the only key/token-ish names are
+# ``multimodal_keys``, ``max_tokens_per_gpu``, ``calculate_per_token_loss`` and
+# ``rollout_stop_token_ids`` — none secret). Every real credential arrives
+# through a free-form dict (``extra_config``, ``train_env_vars``,
+# ``sglang_config``, ``eval_config``, ``sglang_request_params``) under a key
+# name we do not control, so recall matters more than brevity here.
+_SENSITIVE_NAME_MARKERS = (
+    "api_key",
+    "apikey",
+    "access_key",
+    "private_key",
+    "wandb_key",
+    "secret",
+    "password",
+    "passwd",
+    "credential",
+    "token",
+    "bearer",
+    "authorization",
+    "oauth",
+)
+
+# Names containing "token" that are counts, limits, policies or vocabulary ids
+# rather than credentials. Without these, ``max_tokens_per_gpu`` and friends get
+# redacted and the dashboard parameter table loses real tuning knobs.
+_TOKEN_NOT_A_CREDENTIAL = (
+    "token_id",
+    "per_token",
+    "token_per",
+    "tokens_per",
+    "num_token",
+    "max_token",
+    "min_token",
+    "token_count",
+    "token_len",
+    "token_limit",
+    "token_budget",
+    "token_ratio",
+    "token_loss",
+    "tokenizer",
+)
+
+# Value prefixes distinctive enough to identify a credential regardless of the
+# key it is filed under — the backstop for a secret in a free-form dict whose
+# key name says nothing (e.g. ``{"headers": {"x-upstream": "sk-…"}}``).
+_SENSITIVE_VALUE_PREFIXES = (
+    "wk-",  # Modal proxy-auth key id
+    "ws-",  # Modal proxy-auth key secret
+    "hf_",  # Hugging Face user access token
+    "sk-",  # OpenAI-style API key
+    "ghp_",  # GitHub personal access token
+    "gho_",
+    "github_pat_",
+    "xox",  # Slack bot/user/app token
+    "akia",  # AWS access key id
+    "asia",
+)
+
+
+def is_sensitive_recipe_field(name: str) -> bool:
+    normalized = name.lower()
+    if "token" in normalized and any(
+        benign in normalized for benign in _TOKEN_NOT_A_CREDENTIAL
+    ):
+        return False
+    return any(marker in normalized for marker in _SENSITIVE_NAME_MARKERS)
+
+
+def is_sensitive_recipe_value(value: Any) -> bool:
+    """Whether a value looks like a credential on its own, ignoring its key.
+
+    Requires a recognizable prefix *and* opaque-secret shape (long, no spaces or
+    path separators) so ordinary settings that happen to share a prefix — an
+    ``hf_``-prefixed flag name, a ``/root/...`` path — are not redacted.
+    """
+    if not isinstance(value, str) or len(value) < 20:
+        return False
+    if any(ch in value for ch in " \t/\\"):
+        return False
+    lowered = value.lower()
+    return any(lowered.startswith(p) for p in _SENSITIVE_VALUE_PREFIXES)
+
+
+def serialize_recipe_param_value(name: str, value: Any) -> Any:
+    if is_sensitive_recipe_field(name):
+        return REDACTED if value not in (None, "", False) else value
+    if isinstance(value, dict):
+        return {
+            str(k): serialize_recipe_param_value(str(k), v) for k, v in value.items()
+        }
+    if isinstance(value, list | tuple | set):
+        return [serialize_recipe_param_value(name, v) for v in value]
+    if is_sensitive_recipe_value(value):
+        return REDACTED
+    return serialize_recipe_value(value)
+
+
+def serialize_recipe_params(
+    recipe: Any,
+    *,
+    dataset: Any = None,
+    model: Any = None,
+) -> dict[str, Any]:
+    """The recipe's effective CLI flags, serialized for the dashboard run record.
+
+    Framework-agnostic: any recipe implementing ``_fields`` works, so slime and
+    miles runs get the same parameter table.
+    """
+    return {
+        key: serialize_recipe_param_value(key, value)
+        for key, value in recipe._fields(dataset=dataset, model=model).items()
+    }
+
+
+def prepare_launch_config(
+    cfg: Any,
+    model: Any,
+    tmpdir: str,
+    *,
+    yaml_config_fields: Any,
+) -> None:
+    """Resolve HF repo IDs to local paths and materialize inline YAML configs."""
+    import yaml
+
+    if (
+        model
+        and not model.model_path
+        and model.model_name
+        and not str(model.model_name).startswith("/")
+    ):
+        model.model_path = resolve_checkpoint_ref(model.model_name)
+
+    for attr in ("hf_checkpoint", "load", "ref_load", "critic_load"):
+        if val := getattr(cfg, attr, None):
+            object.__setattr__(cfg, attr, resolve_checkpoint_ref(val))
+
+    escape_hatch = getattr(cfg, "_ESCAPE_HATCH_FIELD", None)
+    for field in yaml_config_fields:
+        if isinstance(val := getattr(cfg, field, None), dict):
+            path = os.path.join(tmpdir, f"{field}.yaml")
+            with open(path, "w") as f:
+                yaml.dump(val, f)
+            print(f"Materialized {field} → {path}")
+            # Record the keys before the dict is replaced by its path: this runs
+            # before build_train_cmd calls cli_args, and the recipe's
+            # escape-hatch-wins-over-flag rule needs to know what was in there
+            # (see BaseTrainRecipe._escape_hatch_keys).
+            if field == escape_hatch:
+                object.__setattr__(cfg, "_materialized_config_keys", tuple(val))
+            object.__setattr__(cfg, field, path)
+
+
+def build_train_cmd(
+    cfg: Any,
+    root: str,
+    *,
+    model: Any = None,
+    dataset: Any = None,
+    model_script_attr: str,
+) -> str:
+    """Build the Ray job entrypoint, sourcing model arch args if needed."""
+    train_script = f"{root}/{'train_async.py' if cfg.async_mode else 'train.py'}"
+    args = shlex.join(cfg.cli_args(dataset=dataset, model=model))
+    if model_script := getattr(cfg, model_script_attr, ""):
+        inner = (
+            f"source {root}/{model_script} && "
+            f"python3 {train_script} ${{MODEL_ARGS[@]}} {args}"
+        )
+        return f"bash -c {shlex.quote(inner)}"
+    return f"python3 {train_script} {args}"

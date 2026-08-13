@@ -60,6 +60,29 @@ def hf_secrets() -> list:
         return []
 
 
+def proxy_auth_secrets() -> list:
+    """Return a Modal Secret with ``MODAL_KEY`` / ``MODAL_SECRET`` for train workers.
+
+    Custom deployments can sit behind Modal proxy auth.
+    Driver-shell env does not reach Ray rollout actors, so frameworks attach this
+    secret to the train function the same way they attach wandb / HF secrets.
+    Loads from env or ``~/.training-gym.toml`` via :func:`load_proxy_auth`.
+    Returns ``[]`` when the pair is unset (callers that hit proxy-auth endpoints
+    will then get 401).
+    """
+    from modal import Secret
+
+    from modal_training_gym.common.config import load_proxy_auth
+
+    if not load_proxy_auth():
+        return []
+    key = os.environ.get("MODAL_KEY", "").strip()
+    secret = os.environ.get("MODAL_SECRET", "").strip()
+    if not (key and secret):
+        return []
+    return [Secret.from_dict({"MODAL_KEY": key, "MODAL_SECRET": secret})]
+
+
 __all__ = [
     "COMMON_TRAINING_GYM_TAGS",
     "GPUType",
@@ -69,6 +92,7 @@ __all__ = [
     "modal_tag_value",
     "register_modal_cloudpickle_reducers",
     "hf_secrets",
+    "proxy_auth_secrets",
     "vol_get",
     "vol_list",
     "vol_put",

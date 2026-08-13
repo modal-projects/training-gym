@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from modal_training_gym.common import GPUType
 from modal_training_gym.deploy_recipes.base import BaseDeployRecipe, DeployRecipeType
@@ -17,8 +17,8 @@ class SglangRecipe(BaseDeployRecipe):
     tp : int | None
         Tensor parallelism degree. Default ``None`` (SGLang infers from GPU count).
     dp : int | None
-        Data parallelism degree. Enables ``--enable-dp-attention`` when set.
-        Default ``None``.
+        Data parallelism degree. Emitted as ``--dp-size`` and enables
+        ``--enable-dp-attention`` when set. Default ``None``.
     context_length : int | None
         Maximum context length. Default ``None`` (model default).
     mem_fraction_static : float | None
@@ -33,6 +33,16 @@ class SglangRecipe(BaseDeployRecipe):
         Additional ``--flag value`` pairs passed to ``sglang.launch_server``.
         Use an empty string value for boolean flags (e.g. ``{"--trust-remote-code": ""}``).
         Default ``None``.
+    env_vars : dict[str, str]
+        Extra environment variables baked into the serving image (e.g. DeepGEMM
+        MegaMoE knobs). Merged on top of the base HF cache env. Default empty.
+    install_transformers_from_git : bool
+        If ``True`` (default), the serve image ``pip install``s transformers
+        from GitHub so brand-new architectures (historically DeepSeek-V4 on
+        older SGLang tags) are recognized by ``AutoConfig``. Set ``False``
+        when the chosen ``sglang_image`` already ships a compatible
+        transformers — otherwise the git install double-registers configs
+        (e.g. ``qwen3_asr``) and the server crashloops on import.
     environment_name : str | None
         Modal environment to deploy into. Default ``None``.
     deploy_strategy : str
@@ -56,6 +66,8 @@ class SglangRecipe(BaseDeployRecipe):
     max_running_requests: int | None = None
     sglang_image: str = "lmsysorg/sglang:v0.5.12"
     extra_server_args: dict[str, str] | None = None
+    env_vars: dict[str, str] = field(default_factory=dict)
+    install_transformers_from_git: bool = True
     environment_name: str | None = None
     deploy_strategy: str = "rolling"
     startup_timeout: int = 20 * 60

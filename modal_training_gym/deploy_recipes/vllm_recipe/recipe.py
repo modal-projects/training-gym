@@ -22,6 +22,9 @@ class VllmRecipe(BaseDeployRecipe):
         Modal environment to deploy into. Default ``None``.
     deploy_strategy : str
         Modal deployment strategy. Default ``"rolling"``.
+    startup_timeout : int
+        Seconds the server container is allowed to spend in startup before
+        Modal kills it. Default ``1200`` (20 minutes).
     """
 
     recipe_type: DeployRecipeType = DeployRecipeType.VLLM
@@ -30,3 +33,4 @@ class VllmRecipe(BaseDeployRecipe):
     extra_vllm_args: list[str] | None = None
     environment_name: str | None = None
     deploy_strategy: str = "rolling"
+    startup_timeout: int = 20 * 60

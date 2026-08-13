@@ -18,6 +18,9 @@ from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.deploy_recipes import SglangRecipe, VllmRecipe
 
 
+_CHECKPOINTS_MOUNT_FALLBACK = "/checkpoints"
+
+
 class CheckpointType(Enum):
     hf = "hf"
     megatron = "megatron"
@@ -36,6 +39,12 @@ class Checkpoint:
     checkpoints_volume_name: str = ""
     checkpoints_mount_path: str = ""
 
+    @property
+    def path_relative_to_volume(self) -> str:
+        return _to_volume_path(
+            self.path, self.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
+        )
+
 
 def list_checkpoints(training_run_id: str) -> list[Checkpoint]:
     result = TrainResult.from_training_run_id(training_run_id)
@@ -44,13 +53,12 @@ def list_checkpoints(training_run_id: str) -> list[Checkpoint]:
         Framework.SLIME.value,
         Framework.MILES,
         Framework.MILES.value,
+        # A stitch run's trainer is miles, writing the same megatron checkpoints.
+        Framework.STITCH,
+        Framework.STITCH.value,
     }:
         return _list_checkpoints(result)
     raise TrainingGymConfigError(f"Unsupported framework: {result.framework}")
-
-
-def _get_slime_checkpoint_prefix() -> str:
-    return "iter_"
 
 
 def _to_volume_path(checkpoint_dir: str, checkpoints_mount_path: str) -> str:
@@ -83,9 +91,11 @@ def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
     checkpoints_volume_name = (
         train_result.checkpoints_volume_name or f"{train_result.app_name}-checkpoints"
     )
-    checkpoints_mount_path = train_result.checkpoints_mount_path or "/checkpoints"
+    checkpoints_mount_path = (
+        train_result.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
+    )
     volume = Volume.from_name(checkpoints_volume_name, create_if_missing=True)
-    prefix = _get_slime_checkpoint_prefix()
+    prefix = "iter_"
     rel = _to_volume_path(checkpoint_dir, checkpoints_mount_path)
 
     try:
@@ -95,27 +105,6 @@ def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
         }
     except (FileNotFoundError, NotFoundError):
         return []
-
-    if not prefix:
-        entry = entries.get(os.path.basename(checkpoint_dir))
-        if entry is None:
-            return []
-        name = os.path.basename(checkpoint_dir)
-        checkpoint_type = (
-            CheckpointType.hf if name.endswith("_hf") else CheckpointType.megatron
-        )
-        return [
-            Checkpoint(
-                checkpoint_type=checkpoint_type,
-                name=name,
-                path=checkpoint_dir,
-                timestamp=float(getattr(entry, "mtime", 0.0)),
-                training_run_id=train_result.training_run_id,
-                app_name=train_result.app_name,
-                checkpoints_volume_name=checkpoints_volume_name,
-                checkpoints_mount_path=checkpoints_mount_path,
-            )
-        ]
 
     def _is_dir_entry(entry: object) -> bool:
         is_dir_fn = getattr(entry, "is_dir", None)
@@ -182,7 +171,7 @@ def _conversion_gpu_spec(
 def convert_checkpoint_to_hf(
     checkpoint: Checkpoint,
     model: ModelConfig,
-    recipe: VllmRecipe | SglangRecipe,
+    recipe: VllmRecipe | SglangRecipe = SglangRecipe(),
 ) -> Checkpoint:
     import modal
     from modal import App, Volume
@@ -192,7 +181,9 @@ def convert_checkpoint_to_hf(
         raise TrainingGymConfigError(
             "Cannot convert checkpoint without checkpoints volume metadata."
         )
-    checkpoints_mount_path = checkpoint.checkpoints_mount_path or "/checkpoints"
+    checkpoints_mount_path = (
+        checkpoint.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
+    )
 
     model_ref = model.model_name or model.model_path
     if not model_ref:

@@ -4,16 +4,14 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 8×H100",
-    "summary": "GUI grounding with Qwen3-VL-8B — predict click coordinates from screenshots",
+    "summary": "GUI grounding to predict click coordinates",
     "difficulty": "Advanced",
     "order": 45,
     "api_classes": [
         "Qwen3_VL_8B",
         "Qwen3_VL_8b_Recipe",
         "MultimodalDataset",
-        "DeploymentConfig",
-        "EvalConfig",
-        "ModelDeployment",
+        "CustomDeployment",
         "TrainConfig",
         "WandbConfig",
         "list_checkpoints",
@@ -58,7 +56,7 @@ def _run_instructions():
     ```
     cd training-gym
     uv sync
-    uv run python tutorials/rl/008_computer_use/008_computer_use.py
+    uv run tutorials/rl/008_computer_use/008_computer_use.py
     ```
 
     To detach and watch it from the Modal dashboard instead:
@@ -80,10 +78,7 @@ def _imports():
     import re
 
     from modal_training_gym import (
-        DeploymentConfig,
-        EvalConfig,
-        ImageEvalRowResult,
-        ModelDeployment,
+        CustomDeployment,
         MultimodalDataset,
         Qwen3_VL_8B,
         Qwen3_VL_8b_Recipe,
@@ -295,35 +290,18 @@ def _eval_base_intro():
 
     Let's evaluate the base Qwen3-VL-8B model on our held-out set before
     training to see how well it grounds UI elements out of the box.
-
-    Returning an `ImageEvalRowResult` folds a thumbnail of the screenshot into the row.
     """
 
 
 @code
 def _eval_helpers():
-    def _thumbnail(data_uri: str, max_dim: int = 512) -> str:
-        # Downscale the screenshot to a dashboard-sized thumbnail so the eval
-        # summary stays small (we score on the full-res image, below).
-        import base64
-        import io
-
-        from PIL import Image
-
-        _, _, b64 = data_uri.partition(",")
-        img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
-        img.thumbnail((max_dim, max_dim))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-
     def grounding_eval_fn(
-        deployment: ModelDeployment, example: dict
-    ) -> ImageEvalRowResult:
+        deployment: CustomDeployment, example: dict
+    ) -> dict:
         # Eval sends the screenshot as a separate image_url, so drop the marker.
-        prompt = example.get("prompt", "").replace("<image>", "").strip()
-        label = example.get("label", "")
-        images = example.get("images", [])
+        prompt = example["prompt"].replace("<image>", "").strip()
+        label = example["label"]
+        images = example["images"]
 
         # Build the OpenAI chat content: text + one image_url part per screenshot.
         content = [
@@ -341,44 +319,57 @@ def _eval_helpers():
             outside = _distance_outside_box(pred[0], pred[1], box)
             inside = outside == 0.0
 
-        return ImageEvalRowResult(
-            score=1.0 if inside else 0.0,
-            response=response,
-            prompt=prompt,
-            image=_thumbnail(images[0]) if images else None,
-            metadata={
-                "inside_box": inside,
-                "dist_outside": round(outside, 4),
-                "pred": f"{pred[0]:.4f},{pred[1]:.4f}" if pred else "PARSE_FAIL",
-                "label": label,
-            },
-        )
+        return {
+            "score": 1.0 if inside else 0.0,
+            "response": response,
+            "inside_box": inside,
+            "dist_outside": round(outside, 4),
+            "pred": f"{pred[0]:.4f},{pred[1]:.4f}" if pred else "PARSE_FAIL",
+            "label": label,
+        }
+
+    def run_eval(
+        deployment, *, max_concurrency: int = 2
+    ) -> tuple[float, list[dict]]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        deployment.wait_until_ready(timeout=3000)
+
+        def _score_one(example):
+            return grounding_eval_fn(deployment, example)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            rows = list(executor.map(_score_one, eval_dataset.load()))
+        mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+        return mean, rows
 
 
 @code
 def _eval_base():
     base_model = Qwen3_VL_8B()
-    base_deployment = DeploymentConfig(model=base_model).serve()
+    base_deployment = CustomDeployment.launch(
+        base_model,
+        unauthenticated=True,
+    )
     print(f"Base model URL: {base_deployment.url}")
 
-    eval_config = EvalConfig(dataset=eval_dataset, eval_fn=grounding_eval_fn)
     print("--- Evaluating base model... ---")
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    n_hits = sum(1 for r in base_eval.rows if r.metadata.get("inside_box"))
+    base_mean, base_rows = run_eval(base_deployment)
+    n_hits = sum(1 for r in base_rows if r.get("inside_box"))
     print(
         f"Base accuracy (clicks inside element): "
-        f"{n_hits}/{len(base_eval.rows)} ({base_eval.mean:.1%})"
+        f"{n_hits}/{len(base_rows)} ({base_mean:.1%})"
     )
 
 
 @notebook_only
 @code
 def _base_examples():
-    for r in base_eval.rows[:3]:
-        status = "HIT" if r.metadata["inside_box"] else "MISS"
-        print(f"[{status}] label={r.metadata['label']}, pred={r.metadata['pred']}")
-        print(f"  dist_outside={r.metadata['dist_outside']:.4f}")
-        print(f"  ...{r.response[-100:]}")
+    for r in base_rows[:3]:
+        status = "HIT" if r["inside_box"] else "MISS"
+        print(f"[{status}] label={r['label']}, pred={r['pred']}")
+        print(f"  dist_outside={r['dist_outside']:.4f}")
+        print(f"  ...{r['response'][-100:]}")
         print()
 
 
@@ -395,9 +386,14 @@ def _train_intro():
       teaching the decoder to *read out* coordinates from features the ViT already
       provides. It's also cheaper — no optimizer state or backward pass for the ViT.
     - Padded (bshd) batches for the vision encoder
-    - TP=2 for the 8B model across 8 H100s
-    - Short response cap (256 tokens — coordinates are brief)
-    - Lower SGLang memory fraction (vision tower uses VRAM)
+    - TP=4 for the 8B model across 8 H100s
+    - Short response cap (64 tokens — coordinates are brief)
+    - A high SGLang KV-cache fraction (0.75) for fast colocated rollouts
+
+    The recipe overrides below are tuned to speed up training (~30m → ~19m on
+    one 8×H100 node) while preserving the reward curve, uniquely fitted to this
+    tutorial's short coordinate outputs. Short outputs let us increase rollout
+    concurrency, which sets the memory budget, which sets the shard count.
 
     This tutorial runs 15 rollouts as a quick demo. For a more meaningful
     accuracy gain, increase `num_rollout`.
@@ -415,14 +411,24 @@ def _train():
         model=base_model,
         dataset=train_dataset,
         recipe=Qwen3_VL_8b_Recipe(
+            # TP=4 shards the 8B weights across 4 GPUs, freeing enough VRAM per
+            # GPU for the large 0.75 KV pool below. (TP=2 OOMs at mem=0.75.)
+            tensor_model_parallel_size=4,
             custom_rm_function=grounding_reward,
             num_rollout=15,
             rollout_batch_size=8,
             n_samples_per_prompt=4,
-            rollout_max_response_len=256,
+            # We only need 64 tokens here because the model just outputs coordinates.
+            rollout_max_response_len=64,
+            # Give SGLang 75% of VRAM for its KV cache so it can run more
+            # rollouts concurrently, which is feasible because TP=4 frees the VRAM.
+            sglang_mem_fraction_static=0.75,
             global_batch_size=16,
             lr=1e-6,
-            save_interval=10,
+            save_interval=15,
+            # Skip writing optimizer state to the checkpoint since we only serve the
+            # final weights for eval (not resuming training).
+            no_save_optim=True,
             wandb=WandbConfig(project="computer-use-grounding"),
         ),
     )
@@ -444,33 +450,38 @@ def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_VL_8B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_VL_8B(),
         checkpoint=checkpoint,
         app_name="qwen3-vl-8b-grounding-serve",
         served_model_name="qwen3-vl-8b-grounding",
-    ).serve()
+        unauthenticated=True,
+    )
     print(f"Trained model URL: {trained_deployment.url}")
 
     print("--- Evaluating trained model... ---")
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    n_hits = sum(1 for r in trained_eval.rows if r.metadata.get("inside_box"))
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    n_hits = sum(1 for r in trained_rows if r.get("inside_box"))
     print(
         f"Trained accuracy (clicks inside element): "
-        f"{n_hits}/{len(trained_eval.rows)} ({trained_eval.mean:.1%})"
+        f"{n_hits}/{len(trained_rows)} ({trained_mean:.1%})"
     )
 
 
 @notebook_only
 @code
 def _trained_examples():
-    for base_r, trained_r in zip(base_eval.rows[:3], trained_eval.rows[:3]):
-        label = base_r.metadata["label"]
-        b_status = "HIT" if base_r.metadata["inside_box"] else "MISS"
-        t_status = "HIT" if trained_r.metadata["inside_box"] else "MISS"
+    for base_r, trained_r in zip(base_rows[:3], trained_rows[:3]):
+        label = base_r["label"]
+        b_status = "HIT" if base_r["inside_box"] else "MISS"
+        t_status = "HIT" if trained_r["inside_box"] else "MISS"
         print(f"label={label}")
-        print(f"  Base:    [{b_status}] pred={base_r.metadata['pred']} dist_outside={base_r.metadata['dist_outside']:.4f}")
-        print(f"  Trained: [{t_status}] pred={trained_r.metadata['pred']} dist_outside={trained_r.metadata['dist_outside']:.4f}")
+        print(
+            f"  Base:    [{b_status}] pred={base_r['pred']} dist_outside={base_r['dist_outside']:.4f}"
+        )
+        print(
+            f"  Trained: [{t_status}] pred={trained_r['pred']} dist_outside={trained_r['dist_outside']:.4f}"
+        )
         print()
 
 
@@ -485,11 +496,9 @@ def _compare_intro():
 
 @code
 def _compare():
-    base_hits = sum(1 for r in base_eval.rows if r.metadata.get("inside_box"))
-    trained_hits = sum(
-        1 for r in trained_eval.rows if r.metadata.get("inside_box")
-    )
-    total = len(base_eval.rows)
-    print(f"Base model:    {base_hits}/{total} ({base_eval.mean:.1%})")
-    print(f"Trained model: {trained_hits}/{total} ({trained_eval.mean:.1%})")
-    print(f"Delta:         {trained_eval.mean - base_eval.mean:+.1%}")
+    base_hits = sum(1 for r in base_rows if r.get("inside_box"))
+    trained_hits = sum(1 for r in trained_rows if r.get("inside_box"))
+    total = len(base_rows)
+    print(f"Base model:    {base_hits}/{total} ({base_mean:.1%})")
+    print(f"Trained model: {trained_hits}/{total} ({trained_mean:.1%})")
+    print(f"Delta:         {trained_mean - base_mean:+.1%}")

@@ -7,6 +7,7 @@ import ast
 import shutil
 import sys
 import textwrap
+import urllib.parse
 from pathlib import Path
 
 from api_reference_manifest import CLASS_REFERENCE_PATHS
@@ -16,13 +17,14 @@ TUTORIAL_SRC_DIR = ROOT / "tutorials" / "tutorial_generator"
 DEFAULT_OUTPUT_DIR = ROOT / "docs-next" / "src" / "content" / "docs" / "tutorials"
 REPO_URL = "https://github.com/modal-projects/training-gym"
 
-BUCKETS = ["intro", "rl", "sft", "agent", "misc"]
+BUCKETS = ["intro", "rl", "sft", "agent", "misc", "tools"]
 BUCKET_LABELS = {
     "intro": "Getting Started",
     "rl": "Reinforcement Learning",
     "sft": "Supervised Fine-Tuning",
     "agent": "Agents",
     "misc": "Infrastructure",
+    "tools": "Tools",
 }
 
 
@@ -176,14 +178,18 @@ def generate_tutorial_page(
                 lines.append(f"- `{cls_name}`")
         lines.append("")
 
-    py_path = f"tutorials/{bucket}/{name}/{name}.py"
-    nb_path = f"tutorials/{bucket}/{name}/{name}.ipynb"
-    nb_url = f"https://modal.com/notebooks/new/{REPO_URL}/blob/main/{nb_path}"
-    lines.append(f"**Source:** [`{py_path}`]({REPO_URL}/blob/main/{py_path})")
-    lines.append(
-        f' | <a href="{nb_url}" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>'
-    )
-    lines.append("")
+    # Docs-only tutorials have no generated tutorials/<bucket>/ outputs, so
+    # there is no runnable source or notebook to link.
+    if not metadata.get("docs_only"):
+        py_path = f"tutorials/{bucket}/{name}/{name}.py"
+        nb_path = f"tutorials/{bucket}/{name}/{name}.ipynb"
+        github_nb_url = f"{REPO_URL}/blob/main/{nb_path}"
+        nb_url = f"https://modal.com/notebooks/new/{urllib.parse.quote(github_nb_url, safe='')}"
+        lines.append(f"**Source:** [`{py_path}`]({REPO_URL}/blob/main/{py_path})")
+        lines.append(
+            f' | <a href="{nb_url}" target="_blank" rel="noopener noreferrer">Open in Modal Notebook</a>'
+        )
+        lines.append("")
 
     return "\n".join(lines)
 

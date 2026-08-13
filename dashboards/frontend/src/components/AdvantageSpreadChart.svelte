@@ -91,11 +91,11 @@
 </script>
 
 {#if model}
-  <div class="spread-header">
-    <span class="spread-legend">
-      <span class="spread-legend-item"><span class="sw std"></span>std</span>
-      <span class="spread-legend-item"><span class="sw iqr"></span>IQR (p25–p75)</span>
-      <span class="spread-legend-item"><span class="sw trend"></span>trend</span>
+  <div class="flex flex-wrap items-center justify-between gap-[8px] mb-[8px] text-[11px] text-(--muted)">
+    <span class="inline-flex flex-wrap gap-[12px]">
+      <span class="chart-legend-item"><span class="sw std"></span>std</span>
+      <span class="chart-legend-item"><span class="sw iqr"></span>IQR (p25–p75)</span>
+      <span class="chart-legend-item"><span class="sw trend"></span>trend</span>
     </span>
     <span class="spread-trend trend-{model.dir}">
       std {ARROW[model.dir]}
@@ -106,7 +106,7 @@
       over run
     </span>
   </div>
-  <svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
+  <svg class="w-full h-[200px] block" viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
     <path d={model.iqr} fill="none" stroke="var(--muted)" stroke-width="1.25" stroke-opacity="0.7" />
     <path
       d={model.trend}
@@ -132,83 +132,5 @@
     <span>step {model.lastX}</span>
   </div>
 {:else}
-  <div class="empty">Advantage distribution needs ≥2 steps of data.</div>
+  <div class="plot-empty">Advantage distribution needs ≥2 steps of data.</div>
 {/if}
-
-<style>
-  svg {
-    width: 100%;
-    height: 200px;
-    display: block;
-  }
-  .spread-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 8px;
-    font-size: 11px;
-    color: var(--muted);
-  }
-  .spread-legend {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .spread-legend-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
-  .sw {
-    width: 14px;
-    height: 2px;
-    background: var(--accent);
-  }
-  .sw.iqr {
-    background: var(--muted);
-  }
-  .sw.trend {
-    background: repeating-linear-gradient(
-      to right,
-      var(--accent) 0 4px,
-      transparent 4px 7px
-    );
-  }
-  .spread-trend {
-    font-weight: 600;
-  }
-  .trend-up {
-    color: #5ec962;
-  }
-  .trend-down {
-    color: #e06c75;
-  }
-  .trend-flat {
-    color: var(--muted);
-  }
-  .fan-meta {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--muted);
-  }
-  .fan-axis {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 2px;
-    font-size: 10px;
-    color: var(--muted);
-  }
-  .fan-axis-label {
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .empty {
-    color: var(--muted);
-    font-size: 12px;
-    padding: 8px 0;
-  }
-</style>

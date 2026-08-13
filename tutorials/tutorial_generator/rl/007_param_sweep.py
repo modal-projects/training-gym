@@ -4,12 +4,12 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 8×H100",
-    "summary": "Sweep hyperparameters across runs with TrainingGroup",
+    "summary": "Sweep hyperparameters across runs",
     "difficulty": "Intermediate",
-    "order": 39,
+    "order": 40,
     "api_classes": [
         "HuggingFaceDataset",
-        "Qwen3_4B",
+        "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
         "TrainingGroup",
@@ -22,7 +22,7 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Sweeping hyperparameters with `TrainingGroup`
+    # Sweeping hyperparameters with TrainingGroup
 
     Tuning an RL run usually means launching the *same* recipe several times
     with one or two knobs changed — learning rate, rollout temperature, KL
@@ -44,7 +44,7 @@ def _intro():
       raise immediately, before any run starts. A sweep never dies three
       variants deep because of a typo.
     * `launch()` starts every variant as a detached Modal run with
-      `TrainLaunch` handles you can inspect or wait on later.
+      `TrainingRun` handles you can inspect or wait on later.
     """
 
 
@@ -57,7 +57,7 @@ def _run_instructions():
     ```
     cd training-gym
     uv sync
-    uv run python tutorials/rl/007_param_sweep/007_param_sweep.py
+    uv run tutorials/rl/007_param_sweep/007_param_sweep.py
     ```
     """
 
@@ -81,7 +81,7 @@ def _imports():
 
     from modal_training_gym import (
         HuggingFaceDataset,
-        Qwen3_4B,
+        Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
         TrainingGroup,
@@ -95,7 +95,7 @@ def _base_intro():
 
     Start with an ordinary `TrainConfig` — the recipe you'd launch if you
     weren't sweeping. Everything the sweep *doesn't* override is inherited from
-    here, so set the fields you want held constant once. We use a short Qwen3-4B
+    here, so set the fields you want held constant once. We use a short Qwen3.5-4B
     DAPO-math run as the base.
     """
 
@@ -123,7 +123,7 @@ def _dataset():
 @code
 def _base():
     base = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=train_dataset,
         recipe=SlimeRecipe(
             rm_type="dapo",
@@ -202,8 +202,7 @@ def _preview():
     for cfg in configs:
         print(
             f"  lr={cfg.recipe.lr:<8} "
-            f"temp={cfg.recipe.rollout_temperature}  "
-            f"-> {cfg.training_run_id}"
+            f"temp={cfg.recipe.rollout_temperature}"
         )
 
 
@@ -249,7 +248,7 @@ def _launch_intro():
     ### Background param sweep
 
     `launch()` starts every variant as a detached Modal run and returns a list of
-    `TrainLaunch` handles. Each handle has the `training_run_id`, Modal app URL,
+    `TrainingRun` handles. Each handle has the `training_run_id`, Modal app URL,
     function-call id, and shared `group_id`.
 
     Pass `prepare_inputs=True` to run the model/download conversion steps before
@@ -299,7 +298,7 @@ def _outro():
     * `train(max_parallel=...)` fans the sweep out across Modal; `group.failures`
       isolates any run that didn't make it.
     * `launch(prepare_inputs=True)` fans the sweep out across Modal and returns
-      `TrainLaunch` handles; `group.failures` isolates any run that didn't
+      `TrainingRun` handles; `group.failures` isolates any run that didn't
       launch.
     * Use `launch.result()` to wait on a specific launched run, or
       `train(max_parallel=...)` when you want one blocking call that returns the

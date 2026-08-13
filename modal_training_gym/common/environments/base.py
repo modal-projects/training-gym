@@ -91,6 +91,52 @@ class EvalVerdict:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+# ── Tool schemas ─────────────────────────────────────────────────────────────
+
+
+def render_tool_catalog(tool_schemas: dict, desc_chars: int = 160) -> str:
+    """Render tool schemas as compact ``name(arg, required*)`` lines."""
+    lines = []
+    for name in sorted(tool_schemas or {}):
+        spec = tool_schemas[name]
+        if isinstance(spec, dict) and ("parameters" in spec or "description" in spec):
+            desc, params = spec.get("description", ""), spec.get("parameters", {})
+        else:
+            desc, params = "", spec
+        props = (params or {}).get("properties", {}) if isinstance(params, dict) else {}
+        required = (
+            set((params or {}).get("required", []) or [])
+            if isinstance(params, dict)
+            else set()
+        )
+        sig = ", ".join(f"{key}*" if key in required else key for key in props)
+        desc = " ".join(str(desc).split())[:desc_chars]
+        lines.append(f"- {name}({sig})" + (f": {desc}" if desc else ""))
+    return "\n".join(lines)
+
+
+def tool_schemas_to_openai(tool_schemas: dict) -> list[dict]:
+    """Convert a tool-schema mapping into the OpenAI/HF ``tools=`` shape."""
+    tools = []
+    for name in sorted(tool_schemas or {}):
+        spec = tool_schemas[name]
+        if isinstance(spec, dict) and ("parameters" in spec or "description" in spec):
+            desc, params = spec.get("description", ""), spec.get("parameters", {})
+        else:
+            desc, params = "", spec
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": desc,
+                    "parameters": params or {"type": "object", "properties": {}},
+                },
+            }
+        )
+    return tools
+
+
 # ── Environment lifecycle ───────────────────────────────────────────────────
 
 

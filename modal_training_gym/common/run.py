@@ -7,25 +7,63 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, MutableMapping
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr, computed_field, field_validator
 
 from modal_training_gym.common.framework import Framework
-from modal_training_gym.common.status import FrameworkStatus
+from modal_training_gym.common.status import FrameworkStatus, resolve_framework_status
+from modal_training_gym.common.step_timing import record_step_time_event
 from modal_training_gym.utils.metadata import (
     MetadataStore,
+    _step_times_dict,
     vol_get,
-    vol_get_async,
-    vol_put,
-    vol_put_async,
-    vol_upsert_summary_item,
-    vol_upsert_summary_item_async,
+    vol_put_with_summary,
 )
 
+if TYPE_CHECKING:
+    from modal_training_gym.common.train_result import TrainResult
+    from modal_training_gym.common.training_rollout import TrainingRolloutResult
+
 TRAINING_RUNS_STORE_NAME = MetadataStore.TRAINING_RUNS.value
+
+
+class FrameworkStatusUpdate(BaseModel):
+    """Body of ``POST /api/framework-status``.
+
+    Reporters (``common/status_reporter.py``, slime's ``phase_reporting``) post
+    more keys than the dashboard tracks (``app_name``, ``metrics``, …); those
+    extras are ignored. Progress values come from loosely-typed framework args,
+    so anything non-numeric or negative reads as "not provided".
+    """
+
+    training_run_id: str
+    phase: str
+    is_active: bool | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
+    progress_unit: str | None = None
+    rollout_id: int | None = None
+    step_id: int | None = None
+    step_event: str = ""
+    # Client-side timestamp of the event (time.time() in the reporting
+    # process); step timings use it so queue/network latency doesn't skew them.
+    event_ts: float | None = None
+
+    @field_validator(
+        "progress_current", "progress_total", "rollout_id", "step_id", mode="before"
+    )
+    @classmethod
+    def _non_negative_int_or_none(cls, value: object) -> int | None:
+        if not isinstance(value, (int, float, str)):
+            return None
+        try:
+            parsed = int(value)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
 
 
 class TrainingRunStatus(Enum):
@@ -37,6 +75,29 @@ class TrainingRunStatus(Enum):
 
 
 class TrainingRun(BaseModel):
+    """Handle to one launched training run — the record *and* the way to wait on it.
+
+    ``TrainConfig.launch()`` returns a ``TrainingRun`` as soon as training is
+    spawned, and persists it to the metadata volume (which is what the
+    dashboard reads). Because the Modal app is started detached and the
+    ``train`` function-call id is persisted on the record, a run outlives the
+    process that launched it and can be picked back up by id from anywhere:
+
+    ```python
+    run = TrainConfig(...).launch()
+    print(run.training_run_id, run.modal_app_url)
+
+    # ...later, from any other process:
+    run = TrainingRun.from_id("<training_run_id>")
+    train_result = run.result()   # block for the TrainResult
+    run.function_call.cancel(terminate_containers=True)   # or stop it early
+    ```
+
+    Never hand-roll ``_build_app()`` + ``app.train.spawn()`` to get this: that
+    nested ``app.run()`` is ephemeral, so leaving the block (or Ctrl-C) stops
+    the app and kills the run.
+    """
+
     training_run_id: str
     modal_app_id: str = ""
     modal_app_url: str = ""
@@ -53,7 +114,86 @@ class TrainingRun(BaseModel):
     updated_at: int = 0
     duration_seconds: int | None = None
     step_times: dict[str, dict[str, int | None]] | None = None
+    substep_times: dict[str, dict[str, dict[str, float | None]]] | None = None
+    # Terminal failure message (Ray driver error / exception) for a failed run,
+    # so the cause is queryable from the record and shown on the dashboard even
+    # after logs roll off. None while running / on success.
+    error_message: str | None = None
     metadata: dict[str, Any] | None = None
+    # Handle to the spawned ``app.train`` Modal FunctionCall so a launched run
+    # can be waited on (see ``result()`` / ``__await__``). Empty until the run
+    # is actually spawned by ``TrainConfig.launch()``.
+    function_call_id: str = ""
+
+    # Runtime-only handles attached by ``TrainConfig.launch()``; never persisted.
+    _function_call: Any = PrivateAttr(default=None)
+    _status_display: Any = PrivateAttr(default=None)
+
+    @computed_field
+    @property
+    def group_id(self) -> str | None:
+        """Group id, derived from ``metadata`` (its single source of truth).
+
+        Exposed as a top-level attribute/serialized field so the dashboard and
+        other callers can read ``run.group_id`` directly, but not stored
+        separately — ``TrainConfig`` writes it into ``metadata`` (and
+        ``metadata['group_tags']``), and this reads it back so the two can never
+        drift out of sync.
+        """
+        meta = self.metadata or {}
+        gid = meta.get("group_id")
+        if gid:
+            return str(gid)
+        tags = meta.get("group_tags")
+        if isinstance(tags, dict) and tags.get("group_id"):
+            return str(tags["group_id"])
+        return None
+
+    # ── Launch-handle behavior (waiting on the spawned run) ──────────────────
+
+    @property
+    def function_call(self) -> Any:
+        if self._function_call is not None:
+            return self._function_call
+        import modal
+
+        return modal.FunctionCall.from_id(self.function_call_id)
+
+    def result(
+        self,
+        *,
+        timeout: float | None = None,
+        stop_app_on_success: bool = True,
+    ) -> TrainResult:
+        """Block until the spawned training call finishes and return its TrainResult."""
+        from modal_training_gym.common.modal_lifecycle import stop_app
+        from modal_training_gym.common.status_reporter import (
+            flush as flush_status_reporter,
+        )
+        from modal_training_gym.common.train_result import TrainResult
+
+        if self._status_display is not None:
+            self._status_display.start_polling(self.training_run_id)
+        try:
+            result_dict = self.function_call.get(timeout=timeout)
+        finally:
+            if self._status_display is not None:
+                self._status_display.stop_polling()
+            flush_status_reporter(timeout_seconds=2.0)
+
+        if stop_app_on_success and self.modal_app_id:
+            stop_app(self.modal_app_id)
+        result = TrainResult(**TrainResult._parse_model_config(result_dict))
+        print(f"Training complete: {result.training_run_id}")
+        return result
+
+    def __await__(self):
+        import asyncio
+
+        async def _wait() -> TrainResult:
+            return await asyncio.to_thread(self.result)
+
+        return _wait().__await__()
 
     def _summary_sort_key(self, item: dict[str, Any]) -> tuple[int, str]:
         return (
@@ -61,40 +201,105 @@ class TrainingRun(BaseModel):
             str(item.get("training_run_id", "")),
         )
 
+    def apply_framework_status(
+        self, update: FrameworkStatusUpdate
+    ) -> FrameworkStatus | None:
+        """Apply one framework-status report to this run (without saving).
+
+        Sets ``framework_status``, merges the report into the
+        ``framework_progress`` metadata blob, and records step start/finish
+        times. Returns the resolved status, or ``None`` (run untouched) when
+        ``update.phase`` isn't a valid status for this run's framework.
+        """
+        status = resolve_framework_status(update.phase, str(self.framework.value))
+        if status is None:
+            return None
+
+        self.framework_status = status
+        progress: dict[str, Any] = {
+            "phase": status.value,
+            "updated_at": int(time.time()),
+        }
+        # is_active: True = stage is actually running on hardware; False =
+        # we've marked the stage but it's queuing for a GPU. Sent by the
+        # orchestration code in common/train.py (queue=False) and by the
+        # Modal function itself when its body starts executing (active=True).
+        if update.is_active is not None:
+            progress["is_active"] = update.is_active
+        for key, value in (
+            ("current", update.progress_current),
+            ("total", update.progress_total),
+            ("unit", update.progress_unit),
+            ("rollout_id", update.rollout_id),
+            ("step_id", update.step_id),
+        ):
+            if value is not None:
+                progress[key] = value
+
+        metadata = dict(self.metadata or {})
+        existing_progress = metadata.get("framework_progress")
+        if isinstance(existing_progress, dict):
+            # Drop the existing is_active when we get a fresh transition into
+            # a different phase — it shouldn't bleed across stage changes.
+            if existing_progress.get("phase") != progress["phase"]:
+                existing_progress = {
+                    k: v for k, v in existing_progress.items() if k != "is_active"
+                }
+            progress = {**existing_progress, **progress}
+        metadata["framework_progress"] = progress
+        self.metadata = metadata
+
+        # TODO update step timing
+        if self.framework is Framework.SLIME:
+            current_step = progress.get("current")
+            record_step_time_event(
+                cast(MutableMapping[str, Any], _step_times_dict()),
+                self.training_run_id,
+                current_step,
+                status.value,
+                update.step_event.strip(),
+                update.event_ts or time.time(),
+            )
+        return status
+
+    def record_latest_rollout(self, rollout: TrainingRolloutResult) -> None:
+        """Stamp a just-saved rollout's summary onto this run's metadata."""
+        metadata = dict(self.metadata or {})
+        metadata["latest_rollout"] = {
+            "rollout_id": rollout.rollout_id,
+            "mean": rollout.mean,
+            "total": rollout.total,
+            "created_at": rollout.created_at,
+        }
+        self.metadata = metadata
+
     def _touch(self) -> None:
         self.updated_at = int(time.time())
 
-    def save(self) -> None:
+    def save(self, *, is_async: bool = False) -> None | Awaitable[None]:
         self._touch()
-        payload = self.model_dump(mode="json")
-        vol_put(MetadataStore.TRAINING_RUNS, self.training_run_id, payload)
-        vol_upsert_summary_item(
-            MetadataStore.TRAINING_RUNS_SUMMARY,
-            payload,
+        return vol_put_with_summary(
+            MetadataStore.TRAINING_RUNS,
+            self.training_run_id,
+            self.model_dump(mode="json"),
+            summary_store=MetadataStore.TRAINING_RUNS_SUMMARY,
             item_id_key="training_run_id",
             sort_key=self._summary_sort_key,
             reverse=True,
-        )
-
-    async def save_async(self) -> None:
-        self._touch()
-        payload = self.model_dump(mode="json")
-        await vol_put_async(MetadataStore.TRAINING_RUNS, self.training_run_id, payload)
-        await vol_upsert_summary_item_async(
-            MetadataStore.TRAINING_RUNS_SUMMARY,
-            payload,
-            item_id_key="training_run_id",
-            sort_key=self._summary_sort_key,
-            reverse=True,
+            is_async=is_async,
         )
 
     @classmethod
-    def from_id(cls, run_id: str) -> "TrainingRun":
-        return cls.model_validate(vol_get(MetadataStore.TRAINING_RUNS, run_id))
+    def from_id(
+        cls, run_id: str, *, is_async: bool = False
+    ) -> TrainingRun | Awaitable[TrainingRun]:
+        data = vol_get(MetadataStore.TRAINING_RUNS, run_id, is_async=is_async)
+        if is_async:
 
-    @classmethod
-    async def from_id_async(cls, run_id: str) -> "TrainingRun":
-        data = await vol_get_async(MetadataStore.TRAINING_RUNS, run_id)
+            async def _run() -> TrainingRun:
+                return cls.model_validate(await data)
+
+            return _run()
         return cls.model_validate(data)
 
 
@@ -196,6 +401,7 @@ def mark_training_attempt_started(
     run.ended_at = None
     run.completed_at = None
     run.duration_seconds = None
+    run.error_message = None
     run.metadata = metadata
     return attempt_count
 

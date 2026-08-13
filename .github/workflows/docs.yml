@@ -13,6 +13,7 @@ on:
       - "scripts/generate_api_reference.py"
       - "scripts/generate_tutorial_pages.py"
       - "scripts/api_reference_manifest.py"
+      - "scripts/generate_llms_txt.py"
       - "tutorials/tutorial_generator/**"
       - "tutorials/README.md"
       - "uv.lock"
@@ -28,6 +29,7 @@ on:
       - "scripts/generate_api_reference.py"
       - "scripts/generate_tutorial_pages.py"
       - "scripts/api_reference_manifest.py"
+      - "scripts/generate_llms_txt.py"
       - "tutorials/tutorial_generator/**"
       - "tutorials/README.md"
       - "uv.lock"
@@ -37,7 +39,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: docs
+  group: docs-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -62,19 +64,91 @@ jobs:
         run: uv sync --group docs
 
       - name: Generate and build docs
-        run: uv run python scripts/generate_all.py
+        run: uv run scripts/generate_all.py
 
       - name: Validate docs_next_app.py
-        run: uv run python -m py_compile docs-next/docs_next_app.py
+        run: uv run -m py_compile docs-next/docs_next_app.py
 
-  deploy:
-    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch && secrets.MODAL_TOKEN_ID != '' && secrets.MODAL_TOKEN_SECRET != ''
+      - name: Archive docs dist
+        if: github.event_name == 'pull_request'
+        run: tar -czf docs.tar.gz -C docs-next/dist .
+
+      - name: Upload docs artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-dist
+          path: docs.tar.gz
+
+  preview:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     needs:
       - build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.PREVIEW_MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.PREVIEW_MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: training-gym
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-dist
+
+      - name: Deploy docs preview
+        run: uv run --no-project --with modal python scripts/previews/deploy.py ${{ github.event.pull_request.number }} docs docs.tar.gz
+
+      - name: Comment preview URL on PR
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_BASE_URL: ${{ vars.PREVIEW_BASE_URL }}
+        with:
+          script: |
+            const marker = "<!-- training-gym-docs-preview -->";
+            const prNumber = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            if (comments.some((comment) => comment.body.includes(marker))) {
+              console.log("Preview comment already exists; skipping");
+              return;
+            }
+
+            const baseUrl = process.env.PREVIEW_BASE_URL.replace(/\/+$/, "");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `${marker}\nDocumentation preview: ${baseUrl}/${prNumber}/docs`,
+            });
+
+  deploy:
+    # The `secrets` context is not available in job-level `if:`, so gate on the
+    # ref only; credentials come from the `modal-deploy` environment, which has
+    # no required reviewers (auto-approves) and is restricted to main. The
+    # `modal` environment used by validate-models keeps its approval gate.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    environment: modal-deploy
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: training-gym
       UV_CACHE_DIR: /tmp/uv-cache
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +167,7 @@ jobs:
         run: uv sync --group docs
 
       - name: Generate and build docs
-        run: uv run python scripts/generate_all.py
+        run: uv run scripts/generate_all.py
 
       - name: Deploy docs to Modal
         run: uv run modal deploy docs-next/docs_next_app.py

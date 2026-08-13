@@ -10,7 +10,7 @@ repos:
     hooks:
       - id: regenerate-tutorials
         name: Regenerate tutorials (tutorials/generate_tutorial.py)
-        entry: uv run python tutorials/generate_tutorial.py
+        entry: uv run tutorials/generate_tutorial.py
         language: system
         pass_filenames: false
         # Run only when the generator or a tutorial source file changes.

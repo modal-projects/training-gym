@@ -19,7 +19,7 @@
       <tr>
         {#each columns as _, colIndex (`cell-${rowIndex}-${colIndex}`)}
           <td>
-            <div class="skeleton-cell">
+            <div class="flex items-center min-h-[16px]">
               <SkeletonPulse
                 width={colIndex === columns.length - 1 ? "62%" : "100%"}
                 height={16}
@@ -31,11 +31,3 @@
     {/each}
   </tbody>
 </MinimalTable>
-
-<style>
-  .skeleton-cell {
-    display: flex;
-    align-items: center;
-    min-height: 16px;
-  }
-</style>

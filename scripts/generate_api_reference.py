@@ -120,6 +120,15 @@ def _seo_description(cls: type, class_name: str) -> str:
     return first_para
 
 
+def _yaml_quote(value: str) -> str:
+    """Render a string as a safe single-quoted YAML scalar.
+
+    Doubles embedded single quotes so apostrophes (e.g. "run's") don't
+    prematurely terminate the quoted scalar and break frontmatter parsing.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _format_type(type_hint: Any) -> str:
     """Format a type hint for display."""
     raw = str(type_hint)
@@ -247,6 +256,115 @@ def _extract_field_docs(docstring: str) -> dict[str, str]:
     return field_docs
 
 
+def _render_field_table(
+    attrs: dict[str, tuple[Any, Any]],
+    field_docs: dict[str, str],
+    label: str = "Field",
+) -> list[str]:
+    """Render a `| <label> | Type | Default | Description |` markdown table."""
+    lines = [
+        f"| {label} | Type | Default | Description |",
+        f"|{'-' * (len(label) + 2)}|------|---------|-------------|",
+    ]
+    for name, (type_hint, default) in attrs.items():
+        desc = field_docs.get(name, "")
+        lines.append(
+            f"| `{name}` | `{_format_type(type_hint)}` | {_format_default(default)} | {desc} |"
+        )
+    return lines
+
+
+def _page_preamble(cls: type, entry: dict) -> list[str]:
+    """Shared page opening: frontmatter, import block, summary, inheritance."""
+    docstring = inspect.getdoc(cls) or ""
+    # Render all intro prose before the first section header.  Section
+    # headers are either Markdown `## ...` headings or reST-style
+    # underlined headings (e.g. `Attributes\n-----------`) that would
+    # otherwise be duplicated by the generated ## Fields / ## Methods
+    # tables on behavior pages.
+    intro_lines: list[str] = []
+    lines = docstring.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("## "):
+            break
+        if i + 1 < len(lines):
+            next_line = lines[i + 1].strip()
+            title = line.strip()
+            if (
+                title
+                and next_line
+                and re.match(r"^[-=~]+$", next_line)
+                and len(next_line) >= len(title)
+            ):
+                break
+        intro_lines.append(line)
+        i += 1
+    first_para = "\n".join(intro_lines).strip()
+    module_path = entry["module"]
+
+    lines = [
+        "---",
+        f"title: {_yaml_quote(entry['sidebar_label'])}",
+        f"description: {_yaml_quote(_seo_description(cls, entry['class_name']))}",
+        "---",
+        "",
+        "```python",
+        f"from {module_path} import {entry['class_name']}",
+        "```",
+        "",
+    ]
+
+    if first_para:
+        lines.append(_rst_to_md(first_para))
+        lines.append("")
+
+    parent_classes = [
+        b.__name__
+        for b in cls.__mro__[1:]
+        if b.__name__ not in ("object", "type")
+        and b.__module__.startswith("modal_training_gym")
+    ]
+    if parent_classes:
+        lines.append(
+            f"**Inherits from:** {', '.join(f'`{p}`' for p in parent_classes)}"
+        )
+        lines.append("")
+
+    return lines
+
+
+def _methods_section(cls: type) -> list[str]:
+    """Render the ## Methods section, or nothing if the class has no methods."""
+    methods = _get_methods(cls)
+    if not methods:
+        return []
+    lines = ["## Methods", ""]
+    for name, sig, doc in methods:
+        lines.append(f"### `{name}{sig}`")
+        lines.append("")
+        if doc:
+            lines.append(_rst_to_md(doc))
+            lines.append("")
+    return lines
+
+
+def _page_footer(
+    entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None
+) -> list[str]:
+    """Shared page closing: tutorial backlinks and source link."""
+    lines: list[str] = []
+    if backlinks:
+        _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
+    module_path = entry["module"]
+    lines.append(
+        f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)"
+    )
+    lines.append("")
+    return lines
+
+
 def _get_methods(cls: type) -> list[tuple[str, str, str]]:
     """Get public methods with their signatures and docstrings."""
     methods = []
@@ -275,40 +393,11 @@ def generate_config_data_page(
     cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None
 ) -> str:
     """Generate markdown for a config/data class."""
-    docstring = inspect.getdoc(cls) or ""
-    first_para = docstring.split("\n\n")[0] if docstring else ""
     attrs = _get_class_attrs(cls)
     field_docs = _extract_field_docs_from_mro(cls)
     groups = _parse_docstring_groups_from_mro(cls)
-    module_path = entry["module"]
 
-    lines = [
-        "---",
-        f"title: {entry['sidebar_label']}",
-        f"description: '{_seo_description(cls, entry['class_name'])}'",
-        "---",
-        "",
-        "```python",
-        f"from {module_path} import {entry['class_name']}",
-        "```",
-        "",
-    ]
-
-    if first_para:
-        lines.append(_rst_to_md(first_para))
-        lines.append("")
-
-    parent_classes = [
-        b.__name__
-        for b in cls.__mro__[1:]
-        if b.__name__ not in ("object", "type")
-        and b.__module__.startswith("modal_training_gym")
-    ]
-    if parent_classes:
-        lines.append(
-            f"**Inherits from:** {', '.join(f'`{p}`' for p in parent_classes)}"
-        )
-        lines.append("")
+    lines = _page_preamble(cls, entry)
 
     if not attrs:
         return "\n".join(lines)
@@ -322,72 +411,35 @@ def generate_config_data_page(
     if groups:
         group_field_names: set[str] = set()
         for group_name, group_lines in groups:
-            lines.append(f"## {group_name}")
-            lines.append("")
-            lines.append("| Field | Type | Default | Description |")
-            lines.append("|-------|------|---------|-------------|")
-
+            group_attrs: dict[str, tuple[Any, Any]] = {}
             for gl in group_lines:
                 stripped = gl.strip()
                 for attr_name in list(attrs.keys()):
                     if attr_name in group_field_names:
                         continue
-                    if (
-                        re.match(rf"^{attr_name}\s*:", stripped)
-                        or re.match(rf"^#.*{attr_name}", stripped)
-                        or attr_name in stripped
-                    ):
-                        type_hint, default = attrs[attr_name]
-                        desc = field_docs.get(attr_name, "")
-                        lines.append(
-                            f"| `{attr_name}` | `{_format_type(type_hint)}` | {_format_default(default)} | {desc} |"
-                        )
+                    if re.match(rf"^{attr_name}\s*:", stripped):
+                        group_attrs[attr_name] = attrs[attr_name]
                         group_field_names.add(attr_name)
 
+            lines.append(f"## {group_name}")
+            lines.append("")
+            lines.extend(_render_field_table(group_attrs, field_docs))
             lines.append("")
 
         ungrouped = {k: v for k, v in attrs.items() if k not in group_field_names}
         if ungrouped:
             lines.append("## Other Fields")
             lines.append("")
-            lines.append("| Field | Type | Default | Description |")
-            lines.append("|-------|------|---------|-------------|")
-            for name, (type_hint, default) in ungrouped.items():
-                desc = field_docs.get(name, "")
-                lines.append(
-                    f"| `{name}` | `{_format_type(type_hint)}` | {_format_default(default)} | {desc} |"
-                )
+            lines.extend(_render_field_table(ungrouped, field_docs))
             lines.append("")
     else:
         lines.append("## Fields")
         lines.append("")
-        lines.append("| Field | Type | Default | Description |")
-        lines.append("|-------|------|---------|-------------|")
-        for name, (type_hint, default) in attrs.items():
-            desc = field_docs.get(name, "")
-            lines.append(
-                f"| `{name}` | `{_format_type(type_hint)}` | {_format_default(default)} | {desc} |"
-            )
+        lines.extend(_render_field_table(attrs, field_docs))
         lines.append("")
 
-    methods = _get_methods(cls)
-    if methods:
-        lines.append("## Methods")
-        lines.append("")
-        for name, sig, doc in methods:
-            lines.append(f"### `{name}{sig}`")
-            lines.append("")
-            if doc:
-                lines.append(_rst_to_md(doc))
-                lines.append("")
-
-    if backlinks:
-        _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
-
-    lines.append(
-        f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)"
-    )
-    lines.append("")
+    lines.extend(_methods_section(cls))
+    lines.extend(_page_footer(entry, backlinks))
 
     return "\n".join(lines)
 
@@ -396,37 +448,7 @@ def generate_behavior_page(
     cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None
 ) -> str:
     """Generate markdown for a behavior class."""
-    docstring = inspect.getdoc(cls) or ""
-    first_para = docstring.split("\n\n")[0] if docstring else ""
-    module_path = entry["module"]
-
-    lines = [
-        "---",
-        f"title: {entry['sidebar_label']}",
-        f"description: '{_seo_description(cls, entry['class_name'])}'",
-        "---",
-        "",
-        "```python",
-        f"from {module_path} import {entry['class_name']}",
-        "```",
-        "",
-    ]
-
-    if first_para:
-        lines.append(_rst_to_md(first_para))
-        lines.append("")
-
-    parent_classes = [
-        b.__name__
-        for b in cls.__mro__[1:]
-        if b.__name__ not in ("object", "type")
-        and b.__module__.startswith("modal_training_gym")
-    ]
-    if parent_classes:
-        lines.append(
-            f"**Inherits from:** {', '.join(f'`{p}`' for p in parent_classes)}"
-        )
-        lines.append("")
+    lines = _page_preamble(cls, entry)
 
     init = getattr(cls, "__init__", None)
     if init:
@@ -477,33 +499,11 @@ def generate_behavior_page(
         field_docs = _extract_field_docs_from_mro(cls)
         lines.append("## Attributes")
         lines.append("")
-        lines.append("| Attribute | Type | Default | Description |")
-        lines.append("|-----------|------|---------|-------------|")
-        for name, (type_hint, default) in attrs.items():
-            desc = field_docs.get(name, "")
-            lines.append(
-                f"| `{name}` | `{_format_type(type_hint)}` | {_format_default(default)} | {desc} |"
-            )
+        lines.extend(_render_field_table(attrs, field_docs, label="Attribute"))
         lines.append("")
 
-    methods = _get_methods(cls)
-    if methods:
-        lines.append("## Methods")
-        lines.append("")
-        for name, sig, doc in methods:
-            lines.append(f"### `{name}{sig}`")
-            lines.append("")
-            if doc:
-                lines.append(_rst_to_md(doc))
-                lines.append("")
-
-    if backlinks:
-        _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
-
-    lines.append(
-        f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)"
-    )
-    lines.append("")
+    lines.extend(_methods_section(cls))
+    lines.extend(_page_footer(entry, backlinks))
 
     return "\n".join(lines)
 
@@ -513,11 +513,8 @@ def generate_index_page(manifest: list[dict]) -> str:
     lines = [
         "---",
         "title: API Reference",
-        "description: API reference for training-gym public classes.",
+        "pagefind: false",
         "---",
-        "",
-        "Complete reference for the training-gym Python library.",
-        "",
     ]
 
     for group_key, group_info in sorted(GROUPS.items(), key=lambda x: x[1]["order"]):
@@ -652,8 +649,8 @@ def main() -> None:
             desc = first_sentence or f"API reference for {entry['class_name']}"
             lines = [
                 "---",
-                f'title: "{entry.get("sidebar_label", entry["class_name"])}"',
-                f"description: '{desc}'",
+                f"title: {_yaml_quote(entry.get('sidebar_label', entry['class_name']))}",
+                f"description: {_yaml_quote(desc)}",
                 "---",
                 "",
                 f"# `{entry['class_name']}`",

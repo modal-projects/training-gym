@@ -1,7 +1,7 @@
 """Run all doc generators then build the Starlight site.
 
-uv run python scripts/generate_all.py          # generate + build
-uv run python scripts/generate_all.py --skip-build  # generate only
+uv run scripts/generate_all.py          # generate + build
+uv run scripts/generate_all.py --skip-build  # generate only
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ GENERATORS = [
     [sys.executable, "scripts/generate_docs_pages.py"],
     [sys.executable, "scripts/generate_api_reference.py"],
     [sys.executable, "scripts/generate_tutorial_pages.py"],
+    [sys.executable, "scripts/generate_llms_txt.py"],
 ]
 
 

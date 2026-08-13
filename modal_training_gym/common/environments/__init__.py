@@ -1,7 +1,8 @@
-"""Live, sandbox-backed RL environments.
+"""Live RL environments.
 
-``base`` holds the framework-agnostic abstractions (I/O shapes + lifecycle base
-classes); concrete benchmarks (e.g. ``toolathlon``) build on them.
+``base`` holds the framework-agnostic abstractions (I/O shapes + lifecycle base classes); concrete
+benchmarks build on them — ``toolathlon`` (Modal-sandbox-backed) and ``bfcl`` (in-process, no
+sandbox needed at all; see :mod:`.bfcl`'s module docstring for why).
 """
 
 from modal_training_gym.common.environments.base import (
@@ -13,6 +14,20 @@ from modal_training_gym.common.environments.base import (
     SandboxEnvironmentPool,
     StepResult,
     ToolCall,
+)
+from modal_training_gym.common.environments.bfcl import (
+    BfclEpisodeResult,
+    BfclMultiTurnConfig,
+    BfclMultiTurnDataset,
+    BfclTurnEnvironment,
+    build_env as build_bfcl_env,
+    build_prefix_messages as build_bfcl_prefix_messages,
+    default_system_prompt as bfcl_default_system_prompt,
+    prefix_turn_index as bfcl_prefix_turn_index,
+    prune_prefix as prune_bfcl_prefix,
+    run_bfcl_episode,
+    to_json_schema,
+    tool_schemas_to_openai as bfcl_tool_schemas_to_openai,
 )
 from modal_training_gym.common.environments.toolathlon import (
     DEFAULT_CONFIG,
@@ -61,4 +76,18 @@ __all__ = [
     "render_tool_catalog",
     "default_system_prompt",
     "tool_schemas_to_openai",
+    # bfcl — config + env
+    "BfclEpisodeResult",
+    "BfclMultiTurnConfig",
+    "BfclTurnEnvironment",
+    "build_bfcl_env",
+    "run_bfcl_episode",
+    # bfcl — data + prompts
+    "BfclMultiTurnDataset",
+    "build_bfcl_prefix_messages",
+    "bfcl_prefix_turn_index",
+    "prune_bfcl_prefix",
+    "bfcl_default_system_prompt",
+    "bfcl_tool_schemas_to_openai",
+    "to_json_schema",
 ]

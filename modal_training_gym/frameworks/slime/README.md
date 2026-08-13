@@ -58,8 +58,10 @@ See `modal_training_gym/train_recipes/slime_recipe/recipe.py` for the full field
 
 ## YAML config fields
 
-`eval_config`, `custom_config_path`, and `sglang_config` normally take file paths in slime.
-In `SlimeRecipe` you can write them as inline dicts — the launcher materializes them to temp YAML files automatically:
+`eval_config`, `extra_config`, and `sglang_config` map to slime options that
+normally take file paths (`--eval-config`, `--custom-config-path`,
+`--sglang-config`). In `SlimeRecipe` you can write them as inline dicts — the
+launcher materializes them to temp YAML files automatically:
 
 ```python
 recipe = SlimeRecipe(
@@ -71,12 +73,20 @@ recipe = SlimeRecipe(
             ],
         }
     },
-    custom_config_path={
+    extra_config={
         "max_turns": 3,
         "rollout_interaction_env_path": "examples.my_env.rollout",
     },
 )
 ```
+
+`extra_config` is also the escape hatch for any slime/sglang option that has no
+`SlimeRecipe` field: keys become attributes on slime's parsed args and always
+override same-named recipe fields. Alternatively, declare the flag as a field on
+a recipe subclass — every non-launcher field is emitted as
+`--<field-name-with-dashes>`, so new slime flags (and sglang server args via the
+`sglang_*` prefix) work without editing `SlimeRecipe` itself. See the
+`SlimeRecipe` docstring for the full field reference.
 
 ## Image overlay
 

@@ -116,9 +116,11 @@ def validate_num_experts_divisible_by_expert_parallel_size(
     if not num_experts:
         return
 
-    expert_parallel_size = _positive_int_field(
-        config, "expert_model_parallel_size", default=1
-    )
+    if getattr(config, "expert_model_parallel_size", None) is None:
+        # Unset EP falls back to the framework default of 1, which always divides.
+        return
+
+    expert_parallel_size = _positive_int_field(config, "expert_model_parallel_size")
     _require_divisible(
         num_experts,
         expert_parallel_size,

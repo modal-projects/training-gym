@@ -1,5 +1,17 @@
 const SERVER = "/api";
 
+
+async function getErrorFromResponse(res) {
+  let detail = res.statusText;
+  try {
+    const body = await res.json();
+    if (body?.detail) detail = String(body.detail);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+  }
+  return detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`;
+}
+
 function safeStr(v) {
   if (v && typeof v === "object" && "value" in v) return v.value;
   return v != null ? String(v) : "";
@@ -22,94 +34,6 @@ function modalAppUrl(modalAppId) {
   if (!appId) return null;
   if (appId.startsWith("http://") || appId.startsWith("https://")) return appId;
   return `https://modal.com/id/${appId}`;
-}
-
-function wandbUrl({ entity, project, runId }) {
-  const cleanEntity = safeStr(entity).trim();
-  const cleanProject = safeStr(project).trim();
-  const cleanRunId = safeStr(runId).trim();
-  if (!cleanEntity || !cleanProject) return null;
-  const base = `https://wandb.ai/${encodeURIComponent(cleanEntity)}/${encodeURIComponent(cleanProject)}`;
-  return cleanRunId ? `${base}/runs/${encodeURIComponent(cleanRunId)}` : base;
-}
-
-function wandbSummary(fields) {
-  const wandbProject = safeStr(fields.project || "");
-  const wandbEntity = safeStr(fields.entity || "");
-  const wandbRunId = safeStr(fields.runId || "");
-  const url = wandbUrl({ entity: wandbEntity, project: wandbProject, runId: wandbRunId });
-  return {
-    wandb_project: wandbProject,
-    wandb_group: safeStr(fields.group || ""),
-    wandb_entity: wandbEntity,
-    wandb_training_run_id: wandbRunId,
-    wandb_url: url,
-    wandb_links: url ? [{ label: "W&B", url, run_id: wandbRunId }] : [],
-  };
-}
-
-function wandbLinksFromAttempts(metadata) {
-  const attempts = Array.isArray(metadata?.wandb_attempts) ? metadata.wandb_attempts : [];
-  return attempts
-    .map((attempt) => {
-      if (!attempt || typeof attempt !== "object") return null;
-      const runId = safeStr(attempt.run_id || "");
-      const attemptNumber = Number(attempt.attempt) || 0;
-      const url = wandbUrl({
-        entity: attempt.entity,
-        project: attempt.project,
-        runId,
-      });
-      if (!url) return null;
-      return {
-        label: attemptNumber > 1 ? `W&B a${attemptNumber}` : "W&B",
-        url,
-        run_id: runId,
-        attempt: attemptNumber || null,
-      };
-    })
-    .filter(Boolean);
-}
-
-function dedupeWandbLinks(links) {
-  const seen = new Set();
-  return links.filter((link) => {
-    const key = link?.url || "";
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function extractConfigSummary(config, trainingRunId = "") {
-  if (!config || typeof config !== "object") return {};
-  const model = config.model || {};
-  const preset = config.preset || {};
-  const recipe = config.recipe || {};
-  const compute = Object.keys(recipe).length ? recipe : preset;
-  const wandb = config.wandb || {};
-  const dataset = config.dataset || {};
-  const datasetName =
-    safeStr(dataset.hf_repo) ||
-    safeStr(dataset.prompt_data) ||
-    safeStr(dataset.name);
-  const wandbRunId = safeStr(wandb.run_id || "") || safeStr(trainingRunId).slice(0, 8);
-  return {
-    model_name: safeStr(model.model_name || ""),
-    gpu_type: safeStr(compute.gpu_type || ""),
-    actor_num_nodes: compute.actor_num_nodes || 0,
-    actor_num_gpus_per_node: compute.actor_num_gpus_per_node || 0,
-    lr: config.lr || 0,
-    global_batch_size: config.global_batch_size || 0,
-    ...wandbSummary({
-      entity: wandb.entity,
-      project: wandb.project,
-      group: wandb.group,
-      runId: wandb.project && wandb.entity ? wandbRunId : "",
-    }),
-    dataset_name: datasetName,
-    dataset_prompt_data: safeStr(dataset.prompt_data || ""),
-  };
 }
 
 function summarizeDeployment(d) {
@@ -142,173 +66,30 @@ function summarizeDeployment(d) {
   };
 }
 
-function summarizeTrainResult(r) {
-  return {
-    training_run_id: r.training_run_id || "",
-    app_name: r.app_name || "",
-    checkpoint_dir: r.checkpoint_dir || "",
-    model_name: safeStr(r.model_config?.model_name || ""),
-    model_path: safeStr(r.model_config?.model_path || ""),
-    ...wandbSummary({
-      entity: r.wandb_entity,
-      project: r.wandb_project,
-      runId: r.wandb_training_run_id,
-    }),
-  };
-}
-
-function summarizeProgress(metadata) {
-  const progress = metadata?.framework_progress;
-  if (!progress || typeof progress !== "object") return null;
-  const current = Number(progress.current);
-  const total = Number(progress.total);
-  // is_active: undefined → unknown (treat as active by default); false →
-  // marked-but-queuing-for-hardware; true → actually running.
-  const isActive =
-    progress.is_active === false
-      ? false
-      : progress.is_active === true
-        ? true
-        : null;
-  return {
-    current: Number.isFinite(current) ? current : null,
-    total: Number.isFinite(total) && total > 0 ? total : null,
-    unit: safeStr(progress.unit || "step") || "step",
-    phase: safeStr(progress.phase || ""),
-    is_active: isActive,
-    rollout_id: Number.isFinite(Number(progress.rollout_id))
-      ? Number(progress.rollout_id)
-      : null,
-    step_id: Number.isFinite(Number(progress.step_id)) ? Number(progress.step_id) : null,
-  };
-}
-
-function summarizeResumeState(metadata) {
-  if (!metadata || typeof metadata !== "object") return null;
-  const attemptCount = Number(metadata.attempt_count) || 0;
-  const resumedFromCheckpoint =
-    metadata.resumed_from_checkpoint === true || Boolean(metadata.resume_checkpoint_path);
-  if (attemptCount <= 1 && !resumedFromCheckpoint) return null;
-  return {
-    attempt_count: attemptCount,
-    resumed_from_checkpoint: resumedFromCheckpoint,
-    resume_checkpoint_name: safeStr(metadata.resume_checkpoint_name || ""),
-    resume_checkpoint_path: safeStr(metadata.resume_checkpoint_path || ""),
-    resume_from_iteration: Number.isFinite(Number(metadata.resume_from_iteration))
-      ? Number(metadata.resume_from_iteration)
-      : null,
-    last_attempt_status: safeStr(metadata.last_attempt_status || ""),
-  };
-}
-
 export async function fetchRuns({ signal } = {}) {
-  const [runsRes, resultsRes] = await Promise.all([
-    fetch(`${SERVER}/runs`, { signal }),
-    fetch(`${SERVER}/train-results`, { signal }),
-  ]);
-  if (!runsRes.ok) throw new Error(`HTTP ${runsRes.status}`);
-  const runs = await runsRes.json();
-  const trainResults = resultsRes.ok ? await resultsRes.json() : [];
+  const response = await fetch(`${SERVER}/runs`, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const runs = await response.json();
+  return Array.isArray(runs) ? runs : [];
+}
 
-  const resultsByRunId = {};
-  for (const r of trainResults) {
-    const id = r.training_run_id || "";
-    if (id) resultsByRunId[id] = r;
+export async function fetchRun(trainingRunId, { signal } = {}) {
+  const res = await fetch(
+    `${SERVER}/runs/${encodeURIComponent(trainingRunId)}`,
+    { signal },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(await getErrorFromResponse(res));
   }
-
-  const normalizedRuns = runs.map((run, index) => {
-    const rawRunId = safeStr(run.run_id || run.training_run_id);
-    const modalAppId = safeStr(run.modal_app_id);
-    const runId =
-      rawRunId ||
-      `unknown-run-${modalAppId || "no-app"}-${safeTimestamp(run.created_at || run.started_at)}-${index}`;
-    const trainResult = resultsByRunId[rawRunId] || null;
-    const startedAt = run.started_at || run.created_at || 0;
-    const endedAt = run.ended_at || null;
-    const completedAt =
-      run.completed_at || (run.status === "completed" ? endedAt : null);
-    const durationSeconds =
-      typeof run.duration_seconds === "number" && run.duration_seconds >= 0
-        ? run.duration_seconds
-        : startedAt && endedAt
-          ? Math.max(0, endedAt - startedAt)
-          : null;
-    const metadata = run.metadata || null;
-    const updatedAt =
-      run.updated_at ||
-      completedAt ||
-      endedAt ||
-      startedAt ||
-      run.created_at ||
-      0;
-    const latestRollout =
-      metadata && typeof metadata === "object" && metadata.latest_rollout
-        ? {
-            rollout_id: Number(metadata.latest_rollout.rollout_id) || 0,
-            mean: Number(metadata.latest_rollout.mean) || 0,
-            total: Number(metadata.latest_rollout.total) || 0,
-            created_at: Number(metadata.latest_rollout.created_at) || 0,
-          }
-        : null;
-    const configSummary = extractConfigSummary(run.config, runId);
-    const trainResultSummary = trainResult ? summarizeTrainResult(trainResult) : null;
-    const wandbLinks = dedupeWandbLinks([
-      ...wandbLinksFromAttempts(metadata),
-      ...(trainResultSummary?.wandb_links || []),
-      ...(configSummary.wandb_links || []),
-    ]);
-    return {
-      training_run_id: runId,
-      run_id: runId,
-      modal_app_id: modalAppId,
-      modal_app_url: modalAppUrl(modalAppId),
-      framework: safeStr(run.framework) || "(untagged)",
-      status: run.status || "running",
-      framework_status: safeStr(run.framework_status || ""),
-      framework_progress: summarizeProgress(metadata),
-      latest_rollout: latestRollout,
-      dataset_id: safeStr(run.dataset_id || ""),
-      deployment_id: safeStr(run.deployment_id || ""),
-      group_id: safeStr(metadata?.group_id || ""),
-      config: run.config || {},
-      config_summary: configSummary,
-      created_at: run.created_at || 0,
-      started_at: startedAt,
-      ended_at: endedAt,
-      completed_at: completedAt,
-      updated_at: updatedAt,
-      duration_seconds: durationSeconds,
-      metadata,
-      resume_state: summarizeResumeState(metadata),
-      wandb_links: wandbLinks,
-      has_train_result: !!trainResult,
-      train_result: trainResultSummary,
-    };
-  });
-
-  const dedupedByRunId = new Map();
-  for (const run of normalizedRuns) {
-    const existing = dedupedByRunId.get(run.run_id);
-    if (!existing) {
-      dedupedByRunId.set(run.run_id, run);
-      continue;
-    }
-    if (run.train_result && !existing.train_result) {
-      dedupedByRunId.set(run.run_id, run);
-      continue;
-    }
-    if (existing.train_result && !run.train_result) continue;
-    const existingCreatedAt = safeTimestamp(existing.created_at || existing.started_at);
-    const incomingCreatedAt = safeTimestamp(run.created_at || run.started_at);
-    if (incomingCreatedAt >= existingCreatedAt) dedupedByRunId.set(run.run_id, run);
-  }
-
-  return [...dedupedByRunId.values()];
+  return await res.json();
 }
 
 export async function fetchEvals({ signal } = {}) {
   const res = await fetch(`${SERVER}/evals`, { signal });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    throw new Error(await getErrorFromResponse(res));
+  }
   const evals = await res.json();
   const seen = new Set();
   return evals.filter((e) => {
@@ -355,11 +136,14 @@ export async function fetchRunRollouts(trainingRunId, { signal } = {}) {
       rollout_id: Number(item.rollout_id) || 0,
       created_at: Number(item.created_at) || 0,
       total: Number(item.total) || 0,
+      episode_count:
+        item.episode_count == null ? null : Number(item.episode_count) || 0,
       mean: typeof item.mean === "number" ? item.mean : Number(item.mean) || 0,
       rollout_time: Number.isFinite(Number(item.rollout_time))
         ? Number(item.rollout_time)
         : null,
       error_summary: item.error_summary || null,
+      tag_stats: item.tag_stats || {},
     }))
     .sort((a, b) => a.rollout_id - b.rollout_id);
 }
@@ -370,6 +154,38 @@ export async function fetchRollout(trainingRunId, rolloutId) {
   );
   if (!res.ok) return null;
   return await res.json();
+}
+
+// Historical Modal logs for a run, served from the durable storage.
+//
+// Returns the newest `maxLines` lines within the (since, until] window, oldest
+// first, plus a `nextUntil` cursor for paging further back through history.
+// When omitted, `maxLines` defaults to 100 on the server.
+// `since` defaults to the run's start (then creation time or the Unix epoch);
+// `until` defaults to the run's end/completion time, or now when unavailable.
+export async function fetchRunLogs(
+  trainingRunId,
+  { since, until, maxLines, search, signal } = {},
+) {
+  const params = new URLSearchParams();
+  if (since != null && since !== "") params.set("since", String(since));
+  if (until != null && until !== "") params.set("until", String(until));
+  if (maxLines != null) params.set("max_lines", String(maxLines));
+  if (search) params.set("search", search);
+  const qs = params.toString();
+  const res = await fetch(
+    `${SERVER}/runs/${encodeURIComponent(trainingRunId)}/logs` + (qs ? `?${qs}` : ""),
+    { signal },
+  );
+  if (!res.ok) {
+    throw new Error(await getErrorFromResponse(res));
+  }
+  const data = await res.json();
+  return {
+    logs: Array.isArray(data.logs) ? data.logs : [],
+    hasMore: !!data.has_more,
+    nextUntil: data.next_until ?? null,
+  };
 }
 
 // Per-step advantage distribution summaries (one row per training step, each

@@ -16,7 +16,8 @@ when_to_use: >-
 
 This document defines a durable validation pipeline for agents that need to check whether the examples in this repository still run as documented.
 
-Use this runbook together with [modal-training](../modal-training/SKILL.md), which covers Modal launch and debugging workflow.
+Use [modal-infrastructure](../modal-infrastructure/SKILL.md) only when
+validation requires raw Modal app, container, volume, or scheduling diagnosis.
 
 ## Goal
 
@@ -30,7 +31,9 @@ Use this runbook together with [modal-training](../modal-training/SKILL.md), whi
 - Keep the default pipeline cheap enough to run automatically after example-facing changes.
 - Treat dataset prep, model download, checkpoint conversion, and training as separate checkpoints.
 - Prefer the smallest runnable path that still exercises the real entrypoint.
-- Use detached Modal runs for long-lived training and follow the detached-app workflow in [modal-training](../modal-training/SKILL.md).
+- Use detached Modal runs for long-lived validation; consult
+  [modal-infrastructure](../modal-infrastructure/SKILL.md) for low-level app
+  lifecycle details.
 
 ## Discovering What To Validate
 

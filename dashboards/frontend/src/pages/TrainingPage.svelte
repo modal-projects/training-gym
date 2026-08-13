@@ -3,12 +3,14 @@
   import Drawer from "../components/Drawer.svelte";
   import FilterBar from "../components/FilterBar.svelte";
   import FrameworkStageProgress from "../components/FrameworkStageProgress.svelte";
+  import GroupSection from "../components/GroupSection.svelte";
   import MinimalTableSkeleton from "../components/MinimalTableSkeleton.svelte";
   import ResizableTable from "../components/ResizableTable.svelte";
   import RunSummary from "../components/RunSummary.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
-  import { formatTagValue, getGroupTags, smoothedStageLabel } from "../lib/format.js";
+  import { formatTagValue, getGroupTags } from "../lib/format.js";
+  import { toggleInSet } from "../lib/set.js";
 
   let {
     allRuns,
@@ -27,11 +29,12 @@
     groupCounts,
     activeGroups,
     filteredRuns,
+    runGroups,
+    groupBy = $bindable(),
     loading,
     error,
     modelName,
     getStatus,
-    getFrameworkStatus,
     showFrameworkStatus,
     fmtDuration,
     search = $bindable(),
@@ -39,10 +42,14 @@
     onOpenDetail = () => {},
     onCloseDrawer = () => {},
     onToggleRecipe,
-    onToggleAllRecipes,
+    onSelectAllRecipes,
+    onClearRecipes,
     onToggleStatus,
+    onSelectAllStatuses,
+    onClearStatuses,
     onToggleGroup,
-    onToggleAllGroups,
+    onSelectAllGroups,
+    onClearGroups,
   } = $props();
 
   // The drawer is now driven by the parent: it holds the run-summary while the
@@ -113,12 +120,6 @@
     };
   }
 
-  function frameworkStatusLabel(run) {
-    // Pass the raw `framework_progress` so smoothedStageLabel sees is_active
-    // even for stages that don't have step counters yet (download/convert).
-    return smoothedStageLabel(getFrameworkStatus(run), run?.framework_progress);
-  }
-
   function progressLabel(progress) {
     if (!progress) return "";
     const unit = String(progress.unit || "step");
@@ -142,13 +143,30 @@
   }
 
   $effect(() => {
-    if (drawerRunId && !allRuns.some((run) => run.run_id === drawerRunId)) {
+    if (
+      !loading &&
+      drawerRunId &&
+      !allRuns.some((run) => run.run_id === drawerRunId)
+    ) {
       onCloseDrawer();
     }
   });
+
+  // Inverted vs. evals' expanded set so groups default to expanded, including
+  // ones that appear later via auto-refresh.
+  let collapsedGroupKeys = $state(new Set());
+
+  function toggleGroupSection(key) {
+    collapsedGroupKeys = toggleInSet(collapsedGroupKeys, key);
+  }
+
+  $effect(() => {
+    void groupBy;
+    collapsedGroupKeys = new Set();
+  });
 </script>
 
-<section class="summary-row training-summary">
+<section class="summary-sticky grid grid-cols-5 gap-[14px] p-[0_24px] mb-[24px] max-[900px]:grid-cols-2">
   <article class="summary-card">
     <span class="summary-label">Total runs</span>
     <strong>{allRuns.length}</strong>
@@ -171,8 +189,8 @@
   </article>
 </section>
 
-<section class="runs-surface">
-  <div class="filters-row">
+<section class="[border:0] [background:transparent] flex flex-col gap-[24px] p-[0_24px_16px] max-[900px]:p-[0_16px_24px] min-w-0">
+  <div class="m-0">
     <FilterBar
       {recipes}
       {recipeCounts}
@@ -181,189 +199,220 @@
       {statuses}
       {statusCounts}
       {activeStatuses}
+      allStatusesActive={activeStatuses.size === statuses.length}
       {groups}
       {groupCounts}
       {activeGroups}
       allGroupsActive={activeGroups.size === groups.length}
-      totalRuns={allRuns.length}
       bind:search
+      bind:groupBy
       onToggleRecipe={onToggleRecipe}
-      onToggleAllRecipes={onToggleAllRecipes}
+      onSelectAllRecipes={onSelectAllRecipes}
+      onClearRecipes={onClearRecipes}
       onToggleStatus={onToggleStatus}
+      onSelectAllStatuses={onSelectAllStatuses}
+      onClearStatuses={onClearStatuses}
       onToggleGroup={onToggleGroup}
-      onToggleAllGroups={onToggleAllGroups}
+      onSelectAllGroups={onSelectAllGroups}
+      onClearGroups={onClearGroups}
     />
   </div>
 
-  <div class="runs-body">
+  <div class="p-0">
     {#if loading}
-      <div class="table-wrap">
+      <div class="table-wrap freeze-header">
         <MinimalTableSkeleton
-          class="runs-table"
+          class="training-runs-table"
           columns={["Name", "Status", "Stage", "Model", "Dataset", "Recipe", "Group", "Tags", "Created", "Last updated", ""]}
           rows={8}
         />
       </div>
     {:else if error}
-      <div class="empty">Failed to load: {error}</div>
+      <div class="page-empty">Failed to load: {error}</div>
     {:else if !allRuns.length}
-      <div class="empty">No training runs found yet.</div>
+      <div class="page-empty">No training runs found yet.</div>
     {:else if !filteredRuns.length}
-      <div class="empty">No runs match the current filters.</div>
+      <div class="page-empty">No runs match the current filters.</div>
     {:else}
-      <div class="table-wrap">
-        <ResizableTable class="runs-table training-runs-table" {columns} stickyFirstColumn>
-          <tbody>
-            {#each filteredRuns as run, runIndex (`${run.run_id || "run"}-${run.created_at || 0}-${runIndex}`)}
-              {@const runName = run.run_id || "—"}
-              {@const status = getStatus(run)}
-              {@const stageLabel = frameworkStatusLabel(run)}
-              {@const progress = frameworkProgress(run)}
-              {@const groupTags = getGroupTags(run)}
-              <tr class="run-row" class:row-selected={drawerRunId === run.run_id}>
-                <td class="run-cell row-open-cell">
-                  <a
-                    href={trainingRunDetailPath(run.run_id)}
-                    class="cell-open-button"
-                    title={runName}
-                    aria-label={`Open training run ${runName}`}
-                    onclick={(event) => selectRun(run.run_id, event)}
-                  >
-                    <div class="run-name">{runName}</div>
-                  </a>
-                </td>
-                <td class="row-open-cell">
-                  <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
-                    <span class="status-stack">
-                      <StatusPill status={status} />
-                      {#if resumeBadge(run)}
-                        <span class="resume-badge">{resumeBadge(run)}</span>
-                      {/if}
-                    </span>
-                  </a>
-                </td>
-                <td class="stage-cell row-open-cell">
-                  <a
-                    href={trainingRunDetailPath(run.run_id)}
-                    class="cell-open-button stage-open-button"
-                    onclick={(event) => selectRun(run.run_id, event)}
-                  >
-                    {#if showFrameworkStatus(run) && stageLabel}
-                      <FrameworkStageProgress
-                        progress={progress}
-                        progressLabel={progressLabel(progress)}
-                        stageLabel={stageLabel}
-                        compact
-                        active={status.toLowerCase() === "pending"}
-                      />
-                    {:else}
-                      <span class="stage-empty">—</span>
-                    {/if}
-                  </a>
-                </td>
-                <td class="model-cell row-open-cell" title={modelName(run)}>
-                  <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
-                    {modelName(run)}
-                  </a>
-                </td>
-                <td class="dataset-cell row-open-cell" title={run.config_summary?.dataset_name || "—"}>
-                  <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
-                    {run.config_summary?.dataset_name || "—"}
-                  </a>
-                </td>
-                <td class="row-open-cell">
-                  <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
-                    {run.framework || "—"}
-                  </a>
-                </td>
-                <td class="group-cell row-open-cell" title={groupTags?.group_id || run.group_id || ""}>
-                  <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
-                    {#if groupTags?.group_id}
-                      <span class="group-tag">{groupTags.group_id}</span>
-                    {:else}
-                      <span class="group-empty">—</span>
-                    {/if}
-                  </a>
-                </td>
-                <td class="tags-cell row-open-cell">
-                  <a
-                    href={trainingRunDetailPath(run.run_id)}
-                    class="cell-open-button tags-open-button"
-                    onclick={(event) => selectRun(run.run_id, event)}
-                  >
-                    {#if groupTags?.tags.length}
-                      <span class="tag-pill-list">
-                        {#each groupTags.tags as tag (tag.key)}
-                          <span class="tag-pill" title={`${tag.key}=${formatTagValue(tag.value)}`}>
-                            <span class="tag-pill-key">{tag.key}</span><span>=</span><span class="tag-pill-value">{formatTagValue(tag.value)}</span>
-                          </span>
-                        {/each}
-                      </span>
-                    {:else}
-                      <span class="group-empty">—</span>
-                    {/if}
-                  </a>
-                </td>
-                <td class="created-cell row-open-cell">
-                  <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
-                    <TimeAgo timestamp={run.started_at || run.created_at} showJustNow falsyRepresentation="—" />
-                  </a>
-                </td>
-                <td class="updated-cell row-open-cell">
-                  <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
-                    <TimeAgo timestamp={run.updated_at} showJustNow falsyRepresentation="—" />
-                  </a>
-                </td>
-                <td class="modal-link-cell">
-                  <div class="modal-link-wrap">
-                    <button
-                      class="expand-button"
-                      title="Open expanded view"
-                      aria-label={`Open expanded view for training run ${run.run_id}`}
-                      onclick={(event) => {
-                        event.stopPropagation();
-                        selectRun(run.run_id, event);
-                      }}
+      {#snippet runsTable(runs, frozenOffset)}
+        <div class="table-wrap freeze-header" style={frozenOffset ? `--frozen-table-offset: ${frozenOffset};` : ""}>
+          <ResizableTable class="training-runs-table" {columns} stickyFirstColumn>
+            <tbody>
+              {#each runs as run, runIndex (`${run.run_id || "run"}-${run.created_at || 0}-${runIndex}`)}
+                {@const runName = run.run_id || "—"}
+                {@const status = getStatus(run)}
+                {@const stageLabel = run.display_stage}
+                {@const progress = frameworkProgress(run)}
+                {@const groupTags = getGroupTags(run)}
+                <tr class="run-row" class:row-selected={drawerRunId === run.run_id}>
+                  <td class="min-w-0 row-open-cell">
+                    <a
+                      href={trainingRunDetailPath(run.run_id)}
+                      class="cell-open-button"
+                      title={runName}
+                      aria-label={`Open training run ${runName}`}
+                      onclick={(event) => selectRun(run.run_id, event)}
                     >
-                      <Maximize2 size={12} strokeWidth={2.1} />
-                      <span class="expand-button-label">Expand</span>
-                    </button>
-                    {#if run.modal_app_url}
-                      <a
-                        class="open-modal-link"
-                        href={run.modal_app_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onclick={(event) => event.stopPropagation()}
-                      >
-                        <span class="open-modal-link-label">Open in Modal</span>
-                        <ExternalLink class="open-modal-link-icon" size={12} strokeWidth={2.1} />
-                      </a>
-                    {:else}
-                      <span class="open-modal-link open-modal-link-disabled">
-                        <span class="open-modal-link-label">Open in Modal</span>
-                        <ExternalLink class="open-modal-link-icon" size={12} strokeWidth={2.1} />
+                      <div class="block text-(--text-bright) [font-family:var(--font-mono)] [font-weight:400] text-[14px] leading-[20px] overflow-hidden text-ellipsis whitespace-nowrap">{runName}</div>
+                    </a>
+                  </td>
+                  <td class="row-open-cell">
+                    <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
+                      <span class="flex flex-col items-start gap-[4px] min-w-0 max-w-full">
+                        <StatusPill status={status} />
+                        {#if resumeBadge(run)}
+                          <span class="[border:1px_solid_color-mix(in_srgb,var(--yellow,#fbbf24)_42%,transparent)] rounded-[999px] bg-[color-mix(in_srgb,var(--yellow,#fbbf24)_10%,transparent)] text-(--yellow,#fbbf24) text-[11px] leading-[14px] p-[1px_6px] whitespace-nowrap">{resumeBadge(run)}</span>
+                        {/if}
                       </span>
-                    {/if}
-                    {#each run.wandb_links || [] as link (link.url)}
-                      <a
-                        class="open-modal-link open-wandb-link"
-                        href={link.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onclick={(event) => event.stopPropagation()}
+                    </a>
+                  </td>
+                  <td class="min-w-0 row-open-cell">
+                    <a
+                      href={trainingRunDetailPath(run.run_id)}
+                      class="cell-open-button whitespace-normal! leading-[16px]!"
+                      onclick={(event) => selectRun(run.run_id, event)}
+                    >
+                      {#if showFrameworkStatus(run) && stageLabel}
+                        <FrameworkStageProgress
+                          progress={progress}
+                          progressLabel={progressLabel(progress)}
+                          stageLabel={stageLabel}
+                          compact
+                          active={status.toLowerCase() === "pending"}
+                        />
+                      {:else}
+                        <span class="text-(--muted)">—</span>
+                      {/if}
+                    </a>
+                  </td>
+                  <td class="min-w-0 row-open-cell" title={modelName(run)}>
+                    <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
+                      {modelName(run)}
+                    </a>
+                  </td>
+                  <td class="min-w-0 row-open-cell" title={run.dataset || "—"}>
+                    <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
+                      {run.dataset || "—"}
+                    </a>
+                  </td>
+                  <td class="row-open-cell">
+                    <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
+                      {run.recipe || "—"}
+                    </a>
+                  </td>
+                  <td class="group-cell row-open-cell" title={groupTags?.group_id || run.group_id || ""}>
+                    <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
+                      {#if groupTags?.group_id || run.group_id}
+                        <span class="inline-block max-w-full whitespace-normal [overflow-wrap:anywhere] align-bottom p-[2px_8px] rounded-[999px] text-[0.72rem] [font-variant-numeric:tabular-nums] text-(--muted) [border:1px_solid_var(--border,#2f2f2f)] bg-[color-mix(in_srgb,var(--panel-alt)_70%,transparent)]">{groupTags?.group_id || run.group_id}</span>
+                      {:else}
+                        <span class="group-empty">—</span>
+                      {/if}
+                    </a>
+                  </td>
+                  <td class="h-auto align-top row-open-cell">
+                    <a
+                      href={trainingRunDetailPath(run.run_id)}
+                      class="cell-open-button overflow-visible! text-clip! whitespace-normal!"
+                      onclick={(event) => selectRun(run.run_id, event)}
+                    >
+                      {#if groupTags?.tags.length}
+                        <span class="flex flex-wrap gap-[4px] min-w-0 max-w-full">
+                          {#each groupTags.tags as tag (tag.key)}
+                            <span class="inline-flex items-baseline max-w-full min-w-0 overflow-hidden p-[2px_7px] [border:1px_solid_var(--border,#2f2f2f)] rounded-[999px] bg-[color-mix(in_srgb,var(--panel-alt)_70%,transparent)] text-(--text) [font-family:var(--font-mono)] text-[11px] leading-[14px]" title={`${tag.key}=${formatTagValue(tag.value)}`}>
+                              <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-(--muted)">{tag.key}</span><span>=</span><span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{formatTagValue(tag.value)}</span>
+                            </span>
+                          {/each}
+                        </span>
+                      {:else}
+                        <span class="group-empty">—</span>
+                      {/if}
+                    </a>
+                  </td>
+                  <td class="whitespace-nowrap row-open-cell">
+                    <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
+                      <TimeAgo timestamp={run.created_at} showJustNow falsyRepresentation="—" />
+                    </a>
+                  </td>
+                  <td class="whitespace-nowrap row-open-cell">
+                    <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
+                      <TimeAgo timestamp={run.updated_at} showJustNow falsyRepresentation="—" />
+                    </a>
+                  </td>
+                  <td class="min-w-0 overflow-visible">
+                    <div class="flex items-center flex-wrap gap-[6px]">
+                      <button
+                        class="inline-flex items-center gap-[6px] whitespace-nowrap [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[6px] p-[4px_8px] [font:inherit] text-[12px] font-medium leading-[16px] text-(--muted) bg-transparent cursor-pointer ghost-hover"
+                        title="Open expanded view"
+                        aria-label={`Open expanded view for training run ${run.run_id}`}
+                        onclick={(event) => {
+                          event.stopPropagation();
+                          selectRun(run.run_id, event);
+                        }}
                       >
-                        <span class="open-modal-link-label">{link.label}</span>
-                        <ExternalLink class="open-modal-link-icon" size={12} strokeWidth={2.1} />
-                      </a>
-                    {/each}
-                  </div>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </ResizableTable>
-      </div>
+                        <Maximize2 size={12} strokeWidth={2.1} />
+                        <span class="expand-button-label">Expand</span>
+                      </button>
+                      {#if run.modal_app_url}
+                        <a
+                          class="training-open-modal-link"
+                          href={run.modal_app_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onclick={(event) => event.stopPropagation()}
+                        >
+                          <span class="open-modal-link-label">Open in Modal</span>
+                          <ExternalLink class="training-open-modal-link-icon" size={12} strokeWidth={2.1} />
+                        </a>
+                      {:else}
+                        <span class="training-open-modal-link open-modal-link-disabled">
+                          <span class="open-modal-link-label">Open in Modal</span>
+                          <ExternalLink class="training-open-modal-link-icon" size={12} strokeWidth={2.1} />
+                        </span>
+                      {/if}
+                      {#each run.wandb_links || [] as link (link.url)}
+                        <a
+                          class="training-open-modal-link training-open-wandb-link"
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onclick={(event) => event.stopPropagation()}
+                        >
+                          <span class="open-modal-link-label">{link.label}</span>
+                          <ExternalLink class="training-open-modal-link-icon" size={12} strokeWidth={2.1} />
+                        </a>
+                      {/each}
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </ResizableTable>
+        </div>
+      {/snippet}
+
+      {#if groupBy === "none"}
+        {@render runsTable(filteredRuns)}
+      {:else}
+        <div class="flex flex-col gap-[24px] p-0">
+          {#each runGroups as group (group.key)}
+            <GroupSection
+              title={group.key}
+              subtitle={`${group.runs.length} run${group.runs.length === 1 ? "" : "s"}`}
+              expanded={!collapsedGroupKeys.has(group.key)}
+              onToggle={() => toggleGroupSection(group.key)}
+            >
+              {#snippet meta()}
+                {#if group.latestCreatedAt}
+                  <span class="group-meta-pill [font-variant-numeric:tabular-nums]">
+                    <TimeAgo timestamp={group.latestCreatedAt} showJustNow falsyRepresentation="—" />
+                  </span>
+                {/if}
+              {/snippet}
+              {@render runsTable(group.runs, "360px")}
+            </GroupSection>
+          {/each}
+        </div>
+      {/if}
     {/if}
   </div>
 </section>
@@ -371,17 +420,17 @@
 {#if selectedRun}
   <Drawer open={!!selectedRun} onclose={closeDrawer} width={drawerWidth}>
     <div
-      class="run-drawer"
+      class="w-full h-full max-h-[100vh]"
       aria-label={`Training run ${selectedRun.run_id}`}
     >
-      <div class="drawer-header">
-        <div class="drawer-header-left">
-          <div class="drawer-eyebrow">Training run</div>
-          <h2 class="drawer-run-id" title={selectedRun.run_id}>{selectedRun.run_id}</h2>
+      <div class="drawer-panel-header">
+        <div class="min-w-0 overflow-hidden">
+          <div class="drawer-panel-eyebrow">Training run</div>
+          <h2 class="text-(--text-bright) text-[16px] font-medium [font-family:var(--font-mono)] leading-[24px] whitespace-nowrap overflow-hidden text-ellipsis" title={selectedRun.run_id}>{selectedRun.run_id}</h2>
         </div>
-        <div class="drawer-actions">
+        <div class="flex items-center gap-[8px] shrink-0">
           <button
-            class="drawer-expand-button"
+            class="inline-flex items-center gap-[6px] [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[6px] p-[4px_8px] [font:inherit] text-[12px] font-medium leading-[16px] text-(--muted) bg-transparent cursor-pointer ghost-hover"
             onclick={(event) => selectRun(selectedRun.run_id, event)}
             title="Expand to full view"
           >
@@ -390,7 +439,7 @@
           </button>
           {#if selectedRun.modal_app_url}
             <a
-              class="view-app-link"
+              class="inline-flex items-center gap-[6px] [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[6px] p-[4px_8px] no-underline text-(--muted) text-[12px] font-medium leading-[16px] ghost-hover"
               href={selectedRun.modal_app_url}
               target="_blank"
               rel="noopener noreferrer"
@@ -399,18 +448,17 @@
               <ExternalLink size={12} />
             </a>
           {/if}
-          <button class="drawer-close" onclick={closeDrawer} aria-label="Close run drawer">
+          <button class="drawer-panel-close ghost-hover" onclick={closeDrawer} aria-label="Close run drawer">
             <PanelRightClose size={16} />
           </button>
         </div>
       </div>
 
-      <div class="drawer-summary">
+      <div class="p-[4px_20px_16px]">
         <RunSummary
           run={selectedRun}
           {getStatus}
           {showFrameworkStatus}
-          {getFrameworkStatus}
           {modelName}
           {fmtDuration}
         />
@@ -419,460 +467,3 @@
   </Drawer>
 {/if}
 
-<style>
-  .summary-row {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 14px;
-    margin-bottom: 24px;
-  }
-
-  .training-summary {
-    margin-bottom: 24px;
-  }
-
-  .summary-card {
-    border: 0;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.03);
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    height: 80px;
-  }
-
-  .summary-label {
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 16px;
-  }
-
-  .summary-card strong {
-    color: var(--text-bright);
-    font-size: 20px;
-    font-weight: 500;
-    line-height: 32px;
-  }
-
-  .runs-surface {
-    border: 0;
-    background: transparent;
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-    padding: 0;
-  }
-
-  .filters-row {
-    margin: 0;
-  }
-
-  .runs-body {
-    padding: 0;
-  }
-
-  .table-wrap {
-    max-width: 100%;
-    overflow: auto hidden;
-    overscroll-behavior-x: contain;
-    overscroll-behavior-y: auto;
-    -webkit-overflow-scrolling: auto;
-  }
-
-  :global(table.runs-table) {
-    width: 100%;
-    min-width: 960px;
-  }
-
-  :global(table.runs-table tr.row-selected td) {
-    background: color-mix(in srgb, var(--text) 8%, transparent);
-  }
-
-  :global(table.runs-table tr.row-selected td:first-child) {
-    background: color-mix(in srgb, var(--text) 8%, var(--bg));
-  }
-
-  .run-row {
-    cursor: default;
-  }
-
-  :global(table.runs-table tr.run-row:hover:not(.row-selected) td) {
-    background: color-mix(in srgb, var(--text) 6%, transparent);
-  }
-
-  :global(table.runs-table tr.run-row:hover:not(.row-selected) td:first-child) {
-    background: color-mix(in srgb, var(--text) 6%, var(--bg));
-  }
-
-  :global(table.runs-table td.row-open-cell) {
-    padding: 0;
-  }
-
-  .cell-open-button {
-    display: block;
-    box-sizing: border-box;
-    border: 0;
-    background: transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: 14px;
-    line-height: 20px;
-    cursor: pointer;
-    padding: 8px 16px;
-    text-align: left;
-    width: 100%;
-    min-height: 40px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-decoration: none;
-  }
-
-  .cell-open-button:hover,
-  .cell-open-button:focus-visible {
-    color: var(--text-bright);
-  }
-
-  .cell-open-button:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-  }
-
-  .stage-open-button {
-    white-space: normal;
-    line-height: 16px;
-  }
-
-  .run-name {
-    display: block;
-    color: var(--text-bright);
-    font-family: var(--font-mono);
-    font-weight: 400;
-    font-size: 14px;
-    line-height: 20px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .run-cell {
-    min-width: 0;
-  }
-
-  .model-cell {
-    min-width: 0;
-  }
-
-  .dataset-cell {
-    min-width: 0;
-  }
-
-  .stage-cell {
-    min-width: 0;
-  }
-
-  .status-stack {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .resume-badge {
-    border: 1px solid color-mix(in srgb, var(--yellow, #fbbf24) 42%, transparent);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--yellow, #fbbf24) 10%, transparent);
-    color: var(--yellow, #fbbf24);
-    font-size: 11px;
-    line-height: 14px;
-    padding: 1px 6px;
-    white-space: nowrap;
-  }
-
-  .created-cell,
-  .updated-cell {
-    white-space: nowrap;
-  }
-
-  .stage-empty {
-    color: var(--muted);
-  }
-
-  .group-tag {
-    display: inline-block;
-    max-width: 100%;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    vertical-align: bottom;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    font-variant-numeric: tabular-nums;
-    color: var(--muted);
-    border: 1px solid var(--border, #2f2f2f);
-    background: color-mix(in srgb, var(--panel-alt) 70%, transparent);
-  }
-
-  .tags-open-button {
-    overflow: visible;
-    text-overflow: clip;
-    white-space: normal;
-  }
-
-  .tags-cell {
-    height: auto;
-    vertical-align: top;
-  }
-
-  .tag-pill-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .tag-pill {
-    display: inline-flex;
-    align-items: baseline;
-    max-width: 100%;
-    min-width: 0;
-    overflow: hidden;
-    padding: 2px 7px;
-    border: 1px solid var(--border, #2f2f2f);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--panel-alt) 70%, transparent);
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    line-height: 14px;
-  }
-
-  .tag-pill-key,
-  .tag-pill-value {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .tag-pill-key {
-    color: var(--muted);
-  }
-
-  .group-empty {
-    color: var(--muted);
-  }
-
-  .modal-link-cell {
-    min-width: 0;
-    overflow: visible;
-  }
-
-  .modal-link-wrap {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .expand-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    white-space: nowrap;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    padding: 4px 8px;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-    color: var(--muted);
-    background: transparent;
-    cursor: pointer;
-  }
-
-  .expand-button:hover {
-    color: var(--text-bright);
-    border-color: var(--border-strong);
-  }
-
-  .open-modal-link {
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 6px;
-    white-space: nowrap;
-    flex-shrink: 0;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    padding: 4px 8px;
-    text-decoration: none;
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-    background: transparent;
-  }
-
-  .open-modal-link-label {
-    color: var(--muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  :global(.open-modal-link-icon) {
-    color: var(--muted-strong);
-  }
-
-  .open-modal-link:hover {
-    border-color: var(--border-strong);
-  }
-
-  .open-wandb-link {
-    border-color: color-mix(in srgb, var(--yellow, #fbbf24) 45%, transparent);
-  }
-
-  .open-wandb-link .open-modal-link-label,
-  :global(.open-wandb-link .open-modal-link-icon) {
-    color: var(--yellow, #fbbf24);
-  }
-
-  .open-wandb-link:hover {
-    border-color: color-mix(in srgb, var(--yellow, #fbbf24) 60%, transparent);
-  }
-
-  .open-modal-link-disabled {
-    opacity: 0.5;
-    pointer-events: none;
-  }
-
-  .run-drawer {
-    width: 100%;
-    height: 100%;
-    max-height: 100vh;
-  }
-
-  .drawer-summary {
-    padding: 4px 20px 16px;
-  }
-
-  .drawer-header {
-    border-bottom: 1px solid var(--color-c-gray-10, #2f2f2f);
-    padding: 16px 20px;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .drawer-header-left {
-    min-width: 0;
-    overflow: hidden;
-  }
-
-  .drawer-eyebrow {
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 16px;
-    margin-bottom: 4px;
-  }
-
-  .drawer-run-id {
-    color: var(--text-bright);
-    font-size: 16px;
-    font-weight: 500;
-    font-family: var(--font-mono);
-    line-height: 24px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .drawer-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  .view-app-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    padding: 4px 8px;
-    text-decoration: none;
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-  }
-
-  .view-app-link:hover {
-    color: var(--text-bright);
-    border-color: var(--border-strong);
-  }
-
-  .drawer-expand-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    padding: 4px 8px;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-    color: var(--muted);
-    background: transparent;
-    cursor: pointer;
-  }
-
-  .drawer-expand-button:hover {
-    color: var(--text-bright);
-    border-color: var(--border-strong);
-  }
-
-  .drawer-close {
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px;
-  }
-
-  .drawer-close:hover {
-    color: var(--text-bright);
-    border-color: var(--border-strong);
-  }
-
-  .empty {
-    padding: 24px;
-    color: var(--muted);
-    text-align: center;
-    font-size: 0.84rem;
-  }
-
-  @media (max-width: 900px) {
-    .summary-row {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 640px) {
-    .summary-row {
-      grid-template-columns: 1fr;
-    }
-  }
-</style>

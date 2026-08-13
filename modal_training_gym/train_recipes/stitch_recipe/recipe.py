@@ -8,7 +8,7 @@ recipe is two fields::
         serve=StitchServeConfig(...),   # the Flash pool that applies
     )
 
-The trainer half is a :class:`MilesConfig` — stitch is trainer-agnostic, so the
+The trainer half is a :class:`MilesRecipe` — stitch is trainer-agnostic, so the
 trainer is a *field* rather than a base class and its flags are maintained in one
 place instead of copied. The serving half wraps the same
 :class:`~modal_training_gym.deploy_recipes.sglang_recipe.recipe.SglangRecipe` the
@@ -70,7 +70,7 @@ __all__ = [
 
 
 def fields_to_argv(fields: dict[str, Any]) -> list[str]:
-    """miles argv for a field dict, matching :meth:`MilesConfig.cli_args`.
+    """miles argv for a field dict, matching :meth:`MilesRecipe.cli_args`.
 
     The trainer runs from a plain field dict rather than the recipe object (the
     recipe doesn't survive the trip to a Ray actor), so the same encoding lives
@@ -99,7 +99,7 @@ class StitchRecipe(BaseTrainRecipe):
     ## Fields
 
     train : StitchTrainConfig
-        The miles actor cluster. Every :class:`MilesConfig` field applies,
+        The miles actor cluster. Every :class:`MilesRecipe` field applies,
         defaulted for a publish-only disaggregated run.
     serve : StitchServeConfig
         The Modal Flash pool of SGLang replicas that serves rollouts and applies
@@ -213,7 +213,6 @@ class StitchRecipe(BaseTrainRecipe):
         train = self.train
         return {
             "fields": self.miles_fields(model=model, dataset=dataset),
-            "environment": dict(train.environment),
             "async_mode": train.async_mode,
             "miles_model_script": train.miles_model_script,
         }

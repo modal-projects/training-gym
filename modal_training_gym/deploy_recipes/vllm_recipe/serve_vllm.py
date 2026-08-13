@@ -1,17 +1,16 @@
 """vLLM serving helper — builds a Modal app that hosts a model via vLLM.
 
-Thin wrapper around the canonical
-[Modal vLLM inference example](https://modal.com/docs/examples/vllm_inference):
-one `@modal.web_server`-decorated function that runs `vllm serve` and
-exposes the OpenAI-compatible chat-completions API at
-`https://<workspace>--<app_name>-serve.modal.run/v1/chat/completions`.
+The model is served by ``Server``, a Modal *server* class registered with
+``@app.server`` (Modal's low-latency routing service for inference workloads).
+The endpoint is the Modal class itself — its ``@modal.enter()`` starts the
+``vllm serve`` subprocess; its ``@modal.exit()`` updates deployment status.
 
-`model_path` accepts either:
-  - a **HuggingFace repo id** (e.g. `"Qwen/Qwen3-4B"`) — vLLM downloads
+``model_path`` accepts either:
+  - a **HuggingFace repo id** (e.g. ``"Qwen/Qwen3-4B"``) — vLLM downloads
     the weights from HF into the cache volume on first boot, or
   - an **absolute container path** to an HF-format checkpoint directory
-    (must contain `config.json`) — typically a subdirectory of a
-    training-checkpoints volume you pass via `checkpoints_volume`.
+    (must contain ``config.json``) — typically a subdirectory of a
+    training-checkpoints volume you pass via ``checkpoints_volume``.
 
 Deploy separately from the training app:
 
@@ -37,6 +36,7 @@ def build_vllm_serve_app(
     checkpoints_volume: "Volume | str | None" = None,
     checkpoints_mount_path: str | None = None,
     deployment_id: str | None = None,
+    unauthenticated: bool = True,
 ) -> "App":
     import modal
     from modal import App, Image, Volume
@@ -47,6 +47,7 @@ def build_vllm_serve_app(
     n_gpu = recipe.n_gpu or 1
     vllm_port = 8000
     vllm_version = "0.13.0"
+    startup_timeout = recipe.startup_timeout
 
     image = (
         Image.from_registry("nvidia/cuda:12.8.0-devel-ubuntu22.04", add_python="3.12")
@@ -84,22 +85,21 @@ def build_vllm_serve_app(
     _extra = list(recipe.extra_vllm_args or [])
     _deployment_id = deployment_id
 
-    @app.cls(
+    @app.server(
         image=image,
         gpu=f"{gpu}:{n_gpu}",
         scaledown_window=10 * 60,
-        timeout=24 * 60 * 60,
+        startup_timeout=startup_timeout,
         volumes=volumes,
         secrets=hf_secrets(),
         serialized=True,
         include_source=False,
-    )
-    @modal.experimental.http_server(
         port=vllm_port,
-        startup_timeout=10 * 60,
-        proxy_regions=["us-east"],
+        exit_grace_period=25,
+        routing_region="us-east",
+        target_concurrency=32,
+        unauthenticated=unauthenticated,
     )
-    @modal.concurrent(max_inputs=32)
     class Server:
         @modal.enter()
         def startup(self):
@@ -151,4 +151,8 @@ def build_vllm_serve_app(
         setattr(app, tag, fn)
     for tag, cls in app.registered_classes.items():
         setattr(app, tag, cls)
+    # The decorator returns the `_Server` handle (carries `get_url()`); the
+    # entry in `registered_functions` is only its underlying Function. Bind the
+    # server itself so callers (e.g. deployment URL resolution) get `get_url`.
+    setattr(app, "Server", Server)
     return app

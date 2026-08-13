@@ -14,7 +14,7 @@ crashlooping serve apps with the error:
     "/root/.cache/huggingface"
 
 Usage:
-    uv run python scripts/test_hf_cache_volume_safety.py
+    uv run scripts/test_hf_cache_volume_safety.py
 """
 
 from __future__ import annotations

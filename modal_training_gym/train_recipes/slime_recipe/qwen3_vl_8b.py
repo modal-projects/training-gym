@@ -42,8 +42,8 @@ class Qwen3_VL_8b_Recipe(SlimeRecipe):
     save_interval: int = 10
     eval_interval: int | None = None
 
-    # AutoBridge loads the VL checkpoint (incl. ViT) at TP=2; skips slime's
-    # torch_dist pre-conversion, which mis-assigns the VL pipeline stage.
+    # AutoBridge loads the VL checkpoint (incl. ViT) at the configured TP; skips
+    # slime's torch_dist pre-conversion, which mis-assigns the VL pipeline stage.
     megatron_to_hf_mode: str = "bridge"
 
     # Freeze the vision tower; RL only updates the language backbone.

@@ -8,14 +8,33 @@ from __future__ import annotations
 
 import os
 import tomllib
+from json import JSONDecodeError, loads
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from modal_training_gym.common.dashboard import deployed_dashboard_url
 
 
 CONFIG_PATH = Path.home() / ".training-gym.toml"
 MODAL_CONFIG_PATH = Path(
     os.environ.get("MODAL_CONFIG_PATH") or os.path.expanduser("~/.modal.toml")
 )
+
+_dashboard_requires_proxy_auth = False
+DASHBOARD_PROXY_AUTH_PATH = "/api/proxy-auth"
+
+
+def set_dashboard_requires_proxy_auth(value: bool) -> None:
+    """Set the mode used when `_dashboard` next registers its web function."""
+    global _dashboard_requires_proxy_auth
+    _dashboard_requires_proxy_auth = value
+
+
+def dashboard_requires_proxy_auth() -> bool:
+    """Return the proxy-auth mode for the next dashboard module import."""
+    return _dashboard_requires_proxy_auth
 
 
 def load_config() -> dict[str, Any]:
@@ -29,13 +48,15 @@ def load_config() -> dict[str, Any]:
         return {}
 
 
-def save_dashboard_url(url: str) -> None:
-    """Persist the deployed dashboard URL under ``[dashboard].url``."""
+def save_dashboard_url(url: str, *, proxy_auth: bool | None = None) -> None:
+    """Persist the deployed dashboard URL and optional proxy-auth mode."""
     config = load_config()
     dashboard = config.get("dashboard")
     if not isinstance(dashboard, dict):
         dashboard = {}
     dashboard["url"] = url
+    if proxy_auth is not None:
+        dashboard["proxy_auth"] = proxy_auth
     config["dashboard"] = dashboard
     CONFIG_PATH.write_text(_render(config))
 
@@ -48,6 +69,60 @@ def get_dashboard_url() -> str | None:
         if isinstance(url, str) and url.strip():
             return url.strip()
     return None
+
+
+def get_dashboard_proxy_auth() -> bool | None:
+    """Return the deployed dashboard's proxy-auth mode, if known.
+
+    The live endpoint is authoritative. Modal itself returns 403 before a
+    proxy-authenticated dashboard request reaches FastAPI, so that status also
+    identifies an authenticated deployment. The persisted mode remains a
+    fallback for older or temporarily unreachable dashboards.
+    """
+    dashboard = load_config().get("dashboard")
+    if not isinstance(dashboard, dict):
+        dashboard = {}
+
+    persisted = dashboard.get("proxy_auth")
+    if not isinstance(persisted, bool):
+        persisted = None
+
+    url = dashboard.get("url") or deployed_dashboard_url()
+    if isinstance(url, str) and url.strip():
+        request = Request(
+            url.strip().rstrip("/") + DASHBOARD_PROXY_AUTH_PATH,
+            headers=modal_proxy_auth_headers(),
+        )
+        try:
+            with urlopen(request, timeout=5) as response:
+                value = loads(response.read())
+                if isinstance(value, bool):
+                    if value:
+                        print("The deployed dashboard uses proxy authentication.")
+                    else:
+                        print(
+                            "The deployed dashboard does not use proxy authentication."
+                        )
+                    return value
+        except HTTPError as exc:
+            if exc.code in {401, 403}:
+                print("The deployed dashboard appears to use proxy authentication.")
+                return True
+            elif exc.code != 404:
+                raise
+        except (JSONDecodeError, OSError, URLError, UnicodeDecodeError):
+            pass
+
+    if persisted is not None:
+        print("Unable to reach existing dashboard.")
+        if persisted:
+            print("The last deploy from this computer used proxy authentication.")
+        else:
+            print(
+                "The last deploy from this computer did not use proxy authentication."
+            )
+
+    return persisted
 
 
 PROXY_AUTH_SECTION = "proxy_auth"
@@ -94,6 +169,16 @@ def load_proxy_auth() -> bool:
         os.environ.get("MODAL_KEY", "").strip()
         and os.environ.get("MODAL_SECRET", "").strip()
     )
+
+
+def modal_proxy_auth_headers() -> dict[str, str]:
+    """Return Modal proxy-auth headers from env or saved local credentials."""
+    load_proxy_auth()
+    key = os.environ.get("MODAL_KEY", "").strip()
+    secret = os.environ.get("MODAL_SECRET", "").strip()
+    if key and secret:
+        return {"Modal-Key": key, "Modal-Secret": secret}
+    return {}
 
 
 def get_framework_status_url() -> str | None:

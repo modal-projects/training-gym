@@ -3,14 +3,12 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 1×H100",
-    "summary": "Qwen3-4B haiku evaluation with verifiable rewards — serve, evaluate, train, compare",
+    "summary": "Haiku evaluation with verifiable rewards",
     "difficulty": "Beginner",
     "order": 10,
     "api_classes": [
-        "Qwen3_4B",
-        "DeploymentConfig",
-        "EvalConfig",
-        "EvalRowResult",
+        "Qwen3_5_4B",
+        "CustomDeployment",
         "TrainConfig",
         "SlimeRecipe",
         "TrainResult",
@@ -26,7 +24,7 @@ def _intro():
     """
     # RL basics: verifiable rewards, haiku edition
 
-    This tutorial uses Qwen3-4B and haiku poems to introduce the
+    This tutorial uses Qwen3.5-4B and haiku poems to introduce the
     **verifiable reward** pattern that underpins RL post-training:
 
     1. Serve the base model.
@@ -50,7 +48,7 @@ def run_instructions():
     """
     To run the tutorial, run the following command:
     ```
-    uv run python tutorials/rl/000_rl_basics/000_rl_basics.py
+    uv run tutorials/rl/000_rl_basics/000_rl_basics.py
     ```
     """
 
@@ -69,16 +67,26 @@ def run_instructions():
 def _install():
     pass
 
+@py_only
+@code
+def _ensure_nltk():
+    import importlib.util
+
+    if importlib.util.find_spec("nltk") is None:
+        raise RuntimeError(
+            "This tutorial requires the 'nltk' package. "
+            "Install it before running: uv pip install -q nltk"
+        )
+
+
 @code
 def _imports():
     import re
 
     from modal_training_gym import (
-        DeploymentConfig,
-        EvalConfig,
-        EvalRowResult,
+        CustomDeployment,
         HuggingFaceDataset,
-        Qwen3_4B,
+        Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
         list_checkpoints,
@@ -90,25 +98,28 @@ def _serve_base_intro():
     """
     ## Serve the base model
 
-    So, how does Qwen3-4B currently fare at writing haikus? We can
+    So, how does Qwen3.5-4B currently fare at writing haikus? We can
     serve the base model and find out.
 
     The training gym has several config classes so you can define deployment, training, and evaluation configurations,
     and reuse them across different runs for parameter sweeps.
 
-    Let's start by initializing a `DeploymentConfig`.
-    
-    Calling `DeploymentConfig.serve()` builds and deploys a vLLM app, then
-    returns a `ModelDeployment` that contains a the concrete endpoint URL.
+    Let's start by launching a `CustomDeployment`.
+
+    Calling `CustomDeployment.launch()` builds and deploys an SGLang app, then
+    returns a `CustomDeployment` with the endpoint URL. Pass
+    `unauthenticated=True` so the endpoint is reachable without Modal
+    proxy-auth tokens.
     """
 
 
 @code
 def _serve_base_model():
-    base_model = Qwen3_4B()
-    base_model_deployment = DeploymentConfig(
-        model=base_model,
-    ).serve()
+    base_model = Qwen3_5_4B()
+    base_model_deployment = CustomDeployment.launch(
+        base_model,
+        unauthenticated=True,
+    )
     print(f"Base model deployed to {base_model_deployment.url}")
 
 @notebook_only
@@ -240,18 +251,9 @@ def _eval_dataset_head_code():
 def _grade_haiku_into_eval():
     """
     Seems straightforward enough, right? How do we run an eval on our base model with this dataset?
-    We can transform our scoring function above into an Eval Configuration.
-
-    First, to explain, an Eval Configuration is a class that owns the model-calling loop.
-    The task-specific part is a scoring function passed to `.evaluate(...)`, which must
-    return `EvalRowResult`.
-
-    The very simple form of an eval is given a dataset, and the corresponding model response, return its score. That can be configured using
-    `EvalConfig.eval_response_fn`.
-
-    For more complex evals (e.g. multi-turn), you can also define a custom `EvalConfig.eval_fn` that takes a `ModelDeployment` and a dataset row and returns a score.
+    Well, we already have a way to determine if a response is a good haiku or not: `score_haiku`!
+    So all we need to do is loop the eval dataset, call the deployment, score each response, and aggregate.
     """
-
 
 
 @notebook_only
@@ -264,17 +266,28 @@ def _eval_base_intro():
 
 @code
 def _eval_base_model():
-    def eval_response_fn(_example: dict, response: str) -> EvalRowResult:
-        return EvalRowResult(score=score_haiku(response), response=response)
+    def run_eval(deployment, *, max_concurrency: int = 2) -> float:
+        from concurrent.futures import ThreadPoolExecutor
 
-    eval_config = EvalConfig(
-        dataset=eval_dataset,
-        eval_response_fn=eval_response_fn,
-        generate_kwargs={"chat_template_kwargs": {"enable_thinking": False}},
-    )
+        deployment.wait_until_ready(timeout=3000)
+
+        def _score_one(example):
+            topic = str(example[eval_dataset.input_column])
+            prompt = eval_dataset.prompt_template.format(input=topic)
+            response = deployment.generate(
+                prompt,
+                ensure_ready=False,
+                chat_template_kwargs={"enable_thinking": False},
+            )
+            return score_haiku(response)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            scores = list(executor.map(_score_one, eval_dataset.load()))
+        return sum(scores) / len(scores) if scores else float("nan")
+
     print("——— Running base model evaluation... ———")
-    base_eval = eval_config.evaluate(base_model_deployment, debug=True)
-    print(f"Average haiku score: {base_eval.mean:.1f}")
+    base_mean = run_eval(base_model_deployment)
+    print(f"Average haiku score: {base_mean:.1f}")
     print("——— Base model evaluation complete ———")
 
 @markdown
@@ -292,7 +305,8 @@ def _train_intro():
 @code
 def _define_training_run():
     async def haiku_rm(args, sample, **kwargs) -> float:
-        return score_haiku(sample.response)
+        response = base_model.parse_response(sample.response)
+        return score_haiku(response.content)
     
     training_run = TrainConfig(
         model=base_model,
@@ -315,7 +329,7 @@ def _define_training_run():
             apply_chat_template_kwargs='{"enable_thinking": false}',
 
             image_overlay=lambda image: image.run_commands(
-                "uv pip install --system aiohttp nltk>=3.8.0",
+                "uv pip install --system aiohttp 'nltk>=3.8.0'",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
             ),
         ),
@@ -346,7 +360,7 @@ def _trained_eval_intro():
 
     The returned `TrainResult` has the checkpoint path and volume
     metadata attached. You can pass an explicit `checkpoint=` to
-    `DeploymentConfig` to pin a specific checkpoint, or omit it to use
+    `CustomDeployment.launch()` to pin a specific checkpoint, or omit it to use
     the model's default path.
     """
 
@@ -356,12 +370,13 @@ def _serve_and_eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(checkpoint.path)
 
-    trained_model_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_model_deployment = CustomDeployment.launch(
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-haiku-serve",
-        served_model_name="qwen3-4b-haiku",
-    ).serve()
+        app_name="qwen3-5-4b-haiku-serve",
+        served_model_name="qwen3-5-4b-haiku",
+        unauthenticated=True,
+    )
     print(f"Trained model deployed to {trained_model_deployment.url}")
 
 
@@ -377,8 +392,8 @@ def _trained_eval_section():
 @code
 def _eval_trained():
     print("——— Running trained model evaluation... ———")
-    trained_eval = eval_config.evaluate(trained_model_deployment, debug=True)
-    print(f"Trained haiku score: {trained_eval.mean:.1f}")
+    trained_mean = run_eval(trained_model_deployment)
+    print(f"Trained haiku score: {trained_mean:.1f}")
     print("——— Trained model evaluation complete ———")
 
 @markdown
@@ -395,7 +410,7 @@ def _continue_to_train_off_of_a_checkpoint():
 @code
 def _continue_to_train_off_of_a_checkpoint_code():
     new_training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=train_dataset,
         checkpoint=checkpoint,
         recipe=SlimeRecipe(
@@ -416,7 +431,7 @@ def _continue_to_train_off_of_a_checkpoint_code():
             apply_chat_template_kwargs='{"enable_thinking": false}',
 
             image_overlay=lambda image: image.run_commands(
-                "uv pip install --system aiohttp nltk>=3.8.0",
+                "uv pip install --system aiohttp 'nltk>=3.8.0'",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
             ),
         ),
@@ -438,12 +453,13 @@ def _trained_eval_off_of_a_checkpoint_code():
     new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
     print(new_checkpoint.path)
     
-    new_model_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    new_model_deployment = CustomDeployment.launch(
+        Qwen3_5_4B(),
         checkpoint=new_checkpoint,
-        app_name="qwen3-4b-haiku-serve-new",
-        served_model_name="qwen3-4b-haiku",
-    ).serve()
+        app_name="qwen3-5-4b-haiku-serve-new",
+        served_model_name="qwen3-5-4b-haiku",
+        unauthenticated=True,
+    )
     print(f"Newly trained model deployed to {new_model_deployment.url}")
 
 @markdown
@@ -457,8 +473,8 @@ def _trained_eval_off_of_a_checkpoint_results():
 @code
 def _trained_eval_off_of_a_checkpoint_results_code():
     print("——— Running trained model evaluation... ———")
-    new_eval = eval_config.evaluate(new_model_deployment, debug=True)
-    print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
+    new_mean = run_eval(new_model_deployment)
+    print(f"Trained model (new) haiku score: {new_mean:.1f}")
     print("——— Trained model (new) evaluation complete ———")
 
 @markdown
@@ -471,6 +487,6 @@ def _compare_results():
 
 @code
 def _compare_results_code():
-    print(f"Base model haiku score: {base_eval.mean:.1f}")
-    print(f"Trained model haiku score: {trained_eval.mean:.1f}")
-    print(f"Trained model (new) haiku score: {new_eval.mean:.1f}")
+    print(f"Base model haiku score: {base_mean:.1f}")
+    print(f"Trained model haiku score: {trained_mean:.1f}")
+    print(f"Trained model (new) haiku score: {new_mean:.1f}")

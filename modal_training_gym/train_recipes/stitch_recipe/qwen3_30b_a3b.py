@@ -109,6 +109,7 @@ _TE_PRECISION_CONFIG = {
 }
 
 
+@dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Qwen3_30B_A3B_Stitch_Train(StitchTrainConfig):
     """1×8 B200 miles actor cluster for Qwen3-30B-A3B under NVFP4 QAT.
 
@@ -127,10 +128,12 @@ class Qwen3_30B_A3B_Stitch_Train(StitchTrainConfig):
     num_gpus_per_node: int = 8
     # R3 routing replay needs Megatron's dropless-dispatch fix; the reshardable
     # step lets the CPU-offloaded optimizer survive a changed DP layout.
-    megatron_runtime_patches: list[str] = [
-        MEGATRON_R3_DISPATCH_PATCH,
-        MEGATRON_RESHARDABLE_STEP_PATCH,
-    ]
+    megatron_runtime_patches: list[str] = field(
+        default_factory=lambda: [
+            MEGATRON_R3_DISPATCH_PATCH,
+            MEGATRON_RESHARDABLE_STEP_PATCH,
+        ]
+    )
 
     # ── Checkpoints: BF16 masters to train from, NVFP4 base to serve ─────────
     miles_model_script: str = "scripts/models/qwen3-30B-A3B.sh"
@@ -139,14 +142,16 @@ class Qwen3_30B_A3B_Stitch_Train(StitchTrainConfig):
     hf_checkpoint: str = NVFP4_CHECKPOINT_PATH
     bf16_checkpoint_path: str = BF16_CHECKPOINT_PATH
     served_checkpoint_format: str = "nvfp4"
-    prep_env: dict[str, str] = dict(_NVTE_QUANT_ENV)
+    prep_env: dict[str, str] = field(default_factory=lambda: dict(_NVTE_QUANT_ENV))
     megatron_to_hf_mode: str = "bridge"
 
     # ── NVFP4 QAT ───────────────────────────────────────────────────────────
     fp4_format: str = "e2m1"
     fp4_recipe: str = "nvfp4"
     fp4_param_gather: bool = False
-    te_precision_config_file: dict | str | None = _TE_PRECISION_CONFIG
+    te_precision_config_file: dict | str | None = field(
+        default_factory=lambda: dict(_TE_PRECISION_CONFIG)
+    )
     # Selective precision: the last 15% of 48 layers stay BF16. All layers are MoE
     # (first_k_dense_replace=0), so there is no start carve-out.
     num_layers_at_start_in_bf16: int = 0
@@ -222,13 +227,15 @@ class Qwen3_30B_A3B_Stitch_Train(StitchTrainConfig):
     eval_interval: int | None = None
 
     update_weights_interval: int = 1
-    environment: dict = {
-        "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-        "NCCL_NVLS_ENABLE": "1",
-        "NVSHMEM_DISABLE_NCCL": "1",
-        "NCCL_TIMEOUT_MS": "360000000",
-        **_NVTE_QUANT_ENV,
-    }
+    environment: dict = field(
+        default_factory=lambda: {
+            "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+            "NCCL_NVLS_ENABLE": "1",
+            "NVSHMEM_DISABLE_NCCL": "1",
+            "NCCL_TIMEOUT_MS": "360000000",
+            **_NVTE_QUANT_ENV,
+        }
+    )
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))

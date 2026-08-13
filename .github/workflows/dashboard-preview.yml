@@ -1,0 +1,99 @@
+name: Dashboard preview
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/dashboard-preview.yml"
+      - "dashboards/frontend/**"
+      - "scripts/previews/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboards/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: dashboards/frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: dashboards/frontend
+
+      - name: Archive dashboard dist
+        run: tar -czf dashboard.tar.gz -C dashboards/frontend/dist .
+
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-dist
+          path: dashboard.tar.gz
+
+  preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.PREVIEW_MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.PREVIEW_MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: training-gym
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+
+      - name: Deploy dashboard preview
+        run: uv run --no-project --with modal python scripts/previews/deploy.py ${{ github.event.pull_request.number }} dashboard dashboard.tar.gz
+
+      - name: Comment preview URL on PR
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_BASE_URL: ${{ vars.PREVIEW_BASE_URL }}
+        with:
+          script: |
+            const marker = "<!-- training-gym-dashboard-preview -->";
+            const prNumber = context.payload.pull_request.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            if (comments.some((comment) => comment.body.includes(marker))) {
+              console.log("Preview comment already exists; skipping");
+              return;
+            }
+
+            const baseUrl = process.env.PREVIEW_BASE_URL.replace(/\/+$/, "");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `${marker}\nDashboard preview: ${baseUrl}/${prNumber}/dashboard`,
+            });

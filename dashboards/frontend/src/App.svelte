@@ -25,6 +25,7 @@
   let activeRecipes = $state(new Set());
   let activeStatuses = $state(new Set());
   let activeGroups = $state(new Set());
+  let trainingGroupBy = $state("none");
   // Recipe/status/group values we've seen across loads. New ones are
   // auto-enabled in the filters once; the user's selections are never reset by
   // a refresh.
@@ -42,6 +43,7 @@
   let refreshing = $state(false);
   let runsRequestId = 0;
   let hasLoadedRuns = false;
+  let initialRunsLoadStarted = false;
   let evalsRequestId = 0;
   let deploymentsRequestId = 0;
   let hasLoadedEvals = $state(false);
@@ -97,12 +99,15 @@
     }
 
     window.addEventListener("popstate", syncPageWithPath);
-    void loadRuns();
 
     // Auto-refresh the active page's data every 5s so running training runs,
     // their status/stage and rollouts stay live. Current data stays on screen
-    // (no skeleton) and only the refresh button spins while fetching.
-    const refresh = window.setInterval(load, 5000);
+    // (no skeleton) and only the refresh button spins while fetching. A run
+    // detail page refreshes its own run, so skip the full list there.
+    const refresh = window.setInterval(() => {
+      if (activePage === "training" && activeTrainingRunId) return;
+      void load();
+    }, 5000);
 
     return () => {
       window.removeEventListener("popstate", syncPageWithPath);
@@ -111,24 +116,17 @@
   });
 
   function getRecipe(run) {
-    return run.framework || "(untagged)";
+    return run.recipe || run.framework || "(untagged)";
   }
 
   const NO_GROUP = "(no group)";
 
   function getGroup(run) {
-    return safeText(run.group_id || run.metadata?.group_id) || NO_GROUP;
+    return safeText(run.group_id) || NO_GROUP;
   }
 
   function getStatus(run) {
-    const rawStatus = safeText(run.status).toLowerCase();
-    if (run.train_result || rawStatus === "completed") return "Completed";
-    if (rawStatus === "cancelled") return "Cancelled";
-    if (rawStatus === "stopped") return "Stopped";
-    if (rawStatus === "failed") return "Failed";
-    if (rawStatus === "running") return "Pending";
-    if (rawStatus === "pending") return "Pending";
-    return rawStatus ? rawStatus[0].toUpperCase() + rawStatus.slice(1) : "Pending";
+    return safeText(run.display_status) || "pending";
   }
 
   function getTrainingRunStatus(run) {
@@ -145,7 +143,7 @@
   }
 
   function modelName(run) {
-    return run.train_result?.model_name || run.config_summary?.model_name || "—";
+    return run.model || "—";
   }
 
   function safeText(value) {
@@ -353,6 +351,16 @@
   }
 
   $effect(() => {
+    if (
+      !activeTrainingRunId &&
+      !hasLoadedRuns &&
+      !initialRunsLoadStarted
+    ) {
+      initialRunsLoadStarted = true;
+      void loadRuns();
+    } else if (activeTrainingRunId && !hasLoadedRuns) {
+      loading = false;
+    }
     if (activePage === "evals" && !hasLoadedEvals) {
       void loadEvals();
     }
@@ -415,9 +423,9 @@
             !includesText(run.run_id, q) &&
             !includesText(run.modal_app_id, q) &&
             !includesText(run.group_id, q) &&
-            !includesText(run.metadata?.group_id, q) &&
-            !includesText(JSON.stringify(run.metadata?.group_tags || {}), q) &&
-            !includesText(run.config_summary?.model_name, q) &&
+            !includesText(JSON.stringify(run.group_tags || {}), q) &&
+            !includesText(run.model, q) &&
+            !includesText(run.dataset, q) &&
             !includesText(run.train_result?.training_run_id, q) &&
             !includesText(run.train_result?.checkpoint_dir, q) &&
             !includesText(run.train_result?.model_name, q) &&
@@ -433,10 +441,30 @@
       .sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
   );
 
-  let completedTotal = $derived(allRuns.filter((run) => run.train_result).length);
-  let cancelledTotal = $derived(allRuns.filter((run) => getStatus(run) === "Cancelled").length);
-  let stoppedTotal = $derived(allRuns.filter((run) => getStatus(run) === "Stopped").length);
-  let failedTotal = $derived(allRuns.filter((run) => getStatus(run) === "Failed").length);
+  const trainingGroupKeyFns = {
+    group: getGroup,
+    dataset: (run) => safeText(run.dataset) || "(no dataset)",
+    model: modelName,
+  };
+
+  const trainingGroupKey = (run, groupBy) => trainingGroupKeyFns[groupBy]?.(run) ?? "";
+
+  // Buckets inherit filteredRuns' recency sort: groups come out ordered by
+  // newest member and runs stay sorted within each group.
+  let trainingRunGroups = $derived.by(() => {
+    if (trainingGroupBy === "none") return [];
+    const buckets = Map.groupBy(filteredRuns, (run) => trainingGroupKey(run, trainingGroupBy));
+    return [...buckets].map(([key, runs]) => ({
+      key,
+      runs,
+      latestCreatedAt: runs[0]?.created_at || null,
+    }));
+  });
+
+  let completedTotal = $derived(allRuns.filter((run) => getStatus(run) === "completed").length);
+  let cancelledTotal = $derived(allRuns.filter((run) => getStatus(run) === "cancelled").length);
+  let stoppedTotal = $derived(allRuns.filter((run) => getStatus(run) === "stopped").length);
+  let failedTotal = $derived(allRuns.filter((run) => getStatus(run) === "failed").length);
   let runningTotal = $derived(
     allRuns.length - completedTotal - cancelledTotal - stoppedTotal - failedTotal,
   );
@@ -699,8 +727,12 @@
   let evalFailedTotal = $derived(
     allEvals.filter((ev) => getEvalStatus(ev) === "Failed").length,
   );
+  let activeTrainingRun = $derived(
+    allRuns.find((run) => run.run_id === activeTrainingRunId) || null,
+  );
 
   let statusText = $derived.by(() => {
+    if (activePage === "training" && activeTrainingRunId) return "run details";
     if (activePage === "training" && loading) return "loading...";
     if (activePage === "evals" && loadingEvals) return "loading...";
     if (activePage === "deployments" && loadingDeployments) return "loading...";
@@ -720,9 +752,12 @@
     activeRecipes = next;
   }
 
-  function toggleAllRecipes() {
-    if (activeRecipes.size === recipes.length) activeRecipes = new Set();
-    else activeRecipes = new Set(recipes);
+  function selectAllRecipes() {
+    activeRecipes = new Set(recipes);
+  }
+
+  function clearRecipes() {
+    activeRecipes = new Set();
   }
 
   function toggleStatus(status) {
@@ -732,6 +767,14 @@
     activeStatuses = next;
   }
 
+  function selectAllStatuses() {
+    activeStatuses = new Set(statuses);
+  }
+
+  function clearStatuses() {
+    activeStatuses = new Set();
+  }
+
   function toggleGroup(group) {
     const next = new Set(activeGroups);
     if (next.has(group)) next.delete(group);
@@ -739,9 +782,12 @@
     activeGroups = next;
   }
 
-  function toggleAllGroups() {
-    if (activeGroups.size === groups.length) activeGroups = new Set();
-    else activeGroups = new Set(groups);
+  function selectAllGroups() {
+    activeGroups = new Set(groups);
+  }
+
+  function clearGroups() {
+    activeGroups = new Set();
   }
 
   function setActivePage(page) {
@@ -808,17 +854,17 @@
   }
 </script>
 
-<div class="app-shell">
-  <header class="top-navbar">
-    <div class="top-brand">
-      <img src={logoSvg} alt="Modal" class="top-brand-logo" />
-      <span class="top-brand-title">
-        <span class="top-brand-modal">Modal</span>
-        <span class="top-brand-gym">Training Gym</span>
+<div class="h-[100dvh] grid grid-rows-[auto_1fr] bg-(--bg) overflow-x-hidden">
+  <header class="[border-bottom:1px_solid_var(--color-c-surface-highlight-gray-opaque,#272727)] bg-(--bg-depth) flex items-center justify-between gap-[1rem] min-h-[53px] p-[0_1rem] max-[900px]:min-h-[53px] max-[900px]:p-[0_0.75rem]">
+    <div class="inline-flex items-center gap-[0.55rem] flex-[0_0_auto] min-w-0">
+      <img src={logoSvg} alt="Modal" class="h-[17.5px] w-auto flex-[0_0_auto]" />
+      <span class="inline-flex items-center gap-[0.18rem] [font-family:var(--font-display)] [font-feature-settings:'ss01'_on] text-[17.6px] leading-[1] [padding-block:0.08rem] font-[600] tracking-[-0.02em] [transform:translateY(1px)] whitespace-nowrap max-[360px]:text-[15px]">
+        <span class="text-[#ddffdc]">Modal</span>
+        <span class="text-(--green)">Training Gym</span>
       </span>
     </div>
     <a
-      class="docs-button"
+      class="[border:0] rounded-[10px] text-(--text) [background:transparent] [text-decoration:none] text-[14px] font-medium p-[8px] inline-flex items-center gap-[8px] flex-[0_0_auto] hover:text-(--text-bright) hover:[background:color-mix(in_srgb,white_4%,transparent)] max-[520px]:hidden"
       href={DOCS_URL}
       target="_blank"
       rel="noopener noreferrer"
@@ -828,10 +874,10 @@
     </a>
   </header>
 
-  <div class="shell">
+  <div class="grid grid-cols-[232px_minmax(0,1fr)] min-h-0 h-full bg-(--bg) max-[900px]:grid-cols-[1fr] max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
     <Sidebar {navItems} {activePage} onNavigate={setActivePage} />
 
-    <main class="workspace">
+    <main class="min-w-0 min-h-0 h-full flex flex-col overflow-y-auto">
       <DashboardHeader
         title={pageMeta[activePage].title}
         {statusText}
@@ -842,7 +888,7 @@
     {#if activePage === "training" && activeTrainingRunId}
       <TrainingRunDetailPage
         runId={activeTrainingRunId}
-        {allRuns}
+        initialRun={activeTrainingRun}
         {modelName}
         {getStatus}
         {getFrameworkStatus}
@@ -868,11 +914,12 @@
         {groupCounts}
         {activeGroups}
         {filteredRuns}
+        runGroups={trainingRunGroups}
+        bind:groupBy={trainingGroupBy}
         {loading}
         {error}
         {modelName}
         {getStatus}
-        {getFrameworkStatus}
         {showFrameworkStatus}
         {fmtDuration}
         bind:search
@@ -880,10 +927,14 @@
         onOpenDetail={openTrainingRunDetail}
         onCloseDrawer={closeTrainingDrawer}
         onToggleRecipe={toggleRecipe}
-        onToggleAllRecipes={toggleAllRecipes}
+        onSelectAllRecipes={selectAllRecipes}
+        onClearRecipes={clearRecipes}
         onToggleStatus={toggleStatus}
+        onSelectAllStatuses={selectAllStatuses}
+        onClearStatuses={clearStatuses}
         onToggleGroup={toggleGroup}
-        onToggleAllGroups={toggleAllGroups}
+        onSelectAllGroups={selectAllGroups}
+        onClearGroups={clearGroups}
       />
     {:else if activePage === "deployments"}
       <DeploymentsPage
@@ -919,112 +970,3 @@
     </main>
   </div>
 </div>
-
-<style>
-  .app-shell {
-    min-height: 100vh;
-    display: grid;
-    grid-template-rows: auto 1fr;
-    background: var(--bg);
-  }
-
-  .top-navbar {
-    border-bottom: 1px solid var(--color-c-surface-highlight-gray-opaque, #272727);
-    background: var(--bg-depth);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    min-height: 53px;
-    padding: 0 1rem;
-  }
-
-  .top-brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    flex: 0 0 auto;
-    min-width: 0;
-  }
-
-  .top-brand-logo {
-    height: 17.5px;
-    width: auto;
-    flex: 0 0 auto;
-  }
-
-  .top-brand-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.18rem;
-    font-family: var(--font-display);
-    font-feature-settings: "ss01" on;
-    font-size: 17.6px;
-    line-height: 1;
-    padding-block: 0.08rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    transform: translateY(1px);
-    white-space: nowrap;
-  }
-
-  .top-brand-modal {
-    color: #ddffdc;
-  }
-
-  .top-brand-gym {
-    color: var(--green);
-  }
-
-  .docs-button {
-    border: 0;
-    border-radius: 10px;
-    color: var(--text);
-    background: transparent;
-    text-decoration: none;
-    font-size: 14px;
-    font-weight: 500;
-    padding: 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    flex: 0 0 auto;
-  }
-
-  .docs-button:hover {
-    color: var(--text-bright);
-    background: color-mix(in srgb, white 4%, transparent);
-  }
-
-  .shell {
-    display: grid;
-    grid-template-columns: 232px minmax(0, 1fr);
-    min-height: 0;
-    background: var(--bg);
-  }
-
-  .workspace {
-    padding: 16px 24px;
-  }
-
-  @media (max-width: 900px) {
-    .top-navbar {
-      min-height: 53px;
-      padding: 0 1rem;
-    }
-
-    .shell {
-      grid-template-columns: 1fr;
-    }
-
-    .workspace {
-      padding: 24px;
-    }
-  }
-
-  @media (max-width: 520px) {
-    .docs-button {
-      display: none;
-    }
-  }
-</style>

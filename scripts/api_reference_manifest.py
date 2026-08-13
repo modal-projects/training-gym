@@ -70,35 +70,6 @@ API_REFERENCE_MANIFEST = [
         "class_type": "behavior",
         "sidebar_label": "TrainResult",
     },
-    # --- Evaluation ---
-    {
-        "class_name": "EvalConfig",
-        "module": "modal_training_gym.common.eval",
-        "group": "evaluation",
-        "class_type": "config_data",
-        "sidebar_label": "EvalConfig",
-    },
-    {
-        "class_name": "EvalResult",
-        "module": "modal_training_gym.common.eval",
-        "group": "evaluation",
-        "class_type": "behavior",
-        "sidebar_label": "EvalResult",
-    },
-    {
-        "class_name": "EvalRowResult",
-        "module": "modal_training_gym.common.eval",
-        "group": "evaluation",
-        "class_type": "behavior",
-        "sidebar_label": "EvalRowResult",
-    },
-    {
-        "class_name": "HarborEval",
-        "module": "modal_training_gym.common.eval",
-        "group": "evaluation",
-        "class_type": "config_data",
-        "sidebar_label": "HarborEval",
-    },
     # --- Models ---
     {
         "class_name": "ToolCall",
@@ -150,6 +121,34 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Qwen3-8B",
     },
     {
+        "class_name": "Qwen3_5_0_8B",
+        "module": "modal_training_gym.common.models.qwen3_5_0_8b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.5-0.8B",
+    },
+    {
+        "class_name": "Qwen3_5_2B",
+        "module": "modal_training_gym.common.models.qwen3_5_2b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.5-2B",
+    },
+    {
+        "class_name": "Qwen3_5_4B",
+        "module": "modal_training_gym.common.models.qwen3_5_4b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.5-4B",
+    },
+    {
+        "class_name": "Qwen3_5_9B",
+        "module": "modal_training_gym.common.models.qwen3_5_9b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.5-9B",
+    },
+    {
         "class_name": "Qwen3_30B",
         "module": "modal_training_gym.common.models.qwen3_30b",
         "group": "models",
@@ -163,6 +162,13 @@ API_REFERENCE_MANIFEST = [
         "class_type": "config_data",
         "sidebar_label": "Qwen3.6-35B-A3B",
     },
+    {
+        "class_name": "Qwen3_6_27B",
+        "module": "modal_training_gym.common.models.qwen3_6_27b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.6-27B",
+    },
     # --- Training ---
     {
         "class_name": "TrainConfig",
@@ -170,6 +176,13 @@ API_REFERENCE_MANIFEST = [
         "group": "training",
         "class_type": "config_data",
         "sidebar_label": "TrainConfig",
+    },
+    {
+        "class_name": "TrainingRun",
+        "module": "modal_training_gym.common.run",
+        "group": "training",
+        "class_type": "behavior",
+        "sidebar_label": "TrainingRun",
     },
     {
         "class_name": "TrainingGroup",
@@ -186,26 +199,68 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "SlimeRecipe",
     },
     {
+        "class_name": "MilesRecipe",
+        "module": "modal_training_gym.train_recipes.miles_recipe.recipe",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "MilesRecipe",
+    },
+    {
         "class_name": "Qwen3_6_35b_Recipe",
         "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b",
         "group": "training",
         "class_type": "config_data",
         "sidebar_label": "Qwen3_6_35b_Recipe",
     },
-    # --- Deployment ---
     {
-        "class_name": "DeploymentConfig",
-        "module": "modal_training_gym.common.deployment",
-        "group": "deployment",
+        "class_name": "Qwen3_6_27b_Recipe",
+        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b",
+        "group": "training",
         "class_type": "config_data",
-        "sidebar_label": "DeploymentConfig",
+        "sidebar_label": "Qwen3_6_27b_Recipe",
     },
     {
-        "class_name": "ModelDeployment",
+        "class_name": "Qwen3_5_0_8b_Recipe",
+        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_0_8b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.5-0.8b_Recipe",
+    },
+    {
+        "class_name": "Qwen3_5_2b_Recipe",
+        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_2b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.5-2b_Recipe",
+    },
+    {
+        "class_name": "Qwen3_5_4b_Recipe",
+        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_4b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.5-4b_Recipe",
+    },
+    {
+        "class_name": "Qwen3_5_9b_Recipe",
+        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_9b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.5-9b_Recipe",
+    },
+    # --- Deployment ---
+    {
+        "class_name": "Endpoint",
+        "module": "modal_training_gym.common.endpoint",
+        "group": "deployment",
+        "class_type": "behavior",
+        "sidebar_label": "Endpoint",
+    },
+    {
+        "class_name": "CustomDeployment",
         "module": "modal_training_gym.common.deployment",
         "group": "deployment",
         "class_type": "behavior",
-        "sidebar_label": "ModelDeployment",
+        "sidebar_label": "CustomDeployment",
     },
     {
         "class_name": "SglangRecipe",
@@ -225,10 +280,9 @@ API_REFERENCE_MANIFEST = [
 
 GROUPS = {
     "core": {"label": "Core", "order": 1},
-    "evaluation": {"label": "Evaluation", "order": 2},
-    "models": {"label": "Models", "order": 3},
-    "training": {"label": "Training", "order": 4},
-    "deployment": {"label": "Deployment", "order": 5},
+    "models": {"label": "Models", "order": 2},
+    "training": {"label": "Training", "order": 3},
+    "deployment": {"label": "Deployment", "order": 4},
 }
 
 

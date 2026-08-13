@@ -1,0 +1,270 @@
+---
+interface Props {
+  markdownSource: string;
+  pageUrl: string;
+}
+
+const { markdownSource, pageUrl } = Astro.props;
+const q = encodeURIComponent(`Read from ${pageUrl} so I can ask questions about it.`);
+const chatGptUrl = `https://chat.openai.com/?hints=search&q=${q}`;
+const claudeUrl = `https://claude.ai/new?q=${q}`;
+
+---
+
+{markdownSource && (
+  <div class="tg-copy-page" data-tg-copy-page>
+    <button
+      class="tg-action-button tg-copy-button"
+      type="button"
+      aria-expanded="false"
+      aria-controls="tg-copy-page-panel"
+      data-tg-copy-trigger
+      title="Copy page"
+    >
+      <span class="tg-copy-button__icon" data-tg-copy-icon aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+      </span>
+      <span class="tg-copy-button__icon tg-copy-button__icon--check" data-tg-copy-check hidden aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+      </span>
+      <span data-tg-copy-status>Copy page</span>
+      <svg class="tg-copy-button__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+    </button>
+    <div class="tg-copy-page__menu" id="tg-copy-page-panel" hidden data-tg-copy-menu>
+      <button class="tg-copy-page__item" type="button" data-tg-copy-markdown>
+        <span class="tg-copy-page__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+        </span>
+        <span class="tg-copy-page__item-text">
+          <span class="tg-copy-page__item-title">Copy page</span>
+          <span class="tg-copy-page__item-desc">Copy page as Markdown for LLMs</span>
+        </span>
+      </button>
+      <a class="tg-copy-page__item" href={chatGptUrl} target="_blank" rel="noopener noreferrer">
+        <span class="tg-copy-page__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364l2.0201-1.1638a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.4046-.6813zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997z"></path></svg>
+        </span>
+        <span class="tg-copy-page__item-text">
+          <span class="tg-copy-page__item-title">
+            Open in ChatGPT
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></svg>
+          </span>
+          <span class="tg-copy-page__item-desc">Ask questions about this page</span>
+        </span>
+      </a>
+      <a class="tg-copy-page__item" href={claudeUrl} target="_blank" rel="noopener noreferrer">
+        <span class="tg-copy-page__item-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 256 257" fill="currentColor" fill-rule="evenodd" preserveAspectRatio="xMidYMid"><path d="m50.228 170.321 50.357-28.257.843-2.463-.843-1.361h-2.462l-8.426-.518-28.775-.778-24.952-1.037-24.175-1.296-6.092-1.297L0 125.796l.583-3.759 5.12-3.434 7.324.648 16.202 1.101 24.304 1.685 17.629 1.037 26.118 2.722h4.148l.583-1.685-1.426-1.037-1.101-1.037-25.147-17.045-27.22-18.017-14.258-10.37-7.713-5.25-3.888-4.925-1.685-10.758 7-7.713 9.397.649 2.398.648 9.527 7.323 20.35 15.75L94.817 91.9l3.889 3.24 1.555-1.102.195-.777-1.75-2.917-14.453-26.118-15.425-26.572-6.87-11.018-1.814-6.61c-.648-2.723-1.102-4.991-1.102-7.778l7.972-10.823L71.42 0 82.05 1.426l4.472 3.888 6.61 15.101 10.694 23.786 16.591 32.34 4.861 9.592 2.592 8.879.973 2.722h1.685v-1.556l1.36-18.211 2.528-22.36 2.463-28.776.843-8.1 4.018-9.722 7.971-5.25 6.222 2.981 5.12 7.324-.713 4.73-3.046 19.768-5.962 30.98-3.889 20.739h2.268l2.593-2.593 10.499-13.934 17.628-22.036 7.778-8.749 9.073-9.657 5.833-4.601h11.018l8.1 12.055-3.628 12.443-11.342 14.388-9.398 12.184-13.48 18.147-8.426 14.518.778 1.166 2.01-.194 30.46-6.481 16.462-2.982 19.637-3.37 8.88 4.148.971 4.213-3.5 8.62-20.998 5.184-24.628 4.926-36.682 8.685-.454.324.519.648 16.526 1.555 7.065.389h17.304l32.21 2.398 8.426 5.574 5.055 6.805-.843 5.184-12.962 6.611-17.498-4.148-40.83-9.721-14-3.5h-1.944v1.167l11.666 11.406 21.387 19.314 26.767 24.887 1.36 6.157-3.434 4.86-3.63-.518-23.526-17.693-9.073-7.972-20.545-17.304h-1.36v1.814l4.73 6.935 25.017 37.59 1.296 11.536-1.814 3.76-6.481 2.268-7.13-1.297-14.647-20.544-15.1-23.138-12.185-20.739-1.49.843-7.194 77.448-3.37 3.953-7.778 2.981-6.48-4.925-3.436-7.972 3.435-15.749 4.148-20.544 3.37-16.333 3.046-20.285 1.815-6.74-.13-.454-1.49.194-15.295 20.999-23.267 31.433-18.406 19.702-4.407 1.75-7.648-3.954.713-7.064 4.277-6.286 25.47-32.405 15.36-20.092 9.917-11.6-.065-1.686h-.583L44.07 198.125l-12.055 1.555-5.185-4.86.648-7.972 2.463-2.593 20.35-13.999-.064.065Z"></path></svg>
+        </span>
+        <span class="tg-copy-page__item-text">
+          <span class="tg-copy-page__item-title">
+            Open in Claude
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></svg>
+          </span>
+          <span class="tg-copy-page__item-desc">Ask questions about this page</span>
+        </span>
+      </a>
+    </div>
+    <div hidden data-tg-copy-source>{JSON.stringify(markdownSource)}</div>
+  </div>
+)}
+
+<script is:inline>
+  (() => {
+    const roots = document.querySelectorAll('[data-tg-copy-page]');
+    if (!roots.length) return;
+
+    const IDLE = 'Copy page';
+    const FAIL = 'Copy failed';
+    const widgets = [];
+
+    function setOpen(w, open) {
+      w.menu.hidden = !open;
+      w.trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function setFeedback(w, state) {
+      const ok = state === 'success';
+      const fail = state === 'failed';
+      w.trigger.classList.toggle('is-copied', ok);
+      w.trigger.classList.toggle('is-failed', fail);
+      if (w.icon) w.icon.hidden = ok;
+      if (w.check) w.check.hidden = !ok;
+      const label = fail ? FAIL : IDLE;
+      if (w.status) w.status.textContent = label;
+      w.trigger.title = label;
+    }
+
+    function fallbackCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (!ok) throw new Error('execCommand copy failed');
+    }
+
+    async function writeClipboard(text) {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+      } catch {}
+      fallbackCopy(text);
+    }
+
+    async function copyMarkdown(w) {
+      try {
+        if (!w.source) throw new Error('missing source');
+        await writeClipboard(JSON.parse(w.source.textContent || '""'));
+        setFeedback(w, 'success');
+        setTimeout(() => setFeedback(w, 'idle'), 1600);
+        return true;
+      } catch {
+        setFeedback(w, 'failed');
+        return false;
+      }
+    }
+
+    for (const root of roots) {
+      if (!(root instanceof HTMLElement)) continue;
+      const trigger = root.querySelector('[data-tg-copy-trigger]');
+      const menu = root.querySelector('[data-tg-copy-menu]');
+      if (!(trigger instanceof HTMLButtonElement) || !(menu instanceof HTMLElement)) continue;
+      const copyItem = root.querySelector('[data-tg-copy-markdown]');
+      const w = {
+        root,
+        trigger,
+        menu,
+        status: root.querySelector('[data-tg-copy-status]'),
+        icon: root.querySelector('[data-tg-copy-icon]'),
+        check: root.querySelector('[data-tg-copy-check]'),
+        source: root.querySelector('[data-tg-copy-source]'),
+        copyItem: copyItem instanceof HTMLButtonElement ? copyItem : null,
+      };
+      widgets.push(w);
+
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (menu.hidden) {
+          setFeedback(w, 'idle');
+          setOpen(w, true);
+        } else {
+          setOpen(w, false);
+        }
+      });
+
+      w.copyItem?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        if (await copyMarkdown(w)) setOpen(w, false);
+      });
+
+      root.querySelectorAll('a.tg-copy-page__item').forEach((a) => {
+        a.addEventListener('click', () => setOpen(w, false));
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element)) return;
+      for (const w of widgets) if (!w.root.contains(e.target)) setOpen(w, false);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') for (const w of widgets) setOpen(w, false);
+    });
+  })();
+</script>
+
+<style>
+  .tg-copy-page {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .tg-copy-button.is-copied {
+    border-color: color-mix(in srgb, var(--sl-color-accent) 56%, var(--tg-border-strong));
+    color: var(--sl-color-white);
+  }
+
+  .tg-copy-button.is-failed {
+    border-color: color-mix(in srgb, var(--tg-caution-border) 80%, var(--tg-border-strong));
+    color: var(--tg-caution-text);
+  }
+
+  .tg-copy-button__chevron {
+    margin-left: 0.15rem;
+    opacity: 0.85;
+  }
+
+  .tg-copy-button__icon:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .tg-copy-page__menu {
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    z-index: 40;
+    min-width: 16.5rem;
+    padding: 0.375rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 0.75rem;
+    background: var(--tg-panel);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+
+  .tg-copy-page__item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    width: 100%;
+    margin: 0;
+    padding: 0.55rem 0.6rem;
+    border: 0;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--sl-color-white);
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .tg-copy-page__item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .tg-copy-page__item-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    margin-top: 0.1rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  .tg-copy-page__item-text {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .tg-copy-page__item-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--sl-color-white);
+    font-size: 0.875rem;
+    line-height: 1.25;
+  }
+
+  .tg-copy-page__item-desc {
+    color: var(--sl-color-gray-3);
+    font-size: 0.75rem;
+    line-height: 1.35;
+  }
+</style>

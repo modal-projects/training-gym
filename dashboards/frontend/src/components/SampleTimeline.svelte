@@ -430,6 +430,18 @@
     cursorTime = null;
   }
 
+  function nudgeZoom(factor) {
+    const range = effectiveViewEnd - viewStart;
+    const mid = viewStart + range / 2;
+    const newRange = Math.min(
+      domainMax * 1.1,
+      Math.max(range * factor, 0.001),
+    );
+    const newStart = Math.max(0, mid - newRange / 2);
+    viewStart = newStart;
+    viewEnd = newStart + newRange;
+  }
+
   // Tooltip content builder.
   function tooltipContent(item) {
     if (!item) return "";
@@ -454,24 +466,27 @@
 </script>
 
 {#if spans.length}
-  <div class="tl-container">
+  <div class="bg-[var(--color-c-gray-08,#1c1c1c)] rounded-[6px] p-0 overflow-hidden">
     <!-- Legend -->
-    <div class="tl-legend">
+    <div class="flex flex-wrap gap-[10px] items-center p-[8px_10px_4px] [border-bottom:1px_solid_var(--color-c-gray-10,#2f2f2f)]">
       {#each spanNames as name, i (name)}
-        <span class="tl-chip">
-          <span class="tl-swatch" style:background={colorFor(name)}></span>
+        <span class="inline-flex items-center gap-[5px] text-[11px] [color:var(--text,#d1d1d1)]">
+          <span class="w-[12px] h-[8px] rounded-[2px] inline-block [flex-shrink:0]" style:background={colorFor(name)}></span>
           {name || "—"}
         </span>
       {/each}
-      <span class="tl-total">{spans.length} spans · {fmtDur(domainMax)}</span>
+      <span class="ml-auto text-[10px] [color:var(--muted,#a3a3a3)] [font-variant-numeric:tabular-nums]">{spans.length} spans · {fmtDur(domainMax)}</span>
+      <button class="text-[10px] [color:var(--text,#d1d1d1)] [background:none] [border:1px_solid_var(--color-c-gray-15,#3b3b3b)] rounded-[4px] min-h-[28px] min-w-[28px] p-[1px_6px] cursor-pointer [font-family:inherit] hover:[background:var(--color-c-gray-10,#2f2f2f)]" onclick={() => nudgeZoom(1 / 1.15)} aria-label="Zoom in" title="Zoom in">+</button>
+      <button class="text-[10px] [color:var(--text,#d1d1d1)] [background:none] [border:1px_solid_var(--color-c-gray-15,#3b3b3b)] rounded-[4px] min-h-[28px] min-w-[28px] p-[1px_6px] cursor-pointer [font-family:inherit] hover:[background:var(--color-c-gray-10,#2f2f2f)]" onclick={() => nudgeZoom(1.15)} aria-label="Zoom out" title="Zoom out">−</button>
       {#if viewEnd != null}
-        <button class="tl-reset" onclick={resetZoom}>reset zoom</button>
+        <button class="text-[10px] [color:var(--accent,#7fee64)] [background:none] [border:1px_solid_var(--color-c-gray-15,#3b3b3b)] rounded-[4px] min-h-[28px] p-[1px_6px] cursor-pointer [font-family:inherit] hover:[background:var(--color-c-gray-10,#2f2f2f)]" onclick={resetZoom}>reset</button>
       {/if}
     </div>
 
     <!-- Canvas timeline -->
-    <div class="tl-wrap" bind:this={wrapEl}>
+    <div class="relative cursor-grab select-none active:cursor-grabbing" bind:this={wrapEl}>
       <canvas
+        class="block w-full"
         bind:this={canvasEl}
         onmousemove={onMouseMove}
         onmousedown={onMouseDown}
@@ -494,122 +509,10 @@
     {/if}
 
     <!-- Footer hint -->
-    <div class="tl-footer">
-      drag to pan · scroll to zoom · click to set cursor
+    <div class="p-[4px_10px_6px] text-[10px] [color:var(--muted-strong,#747474)]">
+      drag to pan · scroll or +/− to zoom · click to set cursor
     </div>
   </div>
 {:else}
-  <div class="tl-empty">No trace recorded for this sample.</div>
+  <div class="text-[12px] [color:var(--muted,#a3a3a3)] p-[4px_0]">No trace recorded for this sample.</div>
 {/if}
-
-<style>
-  .tl-container {
-    background: var(--color-c-gray-08, #1c1c1c);
-    border-radius: 6px;
-    padding: 0;
-    overflow: hidden;
-  }
-
-  .tl-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
-    padding: 8px 10px 4px;
-    border-bottom: 1px solid var(--color-c-gray-10, #2f2f2f);
-  }
-
-  .tl-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11px;
-    color: var(--text, #d1d1d1);
-  }
-
-  .tl-swatch {
-    width: 12px;
-    height: 8px;
-    border-radius: 2px;
-    display: inline-block;
-    flex-shrink: 0;
-  }
-
-  .tl-total {
-    margin-left: auto;
-    font-size: 10px;
-    color: var(--muted, #a3a3a3);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .tl-reset {
-    font-size: 10px;
-    color: var(--accent, #7fee64);
-    background: none;
-    border: 1px solid var(--color-c-gray-15, #3b3b3b);
-    border-radius: 4px;
-    padding: 1px 6px;
-    cursor: pointer;
-    font-family: inherit;
-  }
-
-  .tl-reset:hover {
-    background: var(--color-c-gray-10, #2f2f2f);
-  }
-
-  .tl-wrap {
-    position: relative;
-    cursor: grab;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-
-  .tl-wrap:active {
-    cursor: grabbing;
-  }
-
-  canvas {
-    display: block;
-    width: 100%;
-  }
-
-  .tl-tooltip {
-    position: fixed;
-    z-index: 100;
-    max-width: 400px;
-    padding: 8px 10px;
-    background: rgba(24, 24, 24, 0.95);
-    color: #e8e8e8;
-    border: 1px solid var(--color-c-gray-15, #3b3b3b);
-    border-radius: 8px;
-    pointer-events: none;
-    opacity: 0;
-    transform: translateY(4px);
-    transition:
-      opacity 100ms ease,
-      transform 100ms ease;
-    white-space: pre-wrap;
-    font-size: 11px;
-    line-height: 1.5;
-    font-variant-numeric: tabular-nums;
-    font-family: var(--font-mono, monospace);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  }
-
-  .tl-tooltip.visible {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  .tl-footer {
-    padding: 4px 10px 6px;
-    font-size: 10px;
-    color: var(--muted-strong, #747474);
-  }
-
-  .tl-empty {
-    font-size: 12px;
-    color: var(--muted, #a3a3a3);
-    padding: 4px 0;
-  }
-</style>

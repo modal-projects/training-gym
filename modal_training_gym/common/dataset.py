@@ -43,6 +43,11 @@ class DatasetConfig:
     label_key: str = ""
     apply_chat_template: bool = True
     always_prepare: bool = False
+    # When True (default), ``prepare()`` is expected to materialize every path in
+    # ``eval_paths`` and the launcher validates them strictly. Datasets that use
+    # a separate DatasetConfig instance for offline eval (Toolathlon, BFCL) set
+    # this False so resolvers don't invent a companion ``eval.*`` file.
+    writes_eval_paths: bool = True
 
     def __init__(self, **kwargs: Any) -> None:
         if not self.dataset_id:
@@ -139,9 +144,12 @@ class HuggingFaceDataset(DatasetConfig):
     """Dataset backed by a HuggingFace ``datasets`` repo.
 
     Subclass and set ``hf_repo`` plus column mappings. When
-    ``input_column`` and ``output_column`` are set, ``prepare()``
-    auto-wraps rows into chat-message format
-    (``{"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}``).
+    ``input_column`` and ``output_column`` are set, ``prepare()`` wraps
+    each row into a prompt-only chat message list plus a separate label
+    field: ``{"messages": [{"role": "user", ...}], <label_key>: ...}``.
+    A leading ``{"role": "system", ...}`` message is included when
+    ``system_prompt`` is set. No assistant turn is emitted — the target
+    from ``output_column`` is stored under ``label_key``.
     """
 
     _type: DatasetType = DatasetType.HUGGING_FACE
@@ -196,7 +204,6 @@ class HuggingFaceDataset(DatasetConfig):
             if sys_prompt:
                 msgs.append({"role": "system", "content": sys_prompt})
             msgs.append({"role": "user", "content": user_content})
-            msgs.append({"role": "assistant", "content": row[out_col]})
             return {"messages": msgs, label_key: str(row[out_col])}
 
         return ds.map(_to_chat, remove_columns=ds.column_names)
@@ -222,8 +229,7 @@ class HuggingFaceDataset(DatasetConfig):
 
         if eval_paths:
             for eval_path in eval_paths.values():
-                eval_ds = self._format_for_training(self.load())
-                self._write_split(eval_ds, eval_path)
+                self._write_split(ds, eval_path)
 
 
 class HarborDataset(DatasetConfig):
@@ -625,189 +631,3 @@ class MultimodalDataset(DatasetConfig):
         if eval_paths:
             for eval_path in eval_paths.values():
                 self._write_jsonl(rows, eval_path)
-
-
-class ToolathlonTrajectoryDataset(DatasetConfig):
-    """Expert Toolathlon trajectories as one ``(input, label)`` row per task.
-
-    Each row's ``label`` packs the full ground-truth trajectory — the ordered golden tool calls, the
-    aligned tool observations, the task request, and the tool catalog — which a rollout/eval later
-    *indexes into* (pick a start step ``K`` and rebuild the prompt prefix). That trajectory indexing
-    lives in the consumer (the Toolathlon environment), not here; this dataset just emits the pairs.
-
-    Train and eval are split by task-name allowlists (``train_tasks`` / ``eval_tasks``);
-    :meth:`golden_by_task` exposes the per-task expert action sequence that drives a Toolathlon
-    environment's snapshot-library builder.
-
-    The original workspace prefix in each raw trace is remapped onto ``workspace_path``, which must
-    equal the Toolathlon environment's ``ToolathlonEnvConfig.workspace_path`` (both default to
-    ``/task/workspace``) so the trace resolves against the live sandbox.
-    """
-
-    hf_repo: str = "hkust-nlp/Toolathlon-Trajectories"
-    source_file: str = "deepseek-v3.2-exp_1.jsonl"
-    output_format: str = "jsonl"
-    label_key: str = "label"
-    obs_limit: int = 1500  # truncate each observation to N chars in context
-    train_tasks: tuple[str, ...] = ()
-    eval_tasks: tuple[str, ...] = ()
-    # Workspace-path remap; keep ``workspace_path`` in sync with ToolathlonEnvConfig.workspace_path.
-    orig_workspace: str = "/workspace/dumps/workspace"
-    workspace_path: str = "/task/workspace"
-    # Placeholder prompt for the materialized row; the real step-K prefix is rebuilt at rollout time,
-    # so ``sample.prompt`` is not used directly — this just lets the framework load/tokenize the row.
-    placeholder_system_prompt: str = (
-        "You are a tool-calling agent. Output a JSON tool call."
-    )
-
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        if not self.input_key:
-            self.input_key = "messages"
-        if "dataset_id" not in kwargs:
-            self.dataset_id = f"toolathlon-trajectories-{uuid.uuid4()}"
-        self._validate()
-
-    @property
-    def name(self) -> str:
-        return self.hf_repo
-
-    def load(self, split: Literal["all", "train", "eval"] = "all") -> list[dict]:
-        return [
-            self._make_row(traj)
-            for traj in self._load_trajectories(split)
-            if self._golden_calls(
-                traj["messages"]
-            )  # skip degenerate traces with no tool calls
-        ]
-
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
-        import os
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        self._write_rows(self.load("train"), path)
-        if eval_paths:
-            eval_rows = self.load("eval")
-            for eval_path in eval_paths.values():
-                self._write_rows(eval_rows, eval_path)
-
-    def golden_by_task(self) -> dict[str, list[dict]]:
-        """Map ``task_name -> golden tool-call list`` over all tasks (drives the env snapshot builder)."""
-        return {
-            traj["task_name"]: self._golden_calls(traj["messages"])
-            for traj in self._load_trajectories("all")
-        }
-
-    # ── trace loading + parsing ──────────────────────────────────────────────
-
-    @staticmethod
-    def _write_rows(rows: list[dict], path: str) -> None:
-        with open(path, "w") as f:
-            f.writelines(json.dumps(r) + "\n" for r in rows)
-
-    def _split_tasks(self, split: str) -> set[str]:
-        if split == "train":
-            return set(self.train_tasks)
-        if split == "eval":
-            return set(self.eval_tasks)
-        return set(self.train_tasks) | set(self.eval_tasks)
-
-    def _load_trajectories(
-        self, split: Literal["all", "train", "eval"] = "all"
-    ) -> list[dict]:
-        from huggingface_hub import hf_hub_download
-
-        path = hf_hub_download(
-            repo_id=self.hf_repo, filename=self.source_file, repo_type="dataset"
-        )
-        keep = self._split_tasks(split)  # empty -> no filtering (keep all tasks)
-        out: list[dict] = []
-        with open(path) as f:
-            for line in f:
-                raw = json.loads(line)
-                if keep and raw.get("task_name") not in keep:
-                    continue
-                # Remap the original workspace prefix -> our workspace_path on the raw serialized
-                # trajectory (covers golden-call args, observations, and the task text in one pass,
-                # including arguments stored as nested JSON strings).
-                msgs_text = (raw.get("messages") or "[]").replace(
-                    self.orig_workspace, self.workspace_path
-                )
-                msgs = json.loads(msgs_text)
-                if len(msgs) < 3:
-                    continue
-                out.append(
-                    {
-                        "task_name": raw["task_name"],
-                        "messages": msgs,
-                        "tool_calls_meta": json.loads(raw.get("tool_calls", "{}"))
-                        if raw.get("tool_calls")
-                        else {},
-                    }
-                )
-        return out
-
-    def _make_row(self, traj: dict) -> dict:
-        msgs = traj["messages"]
-        golden = self._golden_calls(msgs)
-        task_request = self._task_request(msgs)
-        label = json.dumps(
-            {
-                "task_name": traj["task_name"],
-                "total_steps": len(golden),
-                "task_request": task_request,
-                "golden_calls": golden,
-                "observations": self._observations(msgs),
-                "tool_schemas": self._tool_schemas(traj["tool_calls_meta"]),
-            }
-        )
-        messages = [
-            {"role": "system", "content": self.placeholder_system_prompt},
-            {"role": "user", "content": task_request},
-        ]
-        return {"messages": messages, "label": label}
-
-    def _golden_calls(self, msgs: list[dict]) -> list[dict]:
-        """The ordered list of expert (golden) tool calls in a trajectory."""
-        calls = []
-        for m in msgs:
-            if m.get("role") == "assistant" and m.get("tool_calls"):
-                tc = m["tool_calls"]
-                if tc and isinstance(tc[0], dict) and "function" in tc[0]:
-                    fn = tc[0]["function"]
-                    args = fn.get("arguments", "{}")
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except json.JSONDecodeError:
-                            args = {}
-                    calls.append({"name": fn["name"], "arguments": args})
-        return calls
-
-    def _observations(self, msgs: list[dict]) -> list[str]:
-        """Ordered tool observations (one per executed call), truncated to ``obs_limit``."""
-        return [
-            str(m.get("content", ""))[: self.obs_limit]
-            for m in msgs
-            if m.get("role") == "tool"
-        ]
-
-    def _task_request(self, msgs: list[dict]) -> str:
-        for m in msgs:
-            if m.get("role") == "user" and str(m.get("content", "")).strip():
-                return str(m["content"])
-        return ""
-
-    def _tool_schemas(self, meta: dict) -> dict:
-        # The exact tool catalog the expert was given via the OpenAI tools= param (gateway tools/list).
-        # name -> {description, parameters} so the prompt can show which tools exist + their args.
-        schemas = {}
-        for t in meta.get("tools", []):
-            if isinstance(t, dict) and "function" in t:
-                fn = t["function"]
-                schemas[fn["name"]] = {
-                    "description": fn.get("description", ""),
-                    "parameters": fn.get("parameters", {}),
-                }
-        return schemas

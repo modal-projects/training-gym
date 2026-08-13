@@ -2,7 +2,7 @@
 
 One-stop reference for agents asked to build, modify, or validate tutorials
 and examples in this repo. Pairs with
-[agent-modal-training.md](agent-modal-training.md) (Modal launch/debug) and
+[modal-infrastructure](modal-infrastructure/SKILL.md) (Modal launch/debug) and
 [agent-example-validation.md](agent-example-validation.md) (tiered example
 validation).
 
@@ -34,13 +34,13 @@ tutorials/
 └── generate_tutorial.py    ← AST-walks each source, emits
                               tutorials/<name>/<name>.py + .ipynb
 
-tests/                      ← plain-script tests (uv run python tests/<x>.py)
+tests/                      ← plain-script tests (uv run tests/<x>.py)
 skills/                     ← agent-facing docs (you are here)
 ```
 
 **Never edit `tutorials/<name>/<name>.py` or `.ipynb` directly — they are
 generated.** Edit `tutorials/tutorial_generator/<name>.py` and run
-`uv run python tutorials/generate_tutorial.py`.
+`uv run tutorials/generate_tutorial.py`.
 
 ## Core abstractions
 
@@ -278,9 +278,9 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
 4. **Regenerate** and verify determinism:
    ```bash
-   uv run python tutorials/generate_tutorial.py
+   uv run tutorials/generate_tutorial.py
    # Run it again — should produce byte-identical output (no git diff).
-   uv run python tutorials/generate_tutorial.py
+   uv run tutorials/generate_tutorial.py
    git diff tutorials/
    ```
    Pre-commit hook also runs this — committed `.py`/`.ipynb` never drift.
@@ -320,7 +320,7 @@ existing slime tutorials for full examples.
 Always follow the tiered policy in
 [agent-example-validation.md](agent-example-validation.md):
 
-- **Tier 0 (local compile)** — `uv run python -m compileall modal_training_gym/`.
+- **Tier 0 (local compile)** — `uv run -m compileall modal_training_gym/`.
 - **Tier 1 (cheap drift checks)** — regenerate tutorials (byte-determinism
   check) + local instantiation smoke across the affected frameworks. No GPU.
 - **Tier 2 (scheduled smoke)** — one remote `modal run --detach` that
@@ -332,7 +332,7 @@ Per-change default: Tier 0 + Tier 1, plus Tier 2 for the new/modified
 tutorial only. Don't expand to all tutorials on a single change.
 
 `tests/test_model_configuration.py` is the current model-API regression
-test. Run with `uv run python tests/test_model_configuration.py`.
+test. Run with `uv run tests/test_model_configuration.py`.
 
 ## Gotchas
 
@@ -366,5 +366,5 @@ test. Run with `uv run python tests/test_model_configuration.py`.
 - Cross-framework scripts → `modal_training_gym/tools/`.
 - Cross-framework helpers → `modal_training_gym/common/framework.py`.
 - Tutorial sources → `tutorials/tutorial_generator/<name>.py`.
-- Tutorial regeneration → `uv run python tutorials/generate_tutorial.py`.
-- Tests → `tests/test_*.py`, run via `uv run python tests/<file>.py`.
+- Tutorial regeneration → `uv run tutorials/generate_tutorial.py`.
+- Tests → `tests/test_*.py`, run via `uv run tests/<file>.py`.

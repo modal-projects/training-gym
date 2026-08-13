@@ -1,0 +1,37 @@
+name: Previews App
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/previews-app.yml"
+      - "scripts/previews/frontend_previews.py"
+      - "scripts/previews/nginx/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: previews-app
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: modal-deploy
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: training-gym
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Deploy previews app to Modal
+        run: uv run --no-project --with modal modal deploy scripts/previews/frontend_previews.py

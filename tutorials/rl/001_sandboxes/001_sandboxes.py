@@ -11,13 +11,12 @@
 #
 # Workflow:
 # 1. Pull the hello-world task from Harbor Hub via `HarborDataset`.
-# 2. Score model outputs with `HarborEval` — it extracts code,
-#    runs it in a Modal sandbox, and compares stdout automatically.
+# 2. Score model outputs by running them in a Modal sandbox.
 # 3. Reuse the same `score_in_sandbox` helper as a SLIME `custom_rm_function`.
 # 4. Train and compare base vs. trained behavior.
 # Run with:
 # ```
-# uv run python tutorials/rl/001_sandboxes/001_sandboxes.py
+# uv run tutorials/rl/001_sandboxes/001_sandboxes.py
 # ```
 # ## Prerequisites
 #
@@ -28,10 +27,9 @@
 import modal
 
 from modal_training_gym import (
-    DeploymentConfig,
+    CustomDeployment,
     HarborDataset,
-    HarborEval,
-    Qwen3_4B,
+    Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
     extract_code,
@@ -49,7 +47,7 @@ from modal_training_gym import (
 #
 # The hello-world task uses pytest-based verification rather than
 # `*.in`/`*.out` file pairs, so we define stdin/stdout test cases
-# inline and pass them to `HarborEval` via the `test_cases` field.
+# inline and pass them to `score_in_sandbox` via the `test_cases` field.
 #
 # A single dataset instance handles both training and eval —
 # `prepare()` writes train and eval splits to the volume,
@@ -57,9 +55,23 @@ from modal_training_gym import (
 
 HELLO_WORLD_TESTS = [{"input": "", "expected_output": "Hello, world!\n"}]
 
-# ## Evaluate with HarborEval
+dataset = HarborDataset(
+    dataset_name="harbor/hello-world",
+    label_metadata_path="task.toml",
+    train_repeats=20,
+    always_prepare=True, # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
+    system_prompt=(
+        "You are an expert Python programmer. "
+        "Solve the given problem by writing a complete Python program. "
+        "Your program must print the answer to stdout using print(). "
+        "Do not create or write any files. "
+        "Put your solution in a ```python code fence."
+    ),
+)
+
+# ## Evaluate with sandboxed scoring
 #
-# `HarborEval` automates the sandbox scoring loop. It:
+# The sandbox scoring loop:
 # 1. Sends each task's prompt to the deployed model.
 # 2. Extracts Python code from the response (stripping thinking tags,
 #    chat-template artifacts, and code fences via `extract_code`).
@@ -67,20 +79,42 @@ HELLO_WORLD_TESTS = [{"input": "", "expected_output": "Hello, world!\n"}]
 # 4. Returns a score = fraction of test cases passed.
 #
 # Since hello-world doesn't ship `*.in`/`*.out` file pairs, we pass
-# `test_cases` directly — `HarborEval` uses them as a fallback when
-# the dataset label doesn't contain test cases.
+# `test_cases` directly to `score_in_sandbox`.
 #
-# Passing `model=Qwen3_4B()` enables model-aware response parsing,
-# which populates `parsed_response` on each result row for richer
-# dashboard display.
+# Passing `model=Qwen3_5_4B()` into `extract_code` enables model-aware
+# response parsing.
 
-base_model = Qwen3_4B()
+base_model = Qwen3_5_4B()
+
+def run_eval(deployment, *, max_concurrency: int = 2) -> float:
+    from concurrent.futures import ThreadPoolExecutor
+
+    deployment.wait_until_ready(timeout=3000)
+
+    def _score_one(example):
+        prompt = example["instruction"]
+        messages = [
+            {"role": "system", "content": dataset.system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        response = deployment.generate(
+            prompt,
+            ensure_ready=False,
+            messages=messages,
+        )
+        code = extract_code(response, model=base_model)
+        reward, _meta = score_in_sandbox(code, test_cases=HELLO_WORLD_TESTS)
+        return float(reward)
+
+    with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+        rewards = list(executor.map(_score_one, dataset.load()))
+    return sum(rewards) / len(rewards) if rewards else float("nan")
 
 # ## Train with SLIME and sandbox reward
 #
 # For training, we reuse the same `score_in_sandbox` and `extract_code`
-# helpers that `HarborEval` uses internally — wrapped in an async
-# reward function for SLIME's `custom_rm_function`.
+# helpers — wrapped in an async reward function for SLIME's
+# `custom_rm_function`.
 #
 # `score_in_sandbox` enforces `sandbox_cpu`/`sandbox_memory` with a
 # `"limit"` policy by default: rather than reserving that capacity up
@@ -113,34 +147,18 @@ def _main_impl() -> None:
             "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
         ) from e
 
-    dataset = HarborDataset(
-        dataset_name="harbor/hello-world",
-        label_metadata_path="task.toml",
-        train_repeats=20,
-        always_prepare=True, # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
-        system_prompt=(
-            "You are an expert Python programmer. "
-            "Solve the given problem by writing a complete Python program. "
-            "Your program must print the answer to stdout using print(). "
-            "Do not create or write any files. "
-            "Put your solution in a ```python code fence."
-        ),
+    base_deployment = CustomDeployment.launch(
+        base_model,
+        unauthenticated=True,
     )
-
-    base_deployment = DeploymentConfig(model=base_model).serve()
     print(f"Base model URL: {base_deployment.url}")
 
-    eval_config = HarborEval(
-        dataset=dataset,
-        model=base_model,
-        test_cases=HELLO_WORLD_TESTS,
-    )
     print("Running base eval...")
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    print(f"Base mean reward: {base_eval.mean:.4f}")
+    base_mean = run_eval(base_deployment)
+    print(f"Base mean reward: {base_mean:.4f}")
 
     training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=dataset,
         recipe=SlimeRecipe(
             custom_rm_function=sandbox_rm,
@@ -163,7 +181,7 @@ def _main_impl() -> None:
             max_tokens_per_gpu=4096,
             save_interval=10,
             image_overlay=lambda image: image.run_commands(
-                "uv pip install --system modal>=1.2.0",
+                "uv pip install --system 'modal>=1.2.0'",
             ),
         ),
     )
@@ -174,17 +192,18 @@ def _main_impl() -> None:
     # ## Evaluate the trained checkpoint
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-hello-world-serve",
-        served_model_name="qwen3-4b-hello-world",
-    ).serve()
+        app_name="qwen3-5-4b-hello-world-serve",
+        served_model_name="qwen3-5-4b-hello-world",
+        unauthenticated=True,
+    )
     print(f"Trained model URL: {trained_deployment.url}")
 
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    print(f"Trained mean reward: {trained_eval.mean:.4f}")
-    print(f"Base mean reward:    {base_eval.mean:.4f}")
+    trained_mean = run_eval(trained_deployment)
+    print(f"Trained mean reward: {trained_mean:.4f}")
+    print(f"Base mean reward:    {base_mean:.4f}")
 
 @tutorial_cli_app.local_entrypoint()
 def main() -> None:

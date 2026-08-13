@@ -22,7 +22,7 @@
 # dataset and call `train()`.
 # To run the tutorial, run the following command:
 # ```
-# uv run python tutorials/multinode/002_glm_4_7/002_glm_4_7.py
+# uv run tutorials/multinode/002_glm_4_7/002_glm_4_7.py
 # ```
 # ## Prerequisites
 #
@@ -33,7 +33,7 @@
 import modal
 
 from modal_training_gym import (
-    DeploymentConfig,
+    CustomDeployment,
     GLM_4_7,
     HuggingFaceDataset,
     TrainConfig,
@@ -109,11 +109,10 @@ def _main_impl() -> None:
         recipe=recipe,
     )
 
-    print(f"Training run: {training_run.training_run_id}")
     print(f"Total nodes: {recipe.total_nodes}")
     print("--- Starting training... ---")
     train_result = training_run.train()
-    print("--- Training complete ---")
+    print(f"--- Training complete: {train_result.training_run_id} ---")
 
     # ## Serve the trained checkpoint
     #
@@ -124,13 +123,14 @@ def _main_impl() -> None:
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    deployment = DeploymentConfig(
-        model=GLM_4_7(),
+    deployment = CustomDeployment.launch(
+        GLM_4_7(),
         checkpoint=checkpoint,
         recipe=GLM_4_7_SglangRecipe(),
         app_name="glm-4-7-serve",
         served_model_name="glm-4-7",
-    ).serve()
+        unauthenticated=True,
+    )
     print(f"Deployed to {deployment.url}")
 
 @tutorial_cli_app.local_entrypoint()

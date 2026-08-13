@@ -1,9 +1,12 @@
 <script>
+  import { onMount, tick, untrack } from "svelte";
   import { ArrowLeft, ChevronLeft, ChevronRight, Download, ExternalLink, Minimize2, X } from "lucide-svelte";
   import Tabs from "../components/Tabs.svelte";
   import RunSummary from "../components/RunSummary.svelte";
+  import StepTimings from "../components/StepTimings.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
+  import InferenceStats from "../components/InferenceStats.svelte";
   import SampleTimeline from "../components/SampleTimeline.svelte";
   import ConversationView from "../components/ConversationView.svelte";
   import AdvantageViolins from "../components/AdvantageViolins.svelte";
@@ -13,15 +16,43 @@
   import LineChart from "../components/LineChart.svelte";
   import ResizableTable from "../components/ResizableTable.svelte";
   import {
+    fetchRun,
     fetchRunRollouts,
     fetchRollout,
     fetchRunAdvantages,
     fetchRunAdvantageStep,
+    fetchRunLogs,
   } from "../lib/api.js";
+  import { groupByRollout, rolloutIndex, rolloutScores } from "../lib/rolloutGrouping.js";
+
+  // Number of historical log lines requested per page.
+  const HIST_PAGE = 500;
+  // Maximum number of historical log lines retained in the browser.
+  const HIST_BUFFER_MAX = 2000;
+
+  /** @typedef {"summary" | "rollouts" | "logs"} TabId */
+  const DETAIL_TABS = new Set(["summary", "rollouts", "logs"]);
+  const DEFAULT_TAB = "summary";
+
+  function parseTabFromUrl() {
+    if (typeof window === "undefined") return DEFAULT_TAB;
+    const raw = new URLSearchParams(window.location.search).get("tab");
+    return DETAIL_TABS.has(raw) ? /** @type {TabId} */ (raw) : DEFAULT_TAB;
+  }
+
+  function urlForTab(tab) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", DETAIL_TABS.has(tab) ? tab : DEFAULT_TAB);
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
+
+  function locationKey() {
+    return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  }
 
   let {
     runId,
-    allRuns,
+    initialRun = null,
     modelName,
     getStatus,
     getFrameworkStatus,
@@ -36,9 +67,45 @@
     embedded = false,
   } = $props();
 
-  let run = $derived.by(() =>
-    (allRuns || []).find((r) => r.run_id === runId) || null
-  );
+  let run = $state(null);
+  let runLoading = $state(false);
+  let runError = $state("");
+
+  async function loadRun(id, parentSignal) {
+    if (parentSignal.aborted) return;
+    const controller = new AbortController();
+    let timedOut = false;
+    const abortRequest = () => controller.abort();
+    parentSignal.addEventListener("abort", abortRequest, { once: true });
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 30000);
+
+    runLoading = true;
+    try {
+      const nextRun = await fetchRun(id, { signal: controller.signal });
+      if (parentSignal.aborted) return;
+      if (nextRun === null) {
+        run = null;
+        runError = `Training run "${id}" was not found.`;
+        return;
+      }
+      run = nextRun;
+      runError = "";
+    } catch (err) {
+      if (parentSignal.aborted) return;
+      if (!run) {
+        runError = timedOut
+          ? "Run request timed out after 30 seconds."
+          : String(err?.message || err);
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      parentSignal.removeEventListener("abort", abortRequest);
+      if (!parentSignal.aborted) runLoading = false;
+    }
+  }
 
   // Status as a primitive so effects depending on it don't re-run every time
   // the auto-refresh hands us a new `run` object with the same status (which
@@ -59,13 +126,86 @@
         : [],
   );
 
-  // Active tab: "summary" | "rollouts" | "logs". Each tab loads only its own
-  // data — rollout summaries for summary/rollouts, the log stream for logs.
-  let activeTab = $state("summary");
+  $effect(() => {
+    const id = runId;
+    run = initialRun?.run_id === id ? initialRun : null;
+    runError = "";
+    if (!id) {
+      runLoading = false;
+      return;
+    }
+
+    const controller = new AbortController();
+    void loadRun(id, controller.signal);
+    const interval = window.setInterval(() => {
+      if (runLoading || (runStatus && runStatus !== "running")) return;
+      void loadRun(id, controller.signal);
+    }, 5000);
+
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  });
+
+  // Active tab: "summary" | "rollouts" | "logs". One-way sync with the URL:
+  // init/popstate/runId read URL → activeTab; selectTab writes pushState.
+  let activeTab = $state(/** @type {TabId} */ (DEFAULT_TAB));
+
+  function selectTab(tab) {
+    const next = DETAIL_TABS.has(tab) ? /** @type {TabId} */ (tab) : DEFAULT_TAB;
+    activeTab = next;
+    if (embedded || typeof window === "undefined") return;
+    const target = urlForTab(next);
+    if (target !== locationKey()) {
+      history.pushState({}, "", target);
+    }
+  }
+
+  onMount(() => {
+    if (embedded) {
+      activeTab = DEFAULT_TAB;
+    } else {
+      const tab = parseTabFromUrl();
+      activeTab = tab;
+      const target = urlForTab(tab);
+      if (target !== locationKey()) {
+        history.replaceState({}, "", target);
+      }
+    }
+
+    const onPopState = () => {
+      if (embedded) return;
+      activeTab = parseTabFromUrl();
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  });
+
+  $effect(() => {
+    runId;
+    if (embedded || typeof window === "undefined") return;
+    activeTab = parseTabFromUrl();
+  });
 
   function formatMean(value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return "—";
     return value.toFixed(3);
+  }
+
+  // Map a rollout to its step timing. Step keys are 1-indexed; rollout ids are
+  // 0-indexed, so step N corresponds to rollout N-1 (fall back to a direct match).
+  function stepTimingForRollout(rolloutId) {
+    const st = run?.step_times || null;
+    const sub = run?.substep_times || null;
+    if (!st && !sub) return null;
+    const candidates = [String(Number(rolloutId) + 1), String(rolloutId)];
+    const key = candidates.find((k) => (st && st[k]) || (sub && sub[k]));
+    if (!key) return null;
+    return {
+      stepTimes: st && st[key] ? { [key]: st[key] } : null,
+      substepTimes: sub && sub[key] ? { [key]: sub[key] } : null,
+    };
   }
 
   function resumeBadge(run) {
@@ -91,10 +231,10 @@
   let expandedRollout = $state(null);
   let expandedRolloutLoading = $state(false);
   const rolloutColumns = [
-    { key: "step", label: "Step", width: 160, minWidth: 96 },
-    { key: "mean", label: "Mean reward", width: 180, minWidth: 130 },
-    { key: "samples", label: "Samples", width: 120, minWidth: 96 },
-    { key: "when", label: "When", width: 160, minWidth: 110 },
+    { key: "step", label: "Step", width: 72, minWidth: 56 },
+    { key: "mean", label: "Mean reward", width: 118, minWidth: 96 },
+    { key: "rollouts", label: "Rollouts", width: 80, minWidth: 64 },
+    { key: "when", label: "When", width: 88, minWidth: 64 },
   ];
 
   // Per-step advantage distribution summaries (one row per step, each with the
@@ -102,18 +242,16 @@
   let advantageSteps = $state([]);
   let hasAdvantages = $derived(advantageSteps.length > 0);
 
-  // Per-step sample view: a histogram of sample scores. Clicking a bar opens
-  // a single-sample viewer scoped to that bucket; ←/→ step through it.
   const BUCKET_COUNT = 12;
   let activeBucket = $state(null); // histogram bucket index, or null
   let activeSamplePos = $state(0); // position within the active bucket's list
 
-  // Bucket the expanded rollout's samples by score.
   let sampleDist = $derived.by(() => {
     const samples = expandedRollout?.samples || [];
-    if (!samples.length) return null;
-    const scores = samples.map((s) => Number(s.score) || 0);
-    // Loop instead of Math.min(...arr): a single rollout's per-sample array can
+    const rollouts = groupByRollout(samples);
+    if (!rollouts.length) return null;
+    const scores = rolloutScores(samples, rollouts);
+    // Loop instead of Math.min(...arr): a single step's rollout-score array can
     // exceed the engine's max argument count and make the spread throw a
     // RangeError (same failure class buildDist avoids).
     let lo = Infinity;
@@ -122,20 +260,38 @@
       if (v < lo) lo = v;
       if (v > hi) hi = v;
     }
-    // When every sample scored the same, a single bucket reads clearer than a
+    // When every rollout scored the same, a single bucket reads clearer than a
     // lone bar pinned to one edge.
     const count = lo === hi ? 1 : BUCKET_COUNT;
     const span = hi - lo || 1;
     const buckets = Array.from({ length: count }, () => []);
-    samples.forEach((s, i) => {
-      const score = Number(s.score) || 0;
-      let b = count === 1 ? 0 : Math.floor(((score - lo) / span) * count);
+    rollouts.forEach((positions, r) => {
+      let b = count === 1 ? 0 : Math.floor(((scores[r] - lo) / span) * count);
       b = Math.max(0, Math.min(count - 1, b));
-      buckets[b].push(i);
+      buckets[b].push({ positions, score: scores[r] });
     });
     const maxCount = Math.max(...buckets.map((b) => b.length), 1);
-    return { lo, hi, count, span, buckets, maxCount, total: samples.length };
+    return {
+      lo,
+      hi,
+      count,
+      span,
+      buckets,
+      maxCount,
+      total: rollouts.length,
+      sampleCount: samples.length,
+    };
   });
+
+  let distSummary = $derived(!sampleDist ? "" : plural(sampleDist.total, "rollout"));
+
+  function plural(n, unit) {
+    return `${n} ${unit}${n === 1 ? "" : "s"}`;
+  }
+
+  function bucketLabel(bucket, b) {
+    return `${plural(bucket.length, "rollout")} · reward ${bucketRange(b)}`;
+  }
 
   function bucketRange(b) {
     const d = sampleDist;
@@ -165,15 +321,36 @@
     activeSamplePos = Math.max(0, Math.min(list.length - 1, activeSamplePos + delta));
   }
 
-  // The sample currently shown in the viewer (or null when no bucket is open).
+  // A prompt group shares one screenshot: bytes on the first sample as `image`, the
+  // rest carry only `image_ref`.
+  let rolloutImages = $derived.by(() => {
+    const byRef = {};
+    for (const s of expandedRollout?.samples ?? []) {
+      const meta = s?.metadata;
+      if (meta?.image_ref && meta.image) byRef[meta.image_ref] = meta.image;
+    }
+    return byRef;
+  });
+
+  function sampleImage(sample) {
+    const meta = sample?.metadata;
+    if (!meta) return null;
+    return meta.image ?? (meta.image_ref ? rolloutImages[meta.image_ref] : null) ?? null;
+  }
+
+  // The rollout currently shown in the viewer (or null when no bucket is open).
   let activeSample = $derived.by(() => {
     const d = sampleDist;
     if (!d || activeBucket == null) return null;
     const list = d.buckets[activeBucket] || [];
-    const idx = list[activeSamplePos];
-    if (idx == null) return null;
+    const entry = list[activeSamplePos];
+    if (!entry) return null;
+    const sample = expandedRollout.samples[entry.positions[0]];
     return {
-      sample: expandedRollout.samples[idx],
+      sample,
+      samples: entry.positions.map((p) => expandedRollout.samples[p]),
+      score: entry.score,
+      image: sampleImage(sample),
       pos: activeSamplePos,
       count: list.length,
     };
@@ -192,28 +369,50 @@
     }
   }
 
-  function sampleToPayload(s) {
+  // `imageHandling`: "ignore" | "refs_only" | "resolve".
+  function sampleToPayload(s, imageHandling = "ignore") {
+    let metadata = s.metadata || null;
+    if (imageHandling === "resolve" && metadata?.image_ref && !metadata.image) {
+      // Only add bytes if the lookup resolved — the carrier sample may not be loaded.
+      const resolved = sampleImage(s);
+      if (resolved) metadata = { ...metadata, image: resolved };
+    } else if (imageHandling === "refs_only" && metadata?.image && metadata.image_ref) {
+      // Bytes travel once in the payload's `images` map; keep only the ref here.
+      const { image, ...rest } = metadata;
+      metadata = rest;
+    }
     return {
       score: s.score,
+      rollout_index: rolloutIndex(s),
+      sample_index: s.sample_index ?? null,
+      group_index: s.group_index ?? null,
       prompt: s.prompt || null,
       response: s.response || null,
       thinking: s.thinking || null,
       raw_response: s.raw_response || null,
       raw_prompt: s.raw_prompt || null,
       trace: s.trace || null,
-      metadata: s.metadata || null,
+      metadata,
     };
   }
 
   function downloadSampleTrajectory() {
     if (!activeSample) return;
-    const payload = sampleToPayload(activeSample.sample);
+    const turns = activeSample.samples;
+    const payload =
+      turns.length === 1
+        ? sampleToPayload(turns[0], "resolve")
+        : {
+            mean: activeSample.score,
+            turns: turns.length,
+            samples: turns.map((s) => sampleToPayload(s, "resolve")),
+          };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     const rollout = expandedRolloutId ?? 0;
-    a.download = `trajectory_r${rollout}_s${activeSample.pos}.json`;
+    a.download = `trajectory_r${rollout}_rollout${rolloutIndex(activeSample.sample) ?? activeSample.pos}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -221,12 +420,19 @@
   function downloadAllTrajectories() {
     if (!expandedRollout?.samples?.length) return;
     const rollout = expandedRolloutId ?? 0;
+    const samples = expandedRollout.samples;
+    const groups = groupByRollout(samples);
+    const scores = rolloutScores(samples, groups);
     const payload = {
       training_run_id: runId,
       rollout_id: rollout,
-      total: expandedRollout.samples.length,
-      mean: expandedRollout.samples.reduce((a, s) => a + (s.score || 0), 0) / expandedRollout.samples.length,
-      samples: expandedRollout.samples.map(sampleToPayload),
+      total: samples.length,
+      rollouts: groups.length,
+      n_samples_per_prompt: expandedRollout.n_samples_per_prompt ?? null,
+      mean: scores.reduce((a, v) => a + v, 0) / scores.length,
+      // Shared images, keyed by the `metadata.image_ref` each sample carries.
+      images: rolloutImages,
+      samples: samples.map((s) => sampleToPayload(s, "refs_only")),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -240,10 +446,19 @@
   async function loadRollouts(signal) {
     if (!runId) return;
     try {
+      // Untracked: the fetch effect calls this synchronously, so a tracked read
+      // here makes the effect depend on the state it is about to write, and
+      // every fetch (which always yields a fresh array) retriggers it forever.
+      const wasEmpty = untrack(() => rolloutSummaries.length === 0);
       const rows = await fetchRunRollouts(runId, { signal });
       if (signal?.aborted) return;
       rolloutSummaries = rows;
       rolloutsError = "";
+
+      // Reveal the first rollout
+      if (wasEmpty && rolloutSummaries.length > 0 && expandedRolloutId === null) {
+        toggleRolloutDetail(rolloutSummaries[0].rollout_id);
+      }
     } catch (err) {
       if (signal?.aborted) return;
       // Keep the rollouts we already have on a transient poll failure — only
@@ -339,7 +554,7 @@
       const detail = await fetchRollout(runId, rolloutId);
       if (expandedRolloutId === rolloutId) {
         expandedRollout = detail;
-        // Preselect the first populated bucket so a sample is shown right away.
+        // Preselect the first populated bucket so a rollout is shown right away.
         const d = sampleDist;
         const first = d ? d.buckets.findIndex((b) => b.length > 0) : -1;
         if (first >= 0) openBucket(first);
@@ -430,7 +645,7 @@
     logError = "";
     logDropped = 0;
     // Lazy load: only open the log stream while the Logs tab is active.
-    if (tab !== "logs" || !id || status !== "running" || paused) {
+    if (tab !== "logs" || !id || !status || status !== "running" || paused) {
       if (tab === "logs" && paused) logState = "paused";
       return;
     }
@@ -531,6 +746,379 @@
     logDropped = 0;
   }
 
+  // ── Historical logs ─────
+  let isRunning = $derived(runStatus === "running");
+
+  let histLines = $state([]), histNewerWindows = $state([]);
+  let histLoading = $state(false),
+    histLoadingOlder = $state(false),
+    histLoadingNewer = $state(false);
+  let histError = $state(""), histHasMore = $state(false);
+  let histNextUntil = $state(null), histTailEl = $state(null);
+  let histSeq = 0, histLastScrollTop = 0;
+  let histController = null, histRestoringScroll = false;
+
+  let histRangeInput = $state({ since: "", until: "" });
+  let histRange = $state({ since: "", until: "" });
+
+  function epochToLocalInput(epoch) {
+    if (!epoch) return "";
+    const d = new Date(Number(epoch) * 1000);
+    const p = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function localInputToEpoch(str) {
+    if (!str || !str.trim()) return null;
+    const ms = new Date(str.trim().replace(" ", "T")).getTime();
+    return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
+  }
+
+  function histRangeFromText(sinceText, untilText) {
+    const since = localInputToEpoch(sinceText);
+    const until = localInputToEpoch(untilText);
+    return {
+      since: since != null ? String(since) : "",
+      // The picker has minute precision, so include the entire final minute.
+      until: until != null ? String(until + 59.999999999) : "",
+    };
+  }
+
+  $effect(() => {
+    const { since, until } = histRangeInput;
+    const handle = window.setTimeout(() => {
+      histRange = histRangeFromText(since, until);
+    }, 350);
+    return () => window.clearTimeout(handle);
+  });
+
+  // Seed the pickers with the run's lifetime the first time we view a finished
+  // run.
+  let histPrefilledFor = null;
+  $effect(() => {
+    const id = runId;
+    const running = isRunning;
+    if (!id || running || histPrefilledFor === id) return;
+
+    const startedAt = run?.started_at || run?.created_at || 0;
+    const endedAt = run?.ended_at || run?.completed_at || 0;
+    if (!startedAt && !endedAt) return;
+
+    histPrefilledFor = id;
+    const sinceText = epochToLocalInput(startedAt);
+    const untilText = epochToLocalInput(endedAt);
+    const range = histRangeFromText(sinceText, untilText);
+    histRangeInput = { since: sinceText, until: untilText };
+    histRange = range;
+  });
+
+  // Expand server entries into per-line rows (a single ClickHouse entry can
+  // carry an embedded newline), matching how the live stream splits lines.
+  function pushHistRows(target, entries) {
+    for (const entry of entries) {
+      const task_id = entry.task_id || "";
+      const ts = entry.ts || 0;
+      const ts_ns = entry.ts_ns || 0;
+      for (const part of String(entry.line ?? "").split(/\r?\n/)) {
+        if (!part.length) continue;
+        target.push({ id: histSeq++, task_id, line: part, ts, ts_ns });
+      }
+    }
+  }
+
+  function resetHist() {
+    histLines = [];
+    histError = "";
+    histHasMore = false;
+    histNewerWindows = [];
+    histNextUntil = null;
+    histLoading = false;
+    histLoadingOlder = false;
+    histLoadingNewer = false;
+    histLastScrollTop = 0;
+    histRestoringScroll = false;
+  }
+
+  function histRowTime(row) {
+    if (!row) return 0;
+    if (row.ts_ns) return Number(row.ts_ns) / 1_000_000_000;
+    return Number(row.ts) || 0;
+  }
+
+  function histCursorBefore(row) {
+    if (!row) return null;
+    if (row.ts_ns) return (Number(row.ts_ns) - 1) / 1_000_000_000;
+    const ts = Number(row.ts) || 0;
+    return ts > 0 ? ts - 0.000000001 : null;
+  }
+
+  // Capture a visible row and its exact viewport position. Restoring this
+  // after replacing the bounded window avoids any perceptible jump.
+  function captureHistAnchor() {
+    const el = histTailEl;
+    if (!el) return null;
+    const containerTop = el.getBoundingClientRect().top;
+    const rows = el.querySelectorAll("[data-hist-id]");
+    for (const node of rows) {
+      const rect = node.getBoundingClientRect();
+      if (rect.bottom >= containerTop) {
+        return {
+          id: node.dataset.histId,
+          top: rect.top,
+          scrollTop: el.scrollTop,
+        };
+      }
+    }
+    return null;
+  }
+
+  async function restoreHistAnchor(anchor) {
+    if (!histTailEl || !anchor) return;
+    histRestoringScroll = true;
+    await tick();
+    if (!histTailEl) {
+      histRestoringScroll = false;
+      return;
+    }
+    const node = histTailEl.querySelector(`[data-hist-id="${anchor.id}"]`);
+    if (node) {
+      histTailEl.scrollTop += node.getBoundingClientRect().top - anchor.top;
+    } else {
+      histTailEl.scrollTop = anchor.scrollTop;
+    }
+    histLastScrollTop = histTailEl.scrollTop;
+    requestAnimationFrame(() => {
+      if (histTailEl) histLastScrollTop = histTailEl.scrollTop;
+      histRestoringScroll = false;
+    });
+  }
+
+  function rememberTrimmedNewer(kept, dropped) {
+    if (!kept.length || !dropped.length) return;
+    const since = histRowTime(kept[kept.length - 1]);
+    const until = histRowTime(dropped[dropped.length - 1]);
+    if (since > 0 && until >= since) {
+      histNewerWindows = [...histNewerWindows, { since, until }];
+    }
+  }
+
+  function markTrimmedOlder(kept, dropped) {
+    if (!kept.length || !dropped.length) return;
+    histHasMore = true;
+    histNextUntil = histCursorBefore(kept[0]);
+  }
+
+  async function loadHistInitial(id, { search, since, until }, signal) {
+    histLoading = true;
+    histError = "";
+    try {
+      const data = await fetchRunLogs(id, {
+        maxLines: HIST_PAGE,
+        search,
+        since,
+        until,
+        signal,
+      });
+      if (signal?.aborted) return;
+      histNewerWindows = [];
+      const rows = [];
+      pushHistRows(rows, data.logs);
+      const droppedOlder =
+        rows.length > HIST_BUFFER_MAX
+          ? rows.slice(0, rows.length - HIST_BUFFER_MAX)
+          : [];
+      histLines =
+        rows.length > HIST_BUFFER_MAX
+          ? rows.slice(-HIST_BUFFER_MAX)
+          : rows;
+      if (droppedOlder.length) {
+        markTrimmedOlder(histLines, droppedOlder);
+      } else {
+        histHasMore = data.hasMore;
+        histNextUntil = data.nextUntil;
+      }
+      // Land on the newest line, like the live tail does.
+      queueMicrotask(() => {
+        if (histTailEl) {
+          histRestoringScroll = true;
+          histTailEl.scrollTop = histTailEl.scrollHeight;
+          histLastScrollTop = histTailEl.scrollTop;
+          requestAnimationFrame(() => {
+            histRestoringScroll = false;
+          });
+        }
+      });
+    } catch (err) {
+      if (signal?.aborted) return;
+      histError = String(err?.message || err);
+    } finally {
+      if (!signal?.aborted) histLoading = false;
+    }
+  }
+
+  async function loadHistPage(direction, { since, until }) {
+    const loadingOlder = direction === "older";
+    if (loadingOlder) {
+      histLoadingOlder = true;
+    } else {
+      histLoadingNewer = true;
+    }
+    histError = "";
+    const anchor = captureHistAnchor();
+    const signal = histController?.signal;
+    try {
+      const data = await fetchRunLogs(runId, {
+        since,
+        until,
+        maxLines: HIST_PAGE,
+        search: logSearch,
+        signal,
+      });
+      if (signal?.aborted) return;
+      const rows = [];
+      pushHistRows(rows, data.logs);
+      if (loadingOlder && !rows.length) {
+        histHasMore = false;
+        histNextUntil = null;
+        return;
+      }
+
+      const adjacent =
+        rows.length <= HIST_PAGE
+          ? rows
+          : loadingOlder
+            ? rows.slice(-HIST_PAGE)
+            : rows.slice(0, HIST_PAGE);
+      const merged = loadingOlder
+        ? adjacent.concat(histLines)
+        : histLines.concat(adjacent);
+
+      if (loadingOlder) {
+        const dropped = merged.slice(HIST_BUFFER_MAX);
+        histLines = merged.slice(0, HIST_BUFFER_MAX);
+        rememberTrimmedNewer(histLines, dropped);
+        if (rows.length > HIST_PAGE) {
+          histHasMore = true;
+          histNextUntil = histCursorBefore(adjacent[0]);
+        } else {
+          histHasMore = data.hasMore;
+          histNextUntil = data.nextUntil;
+        }
+      } else {
+        const dropped = merged.slice(
+          0,
+          Math.max(0, merged.length - HIST_BUFFER_MAX),
+        );
+        histLines = merged.slice(-HIST_BUFFER_MAX);
+        markTrimmedOlder(histLines, dropped);
+        histNewerWindows = histNewerWindows.slice(0, -1);
+      }
+
+      await restoreHistAnchor(anchor);
+    } catch (err) {
+      if (signal?.aborted) return;
+      histError = String(err?.message || err);
+    } finally {
+      if (!signal?.aborted) {
+        if (loadingOlder) {
+          histLoadingOlder = false;
+        } else {
+          histLoadingNewer = false;
+        }
+      }
+    }
+  }
+
+  function loadHistOlder() {
+    if (
+      !histHasMore ||
+      histNextUntil == null ||
+      histLoadingOlder ||
+      histLoadingNewer ||
+      histLoading
+    ) {
+      return;
+    }
+    return loadHistPage("older", {
+      since: histRange.since,
+      until: histNextUntil,
+    });
+  }
+
+  function loadHistNewer() {
+    if (
+      !histNewerWindows.length ||
+      histLoadingNewer ||
+      histLoadingOlder ||
+      histLoading
+    ) {
+      return;
+    }
+    const range = histNewerWindows[histNewerWindows.length - 1];
+    return loadHistPage("newer", range);
+  }
+
+  // Load only in the direction the user moved. Scroll restoration after a
+  // page swap is ignored, preventing older/newer fetches from ping-ponging.
+  function onHistScroll() {
+    const el = histTailEl;
+    if (!el || histRestoringScroll) return;
+    const top = el.scrollTop;
+    const delta = top - histLastScrollTop;
+    histLastScrollTop = top;
+    if (delta < 0 && top <= 40) {
+      void loadHistOlder();
+      return;
+    }
+    if (delta > 0) {
+      const distanceFromBottom = el.scrollHeight - top - el.clientHeight;
+      if (distanceFromBottom <= 40) void loadHistNewer();
+    }
+  }
+
+  function jumpHistToLatest() {
+    if (!runId || histLoading || histLoadingOlder || histLoadingNewer) return;
+    void loadHistInitial(
+      runId,
+      {
+        search: logSearch,
+        since: histRange.since,
+        until: histRange.until,
+      },
+      histController?.signal,
+    );
+  }
+
+  function resetHistRange() {
+    const startedAt = run?.started_at || run?.created_at || 0;
+    const endedAt = run?.ended_at || run?.completed_at || 0;
+    histRangeInput = {
+      since: epochToLocalInput(startedAt),
+      until: epochToLocalInput(endedAt),
+    };
+  }
+
+  // Load the newest page when the Logs tab opens on a finished run, and reload
+  // when the debounced search/since/until change.
+  $effect(() => {
+    const id = runId;
+    const tab = activeTab;
+    const status = runStatus;
+    const running = isRunning;
+    const search = logSearch;
+    const { since, until } = histRange;
+
+    resetHist();
+    if (tab !== "logs" || !id || !status || running) return;
+
+    const controller = new AbortController();
+    histController = controller;
+    void loadHistInitial(id, { search, since, until }, controller.signal);
+    return () => {
+      controller.abort();
+      if (histController === controller) histController = null;
+    };
+  });
+
   function _seriesStats(getY) {
     if (!rolloutSummaries.length) return null;
     const values = rolloutSummaries.map(getY);
@@ -549,6 +1137,34 @@
       rollout_id: Number(r.rollout_id) || 0,
     })),
   );
+
+  // Custom reward-function tags: any numeric sample.metadata key a reward fn
+  // sets (e.g. sample.metadata["step_K"] = k) gets aggregated per rollout on
+  // the backend (TrainingRolloutResult.tag_stats) and charted here the same
+  // way as the reward line above — one chart per discovered tag name.
+  let customTagNames = $derived(
+    Array.from(
+      new Set(rolloutSummaries.flatMap((r) => Object.keys(r.tag_stats || {}))),
+    ).sort(),
+  );
+
+  function tagChartData(tag) {
+    return rolloutSummaries
+      .filter((r) => r.tag_stats?.[tag])
+      .map((r) => ({
+        x: Number(r.rollout_id) || 0,
+        y: Number(r.tag_stats[tag].mean) || 0,
+        rollout_id: Number(r.rollout_id) || 0,
+      }));
+  }
+
+  function tagChartStats(tag) {
+    const values = rolloutSummaries
+      .filter((r) => r.tag_stats?.[tag])
+      .map((r) => Number(r.tag_stats[tag].mean) || 0);
+    if (!values.length) return null;
+    return { min: Math.min(...values), max: Math.max(...values), latest: values[values.length - 1] };
+  }
 
   // Score-distribution comparison: the first rollout (step 0) vs the most
   // recent one, to see how sample scores shifted over training.
@@ -597,12 +1213,7 @@
   }
 
   function buildScoreDist(firstSamples, lastSamples, firstId, lastId) {
-    return buildDist(
-      firstSamples.map((s) => Number(s.score) || 0),
-      lastSamples.map((s) => Number(s.score) || 0),
-      firstId,
-      lastId,
-    );
+    return buildDist(rolloutScores(firstSamples), rolloutScores(lastSamples), firstId, lastId);
   }
 
   // Adapt a buildDist result into ComparativeBarChart inputs: one category per
@@ -704,59 +1315,64 @@
 
 <section class="detail" class:embedded>
   {#if !embedded}
-    <header class="detail-header">
-      <button class="back-button" onclick={onBack}>
+    <header class="flex flex-wrap items-center gap-x-[10px] gap-y-[8px] p-[0_24px] mb-[16px] max-[900px]:p-[0_16px]">
+      <button type="button" class="inline-flex items-center gap-[6px] [background:none] [border:0] text-(--muted) cursor-pointer text-[13px] leading-[16px] min-h-[32px] p-[4px_8px] rounded-[6px] hover:text-(--text) hover:bg-(--color-c-gray-10,#2f2f2f) max-[900px]:basis-full" onclick={onBack}>
         <ArrowLeft size={14} strokeWidth={2.1} />
         <span>Back to runs</span>
       </button>
-      <div class="detail-header-actions">
-        {#if onCollapse}
-          <button class="detail-collapse-button" onclick={onCollapse} title="Collapse to drawer">
-            <Minimize2 size={12} strokeWidth={2.1} />
-            <span>Collapse</span>
-          </button>
-        {/if}
-        {#each wandbLinks as link (link.url)}
-          <a
-            class="header-link wandb-link"
-            href={link.url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <span>{link.label}</span>
-            <ExternalLink size={12} strokeWidth={2.1} />
-          </a>
-        {/each}
-        {#if run?.modal_app_url}
-          <a
-            class="header-link"
-            href={run.modal_app_url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <span>Open in Modal</span>
-            <ExternalLink size={12} strokeWidth={2.1} />
-          </a>
-        {/if}
-      </div>
+      {#if onCollapse}
+        <button type="button" class="inline-flex items-center gap-[6px] [border:1px_solid_var(--border,#2f2f2f)] rounded-[6px] [background:none] text-(--muted) cursor-pointer [font:inherit] text-[12px] font-medium leading-[16px] min-h-[32px] p-[4px_8px] hover:text-(--text-bright) hover:border-(--border-strong,#4a4a4a)" onclick={onCollapse} title="Collapse to drawer">
+          <Minimize2 size={12} strokeWidth={2.1} />
+          <span>Collapse</span>
+        </button>
+      {/if}
+      {#each wandbLinks as link (link.url)}
+        <a
+          class="header-link wandb-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"
+          href={link.url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span>{link.label}</span>
+          <ExternalLink size={12} strokeWidth={2.1} />
+        </a>
+      {/each}
+      {#if run?.modal_app_url}
+        <a
+          class="header-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"
+          href={run.modal_app_url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span>Open in Modal</span>
+          <ExternalLink size={12} strokeWidth={2.1} />
+        </a>
+      {/if}
     </header>
   {/if}
 
   {#if !run}
-    <div class="empty">Loading run {runId}…</div>
+    <div class="detail-empty px-[24px]">
+      {#if runError}
+        Failed to load run: {runError}
+      {:else}
+        Loading run {runId}…
+      {/if}
+    </div>
   {:else}
     {#if !embedded}
-    <div class="detail-title-row">
-      <h1 class="detail-title" title={run.run_id}>{run.run_id}</h1>
+    <div class="flex items-center gap-[16px] p-[0_24px] mb-[16px] max-[900px]:p-[0_16px] min-w-0">
+      <h1 class="text-[22px] font-[600] text-(--text-bright) m-0 overflow-hidden text-ellipsis whitespace-nowrap min-w-0" title={run.run_id}>{run.run_id}</h1>
       <StatusPill status={getStatus(run)} />
       {#if resumeBadge(run)}
-        <span class="resume-header-badge">{resumeBadge(run)}</span>
+        <span class="[border:1px_solid_color-mix(in_srgb,var(--yellow,#fbbf24)_42%,transparent)] rounded-[999px] bg-[color-mix(in_srgb,var(--yellow,#fbbf24)_10%,transparent)] text-(--yellow,#fbbf24) text-[12px] leading-[16px] p-[2px_8px] whitespace-nowrap">{resumeBadge(run)}</span>
       {/if}
     </div>
     {/if}
 
     <Tabs
-      bind:active={activeTab}
+      active={activeTab}
+      onSelect={selectTab}
       tabs={[
         { value: "summary", label: "Summary" },
         { value: "rollouts", label: "Rollouts", count: rolloutSummaries.length || undefined },
@@ -767,6 +1383,25 @@
     {#if activeTab === "summary"}
       <div class="summary-tab">
         <div class="summary-tab-main">
+          {#if run?.error_message}
+            <div class="mb-[20px]">
+              <div class="text-(--red,#f87171) text-[12px] font-[600] tracking-[0.02em] mb-[6px] uppercase">Error</div>
+              <pre class="[border:1px_solid_color-mix(in_srgb,var(--red,#f87171)_45%,transparent)] rounded-[8px] bg-[color-mix(in_srgb,var(--red,#f87171)_12%,transparent)] text-(--red,#f87171) [font-family:var(--font-mono)] text-[12px] leading-[17px] m-0 max-h-[320px] overflow-auto p-[12px_14px] whitespace-pre-wrap [word-break:break-word]">{run.error_message}</pre>
+            </div>
+          {/if}
+          {#if run.step_times || run.substep_times}
+            <div class="rollout-chart">
+              <div class="rollout-chart-title">Step &amp; substep timeline</div>
+              <div class="chart-scroll">
+                <StepTimings
+                  stepTimes={run.step_times}
+                  substepTimes={run.substep_times}
+                  layout="timeline"
+                  downloadName={`step_substep_times_${runId}.json`}
+                />
+              </div>
+            </div>
+          {/if}
           {#if rolloutsLoading && !rolloutSummaries.length}
             <div class="rollout-chart">
               <ChartSkeleton variant="line" height={140} showTitle />
@@ -786,20 +1421,22 @@
               </div>
             </div>
           {:else if rolloutsError}
-            <div class="empty">Failed to load rollouts: {rolloutsError}</div>
+            <div class="detail-empty">Failed to load rollouts: {rolloutsError}</div>
           {:else if !rolloutSummaries.length}
-            <div class="empty">No rollouts recorded yet.</div>
+            <div class="detail-empty">No rollouts recorded yet.</div>
           {:else}
             <div class="rollout-chart">
-              <LineChart
-                title="Reward"
-                data={rewardChartData}
-                formatX={(row) => `rollout ${row.rollout_id}`}
-                formatY={(value) => formatMean(value)}
-                ariaLabel="Reward chart"
-              />
+              <div class="chart-scroll">
+                <LineChart
+                  title="Reward"
+                  data={rewardChartData}
+                  formatX={(row) => `rollout ${row.rollout_id}`}
+                  formatY={(value) => formatMean(value)}
+                  ariaLabel="Reward chart"
+                />
+              </div>
               {#if chartStats}
-                <div class="rollout-chart-meta">
+                <div class="flex flex-wrap gap-[16px] mt-[6px] text-[11px] text-(--muted) [font-variant-numeric:tabular-nums]">
                   <span>min {formatMean(chartStats.min)}</span>
                   <span>latest {formatMean(chartStats.latest)}</span>
                   <span>max {formatMean(chartStats.max)}</span>
@@ -810,22 +1447,24 @@
             <!-- Score distribution: second graph, above the advantage graphs. -->
             <div class="rollout-chart">
               <div class="rollout-chart-title">Score distribution</div>
-              {#if scoreDist}
-                <ComparativeBarChart
-                  categories={distCategories(scoreDist)}
-                  series={distSeries(scoreDist)}
-                  height={120}
-                  showCategoryLabels={false}
-                  format={(v) => `${v}`}
-                />
-                <div class="dist-axis">
-                  <span>{formatMean(scoreDist.lo)}</span>
-                  <span class="dist-axis-label">reward</span>
-                  <span>{formatMean(scoreDist.hi)}</span>
-                </div>
-              {:else}
-                <ChartSkeleton variant="bars" height={120} />
-              {/if}
+              <div class="chart-scroll">
+                {#if scoreDist}
+                  <ComparativeBarChart
+                    categories={distCategories(scoreDist)}
+                    series={distSeries(scoreDist)}
+                    height={120}
+                    showCategoryLabels={false}
+                    format={(v) => `${v}`}
+                  />
+                  <div class="dist-axis">
+                    <span>{formatMean(scoreDist.lo)}</span>
+                    <span class="dist-axis-label">reward</span>
+                    <span>{formatMean(scoreDist.hi)}</span>
+                  </div>
+                {:else}
+                  <ChartSkeleton variant="bars" height={120} />
+                {/if}
+              </div>
             </div>
 
             {#if hasAdvantages}
@@ -859,6 +1498,29 @@
                 </div>
               </div>
             {/if}
+
+            {#if customTagNames.length}
+              <div class="chart-grid">
+                {#each customTagNames as tag (tag)}
+                  <div class="rollout-chart">
+                    <LineChart
+                      title={`${tag} (mean)`}
+                      data={tagChartData(tag)}
+                      formatX={(row) => `rollout ${row.rollout_id}`}
+                      formatY={(value) => formatMean(value)}
+                      ariaLabel={`${tag} chart`}
+                    />
+                    {#if tagChartStats(tag)}
+                      <div class="flex gap-[16px] mt-[6px] text-[11px] text-(--muted) [font-variant-numeric:tabular-nums]">
+                        <span>min {formatMean(tagChartStats(tag).min)}</span>
+                        <span>latest {formatMean(tagChartStats(tag).latest)}</span>
+                        <span>max {formatMean(tagChartStats(tag).max)}</span>
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
           {/if}
         </div>
         <aside class="summary-tab-side">
@@ -875,12 +1537,13 @@
     {:else if activeTab === "rollouts"}
       <div class="tab-panel">
       {#if rolloutsLoading && !rolloutSummaries.length}
-        <div class="empty">Loading rollouts…</div>
+        <div class="detail-empty">Loading rollouts…</div>
       {:else if rolloutsError}
-        <div class="empty">Failed to load rollouts: {rolloutsError}</div>
+        <div class="detail-empty">Failed to load rollouts: {rolloutsError}</div>
       {:else if !rolloutSummaries.length}
-        <div class="empty">No rollouts recorded yet.</div>
+        <div class="detail-empty">No rollouts recorded yet.</div>
       {:else}
+        <div class="table-wrap">
         <ResizableTable class="rollout-table" columns={rolloutColumns}>
           <tbody>
             {#each rolloutSummaries as r (r.rollout_id)}
@@ -891,34 +1554,47 @@
                 onclick={() => toggleRolloutDetail(r.rollout_id)}
               >
                 <td>#{r.rollout_id}</td>
-                <td class="rollout-mean">
+                <td class="text-(--text-bright)">
                   {formatMean(r.mean)}
                   {#if r.error_summary?.verdict === "all_infra_failure"}
-                    <span class="rollout-error-badge" title="All samples failed due to infrastructure error">infra failure</span>
+                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(239,68,68,0.15)] text-[#ef4444] [border:1px_solid_rgba(239,68,68,0.25)]" title="All samples failed due to infrastructure error">infra failure</span>
                   {:else if r.error_summary?.verdict === "partial_infra_failure"}
-                    <span class="rollout-warn-badge" title="Some samples failed due to infrastructure error">partial failure</span>
+                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(251,191,36,0.15)] text-[#fbbf24] [border:1px_solid_rgba(251,191,36,0.25)]" title="Some samples failed due to infrastructure error">partial failure</span>
                   {/if}
                 </td>
-                <td>{r.total}</td>
+                <td>{r.episode_count ?? "—"}</td>
                 <td>
                   <TimeAgo timestamp={r.created_at} showJustNow falsyRepresentation="—" />
                 </td>
               </tr>
               {#if expandedRolloutId === r.rollout_id}
-                <tr class="rollout-detail-row">
-                  <td colspan={rolloutColumns.length}>
+                <tr>
+                  <td class="p-[12px_10px] bg-(--color-c-gray-08,#1c1c1c) cursor-default" colspan={rolloutColumns.length}>
                     {#if expandedRolloutLoading}
-                      <div class="empty">Loading samples…</div>
+                      <div class="detail-empty">Loading rollouts…</div>
                     {:else if !expandedRollout || !sampleDist}
-                      <div class="empty">No samples recorded.</div>
+                      <div class="detail-empty">No rollouts recorded.</div>
                     {:else}
+                      {@const stepTiming = stepTimingForRollout(r.rollout_id)}
+                      {#if stepTiming}
+                        <div class="rollout-chart">
+                          <div class="rollout-chart-title">Step timing</div>
+                          <div class="chart-scroll">
+                            <StepTimings
+                              stepTimes={stepTiming.stepTimes}
+                              substepTimes={stepTiming.substepTimes}
+                              layout="rows"
+                            />
+                          </div>
+                        </div>
+                      {/if}
                       {#if expandedRollout.metrics && Object.keys(expandedRollout.metrics).length}
                         {@const m = expandedRollout.metrics}
                         {@const remoteErr = Number(m["agent/exit_status/remoteerror_sample_count"]) || 0}
                         {@const responseMissing = Number(m["agent/response_missing_sample_count"]) || 0}
                         {@const infraInvalid = Number(m["agent/invalid_infra_sample_count"]) || 0}
                         {@const limitsExceeded = Number(m["agent/limits_exceeded_sample_count"]) || 0}
-                        {@const totalSamples = Number(m["agent/valid_sample_count"]) || sampleDist.total || 0}
+                        {@const totalSamples = Number(m["agent/valid_sample_count"]) || sampleDist.sampleCount || 0}
                         {@const hasErrors = remoteErr > 0 || responseMissing > 0 || infraInvalid > 0}
                         {#if hasErrors}
                           <div class="rollout-diagnostics" class:diag-critical={remoteErr >= totalSamples}>
@@ -929,7 +1605,7 @@
                                 {remoteErr + infraInvalid} / {totalSamples} samples hit infrastructure errors
                               {/if}
                             </div>
-                            <div class="diag-details">
+                            <div class="flex flex-wrap gap-[6px] mb-[4px]">
                               {#if remoteErr}
                                 <span class="diag-tag">RemoteError: {remoteErr}</span>
                               {/if}
@@ -944,78 +1620,84 @@
                               {/if}
                             </div>
                             {#if remoteErr >= totalSamples}
-                              <div class="diag-hint">
+                              <div class="text-[11px] text-(--muted,#a3a3a3) mt-[6px]">
                                 Check the Modal app logs for sandbox/image build errors. Common cause: the environment image failed to build.
                               </div>
                             {/if}
                           </div>
                         {/if}
                       {/if}
-                      <div class="dist">
-                        <div class="dist-toolbar">
+                      <div class="mb-[16px]">
+                        <div class="flex justify-end mb-[6px]">
                           <button
-                            class="download-all-btn"
+                            type="button"
+                            class="inline-flex items-center gap-[5px] [background:none] [border:1px_solid_var(--border,#2f2f2f)] rounded-[4px] text-(--muted) text-[11px] p-[3px_8px] cursor-pointer hover:text-(--text) hover:border-(--border-strong,#4a4a4a)"
                             onclick={downloadAllTrajectories}
                             title="Download all samples as JSON"
                           >
                             <Download size={13} />
-                            Download all ({sampleDist.total} samples)
+                            Download all ({sampleDist.sampleCount} samples)
                           </button>
                         </div>
-                        <div
-                          class="dist-bars"
-                          role="group"
-                          aria-label="Sample score distribution"
-                        >
-                          {#each sampleDist.buckets as bucket, b (b)}
-                            <button
-                              class="dist-bar"
-                              class:active={activeBucket === b}
-                              class:is-empty={!bucket.length}
-                              style:height={`${(bucket.length / sampleDist.maxCount) * 100}%`}
-                              disabled={!bucket.length}
-                              title={`${bucket.length} sample${bucket.length === 1 ? "" : "s"} · reward ${bucketRange(b)}`}
-                              onclick={() => openBucket(b)}
-                            >
-                              <span class="dist-bar-count">{bucket.length || ""}</span>
-                            </button>
-                          {/each}
-                        </div>
-                        <div class="dist-axis">
-                          <span>{formatMean(sampleDist.lo)}</span>
-                          <span class="dist-axis-label">reward · {sampleDist.total} samples</span>
-                          <span>{formatMean(sampleDist.hi)}</span>
+                        <div class="chart-scroll">
+                          <div
+                            class="flex items-end gap-[2px] h-[120px] pt-[14px] min-w-[280px] [border-bottom:1px_solid_var(--border,#2f2f2f)]"
+                            role="group"
+                            aria-label="Reward distribution"
+                          >
+                            {#each sampleDist.buckets as bucket, b (b)}
+                              <button
+                                type="button"
+                                class="dist-bar"
+                                class:detail-active={activeBucket === b}
+                                class:is-empty={!bucket.length}
+                                style:height={`${(bucket.length / sampleDist.maxCount) * 100}%`}
+                                disabled={!bucket.length}
+                                title={bucketLabel(bucket, b)}
+                                onclick={() => openBucket(b)}
+                              >
+                                <span class="absolute top-[-14px] left-0 right-0 text-center text-[10px] text-(--muted) [font-variant-numeric:tabular-nums]">{bucket.length || ""}</span>
+                              </button>
+                            {/each}
+                          </div>
+                          <div class="dist-axis">
+                            <span>{formatMean(sampleDist.lo)}</span>
+                            <span class="dist-axis-label">reward · {distSummary}</span>
+                            <span>{formatMean(sampleDist.hi)}</span>
+                          </div>
                         </div>
                       </div>
 
                       {#if activeSample}
-                        <div class="rollout-sample sample-viewer">
+                        <div class="sample-viewer">
                           <div class="sample-viewer-header">
                             <div class="sample-viewer-nav">
                               <button
                                 class="sample-nav-btn"
                                 onclick={() => stepSample(-1)}
                                 disabled={activeSample.pos === 0}
-                                aria-label="Previous sample"
+                                aria-label="Previous rollout"
                               >
                                 <ChevronLeft size={14} />
                               </button>
-                              <span class="sample-viewer-pos">
-                                Sample {activeSample.pos + 1} / {activeSample.count}
+                              <span class="text-[12px] text-(--text-bright) [font-variant-numeric:tabular-nums]">
+                                Rollout {activeSample.pos + 1} / {activeSample.count}
                               </span>
                               <button
                                 class="sample-nav-btn"
                                 onclick={() => stepSample(1)}
                                 disabled={activeSample.pos === activeSample.count - 1}
-                                aria-label="Next sample"
+                                aria-label="Next rollout"
                               >
                                 <ChevronRight size={14} />
                               </button>
                               <span class="sample-viewer-hint">← / → to navigate</span>
                             </div>
-                            <div class="sample-viewer-meta">
-                              <span class="rollout-sample-score">
-                                reward {formatMean(activeSample.sample.score)}
+                            <div class="sample-viewer-actions">
+                              <span class="text-(--text-bright) [font-variant-numeric:tabular-nums]">
+                                reward {formatMean(activeSample.score)}{activeSample.samples.length > 1
+                                  ? ` · first of ${activeSample.samples.length} turns`
+                                  : ""}
                               </span>
                               <button
                                 class="sample-nav-btn"
@@ -1028,26 +1710,30 @@
                               <button
                                 class="sample-nav-btn"
                                 onclick={closeBucket}
-                                aria-label="Close sample viewer"
+                                aria-label="Close rollout viewer"
                               >
                                 <X size={14} />
                               </button>
                             </div>
                           </div>
+                          {#if activeSample.sample.metadata?.inference}
+                            <div class="rollout-sample-label">inference</div>
+                            <InferenceStats inference={activeSample.sample.metadata.inference} />
+                          {/if}
                           {#if activeSample.sample.metadata?._metadata_type === "audio" || activeSample.sample.metadata?.audio}
                             <div class="rollout-sample-label">audio</div>
                             <audio
-                              class="sample-audio"
+                              class="block w-full max-w-[400px] m-[4px_0_8px] rounded-[4px]"
                               controls
                               preload="none"
                               src={activeSample.sample.metadata.audio}
                             ></audio>
                           {/if}
-                          {#if activeSample.sample.metadata?._metadata_type === "image" || activeSample.sample.metadata?.image}
+                          {#if activeSample.image}
                             <div class="rollout-sample-label">image</div>
                             <img
-                              class="sample-image"
-                              src={activeSample.sample.metadata.image}
+                              class="block w-full max-w-[400px] h-auto m-[4px_0_8px] rounded-[4px] [border:1px_solid_var(--border)]"
+                              src={activeSample.image}
                               alt="rollout input"
                               loading="lazy"
                             />
@@ -1075,7 +1761,7 @@
                           {/each}
                           {#if activeSample.sample.metadata?.exit_status}
                             <div class="rollout-sample-label">exit status</div>
-                            <span class="rollout-sample-metric sample-exit-status" class:exit-ok={activeSample.sample.metadata.exit_status === "ok"} class:exit-err={activeSample.sample.metadata.exit_status !== "ok"}>
+                            <span class="rollout-sample-metric p-[2px_8px] rounded-[3px] text-[11px]! font-medium" class:exit-ok={activeSample.sample.metadata.exit_status === "ok"} class:exit-err={activeSample.sample.metadata.exit_status !== "ok"}>
                               {activeSample.sample.metadata.exit_status}
                             </span>
                           {/if}
@@ -1083,13 +1769,45 @@
                             <div class="rollout-sample-label">failure reason</div>
                             <pre class="rollout-sample-text">{activeSample.sample.metadata.eval_detail}</pre>
                           {/if}
+                          <!-- Catch-all: any other tag a custom reward/rollout function set on
+                               sample.metadata (e.g. sample.metadata["guessing"] = {...}) that
+                               isn't one of the known keys rendered explicitly above. -->
+                          {#each Object.entries(activeSample.sample.metadata ?? {}).filter(
+                            ([key]) =>
+                              ![
+                                "inference",
+                                "_metadata_type",
+                                "audio",
+                                "image",
+                                "image_ref",
+                                "trajectory_messages",
+                                "eval_report",
+                                "reference",
+                                "metrics",
+                                "exit_status",
+                                "eval_detail",
+                                "response_length",
+                                "prompt_length",
+                                "rollout_id",
+                                "rollout_idx",
+                              ].includes(key),
+                          ) as [name, value] (name)}
+                            <div class="rollout-sample-label">{name}</div>
+                            {#if value !== null && typeof value === "object"}
+                              <pre class="rollout-sample-text">{JSON.stringify(value, null, 2)}</pre>
+                            {:else}
+                              <span class="rollout-sample-metric">{String(value)}</span>
+                            {/if}
+                          {/each}
                           {#if activeSample.sample.trace?.length}
                             <div class="rollout-sample-label">trajectory timeline</div>
-                            <SampleTimeline trace={activeSample.sample.trace} />
+                            <div class="chart-scroll">
+                              <SampleTimeline trace={activeSample.sample.trace} />
+                            </div>
                           {/if}
                         </div>
                       {:else}
-                        <div class="dist-hint">Click a bar to inspect its samples.</div>
+                        <div class="text-[12px] text-(--muted) p-[4px_0]">Click a bar to inspect its rollouts.</div>
                       {/if}
                     {/if}
                   </td>
@@ -1098,22 +1816,24 @@
             {/each}
           </tbody>
         </ResizableTable>
+        </div>
       {/if}
       </div>
     {:else if activeTab === "logs"}
       <div class="tab-panel">
-      <div class="logs-statusbar">
-        <span class="logs-status">
+      {#if isRunning}
+      <div class="flex justify-end mb-[8px]">
+        <span class="inline-flex items-center gap-[6px] text-[11px] text-(--muted) uppercase tracking-[0.04em]">
           {#if logState === "streaming"}
-            <span class="dot dot-live"></span> live
+            <span class="dot bg-[#4ade80]! shadow-[0_0_0_2px_rgba(74,222,128,0.18)]"></span> live
           {:else if logState === "paused"}
             <span class="dot dot-dim"></span> paused
           {:else if logState === "reconnecting"}
-            <span class="dot dot-warn"></span> reconnecting…{#if logError} <span class="log-reconnect-reason">({logError})</span>{/if}
+            <span class="dot bg-[#fbbf24]!"></span> reconnecting…{#if logError} <span class="log-reconnect-reason">({logError})</span>{/if}
           {:else if logState === "done"}
             <span class="dot dot-dim"></span> finished
           {:else if logState === "error"}
-            <span class="dot dot-err"></span> error
+            <span class="dot bg-[#f87171]!"></span> error
           {:else if String(run?.status || "").toLowerCase() !== "running"}
             <span class="dot dot-dim"></span> run not active
           {:else}
@@ -1122,7 +1842,7 @@
         </span>
       </div>
 
-      <div class="logs-controls">
+      <div class="flex flex-wrap items-center gap-[8px] mb-[8px]">
         <button
           class="log-button"
           onclick={toggleLogPaused}
@@ -1134,15 +1854,15 @@
           Clear
         </button>
         <input
-          class="log-search"
+          class="[flex:1] min-w-[160px] bg-(--color-c-gray-08,#1c1c1c) text-(--text) [border:1px_solid_var(--border,#3a3a3a)] rounded-[4px] p-[4px_8px] text-[12px] [font-family:inherit]"
           type="search"
           placeholder="filter substring…"
           bind:value={logSearchInput}
           aria-label="Filter log lines"
         />
-        <label class="log-rate">
+        <label class="inline-flex items-center gap-[6px] text-(--muted) text-[11px]">
           <span>Rate cap</span>
-          <select bind:value={logRateCap} aria-label="Lines per second cap">
+          <select class="bg-(--color-c-gray-08,#1c1c1c) text-(--text) [border:1px_solid_var(--border,#3a3a3a)] rounded-[4px] p-[2px_6px] text-[12px]" bind:value={logRateCap} aria-label="Lines per second cap">
             <option value={0}>off</option>
             <option value={10}>10/s</option>
             <option value={50}>50/s</option>
@@ -1150,18 +1870,18 @@
             <option value={1000}>1000/s</option>
           </select>
         </label>
-        <label class="log-follow">
+        <label class="inline-flex items-center gap-[6px] text-(--muted) text-[11px]">
           <input type="checkbox" bind:checked={logFollow} />
           <span>Follow tail</span>
         </label>
       </div>
 
       {#if logState === "error" && logError}
-        <div class="empty">Log stream error: {logError}</div>
+        <div class="detail-empty">Log stream error: {logError}</div>
       {/if}
 
       {#if !logLines.length}
-        <div class="empty">
+        <div class="detail-empty">
           {#if String(run?.status || "").toLowerCase() !== "running"}
             Logs only stream while the run is active.
           {:else if logPaused}
@@ -1173,748 +1893,117 @@
           {/if}
         </div>
       {:else}
-        <div class="log-tail" bind:this={logTailEl}>
+        <div class="bg-(--color-c-gray-08,#0e0e0e) rounded-[6px] p-[8px_12px] max-h-[420px] overflow-y-auto overflow-x-auto [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[12px] leading-[1.45] text-(--text)" bind:this={logTailEl}>
           {#each logLines as entry (entry.id)}
-            <div class="log-row">
-              <span class="log-task">{entry.task_id || ""}</span>
-              <span class="log-line">{entry.line}</span>
+            <div class="flex gap-[10px] whitespace-pre">
+              <span class="shrink-0 text-(--muted) text-[10px] min-w-[64px] overflow-hidden text-ellipsis">{entry.task_id || ""}</span>
+              <span class="flex-1 whitespace-pre-wrap break-all">{entry.line}</span>
             </div>
           {/each}
         </div>
-        <div class="log-meta">
+        <div class="mt-[6px] text-[11px] text-(--muted) [font-variant-numeric:tabular-nums] flex gap-[6px]">
           <span>
             Showing last {logLines.length} line{logLines.length === 1 ? "" : "s"} (cap {LOG_BUFFER_MAX})
           </span>
           {#if logDropped > 0}
-            <span class="log-meta-drop">
+            <span class="text-[#fbbf24]">
               · {logDropped} dropped by rate cap
             </span>
           {/if}
         </div>
+      {/if}
+      {:else}
+        <!-- Finished run: page through the durable copy on demand. -->
+        <div class="flex flex-col gap-[12px] mb-[12px] p-[12px_14px] rounded-[8px] bg-(--color-c-gray-08,#161616) [border:1px_solid_var(--border,#2f2f2f)]">
+          <div class="flex items-center gap-[12px]">
+            <input
+              class="flex-1 min-w-0 bg-(--color-c-gray-10,#1c1c1c) text-(--text) [border:1px_solid_var(--border,#3a3a3a)] rounded-[5px] p-[6px_10px] text-[12px] [font-family:inherit] focus:outline-none focus:[border-color:color-mix(in_srgb,var(--accent)_55%,transparent)]"
+              type="search"
+              placeholder="filter substring…"
+              bind:value={logSearchInput}
+              aria-label="Filter log lines"
+            />
+            <span class="inline-flex items-center gap-[6px] text-[11px] text-(--muted) uppercase tracking-[0.04em] shrink-0">
+              <span class="dot dot-dim"></span> stored logs
+            </span>
+          </div>
+          <div class="flex flex-wrap items-center gap-[10px]">
+            <span class="text-(--muted) text-[11px] uppercase tracking-[0.04em]">Time range</span>
+            <input
+              class="w-[160px] bg-(--color-c-gray-10,#1c1c1c) text-(--text) [border:1px_solid_var(--border,#3a3a3a)] rounded-[5px] p-[5px_8px] text-[12px] [font-family:inherit] [font-variant-numeric:tabular-nums] focus:outline-none focus:[border-color:color-mix(in_srgb,var(--accent)_55%,transparent)]"
+              type="text"
+              placeholder="YYYY-MM-DD HH:MM"
+              bind:value={histRangeInput.since}
+              aria-label="Show logs since"
+            />
+            <span class="text-(--muted-strong) text-[13px]">→</span>
+            <input
+              class="w-[160px] bg-(--color-c-gray-10,#1c1c1c) text-(--text) [border:1px_solid_var(--border,#3a3a3a)] rounded-[5px] p-[5px_8px] text-[12px] [font-family:inherit] [font-variant-numeric:tabular-nums] focus:outline-none focus:[border-color:color-mix(in_srgb,var(--accent)_55%,transparent)]"
+              type="text"
+              placeholder="YYYY-MM-DD HH:MM"
+              bind:value={histRangeInput.until}
+              aria-label="Show logs until"
+            />
+            <button
+              class="log-button text-[11px] px-[10px] py-[4px]"
+              onclick={resetHistRange}
+              title="Reset to the run's time range"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+
+        {#if histError}
+          <div class="detail-empty">Failed to load logs: {histError}</div>
+        {/if}
+
+        {#if histLoading && !histLines.length}
+          <div class="detail-empty">Loading logs…</div>
+        {:else if !histLines.length}
+          <div class="detail-empty">
+            {#if logSearch}
+              No log lines matching "{logSearch}".
+            {:else}
+              No logs recorded for this run.
+            {/if}
+          </div>
+        {:else}
+          <div class="bg-(--color-c-gray-08,#0e0e0e) rounded-[6px] p-[8px_12px] max-h-[420px] overflow-y-auto overflow-x-auto [overflow-anchor:none] [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[12px] leading-[1.45] text-(--text)" bind:this={histTailEl} onscroll={onHistScroll}>
+            {#if histHasMore}
+              <div class="text-center text-[10px] text-(--muted) pb-[6px]">
+                {histLoadingOlder ? "Loading older lines…" : "Scroll up for older lines"}
+              </div>
+            {/if}
+            {#each histLines as entry (entry.id)}
+              <div class="flex gap-[10px] whitespace-pre" data-hist-id={entry.id}>
+                <span class="shrink-0 text-(--muted) text-[10px] min-w-[64px] overflow-hidden text-ellipsis">{entry.task_id || ""}</span>
+                <span class="flex-1 whitespace-pre-wrap break-all">{entry.line}</span>
+              </div>
+            {/each}
+            {#if histNewerWindows.length}
+              <div class="text-center text-[10px] text-(--muted) pt-[6px]">
+                {histLoadingNewer ? "Loading newer lines…" : "Scroll down for newer lines"}
+              </div>
+            {/if}
+          </div>
+          <div class="mt-[6px] text-[11px] text-(--muted) [font-variant-numeric:tabular-nums] flex items-center gap-[8px]">
+            <span>Showing {histLines.length} line{histLines.length === 1 ? "" : "s"}</span>
+            {#if histNewerWindows.length}
+              <span class="h-[12px] w-px bg-(--border)"></span>
+              <button
+                type="button"
+                class="text-(--accent) underline-offset-2 hover:underline bg-transparent border-0 p-0 cursor-pointer text-[11px]"
+                onclick={jumpHistToLatest}
+              >
+                Jump to latest
+              </button>
+            {/if}
+          </div>
+        {/if}
       {/if}
       </div>
     {/if}
   {/if}
 </section>
 
-<style>
-  .detail {
-    padding: 0 0 24px;
-    color: var(--text);
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - 145px);
-    max-height: calc(100vh - 145px);
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .detail.embedded {
-    padding: 0;
-    max-width: none;
-    margin: 0;
-    height: auto;
-    max-height: none;
-    overflow: visible;
-  }
-
-  .detail-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-  }
-
-  .back-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: none;
-    border: 0;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 13px;
-    padding: 4px 8px;
-    border-radius: 6px;
-  }
-
-  .back-button:hover {
-    color: var(--text);
-    background: var(--color-c-gray-10, #2f2f2f);
-  }
-
-  .detail-header-actions {
-    display: inline-flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .detail-collapse-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid var(--border, #2f2f2f);
-    border-radius: 6px;
-    background: none;
-    color: var(--muted);
-    cursor: pointer;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 4px 8px;
-  }
-
-  .detail-collapse-button:hover {
-    color: var(--text-bright);
-    border-color: var(--border-strong, #4a4a4a);
-  }
-
-  .header-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--muted);
-    font-size: 12px;
-    text-decoration: none;
-  }
-
-  .header-link:hover {
-    color: var(--accent);
-  }
-
-  .wandb-link {
-    color: var(--yellow, #fbbf24);
-  }
-
-  .wandb-link:hover {
-    color: var(--yellow, #fbbf24);
-    opacity: 0.8;
-  }
-
-  .detail-title-row {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 16px;
-  }
-
-  .detail-title {
-    font-size: 22px;
-    font-weight: 600;
-    color: var(--text-bright);
-    margin: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .resume-header-badge {
-    border: 1px solid color-mix(in srgb, var(--yellow, #fbbf24) 42%, transparent);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--yellow, #fbbf24) 10%, transparent);
-    color: var(--yellow, #fbbf24);
-    font-size: 12px;
-    line-height: 16px;
-    padding: 2px 8px;
-    white-space: nowrap;
-  }
-
-  /* ── Tab panels ───────────────────────────────────────────────────────── */
-  .tab-panel {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding-top: 20px;
-  }
-
-  .summary-tab {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-    gap: 32px;
-    align-items: start;
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: hidden;
-    padding-top: 20px;
-  }
-
-  .summary-tab-main {
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding-right: 4px;
-  }
-
-  .summary-tab-side {
-    border-left: 1px solid var(--border, #2f2f2f);
-    padding-left: 24px;
-    max-height: 100%;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-
-  .detail.embedded .summary-tab,
-  .detail.embedded .tab-panel,
-  .detail.embedded .summary-tab-main {
-    overflow-y: visible;
-  }
-
-  .detail.embedded .summary-tab-side {
-    max-height: none;
-    overflow-y: visible;
-  }
-
-  .logs-statusbar {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 8px;
-  }
-
-  @media (max-width: 900px) {
-    .summary-tab {
-      grid-template-columns: 1fr;
-      gap: 20px;
-      overflow-y: auto;
-    }
-
-    .summary-tab-main {
-      overflow-y: visible;
-      padding-right: 0;
-    }
-
-    .summary-tab-side {
-      border-left: 0;
-      padding-left: 0;
-      border-top: 1px solid var(--border, #2f2f2f);
-      padding-top: 16px;
-      max-height: none;
-      overflow-y: visible;
-    }
-  }
-
-  .rollout-chart {
-    margin-bottom: 20px;
-  }
-
-  .chart-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 20px;
-    margin-bottom: 20px;
-  }
-
-  .chart-grid .rollout-chart {
-    margin-bottom: 0;
-    min-width: 0;
-  }
-
-  @media (max-width: 900px) {
-    .chart-grid {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .rollout-chart-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-bright);
-    margin-bottom: 6px;
-  }
-
-  .rollout-chart-meta {
-    display: flex;
-    gap: 16px;
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-
-  :global(table.rollout-table) {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
-
-  :global(table.rollout-table th) {
-    text-align: left;
-    color: var(--muted);
-    font-weight: 500;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--border, #2f2f2f);
-  }
-
-  :global(table.rollout-table tbody tr) {
-    cursor: pointer;
-  }
-
-  :global(table.rollout-table tbody tr:hover) {
-    background: var(--color-c-gray-10, #2f2f2f);
-  }
-
-  :global(table.rollout-table tbody tr.expanded) {
-    background: var(--color-c-gray-10, #2f2f2f);
-  }
-
-  :global(table.rollout-table td) {
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border, #2f2f2f);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .rollout-mean {
-    color: var(--text-bright);
-  }
-
-  .rollout-detail-row td {
-    padding: 12px 10px;
-    background: var(--color-c-gray-08, #1c1c1c);
-    cursor: default;
-  }
-
-  .rollout-sample {
-    border-left: 2px solid var(--accent);
-    padding: 8px 12px;
-    margin-bottom: 12px;
-    background: var(--color-c-gray-10, #2f2f2f);
-    border-radius: 0 4px 4px 0;
-  }
-
-  /* ── Per-step sample score distribution ──────────────────────────────── */
-  .dist {
-    margin-bottom: 16px;
-  }
-
-  .dist-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 6px;
-  }
-
-  .download-all-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: none;
-    border: 1px solid var(--border, #2f2f2f);
-    border-radius: 4px;
-    color: var(--muted);
-    font-size: 11px;
-    padding: 3px 8px;
-    cursor: pointer;
-  }
-
-  .download-all-btn:hover {
-    color: var(--text);
-    border-color: var(--border-strong, #4a4a4a);
-  }
-
-  .dist-bars {
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    height: 120px;
-    padding-top: 14px;
-    border-bottom: 1px solid var(--border, #2f2f2f);
-  }
-
-  .dist-bar {
-    position: relative;
-    flex: 1;
-    min-height: 2px;
-    padding: 0;
-    border: 0;
-    border-radius: 2px 2px 0 0;
-    background: var(--color-c-gray-30, #4a4a4a);
-    cursor: pointer;
-    transition:
-      background 0.12s ease,
-      opacity 0.12s ease;
-  }
-
-  .dist-bar:hover:not(:disabled) {
-    background: var(--color-c-gray-40, #5e5e5e);
-  }
-
-  .dist-bar.active {
-    background: var(--accent);
-  }
-
-  .dist-bar.is-empty {
-    background: var(--color-c-gray-10, #2f2f2f);
-    cursor: default;
-    opacity: 0.5;
-  }
-
-  .dist-bar-count {
-    position: absolute;
-    top: -14px;
-    left: 0;
-    right: 0;
-    text-align: center;
-    font-size: 10px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .dist-axis {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .dist-axis-label {
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .dist-hint {
-    font-size: 12px;
-    color: var(--muted);
-    padding: 4px 0;
-  }
-
-  /* ── Single-sample viewer (bucket drill-in) ──────────────────────────── */
-  .sample-viewer-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 6px;
-  }
-
-  .sample-viewer-nav,
-  .sample-viewer-meta {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .sample-viewer-pos {
-    font-size: 12px;
-    color: var(--text-bright);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .sample-viewer-hint {
-    font-size: 11px;
-    color: var(--muted);
-  }
-
-  .sample-nav-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2px;
-    border: 1px solid var(--border, #2f2f2f);
-    border-radius: 4px;
-    background: none;
-    color: var(--muted);
-    cursor: pointer;
-  }
-
-  .sample-nav-btn:hover:not(:disabled) {
-    color: var(--text-bright);
-    border-color: var(--border-strong, #4a4a4a);
-  }
-
-  .sample-nav-btn:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
-  .rollout-sample-score {
-    color: var(--text-bright);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .rollout-sample-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
-    margin-top: 8px;
-    margin-bottom: 2px;
-  }
-
-  .sample-audio {
-    display: block;
-    width: 100%;
-    max-width: 400px;
-    margin: 4px 0 8px;
-    border-radius: 4px;
-  }
-
-  .sample-image {
-    display: block;
-    width: 100%;
-    max-width: 400px;
-    height: auto;
-    margin: 4px 0 8px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-  }
-
-  .rollout-sample-metric {
-    font-size: 13px;
-    font-variant-numeric: tabular-nums;
-    color: var(--text-bright);
-  }
-
-  .rollout-sample-text {
-    margin: 0;
-    padding: 8px;
-    background: var(--color-c-gray-08, #1c1c1c);
-    border-radius: 4px;
-    font-size: 12px;
-    color: var(--text);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 240px;
-    overflow: auto;
-  }
-
-  .sample-exit-status {
-    padding: 2px 8px;
-    border-radius: 3px;
-    font-size: 11px;
-    font-weight: 500;
-  }
-  .exit-ok {
-    background: rgba(74, 222, 128, 0.12);
-    color: #4ade80;
-  }
-  .exit-err {
-    background: rgba(248, 113, 113, 0.12);
-    color: #f87171;
-  }
-
-  .empty {
-    color: var(--muted);
-    font-size: 13px;
-    padding: 16px 0;
-  }
-
-  .logs-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .dot {
-    display: inline-block;
-    width: 7px;
-    height: 7px;
-    border-radius: 9999px;
-    background: var(--muted);
-  }
-
-  .dot-live {
-    background: #4ade80;
-    box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.18);
-  }
-
-  .dot-warn {
-    background: #fbbf24;
-  }
-
-  .dot-err {
-    background: #f87171;
-  }
-
-  .dot-dim {
-    background: #6b7280;
-  }
-
-  .log-tail {
-    background: var(--color-c-gray-08, #0e0e0e);
-    border-radius: 6px;
-    padding: 8px 12px;
-    max-height: 420px;
-    overflow-y: auto;
-    overflow-x: auto;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
-    line-height: 1.45;
-    color: var(--text);
-  }
-
-  .log-row {
-    display: flex;
-    gap: 10px;
-    white-space: pre;
-  }
-
-  .log-task {
-    flex-shrink: 0;
-    color: var(--muted);
-    font-size: 10px;
-    min-width: 64px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .log-line {
-    flex: 1;
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
-
-  .log-meta {
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-    display: flex;
-    gap: 6px;
-  }
-
-  .log-meta-drop {
-    color: #fbbf24;
-  }
-
-  .logs-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-
-  .log-button {
-    background: var(--color-c-gray-10, #2f2f2f);
-    color: var(--text);
-    border: 1px solid var(--border, #3a3a3a);
-    border-radius: 4px;
-    padding: 4px 10px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .log-button:hover:not(:disabled) {
-    background: var(--color-c-gray-12, #3a3a3a);
-  }
-
-  .log-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .log-search {
-    flex: 1;
-    min-width: 160px;
-    background: var(--color-c-gray-08, #1c1c1c);
-    color: var(--text);
-    border: 1px solid var(--border, #3a3a3a);
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 12px;
-    font-family: inherit;
-  }
-
-  .log-rate,
-  .log-follow {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--muted);
-    font-size: 11px;
-  }
-
-  .log-rate select {
-    background: var(--color-c-gray-08, #1c1c1c);
-    color: var(--text);
-    border: 1px solid var(--border, #3a3a3a);
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 12px;
-  }
-
-  /* ── Rollout error indicators ──────────────────────────────────────── */
-
-  .rollout-error td {
-    background: rgba(239, 68, 68, 0.06);
-  }
-  .rollout-warn td {
-    background: rgba(251, 191, 36, 0.06);
-  }
-
-  .rollout-error-badge,
-  .rollout-warn-badge {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 500;
-    padding: 1px 6px;
-    border-radius: 3px;
-    margin-left: 6px;
-    vertical-align: middle;
-  }
-  .rollout-error-badge {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.25);
-  }
-  .rollout-warn-badge {
-    background: rgba(251, 191, 36, 0.15);
-    color: #fbbf24;
-    border: 1px solid rgba(251, 191, 36, 0.25);
-  }
-
-  /* ── Rollout diagnostics banner ────────────────────────────────────── */
-
-  .rollout-diagnostics {
-    padding: 10px 14px;
-    border-radius: 6px;
-    margin-bottom: 12px;
-    background: rgba(251, 191, 36, 0.08);
-    border: 1px solid rgba(251, 191, 36, 0.2);
-  }
-  .rollout-diagnostics.diag-critical {
-    background: rgba(239, 68, 68, 0.08);
-    border-color: rgba(239, 68, 68, 0.2);
-  }
-
-  .diag-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: #fbbf24;
-    margin-bottom: 6px;
-  }
-  .diag-critical .diag-title {
-    color: #ef4444;
-  }
-
-  .diag-details {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 4px;
-  }
-  .diag-tag {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 3px;
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text, #d1d1d1);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .diag-hint {
-    font-size: 11px;
-    color: var(--muted, #a3a3a3);
-    margin-top: 6px;
-  }
-</style>

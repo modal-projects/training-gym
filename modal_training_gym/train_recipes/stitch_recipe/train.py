@@ -1,11 +1,11 @@
 """The trainer half of a stitch run: miles in publish-only disaggregated mode.
 
-This is a :class:`MilesConfig` — same flags, same model/dataset/wandb converters
+This is a :class:`MilesRecipe` — same flags, same model/dataset/wandb converters
 — with the ``miles_disagg`` deltas on top: no local rollout engines, sparse
 weight deltas published to a bulletin board instead of an NCCL broadcast, and
 stitch's request/publish hooks wired in.
 
-Deriving from ``MilesConfig`` is the point: a stitch run's trainer *is* a miles
+Deriving from ``MilesRecipe`` is the point: a stitch run's trainer *is* a miles
 trainer, so its ~100 flags are maintained in one place, and
 :class:`~modal_training_gym.train_recipes.stitch_recipe.recipe.StitchRecipe`
 takes the trainer as a field rather than being one.
@@ -13,7 +13,11 @@ takes the trainer as a field rather than being one.
 
 from __future__ import annotations
 
+from dataclasses import field
 from typing import Any
+
+from pydantic import ConfigDict, model_validator
+from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import ModelConfig
@@ -21,7 +25,7 @@ from modal_training_gym.train_recipes.gpu_allocation import (
     GpuAllocation,
     validate_megatron_actor_parallelism,
 )
-from modal_training_gym.train_recipes.miles_recipe.recipe import MilesConfig
+from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 from modal_training_gym.train_recipes.stitch_recipe.pins import (
     MEGATRON_PATH,
     MILES_IMAGE_TAG,
@@ -46,7 +50,7 @@ HOOK_CONFIG_FIELDS = frozenset(
     }
 )
 
-# Inherited MilesConfig fields that must NOT reach this trainer's command line:
+# Inherited MilesRecipe fields that must NOT reach this trainer's command line:
 # they configure a local rollout engine, which a disaggregated run does not have
 # (the Flash pool's engines are configured by the serving half instead).
 _TRAINER_DROP = frozenset(
@@ -68,10 +72,11 @@ _TRAINER_DROP = frozenset(
 )
 
 
-class StitchTrainConfig(MilesConfig):
+@dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
+class StitchTrainConfig(MilesRecipe):
     """miles trainer for a disaggregated stitch run.
 
-    Don't see the flag you need? Every :class:`MilesConfig` field applies here,
+    Don't see the flag you need? Every :class:`MilesRecipe` field applies here,
     and any additional class attribute becomes a miles CLI flag.
     """
 
@@ -81,7 +86,7 @@ class StitchTrainConfig(MilesConfig):
     miles_repo_ref: str = MILES_REPO_REF
     # git patches applied to the Megatron source tree at container start, by
     # absolute in-image path (the trainer image mounts this package's patches).
-    megatron_runtime_patches: list[str] = []
+    megatron_runtime_patches: list[str] = field(default_factory=list)
 
     gpu_type: str = "B200"
     ephemeral_disk: int | None = None
@@ -96,7 +101,7 @@ class StitchTrainConfig(MilesConfig):
     # the same quantizer contract or the first delta apply fails on a checksum.
     served_checkpoint_format: str = "bf16"
     bf16_checkpoint_path: str = ""
-    prep_env: dict[str, str] = {}
+    prep_env: dict[str, str] = field(default_factory=dict)
 
     # Inline dict → a node-local YAML file every Ray actor re-reads at the same
     # path (per-launch tmpdirs differ across nodes).
@@ -143,33 +148,28 @@ class StitchTrainConfig(MilesConfig):
     # replicas would only self-sync on their poll and fall outside the lag bound.
     async_mode: bool = False
 
-    environment: dict = {
-        "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-        "NCCL_NVLS_ENABLE": "1",
-        "NVSHMEM_DISABLE_NCCL": "1",
-        "NCCL_TIMEOUT_MS": "360000000",
-    }
+    environment: dict = field(
+        default_factory=lambda: {
+            "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+            "NCCL_NVLS_ENABLE": "1",
+            "NVSHMEM_DISABLE_NCCL": "1",
+            "NCCL_TIMEOUT_MS": "360000000",
+        }
+    )
 
-    def __init__(self, **kwargs: Any) -> None:
-        self.environment = dict(type(self).environment)
-        self.app_tags = dict(type(self).app_tags)
-        self.image_run_commands = list(type(self).image_run_commands)
-        self.image_env = dict(type(self).image_env)
-        self.patch_files = list(type(self).patch_files)
-        self.megatron_runtime_patches = list(type(self).megatron_runtime_patches)
-        self.prep_env = dict(type(self).prep_env)
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+    @model_validator(mode="after")
+    def _validate_gpu_allocation(self) -> "StitchTrainConfig":
+        """Replaces MilesRecipe's allocator, which reads ``colocate=False`` as
+        "the trainer also owns rollout GPUs" and so rejects
+        ``rollout_num_gpus=0``. Here the engines are a separate Flash pool,
+        sized by the serving half, so only the actor cluster is checked."""
         if self.served_checkpoint_format not in ("bf16", "nvfp4"):
             raise ValueError(
                 "served_checkpoint_format must be 'bf16' or 'nvfp4', got "
                 f"{self.served_checkpoint_format!r}"
             )
-        # Deliberately not MilesConfig's resolve_gpu_allocation: its allocator
-        # reads colocate=False as "the trainer also owns rollout GPUs" and so
-        # rejects rollout_num_gpus=0. Here the engines are a separate Flash pool,
-        # sized by the serving half, so only the actor cluster is checked.
         validate_megatron_actor_parallelism(self)
+        return self
 
     @property
     def gpu_allocation(self) -> GpuAllocation:

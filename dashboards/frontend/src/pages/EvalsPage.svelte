@@ -1,5 +1,6 @@
 <script>
   import {
+    Check,
     ChevronDown,
     ChevronRight,
     ExternalLink,
@@ -9,10 +10,13 @@
   } from "lucide-svelte";
   import ConversationView from "../components/ConversationView.svelte";
   import Drawer from "../components/Drawer.svelte";
+  import FilterBulkActions from "../components/FilterBulkActions.svelte";
+  import GroupSection from "../components/GroupSection.svelte";
   import MinimalTableSkeleton from "../components/MinimalTableSkeleton.svelte";
   import ResizableTable from "../components/ResizableTable.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
+  import { toggleInSet } from "../lib/set.js";
 
   let {
     allEvals,
@@ -31,12 +35,13 @@
   } = $props();
 
   let search = $state("");
-  let statusFilter = $state("all");
+  let activeStatusFilters = $state(new Set(["completed", "pending", "failed"]));
   let statusMenuOpen = $state(false);
-  let datasetFilter = $state("all");
+  let activeDatasetFilters = $state(new Set());
   let datasetMenuOpen = $state(false);
   let expandedConfigIds = $state(new Set());
   let expandedInitialized = $state(false);
+  let seenDatasets = new Set();
   const evalColumns = [
     { key: "name", label: "Name", width: 220, minWidth: 140 },
     { key: "dataset", label: "Dataset", width: 180, minWidth: 120 },
@@ -254,10 +259,7 @@
   }
 
   function toggleGroup(evalConfigId) {
-    const next = new Set(expandedConfigIds);
-    if (next.has(evalConfigId)) next.delete(evalConfigId);
-    else next.add(evalConfigId);
-    expandedConfigIds = next;
+    expandedConfigIds = toggleInSet(expandedConfigIds, evalConfigId);
   }
 
   $effect(() => {
@@ -281,22 +283,61 @@
       }, {}),
   );
 
+  let allStatusFiltersActive = $derived(activeStatusFilters.size === 3);
+  let allDatasetFiltersActive = $derived.by(() =>
+    datasetOptions.length > 0 && datasetOptions.every((dataset) => activeDatasetFilters.has(dataset)),
+  );
+
+  $effect(() => {
+    const optionsSet = new Set(datasetOptions);
+    const next = new Set(
+      [...activeDatasetFilters].filter((dataset) => optionsSet.has(dataset)),
+    );
+    let changed = false;
+
+    if (next.size !== activeDatasetFilters.size) {
+      changed = true;
+    }
+
+    for (const dataset of datasetOptions) {
+      if (!seenDatasets.has(dataset)) {
+        seenDatasets.add(dataset);
+        next.add(dataset);
+        changed = true;
+      }
+    }
+
+    for (const dataset of [...seenDatasets]) {
+      if (!optionsSet.has(dataset)) {
+        seenDatasets.delete(dataset);
+      }
+    }
+
+    if (changed) activeDatasetFilters = next;
+  });
+
   let filteredGroups = $derived.by(() => {
     const query = search.trim().toLowerCase();
     return evalConfigGroups
       .map((group) => {
-        if (datasetFilter !== "all" && groupDataset(group) !== datasetFilter) {
+        let runs = group.runs;
+        if (!activeDatasetFilters.has(groupDataset(group))) {
           return null;
         }
-        let runs = group.runs;
-        if (statusFilter !== "all") {
-          const wanted =
-            statusFilter === "completed"
-              ? "Completed"
-              : statusFilter === "pending"
-                ? "Pending"
-                : "Failed";
-          runs = runs.filter((run) => run.status === wanted);
+        if (activeStatusFilters.size === 0) {
+          return null;
+        }
+        runs = runs.filter((run) => {
+          const bucket =
+            run.status === "Completed"
+              ? "completed"
+              : run.status === "Pending"
+                ? "pending"
+                : "failed";
+          return activeStatusFilters.has(bucket);
+        });
+        if (!runs.length) {
+          return null;
         }
         if (query) {
           const groupMatches =
@@ -326,9 +367,28 @@
       .filter(Boolean);
   });
 
-  function switchDatasetFilter(dataset) {
-    datasetFilter = dataset;
-    datasetMenuOpen = false;
+  function toggleStatusFilter(status) {
+    activeStatusFilters = toggleInSet(activeStatusFilters, status);
+  }
+
+  function selectAllStatusFilters() {
+    activeStatusFilters = new Set(["completed", "pending", "failed"]);
+  }
+
+  function clearStatusFilters() {
+    activeStatusFilters = new Set();
+  }
+
+  function toggleDatasetFilter(dataset) {
+    activeDatasetFilters = toggleInSet(activeDatasetFilters, dataset);
+  }
+
+  function selectAllDatasetFilters() {
+    activeDatasetFilters = new Set(datasetOptions);
+  }
+
+  function clearDatasetFilters() {
+    activeDatasetFilters = new Set();
   }
 
   let selectedEval = $state(null);
@@ -375,10 +435,7 @@
   }
 
   function toggleExample(index) {
-    const next = new Set(expandedExamples);
-    if (next.has(index)) next.delete(index);
-    else next.add(index);
-    expandedExamples = next;
+    expandedExamples = toggleInSet(expandedExamples, index);
   }
 
   let drawerRows = $derived.by(() => {
@@ -451,7 +508,7 @@
   }}
 />
 
-<section class="summary-row">
+<section class="summary-sticky grid [grid-template-columns:repeat(3,minmax(0,1fr))] gap-[14px] p-[0_24px] mb-[24px] max-[1080px]:[grid-template-columns:repeat(2,minmax(0,1fr))]">
   <article class="summary-card">
     <span class="summary-label">Total runs</span>
     <strong>{allEvals.length}</strong>
@@ -466,23 +523,23 @@
   </article>
 </section>
 
-<section class="runs-surface">
-  <div class="filters-row">
-    <label class="search-wrap" aria-label="Search eval runs">
+<section class="[border:0] [background:transparent] p-[0_24px_16px] max-[900px]:pb-[24px]">
+  <div class="mb-[24px] flex items-center gap-[0.4rem] max-[900px]:flex-col max-[900px]:[align-items:stretch]">
+    <label class="inline-flex items-center gap-[0.42rem] [border:1px_solid_var(--border)] rounded-[7px] bg-(--panel) min-w-[220px] w-[min(320px,100%)] p-[0.24rem_0.55rem] max-[900px]:w-full" aria-label="Search eval runs">
       <span class="search-icon"><Search size={13} /></span>
       <input
         type="search"
-        class="search-input"
+        class="[border:0] [outline:0] [background:transparent] text-(--text) w-full min-w-0 [font:inherit] text-[0.78rem] placeholder:text-(--muted)"
         placeholder="Search"
         bind:value={search}
         autocomplete="off"
         spellcheck="false"
       />
     </label>
-    <div class="menu-wrap">
+    <div class="evals-menu-wrap">
       <button
-        class="status-filter"
-        class:open={statusMenuOpen}
+        class="evals-status-filter"
+        class:evals-open={statusMenuOpen}
         onclick={(event) => {
           event.stopPropagation();
           statusMenuOpen = !statusMenuOpen;
@@ -498,29 +555,64 @@
       </button>
       {#if statusMenuOpen}
         <div class="status-menu">
-          <button class="status-item" onclick={() => ((statusFilter = "all"), (statusMenuOpen = false))}>
-            <span>All</span>
-            <span class="status-count">{allEvals.length}</span>
-          </button>
-          <button class="status-item" onclick={() => ((statusFilter = "completed"), (statusMenuOpen = false))}>
-            <span>Completed</span>
+          <FilterBulkActions
+            allSelected={allStatusFiltersActive}
+            noneSelected={activeStatusFilters.size === 0}
+            onSelectAll={selectAllStatusFilters}
+            onDeselectAll={clearStatusFilters}
+          />
+          <button
+            class="status-item"
+            onclick={(event) => {
+              event.stopPropagation();
+              toggleStatusFilter("completed");
+            }}
+          >
+            <span class="checkmark" class:checked={activeStatusFilters.has("completed")}>
+              {#if activeStatusFilters.has("completed")}
+                <Check size={11} />
+              {/if}
+            </span>
+            <span class="item-label">Completed</span>
             <span class="status-count">{evalCompletedTotal}</span>
           </button>
-          <button class="status-item" onclick={() => ((statusFilter = "pending"), (statusMenuOpen = false))}>
-            <span>Pending</span>
+          <button
+            class="status-item"
+            onclick={(event) => {
+              event.stopPropagation();
+              toggleStatusFilter("pending");
+            }}
+          >
+            <span class="checkmark" class:checked={activeStatusFilters.has("pending")}>
+              {#if activeStatusFilters.has("pending")}
+                <Check size={11} />
+              {/if}
+            </span>
+            <span class="item-label">Pending</span>
             <span class="status-count">{evalPendingTotal}</span>
           </button>
-          <button class="status-item" onclick={() => ((statusFilter = "failed"), (statusMenuOpen = false))}>
-            <span>Failed</span>
+          <button
+            class="status-item"
+            onclick={(event) => {
+              event.stopPropagation();
+              toggleStatusFilter("failed");
+            }}
+          >
+            <span class="checkmark" class:checked={activeStatusFilters.has("failed")}>
+              {#if activeStatusFilters.has("failed")}
+                <Check size={11} />
+              {/if}
+            </span>
+            <span class="item-label">Failed</span>
             <span class="status-count">{evalFailedTotal}</span>
           </button>
         </div>
       {/if}
     </div>
-    <div class="menu-wrap">
+    <div class="evals-menu-wrap">
       <button
-        class="status-filter"
-        class:open={datasetMenuOpen}
+        class="evals-status-filter"
+        class:evals-open={datasetMenuOpen}
         onclick={(event) => {
           event.stopPropagation();
           datasetMenuOpen = !datasetMenuOpen;
@@ -535,13 +627,26 @@
         />
       </button>
       {#if datasetMenuOpen}
-        <div class="status-menu dataset-menu">
-          <button class="status-item" onclick={() => switchDatasetFilter("all")}>
-            <span class="dataset-item-label">All datasets</span>
-            <span class="status-count">{allEvals.length}</span>
-          </button>
+        <div class="status-menu w-[min(320px,calc(100vw_-_2rem))]!">
+          <FilterBulkActions
+            allSelected={allDatasetFiltersActive}
+            noneSelected={activeDatasetFilters.size === 0}
+            onSelectAll={selectAllDatasetFilters}
+            onDeselectAll={clearDatasetFilters}
+          />
           {#each datasetOptions as dataset (dataset)}
-            <button class="status-item" onclick={() => switchDatasetFilter(dataset)}>
+            <button
+              class="status-item"
+              onclick={(event) => {
+                event.stopPropagation();
+                toggleDatasetFilter(dataset);
+              }}
+            >
+              <span class="checkmark" class:checked={activeDatasetFilters.has(dataset)}>
+                {#if activeDatasetFilters.has(dataset)}
+                  <Check size={11} />
+                {/if}
+              </span>
               <span class="dataset-item-label">{dataset}</span>
               <span class="status-count">{datasetCounts[dataset] || 0}</span>
             </button>
@@ -551,112 +656,105 @@
     </div>
   </div>
 
-  <div class="runs-body">
+  <div class="p-0">
     {#if loading}
-      <div class="table-wrap">
+      <div class="table-wrap freeze-header">
         <MinimalTableSkeleton
-          class="runs-table"
+          class="evals-runs-table"
           columns={evalSkeletonColumns}
           rows={6}
         />
       </div>
     {:else if error}
-      <div class="empty">Failed to load: {error}</div>
+      <div class="page-empty">Failed to load: {error}</div>
     {:else if !allEvals.length}
-      <div class="empty">No eval results yet.</div>
+      <div class="page-empty">No eval results yet.</div>
     {:else}
-      <div class="eval-groups">
+      <div class="flex flex-col gap-[24px] p-0">
         {#if !filteredGroups.length}
-          <div class="empty">No evals match the current filters.</div>
+          <div class="page-empty">No evals match the current filters.</div>
         {/if}
         {#each filteredGroups as group (group.evalConfigId)}
-          <section class="eval-group">
-            <button class="eval-group-header" onclick={() => toggleGroup(group.evalConfigId)}>
-              <div class="eval-group-title-wrap">
-                <div class="eval-group-title">{group.evalConfigId || group.meta.dataset}</div>
-                <div class="eval-group-subtitle">{groupSubtitle(group)}</div>
-              </div>
-              <div class="eval-group-meta">
-                {#if nonPlaceholderText(group.meta.model)}
-                  <span class="group-meta-pill">{group.meta.model}</span>
-                {/if}
-                {#if nonPlaceholderText(group.meta.split)}
-                  <span class="group-meta-pill">split: {group.meta.split}</span>
-                {/if}
-                <span class="group-meta-pill">total evals: {group.totalEvals}</span>
-                <span class="group-meta-pill">avg: {group.avgAccuracy.toFixed(4)}</span>
-                {#if group.latestCreatedAt}
-                  <span class="group-meta-pill group-meta-pill-time">
-                    <TimeAgo timestamp={group.latestCreatedAt} showJustNow falsyRepresentation="—" />
-                  </span>
-                {/if}
-                <ChevronDown
-                  size={14}
-                  style={`color: var(--muted); transform: ${expandedConfigIds.has(group.evalConfigId) ? "rotate(180deg)" : "rotate(0deg)"};`}
-                />
-              </div>
-            </button>
+          <GroupSection
+            title={group.evalConfigId || group.meta.dataset}
+            subtitle={groupSubtitle(group)}
+            expanded={expandedConfigIds.has(group.evalConfigId)}
+            onToggle={() => toggleGroup(group.evalConfigId)}
+          >
+            {#snippet meta()}
+              {#if nonPlaceholderText(group.meta.model)}
+                <span class="group-meta-pill">{group.meta.model}</span>
+              {/if}
+              {#if nonPlaceholderText(group.meta.split)}
+                <span class="group-meta-pill">split: {group.meta.split}</span>
+              {/if}
+              <span class="group-meta-pill">total evals: {group.totalEvals}</span>
+              <span class="group-meta-pill">avg: {group.avgAccuracy.toFixed(4)}</span>
+              {#if group.latestCreatedAt}
+                <span class="group-meta-pill [font-variant-numeric:tabular-nums]">
+                  <TimeAgo timestamp={group.latestCreatedAt} showJustNow falsyRepresentation="—" />
+                </span>
+              {/if}
+            {/snippet}
 
-            {#if expandedConfigIds.has(group.evalConfigId)}
-              <div class="table-wrap">
-                <ResizableTable class="runs-table evals-runs-table" columns={evalColumns} stickyFirstColumn>
-                  <tbody>
-                    {#each group.visibleRuns as run, runIndex (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}-${runIndex}`)}
-                      {@const linkedDeployment = findDeploymentRow(run, group)}
-                      {@const deploymentName = evalDeploymentName(run, linkedDeployment)}
-                      {@const deploymentRef = deploymentRefValue(linkedDeployment)}
-                      {@const trainingRunId = linkedTrainingRunId(linkedDeployment)}
-                      {@const baseModel = evalBaseModel(run, group, linkedDeployment)}
-                      {@const dataset = groupDataset(group)}
-                      <tr
-                        class="eval-row-clickable"
-                        class:row-selected={selectedEval?.run?.eval?.eval_id === run.eval.eval_id}
-                        onclick={(event) => {
-                          if (event.target.closest(".cross-link")) return;
-                          openEvalDrawer(run, group);
-                        }}
-                      >
-                        <td class="mono name-cell" title={deploymentName}>
-                          <span class="truncate-text">{deploymentName}</span>
-                        </td>
-                        <td class="dataset-cell" title={dataset}>
-                          <span class="truncate-text">{dataset}</span>
-                        </td>
-                        <td class="mono deployment-cell" title={deploymentRef || "—"}>
-                          <span class="truncate-text">{deploymentRef || "—"}</span>
-                        </td>
-                        <td class="training-run-cell" title={trainingRunId || "—"}>
-                          {#if trainingRunId}
-                            <button
-                              class="cross-link mono"
-                              onclick={() => onOpenTrainingRun?.(trainingRunId)}
-                            >
-                              {trainingRunId}
-                            </button>
-                          {:else}
-                            —
-                          {/if}
-                        </td>
-                        <td class="base-model-cell" title={baseModel}>
-                          <span class="truncate-text">{baseModel}</span>
-                        </td>
-                        <td>
-                          <StatusPill status={run.pillStatus} label={run.statusLabel} />
-                        </td>
-                        <td class="eval-score">
-                          {run.status === "Failed" ? "—" : run.avgScore.toFixed(4)}
-                        </td>
-                        <td>{run.totalRows ? run.totalRows : "—"}</td>
-                        <td class="created-cell">
-                          <TimeAgo timestamp={run.createdAt} showJustNow falsyRepresentation="—" />
-                        </td>
-                      </tr>
-                    {/each}
-                  </tbody>
-                </ResizableTable>
-              </div>
-            {/if}
-          </section>
+            <div class="table-wrap freeze-header" style="--frozen-table-offset: 360px;">
+              <ResizableTable class="evals-runs-table" columns={evalColumns} stickyFirstColumn>
+                <tbody>
+                  {#each group.visibleRuns as run, runIndex (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}-${runIndex}`)}
+                    {@const linkedDeployment = findDeploymentRow(run, group)}
+                    {@const deploymentName = evalDeploymentName(run, linkedDeployment)}
+                    {@const deploymentRef = deploymentRefValue(linkedDeployment)}
+                    {@const trainingRunId = linkedTrainingRunId(linkedDeployment)}
+                    {@const baseModel = evalBaseModel(run, group, linkedDeployment)}
+                    {@const dataset = groupDataset(group)}
+                    <tr
+                      class="eval-row-clickable"
+                      class:row-selected={selectedEval?.run?.eval?.eval_id === run.eval.eval_id}
+                      onclick={(event) => {
+                        if (event.target.closest(".cross-link")) return;
+                        openEvalDrawer(run, group);
+                      }}
+                    >
+                      <td class="evals-mono evals-name-cell" title={deploymentName}>
+                        <span class="truncate-text">{deploymentName}</span>
+                      </td>
+                      <td class="evals-dataset-cell" title={dataset}>
+                        <span class="truncate-text">{dataset}</span>
+                      </td>
+                      <td class="evals-mono evals-deployment-cell" title={deploymentRef || "—"}>
+                        <span class="truncate-text">{deploymentRef || "—"}</span>
+                      </td>
+                      <td class="max-w-0" title={trainingRunId || "—"}>
+                        {#if trainingRunId}
+                          <button
+                            class="cross-link"
+                            onclick={() => onOpenTrainingRun?.(trainingRunId)}
+                          >
+                            {trainingRunId}
+                          </button>
+                        {:else}
+                          —
+                        {/if}
+                      </td>
+                      <td class="base-model-cell" title={baseModel}>
+                        <span class="truncate-text">{baseModel}</span>
+                      </td>
+                      <td>
+                        <StatusPill status={run.pillStatus} label={run.statusLabel} />
+                      </td>
+                      <td class="text-(--text-bright) font-[600]">
+                        {run.status === "Failed" ? "—" : run.avgScore.toFixed(4)}
+                      </td>
+                      <td>{run.totalRows ? run.totalRows : "—"}</td>
+                      <td class="created-cell">
+                        <TimeAgo timestamp={run.createdAt} showJustNow falsyRepresentation="—" />
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </ResizableTable>
+            </div>
+          </GroupSection>
         {/each}
       </div>
     {/if}
@@ -664,20 +762,20 @@
 </section>
 
 {#if selectedEval && drawerMeta}
-  <Drawer open={!!selectedEval} onclose={closeEvalDrawer} width="720px">
-    <div class="eval-drawer">
-      <div class="drawer-header">
-        <div class="drawer-header-left">
-          <span class="drawer-eyebrow">Eval</span>
-          <div class="drawer-title-row">
-            <h2 class="drawer-title">{drawerMeta.evalId}</h2>
+  <Drawer open={!!selectedEval} onclose={closeEvalDrawer} width="min(720px, 100vw)">
+    <div class="h-full flex flex-col">
+      <div class="p-[24px_24px_16px] flex justify-between [align-items:flex-start] gap-[12px]">
+        <div class="min-w-0">
+          <span class="text-(--muted) text-[14px] leading-[20px]">Eval</span>
+          <div class="flex items-center gap-[8px] mt-[4px]">
+            <h2 class="text-(--text-bright) [font-family:var(--font-mono)] text-[20px] font-normal leading-[32px] overflow-hidden text-ellipsis whitespace-nowrap">{drawerMeta.evalId}</h2>
             <StatusPill status={drawerMeta.pillStatus} label={drawerMeta.statusLabel} />
           </div>
         </div>
-        <div class="drawer-actions">
+        <div class="flex items-center gap-[16px] [flex-shrink:0]">
           {#if drawerMeta.modalAppUrl}
             <a
-              class="drawer-open-modal"
+              class="inline-flex items-center gap-[4px] [border:1px_solid_var(--color-c-gray-20)] rounded-[4px] p-[2px_6px] text-(--color-c-gray-80) text-[12px] font-medium leading-[16px] [text-decoration:none] whitespace-nowrap ghost-hover"
               href={drawerMeta.modalAppUrl}
               target="_blank"
               rel="noopener noreferrer"
@@ -686,19 +784,19 @@
               <ExternalLink size={12} />
             </a>
           {/if}
-          <button class="drawer-close" onclick={closeEvalDrawer} aria-label="Close drawer">
+          <button class="[border:0] [background:transparent] text-(--muted) cursor-pointer inline-flex items-center p-0 hover:text-(--text-bright)" onclick={closeEvalDrawer} aria-label="Close drawer">
             <PanelRightClose size={20} />
           </button>
         </div>
       </div>
 
-      <section class="drawer-meta">
+      <section class="p-[0_24px_16px]">
         <div class="drawer-meta-row">
           <span class="drawer-meta-key">Deployment</span>
           <span class="drawer-meta-value">
             {#if drawerMeta.deploymentRef}
               <button
-                class="cross-link mono"
+                class="cross-link"
                 onclick={() => onOpenDeployment?.(drawerMeta.deploymentRef)}
               >
                 {drawerMeta.deploymentName}
@@ -714,7 +812,7 @@
         </div>
         <div class="drawer-meta-row">
           <span class="drawer-meta-key">Config</span>
-          <span class="drawer-meta-value mono">{drawerMeta.config}</span>
+          <span class="drawer-meta-value evals-mono">{drawerMeta.config}</span>
         </div>
         <div class="drawer-meta-row">
           <span class="drawer-meta-key">Grading</span>
@@ -737,19 +835,19 @@
       <div class="drawer-divider"></div>
 
       {#if scoreHistogram}
-        <section class="drawer-histogram">
-          <span class="histogram-title">Score distribution</span>
-          <div class="histogram-chart">
+        <section class="p-[16px_24px] flex flex-col gap-[8px]">
+          <span class="text-(--text-bright) text-[14px] font-medium leading-[20px]">Score distribution</span>
+          <div class="flex [align-items:flex-end] gap-[2px] h-[64px] p-[0_1px]">
             {#each scoreHistogram.bins as bin, i (i)}
-              <div class="histogram-bar-wrap" title="{bin.min.toFixed(1)}–{bin.max.toFixed(1)}: {bin.count}">
+              <div class="flex-1 h-full flex [align-items:flex-end]" title="{bin.min.toFixed(1)}–{bin.max.toFixed(1)}: {bin.count}">
                 <div
-                  class="histogram-bar"
+                  class="w-full min-h-[2px] rounded-[2px_2px_0_0] bg-(--color-c-gray-30)"
                   style:height="{scoreHistogram.maxCount > 0 ? (bin.count / scoreHistogram.maxCount) * 100 : 0}%"
                 ></div>
               </div>
             {/each}
           </div>
-          <div class="histogram-labels">
+          <div class="flex justify-between text-(--muted) text-[11px] leading-[16px] [font-variant-numeric:tabular-nums]">
             <span>0</span>
             <span>0.5</span>
             <span>1.0</span>
@@ -759,22 +857,22 @@
 
       <div class="drawer-divider"></div>
 
-      <section class="drawer-examples">
-        <div class="examples-header">
-          <div class="examples-title-row">
-            <span class="examples-title">Examples</span>
+      <section class="p-[24px] flex flex-col gap-[16px] flex-1 min-h-0">
+        <div class="pt-[4px]">
+          <div class="flex items-center gap-[8px]">
+            <span class="text-(--text-bright) text-[14px] font-medium leading-[20px]">Examples</span>
             {#if drawerMeta.totalRows}
-              <span class="examples-count-tag">{drawerMeta.totalRows} examples</span>
+              <span class="bg-(--color-surface-secondary) rounded-[4px] p-[4px_6px] text-(--muted) text-[12px] leading-[12px]">{drawerMeta.totalRows} examples</span>
             {/if}
           </div>
         </div>
 
-        <div class="examples-controls">
-          <label class="examples-search" aria-label="Search prompts">
-            <span class="examples-search-icon"><Search size={16} /></span>
+        <div class="flex items-center justify-between gap-[12px] max-[900px]:flex-col max-[900px]:[align-items:stretch]">
+          <label class="inline-flex items-center gap-[8px] [border:1px_solid_var(--color-c-gray-10)] rounded-[6px] [background:transparent] w-[260px] h-[32px] p-[6px_8px] max-[900px]:w-full" aria-label="Search prompts">
+            <span class="inline-flex text-(--muted-strong) [flex-shrink:0]"><Search size={16} /></span>
             <input
               type="search"
-              class="examples-search-input"
+              class="[border:0] [outline:0] [background:transparent] text-(--text) w-full min-w-0 [font:inherit] text-[14px] placeholder:text-(--muted-strong)"
               placeholder="Search prompts"
               bind:value={exampleSearch}
               autocomplete="off"
@@ -784,38 +882,38 @@
         </div>
 
         {#if loadingDetail}
-          <div class="examples-loading">Loading examples...</div>
+          <div class="p-[24px] text-(--muted) text-center text-[14px]">Loading examples...</div>
         {:else if !selectedEvalDetail?.rows?.length}
           <div class="examples-empty">No example data available for this eval.</div>
         {:else if !drawerRows.length}
           <div class="examples-empty">No examples match the current filter.</div>
         {:else}
-          <div class="examples-list">
+          <div class="flex flex-col gap-[16px]">
             {#each drawerRows as row (row._index)}
               {@const promptText = examplePromptText(row)}
-              <div class="example-card">
-                <button class="example-row" onclick={() => toggleExample(row._index)}>
-                  <span class="example-chevron">
+              <div class="bg-(--color-c-gray-5) [border:1px_solid_var(--color-c-gray-10)] rounded-[6px] overflow-hidden">
+                <button class="w-full [border:0] [background:transparent] text-inherit flex items-center gap-0 p-0 cursor-pointer text-left [font:inherit] hover:[background:rgba(255,255,255,0.02)]" onclick={() => toggleExample(row._index)}>
+                  <span class="flex items-center justify-center w-[40px] p-[8px_12px] text-(--muted) shrink-0 self-stretch">
                     {#if expandedExamples.has(row._index)}
                       <ChevronDown size={16} />
                     {:else}
                       <ChevronRight size={16} />
                     {/if}
                   </span>
-                  <span class="example-index">{row._index}</span>
+                  <span class="text-(--muted) text-[12px] leading-[16px] [flex-shrink:0] w-[20px]">{row._index}</span>
                   {#if promptText}
                     <span class="example-prompt">{promptText}</span>
                   {:else}
-                    <span class="example-prompt example-prompt-fallback">
+                    <span class="example-prompt text-(--muted)! italic">
                       {row.response ? row.response.slice(0, 80) : `Example ${row._index}`}
                     </span>
                   {/if}
-                  <span class="example-score" style:color={scoreColor(row.score)}>
+                  <span class="text-[12px] font-medium leading-[16px] p-[8px_16px] shrink-0 [font-variant-numeric:tabular-nums]" style:color={scoreColor(row.score)}>
                     {row.score.toFixed(2)}
                   </span>
                 </button>
                 {#if expandedExamples.has(row._index)}
-                  <div class="example-expanded">
+                  <div class="[border-top:1px_solid_var(--color-c-gray-10)] p-[12px_16px_12px_40px] flex flex-col gap-[12px]">
                     {#if promptText}
                       <div class="example-section">
                         <span class="example-section-label">Prompt</span>
@@ -834,27 +932,27 @@
                       {#if row.parsed_response.thinking}
                         <div class="example-section">
                           <span class="example-section-label">Thinking</span>
-                          <pre class="example-section-text box-thinking">{row.parsed_response.thinking}</pre>
+                          <pre class="example-section-text text-(--muted)! [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] [border-left:3px_solid_var(--color-c-orange-80,#f0a040)] bg-[rgba(240,160,64,0.06)]!">{row.parsed_response.thinking}</pre>
                         </div>
                       {/if}
                       {#if row.parsed_response.content}
                         <div class="example-section">
                           <span class="example-section-label">Answer</span>
-                          <pre class="example-section-text box-answer">{row.parsed_response.content}</pre>
+                          <pre class="example-section-text [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] [border-left:3px_solid_var(--green,var(--accent))] bg-[rgba(255,255,255,0.02)]!">{row.parsed_response.content}</pre>
                         </div>
                       {/if}
                       {#if row.parsed_response.tool_calls?.length}
                         <div class="example-section">
                           <span class="example-section-label">Tool calls</span>
-                          <div class="tool-calls">
+                          <div class="flex flex-col gap-[10px]">
                             {#each row.parsed_response.tool_calls as call, i (i)}
                               {@const result = call.response ?? call.result ?? call.output}
-                              <div class="tool-call">
-                                <div class="tool-call-name">{call.name || `tool ${i + 1}`}</div>
-                                <pre class="example-section-text box-tool">{JSON.stringify(call.arguments ?? {}, null, 2)}</pre>
+                              <div class="flex flex-col gap-[4px] [border:1px_solid_var(--color-c-gray-10,#2f2f2f)] [border-left:3px_solid_var(--accent)] rounded-[4px] p-[8px] [background:rgba(124,156,255,0.05)]">
+                                <div class="[font-family:var(--font-mono)] text-[12px] [font-weight:600] text-(--text-bright)">{call.name || `tool ${i + 1}`}</div>
+                                <pre class="example-section-text bg-[rgba(0,0,0,0.25)]">{JSON.stringify(call.arguments ?? {}, null, 2)}</pre>
                                 {#if result != null}
                                   <span class="example-section-label">Response</span>
-                                  <pre class="example-section-text box-tool-response">{typeof result === "string" ? result : JSON.stringify(result, null, 2)}</pre>
+                                  <pre class="example-section-text bg-[rgba(0,0,0,0.25)] [border-left:2px_solid_var(--accent)]">{typeof result === "string" ? result : JSON.stringify(result, null, 2)}</pre>
                                 {/if}
                               </div>
                             {/each}
@@ -886,7 +984,7 @@
                           fix is to normalize to a canonical container at the dataset
                           boundary (see MultimodalDataset.modality). -->
                         <audio
-                          class="example-audio"
+                          class="w-full h-[36px] rounded-[6px] [filter:saturate(0.9)]"
                           controls
                           preload="none"
                           src={row.metadata.audio}
@@ -897,7 +995,7 @@
                       <div class="example-section">
                         <span class="example-section-label">Image</span>
                         <img
-                          class="example-image"
+                          class="block w-full max-w-[480px] h-auto rounded-[6px] [border:1px_solid_var(--border)]"
                           src={row.metadata.image}
                           alt="eval input"
                           loading="lazy"
@@ -949,771 +1047,3 @@
     </div>
   </Drawer>
 {/if}
-
-<style>
-  .summary-row {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-    margin-bottom: 24px;
-  }
-
-  .summary-card {
-    border: 0;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.03);
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    height: 80px;
-  }
-
-  .summary-label {
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 16px;
-  }
-
-  .summary-card strong {
-    color: var(--text-bright);
-    font-size: 20px;
-    font-weight: 500;
-    line-height: 32px;
-  }
-
-  .runs-surface {
-    border: 0;
-    background: transparent;
-    padding: 0;
-  }
-
-  .filters-row {
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-
-  .search-wrap {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.42rem;
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    background: var(--panel);
-    min-width: 220px;
-    width: min(320px, 100%);
-    padding: 0.24rem 0.55rem;
-  }
-
-  .search-icon {
-    display: inline-flex;
-    color: var(--muted);
-  }
-
-  .search-input {
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: var(--text);
-    width: 100%;
-    min-width: 0;
-    font: inherit;
-    font-size: 0.78rem;
-  }
-
-  .search-input::placeholder {
-    color: var(--muted);
-  }
-
-  .menu-wrap {
-    position: relative;
-  }
-
-  .status-filter {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.28rem;
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    background: var(--panel);
-    color: var(--text);
-    font: inherit;
-    font-size: 0.76rem;
-    padding: 0.25rem 0.58rem;
-    cursor: pointer;
-  }
-
-  .status-filter.open {
-    border-color: var(--border-strong);
-    background: var(--panel-alt);
-    color: var(--text-bright);
-  }
-
-  .status-menu {
-    position: absolute;
-    top: calc(100% + 0.3rem);
-    left: 0;
-    z-index: 10;
-    width: 175px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--panel);
-    box-shadow: 0 10px 24px color-mix(in srgb, black 55%, transparent);
-    padding: 0.25rem;
-  }
-
-  .dataset-menu {
-    width: min(320px, calc(100vw - 2rem));
-  }
-
-  .status-item {
-    width: 100%;
-    border: 0;
-    background: transparent;
-    color: var(--text);
-    padding: 0.34rem 0.4rem;
-    border-radius: 7px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font: inherit;
-    font-size: 0.74rem;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .status-item:hover {
-    background: color-mix(in srgb, var(--text-bright) 6%, transparent);
-    color: var(--text-bright);
-  }
-
-  .status-count {
-    color: var(--muted);
-    font-size: 0.68rem;
-  }
-
-  .dataset-item-label {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .runs-body {
-    padding: 0;
-  }
-
-  .empty {
-    padding: 24px;
-    color: var(--muted);
-    text-align: center;
-    font-size: 0.84rem;
-  }
-
-  .eval-groups {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-    padding: 0;
-  }
-
-  .eval-group {
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: transparent;
-    overflow: hidden;
-  }
-
-  .eval-group-header {
-    border: 0;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.8rem;
-    padding: 0.75rem 0.9rem;
-  }
-
-  .eval-group-title-wrap {
-    min-width: 0;
-  }
-
-  .eval-group-title {
-    color: var(--text-bright);
-    font-size: 0.86rem;
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .eval-group-subtitle {
-    color: var(--muted);
-    font-size: 0.74rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .eval-group-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .group-meta-pill {
-    border: 0;
-    border-radius: 6px;
-    padding: 0.11rem 0.42rem;
-    font-size: 0.68rem;
-    color: var(--muted);
-    background: color-mix(in srgb, var(--panel-alt) 70%, transparent);
-  }
-
-  .group-meta-pill-time {
-    font-variant-numeric: tabular-nums;
-  }
-
-  .table-wrap {
-    max-width: 100%;
-    overflow: auto hidden;
-    overscroll-behavior-x: contain;
-    overscroll-behavior-y: auto;
-    -webkit-overflow-scrolling: auto;
-  }
-
-  :global(table.runs-table) {
-    width: 100%;
-    min-width: 1180px;
-  }
-
-  .mono {
-    font-family: var(--font-mono);
-    color: color-mix(in srgb, var(--accent) 78%, white);
-    font-size: 0.72rem;
-  }
-
-  .name-cell .truncate-text,
-  .dataset-cell .truncate-text,
-  .deployment-cell .truncate-text,
-  .base-model-cell .truncate-text {
-    display: block;
-    width: 100%;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .dataset-cell,
-  .deployment-cell {
-    max-width: 0;
-  }
-
-  .training-run-cell {
-    max-width: 0;
-  }
-
-  .cross-link {
-    border: 0;
-    background: transparent;
-    color: color-mix(in srgb, var(--text) 86%, white);
-    padding: 0;
-    font: inherit;
-    font-size: 0.74rem;
-    cursor: pointer;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
-  }
-
-  .cross-link:hover {
-    color: var(--text-bright);
-  }
-
-  .eval-score {
-    color: var(--text-bright);
-    font-weight: 600;
-  }
-
-  @media (max-width: 1080px) {
-    .summary-row {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  :global(table.evals-runs-table tbody tr.eval-row-clickable) {
-    cursor: pointer;
-  }
-
-  :global(table.evals-runs-table tr.row-selected td) {
-    background: color-mix(in srgb, var(--accent) 7%, transparent);
-  }
-
-  :global(table.evals-runs-table tbody tr.eval-row-clickable:hover td) {
-    background: color-mix(in srgb, var(--text-bright) 3%, transparent);
-  }
-
-  .eval-drawer {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .drawer-header {
-    padding: 24px 24px 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .drawer-header-left {
-    min-width: 0;
-  }
-
-  .drawer-eyebrow {
-    color: var(--muted);
-    font-size: 14px;
-    line-height: 20px;
-  }
-
-  .drawer-title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 4px;
-  }
-
-  .drawer-title {
-    color: var(--text-bright);
-    font-family: var(--font-mono);
-    font-size: 20px;
-    font-weight: 400;
-    line-height: 32px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .drawer-actions {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 0;
-  }
-
-  .drawer-open-modal {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border: 1px solid var(--color-c-gray-20);
-    border-radius: 4px;
-    padding: 2px 6px;
-    color: var(--color-c-gray-80);
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-    text-decoration: none;
-    white-space: nowrap;
-  }
-
-  .drawer-open-modal:hover {
-    border-color: var(--border-strong);
-    color: var(--text-bright);
-  }
-
-  .drawer-close {
-    border: 0;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    padding: 0;
-  }
-
-  .drawer-close:hover {
-    color: var(--text-bright);
-  }
-
-  .drawer-meta {
-    padding: 0 24px 16px;
-  }
-
-  .drawer-meta-row {
-    display: grid;
-    grid-template-columns: 100px minmax(0, 1fr);
-    gap: 4px;
-    align-items: center;
-    height: 32px;
-  }
-
-  .drawer-meta-key {
-    color: var(--muted);
-    font-size: 14px;
-    line-height: 20px;
-  }
-
-  .drawer-meta-value {
-    color: var(--text);
-    font-size: 14px;
-    line-height: 24px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .drawer-divider {
-    height: 1px;
-    background: var(--color-c-surface-highlight-gray-transparent);
-    margin: 0 24px;
-  }
-
-  .drawer-histogram {
-    padding: 16px 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .histogram-title {
-    color: var(--text-bright);
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 20px;
-  }
-
-  .histogram-chart {
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    height: 64px;
-    padding: 0 1px;
-  }
-
-  .histogram-bar-wrap {
-    flex: 1;
-    height: 100%;
-    display: flex;
-    align-items: flex-end;
-  }
-
-  .histogram-bar {
-    width: 100%;
-    min-height: 2px;
-    border-radius: 2px 2px 0 0;
-    background: var(--color-c-gray-30);
-  }
-
-  .histogram-labels {
-    display: flex;
-    justify-content: space-between;
-    color: var(--muted);
-    font-size: 11px;
-    line-height: 16px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .drawer-examples {
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .examples-header {
-    padding-top: 4px;
-  }
-
-  .examples-title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .examples-title {
-    color: var(--text-bright);
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 20px;
-  }
-
-  .examples-count-tag {
-    background: var(--color-surface-secondary);
-    border-radius: 4px;
-    padding: 4px 6px;
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 12px;
-  }
-
-  .examples-controls {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .examples-search {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--color-c-gray-10);
-    border-radius: 6px;
-    background: transparent;
-    width: 260px;
-    height: 32px;
-    padding: 6px 8px;
-  }
-
-  .examples-search-icon {
-    display: inline-flex;
-    color: var(--muted-strong);
-    flex-shrink: 0;
-  }
-
-  .examples-search-input {
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: var(--text);
-    width: 100%;
-    min-width: 0;
-    font: inherit;
-    font-size: 14px;
-  }
-
-  .examples-search-input::placeholder {
-    color: var(--muted-strong);
-  }
-
-
-  .examples-list {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .example-card {
-    background: var(--color-c-gray-5);
-    border: 1px solid var(--color-c-gray-10);
-    border-radius: 6px;
-    overflow: hidden;
-  }
-
-  .example-row {
-    width: 100%;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    display: flex;
-    align-items: center;
-    gap: 0;
-    padding: 0;
-    cursor: pointer;
-    text-align: left;
-    font: inherit;
-  }
-
-  .example-row:hover {
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .example-chevron {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    padding: 8px 12px;
-    color: var(--muted);
-    flex-shrink: 0;
-    align-self: stretch;
-  }
-
-  .example-index {
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 16px;
-    flex-shrink: 0;
-    width: 20px;
-  }
-
-  .example-prompt {
-    flex: 1;
-    min-width: 0;
-    color: var(--text-bright);
-    font-size: 14px;
-    line-height: 20px;
-    padding: 8px 0 8px 8px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .example-prompt-fallback {
-    color: var(--muted);
-    font-style: italic;
-  }
-
-  .example-score {
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-    padding: 8px 16px;
-    flex-shrink: 0;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .example-expanded {
-    border-top: 1px solid var(--color-c-gray-10);
-    padding: 12px 16px 12px 40px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .example-section {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .example-section-label {
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    line-height: 16px;
-  }
-
-  .example-section-text {
-    color: var(--text);
-    font-size: 13px;
-    line-height: 20px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: var(--font-mono);
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 4px;
-    padding: 8px;
-    max-height: 200px;
-    overflow-y: auto;
-  }
-
-  /* Distinct boxes for the parsed response: reasoning, the answer, and each
-     tool call (with its response) are visually separated. */
-  .box-thinking {
-    color: var(--muted);
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-left: 3px solid var(--color-c-orange-80, #f0a040);
-    background: rgba(240, 160, 64, 0.06);
-  }
-
-  .box-answer {
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-left: 3px solid var(--green, var(--accent));
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .tool-calls {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .tool-call {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    border: 1px solid var(--color-c-gray-10, #2f2f2f);
-    border-left: 3px solid var(--accent);
-    border-radius: 4px;
-    padding: 8px;
-    background: rgba(124, 156, 255, 0.05);
-  }
-
-  .tool-call-name {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-bright);
-  }
-
-  .box-tool,
-  .box-tool-response {
-    background: rgba(0, 0, 0, 0.25);
-  }
-
-  .box-tool-response {
-    border-left: 2px solid var(--accent);
-  }
-
-  .example-section-score {
-    font-size: 14px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .example-audio {
-    width: 100%;
-    height: 36px;
-    border-radius: 6px;
-    filter: saturate(0.9);
-  }
-
-  .example-image {
-    display: block;
-    width: 100%;
-    max-width: 480px;
-    height: auto;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-  }
-
-  .examples-loading,
-  .examples-empty {
-    padding: 24px;
-    color: var(--muted);
-    text-align: center;
-    font-size: 14px;
-  }
-
-  @media (max-width: 900px) {
-    .summary-row {
-      grid-template-columns: 1fr;
-    }
-
-    .filters-row {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .search-wrap {
-      width: 100%;
-    }
-
-    .examples-controls {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .examples-search {
-      width: 100%;
-    }
-  }
-</style>

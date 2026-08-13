@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Awaitable
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -25,7 +26,6 @@ from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_list_prefix,
     vol_put,
-    vol_put_async,
 )
 
 # Quantiles reported per group (and overall). Kept small so payloads stay light.
@@ -121,20 +121,13 @@ class AdvantageDistribution(BaseModel):
         if not self.created_at:
             self.created_at = int(time.time())
 
-    def save(self) -> None:
+    def save(self, *, is_async: bool = False) -> None | Awaitable[None]:
         self._touch_created_at()
-        vol_put(
+        return vol_put(
             MetadataStore.ADVANTAGE_DISTRIBUTIONS,
             self.storage_key,
             self.model_dump(mode="json"),
-        )
-
-    async def save_async(self) -> None:
-        self._touch_created_at()
-        await vol_put_async(
-            MetadataStore.ADVANTAGE_DISTRIBUTIONS,
-            self.storage_key,
-            self.model_dump(mode="json"),
+            is_async=is_async,
         )
 
     @classmethod

@@ -265,11 +265,11 @@
 </script>
 
 {#if parsed.length}
-<div class="conversation">
+<div class="flex flex-col gap-[2px]">
   {#if thinking}
     <div class="turn turn-thinking">
       <div class="turn-header">
-        <span class="role-badge role-thinking">Thinking</span>
+        <span class="text-[10px] font-[600] uppercase tracking-[0.05em] p-[2px_6px] rounded-[3px] bg-[rgba(168,139,250,0.12)] text-[#a78bfa]">Thinking</span>
       </div>
       <pre class="thinking-block">{thinking}</pre>
     </div>
@@ -278,7 +278,7 @@
   {#each parsed as msg, idx (idx)}
     <div class="turn turn-{msg.role}">
       <div class="turn-header">
-        <span class="role-badge role-{msg.role}">{roleLabel(msg.role)}</span>
+        <span class="text-[10px] font-[600] uppercase tracking-[0.05em] p-[2px_6px] rounded-[3px] role-{msg.role}">{roleLabel(msg.role)}</span>
         {#if msg.role === "assistant" && idx > 0}
           <span class="turn-meta">Turn {Math.ceil((idx + 1) / 2)}</span>
         {/if}
@@ -288,7 +288,7 @@
       </div>
 
       {#if msg.thinking}
-        <button class="thinking-toggle" onclick={() => toggleThinking(idx)}>
+        <button class="inline-flex items-center gap-[4px] [background:none] [border:1px_solid_var(--border,#2f2f2f)] rounded-[4px] text-(--muted) text-[11px] p-[2px_8px] cursor-pointer mb-[6px] hover:text-(--text) hover:[border-color:var(--border-strong,#4a4a4a)]" onclick={() => toggleThinking(idx)}>
           <ChevronDown size={12} style={thinkingOpen[idx] ? "transform:rotate(180deg)" : ""} />
           <span>Thinking</span>
         </button>
@@ -298,16 +298,16 @@
       {/if}
 
       {#if msg.content}
-        <pre class="turn-content" class:tool-output={msg.role === "tool"}>{msg.content}</pre>
+        <pre class="m-0 p-0 [background:none] text-[12px] text-(--text) whitespace-pre-wrap [word-break:break-word] max-h-[400px] overflow-auto leading-[1.5]" class:tool-output={msg.role === "tool"}>{msg.content}</pre>
       {/if}
 
       {#if msg.toolCalls.length}
-        <div class="tool-calls">
+        <div class="flex flex-col gap-[4px] mt-[6px]">
           {#each msg.toolCalls as call, ci (ci)}
-            <div class="tool-call">
-              <div class="tool-call-name">{call.name}()</div>
+            <div class="[border-left:2px_solid_#fbbf24] p-[6px_10px] rounded-[0_4px_4px_0] bg-[rgba(251,191,36,0.05)]">
+              <div class="text-[12px] font-[600] text-[#fbbf24] [font-family:ui-monospace,_SFMono-Regular,_Menlo,_monospace] mb-[2px]">{call.name}()</div>
               {#if Object.keys(call.arguments || {}).length}
-                <pre class="tool-call-args">{formatArgs(call.arguments)}</pre>
+                <pre class="m-0 p-0 text-[11px] text-(--text) whitespace-pre-wrap [word-break:break-word] max-h-[160px] overflow-auto [font-family:ui-monospace,_SFMono-Regular,_Menlo,_monospace] leading-[1.4]">{formatArgs(call.arguments)}</pre>
               {/if}
             </div>
           {/each}
@@ -317,29 +317,29 @@
   {/each}
 
   {#if checks}
-    <div class="checks-section">
-      <div class="checks-header">
+    <div class="mt-[8px] p-[10px_12px] rounded-[6px] bg-[var(--color-c-gray-08,#1c1c1c)] [border:1px_solid_var(--border,#2f2f2f)]">
+      <div class="flex items-center gap-[10px] text-[12px] font-[600] text-(--text-bright) mb-[8px]">
         Checks
         {#if checkSummary}
-          <span class="checks-summary">
-            <span class="check-pass-count">{checkSummary.passed} passed</span>
+          <span class="inline-flex gap-[8px] text-[11px] font-[400]">
+            <span class="text-[#4ade80]">{checkSummary.passed} passed</span>
             {#if checkSummary.failed}
-              <span class="check-fail-count">{checkSummary.failed} failed</span>
+              <span class="text-[#f87171]">{checkSummary.failed} failed</span>
             {/if}
           </span>
         {/if}
       </div>
-      <div class="checks-list">
+      <div class="flex flex-col gap-[2px]">
         {#each checks as check (check.name)}
-          <div class="check-row" class:check-passed={check.passed} class:check-failed={!check.passed}>
+          <div class="flex items-center gap-[6px] text-[12px] p-[2px_0]" class:check-passed={check.passed} class:check-failed={!check.passed}>
             <span class="check-icon">{check.passed ? "✓" : "✗"}</span>
-            <span class="check-name">{check.name}</span>
+            <span class="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-(--text)">{check.name}</span>
             {#if check.score != null && typeof check.score === "number"}
-              <span class="check-score">{check.score.toFixed(2)}</span>
+              <span class="text-[11px] [font-variant-numeric:tabular-nums] text-(--muted)">{check.score.toFixed(2)}</span>
             {/if}
           </div>
           {#if !check.passed && check.errors.length}
-            <pre class="check-error">{check.errors.join("\n")}</pre>
+            <pre class="m-[2px_0_4px_20px] p-[6px_8px] bg-[rgba(248,113,113,0.06)] rounded-[4px] text-[11px] text-(--muted) whitespace-pre-wrap [word-break:break-word] max-h-[120px] overflow-auto">{check.errors.join("\n")}</pre>
           {/if}
         {/each}
       </div>
@@ -347,235 +347,3 @@
   {/if}
 </div>
 {/if}
-
-<style>
-  .conversation {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .turn {
-    padding: 10px 12px;
-    border-radius: 6px;
-    background: var(--color-c-gray-08, #1c1c1c);
-  }
-
-  .turn + .turn {
-    margin-top: 1px;
-  }
-
-  .turn-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-  }
-
-  .role-badge {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 2px 6px;
-    border-radius: 3px;
-  }
-
-  .role-assistant {
-    background: rgba(96, 165, 250, 0.12);
-    color: #60a5fa;
-  }
-
-  .role-user {
-    background: rgba(74, 222, 128, 0.12);
-    color: #4ade80;
-  }
-
-  .role-tool {
-    background: rgba(251, 191, 36, 0.12);
-    color: #fbbf24;
-  }
-
-  .role-system, .role-developer, .role-thinking {
-    background: rgba(168, 139, 250, 0.12);
-    color: #a78bfa;
-  }
-
-  .turn-meta {
-    font-size: 11px;
-    color: var(--muted);
-  }
-
-  .turn-content {
-    margin: 0;
-    padding: 0;
-    background: none;
-    font-size: 12px;
-    color: var(--text);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 400px;
-    overflow: auto;
-    line-height: 1.5;
-  }
-
-  .tool-output {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
-    color: var(--muted);
-    background: rgba(0, 0, 0, 0.2);
-    padding: 8px;
-    border-radius: 4px;
-    max-height: 200px;
-  }
-
-  .thinking-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: none;
-    border: 1px solid var(--border, #2f2f2f);
-    border-radius: 4px;
-    color: var(--muted);
-    font-size: 11px;
-    padding: 2px 8px;
-    cursor: pointer;
-    margin-bottom: 6px;
-  }
-
-  .thinking-toggle:hover {
-    color: var(--text);
-    border-color: var(--border-strong, #4a4a4a);
-  }
-
-  .thinking-block {
-    margin: 0 0 8px;
-    padding: 8px;
-    background: rgba(168, 139, 250, 0.06);
-    border: 1px solid rgba(168, 139, 250, 0.15);
-    border-radius: 4px;
-    font-size: 11px;
-    color: var(--muted);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 200px;
-    overflow: auto;
-    line-height: 1.45;
-  }
-
-  .tool-calls {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 6px;
-  }
-
-  .tool-call {
-    border-left: 2px solid #fbbf24;
-    padding: 6px 10px;
-    border-radius: 0 4px 4px 0;
-    background: rgba(251, 191, 36, 0.05);
-  }
-
-  .tool-call-name {
-    font-size: 12px;
-    font-weight: 600;
-    color: #fbbf24;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    margin-bottom: 2px;
-  }
-
-  .tool-call-args {
-    margin: 0;
-    padding: 0;
-    font-size: 11px;
-    color: var(--text);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 160px;
-    overflow: auto;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    line-height: 1.4;
-  }
-
-  .checks-section {
-    margin-top: 8px;
-    padding: 10px 12px;
-    border-radius: 6px;
-    background: var(--color-c-gray-08, #1c1c1c);
-    border: 1px solid var(--border, #2f2f2f);
-  }
-
-  .checks-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-bright);
-    margin-bottom: 8px;
-  }
-
-  .checks-summary {
-    display: inline-flex;
-    gap: 8px;
-    font-size: 11px;
-    font-weight: 400;
-  }
-
-  .check-pass-count { color: #4ade80; }
-  .check-fail-count { color: #f87171; }
-
-  .checks-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .check-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    padding: 2px 0;
-  }
-
-  .check-icon {
-    flex-shrink: 0;
-    width: 14px;
-    text-align: center;
-    font-weight: 600;
-    font-size: 11px;
-  }
-
-  .check-passed .check-icon { color: #4ade80; }
-  .check-failed .check-icon { color: #f87171; }
-
-  .check-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text);
-  }
-
-  .check-score {
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    color: var(--muted);
-  }
-
-  .check-error {
-    margin: 2px 0 4px 20px;
-    padding: 6px 8px;
-    background: rgba(248, 113, 113, 0.06);
-    border-radius: 4px;
-    font-size: 11px;
-    color: var(--muted);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 120px;
-    overflow: auto;
-  }
-</style>

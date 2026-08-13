@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-`modal-training-gym` is a pip-installable Python package that provides framework-aware launchers for distributed training on Modal's multi-node GPU clusters. Users import framework configs, attach a model + dataset, and `modal run` — the package handles image construction, cluster topology, Ray/NCCL bring-up, volume mounts, and checkpointing.
+`modal-training-gym` is a pip-installable Python package that provides framework-aware launchers for distributed training on Modal's multi-node GPU clusters. The current entrypoint is `TrainConfig` + a recipe (`SlimeRecipe` / `MilesConfig`), then `.train()` / `.launch()` — the package handles image construction, cluster topology, Ray/NCCL bring-up, volume mounts, and checkpointing.
 
 ## Commands
 
@@ -21,46 +21,39 @@ uv run ruff format --check modal_training_gym/
 uv run pyright modal_training_gym/    # if pyright is available
 
 # Compile check (no GPU needed)
-uv run python -m compileall modal_training_gym/
+uv run -m compileall modal_training_gym/
 
 # Tutorials — NEVER edit generated files directly
-uv run python tutorials/generate_tutorial.py              # regenerate all .py + .ipynb
-uv run python tutorials/generate_tutorial.py path/to/src  # regenerate one
+uv run tutorials/generate_tutorial.py              # regenerate all .py + .ipynb
+uv run tutorials/generate_tutorial.py path/to/src  # regenerate one
 
 # Docs (Astro/Starlight site at docs-next/)
-uv run python scripts/generate_all.py --skip-build   # regen API reference + tutorial pages
+uv run scripts/generate_all.py --skip-build   # regen API reference + tutorial pages
 cd docs-next && npm ci && npm run dev                 # local dev server
-uv run python scripts/generate_all.py                 # full regen + build
+uv run scripts/generate_all.py                 # full regen + build
 
 # Deploy
+# IMPORTANT: These commands are only for development of the gym itself.
+# Consumers of the gym should use `training-gym setup` instead.
+# Features such as requiring proxy authentication only work with the CLI
+# and will stop working if the dashboard is deployed with `modal deploy`.
 uv run modal deploy docs-next/docs_next_app.py        # docs site → gym.modal.dev
 uv run modal deploy dashboards/app.py                  # observability dashboard
 
-# Validate tutorials (runs on Modal — costs GPU time)
-uv run python scripts/validate_tutorials.py --list           # show discovered targets
-uv run python scripts/validate_tutorials.py --preflight-only # local checks only
-uv run python scripts/validate_tutorials.py --only slime_gsm8k  # single tutorial
+# Validate model configs / map a diff to affected tutorials
+uv run scripts/validate_model_configs.py list              # every model the harness runs
+uv run scripts/validate_model_configs.py list --pr-only    # just the PR matrix set
+uv run scripts/validate_model_configs.py check -m qwen3-4b
+# miles models go through the same script; the registry picks the framework
+uv run scripts/validate_model_configs.py check -m Kimi-K2.5
+git diff | uv run scripts/diff_impact.py
 ```
 
 ## Architecture
 
-### Two-class framework pattern
+### TrainConfig + recipe
 
-Every framework exposes two config classes:
-
-- **`<F>FrameworkConfig`** — Modal infra (gpu, image, n_nodes) + framework CLI flags. Pydantic with `extra="forbid"`.
-- **`<F>Config`** — Composes `dataset: DatasetConfig`, `model: ModelConfig`, `wandb: WandbConfig`, and `framework_config`. Exposes `build_app()`.
-
-```
-SlimeConfig.build_app()
-  → build_slime_app(slime=self)  [in launcher.py]
-    → returns modal.App with:
-        app.download()          — ModelConfig.download()
-        app.prepare_dataset()   — DatasetConfig.prepare()
-        app.train()             — Ray cluster submit → TrainResult
-```
-
-SlimeConfig is a Pydantic dataclass following the two-class composition pattern.
+`TrainConfig` composes `dataset`, `model`, and a recipe (`SlimeRecipe` or `MilesConfig`). Call `.train()` or `.launch()` — there is no public `build_app()`. Recipes carry Modal infra + framework CLI flags (`extra="forbid"`).
 
 ### Train pipeline
 
@@ -75,15 +68,25 @@ Every framework mounts three Modal Volumes:
 
 ### Model presets
 
-Models can declare `training: ModelTrainingConfig` or framework-specific presets (e.g. `SlimePreset`) with tuned parallelism/GPU settings. Framework configs apply these as defaults to unset fields during `__post_init__`.
+Known-model presets live under `train_recipes/` (e.g. `Qwen3_4b_Recipe`); `TrainConfig.merge_model_recipe` (bool, default `True`) merges them onto unset recipe fields.
+
+### Model validation
+
+One registry, one script, one workflow, across every framework.
+
+`common/models/validation.py` holds `VALIDATION_CONFIGS`: each entry maps a model name to its `ModelConfig`, the framework whose `get_base_recipe` trains it, and `run_on_pr`. The framework has to be declared — `SlimeRecipe.get_base_recipe` returns a recipe for any model it's asked about, so the recipe classes can't answer "is this model mine?".
+
+`scripts/validate_model_configs.py` owns everything framework-agnostic (CLI, result JSON, markdown summary, PR comment, and the `check` flags). `scripts/validation_backends/<framework>.py` owns the only two things that differ: which recipe trains the model and which dataset it trains on, returned as a pair from one `build_*_validation` function. Recipes are used as `get_base_recipe` returns them, image included — the image a miles model trains on is declared once, in `MilesRecipe`, and validating a candidate image means bumping it on a branch and dispatching, not passing a flag. Adding a framework is one module here plus registry entries.
+
+`run_on_pr=False` marks a model too expensive to fan out on a PR (Kimi is 16 x 8 H200): still runnable by name from the CLI or `workflow_dispatch` — it is not "disabled in CI" — but `diff_impact.py` never puts it in a PR matrix. `list` prints the whole registry so dispatch-only models are discoverable; `--pr-only` narrows to the matrix set, which is why the workflow's blank-dispatch branch passes it. `tests/test_model_validation_registry.py` enforces both. `diff_impact.py` also scopes re-validation per framework, so a miles-only change doesn't re-run the slime set.
 
 ### Cloudpickle caller resolution
 
-`build_app()` factories use `resolve_caller_module()` (in `common/framework.py`) to find the user's tutorial module by walking the stack past `modal_training_gym.*` frames. This enables cloudpickle to serialize inline `DatasetConfig`/`ModelConfig` subclasses by value to remote containers.
+Launchers use `resolve_caller_module()` (in `common/framework.py`) to find the user's tutorial module by walking the stack past `modal_training_gym.*` frames. This enables cloudpickle to serialize inline `DatasetConfig`/`ModelConfig` subclasses by value to remote containers.
 
 ### TrainResult persistence
 
-`TrainResult` is a dataclass written to a `modal.Dict` (keyed by `{app_name}-train-results`). Created by each framework's `train()` on rank 0. Loaded by eval scripts via `TrainResult.load(app_name)`. The `.model` property reconstructs a `ModelConfig` pointing at the checkpoint for serving.
+`TrainResult` is a dataclass written to the metadata volume (`MetadataStore.TRAIN_RESULTS`, keyed by `training_run_id`). Created by each framework's `train()` on rank 0. Loaded by eval scripts via `TrainResult.load(training_run_id)`. The `.model` property reconstructs a `ModelConfig` pointing at the checkpoint for serving.
 
 ### Tutorial system
 
@@ -104,13 +107,23 @@ Each source declares `TUTORIAL_METADATA` dict with `framework`, `cluster_shape`,
 ## Working rules
 
 - Use `uv` for all Python operations. Never install packages at the system level.
-- Never edit `tutorials/<name>/<name>.py` or `.ipynb` — they are generated. Edit `tutorials/tutorial_generator/<name>.py` and run the generator.
+- Never edit `tutorials/<bucket>/<name>/<name>.py` or `.ipynb` — they are generated. Edit `tutorials/tutorial_generator/<bucket>/<name>.py` and run the generator.
 - Ruff excludes `tutorials/**` — generated tutorial code is not linted.
 - Python 3.12 is pinned. Modal's `serialized=True` requires local ↔ remote Python version match.
-- Modal Secrets `huggingface-secret` (HF_TOKEN) and `wandb-secret` (WANDB_API_KEY) are required for remote runs.
-- Served endpoints (`DeploymentConfig.serve()`) sit behind Modal proxy auth: export a proxy-auth token pair `MODAL_KEY` (`wk-…`) / `MODAL_SECRET` (`ws-…`) in the launching shell, or every eval/`generate`/teacher call returns HTTP 401. For calls from remote workers (custom rm/reward fns), also forward the pair into the worker via a `modal.Secret` — the driver shell env doesn't reach them.
+- Modal Secrets `huggingface-secret` (HF_TOKEN) and `wandb-secret` (WANDB_API_KEY) are optional: HF auth is only needed for gated/rate-limited Hub access, and `wandb-secret` only when a `WandbConfig` is passed.
+- Custom SGLang and vLLM deployments (`CustomDeployment.launch()`) are public by default (`unauthenticated=True`). Pass `unauthenticated=False` to require Modal proxy auth (export `MODAL_KEY` (`wk-…`) / `MODAL_SECRET` (`ws-…`) in the launching shell, or eval/`generate`/teacher calls return HTTP 401). For calls from remote workers (custom rm/reward fns) to authenticated endpoints, also forward the pair into the worker via a `modal.Secret` — the driver shell env doesn't reach them.
 - Every framework's Modal app is tagged with `_modal_framework`, `_modal_job_type=training`, and W&B project/group for dashboard auto-discovery (see `common/__init__.py: COMMON_TRAINING_GYM_TAGS`).
 
 ## Agent skills
 
+- Before acting, inspect the descriptions in `skills/*/SKILL.md` and read every
+  skill that matches the request. Do not assume the explicitly named skills
+  below are the only available skills.
+- For training lifecycle work, read `skills/agent-driven-training/SKILL.md`
+  before acting. This includes launching, monitoring, inspecting, diagnosing,
+  continuing, or promoting a Training Gym run.
+- For raw Modal infrastructure work, read
+  `skills/modal-infrastructure/SKILL.md` before acting. Use it for apps,
+  containers, volumes, scheduling, image builds, caches, and endpoint
+  authentication.
 - For model support work, read `skills/model-support/SKILL.md` before acting. Use it when adding, debugging, validating, or productionizing new model support, especially Slime recipes and model configs.
