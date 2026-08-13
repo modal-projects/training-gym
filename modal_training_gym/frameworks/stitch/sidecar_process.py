@@ -1,8 +1,8 @@
 """Subprocess + runtime helpers for the disaggregated flow.
 
 Vendored from the stitch cookbook (``cookbook/common/process.py``): launch the
-sidecar beside SGLang, wait on HTTP liveness, terminate cleanly, trace host RAM,
-and probe torch-distributed rank/barrier for the rank-gated publish hooks.
+sidecar beside SGLang, wait on HTTP liveness, terminate cleanly, and probe
+torch-distributed rank/barrier for the rank-gated publish hooks.
 """
 
 from __future__ import annotations
@@ -10,9 +10,7 @@ from __future__ import annotations
 import os
 import shlex
 import signal
-import socket
 import subprocess
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -117,44 +115,6 @@ def terminate_process(process: subprocess.Popen | None) -> None:
             os.killpg(process.pid, signal.SIGKILL)
         except Exception:  # noqa: BLE001
             pass
-
-
-def start_host_mem_monitor(interval_s: int = 20) -> None:
-    """Trace this node's host RAM from a daemon thread. Modal exposes no host-RAM
-    metric, so this log line is the only signal for the OOM peak (the publish
-    weight-gather). Best-effort."""
-    host = socket.gethostname()
-
-    def _meminfo() -> tuple[float, float]:
-        total = avail = 0.0
-        try:
-            with open("/proc/meminfo") as f:
-                for line in f:
-                    if line.startswith("MemTotal:"):
-                        total = int(line.split()[1]) / 1024 / 1024
-                    elif line.startswith("MemAvailable:"):
-                        avail = int(line.split()[1]) / 1024 / 1024
-        except Exception:  # noqa: BLE001
-            pass
-        return total, avail
-
-    def _loop() -> None:
-        # One line per node per tick floods a multi-node log, so stay quiet unless host
-        # RAM is climbing toward a host OOM, or on a sparse heartbeat.
-        heartbeat = max(1, 600 // interval_s)
-        i = 0
-        while True:
-            total, avail = _meminfo()
-            if i == 0 or avail < 500 or i % heartbeat == 0:
-                print(
-                    f"[hostmem] {host} used={total - avail:.0f}GiB "
-                    f"avail={avail:.0f}GiB total={total:.0f}GiB",
-                    flush=True,
-                )
-            i += 1
-            time.sleep(interval_s)
-
-    threading.Thread(target=_loop, daemon=True, name="host-mem-monitor").start()
 
 
 def dist_rank() -> int | None:

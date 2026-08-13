@@ -44,7 +44,12 @@ from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework, resolve_caller_module
 from modal_training_gym.common.modal_refs import register_modal_cloudpickle_reducers
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
-from modal_training_gym.common.ray_cluster import clustered_if
+from modal_training_gym.common.ray_cluster import (
+    RAY_PORT,
+    clustered_if,
+    start_ray_head,
+    start_ray_worker,
+)
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import (
     TrainingRun,
@@ -76,7 +81,6 @@ from modal_training_gym.train_recipes.stitch_recipe.train import StitchTrainConf
 MINUTES = 60
 SIDECAR_PORT = 8000
 SGLANG_PORT = 8001
-RAY_PORT = 6379
 SERVER_STARTUP_TIMEOUT = 35 * MINUTES
 # Ephemeral host-local full HF checkpoint the sidecar patches in place per delta.
 LOCAL_CHECKPOINT_PATH = "/local-checkpoint"
@@ -508,14 +512,9 @@ def build_stitch_app(
     ) -> dict:
         """Bring up Ray, claim the rollout pool for this run, and drive miles."""
         del modal_app_url  # derived from modal_app_id in the run record
-        from modal_training_gym.frameworks.stitch import (
-            bulletin_hooks,
-            ray_cluster,
-            sidecar_process,
-            trainer_helpers,
-        )
+        from modal_training_gym.frameworks.stitch import bulletin_hooks, trainer_helpers
 
-        rank, master_addr, my_ip = ray_cluster.get_modal_cluster_context(n_train_nodes)
+        rank, master_addr, my_ip = trainer_helpers.modal_cluster_context(n_train_nodes)
         os.environ.update(
             {
                 "MILES_HOST_IP": my_ip,
@@ -533,7 +532,6 @@ def build_stitch_app(
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
         if framework_status_token:
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
-        sidecar_process.start_host_mem_monitor()  # per-node host-RAM trace
         # Megatron is a source checkout in the image, so R3 dispatch + the
         # reshardable optimizer step arrive as patches. Applied on every node,
         # before the rank gate: each node's Ray actors import their own copy.
@@ -555,10 +553,10 @@ def build_stitch_app(
         # Rank 0 drives the run; the other ranks only host Ray workers, and stay
         # alive until Modal tears the cluster down with rank 0's input.
         if rank != 0:
-            ray_cluster.start_ray_worker(my_ip, master_addr, ray_port=RAY_PORT)
-            ray_cluster.wait_for_teardown()
-            return {}
-        ray_cluster.start_ray_head(my_ip, n_train_nodes, ray_port=RAY_PORT)
+            start_ray_worker(my_ip, master_addr)
+            while True:
+                time.sleep(10)
+        start_ray_head(my_ip, n_train_nodes, worker_wait_retries=180)
         for volume in (hf_cache_volume, data_volume, checkpoints_volume):
             volume.reload()
         # ``launch(prepare_inputs=False)`` (the default, and what a sweep uses)
@@ -802,30 +800,3 @@ class _PoolAwareTrain:
 
     def __getattr__(self, name: str):
         return getattr(self._fn, name)
-
-
-def smoke_flash_pool(
-    *,
-    app_name: str,
-    model: ModelConfig,
-    recipe: StitchRecipe,
-    weight_version: int = 0,
-    timeout_seconds: int = 30 * MINUTES,
-) -> None:
-    """Check the deployed Flash pool serves completions at a weight version, via
-    the gateway and each container directly (call from a
-    ``@app.local_entrypoint``)."""
-    from modal_training_gym.frameworks.stitch import trainer_helpers
-
-    trainer_helpers.smoke_flash_pool(
-        app_name=app_name,
-        cls_name="Server",
-        # The same string the pool booted with (--served-model-name): for a
-        # quantized run that is the prepared baseline, not the HF repo id.
-        model_name=recipe.serve.served_checkpoint_path
-        or model.model_path
-        or model.model_name,
-        weight_version=weight_version,
-        expect_min_containers=recipe.serve.min_containers,
-        timeout_seconds=timeout_seconds,
-    )

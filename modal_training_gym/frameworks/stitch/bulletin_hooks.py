@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -185,19 +184,14 @@ def _store(args: Any) -> ModalVolumeStore:
 
 
 def _pool(args: Any) -> ModalFlashPool:
-    app = getattr(args, "rollout_modal_flash_app_name", None) or os.environ.get(
-        "DELTA_APP_NAME"
+    return ModalFlashPool(
+        getattr(args, "rollout_modal_flash_app_name", None),
+        getattr(args, "rollout_modal_flash_server_cls_name", None) or "Server",
     )
-    cls = getattr(args, "rollout_modal_flash_server_cls_name", None) or os.environ.get(
-        "DELTA_SERVER_CLS_NAME", "Server"
-    )
-    return ModalFlashPool(app, cls)
 
 
 def _volume_name(args: Any) -> str | None:
-    return getattr(args, "update_weight_delta_volume_name", None) or os.environ.get(
-        "DELTA_VOLUME_NAME"
-    )
+    return getattr(args, "update_weight_delta_volume_name", None)
 
 
 def _transport_root(args: Any) -> str:

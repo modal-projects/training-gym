@@ -19,9 +19,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
-import threading
-import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -111,43 +110,24 @@ def _convert_to_nvfp4(train: Any, bf16_dir: str, out: str) -> None:
     )
 
 
-# A single Volume→Volume stream is backend-fetch bound; ~8 parallel streams recover
-# ~5x. 16 MiB reads run at full mount speed while bounding memory.
+# A single cache→Volume stream is backend-fetch bound; ~8 parallel streams recover ~5x.
 _COPY_WORKERS = int(os.environ.get("PREP_COPY_WORKERS", "8"))
-_COPY_CHUNK = 16 << 20
-_COPY_LOG_STEP_GB = 50
 
 
 def _copy_tree(label: str, src: str, dst: str) -> None:
-    src_files = [p for p in Path(src).rglob("*") if p.is_file()]  # follows symlinks
-    total_gb = sum(p.stat().st_size for p in src_files) / 1e9
-    progress = {"done_gb": 0.0, "next_log_gb": float(_COPY_LOG_STEP_GB)}
-    lock = threading.Lock()
-    start = time.monotonic()
+    files = [p for p in Path(src).rglob("*") if p.is_file()]  # follows symlinks
+    total_gb = sum(p.stat().st_size for p in files) / 1e9
 
     def copy_one(p: Path) -> None:
         out = Path(dst) / p.relative_to(src)
         out.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "rb") as fsrc, open(out, "wb") as fdst:
-            while chunk := fsrc.read(_COPY_CHUNK):
-                fdst.write(chunk)
-        with lock:
-            progress["done_gb"] += p.stat().st_size / 1e9
-            done = progress["done_gb"]
-            if done >= progress["next_log_gb"] or done >= total_gb:
-                rate = done / max(time.monotonic() - start, 1e-3)
-                print(
-                    f"copying {label}: {done:.0f}/{total_gb:.0f} GB, {rate:.1f} GB/s",
-                    flush=True,
-                )
-                progress["next_log_gb"] += _COPY_LOG_STEP_GB
+        shutil.copyfile(p, out)  # dereferences the HF cache's blob symlinks
 
     os.makedirs(dst, exist_ok=True)
-    with ThreadPoolExecutor(
-        max_workers=min(_COPY_WORKERS, len(src_files) or 1)
-    ) as pool:
-        list(pool.map(copy_one, src_files))
-    print(f"copied {label}: {total_gb:.0f} GB", flush=True)
+    print(f"copying {label}: {total_gb:.0f} GB", flush=True)
+    with ThreadPoolExecutor(max_workers=min(_COPY_WORKERS, len(files) or 1)) as pool:
+        list(pool.map(copy_one, files))
+    print(f"copied {label}", flush=True)
 
 
 def _staged(final_dir: str, build: Callable[[str], None]) -> None:
