@@ -1,10 +1,12 @@
 import asyncio
+import contextlib
 import hashlib
 import os
 import shlex
 import subprocess
 import shutil
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
@@ -98,7 +100,7 @@ _CONVERT_BARRIER_DICT_NAME = "training-gym-convert-barrier"
 _CONVERT_BARRIER_TIMEOUT_S = 7200.0
 _CONVERT_BARRIER_POLL_S = 5.0
 _CONVERT_LOCK_TTL_S = 5400.0
-_CONVERT_LOCK_REFRESH_EVERY = 100
+_CONVERT_LOCK_REFRESH_S = 1800.0
 
 
 def _convert_barrier_dict() -> Any:
@@ -161,6 +163,33 @@ def _refresh_convert_lock(run_id: str, save_path: str) -> None:
     if isinstance(holder, dict) and str(holder.get("run_id") or "") != run_id:
         return
     barrier[key] = {"run_id": run_id, "claimed_at": time.time()}
+
+
+@contextlib.contextmanager
+def _convert_lock_heartbeat(run_id: str, save_path: str):
+    """Keep this run's claim fresh for as long as the body runs.
+
+    Refreshing on elapsed time rather than on work done: a torch_dist conversion
+    writes only about one file per rank, so any progress-based cadence never fires,
+    and the claim would lapse mid-conversion and let a later launch delete the output
+    being written. The subprocess and the shard move are both covered.
+    """
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(_CONVERT_LOCK_REFRESH_S):
+            try:
+                _refresh_convert_lock(run_id, save_path)
+            except Exception as exc:
+                print(f"WARNING: could not refresh conversion claim: {exc}")
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=5.0)
 
 
 def _release_convert_lock(run_id: str, save_path: str) -> None:
@@ -236,6 +265,21 @@ def _is_resumable_checkpoint(path: str) -> bool:
     if any(name.endswith(".distcp") for name in names):
         return ".metadata" in names
     return True
+
+
+def _unresumable_save_dirs(save_root: str) -> list[str]:
+    """Save directories that exist but cannot be resumed from."""
+    try:
+        names = os.listdir(save_root)
+    except OSError:
+        return []
+    return sorted(
+        name
+        for name in names
+        if (name == "release" or name.startswith("iter_"))
+        and os.path.isdir(os.path.join(save_root, name))
+        and not _is_resumable_checkpoint(os.path.join(save_root, name))
+    )
 
 
 def _is_complete_torch_dist_checkpoint(path: str) -> bool:
@@ -760,70 +804,82 @@ def build_miles_app(
             _refresh_convert_lock(training_run_id, save_path)
             if nnodes > 1:
                 _clear_convert_barrier(training_run_id, nnodes)
+        heartbeat = (
+            _convert_lock_heartbeat(training_run_id, save_path)
+            if node_rank == 0
+            else contextlib.nullcontext()
+        )
         try:
-            subprocess.run(["bash", "-c", cmd], check=True, env=env)
+            with heartbeat:
+                subprocess.run(["bash", "-c", cmd], check=True, env=env)
 
-            if staging_path:
-                # Move file by file, committing after each, rather than copytree: the
-                # Volume buffers writes to local disk before a commit, so copying wants
-                # the whole checkpoint on local disk twice and a 276B model hits ENOSPC.
-                # Moving drains the staging copy as the destination fills and each commit
-                # flushes the Volume's buffer, keeping peak local usage at ~1x.
-                # Every node moves only its own rank-specific shards, so multi-node
-                # conversions still assemble additively.
-                print(f"Moving converted checkpoint {staging_path} -> {save_path}")
-                move_start = time.time()
-                moved = 0
-                deferred: list[tuple[str, str]] = []
-                for root, _dirs, files in os.walk(staging_path):
-                    rel = os.path.relpath(root, staging_path)
-                    dst_dir = save_path if rel == "." else os.path.join(save_path, rel)
-                    os.makedirs(dst_dir, exist_ok=True)
-                    for filename in sorted(files, key=lambda n: (n == ".metadata", n)):
-                        src = os.path.join(root, filename)
-                        dst = os.path.join(dst_dir, filename)
-                        if filename == ".metadata" and nnodes > 1 and node_rank == 0:
-                            deferred.append((src, dst))
-                            continue
+                if staging_path:
+                    # Move file by file, committing after each, rather than copytree: the
+                    # Volume buffers writes to local disk before a commit, so copying wants
+                    # the whole checkpoint on local disk twice and a 276B model hits ENOSPC.
+                    # Moving drains the staging copy as the destination fills and each commit
+                    # flushes the Volume's buffer, keeping peak local usage at ~1x.
+                    # Every node moves only its own rank-specific shards, so multi-node
+                    # conversions still assemble additively.
+                    print(f"Moving converted checkpoint {staging_path} -> {save_path}")
+                    move_start = time.time()
+                    moved = 0
+                    deferred: list[tuple[str, str]] = []
+                    for root, _dirs, files in os.walk(staging_path):
+                        rel = os.path.relpath(root, staging_path)
+                        dst_dir = (
+                            save_path if rel == "." else os.path.join(save_path, rel)
+                        )
+                        os.makedirs(dst_dir, exist_ok=True)
+                        for filename in sorted(
+                            files, key=lambda n: (n == ".metadata", n)
+                        ):
+                            src = os.path.join(root, filename)
+                            dst = os.path.join(dst_dir, filename)
+                            if (
+                                filename == ".metadata"
+                                and nnodes > 1
+                                and node_rank == 0
+                            ):
+                                deferred.append((src, dst))
+                                continue
+                            shutil.move(src, dst)
+                            moved += 1
+                            checkpoints_volume.commit()
+                    if nnodes > 1:
+                        if node_rank == 0:
+                            _await_convert_peers(training_run_id, nnodes)
+                        else:
+                            _signal_convert_rank_moved(training_run_id, node_rank)
+                    for src, dst in deferred:
                         shutil.move(src, dst)
                         moved += 1
                         checkpoints_volume.commit()
-                        if node_rank == 0 and moved % _CONVERT_LOCK_REFRESH_EVERY == 0:
-                            _refresh_convert_lock(training_run_id, save_path)
-                if nnodes > 1:
-                    if node_rank == 0:
-                        _await_convert_peers(training_run_id, nnodes)
-                    else:
-                        _signal_convert_rank_moved(training_run_id, node_rank)
-                for src, dst in deferred:
-                    shutil.move(src, dst)
-                    moved += 1
+                    print(f"Moved {moved} files in {time.time() - move_start:.0f}s")
+                    shutil.rmtree(staging_path, ignore_errors=True)
                     checkpoints_volume.commit()
-                print(f"Moved {moved} files in {time.time() - move_start:.0f}s")
-                shutil.rmtree(staging_path, ignore_errors=True)
-                checkpoints_volume.commit()
-            elif nnodes > 1 and node_rank == 0:
-                _await_convert_peers(training_run_id, nnodes)
-                checkpoints_volume.commit()
-            else:
-                checkpoints_volume.commit()
-                if nnodes > 1:
-                    _signal_convert_rank_moved(training_run_id, node_rank)
+                elif nnodes > 1 and node_rank == 0:
+                    _await_convert_peers(training_run_id, nnodes)
+                    checkpoints_volume.commit()
+                else:
+                    checkpoints_volume.commit()
+                    if nnodes > 1:
+                        _signal_convert_rank_moved(training_run_id, node_rank)
 
-            if node_rank == 0:
-                print(f"Saved Megatron torch_dist checkpoint to {save_path}")
-                # Fail loudly here rather than leaving a partial checkpoint for a later
-                # run to mistake for a cache hit.
-                if not has_torch_dist_checkpoint(
-                    save_path, is_complete=_is_complete_torch_dist_checkpoint
-                ):
-                    raise RuntimeError(
-                        f"Conversion finished but {save_path} holds no complete "
-                        "torch_dist checkpoint (missing .metadata)."
-                    )
-                if nnodes > 1:
-                    _clear_convert_barrier(training_run_id, nnodes)
-                _release_convert_lock(training_run_id, save_path)
+                if node_rank == 0:
+                    print(f"Saved Megatron torch_dist checkpoint to {save_path}")
+                    # Fail loudly here rather than leaving a partial checkpoint for a later
+                    # run to mistake for a cache hit.
+                    if not has_torch_dist_checkpoint(
+                        save_path, is_complete=_is_complete_torch_dist_checkpoint
+                    ):
+                        raise RuntimeError(
+                            f"Conversion finished but {save_path} holds no complete "
+                            "torch_dist checkpoint (missing .metadata)."
+                        )
+                    if nnodes > 1:
+                        _clear_convert_barrier(training_run_id, nnodes)
+                    _release_convert_lock(training_run_id, save_path)
         except BaseException:
             if node_rank == 0:
                 _release_convert_lock(training_run_id, save_path)
@@ -1084,6 +1140,15 @@ def build_miles_app(
                     "resuming training from last saved iteration."
                 )
                 miles.load = save_root
+            elif unresumable := _unresumable_save_dirs(save_root):
+                print(
+                    f"WARNING: {save_root} holds saves that cannot be resumed "
+                    f"({', '.join(unresumable)}) — they carry torch_dist shards "
+                    "without the .metadata written last, so they are interrupted "
+                    "writes. Training restarts from ref_load and their progress is "
+                    "discarded; Megatron follows latest_checkpointed_iteration.txt, "
+                    "so resuming into one of these would load a partial save."
+                )
             try:
                 cmd = build_train_cmd(miles, MILES_ROOT, model=model, dataset=dataset)
             finally:
