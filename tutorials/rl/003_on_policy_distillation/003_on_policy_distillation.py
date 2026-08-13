@@ -262,7 +262,7 @@ def _main_impl() -> None:
 
     # ## Training
     #
-    # The training recipe uses 1 H100 GPU per actor and rollout engine. The actor engine
+    # The training recipe uses one 8×H100 node. The actor engine
     # runs the training and the rollout engine runs the model for inference/forward passes.
     # You may want to tune the batch size for fitting the memory requirements of your GPU
     # and increase the samples per prompt parameter for generating more variants per group.

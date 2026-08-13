@@ -3,7 +3,7 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 2×H100",
+    "cluster_shape": "1 × 1×H100 (teacher) + 1 × 8×H100 (train)",
     "summary": "On-policy distillation on math",
     "difficulty": "Intermediate",
     "order": 30,
@@ -370,7 +370,7 @@ def _train_intro():
     """
     ## Training
 
-    The training recipe uses 1 H100 GPU per actor and rollout engine. The actor engine
+    The training recipe uses one 8×H100 node. The actor engine
     runs the training and the rollout engine runs the model for inference/forward passes.
     You may want to tune the batch size for fitting the memory requirements of your GPU
     and increase the samples per prompt parameter for generating more variants per group.
