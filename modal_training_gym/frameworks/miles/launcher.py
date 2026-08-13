@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from modal import App, Image, Retries, Secret, Volume
+from modal import App, Dict as ModalDict, Image, Retries, Secret, Volume
 from modal.experimental import clustered
 
 from modal_training_gym.common import (
@@ -94,71 +94,62 @@ _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", MEGATRON_PATCHES)
 
 
-_CONVERT_BARRIER_DIRNAME = ".training_gym_convert"
+_CONVERT_BARRIER_DICT_NAME = "training-gym-convert-barrier"
 _CONVERT_BARRIER_TIMEOUT_S = 7200.0
 _CONVERT_BARRIER_POLL_S = 5.0
 
 
-def _convert_barrier_dir(save_path: str) -> str:
-    return os.path.join(save_path, _CONVERT_BARRIER_DIRNAME)
+def _convert_barrier_dict() -> Any:
+    return ModalDict.from_name(_CONVERT_BARRIER_DICT_NAME, create_if_missing=True)
 
 
-def _signal_convert_rank_moved(volume: Any, save_path: str, node_rank: int) -> None:
-    """Publish this rank's "shards are on the Volume" marker."""
-    barrier_dir = _convert_barrier_dir(save_path)
-    os.makedirs(barrier_dir, exist_ok=True)
-    with open(os.path.join(barrier_dir, f"rank{node_rank}.moved"), "w") as handle:
-        handle.write("moved\n")
-    volume.commit()
+def _convert_barrier_key(run_id: str, node_rank: int) -> str:
+    return f"{run_id}:rank{node_rank}"
 
 
-def _withhold_metadata(save_path: str, stash_dir: str) -> list[tuple[str, str]]:
-    """Move every ``.metadata`` under ``save_path`` aside, returning (stashed, original).
-
-    Used on the direct-to-Volume path, where the converter writes ``.metadata``
-    straight to the mount and there is no staging copy to defer. Withholding it
-    before the first commit is what keeps a peer's missing shards from being masked;
-    ``Volume.reload`` may implicitly commit whatever is still pending, so the file
-    has to leave the mount rather than merely stay uncommitted.
-    """
-    stashed: list[tuple[str, str]] = []
-    for root, _dirs, files in os.walk(save_path):
-        if ".metadata" not in files:
-            continue
-        original = os.path.join(root, ".metadata")
-        target = os.path.join(stash_dir, os.path.relpath(original, save_path))
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        shutil.move(original, target)
-        stashed.append((target, original))
-    return stashed
+def _signal_convert_rank_moved(run_id: str, node_rank: int) -> None:
+    """Record that this rank's shards are committed to the Volume."""
+    _convert_barrier_dict()[_convert_barrier_key(run_id, node_rank)] = time.time()
 
 
-def _await_convert_ranks_moved(volume: Any, save_path: str, nnodes: int) -> None:
-    """Block until every rank has published its marker.
+def _clear_convert_barrier(run_id: str, nnodes: int) -> None:
+    """Drop this run's barrier keys."""
+    barrier = _convert_barrier_dict()
+    for rank in range(1, nnodes):
+        try:
+            barrier.pop(_convert_barrier_key(run_id, rank))
+        except KeyError:
+            pass
+
+
+def _await_convert_peers(run_id: str, nnodes: int) -> None:
+    """Block on rank 0 until every peer rank has committed its shards.
 
     ``.metadata`` is what makes a checkpoint look finished, so rank 0 may only
-    publish it once every peer's shards are committed. Without this wait a
-    multi-node conversion interrupted after rank 0's move leaves a directory that
+    publish it once every peer's shards are on the Volume. Without this wait a
+    multi-node conversion interrupted after rank 0's write leaves a directory that
     passes ``_is_complete_torch_dist_checkpoint`` with shards missing, and the next
     run reports a cache hit and trains on partial weights.
+
+    The signal lives in a ``modal.Dict`` rather than on the Volume so that waiting
+    never reloads the mount: ``Volume.reload`` may implicitly commit whatever is
+    pending, which would publish the very ``.metadata`` this holds back.
     """
-    barrier_dir = _convert_barrier_dir(save_path)
-    expected = {f"rank{rank}.moved" for rank in range(nnodes)}
+    barrier = _convert_barrier_dict()
     deadline = time.time() + _CONVERT_BARRIER_TIMEOUT_S
     while True:
-        volume.reload()
-        try:
-            missing = expected - set(os.listdir(barrier_dir))
-        except OSError:
-            missing = set(expected)
+        missing = [
+            rank
+            for rank in range(1, nnodes)
+            if _convert_barrier_key(run_id, rank) not in barrier
+        ]
         if not missing:
             return
         if time.time() >= deadline:
             raise RuntimeError(
                 f"Timed out after {_CONVERT_BARRIER_TIMEOUT_S:.0f}s waiting for "
-                f"conversion ranks {sorted(missing)} to move their shards to "
-                f"{save_path}; refusing to publish .metadata over an incomplete "
-                "checkpoint."
+                f"conversion ranks {missing} to commit their shards; refusing to "
+                "publish .metadata over an incomplete checkpoint."
             )
         time.sleep(_CONVERT_BARRIER_POLL_S)
 
@@ -672,8 +663,7 @@ def build_miles_app(
         )
         print(f"Running: bash -c {cmd!r}")
         if node_rank == 0 and nnodes > 1:
-            shutil.rmtree(_convert_barrier_dir(save_path), ignore_errors=True)
-            checkpoints_volume.commit()
+            _clear_convert_barrier(training_run_id, nnodes)
         subprocess.run(["bash", "-c", cmd], check=True, env=env)
 
         if staging_path:
@@ -702,35 +692,24 @@ def build_miles_app(
                     moved += 1
                     checkpoints_volume.commit()
             if nnodes > 1:
-                _signal_convert_rank_moved(checkpoints_volume, save_path, node_rank)
                 if node_rank == 0:
-                    _await_convert_ranks_moved(checkpoints_volume, save_path, nnodes)
+                    _await_convert_peers(training_run_id, nnodes)
+                else:
+                    _signal_convert_rank_moved(training_run_id, node_rank)
             for src, dst in deferred:
                 shutil.move(src, dst)
                 moved += 1
                 checkpoints_volume.commit()
             print(f"Moved {moved} files in {time.time() - move_start:.0f}s")
             shutil.rmtree(staging_path, ignore_errors=True)
-
-        withheld: list[tuple[str, str]] = []
-        metadata_stash = ""
-        if not staging_path and nnodes > 1 and node_rank == 0:
-            metadata_stash = os.path.join("/tmp", "training_gym_convert_metadata")
-            shutil.rmtree(metadata_stash, ignore_errors=True)
-            os.makedirs(metadata_stash, exist_ok=True)
-            withheld = _withhold_metadata(save_path, metadata_stash)
-
-        checkpoints_volume.commit()
-
-        if not staging_path and nnodes > 1:
-            _signal_convert_rank_moved(checkpoints_volume, save_path, node_rank)
-            if node_rank == 0:
-                _await_convert_ranks_moved(checkpoints_volume, save_path, nnodes)
-                for stashed, original in withheld:
-                    os.makedirs(os.path.dirname(original), exist_ok=True)
-                    shutil.move(stashed, original)
-                checkpoints_volume.commit()
-                shutil.rmtree(metadata_stash, ignore_errors=True)
+            checkpoints_volume.commit()
+        elif nnodes > 1 and node_rank == 0:
+            _await_convert_peers(training_run_id, nnodes)
+            checkpoints_volume.commit()
+        else:
+            checkpoints_volume.commit()
+            if nnodes > 1:
+                _signal_convert_rank_moved(training_run_id, node_rank)
 
         if node_rank == 0:
             print(f"Saved Megatron torch_dist checkpoint to {save_path}")
@@ -744,8 +723,7 @@ def build_miles_app(
                     "torch_dist checkpoint (missing .metadata)."
                 )
             if nnodes > 1:
-                shutil.rmtree(_convert_barrier_dir(save_path), ignore_errors=True)
-                checkpoints_volume.commit()
+                _clear_convert_barrier(training_run_id, nnodes)
 
         if training_run_id:
             flush_status_reporter(timeout_seconds=2.0)

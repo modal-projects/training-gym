@@ -700,14 +700,11 @@ class MilesRecipe(BaseTrainRecipe):
             and not self.convert_ephemeral_disk_mb
         ):
             warnings.warn(
-                f"{type(self).__name__} converts HF -> torch_dist with "
-                "convert_via_local_staging=True but leaves "
-                "convert_ephemeral_disk_mb unset, so the conversion container gets "
-                "Modal's default disk. Staging writes the whole checkpoint to local "
-                "disk before moving it onto the Volume, so a large model hits ENOSPC "
-                "part-way through conversion. Size convert_ephemeral_disk_mb for the "
-                "checkpoint plus the in-flight shard, or set "
-                "convert_via_local_staging=False.",
+                "convert_via_local_staging is True, but convert_ephemeral_disk_mb "
+                "has not been set. This may cause out-of-space errors when "
+                "converting the model. Size convert_ephemeral_disk_mb appropriately "
+                "for the checkpoint and scratch space, or disable local staging by "
+                "setting convert_via_local_staging to False.",
                 stacklevel=2,
             )
         return self
