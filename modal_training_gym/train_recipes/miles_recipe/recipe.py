@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Callable
 from dataclasses import field
 from typing import Any, ClassVar
@@ -689,6 +690,26 @@ class MilesRecipe(BaseTrainRecipe):
     @model_validator(mode="after")
     def _validate_gpu_allocation(self) -> "MilesRecipe":
         resolve_gpu_allocation(self)
+        return self
+
+    @model_validator(mode="after")
+    def _warn_unsized_conversion_staging(self) -> "MilesRecipe":
+        if (
+            self.megatron_to_hf_mode == "raw"
+            and self.convert_via_local_staging
+            and not self.convert_ephemeral_disk_mb
+        ):
+            warnings.warn(
+                f"{type(self).__name__} converts HF -> torch_dist with "
+                "convert_via_local_staging=True but leaves "
+                "convert_ephemeral_disk_mb unset, so the conversion container gets "
+                "Modal's default disk. Staging writes the whole checkpoint to local "
+                "disk before moving it onto the Volume, so a large model hits ENOSPC "
+                "part-way through conversion. Size convert_ephemeral_disk_mb for the "
+                "checkpoint plus the in-flight shard, or set "
+                "convert_via_local_staging=False.",
+                stacklevel=2,
+            )
         return self
 
     # ── Container → miles flag converters ────────────────────────────────────

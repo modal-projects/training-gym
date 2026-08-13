@@ -64,8 +64,12 @@ class _InklingSmallRecipe(MilesRecipe):
             "MILES_SGLANG_DUMMY_LOAD": "0",
             "SGLANG_SERVER_ENGINE_ROLLOUT_RETURN_LOGPROB": "1",
             "RAY_memory_monitor_refresh_ms": "0",
-            # Upstream sets these for GB300; MNNVL is absent on Modal H200 and NCCL
-            # falls back. First vars to drop if NCCL init hangs.
+            # Upstream sets these for GB300. MNNVL is absent on Modal H200, and
+            # enabling it is a no-op there rather than a hang: NCCL probes for the
+            # fabric and falls back to NVLink/PCIe. Kept at upstream's value because
+            # all four validation runs came up clean with it; NCCL_NVLS_ENABLE is the
+            # one that had to deviate. Still the first var to try dropping if a future
+            # NCCL init hangs during bring-up.
             "NCCL_MNNVL_ENABLE": "1",
             "NCCL_NVLS_ENABLE": "0",
             "NCCL_RAS_ENABLE": "0",
