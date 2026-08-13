@@ -542,6 +542,7 @@ body::before {
 
 .tg-header__search {
   min-width: min(14rem, 24vw);
+  width: min(14rem, 24vw);
 }
 
 .tg-header site-search.tg-header__search button[data-open-modal] {
@@ -549,7 +550,7 @@ body::before {
   border-radius: 9999px;
   background: #212525;
   color: color-mix(in srgb, var(--sl-color-gray-2) 62%, transparent);
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.5rem;
   font-family: var(--sl-font);
@@ -559,7 +560,7 @@ body::before {
   box-shadow: none;
   height: 1.75rem;
   min-height: 28px;
-  width: 222px;
+  width: 100%;
   padding-block: 4px;
   padding-inline: 12px;
   transform: translateY(2.5px);
@@ -582,6 +583,7 @@ body::before {
   font-size: 14px;
   font-weight: 400;
   padding: 0;
+  margin-inline-start: auto;
 }
 
 .tg-header site-search.tg-header__search button[data-open-modal] > span {
@@ -1024,6 +1026,7 @@ dialog {
 
   .tg-header__search {
     min-width: 104px;
+    width: 104px;
   }
 
   .tg-header__left {
