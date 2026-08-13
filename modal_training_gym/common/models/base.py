@@ -44,9 +44,7 @@ class ModelArchitecture:
     norm_epsilon : float
         Normalization epsilon. Default ``1e-6``.
     swiglu : bool
-        Emit Megatron's ``--swiglu`` (gated FFN with SiLU). Default ``True``.
-        Megatron has no flag for other gated activations, so a GeGLU model like
-        Gemma leaves this ``False`` and sets its activation via its layer spec.
+        Use SwiGLU activation in FFN. Default ``True``.
     disable_bias_linear : bool
         Disable bias in linear layers. Default ``True``.
     qk_layernorm : bool
