@@ -49,7 +49,7 @@ Options:
   the nearest Git repository.
 - `--force`: replace existing canonical skills or manageable Claude child
   paths. Without this option, locally modified or conflicting paths are
-  preserved.
+  preserved with a warning while unaffected skills continue installing.
 
 ## Dashboard configuration
 

@@ -86,10 +86,10 @@ training-gym skills install
 This installs all bundled skills—`agent-driven-training`, `example-validation`,
 `modal-infrastructure`, `model-support`, and `training-gym-overview`—under the
 cross-tool `.agents/skills/` directory. It also links each skill into
-`.claude/skills/` when that path is safe to manage. Claude-side conflicts are
-preserved with a warning and do not block canonical installation. Run the
-command again with `--force` to replace existing canonical copies or manageable
-Claude child paths.
+`.claude/skills/` when that path is safe to manage. Canonical and Claude-side
+conflicts are preserved with a warning without blocking unrelated skills. Run
+the command again with `--force` to replace existing canonical copies or
+manageable Claude child paths.
 
 This repository also includes an `AGENTS.md` and the source `skills/`
 directory that teach agents how to use and develop the framework.

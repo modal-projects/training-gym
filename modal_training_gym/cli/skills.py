@@ -230,42 +230,38 @@ def install_skills(*, project_dir: Path | None, force: bool) -> tuple[Path, ...]
     destinations = tuple(
         project_root / SKILLS_DIRECTORY / skill_name for skill_name in skills
     )
-
-    if not force:
-        for (skill_name, source), destination in zip(
-            skills.items(), destinations, strict=True
-        ):
-            if (destination.is_symlink() or destination.exists()) and not (
-                _canonical_skill_is_current(source, destination)
-            ):
-                raise CLIError(
-                    f"{skill_name} already exists at {destination}.",
-                    error="skill_destination_exists",
-                    hint="Rerun with --force to replace it.",
-                )
+    installed_destinations: list[tuple[str, Path]] = []
 
     for (skill_name, source), destination in zip(
         skills.items(), destinations, strict=True
     ):
-        skill_installed = _install_canonical_skill(
-            source,
-            destination,
-            skill_name=skill_name,
-            force=force,
-        )
+        try:
+            skill_installed = _install_canonical_skill(
+                source,
+                destination,
+                skill_name=skill_name,
+                force=force,
+            )
+        except CLIError as exc:
+            if exc.error != "skill_destination_exists":
+                raise
+            click.echo(f"Skipped {skill_name}: {exc.format_message()}", err=True)
+            continue
+
         if skill_installed:
             click.echo(f"{skill_name} is already installed at {destination}")
         else:
             click.echo(f"Installed {skill_name} at {destination}")
+        installed_destinations.append((skill_name, destination))
 
-    for skill_name, destination in zip(skills, destinations, strict=True):
+    for skill_name, destination in installed_destinations:
         _ensure_claude_compatibility(
             project_root,
             destination,
             skill_name=skill_name,
             force=force,
         )
-    return destinations
+    return tuple(destination for _, destination in installed_destinations)
 
 
 @click.group("skills", cls=_TrainingGymGroup)

@@ -116,19 +116,27 @@ def test_skills_install_keeps_equivalent_absolute_claude_link(monkeypatch, tmp_p
 def test_skills_install_preserves_modified_skill_without_force(monkeypatch, tmp_path):
     (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)
-    runner = CliRunner()
     destination = tmp_path / ".agents" / "skills" / SKILL_NAME
-
-    assert (
-        runner.invoke(cli_module.entrypoint_cli, ["skills", "install"]).exit_code == 0
-    )
+    destination.mkdir(parents=True)
     (destination / "SKILL.md").write_text("customized\n")
 
-    result = runner.invoke(cli_module.entrypoint_cli, ["skills", "install"])
+    result = CliRunner().invoke(
+        cli_module.entrypoint_cli,
+        ["skills", "install"],
+    )
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0
+    assert f"Skipped {SKILL_NAME}" in result.stderr
     assert "already exists" in result.stderr
     assert (destination / "SKILL.md").read_text() == "customized\n"
+    assert not _claude_link(tmp_path).exists()
+    for skill_name, source in _bundled_skills().items():
+        if skill_name == SKILL_NAME:
+            continue
+        installed = tmp_path / ".agents" / "skills" / skill_name
+        claude_link = tmp_path / ".claude" / "skills" / skill_name
+        assert _contents(installed) == _contents(source)
+        assert claude_link.resolve() == installed
 
 
 def test_skills_install_force_replaces_modified_skill(monkeypatch, tmp_path):
