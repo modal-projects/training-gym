@@ -58,7 +58,7 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import (
     HF_CACHE_PATH,
     MilesRecipe,
 )
-from modal_training_gym.common.patches import MEGATRON_PATCHES, encode_patch
+from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
 from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     build_train_cmd,
     get_checkpoint_conversion_policy,
@@ -91,9 +91,9 @@ _REPORTING_PATCH_COMMANDS = (
 # in inline_container.cc with "unexpected pos". Both are guarded no-ops when their
 # target source doesn't match, so they are safe for every miles image.
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
-    "patch_dist_ckpt_quantized", MEGATRON_PATCHES
+    "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
-_PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", MEGATRON_PATCHES)
+_PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
 
 
 _CONVERT_BARRIER_DICT_NAME = "training-gym-convert-barrier"

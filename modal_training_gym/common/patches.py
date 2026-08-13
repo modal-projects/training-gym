@@ -17,7 +17,7 @@ from pathlib import Path
 # applies all of them and miles applies the two torch_dist save fixes, so keeping them
 # out of either framework's tree leaves exactly one copy and keeps a Megatron fix from
 # looking slime-owned.
-MEGATRON_PATCHES = Path(__file__).parent / "megatron_patches"
+_MEGATRON_PATCHES = Path(__file__).parent / "megatron_patches"
 
 
 def encode_patch(name: str, patches_dir: Path) -> str:

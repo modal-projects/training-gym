@@ -84,7 +84,7 @@ from .modal_helpers.utils import (
     prepare_slime_config,
     resolve_checkpoint_ref,
 )
-from modal_training_gym.common.patches import MEGATRON_PATCHES, encode_patch
+from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.framework import Framework
 
@@ -97,14 +97,14 @@ SLIME_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02
 HARBOR_PKG_VERSION = "0.8.0"
 
 _SLIME_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
-_PATCH_VALIDATION_B64 = encode_patch("patch_validation", MEGATRON_PATCHES)
+_PATCH_VALIDATION_B64 = encode_patch("patch_validation", _MEGATRON_PATCHES)
 _PATCH_MEGATRON_BRIDGE_B64 = encode_patch("patch_megatron_bridge", _SLIME_PATCHES)
-_PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", MEGATRON_PATCHES)
+_PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", _MEGATRON_PATCHES)
 _PATCH_GLOBAL_PLAN_B64 = encode_patch("patch_global_plan", _SLIME_PATCHES)
-_PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", MEGATRON_PATCHES)
+_PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
 _PATCH_ADVANTAGES_B64 = encode_patch("patch_advantages", _SLIME_PATCHES)
 _PATCH_BRIDGE_NONE_TASK_B64 = encode_patch("patch_bridge_none_task", _SLIME_PATCHES)
-_PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", MEGATRON_PATCHES)
+_PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", _MEGATRON_PATCHES)
 _PATCH_BRIDGE_PER_TOKEN_LOSS_B64 = encode_patch(
     "patch_bridge_provider_per_token_loss", _SLIME_PATCHES
 )
@@ -140,7 +140,7 @@ _PATCH_LOG_ELIDE_B64 = encode_patch("patch_log_elide", _SLIME_PATCHES)
 # with inline_container.cc "unexpected pos" (e.g. the GLM-5.2 convert). No-op for
 # non-quantized tensors, so safe for every image.
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
-    "patch_dist_ckpt_quantized", MEGATRON_PATCHES
+    "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
 # OPD / multi-turn: zero-std metrics must skip non-numeric rewards (dict/None).
 _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATCHES)
