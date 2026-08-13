@@ -10,7 +10,7 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "Qwen3_4B",
         "Qwen3_8B",
-        "DeploymentConfig",
+        "CustomDeployment",
         "SlimeRecipe",
         "TrainConfig",
     ],
@@ -33,7 +33,7 @@ def _intro():
 
     The tutorial follows these steps:
 
-    1. **Deploy the teacher** (Qwen3-8B) on an SGLang server with `DeploymentConfig`.
+    1. **Deploy the teacher** (Qwen3-8B) on an SGLang server with `CustomDeployment`.
     2. **Load a math dataset** (`dapo-math-17k`) and define a verifiable eval that checks `Answer: \\boxed{N}`.
     3. **Evaluate the base student** (Qwen3-4B) to get a baseline accuracy.
     4. **Define a reward function** that calls the teacher's `/generate` endpoint with `return_logprob=True` and combines the teacher log-probs with a math correctness score.
@@ -95,9 +95,8 @@ def _imports():
     import re
 
     from modal_training_gym import (
-        DeploymentConfig,
+        CustomDeployment,
         HuggingFaceDataset,
-        ModelDeployment,
         Qwen3_4B,
         Qwen3_8B,
         SlimeRecipe,
@@ -122,13 +121,13 @@ def _deploy_intro():
 @code
 def _deploy_teacher():
     teacher_model = Qwen3_8B()
-    teacher_deployment = DeploymentConfig(
-        model=teacher_model,
+    teacher_deployment = CustomDeployment.launch(
+        teacher_model,
         recipe=SglangRecipe(gpu="H100"),
         app_name="opd-teacher-qwen3-8b",
         served_model_name="qwen3-8b-teacher",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Teacher URL: {teacher_deployment.url}")
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
@@ -226,7 +225,7 @@ def _eval_fn():
             pass
         return pred == gt
 
-    def math_eval_fn(deployment: ModelDeployment, example: dict) -> dict:
+    def math_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
         prompt = example["prompt"][0]["content"]
         label = example["label"]
 
@@ -281,10 +280,10 @@ def _eval_base_intro():
 @code
 def _eval_base():
     base_model = Qwen3_4B()
-    base_deployment = DeploymentConfig(
-        model=base_model,
+    base_deployment = CustomDeployment.launch(
+        base_model,
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Student URL: {base_deployment.url}")
 
     print("--- Evaluating base student... ---")
@@ -451,13 +450,13 @@ def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_4B(),
         checkpoint=checkpoint,
         app_name="qwen3-4b-opd-trained-serve",
         served_model_name="qwen3-4b-opd",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Trained student URL: {trained_deployment.url}")
 
     print("--- Evaluating trained student... ---")

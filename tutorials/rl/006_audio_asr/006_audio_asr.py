@@ -36,8 +36,7 @@
 import modal
 
 from modal_training_gym import (
-    DeploymentConfig,
-    ModelDeployment,
+    CustomDeployment,
     MultimodalDataset,
     Qwen3_ASR_1_7B,
     Qwen3_ASR_1_7b_Recipe,
@@ -151,13 +150,13 @@ async def word_error_rate_reward(args, sample, **kwargs) -> float:
 
 # ## Evaluate the trained checkpoint
 #
-# `DeploymentConfig.serve()` serves the trained checkpoint on SGLang
+# `CustomDeployment.launch()` serves the trained checkpoint on SGLang
 # (converting the Megatron checkpoint to HuggingFace first, audio tower included).
 # Then we `POST` each clip to `/v1/audio/transcriptions`, scoring word
 # accuracy (`1 − WER`), and print the mean WER and mean accuracy.
 
 def transcribe_and_score(
-    deployment: ModelDeployment, example: dict
+    deployment: CustomDeployment, example: dict
 ) -> dict:
     import base64
     import io
@@ -178,7 +177,7 @@ def transcribe_and_score(
         f"{deployment.url}/v1/audio/transcriptions",
         files={"file": ("clip.wav", buf, "audio/wav")},
         data={
-            "model": deployment.deployment_config.served_model_name,
+            "model": deployment.served_model_name,
             "temperature": "0.0",
         },
         timeout=120,
@@ -251,11 +250,11 @@ def _main_impl() -> None:
     print(f"Training run id: {train_result.training_run_id}")
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    deployment = DeploymentConfig(
-        model=Qwen3_ASR_1_7B(),
+    deployment = CustomDeployment.launch(
+        Qwen3_ASR_1_7B(),
         checkpoint=checkpoint,
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Serving trained model at {deployment.url}")
 
     rows = run_eval(deployment)

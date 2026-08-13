@@ -889,7 +889,7 @@ def build_slime_app(
     if slime.wandb is not None:
         train_secrets.append(Secret.from_name(slime.wandb.modal_wandb_secret_name))
     # Proxy-auth tokens for any custom_rm / generate hook that calls a
-    # DeploymentConfig.serve() endpoint (teacher /generate, etc.).
+    # CustomDeployment.launch() endpoint (teacher /generate, etc.).
     train_secrets.extend(proxy_auth_secrets())
     train_experimental_options: dict[str, Any] = {"efa_enabled": True}
 

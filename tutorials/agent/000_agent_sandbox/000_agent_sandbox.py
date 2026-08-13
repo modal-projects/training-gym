@@ -11,7 +11,7 @@
 # isolated container with its own filesystem.
 #
 # What you'll learn:
-# 1. Deploy a model with `DeploymentConfig` and get an
+# 1. Deploy a model with `CustomDeployment` and get an
 #    OpenAI-compatible endpoint.
 # 2. Use the OpenAI Python SDK pointed at your self-hosted
 #    endpoint (no API key needed).
@@ -42,7 +42,7 @@ import modal
 import openai
 
 from modal_training_gym import (
-    DeploymentConfig,
+    CustomDeployment,
     Qwen3_8B,
 )
 from modal_training_gym.deploy_recipes import SglangRecipe
@@ -149,8 +149,8 @@ def _main_impl() -> None:
 
     # ## Deploy the model
     #
-    # `DeploymentConfig.serve()` launches an sglang-backed inference
-    # server on Modal and returns a `ModelDeployment` with a live URL.
+    # `CustomDeployment.launch()` launches an sglang-backed inference
+    # server on Modal and returns a `CustomDeployment` with a live URL.
     # The server exposes an **OpenAI-compatible** `/v1/chat/completions`
     # endpoint, so we point the standard OpenAI Python SDK at it.
     #
@@ -162,11 +162,11 @@ def _main_impl() -> None:
     recipe = SglangRecipe(
         extra_server_args={"--tool-call-parser": "qwen25"},
     )
-    deployment = DeploymentConfig(
-        model=Qwen3_8B(),
+    deployment = CustomDeployment.launch(
+        Qwen3_8B(),
         recipe=recipe,
         unauthenticated=True,
-    ).serve()
+    )
     deployment.wait_until_ready()
     print(f"Model URL: {deployment.url}")
 
@@ -248,7 +248,7 @@ def _main_impl() -> None:
     # skips its internal chain-of-thought block and responds
     # directly — this keeps tool-call parsing clean.
 
-    MODEL = deployment.deployment_config.served_model_name
+    MODEL = deployment.served_model_name
     MAX_ITERATIONS = 10
 
     messages = [

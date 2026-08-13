@@ -9,10 +9,13 @@ _EXPORTS = {
         "modal_training_gym.common.checkpoint",
         "convert_checkpoint_to_hf",
     ),
+    "CustomDeployment": (
+        "modal_training_gym.common.deployment",
+        "CustomDeployment",
+    ),
     "DatasetConfig": ("modal_training_gym.common.dataset", "DatasetConfig"),
     "Endpoint": ("modal_training_gym.common.endpoint", "Endpoint"),
     "HarborDataset": ("modal_training_gym.common.dataset", "HarborDataset"),
-    "DeploymentConfig": ("modal_training_gym.common.deployment", "DeploymentConfig"),
     "EvalConfig": ("modal_training_gym.common.eval", "EvalConfig"),
     "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
     "EvalResult": ("modal_training_gym.common.eval", "EvalResult"),
@@ -42,7 +45,6 @@ _EXPORTS = {
     ),
     "ModelArchitecture": ("modal_training_gym.common.models", "ModelArchitecture"),
     "ModelConfig": ("modal_training_gym.common.models", "ModelConfig"),
-    "ModelDeployment": ("modal_training_gym.common.deployment", "ModelDeployment"),
     "Inkling_Small": ("modal_training_gym.common.models", "Inkling_Small"),
     "Inkling_Small_Recipe": (
         "modal_training_gym.train_recipes.miles_recipe",
@@ -129,6 +131,7 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "CustomDeployment",
     "Inkling_Small",
     "Inkling_Small_Recipe",
     "Inkling_Small_LoRA_Recipe",
@@ -141,7 +144,6 @@ __all__ = [
     "Endpoint",
     "GLM_4_7",
     "HarborDataset",
-    "DeploymentConfig",
     "EvalConfig",
     "EvalConfigDurable",
     "EvalResult",
@@ -163,7 +165,6 @@ __all__ = [
     "ModalCaptureError",
     "ModelArchitecture",
     "ModelConfig",
-    "ModelDeployment",
     "MilesRecipe",
     "parse_qwen3_response",
     "ParsedResponse",

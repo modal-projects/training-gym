@@ -1,7 +1,5 @@
-from types import SimpleNamespace
-
 from modal_training_gym.common import deployment as deployment_module
-from modal_training_gym.common.deployment import ModelDeployment
+from modal_training_gym.common.deployment import CustomDeployment
 
 
 def test_chat_serializes_tool_arguments_without_mutating_messages(monkeypatch) -> None:
@@ -31,9 +29,9 @@ def test_chat_serializes_tool_arguments_without_mutating_messages(monkeypatch) -
 
     monkeypatch.setattr(requests, "post", post)
     monkeypatch.setattr(deployment_module, "_modal_proxy_auth_headers", lambda: {})
-    deployment = ModelDeployment.model_construct(
+    deployment = CustomDeployment.model_construct(
         deployment_id="test",
-        deployment_config=SimpleNamespace(served_model_name="test-model"),
+        served_model_name="test-model",
         url="https://example.test",
     )
     messages = [
@@ -64,9 +62,9 @@ def test_chat_serializes_tool_arguments_without_mutating_messages(monkeypatch) -
 
 
 def test_generate_accepts_caller_supplied_messages(monkeypatch) -> None:
-    deployment = ModelDeployment.model_construct(
+    deployment = CustomDeployment.model_construct(
         deployment_id="test",
-        deployment_config=SimpleNamespace(served_model_name="test-model"),
+        served_model_name="test-model",
         url="https://example.test",
     )
     supplied_messages = [
@@ -81,7 +79,7 @@ def test_generate_accepts_caller_supplied_messages(monkeypatch) -> None:
         captured["kwargs"] = kwargs
         return {"content": "print('hello world')"}
 
-    monkeypatch.setattr(ModelDeployment, "chat", chat)
+    monkeypatch.setattr(CustomDeployment, "chat", chat)
 
     response = deployment.generate(
         "unused fallback",

@@ -200,18 +200,11 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Endpoint",
     },
     {
-        "class_name": "DeploymentConfig",
-        "module": "modal_training_gym.common.deployment",
-        "group": "deployment",
-        "class_type": "config_data",
-        "sidebar_label": "DeploymentConfig",
-    },
-    {
-        "class_name": "ModelDeployment",
+        "class_name": "CustomDeployment",
         "module": "modal_training_gym.common.deployment",
         "group": "deployment",
         "class_type": "behavior",
-        "sidebar_label": "ModelDeployment",
+        "sidebar_label": "CustomDeployment",
     },
     {
         "class_name": "SglangRecipe",

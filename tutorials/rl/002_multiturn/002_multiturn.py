@@ -33,8 +33,7 @@ import re
 
 from modal_training_gym import (
     DatasetConfig,
-    DeploymentConfig,
-    ModelDeployment,
+    CustomDeployment,
     Qwen3_4B,
     SlimeRecipe,
     TrainConfig,
@@ -242,7 +241,7 @@ async def number_guess_rm(args, sample, **kwargs) -> float:
 # small loop over the eval dataset.
 
 def run_guessing_trajectory(
-    deployment: ModelDeployment,
+    deployment: CustomDeployment,
     *,
     target: int,
     max_turns: int = _MAX_TURNS,
@@ -279,7 +278,7 @@ def run_guessing_trajectory(
     }
 
 def guessing_eval_fn(
-    deployment: ModelDeployment,
+    deployment: CustomDeployment,
     example: dict,
 ) -> dict:
     target = int(example["target"])
@@ -348,10 +347,10 @@ def _main_impl() -> None:
 
     # ## Serve and evaluate the base model
 
-    base_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    base_deployment = CustomDeployment.launch(
+        Qwen3_4B(),
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Base model URL: {base_deployment.url}")
     base_mean, base_rows = run_eval(base_deployment)
     base_summary = summarize_eval(base_rows)
@@ -423,13 +422,13 @@ def _main_impl() -> None:
     # ## Evaluate trained checkpoint
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_4B(),
         checkpoint=checkpoint,
         app_name="qwen3-4b-guessing-multiturn-serve",
         served_model_name="qwen3-4b-guessing-multiturn",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Trained model URL: {trained_deployment.url}")
 
     trained_mean, trained_rows = run_eval(trained_deployment)

@@ -18,7 +18,7 @@ from modal_training_gym.common.sample import Sample
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
-    from modal_training_gym.common.deployment import ModelDeployment
+    from modal_training_gym.common.deployment import CustomDeployment
     from modal_training_gym.common.models.base import ModelConfig
 
 EVAL_SUMMARY_STORE = MetadataStore.EVALS
@@ -229,7 +229,7 @@ class EvalResult(BaseModel):
 
 Response = str
 EvalResponseFn = Callable[[DatasetRow, Response], EvalRowResult]  # TOOD: bad name
-EvalFn = Callable[["ModelDeployment", DatasetRow], EvalRowResult]
+EvalFn = Callable[["CustomDeployment", DatasetRow], EvalRowResult]
 
 
 @dataclass
@@ -248,7 +248,7 @@ class EvalConfig:
 
     def _build_eval_fn(self, eval_response_fn: EvalResponseFn) -> EvalFn:
         def eval_fn(
-            deployment: ModelDeployment,
+            deployment: CustomDeployment,
             example: DatasetRow,
         ) -> EvalRowResult:
             prompt = self.build_prompt(example)
@@ -343,7 +343,7 @@ class EvalConfig:
 
     def evaluate(
         self,
-        deployment: "ModelDeployment",
+        deployment: "CustomDeployment",
         debug: bool = False,
         max_concurrency: int = 1,
         ready_timeout: int = 3000,
@@ -663,7 +663,7 @@ class HarborEval(EvalConfig):
 
     def _harbor_eval_fn(
         self,
-        deployment: "ModelDeployment",
+        deployment: "CustomDeployment",
         example: DatasetRow,
     ) -> EvalRowResult:
         prompt = self.build_prompt(example)

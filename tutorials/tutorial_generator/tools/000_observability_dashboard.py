@@ -16,7 +16,7 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "TrainConfig",
         "TrainingGroup",
-        "DeploymentConfig",
+        "CustomDeployment",
     ],
 }
 
@@ -99,7 +99,7 @@ def _runs_overview():
     ![Training runs list with annotated components](/observability_dashboard_1_annotated.png)
 
     1. **Sections** — switch between *Training runs*, *Deployments* (models
-       served with `DeploymentConfig`), and *Evals* (saved evaluation
+       served with `CustomDeployment`), and *Evals* (saved evaluation
        results written to the metadata volume).
     2. **Status cards** — workspace-wide counts of completed, pending,
        stopped, and failed runs.
