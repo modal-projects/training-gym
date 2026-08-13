@@ -177,6 +177,7 @@ class _InklingSmallRecipe(MilesRecipe):
             dataset is not None
             and getattr(dataset, "multimodal_keys", None)
             and not self.custom_model_provider_path
+            and "custom_model_provider_path" not in self._escape_hatch_keys()
         ):
             fields["custom_model_provider_path"] = _MM_MODEL_PROVIDER
         return fields
