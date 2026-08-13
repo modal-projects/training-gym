@@ -112,6 +112,27 @@ def _signal_convert_rank_moved(volume: Any, save_path: str, node_rank: int) -> N
     volume.commit()
 
 
+def _withhold_metadata(save_path: str, stash_dir: str) -> list[tuple[str, str]]:
+    """Move every ``.metadata`` under ``save_path`` aside, returning (stashed, original).
+
+    Used on the direct-to-Volume path, where the converter writes ``.metadata``
+    straight to the mount and there is no staging copy to defer. Withholding it
+    before the first commit is what keeps a peer's missing shards from being masked;
+    ``Volume.reload`` may implicitly commit whatever is still pending, so the file
+    has to leave the mount rather than merely stay uncommitted.
+    """
+    stashed: list[tuple[str, str]] = []
+    for root, _dirs, files in os.walk(save_path):
+        if ".metadata" not in files:
+            continue
+        original = os.path.join(root, ".metadata")
+        target = os.path.join(stash_dir, os.path.relpath(original, save_path))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.move(original, target)
+        stashed.append((target, original))
+    return stashed
+
+
 def _await_convert_ranks_moved(volume: Any, save_path: str, nnodes: int) -> None:
     """Block until every rank has published its marker.
 
@@ -650,7 +671,7 @@ def build_miles_app(
             f"node_rank={node_rank}"
         )
         print(f"Running: bash -c {cmd!r}")
-        if node_rank == 0 and staging_path and nnodes > 1:
+        if node_rank == 0 and nnodes > 1:
             shutil.rmtree(_convert_barrier_dir(save_path), ignore_errors=True)
             checkpoints_volume.commit()
         subprocess.run(["bash", "-c", cmd], check=True, env=env)
@@ -691,7 +712,25 @@ def build_miles_app(
             print(f"Moved {moved} files in {time.time() - move_start:.0f}s")
             shutil.rmtree(staging_path, ignore_errors=True)
 
+        withheld: list[tuple[str, str]] = []
+        metadata_stash = ""
+        if not staging_path and nnodes > 1 and node_rank == 0:
+            metadata_stash = os.path.join("/tmp", "training_gym_convert_metadata")
+            shutil.rmtree(metadata_stash, ignore_errors=True)
+            os.makedirs(metadata_stash, exist_ok=True)
+            withheld = _withhold_metadata(save_path, metadata_stash)
+
         checkpoints_volume.commit()
+
+        if not staging_path and nnodes > 1:
+            _signal_convert_rank_moved(checkpoints_volume, save_path, node_rank)
+            if node_rank == 0:
+                _await_convert_ranks_moved(checkpoints_volume, save_path, nnodes)
+                for stashed, original in withheld:
+                    os.makedirs(os.path.dirname(original), exist_ok=True)
+                    shutil.move(stashed, original)
+                checkpoints_volume.commit()
+                shutil.rmtree(metadata_stash, ignore_errors=True)
 
         if node_rank == 0:
             print(f"Saved Megatron torch_dist checkpoint to {save_path}")
@@ -704,7 +743,7 @@ def build_miles_app(
                     f"Conversion finished but {save_path} holds no complete "
                     "torch_dist checkpoint (missing .metadata)."
                 )
-            if staging_path and nnodes > 1:
+            if nnodes > 1:
                 shutil.rmtree(_convert_barrier_dir(save_path), ignore_errors=True)
                 checkpoints_volume.commit()
 

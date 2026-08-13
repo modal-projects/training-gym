@@ -73,6 +73,45 @@ def test_markers_live_outside_the_checkpoint_scan(tmp_path) -> None:
     )
 
 
+def test_withholding_metadata_leaves_the_mount_incomplete(tmp_path) -> None:
+    """The direct-to-Volume path has to move ``.metadata`` off the mount entirely.
+
+    ``Volume.reload`` may implicitly commit whatever is still pending, so leaving the
+    file in place but uncommitted would publish it during rank 0's wait.
+    """
+    save_path = tmp_path / "ckpt"
+    iter_dir = save_path / "iter_0000001"
+    iter_dir.mkdir(parents=True)
+    for name in (".metadata", "common.pt", "__0_0.distcp"):
+        (iter_dir / name).touch()
+    stash = tmp_path / "stash"
+    stash.mkdir()
+
+    assert launcher._is_complete_torch_dist_checkpoint(str(iter_dir))
+
+    withheld = launcher._withhold_metadata(str(save_path), str(stash))
+
+    assert len(withheld) == 1
+    assert not (iter_dir / ".metadata").exists()
+    assert not launcher._is_complete_torch_dist_checkpoint(str(iter_dir))
+
+    for stashed, original in withheld:
+        os.makedirs(os.path.dirname(original), exist_ok=True)
+        os.replace(stashed, original)
+
+    assert launcher._is_complete_torch_dist_checkpoint(str(iter_dir))
+
+
+def test_withholding_metadata_is_a_noop_without_one(tmp_path) -> None:
+    iter_dir = tmp_path / "ckpt" / "iter_0000001"
+    iter_dir.mkdir(parents=True)
+    (iter_dir / "__1_0.distcp").touch()
+    stash = tmp_path / "stash"
+    stash.mkdir()
+
+    assert launcher._withhold_metadata(str(tmp_path / "ckpt"), str(stash)) == []
+
+
 def test_signalling_is_idempotent(tmp_path) -> None:
     volume = FakeVolume()
     save_path = str(tmp_path)
