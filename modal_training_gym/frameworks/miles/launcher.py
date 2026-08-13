@@ -465,14 +465,30 @@ def build_miles_app(
                 flush_status_reporter(timeout_seconds=2.0)
             return None
 
-        # Anything already at save_path failed the completeness check above, so it is
-        # a partial write from an earlier crash. Clear it here — the single-container
-        # step that decides to convert — so the conversion cannot end up mixing fresh
-        # shards with stale ones from a different parallelism.
+        # Clear partial torch_dist writes from an earlier crash here — the
+        # single-container step that decides to convert — so the conversion cannot mix
+        # fresh shards with stale ones from a different parallelism. Only the
+        # ``iter_*``/``release`` directories the converter itself writes are removed,
+        # and only those failing the completeness check: ``ref_load`` is user-settable
+        # and may hold a hand-placed checkpoint in a layout this predicate rejects.
         if os.path.isdir(save_path):
-            print(f"Removing incomplete torch_dist checkpoint at {save_path}")
-            shutil.rmtree(save_path, ignore_errors=True)
-            checkpoints_volume.commit()
+            stale = [
+                name
+                for name in sorted(os.listdir(save_path))
+                if (name == "release" or name.startswith("iter_"))
+                and os.path.isdir(os.path.join(save_path, name))
+                and not _is_complete_torch_dist_checkpoint(
+                    os.path.join(save_path, name)
+                )
+            ]
+            if stale:
+                print(
+                    f"Removing incomplete torch_dist checkpoint dirs at {save_path}: "
+                    + ", ".join(stale)
+                )
+                for name in stale:
+                    shutil.rmtree(os.path.join(save_path, name), ignore_errors=True)
+                checkpoints_volume.commit()
 
         conversion_hf_checkpoint = (
             getattr(miles, "megatron_conversion_hf_checkpoint", None)
