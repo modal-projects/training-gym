@@ -648,7 +648,7 @@ def build_miles_app(
             dataset,
             eval_dataset,
             data_volume,
-            MilesRecipe._resolve_data_paths,
+            MilesRecipe._resolve_data_path,
         )
 
     convert_nnodes = get_checkpoint_conversion_policy(miles, model=model)[0]
@@ -1057,13 +1057,13 @@ def build_miles_app(
             await _set_framework_status(MilesStatus.PREPARE_DATASET)
             wrote_data = write_dataset_if_needed(
                 dataset,
-                MilesRecipe._resolve_data_paths(dataset, "train"),
+                MilesRecipe._resolve_data_path(dataset, "train"),
             )
             if eval_dataset is not None:
                 wrote_data = (
                     write_dataset_if_needed(
                         eval_dataset,
-                        MilesRecipe._resolve_data_paths(eval_dataset, "eval"),
+                        MilesRecipe._resolve_data_path(eval_dataset, "eval"),
                     )
                     or wrote_data
                 )

@@ -219,6 +219,7 @@ def write_dataset_if_needed(dataset: Any, path: str) -> bool:
         return False
 
     if os.path.isdir(path):
+        print(f"requires_refresh_before_training=True — removing {path}")
         shutil.rmtree(path)
     elif os.path.exists(path):
         os.remove(path)
@@ -234,13 +235,13 @@ def run_prepare_dataset(
     dataset: Any,
     eval_dataset: Any,
     data_volume: "Volume",
-    resolve_data_paths: Callable[[Any, str], str],
+    resolve_data_path: Callable[[Any, str], str],
 ) -> None:
     """Materialize train and optional eval datasets onto the data volume."""
     data_volume.reload()
-    write_dataset_if_needed(dataset, resolve_data_paths(dataset, "train"))
+    write_dataset_if_needed(dataset, resolve_data_path(dataset, "train"))
     if eval_dataset is not None:
-        write_dataset_if_needed(eval_dataset, resolve_data_paths(eval_dataset, "eval"))
+        write_dataset_if_needed(eval_dataset, resolve_data_path(eval_dataset, "eval"))
     data_volume.commit()
 
 

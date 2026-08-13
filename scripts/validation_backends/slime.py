@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from modal_training_gym.common.dataset import (
     DatasetConfig,
     HuggingFaceDataset,
@@ -19,10 +21,13 @@ class Gsm8kDataset(HuggingFaceDataset):
     hf_config = "main"
     input_column = "question"
     output_column = "answer"
-    output_format = "jsonl"
 
     @property
-    def requires_refresh_before_training(self):
+    def output_format(self) -> Literal["jsonl"]:
+        return "jsonl"
+
+    @property
+    def requires_refresh_before_training(self) -> bool:
         return True
 
     def _load_hf_dataset(self):

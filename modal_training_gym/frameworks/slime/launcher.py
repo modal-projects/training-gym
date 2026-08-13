@@ -683,7 +683,7 @@ def build_slime_app(
             dataset,
             eval_dataset,
             data_volume,
-            SlimeRecipe._resolve_data_paths,
+            SlimeRecipe._resolve_data_path,
         )
 
     convert_nnodes = get_checkpoint_conversion_policy(slime, model=model)[0]
@@ -1043,13 +1043,13 @@ def build_slime_app(
                 await _set_framework_status_async(SlimeStatus.PREPARE_DATASET)
                 wrote_data = write_dataset_if_needed(
                     dataset,
-                    SlimeRecipe._resolve_data_paths(dataset, "train"),
+                    SlimeRecipe._resolve_data_path(dataset, "train"),
                 )
                 if eval_dataset is not None:
                     wrote_data = (
                         write_dataset_if_needed(
                             eval_dataset,
-                            SlimeRecipe._resolve_data_paths(eval_dataset, "eval"),
+                            SlimeRecipe._resolve_data_path(eval_dataset, "eval"),
                         )
                         or wrote_data
                     )

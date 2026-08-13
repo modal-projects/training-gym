@@ -104,7 +104,7 @@ class BaseTrainRecipe(ABC):
     # ── Container → framework flag converters ────────────────────────────────
 
     @staticmethod
-    def _resolve_data_paths(
+    def _resolve_data_path(
         ds: "DatasetConfig",
         split: str = "train",
     ) -> str:
@@ -121,9 +121,9 @@ class BaseTrainRecipe(ABC):
         ds: "DatasetConfig",
         eval_ds: "DatasetConfig | None" = None,
     ) -> dict[str, Any]:
-        prompt_data = cls._resolve_data_paths(ds, "train")
+        prompt_data = cls._resolve_data_path(ds, "train")
         eval_prompt_data = (
-            ["eval", cls._resolve_data_paths(eval_ds, "eval")]
+            ["eval", cls._resolve_data_path(eval_ds, "eval")]
             if eval_ds is not None
             else None
         )

@@ -79,7 +79,7 @@ class ScreenSpotDataset(MultimodalDataset):
     def requires_refresh_before_training(self):
         return True
 
-    def _build_rows(self) -> list[dict]:
+    def rows(self) -> list[dict]:
         import base64
         import io
 
@@ -111,9 +111,6 @@ class ScreenSpotDataset(MultimodalDataset):
                 }
             )
         return rows
-
-    def rows(self):
-        return self._build_rows()
 
 train_dataset = ScreenSpotDataset(n_rows=800)
 

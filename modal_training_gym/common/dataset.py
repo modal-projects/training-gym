@@ -127,7 +127,7 @@ class DatasetConfig(ABC):
                 return
         except Exception as e:  # don't shadow the user's real bug with a sniff bug
             print(
-                f"[{type(self).__name__}.validate_write_split] could not sniff "
+                f"[{type(self).__name__}.validate_write] could not sniff "
                 f"{path!r} ({e!r}); skipping schema check."
             )
             return
@@ -148,11 +148,11 @@ class HuggingFaceDataset(DatasetConfig):
     """Dataset backed by a HuggingFace ``datasets`` repo.
 
     Subclass and set ``hf_repo`` plus column mappings. When
-    ``input_column`` and ``output_column`` are set, ``rows()`` wraps
-    each row into a prompt-only chat message list plus a separate label
-    field: ``{"messages": [{"role": "user", ...}], <label_key>: ...}``.
+    ``input_column`` and ``output_column`` are set, ``rows()`` formats
+    each row as a chat message list plus a separate label field:
+    ``{"messages": [{"role": "user", ...}], <label_key>: ...}``.
     A leading ``{"role": "system", ...}`` message is included when
-    ``system_prompt`` is set. No assistant turn is emitted — the target
+    ``system_prompt`` is set. No assistant turn is emitted. The target
     from ``output_column`` is stored under ``label_key``.
 
     With the columns unmapped, rows from the Hub are yielded as they come and
@@ -169,7 +169,11 @@ class HuggingFaceDataset(DatasetConfig):
     prompt_template: str = "{input}"
     n_rows: int = 0
 
-    def __init__(self, *, n_rows: int | None = None) -> None:
+    def __init__(
+        self, *, hf_split: str | None = None, n_rows: int | None = None
+    ) -> None:
+        if hf_split is not None:
+            self.hf_split = hf_split
         if n_rows is not None:
             self.n_rows = n_rows
         if not self.id:
@@ -191,7 +195,7 @@ class HuggingFaceDataset(DatasetConfig):
         return self.input_column or super().input_key
 
     @property
-    def output_format(self) -> Literal["parquet"]:
+    def output_format(self) -> Literal["jsonl", "parquet"]:
         return "parquet"
 
     @property

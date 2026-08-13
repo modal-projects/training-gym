@@ -136,8 +136,8 @@ def test_bfcl_dataset_paths_are_split_specific() -> None:
     train = bfcl.BfclMultiTurnDataset(split="train")
     evaluation = bfcl.BfclMultiTurnDataset(split="eval")
 
-    train_path = BaseTrainRecipe._resolve_data_paths(train, "train")
-    eval_path = BaseTrainRecipe._resolve_data_paths(evaluation, "eval")
+    train_path = BaseTrainRecipe._resolve_data_path(train, "train")
+    eval_path = BaseTrainRecipe._resolve_data_path(evaluation, "eval")
 
     assert train_path == "/data/BfclMultiTurnDataset/train.jsonl"
     assert eval_path == "/data/BfclMultiTurnDataset/eval.jsonl"
