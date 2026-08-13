@@ -89,8 +89,14 @@ from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.framework import Framework
 
 SLIME_ROOT = "/root/slime"
-# Pin by digest to prevent mutable-tag drift.  Tag: nightly-dev-20260722a
-SLIME_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02b31a0109dc850f8ca342"
+# Registry source published as the named Image below (see
+# scripts/publish_framework_images.py). Pinned by digest to prevent
+# mutable-tag drift.  Tag: nightly-dev-20260722a
+SLIME_REGISTRY_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02b31a0109dc850f8ca342"
+# Modal named Image the launcher builds from. Resolving a name never pulls
+# from the registry or triggers a rebuild; run
+# scripts/publish_framework_images.py to (re)publish it.
+SLIME_IMAGE = "slimerl/slime:nightly-dev-20260722a"
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
@@ -151,7 +157,7 @@ _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
 
 def _build_slime_base_image() -> "Image":
     return (
-        Image.from_registry(SLIME_IMAGE)
+        Image.from_name(SLIME_IMAGE)
         .entrypoint([])
         .run_commands(
             "rm -rf /root/.cache/huggingface",
