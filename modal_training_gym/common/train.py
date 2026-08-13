@@ -499,12 +499,12 @@ class TrainConfig:
 
     def _initializing_status(self) -> FrameworkStatus:
         # stitch runs miles in the trainer, so it reports miles' phases too.
-        if isinstance(self.recipe, MilesRecipe) or (
-            self.recipe.recipe_type == RecipeType.STITCH
-        ):
+        if self.recipe.recipe_type == RecipeType.STITCH:
             return MilesStatus.INITIALIZING
         if isinstance(self.recipe, SlimeRecipe):
             return SlimeStatus.INITIALIZING
+        if isinstance(self.recipe, MilesRecipe):
+            return MilesStatus.INITIALIZING
         raise TrainingGymConfigError(
             f"Unknown recipe type: {type(self.recipe).__name__}"
         )

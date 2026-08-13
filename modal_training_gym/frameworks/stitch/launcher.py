@@ -44,13 +44,13 @@ from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework, resolve_caller_module
 from modal_training_gym.common.modal_refs import register_modal_cloudpickle_reducers
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
+from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import (
     RAY_PORT,
     clustered_if,
     start_ray_head,
     start_ray_worker,
 )
-from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import (
     TrainingRun,
     TrainingRunStatus,

@@ -130,22 +130,29 @@ def modal_cluster_context(n_nodes: int) -> tuple[int, str, str]:
     """
     import modal.experimental
 
-    if n_nodes == 1:
-        # Modal may omit container IPv4s for size-1 clustered functions.
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            try:
-                sock.connect(("8.8.8.8", 80))
-                ip = str(sock.getsockname()[0])
-            except OSError:
-                ip = socket.gethostbyname(socket.gethostname())
+    try:
+        info = modal.experimental.get_cluster_info()
+        ips = list(info.container_ipv4_ips or [])
+    except Exception:  # noqa: BLE001 — not running as a clustered function
+        info, ips = None, []
+    if not ips and n_nodes == 1:
+        # Modal may omit container IPv4s for a size-1 cluster.
+        ip = _local_ip()
         return 0, ip, ip
-    info = modal.experimental.get_cluster_info()
-    ips = list(info.container_ipv4_ips or [])
-    if len(ips) != n_nodes:
+    if info is None or len(ips) != n_nodes:
         raise RuntimeError(
             f"Modal cluster size mismatch: expected {n_nodes} nodes, got {len(ips)}"
         )
     return info.rank, ips[0], ips[info.rank]
+
+
+def _local_ip() -> str:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        try:
+            sock.connect(("8.8.8.8", 80))
+            return str(sock.getsockname()[0])
+        except OSError:
+            return socket.gethostbyname(socket.gethostname())
 
 
 def flash_gateway_url(server_cls: Any) -> str:
