@@ -117,23 +117,39 @@ def _acquire_convert_lock(run_id: str, save_path: str) -> str:
     """Claim the right to convert into ``save_path``; return the current holder.
 
     Two launches of the same recipe share one ``ref_load``, so without this the
-    loser's cleanup deletes the winner's still-metadata-less conversion output. The
-    claim is advisory and expires after ``_CONVERT_LOCK_TTL_S`` so a crashed run
-    cannot wedge the path forever.
+    loser's cleanup deletes the winner's still-metadata-less conversion output.
+
+    ``Dict.put(..., skip_if_exists=True)`` is the atomic compare-and-set that decides
+    the winner; a read-then-write claim would let two runs both observe an unheld lock
+    and both proceed. The claim expires after ``_CONVERT_LOCK_TTL_S`` so a crashed run
+    cannot wedge the path: taking a stale claim over is a racy delete followed by the
+    same atomic put, so concurrent takers still yield exactly one owner.
     """
     barrier = _convert_barrier_dict()
     key = _convert_lock_key(save_path)
+    claim = {"run_id": run_id, "claimed_at": time.time()}
+    if barrier.put(key, claim, skip_if_exists=True):
+        return run_id
+
     holder = barrier.get(key)
     if isinstance(holder, dict):
         owner = str(holder.get("run_id") or "")
         claimed_at = holder.get("claimed_at")
-        fresh = (
-            isinstance(claimed_at, (int, float))
+        if owner == run_id:
+            return run_id
+        if (
+            owner
+            and isinstance(claimed_at, (int, float))
             and time.time() - claimed_at < _CONVERT_LOCK_TTL_S
-        )
-        if owner and owner != run_id and fresh:
+        ):
             return owner
-    barrier[key] = {"run_id": run_id, "claimed_at": time.time()}
+
+    barrier.pop(key, None)
+    if barrier.put(key, claim, skip_if_exists=True):
+        return run_id
+    holder = barrier.get(key)
+    if isinstance(holder, dict) and holder.get("run_id"):
+        return str(holder["run_id"])
     return run_id
 
 
@@ -154,10 +170,7 @@ def _release_convert_lock(run_id: str, save_path: str) -> None:
     holder = barrier.get(key)
     if isinstance(holder, dict) and str(holder.get("run_id") or "") != run_id:
         return
-    try:
-        barrier.pop(key)
-    except KeyError:
-        pass
+    barrier.pop(key, None)
 
 
 def _signal_convert_rank_moved(run_id: str, node_rank: int) -> None:
@@ -169,10 +182,7 @@ def _clear_convert_barrier(run_id: str, nnodes: int) -> None:
     """Drop this run's barrier keys."""
     barrier = _convert_barrier_dict()
     for rank in range(1, nnodes):
-        try:
-            barrier.pop(_convert_barrier_key(run_id, rank))
-        except KeyError:
-            pass
+        barrier.pop(_convert_barrier_key(run_id, rank), None)
 
 
 def _await_convert_peers(run_id: str, nnodes: int) -> None:
