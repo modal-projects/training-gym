@@ -9,7 +9,7 @@ TUTORIAL_METADATA = {
     "order": 10,
     "api_classes": [
         "CustomDeployment",
-        "Qwen3_8B",
+        "Qwen3_5_9B",
         "SglangRecipe",
     ],
 }
@@ -82,7 +82,7 @@ def _imports():
 
     from modal_training_gym import (
         CustomDeployment,
-        Qwen3_8B,
+        Qwen3_5_9B,
     )
     from modal_training_gym.deploy_recipes import SglangRecipe
 
@@ -173,20 +173,24 @@ def _deploy_section():
     The server exposes an **OpenAI-compatible** `/v1/chat/completions`
     endpoint, so we point the standard OpenAI Python SDK at it.
 
-    We pass `extra_server_args={"--tool-call-parser": "qwen25"}` to
-    the `SglangRecipe` so the server parses Qwen3's tool-call
-    format into structured `tool_calls` in the response. Without
-    this, the model emits tool calls as raw text.
+    We pass `extra_server_args={"--tool-call-parser": "qwen3_coder",
+    "--reasoning-parser": "qwen3"}` to the `SglangRecipe` so the server
+    parses Qwen3.5's XML-style tool-call format and strips any inline
+    thinking blocks before returning structured `tool_calls`.
+    Without this, the model emits tool calls as raw text.
     """
 
 
 @code
 def _deploy_model():
     recipe = SglangRecipe(
-        extra_server_args={"--tool-call-parser": "qwen25"},
+        extra_server_args={
+            "--tool-call-parser": "qwen3_coder",
+            "--reasoning-parser": "qwen3",
+        },
     )
     deployment = CustomDeployment.launch(
-        Qwen3_8B(),
+        Qwen3_5_9B(),
         recipe=recipe,
         unauthenticated=True,
     )
@@ -370,8 +374,8 @@ def _next_steps():
     - **Add a `write_file` tool** using
       `sandbox.filesystem.write_text` so the agent can modify
       code.
-    - **Swap models** — try `Qwen3_8B` for harder tasks, or
-      `Qwen3_4B` for lower cost.
+    - **Swap models** — try `Qwen3_6_27B` for harder tasks, or
+      `Qwen3_5_4B` for lower cost.
     - **Snapshot the filesystem** with
       `sandbox.snapshot_filesystem()` to create a reusable
       `modal.Image` from the sandbox state.

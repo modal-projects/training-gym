@@ -10,7 +10,7 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "HarborDataset",
         "CustomDeployment",
-        "Qwen3_4B",
+        "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
         "score_in_sandbox",
@@ -72,7 +72,7 @@ def _imports():
     from modal_training_gym import (
         CustomDeployment,
         HarborDataset,
-        Qwen3_4B,
+        Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
         extract_code,
@@ -153,14 +153,14 @@ def _harbor_eval_intro():
     Since hello-world doesn't ship `*.in`/`*.out` file pairs, we pass
     `test_cases` directly to `score_in_sandbox`.
 
-    Passing `model=Qwen3_4B()` into `extract_code` enables model-aware
+    Passing `model=Qwen3_5_4B()` into `extract_code` enables model-aware
     response parsing.
     """
 
 
 @code
 def _serve_eval_base():
-    base_model = Qwen3_4B()
+    base_model = Qwen3_5_4B()
     base_deployment = CustomDeployment.launch(
         base_model,
         unauthenticated=True,
@@ -228,7 +228,7 @@ def _train():
         return float(reward)
 
     training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=dataset,
         recipe=SlimeRecipe(
             custom_rm_function=sandbox_rm,
@@ -251,7 +251,7 @@ def _train():
             max_tokens_per_gpu=4096,
             save_interval=10,
             image_overlay=lambda image: image.run_commands(
-                "uv pip install --system modal>=1.2.0",
+                "uv pip install --system 'modal>=1.2.0'",
             ),
         ),
     )
@@ -271,10 +271,10 @@ def _serve_trained_intro():
 def _serve_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     trained_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-hello-world-serve",
-        served_model_name="qwen3-4b-hello-world",
+        app_name="qwen3-5-4b-hello-world-serve",
+        served_model_name="qwen3-5-4b-hello-world",
         unauthenticated=True,
     )
     print(f"Trained model URL: {trained_deployment.url}")

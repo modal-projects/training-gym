@@ -10,7 +10,7 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "DatasetConfig",
         "CustomDeployment",
-        "Qwen3_4B",
+        "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
     ],
@@ -72,7 +72,7 @@ def _imports():
     from modal_training_gym import (
         DatasetConfig,
         CustomDeployment,
-        Qwen3_4B,
+        Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
         list_checkpoints,
@@ -404,7 +404,7 @@ def _serve_base_intro():
 @code
 def _serve_base():
     base_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
+        Qwen3_5_4B(),
         unauthenticated=True,
     )
     print(f"Base model URL: {base_deployment.url}")
@@ -452,7 +452,7 @@ def _train_intro():
 @code
 def _train():
     training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=train_dataset,
         recipe=SlimeRecipe(
             custom_generate_function=number_guess_generate,
@@ -495,10 +495,10 @@ def _trained_eval_intro():
 def _trained_eval():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     trained_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-guessing-multiturn-serve",
-        served_model_name="qwen3-4b-guessing-multiturn",
+        app_name="qwen3-5-4b-guessing-multiturn-serve",
+        served_model_name="qwen3-5-4b-guessing-multiturn",
         unauthenticated=True,
     )
     print(f"Trained model URL: {trained_deployment.url}")
