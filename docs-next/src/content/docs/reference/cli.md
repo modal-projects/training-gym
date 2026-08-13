@@ -43,13 +43,6 @@ copy. Existing Claude paths are preserved without `--force`. If `.claude` or
 `.claude/skills` is itself a symbolic link, the command skips Claude links with
 a warning; canonical installation still succeeds.
 
-Skills are registered by directory, not in a Python list. To add a bundle entry
-such as CLI awareness or trace debugging, add
-`skills/<skill-name>/SKILL.md` (plus any files it references). The build includes
-the complete `skills/` directory, and `training-gym skills install` discovers
-each direct child containing `SKILL.md`, so no CLI registration change is
-needed.
-
 Options:
 
 - `--project-dir DIR`: install into a specific project instead of discovering
