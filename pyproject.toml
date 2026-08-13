@@ -24,10 +24,10 @@ build-backend = "hatchling.build"
 packages = ["modal_training_gym"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"skills/agent-driven-training" = "modal_training_gym/_skills/agent-driven-training"
+"skills" = "modal_training_gym/_skills"
 
 [tool.hatch.build.targets.sdist.force-include]
-"skills/agent-driven-training" = "skills/agent-driven-training"
+"skills" = "skills"
 
 [project.scripts]
 training-gym = "modal_training_gym.cli:main"

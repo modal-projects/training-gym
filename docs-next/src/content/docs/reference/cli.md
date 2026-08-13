@@ -19,28 +19,43 @@ project.
 
 ### `training-gym skills install`
 
-Install the bundled `agent-driven-training` skill into the current project:
+Install the Training Gym skill bundle into the current project:
 
 ```bash
 training-gym skills install
 ```
 
-The command finds the nearest Git repository and copies the skill to
-`.agents/skills/agent-driven-training`. That canonical installation is completed
-before the command configures Claude compatibility.
+The bundle currently contains:
+
+- `agent-driven-training`
+- `example-validation`
+- `modal-infrastructure`
+- `model-support`
+- `training-gym-overview`
+
+The command finds the nearest Git repository and copies every bundled skill to
+`.agents/skills/<skill-name>`. Canonical installation is completed before the
+command configures Claude compatibility.
 
 When `.claude/skills` is safe to manage, the command creates
-`.claude/skills/agent-driven-training` as a relative symbolic link to the
-canonical copy. Existing Claude paths are preserved without `--force`. If
-`.claude` or `.claude/skills` is itself a symbolic link, the command skips the
-Claude link with a warning; the canonical installation still succeeds.
+`.claude/skills/<skill-name>` as a relative symbolic link to each canonical
+copy. Existing Claude paths are preserved without `--force`. If `.claude` or
+`.claude/skills` is itself a symbolic link, the command skips Claude links with
+a warning; canonical installation still succeeds.
+
+Skills are registered by directory, not in a Python list. To add a bundle entry
+such as CLI awareness or trace debugging, add
+`skills/<skill-name>/SKILL.md` (plus any files it references). The build includes
+the complete `skills/` directory, and `training-gym skills install` discovers
+each direct child containing `SKILL.md`, so no CLI registration change is
+needed.
 
 Options:
 
 - `--project-dir DIR`: install into a specific project instead of discovering
   the nearest Git repository.
-- `--force`: replace an existing canonical skill or manageable Claude child
-  path. Without this option, locally modified or conflicting paths are
+- `--force`: replace existing canonical skills or manageable Claude child
+  paths. Without this option, locally modified or conflicting paths are
   preserved.
 
 ## Dashboard configuration

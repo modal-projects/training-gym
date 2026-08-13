@@ -48,7 +48,7 @@ tutorials/
                               tutorials/<bucket>/<name>/<name>.py + .ipynb
 
 tests/                      <- plain-script tests (uv run tests/<x>.py)
-.claude/skills/             <- agent-facing skills (you are here)
+skills/                     <- packaged agent skills (you are here)
 ```
 
 **Never edit `tutorials/<bucket>/<name>/<name>.py` or `.ipynb` directly -- they are

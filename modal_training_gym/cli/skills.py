@@ -13,26 +13,34 @@ from .commands import _TrainingGymGroup
 from .errors import CLIError
 
 
-SKILL_NAME = "agent-driven-training"
 SKILLS_DIRECTORY = Path(".agents") / "skills"
 CLAUDE_SKILLS_DIRECTORY = Path(".claude") / "skills"
 
 
-def _bundled_skill_path() -> Path:
-    """Locate the bundled skill in an installed wheel or source checkout."""
+def _bundled_skills_path() -> Path:
+    """Locate bundled skills in an installed wheel or source checkout."""
     package_root = Path(__file__).resolve().parent.parent
     candidates = (
-        package_root / "_skills" / SKILL_NAME,
-        package_root.parent / "skills" / SKILL_NAME,
+        package_root / "_skills",
+        package_root.parent / "skills",
     )
     for candidate in candidates:
-        if (candidate / "SKILL.md").is_file():
+        if candidate.is_dir() and any(candidate.glob("*/SKILL.md")):
             return candidate
     raise CLIError(
-        f"The bundled {SKILL_NAME!r} skill is unavailable.",
-        error="skill_not_bundled",
+        "The bundled Training Gym skills are unavailable.",
+        error="skills_not_bundled",
         hint="Reinstall modal-training-gym and try again.",
     )
+
+
+def _bundled_skills() -> dict[str, Path]:
+    """Return every registered skill, keyed by directory name."""
+    skills_path = _bundled_skills_path()
+    return {
+        skill_path.parent.name: skill_path.parent
+        for skill_path in sorted(skills_path.glob("*/SKILL.md"))
+    }
 
 
 def _find_project_root(start: Path) -> Path:
@@ -66,22 +74,32 @@ def _directory_contents(path: Path) -> dict[Path, bytes]:
     }
 
 
+def _canonical_skill_is_current(source: Path, destination: Path) -> bool:
+    """Return whether a canonical destination already matches its source."""
+    return (
+        not destination.is_symlink()
+        and destination.is_dir()
+        and _directory_contents(source) == _directory_contents(destination)
+    )
+
+
 def _install_claude_link(
     link: Path,
     destination: Path,
     *,
+    skill_name: str,
     replace_existing: bool,
 ) -> None:
     """Link Claude's skill directory to the canonical skill."""
     try:
         link.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
-            prefix=f".{SKILL_NAME}-",
+            prefix=f".{skill_name}-",
             dir=link.parent,
             ignore_cleanup_errors=True,
         ) as staging:
             staging_root = Path(staging)
-            staged_link = staging_root / SKILL_NAME
+            staged_link = staging_root / skill_name
             target = Path(os.path.relpath(destination, start=link.parent))
             staged_link.symlink_to(target, target_is_directory=True)
 
@@ -97,7 +115,7 @@ def _install_claude_link(
                 raise
     except OSError as exc:
         raise CLIError(
-            f"Could not link {SKILL_NAME} at {link}: {exc}",
+            f"Could not link {skill_name} at {link}: {exc}",
             error="skill_install_failed",
         ) from exc
 
@@ -106,17 +124,17 @@ def _install_canonical_skill(
     source: Path,
     destination: Path,
     *,
+    skill_name: str,
     force: bool,
 ) -> bool:
     """Install the canonical skill and return whether it was already installed."""
     destination_is_symlink = destination.is_symlink()
     destination_exists = destination_is_symlink or destination.exists()
-    if not destination_is_symlink and destination.is_dir():
-        if _directory_contents(source) == _directory_contents(destination):
-            return True
+    if _canonical_skill_is_current(source, destination):
+        return True
     if destination_exists and not force:
         raise CLIError(
-            f"{SKILL_NAME} already exists at {destination}.",
+            f"{skill_name} already exists at {destination}.",
             error="skill_destination_exists",
             hint="Rerun with --force to replace it.",
         )
@@ -124,12 +142,12 @@ def _install_canonical_skill(
     try:
         destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
-            prefix=f".{SKILL_NAME}-",
+            prefix=f".{skill_name}-",
             dir=destination.parent,
             ignore_cleanup_errors=True,
         ) as staging:
             staging_root = Path(staging)
-            staged_skill = staging_root / SKILL_NAME
+            staged_skill = staging_root / skill_name
             shutil.copytree(source, staged_skill)
 
             backup: Path | None = None
@@ -144,7 +162,7 @@ def _install_canonical_skill(
                 raise
     except OSError as exc:
         raise CLIError(
-            f"Could not install {SKILL_NAME} at {destination}: {exc}",
+            f"Could not install {skill_name} at {destination}: {exc}",
             error="skill_install_failed",
         ) from exc
     return False
@@ -154,11 +172,12 @@ def _ensure_claude_compatibility(
     project_root: Path,
     destination: Path,
     *,
+    skill_name: str,
     force: bool,
 ) -> None:
     """Expose the canonical skill to Claude when its paths are safe to manage."""
     skills_directory = project_root / CLAUDE_SKILLS_DIRECTORY
-    link = skills_directory / SKILL_NAME
+    link = skills_directory / skill_name
     symlinked_parent = _symlinked_claude_link_parent(project_root)
 
     if symlinked_parent is not None:
@@ -191,6 +210,7 @@ def _ensure_claude_compatibility(
         _install_claude_link(
             link,
             destination,
+            skill_name=skill_name,
             replace_existing=link_exists,
         )
     except CLIError as exc:
@@ -199,23 +219,53 @@ def _ensure_claude_compatibility(
     click.echo(f"Linked Claude skill at {link}")
 
 
-def install_skills(*, project_dir: Path | None, force: bool) -> Path:
-    """Install the bundled skill and return its destination."""
+def install_skills(*, project_dir: Path | None, force: bool) -> tuple[Path, ...]:
+    """Install every bundled skill and return their destinations."""
     project_root = (
         project_dir.expanduser().resolve()
         if project_dir is not None
         else _find_project_root(Path.cwd())
     )
-    source = _bundled_skill_path()
-    destination = project_root / SKILLS_DIRECTORY / SKILL_NAME
-    skill_installed = _install_canonical_skill(source, destination, force=force)
+    skills = _bundled_skills()
+    destinations = tuple(
+        project_root / SKILLS_DIRECTORY / skill_name for skill_name in skills
+    )
 
-    if skill_installed:
-        click.echo(f"{SKILL_NAME} is already installed at {destination}")
-    else:
-        click.echo(f"Installed {SKILL_NAME} at {destination}")
-    _ensure_claude_compatibility(project_root, destination, force=force)
-    return destination
+    if not force:
+        for (skill_name, source), destination in zip(
+            skills.items(), destinations, strict=True
+        ):
+            if (destination.is_symlink() or destination.exists()) and not (
+                _canonical_skill_is_current(source, destination)
+            ):
+                raise CLIError(
+                    f"{skill_name} already exists at {destination}.",
+                    error="skill_destination_exists",
+                    hint="Rerun with --force to replace it.",
+                )
+
+    for (skill_name, source), destination in zip(
+        skills.items(), destinations, strict=True
+    ):
+        skill_installed = _install_canonical_skill(
+            source,
+            destination,
+            skill_name=skill_name,
+            force=force,
+        )
+        if skill_installed:
+            click.echo(f"{skill_name} is already installed at {destination}")
+        else:
+            click.echo(f"Installed {skill_name} at {destination}")
+
+    for skill_name, destination in zip(skills, destinations, strict=True):
+        _ensure_claude_compatibility(
+            project_root,
+            destination,
+            skill_name=skill_name,
+            force=force,
+        )
+    return destinations
 
 
 @click.group("skills", cls=_TrainingGymGroup)
@@ -239,8 +289,8 @@ def skills_group() -> None:
 @click.option(
     "--force",
     is_flag=True,
-    help="Replace an existing canonical skill or manageable Claude child path.",
+    help="Replace existing canonical skills or manageable Claude child paths.",
 )
 def install_command(*, project_dir: Path | None, force: bool) -> None:
-    """Install agent-driven-training with optional Claude compatibility."""
+    """Install all bundled skills with optional Claude compatibility."""
     install_skills(project_dir=project_dir, force=force)

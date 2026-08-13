@@ -10,9 +10,14 @@ from click.testing import CliRunner
 
 from modal_training_gym import cli as cli_module
 from modal_training_gym.cli.skills import (
-    SKILL_NAME,
-    _bundled_skill_path,
+    _bundled_skills,
 )
+
+SKILL_NAME = "agent-driven-training"
+
+
+def _bundled_skill_path() -> Path:
+    return _bundled_skills()[SKILL_NAME]
 
 
 def _contents(path: Path) -> dict[Path, bytes]:
@@ -42,16 +47,16 @@ def test_wheel_contains_bundled_skill(tmp_path):
     )
 
     wheel = next(tmp_path.glob("*.whl"))
-    packaged_prefix = f"modal_training_gym/_skills/{SKILL_NAME}/"
     with zipfile.ZipFile(wheel) as archive:
-        packaged_contents = {
-            Path(name.removeprefix(packaged_prefix)): archive.read(name)
-            for name in archive.namelist()
-            if name.startswith(packaged_prefix) and not name.endswith("/")
-        }
-
-    source = project_root / "skills" / SKILL_NAME
-    assert packaged_contents == _contents(source)
+        for skill_name in _bundled_skills():
+            packaged_prefix = f"modal_training_gym/_skills/{skill_name}/"
+            packaged_contents = {
+                Path(name.removeprefix(packaged_prefix)): archive.read(name)
+                for name in archive.namelist()
+                if name.startswith(packaged_prefix) and not name.endswith("/")
+            }
+            source = project_root / "skills" / skill_name
+            assert packaged_contents == _contents(source)
 
 
 def test_skills_install_copies_bundled_skill_to_git_root(monkeypatch, tmp_path):
@@ -62,15 +67,15 @@ def test_skills_install_copies_bundled_skill_to_git_root(monkeypatch, tmp_path):
 
     result = CliRunner().invoke(cli_module.entrypoint_cli, ["skills", "install"])
 
-    destination = tmp_path / ".agents" / "skills" / SKILL_NAME
     assert result.exit_code == 0
-    assert str(destination) in result.stdout
-    assert _contents(destination) == _contents(_bundled_skill_path())
-    assert _claude_link(tmp_path).is_symlink()
-    assert _claude_link(tmp_path).readlink() == _expected_claude_target(tmp_path)
-    assert _claude_link(tmp_path).resolve() == destination
-    assert f"Installed {SKILL_NAME}" in result.stdout
-    assert "Linked Claude skill" in result.stdout
+    for skill_name, source in _bundled_skills().items():
+        destination = tmp_path / ".agents" / "skills" / skill_name
+        claude_link = tmp_path / ".claude" / "skills" / skill_name
+        assert str(destination) in result.stdout
+        assert _contents(destination) == _contents(source)
+        assert claude_link.is_symlink()
+        assert claude_link.resolve() == destination
+        assert f"Installed {skill_name}" in result.stdout
 
 
 def test_skills_install_is_idempotent(monkeypatch, tmp_path):
@@ -309,10 +314,11 @@ def test_skills_install_accepts_explicit_non_git_project(tmp_path):
     )
 
     assert result.exit_code == 0
-    assert (tmp_path / ".agents" / "skills" / SKILL_NAME / "SKILL.md").is_file()
-    assert _claude_link(tmp_path).resolve() == (
-        tmp_path / ".agents" / "skills" / SKILL_NAME
-    )
+    for skill_name in _bundled_skills():
+        destination = tmp_path / ".agents" / "skills" / skill_name
+        claude_link = tmp_path / ".claude" / "skills" / skill_name
+        assert (destination / "SKILL.md").is_file()
+        assert claude_link.resolve() == destination
 
 
 def test_skills_install_requires_git_repo_without_project_dir(monkeypatch, tmp_path):

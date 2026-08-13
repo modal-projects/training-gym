@@ -77,18 +77,19 @@ training-gym open  # opens in your browser
 
 ## Agent set-up
 
-Install the Training Gym skill into your project:
+Install the Training Gym skill bundle into your project:
 
 ```bash
 training-gym skills install
 ```
 
-This copies `agent-driven-training` to the cross-tool `.agents/skills/`
-directory, then links `.claude/skills/agent-driven-training` to that canonical
-copy when the Claude path is safe to manage. Claude-side conflicts are
-preserved with a warning and do not block the canonical installation. Run the
-command again with `--force` to replace an existing canonical copy or
-manageable Claude child path.
+This installs all bundled skills—`agent-driven-training`, `example-validation`,
+`modal-infrastructure`, `model-support`, and `training-gym-overview`—under the
+cross-tool `.agents/skills/` directory. It also links each skill into
+`.claude/skills/` when that path is safe to manage. Claude-side conflicts are
+preserved with a warning and do not block canonical installation. Run the
+command again with `--force` to replace existing canonical copies or manageable
+Claude child paths.
 
 This repository also includes an `AGENTS.md` and the source `skills/`
 directory that teach agents how to use and develop the framework.
