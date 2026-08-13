@@ -97,6 +97,8 @@ _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", MEGATRON_PATC
 _CONVERT_BARRIER_DICT_NAME = "training-gym-convert-barrier"
 _CONVERT_BARRIER_TIMEOUT_S = 7200.0
 _CONVERT_BARRIER_POLL_S = 5.0
+_CONVERT_LOCK_TTL_S = 5400.0
+_CONVERT_LOCK_REFRESH_EVERY = 100
 
 
 def _convert_barrier_dict() -> Any:
@@ -105,6 +107,57 @@ def _convert_barrier_dict() -> Any:
 
 def _convert_barrier_key(run_id: str, node_rank: int) -> str:
     return f"{run_id}:rank{node_rank}"
+
+
+def _convert_lock_key(save_path: str) -> str:
+    return f"lock:{save_path}"
+
+
+def _acquire_convert_lock(run_id: str, save_path: str) -> str:
+    """Claim the right to convert into ``save_path``; return the current holder.
+
+    Two launches of the same recipe share one ``ref_load``, so without this the
+    loser's cleanup deletes the winner's still-metadata-less conversion output. The
+    claim is advisory and expires after ``_CONVERT_LOCK_TTL_S`` so a crashed run
+    cannot wedge the path forever.
+    """
+    barrier = _convert_barrier_dict()
+    key = _convert_lock_key(save_path)
+    holder = barrier.get(key)
+    if isinstance(holder, dict):
+        owner = str(holder.get("run_id") or "")
+        claimed_at = holder.get("claimed_at")
+        fresh = (
+            isinstance(claimed_at, (int, float))
+            and time.time() - claimed_at < _CONVERT_LOCK_TTL_S
+        )
+        if owner and owner != run_id and fresh:
+            return owner
+    barrier[key] = {"run_id": run_id, "claimed_at": time.time()}
+    return run_id
+
+
+def _refresh_convert_lock(run_id: str, save_path: str) -> None:
+    """Extend this run's claim so a long conversion outlives the TTL."""
+    barrier = _convert_barrier_dict()
+    key = _convert_lock_key(save_path)
+    holder = barrier.get(key)
+    if isinstance(holder, dict) and str(holder.get("run_id") or "") != run_id:
+        return
+    barrier[key] = {"run_id": run_id, "claimed_at": time.time()}
+
+
+def _release_convert_lock(run_id: str, save_path: str) -> None:
+    """Drop the conversion claim, but only if this run still holds it."""
+    barrier = _convert_barrier_dict()
+    key = _convert_lock_key(save_path)
+    holder = barrier.get(key)
+    if isinstance(holder, dict) and str(holder.get("run_id") or "") != run_id:
+        return
+    try:
+        barrier.pop(key)
+    except KeyError:
+        pass
 
 
 def _signal_convert_rank_moved(run_id: str, node_rank: int) -> None:
@@ -525,6 +578,16 @@ def build_miles_app(
                 flush_status_reporter(timeout_seconds=2.0)
             return None
 
+        holder = _acquire_convert_lock(training_run_id, save_path)
+        if holder != training_run_id:
+            raise RuntimeError(
+                f"Run {holder} is already converting into {save_path}. Two runs of "
+                "this recipe share one ref_load, so continuing would delete that "
+                "run's in-flight conversion and interleave shards. Wait for it to "
+                "finish and relaunch to pick up the cached checkpoint, or point this "
+                "run at a different ref_load."
+            )
+
         # Clear partial torch_dist writes from an earlier crash here — the
         # single-container step that decides to convert — so the conversion cannot mix
         # fresh shards with stale ones from a different parallelism. Only the
@@ -662,8 +725,10 @@ def build_miles_app(
             f"node_rank={node_rank}"
         )
         print(f"Running: bash -c {cmd!r}")
-        if node_rank == 0 and nnodes > 1:
-            _clear_convert_barrier(training_run_id, nnodes)
+        if node_rank == 0:
+            _refresh_convert_lock(training_run_id, save_path)
+            if nnodes > 1:
+                _clear_convert_barrier(training_run_id, nnodes)
         subprocess.run(["bash", "-c", cmd], check=True, env=env)
 
         if staging_path:
@@ -691,6 +756,8 @@ def build_miles_app(
                     shutil.move(src, dst)
                     moved += 1
                     checkpoints_volume.commit()
+                    if node_rank == 0 and moved % _CONVERT_LOCK_REFRESH_EVERY == 0:
+                        _refresh_convert_lock(training_run_id, save_path)
             if nnodes > 1:
                 if node_rank == 0:
                     _await_convert_peers(training_run_id, nnodes)
@@ -724,6 +791,7 @@ def build_miles_app(
                 )
             if nnodes > 1:
                 _clear_convert_barrier(training_run_id, nnodes)
+            _release_convert_lock(training_run_id, save_path)
 
         if training_run_id:
             flush_status_reporter(timeout_seconds=2.0)
