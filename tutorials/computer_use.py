@@ -67,13 +67,17 @@ class ScreenSpotDataset(MultimodalDataset):
     hf_split = "test"
     n_rows = 800
     row_offset = 0
-    always_prepare = True
-    # Collapse to one chat-templated string; the VL processor crashes on raw
-    # message lists.
-    apply_chat_template = True
 
-    def __init__(self, **kwargs):
-        super().__init__(rows=[], **kwargs)
+    def __init__(self, *, n_rows=None, row_offset=None):
+        if n_rows is not None:
+            self.n_rows = n_rows
+        if row_offset is not None:
+            self.row_offset = row_offset
+        super().__init__(rows=[])
+
+    @property
+    def requires_refresh_before_training(self):
+        return True
 
     def _build_rows(self) -> list[dict]:
         import base64
@@ -108,15 +112,8 @@ class ScreenSpotDataset(MultimodalDataset):
             )
         return rows
 
-    def load(self, split: str = "all") -> list[dict]:
+    def rows(self):
         return self._build_rows()
-
-    def prepare(self, path, eval_paths=None):
-        rows = self._build_rows()
-        self._write_jsonl(rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_jsonl(rows, eval_path)
 
 train_dataset = ScreenSpotDataset(n_rows=800)
 
@@ -250,7 +247,7 @@ def run_eval(
         return grounding_eval_fn(deployment, example)
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        rows = list(executor.map(_score_one, eval_dataset.load()))
+        rows = list(executor.map(_score_one, eval_dataset.rows()))
     mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
     return mean, rows
 
@@ -299,6 +296,7 @@ print(
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
+    eval_dataset=eval_dataset,
     recipe=Qwen3_VL_8b_Recipe(
         # TP=4 shards the 8B weights across 4 GPUs, freeing enough VRAM per
         # GPU for the large 0.75 KV pool below. (TP=2 OOMs at mem=0.75.)

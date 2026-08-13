@@ -278,6 +278,7 @@ class EvalConfig:
                 class_name,
                 dataset_name,
                 eval_fn_name,
+                "",
                 self.prompt_column or "",
             )
         if self.eval_fn is None:
@@ -367,6 +368,7 @@ class EvalConfig:
             self.eval_config_id,
             deployment.deployment_id,
             type(self.dataset).__name__,
+            "",
             _callable_name(self.eval_fn or self.eval_response_fn),
         )
         result = EvalResult(
@@ -407,7 +409,7 @@ class EvalConfig:
             with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
                 futures = [
                     executor.submit(_evaluate_indexed, item)
-                    for item in enumerate(self.dataset.load(split="eval"), start=1)
+                    for item in enumerate(self.dataset.rows(), start=1)
                 ]
                 for future in as_completed(futures):
                     idx, row_result = future.result()

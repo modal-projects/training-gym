@@ -17,8 +17,8 @@ class DapoMath17kDataset(HuggingFaceDataset):
     input_key = "prompt"
     label_key = "label"
     output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
+    needs_chat_template = True
+    requires_refresh_before_training = True
 
 
 def build_miles_validation(

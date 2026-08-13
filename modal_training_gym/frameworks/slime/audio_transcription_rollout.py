@@ -43,7 +43,7 @@ def _iter_content_items(prompt: Any):
 def _audio_ref(sample: Any) -> Any:
     """Pull the raw audio reference (data-URI / bytes) off a slime Sample.
 
-    Our ``MultimodalDataset`` runs with ``apply_chat_template=False``, so slime keeps
+    Our ``MultimodalDataset`` runs with ``needs_chat_template=False``, so slime keeps
     ``sample.prompt`` a conversation list and the audio rides in the message content
     as ``{"type": "audio", "audio": <data-uri>}`` (slime's ``process_vision_info``
     extracts only images/videos, so audio never reaches ``multimodal_inputs``). Fail

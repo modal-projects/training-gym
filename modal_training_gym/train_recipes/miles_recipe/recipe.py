@@ -718,8 +718,12 @@ class MilesRecipe(BaseTrainRecipe):
     # ── Container → miles flag converters ────────────────────────────────────
 
     @classmethod
-    def _dataset_to_fields(cls, ds: "DatasetConfig") -> dict[str, Any]:
-        fields = super()._dataset_to_fields(ds)
+    def _dataset_to_fields(
+        cls,
+        ds: "DatasetConfig",
+        eval_ds: "DatasetConfig | None" = None,
+    ) -> dict[str, Any]:
+        fields = super()._dataset_to_fields(ds, eval_ds)
         if getattr(ds, "multimodal_keys", None):
             fields["multimodal_keys"] = ds.multimodal_keys
         return fields
@@ -809,6 +813,7 @@ class MilesRecipe(BaseTrainRecipe):
     def _fields(
         self,
         dataset: DatasetConfig | None = None,
+        eval_dataset: DatasetConfig | None = None,
         model: ModelConfig | None = None,
     ) -> dict[str, Any]:
         fields = self._field_values()
@@ -825,7 +830,7 @@ class MilesRecipe(BaseTrainRecipe):
                     continue
                 fields[k] = v
         if dataset is not None:
-            fields.update(self._dataset_to_fields(dataset))
+            fields.update(self._dataset_to_fields(dataset, eval_dataset))
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)

@@ -10,14 +10,16 @@ from modal_training_gym.common.training_group import TrainingGroupError
 from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import Qwen3_6_35b_Recipe
 
 
+class Gsm8kDataset(HuggingFaceDataset):
+    hf_repo = "openai/gsm8k"
+    input_column = "question"
+    output_column = "answer"
+
+
 def _base() -> TrainConfig:
     return TrainConfig(
         model=Qwen3_6_35B(),
-        dataset=HuggingFaceDataset(
-            hf_repo="openai/gsm8k",
-            input_column="question",
-            output_column="answer",
-        ),
+        dataset=Gsm8kDataset(),
         recipe=Qwen3_6_35b_Recipe(num_rollout=10),
     )
 

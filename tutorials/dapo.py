@@ -76,8 +76,8 @@ class MathDataset(HuggingFaceDataset):
     input_key = "prompt"
     label_key = "label"
     output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
+    needs_chat_template = True
+    requires_refresh_before_training = True
 
 train_dataset = MathDataset(hf_split="train[:2000]")
 
@@ -102,7 +102,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         return score_answer(response, example["label"])
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        scores = list(executor.map(_score_one, eval_dataset.load()))
+        scores = list(executor.map(_score_one, eval_dataset.rows()))
     percent_correct = (
         len([s for s in scores if s == 1]) / len(scores) if scores else float("nan")
     )
@@ -164,6 +164,7 @@ async def dapo_overlong_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
+    eval_dataset=eval_dataset,
     recipe=SlimeRecipe(
         gpu_type="H100",
         actor_num_nodes=1,

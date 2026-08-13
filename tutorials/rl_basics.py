@@ -124,8 +124,8 @@ class HaikuDataset(HuggingFaceDataset):
     input_column = "keywords"
     output_column = "text"
     output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
+    needs_chat_template = True
+    requires_refresh_before_training = True
     prompt_template = "Write a haiku about {input}."
 
 train_dataset = HaikuDataset(hf_split="train[:10]")
@@ -155,7 +155,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         return score_haiku(msg.get("content") or msg.get("reasoning_content") or "")
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        scores = list(executor.map(_score_one, eval_dataset.load()))
+        scores = list(executor.map(_score_one, eval_dataset.rows()))
     return sum(scores) / len(scores) if scores else float("nan")
 
 print("running base model evaluation...")
@@ -190,6 +190,7 @@ async def haiku_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
+    eval_dataset=eval_dataset,
     recipe=SlimeRecipe(
         gpu_type="H100",
         actor_num_nodes=1,
@@ -245,6 +246,7 @@ print(f"average score: {trained_mean:.1f}")
 new_config = TrainConfig(
     model=model,
     dataset=train_dataset,
+    eval_dataset=eval_dataset,
     checkpoint=checkpoint,
     recipe=SlimeRecipe(
         custom_rm_function=haiku_rm,

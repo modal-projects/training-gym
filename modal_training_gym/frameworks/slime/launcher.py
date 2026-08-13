@@ -60,6 +60,7 @@ from modal_training_gym.common.launcher_helpers import (
     run_download_phase,
     run_prepare_dataset,
     ship_callable,
+    write_dataset_if_needed,
 )
 from modal_training_gym.common.launcher_utils import (
     serialize_recipe_params,
@@ -370,6 +371,7 @@ def build_slime_app(
     slime: SlimeRecipe,
     model: ModelConfig,
     dataset: DatasetConfig,
+    eval_dataset: DatasetConfig | None = None,
     checkpoint: Checkpoint | None = None,
     name: str | None = None,
     group_id: str | None = None,
@@ -380,6 +382,8 @@ def build_slime_app(
 
     SlimeRecipe._validate_custom_model_architecture(model)
     SlimeRecipe._validate_dataset(dataset)
+    if eval_dataset is not None:
+        SlimeRecipe._validate_dataset(eval_dataset)
 
     # Models that can't do THD packing (model.requires_bshd, e.g. Qwen3-ASR) must
     # train on padded (bshd) batches; fail fast with the fix if the recipe didn't.
@@ -675,7 +679,12 @@ def build_slime_app(
         name="prepare_dataset",
     )
     def prepare_dataset():
-        run_prepare_dataset(dataset, data_volume, SlimeRecipe._resolve_data_paths)
+        run_prepare_dataset(
+            dataset,
+            eval_dataset,
+            data_volume,
+            SlimeRecipe._resolve_data_paths,
+        )
 
     convert_nnodes = get_checkpoint_conversion_policy(slime, model=model)[0]
 
@@ -962,7 +971,12 @@ def build_slime_app(
         print(f"Training run id: {training_run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
-            "recipe": _serialize_slime_params(slime, dataset=dataset, model=model),
+            "recipe": _serialize_slime_params(
+                slime,
+                dataset=dataset,
+                eval_dataset=eval_dataset,
+                model=model,
+            ),
             "metrics": metric_metadata(
                 slime.metrics,
                 entity=metric_entity,
@@ -1027,22 +1041,20 @@ def build_slime_app(
 
             if dataset:
                 await _set_framework_status_async(SlimeStatus.PREPARE_DATASET)
-                prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
-                needs_prepare = not os.path.exists(prompt_data)
-                if dataset.always_prepare and os.path.exists(prompt_data):
-                    import shutil
-
-                    data_dir = os.path.dirname(prompt_data)
-                    print(f"always_prepare=True — removing {data_dir}")
-                    shutil.rmtree(data_dir, ignore_errors=True)
-                    needs_prepare = True
-                if needs_prepare:
-                    print(f"Preparing dataset ({prompt_data})...")
-                    dataset.prepare(prompt_data, eval_paths)
+                wrote_data = write_dataset_if_needed(
+                    dataset,
+                    SlimeRecipe._resolve_data_paths(dataset, "train"),
+                )
+                if eval_dataset is not None:
+                    wrote_data = (
+                        write_dataset_if_needed(
+                            eval_dataset,
+                            SlimeRecipe._resolve_data_paths(eval_dataset, "eval"),
+                        )
+                        or wrote_data
+                    )
+                if wrote_data:
                     await data_volume.commit.aio()
-                dataset.validate_prepared(prompt_data)
-                for ep in (eval_paths or {}).values():
-                    dataset.validate_prepared(ep)
 
             await _set_framework_status_async(SlimeStatus.CONVERT_MODEL)
             prepare_slime_config(slime, model, tempfile.mkdtemp())
@@ -1107,7 +1119,13 @@ def build_slime_app(
                 # on the missing optimizer state.
                 object.__setattr__(slime, "ref_load", _hf_ref)
             try:
-                cmd = build_train_cmd(slime, SLIME_ROOT, model=model, dataset=dataset)
+                cmd = build_train_cmd(
+                    slime,
+                    SLIME_ROOT,
+                    model=model,
+                    dataset=dataset,
+                    eval_dataset=eval_dataset,
+                )
             finally:
                 object.__setattr__(slime, "save", original_save)
                 object.__setattr__(slime, "load", original_load)

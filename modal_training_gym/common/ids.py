@@ -9,6 +9,7 @@ def create_hash(
     checkpoint: str,
     recipe: str,
     app_name: str,
+    eval_dataset: str,
     model_path: str,
 ) -> str:
     import randomname
@@ -22,6 +23,7 @@ def create_hash(
         checkpoint,
         recipe,
         app_name,
+        eval_dataset,
         model_path,
         created_at,
     ]

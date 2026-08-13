@@ -21,11 +21,13 @@ import inspect
 import json
 import os
 import time
+import uuid
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
-from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.dataset import DatasetConfig, DatasetRow
 from modal_training_gym.common.environments.base import (
     EvalVerdict,
     Environment,
@@ -588,26 +590,34 @@ def _category_filename(category: str) -> str:
 class BfclMultiTurnDataset(DatasetConfig):
     """Loads a BFCL multi-turn category from the installed ``bfcl_eval`` package.
 
-    Last :attr:`config`.eval_tail ids are held out as eval.
+    The last :attr:`config`.eval_tail ids are held out for an instance configured
+    with ``split="eval"``; the remaining ids are used for ``split="train"``.
     """
-
-    input_key: str = "messages"
-    label_key: str = "label"
-    # JSON-lines output (the gym default is parquet).
-    output_format: str = "jsonl"
-    writes_eval_paths: bool = False
 
     def __init__(
         self,
-        split: str = "train",
+        split: Literal["all", "train", "eval"] = "train",
         config: BfclMultiTurnConfig | None = None,
-        **kwargs: Any,
     ) -> None:
-        self._split = split
+        self.split = split
+        # Keep this while framework path resolution still uses ``hf_split``.
         self.hf_split = split
         self.config = config if config is not None else BfclMultiTurnConfig()
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+        if not self.id:
+            self.id = f"bfcl-{self.config.category}-{split}-{uuid.uuid4()}"
+        super().__init__()
+
+    @property
+    def input_key(self) -> str:
+        return "messages"
+
+    @property
+    def label_key(self) -> str:
+        return "label"
+
+    @property
+    def output_format(self) -> Literal["jsonl"]:
+        return "jsonl"
 
     def _entries(self) -> list[dict]:
         return _load_jsonl(
@@ -624,11 +634,11 @@ class BfclMultiTurnDataset(DatasetConfig):
 
     def _ids_for_split(self, ids: list[str]) -> list[str]:
         tail = self.config.eval_tail
-        if self._split == "eval":
+        if self.split == "eval":
             return ids[-tail:] if tail else []
-        if self._split == "train":
+        if self.split == "train":
             return ids[:-tail] if tail else list(ids)
-        return ids
+        return list(ids)
 
     def _make_row(self, entry: dict, ground_truth: list[list[str]]) -> dict:
         turns = [
@@ -664,26 +674,11 @@ class BfclMultiTurnDataset(DatasetConfig):
         ]
         return {"messages": messages, "label": json.dumps(label)}
 
-    def _load_split(self) -> list[dict]:
+    def rows(self) -> Iterable[DatasetRow]:
         entries_by_id = {e["id"]: e for e in self._entries()}
         gt_by_id = self._ground_truths()
         ids = self._ids_for_split(list(entries_by_id.keys()))
-        return [
-            self._make_row(entries_by_id[i], gt_by_id[i])
-            for i in ids
-            if i in entries_by_id and i in gt_by_id and gt_by_id[i] and any(gt_by_id[i])
-        ]
-
-    def load(self, split: str = "all") -> list[dict]:
-        if split in ("train", "eval"):
-            self._split = split
-            self.hf_split = split
-        return self._load_split()
-
-    def prepare(self, path: str, eval_paths: dict | None = None) -> None:
-        """Write this instance's split to ``path``. ``eval_paths`` is ignored."""
-        del eval_paths  # train/eval are separate DatasetConfig instances
-        rows = self._load_split()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            f.writelines(json.dumps(r) + "\n" for r in rows)
+        for entry_id in ids:
+            ground_truth = gt_by_id.get(entry_id)
+            if entry_id in entries_by_id and ground_truth and any(ground_truth):
+                yield self._make_row(entries_by_id[entry_id], ground_truth)

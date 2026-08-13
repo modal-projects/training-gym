@@ -1,15 +1,17 @@
-"""Dataset config + ``prepare()`` hook, shared across training frameworks.
+"""Dataset config + row materialization, shared across training frameworks.
 
 Pure data — each framework config writes its own converter from a
 ``DatasetConfig`` instance to its specific CLI flags (e.g. SlimeRecipe emits
 ``--prompt-data``, ``--input-key``, …).
 
-Subclass and override ``prepare()`` to materialize the data into a shared
-volume.
+Subclass and implement ``rows()``; launchers call ``write()`` to materialize
+the data into a shared volume.
 """
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from enum import Enum
 from typing import Any, Literal
 import json
@@ -30,72 +32,52 @@ class DatasetType(Enum):
     HARBOR = "harbor"
 
 
-class DatasetConfig:
+class DatasetConfig(ABC):
     """Dataset configuration shared across training frameworks.
 
-    Describes *what* the data is. Where it gets written on disk is decided
-    by the recipe/launcher layer, not by the dataset itself.
+    A dataset describes *what* the data is and a way to iterate over its rows.
+    The recipe/launcher layer then uses the dataset to materialize the data on disk.
 
-    output_format : str
-        On-disk format ``prepare()`` writes, ``"parquet"`` (default) or
-        ``"jsonl"``; it also picks the extension of the path the launcher
-        hands to ``prepare()``. Parquet is the default because it is compact,
-        carries a typed schema (so a ragged or mistyped column fails at write
-        time rather than inside a remote rollout actor), streams row-group by
-        row-group, and stores binary media without base64 inflation. Choose
-        ``"jsonl"`` for small or hand-inspected datasets — it stays greppable
-        on the data volume and tolerates rows whose schemas don't line up.
+    You can implement your own dataset by subclassing DatasetConfig and overriding the
+    necessary methods, but you can also use one of our built-in datasets to pull from
+    common sources like HuggingFace or Harbor.
     """
 
-    _type: DatasetType = DatasetType.DEFAULT
-    dataset_id: str = ""
-    input_key: str = ""
-    label_key: str = ""
-    output_format: str = "parquet"
-    apply_chat_template: bool = True
-    always_prepare: bool = False
-    # When True (default), ``prepare()`` is expected to materialize every path in
-    # ``eval_paths`` and the launcher validates them strictly. Datasets that use
-    # a separate DatasetConfig instance for offline eval (Toolathlon, BFCL) set
-    # this False so resolvers don't invent a companion ``eval.*`` file.
-    writes_eval_paths: bool = True
+    type: DatasetType = DatasetType.DEFAULT
+    id: str = ""
 
-    def __init__(self, **kwargs: Any) -> None:
-        if not self.dataset_id:
-            self.dataset_id = str(uuid.uuid4())
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        self._validate()
+    @property
+    def input_key(self) -> str:
+        return "input"
 
-    def _validate(self) -> None:
-        """Required-field check; subclasses call this at the end of their own ``__init__``."""
-        if self.output_format not in ("parquet", "jsonl"):
-            raise TrainingGymConfigError(
-                f"{type(self).__name__} has output_format="
-                f"{self.output_format!r}; expected 'parquet' or 'jsonl'."
-            )
-        if not self.label_key:
-            raise TrainingGymConfigError(
-                f"{type(self).__name__} requires `label_key` to be set. "
-                "It names the column on the materialized dataset that holds "
-                "per-sample ground-truth / reward-function input. "
-                'Declare it as a class attribute (`label_key = "label"`) on '
-                "your subclass, or pass `label_key=...` as a kwarg. Frameworks "
-                "like slime index `data[label_key]` at load time, so an unset "
-                "value reliably crashes deep in a remote Ray actor."
-            )
+    @property
+    @abstractmethod
+    def label_key(self) -> str:
+        raise NotImplementedError("Datasets must set a label_key.")
+
+    @property
+    def needs_chat_template(self) -> bool:
+        return True
+
+    @property
+    def requires_refresh_before_training(self) -> bool:
+        return False
+
+    @abstractmethod
+    def rows(self) -> Iterable[DatasetRow]:
+        pass
+
+    @property
+    def output_format(self) -> Literal["jsonl", "parquet"]:
+        return "jsonl"
 
     @property
     def name(self) -> str:
-        return self.dataset_id
+        return self.id
 
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
-        """Materialize training data to ``path`` (and eval splits to ``eval_paths``)."""
-        raise NotImplementedError(f"{type(self).__name__} has no prepare()")
-
-    def load(self, split: Literal["all", "train", "eval"] = "all") -> Any:
-        """Load raw examples, optionally filtered by split."""
-        raise NotImplementedError(f"{type(self).__name__} has no load()")
+    def __init__(self):
+        if not self.id:
+            self.id = str(uuid.uuid4())
 
     def _expected_columns(self) -> set[str]:
         cols: set[str] = set()
@@ -105,8 +87,14 @@ class DatasetConfig:
             cols.add(self.label_key)
         return cols
 
-    def validate_prepared(self, path: str) -> None:
-        """Sniff what ``prepare()`` wrote and confirm the columns the framework will index.
+    def write(self, path: str) -> None:
+        rows = self.rows()
+        with open(path, "w") as f:
+            for row in rows:
+                f.write(json.dumps(row) + "\n")
+
+    def validate_write(self, path: str) -> None:
+        """Sniff what ``write()`` wrote and confirm the columns the framework will index.
 
         Catches the common ``KeyError: 'label'`` (and friends) that otherwise
         only fire deep inside a Ray actor on a remote container, after image
@@ -116,8 +104,8 @@ class DatasetConfig:
 
         if not os.path.exists(path):
             raise FileNotFoundError(
-                f"{type(self).__name__}.prepare() did not produce {path!r}. "
-                "Ensure your prepare(path, ...) override writes to the `path` arg."
+                f"{type(self).__name__}.write() did not produce {path!r}. "
+                "Ensure your write(path, ...) override writes to the `path` arg."
             )
 
         expected = self._expected_columns()
@@ -139,7 +127,7 @@ class DatasetConfig:
                 return
         except Exception as e:  # don't shadow the user's real bug with a sniff bug
             print(
-                f"[{type(self).__name__}.validate_prepared] could not sniff "
+                f"[{type(self).__name__}.validate_write_split] could not sniff "
                 f"{path!r} ({e!r}); skipping schema check."
             )
             return
@@ -147,11 +135,11 @@ class DatasetConfig:
         missing = expected - cols
         if missing:
             raise TrainingGymConfigError(
-                f"{type(self).__name__}.prepare() wrote {path!r} but it is "
+                f"{type(self).__name__}.write() wrote {path!r} but it is "
                 f"missing required column(s) {sorted(missing)} "
                 f"(input_key={self.input_key!r}, label_key={self.label_key!r}). "
                 f"Columns present: {sorted(cols)}. "
-                "Either rename the column(s) your prepare() writes, or set "
+                "Either rename the column(s) your write() writes, or set "
                 "input_key/label_key on your DatasetConfig subclass to match."
             )
 
@@ -160,15 +148,18 @@ class HuggingFaceDataset(DatasetConfig):
     """Dataset backed by a HuggingFace ``datasets`` repo.
 
     Subclass and set ``hf_repo`` plus column mappings. When
-    ``input_column`` and ``output_column`` are set, ``prepare()`` wraps
+    ``input_column`` and ``output_column`` are set, ``rows()`` wraps
     each row into a prompt-only chat message list plus a separate label
     field: ``{"messages": [{"role": "user", ...}], <label_key>: ...}``.
     A leading ``{"role": "system", ...}`` message is included when
     ``system_prompt`` is set. No assistant turn is emitted — the target
     from ``output_column`` is stored under ``label_key``.
+
+    With the columns unmapped, rows from the Hub are yielded as they come and
+    ``input_key`` names the prompt column directly.
     """
 
-    _type: DatasetType = DatasetType.HUGGING_FACE
+    type: DatasetType = DatasetType.HUGGING_FACE
     hf_repo: str = ""
     hf_split: str = "train"
     hf_config: str | None = None
@@ -177,22 +168,37 @@ class HuggingFaceDataset(DatasetConfig):
     system_prompt: str = ""
     prompt_template: str = "{input}"
     n_rows: int = 0
-    label_key: str = "label"
 
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        if not self.input_key and self.input_column and self.output_column:
-            self.input_key = "messages"
-        if "dataset_id" not in kwargs:
-            self.dataset_id = f"{self.hf_repo}-{self.hf_split}-{uuid.uuid4()}"
-        self._validate()
+    def __init__(self, *, n_rows: int | None = None) -> None:
+        if n_rows is not None:
+            self.n_rows = n_rows
+        if not self.id:
+            self.id = f"{self.hf_repo}-{self.hf_split}-{uuid.uuid4()}"
+        super().__init__()
 
     @property
     def name(self) -> str:
         return self.hf_repo
 
-    def load(self, split: Literal["all", "train", "eval"] = "all") -> Any:
+    @property
+    def _emits_chat(self) -> bool:
+        return bool(self.input_column and self.output_column)
+
+    @property
+    def input_key(self) -> str:
+        if self._emits_chat:
+            return "messages"
+        return self.input_column or super().input_key
+
+    @property
+    def output_format(self) -> Literal["parquet"]:
+        return "parquet"
+
+    @property
+    def label_key(self) -> str:
+        return "label"
+
+    def _load_hf_dataset(self):
         from datasets import load_dataset
 
         ds = load_dataset(
@@ -200,51 +206,37 @@ class HuggingFaceDataset(DatasetConfig):
             self.hf_config,
             split=self.hf_split,
         )
+
         if self.n_rows:
             ds = ds.select(range(min(self.n_rows, len(ds))))
+
+        if self._emits_chat:
+            ds = ds.map(self._to_chat, remove_columns=ds.column_names)
+
         return ds
 
-    def _format_for_training(self, ds):
-        if not (self.input_column and self.output_column):
-            return ds
+    def _to_chat(self, row: DatasetRow) -> DatasetRow:
+        messages: list[dict[str, str]] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        user_content = self.prompt_template.format(input=row[self.input_column])
+        messages.append({"role": "user", "content": user_content})
+        return {"messages": messages, self.label_key: str(row[self.output_column])}
 
-        in_col, out_col = self.input_column, self.output_column
-        sys_prompt = self.system_prompt
-        template = self.prompt_template
-        label_key = self.label_key
+    def rows(self) -> Iterable[DatasetRow]:
+        for row in self._load_hf_dataset():
+            yield dict(row)
 
-        def _to_chat(row: dict) -> dict:
-            user_content = template.format(input=row[in_col])
-            msgs = []
-            if sys_prompt:
-                msgs.append({"role": "system", "content": sys_prompt})
-            msgs.append({"role": "user", "content": user_content})
-            return {"messages": msgs, label_key: str(row[out_col])}
-
-        return ds.map(_to_chat, remove_columns=ds.column_names)
-
-    def to_pandas(self, *, formatted: bool = False):
-        ds = self.load()
-        if formatted:
-            ds = self._format_for_training(ds)
+    def to_pandas(self):
+        ds = self._load_hf_dataset()
         return ds.to_pandas()
 
-    def _write_split(self, ds, path: str) -> None:
-        import os
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        if self.output_format == "jsonl":
-            ds.to_json(path, orient="records", lines=True)
-        else:
+    def write(self, path: str) -> None:
+        ds = self._load_hf_dataset()
+        if self.output_format == "parquet":
             ds.to_parquet(path)
-
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
-        ds = self._format_for_training(self.load())
-        self._write_split(ds, path)
-
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_split(ds, eval_path)
+        else:
+            ds.to_json(path, orient="records", lines=True)
 
 
 class HarborDataset(DatasetConfig):
@@ -252,9 +244,13 @@ class HarborDataset(DatasetConfig):
 
     Each task folder contains an instruction file and optional label metadata.
     Tasks are discovered by globbing the task_root directory.
+
+    Each instance represents one split. ``train_size`` / ``eval_size`` carve the
+    task list into train and eval subsets, while ``train_repeats`` /
+    ``eval_repeats`` duplicate rows within the selected split.
     """
 
-    _type: DatasetType = DatasetType.HARBOR
+    type: DatasetType = DatasetType.HARBOR
     dataset_name: str = ""
     path: str | None = None
     task_root: str = ""
@@ -272,28 +268,96 @@ class HarborDataset(DatasetConfig):
     shuffle_tasks: bool = False
     shuffle_seed: int = 0
 
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        if not self.input_key:
-            self.input_key = "messages"
-        if not self.label_key:
-            self.label_key = "label"
-        if "dataset_id" not in kwargs:
-            if self.dataset_name:
-                slug = self.dataset_name.replace("/", "-")
-            elif self.path:
-                slug = self.path.replace("/", "_")
-            elif self.task_root:
-                slug = self.task_root.replace("/", "_")
-            else:
-                slug = "harbor"
-            self.dataset_id = f"{slug}-{uuid.uuid4()}"
-        self._validate()
+    def __init__(
+        self,
+        split: Literal["all", "train", "eval"] = "train",
+        *,
+        dataset_name: str | None = None,
+        path: str | None = None,
+        task_root: str | None = None,
+        task_glob: str | None = None,
+        task_names: list[str] | None = None,
+        instruction_path: str | None = None,
+        label_metadata_path: str | None = None,
+        test_data_dir: str | None = None,
+        prompt_template: str | None = None,
+        system_prompt: str | None = None,
+        train_size: int | None = None,
+        eval_size: int | None = None,
+        train_repeats: int | None = None,
+        eval_repeats: int | None = None,
+        shuffle_tasks: bool | None = None,
+        shuffle_seed: int | None = None,
+        requires_refresh_before_training: bool = False,
+    ) -> None:
+        self.split = split
+        # Keep this while framework path resolution still uses ``hf_split``.
+        self.hf_split = split
+        if dataset_name is not None:
+            self.dataset_name = dataset_name
+        if path is not None:
+            self.path = path
+        if task_root is not None:
+            self.task_root = task_root
+        if task_glob is not None:
+            self.task_glob = task_glob
+        if task_names is not None:
+            self.task_names = task_names
+        if instruction_path is not None:
+            self.instruction_path = instruction_path
+        if label_metadata_path is not None:
+            self.label_metadata_path = label_metadata_path
+        if test_data_dir is not None:
+            self.test_data_dir = test_data_dir
+        if prompt_template is not None:
+            self.prompt_template = prompt_template
+        if system_prompt is not None:
+            self.system_prompt = system_prompt
+        if train_size is not None:
+            self.train_size = train_size
+        if eval_size is not None:
+            self.eval_size = eval_size
+        if train_repeats is not None:
+            self.train_repeats = train_repeats
+        if eval_repeats is not None:
+            self.eval_repeats = eval_repeats
+        if shuffle_tasks is not None:
+            self.shuffle_tasks = shuffle_tasks
+        if shuffle_seed is not None:
+            self.shuffle_seed = shuffle_seed
+        self._requires_refresh_before_training = requires_refresh_before_training
+        if not self.id:
+            self.id = f"{self._id_slug()}-{split}-{uuid.uuid4()}"
+        super().__init__()
+
+    def _id_slug(self) -> str:
+        if self.dataset_name:
+            return self.dataset_name.replace("/", "-")
+        if self.path:
+            return self.path.replace("/", "_")
+        if self.task_root:
+            return self.task_root.replace("/", "_")
+        return "harbor"
+
+    @property
+    def input_key(self) -> str:
+        return "messages"
+
+    @property
+    def label_key(self) -> str:
+        return "label"
 
     @property
     def name(self) -> str:
         return self.dataset_name
+
+    @property
+    def output_format(self) -> Literal["parquet"]:
+        return "parquet"
+
+    @property
+    def requires_refresh_before_training(self) -> bool:
+        return self._requires_refresh_before_training
 
     def _harbor_dataset_ref(self) -> str:
         if "@" in self.dataset_name:
@@ -335,18 +399,6 @@ class HarborDataset(DatasetConfig):
                 str(cache_dir),
             ]
         subprocess.run(cmd, check=True)
-
-    def _write_split(self, rows: list[dict[str, Any]], path: str) -> None:
-        import os
-
-        from datasets import Dataset
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        ds = Dataset.from_list(rows)
-        if self.output_format == "jsonl":
-            ds.to_json(path, orient="records", lines=True)
-            return
-        ds.to_parquet(path)
 
     def _pull_harbor_dataset(self) -> Path:
         cache_dir = self._harbor_cache_dir()
@@ -506,85 +558,61 @@ class HarborDataset(DatasetConfig):
         repeats = max(1, repeats)
         return [row for row in rows for _ in range(repeats)]
 
-    def load(self, split: Literal["all", "train", "eval"] = "all") -> Any:
-        task_root = self._resolve_task_root()
-        out = []
-        for task_dir in self._iter_task_dirs():
-            instruction_file = task_dir / self.instruction_path
-            if not instruction_file.exists():
-                raise FileNotFoundError(
-                    f"instruction file does not exist for Harbor task {task_dir.name}: {instruction_file}"
-                )
-            label = self._build_label(task_root, task_dir)
-            out.append(
-                {
-                    "task_name": task_dir.name,
-                    "task_path": task_dir.as_posix(),
-                    "instruction": instruction_file.read_text(encoding="utf-8").strip(),
-                    "label": label,
-                }
-            )
-        if self.train_size is not None:
-            if split == "train":
-                return out[: self.train_size]
-            if split == "eval":
-                return out[self.train_size : self.train_size + (self.eval_size or 0)]
-        return out
+    def _split_rows(
+        self, base_rows: list[DatasetRow]
+    ) -> tuple[list[DatasetRow], list[DatasetRow]]:
+        """Carve the task list into train / eval halves.
 
-    def to_pandas(self, *, formatted: bool = False):
-        import pandas as pd
+        Without a ``train_size`` there is nothing to hold out, so both splits get
+        every task. An ``eval_size`` that runs past the end of the task list also
+        falls back to the full list rather than yielding an empty eval split.
+        """
+        if self.train_size is None:
+            return base_rows, base_rows
+        train_size = max(1, min(int(self.train_size), len(base_rows)))
+        eval_rows = (
+            base_rows[train_size : train_size + (self.eval_size or 0)] or base_rows
+        )
+        return base_rows[:train_size], eval_rows
 
-        if not formatted:
-            return pd.DataFrame(self.load())
-
-        task_root = self._resolve_task_root()
-        rows = [
-            self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()
-        ]
-        return pd.DataFrame(rows)
-
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
+    def rows(self) -> Iterable[DatasetRow]:
         task_root = self._resolve_task_root()
         base_rows = [
             self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()
         ]
+        if self.split == "all":
+            return base_rows
+        train_rows, eval_rows = self._split_rows(base_rows)
+        if self.split == "train":
+            return self._repeat_rows(train_rows, int(self.train_repeats))
+        return self._repeat_rows(eval_rows, int(self.eval_repeats))
 
-        if self.train_size is None:
-            train_base = base_rows
-            eval_base = base_rows
-        else:
-            train_size = max(1, min(int(self.train_size), len(base_rows)))
-            train_base = base_rows[:train_size]
-            eval_base = (
-                base_rows[train_size : train_size + (self.eval_size or 0)] or base_rows
-            )
+    def to_pandas(self):
+        import pandas as pd
 
-        train_rows = self._repeat_rows(train_base, int(self.train_repeats))
-        eval_rows = self._repeat_rows(eval_base, int(self.eval_repeats))
+        return pd.DataFrame(self.rows())
 
-        self._write_split(train_rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_split(eval_rows, eval_path)
+    def write(self, path: str) -> None:
+        from datasets import Dataset
+
+        Dataset.from_list(list(self.rows())).to_parquet(path)
 
 
 class MultimodalDataset(DatasetConfig):
     """Modality-agnostic dataset for image / audio / video RL.
 
     Each row pairs a text ``prompt`` with one or more ``media`` items and a
-    ``label``. ``prepare()`` writes the media verbatim into a column named by
+    ``label``. ``rows()`` emits the media verbatim under a column named by
     ``media_column`` (default ``"<modality>s"``), and the column is surfaced to
     the trainer/rollout via ``multimodal_keys`` (``{modality: media_column}``,
     e.g. slime's ``--multimodal-keys``). Media items may be URLs, local paths,
     or base64 data — whatever the serving engine accepts; the gym never
     inspects them.
 
-    Pass ``rows=[{"prompt": str, "media": list, "label": Any}, ...]`` or
-    subclass and override the ``rows`` property.
+    Pass ``rows=[{"prompt": str, "media": list, "label": Any}, ...]`` to the
+    constructor, or subclass and override ``source_rows()`` to generate them.
     """
 
-    input_key: str = "prompt"
-    label_key: str = "label"
     modality: Literal["image", "audio", "video"] = "audio"
     # TODO(ben/joy): gate-check media at this boundary so the evals dashboard can
     # reliably visualize it. Two parts: (1) normalize each emitted media item to a
@@ -594,11 +622,8 @@ class MultimodalDataset(DatasetConfig):
     # data-URI
     # MIME matches `modality`. Pairs with the dashboard fallback in EvalsPage.svelte.
     media_column: str = ""
-    output_format: str = "jsonl"
 
-    def __init__(self, rows: list[dict[str, Any]] | None = None, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         if self.modality not in ("image", "audio", "video"):
             raise TrainingGymConfigError(
                 f"modality must be one of image/audio/video, got {self.modality!r}"
@@ -609,39 +634,42 @@ class MultimodalDataset(DatasetConfig):
             raise TrainingGymConfigError(
                 "media_column must differ from input_key and label_key"
             )
-        # The whole feature in one line: name the media column for the framework.
-        self.multimodal_keys = {self.modality: self.media_column}
-        self._rows = list(rows or [])
-        if not self.dataset_id:
-            self.dataset_id = f"mm-{self.modality}-{uuid.uuid4()}"
-        self._validate()
+        self._source_rows = list(rows or [])
+        if not self.id:
+            self.id = f"mm-{self.modality}-{uuid.uuid4()}"
+        super().__init__()
 
     @property
-    def rows(self) -> list[DatasetRow]:
-        return self._rows
+    def input_key(self) -> str:
+        return "prompt"
 
-    def _to_row(self, r: dict[str, Any]) -> DatasetRow:
-        media = r["media"]
+    @property
+    def label_key(self) -> str:
+        return "label"
+
+    @property
+    def output_format(self) -> Literal["jsonl"]:
+        return "jsonl"
+
+    @property
+    def multimodal_keys(self) -> dict[str, str]:
+        """The whole feature in one line: name the media column for the framework."""
+        return {self.modality: self.media_column}
+
+    def source_rows(self) -> Iterable[dict[str, Any]]:
+        """Raw ``{"prompt", "media", "label"}`` triples; override to generate them."""
+        return self._source_rows
+
+    def _to_row(self, row: dict[str, Any]) -> DatasetRow:
+        media = row["media"]
         return {
-            self.input_key: r["prompt"],
+            self.input_key: row["prompt"],
             self.media_column: list(media)
             if isinstance(media, (list, tuple))
             else [media],
-            self.label_key: r["label"],
+            self.label_key: row["label"],
         }
 
-    def load(self) -> list[DatasetRow]:
-        return [self._to_row(r) for r in self.rows]
-
-    def _write_jsonl(self, rows: list[dict[str, Any]], path: str) -> None:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            for row in rows:
-                f.write(json.dumps(row) + "\n")
-
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
-        rows = self.load()
-        self._write_jsonl(rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_jsonl(rows, eval_path)
+    def rows(self) -> Iterable[DatasetRow]:
+        for row in self.source_rows():
+            yield self._to_row(row)

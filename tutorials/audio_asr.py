@@ -73,13 +73,23 @@ class LibriSpeechASRDataset(MultimodalDataset):
     hf_repo = "hf-internal-testing/librispeech_asr_dummy"
     hf_config = "clean"
     hf_split = "validation"
-    always_prepare = True
-    apply_chat_template = False  # ensures the data URI is valid throughout the rollout
 
-    def load(self) -> list[dict]:
+    def __init__(self, *, hf_split=None):
+        if hf_split is not None:
+            self.hf_split = hf_split
+        super().__init__(rows=[])
+
+    @property
+    def requires_refresh_before_training(self):
+        return True
+
+    @property
+    def needs_chat_template(self):
+        return False
+
+    def rows(self):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         ds = ds.cast_column("audio", Audio(decode=False))  # decode with soundfile instead of torchcodec
-        rows = []
         for ex in ds:
             audio = ex["audio"]
             data = (
@@ -93,14 +103,11 @@ class LibriSpeechASRDataset(MultimodalDataset):
             data_uri = "data:audio/wav;base64," + base64.b64encode(
                 buf.getvalue()
             ).decode("ascii")
-            rows.append(
-                {
-                    self.input_key: "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
-                    self.media_column: [data_uri],
-                    self.label_key: ex["text"].lower().strip(),
-                }
-            )
-        return rows
+            yield {
+                self.input_key: "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
+                self.media_column: [data_uri],
+                self.label_key: ex["text"].lower().strip(),
+            }
 
 train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
 
@@ -136,7 +143,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         return score_transcript(hypothesis, reference)
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        wers = list(executor.map(_score_one, eval_dataset.load()))
+        wers = list(executor.map(_score_one, eval_dataset.rows()))
     return sum(wers) / len(wers) if wers else float("nan")
 
 print("running base model evaluation...")
@@ -161,6 +168,7 @@ async def wer_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
+    eval_dataset=eval_dataset,
     recipe=Qwen3_ASR_1_7b_Recipe(
         gpu_type="H100",
         actor_num_nodes=1,

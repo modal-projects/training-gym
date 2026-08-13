@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import base64
 import json
+import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
-from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.dataset import DatasetConfig, DatasetRow
 from modal_training_gym.common.environments.base import (
     DirectorySnapshotLibrary,
     EvalVerdict,
@@ -670,15 +672,9 @@ class ToolathlonTrajectoryDataset(DatasetConfig):
     The original workspace path in the raw trace is remapped onto ``config.workspace_path`` so replay
     and student tool calls resolve.
 
-    Configure via kwargs: ``hf_repo``, ``source_file`` (the trajectory file in the repo),
-    ``train_tasks`` / ``eval_tasks`` (task-name allowlists per split), ``obs_limit``.
+    ``train_tasks`` and ``eval_tasks`` are task-name allowlists for their
+    respective instances. An empty allowlist includes every task.
     """
-
-    input_key = "messages"
-    label_key = "label"
-    output_format = "jsonl"
-    apply_chat_template = True
-    writes_eval_paths = False
 
     hf_repo: str = "hkust-nlp/Toolathlon-Trajectories"
     source_file: str = "deepseek-v3.2-exp_1.jsonl"
@@ -688,25 +684,60 @@ class ToolathlonTrajectoryDataset(DatasetConfig):
 
     def __init__(
         self,
-        split: str = "train",
+        split: Literal["all", "train", "eval"] = "train",
         config: ToolathlonEnvConfig = DEFAULT_CONFIG,
-        **kwargs: Any,
+        *,
+        hf_repo: str | None = None,
+        source_file: str | None = None,
+        train_tasks: tuple[str, ...] | None = None,
+        eval_tasks: tuple[str, ...] | None = None,
+        obs_limit: int | None = None,
     ) -> None:
-        self._split = split
+        self.split = split
+        # Keep this while framework path resolution still uses ``hf_split``.
+        self.hf_split = split
         self.config = config
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+        if hf_repo is not None:
+            self.hf_repo = hf_repo
+        if source_file is not None:
+            self.source_file = source_file
+        if train_tasks is not None:
+            self.train_tasks = train_tasks
+        if eval_tasks is not None:
+            self.eval_tasks = eval_tasks
+        if obs_limit is not None:
+            self.obs_limit = obs_limit
+        if not self.id:
+            source = self.source_file.removesuffix(".jsonl")
+            self.id = f"toolathlon-{source}-{split}-{uuid.uuid4()}"
+        super().__init__()
+
+    @property
+    def input_key(self) -> str:
+        return "messages"
+
+    @property
+    def label_key(self) -> str:
+        return "label"
+
+    @property
+    def output_format(self) -> Literal["jsonl"]:
+        return "jsonl"
 
     def _tasks_for_split(self) -> set[str]:
-        return set(self.eval_tasks if self._split == "eval" else self.train_tasks)
+        if self.split == "eval":
+            return set(self.eval_tasks)
+        if self.split == "train":
+            return set(self.train_tasks)
+        return set(self.train_tasks) | set(self.eval_tasks)
 
-    def _load_trajectories(self) -> list[dict]:
+    def _load_trajectories(self, task_names: set[str] | None = None) -> list[dict]:
         from huggingface_hub import hf_hub_download
 
         path = hf_hub_download(
             repo_id=self.hf_repo, filename=self.source_file, repo_type="dataset"
         )
-        keep = self._tasks_for_split()
+        keep = self._tasks_for_split() if task_names is None else task_names
         trajectories = []
         with open(path) as f:
             for line in f:
@@ -802,36 +833,19 @@ class ToolathlonTrajectoryDataset(DatasetConfig):
         ]
         return {"messages": messages, "label": label}
 
-    def _load_split(self) -> list[dict]:
-        return [
-            self._make_row(t)
-            for t in self._load_trajectories()
-            if self._golden_calls(
-                t["messages"]
-            )  # skip degenerate trajectories with no tool calls
-        ]
-
-    def load(self, split: str = "all") -> list[dict]:
-        if split in ("train", "eval"):
-            self._split = split
-        return self._load_split()
+    def rows(self) -> Iterable[DatasetRow]:
+        for trajectory in self._load_trajectories():
+            # Skip degenerate trajectories with no tool calls.
+            if self._golden_calls(trajectory["messages"]):
+                yield self._make_row(trajectory)
 
     def golden_by_task(self) -> dict[str, list[dict]]:
-        """Map task_name -> golden tool-call list (drives the snapshot builder)."""
+        """Map every configured task to golden calls for snapshot construction."""
+        task_names = set(self.train_tasks) | set(self.eval_tasks)
         return {
             t["task_name"]: self._golden_calls(t["messages"])
-            for t in self._load_trajectories()
+            for t in self._load_trajectories(task_names)
         }
-
-    def prepare(self, path: str, eval_paths: dict | None = None) -> None:
-        """Write this instance's split to ``path``. ``eval_paths`` is ignored."""
-        import os
-
-        del eval_paths
-        rows = self._load_split()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            f.writelines(json.dumps(r) + "\n" for r in rows)
 
 
 # ── Prompt-prefix reconstruction ────────────────────────────────────────────

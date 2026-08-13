@@ -50,41 +50,37 @@ TRAIN_TARGETS = list(range(1, _MAX_VALUE + 1, 2))
 TEST_TARGETS = list(range(2, _MAX_VALUE + 1, 2))
 
 class NumberGuessDataset(DatasetConfig):
-    input_key = "messages"
-    label_key = "label"
-    apply_chat_template = True
-    input_column = "prompt"
-    always_prepare = True # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
+    def __init__(self, split="train"):
+        self.split = split
+        super().__init__()
 
-    def load(self, split="all"):
-        targets = TRAIN_TARGETS if split == "train" else TEST_TARGETS
-        return [{"prompt": _PROMPT, "target": target} for target in targets]
+    @property
+    def input_key(self):
+        return "messages"
 
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None):
-        import os
+    @property
+    def label_key(self):
+        return "label"
 
-        from datasets import Dataset
+    @property
+    def requires_refresh_before_training(self):
+        return True
 
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        def _row(target: int) -> dict:
-            return {
+    def rows(self):
+        targets = TEST_TARGETS if self.split == "eval" else TRAIN_TARGETS
+        repeats = 1 if self.split == "eval" else 20
+        for target in targets:
+            row = {
                 "messages": [{"role": "user", "content": _PROMPT}],
                 "label": json.dumps({"answer": target}),
+                "target": target,
             }
-
-        train_rows = [_row(target) for target in TRAIN_TARGETS for _ in range(20)]
-        eval_rows = [_row(target) for target in TEST_TARGETS]
-
-        Dataset.from_list(train_rows).to_parquet(path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                os.makedirs(os.path.dirname(eval_path), exist_ok=True)
-                Dataset.from_list(eval_rows).to_parquet(eval_path)
+            for _ in range(repeats):
+                yield row
 
 train_dataset = NumberGuessDataset()
 
-eval_dataset = NumberGuessDataset()
+eval_dataset = NumberGuessDataset(split="eval")
 
 # ## Multi-turn environment and reward
 #
@@ -318,7 +314,7 @@ def run_eval(
         return guessing_eval_fn(deployment, example)
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        rows = list(executor.map(_score_one, eval_dataset.load()))
+        rows = list(executor.map(_score_one, eval_dataset.rows()))
     mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
     return mean, rows
 
@@ -369,6 +365,7 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
+    eval_dataset=eval_dataset,
     recipe=SlimeRecipe(
         custom_generate_function=number_guess_generate,
         custom_rm_function=number_guess_rm,

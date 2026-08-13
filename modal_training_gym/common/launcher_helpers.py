@@ -209,25 +209,38 @@ def run_download_phase(
         flush_status_reporter(timeout_seconds=2.0)
 
 
+def write_dataset_if_needed(dataset: Any, path: str) -> bool:
+    """Write and validate one dataset unless a reusable materialization exists."""
+    import shutil
+
+    refresh = dataset.requires_refresh_before_training
+    if os.path.exists(path) and not refresh:
+        dataset.validate_write(path)
+        return False
+
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    elif os.path.exists(path):
+        os.remove(path)
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    print(f"Writing dataset ({path})...")
+    dataset.write(path)
+    dataset.validate_write(path)
+    return True
+
+
 def run_prepare_dataset(
     dataset: Any,
+    eval_dataset: Any,
     data_volume: "Volume",
-    resolve_data_paths: Callable[[Any], tuple[str, Any]],
+    resolve_data_paths: Callable[[Any, str], str],
 ) -> None:
-    """Materialize the dataset onto the data volume, honoring ``always_prepare``
-    and validating the prepared prompt/eval paths."""
+    """Materialize train and optional eval datasets onto the data volume."""
     data_volume.reload()
-    prompt_data, eval_paths = resolve_data_paths(dataset)
-    if dataset.always_prepare and os.path.exists(prompt_data):
-        import shutil
-
-        data_dir = os.path.dirname(prompt_data)
-        print(f"always_prepare=True — removing {data_dir}")
-        shutil.rmtree(data_dir, ignore_errors=True)
-    dataset.prepare(prompt_data, eval_paths)
-    dataset.validate_prepared(prompt_data)
-    for ep in (eval_paths or {}).values():
-        dataset.validate_prepared(ep)
+    write_dataset_if_needed(dataset, resolve_data_paths(dataset, "train"))
+    if eval_dataset is not None:
+        write_dataset_if_needed(eval_dataset, resolve_data_paths(eval_dataset, "eval"))
     data_volume.commit()
 
 

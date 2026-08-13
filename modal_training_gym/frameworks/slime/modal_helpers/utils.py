@@ -56,12 +56,15 @@ def prepare_slime_config(slime_cfg, model, tmpdir: str) -> None:
     )
 
 
-def build_train_cmd(slime_cfg, slime_root: str, model=None, dataset=None) -> str:
+def build_train_cmd(
+    slime_cfg, slime_root: str, model=None, dataset=None, eval_dataset=None
+) -> str:
     """Build the Ray job entrypoint, sourcing model arch args if needed."""
     return _build_train_cmd(
         slime_cfg,
         slime_root,
         model=model,
         dataset=dataset,
+        eval_dataset=eval_dataset,
         model_script_attr="slime_model_script",
     )

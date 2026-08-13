@@ -20,16 +20,19 @@ class Gsm8kDataset(HuggingFaceDataset):
     input_column = "question"
     output_column = "answer"
     output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
 
-    def load(self, split: str = "all"):
+    @property
+    def requires_refresh_before_training(self):
+        return True
+
+    def _load_hf_dataset(self):
         from datasets import load_dataset
 
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         if self.n_rows:
             ds = ds.select(range(min(self.n_rows, len(ds))))
-        return ds.map(lambda r: {"answer": r["answer"].split("####")[-1].strip()})
+        ds = ds.map(lambda r: {"answer": r["answer"].split("####")[-1].strip()})
+        return ds.map(self._to_chat, remove_columns=ds.column_names)
 
 
 class LibriSpeechASRDataset(MultimodalDataset):
@@ -44,15 +47,23 @@ class LibriSpeechASRDataset(MultimodalDataset):
     hf_config = "clean"
     hf_split = "validation"
     n_rows = 8
-    always_prepare = True
-    apply_chat_template = False
 
     _INSTRUCTION = (
         "<audio>\nTranscribe the speech to text. Respond with only the transcript."
     )
 
-    def __init__(self, **kwargs):
-        super().__init__(rows=[], **kwargs)
+    def __init__(self, *, n_rows=None):
+        if n_rows is not None:
+            self.n_rows = n_rows
+        super().__init__(rows=[])
+
+    @property
+    def requires_refresh_before_training(self):
+        return True
+
+    @property
+    def needs_chat_template(self):
+        return False
 
     def _build_rows(self) -> list[dict]:
         import base64 as b64
@@ -87,15 +98,8 @@ class LibriSpeechASRDataset(MultimodalDataset):
             )
         return rows
 
-    def load(self, split: str = "all") -> list[dict]:
+    def rows(self):
         return self._build_rows()
-
-    def prepare(self, path, eval_paths=None):
-        rows = self._build_rows()
-        self._write_jsonl(rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_jsonl(rows, eval_path)
 
 
 def build_slime_validation(

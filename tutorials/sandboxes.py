@@ -39,9 +39,7 @@ from modal_training_gym import (
 # `Hello, world!` as its content. We check this file in our eval
 # and reward function, matching the task's verifier.
 #
-# A single dataset instance handles both training and eval —
-# `prepare()` writes train and eval splits to the volume,
-# while `load()` returns all tasks for offline evaluation.
+# Training and evaluation use separate `HarborDataset` instances.
 
 EXPECTED_HELLO = "Hello, world!"
 
@@ -49,13 +47,19 @@ dataset = HarborDataset(
     dataset_name="harbor/hello-world",
     label_metadata_path="task.toml",
     train_repeats=20,
-    always_prepare=True,  # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
+    requires_refresh_before_training=True,
     system_prompt=(
         "You are an expert Python programmer. "
         "Solve the given problem by writing a complete Python program. "
         "Your program may create or modify files as needed. "
         "Put your solution in a ```python code fence."
     ),
+)
+eval_dataset = HarborDataset(
+    split="eval",
+    dataset_name="harbor/hello-world",
+    label_metadata_path="task.toml",
+    system_prompt=dataset.system_prompt,
 )
 
 # ## Evaluate with a file-based sandbox check
@@ -122,20 +126,15 @@ def run_eval(deployment, *, max_concurrency: int = 2) -> float:
     deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
-        prompt = example["instruction"]
-        msg = deployment.chat(
-            [
-                {"role": "system", "content": dataset.system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-        )
+        messages = example["messages"]
+        msg = deployment.chat(messages)
         response = msg.get("content") or msg.get("reasoning_content") or ""
         code = extract_code(response, model=model)
         score, _metadata = score_hello_file(code)
         return score
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        rewards = list(executor.map(_score_one, dataset.load()))
+        rewards = list(executor.map(_score_one, eval_dataset.rows()))
     return sum(rewards) / len(rewards) if rewards else float("nan")
 
 print("Running base eval...")
@@ -158,6 +157,7 @@ async def sandbox_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=dataset,
+    eval_dataset=eval_dataset,
     recipe=SlimeRecipe(
         custom_rm_function=sandbox_rm,
 

@@ -106,31 +106,33 @@ class BaseTrainRecipe(ABC):
     @staticmethod
     def _resolve_data_paths(
         ds: "DatasetConfig",
-    ) -> tuple[str, dict[str, str] | None]:
-        """Derive on-volume file paths from a dataset's properties."""
+        split: str = "train",
+    ) -> str:
+        """Derive one on-volume path for a dataset and destination split."""
         hf_repo = getattr(ds, "hf_repo", "")
         name = hf_repo.replace("/", "_") if hf_repo else type(ds).__name__
-        ext = "jsonl" if ds.output_format == "jsonl" else "parquet"
-        split = getattr(ds, "hf_split", "train")
-        prompt_data = f"{DATA_PATH}/{name}/{split}.{ext}"
-        if getattr(ds, "writes_eval_paths", True):
-            return prompt_data, {"eval": f"{DATA_PATH}/{name}/eval.{ext}"}
-        return prompt_data, None
+        fmt = ds.output_format
+        ext = "jsonl" if fmt == "jsonl" else "parquet"
+        return f"{DATA_PATH}/{name}/{split}.{ext}"
 
     @classmethod
-    def _dataset_to_fields(cls, ds: "DatasetConfig") -> dict[str, Any]:
-        prompt_data, eval_paths = cls._resolve_data_paths(ds)
-        eval_prompt_data: list[str] | None = None
-        if eval_paths:
-            eval_prompt_data = [
-                v for name, path in eval_paths.items() for v in (name, path)
-            ]
+    def _dataset_to_fields(
+        cls,
+        ds: "DatasetConfig",
+        eval_ds: "DatasetConfig | None" = None,
+    ) -> dict[str, Any]:
+        prompt_data = cls._resolve_data_paths(ds, "train")
+        eval_prompt_data = (
+            ["eval", cls._resolve_data_paths(eval_ds, "eval")]
+            if eval_ds is not None
+            else None
+        )
         return {
             "prompt_data": prompt_data,
             "eval_prompt_data": eval_prompt_data,
             "input_key": ds.input_key,
             "label_key": ds.label_key,
-            "apply_chat_template": ds.apply_chat_template,
+            "apply_chat_template": ds.needs_chat_template,
         }
 
     @staticmethod
@@ -180,6 +182,7 @@ class BaseTrainRecipe(ABC):
     def _fields(
         self,
         dataset: "DatasetConfig | None" = None,
+        eval_dataset: "DatasetConfig | None" = None,
         model: "ModelConfig | None" = None,
     ) -> dict[str, Any]:
         """Recipe fields to emit as CLI flags, merged with dataset/model/wandb.
@@ -194,10 +197,13 @@ class BaseTrainRecipe(ABC):
     def cli_args(
         self,
         dataset: "DatasetConfig | None" = None,
+        eval_dataset: "DatasetConfig | None" = None,
         model: "ModelConfig | None" = None,
     ) -> list[str]:
         out: list[str] = []
-        for key, val in self._fields(dataset=dataset, model=model).items():
+        for key, val in self._fields(
+            dataset=dataset, eval_dataset=eval_dataset, model=model
+        ).items():
             if val is None or val is False or val == "":
                 continue
             flag = f"--{key.replace('_', '-')}"
