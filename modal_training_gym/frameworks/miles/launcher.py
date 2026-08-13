@@ -94,6 +94,54 @@ _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", MEGATRON_PATCHES)
 
 
+_CONVERT_BARRIER_DIRNAME = ".training_gym_convert"
+_CONVERT_BARRIER_TIMEOUT_S = 7200.0
+_CONVERT_BARRIER_POLL_S = 5.0
+
+
+def _convert_barrier_dir(save_path: str) -> str:
+    return os.path.join(save_path, _CONVERT_BARRIER_DIRNAME)
+
+
+def _signal_convert_rank_moved(volume: Any, save_path: str, node_rank: int) -> None:
+    """Publish this rank's "shards are on the Volume" marker."""
+    barrier_dir = _convert_barrier_dir(save_path)
+    os.makedirs(barrier_dir, exist_ok=True)
+    with open(os.path.join(barrier_dir, f"rank{node_rank}.moved"), "w") as handle:
+        handle.write("moved\n")
+    volume.commit()
+
+
+def _await_convert_ranks_moved(volume: Any, save_path: str, nnodes: int) -> None:
+    """Block until every rank has published its marker.
+
+    ``.metadata`` is what makes a checkpoint look finished, so rank 0 may only
+    publish it once every peer's shards are committed. Without this wait a
+    multi-node conversion interrupted after rank 0's move leaves a directory that
+    passes ``_is_complete_torch_dist_checkpoint`` with shards missing, and the next
+    run reports a cache hit and trains on partial weights.
+    """
+    barrier_dir = _convert_barrier_dir(save_path)
+    expected = {f"rank{rank}.moved" for rank in range(nnodes)}
+    deadline = time.time() + _CONVERT_BARRIER_TIMEOUT_S
+    while True:
+        volume.reload()
+        try:
+            missing = expected - set(os.listdir(barrier_dir))
+        except OSError:
+            missing = set(expected)
+        if not missing:
+            return
+        if time.time() >= deadline:
+            raise RuntimeError(
+                f"Timed out after {_CONVERT_BARRIER_TIMEOUT_S:.0f}s waiting for "
+                f"conversion ranks {sorted(missing)} to move their shards to "
+                f"{save_path}; refusing to publish .metadata over an incomplete "
+                "checkpoint."
+            )
+        time.sleep(_CONVERT_BARRIER_POLL_S)
+
+
 def _is_complete_torch_dist_checkpoint(path: str) -> bool:
     """Whether ``path`` holds a *finished* torch_dist checkpoint.
 
@@ -602,6 +650,9 @@ def build_miles_app(
             f"node_rank={node_rank}"
         )
         print(f"Running: bash -c {cmd!r}")
+        if node_rank == 0 and staging_path and nnodes > 1:
+            shutil.rmtree(_convert_barrier_dir(save_path), ignore_errors=True)
+            checkpoints_volume.commit()
         subprocess.run(["bash", "-c", cmd], check=True, env=env)
 
         if staging_path:
@@ -615,16 +666,28 @@ def build_miles_app(
             print(f"Moving converted checkpoint {staging_path} -> {save_path}")
             move_start = time.time()
             moved = 0
+            deferred: list[tuple[str, str]] = []
             for root, _dirs, files in os.walk(staging_path):
                 rel = os.path.relpath(root, staging_path)
                 dst_dir = save_path if rel == "." else os.path.join(save_path, rel)
                 os.makedirs(dst_dir, exist_ok=True)
                 for filename in sorted(files, key=lambda n: (n == ".metadata", n)):
-                    shutil.move(
-                        os.path.join(root, filename), os.path.join(dst_dir, filename)
-                    )
+                    src = os.path.join(root, filename)
+                    dst = os.path.join(dst_dir, filename)
+                    if filename == ".metadata" and nnodes > 1 and node_rank == 0:
+                        deferred.append((src, dst))
+                        continue
+                    shutil.move(src, dst)
                     moved += 1
                     checkpoints_volume.commit()
+            if nnodes > 1:
+                _signal_convert_rank_moved(checkpoints_volume, save_path, node_rank)
+                if node_rank == 0:
+                    _await_convert_ranks_moved(checkpoints_volume, save_path, nnodes)
+            for src, dst in deferred:
+                shutil.move(src, dst)
+                moved += 1
+                checkpoints_volume.commit()
             print(f"Moved {moved} files in {time.time() - move_start:.0f}s")
             shutil.rmtree(staging_path, ignore_errors=True)
 
@@ -641,6 +704,9 @@ def build_miles_app(
                     f"Conversion finished but {save_path} holds no complete "
                     "torch_dist checkpoint (missing .metadata)."
                 )
+            if staging_path and nnodes > 1:
+                shutil.rmtree(_convert_barrier_dir(save_path), ignore_errors=True)
+                checkpoints_volume.commit()
 
         if training_run_id:
             flush_status_reporter(timeout_seconds=2.0)
