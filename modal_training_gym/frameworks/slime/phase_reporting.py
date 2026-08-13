@@ -5,8 +5,10 @@ and ``patch_advantage_distribution.py``) and the recipe's default custom-functio
 paths import from this module *inside the training container*, so everything
 they reference must stay importable here. The implementation is split across:
 
-- :mod:`.reporting` — HTTP queue/URL/token plumbing + run-context helpers
-- :mod:`.sample_extraction` — trace/image/trajectory extraction from Samples
+- :mod:`modal_training_gym.common.reporting` — HTTP queue/URL/token plumbing +
+  run-context helpers (shared with miles)
+- :mod:`modal_training_gym.common.sample_extraction` — trace/image/trajectory
+  extraction from Samples (shared with miles)
 - :mod:`.advantage_reporting` — torch/megatron advantage-distribution math
 
 This module keeps the reporting entry points (``report_*``, ``log_*``,
@@ -24,7 +26,7 @@ from .advantage_reporting import (
     _advantage_samples_payload as _advantage_samples_payload,
     report_advantage_distribution as report_advantage_distribution,
 )
-from .reporting import (
+from modal_training_gym.common.reporting import (
     _STEP_EVENT_TIMEOUT_SECONDS,
     _enqueue,
     _enqueue_rollout,
@@ -32,7 +34,7 @@ from .reporting import (
     _run_context,
     _step_progress,
 )
-from .reporting import (
+from modal_training_gym.common.reporting import (
     _advantage_url as _advantage_url,
     _arg_value as _arg_value,
     _derive_url as _derive_url,
@@ -43,8 +45,9 @@ from .reporting import (
     _rollout_url as _rollout_url,
     _total_steps as _total_steps,
 )
-from .sample_extraction import (
-    _image_sample_limit,
+from modal_training_gym.common.sample_extraction import (
+    RolloutImageStore,
+    _image_limit,
     _metrics_to_dict,
     _resolve_hook,
     _response_parser,
@@ -53,7 +56,7 @@ from .sample_extraction import (
     _trace_sample_limit,
     _trajectory_sample_limit,
 )
-from .sample_extraction import (
+from modal_training_gym.common.sample_extraction import (
     CAPTURE_TRACE_ENV as CAPTURE_TRACE_ENV,
     IMAGE_SAMPLE_LIMIT_ENV as IMAGE_SAMPLE_LIMIT_ENV,
     RESPONSE_PARSER_PATH_ENV as RESPONSE_PARSER_PATH_ENV,
@@ -61,7 +64,8 @@ from .sample_extraction import (
     TRAJECTORY_SAMPLE_LIMIT_ENV as TRAJECTORY_SAMPLE_LIMIT_ENV,
     _IMAGE_MAX_BYTES as _IMAGE_MAX_BYTES,
     _IMAGE_MAX_DIM as _IMAGE_MAX_DIM,
-    _IMAGE_SAMPLE_LIMIT_DEFAULT as _IMAGE_SAMPLE_LIMIT_DEFAULT,
+    _IMAGE_LIMIT_DEFAULT as _IMAGE_LIMIT_DEFAULT,
+    _IMAGE_REF_CHARS as _IMAGE_REF_CHARS,
     _TRACE_ATTR_STR_MAX as _TRACE_ATTR_STR_MAX,
     _TRACE_MAX_SPANS as _TRACE_MAX_SPANS,
     _TRACE_SAMPLE_LIMIT_DEFAULT as _TRACE_SAMPLE_LIMIT_DEFAULT,
@@ -73,8 +77,8 @@ from .sample_extraction import (
     _coerce_text as _coerce_text,
     _compact_trajectory_messages as _compact_trajectory_messages,
     _extract_audio_from_prompt as _extract_audio_from_prompt,
-    _extract_image_from_sample as _extract_image_from_sample,
     _extract_trace as _extract_trace,
+    _image_candidates as _image_candidates,
     _image_to_data_uri as _image_to_data_uri,
     _normalize_span as _normalize_span,
     _normalize_trace as _normalize_trace,
@@ -130,11 +134,12 @@ def report_rollout_samples(
     if samples is None:
         return
     parser = _response_parser()
-    # Trace/image only the first N samples (traces also gated by an enable flag) so
-    # the payload stays small — the caps keep volume growth well under 1%.
+    # Trace/trajectory only the first N samples (traces also gated by an enable flag)
+    # so the payload stays small — the caps keep volume growth well under 1%. Images
+    # are capped by distinct content instead.
     trace_limit = _trace_sample_limit() if _trace_enabled() else 0
-    image_limit = _image_sample_limit()
     trajectory_limit = _trajectory_sample_limit()
+    image_store = RolloutImageStore(_image_limit())
     n_per = _positive_int(_arg_value(args, "n_samples_per_prompt")) or 1
     try:
         sample_dicts = [
@@ -142,7 +147,7 @@ def report_rollout_samples(
                 s,
                 parser,
                 include_trace=(i < trace_limit),
-                include_image=(i < image_limit),
+                image_store=image_store,
                 include_trajectory=(i < trajectory_limit),
                 n_samples_per_prompt=n_per,
             )

@@ -65,6 +65,7 @@ from modal_training_gym.frameworks.miles.modal_helpers.utils import (
 )
 
 MILES_ROOT = "/root/miles"
+SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
@@ -72,6 +73,15 @@ HARBOR_PKG_VERSION = "0.8.0"
 
 _MILES_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
 _PATCH_SGLANG_ABORT_B64 = encode_patch("patch_sglang_abort", _MILES_PATCHES)
+_PATCH_ROLLOUT_STATUS_B64 = encode_patch(
+    "patch_rollout_status_reporting", _MILES_PATCHES
+)
+_PATCH_ADVANTAGE_DIST_B64 = encode_patch("patch_advantage_distribution", _MILES_PATCHES)
+
+_REPORTING_PATCH_COMMANDS = (
+    f"echo {_PATCH_ROLLOUT_STATUS_B64} | base64 -d | python3",
+    f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
+)
 
 
 def _build_miles_base_image(miles: MilesRecipe) -> Image:
@@ -81,6 +91,7 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
+            *_REPORTING_PATCH_COMMANDS,
         )
     )
     if miles.image_env:
@@ -88,6 +99,62 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
     if miles.image_run_commands:
         image = image.run_commands(*miles.image_run_commands)
     return image
+
+
+def _response_parser_path(model: Any) -> str:
+    """Import path of the model's response parser so the rollout recorder can
+    resolve and apply it remotely. Empty when the model sets no parser."""
+    fn = getattr(model, "response_parser", None) if model is not None else None
+    if fn is None:
+        return ""
+    module = getattr(fn, "__module__", "")
+    qualname = getattr(fn, "__qualname__", "") or getattr(fn, "__name__", "")
+    return f"{module}.{qualname}" if module and qualname else ""
+
+
+def _compose_ld_library_path() -> str:
+    parts = [SYSTEM_LIB_DIR]
+    for part in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
+        if part and part not in parts:
+            parts.append(part)
+    return ":".join(parts)
+
+
+def build_ray_runtime_env(
+    *,
+    head_addr: str,
+    wandb_env: dict[str, str],
+    environment: dict,
+    extra_env: dict[str, str] | None = None,
+    framework_status_token: str = "",
+) -> dict:
+    """Runtime env for the Ray job that runs miles.
+
+    Ray workers do not pick up the container's linker path on their own, and
+    without it the Megatron actor can resolve a libibverbs that does not match
+    the image's libmlx5 and die importing mooncake. The system lib dir is put
+    in front for that reason; the rest is read from the container, so whatever
+    the image exports — including any wheel-shipped nvidia lib dirs — is
+    carried through. Composing it here rather than in an ``image_env`` entry
+    keeps it independent of whether the base image exports ``LD_LIBRARY_PATH``
+    in its own ``ENV``: a Dockerfile ``$LD_LIBRARY_PATH`` expands to an empty
+    string when it does not, which would drop those dirs and leave a trailing
+    empty entry that the loader reads as the working directory. A recipe can
+    still override the whole thing through ``environment``.
+    """
+    env_vars: dict[str, str] = {
+        "no_proxy": f"127.0.0.1,{head_addr}",
+        "MASTER_ADDR": head_addr,
+        "LD_LIBRARY_PATH": _compose_ld_library_path(),
+    }
+    env_vars.update(extra_env or {})
+    env_vars.update(wandb_env)
+    env_vars.update(environment)
+    if framework_status_token:
+        # Applied after `environment` so a recipe override can't blank the
+        # dashboard auth token by accident.
+        env_vars["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
+    return {"env_vars": env_vars}
 
 
 def build_miles_app(
@@ -121,6 +188,15 @@ def build_miles_app(
             copy=True,
             ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
         )
+        # The local checkout just overwrote the patched miles sources;
+        # re-apply every build-time patch.
+        image = image.run_commands(
+            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
+            " || echo 'WARNING: sglang abort patch did not apply to the"
+            " local_miles checkout; transient router failures during rollout"
+            " cleanup may crash the run'",
+            *_REPORTING_PATCH_COMMANDS,
+        )
 
     if miles.image_overlay is not None:
         image = miles.image_overlay(image)
@@ -142,11 +218,7 @@ def build_miles_app(
         )
 
     def _set_custom_config_value(key: str, value: str) -> None:
-        cfg = (
-            dict(miles.extra_config or {})
-            if isinstance(miles.extra_config, dict)
-            else {}
-        )
+        cfg = dict(miles.extra_config or {})
         cfg[key] = value
         miles.extra_config = cfg
 
@@ -186,10 +258,6 @@ def build_miles_app(
     for attr, fallback_name in (
         ("custom_reward_post_process_function", "custom_reward_post_process"),
         ("rollout_function", "rollout_function"),
-        ("custom_rollout_log_function", "custom_rollout_log"),
-        ("custom_eval_rollout_log_function", "custom_eval_rollout_log"),
-        ("custom_megatron_before_log_prob_hook", "before_log_prob_hook"),
-        ("custom_megatron_before_train_step_hook", "before_train_step_hook"),
     ):
         value = getattr(miles, attr)
         # A str is already an import path the user vouches for — nothing to ship.
@@ -200,6 +268,44 @@ def build_miles_app(
             fallback_name=fallback_name,
             set_path=lambda path, attr=attr: object.__setattr__(miles, attr, path),
         )
+
+    # The gym intercepts these four hooks for dashboard reporting: the CLI
+    # flag always points at the phase-reporting wrapper (MilesRecipe._fields),
+    # and the user's own hook rides along in the YAML custom-config under a
+    # `training_gym_*` key. Str paths were stashed there by the recipe
+    # validator; inline callables are shipped by value here and the stashed
+    # `__pending__` placeholder is overwritten with the resolved path.
+    for attr, config_key, fallback_name in (
+        (
+            "custom_rollout_log_function",
+            "training_gym_custom_rollout_log_function_path",
+            "custom_rollout_log",
+        ),
+        (
+            "custom_eval_rollout_log_function",
+            "training_gym_custom_eval_rollout_log_function_path",
+            "custom_eval_rollout_log",
+        ),
+        (
+            "custom_megatron_before_log_prob_hook",
+            "training_gym_custom_megatron_before_log_prob_hook_path",
+            "before_log_prob_hook",
+        ),
+        (
+            "custom_megatron_before_train_step_hook",
+            "training_gym_custom_megatron_before_train_step_hook_path",
+            "before_train_step_hook",
+        ),
+    ):
+        value = getattr(miles, attr)
+        if not callable(value):
+            continue
+        _ship_callable(
+            value,
+            fallback_name=fallback_name,
+            set_path=lambda path, key=config_key: _set_custom_config_value(key, path),
+        )
+        setattr(miles, attr, None)
 
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
     data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
@@ -675,6 +781,18 @@ def build_miles_app(
                 miles.save = original_save
                 miles.load = original_load
 
+            phase_report_url = (
+                os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL")
+                or framework_status_url
+                or ""
+            )
+            if not phase_report_url:
+                print(
+                    "WARNING: no dashboard URL passed to train() and no "
+                    "TRAINING_GYM_FRAMEWORK_STATUS_URL set inside the "
+                    "container. Phase reporting is disabled for this run."
+                )
+
             wandb_env = {}
             if wandb_run_id:
                 wandb_env["WANDB_RUN_ID"] = wandb_run_id
@@ -682,14 +800,31 @@ def build_miles_app(
             if wandb_entity:
                 wandb_env["WANDB_ENTITY"] = wandb_entity
 
-            runtime_env = {
-                "env_vars": {
-                    "no_proxy": f"127.0.0.1,{cluster.head_addr}",
-                    "MASTER_ADDR": cluster.head_addr,
-                    **wandb_env,
-                    **miles.environment,
-                }
-            }
+            runtime_env = build_ray_runtime_env(
+                head_addr=cluster.head_addr,
+                wandb_env=wandb_env,
+                environment=miles.environment,
+                extra_env={
+                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
+                    "TRAINING_GYM_APP_NAME": app_name,
+                    "TRAINING_GYM_TOTAL_STEPS": str(miles.num_rollout),
+                    "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
+                    "TRAINING_GYM_CAPTURE_TRACE": (
+                        "1" if getattr(miles, "capture_trace", False) else ""
+                    ),
+                    "TRAINING_GYM_TRACE_SAMPLE_LIMIT": str(
+                        getattr(miles, "trace_sample_limit", 16)
+                    ),
+                    "TRAINING_GYM_IMAGE_SAMPLE_LIMIT": str(
+                        getattr(miles, "image_sample_limit", 16)
+                    ),
+                    "TRAINING_GYM_TRAJECTORY_SAMPLE_LIMIT": str(
+                        getattr(miles, "trajectory_sample_limit", 16)
+                    ),
+                    "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
+                },
+                framework_status_token=framework_status_token,
+            )
 
             mode = "async" if miles.async_mode else "sync"
             print(

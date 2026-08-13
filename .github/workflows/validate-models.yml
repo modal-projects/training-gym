@@ -1,11 +1,20 @@
 name: Validate Models
 
+# One workflow for every framework. Which framework a model trains on lives in
+# the registry (modal_training_gym/common/models/validation.py), not here.
+#
+# Pull requests validate only the models the diff touches, and only those
+# registered with run_on_pr=True — diff_impact.py enforces that, so a model too
+# large to gate merges on (Kimi on 16 x 8 H200) can never enter a PR matrix.
+# workflow_dispatch can name any registered model, which is how a Kimi run or a
+# miles image bump (bump MilesRecipe on a branch, then dispatch) gets validated.
+
 on:
   pull_request:
   workflow_dispatch:
     inputs:
       models:
-        description: "Comma-separated model names to validate (blank = all)"
+        description: "Comma-separated model names to validate (blank = all PR-gating models)"
         required: false
         default: ""
       num_steps:
@@ -17,8 +26,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: validate-models-${{ github.ref }}
-  cancel-in-progress: true
+  # PR runs share a per-ref group so a new push supersedes the old run. A dispatch
+  # may be a 16 x 8 H200 job, so it gets a group of its own (run_id is unique per
+  # run): manual validations never abort — nor queue behind — one another.
+  group: validate-models-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   list-models:
@@ -44,16 +56,21 @@ jobs:
       - name: Determine models to validate
         id: list
         env:
+          EVENT_NAME: ${{ github.event_name }}
           MODELS_INPUT: ${{ github.event.inputs.models }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            models=$(git diff "${{ github.event.pull_request.base.sha }}...HEAD" \
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            models=$(git diff "$BASE_SHA...HEAD" \
               | uv run scripts/diff_impact.py --models)
           elif [ -n "$MODELS_INPUT" ]; then
             models=$(printf '%s' "$MODELS_INPUT" \
               | uv run python -c "import json,sys; print(json.dumps([m.strip() for m in sys.stdin.read().split(',') if m.strip()]))")
           else
-            models=$(uv run scripts/validate_model_configs.py list)
+            # --pr-only is load-bearing: bare `list` prints the whole registry,
+            # so without it a dispatch left blank would fan out to Kimi on
+            # 16 x 8 H200. Blank means "the set a PR would have run".
+            models=$(uv run scripts/validate_model_configs.py list --pr-only)
           fi
           echo "Selected models: $models"
           echo "models=$models" >> "$GITHUB_OUTPUT"
@@ -90,12 +107,20 @@ jobs:
           MODEL: ${{ matrix.model }}
         run: echo "name=validate-result-$(printf '%s' "$MODEL" | tr '/' '-')" >> "$GITHUB_OUTPUT"
 
+      # Every interpolated value reaches the shell as an environment variable:
+      # the matrix model can come from the workflow_dispatch input, so expanding
+      # it into the script would let a crafted value run commands in a job that
+      # holds Modal credentials.
       - name: Validate ${{ matrix.model }}
+        env:
+          MODEL: ${{ matrix.model }}
+          NUM_STEPS: ${{ github.event.inputs.num_steps || '1' }}
+          RESULT_NAME: ${{ steps.artifact.outputs.name }}
         run: |
           uv run scripts/validate_model_configs.py check \
-            --model "${{ matrix.model }}" \
-            --num_steps "${{ github.event.inputs.num_steps || '1' }}" \
-            --output "${{ steps.artifact.outputs.name }}.json"
+            --model "$MODEL" \
+            --num_steps "$NUM_STEPS" \
+            --output "$RESULT_NAME.json"
 
       - name: Upload result
         if: always() && hashFiles(format('{0}.json', steps.artifact.outputs.name)) != ''
@@ -139,7 +164,9 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: uv run python scripts/download_perf_baseline.py --baseline-dir baseline
+        run: >-
+          uv run python scripts/download_perf_baseline.py
+          --baseline-dir baseline --results-dir results
 
       - name: Build comment body
         run: >-

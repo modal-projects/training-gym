@@ -378,6 +378,7 @@ def reconcile() -> None:
     min_containers=1,
     secrets=_function_secrets(),
 )
+@modal.concurrent(max_inputs=50, target_inputs=20)
 @modal.asgi_app(requires_proxy_auth=dashboard_requires_proxy_auth())
 def fastapi_app():
     import base64

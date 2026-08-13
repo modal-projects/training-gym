@@ -41,8 +41,11 @@ uv run modal deploy docs-next/docs_next_app.py        # docs site → gym.modal.
 uv run modal deploy dashboards/app.py                  # observability dashboard
 
 # Validate model configs / map a diff to affected tutorials
-uv run scripts/validate_model_configs.py list
+uv run scripts/validate_model_configs.py list              # every model the harness runs
+uv run scripts/validate_model_configs.py list --pr-only    # just the PR matrix set
 uv run scripts/validate_model_configs.py check -m qwen3-4b
+# miles models go through the same script; the registry picks the framework
+uv run scripts/validate_model_configs.py check -m Kimi-K2.5
 git diff | uv run scripts/diff_impact.py
 ```
 
@@ -66,6 +69,16 @@ Every framework mounts three Modal Volumes:
 ### Model presets
 
 Known-model presets live under `train_recipes/` (e.g. `Qwen3_4b_Recipe`); `TrainConfig.merge_model_recipe` (bool, default `True`) merges them onto unset recipe fields.
+
+### Model validation
+
+One registry, one script, one workflow, across every framework.
+
+`common/models/validation.py` holds `VALIDATION_CONFIGS`: each entry maps a model name to its `ModelConfig`, the framework whose `get_base_recipe` trains it, and `run_on_pr`. The framework has to be declared — `SlimeRecipe.get_base_recipe` returns a recipe for any model it's asked about, so the recipe classes can't answer "is this model mine?".
+
+`scripts/validate_model_configs.py` owns everything framework-agnostic (CLI, result JSON, markdown summary, PR comment, and the `check` flags). `scripts/validation_backends/<framework>.py` owns the only two things that differ: which recipe trains the model and which dataset it trains on, returned as a pair from one `build_*_validation` function. Recipes are used as `get_base_recipe` returns them, image included — the image a miles model trains on is declared once, in `MilesRecipe`, and validating a candidate image means bumping it on a branch and dispatching, not passing a flag. Adding a framework is one module here plus registry entries.
+
+`run_on_pr=False` marks a model too expensive to fan out on a PR (Kimi is 16 x 8 H200): still runnable by name from the CLI or `workflow_dispatch` — it is not "disabled in CI" — but `diff_impact.py` never puts it in a PR matrix. `list` prints the whole registry so dispatch-only models are discoverable; `--pr-only` narrows to the matrix set, which is why the workflow's blank-dispatch branch passes it. `tests/test_model_validation_registry.py` enforces both. `diff_impact.py` also scopes re-validation per framework, so a miles-only change doesn't re-run the slime set.
 
 ### Cloudpickle caller resolution
 
@@ -98,9 +111,19 @@ Each source declares `TUTORIAL_METADATA` dict with `framework`, `cluster_shape`,
 - Ruff excludes `tutorials/**` — generated tutorial code is not linted.
 - Python 3.12 is pinned. Modal's `serialized=True` requires local ↔ remote Python version match.
 - Modal Secrets `huggingface-secret` (HF_TOKEN) and `wandb-secret` (WANDB_API_KEY) are optional: HF auth is only needed for gated/rate-limited Hub access, and `wandb-secret` only when a `WandbConfig` is passed.
-- Served endpoints (`DeploymentConfig.serve()`) are public by default for SGLang (`unauthenticated=True`). Pass `unauthenticated=False` to require Modal proxy auth (export `MODAL_KEY` (`wk-…`) / `MODAL_SECRET` (`ws-…`) in the launching shell, or eval/`generate`/teacher calls return HTTP 401). vLLM cannot honor `unauthenticated` (`modal.experimental.http_server` has no proxy-auth knob): `True` (default) is a silent no-op for `VllmRecipe`; explicit `False` emits `warnings.warn` because the endpoint remains public. For calls from remote workers (custom rm/reward fns) to authenticated endpoints, also forward the pair into the worker via a `modal.Secret` — the driver shell env doesn't reach them.
+- Custom SGLang and vLLM deployments (`CustomDeployment.launch()`) are public by default (`unauthenticated=True`). Pass `unauthenticated=False` to require Modal proxy auth (export `MODAL_KEY` (`wk-…`) / `MODAL_SECRET` (`ws-…`) in the launching shell, or eval/`generate`/teacher calls return HTTP 401). For calls from remote workers (custom rm/reward fns) to authenticated endpoints, also forward the pair into the worker via a `modal.Secret` — the driver shell env doesn't reach them.
 - Every framework's Modal app is tagged with `_modal_framework`, `_modal_job_type=training`, and W&B project/group for dashboard auto-discovery (see `common/__init__.py: COMMON_TRAINING_GYM_TAGS`).
 
 ## Agent skills
 
+- Before acting, inspect the descriptions in `skills/*/SKILL.md` and read every
+  skill that matches the request. Do not assume the explicitly named skills
+  below are the only available skills.
+- For training lifecycle work, read `skills/agent-driven-training/SKILL.md`
+  before acting. This includes launching, monitoring, inspecting, diagnosing,
+  continuing, or promoting a Training Gym run.
+- For raw Modal infrastructure work, read
+  `skills/modal-infrastructure/SKILL.md` before acting. Use it for apps,
+  containers, volumes, scheduling, image builds, caches, and endpoint
+  authentication.
 - For model support work, read `skills/model-support/SKILL.md` before acting. Use it when adding, debugging, validating, or productionizing new model support, especially Slime recipes and model configs.

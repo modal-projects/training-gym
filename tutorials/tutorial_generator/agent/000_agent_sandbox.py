@@ -8,8 +8,7 @@ TUTORIAL_METADATA = {
     "difficulty": "Beginner",
     "order": 10,
     "api_classes": [
-        "DeploymentConfig",
-        "ModelDeployment",
+        "CustomDeployment",
         "Qwen3_8B",
         "SglangRecipe",
     ],
@@ -32,7 +31,7 @@ def _intro():
     isolated container with its own filesystem.
 
     What you'll learn:
-    1. Deploy a model with `DeploymentConfig` and get an
+    1. Deploy a model with `CustomDeployment` and get an
        OpenAI-compatible endpoint.
     2. Use the OpenAI Python SDK pointed at your self-hosted
        endpoint (no API key needed).
@@ -53,7 +52,8 @@ def _run_instructions():
     """
     Run with:
     ```
-    uv run tutorials/misc/000_agent_sandbox/000_agent_sandbox.py
+    uv run --with openai \\
+      python tutorials/agent/000_agent_sandbox/000_agent_sandbox.py
     ```
     """
 
@@ -65,7 +65,9 @@ def _run_instructions():
     "# Skip if modal_training_gym is already importable (e.g. a local editable\n"
     "# checkout) so your edits keep taking effect and the env stays synced.\n"
     "if importlib.util.find_spec('modal_training_gym') is None:\n"
-    "    %uv pip install -q git+https://github.com/modal-projects/training-gym.git@main"
+    "    %uv pip install -q git+https://github.com/modal-projects/training-gym.git@main\n"
+    "if importlib.util.find_spec('openai') is None:\n"
+    "    %uv pip install -q openai"
 )
 def _install():
     pass
@@ -79,7 +81,7 @@ def _imports():
     import openai
 
     from modal_training_gym import (
-        DeploymentConfig,
+        CustomDeployment,
         Qwen3_8B,
     )
     from modal_training_gym.deploy_recipes import SglangRecipe
@@ -166,8 +168,8 @@ def _deploy_section():
     """
     ## Deploy the model
 
-    `DeploymentConfig.serve()` launches an sglang-backed inference
-    server on Modal and returns a `ModelDeployment` with a live URL.
+    `CustomDeployment.launch()` launches an sglang-backed inference
+    server on Modal and returns a `CustomDeployment` with a live URL.
     The server exposes an **OpenAI-compatible** `/v1/chat/completions`
     endpoint, so we point the standard OpenAI Python SDK at it.
 
@@ -183,11 +185,11 @@ def _deploy_model():
     recipe = SglangRecipe(
         extra_server_args={"--tool-call-parser": "qwen25"},
     )
-    deployment = DeploymentConfig(
-        model=Qwen3_8B(),
+    deployment = CustomDeployment.launch(
+        Qwen3_8B(),
         recipe=recipe,
         unauthenticated=True,
-    ).serve()
+    )
     deployment.wait_until_ready()
     print(f"Model URL: {deployment.url}")
 
@@ -285,7 +287,7 @@ def _agent_loop_section():
 
 @code
 def _agent_loop():
-    MODEL = deployment.deployment_config.served_model_name
+    MODEL = deployment.served_model_name
     MAX_ITERATIONS = 10
 
     messages = [

@@ -10,7 +10,7 @@ from modal_training_gym.frameworks.slime.modal_helpers.patches import (
     patch_rollout_status_reporting as patcher,
 )
 
-TESTDATA = Path(__file__).parent / "testdata"
+TESTDATA = Path(__file__).parent / "testdata" / "slime"
 
 
 @pytest.fixture(scope="session")

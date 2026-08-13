@@ -63,7 +63,7 @@ def hf_secrets() -> list:
 def proxy_auth_secrets() -> list:
     """Return a Modal Secret with ``MODAL_KEY`` / ``MODAL_SECRET`` for train workers.
 
-    Served endpoints (``DeploymentConfig.serve()``) sit behind Modal proxy auth.
+    Custom deployments can sit behind Modal proxy auth.
     Driver-shell env does not reach Ray rollout actors, so frameworks attach this
     secret to the train function the same way they attach wandb / HF secrets.
     Loads from env or ``~/.training-gym.toml`` via :func:`load_proxy_auth`.

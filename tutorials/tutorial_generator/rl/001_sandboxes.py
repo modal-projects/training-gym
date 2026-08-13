@@ -9,9 +9,7 @@ TUTORIAL_METADATA = {
     "order": 20,
     "api_classes": [
         "HarborDataset",
-        "DeploymentConfig",
-        "EvalConfig",
-        "EvalRowResult",
+        "CustomDeployment",
         "Qwen3_4B",
         "SlimeRecipe",
         "TrainConfig",
@@ -36,9 +34,8 @@ def _intro():
 
     Workflow:
     1. Pull the hello-world task from Harbor Hub via `HarborDataset`.
-    2. Evaluate model outputs by running the generated code in a Modal sandbox
-       and reading the resulting `hello.txt` through the Sandbox filesystem API.
-    3. Use the same file-based check in a SLIME `custom_rm_function`.
+    2. Score model outputs by running them in a Modal sandbox.
+    3. Reuse the same scorer as a SLIME `custom_rm_function`.
     4. Train and compare base vs. trained behavior.
     """
 
@@ -72,9 +69,7 @@ def _install():
 @code
 def _imports():
     from modal_training_gym import (
-        DeploymentConfig,
-        EvalConfig,
-        EvalRowResult,
+        CustomDeployment,
         HarborDataset,
         Qwen3_4B,
         SlimeRecipe,
@@ -199,40 +194,38 @@ def _sandbox_scorer():
 @code
 def _serve_eval_base():
     base_model = Qwen3_4B()
-    base_deployment = DeploymentConfig(
-        model=base_model,
+    base_deployment = CustomDeployment.launch(
+        base_model,
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Base model URL: {base_deployment.url}")
 
-    def hello_file_eval(deployment, example):
-        prompt = example["instruction"]
-        response = deployment.generate(
-            prompt,
-            ensure_ready=False,
-            messages=[
-                {"role": "system", "content": dataset.system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-        )
-        code = extract_code(response, model=base_model)
-        score, metadata = score_hello_file(code)
+    def run_eval(deployment, *, max_concurrency: int = 2) -> float:
+        from concurrent.futures import ThreadPoolExecutor
 
-        return EvalRowResult(
-            score=score,
-            response=response,
-            prompt=prompt,
-            parsed_response=base_model.parse_response(response),
-            metadata=metadata,
-        )
+        deployment.wait_until_ready(timeout=3000)
 
-    eval_config = EvalConfig(
-        dataset=dataset,
-        eval_fn=hello_file_eval,
-    )
+        def _score_one(example):
+            prompt = example["instruction"]
+            response = deployment.generate(
+                prompt,
+                ensure_ready=False,
+                messages=[
+                    {"role": "system", "content": dataset.system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            code = extract_code(response, model=base_model)
+            score, _metadata = score_hello_file(code)
+            return score
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            rewards = list(executor.map(_score_one, dataset.load()))
+        return sum(rewards) / len(rewards) if rewards else float("nan")
+
     print("Running base eval...")
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    print(f"Base mean reward: {base_eval.mean:.4f}")
+    base_mean = run_eval(base_deployment)
+    print(f"Base mean reward: {base_mean:.4f}")
 
 
 @markdown
@@ -240,9 +233,8 @@ def _train_intro():
     """
     ## Train with SLIME and sandbox reward
 
-    The reward function calls the shared file scorer during rollouts. Because
-    SLIME calls reward functions asynchronously, the blocking Sandbox
-    operations run in a worker thread.
+    For training, we reuse the same `extract_code` and `score_hello_file`
+    helpers — wrapped in an async reward function for SLIME's `custom_rm_function`.
     """
 
 
@@ -299,15 +291,15 @@ def _serve_trained_intro():
 @code
 def _serve_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_4B(),
         checkpoint=checkpoint,
         app_name="qwen3-4b-hello-world-serve",
         served_model_name="qwen3-4b-hello-world",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Trained model URL: {trained_deployment.url}")
 
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    print(f"Trained mean reward: {trained_eval.mean:.4f}")
-    print(f"Base mean reward:    {base_eval.mean:.4f}")
+    trained_mean = run_eval(trained_deployment)
+    print(f"Trained mean reward: {trained_mean:.4f}")
+    print(f"Base mean reward:    {base_mean:.4f}")

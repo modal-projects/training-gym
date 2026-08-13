@@ -1,12 +1,4 @@
-"""Deployment config and model deployment handle.
-
-``DeploymentConfig`` composes a ``ModelConfig`` with a serving recipe
-(``VllmRecipe`` or ``SglangRecipe``) and exposes ``serve()`` to deploy
-the model on Modal.
-
-``ModelDeployment`` is the handle returned by ``serve()`` — it carries
-the live endpoint URL and convenience methods for generation and eval.
-"""
+"""Recipe-driven custom model deployments."""
 
 from __future__ import annotations
 
@@ -14,13 +6,11 @@ import asyncio
 import inspect
 import json
 import threading
-import warnings
-from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 from modal.experimental import list_deployed_apps
-from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from modal_training_gym.common.checkpoint import (
     Checkpoint,
@@ -117,7 +107,8 @@ def _raise_for_proxy_auth(status_code: int, url: str) -> None:
         "and MODAL_SECRET (ws-…) in the shell that runs the eval/serve. For calls "
         "issued from remote workers (e.g. a custom rm/reward function), also "
         "forward the pair into the worker via a modal.Secret. SGLang endpoints "
-        "are public by default; pass DeploymentConfig(unauthenticated=False) to "
+        "are public by default; pass CustomDeployment.launch(..., "
+        "unauthenticated=False) to "
         "require proxy auth."
     )
 
@@ -146,177 +137,6 @@ def _messages_to_openai(messages: list[dict]) -> list[dict]:
             wire_message["tool_calls"] = wire_tool_calls
         wire_messages.append(wire_message)
     return wire_messages
-
-
-@dataclass
-class DeploymentConfig:
-    """Deploy a model behind a serving engine.
-
-    When ``recipe`` is ``None``, defaults to ``SglangRecipe()``.
-    """
-
-    model: ModelConfig
-    checkpoint: Checkpoint | None = None
-    recipe: VllmRecipe | SglangRecipe | None = None
-
-    app_name: str | None = None
-    served_model_name: str | None = None
-    unauthenticated: bool = True
-
-    def _checkpoints_volume_name(self) -> str | None:
-        if self.checkpoint is not None and self.checkpoint.checkpoints_volume_name:
-            return self.checkpoint.checkpoints_volume_name
-        return getattr(self.model, "checkpoints_volume_name", None)
-
-    def _checkpoints_mount_path(self) -> str | None:
-        if self.checkpoint is not None and self.checkpoint.checkpoints_mount_path:
-            return self.checkpoint.checkpoints_mount_path
-        return getattr(self.model, "checkpoints_mount_path", None)
-
-    def _resolved_model_path(self) -> str:
-        if self.checkpoint is not None:
-            checkpoint_path = getattr(self.checkpoint, "path", "")
-            if checkpoint_path:
-                return checkpoint_path
-
-        model_path = self.model.model_path or self.model.model_name
-        if not model_path:
-            raise TrainingGymConfigError(
-                f"{type(self.model).__name__} has no model path to serve. "
-                "Set model_path or model_name."
-            )
-        return model_path
-
-    def _new_deployment_id(
-        self,
-        *,
-        recipe: VllmRecipe | SglangRecipe,
-        model_path: str,
-    ) -> str:
-        return create_hash(
-            self.model.model_name,
-            self.checkpoint.path if self.checkpoint is not None else "",
-            f"{type(recipe).__name__}:{recipe.recipe_type.value}",
-            self.app_name or "",
-            model_path,
-        )
-
-    # TODO: add _merge_recipe for deployment configs
-    def serve(self) -> "ModelDeployment":
-        """Build, deploy, and return a ``ModelDeployment`` handle."""
-
-        recipe = self.recipe or SglangRecipe()
-        model = self.model
-
-        if (
-            self.checkpoint is not None
-            and self.checkpoint.checkpoint_type == CheckpointType.megatron
-        ):
-            self.checkpoint = convert_checkpoint_to_hf(
-                checkpoint=self.checkpoint,
-                model=model,
-                recipe=recipe,
-            )
-
-        model_path = self._resolved_model_path()
-
-        default_name_src = model.model_name or model_path
-        default_slug = (
-            default_name_src.rstrip("/").split("/")[-1].replace("_", "-").lower()
-        )
-        if not self.app_name:
-            self.app_name = f"{default_slug}-serve"
-        if not self.served_model_name:
-            self.served_model_name = default_slug
-
-        deployment_id = self._new_deployment_id(recipe=recipe, model_path=model_path)
-        checkpoints_volume = self._checkpoints_volume_name()
-        checkpoints_mount_path = self._checkpoints_mount_path()
-
-        if isinstance(recipe, SglangRecipe):
-            from modal_training_gym.deploy_recipes.sglang_recipe.serve_sglang import (
-                build_sglang_serve_app,
-            )
-
-            app = build_sglang_serve_app(
-                recipe=recipe,
-                app_name=self.app_name,
-                model_path=model_path,
-                served_model_name=self.served_model_name,
-                checkpoints_volume=checkpoints_volume,
-                checkpoints_mount_path=checkpoints_mount_path,
-                deployment_id=deployment_id,
-                unauthenticated=self.unauthenticated,
-            )
-        elif isinstance(recipe, VllmRecipe):
-            # unauthenticated is SGLang-only; vLLM's http_server has no
-            # proxy-auth. Default True is a silent no-op; warn only
-            # when the caller explicitly requests authenticated access.
-            if self.unauthenticated is False:
-                warnings.warn(
-                    "DeploymentConfig(unauthenticated=False) is not supported for "
-                    "VllmRecipe: modal.experimental.http_server has no proxy-auth, so the endpoint remains publicly reachable. Use "
-                    "SglangRecipe if you need Modal proxy auth.",
-                    stacklevel=2,
-                )
-            from modal_training_gym.deploy_recipes.vllm_recipe.serve_vllm import (
-                build_vllm_serve_app,
-            )
-
-            app = build_vllm_serve_app(
-                recipe=recipe,
-                app_name=self.app_name,
-                model_path=model_path,
-                served_model_name=self.served_model_name,
-                checkpoints_volume=checkpoints_volume,
-                checkpoints_mount_path=checkpoints_mount_path,
-                deployment_id=deployment_id,
-            )
-        else:
-            raise TrainingGymConfigError(
-                f"Unsupported deploy recipe: {type(recipe).__name__}"
-            )
-
-        env_name = recipe.environment_name
-        strategy = recipe.deploy_strategy
-        app.deploy(
-            environment_name=env_name,
-            strategy=strategy,
-        )
-
-        if recipe.recipe_type == DeployRecipeType.SGLANG:
-            server_attr = "SGLangEndpoint"
-        else:
-            server_attr = "Server"
-        server = getattr(app, server_attr, None)
-        if server is None and hasattr(app, "registered_functions"):
-            server = app.registered_functions.get(server_attr)
-        if server is None:
-            raise RuntimeError(
-                f"Deployed {self.app_name!r} but could not resolve "
-                f"{server_attr} server handle."
-            )
-        url = _run_coro(server.get_url())
-        modal_app_id = app.app_id
-        modal_app_url = modal_app_dashboard_url(modal_app_id)
-        if not url:
-            raise RuntimeError(
-                f"Deployed {self.app_name!r} but no web URL was returned."
-            )
-        if not modal_app_id:
-            raise RuntimeError(
-                f"Deployed {self.app_name!r} but no Modal app id was returned."
-            )
-        deployment = ModelDeployment(
-            deployment_id=deployment_id,
-            deployment_config=self,
-            modal_app_id=modal_app_id,
-            modal_app_url=modal_app_url or modal_app_dashboard_url(modal_app_id),
-            url=url,
-            status=DeploymentStatus.RUNNING.value,
-        )
-        deployment.save()
-        return deployment
 
 
 class DeploymentStatus(Enum):
@@ -401,60 +221,183 @@ class _CrashloopDetector:
         return elapsed, phase
 
 
-class ModelDeployment(BaseModel):
-    """A deployed model endpoint.
+class CustomDeployment(BaseModel):
+    """A recipe-driven deployed model endpoint.
 
-    Returned by ``DeploymentConfig.serve()``. Carries the live endpoint
-    URL, Modal app id, and convenience methods for generation and evaluation.
+    Use `launch` to build and deploy an SGLang or vLLM serving app.
+    The returned handle carries the live URL, Modal app id, and convenience
+    methods for generation and evaluation.
     """
 
     deployment_id: str
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    deployment_config: DeploymentConfig
+    model: ModelConfig
+    recipe: VllmRecipe | SglangRecipe | None = None
+    app_name: str
+    served_model_name: str
+    unauthenticated: bool = True
 
     modal_app_id: str = ""
     modal_app_url: str = ""
     url: str
     status: str = DeploymentStatus.RUNNING.value
 
-    @field_validator("deployment_config", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _parse_deployment_config(cls, value: object) -> DeploymentConfig | object:
-        if not isinstance(value, dict):
+    def _parse_deployment(cls, value: object) -> object:
+        """Flatten records written by the legacy deployment API."""
+        if not isinstance(value, dict) or "deployment_config" not in value:
             return value
 
-        deployment_config = dict(value)
-        model = deployment_config.get("model")
-        if isinstance(model, dict):
-            deployment_config["model"] = ModelConfig(**model)
-        deployment_config.setdefault("unauthenticated", True)
-        return DeploymentConfig(**deployment_config)
+        payload = dict(value)
+        legacy = payload.pop("deployment_config")
+        if not isinstance(legacy, dict):
+            return payload
+        for field in ("model", "recipe", "app_name", "served_model_name"):
+            if field in legacy:
+                payload.setdefault(field, legacy[field])
+        payload.setdefault("unauthenticated", legacy.get("unauthenticated", True))
+        if isinstance(payload.get("model"), dict):
+            payload["model"] = ModelConfig(**payload["model"])
+        return payload
 
-    @field_serializer("deployment_config")
-    def _serialize_deployment_config(
-        self, value: DeploymentConfig
-    ) -> dict[str, object]:
-        model = value.model
-        return {
-            "model": {
-                "model_name": getattr(model, "model_name", ""),
-                "model_path": getattr(model, "model_path", None),
-                "checkpoints_volume_name": getattr(
-                    model,
-                    "checkpoints_volume_name",
-                    None,
-                ),
-                "checkpoints_mount_path": getattr(
-                    model,
-                    "checkpoints_mount_path",
-                    None,
-                ),
-            },
-            "app_name": value.app_name,
-            "served_model_name": value.served_model_name,
-            "unauthenticated": value.unauthenticated,
-        }
+    @classmethod
+    def launch(
+        cls,
+        model: ModelConfig | str,
+        checkpoint: Checkpoint | None = None,
+        *,
+        recipe: VllmRecipe | SglangRecipe | None = None,
+        app_name: str | None = None,
+        served_model_name: str | None = None,
+        unauthenticated: bool = True,
+    ) -> "CustomDeployment":
+        model = ModelConfig(model_name=model) if isinstance(model, str) else model
+
+        if recipe is None:
+            recipe = SglangRecipe()
+
+        if (
+            checkpoint is not None
+            and checkpoint.checkpoint_type == CheckpointType.megatron
+        ):
+            checkpoint = convert_checkpoint_to_hf(
+                checkpoint=checkpoint,
+                model=model,
+                recipe=recipe,
+            )
+
+        if checkpoint is not None and checkpoint.path:
+            model_path = checkpoint.path
+        else:
+            model_path = model.model_path or model.model_name
+        if not model_path:
+            raise TrainingGymConfigError(
+                f"{type(model).__name__} has no model path to serve. "
+                "Set model_path or model_name."
+            )
+
+        default_name_src = model.model_name or model_path
+        default_slug = (
+            default_name_src.rstrip("/").split("/")[-1].replace("_", "-").lower()
+        )
+        app_name = app_name or f"{default_slug}-serve"
+        served_model_name = served_model_name or default_slug
+        deployment_id = create_hash(
+            model.model_name,
+            checkpoint.path if checkpoint is not None else "",
+            f"{type(recipe).__name__}:{recipe.recipe_type.value}",
+            app_name,
+            model_path,
+        )
+        checkpoints_volume = (
+            checkpoint.checkpoints_volume_name
+            if checkpoint is not None and checkpoint.checkpoints_volume_name
+            else getattr(model, "checkpoints_volume_name", None)
+        )
+        checkpoints_mount_path = (
+            checkpoint.checkpoints_mount_path
+            if checkpoint is not None and checkpoint.checkpoints_mount_path
+            else getattr(model, "checkpoints_mount_path", None)
+        )
+
+        if isinstance(recipe, SglangRecipe):
+            from modal_training_gym.deploy_recipes.sglang_recipe.serve_sglang import (
+                build_sglang_serve_app,
+            )
+
+            app = build_sglang_serve_app(
+                recipe=recipe,
+                app_name=app_name,
+                model_path=model_path,
+                served_model_name=served_model_name,
+                checkpoints_volume=checkpoints_volume,
+                checkpoints_mount_path=checkpoints_mount_path,
+                deployment_id=deployment_id,
+                unauthenticated=unauthenticated,
+            )
+        elif isinstance(recipe, VllmRecipe):
+            from modal_training_gym.deploy_recipes.vllm_recipe.serve_vllm import (
+                build_vllm_serve_app,
+            )
+
+            app = build_vllm_serve_app(
+                recipe=recipe,
+                app_name=app_name,
+                model_path=model_path,
+                served_model_name=served_model_name,
+                checkpoints_volume=checkpoints_volume,
+                checkpoints_mount_path=checkpoints_mount_path,
+                deployment_id=deployment_id,
+                unauthenticated=unauthenticated,
+            )
+        else:
+            raise TrainingGymConfigError(
+                f"Unsupported deploy recipe: {type(recipe).__name__}"
+            )
+
+        app.deploy(
+            environment_name=recipe.environment_name,
+            strategy=recipe.deploy_strategy,
+        )
+
+        server_attr = (
+            "SGLangEndpoint"
+            if recipe.recipe_type == DeployRecipeType.SGLANG
+            else "Server"
+        )
+        server = getattr(app, server_attr, None)
+        if server is None and hasattr(app, "registered_functions"):
+            server = app.registered_functions.get(server_attr)
+        if server is None:
+            raise RuntimeError(
+                f"Deployed {app_name!r} but could not resolve "
+                f"{server_attr} server handle."
+            )
+        url = _run_coro(server.get_url())
+        modal_app_id = app.app_id
+        if not url:
+            raise RuntimeError(f"Deployed {app_name!r} but no web URL was returned.")
+        if not modal_app_id:
+            raise RuntimeError(
+                f"Deployed {app_name!r} but no Modal app id was returned."
+            )
+
+        deployment = cls(
+            deployment_id=deployment_id,
+            model=model,
+            recipe=recipe,
+            app_name=app_name,
+            served_model_name=served_model_name,
+            unauthenticated=unauthenticated,
+            modal_app_id=modal_app_id,
+            modal_app_url=modal_app_dashboard_url(modal_app_id),
+            url=url,
+            status=DeploymentStatus.RUNNING.value,
+        )
+        deployment.save()
+        return deployment
 
     # TODO(atoniolo76): A future PR should update all existing tutorials to
     # use this new function while getting rid of the old generate.
@@ -476,7 +419,7 @@ class ModelDeployment(BaseModel):
         if ensure_ready:
             self.wait_until_ready()
         body = {
-            "model": self.deployment_config.served_model_name,
+            "model": self.served_model_name,
             "messages": _messages_to_openai(messages),
             **kwargs,
         }
@@ -540,7 +483,32 @@ class ModelDeployment(BaseModel):
         return str(content)
 
     def save(self) -> None:
-        payload = self.model_dump(mode="json")
+        payload = {
+            "deployment_id": self.deployment_id,
+            "deployment_config": {
+                "model": {
+                    "model_name": getattr(self.model, "model_name", ""),
+                    "model_path": getattr(self.model, "model_path", None),
+                    "checkpoints_volume_name": getattr(
+                        self.model,
+                        "checkpoints_volume_name",
+                        None,
+                    ),
+                    "checkpoints_mount_path": getattr(
+                        self.model,
+                        "checkpoints_mount_path",
+                        None,
+                    ),
+                },
+                "app_name": self.app_name,
+                "served_model_name": self.served_model_name,
+                "unauthenticated": self.unauthenticated,
+            },
+            "modal_app_id": self.modal_app_id,
+            "modal_app_url": self.modal_app_url,
+            "url": self.url,
+            "status": self.status,
+        }
         vol_put(
             MetadataStore.DEPLOYMENTS,
             self.deployment_id,
@@ -564,12 +532,8 @@ class ModelDeployment(BaseModel):
         """
         import modal
 
-        app_name = self.deployment_config.app_name
-        env_name = (
-            self.deployment_config.recipe.environment_name
-            if self.deployment_config.recipe is not None
-            else None
-        )
+        app_name = self.app_name
+        env_name = self.recipe.environment_name if self.recipe is not None else None
 
         def _tail() -> None:
             try:
@@ -595,7 +559,7 @@ class ModelDeployment(BaseModel):
 
         import requests
 
-        app_name = self.deployment_config.app_name
+        app_name = self.app_name
         logs_hint = (
             f"`modal app logs {self.modal_app_id}`"
             if self.modal_app_id
@@ -613,7 +577,7 @@ class ModelDeployment(BaseModel):
         # window — otherwise a slow-but-healthy boot is misreported as
         # "crashlooping". Only flag a crashloop quickly once we've actually seen a
         # container come up and then disappear (a real restart cycle).
-        recipe = self.deployment_config.recipe
+        recipe = self.recipe
         startup_timeout = recipe.startup_timeout if recipe is not None else 20 * 60
         # Cap the cold-start grace at the overall deadline — otherwise it always
         # exceeds `timeout` and the loop hits TimeoutError before the crashloop
@@ -695,9 +659,6 @@ class ModelDeployment(BaseModel):
             print(f"[deployment] couldn't query Modal app state: {exc!r}")
             return -1
         for app in apps:
-            if (
-                app.app_id == self.modal_app_id
-                or app.name == self.deployment_config.app_name
-            ):
+            if app.app_id == self.modal_app_id or app.name == self.app_name:
                 return app.containers
         return None

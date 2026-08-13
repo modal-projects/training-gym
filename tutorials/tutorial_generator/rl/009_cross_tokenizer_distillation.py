@@ -9,9 +9,7 @@ TUTORIAL_METADATA = {
     "order": 60,
     "api_classes": [
         "Qwen3_6_35B",
-        "DeploymentConfig",
-        "EvalConfig",
-        "EvalRowResult",
+        "CustomDeployment",
         "Qwen3_6_35b_Recipe",
         "TrainConfig",
     ],
@@ -74,10 +72,7 @@ def _imports():
     import re
 
     from modal_training_gym import (
-        DeploymentConfig,
-        EvalConfig,
-        EvalRowResult,
-        ModelDeployment,
+        CustomDeployment,
         Qwen3_6_35B,
         TrainConfig,
         list_checkpoints,
@@ -117,8 +112,8 @@ def _deploy_teacher():
     # OPD fires one /generate prefill per trajectory. With 16×8=128 traj/step, the
     # default max_running_requests=16 saturates and returns 503s for minutes — raise
     # the teacher queue and throttle client-side (see TEACHER_RM_CONCURRENCY below).
-    teacher_deployment = DeploymentConfig(
-        model=HFModelConfiguration(model_name="deepseek-ai/DeepSeek-V4-Flash"),
+    teacher_deployment = CustomDeployment.launch(
+        HFModelConfiguration(model_name="deepseek-ai/DeepSeek-V4-Flash"),
         recipe=DeepSeek_V4_Flash_SglangRecipe(
             context_length=16384,
             startup_timeout=TEACHER_READY_TIMEOUT,
@@ -126,7 +121,7 @@ def _deploy_teacher():
         ),
         app_name="dsv4-teacher-model",
         served_model_name="deepseek-v4-flash",
-    ).serve()
+    )
     print(f"Teacher URL: {teacher_deployment.url}")
 
     teacher_deployment.wait_until_ready(timeout=TEACHER_READY_TIMEOUT)
@@ -431,15 +426,15 @@ def _eval_base():
 
 @code
 def _eval_function():
-    def bfcl_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
-        label = json.loads(example.get("label", "{}"))
-        task_id = label.get("task_id", "")
-        N = label.get("total_steps", 1)
-        flattened_calls = label.get("flattened_calls", [])
+    def bfcl_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+        label = json.loads(example["label"])
+        task_id = label["task_id"]
+        N = label["total_steps"]
+        flattened_calls = label["flattened_calls"]
         K = max(0, N - EVAL_TAIL_STEPS)
         expert_call = flattened_calls[K] if K < len(flattened_calls) else {}
 
-        served = deployment.deployment_config.served_model_name
+        served = deployment.served_model_name
         is_student = served != "deepseek-v4-flash"
 
         deployment.wait_until_ready(timeout=DEPLOYMENT_READY_TIMEOUT)
@@ -471,10 +466,10 @@ def _eval_function():
             EVAL_TAIL_STEPS,
         )
 
-        return EvalRowResult(
-            score=shaped_score,
-            response=episode.final_response,
-            metadata={
+        return {
+            "score": shaped_score,
+            "response": episode.final_response,
+            "metadata": {
                 "task": task_id,
                 "step_K": K,
                 "eval_tail": EVAL_TAIL_STEPS,
@@ -486,39 +481,51 @@ def _eval_function():
                 "parsed_call": first_call is not None,
                 "tool_match": bool(first_call and first_call.get("name") == expert_call.get("name")),
             },
-        )
+        }
+
+    def run_eval(deployment, *, max_concurrency: int = 4):
+        from concurrent.futures import ThreadPoolExecutor
+
+        deployment.wait_until_ready(timeout=3000)
+
+        def _score_one(example):
+            return bfcl_eval_fn(deployment, example)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            rows = list(executor.map(_score_one, eval_dataset.load()))
+        mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+        return mean, rows
 
 
 @code
 def _run_baseline_eval():
-    def _print_eval_summary(name: str, result) -> None:
+    def _print_eval_summary(name: str, mean: float, rows: list[dict]) -> None:
         def _frac(rows, key):
             if not rows:
                 return 0.0
-            return sum(1 for r in rows if r.metadata.get(key)) / len(rows)
+            return sum(1 for r in rows if r["metadata"].get(key)) / len(rows)
 
-        n = len(result.rows)
+        n = len(rows)
         print(f"{'Metric':<25} {name:>10}")
         print("-" * 37)
         print(f"{'Eval rows':<25} {n:>10d}")
-        print(f"{'Shaped reward':<25} {result.mean:>10.3f}")
-        print(f"{'Terminal pass rate':<25} {_frac(result.rows, 'task_passed'):>10.1%}")
+        print(f"{'Shaped reward':<25} {mean:>10.3f}")
+        print(f"{'Terminal pass rate':<25} {_frac(rows, 'task_passed'):>10.1%}")
         if n:
-            print(f"{'Parsed tool call':<25} {_frac(result.rows, 'parsed_call'):>10.1%}")
-            print(f"{'First-call tool match':<25} {_frac(result.rows, 'tool_match'):>10.1%}")
+            print(f"{'Parsed tool call':<25} {_frac(rows, 'parsed_call'):>10.1%}")
+            print(f"{'First-call tool match':<25} {_frac(rows, 'tool_match'):>10.1%}")
 
     student_recipe = Qwen3_6_35b_SglangRecipe(context_length=SERVED_CONTEXT_LEN)
-    base_deployment = DeploymentConfig(model=base_model, recipe=student_recipe).serve()
+    base_deployment = CustomDeployment.launch(base_model, recipe=student_recipe)
     print(f"Student URL: {base_deployment.url}")
 
-    eval_config = EvalConfig(dataset=eval_dataset, eval_fn=bfcl_eval_fn)
-
-    teacher_eval = None
+    teacher_mean = None
+    teacher_rows = None
     print("--- Evaluating teacher (DeepSeek V4 Flash)... ---")
     try:
-        teacher_eval = eval_config.evaluate(teacher_deployment, max_concurrency=4)
-        print(f"Teacher shaped reward: {teacher_eval.mean:.3f}")
-        _print_eval_summary("Teacher", teacher_eval)
+        teacher_mean, teacher_rows = run_eval(teacher_deployment, max_concurrency=4)
+        print(f"Teacher shaped reward: {teacher_mean:.3f}")
+        _print_eval_summary("Teacher", teacher_mean, teacher_rows)
     except Exception as e:
         print(
             f"[teacher-eval] FAILED ({e!r}) — continuing with student baseline",
@@ -527,24 +534,25 @@ def _run_baseline_eval():
 
     print("--- Evaluating base student (shaped live reward + terminal verdict metadata)... ---")
     try:
-        base_eval = eval_config.evaluate(base_deployment, max_concurrency=4)
-        print(f"Base shaped reward: {base_eval.mean:.3f}")
-        _print_eval_summary("Base", base_eval)
+        base_mean, base_rows = run_eval(base_deployment, max_concurrency=4)
+        print(f"Base shaped reward: {base_mean:.3f}")
+        _print_eval_summary("Base", base_mean, base_rows)
     except Exception as e:
         print(
             f"[base-eval] FAILED ({e!r}) — skipping baseline, proceeding to training",
             flush=True,
         )
-        base_eval = None
+        base_mean = None
+        base_rows = None
 
-    if teacher_eval is not None and base_eval is not None:
+    if teacher_rows is not None and base_rows is not None:
         def _frac(rows, key):
             if not rows:
                 return 0.0
-            return sum(1 for r in rows if r.metadata.get(key)) / len(rows)
+            return sum(1 for r in rows if r["metadata"].get(key)) / len(rows)
 
-        t_pass = _frac(teacher_eval.rows, "task_passed")
-        b_pass = _frac(base_eval.rows, "task_passed")
+        t_pass = _frac(teacher_rows, "task_passed")
+        b_pass = _frac(base_rows, "task_passed")
         print(
             f"[baseline] teacher pass={t_pass:.1%} student pass={b_pass:.1%} "
             f"(gap={t_pass - b_pass:+.1%})",
@@ -1182,18 +1190,18 @@ def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_6_35B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_6_35B(),
         recipe=student_recipe,
         checkpoint=checkpoint,
         app_name="qwen3-6-35b-bfcl-trained",
         served_model_name="qwen3-6-35b-bfcl-trained",
-    ).serve()
+    )
     print(f"Trained student URL: {trained_deployment.url}")
 
     print("--- Evaluating trained student (shaped live reward + terminal verdict metadata)... ---")
-    trained_eval = eval_config.evaluate(trained_deployment, max_concurrency=4)
-    print(f"Trained shaped reward: {trained_eval.mean:.3f}")
+    trained_mean, trained_rows = run_eval(trained_deployment, max_concurrency=4)
+    print(f"Trained shaped reward: {trained_mean:.3f}")
 
 
 
@@ -1203,37 +1211,37 @@ def _compare():
     def _frac(rows, key):
         if not rows:
             return 0.0
-        return sum(1 for r in rows if r.metadata.get(key)) / len(rows)
+        return sum(1 for r in rows if r["metadata"].get(key)) / len(rows)
 
-    if base_eval is None:
-        n_trained = len(trained_eval.rows)
+    if base_rows is None:
+        n_trained = len(trained_rows)
         print(f"{'Metric':<25} {'Trained':>10}")
         print("-" * 37)
         print(f"{'Eval rows':<25} {n_trained:>10d}")
-        print(f"{'Shaped reward':<25} {trained_eval.mean:>10.3f}")
-        print(f"{'Terminal pass rate':<25} {_frac(trained_eval.rows, 'task_passed'):>10.1%}")
+        print(f"{'Shaped reward':<25} {trained_mean:>10.3f}")
+        print(f"{'Terminal pass rate':<25} {_frac(trained_rows, 'task_passed'):>10.1%}")
         print("(baseline eval was skipped — trained metrics only)")
         return
 
-    n_base = len(base_eval.rows)
-    n_trained = len(trained_eval.rows)
+    n_base = len(base_rows)
+    n_trained = len(trained_rows)
 
     print(f"{'Metric':<25} {'Base':>10} {'Trained':>10} {'Delta':>10}")
     print("-" * 57)
     print(f"{'Eval rows':<25} {n_base:>10d} {n_trained:>10d} {'':>10}")
-    print(f"{'Shaped reward':<25} {base_eval.mean:>10.3f} {trained_eval.mean:>10.3f} {trained_eval.mean - base_eval.mean:>+10.3f}")
+    print(f"{'Shaped reward':<25} {base_mean:>10.3f} {trained_mean:>10.3f} {trained_mean - base_mean:>+10.3f}")
 
-    base_pass_rate = _frac(base_eval.rows, "task_passed")
-    trained_pass_rate = _frac(trained_eval.rows, "task_passed")
+    base_pass_rate = _frac(base_rows, "task_passed")
+    trained_pass_rate = _frac(trained_rows, "task_passed")
     print(f"{'Terminal pass rate':<25} {base_pass_rate:>10.1%} {trained_pass_rate:>10.1%} {trained_pass_rate - base_pass_rate:>+10.1%}")
 
     if n_base and n_trained:
-        base_parse = _frac(base_eval.rows, "parsed_call")
-        trained_parse = _frac(trained_eval.rows, "parsed_call")
+        base_parse = _frac(base_rows, "parsed_call")
+        trained_parse = _frac(trained_rows, "parsed_call")
         print(f"{'Parsed tool call':<25} {base_parse:>10.1%} {trained_parse:>10.1%} {trained_parse - base_parse:>+10.1%}")
 
-        base_match = _frac(base_eval.rows, "tool_match")
-        trained_match = _frac(trained_eval.rows, "tool_match")
+        base_match = _frac(base_rows, "tool_match")
+        trained_match = _frac(trained_rows, "tool_match")
         print(f"{'First-call tool match':<25} {base_match:>10.1%} {trained_match:>10.1%} {trained_match - base_match:>+10.1%}")
     else:
         print("(no eval rows — check the eval dataset / deployment)")

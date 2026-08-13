@@ -123,6 +123,7 @@ def _run_payload(summary: RunSummary) -> dict[str, object]:
     current_step, total_steps, step_unit = _current_step(summary)
     return {
         "run_id": summary.run_id,
+        "modal_app_id": summary.modal_app_id or None,
         "status": summary.display_status,
         "stage": summary.display_stage or None,
         "current_step": current_step,
@@ -481,12 +482,18 @@ def _run_summary_panel(summary: RunSummary) -> Panel:
         ("  ·  Created ", "dim"),
         (_format_table_timestamp(summary.created_at), "dim bold"),
     )
+    modal_app = Text.assemble(
+        ("Modal app  ", "dim"),
+        (summary.modal_app_id or "—", "bold"),
+    )
     body = Group(
         heading,
         Text(""),
         metrics,
         Text(""),
         Columns([chip for chip in chips if chip is not None], padding=(0, 1)),
+        Text(""),
+        modal_app,
         Text(""),
         footer,
     )

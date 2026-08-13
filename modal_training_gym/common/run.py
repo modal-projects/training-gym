@@ -249,15 +249,17 @@ class TrainingRun(BaseModel):
         metadata["framework_progress"] = progress
         self.metadata = metadata
 
-        current_step = progress.get("current")
-        record_step_time_event(
-            cast(MutableMapping[str, Any], _step_times_dict()),
-            self.training_run_id,
-            current_step,
-            status.value,
-            update.step_event.strip(),
-            update.event_ts or time.time(),
-        )
+        # TODO update step timing
+        if self.framework is Framework.SLIME:
+            current_step = progress.get("current")
+            record_step_time_event(
+                cast(MutableMapping[str, Any], _step_times_dict()),
+                self.training_run_id,
+                current_step,
+                status.value,
+                update.step_event.strip(),
+                update.event_ts or time.time(),
+            )
         return status
 
     def record_latest_rollout(self, rollout: TrainingRolloutResult) -> None:
@@ -399,6 +401,7 @@ def mark_training_attempt_started(
     run.ended_at = None
     run.completed_at = None
     run.duration_seconds = None
+    run.error_message = None
     run.metadata = metadata
     return attempt_count
 

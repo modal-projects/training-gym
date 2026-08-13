@@ -33,10 +33,7 @@ import re
 
 from modal_training_gym import (
     DatasetConfig,
-    DeploymentConfig,
-    EvalConfig,
-    EvalRowResult,
-    ModelDeployment,
+    CustomDeployment,
     Qwen3_4B,
     SlimeRecipe,
     TrainConfig,
@@ -95,6 +92,8 @@ class NumberGuessDataset(DatasetConfig):
             for eval_path in eval_paths.values():
                 os.makedirs(os.path.dirname(eval_path), exist_ok=True)
                 Dataset.from_list(eval_rows).to_parquet(eval_path)
+
+eval_dataset = NumberGuessDataset()
 
 # ## Multi-turn environment and reward
 #
@@ -238,11 +237,11 @@ async def number_guess_rm(args, sample, **kwargs) -> float:
 
 # ## Offline multi-turn trajectory evaluator
 #
-# `EvalConfig` supports `eval_fn`, so we can plug in a full
-# multi-turn evaluator per row while still using the standard eval runner.
+# We create a full multi-turn evaluator that aggregates scores in a
+# small loop over the eval dataset.
 
 def run_guessing_trajectory(
-    deployment: ModelDeployment,
+    deployment: CustomDeployment,
     *,
     target: int,
     max_turns: int = _MAX_TURNS,
@@ -278,26 +277,11 @@ def run_guessing_trajectory(
         "response": trace,
     }
 
-def _resolve_target(example: dict) -> int:
-    if "target" in example:
-        return int(example["target"])
-
-    raw = example.get("label")
-    if isinstance(raw, dict):
-        return int(raw.get("answer", 1))
-    if isinstance(raw, str):
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            payload = {}
-        return int(payload.get("answer", 1))
-    return 1
-
 def guessing_eval_fn(
-    deployment: ModelDeployment,
+    deployment: CustomDeployment,
     example: dict,
-) -> EvalRowResult:
-    target = _resolve_target(example)
+) -> dict:
+    target = int(example["target"])
     trajectory = run_guessing_trajectory(
         deployment,
         target=target,
@@ -308,29 +292,43 @@ def guessing_eval_fn(
         format_error=trajectory["format_error"],
         turns_taken=trajectory["turns_taken"],
     )
-    return EvalRowResult(
-        score=reward,
-        response=trajectory["response"],
-        metadata={
+    return {
+        "score": reward,
+        "response": trajectory["response"],
+        "metadata": {
             "success": trajectory["success"],
             "format_error": trajectory["format_error"],
             "turns_taken": trajectory["turns_taken"],
             "target": target,
         },
-    )
+    }
 
-def summarize_eval(eval_result) -> dict:
-    rows = eval_result.rows
-    success_rate = sum(1 for row in rows if row.metadata.get("success")) / max(
+def summarize_eval(rows: list[dict]) -> dict:
+    success_rate = sum(1 for row in rows if row["metadata"].get("success")) / max(
         len(rows), 1
     )
     mean_turns = sum(
-        int(row.metadata.get("turns_taken", _MAX_TURNS)) for row in rows
+        int(row["metadata"].get("turns_taken", _MAX_TURNS)) for row in rows
     ) / max(len(rows), 1)
     return {
         "success_rate": float(success_rate),
         "mean_turns": float(mean_turns),
     }
+
+def run_eval(
+    deployment, *, max_concurrency: int = 2
+) -> tuple[float, list[dict]]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    deployment.wait_until_ready(timeout=3000)
+
+    def _score_one(example):
+        return guessing_eval_fn(deployment, example)
+
+    with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+        rows = list(executor.map(_score_one, eval_dataset.load()))
+    mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+    return mean, rows
 
 import modal
 
@@ -346,23 +344,18 @@ def _main_impl() -> None:
         ) from e
 
     train_dataset = NumberGuessDataset()
-    eval_dataset = NumberGuessDataset()
 
     # ## Serve and evaluate the base model
 
-    base_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    base_deployment = CustomDeployment.launch(
+        Qwen3_4B(),
         unauthenticated=True,
-    ).serve()
-    print(f"Base model URL: {base_deployment.url}")
-    eval_config = EvalConfig(
-        dataset=eval_dataset,
-        eval_fn=guessing_eval_fn,
     )
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    base_summary = summarize_eval(base_eval)
+    print(f"Base model URL: {base_deployment.url}")
+    base_mean, base_rows = run_eval(base_deployment)
+    base_summary = summarize_eval(base_rows)
     print(f"Base success rate: {base_summary['success_rate']:.2%}")
-    print(f"Base mean reward: {base_eval.mean:.3f}")
+    print(f"Base mean reward: {base_mean:.3f}")
     print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 
     # ## Train with custom multi-turn rollout
@@ -383,8 +376,6 @@ def _main_impl() -> None:
     # - `num_rollout=20` — total rollout/train iterations to run. Each iteration samples
     #   a batch, scores it, and applies one policy update.
     # - `rollout_batch_size=8` — prompts sampled per rollout iteration.
-    # - `n_samples_per_prompt=1` — GRPO group size. `1` disables grouping; bump to ≥2
-    #   to get within-prompt advantage normalization.
     # - `rollout_max_response_len=64` — max new tokens per sglang call. We keep it tiny
     #    because every turn is `<answer>N</answer>` plus a bit of thinking.
     # - `rollout_temperature=1.0` — sampling temperature during rollouts.
@@ -415,7 +406,7 @@ def _main_impl() -> None:
 
             num_rollout=20,
             rollout_batch_size=8,
-            n_samples_per_prompt=1,
+            n_samples_per_prompt=4,
             rollout_max_response_len=64,
             rollout_temperature=1.0,
 
@@ -431,22 +422,22 @@ def _main_impl() -> None:
     # ## Evaluate trained checkpoint
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_4B(),
         checkpoint=checkpoint,
         app_name="qwen3-4b-guessing-multiturn-serve",
         served_model_name="qwen3-4b-guessing-multiturn",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Trained model URL: {trained_deployment.url}")
 
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    trained_summary = summarize_eval(trained_eval)
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    trained_summary = summarize_eval(trained_rows)
     print(f"Trained success rate: {trained_summary['success_rate']:.2%}")
-    print(f"Trained mean reward: {trained_eval.mean:.3f}")
+    print(f"Trained mean reward: {trained_mean:.3f}")
     print(f"Trained mean turns:  {trained_summary['mean_turns']:.2f}")
     print(f"Base success rate:    {base_summary['success_rate']:.2%}")
-    print(f"Base mean reward:     {base_eval.mean:.3f}")
+    print(f"Base mean reward:     {base_mean:.3f}")
     print(f"Base mean turns:      {base_summary['mean_turns']:.2f}")
 
 @tutorial_cli_app.local_entrypoint()

@@ -12,7 +12,7 @@ from modal_training_gym import _dashboard
 from modal_training_gym.cli import setup as cli_setup_module
 from modal_training_gym.common import config
 from modal_training_gym.common import status_reporter
-from modal_training_gym.frameworks.slime import reporting
+from modal_training_gym.common import reporting
 
 
 class _Response:

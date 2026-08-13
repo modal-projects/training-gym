@@ -3,16 +3,14 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 2×H100",
+    "cluster_shape": "1 × 1×H100 (teacher) + 1 × 8×H100 (train)",
     "summary": "On-policy distillation on math",
     "difficulty": "Intermediate",
     "order": 30,
     "api_classes": [
         "Qwen3_4B",
         "Qwen3_8B",
-        "DeploymentConfig",
-        "EvalConfig",
-        "EvalRowResult",
+        "CustomDeployment",
         "SlimeRecipe",
         "TrainConfig",
     ],
@@ -35,7 +33,7 @@ def _intro():
 
     The tutorial follows these steps:
 
-    1. **Deploy the teacher** (Qwen3-8B) on an SGLang server with `DeploymentConfig`.
+    1. **Deploy the teacher** (Qwen3-8B) on an SGLang server with `CustomDeployment`.
     2. **Load a math dataset** (`dapo-math-17k`) and define a verifiable eval that checks `Answer: \\boxed{N}`.
     3. **Evaluate the base student** (Qwen3-4B) to get a baseline accuracy.
     4. **Define a reward function** that calls the teacher's `/generate` endpoint with `return_logprob=True` and combines the teacher log-probs with a math correctness score.
@@ -97,11 +95,8 @@ def _imports():
     import re
 
     from modal_training_gym import (
-        DeploymentConfig,
-        EvalConfig,
-        EvalRowResult,
+        CustomDeployment,
         HuggingFaceDataset,
-        ModelDeployment,
         Qwen3_4B,
         Qwen3_8B,
         SlimeRecipe,
@@ -126,13 +121,13 @@ def _deploy_intro():
 @code
 def _deploy_teacher():
     teacher_model = Qwen3_8B()
-    teacher_deployment = DeploymentConfig(
-        model=teacher_model,
+    teacher_deployment = CustomDeployment.launch(
+        teacher_model,
         recipe=SglangRecipe(gpu="H100"),
         app_name="opd-teacher-qwen3-8b",
         served_model_name="qwen3-8b-teacher",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Teacher URL: {teacher_deployment.url}")
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
@@ -199,10 +194,7 @@ def _dataset():
 def _dataset_peek():
     rows = eval_dataset.load()
     for row in rows.select(range(2)):
-        prompt = row["prompt"]
-        if isinstance(prompt, list):
-            prompt = prompt[0]["content"] if prompt else ""
-        print(prompt[:200])
+        print(row["prompt"][0]["content"][:200])
         print(f"  label: {row['label']}")
         print()
 
@@ -233,11 +225,9 @@ def _eval_fn():
             pass
         return pred == gt
 
-    def math_eval_fn(deployment: ModelDeployment, example: dict) -> EvalRowResult:
-        prompt = example.get("prompt", "")
-        if isinstance(prompt, list):
-            prompt = prompt[0]["content"] if prompt else ""
-        label = example.get("label", "")
+    def math_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+        prompt = example["prompt"][0]["content"]
+        label = example["label"]
 
         response = deployment.generate(
             prompt,
@@ -248,11 +238,28 @@ def _eval_fn():
         correct = _check_math(response, label)
         pred = _normalize_answer(_extract_answer(response))
 
-        return EvalRowResult(
-            score=1.0 if correct else 0.0,
-            response=response,
-            metadata={"correct": correct, "pred": pred, "label": label},
-        )
+        return {
+            "score": 1.0 if correct else 0.0,
+            "response": response,
+            "correct": correct,
+            "pred": pred,
+            "label": label,
+        }
+
+    def run_eval(
+        deployment, *, max_concurrency: int = 2
+    ) -> tuple[float, list[dict]]:
+        from concurrent.futures import ThreadPoolExecutor
+
+        deployment.wait_until_ready(timeout=3000)
+
+        def _score_one(example):
+            return math_eval_fn(deployment, example)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            rows = list(executor.map(_score_one, eval_dataset.load()))
+        mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
+        return mean, rows
 
 
 # ── Evaluate base student ────────────────────────────────────────────────
@@ -273,27 +280,26 @@ def _eval_base_intro():
 @code
 def _eval_base():
     base_model = Qwen3_4B()
-    base_deployment = DeploymentConfig(
-        model=base_model,
+    base_deployment = CustomDeployment.launch(
+        base_model,
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Student URL: {base_deployment.url}")
 
-    eval_config = EvalConfig(dataset=eval_dataset, eval_fn=math_eval_fn)
     print("--- Evaluating base student... ---")
-    base_eval = eval_config.evaluate(base_deployment, debug=True)
-    n_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    print(f"Base accuracy: {n_correct}/{len(base_eval.rows)} "
-          f"({base_eval.mean:.1%})")
+    base_mean, base_rows = run_eval(base_deployment)
+    n_correct = sum(1 for r in base_rows if r.get("correct"))
+    print(f"Base accuracy: {n_correct}/{len(base_rows)} "
+          f"({base_mean:.1%})")
 
 
 @notebook_only
 @code
 def _base_examples():
-    for r in base_eval.rows[:3]:
-        status = "CORRECT" if r.metadata["correct"] else "WRONG"
-        print(f"[{status}] label={r.metadata['label']}, pred={r.metadata['pred']}")
-        print(f"  ...{r.response[-150:]}")
+    for r in base_rows[:3]:
+        status = "CORRECT" if r["correct"] else "WRONG"
+        print(f"[{status}] label={r['label']}, pred={r['pred']}")
+        print(f"  ...{r['response'][-150:]}")
         print()
 
 
@@ -363,7 +369,7 @@ def _train_intro():
     """
     ## Training
 
-    The training recipe uses 1 H100 GPU per actor and rollout engine. The actor engine
+    The training recipe uses one 8×H100 node. The actor engine
     runs the training and the rollout engine runs the model for inference/forward passes.
     You may want to tune the batch size for fitting the memory requirements of your GPU
     and increase the samples per prompt parameter for generating more variants per group.
@@ -444,31 +450,31 @@ def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_4B(),
         checkpoint=checkpoint,
         app_name="qwen3-4b-opd-trained-serve",
         served_model_name="qwen3-4b-opd",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Trained student URL: {trained_deployment.url}")
 
     print("--- Evaluating trained student... ---")
-    trained_eval = eval_config.evaluate(trained_deployment, debug=True)
-    n_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    print(f"Trained accuracy: {n_correct}/{len(trained_eval.rows)} "
-          f"({trained_eval.mean:.1%})")
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    n_correct = sum(1 for r in trained_rows if r.get("correct"))
+    print(f"Trained accuracy: {n_correct}/{len(trained_rows)} "
+          f"({trained_mean:.1%})")
 
 @notebook_only
 @code
 def _trained_examples():
-    for base_r, trained_r in zip(base_eval.rows[:3], trained_eval.rows[:3]):
-        label = base_r.metadata["label"]
-        b_status = "CORRECT" if base_r.metadata["correct"] else "WRONG"
-        t_status = "CORRECT" if trained_r.metadata["correct"] else "WRONG"
+    for base_r, trained_r in zip(base_rows[:3], trained_rows[:3]):
+        label = base_r["label"]
+        b_status = "CORRECT" if base_r["correct"] else "WRONG"
+        t_status = "CORRECT" if trained_r["correct"] else "WRONG"
         print(f"label={label}")
-        print(f"  Base:    [{b_status}] pred={base_r.metadata['pred']}")
-        print(f"  Trained: [{t_status}] pred={trained_r.metadata['pred']}")
+        print(f"  Base:    [{b_status}] pred={base_r['pred']}")
+        print(f"  Trained: [{t_status}] pred={trained_r['pred']}")
         print()
 
 
@@ -483,12 +489,12 @@ def _compare_intro():
 
 @code
 def _compare():
-    base_correct = sum(1 for r in base_eval.rows if r.metadata.get("correct"))
-    trained_correct = sum(1 for r in trained_eval.rows if r.metadata.get("correct"))
-    total = len(base_eval.rows)
-    print(f"Base student:    {base_correct}/{total} ({base_eval.mean:.1%})")
-    print(f"Trained student: {trained_correct}/{total} ({trained_eval.mean:.1%})")
-    print(f"Delta:           {trained_eval.mean - base_eval.mean:+.1%}")
+    base_correct = sum(1 for r in base_rows if r.get("correct"))
+    trained_correct = sum(1 for r in trained_rows if r.get("correct"))
+    total = len(base_rows)
+    print(f"Base student:    {base_correct}/{total} ({base_mean:.1%})")
+    print(f"Trained student: {trained_correct}/{total} ({trained_mean:.1%})")
+    print(f"Delta:           {trained_mean - base_mean:+.1%}")
 
 
 @markdown

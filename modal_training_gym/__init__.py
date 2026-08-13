@@ -3,9 +3,19 @@ from __future__ import annotations
 from importlib import import_module
 
 _EXPORTS = {
+    "Checkpoint": ("modal_training_gym.common.checkpoint", "Checkpoint"),
+    "CheckpointType": ("modal_training_gym.common.checkpoint", "CheckpointType"),
+    "convert_checkpoint_to_hf": (
+        "modal_training_gym.common.checkpoint",
+        "convert_checkpoint_to_hf",
+    ),
+    "CustomDeployment": (
+        "modal_training_gym.common.deployment",
+        "CustomDeployment",
+    ),
     "DatasetConfig": ("modal_training_gym.common.dataset", "DatasetConfig"),
+    "Endpoint": ("modal_training_gym.common.endpoint", "Endpoint"),
     "HarborDataset": ("modal_training_gym.common.dataset", "HarborDataset"),
-    "DeploymentConfig": ("modal_training_gym.common.deployment", "DeploymentConfig"),
     "EvalConfig": ("modal_training_gym.common.eval", "EvalConfig"),
     "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
     "EvalResult": ("modal_training_gym.common.eval", "EvalResult"),
@@ -35,7 +45,6 @@ _EXPORTS = {
     ),
     "ModelArchitecture": ("modal_training_gym.common.models", "ModelArchitecture"),
     "ModelConfig": ("modal_training_gym.common.models", "ModelConfig"),
-    "ModelDeployment": ("modal_training_gym.common.deployment", "ModelDeployment"),
     "Kimi_K2_5": ("modal_training_gym.common.models", "Kimi_K2_5"),
     "Kimi_K2_6": ("modal_training_gym.common.models", "Kimi_K2_6"),
     "Kimi_K2_5_LoRA_Recipe": (
@@ -58,6 +67,26 @@ _EXPORTS = {
     "Qwen3_4b_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_4b_Recipe",
+    ),
+    "Qwen3_5_0_8B": ("modal_training_gym.common.models", "Qwen3_5_0_8B"),
+    "Qwen3_5_0_8b_Recipe": (
+        "modal_training_gym.train_recipes.slime_recipe",
+        "Qwen3_5_0_8b_Recipe",
+    ),
+    "Qwen3_5_2B": ("modal_training_gym.common.models", "Qwen3_5_2B"),
+    "Qwen3_5_2b_Recipe": (
+        "modal_training_gym.train_recipes.slime_recipe",
+        "Qwen3_5_2b_Recipe",
+    ),
+    "Qwen3_5_4B": ("modal_training_gym.common.models", "Qwen3_5_4B"),
+    "Qwen3_5_4b_Recipe": (
+        "modal_training_gym.train_recipes.slime_recipe",
+        "Qwen3_5_4b_Recipe",
+    ),
+    "Qwen3_5_9B": ("modal_training_gym.common.models", "Qwen3_5_9B"),
+    "Qwen3_5_9b_Recipe": (
+        "modal_training_gym.train_recipes.slime_recipe",
+        "Qwen3_5_9b_Recipe",
     ),
     "Qwen3_8B": ("modal_training_gym.common.models", "Qwen3_8B"),
     "Qwen3_30B": ("modal_training_gym.common.models", "Qwen3_30B"),
@@ -93,12 +122,16 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "CustomDeployment",
     "Kimi_K2_6_LoRA_Recipe",
     "Kimi_K2_5_LoRA_Recipe",
+    "Checkpoint",
+    "CheckpointType",
+    "convert_checkpoint_to_hf",
     "DatasetConfig",
+    "Endpoint",
     "GLM_4_7",
     "HarborDataset",
-    "DeploymentConfig",
     "EvalConfig",
     "EvalConfigDurable",
     "EvalResult",
@@ -120,7 +153,6 @@ __all__ = [
     "ModalCaptureError",
     "ModelArchitecture",
     "ModelConfig",
-    "ModelDeployment",
     "MilesRecipe",
     "parse_qwen3_response",
     "ParsedResponse",
@@ -128,6 +160,14 @@ __all__ = [
     "Qwen3_1_7B",
     "Qwen3_4B",
     "Qwen3_4b_Recipe",
+    "Qwen3_5_0_8B",
+    "Qwen3_5_0_8b_Recipe",
+    "Qwen3_5_2B",
+    "Qwen3_5_2b_Recipe",
+    "Qwen3_5_4B",
+    "Qwen3_5_4b_Recipe",
+    "Qwen3_5_9B",
+    "Qwen3_5_9b_Recipe",
     "Qwen3_8B",
     "Qwen3_30B",
     "Qwen3_6_35B",

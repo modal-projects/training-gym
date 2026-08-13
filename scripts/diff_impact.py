@@ -35,18 +35,39 @@ MILES_RECIPE_PACKAGE_ROOT = (
     REPO_ROOT / "modal_training_gym" / "train_recipes" / "miles_recipe"
 )
 
-# Touching the validation harness or shared training plumbing invalidates every
-# model, so a diff that hits any of these forces a full re-validation.
-MODEL_VALIDATION_HARNESS_PATHS = frozenset(
+VALIDATION_BACKEND_ROOT = REPO_ROOT / "scripts" / "validation_backends"
+
+# Touching the shared validation harness or shared training plumbing
+# invalidates every model, so a diff that hits any of these forces a full
+# re-validation.
+SHARED_VALIDATION_HARNESS_PATHS = frozenset(
     {
         REPO_ROOT / "scripts" / "validate_model_configs.py",
         REPO_ROOT / "scripts" / "diff_impact.py",
+        VALIDATION_BACKEND_ROOT / "__init__.py",
         REPO_ROOT / "modal_training_gym" / "common" / "models" / "validation.py",
-        REPO_ROOT / "modal_training_gym" / "frameworks" / "slime" / "launcher.py",
         REPO_ROOT / "modal_training_gym" / "common" / "train.py",
         REPO_ROOT / "modal_training_gym" / "common" / "train_result.py",
     }
 )
+
+# Per-framework harness paths invalidate only the models that train on that
+# framework. Without this split, adding a miles model would make every
+# miles-only change re-validate the whole slime set.
+FRAMEWORK_VALIDATION_HARNESS_PATHS: dict[str, frozenset[Path]] = {
+    "slime": frozenset(
+        {
+            REPO_ROOT / "modal_training_gym" / "frameworks" / "slime" / "launcher.py",
+            VALIDATION_BACKEND_ROOT / "slime.py",
+        }
+    ),
+    "miles": frozenset(
+        {
+            REPO_ROOT / "modal_training_gym" / "frameworks" / "miles" / "launcher.py",
+            VALIDATION_BACKEND_ROOT / "miles.py",
+        }
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -138,32 +159,55 @@ def _package_public_definitions(package_root: str) -> set[str]:
     return names
 
 
+def _base_recipe_for(framework, model_config):
+    """The framework's base recipe for a model, importing only that framework.
+
+    Same rule as ``validation_backends.build_recipe_and_dataset``: each
+    framework is imported inside its own branch, so indexing the slime models
+    that gate PRs never imports the miles recipes — a broken miles recipe must
+    not be able to fail every pull request.
+    """
+    from modal_training_gym.common.models.validation import Framework
+
+    if framework is Framework.SLIME:
+        from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+
+        return SlimeRecipe.get_base_recipe(model_config)
+    if framework is Framework.MILES:
+        from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
+
+        return MilesRecipe.get_base_recipe(model_config)
+    raise ValueError(f"no base recipe lookup for framework {framework!r}")
+
+
 @lru_cache(maxsize=1)
-def _model_index() -> tuple[dict[str, frozenset[str]], frozenset[str]]:
-    """Map each defining class to the model names it gates, plus all models.
+def _model_index() -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
+    """Map defining classes to the model names they gate, and frameworks to theirs.
 
     A model is validated by ``validate_model_configs.py check --model <name>``,
-    where ``<name>`` is the HF repo's short name (e.g. ``Qwen3-0.6B``). Both the
-    model's ``ModelConfig`` subclass and its slime ``get_base_recipe`` recipe
-    class gate that model, so a change to either re-validates it.
+    where ``<name>`` is the registry's short name (e.g. ``Qwen3-0.6B``). Both
+    the model's ``ModelConfig`` subclass and the recipe class its framework
+    returns from ``get_base_recipe`` gate that model, so a change to either
+    re-validates it.
 
-    Only models with a base slime recipe are tracked — validation runs base
-    training on slime, so models without one (e.g. Kimi on miles) are skipped.
+    Only the PR-matrix set is indexed. A model registered with
+    ``run_on_pr=False`` (e.g. Kimi on 16 x 8 H200) must never reach a PR
+    matrix, so no diff can select it.
     """
-    from modal_training_gym.common.models.validation import VALIDATABLE_MODELS
-    from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+    from modal_training_gym.common.models.validation import _ValidationConfig
 
     class_to_models: dict[str, set[str]] = defaultdict(set)
-    all_models: set[str] = set()
-    for model_name, model_config in VALIDATABLE_MODELS:
-        recipe = SlimeRecipe.get_base_recipe(model_config())
-        all_models.add(model_name)
-        class_to_models[model_config.__name__].add(model_name)
-        class_to_models[type(recipe).__name__].add(model_name)
+    framework_to_models: dict[str, set[str]] = defaultdict(set)
+    for config in _ValidationConfig.select(pr_only=True):
+        class_to_models[config.model_config.__name__].add(config.name)
+        framework_to_models[config.framework.value].add(config.name)
+        recipe = _base_recipe_for(config.framework, config.model_config())
+        if recipe is not None:
+            class_to_models[type(recipe).__name__].add(config.name)
 
     return (
         {name: frozenset(models) for name, models in class_to_models.items()},
-        frozenset(all_models),
+        {name: frozenset(models) for name, models in framework_to_models.items()},
     )
 
 
@@ -174,13 +218,18 @@ def affected_models(diff_text: str) -> tuple[str, ...]:
     paths through ``analyze_diff`` stay import-free.
     """
     changed_paths = _paths_from_diff(diff_text)
-    class_to_models, all_models = _model_index()
+    class_to_models, framework_to_models = _model_index()
+    all_models = {model for models in framework_to_models.values() for model in models}
 
-    if any(path in MODEL_VALIDATION_HARNESS_PATHS for path in changed_paths):
+    if any(path in SHARED_VALIDATION_HARNESS_PATHS for path in changed_paths):
         return tuple(sorted(all_models))
 
-    report = analyze_diff(diff_text)
     models: set[str] = set()
+    for framework, harness_paths in FRAMEWORK_VALIDATION_HARNESS_PATHS.items():
+        if any(path in harness_paths for path in changed_paths):
+            models.update(framework_to_models.get(framework, frozenset()))
+
+    report = analyze_diff(diff_text)
     for class_name in report.affected_classes:
         models.update(class_to_models.get(class_name, frozenset()))
     return tuple(sorted(models))

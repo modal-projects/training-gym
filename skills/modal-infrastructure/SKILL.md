@@ -1,20 +1,22 @@
 ---
-name: modal-training
+name: modal-infrastructure
 description: >-
-  Runbook for launching, monitoring, and debugging training jobs on Modal:
-  entrypoint discovery, detached app workflow, log filtering, container
-  inspection, volume state, image build behavior, and debugging strategy.
-  Use when running modal run, checking app status, reading logs, or
-  troubleshooting a Modal training job.
+  Operates raw Modal infrastructure: runs, apps, containers, volumes,
+  scheduling, image builds, caches, and endpoint authentication.
 when_to_use: >-
-  User runs modal run/deploy, asks about Modal app state, checks logs with
-  modal app logs, debugs a stuck or failed training job, inspects containers
-  or volumes, or asks how to launch/monitor a training run on Modal.
+  Use for explicit raw Modal operations or when the Training Gym CLI cannot
+  explain an infrastructure failure. Use agent-driven-training for normal
+  Training Gym lifecycle work.
 ---
 
-# Running Training Jobs On Modal
+# Modal infrastructure operations
 
 This document captures durable repo-specific workflow for agents launching and debugging training jobs on Modal in this repository.
+
+For routine Training Gym lifecycle work, use
+[agent-driven-training](../agent-driven-training/SKILL.md). Use this runbook
+when the request explicitly concerns Modal infrastructure or the Training Gym
+CLI cannot explain the underlying failure.
 
 ## Scope
 
@@ -29,7 +31,7 @@ This document captures durable repo-specific workflow for agents launching and d
 - Set `MODAL_ENVIRONMENT` explicitly, or pass `--env <env>`, when the target environment matters.
 - If your local setup relies on shell init for auth or helper tooling, ensure that setup is loaded before launching jobs.
 - Store credentials in local shell config or Modal secrets, not in tracked files.
-- **Proxy-auth tokens for served endpoints.** SGLang endpoints from `DeploymentConfig.serve()` are public by default (`unauthenticated=True`). Pass `unauthenticated=False` to require Modal proxy auth — then *any* call to that endpoint — `EvalConfig.evaluate()`, `deployment.generate()`, an OPD teacher `/generate`, health/readiness polls — must send a proxy-auth token pair or it returns **HTTP 401**. vLLM cannot honor `unauthenticated` (`modal.experimental.http_server` has no proxy-auth knob): `True` (default) is a silent no-op for `VllmRecipe`; explicit `False` emits `warnings.warn` because the endpoint remains public. Create a token in the Modal dashboard (Settings → Proxy Auth Tokens) and export it in the launching shell as `MODAL_KEY` (`wk-…`) and `MODAL_SECRET` (`ws-…`); the package turns these into `Modal-Key`/`Modal-Secret` headers. For calls issued from **remote workers** (e.g. a custom rm/reward function hitting a teacher endpoint), the driver's shell env does not reach the worker — forward the pair into the worker by attaching a `modal.Secret` (e.g. via the recipe's `train_function_kwargs={"secrets": [...]}`).
+- **Proxy-auth tokens for served endpoints.** SGLang and vLLM endpoints from `CustomDeployment.launch()` are public by default (`unauthenticated=True`). Pass `unauthenticated=False` to require Modal proxy auth — then *any* call to that endpoint — `deployment.generate()`, an OPD teacher `/generate`, health/readiness polls — must send a proxy-auth token pair or it returns **HTTP 401**. Create a token in the Modal dashboard (Settings → Proxy Auth Tokens) and export it in the launching shell as `MODAL_KEY` (`wk-…`) and `MODAL_SECRET` (`ws-…`); the package turns these into `Modal-Key`/`Modal-Secret` headers. For calls issued from **remote workers** (e.g. a custom rm/reward function hitting a teacher endpoint), the driver's shell env does not reach the worker — forward the pair into the worker by attaching a `modal.Secret` (e.g. via the recipe's `train_function_kwargs={"secrets": [...]}`).
 
 ## Finding The Right Entrypoint
 
@@ -75,6 +77,8 @@ modal app list --json
 modal app logs <app-id>
 modal app stop <app-id>
 ```
+
+Do not stop an app during a status or diagnosis-only request.
 
 ## Reading App State
 

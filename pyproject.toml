@@ -9,8 +9,6 @@ dependencies = [
     "cloudpickle",
     "datasets",
     "httpx",
-    "msgspec",
-    "openai",
     "pydantic",
     "fastapi",
     "randomname",

@@ -2,7 +2,9 @@
 
 This document defines a durable validation pipeline for agents that need to check whether the examples in this repository still run as documented.
 
-Use this runbook together with [agent-modal-training.md](agent-modal-training.md), which covers Modal launch and debugging workflow.
+Use this runbook together with
+[modal-infrastructure](modal-infrastructure/SKILL.md), which covers Modal
+launch and debugging workflow.
 
 ## Goal
 
@@ -16,7 +18,8 @@ Use this runbook together with [agent-modal-training.md](agent-modal-training.md
 - Keep the default pipeline cheap enough to run automatically after example-facing changes.
 - Treat dataset prep, model download, checkpoint conversion, and training as separate checkpoints.
 - Prefer the smallest runnable path that still exercises the real entrypoint.
-- Use detached Modal runs for long-lived training and follow the detached-app workflow in [agent-modal-training.md](agent-modal-training.md).
+- Use detached Modal runs for long-lived training and follow the detached-app
+  workflow in [modal-infrastructure](modal-infrastructure/SKILL.md).
 
 ## Discovering What To Validate
 

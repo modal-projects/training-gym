@@ -59,13 +59,6 @@ Repo: https://github.com/modal-projects/training-gym
 - [ModalRayCluster](https://gym.modal.dev/reference/core/modalraycluster/): `ModalRayCluster`
 - [TrainResult](https://gym.modal.dev/reference/core/trainresult/): `TrainResult`
 
-### Evaluation
-
-- [EvalConfig](https://gym.modal.dev/reference/evaluation/evalconfig/): `EvalConfig`
-- [EvalResult](https://gym.modal.dev/reference/evaluation/evalresult/): `EvalResult`
-- [EvalRowResult](https://gym.modal.dev/reference/evaluation/evalrowresult/): `EvalRowResult`
-- [HarborEval](https://gym.modal.dev/reference/evaluation/harboreval/): `HarborEval`
-
 ### Models
 
 - [ToolCall](https://gym.modal.dev/reference/models/toolcall/): `ToolCall`
@@ -91,8 +84,8 @@ Repo: https://github.com/modal-projects/training-gym
 
 ### Deployment
 
-- [DeploymentConfig](https://gym.modal.dev/reference/deployment/deploymentconfig/): `DeploymentConfig`
-- [ModelDeployment](https://gym.modal.dev/reference/deployment/modeldeployment/): `ModelDeployment`
+- [Endpoint](https://gym.modal.dev/reference/deployment/endpoint/): `Endpoint`
+- [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment/): `CustomDeployment`
 - [SglangRecipe](https://gym.modal.dev/reference/deployment/sglangrecipe/): `SglangRecipe`
 - [VllmRecipe](https://gym.modal.dev/reference/deployment/vllmrecipe/): `VllmRecipe`
 
