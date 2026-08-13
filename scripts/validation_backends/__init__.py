@@ -37,4 +37,8 @@ def build_recipe_and_dataset(
         from .miles import build_miles_validation
 
         return build_miles_validation(model_config, step_count)
+    if framework is Framework.STITCH:
+        from .stitch import build_stitch_validation
+
+        return build_stitch_validation(model_config, step_count)
     raise TrainingGymConfigError(f"no validation backend for framework {framework!r}")

@@ -51,6 +51,9 @@ REMOTE_ONLY = frozenset(
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_validation",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_zero_std_metrics",
         "modal_training_gym.frameworks.slime.opd_reward",
+        # ``stitch`` is only installed in the stitch trainer / serving images.
+        "modal_training_gym.frameworks.stitch.bulletin_hooks",
+        "modal_training_gym.frameworks.stitch.sidecar",
     }
 )
 

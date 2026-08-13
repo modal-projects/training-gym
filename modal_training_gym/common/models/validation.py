@@ -15,6 +15,7 @@ from .kimi_k2_5 import Kimi_K2_5
 from .kimi_k2_6 import Kimi_K2_6
 from .qwen3_0_6b import Qwen3_0_6B
 from .qwen3_1_7b import Qwen3_1_7B
+from .qwen3_30b import Qwen3_30B
 from .qwen3_4b import Qwen3_4B
 from .qwen3_5_0_8b import Qwen3_5_0_8B
 from .qwen3_5_2b import Qwen3_5_2B
@@ -91,4 +92,9 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
     # name. Flipping run_on_pr is the only change needed to gate PRs on one.
     _ValidationConfig("Kimi-K2.5", Kimi_K2_5, Framework.MILES, run_on_pr=False),
     _ValidationConfig("Kimi-K2.6", Kimi_K2_6, Framework.MILES, run_on_pr=False),
+    # Disaggregated: 8 B200 trainer plus a B200 rollout pool, and its served
+    # baseline is a one-off NVFP4 conversion — dispatch-only.
+    _ValidationConfig(
+        "Qwen3-30B-A3B-stitch", Qwen3_30B, Framework.STITCH, run_on_pr=False
+    ),
 }
