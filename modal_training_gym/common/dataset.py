@@ -211,7 +211,7 @@ class HuggingFaceDataset(DatasetConfig):
             ds = ds.select(range(min(self.n_rows, len(ds))))
 
         if self._emits_chat:
-            ds = ds.map(self._to_chat, remove_columns=ds.column_names)
+            ds = ds.map(self._to_chat)
 
         return ds
 
