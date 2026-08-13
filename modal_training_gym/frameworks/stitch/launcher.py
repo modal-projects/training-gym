@@ -386,6 +386,30 @@ def build_stitch_app(
         extra_env=serve_recipe.env,
     )
     sglang_server_args = serve_recipe.engine_args(model_name=served_model)
+    # Everything the sidecar needs, resolved here so the recipe is the only source
+    # of truth; the replica adds only what it can't know until it has booted (the
+    # engine's own checkpoint dir).
+    sidecar_flags = [
+        "--bulletin-root",
+        run_bulletin_root,
+        "--local-checkpoint-dir",
+        LOCAL_CHECKPOINT_PATH,
+        "--delta-update-mode",
+        serve_recipe.delta_update_mode,
+        "--disk-load-format",
+        serve_recipe.disk_load_format
+        or str(sglang_server_args.get("--load-format", "auto")),
+        "--volume-name",
+        delta_volume_name,
+        "--run-id",
+        run_id,
+        "--commit-mode",
+        serve_recipe.commit_mode,
+    ]
+    if serve_recipe.flush_cache_on_commit:
+        sidecar_flags.append("--flush-cache-on-commit")
+    if serve_recipe.debug_requests:
+        sidecar_flags.append("--debug-requests")
 
     hf_cache_volume = modal.Volume.from_name(
         "huggingface-cache", create_if_missing=True
@@ -464,19 +488,12 @@ def build_stitch_app(
                 self,
                 model_name=served_model,
                 sglang_args=sglang_server_args,
-                disk_load_format=serve_recipe.disk_load_format,
+                sidecar_flags=sidecar_flags,
+                delta_update_mode=serve_recipe.delta_update_mode,
                 tp=serve_recipe.gpus_per_replica,
                 concurrency=rollout_concurrency,
                 sidecar_port=SIDECAR_PORT,
                 sglang_port=SGLANG_PORT,
-                bulletin_root=run_bulletin_root,
-                local_checkpoint_dir=LOCAL_CHECKPOINT_PATH,
-                delta_update_mode=serve_recipe.delta_update_mode,
-                volume_name=delta_volume_name,
-                run_id=run_id,
-                commit_mode=serve_recipe.commit_mode,
-                flush_cache_on_commit=serve_recipe.flush_cache_on_commit,
-                debug_requests=serve_recipe.debug_requests,
                 log_dir=ROLLOUT_LOG_PATH,
                 startup_timeout=SERVER_STARTUP_TIMEOUT,
             )

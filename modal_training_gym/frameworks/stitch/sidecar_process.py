@@ -20,22 +20,17 @@ SIDECAR_MODULE = "modal_training_gym.frameworks.stitch.sidecar"
 
 
 def start_sidecar(
+    flags: list[str],
     *,
     sidecar_port: int,
     sglang_port: int,
-    bulletin_root: str,
-    base_checkpoint_dir: str,
-    local_checkpoint_dir: str | None,
-    delta_update_mode: str,
-    disk_load_format: str,
-    volume_name: str,
-    run_id: str,
-    commit_mode: str,
-    flush_cache_on_commit: bool = False,
-    debug_requests: bool = False,
     log_path: str | None = None,
 ) -> subprocess.Popen:
-    """Launch the versioned rollout proxy (the stitch sidecar) beside SGLang."""
+    """Launch the versioned rollout proxy (the stitch sidecar) beside SGLang.
+
+    ``flags`` are the recipe-derived sidecar CLI flags; only the ports are wired
+    here, since they belong to this container's process layout.
+    """
     cmd = [
         "python3",
         "-m",
@@ -46,27 +41,8 @@ def start_sidecar(
         str(sidecar_port),
         "--upstream",
         f"http://127.0.0.1:{sglang_port}",
-        "--bulletin-root",
-        bulletin_root,
-        "--base-checkpoint-dir",
-        base_checkpoint_dir,
-        "--delta-update-mode",
-        delta_update_mode,
-        "--disk-load-format",
-        disk_load_format,
-        "--volume-name",
-        volume_name,
-        "--run-id",
-        run_id,
-        "--commit-mode",
-        commit_mode,
+        *flags,
     ]
-    if local_checkpoint_dir is not None:
-        cmd.extend(["--local-checkpoint-dir", local_checkpoint_dir])
-    if flush_cache_on_commit:
-        cmd.append("--flush-cache-on-commit")
-    if debug_requests:
-        cmd.append("--debug-requests")
     print("Starting sidecar:", " ".join(cmd))
     if log_path is None:
         return subprocess.Popen(cmd, start_new_session=True)

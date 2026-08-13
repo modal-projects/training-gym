@@ -48,19 +48,12 @@ def serve_startup(
     *,
     model_name: str,
     sglang_args: dict,
-    disk_load_format: str,
+    sidecar_flags: list[str],
+    delta_update_mode: str,
     tp: int,
     concurrency: int,
     sidecar_port: int,
     sglang_port: int,
-    bulletin_root: str,
-    local_checkpoint_dir: str | None,
-    delta_update_mode: str,
-    volume_name: str,
-    run_id: str,
-    commit_mode: str,
-    flush_cache_on_commit: bool,
-    debug_requests: bool,
     log_dir: str | None,
     startup_timeout: int,
 ) -> None:
@@ -110,19 +103,13 @@ def serve_startup(
         max_attempts_per_request=3,
     )
     replica.sidecar = sidecar_process.start_sidecar(
+        [
+            *sidecar_flags,
+            "--base-checkpoint-dir",
+            base_checkpoint_dir(model_name),
+        ],
         sidecar_port=sidecar_port,
         sglang_port=sglang_port,
-        bulletin_root=bulletin_root,
-        base_checkpoint_dir=base_checkpoint_dir(model_name),
-        local_checkpoint_dir=local_checkpoint_dir,
-        delta_update_mode=delta_update_mode,
-        disk_load_format=disk_load_format
-        or str(sglang_args.get("--load-format", "auto")),
-        volume_name=volume_name,
-        run_id=run_id,
-        commit_mode=commit_mode,
-        flush_cache_on_commit=flush_cache_on_commit,
-        debug_requests=debug_requests,
         log_path=(
             f"{log_dir}/sidecar-{os.environ.get('MODAL_TASK_ID', 'local')}.log"
             if log_dir
