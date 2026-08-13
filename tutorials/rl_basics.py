@@ -128,6 +128,10 @@ class HaikuDataset(HuggingFaceDataset):
     requires_refresh_before_training = True
     prompt_template = "Write a haiku about {input}."
 
+    def __init__(self, *, hf_split="train", n_rows=None):
+        self.hf_split = hf_split
+        super().__init__(n_rows=n_rows)
+
 train_dataset = HaikuDataset(hf_split="train[:10]")
 
 eval_dataset = HaikuDataset(hf_split="train[10:15]")
@@ -146,8 +150,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
     deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
-        topic = str(example[eval_dataset.input_column])
-        prompt = eval_dataset.prompt_template.format(input=topic)
+        prompt = example[eval_dataset.input_key][-1]["content"]
         msg = deployment.chat(
             [{"role": "user", "content": prompt}],
             chat_template_kwargs={"enable_thinking": False},

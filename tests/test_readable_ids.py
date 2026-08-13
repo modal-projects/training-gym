@@ -48,10 +48,12 @@ def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
         recipe_type: RecipeType = field(default=RecipeType.SLIME)
 
     calls = 0
+    hash_parts: list[tuple[str, ...]] = []
 
     def fake_create_hash(*parts: str) -> str:
         nonlocal calls
         calls += 1
+        hash_parts.append(parts)
         return f"brisk-river-{calls:08x}"
 
     monkeypatch.setattr(
@@ -59,8 +61,11 @@ def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
         fake_create_hash,
     )
 
+    dataset = DummyDataset()
+    eval_dataset = DummyDataset()
     config = TrainConfig(
-        dataset=DummyDataset(),
+        dataset=dataset,
+        eval_dataset=eval_dataset,
         model=ModelConfig(model_name="Qwen/Qwen3-4B"),
         recipe=DummyRecipe(),
     )
@@ -69,6 +74,7 @@ def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
     second = config._generate_training_run_id()
     assert first != second
     assert calls == 2
+    assert hash_parts[0][3:5] == (dataset.id, eval_dataset.id)
 
 
 def test_train_config_can_skip_model_recipe_merge() -> None:

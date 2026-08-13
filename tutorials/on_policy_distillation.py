@@ -122,6 +122,10 @@ class MathDataset(HuggingFaceDataset):
     needs_chat_template = True
     requires_refresh_before_training = True
 
+    def __init__(self, *, hf_split="train", n_rows=None):
+        self.hf_split = hf_split
+        super().__init__(n_rows=n_rows)
+
 train_dataset = MathDataset(hf_split="train[:100]")
 
 eval_dataset = MathDataset(hf_split="train[100:120]")
