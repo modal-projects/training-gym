@@ -97,14 +97,14 @@ SLIME_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02
 HARBOR_PKG_VERSION = "0.8.0"
 
 _SLIME_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
-_PATCH_VALIDATION_B64 = encode_patch("patch_validation", _SLIME_PATCHES)
+_PATCH_VALIDATION_B64 = encode_patch("patch_validation", MEGATRON_PATCHES)
 _PATCH_MEGATRON_BRIDGE_B64 = encode_patch("patch_megatron_bridge", _SLIME_PATCHES)
-_PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", _SLIME_PATCHES)
+_PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", MEGATRON_PATCHES)
 _PATCH_GLOBAL_PLAN_B64 = encode_patch("patch_global_plan", _SLIME_PATCHES)
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", MEGATRON_PATCHES)
 _PATCH_ADVANTAGES_B64 = encode_patch("patch_advantages", _SLIME_PATCHES)
 _PATCH_BRIDGE_NONE_TASK_B64 = encode_patch("patch_bridge_none_task", _SLIME_PATCHES)
-_PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", _SLIME_PATCHES)
+_PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", MEGATRON_PATCHES)
 _PATCH_BRIDGE_PER_TOKEN_LOSS_B64 = encode_patch(
     "patch_bridge_provider_per_token_loss", _SLIME_PATCHES
 )

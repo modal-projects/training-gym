@@ -41,14 +41,14 @@ REMOTE_ONLY = frozenset(
     {
         "modal_training_gym.common.megatron_patches.patch_checkpoint_save",
         "modal_training_gym.common.megatron_patches.patch_dist_ckpt_quantized",
+        "modal_training_gym.common.megatron_patches.patch_gdn_packed_seq",
+        "modal_training_gym.common.megatron_patches.patch_torch_load",
+        "modal_training_gym.common.megatron_patches.patch_validation",
         "modal_training_gym.frameworks.miles.modal_helpers.patches.patch_sglang_abort",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_advantages",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_bridge_provider_per_token_loss",
-        "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_gdn_packed_seq",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_megatron_bridge",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_stop_token_diagnostic",
-        "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_torch_load",
-        "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_validation",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_zero_std_metrics",
         "modal_training_gym.frameworks.slime.opd_reward",
     }
