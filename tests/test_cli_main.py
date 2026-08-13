@@ -22,7 +22,7 @@ def test_root_help_lists_existing_commands_by_panel(runner):
     assert "Configuration:" in result.stdout
     assert "Utilities:" in result.stdout
     assert "Training runs:" in result.stdout
-    assert "Available Agent skills:" in result.stdout
+    assert "Available agent skills:" in result.stdout
     for command in (
         "run",
         "skills",
