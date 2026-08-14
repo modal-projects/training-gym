@@ -33,7 +33,8 @@ from modal_training_gym.common.reporting import (
     _positive_int as _positive_int,
 )
 from modal_training_gym.common.sample_extraction import (
-    _image_sample_limit,
+    RolloutImageStore,
+    _image_limit,
     _metrics_to_dict,
     _resolve_hook,
     _response_parser,
@@ -126,11 +127,12 @@ def report_rollout_samples(
     if samples is None:
         return
     parser = _response_parser()
-    # Trace/image only the first N samples (traces also gated by an enable flag) so
-    # the payload stays small — the caps keep volume growth well under 1%.
+    # Trace/trajectory only the first N samples (traces also gated by an enable flag)
+    # so the payload stays small — the caps keep volume growth well under 1%. Images
+    # are capped by distinct content instead.
     trace_limit = _trace_sample_limit() if _trace_enabled() else 0
-    image_limit = _image_sample_limit()
     trajectory_limit = _trajectory_sample_limit()
+    image_store = RolloutImageStore(_image_limit())
     n_per = _positive_int(_arg_value(args, "n_samples_per_prompt")) or 1
     try:
         sample_dicts = [
@@ -138,7 +140,7 @@ def report_rollout_samples(
                 s,
                 parser,
                 include_trace=(i < trace_limit),
-                include_image=(i < image_limit),
+                image_store=image_store,
                 include_trajectory=(i < trajectory_limit),
                 n_samples_per_prompt=n_per,
             )

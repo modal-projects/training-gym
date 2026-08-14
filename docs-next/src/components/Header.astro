@@ -1,14 +1,10 @@
 ---
 import config from 'virtual:starlight/user-config';
-import Search from '@astrojs/starlight/components/Search.astro';
+import { DOCS_NAV } from '../lib/docs-sections';
+import Search from './Search.astro';
 
 const currentPath = Astro.url.pathname;
-const navItems = [
-  { href: '/', label: 'Overview' },
-  { href: '/tutorials/', label: 'Tutorials' },
-  { href: '/reference/', label: 'API Reference' },
-  { href: '/support/', label: 'Support' },
-];
+const navItems = DOCS_NAV.map(({ section, prefix }) => ({ href: prefix, label: section }));
 
 const shouldRenderSearch =
   config.pagefind || config.components.Search !== '@astrojs/starlight/components/Search.astro';

@@ -111,6 +111,7 @@ export default defineConfig({
       customCss: ['./src/styles/custom.css'],
       components: {
         Header: './src/components/Header.astro',
+        Search: './src/components/Search.astro',
         Sidebar: './src/components/Sidebar.astro',
         PageSidebar: './src/components/PageSidebar.astro',
         PageTitle: './src/components/PageTitle.astro',
@@ -184,8 +185,7 @@ export default defineConfig({
               label: 'Deployment',
               items: [
                 { label: 'Endpoint', link: '/reference/deployment/endpoint/' },
-                { label: 'DeploymentConfig', link: '/reference/deployment/deploymentconfig/' },
-                { label: 'ModelDeployment', link: '/reference/deployment/modeldeployment/' },
+                { label: 'CustomDeployment', link: '/reference/deployment/customdeployment/' },
                 { label: 'SglangRecipe', link: '/reference/deployment/sglangrecipe/' },
                 { label: 'VllmRecipe', link: '/reference/deployment/vllmrecipe/' },
               ],

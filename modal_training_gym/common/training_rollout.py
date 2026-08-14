@@ -52,6 +52,7 @@ _NON_TAG_METADATA_KEYS = frozenset(
         "_metadata_type",
         "audio",
         "image",
+        "image_ref",
         "response_length",
         "prompt_length",
         "rollout_id",

@@ -1,0 +1,704 @@
+---
+const placeholder = Astro.locals.t('search.label');
+const bundlePath = import.meta.env.BASE_URL.replace(/\/$/, '') + '/pagefind/';
+---
+
+{
+	!import.meta.env.DEV && (
+		<link rel="modulepreload" href={`${bundlePath}pagefind.js`} />
+	)
+}
+
+<site-search class={Astro.props.class}>
+	<button
+		data-open-modal
+		disabled
+		aria-label={Astro.locals.t('search.label')}
+		aria-keyshortcuts="Control+K"
+	>
+		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<circle cx="11" cy="11" r="8"></circle>
+			<path d="m21 21-4.3-4.3"></path>
+		</svg>
+		<span aria-hidden="true">{Astro.locals.t('search.label')}</span>
+		<kbd style="display: none;">
+			<kbd>{Astro.locals.t('search.ctrlKey')}</kbd><kbd>K</kbd>
+		</kbd>
+	</button>
+
+	<dialog aria-label={Astro.locals.t('search.label')}>
+		{
+			import.meta.env.DEV ? (
+				<div class="tg-search-dev" dir="ltr">
+					<p>{Astro.locals.t('search.devWarning')}</p>
+				</div>
+			) : (
+				<form class="tg-search" role="search" action="javascript:void(0);">
+					<div class="tg-search-field">
+						<span class="tg-search-magnifier" aria-hidden="true">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+								<path
+									d="M14.386 14.386l4.088 4.088-4.088-4.088c-2.942 2.942-7.711 2.942-10.653 0-2.942-2.942-2.942-7.711 0-10.653 2.942-2.942 7.711-2.942 10.653 0 2.942 2.942 2.942 7.711 0 10.653z"
+									stroke="currentColor"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								></path>
+							</svg>
+						</span>
+						<input
+							class="tg-search-input"
+							type="search"
+							role="combobox"
+							aria-label={placeholder}
+							aria-autocomplete="list"
+							aria-expanded="false"
+							aria-controls="tg-search-results"
+							placeholder={placeholder}
+							enterkeyhint="search"
+							autocapitalize="none"
+							autocomplete="off"
+						/>
+						<button type="button" class="tg-search-close" data-close-modal aria-label="Close">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+								<path
+									d="M10 10l5.09-5.09L10 10l5.09 5.09L10 10zm0 0L4.91 4.91 10 10l-5.09 5.09L10 10z"
+									stroke="currentColor"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								></path>
+							</svg>
+						</button>
+					</div>
+					<div class="tg-search-results" id="tg-search-results" data-results role="listbox"></div>
+					<footer class="tg-search-footer">
+						<ul class="tg-search-commands">
+							<li><kbd>↵</kbd><span>to select</span></li>
+							<li><kbd>↓</kbd><kbd>↑</kbd><span>to navigate</span></li>
+							<li><kbd>esc</kbd><span>to close</span></li>
+						</ul>
+					</footer>
+					<template data-hit-icon>
+						<svg class="tg-search-hit-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+							<path
+								d="M17 6v12c0 .52-.2 1-1 1H4c-.7 0-1-.33-1-1V2c0-.55.42-1 1-1h8l5 5zM14 8h-3.13c-.51 0-.87-.34-.87-.87V4"
+								stroke="currentColor"
+								stroke-linejoin="round"
+							></path>
+						</svg>
+					</template>
+					<template data-heading-icon>
+						<svg class="tg-search-hit-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+							<path
+								d="M8.3 2.5L6.7 17.5M13.3 2.5L11.7 17.5M3.3 7.5h13.4M3.3 12.5h13.4"
+								stroke="currentColor"
+								stroke-width="1.4"
+								stroke-linecap="round"
+							></path>
+						</svg>
+					</template>
+				</form>
+			)
+		}
+	</dialog>
+</site-search>
+
+<script is:inline>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script>
+
+<script>
+	import { groupHits, toSearchHit, type SearchGroup, type SearchHit } from '../lib/search';
+
+	const bundlePath = import.meta.env.BASE_URL.replace(/\/$/, '') + '/pagefind/';
+
+	type PagefindClient = {
+		options(opts: { excerptLength: number; metaCacheTag: string }): Promise<void>;
+		init(): Promise<void>;
+		search(query: string): Promise<{ results: Array<{ data: () => Promise<unknown> }> }>;
+	};
+
+	let pagefindPromise: Promise<PagefindClient> | undefined;
+
+	function loadPagefind(): Promise<PagefindClient> {
+		pagefindPromise ??= (async () => {
+			const pagefind = (await import(/* @vite-ignore */ `${bundlePath}pagefind.js`)) as PagefindClient;
+			await pagefind.options({ excerptLength: 0, metaCacheTag: '' });
+			await pagefind.init();
+			return pagefind;
+		})();
+		return pagefindPromise;
+	}
+
+	function escapeRegExp(value: string): string {
+		return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	}
+
+	function appendMarkedTitle(el: HTMLElement, title: string, query: string): void {
+		const needle = query.trim();
+		if (!needle) {
+			el.textContent = title;
+			return;
+		}
+		const re = new RegExp(escapeRegExp(needle), 'gi');
+		let last = 0;
+		let match: RegExpExecArray | null;
+		while ((match = re.exec(title)) !== null) {
+			if (match.index > last) el.append(title.slice(last, match.index));
+			const mark = document.createElement('mark');
+			mark.textContent = match[0];
+			el.append(mark);
+			last = match.index + match[0].length;
+		}
+		if (last === 0) {
+			el.textContent = title;
+			return;
+		}
+		if (last < title.length) el.append(title.slice(last));
+	}
+
+	class SiteSearch extends HTMLElement {
+		constructor() {
+			super();
+			const openBtn = this.querySelector<HTMLButtonElement>('button[data-open-modal]')!;
+			const dialog = this.querySelector('dialog')!;
+			const input = this.querySelector<HTMLInputElement>('.tg-search-input');
+			const resultsEl = this.querySelector<HTMLElement>('[data-results]');
+			const iconTpl = this.querySelector<HTMLTemplateElement>('[data-hit-icon]');
+			const headingTpl = this.querySelector<HTMLTemplateElement>('[data-heading-icon]');
+			let searchGen = 0;
+			let selectedIndex = 0;
+			let hitIndex = 0;
+
+			const hitNodes = () =>
+				resultsEl ? [...resultsEl.querySelectorAll<HTMLAnchorElement>('.tg-search-hit')] : [];
+
+			const applySelection = (scroll = false) => {
+				const hits = hitNodes();
+				input?.setAttribute('aria-expanded', String(hits.length > 0));
+				if (hits.length === 0) {
+					input?.removeAttribute('aria-activedescendant');
+					return;
+				}
+				selectedIndex = ((selectedIndex % hits.length) + hits.length) % hits.length;
+				hits.forEach((hit, i) => {
+					const on = i === selectedIndex;
+					hit.classList.toggle('is-selected', on);
+					hit.setAttribute('aria-selected', String(on));
+					if (on) {
+						input?.setAttribute('aria-activedescendant', hit.id);
+						if (scroll) hit.scrollIntoView({ block: 'nearest' });
+					}
+				});
+			};
+
+			const onClick = (event: MouseEvent) => {
+				const isLink = 'href' in (event.target || {});
+				if (
+					isLink ||
+					event.target === dialog ||
+					(document.body.contains(event.target as Node) &&
+						!dialog.contains(event.target as Node))
+				) {
+					closeModal();
+				}
+			};
+
+			const openModal = (event?: MouseEvent) => {
+				dialog.showModal();
+				document.body.toggleAttribute('data-search-modal-open', true);
+				input?.focus();
+				if (!import.meta.env.DEV) void loadPagefind();
+				event?.stopPropagation();
+				window.addEventListener('click', onClick);
+			};
+
+			const closeModal = () => dialog.close();
+
+			openBtn.addEventListener('click', openModal);
+			openBtn.disabled = false;
+			this.querySelector('[data-close-modal]')?.addEventListener('click', closeModal);
+
+			dialog.addEventListener('close', () => {
+				document.body.toggleAttribute('data-search-modal-open', false);
+				window.removeEventListener('click', onClick);
+			});
+
+			window.addEventListener('keydown', (e) => {
+				if ((e.metaKey === true || e.ctrlKey === true) && e.key === 'k') {
+					dialog.open ? closeModal() : openModal();
+					e.preventDefault();
+				}
+			});
+
+			dialog.addEventListener(
+				'keydown',
+				(e) => {
+					if (!dialog.open) return;
+					if (e.key === 'Escape') {
+						e.preventDefault();
+						closeModal();
+						return;
+					}
+					const hits = hitNodes();
+					if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+						if (hits.length === 0) return;
+						e.preventDefault();
+						selectedIndex += e.key === 'ArrowDown' ? 1 : -1;
+						applySelection(true);
+						return;
+					}
+					if (e.key === 'Enter') {
+						if (e.isComposing) return;
+						const target = e.target;
+						if (!(input && target instanceof Node && input.contains(target))) return;
+						if (hits.length === 0) return;
+						e.preventDefault();
+						hits[selectedIndex]?.click();
+					}
+				},
+				true,
+			);
+
+			resultsEl?.addEventListener('mouseover', (e) => {
+				const hit = (e.target as HTMLElement | null)?.closest('.tg-search-hit');
+				if (!(hit instanceof HTMLAnchorElement) || !resultsEl.contains(hit)) return;
+				const idx = Number(hit.dataset.hitIndex);
+				if (!Number.isInteger(idx) || idx === selectedIndex) return;
+				selectedIndex = idx;
+				applySelection();
+			});
+
+			const form = this.querySelector('.tg-search');
+			form?.addEventListener('submit', (e) => e.preventDefault());
+
+			const appendHit = (list: HTMLElement, hit: SearchHit, nested: boolean, query: string) => {
+				const item = document.createElement('li');
+				const link = document.createElement('a');
+				link.className = nested ? 'tg-search-hit tg-search-hit--child' : 'tg-search-hit';
+				link.href = hit.url;
+				link.id = `tg-search-hit-${hitIndex}`;
+				link.dataset.hitIndex = String(hitIndex);
+				link.setAttribute('role', 'option');
+				const tpl = nested ? headingTpl : iconTpl;
+				if (tpl) link.append(tpl.content.cloneNode(true));
+				const text = document.createElement('span');
+				text.className = 'tg-search-hit-text';
+				const title = document.createElement('span');
+				title.className = 'tg-search-hit-title';
+				appendMarkedTitle(title, hit.title, query);
+				text.append(title);
+				if (hit.subtitle) {
+					const subtitle = document.createElement('span');
+					subtitle.className = 'tg-search-hit-subtitle';
+					subtitle.textContent = hit.subtitle;
+					text.append(subtitle);
+				}
+				link.append(text);
+				const action = document.createElement('span');
+				action.className = 'tg-search-hit-action';
+				action.setAttribute('aria-hidden', 'true');
+				action.textContent = '↵';
+				link.append(action);
+				item.append(link);
+				hitIndex += 1;
+				if (!nested && hit.children?.length) {
+					const kids = document.createElement('ul');
+					kids.className = 'tg-search-children';
+					for (const child of hit.children) appendHit(kids, child, true, query);
+					item.append(kids);
+				}
+				list.append(item);
+			};
+
+			const render = (groups: readonly SearchGroup[], query: string) => {
+				if (!resultsEl) return;
+				if (!query.trim()) {
+					resultsEl.replaceChildren();
+					applySelection();
+					return;
+				}
+				if (groups.length === 0) {
+					const empty = document.createElement('p');
+					empty.className = 'tg-search-empty';
+					empty.textContent = `No results for ${query}`;
+					resultsEl.replaceChildren(empty);
+					applySelection();
+					return;
+				}
+				const root = document.createDocumentFragment();
+				hitIndex = 0;
+				for (const [i, group] of groups.entries()) {
+					const section = document.createElement('section');
+					section.className = 'tg-search-group';
+					const heading = document.createElement('h2');
+					heading.className = 'tg-search-source';
+					heading.id = `tg-search-source-${i}`;
+					heading.textContent = group.section;
+					section.setAttribute('aria-labelledby', heading.id);
+					section.append(heading);
+					const list = document.createElement('ul');
+					list.className = 'tg-search-hits';
+					for (const hit of group.hits) appendHit(list, hit, false, query);
+					section.append(list);
+					root.append(section);
+				}
+				resultsEl.replaceChildren(root);
+				selectedIndex = 0;
+				applySelection();
+			};
+
+			if (!import.meta.env.DEV && input && resultsEl) {
+				const startIdleLoad = () => {
+					const onIdle = window.requestIdleCallback || ((cb) => setTimeout(cb, 1));
+					onIdle(() => {
+						void loadPagefind();
+					});
+				};
+				if (document.readyState === 'loading') {
+					window.addEventListener('DOMContentLoaded', startIdleLoad);
+				} else {
+					startIdleLoad();
+				}
+				input.addEventListener('input', async () => {
+					const gen = ++searchGen;
+					const query = input.value;
+					if (!query.trim()) {
+						if (gen === searchGen) render([], '');
+						return;
+					}
+					const pagefind = await loadPagefind();
+					if (gen !== searchGen) return;
+					const { results } = await pagefind.search(query);
+					if (gen !== searchGen) return;
+					const hits = (await Promise.all(results.slice(0, 24).map((stub) => stub.data())))
+						.map(toSearchHit)
+						.filter((hit): hit is SearchHit => hit !== undefined);
+					if (gen !== searchGen) return;
+					render(groupHits(hits), query);
+				});
+			}
+		}
+	}
+	customElements.define('site-search', SiteSearch);
+</script>
+
+<style is:global>
+	html {
+		scrollbar-gutter: stable;
+	}
+
+	[data-search-modal-open] {
+		overflow: hidden;
+	}
+
+	site-search {
+		display: contents;
+	}
+
+	site-search button[data-open-modal] {
+		cursor: pointer;
+	}
+
+	site-search dialog {
+		margin: 4rem auto auto;
+		padding: 0;
+		width: min(35rem, calc(100% - 2rem));
+		max-height: min(36rem, calc(100vh - 8rem));
+		overflow: hidden;
+		border: 1px solid var(--sl-color-gray-6);
+		border-radius: 0.5rem;
+		background: var(--tg-panel);
+		color: var(--sl-color-text);
+		box-shadow: none;
+		font-family: var(--__sl-font);
+	}
+
+	site-search dialog[open] {
+		display: flex;
+		flex-direction: column;
+	}
+
+	site-search dialog::backdrop {
+		background: color-mix(in srgb, var(--sl-color-black) 50%, transparent);
+	}
+
+	site-search .tg-search {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		flex: 1;
+		max-height: min(36rem, calc(100vh - 8rem));
+		overflow: hidden;
+	}
+
+	site-search .tg-search-field {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex: none;
+		height: 3rem;
+		padding: 0 1rem;
+		border-bottom: 1px solid var(--sl-color-gray-6);
+		background: var(--tg-panel);
+	}
+
+	site-search .tg-search-magnifier {
+		display: flex;
+		flex: none;
+		color: var(--sl-color-gray-3);
+	}
+
+	site-search .tg-search-input {
+		appearance: none;
+		box-sizing: border-box;
+		flex: 1;
+		min-width: 0;
+		height: 100%;
+		margin: 0;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: var(--sl-color-white);
+		font: inherit;
+		font-size: 1.125rem;
+		line-height: 1.4;
+	}
+
+	site-search .tg-search-input:focus {
+		outline: none;
+	}
+
+	site-search .tg-search-input::-webkit-search-decoration,
+	site-search .tg-search-input::-webkit-search-cancel-button {
+		display: none;
+	}
+
+	site-search .tg-search-close {
+		display: flex;
+		flex: none;
+		margin: 0;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: var(--sl-color-gray-3);
+		cursor: pointer;
+	}
+
+	site-search .tg-search-close:hover {
+		color: var(--sl-color-gray-1);
+	}
+
+	site-search .tg-search-dev {
+		margin: auto;
+		padding: 1rem;
+		text-align: center;
+		white-space: pre-line;
+		color: var(--sl-color-gray-4);
+		font-size: 0.875rem;
+	}
+
+	site-search .tg-search-results {
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		min-height: 0;
+		flex: 1 1 auto;
+		padding: 0 0.75rem 0.75rem;
+		scroll-padding-top: calc(1rem + 0.8125rem * 1.5);
+	}
+
+	site-search .tg-search-group + .tg-search-group {
+		margin-top: 0.75rem;
+	}
+
+	site-search .tg-search-source {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+		margin: 0;
+		padding: 0.5rem 0.25rem;
+		background: var(--tg-panel);
+		color: var(--sl-color-gray-3);
+		font-size: 0.8125rem;
+		font-weight: 600;
+		line-height: 1.5;
+	}
+
+	site-search .tg-search-hits {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	site-search .tg-search-hits > li {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	site-search .tg-search-children {
+		list-style: none;
+		margin: 0;
+		padding: 0 0 0 1.375rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		position: relative;
+	}
+
+	site-search .tg-search-children::before {
+		content: '';
+		position: absolute;
+		left: 0.4375rem;
+		top: 0.25rem;
+		bottom: 0.75rem;
+		width: 1px;
+		background: var(--sl-color-gray-5);
+	}
+
+	site-search .tg-search-hit {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.75rem 1rem;
+		border-radius: 0.375rem;
+		background: var(--tg-panel-alt);
+		color: var(--sl-color-gray-1);
+		font-size: 0.9375rem;
+		font-weight: 500;
+		line-height: 1.35;
+		text-decoration: none;
+	}
+
+	site-search .tg-search-hit:focus,
+	site-search .tg-search-hit.is-selected {
+		background: var(--tg-surface);
+		color: var(--sl-color-white);
+		outline: none;
+	}
+
+	site-search .tg-search-hit-icon {
+		flex: none;
+		align-self: center;
+		width: 20px;
+		height: 20px;
+		overflow: visible;
+		color: var(--sl-color-gray-3);
+	}
+
+	site-search .tg-search-hit.is-selected .tg-search-hit-icon {
+		color: var(--sl-color-gray-1);
+	}
+
+	site-search .tg-search-hit-text {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+
+	site-search .tg-search-hit-title {
+		min-width: 0;
+	}
+
+	site-search .tg-search-hit-title mark {
+		background: none;
+		color: var(--sl-color-white);
+		font-weight: 600;
+		text-decoration: underline;
+		padding: 0;
+	}
+
+	site-search .tg-search-hit-subtitle {
+		color: var(--sl-color-gray-3);
+		font-size: 0.8125rem;
+		font-weight: 400;
+		line-height: 1.3;
+	}
+
+	site-search .tg-search-hit.is-selected .tg-search-hit-subtitle {
+		color: var(--sl-color-gray-2);
+	}
+
+	site-search .tg-search-hit-action {
+		visibility: hidden;
+		flex: none;
+		color: var(--sl-color-gray-2);
+		font-size: 1rem;
+		line-height: 1;
+	}
+
+	site-search .tg-search-hit.is-selected .tg-search-hit-action {
+		visibility: visible;
+	}
+
+	site-search .tg-search-empty {
+		margin: 0;
+		padding: 0.75rem 0.5rem;
+		color: var(--sl-color-gray-4);
+		font-size: 0.9375rem;
+	}
+
+	site-search .tg-search-footer {
+		position: sticky;
+		bottom: 0;
+		z-index: 2;
+		display: flex;
+		flex: none;
+		justify-content: flex-end;
+		align-items: center;
+		padding: 0.5rem 0.75rem;
+		border-top: 1px solid var(--sl-color-gray-6);
+		background: var(--sl-color-black);
+		color: var(--sl-color-gray-4);
+		font-size: 0.75rem;
+	}
+
+	site-search .tg-search-commands {
+		display: flex;
+		align-items: center;
+		gap: 0.875rem;
+		list-style: none;
+		margin: 0;
+		padding: 0;
+	}
+
+	site-search .tg-search-commands li {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	site-search .tg-search-commands kbd {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.25rem;
+		height: 1.25rem;
+		padding: 0 0.25rem;
+		border: 0;
+		border-radius: 0.25rem;
+		background: var(--tg-surface);
+		color: var(--sl-color-gray-3);
+		font-family: var(--sl-font);
+		font-size: 0.6875rem;
+		font-weight: 500;
+		box-shadow: none;
+	}
+</style>

@@ -10,6 +10,7 @@ here is duck-typed so neither framework need be importable; heavy optional deps
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib
 import io
 import json
@@ -32,13 +33,14 @@ _TRACE_SAMPLE_LIMIT_DEFAULT = 16
 # small by sampling + dropping payload-bearing attributes.
 _TRACE_MAX_SPANS = 256
 _TRACE_ATTR_STR_MAX = 200
-# Per-sample input-image capture (image-modality runs). Screenshots are large, so
-# only the first IMAGE_SAMPLE_LIMIT_ENV samples of each rollout carry one, and each
-# is thumbnailed + size-capped before it goes on the payload.
+# Input-image capture (image-modality runs). The limit bounds *distinct* images, not
+# samples: a prompt group's ``n_samples_per_prompt`` samples share one screenshot. Each
+# distinct image is thumbnailed and size-capped before it goes on the payload.
 IMAGE_SAMPLE_LIMIT_ENV = "TRAINING_GYM_IMAGE_SAMPLE_LIMIT"
-_IMAGE_SAMPLE_LIMIT_DEFAULT = 16
+_IMAGE_LIMIT_DEFAULT = 16
 _IMAGE_MAX_DIM = 512
 _IMAGE_MAX_BYTES = 256 * 1024
+_IMAGE_REF_CHARS = 16
 # Per-sample multi-turn trajectory capture. The full ``trajectory_messages`` blob
 # (agent transcripts, many turns) is large, so only the first
 # TRAJECTORY_SAMPLE_LIMIT_ENV samples of each rollout carry it and each message's
@@ -54,7 +56,9 @@ _TRAJECTORY_MAX_MESSAGES = 128
 # Keys handled separately below (compacted/size-limited their own way) —
 # never copy them through the generic passthrough too, or they'd end up
 # duplicated under the same name with two different shapes.
-_RESERVED_METADATA_KEYS = frozenset({"trajectory_messages", "eval_report"})
+_RESERVED_METADATA_KEYS = frozenset(
+    {"trajectory_messages", "eval_report", "image", "image_ref"}
+)
 # Per-tag cap on the generic metadata passthrough so a stray large value a
 # reward function stashes on the sample can't bloat the rollout payload.
 _MAX_TAG_VALUE_BYTES = 2048
@@ -336,11 +340,12 @@ def _extract_audio_from_prompt(prompt: Any) -> str | None:
     return None
 
 
-def _image_sample_limit() -> int:
+def _image_limit() -> int:
+    """Max *distinct* images one rollout payload may carry (0 disables capture)."""
     try:
         n = int(os.environ.get(IMAGE_SAMPLE_LIMIT_ENV, "").strip())
     except (TypeError, ValueError):
-        return _IMAGE_SAMPLE_LIMIT_DEFAULT
+        return _IMAGE_LIMIT_DEFAULT
     return max(0, n)
 
 
@@ -441,13 +446,13 @@ def _image_to_data_uri(value: Any) -> str | None:
         return None
 
 
-def _extract_image_from_sample(sample: Any) -> str | None:
-    """Pull a browser-renderable input image off a slime Sample.
+def _image_candidates(sample: Any) -> list[Any]:
+    """Unencoded input-image references on a slime Sample, best first.
 
     For image-modality runs slime's ``process_vision_info`` lifts the screenshot
     into ``sample.multimodal_inputs['images']`` (even when ``apply_chat_template``
     collapses the prompt to a string). Falls back to image items in a
-    conversation-list prompt. Returns ``None`` for non-image samples.
+    conversation-list prompt. Returns ``[]`` for non-image samples.
     """
     if isinstance(sample, dict):
         get = sample.get
@@ -483,11 +488,129 @@ def _extract_image_from_sample(sample: Any) -> str | None:
                     if ref is not None:
                         candidates.append(ref)
 
-    for candidate in candidates:
-        uri = _image_to_data_uri(candidate)
-        if uri:
-            return uri
-    return None
+    return candidates
+
+
+def _raw_image_key(value: Any) -> Any:
+    """Hashable identity for an *unencoded* image candidate.
+
+    Recognises a repeat before paying for a decode + thumbnail + base64 pass.
+    Content-derived wherever the value exposes its bytes; ``id()`` is the last
+    resort, and the store pins those objects so the id cannot be recycled.
+    """
+    if isinstance(value, str):
+        if len(value) <= 512:
+            return value
+        return ("s", hashlib.md5(value.encode()).hexdigest())
+    if isinstance(value, (bytes, bytearray)):
+        return ("b", hashlib.md5(bytes(value)).hexdigest())
+    tobytes = getattr(value, "tobytes", None)
+    if callable(tobytes):
+        try:
+            return (
+                "c",
+                getattr(value, "mode", ""),
+                getattr(value, "size", ()),
+                hashlib.md5(tobytes()).hexdigest(),
+            )
+        except Exception:
+            pass
+    return ("o", id(value))
+
+
+class RolloutImageStore:
+    """Deduplicates input images across one rollout's samples.
+
+    The bytes ride on the first sample that uses them as ``metadata["image"]``; the
+    rest of the prompt group carries only ``metadata["image_ref"]`` naming it. Both
+    keys live in sample metadata rather than a new rollout-level field, which a
+    dashboard one deploy behind the trainer would drop while keeping the refs.
+
+    ``limit`` bounds distinct images. Once spent, further images are skipped and
+    their samples left unannotated, while samples sharing an already-captured image
+    still resolve — coverage degrades by prompt group instead of dangling refs.
+
+    Frameworks build a prompt group by copying one prepared sample (miles
+    deep-copies it per ``n_samples_per_prompt``), so members hold equal-content but
+    distinct image objects. Content keying is what collapses them, so every sample
+    is resolved from its own candidates.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._limit = max(0, limit)
+        self._ref_by_uri: dict[str, str] = {}
+        # "" marks a candidate already known to be unusable, so it is not retried
+        # once per sample.
+        self._ref_by_raw: dict[Any, str] = {}
+        self._key_by_id: dict[int, Any] = {}
+        self._pinned: list[Any] = []
+        self._closed = False
+
+    @property
+    def count(self) -> int:
+        """Distinct images captured so far."""
+        return len(self._ref_by_uri)
+
+    def _memo_key(self, candidate: Any) -> Any:
+        """The key already computed for this exact object, or ``None``.
+
+        Covers a prompt group that shares one image object, so the content key -- a
+        full raw-pixel materialisation plus a hash for a PIL image -- is not paid
+        once per sample. Content keying still decides equality: this only
+        short-circuits the same object, which cannot have different content within
+        one payload.
+        """
+        return self._key_by_id.get(id(candidate))
+
+    def _key(self, candidate: Any) -> Any:
+        """Key ``candidate`` by content, memoised on the object."""
+        memo = self._memo_key(candidate)
+        if memo is not None:
+            return memo
+        key = _raw_image_key(candidate)
+        # Pinning keeps id() from being recycled onto another image while the
+        # memo (or an identity-derived key) is live.
+        self._pinned.append(candidate)
+        self._key_by_id[id(candidate)] = key
+        return key
+
+    def annotate(self, sample: Any, metadata: dict[str, Any]) -> bool:
+        """Write this sample's image keys onto ``metadata``; True if one resolves."""
+        if not self._limit:
+            return False
+        return bool(self._resolve(sample, metadata))
+
+    def _resolve(self, sample: Any, metadata: dict[str, Any]) -> str:
+        """Annotate from ``sample``'s own candidates; the ref written, else ``""``."""
+        for candidate in _image_candidates(sample):
+            key = self._memo_key(candidate)
+            if key is None:
+                if self._closed:
+                    continue
+                key = self._key(candidate)
+            cached = self._ref_by_raw.get(key)
+            if cached is not None:
+                if not cached:
+                    continue
+                metadata["image_ref"] = cached
+                return cached
+            if self.count >= self._limit:
+                self._ref_by_raw[key] = ""
+                self._closed = True
+                continue
+            uri = _image_to_data_uri(candidate)
+            if not uri:
+                self._ref_by_raw[key] = ""
+                continue
+            ref = self._ref_by_uri.get(uri)
+            if ref is None:
+                ref = hashlib.md5(uri.encode()).hexdigest()[:_IMAGE_REF_CHARS]
+                self._ref_by_uri[uri] = ref
+                metadata["image"] = uri
+            self._ref_by_raw[key] = ref
+            metadata["image_ref"] = ref
+            return ref
+        return ""
 
 
 def _sample_to_dict(
@@ -495,7 +618,7 @@ def _sample_to_dict(
     parser: Any = None,
     *,
     include_trace: bool = False,
-    include_image: bool = False,
+    image_store: RolloutImageStore | None = None,
     include_trajectory: bool = False,
     n_samples_per_prompt: int = 1,
 ) -> dict[str, Any]:
@@ -563,12 +686,17 @@ def _sample_to_dict(
             if compact:
                 metadata["eval_report"] = compact
 
+    sample_index = optional_int(get("index"))
+    group_index = optional_int(get("group_index"))
+    if group_index is None and sample_index is not None:
+        group_index = sample_index // max(1, int(n_samples_per_prompt or 1))
+
+    prompt_text = _coerce_text(prompt)
     if audio_uri := _extract_audio_from_prompt(prompt):
         metadata["_metadata_type"] = "audio"
         metadata["audio"] = audio_uri
-    elif include_image and (image_uri := _extract_image_from_sample(sample)):
+    elif image_store is not None and image_store.annotate(sample, metadata):
         metadata["_metadata_type"] = "image"
-        metadata["image"] = image_uri
 
     response_text = _coerce_text(response)
     # Score via gym Sample: numeric reward, else metadata["shaped_reward"] (OPD).
@@ -580,11 +708,10 @@ def _sample_to_dict(
     score = _sample_score(Sample(metadata=metadata), numeric_reward)
     out: dict[str, Any] = {
         "score": score,
-        "prompt": _coerce_text(prompt),
+        "prompt": prompt_text,
         "response": response_text,
         "metadata": metadata,
     }
-    sample_index = optional_int(get("index"))
     rollout_index = optional_int(get("rollout_id"))
     if rollout_index is None:
         rollout_index = sample_index
@@ -592,7 +719,8 @@ def _sample_to_dict(
         out["rollout_index"] = rollout_index
     if sample_index is not None:
         out["sample_index"] = sample_index
-        out["group_index"] = sample_index // max(1, int(n_samples_per_prompt or 1))
+    if group_index is not None:
+        out["group_index"] = group_index
     # Store raw + parsed (mirrors eval's EvalRowResult) so the dashboard can show
     # cleaned content without re-parsing. Parsing happens here, in the recorder.
     parsed = _parsed_response_dict(response_text, parser)

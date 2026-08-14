@@ -31,7 +31,7 @@ CLI cannot explain the underlying failure.
 - Set `MODAL_ENVIRONMENT` explicitly, or pass `--env <env>`, when the target environment matters.
 - If your local setup relies on shell init for auth or helper tooling, ensure that setup is loaded before launching jobs.
 - Store credentials in local shell config or Modal secrets, not in tracked files.
-- **Proxy-auth tokens for served endpoints.** SGLang endpoints from `DeploymentConfig.serve()` are public by default (`unauthenticated=True`). Pass `unauthenticated=False` to require Modal proxy auth — then *any* call to that endpoint — `deployment.generate()`, an OPD teacher `/generate`, health/readiness polls — must send a proxy-auth token pair or it returns **HTTP 401**. vLLM cannot honor `unauthenticated` (`modal.experimental.http_server` has no proxy-auth knob): `True` (default) is a silent no-op for `VllmRecipe`; explicit `False` emits `warnings.warn` because the endpoint remains public. Create a token in the Modal dashboard (Settings → Proxy Auth Tokens) and export it in the launching shell as `MODAL_KEY` (`wk-…`) and `MODAL_SECRET` (`ws-…`); the package turns these into `Modal-Key`/`Modal-Secret` headers. For calls issued from **remote workers** (e.g. a custom rm/reward function hitting a teacher endpoint), the driver's shell env does not reach the worker — forward the pair into the worker by attaching a `modal.Secret` (e.g. via the recipe's `train_function_kwargs={"secrets": [...]}`).
+- **Proxy-auth tokens for served endpoints.** SGLang and vLLM endpoints from `CustomDeployment.launch()` are public by default (`unauthenticated=True`). Pass `unauthenticated=False` to require Modal proxy auth — then *any* call to that endpoint — `deployment.generate()`, an OPD teacher `/generate`, health/readiness polls — must send a proxy-auth token pair or it returns **HTTP 401**. Create a token in the Modal dashboard (Settings → Proxy Auth Tokens) and export it in the launching shell as `MODAL_KEY` (`wk-…`) and `MODAL_SECRET` (`ws-…`); the package turns these into `Modal-Key`/`Modal-Secret` headers. For calls issued from **remote workers** (e.g. a custom rm/reward function hitting a teacher endpoint), the driver's shell env does not reach the worker — forward the pair into the worker by attaching a `modal.Secret` (e.g. via the recipe's `train_function_kwargs={"secrets": [...]}`).
 
 ## Finding The Right Entrypoint
 
@@ -153,6 +153,33 @@ modal volume ls <volume-name> / --env <env>
 5. Inspect logs only after workers appear.
 6. If logs are ambiguous, check live containers and committed volumes separately.
 7. After a known-good run, change one variable at a time.
+
+## SGLang Qwen3.5 served endpoint tool-call parser
+
+When serving Qwen3.5 models (`Qwen3_5_9B`, `Qwen3_5_4B`, etc.) behind an SGLang endpoint that will be used for tool calling, set the parser to `qwen3_coder` and add the reasoning parser:
+
+```python
+SglangRecipe(
+    extra_server_args={
+        "--tool-call-parser": "qwen3_coder",
+        "--reasoning-parser": "qwen3",
+    },
+)
+```
+
+Do **not** use `--tool-call-parser qwen` or `qwen25` for Qwen3.5. Those parsers expect a JSON object inside `<tool_call>` tags, while Qwen3.5 emits XML-style calls like:
+
+```xml
+<tool_call>
+<function=list_directory>
+<parameter=path>/repo</parameter>
+</function>
+</tool_call>
+```
+
+With `qwen`/`qwen25`, SGLang logs `Failed to parse JSON part: ...` and the OpenAI response contains an empty `tool_calls` list, causing agent loops to hit `Reached max iterations without a final response.`. The `qwen3_coder` parser (and the `qwen3` reasoning parser for any inline thinking) handles the XML format correctly on the default `lmsysorg/sglang:v0.5.12` image.
+
+(Qwen3.6-35B is a separate case: its shipped `SglangRecipe` uses `--tool-call-parser qwen`, so don't apply this Qwen3.5 guidance to it.)
 
 ## Updating This Runbook
 

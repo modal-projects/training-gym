@@ -25,15 +25,33 @@ when_to_use: >-
 
 ## 1. Configure and preflight
 
-Create or adapt a config for the requested task. Before spending GPU capacity:
+If the user has not already chosen the model, dataset and reward function,
+propose an implementation for the missing pieces and ask the user to confirm
+that it matches the intended task before implementing it.
+
+Create or adapt the config only after that decision. Before spending GPU
+capacity:
 
 - run a local compile/import check,
 - exercise dataset formatting on representative rows, and
 - test custom reward extraction on correct, incorrect, malformed, and
   missing-answer responses.
 
-The predicted answer must come from the model response; it must not be read from 
+The predicted answer must come from the model response; it must not be read from
 prompt or reference fields.
+
+## Trace monitoring
+
+At every proof, smoke, and full-run monitoring stage, use `run trace` to pull
+traces for completed steps:
+
+```bash
+training-gym run trace <run-id> --out ./traces --step <steps> --yes
+```
+
+Read both the prompts and responses in the downloaded traces. Confirm that the
+prompts and responses make sense in the context of the requested task before
+advancing to the next stage.
 
 ## 2. Prove one step
 
@@ -71,14 +89,15 @@ Change one setting at a time and repeat the smoke test with a fresh run ID.
 ## 4. Promote
 
 Promote only when the proof and smoke runs are healthy and the reward remains
-informative. Launch a fresh full run from the final config and monitor it until
-completion or an early-stop decision.
+informative, and trace inspection confirms that prompts and responses make
+sense for the task. Launch a fresh full run from the final config and monitor
+it until completion or an early-stop decision.
 
 A full run is not a commitment to spend its entire configured horizon.
-Reassess efficacy early; if reward remains flat, declines, or is otherwise
-uninformative, read [debug-reward.md](references/debug-reward.md) and make an
-early-stop decision rather than letting a healthy but ineffective job finish
-by default.
+Reassess efficacy early using both reward trajectories and sampled traces. If
+reward remains flat, declines, or is otherwise uninformative, read
+[debug-reward.md](references/debug-reward.md) and make an early-stop decision
+rather than letting a healthy but ineffective job finish by default.
 
 Report the run ID, checkpoint, early-versus-late reward, task-specific success
 rate, timing, and whether all apps stopped.

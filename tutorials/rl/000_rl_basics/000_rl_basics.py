@@ -3,7 +3,7 @@
 
 # # RL basics: verifiable rewards, haiku edition
 #
-# This tutorial uses Qwen3-4B and haiku poems to introduce the
+# This tutorial uses Qwen3.5-4B and haiku poems to introduce the
 # **verifiable reward** pattern that underpins RL post-training:
 #
 # 1. Serve the base model.
@@ -31,12 +31,14 @@
 
 import modal
 
+import importlib.util
+
 import re
 
 from modal_training_gym import (
-    DeploymentConfig,
+    CustomDeployment,
     HuggingFaceDataset,
-    Qwen3_4B,
+    Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
     list_checkpoints,
@@ -44,20 +46,20 @@ from modal_training_gym import (
 
 # ## Serve the base model
 #
-# So, how does Qwen3-4B currently fare at writing haikus? We can
+# So, how does Qwen3.5-4B currently fare at writing haikus? We can
 # serve the base model and find out.
 #
 # The training gym has several config classes so you can define deployment, training, and evaluation configurations,
 # and reuse them across different runs for parameter sweeps.
 #
-# Let's start by initializing a `DeploymentConfig`.
+# Let's start by launching a `CustomDeployment`.
 #
-# Calling `DeploymentConfig.serve()` builds and deploys an SGLang app, then
-# returns a `ModelDeployment` with the endpoint URL. Pass
+# Calling `CustomDeployment.launch()` builds and deploys an SGLang app, then
+# returns a `CustomDeployment` with the endpoint URL. Pass
 # `unauthenticated=True` so the endpoint is reachable without Modal
 # proxy-auth tokens.
 
-base_model = Qwen3_4B()
+base_model = Qwen3_5_4B()
 
 # Let's now cover the evaluation part of the tutorial.
 #
@@ -178,10 +180,16 @@ def _main_impl() -> None:
             "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
         ) from e
 
-    base_model_deployment = DeploymentConfig(
-        model=base_model,
+    if importlib.util.find_spec("nltk") is None:
+        raise RuntimeError(
+            "This tutorial requires the 'nltk' package. "
+            "Install it before running: uv pip install -q nltk"
+        )
+
+    base_model_deployment = CustomDeployment.launch(
+        base_model,
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Base model deployed to {base_model_deployment.url}")
 
     train_dataset = HaikuDataset(n_rows=10)
@@ -212,7 +220,7 @@ def _main_impl() -> None:
             apply_chat_template_kwargs='{"enable_thinking": false}',
 
             image_overlay=lambda image: image.run_commands(
-                "uv pip install --system aiohttp nltk>=3.8.0",
+                "uv pip install --system aiohttp 'nltk>=3.8.0'",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
             ),
         ),
@@ -231,19 +239,19 @@ def _main_impl() -> None:
     #
     # The returned `TrainResult` has the checkpoint path and volume
     # metadata attached. You can pass an explicit `checkpoint=` to
-    # `DeploymentConfig` to pin a specific checkpoint, or omit it to use
+    # `CustomDeployment.launch()` to pin a specific checkpoint, or omit it to use
     # the model's default path.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(checkpoint.path)
 
-    trained_model_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_model_deployment = CustomDeployment.launch(
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-haiku-serve",
-        served_model_name="qwen3-4b-haiku",
+        app_name="qwen3-5-4b-haiku-serve",
+        served_model_name="qwen3-5-4b-haiku",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Trained model deployed to {trained_model_deployment.url}")
 
     # ## Evaluate the first checkpoint
@@ -263,7 +271,7 @@ def _main_impl() -> None:
     # We want to train it off of the latest checkpoint, not from scratch.
 
     new_training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=train_dataset,
         checkpoint=checkpoint,
         recipe=SlimeRecipe(
@@ -284,7 +292,7 @@ def _main_impl() -> None:
             apply_chat_template_kwargs='{"enable_thinking": false}',
 
             image_overlay=lambda image: image.run_commands(
-                "uv pip install --system aiohttp nltk>=3.8.0",
+                "uv pip install --system aiohttp 'nltk>=3.8.0'",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
             ),
         ),
@@ -300,13 +308,13 @@ def _main_impl() -> None:
     new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
     print(new_checkpoint.path)
 
-    new_model_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    new_model_deployment = CustomDeployment.launch(
+        Qwen3_5_4B(),
         checkpoint=new_checkpoint,
-        app_name="qwen3-4b-haiku-serve-new",
-        served_model_name="qwen3-4b-haiku",
+        app_name="qwen3-5-4b-haiku-serve-new",
+        served_model_name="qwen3-5-4b-haiku",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Newly trained model deployed to {new_model_deployment.url}")
 
     # ## Compare second-run results

@@ -4,7 +4,7 @@
 # # On-policy Distillation (OPD) Across Model Families
 #
 # In the 003 tutorial, we learned the basics of OPD: minimize the reverse-KL of a teacher and student model. Our toy environment
-# used Qwen3-8B to distill basic math answering capabilities to Qwen3-4B. What if we want our teacher model to be from a different,
+# used Qwen3.5-9B to distill basic math answering capabilities to Qwen3.5-4B. What if we want our teacher model to be from a different,
 # more powerful model family? We can't compute reverse-KL divergence betweeen teacher and token logprobs because their
 # tokenizer vocabularies are different! 
 #
@@ -40,8 +40,7 @@ import json
 import re
 
 from modal_training_gym import (
-    DeploymentConfig,
-    ModelDeployment,
+    CustomDeployment,
     Qwen3_6_35B,
     TrainConfig,
     list_checkpoints,
@@ -315,7 +314,7 @@ def _actions_from_message(msg: dict) -> tuple[str, list[ToolCall]]:
     parsed = base_model.parse_response(content)
     return parsed.content, parsed.tool_calls
 
-def bfcl_eval_fn(deployment: ModelDeployment, example: dict) -> dict:
+def bfcl_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
     label = json.loads(example["label"])
     task_id = label["task_id"]
     N = label["total_steps"]
@@ -323,7 +322,7 @@ def bfcl_eval_fn(deployment: ModelDeployment, example: dict) -> dict:
     K = max(0, N - EVAL_TAIL_STEPS)
     expert_call = flattened_calls[K] if K < len(flattened_calls) else {}
 
-    served = deployment.deployment_config.served_model_name
+    served = deployment.served_model_name
     is_student = served != "deepseek-v4-flash"
 
     deployment.wait_until_ready(timeout=DEPLOYMENT_READY_TIMEOUT)
@@ -963,8 +962,8 @@ def _main_impl() -> None:
     # OPD fires one /generate prefill per trajectory. With 16×8=128 traj/step, the
     # default max_running_requests=16 saturates and returns 503s for minutes — raise
     # the teacher queue and throttle client-side (see TEACHER_RM_CONCURRENCY below).
-    teacher_deployment = DeploymentConfig(
-        model=HFModelConfiguration(model_name="deepseek-ai/DeepSeek-V4-Flash"),
+    teacher_deployment = CustomDeployment.launch(
+        HFModelConfiguration(model_name="deepseek-ai/DeepSeek-V4-Flash"),
         recipe=DeepSeek_V4_Flash_SglangRecipe(
             context_length=16384,
             startup_timeout=TEACHER_READY_TIMEOUT,
@@ -972,7 +971,7 @@ def _main_impl() -> None:
         ),
         app_name="dsv4-teacher-model",
         served_model_name="deepseek-v4-flash",
-    ).serve()
+    )
     print(f"Teacher URL: {teacher_deployment.url}")
 
     teacher_deployment.wait_until_ready(timeout=TEACHER_READY_TIMEOUT)
@@ -983,7 +982,7 @@ def _main_impl() -> None:
     dataset = BfclMultiTurnDataset(split="train", config=dataset_config)
 
     student_recipe = Qwen3_6_35b_SglangRecipe(context_length=SERVED_CONTEXT_LEN)
-    base_deployment = DeploymentConfig(model=base_model, recipe=student_recipe).serve()
+    base_deployment = CustomDeployment.launch(base_model, recipe=student_recipe)
     print(f"Student URL: {base_deployment.url}")
 
     teacher_mean = None
@@ -1115,13 +1114,13 @@ def _main_impl() -> None:
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_6_35B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_6_35B(),
         recipe=student_recipe,
         checkpoint=checkpoint,
         app_name="qwen3-6-35b-bfcl-trained",
         served_model_name="qwen3-6-35b-bfcl-trained",
-    ).serve()
+    )
     print(f"Trained student URL: {trained_deployment.url}")
 
     print("--- Evaluating trained student (shaped live reward + terminal verdict metadata)... ---")

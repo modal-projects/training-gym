@@ -168,20 +168,24 @@ def test_validation_dataset_unpickles_without_the_scripts_directory(config, tmp_
     image, so a dataset pickled by reference crashes remotely during data
     preparation. Unpickling in a subprocess whose ``sys.path`` has no
     ``scripts/`` entry reproduces that container exactly.
+
+    Pickled with ``modal._serialization``, which is what actually ships the
+    dataset: it uses Modal's vendored cloudpickle, whose by-value registry is
+    separate from the installed cloudpickle's.
     """
     import base64
     import subprocess
     import sys
     import textwrap
 
-    import cloudpickle
+    from modal._serialization import serialize
 
     from scripts.validate_model_configs import _ship_dataset_definition
 
     _, dataset = build_recipe_and_dataset(config.framework, config.model_config(), 1)
 
     _ship_dataset_definition(dataset)
-    payload = cloudpickle.dumps(dataset)
+    payload = serialize(dataset)
 
     # Blocking the import is a truer stand-in for the image than trimming
     # sys.path: modal_training_gym is installed from this same tree, so the

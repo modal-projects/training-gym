@@ -9,8 +9,6 @@ dependencies = [
     "cloudpickle",
     "datasets",
     "httpx",
-    "msgspec",
-    "openai",
     "pydantic",
     "fastapi",
     "randomname",
@@ -24,6 +22,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["modal_training_gym"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "modal_training_gym/_skills"
+
+[tool.hatch.build.targets.sdist.force-include]
+"skills" = "skills"
 
 [project.scripts]
 training-gym = "modal_training_gym.cli:main"

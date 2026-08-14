@@ -33,9 +33,8 @@ import re
 
 from modal_training_gym import (
     DatasetConfig,
-    DeploymentConfig,
-    ModelDeployment,
-    Qwen3_4B,
+    CustomDeployment,
+    Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
     list_checkpoints,
@@ -242,7 +241,7 @@ async def number_guess_rm(args, sample, **kwargs) -> float:
 # small loop over the eval dataset.
 
 def run_guessing_trajectory(
-    deployment: ModelDeployment,
+    deployment: CustomDeployment,
     *,
     target: int,
     max_turns: int = _MAX_TURNS,
@@ -279,7 +278,7 @@ def run_guessing_trajectory(
     }
 
 def guessing_eval_fn(
-    deployment: ModelDeployment,
+    deployment: CustomDeployment,
     example: dict,
 ) -> dict:
     target = int(example["target"])
@@ -348,10 +347,10 @@ def _main_impl() -> None:
 
     # ## Serve and evaluate the base model
 
-    base_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    base_deployment = CustomDeployment.launch(
+        Qwen3_5_4B(),
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Base model URL: {base_deployment.url}")
     base_mean, base_rows = run_eval(base_deployment)
     base_summary = summarize_eval(base_rows)
@@ -377,8 +376,6 @@ def _main_impl() -> None:
     # - `num_rollout=20` — total rollout/train iterations to run. Each iteration samples
     #   a batch, scores it, and applies one policy update.
     # - `rollout_batch_size=8` — prompts sampled per rollout iteration.
-    # - `n_samples_per_prompt=1` — GRPO group size. `1` disables grouping; bump to ≥2
-    #   to get within-prompt advantage normalization.
     # - `rollout_max_response_len=64` — max new tokens per sglang call. We keep it tiny
     #    because every turn is `<answer>N</answer>` plus a bit of thinking.
     # - `rollout_temperature=1.0` — sampling temperature during rollouts.
@@ -391,7 +388,7 @@ def _main_impl() -> None:
     #   short and parseable.
 
     training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=train_dataset,
         recipe=SlimeRecipe(
             custom_generate_function=number_guess_generate,
@@ -409,7 +406,7 @@ def _main_impl() -> None:
 
             num_rollout=20,
             rollout_batch_size=8,
-            n_samples_per_prompt=1,
+            n_samples_per_prompt=4,
             rollout_max_response_len=64,
             rollout_temperature=1.0,
 
@@ -425,13 +422,13 @@ def _main_impl() -> None:
     # ## Evaluate trained checkpoint
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    trained_deployment = DeploymentConfig(
-        model=Qwen3_4B(),
+    trained_deployment = CustomDeployment.launch(
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-guessing-multiturn-serve",
-        served_model_name="qwen3-4b-guessing-multiturn",
+        app_name="qwen3-5-4b-guessing-multiturn-serve",
+        served_model_name="qwen3-5-4b-guessing-multiturn",
         unauthenticated=True,
-    ).serve()
+    )
     print(f"Trained model URL: {trained_deployment.url}")
 
     trained_mean, trained_rows = run_eval(trained_deployment)

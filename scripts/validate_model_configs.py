@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import cloudpickle
+from modal._vendor import cloudpickle as modal_cloudpickle
 
 try:
     # Run as a script: sys.path[0] is scripts/, matching download_perf_baseline.
@@ -192,11 +193,15 @@ def _ship_dataset_definition(dataset) -> None:
     Nothing under ``scripts/`` is importable inside the training image, so the
     container would fail to unpickle it during data preparation. Classes that
     ship with the package are importable remotely and stay by reference.
+
+    Modal serializes with its own vendored copy of cloudpickle, which keeps a
+    registry separate from the installed one, so both have to be told.
     """
     module = sys.modules.get(type(dataset).__module__)
     if module is None or module.__name__.startswith("modal_training_gym"):
         return
     cloudpickle.register_pickle_by_value(module)
+    modal_cloudpickle.register_pickle_by_value(module)
 
 
 def run_base_training(
