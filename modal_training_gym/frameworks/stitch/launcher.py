@@ -581,11 +581,10 @@ def build_stitch_app(
             print(f"Preparing dataset ({prompt_data})...")
             dataset.prepare(prompt_data, eval_paths)
             data_volume.commit()
-        if not trainer_helpers.model_is_cached(model):
-            print(f"Downloading model {model.model_name}...")
-            model.download()
-            train_recipe.download_model()
-            hf_cache_volume.commit()
+        # Both are no-ops on a warm cache.
+        model.download()
+        train_recipe.download_model()
+        hf_cache_volume.commit()
         # The served baseline is the one input the trainer can't build here: the
         # conversion wants its own GPU function (prepare_checkpoints).
         for path in (train_recipe.hf_checkpoint, train_recipe.bf16_checkpoint_path):

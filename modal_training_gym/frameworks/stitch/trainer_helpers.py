@@ -2,32 +2,17 @@
 
 Everything the cookbook already does — config resolution, the train command, Ray
 bring-up, the Megatron patches — is imported from it in the trainer. What is left
-is the gym's own self-healing check and reaching a pool's Flash gateway, the
-latter partly from the *client*, where the cookbook isn't importable.
+is reaching a pool's Flash gateway, part of it from the *client*, where the
+cookbook is not importable.
 """
 
 from __future__ import annotations
 
-import os
 import time
 import urllib.request
 from typing import Any
 
 import modal
-
-
-def model_is_cached(model: Any) -> bool:
-    """Whether the HF cache already holds the model's weights, so ``train`` can
-    self-heal a launch that skipped the client-side download step."""
-    from huggingface_hub import snapshot_download
-
-    if path := getattr(model, "model_path", ""):
-        return os.path.isdir(path) and bool(os.listdir(path))
-    try:
-        snapshot_download(model.model_name, local_files_only=True)
-    except Exception:  # noqa: BLE001 — any cache miss means "download it"
-        return False
-    return True
 
 
 def flash_gateway_url(server_cls: Any) -> str:
