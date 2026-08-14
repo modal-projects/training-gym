@@ -157,11 +157,15 @@ def _acquire_convert_lock(run_id: str, save_path: str) -> str:
 
 
 def _refresh_convert_lock(run_id: str, save_path: str) -> None:
-    """Extend this run's claim so a long conversion outlives the TTL."""
+    """Extend an existing claim of this run's; never create one.
+
+    A refresh that wrote unconditionally would resurrect the claim when a tick
+    straddles the release, leaving it held with nobody to give it back.
+    """
     barrier = _convert_barrier_dict()
     key = _convert_lock_key(save_path)
     holder = barrier.get(key)
-    if isinstance(holder, dict) and str(holder.get("run_id") or "") != run_id:
+    if not isinstance(holder, dict) or str(holder.get("run_id") or "") != run_id:
         return
     barrier[key] = {"run_id": run_id, "claimed_at": time.time()}
 
@@ -897,9 +901,10 @@ def build_miles_app(
                             f"Conversion finished but {save_path} holds no complete "
                             "torch_dist checkpoint (missing .metadata)."
                         )
-                    if nnodes > 1:
-                        _clear_convert_barrier(training_run_id, nnodes)
-                    _release_convert_lock(training_run_id, save_path)
+            if node_rank == 0:
+                if nnodes > 1:
+                    _clear_convert_barrier(training_run_id, nnodes)
+                _release_convert_lock(training_run_id, save_path)
         except BaseException:
             if node_rank == 0:
                 _release_convert_lock(training_run_id, save_path)
