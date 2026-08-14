@@ -240,7 +240,9 @@ def _record_run_started(
                 if dataset
                 else {}
             ),
-            "recipe": config_fields,
+            # gpu_type is a miles _SKIP_FIELD (infra, not a CLI flag), but the
+            # dashboard's cluster column and checkpoint conversion read it.
+            "recipe": {"gpu_type": recipe.train.gpu_type, **config_fields},
             "wandb": wandb_block,
             "lr": recipe.train.lr,
             "global_batch_size": recipe.train.global_batch_size,
@@ -638,7 +640,14 @@ def build_stitch_app(
         )
         cfg.custom_config_path = custom_config
 
-        trainer_helpers.prepare_config(cfg, tempfile.mkdtemp(), YAML_CONFIG_FIELDS)
+        # ``custom_config_path`` is a *path* flag: in the colocated flow the dict
+        # is materialized while still named ``extra_config`` (which is in miles'
+        # YAML_CONFIG_FIELDS) and renamed after. Here it is already renamed, so
+        # it has to be materialized under its final name or miles is handed a
+        # dict repr as a filename.
+        trainer_helpers.prepare_config(
+            cfg, tempfile.mkdtemp(), (*YAML_CONFIG_FIELDS, "custom_config_path")
+        )
         cmd = trainer_helpers.build_train_cmd(
             cfg, MILES_ROOT, model_script_attr="miles_model_script"
         )

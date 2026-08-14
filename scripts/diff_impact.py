@@ -190,7 +190,10 @@ def _base_recipe_for(framework, model_config):
         except ImportError:  # imported as scripts.diff_impact, e.g. by tests
             from scripts.validation_backends.stitch import _BASE_RECIPES
 
-        return _BASE_RECIPES.get(model_config.model_name)
+        # An instance, like the other branches: the caller indexes by
+        # type(recipe).__name__.
+        recipe_cls = _BASE_RECIPES.get(model_config.model_name)
+        return recipe_cls() if recipe_cls is not None else None
     raise ValueError(f"no base recipe lookup for framework {framework!r}")
 
 
