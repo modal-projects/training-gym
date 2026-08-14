@@ -570,7 +570,7 @@ def _bucket_for(input_path: pathlib.Path) -> str:
 
 def generate_one(
     input_path: pathlib.Path, output_root: pathlib.Path
-) -> tuple[pathlib.Path, pathlib.Path] | None:
+) -> tuple[pathlib.Path, pathlib.Path]:
     source = input_path.read_text()
     name = input_path.stem
     metadata = _extract_metadata(source) or {}
@@ -770,14 +770,7 @@ def main() -> None:
         return
 
     for inp in inputs:
-        result = generate_one(inp.resolve(), OUTPUT_ROOT)
-        if result is None:
-            print(
-                f"{inp.relative_to(REPO_ROOT) if inp.is_absolute() else inp} "
-                f"→ skipped (docs-only tutorial, no runnable output)"
-            )
-            continue
-        py, ipynb = result
+        py, ipynb = generate_one(inp.resolve(), OUTPUT_ROOT)
         print(
             f"{inp.relative_to(REPO_ROOT) if inp.is_absolute() else inp} "
             f"→ {py.relative_to(REPO_ROOT)} + {ipynb.relative_to(REPO_ROOT)}"

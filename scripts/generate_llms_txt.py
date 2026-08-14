@@ -10,6 +10,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import yaml
+
 from api_reference_manifest import (
     API_REFERENCE_MANIFEST,
     CLASS_REFERENCE_PATHS,
@@ -67,29 +69,27 @@ def _collect_guides() -> list[tuple[str, str, str, int]]:
             raise ValueError(f"Guide has invalid frontmatter: {path}")
         frontmatter = parts[1]
 
-        metadata: dict[str, str] = {}
-        sidebar_order = 10_000
-        current_mapping = ""
-        for line in frontmatter.splitlines():
-            key, separator, value = line.partition(":")
-            if not separator:
-                continue
-            if not line.startswith((" ", "\t")):
-                value = value.strip().strip("'\"")
-                metadata[key] = value
-                current_mapping = key if not value else ""
-            elif current_mapping == "sidebar" and key.strip() == "order":
-                try:
-                    sidebar_order = int(value.strip())
-                except ValueError as exc:
-                    raise ValueError(
-                        f"Guide sidebar order must be an integer: {path}"
-                    ) from exc
+        try:
+            metadata = yaml.safe_load(frontmatter)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"Guide has invalid YAML frontmatter: {path}") from exc
+        if not isinstance(metadata, dict):
+            raise ValueError(f"Guide frontmatter must be a mapping: {path}")
 
         title = metadata.get("title")
-        if not title:
+        if not isinstance(title, str) or not title:
             raise ValueError(f"Guide frontmatter is missing title: {path}")
         description = metadata.get("description", "")
+        if not isinstance(description, str):
+            raise ValueError(f"Guide description must be a string: {path}")
+
+        sidebar = metadata.get("sidebar", {})
+        if not isinstance(sidebar, dict):
+            raise ValueError(f"Guide sidebar must be a mapping: {path}")
+        sidebar_order = sidebar.get("order", 10_000)
+        if type(sidebar_order) is not int:
+            raise ValueError(f"Guide sidebar order must be an integer: {path}")
+
         slug = path.relative_to(GUIDES_DIR).with_suffix("").as_posix()
         if slug != "index":
             guides.append((slug, title, description, sidebar_order))

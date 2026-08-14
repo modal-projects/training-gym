@@ -203,7 +203,7 @@ def main() -> None:
     args = parser.parse_args()
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-    for bucket_output_dir in output_dir.iterdir():
+    for bucket_output_dir in list(output_dir.iterdir()):
         if bucket_output_dir.is_dir():
             shutil.rmtree(bucket_output_dir)
     generated = 0
