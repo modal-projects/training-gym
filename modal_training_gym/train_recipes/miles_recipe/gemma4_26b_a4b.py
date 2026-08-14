@@ -144,6 +144,7 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     global_batch_size: int = 256
     save_interval: int = 20
 
+    rollout_health_check_first_wait: int = 300
     rollout_num_gpus_per_engine: int = 4
     # 0.25, not upstream's 0.55: both engines stay resident, and at 0.55 the
     # optimizer step OOMs on a 139.8 GiB H200.

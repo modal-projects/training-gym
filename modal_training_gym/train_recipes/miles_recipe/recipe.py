@@ -518,7 +518,7 @@ class MilesRecipe(BaseTrainRecipe):
     # Miles' own argparse defaults (slime uses 30/30/300).
     rollout_health_check_interval: int = 30
     rollout_health_check_timeout: int = 30
-    rollout_health_check_first_wait: int = 300
+    rollout_health_check_first_wait: int = 0
 
     # ── Weight sync ─────────────────────────────────────────────────────────
     update_weight_buffer_size: int | None = None

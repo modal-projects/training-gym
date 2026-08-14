@@ -163,6 +163,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Moonlight-16B-A3B-Instruct",
     },
     {
+        "class_name": "Gemma4_26B_A4B",
+        "module": "modal_training_gym.common.models.gemma4_26b_a4b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Gemma-4-26B-A4B-it",
+    },
+    {
         "class_name": "Qwen3_6_35B",
         "module": "modal_training_gym.common.models.qwen3_6_35b",
         "group": "models",
@@ -225,6 +232,13 @@ API_REFERENCE_MANIFEST = [
         "group": "training",
         "class_type": "config_data",
         "sidebar_label": "Moonlight_16B_A3B_Recipe",
+    },
+    {
+        "class_name": "Gemma4_26B_A4B_Recipe",
+        "module": "modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Gemma4_26B_A4B_Recipe",
     },
     {
         "class_name": "Qwen3_6_35b_Recipe",
