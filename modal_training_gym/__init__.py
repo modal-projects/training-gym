@@ -68,6 +68,10 @@ _EXPORTS = {
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_4b_Recipe",
     ),
+    "Qwen3_30B_A3B_Stitch_Recipe": (
+        "modal_training_gym.train_recipes.stitch_recipe",
+        "Qwen3_30B_A3B_Stitch_Recipe",
+    ),
     "Qwen3_5_0_8B": ("modal_training_gym.common.models", "Qwen3_5_0_8B"),
     "Qwen3_5_0_8b_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
@@ -179,6 +183,7 @@ __all__ = [
     "Qwen3_5_9b_Recipe",
     "Qwen3_8B",
     "Qwen3_30B",
+    "Qwen3_30B_A3B_Stitch_Recipe",
     "Qwen3_6_35B",
     "Qwen3_6_27B",
     "Qwen3_6_27b_Recipe",
