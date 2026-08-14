@@ -14,10 +14,17 @@ Repo: https://github.com/modal-projects/training-gym
 ## Docs
 
 - [Overview](https://gym.modal.dev/): Product overview and getting started
+- [Guides](https://gym.modal.dev/guides/): Concepts and practical workflows
 - [All Tutorials](https://gym.modal.dev/tutorials/): Tutorial catalog
 - [API Reference](https://gym.modal.dev/reference/): Public class reference
 - [CLI Reference](https://gym.modal.dev/reference/cli/): `modal-training-gym` CLI
 - [Support](https://gym.modal.dev/support/): Support and contribution notes
+
+## Guides
+
+- [Guides](https://gym.modal.dev/guides/): Conceptual and practical guides for working with Training Gym.
+- [The observability dashboard](https://gym.modal.dev/guides/tools/observability-dashboard/): Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings.
+- [Weights & Biases integration](https://gym.modal.dev/guides/tools/wandb-integration/): Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links.
 
 ## Tutorials
 
@@ -36,11 +43,6 @@ Repo: https://github.com/modal-projects/training-gym
 ### Agents
 
 - [000_agent_sandbox](https://gym.modal.dev/tutorials/agent/000_agent_sandbox/): Build an LLM agent harness with a self-hosted model and Modal Sandbox tool execution
-
-### Tools
-
-- [000_observability_dashboard](https://gym.modal.dev/tutorials/tools/000_observability_dashboard/): Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings
-- [001_wandb_integration](https://gym.modal.dev/tutorials/tools/001_wandb_integration/): Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links
 
 ## API Reference
 

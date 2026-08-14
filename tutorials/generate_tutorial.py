@@ -63,10 +63,7 @@ _NB = "notebook"
 # Buckets the tutorial catalog is grouped into. Display order in the README
 # sections and ordering within each bucket fall back to meta["order"].
 _BUCKETS = ("intro", "rl", "sft", "singlenode", "agent", "multinode", "misc")
-# Docs-only buckets render on the docs site (scripts/generate_tutorial_pages.py)
-# but produce no runnable tutorials/<bucket>/ outputs and no README table rows.
-_DOCS_ONLY_BUCKETS = ("tools",)
-_DOCS_PAGE_BUCKETS = frozenset({"intro", "rl", "sft", "agent", "misc", "tools"})
+_DOCS_PAGE_BUCKETS = frozenset({"intro", "rl", "sft", "agent", "misc"})
 _BUCKET_DISPLAY = {
     "intro": "Intro",
     "rl": "RL",
@@ -563,12 +560,6 @@ def _bucket_for(input_path: pathlib.Path) -> str:
             f"tutorial_generator/<bucket>/<name>.py."
         )
     bucket = parts[0]
-    if bucket in _DOCS_ONLY_BUCKETS:
-        raise ValueError(
-            f"Tutorial source {input_path} lives under docs-only bucket {bucket!r}; "
-            f"docs-only buckets are rendered by scripts/generate_tutorial_pages.py, "
-            f"not by generate_tutorial.py. Expected runnable buckets: {_BUCKETS}."
-        )
     if bucket not in _BUCKETS:
         raise ValueError(
             f"Tutorial source {input_path} lives under unknown bucket {bucket!r}. "
@@ -583,8 +574,6 @@ def generate_one(
     source = input_path.read_text()
     name = input_path.stem
     metadata = _extract_metadata(source) or {}
-    if metadata.get("docs_only"):
-        return None
     bucket = _bucket_for(input_path)
     cells = _extract_cells(
         source,
@@ -728,17 +717,14 @@ def _update_readme_table(entries: list[tuple[str, str, dict]]) -> bool:
 def _iter_source_files() -> list[pathlib.Path]:
     """Return every tutorial source under `tutorial_generator/<bucket>/`.
 
-    Skips `__init__.py` at any level; skips docs-only buckets (rendered by
-    scripts/generate_tutorial_pages.py, never emitted as runnable tutorials);
-    skips files that aren't inside a known bucket subdirectory (so a stray
-    top-level file produces a clear error in `_bucket_for` rather than a
-    silent no-op).
+    Skips `__init__.py` at any level and files that aren't inside a known
+    bucket subdirectory (so a stray top-level file produces a clear error in
+    `_bucket_for` rather than a silent no-op).
     """
     return sorted(
         p
         for p in INPUT_DIR.rglob("*.py")
         if p.name != "__init__.py"
-        and p.relative_to(INPUT_DIR).parts[0] not in _DOCS_ONLY_BUCKETS
     )
 
 

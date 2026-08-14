@@ -19,6 +19,7 @@ from generate_tutorial_pages import BUCKET_LABELS, BUCKETS, extract_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 TUTORIAL_SRC_DIR = ROOT / "tutorials" / "tutorial_generator"
+GUIDES_DIR = ROOT / "docs-next" / "src" / "content" / "docs" / "guides"
 DEFAULT_OUTPUT = ROOT / "docs-next" / "public" / "llms.txt"
 
 SITE = "https://gym.modal.dev"
@@ -54,7 +55,38 @@ def _collect_tutorials() -> list[tuple[str, str, dict]]:
     return entries
 
 
-def _render(tutorials: list[tuple[str, str, dict]]) -> str:
+def _collect_guides() -> list[tuple[str, str, str]]:
+    """Return (slug, title, description) for authored Markdown guides."""
+    guides: list[tuple[str, str, str]] = []
+    for path in sorted(GUIDES_DIR.rglob("*.md")):
+        text = path.read_text()
+        if not text.startswith("---\n"):
+            raise ValueError(f"Guide is missing frontmatter: {path}")
+        parts = text.split("---\n", 2)
+        if len(parts) != 3:
+            raise ValueError(f"Guide has invalid frontmatter: {path}")
+        frontmatter = parts[1]
+
+        metadata: dict[str, str] = {}
+        for line in frontmatter.splitlines():
+            key, separator, value = line.partition(":")
+            if separator and not line.startswith((" ", "\t")):
+                metadata[key] = value.strip().strip("'\"")
+
+        title = metadata.get("title")
+        if not title:
+            raise ValueError(f"Guide frontmatter is missing title: {path}")
+        description = metadata.get("description", "")
+        slug = path.relative_to(GUIDES_DIR).with_suffix("").as_posix()
+        guides.append((slug, title, description))
+
+    guides.sort(key=lambda guide: (guide[0] != "index", guide[1].lower()))
+    return guides
+
+
+def _render(
+    tutorials: list[tuple[str, str, dict]], guides: list[tuple[str, str, str]]
+) -> str:
     lines: list[str] = [
         "# Modal Training Gym",
         "",
@@ -72,14 +104,28 @@ def _render(tutorials: list[tuple[str, str, dict]]) -> str:
         "## Docs",
         "",
         f"- [Overview]({SITE}/): Product overview and getting started",
+        f"- [Guides]({SITE}/guides/): Concepts and practical workflows",
         f"- [All Tutorials]({SITE}/tutorials/): Tutorial catalog",
         f"- [API Reference]({SITE}/reference/): Public class reference",
         f"- [CLI Reference]({SITE}/reference/cli/): `modal-training-gym` CLI",
         f"- [Support]({SITE}/support/): Support and contribution notes",
         "",
-        "## Tutorials",
+        "## Guides",
         "",
     ]
+
+    for slug, title, description in guides:
+        path = "" if slug == "index" else f"{slug}/"
+        suffix = f": {description}" if description else ""
+        lines.append(f"- [{title}]({SITE}/guides/{path}){suffix}")
+
+    lines.extend(
+        [
+            "",
+            "## Tutorials",
+            "",
+        ]
+    )
 
     by_bucket: dict[str, list[tuple[str, dict]]] = defaultdict(list)
     for bucket, name, metadata in tutorials:
@@ -159,8 +205,11 @@ def main() -> None:
     tutorials = _collect_tutorials()
     if not tutorials:
         raise SystemExit("No tutorials with TUTORIAL_METADATA found")
+    guides = _collect_guides()
+    if not guides:
+        raise SystemExit("No Markdown guides found")
 
-    text = _render(tutorials)
+    text = _render(tutorials, guides)
     out_path: Path = args.output
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(text)
@@ -171,6 +220,7 @@ def main() -> None:
     except ValueError:
         display_path = out_path
     print(f"Wrote {display_path}")
+    print(f"  guides: {len(guides)}")
     print(f"  tutorials: {len(tutorials)}")
     print(f"  api classes: {n_api}")
 
