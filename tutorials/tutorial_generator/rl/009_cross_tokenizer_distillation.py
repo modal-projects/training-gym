@@ -111,6 +111,28 @@ def _deploy_intro():
 @code
 def _deploy_teacher():
     TEACHER_READY_TIMEOUT = 30 * 60
+    STUDENT_READY_TIMEOUT = 15 * 60
+
+    def wait_ready(deployment, timeout):
+        if isinstance(deployment, Endpoint):
+            deployment.wait_until_ready(timeout_sec=timeout)
+        else:
+            deployment.wait_until_ready(timeout=timeout)
+
+    def _chat(deployment, messages, extra, max_attempts=12):
+        if isinstance(deployment, Endpoint):
+            return deployment.chat(
+                messages,
+                max_attempts=max_attempts,
+                extra_parameters=extra,
+            )
+        return deployment.chat(
+            messages,
+            ensure_ready=False,
+            max_attempts=max_attempts,
+            **extra,
+        )
+
     # OPD fires one /generate prefill per trajectory. With 16×8=128 traj/step, the
     # default max_running_requests=16 saturates and returns 503s for minutes — raise
     # the teacher queue and throttle client-side (see TEACHER_RM_CONCURRENCY below).
@@ -126,7 +148,7 @@ def _deploy_teacher():
     )
     print(f"Teacher URL: {teacher_deployment.url}")
 
-    teacher_deployment.wait_until_ready(timeout=TEACHER_READY_TIMEOUT)
+    wait_ready(teacher_deployment, TEACHER_READY_TIMEOUT)
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
     TEACHER_RM_CONCURRENCY = 24
@@ -378,7 +400,7 @@ def _eval_base():
         except Exception:
             return sum(len(str(m.get("content", ""))) for m in messages) // 3
 
-    def _chat(deployment, messages, tools=None, max_tokens=None, max_attempts=12, *, qwen_thinking=False):
+    def _eval_chat(deployment, messages, tools=None, max_tokens=None, max_attempts=12, *, qwen_thinking=False):
         if max_tokens is None:
             max_tokens = RESPONSE_TOKEN_CAP
         remaining = SERVED_CONTEXT_LEN - _prompt_token_count(messages, tools) - CONTEXT_SAFETY_MARGIN
@@ -394,18 +416,7 @@ def _eval_base():
             extra["tools"] = tools
         if qwen_thinking is not None:
             extra["chat_template_kwargs"] = {"enable_thinking": qwen_thinking}
-        if isinstance(deployment, Endpoint):
-            return deployment.chat(
-                messages,
-                max_attempts=max_attempts,
-                extra_parameters=extra,
-            )
-        return deployment.chat(
-            messages,
-            ensure_ready=False,
-            max_attempts=max_attempts,
-            **extra,
-        )
+        return _chat(deployment, messages, extra, max_attempts=max_attempts)
 
     def _actions_from_message(msg: dict) -> tuple[str, list[ToolCall]]:
         """Prefer structured API tool_calls (DeepSeek); else parse Qwen wire text."""
@@ -444,15 +455,10 @@ def _eval_function():
         served = getattr(deployment, "served_model_name", None)
         is_student = served != "deepseek-v4-flash"
 
-        if isinstance(deployment, Endpoint):
-            deployment.wait_until_ready(timeout_sec=15 * 60)
-        else:
-            deployment.wait_until_ready(timeout=30 * 60)
-
         episode = run_bfcl_episode(
             label,
             start_step=K,
-            generate=lambda messages, tools: _chat(
+            generate=lambda messages, tools: _eval_chat(
                 deployment,
                 messages,
                 tools=tools,
@@ -493,13 +499,10 @@ def _eval_function():
             },
         }
 
-    def run_eval(deployment, *, max_concurrency: int = 4):
+    def run_eval(deployment, *, ready_timeout, max_concurrency: int = 4):
         from concurrent.futures import ThreadPoolExecutor
 
-        if isinstance(deployment, Endpoint):
-            deployment.wait_until_ready(timeout_sec=15 * 60)
-        else:
-            deployment.wait_until_ready(timeout=30 * 60)
+        wait_ready(deployment, ready_timeout)
 
         def _score_one(example):
             return bfcl_eval_fn(deployment, example)
@@ -535,7 +538,11 @@ def _run_baseline_eval():
     teacher_rows = None
     print("--- Evaluating teacher (DeepSeek V4 Flash)... ---")
     try:
-        teacher_mean, teacher_rows = run_eval(teacher_deployment, max_concurrency=4)
+        teacher_mean, teacher_rows = run_eval(
+            teacher_deployment,
+            ready_timeout=TEACHER_READY_TIMEOUT,
+            max_concurrency=4,
+        )
         print(f"Teacher shaped reward: {teacher_mean:.3f}")
         _print_eval_summary("Teacher", teacher_mean, teacher_rows)
     except Exception as e:
@@ -546,7 +553,11 @@ def _run_baseline_eval():
 
     print("--- Evaluating base student (shaped live reward + terminal verdict metadata)... ---")
     try:
-        base_mean, base_rows = run_eval(base_deployment, max_concurrency=4)
+        base_mean, base_rows = run_eval(
+            base_deployment,
+            ready_timeout=STUDENT_READY_TIMEOUT,
+            max_concurrency=4,
+        )
         print(f"Base shaped reward: {base_mean:.3f}")
         _print_eval_summary("Base", base_mean, base_rows)
     except Exception as e:
@@ -1209,7 +1220,11 @@ def _eval_trained():
     print(f"Trained student URL: {trained_deployment.url}")
 
     print("--- Evaluating trained student (shaped live reward + terminal verdict metadata)... ---")
-    trained_mean, trained_rows = run_eval(trained_deployment, max_concurrency=4)
+    trained_mean, trained_rows = run_eval(
+        trained_deployment,
+        ready_timeout=STUDENT_READY_TIMEOUT,
+        max_concurrency=4,
+    )
     print(f"Trained shaped reward: {trained_mean:.3f}")
 
 
