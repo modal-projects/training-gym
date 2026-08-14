@@ -11,15 +11,15 @@
 # experiment on Modal. It chose **Qwen3-4B**, designed a reward that balances
 # rhyme with relevance, prepared a dataset, wrote the GRPO configuration,
 # debugged the remote environment, and managed the run from a one-step proof
-# through full training.
+# all the way through full training.
 #
 # The result: answers meeting the rhyme threshold rose from **27% to 84%**,
 # while relevance held steady. The model learned to rhyme *in addition to*
-# answering the question—not instead of it.
+# answering the question.
 #
-# This tutorial shows both what the agent built and, more importantly, how it
-# used Training Gym's observability to prove that such a simple prompt
-# produced a real behavior change.
+# This tutorial walks through two things: what the agent built, and more 
+# importantly, how it used Training Gym's observability through the CLI 
+# to prove that such a simple prompt could produce a real behavior change.
 # Run locally (your machine drives the Modal GPU workers):
 #
 # ```
@@ -44,17 +44,16 @@ import modal
 # ## Turn one sentence into a training objective
 #
 # The initial prompt was intentionally underspecified. The agent did not need
-# a finished reward function or training recipe from the user; it only asked
-# for the few choices that materially affect behavior and cost:
+# a finished reward function or training recipe from the user; it only prompted 
+# the user once to confirm its decisions for the few choices that materially 
+# affect behavior and cost:
 #
-# - **Behavior:** rhyme in every answer, not only when explicitly requested.
 # - **Model:** Qwen3-4B.
-# - **Topology:** one node with 8×H100 GPUs, as resolved by the validated
-#   Qwen3-4B recipe.
-# - **Content quality:** reward rhyme only when the response remains relevant
-#   to the question.
+# - **Dataset:** tatsu-lab/alpaca
+# - **Reward function:** reward rhyme only when the response remains relevant
+#   to the question
 #
-# With those answers, the agent had enough of a specification to implement
+# With those answers, the agent had the confirmation it needed to implement
 # and validate the complete training workflow below.
 # ## Dataset
 #
@@ -111,9 +110,9 @@ class RhymeInstructionDataset(HuggingFaceDataset):
 #
 # The agent combined a deterministic rhyme score with an embedding-based
 # relevance score. Relevance gates rhyme so unrelated verse cannot win, and
-# anti-gaming checks penalize repeated end words and one-word lines.
+# anti-reward hacking checks penalize repeated end words and one-word lines.
 #
-# Before spending GPU time, the agent exercised the reward on correct,
+# Before spending any GPU time, the agent exercised the reward on correct,
 # non-rhyming, off-topic, repeated-word, malformed, and empty responses. The
 # full implementation is below.
 
@@ -320,52 +319,29 @@ def build_config(
 
 # ## What one prompt produced
 #
-# The agent promoted this training job only after each stage passed:
+# The agent promoted the job only after each stage passed cleanly — a one-step 
+# proof (mean reward 0.785, healthy reward spread), then a 10-step smoke test 
+# where traces showed rhyme rising while relevance held, and finally the full 
+# 100-step run, checked at milestones and reassessed at the midpoint.
 #
-# - **Proof — `grouchy-ellipsis-453dfe77b375`:** `run get --verbose`
-#   reported 1/1 steps complete with mean reward 0.785. The 128 samples had
-#   useful reward spread, the prompts and responses were intact, and the
-#   checkpoint was present.
-# - **Smoke — `fast-discriminator-1680dee16483`:** all 10 steps completed
-#   without errors. First- and last-step traces showed rhyme improving
-#   without relevance falling, so the reward was not being hacked.
-# - **Full — `overcast-gauge-2d52c4e2b271`:** the agent monitored milestone
-#   steps and reassessed at the midpoint before allowing all 100 steps to
-#   finish.
+# The full run finished in **46 minutes**, and the numbers tell the story:
+# - Rhyme score: 0.475 → 0.908
+# - Answers above the rhyme threshold: 27% → 84%
+# - Non-rhyming answers: 35/128 → 0/128
+# - Relevance: 0.877 → 0.886 (essentially flat)
 #
-# The full run completed in 46 minutes. Mean reward rose from **0.738 to
-# 1.174** (maximum 1.30). Rhyme score rose from **0.475 to 0.908**, answers
-# above the rhyme threshold rose from **27% to 84%**, and non-rhyming answers
-# fell from **35/128 to 0/128**.
+# That last line is the one that matters. Relevance held steady while rhyme 
+# climbed, which is the evidence that the model learned to rhyme *in addition 
+# to* answering the question as intended.
+# ## A note on what went wrong (and how it recovered)
 #
-# Most importantly, relevance held steady (**0.877 to 0.886**) while rhyme
-# improved. That is the evidence that the model learned to rhyme *in
-# addition to* answering the question. The agent also confirmed that every
-# Modal app stopped after final checkpoint synchronization.
-# ## Debugging lessons
-#
-# The complete trace includes mistakes as well as the successful run:
-#
-# - A launch was accidentally backgrounded twice and its process group was
-#   torn down.
-# - A build-time Hugging Face download polluted
-#   `/root/.cache/huggingface`, so Modal could not mount the shared model
-#   cache there. The fixed image downloads through a scratch cache and
-#   removes the mount-point contents before startup.
-# - A CPU verification app crash-looped because it imported a local-only
-#   module that was unavailable in the container. Reading the logs revealed
-#   that this was failure, not slow progress.
-#
-# In each case, the next useful action came from checking run state and logs,
-# not from waiting longer. Agent-driven training is a lifecycle rather than
-# a single code-generation step: the agent must distinguish startup from a
-# crash loop, verify rewards on real traces, clean up failed apps, and change
-# course when observability contradicts its assumptions.
-#
-# One caveat remains: this scorer measures rhyme, not poetic quality.
-# Awkward filler can still score well. A production objective could add an
-# LLM judge or a separate fluency reward, followed by the same prove, smoke,
-# and promotion process.
+# The real trace wasn't clean, and that's the point. A launch got accidentally 
+# backgrounded and torn down; a build-time download polluted the Hugging Face 
+# cache and blocked Modal from mounting the shared model volume; a verification 
+# app crash-looped on a missing local-only import. In each case the fix came 
+# from reading run state, logs, and traces. That's the whole shape of agent-driven 
+# training: tell startup apart from a crash loop, verify rewards on real traces, 
+# and change course when the observability contradicts its assumptions.
 
 import modal
 
@@ -380,76 +356,27 @@ def _main_impl() -> None:
             "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
         ) from e
 
-    # ## The agent owns the training loop
+    # ## How it ran and monitored the loop
     #
-    # Writing the configuration is only the beginning. The repository's
-    # `agent-driven-training` skill has the agent own four stages:
+    # Writing the config is only the start. From here the agent, following 
+    # the repository's `agent-driven-training` skill, ran the job as a 
+    # lifecycle, scaling up only as each stage checked out:
     #
-    # 1. **Configure and preflight.** Implement the dataset and reward, then test
-    #    formatting and adversarial reward cases locally.
-    # 2. **Prove one step.** Launch a fresh one-rollout job. Advance only when it
-    #    records a nonempty reward, completes without a traceback, and produces
-    #    sensible traces.
-    # 3. **Smoke test.** Run about ten steps with the same topology. Check step
-    #    timing, reward spread, and whether the policy is exploiting the scorer.
-    # 4. **Promote.** Start a fresh full run only after the smoke test is healthy.
-    #    Continue monitoring and stop early if the reward becomes flat,
-    #    suspicious, or unstable.
+    # 1. **Preflight** locally (dataset formatting, adversarial reward cases) 
+    # before any GPU time.
+    # 2. **Prove one step** with a single rollout.
+    # 3. **Smoke test** at ~10 steps.
+    # 4. **Promote** to the full run.
     #
-    # Modal supplies remote GPU workers, image builds, networking, and
-    # persistent volumes. Training Gym handles cluster bring-up, checkpointing,
-    # and run metadata. The agent chooses the next stage from observed evidence.
-    # ## Watch the agent prove it worked
+    # The agent decides when to advance at each step, based on what it observes 
+    # of the run. After each launch it grabs the run ID and polls the run directly, 
+    # mostly through two commands — `training-gym run get <run-id> --verbose` for 
+    # stage, step, and reward trajectory, and `training-gym run logs <run-id> --follow` 
+    # when something stalls. The CLI also captures sample traces, so before promoting a 
+    # run the agent can read the actual generated prompts and responses and confirm the 
+    # reward isn't being gamed.
     #
-    # After each launch, the agent records the new training run ID and monitors
-    # that run directly. It does not treat a live launcher process—or a quiet
-    # terminal during model startup—as proof that training is healthy.
-    #
-    # If the run ID is not visible in the launch output, list recent runs:
-    #
-    # ```bash
-    # training-gym run list --since 1h
-    # ```
-    #
-    # Poll the run summary throughout startup and training:
-    #
-    # ```bash
-    # training-gym run get <run-id> --verbose
-    # ```
-    #
-    # This reports the current stage and step, latest reward, reward trajectory,
-    # rollout timing, Modal app ID, and terminal status. For an automated
-    # monitor, the agent uses `--json` and treats an empty response or CLI error
-    # as an observability failure—not as a training event.
-    #
-    # When progress stops or an error appears, stream the run logs:
-    #
-    # ```bash
-    # training-gym run logs <run-id> --follow
-    # ```
-    #
-    # The recipe captures sample traces so the agent can inspect generated
-    # answers and reward execution before promotion:
-    #
-    # ```bash
-    # training-gym run trace <run-id> --out ./traces --dry-run
-    # training-gym run trace <run-id> --out ./traces --yes
-    # ```
-    #
-    # The same data is available visually with `training-gym open`. The
-    # dashboard shows stage timing, reward distributions, individual rollouts,
-    # and logs. The agent uses both interfaces: the CLI for repeatable monitoring
-    # and the dashboard for quickly spotting collapsed rewards, slow phases, or
-    # suspicious high-scoring samples.
-    # ## Prove one step
-    #
-    # This tutorial defaults to the cheapest meaningful stage: one rollout.
-    # It still starts the full Qwen3-4B cluster, so model and worker startup can
-    # take several minutes.
-    #
-    # After the proof passes, change `num_rollout` to 10 for a fresh smoke test.
-    # Promote to the full horizon only after checking reward spread and rollout
-    # traces.
+    # Kicking off the first, cheapest stage is a single call:
 
     training_run = build_config(num_rollout=1, n_rows=512, save_interval=1)
     train_result = training_run.train()
