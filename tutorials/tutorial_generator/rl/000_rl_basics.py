@@ -8,7 +8,7 @@ TUTORIAL_METADATA = {
     "order": 10,
     "api_classes": [
         "Qwen3_5_4B",
-        "CustomDeployment",
+        "Endpoint",
         "TrainConfig",
         "SlimeRecipe",
         "TrainResult",
@@ -84,11 +84,12 @@ def _imports():
     import re
 
     from modal_training_gym import (
-        CustomDeployment,
+        Endpoint,
         HuggingFaceDataset,
         Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
+        convert_checkpoint_to_hf,
         list_checkpoints,
     )
 
@@ -104,22 +105,19 @@ def _serve_base_intro():
     The training gym has several config classes so you can define deployment, training, and evaluation configurations,
     and reuse them across different runs for parameter sweeps.
 
-    Let's start by launching a `CustomDeployment`.
-
-    Calling `CustomDeployment.launch()` builds and deploys an SGLang app, then
-    returns a `CustomDeployment` with the endpoint URL. Pass
+    `Endpoint.launch` provisions a Modal endpoint that serves Qwen3.5-4B
+    behind an OpenAI-compatible Chat Completions API. Pass
     `unauthenticated=True` so the endpoint is reachable without Modal
-    proxy-auth tokens.
+    proxy-auth tokens. `launch` returns once the endpoint has a URL;
+    `wait_until_ready` waits until it can serve.
     """
 
 
 @code
 def _serve_base_model():
     base_model = Qwen3_5_4B()
-    base_model_deployment = CustomDeployment.launch(
-        base_model,
-        unauthenticated=True,
-    )
+    base_model_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_model_deployment.wait_until_ready(timeout_sec=15 * 60)
     print(f"Base model deployed to {base_model_deployment.url}")
 
 @notebook_only
@@ -132,10 +130,11 @@ def _qualitative_eval_of_base_model():
 @notebook_only
 @code
 def _qualitative_eval_of_base_model_code():
-    response = base_model_deployment.generate(
-        "Write a haiku about cat.",
-        chat_template_kwargs={"enable_thinking": False},
+    msg = base_model_deployment.chat(
+        [{"role": "user", "content": "Write a haiku about cat."}],
+        extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
     )
+    response = msg.get("content") or ""
     print(response)
 
 
@@ -195,10 +194,11 @@ def _score_haiku():
 @notebook_only
 @code
 def _score_haiku_demo():
-    response = base_model_deployment.generate(
-        "Write a haiku about cat.",
-        chat_template_kwargs={"enable_thinking": False},
+    msg = base_model_deployment.chat(
+        [{"role": "user", "content": "Write a haiku about cat."}],
+        extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
     )
+    response = msg.get("content") or ""
     print(response)
     print(f"Score: {score_haiku(response)}")
 
@@ -269,17 +269,16 @@ def _eval_base_model():
     def run_eval(deployment, *, max_concurrency: int = 2) -> float:
         from concurrent.futures import ThreadPoolExecutor
 
-        deployment.wait_until_ready(timeout=3000)
+        deployment.wait_until_ready(timeout_sec=15 * 60)
 
         def _score_one(example):
             topic = str(example[eval_dataset.input_column])
             prompt = eval_dataset.prompt_template.format(input=topic)
-            response = deployment.generate(
-                prompt,
-                ensure_ready=False,
-                chat_template_kwargs={"enable_thinking": False},
+            msg = deployment.chat(
+                [{"role": "user", "content": prompt}],
+                extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
             )
-            return score_haiku(response)
+            return score_haiku(msg.get("content") or "")
 
         with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
             scores = list(executor.map(_score_one, eval_dataset.load()))
@@ -359,24 +358,21 @@ def _trained_eval_intro():
     ## Serve and evaluate the trained checkpoint
 
     The returned `TrainResult` has the checkpoint path and volume
-    metadata attached. You can pass an explicit `checkpoint=` to
-    `CustomDeployment.launch()` to pin a specific checkpoint, or omit it to use
-    the model's default path.
+    metadata attached. Endpoints require Hugging Face weights, so convert
+    the Megatron checkpoint first, then pass it to `Endpoint.launch`.
     """
 
 
 @code
 def _serve_and_eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(checkpoint.path)
+    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
+    print(hf_checkpoint.path)
 
-    trained_model_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-5-4b-haiku-serve",
-        served_model_name="qwen3-5-4b-haiku",
-        unauthenticated=True,
+    trained_model_deployment = Endpoint.launch(
+        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
     )
+    trained_model_deployment.wait_until_ready(timeout_sec=15 * 60)
     print(f"Trained model deployed to {trained_model_deployment.url}")
 
 
@@ -451,15 +447,13 @@ def _trained_eval_off_of_a_checkpoint():
 @code
 def _trained_eval_off_of_a_checkpoint_code():
     new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
-    print(new_checkpoint.path)
-    
-    new_model_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=new_checkpoint,
-        app_name="qwen3-5-4b-haiku-serve-new",
-        served_model_name="qwen3-5-4b-haiku",
-        unauthenticated=True,
+    new_hf_checkpoint = convert_checkpoint_to_hf(new_checkpoint, Qwen3_5_4B())
+    print(new_hf_checkpoint.path)
+
+    new_model_deployment = Endpoint.launch(
+        Qwen3_5_4B(), new_hf_checkpoint, unauthenticated=True
     )
+    new_model_deployment.wait_until_ready(timeout_sec=15 * 60)
     print(f"Newly trained model deployed to {new_model_deployment.url}")
 
 @markdown

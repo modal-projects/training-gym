@@ -36,11 +36,12 @@ import importlib.util
 import re
 
 from modal_training_gym import (
-    CustomDeployment,
+    Endpoint,
     HuggingFaceDataset,
     Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
+    convert_checkpoint_to_hf,
     list_checkpoints,
 )
 
@@ -52,12 +53,11 @@ from modal_training_gym import (
 # The training gym has several config classes so you can define deployment, training, and evaluation configurations,
 # and reuse them across different runs for parameter sweeps.
 #
-# Let's start by launching a `CustomDeployment`.
-#
-# Calling `CustomDeployment.launch()` builds and deploys an SGLang app, then
-# returns a `CustomDeployment` with the endpoint URL. Pass
+# `Endpoint.launch` provisions a Modal endpoint that serves Qwen3.5-4B
+# behind an OpenAI-compatible Chat Completions API. Pass
 # `unauthenticated=True` so the endpoint is reachable without Modal
-# proxy-auth tokens.
+# proxy-auth tokens. `launch` returns once the endpoint has a URL;
+# `wait_until_ready` waits until it can serve.
 
 base_model = Qwen3_5_4B()
 
@@ -139,17 +139,16 @@ eval_dataset = HaikuDataset(n_rows=5)
 def run_eval(deployment, *, max_concurrency: int = 2) -> float:
     from concurrent.futures import ThreadPoolExecutor
 
-    deployment.wait_until_ready(timeout=3000)
+    deployment.wait_until_ready(timeout_sec=15 * 60)
 
     def _score_one(example):
         topic = str(example[eval_dataset.input_column])
         prompt = eval_dataset.prompt_template.format(input=topic)
-        response = deployment.generate(
-            prompt,
-            ensure_ready=False,
-            chat_template_kwargs={"enable_thinking": False},
+        msg = deployment.chat(
+            [{"role": "user", "content": prompt}],
+            extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
         )
-        return score_haiku(response)
+        return score_haiku(msg.get("content") or "")
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
         scores = list(executor.map(_score_one, eval_dataset.load()))
@@ -186,10 +185,8 @@ def _main_impl() -> None:
             "Install it before running: uv pip install -q nltk"
         )
 
-    base_model_deployment = CustomDeployment.launch(
-        base_model,
-        unauthenticated=True,
-    )
+    base_model_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_model_deployment.wait_until_ready(timeout_sec=15 * 60)
     print(f"Base model deployed to {base_model_deployment.url}")
 
     train_dataset = HaikuDataset(n_rows=10)
@@ -238,20 +235,17 @@ def _main_impl() -> None:
     # ## Serve and evaluate the trained checkpoint
     #
     # The returned `TrainResult` has the checkpoint path and volume
-    # metadata attached. You can pass an explicit `checkpoint=` to
-    # `CustomDeployment.launch()` to pin a specific checkpoint, or omit it to use
-    # the model's default path.
+    # metadata attached. Endpoints require Hugging Face weights, so convert
+    # the Megatron checkpoint first, then pass it to `Endpoint.launch`.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(checkpoint.path)
+    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
+    print(hf_checkpoint.path)
 
-    trained_model_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-5-4b-haiku-serve",
-        served_model_name="qwen3-5-4b-haiku",
-        unauthenticated=True,
+    trained_model_deployment = Endpoint.launch(
+        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
     )
+    trained_model_deployment.wait_until_ready(timeout_sec=15 * 60)
     print(f"Trained model deployed to {trained_model_deployment.url}")
 
     # ## Evaluate the first checkpoint
@@ -306,15 +300,13 @@ def _main_impl() -> None:
     # Now let's run the same eval on the newly trained model and compare.
 
     new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
-    print(new_checkpoint.path)
+    new_hf_checkpoint = convert_checkpoint_to_hf(new_checkpoint, Qwen3_5_4B())
+    print(new_hf_checkpoint.path)
 
-    new_model_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=new_checkpoint,
-        app_name="qwen3-5-4b-haiku-serve-new",
-        served_model_name="qwen3-5-4b-haiku",
-        unauthenticated=True,
+    new_model_deployment = Endpoint.launch(
+        Qwen3_5_4B(), new_hf_checkpoint, unauthenticated=True
     )
+    new_model_deployment.wait_until_ready(timeout_sec=15 * 60)
     print(f"Newly trained model deployed to {new_model_deployment.url}")
 
     # ## Compare second-run results

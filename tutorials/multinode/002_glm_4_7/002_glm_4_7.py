@@ -33,14 +33,14 @@
 import modal
 
 from modal_training_gym import (
-    CustomDeployment,
+    Endpoint,
     GLM_4_7,
     HuggingFaceDataset,
     TrainConfig,
+    convert_checkpoint_to_hf,
     list_checkpoints,
 )
 from modal_training_gym.train_recipes.slime_recipe import GLM_4_7_Recipe
-from modal_training_gym.deploy_recipes.sglang_recipe import GLM_4_7_SglangRecipe
 
 # ## Dataset
 #
@@ -116,21 +116,18 @@ def _main_impl() -> None:
 
     # ## Serve the trained checkpoint
     #
-    # After training, serve the checkpoint with SGLang for inference.
-    # `GLM_4_7_SglangRecipe` defaults to 8xH200 with TP=8 — enough
-    # to hold the full 355B model in BF16.
+    # After training, convert the Megatron checkpoint to Hugging Face
+    # weights and serve it with `Endpoint.launch`. GLM-4.7 is in the
+    # dedicated Endpoints catalog.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(f"Checkpoint: {checkpoint.path}")
+    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, GLM_4_7())
+    print(f"Checkpoint: {hf_checkpoint.path}")
 
-    deployment = CustomDeployment.launch(
-        GLM_4_7(),
-        checkpoint=checkpoint,
-        recipe=GLM_4_7_SglangRecipe(),
-        app_name="glm-4-7-serve",
-        served_model_name="glm-4-7",
-        unauthenticated=True,
+    deployment = Endpoint.launch(
+        GLM_4_7(), hf_checkpoint, unauthenticated=True
     )
+    deployment.wait_until_ready(timeout_sec=45 * 60)
     print(f"Deployed to {deployment.url}")
 
 @tutorial_cli_app.local_entrypoint()

@@ -33,10 +33,11 @@ import re
 
 from modal_training_gym import (
     DatasetConfig,
-    CustomDeployment,
+    Endpoint,
     Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
+    convert_checkpoint_to_hf,
     list_checkpoints,
 )
 
@@ -241,7 +242,7 @@ async def number_guess_rm(args, sample, **kwargs) -> float:
 # small loop over the eval dataset.
 
 def run_guessing_trajectory(
-    deployment: CustomDeployment,
+    deployment: Endpoint,
     *,
     target: int,
     max_turns: int = _MAX_TURNS,
@@ -249,10 +250,11 @@ def run_guessing_trajectory(
     trace = ""
     for turn in range(max_turns):
         prompt = f"{_PROMPT}\n{trace}".strip()
-        response = deployment.generate(
-            prompt,
-            chat_template_kwargs={"enable_thinking": False},
+        msg = deployment.chat(
+            [{"role": "user", "content": prompt}],
+            extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
         )
+        response = msg.get("content") or ""
         guess = _extract_answer(response)
         if guess is None:
             return {
@@ -278,7 +280,7 @@ def run_guessing_trajectory(
     }
 
 def guessing_eval_fn(
-    deployment: CustomDeployment,
+    deployment: Endpoint,
     example: dict,
 ) -> dict:
     target = int(example["target"])
@@ -320,7 +322,7 @@ def run_eval(
 ) -> tuple[float, list[dict]]:
     from concurrent.futures import ThreadPoolExecutor
 
-    deployment.wait_until_ready(timeout=3000)
+    deployment.wait_until_ready(timeout_sec=15 * 60)
 
     def _score_one(example):
         return guessing_eval_fn(deployment, example)
@@ -347,7 +349,7 @@ def _main_impl() -> None:
 
     # ## Serve and evaluate the base model
 
-    base_deployment = CustomDeployment.launch(
+    base_deployment = Endpoint.launch(
         Qwen3_5_4B(),
         unauthenticated=True,
     )
@@ -422,12 +424,9 @@ def _main_impl() -> None:
     # ## Evaluate trained checkpoint
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-5-4b-guessing-multiturn-serve",
-        served_model_name="qwen3-5-4b-guessing-multiturn",
-        unauthenticated=True,
+    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
+    trained_deployment = Endpoint.launch(
+        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

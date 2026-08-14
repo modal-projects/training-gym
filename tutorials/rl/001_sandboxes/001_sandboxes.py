@@ -27,11 +27,12 @@
 import modal
 
 from modal_training_gym import (
-    CustomDeployment,
+    Endpoint,
     HarborDataset,
     Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
+    convert_checkpoint_to_hf,
     extract_code,
     list_checkpoints,
 )
@@ -123,18 +124,17 @@ base_model = Qwen3_5_4B()
 def run_eval(deployment, *, max_concurrency: int = 2) -> float:
     from concurrent.futures import ThreadPoolExecutor
 
-    deployment.wait_until_ready(timeout=3000)
+    deployment.wait_until_ready(timeout_sec=15 * 60)
 
     def _score_one(example):
         prompt = example["instruction"]
-        response = deployment.generate(
-            prompt,
-            ensure_ready=False,
-            messages=[
+        msg = deployment.chat(
+            [
                 {"role": "system", "content": dataset.system_prompt},
                 {"role": "user", "content": prompt},
             ],
         )
+        response = msg.get("content") or ""
         code = extract_code(response, model=base_model)
         score, _metadata = score_hello_file(code)
         return score
@@ -169,10 +169,7 @@ def _main_impl() -> None:
             "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
         ) from e
 
-    base_deployment = CustomDeployment.launch(
-        base_model,
-        unauthenticated=True,
-    )
+    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
     print(f"Base model URL: {base_deployment.url}")
 
     print("Running base eval...")
@@ -214,12 +211,9 @@ def _main_impl() -> None:
     # ## Evaluate the trained checkpoint
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-5-4b-hello-world-serve",
-        served_model_name="qwen3-5-4b-hello-world",
-        unauthenticated=True,
+    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
+    trained_deployment = Endpoint.launch(
+        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

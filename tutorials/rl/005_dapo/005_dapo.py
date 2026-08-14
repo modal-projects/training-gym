@@ -48,11 +48,12 @@ import re
 from typing import Any
 
 from modal_training_gym import (
-    CustomDeployment,
+    Endpoint,
     HuggingFaceDataset,
     Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
+    convert_checkpoint_to_hf,
     list_checkpoints,
 )
 
@@ -111,15 +112,15 @@ def _check_math(response: str, label: str) -> bool:
         pass
     return pred == gt
 
-def math_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+def math_eval_fn(deployment: Endpoint, example: dict) -> dict:
     prompt = example["prompt"][0]["content"]
     label = example["label"]
 
-    response = deployment.generate(
-        prompt,
-        ensure_ready=False,
-        chat_template_kwargs={"enable_thinking": True},
+    msg = deployment.chat(
+        [{"role": "user", "content": prompt}],
+        extra_parameters={"chat_template_kwargs": {"enable_thinking": True}},
     )
+    response = msg.get("content") or msg.get("reasoning_content") or ""
 
     correct = _check_math(response, label)
     pred = _normalize_answer(_extract_answer(response))
@@ -137,7 +138,7 @@ def run_eval(
 ) -> tuple[float, list[dict]]:
     from concurrent.futures import ThreadPoolExecutor
 
-    deployment.wait_until_ready(timeout=3000)
+    deployment.wait_until_ready(timeout_sec=15 * 60)
 
     def _score_one(example):
         return math_eval_fn(deployment, example)
@@ -207,10 +208,7 @@ def _main_impl() -> None:
     # Let's run the math eval on our base serving model before training.
 
     base_model = Qwen3_5_4B()
-    base_deployment = CustomDeployment.launch(
-        base_model,
-        unauthenticated=True,
-    )
+    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
     print(f"Base model URL: {base_deployment.url}")
 
     print("--- Evaluating base model... ---")
@@ -310,14 +308,11 @@ def _main_impl() -> None:
     # Let's run the same eval on the trained checkpoint.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(f"Checkpoint: {checkpoint.path}")
+    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
+    print(f"Checkpoint: {hf_checkpoint.path}")
 
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-5-4b-dapo-serve",
-        served_model_name="qwen3-5-4b-dapo",
-        unauthenticated=True,
+    trained_deployment = Endpoint.launch(
+        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

@@ -9,7 +9,7 @@ TUTORIAL_METADATA = {
     "order": 30,
     "api_classes": [
         "DatasetConfig",
-        "CustomDeployment",
+        "Endpoint",
         "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
@@ -71,10 +71,11 @@ def _imports():
 
     from modal_training_gym import (
         DatasetConfig,
-        CustomDeployment,
+        Endpoint,
         Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
+        convert_checkpoint_to_hf,
         list_checkpoints,
     )
 
@@ -304,7 +305,7 @@ def _eval_intro():
 @code
 def _eval_helpers():
     def run_guessing_trajectory(
-        deployment: CustomDeployment,
+        deployment: Endpoint,
         *,
         target: int,
         max_turns: int = _MAX_TURNS,
@@ -312,10 +313,11 @@ def _eval_helpers():
         trace = ""
         for turn in range(max_turns):
             prompt = f"{_PROMPT}\n{trace}".strip()
-            response = deployment.generate(
-                prompt,
-                chat_template_kwargs={"enable_thinking": False},
+            msg = deployment.chat(
+                [{"role": "user", "content": prompt}],
+                extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
             )
+            response = msg.get("content") or ""
             guess = _extract_answer(response)
             if guess is None:
                 return {
@@ -341,7 +343,7 @@ def _eval_helpers():
         }
 
     def guessing_eval_fn(
-        deployment: CustomDeployment,
+        deployment: Endpoint,
         example: dict,
     ) -> dict:
         target = int(example["target"])
@@ -383,7 +385,7 @@ def _eval_helpers():
     ) -> tuple[float, list[dict]]:
         from concurrent.futures import ThreadPoolExecutor
 
-        deployment.wait_until_ready(timeout=3000)
+        deployment.wait_until_ready(timeout_sec=15 * 60)
 
         def _score_one(example):
             return guessing_eval_fn(deployment, example)
@@ -403,7 +405,7 @@ def _serve_base_intro():
 
 @code
 def _serve_base():
-    base_deployment = CustomDeployment.launch(
+    base_deployment = Endpoint.launch(
         Qwen3_5_4B(),
         unauthenticated=True,
     )
@@ -494,12 +496,9 @@ def _trained_eval_intro():
 @code
 def _trained_eval():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-5-4b-guessing-multiturn-serve",
-        served_model_name="qwen3-5-4b-guessing-multiturn",
-        unauthenticated=True,
+    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
+    trained_deployment = Endpoint.launch(
+        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

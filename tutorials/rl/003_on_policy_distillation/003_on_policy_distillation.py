@@ -14,7 +14,7 @@
 #
 # 1. **Deploy the teacher** (Qwen3.5-9B) on an SGLang server with `CustomDeployment`.
 # 2. **Load a math dataset** (`dapo-math-17k`) and define a verifiable eval that checks `Answer: \boxed{N}`.
-# 3. **Evaluate the base student** (Qwen3.5-4B) to get a baseline accuracy.
+# 3. **Evaluate the base student** (Qwen3.5-4B) on an `Endpoint` to get a baseline accuracy.
 # 4. **Define a reward function** that calls the teacher's `/generate` endpoint with `return_logprob=True` and combines the teacher log-probs with a math correctness score.
 # 5. **Train with GRPO + OPD** using `SlimeRecipe` — slime applies a per-token reverse KL penalty from the teacher log-probs on top of the GRPO advantage.
 # 6. **Evaluate the trained student** and compare accuracy before vs after.
@@ -58,11 +58,13 @@ import re
 
 from modal_training_gym import (
     CustomDeployment,
+    Endpoint,
     HuggingFaceDataset,
     Qwen3_5_4B,
     Qwen3_5_9B,
     SlimeRecipe,
     TrainConfig,
+    convert_checkpoint_to_hf,
     list_checkpoints,
 )
 from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
@@ -111,15 +113,15 @@ def _check_math(response: str, label: str) -> bool:
         pass
     return pred == gt
 
-def math_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+def math_eval_fn(deployment: Endpoint, example: dict) -> dict:
     prompt = example["prompt"][0]["content"]
     label = example["label"]
 
-    response = deployment.generate(
-        prompt,
-        ensure_ready=False,
-        chat_template_kwargs={"enable_thinking": True},
+    msg = deployment.chat(
+        [{"role": "user", "content": prompt}],
+        extra_parameters={"chat_template_kwargs": {"enable_thinking": True}},
     )
+    response = msg.get("content") or msg.get("reasoning_content") or ""
 
     correct = _check_math(response, label)
     pred = _normalize_answer(_extract_answer(response))
@@ -137,7 +139,7 @@ def run_eval(
 ) -> tuple[float, list[dict]]:
     from concurrent.futures import ThreadPoolExecutor
 
-    deployment.wait_until_ready(timeout=3000)
+    deployment.wait_until_ready(timeout_sec=15 * 60)
 
     def _score_one(example):
         return math_eval_fn(deployment, example)
@@ -247,10 +249,7 @@ def _main_impl() -> None:
     # See [this LoRA adapter for making Qwen3-4B successful at structured output](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora) for an example of adapting a small Qwen model to strict output formats.
 
     base_model = Qwen3_5_4B()
-    base_deployment = CustomDeployment.launch(
-        base_model,
-        unauthenticated=True,
-    )
+    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
     print(f"Student URL: {base_deployment.url}")
 
     print("--- Evaluating base student... ---")
@@ -325,14 +324,11 @@ def _main_impl() -> None:
     # to the baseline evaluation from earlier.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(f"Checkpoint: {checkpoint.path}")
+    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
+    print(f"Checkpoint: {hf_checkpoint.path}")
 
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-5-4b-opd-trained-serve",
-        served_model_name="qwen3-5-4b-opd",
-        unauthenticated=True,
+    trained_deployment = Endpoint.launch(
+        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 

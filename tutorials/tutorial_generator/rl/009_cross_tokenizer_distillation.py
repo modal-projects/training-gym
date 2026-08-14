@@ -10,6 +10,7 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "Qwen3_6_35B",
         "CustomDeployment",
+        "Endpoint",
         "Qwen3_6_35b_Recipe",
         "TrainConfig",
     ],
@@ -73,8 +74,10 @@ def _imports():
 
     from modal_training_gym import (
         CustomDeployment,
+        Endpoint,
         Qwen3_6_35B,
         TrainConfig,
+        convert_checkpoint_to_hf,
         list_checkpoints,
     )
     from modal_training_gym.common.models.base import HFModelConfiguration, ToolCall
@@ -91,7 +94,6 @@ def _imports():
     )
     from modal_training_gym.deploy_recipes.sglang_recipe import (
         DeepSeek_V4_Flash_SglangRecipe,
-        Qwen3_6_35b_SglangRecipe,
     )
     from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_35b_Recipe
 
@@ -365,7 +367,6 @@ def _eval_base():
 
     EVAL_MAX_TURNS = EVAL_TAIL_STEPS * 2
     MAX_CONSECUTIVE_TOOL_ERRORS = 3
-    DEPLOYMENT_READY_TIMEOUT = 1200
 
     def _prompt_token_count(messages, tools=None) -> int:
         try:
@@ -385,19 +386,25 @@ def _eval_base():
         if capped <= 0:
             return {"content": "", "tool_calls": []}
 
-        kwargs = {
+        extra = {
             "temperature": 0.0,
             "max_tokens": capped,
         }
         if tools is not None:
-            kwargs["tools"] = tools
+            extra["tools"] = tools
         if qwen_thinking is not None:
-            kwargs["chat_template_kwargs"] = {"enable_thinking": qwen_thinking}
+            extra["chat_template_kwargs"] = {"enable_thinking": qwen_thinking}
+        if isinstance(deployment, Endpoint):
+            return deployment.chat(
+                messages,
+                max_attempts=max_attempts,
+                extra_parameters=extra,
+            )
         return deployment.chat(
             messages,
             ensure_ready=False,
             max_attempts=max_attempts,
-            **kwargs,
+            **extra,
         )
 
     def _actions_from_message(msg: dict) -> tuple[str, list[ToolCall]]:
@@ -426,7 +433,7 @@ def _eval_base():
 
 @code
 def _eval_function():
-    def bfcl_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+    def bfcl_eval_fn(deployment, example: dict) -> dict:
         label = json.loads(example["label"])
         task_id = label["task_id"]
         N = label["total_steps"]
@@ -434,10 +441,13 @@ def _eval_function():
         K = max(0, N - EVAL_TAIL_STEPS)
         expert_call = flattened_calls[K] if K < len(flattened_calls) else {}
 
-        served = deployment.served_model_name
+        served = getattr(deployment, "served_model_name", None)
         is_student = served != "deepseek-v4-flash"
 
-        deployment.wait_until_ready(timeout=DEPLOYMENT_READY_TIMEOUT)
+        if isinstance(deployment, Endpoint):
+            deployment.wait_until_ready(timeout_sec=15 * 60)
+        else:
+            deployment.wait_until_ready(timeout=30 * 60)
 
         episode = run_bfcl_episode(
             label,
@@ -486,7 +496,10 @@ def _eval_function():
     def run_eval(deployment, *, max_concurrency: int = 4):
         from concurrent.futures import ThreadPoolExecutor
 
-        deployment.wait_until_ready(timeout=3000)
+        if isinstance(deployment, Endpoint):
+            deployment.wait_until_ready(timeout_sec=15 * 60)
+        else:
+            deployment.wait_until_ready(timeout=30 * 60)
 
         def _score_one(example):
             return bfcl_eval_fn(deployment, example)
@@ -515,8 +528,7 @@ def _run_baseline_eval():
             print(f"{'Parsed tool call':<25} {_frac(rows, 'parsed_call'):>10.1%}")
             print(f"{'First-call tool match':<25} {_frac(rows, 'tool_match'):>10.1%}")
 
-    student_recipe = Qwen3_6_35b_SglangRecipe(context_length=SERVED_CONTEXT_LEN)
-    base_deployment = CustomDeployment.launch(base_model, recipe=student_recipe)
+    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
     print(f"Student URL: {base_deployment.url}")
 
     teacher_mean = None
@@ -1188,14 +1200,11 @@ def _eval_trained_intro():
 @code
 def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(f"Checkpoint: {checkpoint.path}")
+    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_6_35B())
+    print(f"Checkpoint: {hf_checkpoint.path}")
 
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_6_35B(),
-        recipe=student_recipe,
-        checkpoint=checkpoint,
-        app_name="qwen3-6-35b-bfcl-trained",
-        served_model_name="qwen3-6-35b-bfcl-trained",
+    trained_deployment = Endpoint.launch(
+        Qwen3_6_35B(), hf_checkpoint, unauthenticated=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 

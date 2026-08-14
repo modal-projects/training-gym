@@ -8,9 +8,8 @@ TUTORIAL_METADATA = {
     "difficulty": "Beginner",
     "order": 10,
     "api_classes": [
-        "CustomDeployment",
+        "Endpoint",
         "Qwen3_5_9B",
-        "SglangRecipe",
     ],
 }
 
@@ -31,7 +30,7 @@ def _intro():
     isolated container with its own filesystem.
 
     What you'll learn:
-    1. Deploy a model with `CustomDeployment` and get an
+    1. Deploy a model with `Endpoint.launch` and get an
        OpenAI-compatible endpoint.
     2. Use the OpenAI Python SDK pointed at your self-hosted
        endpoint (no API key needed).
@@ -81,10 +80,9 @@ def _imports():
     import openai
 
     from modal_training_gym import (
-        CustomDeployment,
+        Endpoint,
         Qwen3_5_9B,
     )
-    from modal_training_gym.deploy_recipes import SglangRecipe
 
 
 @markdown
@@ -168,33 +166,18 @@ def _deploy_section():
     """
     ## Deploy the model
 
-    `CustomDeployment.launch()` launches an sglang-backed inference
-    server on Modal and returns a `CustomDeployment` with a live URL.
-    The server exposes an **OpenAI-compatible** `/v1/chat/completions`
-    endpoint, so we point the standard OpenAI Python SDK at it.
-
-    We pass `extra_server_args={"--tool-call-parser": "qwen3_coder",
-    "--reasoning-parser": "qwen3"}` to the `SglangRecipe` so the server
-    parses Qwen3.5's XML-style tool-call format and strips any inline
-    thinking blocks before returning structured `tool_calls`.
-    Without this, the model emits tool calls as raw text.
+    `Endpoint.launch` provisions a Modal endpoint that serves
+    Qwen3.5-9B behind an OpenAI-compatible Chat Completions API.
+    Point the standard OpenAI Python SDK at that URL.     Dedicated
+    Endpoints already return structured `tool_calls`, so the OpenAI
+    SDK can use them as-is.
     """
 
 
 @code
 def _deploy_model():
-    recipe = SglangRecipe(
-        extra_server_args={
-            "--tool-call-parser": "qwen3_coder",
-            "--reasoning-parser": "qwen3",
-        },
-    )
-    deployment = CustomDeployment.launch(
-        Qwen3_5_9B(),
-        recipe=recipe,
-        unauthenticated=True,
-    )
-    deployment.wait_until_ready()
+    deployment = Endpoint.launch(Qwen3_5_9B(), unauthenticated=True)
+    deployment.wait_until_ready(timeout_sec=15 * 60)
     print(f"Model URL: {deployment.url}")
 
     client = openai.OpenAI(
@@ -285,19 +268,15 @@ def _agent_loop_section():
     We cap iterations at 10 to avoid runaway loops. We also pass
     `enable_thinking=False` in `chat_template_kwargs` so Qwen3.5
     skips its internal chain-of-thought block and responds
-    directly — this keeps tool-call parsing clean.
-
-    That's only a chat-template hint, though, and `--reasoning-parser
-    qwen3` routes any thinking that does slip through into
-    `reasoning_content` instead of `content`. We read `content` first
-    and fall back to `reasoning_content` so a thinking-only turn still
-    prints an answer.
+    directly. Read `content` first and fall back to
+    `reasoning_content` so a thinking-only turn still prints an
+    answer.
     """
 
 
 @code
 def _agent_loop():
-    MODEL = deployment.served_model_name
+    MODEL = deployment.model_name
     MAX_ITERATIONS = 10
 
     messages = [
@@ -326,11 +305,9 @@ def _agent_loop():
         choice = response.choices[0]
 
         if choice.finish_reason == "stop":
-            # `--reasoning-parser qwen3` splits any <think> block out of
-            # `content` and into `reasoning_content`. `enable_thinking=False`
-            # above should keep thinking off entirely, but that's a chat-template
-            # hint the server is free to ignore — fall back so a thinking-only
-            # turn still prints something instead of `None`.
+            # `enable_thinking=False` is a chat-template hint the server
+            # is free to ignore. Fall back to reasoning_content so a
+            # thinking-only turn still prints something instead of None.
             final = choice.message.content or getattr(
                 choice.message, "reasoning_content", None
             )
