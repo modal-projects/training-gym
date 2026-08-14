@@ -32,7 +32,7 @@ from starlette.requests import Request
 
 # Used as endpoint parameter annotations, so — like ``Request`` above — these
 # must resolve from this module's globals.
-from modal_training_gym._lab_routes import lab_obs_mount as _lab_obs_mount
+from modal_training_gym._learning_agent_routes import learning_agent_obs_mount as _learning_agent_obs_mount
 from modal_training_gym.common.advantage_distribution import AdvantageDistribution
 from modal_training_gym.common.config import (
     DASHBOARD_PROXY_AUTH_PATH,
@@ -103,18 +103,18 @@ def _build_image() -> modal.Image:
             "rm -rf /tmp/training-gym",
         )
 
-    # Learning-agent (LAB) observability config, captured from the deploying
+    # Learning-agent observability config, captured from the deploying
     # shell so the container knows which observatory volume to read and where
     # the deep-dive observatory viewer lives. Absent both, the learning routes
     # serve empty data and the nav item stays hidden.
-    from modal_training_gym._lab_routes import (
-        LAB_OBS_URL_ENV_KEY,
-        LAB_OBS_VOLUME_ENV_KEY,
+    from modal_training_gym._learning_agent_routes import (
+        LEARNING_AGENT_OBS_URL_ENV_KEY,
+        LEARNING_AGENT_OBS_VOLUME_ENV_KEY,
     )
 
     lab_env = {
         key: os.environ[key]
-        for key in (LAB_OBS_VOLUME_ENV_KEY, LAB_OBS_URL_ENV_KEY)
+        for key in (LEARNING_AGENT_OBS_VOLUME_ENV_KEY, LEARNING_AGENT_OBS_URL_ENV_KEY)
         if os.environ.get(key)
     }
 
@@ -396,8 +396,8 @@ def reconcile() -> None:
     secrets=_function_secrets(),
     # Learning-agent (LAB) observatory volume, mounted read-through so the
     # /api/learning-runs routes can read run records from the filesystem.
-    # Empty (no mount) when LAB_OBS_VOLUME isn't configured.
-    volumes=_lab_obs_mount(),
+    # Empty (no mount) when LEARNING_AGENT_OBS_VOLUME isn't configured.
+    volumes=_learning_agent_obs_mount(),
 )
 @modal.concurrent(max_inputs=50, target_inputs=20)
 @modal.asgi_app(requires_proxy_auth=dashboard_requires_proxy_auth())
@@ -1183,11 +1183,11 @@ def fastapi_app():
             data = []
         return JSONResponse(data)
 
-    # ── Learning agent (LAB observatory) ─────────────────────────────────
+    # ── Learning agent (learning-agent observatory) ─────────────────────────────────
 
-    from modal_training_gym._lab_routes import register_lab_routes
+    from modal_training_gym._learning_agent_routes import register_learning_agent_routes
 
-    register_lab_routes(web)
+    register_learning_agent_routes(web)
 
     @web.get("/favicon.svg", include_in_schema=False)
     async def favicon():

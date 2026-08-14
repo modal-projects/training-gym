@@ -17,7 +17,7 @@
     fmtGpuHours,
     fmtScore,
     fmtSeconds,
-    labPillStatus,
+    runPillStatus,
   } from "../lib/learning.js";
 
   let { runId, gymRuns = [], onBack = () => {} } = $props();
@@ -292,7 +292,7 @@
   onMount(() => {
     const interval = window.setInterval(() => {
       const state = detail?.status?.state || detail?.index_row?.state;
-      const live = !detail || labPillStatus(state) === "running";
+      const live = !detail || runPillStatus(state) === "running";
       if (live) void load();
       if (live && traceOpen && eventsLoadedOnce && followTail) {
         eventsTotal = detail?.status?.num_events ?? eventsTotal;
@@ -378,13 +378,13 @@
     return fallback;
   }
 
-  let logWindow = $state(readWindowPref("lab-log-window", "480"));
-  let traceWindow = $state(readWindowPref("lab-trace-window", "560"));
+  let logWindow = $state(readWindowPref("learning-log-window", "480"));
+  let traceWindow = $state(readWindowPref("learning-trace-window", "560"));
 
   $effect(() => {
     try {
-      window.localStorage.setItem("lab-log-window", logWindow);
-      window.localStorage.setItem("lab-trace-window", traceWindow);
+      window.localStorage.setItem("learning-log-window", logWindow);
+      window.localStorage.setItem("learning-trace-window", traceWindow);
     } catch {
       // Private mode etc. — preference just doesn't persist.
     }
@@ -604,7 +604,7 @@
       <h2 class="m-0 text-(--text-bright) text-[18px] font-medium [font-family:var(--font-mono)] break-all">
         {row.run_id || runId}
       </h2>
-      <StatusPill status={labPillStatus(runState)} label={runState || null} />
+      <StatusPill status={runPillStatus(runState)} label={runState || null} />
     </header>
 
     <div class="info-band">
@@ -804,7 +804,7 @@
       {#if logOpen}
         {#if !learningLog.length}
           <div class="page-empty">
-            {#if labPillStatus(runState) === "running"}
+            {#if runPillStatus(runState) === "running"}
               No log entries yet — the run is live and this refreshes automatically.
               Agents usually write their first entry after the baseline eval.
             {:else}
@@ -999,7 +999,7 @@
           {/if}
           <div class="text-[12px] text-(--muted)">
             Showing events {eventsOffset}–{eventsOffset + events.length - 1} of {eventsTotal}.
-            {#if labPillStatus(runState) === "running"}New events append automatically while the run is live.{/if}
+            {#if runPillStatus(runState) === "running"}New events append automatically while the run is live.{/if}
           </div>
         {/if}
       {/if}

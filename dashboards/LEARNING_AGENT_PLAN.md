@@ -10,14 +10,14 @@ working as they are today.
 Implemented as planned, deployed to Modal env `lab-dev` as app
 `lab-learning-dashboard`. What exists:
 
-- `modal_training_gym/_lab_routes.py` — `GET /api/learning-runs` +
+- `modal_training_gym/_learning_agent_routes.py` — `GET /api/learning-runs` +
   `GET /api/learning-runs/{run_id}` reading the `lab-observatory` volume.
   One recursive `iterdir` per refresh (VolumeListFiles is rate-limited —
   never list per run), index_row/status cached per file mtime, 15s list TTL.
   Detail response drops `events`/`system_monitor` (~850 KB → ~17 KB) and
   strips `per_question` from results.
-- `_dashboard.py` — two small diffs: `register_lab_routes(web)` and
-  LAB_OBS_VOLUME/LAB_OBS_URL env passthrough into the image.
+- `_dashboard.py` — two small diffs: `register_learning_agent_routes(web)` and
+  LEARNING_AGENT_OBS_VOLUME/LEARNING_AGENT_OBS_URL env passthrough into the image.
 - `common/dashboard.py` — `DASHBOARD_APP_NAME` overridable via
   `TRAINING_GYM_DASHBOARD_APP_NAME` (deploy-time collision avoidance).
 - Frontend — nav item "Learning agent" (FlaskConical), `/learning` list page
@@ -39,7 +39,7 @@ Implemented as planned, deployed to Modal env `lab-dev` as app
 - ATIF export — `GET /api/learning-runs/{run_id}/trajectory[?download=true]`
   converts the full trace to a Harbor ATIF-v1.7 trajectory
   (harborframework.com/docs/agents/trajectory-format) via
-  `modal_training_gym/_lab_atif.py`: assistant events → agent steps
+  `modal_training_gym/_learning_agent_atif.py`: assistant events → agent steps
   (message/reasoning_content/tool_calls/metrics), tool-result user events →
   observations folded onto the calling step (resolved by (session_idx,
   call_id) first — codex resumes reuse item ids across sessions), text user
@@ -61,8 +61,8 @@ Redeploy:
 
     MODAL_ENVIRONMENT=lab-dev \
     TRAINING_GYM_DASHBOARD_APP_NAME=lab-learning-dashboard \
-    LAB_OBS_VOLUME=lab-observatory \
-    LAB_OBS_URL=https://modal-labs-lab-dev--lab-observatory-web.modal.run \
+    LEARNING_AGENT_OBS_VOLUME=lab-observatory \
+    LEARNING_AGENT_OBS_URL=https://modal-labs-lab-dev--lab-observatory-web.modal.run \
     uv run modal deploy dashboards/app.py
 
 ## Fit assessment
@@ -91,8 +91,8 @@ out to the observatory run view for deep dives.
 
 ## Phase 1 — backend (new module, minimal diff to `_dashboard.py`)
 
-1. New file `modal_training_gym/_lab_routes.py`: a FastAPI router that reads
-   the `lab-observatory` volume (name from env `LAB_OBS_VOLUME`, default
+1. New file `modal_training_gym/_learning_agent_routes.py`: a FastAPI router that reads
+   the `lab-observatory` volume (name from env `LEARNING_AGENT_OBS_VOLUME`, default
    `lab-observatory`), mounted read-only in the dashboard app.
    - `GET /api/learning-runs` — list `runs/*/`, return each `record.json`'s
      `index_row` overlaid with `status.json` (that file is tiny and designed

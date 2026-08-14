@@ -211,7 +211,7 @@ export async function fetchRunAdvantages(trainingRunId, { signal } = {}) {
     .sort((a, b) => a.rollout_id - b.rollout_id);
 }
 
-// Learning-agent (LAB) runs, served from the observatory volume. Each row is
+// Learning-agent runs, served from the observatory volume. Each row is
 // the observatory index_row (+ status overlay); empty when no LAB volume is
 // configured on the deployment.
 export async function fetchLearningRuns({ signal } = {}) {

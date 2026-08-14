@@ -7,8 +7,8 @@
     fmtGpuHours,
     fmtScore,
     fmtSeconds,
-    labActionCount,
-    labPillStatus,
+    learningActionCount,
+    runPillStatus,
   } from "../lib/learning.js";
 
   let {
@@ -30,10 +30,10 @@
   );
 
   let runningTotal = $derived(
-    runs.filter((run) => labPillStatus(run.state) === "running").length,
+    runs.filter((run) => runPillStatus(run.state) === "running").length,
   );
   let finishedTotal = $derived(
-    runs.filter((run) => labPillStatus(run.state) === "completed").length,
+    runs.filter((run) => runPillStatus(run.state) === "completed").length,
   );
   let bestScore = $derived.by(() => {
     const scores = runs
@@ -131,7 +131,7 @@
                   </div>
                 </a>
               </td>
-              <td><StatusPill status={labPillStatus(run.state)} label={run.state || null} /></td>
+              <td><StatusPill status={runPillStatus(run.state)} label={run.state || null} /></td>
               <td>{run.task || "—"}</td>
               <td class="[font-family:var(--font-mono)] text-[12px]">{run.scaffold || "—"}</td>
               <td>{run.track || "—"}</td>
@@ -142,7 +142,7 @@
                 {/if}
               </td>
               <td class="[font-variant-numeric:tabular-nums]" class:text-(--muted)={!run.learning_log_entries}>{run.learning_log_entries ?? "—"}</td>
-              <td class="[font-variant-numeric:tabular-nums]">{labActionCount(run) ?? "—"}</td>
+              <td class="[font-variant-numeric:tabular-nums]">{learningActionCount(run) ?? "—"}</td>
               <td class="[font-variant-numeric:tabular-nums]">{fmtGpuHours(run.gpu_hours)}</td>
               <td class="whitespace-nowrap">
                 <TimeAgo timestamp={run.launched_at} showJustNow falsyRepresentation="—" />

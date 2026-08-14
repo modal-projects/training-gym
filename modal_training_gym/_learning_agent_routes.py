@@ -1,6 +1,6 @@
-"""Learning-agent (LAB) observability routes for the dashboard.
+"""Learning-agent observability routes for the dashboard.
 
-Optional add-on: reads the run records that the LAB observatory ingestion
+Optional add-on: reads the run records that the learning-agent observatory ingestion
 pipeline (learning_agent_bench/observatory) writes to its own Modal Volume
 and serves the agent's learning research log alongside the training-gym
 data. Strictly read-only — the observatory pipeline remains the only writer.
@@ -10,7 +10,7 @@ Volume layout read here (documented in observatory/DESIGN.md):
     runs/<run_id>/record.json   # full run record; index_row + scores.learning_log
     runs/<run_id>/status.json   # tiny {state, updated_at, num_events, ...}
 
-The volume is MOUNTED on the dashboard function (see ``lab_obs_mount()`` and
+The volume is MOUNTED on the dashboard function (see ``learning_agent_obs_mount()`` and
 its use in ``_dashboard.py``) and read through the filesystem with a
 throttled ``Volume.reload()`` — the same pattern the observatory viewer
 uses. Client-API streaming reads (``Volume.read_file``) are deliberately not
@@ -20,8 +20,8 @@ every time. Mounted reads serve a consistent snapshot between reloads.
 
 Configuration comes from env vars captured into the image at deploy time:
 
-    LAB_OBS_VOLUME  observatory volume name; unset disables the whole feature
-    LAB_OBS_URL     deployed observatory base URL, used for deep-dive links
+    LEARNING_AGENT_OBS_VOLUME  observatory volume name; unset disables the whole feature
+    LEARNING_AGENT_OBS_URL     deployed observatory base URL, used for deep-dive links
 
 Every route degrades to empty data when the mount is absent, so upstream
 deployments without a LAB volume are unaffected.
@@ -39,12 +39,12 @@ from typing import Any
 
 import modal
 
-LAB_OBS_VOLUME_ENV_KEY = "LAB_OBS_VOLUME"
-LAB_OBS_URL_ENV_KEY = "LAB_OBS_URL"
+LEARNING_AGENT_OBS_VOLUME_ENV_KEY = "LEARNING_AGENT_OBS_VOLUME"
+LEARNING_AGENT_OBS_URL_ENV_KEY = "LEARNING_AGENT_OBS_URL"
 
-LAB_OBS_MOUNT_PATH = "/lab_obs"
+LEARNING_AGENT_OBS_MOUNT_PATH = "/lab_obs"
 # Local-dev override (e.g. a stub server pointing at a directory of runs).
-LAB_OBS_MOUNT_PATH_ENV_KEY = "LAB_OBS_MOUNT_PATH"
+LEARNING_AGENT_OBS_MOUNT_PATH_ENV_KEY = "LEARNING_AGENT_OBS_MOUNT_PATH"
 
 # Same charset the observatory viewer enforces for run ids.
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -66,32 +66,32 @@ _EVENTS_DEFAULT_LIMIT = 100
 _EVENTS_MAX_LIMIT = 500
 
 
-def lab_obs_volume_name() -> str:
-    return os.environ.get(LAB_OBS_VOLUME_ENV_KEY, "")
+def learning_agent_obs_volume_name() -> str:
+    return os.environ.get(LEARNING_AGENT_OBS_VOLUME_ENV_KEY, "")
 
 
-def lab_obs_enabled() -> bool:
-    return bool(lab_obs_volume_name())
+def learning_agent_obs_enabled() -> bool:
+    return bool(learning_agent_obs_volume_name())
 
 
-def lab_obs_mount() -> dict[str, modal.Volume]:
+def learning_agent_obs_mount() -> dict[str, modal.Volume]:
     """Volume mount for the dashboard function; empty when not configured."""
-    if not lab_obs_enabled():
+    if not learning_agent_obs_enabled():
         return {}
-    return {LAB_OBS_MOUNT_PATH: modal.Volume.from_name(lab_obs_volume_name())}
+    return {LEARNING_AGENT_OBS_MOUNT_PATH: modal.Volume.from_name(learning_agent_obs_volume_name())}
 
 
-def lab_obs_url() -> str:
-    return os.environ.get(LAB_OBS_URL_ENV_KEY, "").rstrip("/")
+def learning_agent_obs_url() -> str:
+    return os.environ.get(LEARNING_AGENT_OBS_URL_ENV_KEY, "").rstrip("/")
 
 
 def _obs_run_url(run_id: str) -> str | None:
-    base = lab_obs_url()
+    base = learning_agent_obs_url()
     return f"{base}/run?id={run_id}" if base else None
 
 
 def _runs_root() -> Path:
-    return Path(os.environ.get(LAB_OBS_MOUNT_PATH_ENV_KEY, LAB_OBS_MOUNT_PATH)) / "runs"
+    return Path(os.environ.get(LEARNING_AGENT_OBS_MOUNT_PATH_ENV_KEY, LEARNING_AGENT_OBS_MOUNT_PATH)) / "runs"
 
 
 def _read_json_file(path: Path) -> Any | None:
@@ -119,7 +119,7 @@ def _apply_staleness(row: dict[str, Any]) -> None:
         row["state"] = "stale"
 
 
-class LabRunStore:
+class LearningAgentRunStore:
     """Read-side cache over the mounted observatory volume.
 
     Index rows and status blobs are cached per file mtime, so a refresh
@@ -151,14 +151,14 @@ class LabRunStore:
 
         No-op outside a Modal container (local dev reads a plain directory).
         """
-        if not lab_obs_enabled() or not os.environ.get("MODAL_IS_REMOTE"):
+        if not learning_agent_obs_enabled() or not os.environ.get("MODAL_IS_REMOTE"):
             return
         now = time.monotonic()
         if now - self._last_reload < _RELOAD_EVERY_SECONDS:
             return
         self._last_reload = now
         try:
-            modal.Volume.from_name(lab_obs_volume_name()).reload()
+            modal.Volume.from_name(learning_agent_obs_volume_name()).reload()
         except Exception:
             pass
 
@@ -404,7 +404,7 @@ class LabRunStore:
         return loaded[1].get(path)
 
     def get_trajectory(self, run_id: str) -> dict[str, Any] | None:
-        """The full trace as a Harbor ATIF-v1.7 trajectory (see _lab_atif)."""
+        """The full trace as a Harbor ATIF-v1.7 trajectory (see _learning_agent_atif)."""
         if not _RUN_ID_RE.match(run_id):
             return None
         self._maybe_reload()
@@ -415,13 +415,13 @@ class LabRunStore:
         if not isinstance(record, dict):
             return None
 
-        from modal_training_gym._lab_atif import events_to_atif
+        from modal_training_gym._learning_agent_atif import events_to_atif
 
         raw = record.get("events")
         return events_to_atif(record, raw if isinstance(raw, list) else [])
 
 
-def register_lab_routes(web: Any) -> None:
+def register_learning_agent_routes(web: Any) -> None:
     """Attach the learning-agent routes to the dashboard FastAPI app.
 
     Called from ``fastapi_app()`` in ``_dashboard.py``. The routes inherit
@@ -431,7 +431,7 @@ def register_lab_routes(web: Any) -> None:
     """
     from fastapi import HTTPException
 
-    store = LabRunStore()
+    store = LearningAgentRunStore()
 
     @web.get("/api/learning-runs")
     async def learning_runs() -> list[dict[str, Any]]:

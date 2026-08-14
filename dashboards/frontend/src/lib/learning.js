@@ -1,9 +1,9 @@
-// Helpers shared by the learning-agent (LAB) pages.
+// Helpers shared by the learning-agent pages.
 
 // Observatory run states → StatusPill variants. The observatory uses
 // running / finished / failed (plus stale variants); anything unknown
 // renders as a live run.
-export function labPillStatus(state) {
+export function runPillStatus(state) {
   const s = String(state || "").toLowerCase();
   if (s === "finished" || s === "done" || s === "completed") return "completed";
   if (s === "failed" || s === "error") return "failed";
@@ -29,7 +29,7 @@ export function fmtSeconds(s) {
 }
 
 // Total classified learning-tool uses from index_row.learning_counts.
-export function labActionCount(run) {
+export function learningActionCount(run) {
   const counts = run?.learning_counts;
   if (!counts || typeof counts !== "object") return null;
   return Object.values(counts).reduce(
