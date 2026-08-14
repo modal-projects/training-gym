@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent Docs · Introduction</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a>
+    <a href="/docs" aria-current="page" style="font-weight:600;">docs</a>
+    <a href="/tools">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="docs-shell">
+<nav id="docs-nav"></nav>
+<main class="docs-page">
+  <h1>The Learning Agent</h1>
+  <p class="lede">The learning agent bench measures whether an agent can run the full applied-ML loop — build
+  training data, train a model, evaluate it, and iterate — well enough to make a small model
+  answer expert questions in a domain neither model has seen. There is no verifiable reward
+  and no human in the loop.</p>
+
+  <h2 id="objective">Objective</h2>
+  <p>A <em>learning agent</em> (a frontier model driving a CLI coding harness) receives a
+  domain corpus and a frozen <em>student</em> model. Within a fixed wall-clock budget it must
+  produce a fine-tune of the student, plus the inference harness the student answers through.
+  The goal is the highest possible score on held-out expert questions about the corpus.</p>
+  <p>The agent controls every step of the loop:</p>
+  <ol>
+    <li>Training-data construction.</li>
+    <li>Training method and hyperparameters.</li>
+    <li>Its own development evaluation.</li>
+    <li>The answering system.</li>
+  </ol>
+  <p>Nothing is delegated and nothing is graded by unit tests. Answers are scored by a pinned
+  LLM rubric judge.</p>
+  <p>The reported number is the <strong>margin</strong>: the trained student's held-out score
+  minus the untrained student's score through a fixed reference harness, both judged
+  identically. Gains that do not transfer to unseen questions do not raise the margin.</p>
+
+  <h2 id="actors">The three actors</h2>
+  <div class="tblwrap"><table>
+    <tr><th>actor</th><th>what it is</th><th>what it holds</th></tr>
+    <tr><td><strong>Learning agent</strong></td>
+        <td>a frontier model (Claude, GPT, GLM, Kimi, …) in a CLI harness (Codex CLI,
+            Claude Code, OpenCode), launched in an isolated copy of this repository</td>
+        <td>the workspace: corpus, the learning toolbox, trainers, its own dev evaluation
+            data. The agent may rewrite anything in the workspace.</td></tr>
+    <tr><td><strong>Student</strong></td>
+        <td>the small model being taught — pinned in <code>bench/config.yaml</code>
+            (<code>global.base_model</code>, currently Qwen3.5-9B)</td>
+        <td>nothing. Every model that answers at evaluation time must be the student or a
+            fine-tune of it; no external LLM API may sit in the answer path.</td></tr>
+    <tr><td><strong>Operator</strong></td>
+        <td>the human (or automation) that launches runs and scores submissions</td>
+        <td>the held-out questions and gold (physically absent from every workspace), the
+            pinned judge, and the submission contract.</td></tr>
+  </table></div>
+
+  <h2 id="contract">The submission contract</h2>
+  <p>When the budget ends, the workspace is the submission. The operator runs, from
+  the workspace root, exactly:</p>
+  <pre><code>python submission/eval.py --input questions.json --output answers.json</code></pre>
+  <p>The contract:</p>
+  <ol>
+    <li>Input is a JSON array of <code>{"id", "question"}</code>.</li>
+    <li>Output is a JSON object <code>{id: answer}</code> covering every input id.</li>
+    <li>The command must run unattended. If it does not, there is nothing to score.</li>
+    <li>The agent's <code>eval.py</code> must handle its own serving (typically the merged
+        weights on the shared Modal volume).</li>
+    <li>It may implement any retrieval or prompting, subject to the answer-path rules
+        above: only the student or a fine-tune of it may produce answers.</li>
+  </ol>
+
+  <h2 id="ladder">The autonomy ladder</h2>
+  <p>Every run is launched on one of three tracks. The set of tracks is called the
+  "autonomy ladder": the axis along which each track gives the agent less input than the
+  one before. Held-out scoring is identical on every track, so a score difference between
+  tracks measures exactly the value of the input that was removed.</p>
+  <ol>
+    <li><code>easy</code>: the corpus and graded dev questions are given.</li>
+    <li><code>medium</code>: the corpus only. The agent must write the dev questions and
+        gold answers it uses to guide its own development.</li>
+    <li><code>hard</code>: a one-page brief naming primary sources. The agent must acquire
+        and normalize the corpus itself.</li>
+  </ol>
+  <p>Details in <a href="/docs/tasks">Tasks &amp; Tracks</a>.</p>
+
+  <h2 id="thesis">Why "learning as tools"</h2>
+  <p>The agent acts through ordinary shell commands over a versioned
+  <a href="/docs/toolbox">learning toolbox</a>: method cards for making training data,
+  pinned training packages, evaluation and serving tools. A tool is a self-describing
+  Python file (its docstring and <code>--help</code> are its documentation). Every action
+  is a traced command, so a completed run can be reconstructed as an exact sequence of
+  steps. Writing a new tool is permitted and is itself a measured behavior.
+  The agent may edit the toolbox. It may not edit the measurement components
+  (<a href="/docs/integrity">pins, judge, held-out data</a>).</p>
+
+  <h2 id="map">Reading these docs</h2>
+  <ul>
+    <li><a href="/docs/workflow">The Workflow</a> — one run end to end, with the agent's loop and the workspace contents.</li>
+    <li><a href="/docs/tasks">Tasks &amp; Tracks</a> — the domains, per-task configuration, and what each track withholds.</li>
+    <li><a href="/docs/agent">The Learning Agent</a> — harnesses, scaffolds, endpoints, prompt assembly, budget mechanics.</li>
+    <li><a href="/docs/toolbox">The Learning Toolbox</a> — the tool contract, categories, method cards, and tool invention.</li>
+    <li><a href="/docs/training">Training Pipeline</a> — row formats, the SFT and RL paths, exact configurations, artifact locations.</li>
+    <li><a href="/docs/eval">Evaluation &amp; Scoring</a> — the fixed reference harness, the rubric judge, margins, calibration.</li>
+    <li><a href="/docs/integrity">Integrity Model</a> — pins, sandboxing, audits, and what keeps numbers comparable.</li>
+    <li><a href="/docs/runs">Runs &amp; Observability</a> — runners, storage layout, the run record, and this dashboard.</li>
+  </ul>
+</main>
+</div>
+<script src="/assets/docs.js"></script>
+</body>
+</html>

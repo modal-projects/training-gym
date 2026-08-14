@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent Docs · Tasks &amp; Tracks</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a><a href="/docs" style="font-weight:600;">docs</a><a href="/tools">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="docs-shell">
+<nav id="docs-nav"></nav>
+<main class="docs-page">
+  <h1>Tasks &amp; Tracks</h1>
+  <p class="lede">A task is a domain corpus plus a question set and an answer format. A track
+  sets how much of that the agent is given at launch. A task exists if and only if
+  <code>tasks/&lt;task&gt;/task.yaml</code> exists. That file is the single per-task
+  configuration read by the bench CLI, the judge, the integrity pins, and the runners.</p>
+
+  <h2 id="registered">Registered tasks</h2>
+  <div class="tblwrap"><table>
+    <tr><th>task</th><th>archetype</th><th>corpus</th><th>student answers as</th><th>secondary metric</th></tr>
+    <tr><td class="mono">fav2</td><td class="mono">qa</td>
+        <td>SEC EDGAR snapshot: 2,415 filings, 41 issuers, 2023–2026
+            (<code>edgar-20260708-norm1</code>)</td>
+        <td>buy-side analyst prose</td>
+        <td class="mono">edgar_ref_grounding</td></tr>
+    <tr><td class="mono">openclaw</td><td class="mono">qa</td>
+        <td>OpenClaw TypeScript framework at commit <code>da228660</code></td>
+        <td>TypeScript + explanation</td>
+        <td class="mono">ts_symbol_grounding</td></tr>
+    <tr><td class="mono">maud</td><td class="mono">qa</td>
+        <td>Atticus MAUD v1: all 152 public-target merger agreements
+            (CC-BY-4.0, <code>maud-M-095c61b5ecdb</code>)</td>
+        <td>legal prose</td>
+        <td class="mono">none</td></tr>
+        <tr><td class="mono">alfworld</td><td class="mono">agentic</td>
+        <td>ALFWorld household environments (<code>alfworld==0.4.2</code>)</td>
+        <td>native tool calls, 40-step episodes</td>
+        <td class="mono">—</td></tr>
+    <tr><td class="mono">tau2_airline</td><td class="mono">agentic</td>
+        <td>τ²-bench airline policy + db snapshot (<code>tau2-1901a301-airline</code>)</td>
+        <td>tool calls in a multi-turn conversation</td>
+        <td class="mono">pass^4</td></tr>
+    <tr><td class="mono">tau2_retail</td><td class="mono">agentic</td>
+        <td>τ²-bench retail policy + db snapshot (<code>tau2-1901a301-retail</code>)</td>
+        <td>tool calls in a multi-turn conversation</td>
+        <td class="mono">pass^4</td></tr>
+    <tr><td class="mono">tau2_telecom</td><td class="mono">agentic</td>
+        <td>τ²-bench telecom policies, workflow, manual + dbs
+            (<code>tau2-1901a301-telecom</code>)</td>
+        <td>tool calls + customer instructions (dual-control)</td>
+        <td class="mono">pass^4</td></tr>
+    <tr><td class="mono">tau2_banking</td><td class="mono">agentic</td>
+        <td>τ²-bench banking knowledge base: 698 documents + account db
+            (<code>tau2-aa74303c-banking_knowledge</code>)</td>
+        <td>grounded answers + account actions via tools</td>
+        <td class="mono">pass^4</td></tr>
+  </table></div>
+  <p>Two archetypes exist. <code>qa</code> tasks are scored through the reference search
+  harness and the rubric judge. <code>agentic</code> tasks are scored through the rollout
+  evaluator (<code>bench.py score</code> dispatches on the archetype field) by the
+  environment's own verifier; no LLM judge is involved in scoring them.</p>
+
+  <h2 id="anatomy">Anatomy of a task</h2>
+  <pre><code>tasks/&lt;task&gt;/
+  task.yaml     # the per-task config: archetype, corpus path + version pin, dev/test
+                #   paths, sys prompt path, file glob, secondary metric, session defaults
+  corpus/       # the domain corpus (gitignored; distributed separately; content
+                #   tree-hash pinned in bench/pins.json)
+  dev.json      # agent-visible on easy: rows of {id, topic, question, gold_answer,
+                #   rubric, evidence} — gold answers plus a weighted rubric
+  test.json     # held-out counterpart of dev.json, same format — physically deleted
+                #   from every workspace
+  sys.txt       # the student's verbatim system prompt at evaluation time
+  task.md       # the task description the agent reads
+  brief.md      # hard-track acquisition manifest: names the primary sources and the
+                #   normalization contract so the corpus can be re-fetched byte-identically
+  ROUNDS.md     # legacy iteration log (pre-2026-08-11 runs; runs/LEARNING_LOG.jsonl
+                #   is the record now)</code></pre>
+
+  <h2 id="tracks">Tracks</h2>
+  <div class="tblwrap"><table>
+    <tr><th>track</th><th>corpus</th><th>dev gold</th><th>the agent must additionally</th></tr>
+    <tr><td class="mono">easy</td><td>seeded</td><td>seeded</td><td>—</td></tr>
+    <tr><td class="mono">medium</td><td>seeded</td><td>withheld</td>
+        <td>author its own dev questions and gold to steer by</td></tr>
+    <tr><td class="mono">hard</td><td>withheld</td><td>withheld</td>
+        <td>acquire and normalize the corpus per <code>brief.md</code>, then everything
+            medium requires</td></tr>
+  </table></div>
+  <p>Track selection happens at launch time through prompt assembly. There is no
+  track-specific code path.</p>
+  <ol>
+    <li>One pinned <code>AGENTS.md</code> template contains a single
+        <code>&lt;MEASURING_YOURSELF&gt;</code> slot.</li>
+    <li>At launch, the slot is filled from the pinned
+        <code>bench/tracks/&lt;track&gt;.md</code> block.</li>
+    <li>On <code>medium</code> and <code>hard</code>, the withheld files are physically
+        absent from the workspace — the same treatment as <code>test.json</code> — so the
+        agent cannot recover them by searching.</li>
+    <li>The assembled prompt never names the track and never mentions that the repository
+        is a copy.</li>
+  </ol>
+
+  <h2 id="floors">Base floors</h2>
+  <p>Each task's margin is computed against a base floor: the score of the untrained
+  student answering through the frozen reference harness
+  (<a href="/docs/eval">Evaluation &amp; Scoring</a>). The floor is scored once per judge
+  configuration and re-judged whenever the operator changes the judge. A submission and
+  its floor must be scored by the same judge; otherwise the margin is not comparable.</p>
+
+  <h2 id="adding">Adding a task</h2>
+  <ol>
+    <li>Create <code>tasks/&lt;task&gt;/</code> with the files above; write
+        <code>task.yaml</code> (a task exists if and only if this file exists).</li>
+    <li>Keep held-out material out of the corpus by construction: build the evaluation
+        file and the corpus as two separate artifacts — see
+        <a href="/docs/integrity">Integrity</a>.</li>
+    <li>Register nothing else: the CLI, pins, and runners discover the task from
+        <code>task.yaml</code>. Then run <code>python bench.py freeze</code> (a new task
+        changes the set of pinned files) and commit the updated pins deliberately.</li>
+  </ol>
+</main>
+</div>
+<script src="/assets/docs.js"></script>
+</body>
+</html>

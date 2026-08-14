@@ -1,0 +1,13 @@
+# fav2 variant: RL-only toolbox. Same corpus/dev/test as fav2 (extends),
+# scored on the same test.json so margins are directly comparable.
+task: fav2_rl
+extends: fav2
+
+toolbox:
+  harnesses: [react_loop]
+  training: [rl]
+
+session:
+  scaffold: codex_glm52
+  track: easy
+  hours: 24

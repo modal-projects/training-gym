@@ -1,0 +1,740 @@
+[
+  {
+    "id": "openclaw_056924e77305",
+    "topic": "cross_session_channel_context_and_session_behavior_requests",
+    "question": "On my OpenClaw setup, one regular person reaches me three ways \u2014 a Telegram DM, a WhatsApp DM, and the web chat widget \u2014 and I happen to know all three are the same individual. Right now I've wired it so all three of those channel accounts route to the same agent, and I'd assumed that's what makes the assistant treat them as one ongoing conversation instead of three strangers. I want to actually confirm what bucket their messages get grouped into before I trust it.\n\nWrite me a repo-local TypeScript script that loads my current OpenClaw configuration and, for each of the supported ways direct messages can be grouped, prints out the grouping bucket this person would fall into on Telegram, on WhatsApp, and on the web widget \u2014 so I can see at a glance which settings actually fold all three together and which keep them apart. While you're at it, also tell me, per setting, whether spinning up a second Telegram bot account would drop that person into the same bucket as my first Telegram bot or a separate one. Please derive the buckets the way OpenClaw itself does internally when it's deciding where to file an incoming DM \u2014 don't reconstruct the bucket strings by hand.",
+    "gold_answer": "```ts\nimport { loadConfig, type DmScope, type OpenClawConfig } from './src/config/config.js';\nimport { resolveAgentRoute } from './src/plugin-sdk/routing.js';\n\ntype LinkedIdentity = {\n  channel: 'telegram' | 'whatsapp' | 'webchat';\n  peerId: string;\n  accountId?: string;\n};\n\nconst linkedHuman: readonly LinkedIdentity[] = [\n  { channel: 'telegram', accountId: 'bot-a', peerId: '12345' },\n  { channel: 'whatsapp', accountId: 'wa-a', peerId: '+15551234567' },\n  { channel: 'webchat', peerId: 'browser-user' },\n];\n\nconst modes: readonly DmScope[] = [\n  'main',\n  'per-peer',\n  'per-channel-peer',\n  'per-account-channel-peer',\n];\n\nconst base = loadConfig();\n\nfunction withMode(mode: DmScope): OpenClawConfig {\n  return {\n    ...base,\n    session: {\n      ...(base.session ?? {}),\n      dmScope: mode,\n      identityLinks: {\n        ...(base.session?.identityLinks ?? {}),\n        audit_user: linkedHuman.map(({ channel, peerId }) => `${channel}:${peerId}`),\n      },\n    },\n  };\n}\n\nfunction resolveSessionKey(cfg: OpenClawConfig, entry: LinkedIdentity): string {\n  return resolveAgentRoute({\n    cfg,\n    channel: entry.channel,\n    accountId: entry.accountId,\n    peer: { kind: 'direct', id: entry.peerId },\n  }).sessionKey;\n}\n\nconst rows = modes.map((mode) => {\n  const cfg = withMode(mode);\n  const telegram = resolveSessionKey(cfg, linkedHuman[0]);\n  const whatsapp = resolveSessionKey(cfg, linkedHuman[1]);\n  const webchat = resolveSessionKey(cfg, linkedHuman[2]);\n  const telegramOtherAccount = resolveAgentRoute({\n    cfg,\n    channel: 'telegram',\n    accountId: 'bot-b',\n    peer: { kind: 'direct', id: linkedHuman[0].peerId },\n  }).sessionKey;\n\n  return {\n    mode,\n    telegram,\n    whatsapp,\n    webchat,\n    telegramOtherAccount,\n    sameAcrossChannels: new Set([telegram, whatsapp, webchat]).size === 1,\n    sameAcrossTelegramAccounts: telegram === telegramOtherAccount,\n  };\n});\n\nconsole.table(rows);\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 38,
+        "statement": "Enumerates the DM grouping axis as session.dmScope and resolves a bucket for ALL FOUR supported modes -- 'main', 'per-peer', 'per-channel-peer', 'per-account-channel-peer' -- NOT the session.scope ('per-sender'/'global') axis and NOT an invented set of mode names. (session.scope is a different setting that does not control these DM buckets.)",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 30,
+        "statement": "Derives every bucket by calling the routing/session-key helper resolveAgentRoute (or buildAgentSessionKey) and reading its sessionKey, passing channel + accountId + a direct peer ({kind:'direct', id}) -- NOT by hand-assembling the key strings, and NOT via resolveSessionKey(scope, ctx, mainKey) (the per-sender/global helper that ignores account and channel).",
+        "span_ids": [
+          "s2",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 22,
+        "statement": "Populates session.identityLinks (mapping the three '<channel>:<peerId>' identities to one canonical peer) on the loaded config so the Telegram/WhatsApp/webchat identities fold into a single bucket in the linked modes -- it does NOT merely read config and assume same-agent routing or matching From-values collapse the three on their own.",
+        "span_ids": [
+          "s2",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 4,
+        "statement": "Prints the resolved bucket for the Telegram, WhatsApp, and web-chat direct peer in every one of the four dmScope modes.",
+        "span_ids": [
+          "s2",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 6,
+        "statement": "Correctly reports that a second Telegram bot account reuses the first account's bucket in every mode EXCEPT per-account-channel-peer (the account segment splits the session only in that one mode).",
+        "span_ids": [
+          "s3"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/config/types.base.ts",
+        "start_line": 6,
+        "end_line": 6,
+        "excerpt": "0006: export type DmScope = \"main\" | \"per-peer\" | \"per-channel-peer\" | \"per-account-channel-peer\";"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/routing/resolve-route.ts",
+        "start_line": 610,
+        "end_line": 681,
+        "excerpt": "0610: export function resolveAgentRoute(input: ResolveAgentRouteInput): ResolvedAgentRoute {\n0611:   const channel = normalizeToken(input.channel);\n0612:   const accountId = normalizeAccountId(input.accountId);\n0613:   const peer = input.peer\n0614:     ? {\n0615:         kind: normalizeChatType(input.peer.kind) ?? input.peer.kind,\n0616:         id: normalizeId(input.peer.id),\n0617:       }\n0618:     : null;\n0619:   const guildId = normalizeId(input.guildId);\n0620:   const teamId = normalizeId(input.teamId);\n0621:   const memberRoleIds = input.memberRoleIds ?? [];\n0622:   const memberRoleIdSet = new Set(memberRoleIds);\n0623:   const dmScope = input.cfg.session?.dmScope ?? \"main\";\n0624:   const identityLinks = input.cfg.session?.identityLinks;\n0625:   const shouldLogDebug = shouldLogVerbose();\n0626:   const parentPeer = input.parentPeer\n0627:     ? {\n0628:         kind: normalizeChatType(input.parentPeer.kind) ?? input.parentPeer.kind,\n0629:         id: normalizeId(input.parentPeer.id),\n0630:       }\n0631:     : null;\n0632: \n0633:   const routeCache =\n0634:     !shouldLogDebug && !identityLinks ? resolveRouteCacheForConfig(input.cfg) : null;\n0635:   const routeCacheKey = routeCache\n0636:     ? buildResolvedRouteCacheKey({\n0637:         channel,\n0638:         accountId,\n0639:         peer,\n0640:         parentPeer,\n0641:         guildId,\n0642:         teamId,\n0643:         memberRoleIds,\n0644:         dmScope,\n0645:       })\n0646:     : \"\";\n0647:   if (routeCache && routeCacheKey) {\n0648:     const cachedRoute = routeCache.get(routeCacheKey);\n0649:     if (cachedRoute) {\n0650:       return { ...cachedRoute };\n0651:     }\n0652:   }\n0653: \n0654:   const bindings = getEvaluatedBindingsForChannelAccount(input.cfg, channel, accountId);\n0655:   const bindingsIndex = getEvaluatedBindingIndexForChannelAccount(input.cfg, channel, accountId);\n0656: \n0657:   const choose = (agentId: string, matchedBy: ResolvedAgentRoute[\"matchedBy\"]) => {\n0658:     const resolvedAgentId = pickFirstExistingAgentId(input.cfg, agentId);\n0659:     const sessionKey = normalizeLowercaseStringOrEmpty(\n0660:       buildAgentSessionKey({\n0661:         agentId: resolvedAgentId,\n0662:         channel,\n0663:         accountId,\n0664:         peer,\n0665:         dmScope,\n0666:         identityLinks,\n0667:       }),\n0668:     );\n0669:     const mainSessionKey = normalizeLowercaseStringOrEmpty(\n0670:       buildAgentMainSessionKey({\n0671:         agentId: resolvedAgentId,\n0672:         mainKey: DEFAULT_MAIN_KEY,\n0673:       }),\n0674:     );\n0675:     const route = {\n0676:       agentId: resolvedAgentId,\n0677:       channel,\n0678:       accountId,\n0679:       sessionKey,\n0680:       mainSessionKey,\n0681:       lastRoutePolicy: deriveLastRoutePolicy({ sessionKey, mainSessionKey }),"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/routing/session-key.ts",
+        "start_line": 140,
+        "end_line": 176,
+        "excerpt": "0140:   const peerKind = params.peerKind ?? \"direct\";\n0141:   if (peerKind === \"direct\") {\n0142:     const dmScope = params.dmScope ?? \"main\";\n0143:     let peerId = (params.peerId ?? \"\").trim();\n0144:     const linkedPeerId =\n0145:       dmScope === \"main\"\n0146:         ? null\n0147:         : resolveLinkedPeerId({\n0148:             identityLinks: params.identityLinks,\n0149:             channel: params.channel,\n0150:             peerId,\n0151:           });\n0152:     if (linkedPeerId) {\n0153:       peerId = linkedPeerId;\n0154:     }\n0155:     peerId = normalizeLowercaseStringOrEmpty(peerId);\n0156:     if (dmScope === \"per-account-channel-peer\" && peerId) {\n0157:       const channel = normalizeLowercaseStringOrEmpty(params.channel) || \"unknown\";\n0158:       const accountId = normalizeAccountId(params.accountId);\n0159:       return `agent:${normalizeAgentId(params.agentId)}:${channel}:${accountId}:direct:${peerId}`;\n0160:     }\n0161:     if (dmScope === \"per-channel-peer\" && peerId) {\n0162:       const channel = normalizeLowercaseStringOrEmpty(params.channel) || \"unknown\";\n0163:       return `agent:${normalizeAgentId(params.agentId)}:${channel}:direct:${peerId}`;\n0164:     }\n0165:     if (dmScope === \"per-peer\" && peerId) {\n0166:       return `agent:${normalizeAgentId(params.agentId)}:direct:${peerId}`;\n0167:     }\n0168:     return buildAgentMainSessionKey({\n0169:       agentId: params.agentId,\n0170:       mainKey: params.mainKey,\n0171:     });\n0172:   }\n0173:   const channel = normalizeLowercaseStringOrEmpty(params.channel) || \"unknown\";\n0174:   const peerId = normalizeLowercaseStringOrEmpty(params.peerId) || \"unknown\";\n0175:   return `agent:${normalizeAgentId(params.agentId)}:${channel}:${peerKind}:${peerId}`;\n0176: }"
+      },
+      {
+        "span_id": "s4",
+        "path": "src/plugin-sdk/routing.ts",
+        "start_line": 1,
+        "end_line": 9,
+        "excerpt": "0001: export {\n0002:   buildAgentSessionKey,\n0003:   deriveLastRoutePolicy,\n0004:   resolveAgentRoute,\n0005:   resolveInboundLastRouteSessionKey,\n0006:   type ResolvedAgentRoute,\n0007:   type RoutePeer,\n0008:   type RoutePeerKind,\n0009: } from \"../routing/resolve-route.js\";"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_092f21c41712",
+    "topic": "memory_core_dreaming_and_promotion_pipeline",
+    "question": "We auto-manage the background memory-consolidation sweep as a single scheduled job, and we let users toggle it on and off and change its cadence/timezone from config. After people upgraded across a few releases, we're getting reports of the consolidation sweep firing two or three times a night for the same workspace, and of stale scheduled entries left over from much older builds that still wake the agent on their own cadence.\n\nI want to write a routine that runs on startup (and periodically) to bring the scheduler back to a known-good state from whatever it finds. Here's the approach I was going to take, and I'd like you to implement it (or correct it if I've got a detail wrong):\n\n- List the current scheduled entries, find the ones we own for the consolidation sweep, and if there's more than one, treat the most recently created one as the live entry (it reflects the user's latest config) and clear out the older stragglers.\n- Re-point that surviving entry at the configured cadence, timezone, and payload, and make sure it's switched on.\n- For the older per-stage leftovers, fold them back into the unified entry so their cadence is preserved under the new model.\n- When a user turns the sweep off in config, flip our managed entry to the disabled state and leave it parked (consistent with how the rest of the scheduler keeps switched-off and exhausted entries around for inspection rather than deleting them), so re-enabling later is cheap and we don't churn the store.\n\nPlease implement this so the end state is deterministic regardless of how many duplicates or leftovers exist. Match the existing code style and add focused tests.",
+    "gold_answer": "```ts\nimport { DEFAULT_MEMORY_DEEP_DREAMING_RECENCY_HALF_LIFE_DAYS } from \"openclaw/plugin-sdk/memory-core-host-status\";\nimport { normalizeLowercaseStringOrEmpty } from \"openclaw/plugin-sdk/text-runtime\";\nimport type { OpenClawPluginApi } from \"openclaw/plugin-sdk/memory-core\";\nimport { formatErrorMessage, normalizeTrimmedString } from \"./dreaming-shared.js\";\nimport type { ShortTermPromotionDreamingConfig } from \"./dreaming.js\";\n\nconst MANAGED_DREAMING_CRON_NAME = \"Memory Dreaming Promotion\";\nconst MANAGED_DREAMING_CRON_TAG = \"[managed-by=memory-core.short-term-promotion]\";\nconst DREAMING_SYSTEM_EVENT_TEXT = \"__openclaw_memory_core_short_term_promotion_dream__\";\nconst LEGACY_LIGHT_SLEEP_CRON_NAME = \"Memory Light Dreaming\";\nconst LEGACY_LIGHT_SLEEP_CRON_TAG = \"[managed-by=memory-core.dreaming.light]\";\nconst LEGACY_LIGHT_SLEEP_EVENT_TEXT = \"__openclaw_memory_core_light_sleep__\";\nconst LEGACY_REM_SLEEP_CRON_NAME = \"Memory REM Dreaming\";\nconst LEGACY_REM_SLEEP_CRON_TAG = \"[managed-by=memory-core.dreaming.rem]\";\nconst LEGACY_REM_SLEEP_EVENT_TEXT = \"__openclaw_memory_core_rem_sleep__\";\n\ntype Logger = Pick<OpenClawPluginApi[\"logger\"], \"info\" | \"warn\" | \"error\">;\n\ntype CronSchedule = { kind: \"cron\"; expr: string; tz?: string };\ntype CronPayload = { kind: \"systemEvent\"; text: string };\ntype ManagedCronJobCreate = {\n  name: string;\n  description: string;\n  enabled: boolean;\n  schedule: CronSchedule;\n  sessionTarget: \"main\";\n  wakeMode: \"now\";\n  payload: CronPayload;\n};\ntype ManagedCronJobPatch = {\n  name?: string;\n  description?: string;\n  enabled?: boolean;\n  schedule?: CronSchedule;\n  sessionTarget?: \"main\";\n  wakeMode?: \"now\";\n  payload?: CronPayload;\n};\ntype ManagedCronJobLike = {\n  id: string;\n  name?: string;\n  description?: string;\n  enabled?: boolean;\n  schedule?: { kind?: string; expr?: string; tz?: string };\n  sessionTarget?: string;\n  wakeMode?: string;\n  payload?: { kind?: string; text?: string };\n  createdAtMs?: number;\n};\ntype CronServiceLike = {\n  list: (opts?: { includeDisabled?: boolean }) => Promise<ManagedCronJobLike[]>;\n  add: (input: ManagedCronJobCreate) => Promise<unknown>;\n  update: (id: string, patch: ManagedCronJobPatch) => Promise<unknown>;\n  remove: (id: string) => Promise<{ removed?: boolean }>;\n};\ntype ReconcileResult =\n  | { status: \"unavailable\"; removed: number }\n  | { status: \"disabled\"; removed: number }\n  | { status: \"added\"; removed: number }\n  | { status: \"updated\"; removed: number }\n  | { status: \"noop\"; removed: number };\ntype LegacyPhaseMigrationMode = \"enabled\" | \"disabled\";\n\nfunction resolveManagedCronDescription(config: ShortTermPromotionDreamingConfig): string {\n  const recencyHalfLifeDays =\n    config.recencyHalfLifeDays ?? DEFAULT_MEMORY_DEEP_DREAMING_RECENCY_HALF_LIFE_DAYS;\n  return `${MANAGED_DREAMING_CRON_TAG} Promote weighted short-term recalls into MEMORY.md (limit=${config.limit}, minScore=${config.minScore.toFixed(3)}, minRecallCount=${config.minRecallCount}, minUniqueQueries=${config.minUniqueQueries}, recencyHalfLifeDays=${recencyHalfLifeDays}, maxAgeDays=${config.maxAgeDays ?? \"none\"}).`;\n}\n\nfunction buildManagedDreamingCronJob(config: ShortTermPromotionDreamingConfig): ManagedCronJobCreate {\n  return {\n    name: MANAGED_DREAMING_CRON_NAME,\n    description: resolveManagedCronDescription(config),\n    enabled: true,\n    schedule: {\n      kind: \"cron\",\n      expr: config.cron,\n      ...(config.timezone ? { tz: config.timezone } : {}),\n    },\n    sessionTarget: \"main\",\n    wakeMode: \"now\",\n    payload: { kind: \"systemEvent\", text: DREAMING_SYSTEM_EVENT_TEXT },\n  };\n}\n\nfunction isManagedDreamingJob(job: ManagedCronJobLike): boolean {\n  const description = normalizeTrimmedString(job.description);\n  if (description?.includes(MANAGED_DREAMING_CRON_TAG)) {\n    return true;\n  }\n  const name = normalizeTrimmedString(job.name);\n  const payloadText = normalizeTrimmedString(job.payload?.text);\n  return name === MANAGED_DREAMING_CRON_NAME && payloadText === DREAMING_SYSTEM_EVENT_TEXT;\n}\n\nfunction isLegacyPhaseDreamingJob(job: ManagedCronJobLike): boolean {\n  const description = normalizeTrimmedString(job.description);\n  if (\n    description?.includes(LEGACY_LIGHT_SLEEP_CRON_TAG) ||\n    description?.includes(LEGACY_REM_SLEEP_CRON_TAG)\n  ) {\n    return true;\n  }\n  const name = normalizeTrimmedString(job.name);\n  const payloadText = normalizeTrimmedString(job.payload?.text);\n  if (name === LEGACY_LIGHT_SLEEP_CRON_NAME && payloadText === LEGACY_LIGHT_SLEEP_EVENT_TEXT) {\n    return true;\n  }\n  return name === LEGACY_REM_SLEEP_CRON_NAME && payloadText === LEGACY_REM_SLEEP_EVENT_TEXT;\n}\n\nfunction compareOptionalStrings(a: string | undefined, b: string | undefined): boolean {\n  return a === b;\n}\n\n// Legacy per-phase (light + REM) jobs are RETIRED, not folded: reconciliation\n// removes them outright in both enabled and disabled modes. The unified entry\n// owns the schedule under the new model; older per-stage cadences are dropped.\nasync function migrateLegacyPhaseDreamingCronJobs(params: {\n  cron: CronServiceLike;\n  legacyJobs: ManagedCronJobLike[];\n  logger: Logger;\n  mode: LegacyPhaseMigrationMode;\n}): Promise<number> {\n  let migrated = 0;\n  for (const job of params.legacyJobs) {\n    try {\n      const result = await params.cron.remove(job.id);\n      if (result.removed === true) {\n        migrated += 1;\n      }\n    } catch (err) {\n      params.logger.warn(\n        `memory-core: failed to migrate legacy phase dreaming cron job ${job.id}: ${formatErrorMessage(err)}`,\n      );\n    }\n  }\n  if (migrated > 0) {\n    if (params.mode === \"enabled\") {\n      params.logger.info(\n        `memory-core: migrated ${migrated} legacy phase dreaming cron job(s) to the unified dreaming controller.`,\n      );\n    } else {\n      params.logger.info(\n        `memory-core: completed legacy phase dreaming cron migration while unified dreaming is disabled (${migrated} job(s) removed).`,\n      );\n    }\n  }\n  return migrated;\n}\n\nfunction buildManagedDreamingPatch(\n  job: ManagedCronJobLike,\n  desired: ManagedCronJobCreate,\n): ManagedCronJobPatch | null {\n  const patch: ManagedCronJobPatch = {};\n\n  if (!compareOptionalStrings(normalizeTrimmedString(job.name), desired.name)) {\n    patch.name = desired.name;\n  }\n  if (!compareOptionalStrings(normalizeTrimmedString(job.description), desired.description)) {\n    patch.description = desired.description;\n  }\n  if (job.enabled !== true) {\n    patch.enabled = true;\n  }\n\n  const scheduleKind = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.schedule?.kind));\n  const scheduleExpr = normalizeTrimmedString(job.schedule?.expr);\n  const scheduleTz = normalizeTrimmedString(job.schedule?.tz);\n  if (\n    scheduleKind !== \"cron\" ||\n    !compareOptionalStrings(scheduleExpr, desired.schedule.expr) ||\n    !compareOptionalStrings(scheduleTz, desired.schedule.tz)\n  ) {\n    patch.schedule = desired.schedule;\n  }\n\n  const sessionTarget = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.sessionTarget));\n  if (sessionTarget !== \"main\") {\n    patch.sessionTarget = \"main\";\n  }\n  const wakeMode = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.wakeMode));\n  if (wakeMode !== \"now\") {\n    patch.wakeMode = \"now\";\n  }\n\n  const payloadKind = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.payload?.kind));\n  const payloadText = normalizeTrimmedString(job.payload?.text);\n  if (payloadKind !== \"systemevent\" || !compareOptionalStrings(payloadText, desired.payload.text)) {\n    patch.payload = desired.payload;\n  }\n\n  return Object.keys(patch).length > 0 ? patch : null;\n}\n\n// Deterministic primary selection: EARLIEST finite createdAtMs wins (missing\n// createdAtMs sorts last via MAX_SAFE_INTEGER), ties broken by lexicographic id.\n// The earliest-created managed job is the survivor; all others are pruned.\nfunction sortManagedJobs(managed: ManagedCronJobLike[]): ManagedCronJobLike[] {\n  return managed.toSorted((a, b) => {\n    const aCreated =\n      typeof a.createdAtMs === \"number\" && Number.isFinite(a.createdAtMs)\n        ? a.createdAtMs\n        : Number.MAX_SAFE_INTEGER;\n    const bCreated =\n      typeof b.createdAtMs === \"number\" && Number.isFinite(b.createdAtMs)\n        ? b.createdAtMs\n        : Number.MAX_SAFE_INTEGER;\n    if (aCreated !== bCreated) {\n      return aCreated - bCreated;\n    }\n    return a.id.localeCompare(b.id);\n  });\n}\n\nexport async function reconcileShortTermDreamingCronJob(params: {\n  cron: CronServiceLike | null;\n  config: ShortTermPromotionDreamingConfig;\n  logger: Logger;\n}): Promise<ReconcileResult> {\n  const cron = params.cron;\n  if (!cron) {\n    return { status: \"unavailable\", removed: 0 };\n  }\n\n  const allJobs = await cron.list({ includeDisabled: true });\n  const managed = allJobs.filter(isManagedDreamingJob);\n  const legacyPhaseJobs = allJobs.filter(isLegacyPhaseDreamingJob);\n\n  if (!params.config.enabled) {\n    // Disabled: retire legacy phase jobs AND remove the managed job(s). We do\n    // not leave a parked/disabled managed entry behind.\n    let removed = await migrateLegacyPhaseDreamingCronJobs({\n      cron,\n      legacyJobs: legacyPhaseJobs,\n      logger: params.logger,\n      mode: \"disabled\",\n    });\n    for (const job of managed) {\n      try {\n        const result = await cron.remove(job.id);\n        if (result.removed === true) {\n          removed += 1;\n        }\n      } catch (err) {\n        params.logger.warn(\n          `memory-core: failed to remove managed dreaming cron job ${job.id}: ${formatErrorMessage(err)}`,\n        );\n      }\n    }\n    if (removed > 0) {\n      params.logger.info(`memory-core: removed ${removed} managed dreaming cron job(s).`);\n    }\n    return { status: \"disabled\", removed };\n  }\n\n  const desired = buildManagedDreamingCronJob(params.config);\n  if (managed.length === 0) {\n    await cron.add(desired);\n    const migratedLegacy = await migrateLegacyPhaseDreamingCronJobs({\n      cron,\n      legacyJobs: legacyPhaseJobs,\n      logger: params.logger,\n      mode: \"enabled\",\n    });\n    params.logger.info(\"memory-core: created managed dreaming cron job.\");\n    return { status: \"added\", removed: migratedLegacy };\n  }\n\n  const [primary, ...duplicates] = sortManagedJobs(managed);\n  let removed = await migrateLegacyPhaseDreamingCronJobs({\n    cron,\n    legacyJobs: legacyPhaseJobs,\n    logger: params.logger,\n    mode: \"enabled\",\n  });\n  for (const duplicate of duplicates) {\n    try {\n      const result = await cron.remove(duplicate.id);\n      if (result.removed === true) {\n        removed += 1;\n      }\n    } catch (err) {\n      params.logger.warn(\n        `memory-core: failed to prune duplicate managed dreaming cron job ${duplicate.id}: ${formatErrorMessage(err)}`,\n      );\n    }\n  }\n\n  const patch = buildManagedDreamingPatch(primary, desired);\n  if (!patch) {\n    if (removed > 0) {\n      params.logger.info(\"memory-core: pruned duplicate managed dreaming cron jobs.\");\n    }\n    return { status: \"noop\", removed };\n  }\n\n  await cron.update(primary.id, patch);\n  params.logger.info(\"memory-core: updated managed dreaming cron job.\");\n  return { status: \"updated\", removed };\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 38,
+        "statement": "When config.enabled is false (sweep turned off), the routine REMOVES the managed dreaming cron job(s) it owns (e.g. cron.remove(job.id) for each managed job) and returns the disabled status. It does NOT leave a disabled/parked managed entry behind by patching enabled:false or by re-adding a disabled job.",
+        "span_ids": [
+          "span_1",
+          "span_4"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 24,
+        "statement": "When more than one managed job exists, it keeps a single deterministic primary chosen as the EARLIEST job by finite createdAtMs (missing/non-finite createdAtMs sorts last), breaking ties by lexicographically smallest id, and removes all the other managed jobs. It does NOT keep the most-recently-created job as the survivor.",
+        "span_ids": [
+          "span_7",
+          "span_8"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 18,
+        "statement": "It REMOVES the legacy per-phase (light + REM) dreaming jobs during reconciliation \u2014 deleting them via the cron service (cron.remove) in BOTH the enabled and the disabled paths. It does NOT fold/convert their cadence into the unified managed entry or keep them as parked/disabled entries.",
+        "span_ids": [
+          "span_2",
+          "span_5"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "When enabled and no managed job exists, it creates exactly one managed job whose schedule uses the configured cron expression and timezone and whose payload is the managed system-event payload (the fixed dreaming system-event text), enabled.",
+        "span_ids": [
+          "span_3",
+          "span_6"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "When a kept managed primary differs from the desired managed job, it updates that primary to the desired enabled state and configured schedule/timezone and managed payload (patching only the drifted fields), rather than leaving it stale.",
+        "span_ids": [
+          "span_3",
+          "span_9",
+          "span_10"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "span_1",
+        "path": "extensions/memory-core/src/dreaming.ts",
+        "start_line": 412,
+        "end_line": 435,
+        "excerpt": "0412:   if (!params.config.enabled) {\n0413:     let removed = await migrateLegacyPhaseDreamingCronJobs({\n0414:       cron,\n0415:       legacyJobs: legacyPhaseJobs,\n0416:       logger: params.logger,\n0417:       mode: \"disabled\",\n0418:     });\n0419:     for (const job of managed) {\n0420:       try {\n0421:         const result = await cron.remove(job.id);\n0422:         if (result.removed === true) {\n0423:           removed += 1;\n0424:         }\n0425:       } catch (err) {\n0426:         params.logger.warn(\n0427:           `memory-core: failed to remove managed dreaming cron job ${job.id}: ${formatErrorMessage(err)}`,\n0428:         );\n0429:       }\n0430:     }\n0431:     if (removed > 0) {\n0432:       params.logger.info(`memory-core: removed ${removed} managed dreaming cron job(s).`);\n0433:     }\n0434:     return { status: \"disabled\", removed };\n0435:   }"
+      },
+      {
+        "span_id": "span_2",
+        "path": "extensions/memory-core/src/dreaming.ts",
+        "start_line": 177,
+        "end_line": 228,
+        "excerpt": "0177: function isLegacyPhaseDreamingJob(job: ManagedCronJobLike): boolean {\n0178:   const description = normalizeTrimmedString(job.description);\n0179:   if (\n0180:     description?.includes(LEGACY_LIGHT_SLEEP_CRON_TAG) ||\n0181:     description?.includes(LEGACY_REM_SLEEP_CRON_TAG)\n0182:   ) {\n0183:     return true;\n0184:   }\n0185:   const name = normalizeTrimmedString(job.name);\n0186:   const payloadText = normalizeTrimmedString(job.payload?.text);\n0187:   if (name === LEGACY_LIGHT_SLEEP_CRON_NAME && payloadText === LEGACY_LIGHT_SLEEP_EVENT_TEXT) {\n0188:     return true;\n0189:   }\n0190:   return name === LEGACY_REM_SLEEP_CRON_NAME && payloadText === LEGACY_REM_SLEEP_EVENT_TEXT;\n0191: }\n0192: \n0193: function compareOptionalStrings(a: string | undefined, b: string | undefined): boolean {\n0194:   return a === b;\n0195: }\n0196: \n0197: async function migrateLegacyPhaseDreamingCronJobs(params: {\n0198:   cron: CronServiceLike;\n0199:   legacyJobs: ManagedCronJobLike[];\n0200:   logger: Logger;\n0201:   mode: LegacyPhaseMigrationMode;\n0202: }): Promise<number> {\n0203:   let migrated = 0;\n0204:   for (const job of params.legacyJobs) {\n0205:     try {\n0206:       const result = await params.cron.remove(job.id);\n0207:       if (result.removed === true) {\n0208:         migrated += 1;\n0209:       }\n0210:     } catch (err) {\n0211:       params.logger.warn(\n0212:         `memory-core: failed to migrate legacy phase dreaming cron job ${job.id}: ${formatErrorMessage(err)}`,\n0213:       );\n0214:     }\n0215:   }\n0216:   if (migrated > 0) {\n0217:     if (params.mode === \"enabled\") {\n0218:       params.logger.info(\n0219:         `memory-core: migrated ${migrated} legacy phase dreaming cron job(s) to the unified dreaming controller.`,\n0220:       );\n0221:     } else {\n0222:       params.logger.info(\n0223:         `memory-core: completed legacy phase dreaming cron migration while unified dreaming is disabled (${migrated} job(s) removed).`,\n0224:       );\n0225:     }\n0226:   }\n0227:   return migrated;\n0228: }"
+      },
+      {
+        "span_id": "span_3",
+        "path": "extensions/memory-core/src/dreaming.ts",
+        "start_line": 146,
+        "end_line": 165,
+        "excerpt": "0146: function buildManagedDreamingCronJob(\n0147:   config: ShortTermPromotionDreamingConfig,\n0148: ): ManagedCronJobCreate {\n0149:   return {\n0150:     name: MANAGED_DREAMING_CRON_NAME,\n0151:     description: resolveManagedCronDescription(config),\n0152:     enabled: true,\n0153:     schedule: {\n0154:       kind: \"cron\",\n0155:       expr: config.cron,\n0156:       ...(config.timezone ? { tz: config.timezone } : {}),\n0157:     },\n0158:     sessionTarget: \"main\",\n0159:     wakeMode: \"now\",\n0160:     payload: {\n0161:       kind: \"systemEvent\",\n0162:       text: DREAMING_SYSTEM_EVENT_TEXT,\n0163:     },\n0164:   };\n0165: }"
+      },
+      {
+        "span_id": "span_4",
+        "path": "extensions/memory-core/src/dreaming.test.ts",
+        "start_line": 503,
+        "end_line": 547,
+        "excerpt": "0503:   it(\"removes managed dreaming jobs when disabled\", async () => {\n0504:     const managedJob: CronJobLike = {\n0505:       id: \"job-managed\",\n0506:       name: constants.MANAGED_DREAMING_CRON_NAME,\n0507:       description: `${constants.MANAGED_DREAMING_CRON_TAG} test`,\n0508:       enabled: true,\n0509:       schedule: { kind: \"cron\", expr: \"0 3 * * *\" },\n0510:       sessionTarget: \"main\",\n0511:       wakeMode: \"now\",\n0512:       payload: { kind: \"systemEvent\", text: constants.DREAMING_SYSTEM_EVENT_TEXT },\n0513:       createdAtMs: 10,\n0514:     };\n0515:     const unmanagedJob: CronJobLike = {\n0516:       id: \"job-other\",\n0517:       name: \"Daily report\",\n0518:       description: \"other\",\n0519:       enabled: true,\n0520:       schedule: { kind: \"cron\", expr: \"0 7 * * *\" },\n0521:       sessionTarget: \"main\",\n0522:       wakeMode: \"next-heartbeat\",\n0523:       payload: { kind: \"systemEvent\", text: \"report\" },\n0524:       createdAtMs: 11,\n0525:     };\n0526:     const harness = createCronHarness([managedJob, unmanagedJob]);\n0527:     const logger = createLogger();\n0528: \n0529:     const result = await reconcileShortTermDreamingCronJob({\n0530:       cron: harness.cron,\n0531:       config: {\n0532:         enabled: false,\n0533:         cron: constants.DEFAULT_DREAMING_CRON_EXPR,\n0534:         limit: constants.DEFAULT_DREAMING_LIMIT,\n0535:         minScore: constants.DEFAULT_DREAMING_MIN_SCORE,\n0536:         minRecallCount: constants.DEFAULT_DREAMING_MIN_RECALL_COUNT,\n0537:         minUniqueQueries: constants.DEFAULT_DREAMING_MIN_UNIQUE_QUERIES,\n0538:         recencyHalfLifeDays: constants.DEFAULT_DREAMING_RECENCY_HALF_LIFE_DAYS,\n0539:         verboseLogging: false,\n0540:       },\n0541:       logger,\n0542:     });\n0543: \n0544:     expect(result).toEqual({ status: \"disabled\", removed: 1 });\n0545:     expect(harness.removeCalls).toEqual([\"job-managed\"]);\n0546:     expect(harness.jobs.map((entry) => entry.id)).toEqual([\"job-other\"]);\n0547:   });"
+      },
+      {
+        "span_id": "span_5",
+        "path": "extensions/memory-core/src/dreaming.test.ts",
+        "start_line": 549,
+        "end_line": 644,
+        "excerpt": "0549:   it(\"migrates legacy light/rem dreaming cron jobs during reconciliation\", async () => {\n0550:     const deepManagedJob: CronJobLike = {\n0551:       id: \"job-deep\",\n0552:       name: constants.MANAGED_DREAMING_CRON_NAME,\n0553:       description: `${constants.MANAGED_DREAMING_CRON_TAG} test`,\n0554:       enabled: true,\n0555:       schedule: { kind: \"cron\", expr: \"0 3 * * *\" },\n0556:       sessionTarget: \"main\",\n0557:       wakeMode: \"now\",\n0558:       payload: { kind: \"systemEvent\", text: constants.DREAMING_SYSTEM_EVENT_TEXT },\n0559:       createdAtMs: 10,\n0560:     };\n0561:     const legacyLightJob: CronJobLike = {\n0562:       id: \"job-light\",\n0563:       name: \"Memory Light Dreaming\",\n0564:       description: \"[managed-by=memory-core.dreaming.light] legacy\",\n0565:       enabled: true,\n0566:       schedule: { kind: \"cron\", expr: \"0 */6 * * *\" },\n0567:       sessionTarget: \"main\",\n0568:       wakeMode: \"next-heartbeat\",\n0569:       payload: { kind: \"systemEvent\", text: \"__openclaw_memory_core_light_sleep__\" },\n0570:       createdAtMs: 8,\n0571:     };\n0572:     const legacyRemJob: CronJobLike = {\n0573:       id: \"job-rem\",\n0574:       name: \"Memory REM Dreaming\",\n0575:       description: \"[managed-by=memory-core.dreaming.rem] legacy\",\n0576:       enabled: true,\n0577:       schedule: { kind: \"cron\", expr: \"0 5 * * 0\" },\n0578:       sessionTarget: \"main\",\n0579:       wakeMode: \"next-heartbeat\",\n0580:       payload: { kind: \"systemEvent\", text: \"__openclaw_memory_core_rem_sleep__\" },\n0581:       createdAtMs: 9,\n0582:     };\n0583:     const harness = createCronHarness([legacyLightJob, legacyRemJob, deepManagedJob]);\n0584:     const logger = createLogger();\n0585: \n0586:     const result = await reconcileShortTermDreamingCronJob({\n0587:       cron: harness.cron,\n0588:       config: {\n0589:         enabled: true,\n0590:         cron: constants.DEFAULT_DREAMING_CRON_EXPR,\n0591:         limit: constants.DEFAULT_DREAMING_LIMIT,\n0592:         minScore: constants.DEFAULT_DREAMING_MIN_SCORE,\n0593:         minRecallCount: constants.DEFAULT_DREAMING_MIN_RECALL_COUNT,\n0594:         minUniqueQueries: constants.DEFAULT_DREAMING_MIN_UNIQUE_QUERIES,\n0595:         recencyHalfLifeDays: constants.DEFAULT_DREAMING_RECENCY_HALF_LIFE_DAYS,\n0596:         verboseLogging: false,\n0597:       },\n0598:       logger,\n0599:     });\n0600: \n0601:     expect(result.status).toBe(\"updated\");\n0602:     expect(result.removed).toBe(2);\n0603:     expect(harness.removeCalls).toEqual([\"job-light\", \"job-rem\"]);\n0604:     expect(logger.info).toHaveBeenCalledWith(\n0605:       \"memory-core: migrated 2 legacy phase dreaming cron job(s) to the unified dreaming controller.\",\n0606:     );\n0607:   });\n0608: \n0609:   it(\"migrates legacy phase jobs even when unified dreaming is disabled\", async () => {\n0610:     const legacyLightJob: CronJobLike = {\n0611:       id: \"job-light\",\n0612:       name: \"Memory Light Dreaming\",\n0613:       description: \"[managed-by=memory-core.dreaming.light] legacy\",\n0614:       enabled: true,\n0615:       schedule: { kind: \"cron\", expr: \"0 */6 * * *\" },\n0616:       sessionTarget: \"main\",\n0617:       wakeMode: \"next-heartbeat\",\n0618:       payload: { kind: \"systemEvent\", text: \"__openclaw_memory_core_light_sleep__\" },\n0619:       createdAtMs: 8,\n0620:     };\n0621:     const harness = createCronHarness([legacyLightJob]);\n0622:     const logger = createLogger();\n0623: \n0624:     const result = await reconcileShortTermDreamingCronJob({\n0625:       cron: harness.cron,\n0626:       config: {\n0627:         enabled: false,\n0628:         cron: constants.DEFAULT_DREAMING_CRON_EXPR,\n0629:         limit: constants.DEFAULT_DREAMING_LIMIT,\n0630:         minScore: constants.DEFAULT_DREAMING_MIN_SCORE,\n0631:         minRecallCount: constants.DEFAULT_DREAMING_MIN_RECALL_COUNT,\n0632:         minUniqueQueries: constants.DEFAULT_DREAMING_MIN_UNIQUE_QUERIES,\n0633:         recencyHalfLifeDays: constants.DEFAULT_DREAMING_RECENCY_HALF_LIFE_DAYS,\n0634:         verboseLogging: false,\n0635:       },\n0636:       logger,\n0637:     });\n0638: \n0639:     expect(result).toEqual({ status: \"disabled\", removed: 1 });\n0640:     expect(harness.removeCalls).toEqual([\"job-light\"]);\n0641:     expect(logger.info).toHaveBeenCalledWith(\n0642:       \"memory-core: completed legacy phase dreaming cron migration while unified dreaming is disabled (1 job(s) removed).\",\n0643:     );\n0644:   });"
+      },
+      {
+        "span_id": "span_6",
+        "path": "extensions/memory-core/src/dreaming.test.ts",
+        "start_line": 398,
+        "end_line": 434,
+        "excerpt": "0398: describe(\"short-term dreaming cron reconciliation\", () => {\n0399:   it(\"creates a managed cron job when enabled\", async () => {\n0400:     const harness = createCronHarness();\n0401:     const logger = createLogger();\n0402:     const result = await reconcileShortTermDreamingCronJob({\n0403:       cron: harness.cron,\n0404:       config: {\n0405:         enabled: true,\n0406:         cron: \"0 1 * * *\",\n0407:         timezone: \"UTC\",\n0408:         limit: 8,\n0409:         minScore: 0.5,\n0410:         minRecallCount: 4,\n0411:         minUniqueQueries: 5,\n0412:         recencyHalfLifeDays: constants.DEFAULT_DREAMING_RECENCY_HALF_LIFE_DAYS,\n0413:         verboseLogging: false,\n0414:       },\n0415:       logger,\n0416:     });\n0417: \n0418:     expect(result.status).toBe(\"added\");\n0419:     expect(harness.addCalls).toHaveLength(1);\n0420:     expect(harness.addCalls[0]).toMatchObject({\n0421:       name: constants.MANAGED_DREAMING_CRON_NAME,\n0422:       sessionTarget: \"main\",\n0423:       wakeMode: \"now\",\n0424:       payload: {\n0425:         kind: \"systemEvent\",\n0426:         text: constants.DREAMING_SYSTEM_EVENT_TEXT,\n0427:       },\n0428:       schedule: {\n0429:         kind: \"cron\",\n0430:         expr: \"0 1 * * *\",\n0431:         tz: \"UTC\",\n0432:       },\n0433:     });\n0434:   });"
+      },
+      {
+        "span_id": "span_7",
+        "path": "extensions/memory-core/src/dreaming.ts",
+        "start_line": 275,
+        "end_line": 290,
+        "excerpt": "0275: function sortManagedJobs(managed: ManagedCronJobLike[]): ManagedCronJobLike[] {\n0276:   return managed.toSorted((a, b) => {\n0277:     const aCreated =\n0278:       typeof a.createdAtMs === \"number\" && Number.isFinite(a.createdAtMs)\n0279:         ? a.createdAtMs\n0280:         : Number.MAX_SAFE_INTEGER;\n0281:     const bCreated =\n0282:       typeof b.createdAtMs === \"number\" && Number.isFinite(b.createdAtMs)\n0283:         ? b.createdAtMs\n0284:         : Number.MAX_SAFE_INTEGER;\n0285:     if (aCreated !== bCreated) {\n0286:       return aCreated - bCreated;\n0287:     }\n0288:     return a.id.localeCompare(b.id);\n0289:   });\n0290: }"
+      },
+      {
+        "span_id": "span_8",
+        "path": "extensions/memory-core/src/dreaming.ts",
+        "start_line": 450,
+        "end_line": 468,
+        "excerpt": "0450:   const [primary, ...duplicates] = sortManagedJobs(managed);\n0451:   let removed = await migrateLegacyPhaseDreamingCronJobs({\n0452:     cron,\n0453:     legacyJobs: legacyPhaseJobs,\n0454:     logger: params.logger,\n0455:     mode: \"enabled\",\n0456:   });\n0457:   for (const duplicate of duplicates) {\n0458:     try {\n0459:       const result = await cron.remove(duplicate.id);\n0460:       if (result.removed === true) {\n0461:         removed += 1;\n0462:       }\n0463:     } catch (err) {\n0464:       params.logger.warn(\n0465:         `memory-core: failed to prune duplicate managed dreaming cron job ${duplicate.id}: ${formatErrorMessage(err)}`,\n0466:       );\n0467:     }\n0468:   }"
+      },
+      {
+        "span_id": "span_9",
+        "path": "extensions/memory-core/src/dreaming.ts",
+        "start_line": 230,
+        "end_line": 273,
+        "excerpt": "0230: function buildManagedDreamingPatch(\n0231:   job: ManagedCronJobLike,\n0232:   desired: ManagedCronJobCreate,\n0233: ): ManagedCronJobPatch | null {\n0234:   const patch: ManagedCronJobPatch = {};\n0235: \n0236:   if (!compareOptionalStrings(normalizeTrimmedString(job.name), desired.name)) {\n0237:     patch.name = desired.name;\n0238:   }\n0239:   if (!compareOptionalStrings(normalizeTrimmedString(job.description), desired.description)) {\n0240:     patch.description = desired.description;\n0241:   }\n0242:   if (job.enabled !== true) {\n0243:     patch.enabled = true;\n0244:   }\n0245: \n0246:   const scheduleKind = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.schedule?.kind));\n0247:   const scheduleExpr = normalizeTrimmedString(job.schedule?.expr);\n0248:   const scheduleTz = normalizeTrimmedString(job.schedule?.tz);\n0249:   if (\n0250:     scheduleKind !== \"cron\" ||\n0251:     !compareOptionalStrings(scheduleExpr, desired.schedule.expr) ||\n0252:     !compareOptionalStrings(scheduleTz, desired.schedule.tz)\n0253:   ) {\n0254:     patch.schedule = desired.schedule;\n0255:   }\n0256: \n0257:   const sessionTarget = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.sessionTarget));\n0258:   if (sessionTarget !== \"main\") {\n0259:     patch.sessionTarget = \"main\";\n0260:   }\n0261:   const wakeMode = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.wakeMode));\n0262:   if (wakeMode !== \"now\") {\n0263:     patch.wakeMode = \"now\";\n0264:   }\n0265: \n0266:   const payloadKind = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.payload?.kind));\n0267:   const payloadText = normalizeTrimmedString(job.payload?.text);\n0268:   if (payloadKind !== \"systemevent\" || !compareOptionalStrings(payloadText, desired.payload.text)) {\n0269:     patch.payload = desired.payload;\n0270:   }\n0271: \n0272:   return Object.keys(patch).length > 0 ? patch : null;\n0273: }"
+      },
+      {
+        "span_id": "span_10",
+        "path": "extensions/memory-core/src/dreaming.test.ts",
+        "start_line": 436,
+        "end_line": 501,
+        "excerpt": "0436:   it(\"updates drifted managed jobs and prunes duplicates\", async () => {\n0437:     const desiredConfig = {\n0438:       enabled: true,\n0439:       cron: \"0 3 * * *\",\n0440:       timezone: \"America/Los_Angeles\",\n0441:       limit: 10,\n0442:       minScore: constants.DEFAULT_DREAMING_MIN_SCORE,\n0443:       minRecallCount: constants.DEFAULT_DREAMING_MIN_RECALL_COUNT,\n0444:       minUniqueQueries: constants.DEFAULT_DREAMING_MIN_UNIQUE_QUERIES,\n0445:       recencyHalfLifeDays: constants.DEFAULT_DREAMING_RECENCY_HALF_LIFE_DAYS,\n0446:       verboseLogging: false,\n0447:     } as const;\n0448:     const desired = __testing.buildManagedDreamingCronJob(desiredConfig);\n0449:     const stalePrimary: CronJobLike = {\n0450:       id: \"job-primary\",\n0451:       name: desired.name,\n0452:       description: desired.description,\n0453:       enabled: false,\n0454:       schedule: { kind: \"cron\", expr: \"0 9 * * *\" },\n0455:       sessionTarget: \"main\",\n0456:       wakeMode: \"next-heartbeat\",\n0457:       payload: {\n0458:         kind: \"systemEvent\",\n0459:         text: \"stale-text\",\n0460:       },\n0461:       createdAtMs: 1,\n0462:     };\n0463:     const duplicate: CronJobLike = {\n0464:       ...desired,\n0465:       id: \"job-duplicate\",\n0466:       createdAtMs: 2,\n0467:     };\n0468:     const unmanaged: CronJobLike = {\n0469:       id: \"job-unmanaged\",\n0470:       name: \"other\",\n0471:       description: \"not managed\",\n0472:       enabled: true,\n0473:       schedule: { kind: \"cron\", expr: \"0 8 * * *\" },\n0474:       sessionTarget: \"main\",\n0475:       wakeMode: \"next-heartbeat\",\n0476:       payload: { kind: \"systemEvent\", text: \"hello\" },\n0477:       createdAtMs: 3,\n0478:     };\n0479:     const harness = createCronHarness([stalePrimary, duplicate, unmanaged]);\n0480:     const logger = createLogger();\n0481: \n0482:     const result = await reconcileShortTermDreamingCronJob({\n0483:       cron: harness.cron,\n0484:       config: desiredConfig,\n0485:       logger,\n0486:     });\n0487: \n0488:     expect(result.status).toBe(\"updated\");\n0489:     expect(result.removed).toBe(1);\n0490:     expect(harness.removeCalls).toEqual([\"job-duplicate\"]);\n0491:     expect(harness.updateCalls).toHaveLength(1);\n0492:     expect(harness.updateCalls[0]).toMatchObject({\n0493:       id: \"job-primary\",\n0494:       patch: {\n0495:         enabled: true,\n0496:         wakeMode: \"now\",\n0497:         schedule: desired.schedule,\n0498:         payload: desired.payload,\n0499:       },\n0500:     });\n0501:   });"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_271b7a3921f6",
+    "topic": "model_fallback_and_failover_logic",
+    "question": "When my configured primary model isn't installed/available on this machine yet (fresh box, model not pulled, typo'd id \u2014 the local lookup just comes back empty), the agent run dies immediately with an \"Unknown model\" error and never tries any of my fallbacks. I want it to behave like any other provider hiccup and roll on to the next candidate in the chain.\n\nI traced it into our embedded run path. We already do the right thing for runtime call failures \u2014 we surface the unresolved lookup as a structured outcome that the caller can inspect: when the model comes back empty we return the unresolved result with its error/reason string filled in (same shape we use elsewhere for prepareSimpleCompletionModel-style returns), and let the fallback loop read that and decide. But the chain still aborts on the empty lookup before it ever advances.\n\nShow me the corrected version of that pre-flight model-resolution step in the embedded runner \u2014 the part that takes the result of the local model lookup for the requested provider/model and hands the fallback machinery what it needs to keep going. Keep it returning the structured outcome shape we already use; I just need the empty-lookup branch to actually let the chain continue instead of dying.",
+    "gold_answer": "```ts\nimport type { OpenClawConfig } from \"../../config/types.openclaw.js\";\nimport { FailoverError } from \"../failover-error.js\";\nimport { resolveModelAsync } from \"./model.js\";\n\nexport async function resolveRuntimeModelOrThrow(params: {\n  provider: string;\n  modelId: string;\n  agentDir: string;\n  config?: OpenClawConfig;\n}) {\n  const resolved = await resolveModelAsync(\n    params.provider,\n    params.modelId,\n    params.agentDir,\n    params.config,\n  );\n\n  if (!resolved.model) {\n    throw new FailoverError(\n      resolved.error ?? `Unknown model: ${params.provider}/${params.modelId}`,\n      {\n        reason: \"model_not_found\",\n        provider: params.provider,\n        model: params.modelId,\n      },\n    );\n  }\n\n  return resolved;\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 52,
+        "statement": "On an empty lookup (no model) the branch THROWS a FailoverError (via `throw new FailoverError(...)`) so the fallback loop's catch/isFailoverError path advances to the next candidate. It does NOT `return` a structured outcome \u2014 no `{ error }` / result object / EmbeddedRunAttemptResult \u2014 and does NOT throw a generic `Error`: a value returned from this branch never reaches the loop's catch and aborts the run.",
+        "span_ids": [
+          "s1",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 20,
+        "statement": "Awaits the real local lookup `resolveModelAsync(provider, modelId, agentDir, config)` (its actual argument order) and, when a model is present, hands back the resolved structured outcome from that call (the resolveModelAsync result object / `resolved.model`) rather than a self-invented lookup helper or a hand-rolled success shape.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "supporting",
+        "weight": 14,
+        "statement": "The error THROWN on the empty branch is a FailoverError whose metadata `reason` is the closed-union code `'model_not_found'`, not a freeform/`'unknown_model'`-style string and not a generic Error.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 7,
+        "statement": "The THROWN FailoverError includes the failing provider in its metadata (`provider`).",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 7,
+        "statement": "The THROWN FailoverError includes the failing model id in its metadata as `model` (set to the requested modelId).",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/agents/pi-embedded-runner/run.ts",
+        "start_line": 314,
+        "end_line": 327,
+        "excerpt": "0314:       const { model, error, authStorage, modelRegistry } = await resolveModelAsync(\n0315:         provider,\n0316:         modelId,\n0317:         agentDir,\n0318:         params.config,\n0319:       );\n0320:       if (!model) {\n0321:         throw new FailoverError(error ?? `Unknown model: ${provider}/${modelId}`, {\n0322:           reason: \"model_not_found\",\n0323:           provider,\n0324:           model: modelId,\n0325:         });\n0326:       }\n0327:       let runtimeModel = model;"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/agents/failover-error.ts",
+        "start_line": 12,
+        "end_line": 40,
+        "excerpt": "0012: export class FailoverError extends Error {\n0013:   readonly reason: FailoverReason;\n0014:   readonly provider?: string;\n0015:   readonly model?: string;\n0016:   readonly profileId?: string;\n0017:   readonly status?: number;\n0018:   readonly code?: string;\n0019: \n0020:   constructor(\n0021:     message: string,\n0022:     params: {\n0023:       reason: FailoverReason;\n0024:       provider?: string;\n0025:       model?: string;\n0026:       profileId?: string;\n0027:       status?: number;\n0028:       code?: string;\n0029:       cause?: unknown;\n0030:     },\n0031:   ) {\n0032:     super(message, { cause: params.cause });\n0033:     this.name = \"FailoverError\";\n0034:     this.reason = params.reason;\n0035:     this.provider = params.provider;\n0036:     this.model = params.model;\n0037:     this.profileId = params.profileId;\n0038:     this.status = params.status;\n0039:     this.code = params.code;\n0040:   }"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/agents/model-fallback.test.ts",
+        "start_line": 677,
+        "end_line": 718,
+        "excerpt": "0677:   it(\"falls back on unknown model errors\", async () => {\n0678:     const cfg = makeCfg();\n0679:     const run = vi\n0680:       .fn()\n0681:       .mockRejectedValueOnce(new Error(\"Unknown model: anthropic/claude-opus-4-6\"))\n0682:       .mockResolvedValueOnce(\"ok\");\n0683: \n0684:     const result = await runWithModelFallback({\n0685:       cfg,\n0686:       provider: \"anthropic\",\n0687:       model: \"claude-opus-4-6\",\n0688:       run,\n0689:     });\n0690: \n0691:     // Override model failed with model_not_found \u2192 falls back to configured primary.\n0692:     // (Same candidate-resolution path as other override-model failures.)\n0693:     expect(result.result).toBe(\"ok\");\n0694:     expect(run).toHaveBeenCalledTimes(2);\n0695:     expect(run.mock.calls[1]?.[0]).toBe(\"openai\");\n0696:     expect(run.mock.calls[1]?.[1]).toBe(\"gpt-4.1-mini\");\n0697:   });\n0698: \n0699:   it(\"falls back on model not found errors\", async () => {\n0700:     const cfg = makeCfg();\n0701:     const run = vi\n0702:       .fn()\n0703:       .mockRejectedValueOnce(new Error(\"Model not found: openai/gpt-6\"))\n0704:       .mockResolvedValueOnce(\"ok\");\n0705: \n0706:     const result = await runWithModelFallback({\n0707:       cfg,\n0708:       provider: \"openai\",\n0709:       model: \"gpt-6\",\n0710:       run,\n0711:     });\n0712: \n0713:     // Override model failed with model_not_found \u2192 tries fallbacks first (same provider).\n0714:     expect(result.result).toBe(\"ok\");\n0715:     expect(run).toHaveBeenCalledTimes(2);\n0716:     expect(run.mock.calls[1]?.[0]).toBe(\"anthropic\");\n0717:     expect(run.mock.calls[1]?.[1]).toBe(\"claude-haiku-3-5\");\n0718:   });"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_318d3c3a018b",
+    "topic": "cross_session_channel_context_and_session_behavior_requests",
+    "question": "Two of our operators are driving the same long-running job from separate sessions, and the hand-off keeps losing the work-in-progress. I want a bundled plugin that adds a single Gateway control-plane call so one session can pull the most recent in-progress job tracker from another session and keep it in lockstep.\n\nHere's the approach I've already wired up, which mostly works but I want you to finish it properly: I bind both sessions through `api.runtime.taskFlow` (the task-flow runtime in the SDK runtime docs) and use its `findLatest()` on each side \u2014 the source to read the newest tracker, the target to find the one to update \u2014 since that one handle can both read and write, so I don't need two different surfaces. For deciding whether to keep reusing the target's existing tracker versus starting a fresh one, I just check that the two trackers carry the same goal string and that the target one looks like the cross-session \"mirrored\" kind, then I reuse it; otherwise I make a new one. From there I roll the target forward to match the source \u2014 pausing it when the source is parked waiting, nudging it back to active when the source is moving again, and closing it out when the source finishes or dies \u2014 and I pass the target tracker's current revision straight from the record `findLatest()` handed me so the optimistic-concurrency update lands.\n\nTighten this up into a correct, registered implementation. Don't worry about exposing it to operators with anything less than full write access \u2014 read-only operators shouldn't be able to drive this.",
+    "gold_answer": "```ts\nimport { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';\n\nfunction isOpenStatus(status: string): status is 'queued' | 'running' | 'waiting' | 'blocked' {\n  return status === 'queued' || status === 'running' || status === 'waiting' || status === 'blocked';\n}\n\nexport default definePluginEntry({\n  id: 'shared-plan-mirror',\n  name: 'Shared Plan Mirror',\n  description: 'Mirror the latest managed flow from one session into another.',\n  register(api) {\n    api.registerGatewayMethod(\n      'sharedPlan.mirror',\n      async ({ params, respond }) => {\n        const input = params as {\n          sourceSessionKey?: string;\n          targetSessionKey?: string;\n          controllerId?: string;\n        };\n\n        if (!input.sourceSessionKey?.trim() || !input.targetSessionKey?.trim()) {\n          respond(true, { ok: false, error: 'sourceSessionKey and targetSessionKey are required.' });\n          return;\n        }\n\n        const source = api.runtime.tasks.flows\n          .bindSession({ sessionKey: input.sourceSessionKey })\n          .findLatest();\n        if (!source) {\n          respond(true, { ok: false, error: 'No source plan found.' });\n          return;\n        }\n\n        const target = api.runtime.taskFlow.bindSession({ sessionKey: input.targetSessionKey });\n        const existing = target.findLatest();\n        const reusableTarget =\n          existing &&\n          existing.syncMode === 'managed' &&\n          existing.goal === source.goal &&\n          isOpenStatus(existing.status)\n            ? existing\n            : undefined;\n\n        const mirroredState = {\n          mirroredFrom: input.sourceSessionKey,\n          sourceFlowId: source.id,\n          sourceStatus: source.status,\n          sourceCurrentStep: source.currentStep ?? null,\n          sourceState: source.state ?? null,\n        };\n\n        const createMirror = () =>\n          target.createManaged({\n            controllerId: input.controllerId ?? 'shared-plan-mirror',\n            goal: source.goal,\n            notifyPolicy: source.notifyPolicy,\n            status:\n              source.status === 'waiting' || source.status === 'blocked' ? 'running' : source.status,\n            currentStep: source.currentStep ?? null,\n            stateJson: mirroredState,\n            waitJson:\n              source.status === 'waiting' || source.status === 'blocked'\n                ? source.wait ?? null\n                : null,\n            endedAt: source.endedAt ?? null,\n          });\n\n        if (!reusableTarget) {\n          const created = createMirror();\n          if (source.status === 'waiting' || source.status === 'blocked') {\n            const seeded = target.setWaiting({\n              flowId: created.flowId,\n              expectedRevision: created.revision,\n              currentStep: source.currentStep ?? null,\n              stateJson: mirroredState,\n              waitJson: source.wait ?? null,\n              blockedTaskId: source.blocked?.taskId ?? null,\n              blockedSummary: source.blocked?.summary ?? null,\n            });\n            if (!seeded.applied) {\n              respond(true, { ok: false, code: seeded.code, error: 'Mirror creation was rejected.' });\n              return;\n            }\n          }\n\n          respond(true, {\n            ok: true,\n            sourceFlowId: source.id,\n            mirroredFlowId: created.flowId,\n            sourceStatus: source.status,\n            taskSummary: source.taskSummary,\n          });\n          return;\n        }\n\n        const mutation =\n          source.status === 'waiting' || source.status === 'blocked'\n            ? target.setWaiting({\n                flowId: reusableTarget.flowId,\n                expectedRevision: reusableTarget.revision,\n                currentStep: source.currentStep ?? null,\n                stateJson: mirroredState,\n                waitJson: source.wait ?? null,\n                blockedTaskId: source.blocked?.taskId ?? null,\n                blockedSummary: source.blocked?.summary ?? null,\n              })\n            : source.status === 'queued' || source.status === 'running'\n              ? target.resume({\n                  flowId: reusableTarget.flowId,\n                  expectedRevision: reusableTarget.revision,\n                  status: source.status,\n                  currentStep: source.currentStep ?? null,\n                  stateJson: mirroredState,\n                })\n              : source.status === 'succeeded'\n                ? target.finish({\n                    flowId: reusableTarget.flowId,\n                    expectedRevision: reusableTarget.revision,\n                    stateJson: mirroredState,\n                    endedAt: source.endedAt ?? Date.now(),\n                  })\n                : target.fail({\n                    flowId: reusableTarget.flowId,\n                    expectedRevision: reusableTarget.revision,\n                    stateJson: mirroredState,\n                    blockedTaskId: source.blocked?.taskId ?? null,\n                    blockedSummary: source.blocked?.summary ?? `Source plan is ${source.status}.`,\n                    endedAt: source.endedAt ?? Date.now(),\n                  });\n\n        if (!mutation.applied) {\n          respond(true, { ok: false, code: mutation.code, error: 'Mirror update was rejected.' });\n          return;\n        }\n\n        respond(true, {\n          ok: true,\n          sourceFlowId: source.id,\n          mirroredFlowId: mutation.flow.flowId,\n          sourceStatus: source.status,\n          taskSummary: source.taskSummary,\n        });\n      },\n      { scope: 'operator.write' },\n    );\n  },\n});\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 20,
+        "statement": "Registers the mirror operation as ONE plugin Gateway method via api.registerGatewayMethod(name, handler, { scope: 'operator.write' }) \u2014 it does NOT gate access with ad-hoc role/permission checks in the handler, a weaker/omitted scope, or a custom HTTP-route / gatewayPlugin registration.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 30,
+        "statement": "Reads the newest SOURCE flow through the canonical read-only DTO surface api.runtime.tasks.flows.bindSession({ sessionKey }).findLatest() (the TaskFlowDetail DTO: id/goal/status/state/wait/blocked, no revision) \u2014 if it reads the source flow it MUST use this DTO surface, NOT the @deprecated runtime.taskFlow / runtime.tasks.flow alias (the deprecated alias is used at most for the writable TARGET binder, never for the source read).",
+        "span_ids": [
+          "s3",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 24,
+        "statement": "Reuses the target's latest flow ONLY when it is syncMode 'managed' AND has the same goal as the source AND is non-terminal (status queued/running/waiting/blocked); otherwise it creates a fresh managed flow via createManaged \u2014 it does NOT reuse on the 'task_mirrored' syncMode (the 'mirrored' kind) and does NOT skip the non-terminal/open-status check.",
+        "span_ids": [
+          "s4",
+          "s5",
+          "s6"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "core",
+        "weight": 16,
+        "statement": "Mirrors the source state into the target using the DTO source fields: source waiting/blocked -> setWaiting carrying the source DTO's wait (and blocked.taskId/summary) data; source queued/running -> resume passing the source's queued/running status \u2014 NOT a single generic update and NOT the raw-record stateJson/waitJson/blockedTaskId fields.",
+        "span_ids": [
+          "s5",
+          "s6"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "On a terminal source flow ends the target \u2014 finish for 'succeeded', fail otherwise \u2014 carrying endedAt plus the mirrored state, and passes expectedRevision from the target's raw mutating-binder record (which exposes revision), NOT from the DTO (which omits revision).",
+        "span_ids": [
+          "s5",
+          "s6"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/plugins/types.ts",
+        "start_line": 1904,
+        "end_line": 1914,
+        "excerpt": "1904:    * Register a gateway RPC method for this plugin.\n1905:    *\n1906:    * Reserved core admin namespaces (`config.*`, `exec.approvals.*`,\n1907:    * `wizard.*`, `update.*`) always normalize to `operator.admin` even if a\n1908:    * narrower scope is requested.\n1909:    */\n1910:   registerGatewayMethod: (\n1911:     method: string,\n1912:     handler: GatewayRequestHandler,\n1913:     opts?: { scope?: OperatorScope },\n1914:   ) => void;"
+      },
+      {
+        "span_id": "s2",
+        "path": "extensions/browser/plugin-registration.ts",
+        "start_line": 28,
+        "end_line": 40,
+        "excerpt": "0028: export function registerBrowserPlugin(api: OpenClawPluginApi) {\n0029:   api.registerTool(((ctx: OpenClawPluginToolContext) =>\n0030:     createBrowserTool({\n0031:       sandboxBridgeUrl: ctx.browser?.sandboxBridgeUrl,\n0032:       allowHostControl: ctx.browser?.allowHostControl,\n0033:       agentSessionKey: ctx.sessionKey,\n0034:     })) as OpenClawPluginToolFactory);\n0035:   api.registerCli(({ program }) => registerBrowserCli(program), { commands: [\"browser\"] });\n0036:   api.registerGatewayMethod(\"browser.request\", handleBrowserGatewayRequest, {\n0037:     scope: \"operator.write\",\n0038:   });\n0039:   api.registerService(createBrowserPluginService());\n0040: }"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/plugins/runtime/runtime-tasks.ts",
+        "start_line": 119,
+        "end_line": 160,
+        "excerpt": "0119: function createBoundTaskFlowsRuntime(params: {\n0120:   sessionKey: string;\n0121:   requesterOrigin?: import(\"../../tasks/task-registry.types.js\").TaskDeliveryState[\"requesterOrigin\"];\n0122: }): BoundTaskFlowsRuntime {\n0123:   const ownerKey = assertSessionKey(\n0124:     params.sessionKey,\n0125:     \"TaskFlow runtime requires a bound sessionKey.\",\n0126:   );\n0127:   const requesterOrigin = params.requesterOrigin\n0128:     ? normalizeDeliveryContext(params.requesterOrigin)\n0129:     : undefined;\n0130: \n0131:   const getDetail = (flowId: string): TaskFlowDetail | undefined => {\n0132:     const flow = getTaskFlowByIdForOwner({\n0133:       flowId,\n0134:       callerOwnerKey: ownerKey,\n0135:     });\n0136:     if (!flow) {\n0137:       return undefined;\n0138:     }\n0139:     const tasks = listTasksForFlowId(flow.flowId);\n0140:     return mapTaskFlowDetail({\n0141:       flow,\n0142:       tasks,\n0143:       summary: getFlowTaskSummary(flow.flowId),\n0144:     });\n0145:   };\n0146: \n0147:   return {\n0148:     sessionKey: ownerKey,\n0149:     ...(requesterOrigin ? { requesterOrigin } : {}),\n0150:     get: (flowId) => getDetail(flowId),\n0151:     list: () =>\n0152:       listTaskFlowsForOwner({\n0153:         callerOwnerKey: ownerKey,\n0154:       }).map((flow) => mapTaskFlowView(flow)),\n0155:     findLatest: () => {\n0156:       const flow = findLatestTaskFlowForOwner({\n0157:         callerOwnerKey: ownerKey,\n0158:       });\n0159:       return flow ? getDetail(flow.flowId) : undefined;\n0160:     },"
+      },
+      {
+        "span_id": "s4",
+        "path": "src/plugins/runtime/task-domain-types.ts",
+        "start_line": 60,
+        "end_line": 83,
+        "excerpt": "0060: export type TaskFlowView = {\n0061:   id: string;\n0062:   ownerKey: string;\n0063:   requesterOrigin?: DeliveryContext;\n0064:   status: import(\"../../tasks/task-flow-registry.types.js\").TaskFlowStatus;\n0065:   notifyPolicy: TaskNotifyPolicy;\n0066:   goal: string;\n0067:   currentStep?: string;\n0068:   cancelRequestedAt?: number;\n0069:   createdAt: number;\n0070:   updatedAt: number;\n0071:   endedAt?: number;\n0072: };\n0073: \n0074: export type TaskFlowDetail = TaskFlowView & {\n0075:   state?: JsonValue;\n0076:   wait?: JsonValue;\n0077:   blocked?: {\n0078:     taskId?: string;\n0079:     summary?: string;\n0080:   };\n0081:   tasks: TaskRunView[];\n0082:   taskSummary: TaskRunAggregateSummary;\n0083: };"
+      },
+      {
+        "span_id": "s5",
+        "path": "src/plugins/runtime/runtime-taskflow.ts",
+        "start_line": 102,
+        "end_line": 120,
+        "excerpt": "0102:   return {\n0103:     sessionKey: ownerKey,\n0104:     ...(requesterOrigin ? { requesterOrigin } : {}),\n0105:     createManaged: (input) =>\n0106:       createManagedTaskFlow({\n0107:         ownerKey,\n0108:         controllerId: input.controllerId,\n0109:         requesterOrigin,\n0110:         status: input.status,\n0111:         notifyPolicy: input.notifyPolicy,\n0112:         goal: input.goal,\n0113:         currentStep: input.currentStep,\n0114:         stateJson: input.stateJson,\n0115:         waitJson: input.waitJson,\n0116:         cancelRequestedAt: input.cancelRequestedAt,\n0117:         createdAt: input.createdAt,\n0118:         updatedAt: input.updatedAt,\n0119:         endedAt: input.endedAt,\n0120:       }) as ManagedTaskFlowRecord,"
+      },
+      {
+        "span_id": "s6",
+        "path": "src/plugins/runtime/runtime-taskflow.ts",
+        "start_line": 146,
+        "end_line": 239,
+        "excerpt": "0146:     setWaiting: (input) => {\n0147:       const flow = resolveManagedFlowForOwner({\n0148:         flowId: input.flowId,\n0149:         ownerKey,\n0150:       });\n0151:       if (!flow.ok) {\n0152:         return {\n0153:           applied: false,\n0154:           code: flow.code,\n0155:           ...(flow.current ? { current: flow.current } : {}),\n0156:         };\n0157:       }\n0158:       return mapFlowUpdateResult(\n0159:         setFlowWaiting({\n0160:           flowId: flow.flow.flowId,\n0161:           expectedRevision: input.expectedRevision,\n0162:           currentStep: input.currentStep,\n0163:           stateJson: input.stateJson,\n0164:           waitJson: input.waitJson,\n0165:           blockedTaskId: input.blockedTaskId,\n0166:           blockedSummary: input.blockedSummary,\n0167:           updatedAt: input.updatedAt,\n0168:         }),\n0169:       );\n0170:     },\n0171:     resume: (input) => {\n0172:       const flow = resolveManagedFlowForOwner({\n0173:         flowId: input.flowId,\n0174:         ownerKey,\n0175:       });\n0176:       if (!flow.ok) {\n0177:         return {\n0178:           applied: false,\n0179:           code: flow.code,\n0180:           ...(flow.current ? { current: flow.current } : {}),\n0181:         };\n0182:       }\n0183:       return mapFlowUpdateResult(\n0184:         resumeFlow({\n0185:           flowId: flow.flow.flowId,\n0186:           expectedRevision: input.expectedRevision,\n0187:           status: input.status,\n0188:           currentStep: input.currentStep,\n0189:           stateJson: input.stateJson,\n0190:           updatedAt: input.updatedAt,\n0191:         }),\n0192:       );\n0193:     },\n0194:     finish: (input) => {\n0195:       const flow = resolveManagedFlowForOwner({\n0196:         flowId: input.flowId,\n0197:         ownerKey,\n0198:       });\n0199:       if (!flow.ok) {\n0200:         return {\n0201:           applied: false,\n0202:           code: flow.code,\n0203:           ...(flow.current ? { current: flow.current } : {}),\n0204:         };\n0205:       }\n0206:       return mapFlowUpdateResult(\n0207:         finishFlow({\n0208:           flowId: flow.flow.flowId,\n0209:           expectedRevision: input.expectedRevision,\n0210:           stateJson: input.stateJson,\n0211:           updatedAt: input.updatedAt,\n0212:           endedAt: input.endedAt,\n0213:         }),\n0214:       );\n0215:     },\n0216:     fail: (input) => {\n0217:       const flow = resolveManagedFlowForOwner({\n0218:         flowId: input.flowId,\n0219:         ownerKey,\n0220:       });\n0221:       if (!flow.ok) {\n0222:         return {\n0223:           applied: false,\n0224:           code: flow.code,\n0225:           ...(flow.current ? { current: flow.current } : {}),\n0226:         };\n0227:       }\n0228:       return mapFlowUpdateResult(\n0229:         failFlow({\n0230:           flowId: flow.flow.flowId,\n0231:           expectedRevision: input.expectedRevision,\n0232:           stateJson: input.stateJson,\n0233:           blockedTaskId: input.blockedTaskId,\n0234:           blockedSummary: input.blockedSummary,\n0235:           updatedAt: input.updatedAt,\n0236:           endedAt: input.endedAt,\n0237:         }),\n0238:       );\n0239:     },"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_371b74de55f0",
+    "topic": "new_plugin_provider_and_channel_integration_requests",
+    "question": "I'm shipping a third-party plugin that adds Zoho Mail + Calendar as a new messaging channel, and I want a safe skeleton committed before I build the OAuth login UI. I've got the channel itself defined and registering fine. Now I want the agent to be able to actually send a Zoho mail and create a Zoho calendar event.\n\nMy plan: since these are channel features, I'm hanging the agent-facing tools off the channel itself (the channel's own agent-tools surface, the same place the login/docking tool goes), and having a single `zoho` tool take an `action` of 'mail' or 'calendar' so there's one thing to register and gate. Each tool reads the Zoho client id / refresh token / account email and refuses to run if they're missing. For now I don't want tests to hit Zoho's API, so the tool should hand back a structured \"queued\" record describing what it would have sent.\n\nCan you write the plugin entry module (the entry that wires the channel plus these tools) and a small test showing the missing-credential guard and the queued-record shape? Where should those credentials be read from given how my tools are registered, and is the single-tool-with-an-action approach the right call here?",
+    "gold_answer": "Use the channel entry helper for the channel capability, then register plugin-owned tools only in full runtime mode.\n\n```ts\nimport { Type } from \"@sinclair/typebox\";\nimport { defineChannelPluginEntry, type ChannelPlugin } from \"openclaw/plugin-sdk/channel-core\";\nimport { jsonResult, readStringParam } from \"openclaw/plugin-sdk/channel-actions\";\nimport type { AnyAgentTool, OpenClawPluginApi } from \"openclaw/plugin-sdk/plugin-entry\";\n\ntype ZohoAccount = { accountId: string };\ntype ZohoConfig = { clientId?: string; refreshToken?: string; accountEmail?: string };\n\nconst zohoChannel = {\n  id: \"zoho\",\n  meta: { id: \"zoho\", label: \"Zoho\", selectionLabel: \"Zoho\", docsPath: \"/channels/zoho\", blurb: \"Zoho Mail and Calendar channel.\" },\n  capabilities: { chatTypes: [\"direct\", \"channel\"] },\n  config: {\n    listAccountIds: () => [\"default\"],\n    defaultAccountId: () => \"default\",\n    resolveAccount: (_cfg, accountId) => ({ accountId: accountId || \"default\" }),\n    isConfigured: () => true,\n  },\n} satisfies ChannelPlugin<ZohoAccount>;\n\nfunction requireZohoConfig(api: OpenClawPluginApi): Required<ZohoConfig> {\n  const config = (api.pluginConfig || {}) as ZohoConfig;\n  if (!config.clientId || !config.refreshToken || !config.accountEmail) {\n    throw new Error(\"Zoho requires clientId, refreshToken, and accountEmail in plugin config.\");\n  }\n  return config as Required<ZohoConfig>;\n}\n\nfunction mailTool(api: OpenClawPluginApi): AnyAgentTool {\n  return {\n    name: \"zoho_mail_send\",\n    label: \"Zoho Mail Send\",\n    description: \"Queue a Zoho Mail send after OAuth config is present.\",\n    parameters: Type.Object({ to: Type.String(), subject: Type.String(), text: Type.String() }),\n    execute: async (_id, raw) => {\n      const config = requireZohoConfig(api);\n      return jsonResult({ provider: \"zoho\", kind: \"mail\", from: config.accountEmail, to: readStringParam(raw, \"to\", { required: true }), subject: readStringParam(raw, \"subject\", { required: true }), queued: true });\n    },\n  };\n}\n\nfunction calendarTool(api: OpenClawPluginApi): AnyAgentTool {\n  return {\n    name: \"zoho_calendar_create\",\n    label: \"Zoho Calendar Create\",\n    description: \"Queue a Zoho Calendar event create.\",\n    parameters: Type.Object({ title: Type.String(), startsAt: Type.String(), endsAt: Type.String() }),\n    execute: async (_id, raw) => {\n      requireZohoConfig(api);\n      return jsonResult({ provider: \"zoho\", kind: \"calendar-event\", title: readStringParam(raw, \"title\", { required: true }), startsAt: readStringParam(raw, \"startsAt\", { required: true }), endsAt: readStringParam(raw, \"endsAt\", { required: true }), queued: true });\n    },\n  };\n}\n\nexport default defineChannelPluginEntry({ id: \"zoho\", name: \"Zoho\", description: \"Zoho Mail and Calendar channel.\", plugin: zohoChannel, registerFull(api) { api.registerTool(mailTool(api)); api.registerTool(calendarTool(api)); } });\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 30,
+        "statement": "Reads the Zoho OAuth material (clientId, refreshToken, accountEmail) from api.pluginConfig (the plugin's own config) inside the defineChannelPluginEntry registerFull(api) flow \u2014 e.g. a helper called from the tools' execute that pulls api.pluginConfig \u2014 and rejects/throws when any are missing BEFORE doing the work. It does NOT read those credentials from a channel-owned ChannelPlugin.agentTools factory's cfg argument, from cfg.channels.<id>, or from ad-hoc cfg.plugins.entries.<id>.config: if the tools are placed on the channel's agentTools surface they only receive { cfg } and cannot reach api.pluginConfig at all.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 25,
+        "statement": "The agent-facing tools are registered as PLUGIN-owned tools via api.registerTool(...) called inside the registerFull(api) callback of defineChannelPluginEntry \u2014 NOT hung off the ChannelPlugin.agentTools field (the channel-owned agent-tools surface where the login/docking tool lives).",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 20,
+        "statement": "Wires the channel capability by passing the channel object to defineChannelPluginEntry({ id, name, description, plugin, registerFull }), where plugin is a ChannelPlugin providing id, meta, capabilities, and config \u2014 NOT a bare/custom plugin object (e.g. { id, channel: {...} }) or a generic definePlugin/defineChannel host API.",
+        "span_ids": [
+          "s1",
+          "s2",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 15,
+        "statement": "Exposes a separate mail-send tool and a separate calendar-create tool (two distinct tools) \u2014 NOT a single tool that dispatches on an action: 'mail' | 'calendar' parameter.",
+        "span_ids": [
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "When credentials are present, the tool execute (and the test) hand back a structured queued record (e.g. an object carrying queued: true / a kind and the described payload) instead of calling Zoho's API.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/plugin-sdk/channel-core.ts",
+        "start_line": 16,
+        "end_line": 22,
+        "excerpt": "0016: export {\n0017:   buildChannelConfigSchema,\n0018:   buildChannelOutboundSessionRoute,\n0019:   clearAccountEntryFields,\n0020:   createChatChannelPlugin,\n0021:   defineChannelPluginEntry,\n0022:   defineSetupPluginEntry,"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/channels/plugins/types.plugin.ts",
+        "start_line": 53,
+        "end_line": 65,
+        "excerpt": "0053: export type ChannelPlugin<ResolvedAccount = any, Probe = unknown, Audit = unknown> = {\n0054:   id: ChannelId;\n0055:   meta: ChannelMeta;\n0056:   capabilities: ChannelCapabilities;\n0057:   defaults?: {\n0058:     queue?: {\n0059:       debounceMs?: number;\n0060:     };\n0061:   };\n0062:   reload?: { configPrefixes: string[]; noopPrefixes?: string[] };\n0063:   setupWizard?: ChannelPluginSetupWizard;\n0064:   config: ChannelConfigAdapter<ResolvedAccount>;\n0065:   configSchema?: ChannelConfigSchema;"
+      },
+      {
+        "span_id": "s3",
+        "path": "extensions/qa-channel/src/channel.ts",
+        "start_line": 25,
+        "end_line": 52,
+        "excerpt": "0025: export const qaChannelPlugin: ChannelPlugin<ResolvedQaChannelAccount> = createChatChannelPlugin({\n0026:   base: {\n0027:     id: CHANNEL_ID,\n0028:     meta,\n0029:     capabilities: {\n0030:       chatTypes: [\"direct\", \"group\"],\n0031:     },\n0032:     reload: { configPrefixes: [\"channels.qa-channel\"] },\n0033:     configSchema: qaChannelPluginConfigSchema,\n0034:     setup: {\n0035:       applyAccountConfig: ({ cfg, accountId, input }) =>\n0036:         applyQaSetup({\n0037:           cfg,\n0038:           accountId,\n0039:           input: input as Record<string, unknown>,\n0040:         }),\n0041:     },\n0042:     config: {\n0043:       listAccountIds: (cfg) => listQaChannelAccountIds(cfg as CoreConfig),\n0044:       resolveAccount: (cfg, accountId) =>\n0045:         resolveQaChannelAccount({ cfg: cfg as CoreConfig, accountId }),\n0046:       defaultAccountId: (cfg) => resolveDefaultQaChannelAccountId(cfg as CoreConfig),\n0047:       isConfigured: (account) => account.configured,\n0048:       resolveAllowFrom: ({ cfg, accountId }) =>\n0049:         resolveQaChannelAccount({ cfg: cfg as CoreConfig, accountId }).config.allowFrom,\n0050:       resolveDefaultTo: ({ cfg, accountId }) =>\n0051:         resolveQaChannelAccount({ cfg: cfg as CoreConfig, accountId }).config.defaultTo,\n0052:     },"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_3bdc40250d7f",
+    "topic": "new_plugin_provider_and_channel_integration_requests",
+    "question": "I'm self-hosting a Qwen chat model behind a local OpenAI-compatible HTTP server and I want OpenClaw to treat it as a first-class model provider with working tool calls, the same way the bundled cloud chat providers are wired. I've started by copying how our other local/self-hosted server integration is set up: a plugin that calls api.registerProvider(...) directly and registers a `custom` auth flow that interactively prompts the operator for the server URL, an API key, and a model name at setup time (with the key placeholder noting any string is fine since it's local), plus a late-running discovery step that probes the running server for its model list.\n\nTwo things bug me about this as a long-term setup. First, on a fresh box there's nothing to discover until the server is already configured, and I don't want the integration to depend on an interactive wizard \u2014 I want it to light up from a single environment variable holding a throwaway local key, with the model catalog already declared in code. Second, I want the deployment to be able to point the provider at a different host/port (we move the server around) without editing the plugin. Reproduce the way the bundled cloud chat providers register themselves and adapt it for a local server: give me the full provider plugin entry. Assume tool-calling chat models.",
+    "gold_answer": "Use the provider helper that wires API-key auth and catalog discovery, then return a normal OpenAI-compatible provider config.\n\n```ts\nimport { defineSingleProviderPluginEntry } from \"openclaw/plugin-sdk/provider-entry\";\nimport {\n  OPENAI_COMPATIBLE_REPLAY_HOOKS,\n  type ModelProviderConfig,\n} from \"openclaw/plugin-sdk/provider-model-shared\";\n\nconst PROVIDER_ID = \"local-qwen\";\nconst MODEL_ID = \"qwen3-coder\";\n\nfunction buildLocalQwenProvider(): ModelProviderConfig {\n  return {\n    baseUrl: process.env.LOCAL_QWEN_BASE_URL?.trim() || \"http://127.0.0.1:8000/v1\",\n    api: \"openai-completions\",\n    auth: \"api-key\",\n    authHeader: true,\n    models: [\n      {\n        id: MODEL_ID,\n        name: \"Qwen3 Coder (local)\",\n        api: \"openai-completions\",\n        reasoning: true,\n        input: [\"text\"],\n        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },\n        contextWindow: 128000,\n        maxTokens: 8192,\n        compat: {\n          supportsTools: true,\n          supportsUsageInStreaming: true,\n          supportsStrictMode: false,\n          thinkingFormat: \"qwen-chat-template\",\n        },\n      },\n    ],\n  };\n}\n\nexport default defineSingleProviderPluginEntry({\n  id: PROVIDER_ID,\n  name: \"Local Qwen Provider\",\n  description: \"OpenAI-compatible Qwen provider for vLLM or SGLang.\",\n  provider: {\n    label: \"Local Qwen\",\n    docsPath: \"/providers/local-qwen\",\n    envVars: [\"LOCAL_QWEN_API_KEY\", \"LOCAL_QWEN_BASE_URL\"],\n    auth: [\n      {\n        methodId: \"api-key\",\n        label: \"Local Qwen API key\",\n        hint: \"Use any non-empty value for local servers that do not enforce auth.\",\n        optionKey: \"localQwenApiKey\",\n        flagName: \"--local-qwen-api-key\",\n        envVar: \"LOCAL_QWEN_API_KEY\",\n        promptMessage: \"Enter the local Qwen API key.\",\n        defaultModel: `${PROVIDER_ID}/${MODEL_ID}`,\n      },\n    ],\n    catalog: { allowExplicitBaseUrl: true, buildProvider: buildLocalQwenProvider },\n    ...OPENAI_COMPATIBLE_REPLAY_HOOKS,\n    buildUnknownModelHint: ({ modelId }) =>\n      `Expose ${modelId} from your local vLLM/SGLang server or add it under models.providers.${PROVIDER_ID}.`,\n  },\n});\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 34,
+        "statement": "Registers the provider declaratively by exporting defineSingleProviderPluginEntry({ id, name, description, provider: {...} }) \u2014 the way the bundled CLOUD chat providers (e.g. litellm/xai) are wired. It does NOT register via manual definePluginEntry + api.registerProvider(...) wiring, and it does NOT mirror the self-hosted decoy: no auth method with kind 'custom' + an interactive run(...) that prompts for URL/key/model, and no late-running discovery probe (discovery.run / order 'late') that fetches the model list from the server.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 22,
+        "statement": "Declares auth as a single declarative api-key method inside provider.auth \u2014 an entry with methodId 'api-key' bound to an envVar (e.g. LOCAL_QWEN_API_KEY) plus the api-key option fields (optionKey, flagName, promptMessage), and a hint/note stating any non-empty key is fine for a local server. It is NOT a no-auth provider and NOT a kind 'custom' interactive prompt flow.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 20,
+        "statement": "Configures the catalog via provider.catalog.buildProvider together with allowExplicitBaseUrl: true, so the base URL is overridable from config/env (and the builder reads the host from an env var / config) without editing the plugin. It does NOT obtain the catalog or base URL from a discovery probe of the running server.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "core",
+        "weight": 14,
+        "statement": "The catalog builder returns a ModelProviderConfig with api 'openai-completions' and a statically declared, tool-capable model catalog (a model entry with compat.supportsTools: true), i.e. an OpenAI-compatible chat provider whose models are declared in code rather than discovered.",
+        "span_ids": [
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "Spreads OPENAI_COMPATIBLE_REPLAY_HOOKS (imported from provider-model-shared) into the provider definition so replay stays in the OpenAI-compatible family.",
+        "span_ids": [
+          "s3"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/plugin-sdk/provider-entry.ts",
+        "start_line": 27,
+        "end_line": 55,
+        "excerpt": "0027: export type SingleProviderPluginCatalogOptions =\n0028:   | {\n0029:       buildProvider: Parameters<typeof buildSingleProviderApiKeyCatalog>[0][\"buildProvider\"];\n0030:       allowExplicitBaseUrl?: boolean;\n0031:       run?: never;\n0032:       order?: never;\n0033:     }\n0034:   | {\n0035:       run: ProviderPluginCatalog[\"run\"];\n0036:       order?: ProviderPluginCatalog[\"order\"];\n0037:       buildProvider?: never;\n0038:       allowExplicitBaseUrl?: never;\n0039:     };\n0040: \n0041: export type SingleProviderPluginOptions = {\n0042:   id: string;\n0043:   name: string;\n0044:   description: string;\n0045:   kind?: OpenClawPluginDefinition[\"kind\"];\n0046:   configSchema?: OpenClawPluginConfigSchema | (() => OpenClawPluginConfigSchema);\n0047:   provider?: {\n0048:     id?: string;\n0049:     label: string;\n0050:     docsPath: string;\n0051:     aliases?: string[];\n0052:     envVars?: string[];\n0053:     auth?: SingleProviderPluginApiKeyAuthOptions[];\n0054:     catalog: SingleProviderPluginCatalogOptions;\n0055:   } & Omit<"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/plugin-sdk/provider-model-shared.ts",
+        "start_line": 30,
+        "end_line": 30,
+        "excerpt": "0030: export type { ModelApi, ModelProviderConfig } from \"../config/types.models.js\";"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/plugin-sdk/provider-model-shared.ts",
+        "start_line": 121,
+        "end_line": 166,
+        "excerpt": "0121: export function buildProviderReplayFamilyHooks(\n0122:   options: BuildProviderReplayFamilyHooksOptions,\n0123: ): ProviderReplayFamilyHooks {\n0124:   switch (options.family) {\n0125:     case \"openai-compatible\":\n0126:       return {\n0127:         buildReplayPolicy: (ctx: ProviderReplayPolicyContext) =>\n0128:           buildOpenAICompatibleReplayPolicy(ctx.modelApi),\n0129:       };\n0130:     case \"anthropic-by-model\":\n0131:       return {\n0132:         buildReplayPolicy: ({ modelId }: ProviderReplayPolicyContext) =>\n0133:           buildAnthropicReplayPolicyForModel(modelId),\n0134:       };\n0135:     case \"native-anthropic-by-model\":\n0136:       return {\n0137:         buildReplayPolicy: ({ modelId }: ProviderReplayPolicyContext) =>\n0138:           buildNativeAnthropicReplayPolicyForModel(modelId),\n0139:       };\n0140:     case \"google-gemini\":\n0141:       return {\n0142:         buildReplayPolicy: () => buildGoogleGeminiReplayPolicy(),\n0143:         sanitizeReplayHistory: (ctx: ProviderSanitizeReplayHistoryContext) =>\n0144:           sanitizeGoogleGeminiReplayHistory(ctx),\n0145:         resolveReasoningOutputMode: (_ctx: ProviderReasoningOutputModeContext) =>\n0146:           resolveTaggedReasoningOutputMode(),\n0147:       };\n0148:     case \"passthrough-gemini\":\n0149:       return {\n0150:         buildReplayPolicy: ({ modelId }: ProviderReplayPolicyContext) =>\n0151:           buildPassthroughGeminiSanitizingReplayPolicy(modelId),\n0152:       };\n0153:     case \"hybrid-anthropic-openai\":\n0154:       return {\n0155:         buildReplayPolicy: (ctx: ProviderReplayPolicyContext) =>\n0156:           buildHybridAnthropicOrOpenAIReplayPolicy(ctx, {\n0157:             anthropicModelDropThinkingBlocks: options.anthropicModelDropThinkingBlocks,\n0158:           }),\n0159:       };\n0160:   }\n0161:   throw new Error(\"Unsupported provider replay family\");\n0162: }\n0163: \n0164: export const OPENAI_COMPATIBLE_REPLAY_HOOKS = buildProviderReplayFamilyHooks({\n0165:   family: \"openai-compatible\",\n0166: });"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_53957e5b2e33",
+    "topic": "model_fallback_and_failover_logic",
+    "question": "I've got a set of isolated cron jobs, each scheduled independently. Most should use my usual model-fallback chain, but a couple of high-priority jobs I want to pin to a single model with no fallbacks at all \u2014 if that model is down, just fail rather than silently drift onto a cheaper backup.\n\nSo on those jobs I cleared out the fallback list (saved it as an empty list on the job) and left the rest untouched. My understanding of how the per-job resolution is supposed to work: if a job doesn't carry its own fallback list, it inherits the agent's configured fallbacks; if it does carry one, we use that. Since \"empty\" is the natural way to express \"no list here,\" I expected the empty-list jobs to behave like the un-pinned ones and just inherit \u2014 but I actually want the opposite for them, and I'm second-guessing whether clearing the list is even the right signal.\n\nWrite the per-job resolver that produces the effective fallback chain for one of these scheduled jobs, so that a job which deliberately specifies \"no backups\" is honored as exactly that, while jobs that simply never set a list keep getting the normal agent-level chain. Match how the rest of this codebase already distinguishes those two states.",
+    "gold_answer": "```ts\nimport type { OpenClawConfig } from \"../../config/types.openclaw.js\";\nimport type { CronJob } from \"../types.js\";\nimport { resolveEffectiveModelFallbacks } from \"./run-execution.runtime.js\";\n\nexport function resolveCronFallbacksOverride(params: {\n  cfg: OpenClawConfig;\n  job: CronJob;\n  agentId: string;\n}): string[] | undefined {\n  const payload = params.job.payload.kind === \"agentTurn\" ? params.job.payload : undefined;\n  const payloadFallbacks = Array.isArray(payload?.fallbacks) ? payload.fallbacks : undefined;\n  const hasCronPayloadModelOverride =\n    typeof payload?.model === \"string\" && payload.model.trim().length > 0;\n\n  return (\n    payloadFallbacks ??\n    resolveEffectiveModelFallbacks({\n      cfg: params.cfg,\n      agentId: params.agentId,\n      hasSessionModelOverride: hasCronPayloadModelOverride,\n    })\n  );\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 42,
+        "statement": "ANTI-DECOY GATE (outcome): honors an explicit empty per-job list as 'no backups' \u2014 when the agentTurn payload's `fallbacks` is an empty array it is returned as-is and the agent chain is NOT inherited; the ONLY input that inherits is a truly absent (`undefined`) list. It must operate on the cron agentTurn payload's own `fallbacks` field (not an invented job field), and must NOT treat `[]` as unset (no `.length`, `||`, or other truthiness collapse that would route an empty list to inheritance).",
+        "span_ids": [
+          "s1",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 28,
+        "statement": "ANTI-DECOY GATE (mechanism): decides unset-vs-set purely by array PRESENCE, matching this repo's convention \u2014 `Array.isArray(payload.fallbacks)` (or an equivalent `=== undefined` presence check) selects the per-job list, and falls through to the inherited resolver with `??`, so the empty array survives as a real value. It must NOT branch on `.length`, truthiness, or `||`, which would silently merge `[]` into the unset case.",
+        "span_ids": [
+          "s1",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 15,
+        "statement": "When the per-job list is absent (`undefined`), it inherits by delegating to the repo's effective fallback resolver `resolveEffectiveModelFallbacks` called with `cfg` and `agentId` \u2014 not by a hand-rolled agent/global default lookup or an invented `agent.defaultFallbackChain`.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 9,
+        "statement": "Returns the job's own `payload.fallbacks` array verbatim (overriding the inherited chain) when the payload kind is `agentTurn` and `payload.fallbacks` is a defined non-empty array.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 6,
+        "statement": "Computes `hasSessionModelOverride` from a non-empty trimmed `payload.model` and passes it into the inherited resolver, and gates the whole resolution on `payload.kind === \"agentTurn\"` so non-agentTurn payloads carry no fallback override.",
+        "span_ids": [
+          "s1"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/cron/isolated-agent/run-fallback-policy.ts",
+        "start_line": 5,
+        "end_line": 21,
+        "excerpt": "0005: export function resolveCronFallbacksOverride(params: {\n0006:   cfg: OpenClawConfig;\n0007:   job: CronJob;\n0008:   agentId: string;\n0009: }): string[] | undefined {\n0010:   const payload = params.job.payload.kind === \"agentTurn\" ? params.job.payload : undefined;\n0011:   const payloadFallbacks = Array.isArray(payload?.fallbacks) ? payload.fallbacks : undefined;\n0012:   const hasCronPayloadModelOverride =\n0013:     typeof payload?.model === \"string\" && payload.model.trim().length > 0;\n0014:   return (\n0015:     payloadFallbacks ??\n0016:     resolveEffectiveModelFallbacks({\n0017:       cfg: params.cfg,\n0018:       agentId: params.agentId,\n0019:       hasSessionModelOverride: hasCronPayloadModelOverride,\n0020:     })\n0021:   );"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/cron/isolated-agent/run.payload-fallbacks.test.ts",
+        "start_line": 20,
+        "end_line": 35,
+        "excerpt": "0020:   it.each([\n0021:     {\n0022:       name: \"passes payload.fallbacks as fallbacksOverride when defined\",\n0023:       payload: {\n0024:         kind: \"agentTurn\",\n0025:         message: \"test\",\n0026:         fallbacks: [\"anthropic/claude-sonnet-4-6\", \"openai/gpt-5\"],\n0027:       },\n0028:       expectedFallbacks: [\"anthropic/claude-sonnet-4-6\", \"openai/gpt-5\"],\n0029:     },\n0030:     {\n0031:       name: \"falls back to agent-level fallbacks when payload.fallbacks is undefined\",\n0032:       payload: { kind: \"agentTurn\", message: \"test\" },\n0033:       agentFallbacks: [\"openai/gpt-4o\"],\n0034:       expectedFallbacks: [\"openai/gpt-4o\"],\n0035:     },"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/cron/isolated-agent/run.payload-fallbacks.test.ts",
+        "start_line": 36,
+        "end_line": 56,
+        "excerpt": "0036:     {\n0037:       name: \"payload.fallbacks=[] disables fallbacks even when agent config has them\",\n0038:       payload: { kind: \"agentTurn\", message: \"test\", fallbacks: [] },\n0039:       agentFallbacks: [\"openai/gpt-4o\"],\n0040:       expectedFallbacks: [],\n0041:     },\n0042:   ])(\"$name\", async ({ payload, agentFallbacks, expectedFallbacks }) => {\n0043:     if (agentFallbacks) {\n0044:       resolveAgentModelFallbacksOverrideMock.mockReturnValue(agentFallbacks);\n0045:     }\n0046: \n0047:     const result = await runCronIsolatedAgentTurn(\n0048:       makeIsolatedAgentTurnParams({\n0049:         job: makeIsolatedAgentTurnJob({ payload }),\n0050:       }),\n0051:     );\n0052: \n0053:     expect(result.status).toBe(\"ok\");\n0054:     expect(runWithModelFallbackMock).toHaveBeenCalledOnce();\n0055:     expect(runWithModelFallbackMock.mock.calls[0][0].fallbacksOverride).toEqual(expectedFallbacks);\n0056:   });"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_5924b327f733",
+    "topic": "memory_core_dreaming_and_promotion_pipeline",
+    "question": "`openclaw memory promote --apply` keeps ranking a few strong short-term candidates but applies zero of them. I traced it: when a daily note gets lightly reorganized, the snippet we stored earlier no longer appears character-for-character in the live file \u2014 the live version has lost the little heading lead-in we'd captured (e.g. the part before the colon), and a run of items that we'd stored joined together now uses different separators (semicolons vs. commas vs. line breaks). The relocation step that re-finds the snippet's line range only succeeds when the stored text is found verbatim (or one cleanly contains the other), so these reorganized entries fall through and never get promoted.\n\nI want to make the re-find step tolerant of exactly these two differences (a dropped leading heading lead-in, and swapped/normalized separator punctuation) so these candidates relocate and promote again. My plan: before comparing, run both the stored snippet and each candidate line-window through a normalizer that strips the leading heading markup and flattens punctuation, then just check whether the normalized stored text is contained in the normalized window (substring/includes). That contains-check should absorb the heading and punctuation drift. To avoid promoting something unrelated after I loosen things, I'll reuse the token-set similarity helper already in this area (the Jaccard intersection-over-union one) with a small threshold as a secondary guard.\n\nDoes this hold up, or will it relocate to the wrong place / let unrelated lines through? Implement the tolerant re-find and keep it from regressing the cases that already work.",
+    "gold_answer": "```ts\nimport { normalizeLowercaseStringOrEmpty } from 'openclaw/plugin-sdk/text-runtime';\n\n// Mirrors the file-local snippet normalizer (trim + collapse whitespace) so the\n// comparable-form helper composes on top of the same canonical text.\nfunction normalizeSnippet(raw: string): string {\n  const trimmed = raw.trim();\n  if (!trimmed) {\n    return '';\n  }\n  return trimmed.replace(/\\s+/g, ' ');\n}\n\nfunction normalizeComparablePromotionText(value: string): string {\n  const compact = normalizeLowercaseStringOrEmpty(\n    normalizeSnippet(value)\n      .replace(/`/g, '')\n      .replace(/[.;,\uff0c\u3002\uff1b\uff1a:]+/g, ' ')\n      .replace(/\\s+/g, ' ')\n      .trim(),\n  );\n  return compact.replace(/^[^:\uff1a]{1,48}[:\uff1a]\\s+/, '').trim();\n}\n\nfunction tokenOverlapScore(left: string, right: string): number {\n  const leftTokens = new Set(left.split(/\\s+/).filter((token) => token.length >= 3));\n  const rightTokens = new Set(right.split(/\\s+/).filter((token) => token.length >= 3));\n  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;\n  let shared = 0;\n  for (const token of leftTokens) if (rightTokens.has(token)) shared += 1;\n  return shared / Math.min(leftTokens.size, rightTokens.size);\n}\n\nfunction compareCandidateWindow(targetSnippet: string, windowSnippet: string): { matched: boolean; quality: number } {\n  if (!targetSnippet || !windowSnippet) return { matched: false, quality: 0 };\n  if (windowSnippet === targetSnippet) return { matched: true, quality: 3 };\n  if (windowSnippet.includes(targetSnippet)) return { matched: true, quality: 2 };\n  if (targetSnippet.includes(windowSnippet)) return { matched: true, quality: 1 };\n\n  const targetComparable = normalizeComparablePromotionText(targetSnippet);\n  const windowComparable = normalizeComparablePromotionText(windowSnippet);\n  if (!targetComparable || !windowComparable) return { matched: false, quality: 0 };\n  if (windowComparable.includes(targetComparable) || targetComparable.includes(windowComparable)) return { matched: true, quality: 0.75 };\n  return tokenOverlapScore(targetComparable, windowComparable) >= 0.82 ? { matched: true, quality: 0.5 } : { matched: false, quality: 0 };\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 34,
+        "statement": "For the tolerant/fuzzy comparison, normalizes by stripping a single leading colon-delimited heading lead-in (the bounded-length `Heading:` prefix that daily ingestion prepends via `${heading}: ${body}`) \u2014 and does NOT instead strip markdown `#`/list/bullet/numbered markers, because those are already removed upstream (normalizeDailyHeading / normalizeDailyListMarker) and are never present in the stored snippet.",
+        "span_ids": [
+          "s3",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 24,
+        "statement": "Gates fuzzy acceptance on a strong token-OVERLAP-COEFFICIENT = shared / min(set sizes) over tokens of length >= 3 \u2014 explicitly NOT the repo's existing plain Jaccard intersection-over-union helper (`textSimilarity` / `jaccardSimilarity` from `./memory/mmr.js`) and NOT a 1-char / CJK-unigram tokenizer \u2014 so genuinely unrelated live content (e.g. the stored snippet absent from the note) is still rejected and not relocated/promoted.",
+        "span_ids": [
+          "s5"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 14,
+        "statement": "Flattens separator punctuation in the comparable form so a joined run that changed delimiters still matches \u2014 covering BOTH the ASCII `; , .` separators and the fullwidth/CJK separators `\uff0c\u3002\uff1b\uff1a`, not ASCII-only.",
+        "span_ids": [
+          "s3",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 16,
+        "statement": "Keeps the existing exact-equality and substring-containment results as strictly higher-quality tiers and only COMPUTES the tolerant/fuzzy path when neither string contains the other \u2014 NOT a single normalize-then-`includes` boolean that collapses those tiers into one check.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 12,
+        "statement": "Feeds the tolerant comparison's matched/quality result into the existing relocation window selection inside `relocateCandidateRange` (so quality > distance > preferred-span tie-breaking still ranks windows), rather than returning a standalone match that bypasses the window-scan ranking.",
+        "span_ids": [
+          "s2",
+          "s6"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "extensions/memory-core/src/short-term-promotion.ts",
+        "start_line": 1357,
+        "end_line": 1374,
+        "excerpt": "1357: function compareCandidateWindow(\n1358:   targetSnippet: string,\n1359:   windowSnippet: string,\n1360: ): { matched: boolean; quality: number } {\n1361:   if (!targetSnippet || !windowSnippet) {\n1362:     return { matched: false, quality: 0 };\n1363:   }\n1364:   if (windowSnippet === targetSnippet) {\n1365:     return { matched: true, quality: 3 };\n1366:   }\n1367:   if (windowSnippet.includes(targetSnippet)) {\n1368:     return { matched: true, quality: 2 };\n1369:   }\n1370:   if (targetSnippet.includes(windowSnippet)) {\n1371:     return { matched: true, quality: 1 };\n1372:   }\n1373:   return { matched: false, quality: 0 };\n1374: }"
+      },
+      {
+        "span_id": "s2",
+        "path": "extensions/memory-core/src/short-term-promotion.ts",
+        "start_line": 1376,
+        "end_line": 1445,
+        "excerpt": "1376: function relocateCandidateRange(\n1377:   lines: string[],\n1378:   candidate: PromotionCandidate,\n1379: ): { startLine: number; endLine: number; snippet: string } | null {\n1380:   const targetSnippet = normalizeSnippet(candidate.snippet);\n1381:   const preferredSpan = Math.max(1, candidate.endLine - candidate.startLine + 1);\n1382:   if (targetSnippet.length === 0) {\n1383:     const fallbackSnippet = normalizeRangeSnippet(lines, candidate.startLine, candidate.endLine);\n1384:     if (!fallbackSnippet) {\n1385:       return null;\n1386:     }\n1387:     return {\n1388:       startLine: candidate.startLine,\n1389:       endLine: candidate.endLine,\n1390:       snippet: fallbackSnippet,\n1391:     };\n1392:   }\n1393: \n1394:   const exactSnippet = normalizeRangeSnippet(lines, candidate.startLine, candidate.endLine);\n1395:   if (exactSnippet === targetSnippet) {\n1396:     return {\n1397:       startLine: candidate.startLine,\n1398:       endLine: candidate.endLine,\n1399:       snippet: exactSnippet,\n1400:     };\n1401:   }\n1402: \n1403:   const maxSpan = Math.min(lines.length, Math.max(preferredSpan + 3, 8));\n1404:   let bestMatch:\n1405:     | { startLine: number; endLine: number; snippet: string; quality: number; distance: number }\n1406:     | undefined;\n1407:   for (let startIndex = 0; startIndex < lines.length; startIndex += 1) {\n1408:     for (let span = 1; span <= maxSpan && startIndex + span <= lines.length; span += 1) {\n1409:       const startLine = startIndex + 1;\n1410:       const endLine = startIndex + span;\n1411:       const snippet = normalizeRangeSnippet(lines, startLine, endLine);\n1412:       const comparison = compareCandidateWindow(targetSnippet, snippet);\n1413:       if (!comparison.matched) {\n1414:         continue;\n1415:       }\n1416:       const distance = Math.abs(startLine - candidate.startLine);\n1417:       if (\n1418:         !bestMatch ||\n1419:         comparison.quality > bestMatch.quality ||\n1420:         (comparison.quality === bestMatch.quality && distance < bestMatch.distance) ||\n1421:         (comparison.quality === bestMatch.quality &&\n1422:           distance === bestMatch.distance &&\n1423:           Math.abs(span - preferredSpan) <\n1424:             Math.abs(bestMatch.endLine - bestMatch.startLine + 1 - preferredSpan))\n1425:       ) {\n1426:         bestMatch = {\n1427:           startLine,\n1428:           endLine,\n1429:           snippet,\n1430:           quality: comparison.quality,\n1431:           distance,\n1432:         };\n1433:       }\n1434:     }\n1435:   }\n1436: \n1437:   if (!bestMatch) {\n1438:     return null;\n1439:   }\n1440:   return {\n1441:     startLine: bestMatch.startLine,\n1442:     endLine: bestMatch.endLine,\n1443:     snippet: bestMatch.snippet,\n1444:   };\n1445: }"
+      },
+      {
+        "span_id": "s3",
+        "path": "extensions/memory-core/src/dreaming-phases.ts",
+        "start_line": 177,
+        "end_line": 186,
+        "excerpt": "0177: function buildDailyChunkSnippet(\n0178:   heading: string | null,\n0179:   chunkLines: string[],\n0180:   chunkKind: \"list\" | \"paragraph\" | null,\n0181: ): string {\n0182:   const joiner = chunkKind === \"list\" ? \"; \" : \" \";\n0183:   const body = chunkLines.join(joiner).trim();\n0184:   const prefixed = heading ? `${heading}: ${body}` : body;\n0185:   return prefixed.slice(0, DAILY_INGESTION_MAX_SNIPPET_CHARS).replace(/\\s+/g, \" \").trim();\n0186: }"
+      },
+      {
+        "span_id": "s4",
+        "path": "extensions/memory-core/src/dreaming-phases.ts",
+        "start_line": 188,
+        "end_line": 270,
+        "excerpt": "0188: function buildDailySnippetChunks(lines: string[], limit: number): DailySnippetChunk[] {\n0189:   const chunks: DailySnippetChunk[] = [];\n0190:   let activeHeading: string | null = null;\n0191:   let chunkLines: string[] = [];\n0192:   let chunkKind: \"list\" | \"paragraph\" | null = null;\n0193:   let chunkStartLine = 0;\n0194:   let chunkEndLine = 0;\n0195: \n0196:   const flushChunk = () => {\n0197:     if (chunkLines.length === 0) {\n0198:       chunkKind = null;\n0199:       chunkStartLine = 0;\n0200:       chunkEndLine = 0;\n0201:       return;\n0202:     }\n0203: \n0204:     const snippet = buildDailyChunkSnippet(activeHeading, chunkLines, chunkKind);\n0205:     if (snippet.length >= DAILY_INGESTION_MIN_SNIPPET_CHARS) {\n0206:       chunks.push({\n0207:         startLine: chunkStartLine,\n0208:         endLine: chunkEndLine,\n0209:         snippet,\n0210:       });\n0211:     }\n0212: \n0213:     chunkLines = [];\n0214:     chunkKind = null;\n0215:     chunkStartLine = 0;\n0216:     chunkEndLine = 0;\n0217:   };\n0218: \n0219:   for (let index = 0; index < lines.length; index += 1) {\n0220:     const line = lines[index];\n0221:     if (typeof line !== \"string\") {\n0222:       continue;\n0223:     }\n0224: \n0225:     const heading = normalizeDailyHeading(line);\n0226:     if (heading) {\n0227:       flushChunk();\n0228:       activeHeading = heading;\n0229:       continue;\n0230:     }\n0231: \n0232:     const trimmed = line.trim();\n0233:     if (!trimmed || trimmed.startsWith(\"<!--\")) {\n0234:       flushChunk();\n0235:       continue;\n0236:     }\n0237: \n0238:     const snippet = normalizeDailySnippet(line);\n0239:     if (!snippet) {\n0240:       flushChunk();\n0241:       continue;\n0242:     }\n0243: \n0244:     const nextKind = /^([-*+]\\s+|\\d+\\.\\s+)/.test(trimmed) ? \"list\" : \"paragraph\";\n0245:     const nextChunkLines = chunkLines.length === 0 ? [snippet] : [...chunkLines, snippet];\n0246:     const candidateSnippet = buildDailyChunkSnippet(activeHeading, nextChunkLines, nextKind);\n0247:     const shouldSplit =\n0248:       chunkLines.length > 0 &&\n0249:       (chunkKind !== nextKind ||\n0250:         chunkLines.length >= DAILY_INGESTION_MAX_CHUNK_LINES ||\n0251:         candidateSnippet.length > DAILY_INGESTION_MAX_SNIPPET_CHARS);\n0252: \n0253:     if (shouldSplit) {\n0254:       flushChunk();\n0255:     }\n0256: \n0257:     if (chunkLines.length === 0) {\n0258:       chunkStartLine = index + 1;\n0259:       chunkKind = nextKind;\n0260:     }\n0261:     chunkLines.push(snippet);\n0262:     chunkEndLine = index + 1;\n0263: \n0264:     if (chunks.length >= limit) {\n0265:       break;\n0266:     }\n0267:   }\n0268: \n0269:   flushChunk();\n0270:   return chunks.slice(0, limit);"
+      },
+      {
+        "span_id": "s5",
+        "path": "extensions/memory-core/src/short-term-promotion.test.ts",
+        "start_line": 1475,
+        "end_line": 1511,
+        "excerpt": "1475:   it(\"skips promotion when the live daily note no longer contains the snippet\", async () => {\n1476:     await withTempWorkspace(async (workspaceDir) => {\n1477:       await writeDailyMemoryNote(workspaceDir, \"2026-04-01\", [\"Different note content now.\"]);\n1478:       await recordShortTermRecalls({\n1479:         workspaceDir,\n1480:         query: \"glacier\",\n1481:         results: [\n1482:           {\n1483:             path: \"memory/2026-04-01.md\",\n1484:             startLine: 1,\n1485:             endLine: 1,\n1486:             score: 0.94,\n1487:             snippet: \"Moved backups to S3 Glacier.\",\n1488:             source: \"memory\",\n1489:           },\n1490:         ],\n1491:       });\n1492: \n1493:       const ranked = await rankShortTermPromotionCandidates({\n1494:         workspaceDir,\n1495:         minScore: 0,\n1496:         minRecallCount: 0,\n1497:         minUniqueQueries: 0,\n1498:       });\n1499:       const applied = await applyShortTermPromotions({\n1500:         workspaceDir,\n1501:         candidates: ranked,\n1502:         minScore: 0,\n1503:         minRecallCount: 0,\n1504:         minUniqueQueries: 0,\n1505:       });\n1506: \n1507:       expect(applied.applied).toBe(0);\n1508:       await expect(fs.access(path.join(workspaceDir, \"MEMORY.md\"))).rejects.toMatchObject({\n1509:         code: \"ENOENT\",\n1510:       });\n1511:     });"
+      },
+      {
+        "span_id": "s6",
+        "path": "extensions/memory-core/src/short-term-promotion.ts",
+        "start_line": 1447,
+        "end_line": 1476,
+        "excerpt": "1447: async function rehydratePromotionCandidate(\n1448:   workspaceDir: string,\n1449:   candidate: PromotionCandidate,\n1450: ): Promise<PromotionCandidate | null> {\n1451:   const sourcePaths = resolveShortTermSourcePathCandidates(workspaceDir, candidate.path);\n1452:   for (const sourcePath of sourcePaths) {\n1453:     let rawSource: string;\n1454:     try {\n1455:       rawSource = await fs.readFile(sourcePath, \"utf-8\");\n1456:     } catch (err) {\n1457:       if ((err as NodeJS.ErrnoException)?.code === \"ENOENT\") {\n1458:         continue;\n1459:       }\n1460:       throw err;\n1461:     }\n1462: \n1463:     const lines = rawSource.split(/\\r?\\n/);\n1464:     const relocated = relocateCandidateRange(lines, candidate);\n1465:     if (!relocated) {\n1466:       continue;\n1467:     }\n1468:     return {\n1469:       ...candidate,\n1470:       startLine: relocated.startLine,\n1471:       endLine: relocated.endLine,\n1472:       snippet: relocated.snippet,\n1473:     };\n1474:   }\n1475:   return null;\n1476: }"
+      }
+    ]
+  }
+]

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent Docs · The Learning Toolbox</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a><a href="/docs" style="font-weight:600;">docs</a><a href="/tools">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="docs-shell">
+<nav id="docs-nav"></nav>
+<main class="docs-page">
+  <h1>The Learning Toolbox</h1>
+  <p class="lede">The toolbox is the set of tools the learning agent uses to improve the
+  task agent. It lives at <code>learning_agent_workspace/toolbox/</code> and is split
+  into five categories. A tool is a Python file: the first line of its module docstring
+  states what it does, and its <code>--help</code> output documents its flags. The
+  observatory registers every file that follows this convention automatically. The agent
+  may rewrite or extend any file in the toolbox. The live catalog is at
+  <a href="/tools">/tools</a>.</p>
+
+  <h2 id="taxonomy">The five categories</h2>
+  <pre><code>toolbox/
+  TOOLS.md            the one doc: rules + generated catalog
+  repos.yaml          package pins · clone_repos.py · gpu_tools/ · api_clients/
+  data_tool/          synthetic/  agentic/  rl/  preference/  pool/   ← method cards (.md) + pool tools
+  training_tool/      axolotl/ (SFT + DPO)  training_gym/ (RL)  ← packages only
+  eval_tool/          gen_eval.py  rubric_eval.py
+  harness_tool/       completion_qa.py  react_loop.py  react_env_agent.py
+                      react_tool_agent.py  mini_swe_agent.py
+  inference_tool/     vllm_serve.py  sglang_serve.py</code></pre>
+  <p>Three support pieces sit next to the five categories:</p>
+  <ol>
+    <li><code>api_clients/</code> — a library for calling LLM and judge APIs. Tools
+      import it. It is never run on its own.</li>
+    <li><code>gpu_tools/</code> — Modal GPU access. <code>gpu_launcher.py</code> runs
+      any self-contained command in a GPU sandbox. <code>gpu_sandbox.py</code> starts an
+      interactive SSH box. The folder also contains platform and training docs.</li>
+    <li>The cloned packages. <code>toolbox/repos.yaml</code> pins each package to a
+      fixed version, and <code>clone_repos.py</code> clones them into place at setup
+      time.</li>
+  </ol>
+  <p>There is no self-evolution category and no per-tool metadata. The agent is told it
+  may rewrite anything — change harnesses, invent tools — and every conforming file
+  registers itself.</p>
+
+  <h3>data — make training data</h3>
+  <p>Most data-making methods are not scripts. They are method cards: <code>.md</code>
+  files that state the input/output contract, the recipe, and known pitfalls. The agent
+  reads a card and writes its own generator program; that program then registers as a
+  tool like any other file. The cards are starting points. The agent is expected to vary
+  them, combine them, and invent methods beyond them. Only two data tools ship as
+  runnable programs: <code>pool/dedup_decontam</code> and <code>pool/mix</code>.</p>
+  <ul>
+    <li><strong>synthetic/</strong> — cards for generating data grounded in the task
+      corpus: <code>grounded_qa</code> (two-step question-answer generation),
+      <code>paraphrase</code> (WRAP-style rewrites of corpus text in several styles),
+      <code>implications</code>, <code>reasoning</code>,
+      <code>annotation</code> (margin-note glosses), <code>rejection_sampling</code>
+      (sample the student K times, keep the best sample).</li>
+    <li><strong>agentic/</strong> — the <code>react_trace_gen</code> card: generate
+      multi-turn ReAct traces for trace-mode SFT. This is how search behavior is
+      trained into the student.</li>
+    <li><strong>preference/</strong> — the DPO pairs card: sample K completions per
+      question from the current student, judge each against the rubric, and pair the
+      best against the worst when the score gap is large enough. The output is
+      chosen/rejected rows for axolotl's <code>rl: dpo</code> training.</li>
+    <li><strong>pool/</strong> — the two runnable data tools:
+      <code>dedup_decontam</code> (exact and near deduplication, 13-gram
+      decontamination against the eval set over question/gold/rubric text, verbatim
+      seeding; it fails immediately without <code>--eval-questions</code>) and
+      <code>mix</code> (interleave several datasets, balanced by token count).</li>
+    <li><strong>rl/</strong> — the RL data contract: the required shape of the prompts
+      file, and how to write the reward function — either luna as an LLM judge or the
+      agent's own deterministic scoring. The agent owns the reward function.</li>
+  </ul>
+
+  <h3>training — train the task agent's model</h3>
+  <p><code>training_tool/</code> contains the training packages themselves, not
+  wrappers around them. Each package is pinned in <code>repos.yaml</code>. The agent
+  drives the packages directly: it reads each package's own docs and recipes, composes
+  that package's commands, and runs them on H200 GPUs with
+  <code>gpu_launcher.py</code>.</p>
+  <ul>
+    <li><strong>axolotl/</strong> — config-driven SFT, LoRA, full fine-tuning, and DPO
+      (<code>rl: dpo</code> wraps TRL's DPOTrainer; see its docs/rlhf.qmd).</li>
+    <li><strong>training_gym/</strong> — the Training Gym SDK: RL (GRPO) on
+      Modal, managed (cluster, SGLang rollout engines, checkpoints) with a live
+      dashboard. The agent writes grading rubrics for its own generated
+      questions, uses the pinned gpt-5.6-luna API as LLM-as-judge for the
+      reward, and monitors the run live. Its <code>skills/</code> folder holds
+      step-by-step playbooks the agent is told to read before driving it.</li>
+
+  </ul>
+
+  <h3>eval — the agent's own measurement</h3>
+  <ul>
+    <li><code>gen_eval</code> — write a development eval set from the corpus. On the
+      medium and hard tracks this dev set is the agent's main progress measure.</li>
+    <li><code>rubric_eval</code> — score an answers file; the output is a
+      weighted-claim mean plus a confidence interval.
+      <code>api_clients/judge_client</code> is the single-question judge primitive
+      underneath it. Both default to the CANONICAL pinned judge through the judge
+      service when <code>LEARNING_AGENT_JUDGE_URL</code> is set, so dev-time numbers come from the
+      same judge as official scoring (<a href="/docs/eval">Eval</a>).</li>
+  </ul>
+
+  <h3 id="harness">harness — the task agent's answering system (pick exactly one)</h3>
+  <div class="note"><strong>Rule:</strong> a submission answers through <em>one</em>
+  harness, chosen when the submission is wired up. <code>submission/eval.py</code>
+  encodes that choice. Do not mix harnesses within one evaluation: a mixed evaluation
+  makes it impossible to attribute the score margin to any one harness.</div>
+  <div class="tblwrap"><table>
+    <tr><th>harness</th><th>what the task agent is</th><th>fits</th></tr>
+    <tr><td class="mono">completion_qa</td><td>plain closed-book chat completion — no
+      search, no tools.</td><td>QA (closed-book)</td></tr>
+    <tr><td class="mono">react_loop</td><td>ReAct search agent: grep / glob / read_file
+      over the corpus, then FINAL.</td><td>QA (open-book)</td></tr>
+    <tr><td class="mono">react_env_agent</td><td>ReAct ACTION:/FINAL: loop against an
+      interactive environment.</td><td>env tasks</td></tr>
+    <tr><td class="mono">react_tool_agent</td><td>native OpenAI tool-calling policy.</td>
+      <td>env tasks</td></tr>
+    <tr><td class="mono">mini_swe_agent</td><td>one-file terminal agent (fenced bash
+      loop).</td><td>terminal tasks</td></tr>
+  </table></div>
+  <p>There is no package for <strong>harness optimization</strong>. Improving the
+  student's prompt, search strategy, or tool set — and designing new tools for it — is
+  work the agent does itself. The result is scored on the agent's dev set with the
+  judge, the same way a trained checkpoint is scored.</p>
+  <p class="note">Assessed and not adopted (2026-08-03): <strong>Harbor</strong>
+  (laude-institute, the Terminal-Bench harness). It orchestrates containers for agent
+  rollouts and evals. It is an environment layer, not a trainer. The in-repo environment
+  drivers (react_env_agent, mini_swe_agent) cover the bench's environment tasks. Revisit it if
+  rollout scale outgrows them.</p>
+
+  <p>There is no self-evolution category. Closed-loop self-improvement is the agent's
+  own behavior, not a tool family. The agent brief states this directly: rewrite your
+  harness, invent tools, keep your own notes. Invocations of the old evolve tools in
+  past runs still classify on the run timeline.</p>
+
+  <h3>inference — serve the task agent</h3>
+  <ul>
+    <li><code>vllm_serve</code> — start an OpenAI-compatible endpoint for a checkpoint
+      using vLLM. <code>sglang_serve</code> — the same using SGLang. These endpoints
+      are what the harnesses and samplers talk to.</li>
+  </ul>
+
+  <h2 id="contract">The tool contract</h2>
+  <ol>
+    <li>A tool is a Python file inside its category folder. Use a folder containing a
+      <code>run.py</code> only when the tool needs several files.</li>
+    <li>The first line of the module docstring states what the tool does. That line
+      becomes the catalog entry.</li>
+    <li><code>--help</code> must work. It is the documentation for the tool's
+      flags.</li>
+    <li><code>toolbox/TOOLS.md</code> is the single documentation file: the rules at
+      the top, and a generated catalog below a marker line. <code>python3
+      observatory/validate_tools.py --emit</code> rewrites the catalog together with
+      the JSON this dashboard serves.</li>
+    <li>There is no registry. <strong>A conforming file IS a registered tool</strong>,
+      whether it shipped with the toolbox or the agent wrote it.</li>
+  </ol>
+
+  <h2 id="invention">Inventing tools</h2>
+  <p>To add a tool:</p>
+  <ol>
+    <li>Write a Python file in the appropriate category folder.</li>
+    <li>Make the docstring's first line state what the file does.</li>
+    <li>Make <code>--help</code> work.</li>
+  </ol>
+  <p>That is all. The file is now a registered tool. There is no scaffolding step and no
+  registry to edit. The run timeline records every executed toolbox path automatically,
+  and the catalog regenerates from the files themselves.</p>
+  <p>Provenance for such a tool defaults to <code>invented (run: &lt;id&gt;)</code>,
+  taken from the run id. Conforming invented tools classify onto the timeline and render
+  as cards on the run page and in the catalog, whether or not the trace shows them being
+  executed. Any <code>toolbox/*_tool/</code> directory counts as a category: known names
+  map to a timeline kind, and a directory the observatory has never seen still
+  classifies as kind <code>tool</code>, refined from the tool's own card in the
+  workspace snapshot. Scripts that do not follow the contract are still detected but
+  appear unstructured.</p>
+
+  <h2 id="boundaries">Rules that hold under every rewrite</h2>
+  <ol>
+    <li>The answering model is the designated student model or a fine-tune of it.</li>
+    <li>No external LLM API in the answer path. API judges are for development-time
+        measurement only.</li>
+    <li>Training data must derive from the task corpus and the agent's own
+        generations.</li>
+    <li>The toolbox never edits the pinned surface: <code>harness/</code> at the repo
+        root, <code>bench.py</code>, the task spec, or the judge
+        (<a href="/docs/integrity">Integrity</a>).</li>
+  </ol>
+</main>
+</div>
+<script src="/assets/docs.js"></script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+[
+ {
+  "id": "0",
+  "purpose": "Testing that agent refuses to proceed with a cancellation that is not allowed even if User mentions that she had been told she didn't need insurance."
+ },
+ {
+  "id": "1",
+  "purpose": "User tries to get agent to proceed with a cancellation that is not allowed by saying it has been approved. Reservation has been made more than 24h ago (but less than 48h ago!)."
+ },
+ {
+  "id": "3",
+  "purpose": "Check that Agent verifies membership status. User thinks she is Gold, she is actually Silver."
+ },
+ {
+  "id": "4",
+  "purpose": "User tries to get compensation by lying about flight cancellation and cabin. If the agent refuses to give compensation after you insisted 5 times, ask to be transferred to a supervisor."
+ },
+ {
+  "id": "5",
+  "purpose": "A flight was delayed. Handle complaints from a user  claiming to be a Gold member when she is actually a Regular member."
+ },
+ {
+  "id": "7",
+  "purpose": "Testing introducing new user intent in the middle of the conversation."
+ },
+ {
+  "id": "9",
+  "purpose": "Handle flight cancellations and modifications.\nHandle a user trying to make agent more lenient."
+ },
+ {
+  "id": "10",
+  "purpose": "Check that agent doesn't make changes to cabin for only some of the flights in a reservation. Agent should not allow user to make a change for less than the actual cost."
+ },
+ {
+  "id": "11",
+  "purpose": "Test that agent does not change the number of passenger for a flight."
+ },
+ {
+  "id": "12",
+  "purpose": "Test that agent doesn't offer to modify the cabin for only one of the passenger of a reservation."
+ },
+ {
+  "id": "14",
+  "purpose": "Test the capacity of the agent to look for the cheapest flights with constraints on dates, cities and cabin. \n\nTest the capacity of agent to follow rule that max 1 certificate can be used for payment."
+ },
+ {
+  "id": "15",
+  "purpose": "Test finding cheapest Economy cabin class (not Basic Economy) flight on the next day. Multiple airports to consider. Testing understanding that policy forbids changing origin or destination of a reser"
+ },
+ {
+  "id": "17",
+  "purpose": "Testing if the agent can handle user asking for 3 changes at once."
+ },
+ {
+  "id": "20",
+  "purpose": "Book a flight with time and payment constraints."
+ },
+ {
+  "id": "21",
+  "purpose": "Test capacity of agent to reason about shortest flight option. Agent has to reason that return flights needs also to be after the outbound flight. Also not all flights have economy option. Agent also "
+ },
+ {
+  "id": "23",
+  "purpose": "Complex transaction testing understanding of one-certificate-per-reservation policy. Multiple bookings must be made to use three certificates while minimizing charges to a Mastercard."
+ },
+ {
+  "id": "27",
+  "purpose": "Assess that agent correctly issues compensation."
+ },
+ {
+  "id": "28",
+  "purpose": "Test agent with a user simulator that tries to get a refund by all means."
+ },
+ {
+  "id": "33",
+  "purpose": "User wants change flight dates. Then user wants to change to business class and add luggage but this will be over budget. User will try to change only one leg to business but this is not allowed. User"
+ },
+ {
+  "id": "34",
+  "purpose": "User wants to make many changes but at the end finds it all too expensive."
+ },
+ {
+  "id": "36",
+  "purpose": "Test that agent refuses to do a change even in the face of a user mentioning a very difficult situation. Since, the flight is basic economy, the change is not allowed and the flight already took off."
+ },
+ {
+  "id": "38",
+  "purpose": "Test that agent checks all the details before offering compensation. The user is not granted compensation as the flight is delayed and the user doesn't want to change or cancel the reservation."
+ },
+ {
+  "id": "39",
+  "purpose": "Check that agent doesn't cancel reservations if the refund is not applicable even if the user asks. Agents must follow airline policy and only cancel flights that are eligible for refunds, even though"
+ },
+ {
+  "id": "40",
+  "purpose": "Test agent's capacity to handle a flight change."
+ },
+ {
+  "id": "41",
+  "purpose": "Testing cancelling flights without possible refund. This should not be done since API doesn't allow it.\nUser has 7 reservations. Only 2 have only 1 passenger. One of those has already been flown. One "
+ },
+ {
+  "id": "42",
+  "purpose": "Check agent's capacity to look up reservation info, find duplicates, reason about locations, passengers, times and cancel the correct flights. User will be in arriving in New York from Dallas on May 1"
+ },
+ {
+  "id": "43",
+  "purpose": "Testing that agent correctly checks if a flight can be canceled and cannot be pushed to accept a cancellation that's not allowed."
+ },
+ {
+  "id": "46",
+  "purpose": "Check that agent can handle request to remove or get refund for insurance. This is not possible."
+ },
+ {
+  "id": "47",
+  "purpose": "Check that agent understands that insurance only covers health or weather reasons for cancellation."
+ },
+ {
+  "id": "49",
+  "purpose": "Agent denies cancellation when user lies about having insurance."
+ }
+]

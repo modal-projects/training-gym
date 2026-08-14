@@ -1,0 +1,42 @@
+# THE per-task config — loaded by harness/config.py for bench.py, rollout.py,
+# integrity pins, and the agent runners. A task exists iff this file exists.
+task: tau2_telecom
+archetype: agentic
+
+adapter: harness/adapters/tau2.py
+dev: tasks/tau2_telecom/dev.json        # tau2 shipped split_tasks.json "train" (74 ids)
+test: tasks/tau2_telecom/test.json      # tau2 shipped split_tasks.json "test" (40 ids)
+sys: tasks/tau2_telecom/sys.txt
+corpus: tasks/tau2_telecom/corpus       # study corpus: policies, tech-support
+corpus_version: "tau2-1901a301-telecom" #   workflow/manual, db snapshots
+
+env:
+  pin: "git+https://github.com/sierra-research/tau2-bench@1901a301961cbbe3fd11f3e84a2a376530c759e3"
+  domain: telecom                       # dual-control: the simulated customer also
+                                        #   acts on their own device (user tools)
+  max_steps: 200                        # leaderboard protocol (tau2 default)
+  num_trials: 4                         # pass^4 secondary, leaderboard protocol
+  seed: 300                             # leaderboard protocol base seed
+  max_concurrency: 8
+  user_llm: gpt-5.6-luna                # THE customer simulator — same model for
+  user_llm_args:                        #   dev and scoring (it is part of the
+    reasoning_effort: low               #   environment, so a weaker dev
+                                        #   stand-in would break comparability).
+                                        #   Workspaces reach it keylessly via the
+                                        #   operator's service: LEARNING_AGENT_USER_SIM_URL
+                                        #   (harness/user_sim.py pins the model
+                                        #   and holds the API key).
+
+agent:
+  driver: native                        # tau2's own llm_agent orchestrator drives
+                                        #   the endpoint; agentic_toolbox loops unused
+  temperature: 1.0                      # Qwen3.5 thinking-mode recipe (leaderboard
+  top_p: 0.95                           #   protocol): the sampling the reward
+  top_k: 20                             #   numbers are comparable under
+  presence_penalty: 1.5
+  max_tokens: 81920
+
+session:                                # agent-session defaults (agents/run*.sh --config)
+  scaffold: modal_glm52
+  track: easy
+  hours: 24

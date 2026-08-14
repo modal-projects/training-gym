@@ -1,0 +1,4 @@
+# Viewer + deploy only (app.py). normalize/, cli.py, sampler.py stay stdlib-only.
+modal>=1.0
+fastapi[standard]
+uvicorn

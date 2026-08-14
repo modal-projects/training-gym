@@ -1,0 +1,17 @@
+{
+ "task": "dspy",
+ "integrity": "CLEAN",
+ "findings": [],
+ "access_counts": {
+  "reads_test": 0,
+  "split_test_runs": 0,
+  "source_pack_touches": 0
+ },
+ "behavior": {
+  "agent_tool_calls": 41,
+  "train_launches_seen": 1,
+  "rl_launches_seen": 0,
+  "score_launches_seen": 2
+ },
+ "caveat": "tool calls made by sub-agents are not visible in the trace"
+}
