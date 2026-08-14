@@ -197,6 +197,14 @@ class StitchTrainConfig(MilesRecipe):
             colocate=False,
         )
 
+    @classmethod
+    def get_base_recipe(cls, model_config: ModelConfig) -> MilesRecipe | None:
+        """No presets: a miles preset merged onto a stitch trainer would drop the
+        disaggregated fields (``_merge_recipe`` rebuilds as the preset's type), so
+        a stitch run declares its topology explicitly and
+        ``merge_model_recipe`` is a no-op here."""
+        return None
+
     def _fields(
         self,
         dataset: DatasetConfig | None = None,

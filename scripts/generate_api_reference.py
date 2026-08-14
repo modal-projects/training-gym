@@ -42,13 +42,7 @@ def _get_class_attrs(cls: type) -> dict[str, tuple[type, Any]]:
             if f.default is not MISSING:
                 default = f.default
             elif f.default_factory is not MISSING:
-                try:
-                    default = f.default_factory()
-                except Exception:
-                    # A factory whose result only validates once a subclass or
-                    # caller fills the rest in (e.g. StitchRecipe.train) — the
-                    # page documents the field, not a constructible instance.
-                    default = inspect.Parameter.empty
+                default = f.default_factory()
             else:
                 default = inspect.Parameter.empty
             attrs[f.name] = (hints.get(f.name, Any), default)

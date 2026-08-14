@@ -32,7 +32,7 @@ part of the same app.
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import field
+from dataclasses import field, replace
 from typing import Any
 
 from pydantic import ConfigDict, model_validator
@@ -92,7 +92,7 @@ class StitchRecipe(BaseTrainRecipe):
         published deltas in place.
     name : str
         Modal app name. Empty → derived from the model name.
-    app_tags : dict
+    app_tags : dict[str, str]
         Extra Modal app tags, merged over the standard training-gym ones.
     wandb : WandbConfig | None
         Applied to the trainer half and to the app's dashboard tags.
@@ -100,11 +100,14 @@ class StitchRecipe(BaseTrainRecipe):
 
     recipe_type: RecipeType = RecipeType.STITCH
 
-    train: StitchTrainConfig = field(default_factory=StitchTrainConfig)
-    serve: StitchServeConfig = field(default_factory=StitchServeConfig)
+    # Required (keyword-only, so they may follow the base class's defaulted
+    # fields): a publish-only trainer has no meaningful default topology, and a
+    # pool has to be sized for the model it serves.
+    train: StitchTrainConfig = field(kw_only=True)
+    serve: StitchServeConfig = field(kw_only=True)
 
     name: str = ""
-    app_tags: dict = field(default_factory=dict)
+    app_tags: dict[str, str] = field(default_factory=dict)
     wandb: WandbConfig | None = None
 
     @model_validator(mode="after")
@@ -117,15 +120,6 @@ class StitchRecipe(BaseTrainRecipe):
                 "StitchRecipe.train must be a StitchTrainConfig (stitch's miles "
                 f"trainer); got {type(train).__name__}"
             )
-        if self.wandb is not None:
-            train.wandb = self.wandb
-        # Rollout parallelism is a property of a replica, so the pool owns it and
-        # the trainer follows: miles' router sizes its fan-out from this.
-        train.rollout_num_gpus_per_engine = serve.gpus_per_replica
-        # Publish-only: rollouts come from the pool, so the actor cluster holds
-        # no engines of its own.
-        train.rollout_num_gpus = 0
-        train.colocate = False
         # The bulletin board is a shared Modal Volume the sidecar reloads from,
         # so neither half can opt out of the transport alone.
         if train.update_weight_transfer_mode != "disk-delta":
@@ -134,6 +128,23 @@ class StitchRecipe(BaseTrainRecipe):
                 "train.update_weight_transfer_mode must be 'disk-delta', got "
                 f"{train.update_weight_transfer_mode!r}"
             )
+        # Derived cross-half settings, applied to a copy: a caller may reuse the
+        # config object it passed in, and ``replace`` revalidates the trainer half
+        # (plain attribute assignment on a pydantic dataclass would not).
+        derived: dict[str, Any] = {
+            # Rollout parallelism is a property of a replica, so the pool owns it
+            # and the trainer follows: miles' router sizes its fan-out from this.
+            "rollout_num_gpus_per_engine": serve.gpus_per_replica,
+            # Publish-only: rollouts come from the pool, so the actor cluster
+            # holds no engines of its own.
+            "rollout_num_gpus": 0,
+            "colocate": False,
+        }
+        if self.wandb is not None:
+            derived["wandb"] = self.wandb
+        if any(getattr(train, k) != v for k, v in derived.items()):
+            train = replace(train, **derived)
+            self.train = train
         if train.served_checkpoint_format == "nvfp4":
             # A quantized baseline is built by prepare_checkpoints, so it has to
             # be a local path on the checkpoints Volume, not a repo id — and the
@@ -165,6 +176,14 @@ class StitchRecipe(BaseTrainRecipe):
         if model_config.model_name == "Qwen/Qwen3-30B-A3B":
             return Qwen3_30B_A3B_Stitch_Recipe()
         return None
+
+    def served_baseline(self, model: ModelConfig) -> str:
+        """Checkpoint the pool serves, and the baseline deltas apply against.
+
+        Derived at launch rather than stored, so it can't go stale against a
+        ``train.hf_checkpoint`` that model-preset merging changed.
+        """
+        return self.train.hf_checkpoint or model.model_path or model.model_name
 
     # ── Converters (delegated to the trainer half) ──────────────────────────
 

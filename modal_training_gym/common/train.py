@@ -472,9 +472,18 @@ class TrainConfig:
                 raise TrainingGymConfigError(
                     f"Recipe type {recipe_type} requires StitchRecipe, got {type(self.recipe).__name__}"
                 )
+            stitch = cast(StitchRecipe, self.recipe)
+            # The parallelism preflight lives on the trainer half, so resolve
+            # that (stitch has no model presets, so merging is a documented
+            # no-op) rather than the outer recipe, which has no such check.
+            _resolve_recipe(
+                self.model,
+                stitch.train,
+                merge_model_recipe=self.merge_model_recipe,
+            )
             return build_stitch_app(
                 training_run_id=training_run_id,
-                recipe=cast(StitchRecipe, self.recipe),
+                recipe=stitch,
                 model=self.model,
                 dataset=self.dataset,
                 checkpoint=self.checkpoint,
@@ -615,8 +624,17 @@ class TrainConfig:
         )
 
     def _resolved_recipe_for_logging(self) -> BaseTrainRecipe:
+        recipe: BaseTrainRecipe = self.recipe
+        if recipe.recipe_type == RecipeType.STITCH:
+            from modal_training_gym.train_recipes.stitch_recipe.recipe import (
+                StitchRecipe,
+            )
+
+            # The megatron knobs the log line reports live on the trainer half.
+            if isinstance(recipe, StitchRecipe):
+                recipe = recipe.train
         return _resolve_recipe(
-            self.model, self.recipe, merge_model_recipe=self.merge_model_recipe
+            self.model, recipe, merge_model_recipe=self.merge_model_recipe
         )
 
     def context_plan_line(self) -> str | None:

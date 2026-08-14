@@ -25,10 +25,12 @@ around a training-gym ``StitchRecipe`` + ``ModelConfig`` + ``DatasetConfig``.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import tempfile
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import cast
@@ -68,6 +70,9 @@ from modal_training_gym.common.run import (
 )
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.wandb import preflight_wandb
+from modal_training_gym.frameworks.miles.modal_helpers.patches import (
+    REPORTING_PATCH_COMMANDS,
+)
 from modal_training_gym.frameworks.stitch import serving_image
 from modal_training_gym.train_recipes.stitch_recipe.pins import (
     MEGATRON_PATH,
@@ -147,7 +152,7 @@ class _MilesArgs:
         return fields_to_argv(fields)
 
 
-def _local_checkpoint(model_name: str, volume_name: str) -> str:
+def _local_checkpoint(model_name: str, volume: modal.Volume) -> str:
     """The served baseline as a local directory.
 
     A repo id is materialized from the HF cache volume. A prepared (quantized)
@@ -160,7 +165,6 @@ def _local_checkpoint(model_name: str, volume_name: str) -> str:
     if not model_name.startswith("/"):
         return snapshot_download(model_name, allow_patterns=_CHECKPOINT_PATTERNS)
 
-    volume = modal.Volume.from_name(volume_name)
     deadline = time.monotonic() + BASELINE_WAIT_TIMEOUT
     while not os.path.isdir(model_name):
         if time.monotonic() > deadline:
@@ -180,6 +184,30 @@ def _response_parser_path(model: ModelConfig | None) -> str:
     module = getattr(fn, "__module__", "")
     qualname = getattr(fn, "__qualname__", "") or getattr(fn, "__name__", "")
     return f"{module}.{qualname}" if module and qualname else ""
+
+
+def dashboard_env(
+    *,
+    training_run_id: str,
+    app_name: str,
+    total_steps: int,
+    model: ModelConfig | None,
+) -> dict[str, str]:
+    """Run identity for miles' phase/rollout hooks, which run inside the Ray
+    actors and read it from the environment.
+
+    The colocated launcher passes it as a Ray ``runtime_env``, which a submitted
+    job carries and this subprocess flow does not — so ``train`` exports it on
+    every rank before Ray starts (a raylet's workers inherit the container env
+    they were started with, and without a run id the reports are dropped and the
+    dashboard sees nothing after launch).
+    """
+    return {
+        "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
+        "TRAINING_GYM_APP_NAME": app_name,
+        "TRAINING_GYM_TOTAL_STEPS": str(total_steps),
+        "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
+    }
 
 
 def _trainer_failed(
@@ -261,6 +289,12 @@ def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
             f" && git fetch origin {train.miles_repo_ref} && git checkout FETCH_HEAD"
             f" && python3 -m pip install --no-deps -e {MILES_ROOT}"
         )
+        # The trainer *is* miles, so it reports phases the way miles does: the
+        # patches inject the ``report_step_event`` calls its driver loop has no
+        # hook for. Applied after the clone, since they rewrite it in place
+        # (the hook wrappers themselves come through the inherited
+        # ``custom_*_function_path`` flags).
+        .run_commands(*REPORTING_PATCH_COMMANDS)
         .pip_install(
             "httpx",  # stitch's pool client (wake fan-out)
             # miles is installed --no-deps, but the trainer-side delta ENCODER needs
@@ -455,11 +489,10 @@ def build_stitch_app(
         cloudpickle.register_pickle_by_value(caller_module)
     register_modal_cloudpickle_reducers()
 
+    # Re-derive, because a caller (the validation harness) may mutate a half
+    # after construction, i.e. after the deriving validator ran.
+    recipe = replace(recipe)
     train_recipe, serve_recipe = recipe.train, recipe.serve
-    # Re-push, because a caller (the validation harness) may set the outer
-    # ``wandb`` after construction, i.e. after the deriving validator ran.
-    if recipe.wandb is not None:
-        train_recipe.wandb = recipe.wandb
     app_name = recipe.name or name or f"stitch-{modal_tag_value(model.model_name)}"
     # Volumes are keyed by recipe (not by run) so runs of the same recipe reuse
     # the same dataset / checkpoints / bulletin board.
@@ -479,7 +512,7 @@ def build_stitch_app(
     update_weight_disk_dir = f"{run_bulletin_root}/updates"
     # What the pool serves is what the trainer exports against: the prepared
     # baseline for a quantized run, else the model's own checkpoint.
-    served_model = train_recipe.hf_checkpoint or (model.model_path or model.model_name)
+    served_model = recipe.served_baseline(model)
     rollout_concurrency = serve_recipe.concurrency
     n_train_nodes = train_recipe.actor_num_nodes
     _multi_node = n_train_nodes > 1
@@ -581,7 +614,7 @@ def build_stitch_app(
                 # A local path (both the engine's model and the sidecar's delta
                 # baseline): the sidecar can't seed a delta from a repo id, and a
                 # post-boot resolve would race the cache SGLang warms itself.
-                model_name=_local_checkpoint(served_model, checkpoints_volume_name),
+                model_name=_local_checkpoint(served_model, checkpoints_volume),
                 sglang_args=sglang_server_args,
                 tp=gpus_per_replica,
                 concurrency=rollout_concurrency,
@@ -669,19 +702,13 @@ def build_stitch_app(
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
         if framework_status_token:
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
-        # miles' phase/rollout hooks run inside the Ray actors and read their run
-        # identity from the environment; the colocated launcher passes it as a Ray
-        # runtime_env, which a submitted job carries and this subprocess flow does
-        # not. Set before Ray starts on every rank, since a raylet's workers
-        # inherit the container env they were started with — without a run id the
-        # reports are dropped and the dashboard sees nothing after launch.
         os.environ.update(
-            {
-                "TRAINING_GYM_TRAINING_RUN_ID": training_run_id or run_id,
-                "TRAINING_GYM_APP_NAME": app_name,
-                "TRAINING_GYM_TOTAL_STEPS": str(train_recipe.num_rollout),
-                "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
-            }
+            dashboard_env(
+                training_run_id=training_run_id or run_id,
+                app_name=app_name,
+                total_steps=train_recipe.num_rollout,
+                model=model,
+            )
         )
         # Megatron is a source checkout in the image, so R3 dispatch + the
         # reshardable optimizer step arrive as patches. Applied on every node,
@@ -840,7 +867,7 @@ def build_stitch_app(
                 [
                     "bash",
                     "-lc",
-                    f"set -o pipefail; ({cmd}) 2>&1 | tee -a {trainer_log}",
+                    f"set -o pipefail; ({cmd}) 2>&1 | tee -a {shlex.quote(str(trainer_log))}",
                 ],
                 check=True,
             )
@@ -872,7 +899,6 @@ def build_stitch_app(
             extra={"rollout_endpoint_url": cfg.rollout_endpoint_url, "run_id": run_id},
         )
         result.save()
-        checkpoints_volume.commit()
         return result._to_dict()
 
     @app.function(
