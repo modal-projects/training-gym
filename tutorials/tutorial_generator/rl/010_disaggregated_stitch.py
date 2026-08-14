@@ -177,6 +177,14 @@ def _recipe_intro():
 
 @code
 def _recipe():
+    # A replica catches up in two phases: it *stages* the new weight bytes next
+    # to the GPU while still serving, then *commits* them — swapping them into
+    # the engine and flipping its served version. `commit_mode` is how
+    # disruptive that swap may be: `quiesce` waits for the replica to go idle,
+    # `in_place` pauses, applies, resumes, so a generation in flight can span
+    # two versions (one gradient step apart — the right trade for RL rollouts,
+    # and what every cookbook config uses). Requests that pinned an exact
+    # version are drained either way, as is a change of lineage.
     recipe = Qwen3_30B_A3B_Stitch_Recipe(
         wandb=WandbConfig(project="training-gym", group="stitch-qwen3-30b-a3b-nvfp4"),
     )
