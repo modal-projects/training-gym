@@ -663,38 +663,42 @@ def build_miles_app(
                 "run at a different ref_load."
             )
 
-        # Clear partial torch_dist writes from an earlier crash here — the
-        # single-container step that decides to convert — so the conversion cannot mix
-        # fresh shards with stale ones from a different parallelism. Only the
-        # ``iter_*``/``release`` directories the converter itself writes are removed,
-        # and only those failing the completeness check: ``ref_load`` is user-settable
-        # and may hold a hand-placed checkpoint in a layout this predicate rejects.
-        if os.path.isdir(save_path):
-            stale = [
-                name
-                for name in sorted(os.listdir(save_path))
-                if (name == "release" or name.startswith("iter_"))
-                and os.path.isdir(os.path.join(save_path, name))
-                and not _is_complete_torch_dist_checkpoint(
-                    os.path.join(save_path, name)
-                )
-            ]
-            if stale:
-                print(
-                    f"Removing incomplete torch_dist checkpoint dirs at {save_path}: "
-                    + ", ".join(stale)
-                )
-                for name in stale:
-                    shutil.rmtree(os.path.join(save_path, name), ignore_errors=True)
-                checkpoints_volume.commit()
+        try:
+            # Clear partial torch_dist writes from an earlier crash here — the
+            # single-container step that decides to convert — so the conversion cannot mix
+            # fresh shards with stale ones from a different parallelism. Only the
+            # ``iter_*``/``release`` directories the converter itself writes are removed,
+            # and only those failing the completeness check: ``ref_load`` is user-settable
+            # and may hold a hand-placed checkpoint in a layout this predicate rejects.
+            if os.path.isdir(save_path):
+                stale = [
+                    name
+                    for name in sorted(os.listdir(save_path))
+                    if (name == "release" or name.startswith("iter_"))
+                    and os.path.isdir(os.path.join(save_path, name))
+                    and not _is_complete_torch_dist_checkpoint(
+                        os.path.join(save_path, name)
+                    )
+                ]
+                if stale:
+                    print(
+                        f"Removing incomplete torch_dist checkpoint dirs at {save_path}: "
+                        + ", ".join(stale)
+                    )
+                    for name in stale:
+                        shutil.rmtree(os.path.join(save_path, name), ignore_errors=True)
+                    checkpoints_volume.commit()
 
-        conversion_hf_checkpoint = (
-            getattr(miles, "megatron_conversion_hf_checkpoint", None)
-            or getattr(miles, "hf_checkpoint", "")
-            or model.model_path
-            or model.model_name
-        )
-        return resolve_checkpoint_ref(conversion_hf_checkpoint)
+            conversion_hf_checkpoint = (
+                getattr(miles, "megatron_conversion_hf_checkpoint", None)
+                or getattr(miles, "hf_checkpoint", "")
+                or model.model_path
+                or model.model_name
+            )
+            return resolve_checkpoint_ref(conversion_hf_checkpoint)
+        except BaseException:
+            _release_convert_lock(training_run_id, save_path)
+            raise
 
     @app.function(
         image=image,
