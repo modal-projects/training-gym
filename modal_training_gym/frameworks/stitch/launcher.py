@@ -41,7 +41,12 @@ from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS, modal_tag_value
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.framework import Framework, resolve_caller_module
+from modal_training_gym.common.framework import (
+    Framework,
+    mount_tools_dir,
+    resolve_caller_module,
+)
+from modal_training_gym.common.launcher_helpers import compute_save_root
 from modal_training_gym.common.modal_refs import register_modal_cloudpickle_reducers
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
@@ -80,7 +85,10 @@ MINUTES = 60
 # ``@app.cls`` decorators are evaluated client-side, where it isn't importable.
 SIDECAR_PORT = 8000
 SGLANG_PORT = 8001
-SERVER_STARTUP_TIMEOUT = 35 * MINUTES
+SERVER_STARTUP_TIMEOUT = 60 * MINUTES
+# A replica serves for as long as the run does, so it gets the trainer's bound
+# rather than one a long rollout wave can reach.
+SERVER_TIMEOUT = 24 * 60 * MINUTES
 # A replica boots with the app, i.e. while prepare_checkpoints may still be
 # building the baseline it serves. Waiting it out has to fit inside the startup
 # budget, so a longer conversion means the replica exits and Modal reboots it
@@ -261,7 +269,9 @@ def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
         image = train.image_overlay(image)
     # Mount the package so the trainer and the Ray workers can import the hooks.
     image = image.add_local_python_source("modal_training_gym", copy=True)
-    return image
+    # A model's download/convert may shell out to the shared tools, as on every
+    # other framework image.
+    return mount_tools_dir(image)
 
 
 def _resolve_container_app_id() -> str:
@@ -326,7 +336,11 @@ def _record_run_started(
             ),
             # gpu_type is a miles _SKIP_FIELD (infra, not a CLI flag), but the
             # dashboard's cluster column and checkpoint conversion read it.
-            "recipe": {"gpu_type": recipe.train.gpu_type, **config_fields},
+            # wandb_key is a derived miles field, not config to persist.
+            "recipe": {
+                "gpu_type": recipe.train.gpu_type,
+                **{k: v for k, v in config_fields.items() if k != "wandb_key"},
+            },
             "wandb": wandb_block,
             "lr": recipe.train.lr,
             "global_batch_size": recipe.train.global_batch_size,
@@ -426,6 +440,10 @@ def build_stitch_app(
     register_modal_cloudpickle_reducers()
 
     train_recipe, serve_recipe = recipe.train, recipe.serve
+    # Re-push, because a caller (the validation harness) may set the outer
+    # ``wandb`` after construction, i.e. after the deriving validator ran.
+    if recipe.wandb is not None:
+        train_recipe.wandb = recipe.wandb
     app_name = recipe.name or name or f"stitch-{modal_tag_value(model.model_name)}"
     # Volumes are keyed by recipe (not by run) so runs of the same recipe reuse
     # the same dataset / checkpoints / bulletin board.
@@ -525,7 +543,7 @@ def build_stitch_app(
         ephemeral_disk=serve_recipe.ephemeral_disk,
         min_containers=serve_recipe.min_containers,
         max_containers=serve_recipe.max_containers,
-        timeout=40 * MINUTES,
+        timeout=SERVER_TIMEOUT,
         scaledown_window=15 * MINUTES,
         serialized=True,
     )
@@ -702,6 +720,17 @@ def build_stitch_app(
             cfg.rollout_endpoint_url, timeout_seconds=SERVER_STARTUP_TIMEOUT
         )
         cfg.update_weight_disk_dir = update_weight_disk_dir
+        # Run-scope the saves, as the colocated miles launcher does: the
+        # checkpoints Volume is keyed by recipe, so its root is shared by every
+        # run of it. (A publish-only run keeps no checkpoints and has no
+        # ``save`` at all — see StitchTrainConfig._fields.)
+        if getattr(cfg, "save", None):
+            cfg.save = compute_save_root(
+                cfg.save,
+                recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
+                mounted_save_root=str(CHECKPOINTS_PATH),
+                training_run_id=training_run_id or run_id,
+            )
         # stitch's publish + request hooks read these off the miles args
         # namespace; merge over any user extra_config already on
         # custom_config_path.
@@ -798,7 +827,7 @@ def build_stitch_app(
             app_name=app_name,
             framework=Framework.STITCH,
             training_run_id=record_id,
-            checkpoint_dir=str(train_recipe.save),
+            checkpoint_dir=str(getattr(cfg, "save", "") or CHECKPOINTS_PATH),
             checkpoints_volume_name=checkpoints_volume_name,
             checkpoints_mount_path=str(CHECKPOINTS_PATH),
             model_config=model,
@@ -867,6 +896,9 @@ def build_stitch_app(
             ),
             checkpoints_volume,
         )
+        # The pool waits on the renamed baseline appearing, so don't take the
+        # cookbook's commit on faith.
+        checkpoints_volume.commit()
         hf_cache_volume.commit()
 
     @app.function(

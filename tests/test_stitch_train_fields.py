@@ -2,6 +2,7 @@
 
 import dataclasses
 
+from modal_training_gym.common.status import MilesStatus, resolve_framework_status
 from modal_training_gym.train_recipes.stitch_recipe import Qwen3_30B_A3B_Stitch_Train
 
 
@@ -22,3 +23,12 @@ def test_save_path_survives_a_save_interval() -> None:
     fields = _fields(save_interval=10)
     assert fields["save_interval"] == 10
     assert fields["save"]
+
+
+def test_stitch_reports_miles_phases() -> None:
+    """The trainer is miles, so the dashboard has to accept its phase names for a
+    run recorded as stitch."""
+    assert (
+        resolve_framework_status("generate_rollouts", "stitch")
+        is MilesStatus.ROLLOUT_LOGGING
+    )

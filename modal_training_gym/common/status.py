@@ -46,10 +46,12 @@ def resolve_framework_status(phase: str, framework: str) -> FrameworkStatus | No
 
     Returns ``None`` for a phase the framework doesn't know.
     """
-    if framework.strip().lower() not in ("miles", "slime"):
+    name = framework.strip().lower()
+    # stitch runs miles in the trainer, so it reports miles' phases.
+    if name not in ("miles", "slime", "stitch"):
         raise ValueError(f"Invalid framework string detected: {framework}")
 
-    status_enum = MilesStatus if framework.strip().lower() == "miles" else SlimeStatus
+    status_enum = SlimeStatus if name == "slime" else MilesStatus
     try:
         return status_enum(phase.strip())
     except ValueError:
