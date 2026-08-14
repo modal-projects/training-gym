@@ -236,6 +236,7 @@ def _main_impl() -> None:
         unauthenticated=True,
     )
     print(f"Teacher URL: {teacher_deployment.url}")
+    teacher_deployment.wait_until_ready(timeout=15 * 60)
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 

@@ -132,6 +132,7 @@ def _deploy_teacher():
         unauthenticated=True,
     )
     print(f"Teacher URL: {teacher_deployment.url}")
+    teacher_deployment.wait_until_ready(timeout=15 * 60)
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 
@@ -148,12 +149,18 @@ def _teacher_test_intro():
 @notebook_only
 @code
 def _teacher_test():
-    response = teacher_deployment.generate(
-        "Solve the following math problem step by step. The last line of your "
-        "response should be of the form Answer: \\boxed{$Answer} where $Answer "
-        "is the answer to the problem.\n\nWhat is 17 * 23?",
+    msg = teacher_deployment.chat(
+        [{
+            "role": "user",
+            "content": (
+                "Solve the following math problem step by step. The last line of your "
+                "response should be of the form Answer: \\boxed{$Answer} where $Answer "
+                "is the answer to the problem.\n\nWhat is 17 * 23?"
+            ),
+        }],
         chat_template_kwargs={"enable_thinking": True},
     )
+    response = msg.get("content") or msg.get("reasoning_content") or ""
     print(response[-200:])
 
 
