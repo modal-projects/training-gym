@@ -159,7 +159,7 @@ def _local_checkpoint(model_name: str, volume_name: str) -> str:
 
 
 def _trainer_failed(
-    log_path: Path, returncode: int, lines: int = 50, budget: int = 4000
+    log_path: Path, returncode: int, lines: int = 50, budget: int = 1500
 ) -> str:
     """What the trainer's exit code and the tail of its log say, as one message.
 
@@ -610,7 +610,13 @@ def build_stitch_app(
                 "RAY_ADDRESS": f"{master_addr}:{RAY_PORT}",
                 "no_proxy": f"127.0.0.1,{master_addr},{my_ip}",
                 "NO_PROXY": f"127.0.0.1,{master_addr},{my_ip}",
-                "PYTHONPATH": train_recipe.megatron_pythonpath,
+                # Source-only ``megatron.training`` in front of what the
+                # container already exports — Modal puts its own client on
+                # PYTHONPATH, and the bulletin's store imports ``modal`` from
+                # inside a Ray actor, which inherits this.
+                "PYTHONPATH": os.pathsep.join(
+                    [train_recipe.megatron_pythonpath, os.environ.get("PYTHONPATH", "")]
+                ).rstrip(os.pathsep),
                 # Only the RDMA nodes take the host's libibverbs, so only they
                 # want the libmlx5 built against it (see RDMA_LIB_DIR). Set
                 # before Ray starts, since its workers inherit this.
