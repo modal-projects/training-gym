@@ -29,7 +29,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 ### Reinforcement Learning
 
-- [000_rl_basics](https://gym.modal.dev/tutorials/rl/000_rl_basics/): Haiku evaluation with verifiable rewards
+- [000_rl_basics](https://gym.modal.dev/tutorials/rl/000_rl_basics/): Writing correct haikus
 - [001_sandboxes](https://gym.modal.dev/tutorials/rl/001_sandboxes/): Code RL with Harbor sandboxed evals
 - [002_multiturn](https://gym.modal.dev/tutorials/rl/002_multiturn/): Multi-turn number-guessing RL with custom generate and reward functions
 - [003_on_policy_distillation](https://gym.modal.dev/tutorials/rl/003_on_policy_distillation/): On-policy distillation on math
