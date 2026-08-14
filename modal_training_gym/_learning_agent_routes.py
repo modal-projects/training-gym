@@ -415,7 +415,7 @@ class LearningAgentRunStore:
         if not isinstance(record, dict):
             return None
 
-        from modal_training_gym._learning_agent_atif import events_to_atif
+        from modal_training_gym._atif import events_to_atif
 
         raw = record.get("events")
         return events_to_atif(record, raw if isinstance(raw, list) else [])

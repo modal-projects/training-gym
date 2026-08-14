@@ -39,7 +39,7 @@ Implemented as planned, deployed to Modal env `lab-dev` as app
 - ATIF export — `GET /api/learning-runs/{run_id}/trajectory[?download=true]`
   converts the full trace to a Harbor ATIF-v1.7 trajectory
   (harborframework.com/docs/agents/trajectory-format) via
-  `modal_training_gym/_learning_agent_atif.py`: assistant events → agent steps
+  `modal_training_gym/_atif.py`: assistant events → agent steps
   (message/reasoning_content/tool_calls/metrics), tool-result user events →
   observations folded onto the calling step (resolved by (session_idx,
   call_id) first — codex resumes reuse item ids across sessions), text user
