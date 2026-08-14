@@ -37,7 +37,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [GUI Grounding with Qwen3-VL-8B](https://gym.modal.dev/tutorials/computer_use)
 - [On-policy Distillation (OPD) Across Model Families](https://gym.modal.dev/tutorials/cross_tokenizer_distillation)
 - [Frontier-scale training](https://gym.modal.dev/tutorials/multinode)
-- [Post-train Qwen3-4B from one plain-language prompt with an agent](https://gym.modal.dev/tutorials/rl/010_agent_driven_training)
+- [Turn a plain-language objective into an end-to-end Qwen3-4B training run](https://gym.modal.dev/tutorials/rl/010_agent_driven_training)
 
 ## Reference
 
