@@ -9,7 +9,7 @@ TUTORIAL_METADATA = {
     "order": 40,
     "api_classes": [
         "HuggingFaceDataset",
-        "Qwen3_4B",
+        "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
         "TrainingGroup",
@@ -81,7 +81,7 @@ def _imports():
 
     from modal_training_gym import (
         HuggingFaceDataset,
-        Qwen3_4B,
+        Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
         TrainingGroup,
@@ -95,7 +95,7 @@ def _base_intro():
 
     Start with an ordinary `TrainConfig` — the recipe you'd launch if you
     weren't sweeping. Everything the sweep *doesn't* override is inherited from
-    here, so set the fields you want held constant once. We use a short Qwen3-4B
+    here, so set the fields you want held constant once. We use a short Qwen3.5-4B
     DAPO-math run as the base.
     """
 
@@ -123,7 +123,7 @@ def _dataset():
 @code
 def _base():
     base = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=train_dataset,
         recipe=SlimeRecipe(
             rm_type="dapo",

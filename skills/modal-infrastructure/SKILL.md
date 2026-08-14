@@ -154,6 +154,33 @@ modal volume ls <volume-name> / --env <env>
 6. If logs are ambiguous, check live containers and committed volumes separately.
 7. After a known-good run, change one variable at a time.
 
+## SGLang Qwen3.5 served endpoint tool-call parser
+
+When serving Qwen3.5 models (`Qwen3_5_9B`, `Qwen3_5_4B`, etc.) behind an SGLang endpoint that will be used for tool calling, set the parser to `qwen3_coder` and add the reasoning parser:
+
+```python
+SglangRecipe(
+    extra_server_args={
+        "--tool-call-parser": "qwen3_coder",
+        "--reasoning-parser": "qwen3",
+    },
+)
+```
+
+Do **not** use `--tool-call-parser qwen` or `qwen25` for Qwen3.5. Those parsers expect a JSON object inside `<tool_call>` tags, while Qwen3.5 emits XML-style calls like:
+
+```xml
+<tool_call>
+<function=list_directory>
+<parameter=path>/repo</parameter>
+</function>
+</tool_call>
+```
+
+With `qwen`/`qwen25`, SGLang logs `Failed to parse JSON part: ...` and the OpenAI response contains an empty `tool_calls` list, causing agent loops to hit `Reached max iterations without a final response.`. The `qwen3_coder` parser (and the `qwen3` reasoning parser for any inline thinking) handles the XML format correctly on the default `lmsysorg/sglang:v0.5.12` image.
+
+(Qwen3.6-35B is a separate case: its shipped `SglangRecipe` uses `--tool-call-parser qwen`, so don't apply this Qwen3.5 guidance to it.)
+
 ## Updating This Runbook
 
 - Add new notes when they describe durable Modal behavior or a stable repo workflow.

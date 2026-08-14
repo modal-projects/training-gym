@@ -10,7 +10,7 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "HarborDataset",
         "CustomDeployment",
-        "Qwen3_4B",
+        "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
         "extract_code",
@@ -71,7 +71,7 @@ def _imports():
     from modal_training_gym import (
         CustomDeployment,
         HarborDataset,
-        Qwen3_4B,
+        Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
         extract_code,
@@ -141,11 +141,14 @@ def _harbor_eval_intro():
     ## Evaluate with a file-based sandbox check
 
     The custom eval sends the Harbor instruction to the model, extracts its
-    Python program, and executes that program with `/app` as the working
-    directory in a Modal Sandbox. It then reads `/app/hello.txt` directly with
-    `sandbox.filesystem.read_text` and awards a point only when the content
-    matches `Hello, world!`. We keep that sandbox logic in one local helper so
-    the eval and training reward use exactly the same check.
+    Python program with `extract_code`, and executes that program with `/app`
+    as the working directory in a Modal Sandbox. It then reads `/app/hello.txt`
+    directly with `sandbox.filesystem.read_text` and awards a point only when
+    the content matches `Hello, world!`. We keep that sandbox logic in one
+    local helper so the eval and training reward use exactly the same check.
+
+    Passing `model=Qwen3_5_4B()` into `extract_code` enables model-aware
+    response parsing.
     """
 
 
@@ -193,7 +196,7 @@ def _sandbox_scorer():
 
 @code
 def _serve_eval_base():
-    base_model = Qwen3_4B()
+    base_model = Qwen3_5_4B()
     base_deployment = CustomDeployment.launch(
         base_model,
         unauthenticated=True,
@@ -249,7 +252,7 @@ def _train():
         return reward
 
     training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=dataset,
         recipe=SlimeRecipe(
             custom_rm_function=sandbox_rm,
@@ -292,10 +295,10 @@ def _serve_trained_intro():
 def _serve_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     trained_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-hello-world-serve",
-        served_model_name="qwen3-4b-hello-world",
+        app_name="qwen3-5-4b-hello-world-serve",
+        served_model_name="qwen3-5-4b-hello-world",
         unauthenticated=True,
     )
     print(f"Trained model URL: {trained_deployment.url}")

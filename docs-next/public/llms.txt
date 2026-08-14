@@ -68,6 +68,10 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3-1.7B](https://gym.modal.dev/reference/models/qwen3_1_7b/): `Qwen3_1_7B`
 - [Qwen3-4B](https://gym.modal.dev/reference/models/qwen3_4b/): `Qwen3_4B`
 - [Qwen3-8B](https://gym.modal.dev/reference/models/qwen3_8b/): `Qwen3_8B`
+- [Qwen3.5-0.8B](https://gym.modal.dev/reference/models/qwen3_5_0_8b/): `Qwen3_5_0_8B`
+- [Qwen3.5-2B](https://gym.modal.dev/reference/models/qwen3_5_2b/): `Qwen3_5_2B`
+- [Qwen3.5-4B](https://gym.modal.dev/reference/models/qwen3_5_4b/): `Qwen3_5_4B`
+- [Qwen3.5-9B](https://gym.modal.dev/reference/models/qwen3_5_9b/): `Qwen3_5_9B`
 - [Qwen3-30B-A3B](https://gym.modal.dev/reference/models/qwen3_30b/): `Qwen3_30B`
 - [Qwen3.6-35B-A3B](https://gym.modal.dev/reference/models/qwen3_6_35b/): `Qwen3_6_35B`
 - [Qwen3.6-27B](https://gym.modal.dev/reference/models/qwen3_6_27b/): `Qwen3_6_27B`
@@ -81,6 +85,10 @@ Repo: https://github.com/modal-projects/training-gym
 - [MilesRecipe](https://gym.modal.dev/reference/training/milesrecipe/): `MilesRecipe`
 - [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe/): `Qwen3_6_35b_Recipe`
 - [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe/): `Qwen3_6_27b_Recipe`
+- [Qwen3.5-0.8b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_0_8b_recipe/): `Qwen3_5_0_8b_Recipe`
+- [Qwen3.5-2b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_2b_recipe/): `Qwen3_5_2b_Recipe`
+- [Qwen3.5-4b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_recipe/): `Qwen3_5_4b_Recipe`
+- [Qwen3.5-9b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_9b_recipe/): `Qwen3_5_9b_Recipe`
 
 ### Deployment
 

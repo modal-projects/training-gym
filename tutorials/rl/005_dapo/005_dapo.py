@@ -3,7 +3,7 @@
 
 # # Decoupled Clip and Dynamic Sampling Policy Optimization (DAPO)
 #
-# This tutorial trains **Qwen3-4B** according to DAPO as presented in Yu et al.,
+# This tutorial trains **Qwen3.5-4B** according to DAPO as presented in Yu et al.,
 # 2025 on the provided dataset `zhuzilin/dapo-math-17k`.
 #
 # DAPO presents four changes to the vanilla GRPO recipe aimed to improve long
@@ -50,7 +50,7 @@ from typing import Any
 from modal_training_gym import (
     CustomDeployment,
     HuggingFaceDataset,
-    Qwen3_4B,
+    Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
     list_checkpoints,
@@ -206,7 +206,7 @@ def _main_impl() -> None:
     #
     # Let's run the math eval on our base serving model before training.
 
-    base_model = Qwen3_4B()
+    base_model = Qwen3_5_4B()
     base_deployment = CustomDeployment.launch(
         base_model,
         unauthenticated=True,
@@ -221,7 +221,7 @@ def _main_impl() -> None:
 
     # ## Training
     #
-    # The recipe below is slime's reference Qwen3-4B layout (TP=2, 8192-token
+    # The recipe below is slime's reference Qwen3.5-4B layout (TP=2, 8192-token
     # responses, `max_tokens_per_gpu=9216`) with the DAPO modifications  on
     # top of GRPO. We follow ([the paper's recipe](https://arxiv.org/abs/2503.14476)) for the most part, 
     # but with some modifications for speed:
@@ -313,10 +313,10 @@ def _main_impl() -> None:
     print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-dapo-serve",
-        served_model_name="qwen3-4b-dapo",
+        app_name="qwen3-5-4b-dapo-serve",
+        served_model_name="qwen3-5-4b-dapo",
         unauthenticated=True,
     )
     print(f"Trained model URL: {trained_deployment.url}")

@@ -24,7 +24,7 @@ def _intro():
     # On-policy Distillation (OPD) Across Model Families
 
     In the 003 tutorial, we learned the basics of OPD: minimize the reverse-KL of a teacher and student model. Our toy environment
-    used Qwen3-8B to distill basic math answering capabilities to Qwen3-4B. What if we want our teacher model to be from a different,
+    used Qwen3.5-9B to distill basic math answering capabilities to Qwen3.5-4B. What if we want our teacher model to be from a different,
     more powerful model family? We can't compute reverse-KL divergence betweeen teacher and token logprobs because their
     tokenizer vocabularies are different! 
 

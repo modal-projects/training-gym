@@ -77,13 +77,13 @@ def _enable():
 
 @code
 def _enable_example():
-    from modal_training_gym import Qwen3_4b_Recipe, TrainConfig, WandbConfig
-    from modal_training_gym.common.models import Qwen3_4B
+    from modal_training_gym import Qwen3_5_4b_Recipe, TrainConfig, WandbConfig
+    from modal_training_gym.common.models import Qwen3_5_4B
 
     training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=my_dataset,  # any DatasetConfig
-        recipe=Qwen3_4b_Recipe(
+        recipe=Qwen3_5_4b_Recipe(
             num_rollout=40,
             wandb=WandbConfig(
                 project="my-rl-project",
