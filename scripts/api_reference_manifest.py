@@ -156,6 +156,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Qwen3-30B-A3B",
     },
     {
+        "class_name": "Moonlight_16B_A3B_Instruct",
+        "module": "modal_training_gym.common.models.moonlight_16b_a3b_instruct",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Moonlight-16B-A3B-Instruct",
+    },
+    {
         "class_name": "Qwen3_6_35B",
         "module": "modal_training_gym.common.models.qwen3_6_35b",
         "group": "models",
@@ -204,6 +211,20 @@ API_REFERENCE_MANIFEST = [
         "group": "training",
         "class_type": "config_data",
         "sidebar_label": "MilesRecipe",
+    },
+    {
+        "class_name": "Qwen3_5_4b_Miles_Recipe",
+        "module": "modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3_5_4b_Miles_Recipe",
+    },
+    {
+        "class_name": "Moonlight_16B_A3B_Recipe",
+        "module": "modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Moonlight_16B_A3B_Recipe",
     },
     {
         "class_name": "StitchRecipe",

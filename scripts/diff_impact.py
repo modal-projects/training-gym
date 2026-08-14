@@ -208,8 +208,7 @@ def _model_index() -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]
     re-validates it.
 
     Only the PR-matrix set is indexed. A model registered with
-    ``run_on_pr=False`` (e.g. Kimi on 16 x 8 H200) must never reach a PR
-    matrix, so no diff can select it.
+    ``run_on_pr=False`` must never reach a PR matrix, so no diff can select it.
     """
     from modal_training_gym.common.models.validation import _ValidationConfig
 
@@ -238,13 +237,17 @@ def affected_models(diff_text: str) -> tuple[str, ...]:
     class_to_models, framework_to_models = _model_index()
     all_models = {model for models in framework_to_models.values() for model in models}
 
+    touched_frameworks = {
+        framework
+        for framework, harness_paths in FRAMEWORK_VALIDATION_HARNESS_PATHS.items()
+        if any(path in harness_paths for path in changed_paths)
+    }
     if any(path in SHARED_VALIDATION_HARNESS_PATHS for path in changed_paths):
         return tuple(sorted(all_models))
 
     models: set[str] = set()
-    for framework, harness_paths in FRAMEWORK_VALIDATION_HARNESS_PATHS.items():
-        if any(path in harness_paths for path in changed_paths):
-            models.update(framework_to_models.get(framework, frozenset()))
+    for framework in touched_frameworks:
+        models.update(framework_to_models.get(framework, frozenset()))
 
     report = analyze_diff(diff_text)
     for class_name in report.affected_classes:
