@@ -28,7 +28,7 @@ uv run tutorials/generate_tutorial.py              # regenerate all .py + .ipynb
 uv run tutorials/generate_tutorial.py path/to/src  # regenerate one
 
 # Docs (Astro/Starlight site at docs-next/)
-uv run scripts/generate_all.py --skip-build   # regen API reference + tutorial pages
+uv run scripts/generate_all.py --skip-build   # regen models table, API reference, tutorial pages
 cd docs-next && npm ci && npm run dev                 # local dev server
 uv run scripts/generate_all.py                 # full regen + build
 

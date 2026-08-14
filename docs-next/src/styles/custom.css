@@ -880,41 +880,39 @@ a:hover {
   min-width: 6.5rem;
 }
 
-.sl-markdown-content .tutorial-catalog table {
+.sl-markdown-content .catalog table {
   display: block;
   width: 100%;
-  min-width: 44rem;
+  min-width: 0;
   border-collapse: separate;
   border-spacing: 0;
 }
 
-.sl-markdown-content .tutorial-catalog :is(thead, tbody) {
+.sl-markdown-content .catalog :is(thead, tbody) {
   display: block;
   width: 100%;
 }
 
-.sl-markdown-content .tutorial-catalog :is(thead, tbody, tr, th, td) {
+.sl-markdown-content .catalog :is(thead, tbody, tr, th, td) {
   margin: 0;
 }
 
-.sl-markdown-content .tutorial-catalog tr {
+.sl-markdown-content .catalog tr {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 2.6fr) minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: var(--catalog-columns);
   width: 100%;
 }
 
-.sl-markdown-content .tutorial-catalog table th:nth-child(n),
-.sl-markdown-content .tutorial-catalog table td:nth-child(n) {
+.sl-markdown-content .catalog table :is(th, td):nth-child(n) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.sl-markdown-content .tutorial-catalog table td > a > code:not(pre code),
-.sl-markdown-content .tutorial-catalog table td > code:not(pre code) {
+.sl-markdown-content .catalog table td :is(code, a > code):not(pre code) {
   white-space: normal;
 }
 
-.sl-markdown-content .tutorial-catalog td {
+.sl-markdown-content .catalog td {
   font-size: 0.875rem;
   display: flex;
   flex-wrap: wrap;
@@ -922,11 +920,11 @@ a:hover {
   align-content: center;
 }
 
-.sl-markdown-content .tutorial-catalog td code:not(pre code) {
+.sl-markdown-content .catalog td code:not(pre code) {
   font-size: 0.875rem;
 }
 
-.sl-markdown-content .tutorial-catalog td:nth-child(5) img {
+.sl-markdown-content .catalog td img {
   display: block;
 }
 
