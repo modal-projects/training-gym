@@ -26,10 +26,14 @@ def _create_endpoint_and_wait_for_url(
     model_name: str,
     checkpoint: Checkpoint | None,
     unauthenticated: bool,
-    environment: str | None,
     routing_region: str | None,
+    colocate_compute: bool,
+    custom_hf_repo: str | None,
+    custom_hf_revision: str | None,
+    custom_hf_token: str | None,
     wait_timeout_sec: float,
     recreate_if_existing: bool,
+    environment: str | None,
 ) -> str:
     if recreate_if_existing:
         stop = [
@@ -66,6 +70,14 @@ def _create_endpoint_and_wait_for_url(
         command.append("--unauthenticated")
     if routing_region:
         command.extend(["--routing-region", routing_region])
+    if colocate_compute:
+        command.append("--colocate-compute")
+    if custom_hf_repo:
+        command.extend(["--custom-hf-repo", custom_hf_repo])
+    if custom_hf_revision:
+        command.extend(["--custom-hf-revision", custom_hf_revision])
+    if custom_hf_token:
+        command.extend(["--custom-hf-token", custom_hf_token])
 
     if checkpoint:
         command.extend(["--custom-volume-name", checkpoint.checkpoints_volume_name])
@@ -145,10 +157,14 @@ class Endpoint:
         *,
         endpoint_name: str | None = None,
         unauthenticated: bool = True,
-        environment: str | None = None,
         routing_region: str | None = None,
+        colocate_compute: bool = False,
+        custom_hf_repo: str | None = None,
+        custom_hf_revision: str | None = None,
+        custom_hf_token: str | None = None,
         wait_timeout_sec: float = 300,
         recreate_if_existing: bool = False,
+        environment: str | None = None,
     ):
         """Provision a Modal endpoint for ``model`` and return a handle to it.
 
@@ -159,6 +175,10 @@ class Endpoint:
         When ``endpoint_name`` is omitted, an endpoint name is derived for you.
 
         Endpoints require proxy auth if ``unauthenticated=False``.
+        ``colocate_compute=True`` keeps containers in the routing region, and
+        ``custom_hf_repo`` serves fine-tuned weights from Hugging Face.
+        ``custom_hf_revision`` and ``custom_hf_token`` apply only with that
+        repo. A ``checkpoint`` and ``custom_hf_repo`` cannot be combined.
 
         ``modal endpoint create`` fails when the name already exists. Pass
         ``recreate_if_existing=True`` to stop an endpoint with the same name
@@ -172,6 +192,15 @@ class Endpoint:
         Megatron training checkpoints are converted to Hugging Face format
         before create.
         """
+        if checkpoint and custom_hf_repo:
+            raise TrainingGymConfigError(
+                "checkpoint and custom_hf_repo cannot both be set"
+            )
+        if (custom_hf_revision or custom_hf_token) and not custom_hf_repo:
+            raise TrainingGymConfigError(
+                "custom_hf_revision and custom_hf_token require custom_hf_repo"
+            )
+
         if checkpoint:
             model_config = (
                 model
@@ -196,6 +225,12 @@ class Endpoint:
                         "checkpoint_name": checkpoint.name,
                     }
                 )
+            if colocate_compute:
+                spec["colocate_compute"] = True
+            if custom_hf_repo:
+                spec["custom_hf_repo"] = custom_hf_repo
+            if custom_hf_repo and custom_hf_revision:
+                spec["custom_hf_revision"] = custom_hf_revision
 
             digest = hashlib.sha256(
                 json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
@@ -207,8 +242,12 @@ class Endpoint:
             model_name=model_name,
             checkpoint=checkpoint,
             unauthenticated=unauthenticated,
-            environment=environment,
             routing_region=routing_region,
+            environment=environment,
+            colocate_compute=colocate_compute,
+            custom_hf_repo=custom_hf_repo,
+            custom_hf_revision=custom_hf_revision,
+            custom_hf_token=custom_hf_token,
             wait_timeout_sec=wait_timeout_sec,
             recreate_if_existing=recreate_if_existing,
         )

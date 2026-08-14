@@ -164,6 +164,10 @@ def test_launch_creates_a_public_endpoint(fake_modal_cli) -> None:
     assert "--env" not in cli.last_command
     assert "--routing-region" not in cli.last_command
     assert "--custom-volume-name" not in cli.last_command
+    assert "--colocate-compute" not in cli.last_command
+    assert "--custom-hf-repo" not in cli.last_command
+    assert "--custom-hf-revision" not in cli.last_command
+    assert "--custom-hf-token" not in cli.last_command
     assert cli.run_kwargs[-1] == {"check": True, "timeout": 120}
     assert endpoint.model_name == "Qwen/Qwen3-4B"
     assert endpoint.requires_proxy_auth is False
@@ -191,6 +195,40 @@ def test_launch_forwards_environment_and_routing_region(fake_modal_cli) -> None:
     assert cli.flag_value("--env") == "dev"
     assert cli.flag_value("--routing-region") == "us-east"
     assert cli.servers[-1][2] == "dev"
+
+
+def test_launch_appends_colocate_compute(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+
+    Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True, colocate_compute=True)
+
+    assert "--colocate-compute" in cli.last_command
+
+
+def test_launch_forwards_custom_hf_flags(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+
+    Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        unauthenticated=True,
+        custom_hf_repo="org/model",
+        custom_hf_revision="abc123",
+        custom_hf_token="hf_token",
+    )
+
+    assert cli.flag_value("--custom-hf-repo") == "org/model"
+    assert cli.flag_value("--custom-hf-revision") == "abc123"
+    assert cli.flag_value("--custom-hf-token") == "hf_token"
+
+
+def test_launch_omits_unset_custom_hf_revision_and_token(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+
+    Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True, custom_hf_repo="org/model")
+
+    assert cli.flag_value("--custom-hf-repo") == "org/model"
+    assert "--custom-hf-revision" not in cli.last_command
+    assert "--custom-hf-token" not in cli.last_command
 
 
 def _checkpoint(
@@ -308,6 +346,46 @@ def test_launch_skips_conversion_for_hub_models(
     Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
 
 
+def test_launch_rejects_checkpoint_with_custom_hf_repo(
+    fake_modal_cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = fake_modal_cli()
+
+    def convert(*args, **kwargs):
+        raise AssertionError("xor launch converted a checkpoint")
+
+    monkeypatch.setattr(endpoint_module, "convert_megatron_checkpoint_to_hf", convert)
+
+    with pytest.raises(TrainingGymConfigError, match="checkpoint and custom_hf_repo"):
+        Endpoint.launch(
+            "Qwen/Qwen3-4B",
+            _checkpoint(),
+            unauthenticated=True,
+            custom_hf_repo="org/model",
+        )
+
+    assert cli.commands == []
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"custom_hf_revision": "abc123"},
+        {"custom_hf_token": "hf_token"},
+        {"custom_hf_revision": "abc123", "custom_hf_token": "hf_token"},
+    ],
+)
+def test_launch_rejects_custom_hf_revision_or_token_without_repo(
+    fake_modal_cli, kwargs: dict[str, str]
+) -> None:
+    cli = fake_modal_cli()
+
+    with pytest.raises(TrainingGymConfigError, match="require custom_hf_repo"):
+        Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True, **kwargs)
+
+    assert cli.commands == []
+
+
 def test_launch_derives_stable_names_from_the_serving_spec(fake_modal_cli) -> None:
     fake_modal_cli()
 
@@ -342,6 +420,61 @@ def test_launch_derives_stable_names_from_the_serving_spec(fake_modal_cli) -> No
         )
         == 6
     )
+    assert public.endpoint_name == "training-gym-814a133f9cff"
+
+
+def test_launch_derived_name_changes_for_colocate_and_custom_hf(
+    fake_modal_cli,
+) -> None:
+    fake_modal_cli()
+
+    default = Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
+    colocated = Endpoint.launch(
+        "Qwen/Qwen3-4B", unauthenticated=True, colocate_compute=True
+    )
+    repo = Endpoint.launch(
+        "Qwen/Qwen3-4B", unauthenticated=True, custom_hf_repo="org/model"
+    )
+    repo_revision = Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        unauthenticated=True,
+        custom_hf_repo="org/model",
+        custom_hf_revision="abc123",
+    )
+
+    assert (
+        len(
+            {
+                default.endpoint_name,
+                colocated.endpoint_name,
+                repo.endpoint_name,
+                repo_revision.endpoint_name,
+            }
+        )
+        == 4
+    )
+
+
+def test_launch_derived_name_ignores_custom_hf_token(fake_modal_cli) -> None:
+    fake_modal_cli()
+
+    repo = Endpoint.launch(
+        "Qwen/Qwen3-4B", unauthenticated=True, custom_hf_repo="org/model"
+    )
+    token_a = Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        unauthenticated=True,
+        custom_hf_repo="org/model",
+        custom_hf_token="token-a",
+    )
+    token_b = Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        unauthenticated=True,
+        custom_hf_repo="org/model",
+        custom_hf_token="token-b",
+    )
+
+    assert repo.endpoint_name == token_a.endpoint_name == token_b.endpoint_name
 
 
 def test_launch_uses_an_explicit_endpoint_name(fake_modal_cli) -> None:
