@@ -4,7 +4,7 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 8×H100",
-    "summary": "Post-train Qwen3-4B from one plain-language prompt with an agent",
+    "summary": "Turn a plain-language objective into an end-to-end Qwen3-4B training run",
     "difficulty": "Intermediate",
     "order": 70,
     "api_classes": [
@@ -22,7 +22,7 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # From one prompt to a trained model
+    # Agent-driven RL for rhyming with Qwen3-4B
 
     This entire training project started with one sentence:
 
