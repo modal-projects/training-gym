@@ -688,12 +688,11 @@ def build_miles_app(
                 ]
                 tracker = "latest_checkpointed_iteration.txt"
                 tracker_path = os.path.join(save_path, tracker)
-                has_tracker = os.path.isfile(tracker_path)
-                removed = [*stale, *([tracker] if has_tracker else [])]
-                if removed:
+                has_tracker = stale and os.path.isfile(tracker_path)
+                if stale:
                     print(
                         f"Removing incomplete torch_dist checkpoint state at {save_path}: "
-                        + ", ".join(removed)
+                        + ", ".join([*stale, *([tracker] if has_tracker else [])])
                     )
                     for name in stale:
                         shutil.rmtree(os.path.join(save_path, name), ignore_errors=True)
@@ -806,7 +805,7 @@ def build_miles_app(
                 f'read -ra MODEL_ARGS <<< "$MODEL_ARGS_LINE"; '
                 f"torchrun {' '.join(torchrun_args)} {convert_script} "
                 f"${{MODEL_ARGS[@]}} {' '.join(extra_args)} "
-                f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(save_path)}"
+                f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(write_path)}"
             )
         else:
             cmd = (
