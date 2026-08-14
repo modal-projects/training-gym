@@ -206,6 +206,12 @@ class StitchTrainConfig(MilesRecipe):
         fields = super()._fields(dataset=dataset, model=model)
         for name in _TRAINER_DROP:
             fields.pop(name, None)
+        # Megatron asserts a save interval whenever a save path is set, and this
+        # recipe defaults to keeping no trainer checkpoints (the pool's weights
+        # come from the deltas, not from a save).
+        if self.save_interval is None:
+            fields.pop("save", None)
+            fields.pop("save_hf", None)
         # bridge mode loads HF weights directly as the reference. The reference
         # is the BF16 masters, never the served base: for a quantized run those
         # differ, and loading a quantized checkpoint as the trainer's weights
