@@ -47,7 +47,6 @@ from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import (
     RAY_PORT,
-    clustered_if,
     start_ray_head,
     start_ray_worker,
 )
@@ -159,26 +158,35 @@ def _local_checkpoint(model_name: str, volume_name: str) -> str:
     return model_name
 
 
-def _trainer_failed(log_path: Path, returncode: int, lines: int = 50) -> str:
-    """What the trainer's exit code and the tail of its log say, as one message."""
+def _trainer_failed(
+    log_path: Path, returncode: int, lines: int = 50, budget: int = 4000
+) -> str:
+    """What the trainer's exit code and the tail of its log say, as one message.
+
+    Capped in characters as well as lines: Modal refuses to ship an exception
+    over a few KB back to the client, and one Ray-prefixed line of miles output
+    can be that on its own.
+    """
     try:
         tail = log_path.read_text(errors="replace").splitlines()[-lines:]
     except OSError as exc:
         tail = [f"(no log at {log_path}: {exc})"]
-    return "\n".join(
-        [f"miles exited {returncode}; last {lines} lines of {log_path}:", *tail]
-    )
+    body = "\n".join(tail)[-budget:]
+    return f"miles exited {returncode}; tail of {log_path}:\n{body}"
 
 
-# A cluster node bind-mounts the host's own rdma-core over the image's
-# libibverbs — same file name, newer contents — and the host's exports only
-# ``IBVERBS_PRIVATE_59`` while the libibverbs providers Ubuntu ships here are
-# built against ``IBVERBS_PRIVATE_34``. miles pulls libmlx5 in through
-# mooncake, so the trainer dies importing it before the first step. Rebuild
-# libmlx5 from the rdma-core the host is running, and point the provider name
-# that libibverbs now looks for at the host's own libefa: building that one
-# too segfaults NCCL, since the EFA userspace has to be the node's.
+# An RDMA node bind-mounts the host's own rdma-core over the image's libibverbs
+# — same file name, newer contents — and the host's exports only
+# ``IBVERBS_PRIVATE_59`` while the providers Ubuntu ships here are built against
+# ``IBVERBS_PRIVATE_34``. miles pulls libmlx5 in through mooncake, so the
+# trainer dies importing it before the first step. Build the matching libmlx5
+# *beside* the system one and reach it through the linker path on the nodes that
+# take the mount, leaving a non-RDMA node with the coherent set it already has.
+# libefa is deliberately not rebuilt — the EFA userspace has to be the node's
+# own, and ours segfaults NCCL — so the provider name libibverbs now looks for
+# points back at the system (i.e. host-mounted) library.
 RDMA_CORE_REF = "v59.0"
+RDMA_LIB_DIR = "/opt/rdma59"
 _SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
 _RDMA_CORE_COMMANDS = (
     "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq"
@@ -188,11 +196,13 @@ _RDMA_CORE_COMMANDS = (
     " && cd /tmp/rdma-core"
     " && cmake -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DNO_MAN_PAGES=1"
     " && ninja -C build",
-    f"set -eu; cd {_SYSTEM_LIB_DIR}"
-    " && mlx5=$(basename /tmp/rdma-core/build/lib/libmlx5.so.1.*)"
-    f" && cp -aL /tmp/rdma-core/build/lib/$mlx5 {_SYSTEM_LIB_DIR}/"
-    " && ln -sf $mlx5 libmlx5.so.1"
-    " && ln -sf ../$(ls libefa.so.1.*.*.*) libibverbs/libefa-rdmav59.so"
+    f"set -eu; mkdir -p {RDMA_LIB_DIR}"
+    f" && cp -aL /tmp/rdma-core/build/lib/libmlx5.so.1.* {RDMA_LIB_DIR}/"
+    f" && cd {RDMA_LIB_DIR}"
+    " && ln -sf $(ls libmlx5.so.1.*) libmlx5.so.1"
+    " && ln -sf libmlx5.so.1 libmlx5-rdmav59.so"
+    f" && ln -sf {_SYSTEM_LIB_DIR}/$(cd {_SYSTEM_LIB_DIR} && ls libefa.so.1.*.*.*)"
+    " libefa-rdmav59.so"
     " && rm -rf /tmp/rdma-core",
 )
 
@@ -440,6 +450,7 @@ def build_stitch_app(
     )
     rollout_concurrency = serve_recipe.concurrency
     n_train_nodes = train_recipe.actor_num_nodes
+    _multi_node = n_train_nodes > 1
 
     tags = {
         **COMMON_TRAINING_GYM_TAGS,
@@ -568,11 +579,14 @@ def build_stitch_app(
         ephemeral_disk=train_recipe.ephemeral_disk,
         timeout=24 * 60 * MINUTES,
         startup_timeout=20 * MINUTES,
-        experimental_options={"efa_enabled": True},
+        experimental_options={"efa_enabled": True} if _multi_node else {},
         serialized=True,
         name="train",
     )
-    @clustered_if(True, n_train_nodes, gpu_type=train_recipe.gpu_type)
+    # RDMA only across nodes, as in the miles launcher: a node that asks for it
+    # gets the host's own rdma-core mounted over the image's, and the trainer has
+    # no use for the fabric when the whole actor group is one node anyway.
+    @modal.experimental.clustered(n_train_nodes, rdma=_multi_node)
     def train(
         modal_app_id: str = "",
         modal_app_url: str = "",
@@ -597,6 +611,18 @@ def build_stitch_app(
                 "no_proxy": f"127.0.0.1,{master_addr},{my_ip}",
                 "NO_PROXY": f"127.0.0.1,{master_addr},{my_ip}",
                 "PYTHONPATH": train_recipe.megatron_pythonpath,
+                # Only the RDMA nodes take the host's libibverbs, so only they
+                # want the libmlx5 built against it (see RDMA_LIB_DIR). Set
+                # before Ray starts, since its workers inherit this.
+                **(
+                    {
+                        "LD_LIBRARY_PATH": ":".join(
+                            [RDMA_LIB_DIR, os.environ.get("LD_LIBRARY_PATH", "")]
+                        ).rstrip(":")
+                    }
+                    if _multi_node
+                    else {}
+                ),
                 **{str(k): str(v) for k, v in train_recipe.environment.items()},
             }
         )
