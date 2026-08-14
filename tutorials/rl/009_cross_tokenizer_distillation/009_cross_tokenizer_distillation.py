@@ -44,7 +44,6 @@ from modal_training_gym import (
     Endpoint,
     Qwen3_6_35B,
     TrainConfig,
-    convert_checkpoint_to_hf,
     list_checkpoints,
 )
 from modal_training_gym.common.models.base import HFModelConfiguration, ToolCall
@@ -1101,10 +1100,10 @@ def _main_impl() -> None:
     )
 
     print("--- Starting GRPO + cross-tokenizer OPD training... ---")
-    print(f"  Teacher: DeepSeek V4 Flash")
-    print(f"  Student: Qwen3.6-35B-A3B")
-    print(f"  Dataset: BFCL multi_turn_base, prefix-conditioned (task, K) rows")
-    print(f"  Reward: schema + live exec + structural match + terminal state/response verdict")
+    print("  Teacher: DeepSeek V4 Flash")
+    print("  Student: Qwen3.6-35B-A3B")
+    print("  Dataset: BFCL multi_turn_base, prefix-conditioned (task, K) rows")
+    print("  Reward: schema + live exec + structural match + terminal state/response verdict")
     train_result = training_run.train()
     print(f"Training run id: {train_result.training_run_id}")
     print("--- Training complete ---")
@@ -1114,11 +1113,10 @@ def _main_impl() -> None:
     # Deploy the last checkpoint and re-run the held-out BFCL ids with the same evaluator from our earlier baseline.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_6_35B())
-    print(f"Checkpoint: {hf_checkpoint.path}")
+    print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
-        Qwen3_6_35B(), hf_checkpoint, unauthenticated=True
+        Qwen3_6_35B(), checkpoint, unauthenticated=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 

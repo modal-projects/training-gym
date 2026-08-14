@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import modal
 
-from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
+from modal_training_gym.common.checkpoint import Checkpoint, convert_checkpoint_to_hf
 from modal_training_gym.common.config import modal_proxy_auth_headers
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.openai_messages import _messages_to_openai
@@ -141,12 +141,17 @@ class Endpoint:
         Returns once the endpoint has a URL, which may occur before it can serve
         traffic; call ``wait_until_ready()`` to wait for the model to become ready.
         Raises ``TimeoutError`` if no URL is published within ``wait_timeout_sec``.
+
+        Megatron training checkpoints are converted to Hugging Face format
+        before create.
         """
-        if checkpoint and checkpoint.checkpoint_type is not CheckpointType.hf:
-            raise TrainingGymConfigError(
-                "Checkpoint must be in Hugging Face format. Convert it with "
-                "`convert_checkpoint_to_hf()` first."
+        if checkpoint:
+            model_config = (
+                model
+                if isinstance(model, ModelConfig)
+                else ModelConfig(model_name=model)
             )
+            checkpoint = convert_checkpoint_to_hf(checkpoint, model_config)
 
         model_name = model if isinstance(model, str) else model.model_name
 

@@ -72,7 +72,6 @@ def _imports():
         GLM_4_7,
         HuggingFaceDataset,
         TrainConfig,
-        convert_checkpoint_to_hf,
         list_checkpoints,
     )
     from modal_training_gym.train_recipes.slime_recipe import GLM_4_7_Recipe
@@ -166,20 +165,19 @@ def _serve_intro():
     """
     ## Serve the trained checkpoint
 
-    After training, convert the Megatron checkpoint to Hugging Face
-    weights and serve it with `Endpoint.launch`. GLM-4.7 is in the
-    dedicated Endpoints catalog.
+    After training, pass the last checkpoint to `Endpoint.launch`. GLM-4.7
+    is in the dedicated Endpoints catalog; Megatron weights are converted
+    to Hugging Face format during launch.
     """
 
 
 @code
 def _serve_checkpoint():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, GLM_4_7())
-    print(f"Checkpoint: {hf_checkpoint.path}")
+    print(f"Checkpoint: {checkpoint.path}")
 
     deployment = Endpoint.launch(
-        GLM_4_7(), hf_checkpoint, unauthenticated=True
+        GLM_4_7(), checkpoint, unauthenticated=True
     )
     deployment.wait_until_ready(timeout=45 * 60)
     print(f"Deployed to {deployment.url}")

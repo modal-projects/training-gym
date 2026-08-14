@@ -89,7 +89,6 @@ def _imports():
         Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
-        convert_checkpoint_to_hf,
         list_checkpoints,
     )
 
@@ -358,19 +357,18 @@ def _trained_eval_intro():
     ## Serve and evaluate the trained checkpoint
 
     The returned `TrainResult` has the checkpoint path and volume
-    metadata attached. Endpoints require Hugging Face weights, so convert
-    the Megatron checkpoint first, then pass it to `Endpoint.launch`.
+    metadata attached. Pass that checkpoint to `Endpoint.launch`; Megatron
+    weights are converted to Hugging Face format during launch.
     """
 
 
 @code
 def _serve_and_eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
-    print(hf_checkpoint.path)
+    print(checkpoint.path)
 
     trained_model_deployment = Endpoint.launch(
-        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True
     )
     trained_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Trained model deployed to {trained_model_deployment.url}")
@@ -447,11 +445,10 @@ def _trained_eval_off_of_a_checkpoint():
 @code
 def _trained_eval_off_of_a_checkpoint_code():
     new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
-    new_hf_checkpoint = convert_checkpoint_to_hf(new_checkpoint, Qwen3_5_4B())
-    print(new_hf_checkpoint.path)
+    print(new_checkpoint.path)
 
     new_model_deployment = Endpoint.launch(
-        Qwen3_5_4B(), new_hf_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), new_checkpoint, unauthenticated=True
     )
     new_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Newly trained model deployed to {new_model_deployment.url}")

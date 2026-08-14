@@ -234,6 +234,70 @@ def test_launch_mounts_the_checkpoint_relative_to_the_volume_root(
     assert cli.flag_value("--custom-volume-path") == expected
 
 
+def test_launch_converts_megatron_checkpoints_before_create(
+    fake_modal_cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = fake_modal_cli()
+    megatron = Checkpoint(
+        checkpoint_type=CheckpointType.megatron,
+        name="iter_10",
+        path="/checkpoints/run-1/iter_10",
+        timestamp=0.0,
+        training_run_id="run-1",
+        checkpoints_volume_name="gym-checkpoints",
+        checkpoints_mount_path="/checkpoints",
+    )
+    converted = _checkpoint("/checkpoints/run-1/iter_10_hf")
+    seen: dict[str, Any] = {}
+
+    def convert(checkpoint, model, **kwargs):
+        seen["checkpoint"] = checkpoint
+        seen["model"] = model
+        return converted
+
+    monkeypatch.setattr(endpoint_module, "convert_checkpoint_to_hf", convert)
+
+    Endpoint.launch("Qwen/Qwen3-4B", megatron, unauthenticated=True)
+
+    assert seen["checkpoint"] is megatron
+    assert seen["model"].model_name == "Qwen/Qwen3-4B"
+    assert cli.flag_value("--custom-volume-path") == "run-1/iter_10_hf"
+
+
+def test_launch_leaves_hf_checkpoints_unchanged(
+    fake_modal_cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = fake_modal_cli()
+    checkpoint = _checkpoint()
+    seen: list[tuple[Checkpoint, Checkpoint]] = []
+    original = endpoint_module.convert_checkpoint_to_hf
+
+    def convert(checkpoint, model, **kwargs):
+        result = original(checkpoint, model)
+        seen.append((checkpoint, result))
+        return result
+
+    monkeypatch.setattr(endpoint_module, "convert_checkpoint_to_hf", convert)
+
+    Endpoint.launch("Qwen/Qwen3-4B", checkpoint, unauthenticated=True)
+
+    assert seen == [(checkpoint, checkpoint)]
+    assert cli.flag_value("--custom-volume-path") == "run-1/iter_10_hf"
+
+
+def test_launch_skips_conversion_for_hub_models(
+    fake_modal_cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_modal_cli()
+
+    def convert(*args, **kwargs):
+        raise AssertionError("hub launch converted a checkpoint")
+
+    monkeypatch.setattr(endpoint_module, "convert_checkpoint_to_hf", convert)
+
+    Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
+
+
 def test_launch_derives_stable_names_from_the_serving_spec(fake_modal_cli) -> None:
     fake_modal_cli()
 
