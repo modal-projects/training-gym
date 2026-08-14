@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 import modal
 
+from modal_training_gym.common import hf_token
 from modal_training_gym.common.checkpoint import (
     Checkpoint,
     convert_megatron_checkpoint_to_hf,
@@ -31,7 +32,7 @@ def _create_endpoint_and_wait_for_url(
     colocate_compute: bool,
     custom_hf_repo: str | None,
     custom_hf_revision: str | None,
-    custom_hf_token: str | None,
+    resolved_hf_token: str | None,
     wait_timeout_sec: float,
     recreate_if_existing: bool,
 ) -> str:
@@ -76,8 +77,8 @@ def _create_endpoint_and_wait_for_url(
         command.extend(["--custom-hf-repo", custom_hf_repo])
     if custom_hf_revision:
         command.extend(["--custom-hf-revision", custom_hf_revision])
-    if custom_hf_token:
-        command.extend(["--custom-hf-token", custom_hf_token])
+    if resolved_hf_token:
+        command.extend(["--custom-hf-token", resolved_hf_token])
 
     if checkpoint:
         command.extend(["--custom-volume-name", checkpoint.checkpoints_volume_name])
@@ -162,7 +163,6 @@ class Endpoint:
         colocate_compute: bool = False,
         custom_hf_repo: str | None = None,
         custom_hf_revision: str | None = None,
-        custom_hf_token: str | None = None,
         wait_timeout_sec: float = 300,
         recreate_if_existing: bool = False,
     ):
@@ -177,8 +177,9 @@ class Endpoint:
         Endpoints require proxy auth if ``unauthenticated=False``.
         ``colocate_compute=True`` keeps containers in the routing region, and
         ``custom_hf_repo`` serves fine-tuned weights from Hugging Face.
-        ``custom_hf_revision`` and ``custom_hf_token`` apply only with that
-        repo. A ``checkpoint`` and ``custom_hf_repo`` cannot be combined.
+        ``custom_hf_revision`` applies only with that repo. A repo also
+        requires ``HF_TOKEN`` or ``HUGGING_FACE_HUB_TOKEN`` in the launching
+        shell. A ``checkpoint`` and ``custom_hf_repo`` cannot be combined.
 
         ``modal endpoint create`` fails when the name already exists. Pass
         ``recreate_if_existing=True`` to stop an endpoint with the same name
@@ -196,10 +197,17 @@ class Endpoint:
             raise TrainingGymConfigError(
                 "checkpoint and custom_hf_repo cannot both be set"
             )
-        if (custom_hf_revision or custom_hf_token) and not custom_hf_repo:
-            raise TrainingGymConfigError(
-                "custom_hf_revision and custom_hf_token require custom_hf_repo"
-            )
+        if custom_hf_repo:
+            resolved_hf_token = hf_token()
+            if resolved_hf_token is None:
+                raise TrainingGymConfigError(
+                    "custom_hf_repo requires HF_TOKEN or HUGGING_FACE_HUB_TOKEN "
+                    "in the launching shell"
+                )
+        elif custom_hf_revision:
+            raise TrainingGymConfigError("custom_hf_revision requires custom_hf_repo")
+        else:
+            resolved_hf_token = None
 
         if checkpoint:
             model_config = (
@@ -247,7 +255,7 @@ class Endpoint:
             colocate_compute=colocate_compute,
             custom_hf_repo=custom_hf_repo,
             custom_hf_revision=custom_hf_revision,
-            custom_hf_token=custom_hf_token,
+            resolved_hf_token=resolved_hf_token,
             wait_timeout_sec=wait_timeout_sec,
             recreate_if_existing=recreate_if_existing,
         )
