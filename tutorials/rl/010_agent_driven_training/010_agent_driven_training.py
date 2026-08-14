@@ -395,8 +395,9 @@ def build_config(
 # reran the cheap stage, and checked real samples again before promotion.
 #
 # <video controls playsinline width="100%">
-#   <source src="https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/agent-driven-training-rhyme.mp4" type="video/mp4">
-#   <a href="https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/agent-driven-training-rhyme.mp4">Watch the agent-driven training demo.</a>
+#   <source src="/agent-driven-training-rhyme.mp4" type="video/mp4">
+#   <source src="https://gym.modal.dev/agent-driven-training-rhyme.mp4" type="video/mp4">
+#   <a href="https://gym.modal.dev/agent-driven-training-rhyme.mp4">Watch the agent-driven training demo.</a>
 # </video>
 #
 # This is why traces belong in the normal workflow: a reward curve can tell
