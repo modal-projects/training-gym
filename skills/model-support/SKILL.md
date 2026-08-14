@@ -26,7 +26,7 @@ If reward doesn't climb, isolate which layer is at fault: data (`DatasetConfig` 
 
 ### Common gotchas (both frameworks)
 
-Naming convention: For the model name in artifacts, it should be `_` separated by model family identifiers and replacing `.` for versioning (e.g. `Qwen3_4b`, `Qwen3_6_35b`, `Kimi_K2_6`).
+Naming convention: For the model name in artifacts, it should be `_` separated by model family identifiers and replacing `.` for versioning (e.g. `Qwen3_4b`, `Qwen3_6_35b`).
 
 `--max-tokens-per-gpu` is a flag for training, whereas `--rollout-max-response-len` is a flag for rollouts.
 
@@ -34,4 +34,4 @@ If it is a large MoE, you may need `--optimizer-cpu-offload`, `--use-precision-a
 
 ### Validate Model Configs
 
-`.github/workflows/validate-models.yml` guards against performance regressions and is manually triggered — required before merging a new model, so ping someone who can dispatch it (escalate to Joy Liu). Register the model in `common/models/validation.py: VALIDATION_CONFIGS` with its `Framework`; `run_on_pr=False` means dispatch-only (Kimi, at 16 x 8 H200), not disabled. The recipe is used as `get_base_recipe` returns it, image included, so validating a candidate image means bumping it on a branch and dispatching.
+`.github/workflows/validate-models.yml` guards against performance regressions and is manually triggered — required before merging a new model, so ping someone who can dispatch it (escalate to Joy Liu). Register the model in `common/models/validation.py: VALIDATION_CONFIGS` with its `Framework`; `run_on_pr=False` means dispatch-only, not disabled. The recipe is used as `get_base_recipe` returns it, image included, so validating a candidate image means bumping it on a branch and dispatching.

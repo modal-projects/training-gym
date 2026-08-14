@@ -30,6 +30,7 @@ _MILES_SKIP = {
     "environment",
     "async_mode",
     "miles_model_script",
+    "miles_model_name",
     "source_hf_checkpoint",
     "megatron_conversion_hf_checkpoint",
     "docker_image",
@@ -144,8 +145,10 @@ class MilesRecipe(BaseTrainRecipe):
         Modal region to pin the cluster to.
     miles_model_script : str
         Script in the Miles repo sourced for ``MODEL_ARGS`` instead of arch flags.
+    miles_model_name : str
+        Name accepted by Miles' ``model_args_utils.py``.
     source_hf_checkpoint : str | None
-        Source checkpoint when it differs from the model's own (Kimi: INT4 + BF16).
+        Source checkpoint when it differs from the model's own.
     megatron_conversion_hf_checkpoint : str | None
         HF weights used for the HF→Megatron conversion instead of the model's own.
     patch_files : list[str]
@@ -451,7 +454,7 @@ class MilesRecipe(BaseTrainRecipe):
     recipe_type: RecipeType = RecipeType.MILES
 
     # ── Launcher instructions (not Miles CLI flags) ─────────────────────────
-    docker_image: str = "radixark/miles:dev-202608051303"
+    docker_image: str = "radixark/miles:dev-202608120325"
     gpu_type: str = "H100"
     memory: int | tuple[int, int] | None = None
     cloud: str | None = None
@@ -473,6 +476,7 @@ class MilesRecipe(BaseTrainRecipe):
     )
     async_mode: bool = False
     miles_model_script: str = ""
+    miles_model_name: str = ""
     source_hf_checkpoint: str | None = None
     megatron_conversion_hf_checkpoint: str | None = None
     wandb: WandbConfig | None = None
@@ -498,7 +502,7 @@ class MilesRecipe(BaseTrainRecipe):
     save_interval: int = 10
     no_save_optim: bool = False
 
-    # ── Checkpoint conversion ───────────────────────────────────────────────
+    # ── Checkpoint conversion ───────────────────────────────────────────
     # Conversion-only parallelism overrides. Launcher instructions, not CLI flags
     # (see _MILES_SKIP): torch_dist reshards on load, so the conversion layout is
     # independent of the training layout.
@@ -640,8 +644,6 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_config: dict | str | None = None
     apply_chat_template_kwargs: str | dict = ""
     train_env_vars: dict | str | None = None
-    # {modality: media_column}; normally inherited from a MultimodalDataset rather
-    # than set here. JSON-encoded by cli_args (JSON_CONFIG_FIELDS).
     multimodal_keys: dict | str | None = None
 
     # ── Custom functions and hooks ──────────────────────────────────────────
@@ -714,9 +716,6 @@ class MilesRecipe(BaseTrainRecipe):
     @classmethod
     def _dataset_to_fields(cls, ds: "DatasetConfig") -> dict[str, Any]:
         fields = super()._dataset_to_fields(ds)
-        # miles splits the prompt on the modality placeholder ("<image>", "<audio>",
-        # "<video>") and pops items from the named list column, so naming the column
-        # is the whole handoff for a MultimodalDataset.
         if getattr(ds, "multimodal_keys", None):
             fields["multimodal_keys"] = ds.multimodal_keys
         return fields
@@ -743,16 +742,35 @@ class MilesRecipe(BaseTrainRecipe):
                 "disable_bias_linear": arch.disable_bias_linear,
                 "qk_layernorm": arch.qk_layernorm,
                 "untie_embeddings_and_output_weights": arch.untie_embeddings_and_output_weights,
+                "no_masked_softmax_fusion": arch.no_masked_softmax_fusion,
+                "multi_latent_attention": arch.multi_latent_attention,
                 "use_rotary_position_embeddings": arch.use_rotary_position_embeddings,
                 "rotary_base": arch.rotary_base,
+                "rotary_scaling_factor": arch.rotary_scaling_factor,
+                "mscale": arch.mscale,
+                "mscale_all_dim": arch.mscale_all_dim,
+                "no_rope_fusion": arch.no_rope_fusion,
             }
         )
         optional = {
+            "kv_lora_rank": arch.kv_lora_rank,
+            "qk_head_dim": arch.qk_head_dim,
+            "qk_pos_emb_head_dim": arch.qk_pos_emb_head_dim,
+            "v_head_dim": arch.v_head_dim,
             "num_experts": arch.num_experts,
+            "moe_layer_freq": arch.moe_layer_freq,
             "moe_ffn_hidden_size": arch.moe_ffn_hidden_size,
             "moe_shared_expert_intermediate_size": arch.moe_shared_expert_intermediate_size,
             "moe_router_topk": arch.moe_router_topk,
+            "moe_router_pre_softmax": arch.moe_router_pre_softmax,
             "moe_router_score_function": arch.moe_router_score_function,
+            "moe_router_enable_expert_bias": arch.moe_router_enable_expert_bias,
+            "moe_router_load_balancing_type": arch.moe_router_load_balancing_type,
+            "moe_token_dispatcher_type": arch.moe_token_dispatcher_type,
+            "moe_router_bias_update_rate": arch.moe_router_bias_update_rate,
+            "moe_router_group_topk": arch.moe_router_group_topk,
+            "moe_router_num_groups": arch.moe_router_num_groups,
+            "moe_router_topk_scaling_factor": arch.moe_router_topk_scaling_factor,
             "moe_token_drop_policy": arch.moe_token_drop_policy,
             "moe_router_dtype": arch.moe_router_dtype,
             "moe_aux_loss_coeff": arch.moe_aux_loss_coeff,
@@ -762,10 +780,15 @@ class MilesRecipe(BaseTrainRecipe):
             else None,
         }
         fields.update({k: v for k, v in optional.items() if v not in (None, "", 0)})
+        for key in ("moe_aux_loss_coeff", "moe_router_bias_update_rate"):
+            if optional[key] is not None:
+                fields[key] = optional[key]
         for key in (
             "moe_grouped_gemm",
             "moe_shared_expert_gate",
             "moe_permute_fusion",
+            "moe_router_pre_softmax",
+            "moe_router_enable_expert_bias",
             "apply_layernorm_1p",
             "use_gated_attention",
             "attention_output_gate",
@@ -788,14 +811,13 @@ class MilesRecipe(BaseTrainRecipe):
         if model is not None:
             self.validate_model_parallelism(model)
             for k, v in self._model_to_fields(model).items():
-                # An explicitly configured hf_checkpoint wins: the Kimi recipes
-                # point it at a converted INT4 copy on the volume, not at the
-                # model's own HF weights.
                 if k == "hf_checkpoint":
                     if fields.get(k):
                         continue
                 elif self.miles_model_script:
                     # The model script already sources the arch args.
+                    continue
+                elif self.miles_model_name:
                     continue
                 fields[k] = v
         if dataset is not None:
@@ -819,15 +841,17 @@ class MilesRecipe(BaseTrainRecipe):
             Inkling_Small_LoRA_Recipe,
             Inkling_Small_Recipe,
         )
-        from modal_training_gym.train_recipes.miles_recipe.kimi import (
-            Kimi_K2_5_LoRA_Recipe,
-            Kimi_K2_6_LoRA_Recipe,
+        from modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b import (
+            Moonlight_16B_A3B_Recipe,
+        )
+        from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
+            Qwen3_5_4b_Miles_Recipe,
         )
 
-        if model_config.model_name == "moonshotai/Kimi-K2.5":
-            return Kimi_K2_5_LoRA_Recipe()
-        if model_config.model_name == "moonshotai/Kimi-K2.6":
-            return Kimi_K2_6_LoRA_Recipe()
+        if model_config.model_name == "Qwen/Qwen3.5-4B":
+            return Qwen3_5_4b_Miles_Recipe()
+        if model_config.model_name == "moonshotai/Moonlight-16B-A3B-Instruct":
+            return Moonlight_16B_A3B_Recipe()
         if model_config.model_name == "thinkingmachines/Inkling-Small":
             if issubclass(cls, Inkling_Small_LoRA_Recipe):
                 return Inkling_Small_LoRA_Recipe()

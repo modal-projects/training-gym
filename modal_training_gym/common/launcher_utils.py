@@ -82,8 +82,28 @@ def _append_common_arch_args(extra_args: list[str], arch: Any) -> None:
 
 
 def _append_extended_arch_args(extra_args: list[str], arch: Any) -> None:
+    for attr, flag in (
+        ("kv_lora_rank", "kv-lora-rank"),
+        ("qk_head_dim", "qk-head-dim"),
+        ("qk_pos_emb_head_dim", "qk-pos-emb-head-dim"),
+        ("v_head_dim", "v-head-dim"),
+        ("rotary_scaling_factor", "rotary-scaling-factor"),
+        ("mscale", "mscale"),
+        ("mscale_all_dim", "mscale-all-dim"),
+    ):
+        if (value := getattr(arch, attr, None)) is not None and value != 0:
+            extra_args.append(f"--{flag} {value}")
+    for attr, flag in (
+        ("no_masked_softmax_fusion", "no-masked-softmax-fusion"),
+        ("multi_latent_attention", "multi-latent-attention"),
+        ("no_rope_fusion", "no-rope-fusion"),
+    ):
+        if getattr(arch, attr, False):
+            extra_args.append(f"--{flag}")
     if arch.num_experts:
         extra_args.append(f"--num-experts {arch.num_experts}")
+    if arch.moe_layer_freq:
+        extra_args.append(f"--moe-layer-freq {shlex.quote(str(arch.moe_layer_freq))}")
     if arch.moe_ffn_hidden_size:
         extra_args.append(f"--moe-ffn-hidden-size {arch.moe_ffn_hidden_size}")
     if arch.moe_shared_expert_intermediate_size:
@@ -96,9 +116,33 @@ def _append_extended_arch_args(extra_args: list[str], arch: Any) -> None:
         extra_args.append("--moe-shared-expert-gate")
     if arch.moe_router_topk:
         extra_args.append(f"--moe-router-topk {arch.moe_router_topk}")
+    if arch.moe_router_pre_softmax:
+        extra_args.append("--moe-router-pre-softmax")
     if arch.moe_router_score_function:
         extra_args.append(
             f"--moe-router-score-function {arch.moe_router_score_function}"
+        )
+    if arch.moe_router_enable_expert_bias:
+        extra_args.append("--moe-router-enable-expert-bias")
+    if arch.moe_router_load_balancing_type:
+        extra_args.append(
+            f"--moe-router-load-balancing-type {arch.moe_router_load_balancing_type}"
+        )
+    if arch.moe_token_dispatcher_type:
+        extra_args.append(
+            f"--moe-token-dispatcher-type {arch.moe_token_dispatcher_type}"
+        )
+    if arch.moe_router_bias_update_rate is not None:
+        extra_args.append(
+            f"--moe-router-bias-update-rate {arch.moe_router_bias_update_rate}"
+        )
+    if arch.moe_router_group_topk:
+        extra_args.append(f"--moe-router-group-topk {arch.moe_router_group_topk}")
+    if arch.moe_router_num_groups:
+        extra_args.append(f"--moe-router-num-groups {arch.moe_router_num_groups}")
+    if arch.moe_router_topk_scaling_factor is not None:
+        extra_args.append(
+            f"--moe-router-topk-scaling-factor {arch.moe_router_topk_scaling_factor}"
         )
     if arch.moe_token_drop_policy:
         extra_args.append(f"--moe-token-drop-policy {arch.moe_token_drop_policy}")
@@ -414,6 +458,7 @@ def build_train_cmd(
     model: Any = None,
     dataset: Any = None,
     model_script_attr: str,
+    model_args_command: str = "",
 ) -> str:
     """Build the Ray job entrypoint, sourcing model arch args if needed."""
     train_script = f"{root}/{'train_async.py' if cfg.async_mode else 'train.py'}"
@@ -421,6 +466,13 @@ def build_train_cmd(
     if model_script := getattr(cfg, model_script_attr, ""):
         inner = (
             f"source {root}/{model_script} && "
+            f"python3 {train_script} ${{MODEL_ARGS[@]}} {args}"
+        )
+        return f"bash -c {shlex.quote(inner)}"
+    if model_args_command:
+        inner = (
+            f'MODEL_ARGS_LINE="$({model_args_command})" '
+            f'|| exit 1; read -ra MODEL_ARGS <<< "$MODEL_ARGS_LINE"; '
             f"python3 {train_script} ${{MODEL_ARGS[@]}} {args}"
         )
         return f"bash -c {shlex.quote(inner)}"

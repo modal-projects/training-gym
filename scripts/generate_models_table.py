@@ -1,9 +1,7 @@
 """Generate the Models table in README.md from the train recipe registries.
 
-Each recipe is matched to its `ModelConfig` by class name to recover the
-canonical HuggingFace model name, which the class name alone does not encode
-(`Qwen3_5_0_8b_Recipe` -> `Qwen3_5_0_8B.model_name` -> `Qwen/Qwen3.5-0.8B`).
-Adding a recipe to a registry is therefore the only step needed to list a model.
+Each recipe is matched to its `ModelConfig` by `model_config_class` or class
+name to recover the canonical Hugging Face model name.
 
 uv run scripts/generate_models_table.py            # rewrite README.md
 uv run scripts/generate_models_table.py --check    # fail if the table is stale
@@ -70,7 +68,10 @@ def collect_models() -> dict[str, ModelRow]:
         for recipe_name in registry.__all__:
             if recipe_name in BASE_RECIPES:
                 continue
-            config = MODEL_CONFIGS.get(_model_key(recipe_name))
+            recipe = getattr(registry, recipe_name)
+            config = recipe.model_config_class or MODEL_CONFIGS.get(
+                _model_key(recipe_name)
+            )
             model_name = getattr(config, "model_name", None)
             if not model_name:
                 unmatched.append(f"{module_path}.{recipe_name}")
@@ -84,8 +85,8 @@ def collect_models() -> dict[str, ModelRow]:
         raise SystemExit(
             "No ModelConfig found for these recipes:\n  "
             + "\n  ".join(unmatched)
-            + "\nExport a matching ModelConfig from modal_training_gym.common.models "
-            "(class name = recipe name without the _Recipe suffix)."
+            + "\nSet model_config_class on the recipe, or export a matching "
+            "ModelConfig from modal_training_gym.common.models."
         )
     return table
 

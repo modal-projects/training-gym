@@ -54,15 +54,13 @@ _EXPORTS = {
         "modal_training_gym.train_recipes.miles_recipe",
         "Inkling_Small_LoRA_Recipe",
     ),
-    "Kimi_K2_5": ("modal_training_gym.common.models", "Kimi_K2_5"),
-    "Kimi_K2_6": ("modal_training_gym.common.models", "Kimi_K2_6"),
-    "Kimi_K2_5_LoRA_Recipe": (
-        "modal_training_gym.train_recipes.miles_recipe",
-        "Kimi_K2_5_LoRA_Recipe",
+    "Moonlight_16B_A3B_Instruct": (
+        "modal_training_gym.common.models",
+        "Moonlight_16B_A3B_Instruct",
     ),
-    "Kimi_K2_6_LoRA_Recipe": (
+    "Moonlight_16B_A3B_Recipe": (
         "modal_training_gym.train_recipes.miles_recipe",
-        "Kimi_K2_6_LoRA_Recipe",
+        "Moonlight_16B_A3B_Recipe",
     ),
     "MilesRecipe": ("modal_training_gym.train_recipes.miles_recipe", "MilesRecipe"),
     "parse_qwen3_response": (
@@ -91,6 +89,10 @@ _EXPORTS = {
     "Qwen3_5_4b_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_5_4b_Recipe",
+    ),
+    "Qwen3_5_4b_Miles_Recipe": (
+        "modal_training_gym.train_recipes.miles_recipe",
+        "Qwen3_5_4b_Miles_Recipe",
     ),
     "Qwen3_5_9B": ("modal_training_gym.common.models", "Qwen3_5_9B"),
     "Qwen3_5_9b_Recipe": (
@@ -132,11 +134,6 @@ _EXPORTS = {
 
 __all__ = [
     "CustomDeployment",
-    "Inkling_Small",
-    "Inkling_Small_Recipe",
-    "Inkling_Small_LoRA_Recipe",
-    "Kimi_K2_6_LoRA_Recipe",
-    "Kimi_K2_5_LoRA_Recipe",
     "Checkpoint",
     "CheckpointType",
     "convert_checkpoint_to_hf",
@@ -158,13 +155,16 @@ __all__ = [
     "HuggingFaceDataset",
     "MultimodalDataset",
     "list_checkpoints",
-    "Kimi_K2_6",
-    "Kimi_K2_5",
     "METADATA_VOLUME_NAME",
     "MetadataStore",
     "ModalCaptureError",
     "ModelArchitecture",
     "ModelConfig",
+    "Inkling_Small",
+    "Inkling_Small_Recipe",
+    "Inkling_Small_LoRA_Recipe",
+    "Moonlight_16B_A3B_Instruct",
+    "Moonlight_16B_A3B_Recipe",
     "MilesRecipe",
     "parse_qwen3_response",
     "ParsedResponse",
@@ -177,6 +177,7 @@ __all__ = [
     "Qwen3_5_2B",
     "Qwen3_5_2b_Recipe",
     "Qwen3_5_4B",
+    "Qwen3_5_4b_Miles_Recipe",
     "Qwen3_5_4b_Recipe",
     "Qwen3_5_9B",
     "Qwen3_5_9b_Recipe",
