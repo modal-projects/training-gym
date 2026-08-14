@@ -1,7 +1,13 @@
 <script>
   import { onMount } from "svelte";
-  import { Download, X } from "$host/icons";
-  import { ConversationView, ResizableTable, SampleTimeline, TimeAgo } from "$host/components";
+  import { ChevronLeft, ChevronRight, Download, X } from "$host/icons";
+  import {
+    ConversationView,
+    ResizableTable,
+    SampleTimeline,
+    StepTimings,
+    TimeAgo,
+  } from "$host/components";
   import { fetchRunRollouts, fetchRollout } from "$host/data";
 
   let { runId } = $props();
@@ -9,6 +15,7 @@
   let selected = $state(null);
   let loading = $state(true);
   let error = $state("");
+  let activeSampleIndex = $state(0);
 
   onMount(() => {
     let disposed = false;
@@ -38,6 +45,7 @@
 
   async function openRollout(row) {
     selected = { loading: true, row };
+    activeSampleIndex = 0;
     const detail = await fetchRollout(runId, row.rollout_id);
     selected = { row, detail, loading: false };
   }
@@ -45,6 +53,34 @@
   let samples = $derived(selected?.detail?.samples || []);
   function close() {
     selected = null;
+    activeSampleIndex = 0;
+  }
+
+  let sampleDist = $derived.by(() => {
+    const samples = selected?.detail?.samples || [];
+    if (!samples.length) return null;
+    const values = samples.map((sample) => Number(sample.score ?? sample.reward ?? 0));
+    const lo = Math.min(...values);
+    const hi = Math.max(...values);
+    const count = lo === hi ? 1 : 12;
+    const span = hi - lo || 1;
+    const buckets = Array.from({ length: count }, () => []);
+    for (const [index, score] of values.entries()) {
+      const bucket = Math.max(0, Math.min(count - 1, Math.floor(((score - lo) / span) * count)));
+      buckets[bucket].push({ index, score });
+    }
+    return { lo, hi, span, count, buckets, maxCount: Math.max(...buckets.map((bucket) => bucket.length), 1) };
+  });
+
+  function downloadAll() {
+    if (!selected?.detail) return;
+    const blob = new Blob([JSON.stringify(selected.detail, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `rollout_${selected.row.rollout_id}_samples.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
   function download() {
     if (!selected?.detail) return;
@@ -66,7 +102,7 @@
   {:else if !rows.length}
     <div class="detail-empty">No rollouts recorded yet.</div>
   {:else}
-    <ResizableTable columns={[
+    <ResizableTable class="rollout-table" columns={[
       { key: "step", label: "Step", width: 72, minWidth: 56 },
       { key: "mean", label: "Mean reward", width: 118, minWidth: 96 },
       { key: "rollouts", label: "Rollouts", width: 80, minWidth: 64 },
@@ -86,14 +122,81 @@
                 {#if selected.loading}
                   <div class="detail-empty">Loading rollouts…</div>
                 {:else if samples.length}
-                  {@const sample = samples[0]}
+                  {@const sample = samples[activeSampleIndex]}
                   <div class="rollout-chart">
                     <div class="rollout-chart-title">Step timing</div>
-                    <div class="h-[10px] rounded-[3px] bg-(--color-c-gray-10,#2f2f2f)"></div>
+                    <div class="chart-scroll">
+                      <StepTimings
+                        stepTimes={{ 1: { duration_s: selected.row.rollout_time } }}
+                        substepTimes={{}}
+                        layout="rows"
+                      />
+                    </div>
                   </div>
+                  {#if sampleDist}
+                    <div class="mb-[16px]">
+                      <div class="flex justify-end mb-[6px]">
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-[5px] [background:none] [border:1px_solid_var(--border,#2f2f2f)] rounded-[4px] text-(--muted) text-[11px] p-[3px_8px] cursor-pointer hover:text-(--text) hover:border-(--border-strong,#4a4a4a)"
+                          onclick={downloadAll}
+                          title="Download all samples as JSON"
+                        >
+                          <Download size={13} />
+                          Download all ({samples.length} samples)
+                        </button>
+                      </div>
+                      <div class="chart-scroll">
+                        <div
+                          class="flex items-end gap-[2px] h-[120px] pt-[14px] min-w-[280px] [border-bottom:1px_solid_var(--border,#2f2f2f)]"
+                          role="group"
+                          aria-label="Reward distribution"
+                        >
+                          {#each sampleDist.buckets as bucket, index (index)}
+                            <button
+                              type="button"
+                              class="dist-bar"
+                              class:detail-active={bucket.some((entry) => entry.index === activeSampleIndex)}
+                              class:is-empty={!bucket.length}
+                              style:height={`${(bucket.length / sampleDist.maxCount) * 100}%`}
+                              disabled={!bucket.length}
+                              onclick={() => (activeSampleIndex = bucket[0].index)}
+                              aria-label={`Reward bucket ${index + 1}`}
+                            >
+                              <span class="absolute top-[-14px] left-0 right-0 text-center text-[10px] text-(--muted) [font-variant-numeric:tabular-nums]">{bucket.length || ""}</span>
+                            </button>
+                          {/each}
+                        </div>
+                        <div class="dist-axis">
+                          <span>{Number(sampleDist.lo).toFixed(3)}</span>
+                          <span class="dist-axis-label">reward · {samples.length} samples</span>
+                          <span>{Number(sampleDist.hi).toFixed(3)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  {/if}
                   <div class="sample-viewer">
                     <div class="sample-viewer-header">
-                      <span>Rollout {selected.row.rollout_id} / 1</span>
+                      <div class="sample-viewer-nav">
+                        <button
+                          class="sample-nav-btn"
+                          onclick={() => (activeSampleIndex = Math.max(0, activeSampleIndex - 1))}
+                          disabled={activeSampleIndex === 0}
+                          aria-label="Previous rollout"
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <span>Rollout {activeSampleIndex + 1} / {samples.length}</span>
+                        <button
+                          class="sample-nav-btn"
+                          onclick={() => (activeSampleIndex = Math.min(samples.length - 1, activeSampleIndex + 1))}
+                          disabled={activeSampleIndex === samples.length - 1}
+                          aria-label="Next rollout"
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                        <span class="sample-viewer-hint">← / → to navigate</span>
+                      </div>
                       <div class="sample-viewer-actions">
                         <span class="rollout-sample-metric">reward {Number(sample.score || 0).toFixed(3)}</span>
                         <button class="sample-nav-btn" onclick={download} aria-label="Download trajectory"><Download size={14} /></button>

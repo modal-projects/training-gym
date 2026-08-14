@@ -8,6 +8,7 @@
   import Drawer from "../components/Drawer.svelte";
   import JsonView from "./builtin/JsonView.svelte";
   import Tabs from "../components/Tabs.svelte";
+  import { fetchRunRollouts } from "../lib/api.js";
 
   let {
     layoutId = "training-run.default",
@@ -22,6 +23,7 @@
   let editingDoc = $state(null);
   let editingLayout = $state(false);
   let jsonDoc = $state(null);
+  let tabCounts = $state({});
 
   onMount(async () => {
     function readTab() {
@@ -35,6 +37,14 @@
     window.addEventListener("popstate", syncTab);
     remoteViews = views;
     remoteLayouts = layouts;
+    if (context.run_id) {
+      try {
+        const rows = await fetchRunRollouts(context.run_id);
+        tabCounts = { rollouts: rows.length };
+      } catch {
+        tabCounts = {};
+      }
+    }
     if (safe) {
       return () => window.removeEventListener("popstate", syncTab);
     }
@@ -151,7 +161,11 @@
             <Tabs
               active={selectedTab}
               onSelect={selectTab}
-              tabs={layout.tabs.map((item) => ({ value: item.id, label: item.label, count: item.count }))}
+              tabs={layout.tabs.map((item) => ({
+                value: item.id,
+                label: item.label,
+                count: item.count ?? tabCounts[item.id],
+              }))}
             />
             <button class="layout-edit-button" type="button" onclick={() => (editingLayout = true)}>Edit layout</button>
           </div>

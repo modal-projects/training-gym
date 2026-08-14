@@ -1,4 +1,5 @@
 export { default as AdvantageSpreadChart } from "../../components/AdvantageSpreadChart.svelte";
+export { default as AdvantageViolins } from "../../components/AdvantageViolins.svelte";
 export { default as ChartSkeleton } from "../../components/ChartSkeleton.svelte";
 export { default as ComparativeBarChart } from "../../components/ComparativeBarChart.svelte";
 export { default as ConversationView } from "../../components/ConversationView.svelte";

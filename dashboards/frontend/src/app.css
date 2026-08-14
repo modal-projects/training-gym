@@ -2652,6 +2652,8 @@ table.deployments-table tr.row-selected td {
 }
 
 .layout-edit-button {
+  align-self: center;
+  margin-right: 24px;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: transparent;

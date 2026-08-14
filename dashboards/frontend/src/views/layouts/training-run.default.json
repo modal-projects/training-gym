@@ -11,9 +11,7 @@
       "slots": {
         "header": [{ "id": "run-header", "view": "run-header" }],
         "main": [
-          { "id": "run-summary", "view": "run-summary-card" },
-          { "id": "score-distribution", "view": "score-distribution" },
-          { "id": "advantage-distribution", "view": "advantage-distribution" }
+          { "id": "run-summary", "view": "run-summary-card" }
         ]
       }
     },
