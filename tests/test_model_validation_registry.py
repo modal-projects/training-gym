@@ -1,10 +1,4 @@
-"""Invariants of the cross-framework model validation registry.
-
-Before the frameworks shared a harness, a model too large to gate PRs on was
-kept out of the PR matrix by living in a different module. Now it is kept out
-by ``run_on_pr=False`` alone, so that flag needs a test: a regression here
-spends real GPU hours on every pull request.
-"""
+"""Invariants of the cross-framework model validation registry."""
 
 from __future__ import annotations
 
@@ -62,20 +56,12 @@ def test_registry_uses_the_packages_one_framework_enum():
 
 
 def test_registry_names_are_unique():
-    """A copy-pasted entry must fail a test, not silently shadow a model.
-
-    ``_ValidationConfig.find`` returns the first case-insensitive match on
-    either spelling, so two entries answering to one name or repo id would hide
-    whichever came second. Keyed on identity, not name: an entry whose short
-    name is also its repo id registers one key twice and is fine.
-    """
+    """Every model/framework pair needs an unambiguous dispatch name."""
     seen: dict[str, _ValidationConfig] = {}
     for config in ALL_CONFIGS:
-        for key in (config.name.lower(), config.model_name.lower()):
-            other = seen.setdefault(key, config)
-            assert other is config, (
-                f"{other.name!r} and {config.name!r} both answer to {key!r}"
-            )
+        key = config.name.lower()
+        other = seen.setdefault(key, config)
+        assert other is config, f"duplicate validation name: {config.name!r}"
 
 
 @pytest.mark.parametrize("config", ALL_CONFIGS, ids=lambda c: c.name)
@@ -88,8 +74,13 @@ def test_config_resolves_by_name_case_insensitively(config):
 @pytest.mark.parametrize("config", ALL_CONFIGS, ids=lambda c: c.name)
 def test_config_resolves_by_hf_repo_id(config):
     """``check -m Qwen/Qwen3-4B`` must keep working, not just the short name."""
-    assert _ValidationConfig.find(config.model_name) is config
-    assert _ValidationConfig.find(config.model_name.upper()) is config
+    matches = [c for c in ALL_CONFIGS if c.model_name == config.model_name]
+    if len(matches) == 1:
+        assert _ValidationConfig.find(config.model_name) is config
+        assert _ValidationConfig.find(config.model_name.upper()) is config
+    else:
+        with pytest.raises(ValueError, match="ambiguous model"):
+            _ValidationConfig.find(config.model_name)
 
 
 def test_unknown_model_names_are_rejected():
@@ -121,34 +112,36 @@ def test_list_shows_every_model_by_default_and_narrows_with_pr_only():
     everything = set(available_model_names())
     pr_set = set(available_model_names(pr_only=True))
 
-    assert pr_set < everything
+    assert pr_set <= everything
+    if DISPATCH_ONLY_CONFIGS:
+        assert pr_set < everything
     for config in DISPATCH_ONLY_CONFIGS:
         assert config.name in everything
         assert config.name not in pr_set
 
 
-@pytest.mark.skipif(not DISPATCH_ONLY_CONFIGS, reason="every model runs on PRs")
 def test_blank_dispatch_asks_for_the_pr_only_set():
     """The workflow's blank-models branch must narrow explicitly.
 
-    ``list`` prints the whole registry, so a blank dispatch that dropped
-    ``--pr-only`` would fan out to Kimi on 16 x 8 H200.
+    ``list`` prints the whole registry, so a blank dispatch must retain the
+    explicit narrowing even when no dispatch-only models are registered.
     """
     import re
 
     workflow = (REPO_ROOT / ".github/workflows/validate-models.yml").read_text()
-    unnarrowed = re.findall(r"validate_model_configs\.py list(?! --pr-only)", workflow)
+    unnarrowed = re.findall(
+        r"validate_model_configs\.py list(?! --names-only --pr-only)", workflow
+    )
 
-    assert "validate_model_configs.py list --pr-only" in workflow
-    assert not unnarrowed, "a `list` in the workflow is missing --pr-only"
+    assert "validate_model_configs.py list --names-only --pr-only" in workflow
+    assert not unnarrowed, "a `list` in the workflow is missing matrix-only flags"
 
 
 def test_baselines_are_fetched_only_for_models_that_ran(tmp_path):
     """Baseline lookup follows the results directory, not the registry.
 
     Widening ``available_model_names`` to the whole registry would otherwise
-    have the PR comment job scan artifacts for Kimi, which no pull request can
-    ever have produced.
+    have the PR comment job scan artifacts for models that did not run.
     """
     from scripts.download_perf_baseline import models_with_results
 
@@ -253,5 +246,27 @@ def test_framework_harness_change_only_revalidates_that_framework():
 def test_shared_harness_change_revalidates_every_gating_model():
     gating = {c.name for c in _ValidationConfig.select()}
     diff = _diff_touching("scripts/validate_model_configs.py")
+
+    assert set(affected_models(diff)) == gating
+
+
+def test_framework_change_does_not_narrow_shared_harness_impact():
+    gating = {c.name for c in _ValidationConfig.select()}
+    miles_launcher = next(iter(FRAMEWORK_VALIDATION_HARNESS_PATHS["miles"]))
+    diff = _diff_touching(
+        "scripts/validate_model_configs.py",
+        str(miles_launcher.relative_to(REPO_ROOT)),
+    )
+
+    assert set(affected_models(diff)) == gating
+
+
+def test_framework_change_preserves_shared_class_impact():
+    gating = {c.name for c in _ValidationConfig.select()}
+    miles_launcher = next(iter(FRAMEWORK_VALIDATION_HARNESS_PATHS["miles"]))
+    diff = _diff_touching(
+        "modal_training_gym/common/models/base.py",
+        str(miles_launcher.relative_to(REPO_ROOT)),
+    )
 
     assert set(affected_models(diff)) == gating

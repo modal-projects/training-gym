@@ -29,6 +29,7 @@ _MILES_SKIP = {
     "environment",
     "async_mode",
     "miles_model_script",
+    "miles_model_name",
     "source_hf_checkpoint",
     "megatron_conversion_hf_checkpoint",
     "docker_image",
@@ -55,7 +56,6 @@ _MILES_SKIP = {
     "rollout_function",
     "custom_megatron_before_log_prob_hook",
     "custom_megatron_before_train_step_hook",
-    "train_function_kwargs",
     "capture_trace",
     "trace_sample_limit",
 }
@@ -135,8 +135,10 @@ class MilesRecipe(BaseTrainRecipe):
         Modal region to pin the cluster to.
     miles_model_script : str
         Script in the Miles repo sourced for ``MODEL_ARGS`` instead of arch flags.
+    miles_model_name : str
+        Name accepted by Miles' ``model_args_utils.py``.
     source_hf_checkpoint : str | None
-        Source checkpoint when it differs from the model's own (Kimi: INT4 + BF16).
+        Source checkpoint when it differs from the model's own.
     megatron_conversion_hf_checkpoint : str | None
         HF weights used for the HF→Megatron conversion instead of the model's own.
     patch_files : list[str]
@@ -145,9 +147,6 @@ class MilesRecipe(BaseTrainRecipe):
         Extra shell commands run while building the image.
     image_env : dict[str, str]
         Extra env vars baked into the image.
-    train_function_kwargs : dict[str, Any]
-        Extra Modal Function kwargs for the train function; supports
-        ``ephemeral_disk`` (MiB), ``secrets`` and ``experimental_options``.
     capture_trace : bool
         Attach miles' per-sample execution trace (generate/reward/tool-call
         timeline) to recorded rollouts for the dashboard.
@@ -206,8 +205,6 @@ class MilesRecipe(BaseTrainRecipe):
         Shuffle the prompt dataset between epochs.
     rollout_top_p : float
         Nucleus-sampling top-p for rollout generation.
-    rollout_top_k : int | None
-        Top-k for rollout generation; ``None`` leaves Miles' own default.
     rollout_stop_token_ids : list[int] | None
         Extra token ids that terminate generation.
     use_miles_router : bool
@@ -357,9 +354,6 @@ class MilesRecipe(BaseTrainRecipe):
         Pack samples up to ``max_tokens_per_gpu`` instead of a fixed micro batch.
     max_tokens_per_gpu : int
         Token budget per GPU per micro-batch when dynamic batching is on.
-    micro_batch_size : int | None
-        Fixed micro-batch size when dynamic batching is off; ``None`` leaves
-        Miles' own default.
 
     ## Eval
 
@@ -433,9 +427,6 @@ class MilesRecipe(BaseTrainRecipe):
         Fall back to NCCL all-reduce instead of sglang's custom kernel.
     sglang_cuda_graph_bs : list[int] | None
         Batch sizes to capture CUDA graphs for.
-    sglang_attention_backend : str | None
-        sglang attention kernel backend, e.g. ``"triton"``. ``None`` leaves
-        sglang's own selection (FlashAttention) in place.
     sglang_moe_runner_backend : str | None
         MoE GEMM runner for the engines, e.g. ``"triton"``. ``None`` leaves
         sglang's ``auto`` selection in place.
@@ -447,27 +438,13 @@ class MilesRecipe(BaseTrainRecipe):
         Parser for tool-call output, e.g. ``"qwen25"``.
     sglang_reasoning_parser : str | None
         Parser for reasoning/thinking output.
-    sglang_disable_cuda_graph : bool
-        Run the engines in eager mode instead of capturing CUDA graphs.
-    sglang_disable_overlap_schedule : bool
-        Disable sglang's overlapped scheduler.
-    sglang_disable_radix_cache : bool
-        Disable prefix (radix) caching across requests.
-
-    ## Offload
-
-    no_offload_train : bool
-        Keep the training weights and optimizer resident instead of offloading
-        them between rollout and train phases (colocated runs).
-    no_offload_rollout : bool
-        Keep the rollout engines resident instead of offloading them.
     """
 
     # ── App identity ─────────────────────────────────────────────────────────
     recipe_type: RecipeType = RecipeType.MILES
 
     # ── Launcher instructions (not Miles CLI flags) ─────────────────────────
-    docker_image: str = "radixark/miles:dev-202608051303"
+    docker_image: str = "radixark/miles:dev-202608120325"
     gpu_type: str = "H100"
     memory: int | tuple[int, int] | None = None
     cloud: str | None = None
@@ -479,7 +456,6 @@ class MilesRecipe(BaseTrainRecipe):
     image_env: dict[str, str] = field(default_factory=dict)
     local_miles: str | None = None
     patch_files: list[str] = field(default_factory=list)
-    train_function_kwargs: dict[str, Any] = field(default_factory=dict)
 
     environment: dict = field(
         default_factory=lambda: {
@@ -490,6 +466,7 @@ class MilesRecipe(BaseTrainRecipe):
     )
     async_mode: bool = False
     miles_model_script: str = ""
+    miles_model_name: str = ""
     source_hf_checkpoint: str | None = None
     megatron_conversion_hf_checkpoint: str | None = None
     wandb: WandbConfig | None = None
@@ -515,13 +492,10 @@ class MilesRecipe(BaseTrainRecipe):
     # ── Fault tolerance and health checks ───────────────────────────────────
     # Miles' own argparse default; slime defaults this on instead.
     use_fault_tolerance: bool = False
-    # Miles' own argparse defaults.
+    # Miles' own argparse defaults (slime uses 30/30/300).
     rollout_health_check_interval: int = 30
     rollout_health_check_timeout: int = 30
-    # 300 like slime, not miles' own 0: at 0 the monitor probes /health_generate
-    # during rollout-0's cold Triton/deepgemm JIT compile, and the busy scheduler
-    # returns 503 so the engine is killed before it ever serves.
-    rollout_health_check_first_wait: int = 300
+    rollout_health_check_first_wait: int = 0
 
     # ── Weight sync ─────────────────────────────────────────────────────────
     update_weight_buffer_size: int | None = None
@@ -534,7 +508,6 @@ class MilesRecipe(BaseTrainRecipe):
     rollout_temperature: float = 1.0
     rollout_shuffle: bool = True
     rollout_top_p: float = 1.0
-    rollout_top_k: int | None = None
     rollout_stop_token_ids: list[int] | None = None
     rollout_num_gpus_per_engine: int = 1
     use_miles_router: bool = False
@@ -607,7 +580,6 @@ class MilesRecipe(BaseTrainRecipe):
     # ── Dynamic batching ────────────────────────────────────────────────────
     use_dynamic_batch_size: bool = True
     max_tokens_per_gpu: int = 9216
-    micro_batch_size: int | None = None
 
     # ── Eval ────────────────────────────────────────────────────────────────
     eval_interval: int | None = None
@@ -625,19 +597,11 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_enable_dp_lm_head: bool = False
     sglang_disable_custom_all_reduce: bool = False
     sglang_cuda_graph_bs: list[int] | None = None
-    sglang_attention_backend: str | None = None
     sglang_moe_runner_backend: str | None = None
     sglang_max_running_requests: int | None = None
     sglang_server_concurrency: int | None = None
     sglang_tool_call_parser: str | None = None
     sglang_reasoning_parser: str | None = None
-    sglang_disable_cuda_graph: bool = False
-    sglang_disable_overlap_schedule: bool = False
-    sglang_disable_radix_cache: bool = False
-
-    # ── Offload ─────────────────────────────────────────────────────────────
-    no_offload_train: bool = False
-    no_offload_rollout: bool = False
 
     # ── Config overrides ────────────────────────────────────────────────────
     extra_config: dict | None = None
@@ -725,16 +689,35 @@ class MilesRecipe(BaseTrainRecipe):
                 "disable_bias_linear": arch.disable_bias_linear,
                 "qk_layernorm": arch.qk_layernorm,
                 "untie_embeddings_and_output_weights": arch.untie_embeddings_and_output_weights,
+                "no_masked_softmax_fusion": arch.no_masked_softmax_fusion,
+                "multi_latent_attention": arch.multi_latent_attention,
                 "use_rotary_position_embeddings": arch.use_rotary_position_embeddings,
                 "rotary_base": arch.rotary_base,
+                "rotary_scaling_factor": arch.rotary_scaling_factor,
+                "mscale": arch.mscale,
+                "mscale_all_dim": arch.mscale_all_dim,
+                "no_rope_fusion": arch.no_rope_fusion,
             }
         )
         optional = {
+            "kv_lora_rank": arch.kv_lora_rank,
+            "qk_head_dim": arch.qk_head_dim,
+            "qk_pos_emb_head_dim": arch.qk_pos_emb_head_dim,
+            "v_head_dim": arch.v_head_dim,
             "num_experts": arch.num_experts,
+            "moe_layer_freq": arch.moe_layer_freq,
             "moe_ffn_hidden_size": arch.moe_ffn_hidden_size,
             "moe_shared_expert_intermediate_size": arch.moe_shared_expert_intermediate_size,
             "moe_router_topk": arch.moe_router_topk,
+            "moe_router_pre_softmax": arch.moe_router_pre_softmax,
             "moe_router_score_function": arch.moe_router_score_function,
+            "moe_router_enable_expert_bias": arch.moe_router_enable_expert_bias,
+            "moe_router_load_balancing_type": arch.moe_router_load_balancing_type,
+            "moe_token_dispatcher_type": arch.moe_token_dispatcher_type,
+            "moe_router_bias_update_rate": arch.moe_router_bias_update_rate,
+            "moe_router_group_topk": arch.moe_router_group_topk,
+            "moe_router_num_groups": arch.moe_router_num_groups,
+            "moe_router_topk_scaling_factor": arch.moe_router_topk_scaling_factor,
             "moe_token_drop_policy": arch.moe_token_drop_policy,
             "moe_router_dtype": arch.moe_router_dtype,
             "moe_aux_loss_coeff": arch.moe_aux_loss_coeff,
@@ -744,10 +727,15 @@ class MilesRecipe(BaseTrainRecipe):
             else None,
         }
         fields.update({k: v for k, v in optional.items() if v not in (None, "", 0)})
+        for key in ("moe_aux_loss_coeff", "moe_router_bias_update_rate"):
+            if optional[key] is not None:
+                fields[key] = optional[key]
         for key in (
             "moe_grouped_gemm",
             "moe_shared_expert_gate",
             "moe_permute_fusion",
+            "moe_router_pre_softmax",
+            "moe_router_enable_expert_bias",
             "apply_layernorm_1p",
             "use_gated_attention",
             "attention_output_gate",
@@ -770,14 +758,13 @@ class MilesRecipe(BaseTrainRecipe):
         if model is not None:
             self.validate_model_parallelism(model)
             for k, v in self._model_to_fields(model).items():
-                # An explicitly configured hf_checkpoint wins: the Kimi recipes
-                # point it at a converted INT4 copy on the volume, not at the
-                # model's own HF weights.
                 if k == "hf_checkpoint":
                     if fields.get(k):
                         continue
                 elif self.miles_model_script:
                     # The model script already sources the arch args.
+                    continue
+                elif self.miles_model_name:
                     continue
                 fields[k] = v
         if dataset is not None:
@@ -800,15 +787,17 @@ class MilesRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
             Gemma4_26B_A4B_Recipe,
         )
-        from modal_training_gym.train_recipes.miles_recipe.kimi import (
-            Kimi_K2_5_LoRA_Recipe,
-            Kimi_K2_6_LoRA_Recipe,
+        from modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b import (
+            Moonlight_16B_A3B_Recipe,
+        )
+        from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
+            Qwen3_5_4b_Miles_Recipe,
         )
 
-        if model_config.model_name == "moonshotai/Kimi-K2.5":
-            return Kimi_K2_5_LoRA_Recipe()
-        if model_config.model_name == "moonshotai/Kimi-K2.6":
-            return Kimi_K2_6_LoRA_Recipe()
+        if model_config.model_name == "Qwen/Qwen3.5-4B":
+            return Qwen3_5_4b_Miles_Recipe()
+        if model_config.model_name == "moonshotai/Moonlight-16B-A3B-Instruct":
+            return Moonlight_16B_A3B_Recipe()
         if model_config.model_name == "google/gemma-4-26B-A4B-it":
             return Gemma4_26B_A4B_Recipe()
         return None

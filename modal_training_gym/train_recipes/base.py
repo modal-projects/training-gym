@@ -34,6 +34,7 @@ class RecipeType(Enum):
 
 class BaseTrainRecipe(ABC):
     recipe_type: RecipeType
+    model_config_class: ClassVar["type[ModelConfig] | None"] = None
 
     # Fields consumed by the Modal launcher (image build, cluster topology,
     # callable shipping) and never forwarded to the framework CLI. Every

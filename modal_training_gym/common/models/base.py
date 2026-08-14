@@ -119,13 +119,28 @@ class ModelArchitecture:
     disable_bias_linear: bool = True
     qk_layernorm: bool = True
     untie_embeddings_and_output_weights: bool = False
+    no_masked_softmax_fusion: bool = False
+    multi_latent_attention: bool = False
+    kv_lora_rank: int = 0
+    qk_head_dim: int = 0
+    qk_pos_emb_head_dim: int = 0
+    v_head_dim: int = 0
     num_experts: int = 0
+    moe_layer_freq: str = ""
     moe_ffn_hidden_size: int = 0
     moe_shared_expert_intermediate_size: int = 0
     moe_grouped_gemm: bool = False
     moe_shared_expert_gate: bool = False
     moe_router_topk: int = 0
+    moe_router_pre_softmax: bool = False
     moe_router_score_function: str = ""
+    moe_router_enable_expert_bias: bool = False
+    moe_router_load_balancing_type: str = ""
+    moe_token_dispatcher_type: str = ""
+    moe_router_bias_update_rate: float | None = None
+    moe_router_group_topk: int = 0
+    moe_router_num_groups: int = 0
+    moe_router_topk_scaling_factor: float | None = None
     moe_token_drop_policy: str = ""
     moe_router_dtype: str = ""
     moe_permute_fusion: bool = False
@@ -138,6 +153,10 @@ class ModelArchitecture:
     use_rotary_position_embeddings: bool = True
     rotary_base: int = 10000
     rotary_percent: float = 1.0
+    rotary_scaling_factor: float | None = None
+    mscale: float | None = None
+    mscale_all_dim: float | None = None
+    no_rope_fusion: bool = False
 
 
 @dataclass
@@ -424,67 +443,6 @@ def parse_glm_response(text: str) -> ParsedResponse:
         }
         tool_calls.append(ToolCall(name=name, arguments=arguments))
     content = _GLM_TOOL_CALL_RE.sub("", text).strip()
-
-    return ParsedResponse(
-        content=content,
-        tool_calls=tool_calls,
-        thinking=thinking,
-    )
-
-
-# ── Kimi K2 family (K2.5 / K2.6) ───────────────────────────────────────
-
-# Kimi K2 wraps tool calls in a token-delimited section; each call carries an
-# id of the form ``functions.<name>:<index>`` and a JSON argument blob:
-#
-#   <|tool_calls_section_begin|>
-#   <|tool_call_begin|>functions.get_weather:0<|tool_call_argument_begin|>
-#   {"location": "Beijing"}<|tool_call_end|>
-#   <|tool_calls_section_end|>
-#
-# This mirrors SGLang's ``kimi_k2`` tool-call parser.
-_KIMI_SECTION_RE = re.compile(
-    r"<\|tool_calls_section_begin\|>(.*?)<\|tool_calls_section_end\|>",
-    re.DOTALL,
-)
-_KIMI_CALL_RE = re.compile(
-    r"<\|tool_call_begin\|>\s*(?P<id>[\w\.]+):(?P<idx>\d+)\s*"
-    r"<\|tool_call_argument_begin\|>\s*(?P<args>.*?)\s*<\|tool_call_end\|>",
-    re.DOTALL,
-)
-
-
-def parse_kimi_k2_response(text: str) -> ParsedResponse:
-    """Parse Kimi K2 (K2.5 / K2.6) output into structured content.
-
-    Handles ``<think>``/``</think>`` reasoning blocks, the Kimi chat-template
-    delimiters (``<|im_end|>``, ``<|im_start|>assistant``), and the
-    ``<|tool_calls_section_begin|>`` … ``<|tool_calls_section_end|>`` tool-call
-    section. Each tool-call id (``functions.<name>:<index>``) is reduced to its
-    bare function name.
-    """
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-    if "<|im_start|>assistant" in text:
-        text = text.rsplit("<|im_start|>assistant", 1)[-1]
-    text = text.replace("<|im_end|>", "")
-
-    thinking, text = _split_thinking(text)
-
-    tool_calls: list[ToolCall] = []
-    for section in _KIMI_SECTION_RE.finditer(text):
-        for call in _KIMI_CALL_RE.finditer(section.group(1)):
-            name = call.group("id").split(".")[-1].strip()
-            if not name:
-                continue
-            try:
-                arguments = json.loads(call.group("args"))
-            except (json.JSONDecodeError, ValueError):
-                arguments = {}
-            if not isinstance(arguments, dict):
-                arguments = {}
-            tool_calls.append(ToolCall(name=name, arguments=arguments))
-    content = _KIMI_SECTION_RE.sub("", text).strip()
 
     return ParsedResponse(
         content=content,

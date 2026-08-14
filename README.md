@@ -139,7 +139,6 @@ Difficulty is a rough signal for where to start:
 
 | Tutorial | Summary | Difficulty | Framework | Launch |
 |---|---|---|---|---|
-| [`001_kimi_k26`](tutorials/multinode/001_kimi_k26/001_kimi_k26.ipynb) | Kimi K2.6 LoRA GRPO training on 128 GPUs with DAPO-Math-17k | Advanced | `miles` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Fmultinode%2F001_kimi_k26%2F001_kimi_k26.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`002_glm_4_7`](tutorials/multinode/002_glm_4_7/002_glm_4_7.ipynb) | GLM-4.7 355B MoE full-weight GSPO training on 64 GPUs with DAPO-Math-17k | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Fmultinode%2F002_glm_4_7%2F002_glm_4_7.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`003_qwen27b`](tutorials/multinode/003_qwen27b/003_qwen27b.ipynb) | Qwen3.6-27B full-weight GRPO training on 32 GPUs with DAPO-Math-17k | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Fmultinode%2F003_qwen27b%2F003_qwen27b.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
@@ -166,12 +165,11 @@ Models with a built-in training recipe, with the `ModelConfig` and recipe classe
 | `Qwen/Qwen3-VL-8B-Instruct` | `slime` | `Qwen3_VL_8B` | `Qwen3_VL_8b_Recipe` |
 | `Qwen/Qwen3.5-0.8B` | `slime` | `Qwen3_5_0_8B` | `Qwen3_5_0_8b_Recipe` |
 | `Qwen/Qwen3.5-2B` | `slime` | `Qwen3_5_2B` | `Qwen3_5_2b_Recipe` |
-| `Qwen/Qwen3.5-4B` | `slime` | `Qwen3_5_4B` | `Qwen3_5_4b_Recipe` |
+| `Qwen/Qwen3.5-4B` | `slime`, `miles` | `Qwen3_5_4B` | `Qwen3_5_4b_Recipe`, `Qwen3_5_4b_Miles_Recipe` |
 | `Qwen/Qwen3.5-9B` | `slime` | `Qwen3_5_9B` | `Qwen3_5_9b_Recipe` |
 | `Qwen/Qwen3.6-27B` | `slime` | `Qwen3_6_27B` | `Qwen3_6_27b_Recipe` |
 | `Qwen/Qwen3.6-35B-A3B` | `slime` | `Qwen3_6_35B` | `Qwen3_6_35b_Recipe` |
 | `google/gemma-4-26B-A4B-it` | `miles` | `Gemma4_26B_A4B` | `Gemma4_26B_A4B_Recipe` |
-| `moonshotai/Kimi-K2.5` | `miles` | `Kimi_K2_5` | `Kimi_K2_5_LoRA_Recipe` |
-| `moonshotai/Kimi-K2.6` | `miles` | `Kimi_K2_6` | `Kimi_K2_6_LoRA_Recipe` |
+| `moonshotai/Moonlight-16B-A3B-Instruct` | `miles` | `Moonlight_16B_A3B_Instruct` | `Moonlight_16B_A3B_Recipe` |
 | `zai-org/GLM-4.7` | `slime` | `GLM_4_7` | `GLM_4_7_Recipe` |
 <!-- END MODELS TABLE -->

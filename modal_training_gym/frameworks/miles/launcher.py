@@ -60,6 +60,7 @@ from modal_training_gym.common.patches import encode_patch
 from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     build_train_cmd,
     get_checkpoint_conversion_policy,
+    model_args_command,
     prepare_miles_config,
     resolve_checkpoint_ref,
 )
@@ -502,6 +503,14 @@ def build_miles_app(
                 f"${{MODEL_ARGS[@]}} {' '.join(extra_args)} "
                 f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(save_path)}"
             )
+        elif model_args_cmd := model_args_command(miles, MILES_ROOT):
+            cmd = (
+                f'MODEL_ARGS_LINE="$({model_args_cmd})" || exit 1; '
+                f'read -ra MODEL_ARGS <<< "$MODEL_ARGS_LINE"; '
+                f"torchrun {' '.join(torchrun_args)} {convert_script} "
+                f"${{MODEL_ARGS[@]}} {' '.join(extra_args)} "
+                f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(save_path)}"
+            )
         else:
             cmd = (
                 f"torchrun {' '.join(torchrun_args)} {convert_script} "
@@ -850,17 +859,14 @@ def build_miles_app(
             print(f"Command: {cmd}, runtime_env: {runtime_env}")
 
             await _set_framework_status(MilesStatus.TRAINING)
-            async with cluster.forward_dashboard() as tunnel:
-                print(f"Ray dashboard: {tunnel.url}")
-                result = await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
-                if not result.is_success:
-                    run_record.error_message = (
-                        result.message
-                        or f"Ray job finished with status: {result.status}"
-                    )
-                    raise RuntimeError(run_record.error_message)
-                print(f"Ray job completed: {result.status}")
-                print(f"Ray job message: {result.message}")
+            result = await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
+            if not result.is_success:
+                run_record.error_message = (
+                    result.message or f"Ray job finished with status: {result.status}"
+                )
+                raise RuntimeError(run_record.error_message)
+            print(f"Ray job completed: {result.status}")
+            print(f"Ray job message: {result.message}")
 
             result = build_train_result(
                 app_name=app_name,

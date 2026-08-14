@@ -45,11 +45,11 @@ uv run modal deploy docs-next/docs_next_app.py        # docs site → gym.modal.
 uv run modal deploy dashboards/app.py                  # observability dashboard
 
 # Validate model configs / map a diff to affected tutorials
-uv run scripts/validate_model_configs.py list              # every model the harness runs
-uv run scripts/validate_model_configs.py list --pr-only    # just the PR matrix set
+uv run scripts/validate_model_configs.py list                         # models + frameworks
+uv run scripts/validate_model_configs.py list --names-only --pr-only # PR matrix names
 uv run scripts/validate_model_configs.py check -m qwen3-4b
 # miles models go through the same script; the registry picks the framework
-uv run scripts/validate_model_configs.py check -m Kimi-K2.5
+uv run scripts/validate_model_configs.py check -m Qwen3.5-4B-Miles
 git diff | uv run scripts/diff_impact.py
 ```
 
@@ -82,7 +82,7 @@ One registry, one script, one workflow, across every framework.
 
 `scripts/validate_model_configs.py` owns everything framework-agnostic (CLI, result JSON, markdown summary, PR comment, and the `check` flags). `scripts/validation_backends/<framework>.py` owns the only two things that differ: which recipe trains the model and which dataset it trains on, returned as a pair from one `build_*_validation` function. Recipes are used as `get_base_recipe` returns them, image included — the image a miles model trains on is declared once, in `MilesRecipe`, and validating a candidate image means bumping it on a branch and dispatching, not passing a flag. Adding a framework is one module here plus registry entries.
 
-`run_on_pr=False` marks a model too expensive to fan out on a PR (Kimi is 16 x 8 H200): still runnable by name from the CLI or `workflow_dispatch` — it is not "disabled in CI" — but `diff_impact.py` never puts it in a PR matrix. `list` prints the whole registry so dispatch-only models are discoverable; `--pr-only` narrows to the matrix set, which is why the workflow's blank-dispatch branch passes it. `tests/test_model_validation_registry.py` enforces both. `diff_impact.py` also scopes re-validation per framework, so a miles-only change doesn't re-run the slime set.
+`run_on_pr=False` marks a model too expensive to fan out on a PR: it remains runnable by name from the CLI or `workflow_dispatch`, but `diff_impact.py` never puts it in a PR matrix. `list` prints the whole registry with each model's framework so dispatch-only models are discoverable; `--names-only --pr-only` emits the name-only PR matrix used by the workflow's blank-dispatch branch. `tests/test_model_validation_registry.py` enforces both. `diff_impact.py` also scopes re-validation per framework, so a miles-only change doesn't re-run the slime set.
 
 ### Cloudpickle caller resolution
 

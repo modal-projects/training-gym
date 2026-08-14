@@ -9,7 +9,7 @@ from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
 
 class DapoMath17kDataset(HuggingFaceDataset):
-    """DAPO-Math-17k prompts, as used by the Kimi multinode tutorials."""
+    """DAPO-Math-17k prompts for Miles math-RL validation."""
 
     hf_repo = "zhuzilin/dapo-math-17k"
     input_column = ""
@@ -41,4 +41,8 @@ def build_miles_validation(
             f"no base miles recipe for model {model_config.model_name!r}, "
             "which is registered as a miles validation target"
         )
-    return recipe, DapoMath17kDataset(n_rows=recipe.rollout_batch_size * step_count)
+    recipe.skip_eval_before_train = True
+    prompts_per_step = max(
+        recipe.rollout_batch_size, recipe.over_sampling_batch_size or 0
+    )
+    return recipe, DapoMath17kDataset(n_rows=prompts_per_step * step_count)
