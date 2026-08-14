@@ -55,9 +55,9 @@ def _collect_tutorials() -> list[tuple[str, str, dict]]:
     return entries
 
 
-def _collect_guides() -> list[tuple[str, str, str]]:
-    """Return (slug, title, description) for authored Markdown guides."""
-    guides: list[tuple[str, str, str]] = []
+def _collect_guides() -> list[tuple[str, str, str, int]]:
+    """Return (slug, title, description, sidebar order) for authored guides."""
+    guides: list[tuple[str, str, str, int]] = []
     for path in sorted(GUIDES_DIR.rglob("*.md")):
         text = path.read_text()
         if not text.startswith("---\n"):
@@ -68,24 +68,38 @@ def _collect_guides() -> list[tuple[str, str, str]]:
         frontmatter = parts[1]
 
         metadata: dict[str, str] = {}
+        sidebar_order = 10_000
+        current_mapping = ""
         for line in frontmatter.splitlines():
             key, separator, value = line.partition(":")
-            if separator and not line.startswith((" ", "\t")):
-                metadata[key] = value.strip().strip("'\"")
+            if not separator:
+                continue
+            if not line.startswith((" ", "\t")):
+                value = value.strip().strip("'\"")
+                metadata[key] = value
+                current_mapping = key if not value else ""
+            elif current_mapping == "sidebar" and key.strip() == "order":
+                try:
+                    sidebar_order = int(value.strip())
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Guide sidebar order must be an integer: {path}"
+                    ) from exc
 
         title = metadata.get("title")
         if not title:
             raise ValueError(f"Guide frontmatter is missing title: {path}")
         description = metadata.get("description", "")
         slug = path.relative_to(GUIDES_DIR).with_suffix("").as_posix()
-        guides.append((slug, title, description))
+        if slug != "index":
+            guides.append((slug, title, description, sidebar_order))
 
-    guides.sort(key=lambda guide: (guide[0] != "index", guide[1].lower()))
+    guides.sort(key=lambda guide: (guide[3], guide[1].lower()))
     return guides
 
 
 def _render(
-    tutorials: list[tuple[str, str, dict]], guides: list[tuple[str, str, str]]
+    tutorials: list[tuple[str, str, dict]], guides: list[tuple[str, str, str, int]]
 ) -> str:
     lines: list[str] = [
         "# Modal Training Gym",
@@ -114,10 +128,9 @@ def _render(
         "",
     ]
 
-    for slug, title, description in guides:
-        path = "" if slug == "index" else f"{slug}/"
+    for slug, title, description, _ in guides:
         suffix = f": {description}" if description else ""
-        lines.append(f"- [{title}]({SITE}/guides/{path}){suffix}")
+        lines.append(f"- [{title}]({SITE}/guides/{slug}/){suffix}")
 
     lines.extend(
         [
