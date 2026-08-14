@@ -27,13 +27,13 @@ def _create_endpoint_and_wait_for_url(
     checkpoint: Checkpoint | None,
     unauthenticated: bool,
     routing_region: str | None,
+    environment: str | None,
     colocate_compute: bool,
     custom_hf_repo: str | None,
     custom_hf_revision: str | None,
     custom_hf_token: str | None,
     wait_timeout_sec: float,
     recreate_if_existing: bool,
-    environment: str | None,
 ) -> str:
     if recreate_if_existing:
         stop = [
@@ -64,12 +64,12 @@ def _create_endpoint_and_wait_for_url(
         model_name,
     ]
 
-    if environment:
-        command.extend(["--env", environment])
     if unauthenticated:
         command.append("--unauthenticated")
     if routing_region:
         command.extend(["--routing-region", routing_region])
+    if environment:
+        command.extend(["--env", environment])
     if colocate_compute:
         command.append("--colocate-compute")
     if custom_hf_repo:
@@ -158,13 +158,13 @@ class Endpoint:
         endpoint_name: str | None = None,
         unauthenticated: bool = True,
         routing_region: str | None = None,
+        environment: str | None = None,
         colocate_compute: bool = False,
         custom_hf_repo: str | None = None,
         custom_hf_revision: str | None = None,
         custom_hf_token: str | None = None,
         wait_timeout_sec: float = 300,
         recreate_if_existing: bool = False,
-        environment: str | None = None,
     ):
         """Provision a Modal endpoint for ``model`` and return a handle to it.
 
