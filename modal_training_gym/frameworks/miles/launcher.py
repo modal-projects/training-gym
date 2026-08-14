@@ -667,8 +667,9 @@ def build_miles_app(
             # Clear partial torch_dist writes from an earlier crash here — the
             # single-container step that decides to convert — so the conversion cannot mix
             # fresh shards with stale ones from a different parallelism. Only the
-            # ``iter_*``/``release`` directories the converter itself writes are removed,
-            # and only those failing the completeness check: ``ref_load`` is user-settable
+            # ``iter_*``/``release`` directories the converter itself writes, plus the
+            # iteration tracker the resume scan prefers over them, are removed, and only
+            # those failing the completeness check: ``ref_load`` is user-settable
             # and may hold a hand-placed checkpoint in a layout this predicate rejects.
             if os.path.isdir(save_path):
                 stale = [
@@ -680,13 +681,19 @@ def build_miles_app(
                         os.path.join(save_path, name)
                     )
                 ]
-                if stale:
+                tracker = "latest_checkpointed_iteration.txt"
+                tracker_path = os.path.join(save_path, tracker)
+                has_tracker = os.path.isfile(tracker_path)
+                removed = [*stale, *([tracker] if has_tracker else [])]
+                if removed:
                     print(
-                        f"Removing incomplete torch_dist checkpoint dirs at {save_path}: "
-                        + ", ".join(stale)
+                        f"Removing incomplete torch_dist checkpoint state at {save_path}: "
+                        + ", ".join(removed)
                     )
                     for name in stale:
                         shutil.rmtree(os.path.join(save_path, name), ignore_errors=True)
+                    if has_tracker:
+                        os.remove(tracker_path)
                     checkpoints_volume.commit()
 
             conversion_hf_checkpoint = (

@@ -154,6 +154,14 @@ def get_checkpoint_conversion_policy(
     # (Inkling-Small: 256 experts) set it explicitly to mirror upstream's layout.
     ep = getattr(cfg, "conversion_expert_model_parallel_size", None)
     etp = getattr(cfg, "conversion_expert_tensor_parallel_size", None)
+    if (ep or etp) and not (ep and etp):
+        raise ValueError(
+            "checkpoint conversion expert parallelism needs both "
+            "conversion_expert_model_parallel_size and "
+            f"conversion_expert_tensor_parallel_size (got ep={ep}, etp={etp}); "
+            "Megatron otherwise defaults ETP to TP and the expert world size no "
+            "longer matches tp*pp"
+        )
     if ep and etp and (etp * ep * pp) != (tp * pp):
         raise ValueError(
             f"checkpoint conversion expert world size etp*ep*pp={etp}*{ep}*{pp}"
