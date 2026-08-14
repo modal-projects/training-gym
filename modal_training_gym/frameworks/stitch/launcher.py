@@ -170,6 +170,33 @@ def _trainer_failed(log_path: Path, returncode: int, lines: int = 50) -> str:
     )
 
 
+# A cluster node bind-mounts the host's own rdma-core over the image's
+# libibverbs — same file name, newer contents — and the host's exports only
+# ``IBVERBS_PRIVATE_59`` while the libibverbs providers Ubuntu ships here are
+# built against ``IBVERBS_PRIVATE_34``. miles pulls libmlx5 in through
+# mooncake, so the trainer dies importing it before the first step. Rebuild
+# libmlx5 from the rdma-core the host is running, and point the provider name
+# that libibverbs now looks for at the host's own libefa: building that one
+# too segfaults NCCL, since the EFA userspace has to be the node's.
+RDMA_CORE_REF = "v59.0"
+_SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
+_RDMA_CORE_COMMANDS = (
+    "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq"
+    " cmake ninja-build libnl-3-dev libnl-route-3-dev pkg-config python3-docutils",
+    f"git clone --depth 1 -b {RDMA_CORE_REF}"
+    " https://github.com/linux-rdma/rdma-core /tmp/rdma-core"
+    " && cd /tmp/rdma-core"
+    " && cmake -GNinja -B build -DCMAKE_BUILD_TYPE=Release -DNO_MAN_PAGES=1"
+    " && ninja -C build",
+    f"set -eu; cd {_SYSTEM_LIB_DIR}"
+    " && mlx5=$(basename /tmp/rdma-core/build/lib/libmlx5.so.1.*)"
+    f" && cp -aL /tmp/rdma-core/build/lib/$mlx5 {_SYSTEM_LIB_DIR}/"
+    " && ln -sf $mlx5 libmlx5.so.1"
+    " && ln -sf ../$(ls libefa.so.1.*.*.*) libibverbs/libefa-rdmav59.so"
+    " && rm -rf /tmp/rdma-core",
+)
+
+
 def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
     """The miles trainer image. The rollout pool serves on a different image
     (:func:`serving_image.build_serving_image`): it installs no trainer package, and
@@ -189,6 +216,7 @@ def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
         .apt_install(
             "libibverbs-dev", "libibverbs1", "libhwloc-dev", "libnl-route-3-200"
         )
+        .run_commands(*_RDMA_CORE_COMMANDS)
         # The base image bakes an HF cache; drop it so the mounted cache volume
         # at the same path isn't shadowed.
         .run_commands(f"rm -rf {HF_CACHE_PATH}")
