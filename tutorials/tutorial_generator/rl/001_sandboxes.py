@@ -214,7 +214,7 @@ def _serve_eval_base():
                     {"role": "user", "content": prompt},
                 ],
             )
-            response = msg.get("content") or ""
+            response = msg.get("content") or msg.get("reasoning_content") or ""
             code = extract_code(response, model=base_model)
             score, _metadata = score_hello_file(code)
             return score

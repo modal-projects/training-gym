@@ -148,7 +148,7 @@ def run_eval(deployment, *, max_concurrency: int = 2) -> float:
             [{"role": "user", "content": prompt}],
             extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
         )
-        return score_haiku(msg.get("content") or "")
+        return score_haiku(msg.get("content") or msg.get("reasoning_content") or "")
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
         scores = list(executor.map(_score_one, eval_dataset.load()))

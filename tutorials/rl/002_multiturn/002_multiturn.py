@@ -254,7 +254,7 @@ def run_guessing_trajectory(
             [{"role": "user", "content": prompt}],
             extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
         )
-        response = msg.get("content") or ""
+        response = msg.get("content") or msg.get("reasoning_content") or ""
         guess = _extract_answer(response)
         if guess is None:
             return {
