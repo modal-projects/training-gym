@@ -697,7 +697,7 @@ class MilesRecipe(BaseTrainRecipe):
     @model_validator(mode="after")
     def _warn_unsized_conversion_staging(self) -> "MilesRecipe":
         if (
-            self.megatron_to_hf_mode == "raw"
+            self.megatron_to_hf_mode != "bridge"
             and self.convert_via_local_staging
             and not self.convert_ephemeral_disk_mb
         ):
