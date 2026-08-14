@@ -132,8 +132,13 @@ class StitchTrainConfig(MilesRecipe):
     custom_rollout_request_hook_path: str = (
         "cookbook.common.hooks.gated_rollout_request_hook"
     )
-    rollout_request_weight_version_mode: str = "exact"
-    rollout_request_weight_version_lag: int = 0
+    # ``min`` (a floor), not ``exact``: the pointer the hook reads is TTL-cached,
+    # so an exact pin races the replica it is pinning — a request pinned to
+    # version N reaching a replica that already applied N+1 is unsatisfiable and
+    # 409s until the retry budget runs out, failing the run. A floor of
+    # latest-minus-lag is satisfied by anything at least that new.
+    rollout_request_weight_version_mode: str = "min"
+    rollout_request_weight_version_lag: int = 1
     rollout_request_retry_attempts: int = 240
     rollout_request_retry_sleep: float = 1.0
     # The trainer hits the Flash gateway directly, which routes session affinity

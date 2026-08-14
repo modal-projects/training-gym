@@ -32,3 +32,12 @@ def test_stitch_reports_miles_phases() -> None:
         resolve_framework_status("generate_rollouts", "stitch")
         is MilesStatus.ROLLOUT_LOGGING
     )
+
+
+def test_rollout_gating_matches_the_cookbook_config() -> None:
+    """An exact pin races the TTL-cached pointer it is computed from: a request
+    pinned to version N that lands on a replica already at N+1 can never be
+    served. The ported cookbook config floors instead."""
+    train = Qwen3_30B_A3B_Stitch_Train()
+    assert train.rollout_request_weight_version_mode == "min"
+    assert train.rollout_request_weight_version_lag == 1
