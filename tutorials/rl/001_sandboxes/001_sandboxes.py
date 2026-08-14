@@ -91,8 +91,8 @@ def score_hello_file(code):
         image=sandbox_image,
         workdir="/app",
         timeout=10,
-        cpu=(0.125, 1.0),
-        memory=(128, 1024),
+        cpu=0.125,
+        memory=128,
     )
 
     stderr = None
