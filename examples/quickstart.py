@@ -20,7 +20,11 @@ def main() -> None:
         dataset=MathDataset(n_rows=120),
         recipe=Qwen3_4b_Recipe(
             rm_type="deepscaler",
-            actor_num_gpus_per_node=1,
+            gpu_type="H100",
+            colocate=True,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,
+            rollout_num_gpus_per_engine=1,
             num_rollout=1,
             n_samples_per_prompt=4,
             rollout_batch_size=8,
