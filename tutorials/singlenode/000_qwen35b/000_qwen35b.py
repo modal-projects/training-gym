@@ -118,7 +118,7 @@ def _main_impl() -> None:
     # is what `wait_until_ready` waits for.
 
     endpoint = Endpoint.launch(model, hf_checkpoint, unauthenticated=True)
-    endpoint.wait_until_ready(timeout_sec=45 * 60)
+    endpoint.wait_until_ready(timeout=45 * 60)
     print(f"Trained model URL: {endpoint.url}")
 
 @tutorial_cli_app.local_entrypoint()

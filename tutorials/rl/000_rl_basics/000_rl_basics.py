@@ -139,14 +139,14 @@ eval_dataset = HaikuDataset(n_rows=5)
 def run_eval(deployment, *, max_concurrency: int = 2) -> float:
     from concurrent.futures import ThreadPoolExecutor
 
-    deployment.wait_until_ready(timeout_sec=15 * 60)
+    deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
         topic = str(example[eval_dataset.input_column])
         prompt = eval_dataset.prompt_template.format(input=topic)
         msg = deployment.chat(
             [{"role": "user", "content": prompt}],
-            extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
+            chat_template_kwargs={"enable_thinking": False},
         )
         return score_haiku(msg.get("content") or msg.get("reasoning_content") or "")
 
@@ -186,7 +186,7 @@ def _main_impl() -> None:
         )
 
     base_model_deployment = Endpoint.launch(base_model, unauthenticated=True)
-    base_model_deployment.wait_until_ready(timeout_sec=15 * 60)
+    base_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Base model deployed to {base_model_deployment.url}")
 
     train_dataset = HaikuDataset(n_rows=10)
@@ -245,7 +245,7 @@ def _main_impl() -> None:
     trained_model_deployment = Endpoint.launch(
         Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
     )
-    trained_model_deployment.wait_until_ready(timeout_sec=15 * 60)
+    trained_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Trained model deployed to {trained_model_deployment.url}")
 
     # ## Evaluate the first checkpoint
@@ -306,7 +306,7 @@ def _main_impl() -> None:
     new_model_deployment = Endpoint.launch(
         Qwen3_5_4B(), new_hf_checkpoint, unauthenticated=True
     )
-    new_model_deployment.wait_until_ready(timeout_sec=15 * 60)
+    new_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Newly trained model deployed to {new_model_deployment.url}")
 
     # ## Compare second-run results

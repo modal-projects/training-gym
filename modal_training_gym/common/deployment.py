@@ -378,24 +378,25 @@ class CustomDeployment(BaseModel):
     def chat(
         self,
         messages: list[dict],
-        ensure_ready: bool = True,
-        max_attempts: int = 4,
         timeout: int = 120,
-        **kwargs,
+        max_attempts: int = 4,
+        **extra,
     ) -> dict:
         """Return one OpenAI-compatible chat-completion message while
         preserving structured fields like tool_calls and reasoning_content.
+
+        Extra keyword arguments are Chat Completions body fields. Call
+        ``wait_until_ready`` before chatting if the deployment may still be
+        starting.
         """
         import time
 
         import requests
 
-        if ensure_ready:
-            self.wait_until_ready()
         body = {
             "model": self.served_model_name,
             "messages": _messages_to_openai(messages),
-            **kwargs,
+            **extra,
         }
         transient_status_codes = {429, 500, 502, 503, 504}
 
@@ -415,7 +416,6 @@ class CustomDeployment(BaseModel):
                         f"Transient generation error {resp.status_code} from {self.url}; "
                         f"retrying ({attempt}/{max_attempts})..."
                     )
-                    self.wait_until_ready(timeout=120)
                     time.sleep(min(2 * attempt, 5))
                     continue
                 _raise_for_proxy_auth(resp.status_code, self.url)
@@ -428,7 +428,6 @@ class CustomDeployment(BaseModel):
                     f"Transient generation transport error from {self.url}: {exc}; "
                     f"retrying ({attempt}/{max_attempts})..."
                 )
-                self.wait_until_ready(timeout=120)
                 time.sleep(min(2 * attempt, 5))
 
         raise RuntimeError(
@@ -438,7 +437,6 @@ class CustomDeployment(BaseModel):
     def generate(
         self,
         prompt: str | list[dict],
-        ensure_ready: bool = True,
         **kwargs,
     ) -> str:
         messages = kwargs.pop("messages", None)
@@ -446,7 +444,6 @@ class CustomDeployment(BaseModel):
             messages = [{"role": "user", "content": prompt}]
         message = self.chat(
             messages,
-            ensure_ready=ensure_ready,
             **kwargs,
         )
         content = message.get("content")

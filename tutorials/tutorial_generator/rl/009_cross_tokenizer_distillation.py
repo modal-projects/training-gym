@@ -113,26 +113,6 @@ def _deploy_teacher():
     TEACHER_READY_TIMEOUT = 30 * 60
     STUDENT_READY_TIMEOUT = 15 * 60
 
-    def wait_ready(deployment, timeout):
-        if isinstance(deployment, Endpoint):
-            deployment.wait_until_ready(timeout_sec=timeout)
-        else:
-            deployment.wait_until_ready(timeout=timeout)
-
-    def _chat(deployment, messages, extra, max_attempts=12):
-        if isinstance(deployment, Endpoint):
-            return deployment.chat(
-                messages,
-                max_attempts=max_attempts,
-                extra_parameters=extra,
-            )
-        return deployment.chat(
-            messages,
-            ensure_ready=False,
-            max_attempts=max_attempts,
-            **extra,
-        )
-
     # OPD fires one /generate prefill per trajectory. With 16×8=128 traj/step, the
     # default max_running_requests=16 saturates and returns 503s for minutes — raise
     # the teacher queue and throttle client-side (see TEACHER_RM_CONCURRENCY below).
@@ -148,7 +128,7 @@ def _deploy_teacher():
     )
     print(f"Teacher URL: {teacher_deployment.url}")
 
-    wait_ready(teacher_deployment, TEACHER_READY_TIMEOUT)
+    teacher_deployment.wait_until_ready(timeout=TEACHER_READY_TIMEOUT)
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
     TEACHER_RM_CONCURRENCY = 24
@@ -400,7 +380,7 @@ def _eval_base():
         except Exception:
             return sum(len(str(m.get("content", ""))) for m in messages) // 3
 
-    def _eval_chat(deployment, messages, tools=None, max_tokens=None, max_attempts=12, *, qwen_thinking=False):
+    def _chat(deployment, messages, tools=None, max_tokens=None, max_attempts=12, *, qwen_thinking=False):
         if max_tokens is None:
             max_tokens = RESPONSE_TOKEN_CAP
         remaining = SERVED_CONTEXT_LEN - _prompt_token_count(messages, tools) - CONTEXT_SAFETY_MARGIN
@@ -416,7 +396,7 @@ def _eval_base():
             extra["tools"] = tools
         if qwen_thinking is not None:
             extra["chat_template_kwargs"] = {"enable_thinking": qwen_thinking}
-        return _chat(deployment, messages, extra, max_attempts=max_attempts)
+        return deployment.chat(messages, max_attempts=max_attempts, **extra)
 
     def _actions_from_message(msg: dict) -> tuple[str, list[ToolCall]]:
         """Prefer structured API tool_calls (DeepSeek); else parse Qwen wire text."""
@@ -458,7 +438,7 @@ def _eval_function():
         episode = run_bfcl_episode(
             label,
             start_step=K,
-            generate=lambda messages, tools: _eval_chat(
+            generate=lambda messages, tools: _chat(
                 deployment,
                 messages,
                 tools=tools,
@@ -502,7 +482,7 @@ def _eval_function():
     def run_eval(deployment, *, ready_timeout, max_concurrency: int = 4):
         from concurrent.futures import ThreadPoolExecutor
 
-        wait_ready(deployment, ready_timeout)
+        deployment.wait_until_ready(timeout=ready_timeout)
 
         def _score_one(example):
             return bfcl_eval_fn(deployment, example)

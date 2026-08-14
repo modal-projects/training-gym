@@ -117,7 +117,7 @@ def _serve_base_intro():
 def _serve_base_model():
     base_model = Qwen3_5_4B()
     base_model_deployment = Endpoint.launch(base_model, unauthenticated=True)
-    base_model_deployment.wait_until_ready(timeout_sec=15 * 60)
+    base_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Base model deployed to {base_model_deployment.url}")
 
 @notebook_only
@@ -132,7 +132,7 @@ def _qualitative_eval_of_base_model():
 def _qualitative_eval_of_base_model_code():
     msg = base_model_deployment.chat(
         [{"role": "user", "content": "Write a haiku about cat."}],
-        extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
+        chat_template_kwargs={"enable_thinking": False},
     )
     response = msg.get("content") or msg.get("reasoning_content") or ""
     print(response)
@@ -196,7 +196,7 @@ def _score_haiku():
 def _score_haiku_demo():
     msg = base_model_deployment.chat(
         [{"role": "user", "content": "Write a haiku about cat."}],
-        extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
+        chat_template_kwargs={"enable_thinking": False},
     )
     response = msg.get("content") or msg.get("reasoning_content") or ""
     print(response)
@@ -269,14 +269,14 @@ def _eval_base_model():
     def run_eval(deployment, *, max_concurrency: int = 2) -> float:
         from concurrent.futures import ThreadPoolExecutor
 
-        deployment.wait_until_ready(timeout_sec=15 * 60)
+        deployment.wait_until_ready(timeout=15 * 60)
 
         def _score_one(example):
             topic = str(example[eval_dataset.input_column])
             prompt = eval_dataset.prompt_template.format(input=topic)
             msg = deployment.chat(
                 [{"role": "user", "content": prompt}],
-                extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
+                chat_template_kwargs={"enable_thinking": False},
             )
             return score_haiku(msg.get("content") or msg.get("reasoning_content") or "")
 
@@ -372,7 +372,7 @@ def _serve_and_eval_trained():
     trained_model_deployment = Endpoint.launch(
         Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
     )
-    trained_model_deployment.wait_until_ready(timeout_sec=15 * 60)
+    trained_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Trained model deployed to {trained_model_deployment.url}")
 
 
@@ -453,7 +453,7 @@ def _trained_eval_off_of_a_checkpoint_code():
     new_model_deployment = Endpoint.launch(
         Qwen3_5_4B(), new_hf_checkpoint, unauthenticated=True
     )
-    new_model_deployment.wait_until_ready(timeout_sec=15 * 60)
+    new_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Newly trained model deployed to {new_model_deployment.url}")
 
 @markdown

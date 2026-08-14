@@ -198,14 +198,14 @@ class Endpoint:
                 )
         return headers
 
-    def wait_until_ready(self, timeout_sec: float = 30 * 60) -> None:
+    def wait_until_ready(self, timeout: float = 30 * 60) -> None:
         """Block until the endpoint can serve traffic.
 
         Raises ``TimeoutError`` if the endpoint is still not ready by then, and
         ``RuntimeError`` if the endpoint rejects the proxy credentials.
         """
         last_error: Exception | None = None
-        deadline = time.monotonic() + timeout_sec
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
                 response = httpx.get(
@@ -238,15 +238,15 @@ class Endpoint:
         messages: list[dict[str, Any]],
         timeout: int = 120,
         max_attempts: int = 4,
-        extra_parameters: dict[str, Any] | None = None,
+        **extra: Any,
     ):
         """POST one chat completion to ``/v1/chat/completions``.
 
-        ``messages`` is a list of ``{"role": ..., "content": ...}`` dicts, and
-        ``extra_parameters`` carries any other body fields the OpenAI Chat
-        Completions API accepts, such as ``temperature`` or ``max_tokens``.
-        Returns the assistant message as a dict, preserving structured fields
-        like ``tool_calls`` and ``reasoning_content``.
+        ``messages`` is a list of ``{"role": ..., "content": ...}`` dicts.
+        Extra keyword arguments are Chat Completions body fields such as
+        ``temperature`` or ``max_tokens``. Returns the assistant message as a
+        dict, preserving structured fields like ``tool_calls`` and
+        ``reasoning_content``.
 
         Requests are retried up to ``max_attempts`` times with a short backoff,
         while ``timeout`` bounds each individual request. Raises ``RuntimeError``
@@ -257,9 +257,8 @@ class Endpoint:
         body: dict[str, Any] = {
             "model": self.model_name,
             "messages": _messages_to_openai(messages),
+            **extra,
         }
-        if extra_parameters:
-            body.update(extra_parameters)
 
         headers = self._headers()
         transient = {429, 500, 502, 503, 504}

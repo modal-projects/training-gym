@@ -182,7 +182,7 @@ def _eval_helpers():
 
         msg = deployment.chat(
             [{"role": "user", "content": prompt}],
-            extra_parameters={"chat_template_kwargs": {"enable_thinking": True}},
+            chat_template_kwargs={"enable_thinking": True},
         )
         response = msg.get("content") or msg.get("reasoning_content") or ""
 
@@ -202,7 +202,7 @@ def _eval_helpers():
     ) -> tuple[float, list[dict]]:
         from concurrent.futures import ThreadPoolExecutor
 
-        deployment.wait_until_ready(timeout_sec=15 * 60)
+        deployment.wait_until_ready(timeout=15 * 60)
 
         def _score_one(example):
             return math_eval_fn(deployment, example)

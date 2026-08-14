@@ -177,7 +177,7 @@ def _deploy_section():
 @code
 def _deploy_model():
     deployment = Endpoint.launch(Qwen3_5_9B(), unauthenticated=True)
-    deployment.wait_until_ready(timeout_sec=15 * 60)
+    deployment.wait_until_ready(timeout=15 * 60)
     print(f"Model URL: {deployment.url}")
 
     client = openai.OpenAI(

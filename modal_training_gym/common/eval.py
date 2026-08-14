@@ -254,7 +254,6 @@ class EvalConfig:
             prompt = self.build_prompt(example)
             text = deployment.generate(
                 prompt,
-                ensure_ready=False,
                 **self.generate_kwargs,
             )
             result = eval_response_fn(example, text)
@@ -670,7 +669,6 @@ class HarborEval(EvalConfig):
         messages = self._build_messages(example, prompt)
         response = deployment.generate(
             prompt,
-            ensure_ready=False,
             messages=messages,
             **self.generate_kwargs,
         )

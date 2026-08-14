@@ -252,7 +252,7 @@ def run_guessing_trajectory(
         prompt = f"{_PROMPT}\n{trace}".strip()
         msg = deployment.chat(
             [{"role": "user", "content": prompt}],
-            extra_parameters={"chat_template_kwargs": {"enable_thinking": False}},
+            chat_template_kwargs={"enable_thinking": False},
         )
         response = msg.get("content") or msg.get("reasoning_content") or ""
         guess = _extract_answer(response)
@@ -322,7 +322,7 @@ def run_eval(
 ) -> tuple[float, list[dict]]:
     from concurrent.futures import ThreadPoolExecutor
 
-    deployment.wait_until_ready(timeout_sec=15 * 60)
+    deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
         return guessing_eval_fn(deployment, example)

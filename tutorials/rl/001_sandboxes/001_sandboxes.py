@@ -124,7 +124,7 @@ base_model = Qwen3_5_4B()
 def run_eval(deployment, *, max_concurrency: int = 2) -> float:
     from concurrent.futures import ThreadPoolExecutor
 
-    deployment.wait_until_ready(timeout_sec=15 * 60)
+    deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
         prompt = example["instruction"]

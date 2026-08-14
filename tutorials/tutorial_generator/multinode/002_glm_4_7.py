@@ -181,7 +181,7 @@ def _serve_checkpoint():
     deployment = Endpoint.launch(
         GLM_4_7(), hf_checkpoint, unauthenticated=True
     )
-    deployment.wait_until_ready(timeout_sec=45 * 60)
+    deployment.wait_until_ready(timeout=45 * 60)
     print(f"Deployed to {deployment.url}")
 
 

@@ -155,7 +155,7 @@ def _main_impl() -> None:
     # SDK can use them as-is.
 
     deployment = Endpoint.launch(Qwen3_5_9B(), unauthenticated=True)
-    deployment.wait_until_ready(timeout_sec=15 * 60)
+    deployment.wait_until_ready(timeout=15 * 60)
     print(f"Model URL: {deployment.url}")
 
     client = openai.OpenAI(

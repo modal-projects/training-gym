@@ -235,7 +235,7 @@ def grounding_eval_fn(
         {"type": "text", "text": prompt},
         *({"type": "image_url", "image_url": {"url": img}} for img in images),
     ]
-    response = deployment.generate(content, ensure_ready=False)
+    response = deployment.generate(content)
 
     pred = _parse_coordinates(response)
     box = _parse_bbox(label)

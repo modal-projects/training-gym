@@ -51,7 +51,7 @@ def test_chat_serializes_tool_arguments_without_mutating_messages(monkeypatch) -
         }
     ]
 
-    response = deployment.chat(messages, ensure_ready=False)
+    response = deployment.chat(messages)
 
     assert response == structured_message
     assert request_body["model"] == "test-model"
@@ -73,9 +73,8 @@ def test_generate_accepts_caller_supplied_messages(monkeypatch) -> None:
     ]
     captured = {}
 
-    def chat(self, messages, ensure_ready=True, **kwargs):
+    def chat(self, messages, **kwargs):
         captured["messages"] = messages
-        captured["ensure_ready"] = ensure_ready
         captured["kwargs"] = kwargs
         return {"content": "print('hello world')"}
 
@@ -83,7 +82,6 @@ def test_generate_accepts_caller_supplied_messages(monkeypatch) -> None:
 
     response = deployment.generate(
         "unused fallback",
-        ensure_ready=False,
         messages=supplied_messages,
         temperature=0,
     )
@@ -91,6 +89,5 @@ def test_generate_accepts_caller_supplied_messages(monkeypatch) -> None:
     assert response == "print('hello world')"
     assert captured == {
         "messages": supplied_messages,
-        "ensure_ready": False,
         "kwargs": {"temperature": 0},
     }
