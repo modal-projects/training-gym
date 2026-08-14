@@ -16,8 +16,8 @@ from modal_training_gym.common.checkpoint import (
     CheckpointType,
     convert_checkpoint_to_hf,
 )
-from modal_training_gym.common.endpoint import _messages_to_openai
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.openai_messages import _messages_to_openai
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig

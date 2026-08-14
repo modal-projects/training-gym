@@ -13,33 +13,8 @@ import modal
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
 from modal_training_gym.common.config import modal_proxy_auth_headers
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.openai_messages import _messages_to_openai
 from modal_training_gym.model import ModelConfig
-
-
-def _messages_to_openai(messages: list[dict]) -> list[dict]:
-    """Serialize internal tool-call arguments without mutating caller messages."""
-    wire_messages = []
-    for message in messages:
-        wire_message = dict(message)
-        tool_calls = message.get("tool_calls")
-        if isinstance(tool_calls, list):
-            wire_tool_calls = []
-            for tool_call in tool_calls:
-                if not isinstance(tool_call, dict):
-                    wire_tool_calls.append(tool_call)
-                    continue
-                wire_tool_call = dict(tool_call)
-                function = tool_call.get("function")
-                if isinstance(function, dict):
-                    wire_function = dict(function)
-                    arguments = function.get("arguments")
-                    if isinstance(arguments, dict):
-                        wire_function["arguments"] = json.dumps(arguments)
-                    wire_tool_call["function"] = wire_function
-                wire_tool_calls.append(wire_tool_call)
-            wire_message["tool_calls"] = wire_tool_calls
-        wire_messages.append(wire_message)
-    return wire_messages
 
 
 def _create_endpoint_and_wait_for_url(
