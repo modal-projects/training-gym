@@ -91,7 +91,7 @@ class StitchServeConfig:
         Container disk MiB, for a disk-mode replica's local checkpoint copy.
     """
 
-    sglang: SglangRecipe = field(default_factory=lambda: SglangRecipe(gpu="H200"))
+    sglang: SglangRecipe = field(default_factory=SglangRecipe)
     runtime: SGLangRuntime = DEFAULT_SGLANG_RUNTIME
 
     # ── Flash pool shape ────────────────────────────────────────────────────
