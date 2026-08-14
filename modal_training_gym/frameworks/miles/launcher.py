@@ -21,6 +21,7 @@ from modal_training_gym.common import (
 )
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import (
     Framework,
     mount_tools_dir,
@@ -228,9 +229,17 @@ def _await_convert_peers(run_id: str, nnodes: int) -> None:
     passes ``_is_complete_torch_dist_checkpoint`` with shards missing, and the next
     run reports a cache hit and trains on partial weights.
 
-    The signal lives in a ``modal.Dict`` rather than on the Volume so that waiting
-    never reloads the mount: ``Volume.reload`` may implicitly commit whatever is
-    pending, which would publish the very ``.metadata`` this holds back.
+    What holds ``.metadata`` back is that it stays in the staging directory on
+    container-local disk until this returns — not that it stays uncommitted. Modal
+    mounts are created with ``allow_background_commits``, and uncommitted changes are
+    also flushed on container exit, so "written to the mount but not committed" is
+    not a state anything may rely on. Multi-node conversion therefore requires
+    staging, enforced where the conversion topology is resolved.
+
+    The signal lives in a ``modal.Dict`` because it is coordination state rather than
+    checkpoint data: it needs an atomic compare-and-set for the sibling claim, and
+    keeping it out of ``ref_load`` leaves no marker files in a user-visible checkpoint
+    directory and nothing to garbage-collect there.
     """
     barrier = _convert_barrier_dict()
     deadline = time.time() + _CONVERT_BARRIER_TIMEOUT_S
@@ -606,6 +615,21 @@ def build_miles_app(
 
     convert_nnodes = get_checkpoint_conversion_policy(miles, model=model)[0]
     convert_multi_node = convert_nnodes > 1
+    if (
+        convert_multi_node
+        and not miles.convert_via_local_staging
+        and miles.megatron_to_hf_mode != "bridge"
+    ):
+        raise TrainingGymConfigError(
+            f"{type(miles).__name__} converts on {convert_nnodes} nodes with "
+            "convert_via_local_staging=False. Writing straight to the Volume cannot be "
+            "made safe across nodes: the converter puts .metadata on the mount as soon "
+            "as rank 0 finishes, Modal mounts allow background commits, and that "
+            "publishes a checkpoint that passes the completeness check while peer "
+            "shards are still being written. Leave convert_via_local_staging on, which "
+            "keeps .metadata on container-local disk until every peer's shards are "
+            "committed."
+        )
 
     @app.function(
         image=image,
@@ -881,13 +905,8 @@ def build_miles_app(
                     print(f"Moved {moved} files in {time.time() - move_start:.0f}s")
                     shutil.rmtree(staging_path, ignore_errors=True)
                     checkpoints_volume.commit()
-                elif nnodes > 1 and node_rank == 0:
-                    _await_convert_peers(training_run_id, nnodes)
-                    checkpoints_volume.commit()
                 else:
                     checkpoints_volume.commit()
-                    if nnodes > 1:
-                        _signal_convert_rank_moved(training_run_id, node_rank)
 
                 if node_rank == 0:
                     print(f"Saved Megatron torch_dist checkpoint to {save_path}")
