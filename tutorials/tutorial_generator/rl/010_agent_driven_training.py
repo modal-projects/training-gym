@@ -24,23 +24,22 @@ def _intro():
     """
     # Drive a training run with an agent and the Training Gym CLI
 
-    Training Gym gives an agent more than an API for writing a training
+    The Training Gym gives an agent more than an API for writing a training
     configuration. Its bundled skill teaches the agent how to own the full
-    lifecycle—preflight, prove one step, smoke test, inspect real rollouts,
-    diagnose problems, and promote a healthy run.
+    RL training, monitoring, and debugging lifecycle.
 
     This tutorial is a hands-on walkthrough of that loop. You will:
 
-    1. install the Training Gym agent skills,
-    2. give an agent a plain-language training objective,
-    3. launch the Qwen3-4B configuration it produces, and
-    4. use the CLI to inspect status, rewards, logs, and rollout traces.
+    1. Install the Training Gym agent skills.
+    2. Give an agent a plain-language training objective.
+    3. Watch the agent build the Qwen3-4B configuration it produces.
+    4. Watch as the agent uses the CLI to inspect status, rewards, logs, 
+    and rollout traces to see how the agent is progressing.
 
-    We use a real request—**post-train a model to answer in rhyme**—throughout.
-    The goal is not to repeat every option in the
-    [CLI reference](/reference/cli/). It is to practice the small set of
-    commands that answers the questions an agent must ask while a run is live:
-    Is it progressing? Is reward improving? What is the model actually doing?
+    We use the training objective to **post-train a model to answer in rhyme** throughout.
+    The goal is to practice the small set of commands that answers the questions an
+    agent must ask while a run is live: Is it progressing? Is reward improving?
+    What is the model actually doing?
     """
 
 
@@ -77,12 +76,11 @@ def _notebook_setup():
 @markdown
 def _confirmations():
     """
-    ## 1. Meet the CLI
+    ## 1. Introducing the CLI
 
     The package installs the `training-gym` command. Start by looking at its
-    top-level command groups. In the notebook, cells beginning with `!` run in
-    your shell, so you can execute the walkthrough instead of only reading it.
-
+    top-level command groups. 
+    
     ```bash
     training-gym --help
     ```
@@ -103,13 +101,13 @@ def _install_skill_intro():
     Install the bundled skills into the current project:
 
     ```bash
-    training-gym skills install --project-dir .
+    training-gym skills install
     ```
     """
 
 
 @notebook_only
-@shell("!training-gym skills install --project-dir .")
+@shell("!training-gym skills install")
 def _install_skills():
     pass
 
@@ -117,11 +115,7 @@ def _install_skills():
 @markdown
 def _skill_details():
     """
-    This creates `.agents/skills/agent-driven-training` along with supporting
-    skills for model selection, validation, and Modal infrastructure. Compatible
-    agents discover these files as project instructions.
-
-    The `agent-driven-training` skill tells the agent to:
+    The installed `agent-driven-training` skill tells the agent to:
 
     - confirm behavior- and cost-sensitive choices before implementation,
     - validate the dataset and reward locally before using GPUs,
@@ -129,17 +123,15 @@ def _skill_details():
     - inspect rollout traces at every stage, and
     - diagnose suspicious rewards instead of trusting a rising number.
 
-    You do not have to translate that lifecycle into a long prompt. Ask your
-    agent:
+    You can just ask your agent:
 
-    > Post-train a model to rhyme in its output. Keep the answers relevant, and
-    > own the run through proof, smoke test, and full training.
+    > can you post-train a model to rhyme in its output
 
     The request is deliberately incomplete. The agent proposes the model,
     dataset, reward, and cluster shape, then asks you to confirm the choices
     that affect behavior and cost. For this run it selected **Qwen3-4B**,
-    `tatsu-lab/alpaca`, and a reward that grants rhyme credit only when the
-    response remains relevant.
+    `tatsu-lab/alpaca`, and a reward that grants rhyme credit only when it rhymes 
+    and the response remains relevant.
     """
 
 
@@ -148,7 +140,7 @@ def _code_summary():
     """
     ## 3. Review the code the agent generated
 
-    Training Gym gives the agent the framework primitives and lifecycle
+    The Training Gym gives the agent the framework primitives and lifecycle
     guidance; the result is ordinary Python that you can inspect, edit, and run.
     The rest of this section is the rhyming configuration produced for the
     request above.
@@ -398,9 +390,7 @@ def _reward_details():
     ### Training configuration
 
     The agent assembled the validated Qwen3-4B recipe, custom reward, dataset,
-    and image dependencies into one `TrainConfig`. The important process
-    detail is that this same configuration and cluster shape are reused at
-    every stage; only the rollout horizon changes.
+    and image dependencies into one `TrainConfig`.
     """
 
 
@@ -465,8 +455,7 @@ def _cli_walkthrough():
     """
     ## 5. Inspect the run with the CLI
 
-    A reference tells you which flags exist; this walkthrough shows when each
-    command becomes useful.
+    This walkthrough shows when each `training-gym run` command becomes useful.
 
     First, verify that the run was recorded. `run list` is also how you recover
     an ID after closing a terminal or notebook.
@@ -505,8 +494,7 @@ def _run_get():
 @markdown
 def _run_logs_intro():
     """
-    If progress stops advancing or the run fails, inspect logs. A bounded tail
-    is friendlier in a notebook than `--follow`, which keeps the cell running.
+    If progress stops advancing or the run fails, inspect logs.
 
     ```bash
     training-gym run logs <run-id> --tail 100
@@ -567,7 +555,7 @@ def _success():
     """
     ## 6. Watch the agent catch reward hacking
 
-    The demo below shows the loop in practice. A rising reward initially looked
+    The timelapsed demo below shows the loop in practice. A rising reward initially looked
     healthy, but trace inspection exposed responses gaming the rhyme signal with
     repeated end words and undersized lines. The agent tightened the scorer,
     reran the cheap stage, and checked real samples again before promotion.
@@ -577,10 +565,6 @@ def _success():
       <source src="https://gym.modal.dev/agent-driven-training-rhyme.mp4" type="video/mp4">
       <a href="https://gym.modal.dev/agent-driven-training-rhyme.mp4">Watch the agent-driven training demo.</a>
     </video>
-
-    This is why traces belong in the normal workflow: a reward curve can tell
-    you that optimization found *something*, but only samples tell you whether
-    it found the behavior you intended.
 
     ## 7. Results
 
@@ -602,14 +586,17 @@ def _lessons():
     """
     ## What to take away
 
-    Installing the skill turns “post-train a model to rhyme” into a repeatable
-    process, not a one-shot code-generation request. The generated Python is
-    only the starting artifact. The CLI closes the loop by giving the agent
-    direct evidence about progress, failures, reward behavior, and real model
-    outputs.
+    Installing the Training Gym skill gives your agent a runbook for the full
+    training lifecycle. Instead of stopping after it generates a configuration,
+    the agent knows to preflight locally, prove one step, smoke test, diagnose
+    problems, and promote only when a run is healthy.
 
-    Keep the CLI reference nearby for exhaustive syntax. For day-to-day
-    agent-driven training, remember the workflow practiced here:
-    **install the skill → launch cheaply → inspect status and logs → read
-    traces → promote only with evidence**.
+    The CLI unlocks the observability needed to make those training judgments.
+    Run status and logs distinguish slow startup from failure, reward history
+    shows whether learning is occurring, and rollout traces reveal whether the
+    model is improving or merely gaming the reward.
+
+    Together, the skill provides the learning judgment and the CLI provides the evidence:
+    **install the skill, then let the CLI's observability guide each training 
+    decision**.
     """
