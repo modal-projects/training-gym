@@ -3,7 +3,7 @@
 
 TUTORIAL_METADATA = {
     "framework": "Modal Sandbox",
-    "cluster_shape": "1 × 1×H100",
+    "cluster_shape": "—",
     "summary": "Build an LLM agent harness with a self-hosted model and Modal Sandbox tool execution",
     "difficulty": "Beginner",
     "order": 10,

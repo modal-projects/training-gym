@@ -369,8 +369,8 @@ def _main_impl() -> None:
     #   (Megatron) ranks.
     # - `colocate=True` — share the same GPUs between rollout and training, alternating
     #   between the two. Set `False` to give sglang dedicated GPUs (faster, more expensive).
-    # - `tensor_model_parallel_size=1` — Megatron tensor-parallel degree. `1` keeps the
-    #   4B model on a single GPU; bump it for larger models that don't fit.
+    # - `tensor_model_parallel_size=1` — Megatron tensor-parallel degree. The 4B
+    #   preset still uses 8 H100s; bump TP for larger models that outgrow one GPU.
     # - `sequence_parallel=False` — only meaningful when `tensor_model_parallel_size > 1`.
     # - `rollout_num_gpus_per_engine=1` — GPUs per sglang inference engine (sglang's TP).
     #

@@ -3,7 +3,7 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 1×H100",
+    "cluster_shape": "1 × 8×H100",
     "summary": "Code RL with Harbor sandboxed evals",
     "difficulty": "Intermediate",
     "order": 20,

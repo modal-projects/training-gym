@@ -2,7 +2,7 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 1×H100",
+    "cluster_shape": "1 × 8×H100",
     "summary": "Haiku evaluation with verifiable rewards",
     "difficulty": "Beginner",
     "order": 10,
