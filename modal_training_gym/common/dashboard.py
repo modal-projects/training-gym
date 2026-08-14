@@ -6,7 +6,13 @@ resolve the live dashboard without importing ``cli``, which imports ``common``.
 
 from __future__ import annotations
 
-DASHBOARD_APP_NAME = "training-gym-dashboard"
+import os
+
+# Overridable so a fork/experiment can deploy alongside a stock dashboard
+# without colliding on the app name.
+DASHBOARD_APP_NAME = os.environ.get(
+    "TRAINING_GYM_DASHBOARD_APP_NAME", "training-gym-dashboard"
+)
 DASHBOARD_WEB_FUNCTION = "fastapi_app"
 
 

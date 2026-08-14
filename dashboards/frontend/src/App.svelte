@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { Book, CheckCircle2, Rocket, Zap } from "lucide-svelte";
+  import { Book, CheckCircle2, FlaskConical, Rocket, Zap } from "lucide-svelte";
   import "./app.css";
   import Sidebar from "./components/Sidebar.svelte";
   import DashboardHeader from "./components/DashboardHeader.svelte";
@@ -8,7 +8,15 @@
   import TrainingRunDetailPage from "./pages/TrainingRunDetailPage.svelte";
   import DeploymentsPage from "./pages/DeploymentsPage.svelte";
   import EvalsPage from "./pages/EvalsPage.svelte";
-  import { fetchRuns, fetchEvals, fetchDeployments, fetchEvalDetail } from "./lib/api.js";
+  import LearningPage from "./pages/LearningPage.svelte";
+  import LearningRunDetailPage from "./pages/LearningRunDetailPage.svelte";
+  import {
+    fetchRuns,
+    fetchEvals,
+    fetchDeployments,
+    fetchEvalDetail,
+    fetchLearningRuns,
+  } from "./lib/api.js";
   import logoSvg from "./lib/logo.svg";
   import { fmtDuration, truncateId } from "./lib/format.js";
 
@@ -49,23 +57,35 @@
   let hasLoadedEvals = $state(false);
   let hasLoadedDeployments = $state(false);
   let pendingDeploymentFocus = $state(null);
+  // Learning-agent (LAB) runs from the observatory volume.
+  let allLearningRuns = $state([]);
+  let loadingLearning = $state(false);
+  let hasLoadedLearning = $state(false);
+  let learningRequestId = 0;
+  let learningSearch = $state("");
+  let activeLearningRunId = $state(null);
 
   const pageMeta = {
     training: { title: "Training runs" },
     deployments: { title: "Deployments" },
     evals: { title: "Evals" },
+    learning: { title: "Learning agent" },
   };
 
   const pagePaths = {
     training: "/training",
     deployments: "/deployments",
     evals: "/evals",
+    learning: "/learning",
   };
 
   function pageFromPath(pathname) {
-    if (pathname === "/" || pathname.startsWith("/training")) return "training";
+    // This fork's primary view is the learning agent, so "/" lands there.
+    if (pathname === "/") return "learning";
+    if (pathname.startsWith("/training")) return "training";
     if (pathname.startsWith("/deployments")) return "deployments";
     if (pathname.startsWith("/evals")) return "evals";
+    if (pathname.startsWith("/learning")) return "learning";
     return "training";
   }
 
@@ -75,25 +95,34 @@
     return tail ? decodeURIComponent(tail) : null;
   }
 
+  function learningRunIdFromPath(pathname) {
+    if (!pathname.startsWith("/learning/")) return null;
+    const tail = pathname.slice("/learning/".length).split("/")[0];
+    return tail ? decodeURIComponent(tail) : null;
+  }
+
   const navItems = [
     { key: "training", label: "Training runs", Icon: Zap, path: pagePaths.training },
     { key: "deployments", label: "Deployments", Icon: Rocket, path: pagePaths.deployments },
     { key: "evals", label: "Evals", Icon: CheckCircle2, path: pagePaths.evals },
+    { key: "learning", label: "Learning agent", Icon: FlaskConical, path: pagePaths.learning },
   ];
 
   if (typeof window !== "undefined") {
     activePage = pageFromPath(window.location.pathname);
     activeTrainingRunId = runIdFromPath(window.location.pathname);
+    activeLearningRunId = learningRunIdFromPath(window.location.pathname);
   }
 
   onMount(() => {
     const syncPageWithPath = () => {
       activePage = pageFromPath(window.location.pathname);
       activeTrainingRunId = runIdFromPath(window.location.pathname);
+      activeLearningRunId = learningRunIdFromPath(window.location.pathname);
     };
 
     if (window.location.pathname === "/") {
-      window.history.replaceState({}, "", pagePaths.training);
+      window.history.replaceState({}, "", pagePaths.learning);
     } else {
       syncPageWithPath();
     }
@@ -106,6 +135,8 @@
     // detail page refreshes its own run, so skip the full list there.
     const refresh = window.setInterval(() => {
       if (activePage === "training" && activeTrainingRunId) return;
+      // The learning run detail page polls its own record.
+      if (activePage === "learning" && activeLearningRunId) return;
       void load();
     }, 5000);
 
@@ -335,6 +366,24 @@
     if (!isStale()) loadingDeployments = false;
   }
 
+  async function loadLearningRuns() {
+    const requestId = ++learningRequestId;
+    const isStale = () => requestId !== learningRequestId;
+
+    if (!allLearningRuns.length) loadingLearning = true;
+    try {
+      const runs = await fetchWithTimeout(fetchLearningRuns, 30000, "learning runs");
+      if (isStale()) return;
+      allLearningRuns = runs;
+      hasLoadedLearning = true;
+    } catch (reason) {
+      if (isStale()) return;
+      if (!allLearningRuns.length) allLearningRuns = [];
+      console.warn(getErrorMessage(reason));
+    }
+    if (!isStale()) loadingLearning = false;
+  }
+
   async function load() {
     refreshing = true;
     try {
@@ -343,6 +392,8 @@
         tasks.push(loadEvals(), loadDeployments());
       } else if (activePage === "deployments") {
         tasks.push(loadDeployments());
+      } else if (activePage === "learning") {
+        tasks.push(loadLearningRuns());
       }
       await Promise.all(tasks);
     } finally {
@@ -372,6 +423,9 @@
     }
     if (activePage === "deployments" && !hasLoadedDeployments) {
       void loadDeployments();
+    }
+    if (activePage === "learning" && !hasLoadedLearning) {
+      void loadLearningRuns();
     }
   });
 
@@ -733,14 +787,18 @@
 
   let statusText = $derived.by(() => {
     if (activePage === "training" && activeTrainingRunId) return "run details";
+    if (activePage === "learning" && activeLearningRunId) return "run details";
     if (activePage === "training" && loading) return "loading...";
     if (activePage === "evals" && loadingEvals) return "loading...";
     if (activePage === "deployments" && loadingDeployments) return "loading...";
+    if (activePage === "learning" && loadingLearning) return "loading...";
     if (error) return "error";
     if (activePage === "evals")
       return `${allEvals.length} eval${allEvals.length === 1 ? "" : "s"}`;
     if (activePage === "deployments")
       return `${allDeployments.length} deployment${allDeployments.length === 1 ? "" : "s"}`;
+    if (activePage === "learning")
+      return `${allLearningRuns.length} run${allLearningRuns.length === 1 ? "" : "s"}`;
     if (!allRuns.length) return "0 runs";
     return `${filteredRuns.length} of ${allRuns.length} runs`;
   });
@@ -793,11 +851,29 @@
   function setActivePage(page) {
     activePage = page;
     activeTrainingRunId = null;
+    activeLearningRunId = null;
     drawerRunId = null;
     if (typeof window === "undefined") return;
     const targetPath = pagePaths[page] || pagePaths.training;
     if (window.location.pathname !== targetPath) {
       window.history.pushState({}, "", targetPath);
+    }
+  }
+
+  function openLearningRunDetail(runId) {
+    activeLearningRunId = runId;
+    if (typeof window === "undefined") return;
+    const target = `${pagePaths.learning}/${encodeURIComponent(runId)}`;
+    if (window.location.pathname !== target) {
+      window.history.pushState({}, "", target);
+    }
+  }
+
+  function backToLearningList() {
+    activeLearningRunId = null;
+    if (typeof window === "undefined") return;
+    if (window.location.pathname !== pagePaths.learning) {
+      window.history.pushState({}, "", pagePaths.learning);
     }
   }
 
@@ -965,6 +1041,20 @@
         {evalConfigMeta}
         onOpenTrainingRun={openTrainingRun}
         onOpenDeployment={openDeployment}
+      />
+    {:else if activePage === "learning" && activeLearningRunId}
+      <LearningRunDetailPage
+        runId={activeLearningRunId}
+        gymRuns={allRuns}
+        onBack={backToLearningList}
+      />
+    {:else if activePage === "learning"}
+      <LearningPage
+        runs={allLearningRuns}
+        loading={loadingLearning}
+        error={null}
+        bind:search={learningSearch}
+        onOpenDetail={openLearningRunDetail}
       />
     {/if}
     </main>

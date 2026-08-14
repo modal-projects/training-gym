@@ -32,6 +32,7 @@ from starlette.requests import Request
 
 # Used as endpoint parameter annotations, so — like ``Request`` above — these
 # must resolve from this module's globals.
+from modal_training_gym._lab_routes import lab_obs_mount as _lab_obs_mount
 from modal_training_gym.common.advantage_distribution import AdvantageDistribution
 from modal_training_gym.common.config import (
     DASHBOARD_PROXY_AUTH_PATH,
@@ -102,6 +103,21 @@ def _build_image() -> modal.Image:
             "rm -rf /tmp/training-gym",
         )
 
+    # Learning-agent (LAB) observability config, captured from the deploying
+    # shell so the container knows which observatory volume to read and where
+    # the deep-dive observatory viewer lives. Absent both, the learning routes
+    # serve empty data and the nav item stays hidden.
+    from modal_training_gym._lab_routes import (
+        LAB_OBS_URL_ENV_KEY,
+        LAB_OBS_VOLUME_ENV_KEY,
+    )
+
+    lab_env = {
+        key: os.environ[key]
+        for key in (LAB_OBS_VOLUME_ENV_KEY, LAB_OBS_URL_ENV_KEY)
+        if os.environ.get(key)
+    }
+
     return (
         base.run_commands("cd /app/frontend && npm install && npm run build")
         .add_local_python_source("modal_training_gym", copy=True)
@@ -109,7 +125,8 @@ def _build_image() -> modal.Image:
             {
                 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY: "true"
                 if dashboard_requires_proxy_auth()
-                else "false"
+                else "false",
+                **lab_env,
             }
         )
     )
@@ -377,6 +394,10 @@ def reconcile() -> None:
 @app.function(
     min_containers=1,
     secrets=_function_secrets(),
+    # Learning-agent (LAB) observatory volume, mounted read-through so the
+    # /api/learning-runs routes can read run records from the filesystem.
+    # Empty (no mount) when LAB_OBS_VOLUME isn't configured.
+    volumes=_lab_obs_mount(),
 )
 @modal.concurrent(max_inputs=50, target_inputs=20)
 @modal.asgi_app(requires_proxy_auth=dashboard_requires_proxy_auth())
@@ -450,7 +471,12 @@ def fastapi_app():
     cache_locks = {key: asyncio.Lock() for key in cache_keys}
     # Hold strong refs to background refresh tasks so they aren't GC'd mid-flight.
     refresh_tasks: set[asyncio.Task[list[JsonDict]]] = set()
-    web.mount("/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets")
+    # Absent with the single-file frontend build (everything inlines into
+    # index.html); mounting a missing directory would crash app startup.
+    if Path(f"{STATIC_DIR}/assets").is_dir():
+        web.mount(
+            "/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets"
+        )
 
     # ── Shared Modal client ───────────────────────────────────────────────
     # Opens a client at startup and reuses it across all requests.
@@ -1157,6 +1183,12 @@ def fastapi_app():
             data = []
         return JSONResponse(data)
 
+    # ── Learning agent (LAB observatory) ─────────────────────────────────
+
+    from modal_training_gym._lab_routes import register_lab_routes
+
+    register_lab_routes(web)
+
     @web.get("/favicon.svg", include_in_schema=False)
     async def favicon():
         return FileResponse(f"{STATIC_DIR}/favicon.svg", media_type="image/svg+xml")
@@ -1171,6 +1203,12 @@ def fastapi_app():
 
     @web.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        return FileResponse(f"{STATIC_DIR}/index.html")
+        # The shell must always revalidate: hashed assets are immutable, but a
+        # cached index.html pins the browser to a bundle that no longer exists
+        # after a redeploy.
+        return FileResponse(
+            f"{STATIC_DIR}/index.html",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     return web

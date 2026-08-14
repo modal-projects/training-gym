@@ -211,6 +211,82 @@ export async function fetchRunAdvantages(trainingRunId, { signal } = {}) {
     .sort((a, b) => a.rollout_id - b.rollout_id);
 }
 
+// Learning-agent (LAB) runs, served from the observatory volume. Each row is
+// the observatory index_row (+ status overlay); empty when no LAB volume is
+// configured on the deployment.
+export async function fetchLearningRuns({ signal } = {}) {
+  const res = await fetch(`${SERVER}/learning-runs`, { signal });
+  if (!res.ok) throw new Error(await getErrorFromResponse(res));
+  const runs = await res.json();
+  return Array.isArray(runs) ? runs : [];
+}
+
+// One learning run's record (index_row, meta, scores.learning_log, status, …)
+// minus the heavy trace/telemetry sections.
+export async function fetchLearningRun(runId, { signal } = {}) {
+  const res = await fetch(
+    `${SERVER}/learning-runs/${encodeURIComponent(runId)}`,
+    { signal },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await getErrorFromResponse(res));
+  return await res.json();
+}
+
+// One page of a learning run's normalized trace events. `offset` is the
+// absolute index of the first event; omit it for the newest `limit` events.
+// Returns {total, offset, events}.
+export async function fetchLearningRunEvents(runId, { offset, limit, signal } = {}) {
+  const params = new URLSearchParams();
+  if (offset != null) params.set("offset", String(offset));
+  if (limit != null) params.set("limit", String(limit));
+  const qs = params.toString();
+  const res = await fetch(
+    `${SERVER}/learning-runs/${encodeURIComponent(runId)}/events` + (qs ? `?${qs}` : ""),
+    { signal },
+  );
+  if (!res.ok) throw new Error(await getErrorFromResponse(res));
+  const data = await res.json();
+  return {
+    total: Number(data.total) || 0,
+    offset: Number(data.offset) || 0,
+    events: Array.isArray(data.events) ? data.events : [],
+  };
+}
+
+// System-monitor telemetry samples for a learning run (agent CPU container;
+// GPU jobs run as separate Modal jobs). Downsampled server-side.
+export async function fetchLearningRunMonitor(runId, { signal } = {}) {
+  const res = await fetch(
+    `${SERVER}/learning-runs/${encodeURIComponent(runId)}/monitor`,
+    { signal },
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
+// Workspace snapshot tree (file paths + sizes, contents stripped).
+export async function fetchLearningRunWorkspace(runId, { signal } = {}) {
+  const res = await fetch(
+    `${SERVER}/learning-runs/${encodeURIComponent(runId)}/workspace`,
+    { signal },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await getErrorFromResponse(res));
+  return await res.json();
+}
+
+// One workspace file's snapshot entry (inlined content included).
+export async function fetchLearningRunWorkspaceFile(runId, path, { signal } = {}) {
+  const res = await fetch(
+    `${SERVER}/learning-runs/${encodeURIComponent(runId)}/workspace/file?path=${encodeURIComponent(path)}`,
+    { signal },
+  );
+  if (!res.ok) return null;
+  return await res.json();
+}
+
 // One step's full per-group advantage distribution (for drill-in).
 export async function fetchRunAdvantageStep(trainingRunId, rolloutId) {
   const res = await fetch(
