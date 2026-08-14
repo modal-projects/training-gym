@@ -701,6 +701,7 @@ class TrainConfig:
         print(f"TrainingRun recorded: {training_run_id}")
 
         app = self._build_app(training_run_id)
+        function_call: modal.FunctionCall | None = None
         output_context = modal.enable_output() if show_output else nullcontext()
         with output_context:
             with app.run(detach=True):
@@ -780,6 +781,14 @@ class TrainConfig:
                     framework_status_token=framework_status_token,
                 )
 
+        if function_call is None:
+            # Modal exits ``app.run`` cleanly on an interrupt, so the input
+            # preparation above can be cut short without raising.
+            raise RuntimeError(
+                f"training was never spawned for {training_run_id}: the Modal app "
+                "run ended while preparing inputs. The app is detached and its "
+                "prepared inputs persist, so re-running resumes from them."
+            )
         run_record.function_call_id = function_call.object_id
         run_record._function_call = function_call
         run_record._status_display = status_display if show_output else None
