@@ -170,6 +170,9 @@ def convert_checkpoint_to_hf(
     model: ModelConfig,
     recipe: VllmRecipe | SglangRecipe = SglangRecipe(),
 ) -> Checkpoint:
+    if checkpoint.checkpoint_type == CheckpointType.hf:
+        return checkpoint
+
     import modal
     from modal import App, Volume
 
