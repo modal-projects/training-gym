@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from modal_training_gym.common.checkpoint import (
     Checkpoint,
     CheckpointType,
-    convert_checkpoint_to_hf,
+    convert_megatron_checkpoint_to_hf,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.openai_messages import _messages_to_openai
@@ -256,7 +256,7 @@ class CustomDeployment(BaseModel):
             checkpoint is not None
             and checkpoint.checkpoint_type == CheckpointType.megatron
         ):
-            checkpoint = convert_checkpoint_to_hf(
+            checkpoint = convert_megatron_checkpoint_to_hf(
                 checkpoint=checkpoint,
                 model=model,
                 recipe=recipe,

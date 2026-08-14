@@ -5,9 +5,9 @@ from importlib import import_module
 _EXPORTS = {
     "Checkpoint": ("modal_training_gym.common.checkpoint", "Checkpoint"),
     "CheckpointType": ("modal_training_gym.common.checkpoint", "CheckpointType"),
-    "convert_checkpoint_to_hf": (
+    "convert_megatron_checkpoint_to_hf": (
         "modal_training_gym.common.checkpoint",
-        "convert_checkpoint_to_hf",
+        "convert_megatron_checkpoint_to_hf",
     ),
     "CustomDeployment": (
         "modal_training_gym.common.deployment",
@@ -127,7 +127,7 @@ __all__ = [
     "CustomDeployment",
     "Checkpoint",
     "CheckpointType",
-    "convert_checkpoint_to_hf",
+    "convert_megatron_checkpoint_to_hf",
     "DatasetConfig",
     "Endpoint",
     "GLM_4_7",

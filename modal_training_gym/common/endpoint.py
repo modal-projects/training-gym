@@ -10,7 +10,10 @@ from typing import Any
 import httpx
 import modal
 
-from modal_training_gym.common.checkpoint import Checkpoint, convert_checkpoint_to_hf
+from modal_training_gym.common.checkpoint import (
+    Checkpoint,
+    convert_megatron_checkpoint_to_hf,
+)
 from modal_training_gym.common.config import modal_proxy_auth_headers
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.openai_messages import _messages_to_openai
@@ -151,7 +154,7 @@ class Endpoint:
                 if isinstance(model, ModelConfig)
                 else ModelConfig(model_name=model)
             )
-            checkpoint = convert_checkpoint_to_hf(checkpoint, model_config)
+            checkpoint = convert_megatron_checkpoint_to_hf(checkpoint, model_config)
 
         model_name = model if isinstance(model, str) else model.model_name
 

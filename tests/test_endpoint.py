@@ -255,7 +255,7 @@ def test_launch_converts_megatron_checkpoints_before_create(
         seen["model"] = model
         return converted
 
-    monkeypatch.setattr(endpoint_module, "convert_checkpoint_to_hf", convert)
+    monkeypatch.setattr(endpoint_module, "convert_megatron_checkpoint_to_hf", convert)
 
     Endpoint.launch("Qwen/Qwen3-4B", megatron, unauthenticated=True)
 
@@ -270,14 +270,14 @@ def test_launch_leaves_hf_checkpoints_unchanged(
     cli = fake_modal_cli()
     checkpoint = _checkpoint()
     seen: list[tuple[Checkpoint, Checkpoint]] = []
-    original = endpoint_module.convert_checkpoint_to_hf
+    original = endpoint_module.convert_megatron_checkpoint_to_hf
 
     def convert(checkpoint, model, **kwargs):
         result = original(checkpoint, model)
         seen.append((checkpoint, result))
         return result
 
-    monkeypatch.setattr(endpoint_module, "convert_checkpoint_to_hf", convert)
+    monkeypatch.setattr(endpoint_module, "convert_megatron_checkpoint_to_hf", convert)
 
     Endpoint.launch("Qwen/Qwen3-4B", checkpoint, unauthenticated=True)
 
@@ -293,7 +293,7 @@ def test_launch_skips_conversion_for_hub_models(
     def convert(*args, **kwargs):
         raise AssertionError("hub launch converted a checkpoint")
 
-    monkeypatch.setattr(endpoint_module, "convert_checkpoint_to_hf", convert)
+    monkeypatch.setattr(endpoint_module, "convert_megatron_checkpoint_to_hf", convert)
 
     Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
 
