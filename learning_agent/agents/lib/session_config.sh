@@ -4,7 +4,7 @@
 # task-config-schema file: top-level `task:` and scalars under the `session:`
 # block. This is deliberately not a YAML parser; session config must stay flat.
 #
-#   lab_task_known   <root> <task>     a task exists iff workspace_setup/task_configs/<task>.yaml does
+#   lab_task_known   <root> <task>     a task exists iff task_configs/<task>.yaml does
 #   yaml_top     <file> <key>      top-level scalar (e.g. task)
 #   lab_yaml_session <file> <key>      scalar under `session:` (scaffold/track/hours/model)
 #
@@ -12,7 +12,7 @@
 # print nothing (callers apply their own defaults).
 
 lab_task_known() {
-    [ -f "$1/workspace_setup/task_configs/$2.yaml" ]
+    [ -f "$1/task_configs/$2.yaml" ]
 }
 
 yaml_top() {

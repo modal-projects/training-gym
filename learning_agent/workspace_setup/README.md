@@ -7,7 +7,7 @@ turns the repo's folders into one agent workspace. Folder to folder:
 |---|---|---|
 | `learning_agent_workspace/` | the workspace root | copied as-is (placeholders: empty `toolbox/`, `submission/` stubs, empty ledgers) |
 | `instructions/` | `AGENTS.md` | stitched by `setup_agent_md.py`: objective, data access, methods, harness, tips, setup, rules blocks per the task config |
-| `task_configs/<task>.yaml` | (nothing — operator only) | the plan: archetype, assets, toolbox selection, instruction overrides. Never enters a workspace |
+| `../task_configs/<task>.yaml` | (nothing — operator only) | the LAUNCH INPUT: `run_agent.sh task_configs/<task>.yaml`. Archetype, assets, toolbox selection, instruction overrides, session defaults. Never enters a workspace |
 | `tasks/<task>/` | `task/` | assets copied per the config: corpus and dev gold as declared, `test.json` never |
 | `toolbox_bank/` | `toolbox/` | the shared core, then the task's harness starters, data cards, and pinned packages; shelf docs resolved per method; catalog generated from what shipped |
 

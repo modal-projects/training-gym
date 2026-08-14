@@ -188,7 +188,7 @@ def compute_pins(root: Path | None = None, allow_missing: bool = False) -> dict:
         # the config is always pinned; a variant task (extends: parent)
         # carries nothing else of its own — the asset files it inherits are
         # pinned under the parent task already.
-        crel = f"workspace_setup/task_configs/{task}.yaml"
+        crel = f"task_configs/{task}.yaml"
         cp = root / crel
         if cp.exists():
             files[crel] = _sha256_file(cp)

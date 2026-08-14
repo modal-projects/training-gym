@@ -56,8 +56,8 @@ prepare_workspace() {
     GITPFX="$(git -C "$SEED_ROOT" rev-parse --show-prefix 2>/dev/null)"
     GITROOT="$(git -C "$SEED_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$SEED_ROOT")"
 
-    # 0) the seeding plan: task_configs/<task>.yaml (with extends + toolbox
-    #    resolution) says which harnesses, training methods, and packages this
+    # 0) the seeding plan: task_configs/<task>.yaml (the launch input, with
+    #    extends + toolbox resolution) says which harnesses, methods, packages this
     #    workspace gets, which task dir holds the gitignored assets, and which
     #    instructions blocks stitch AGENTS.md. The config itself never enters
     #    the workspace.
@@ -130,7 +130,7 @@ prepare_workspace() {
     local ASSETS="$SEED_ROOT/workspace_setup/tasks/$LEARNING_AGENT_TB_ASSETS_TASK"
     if [ "$TRACK" = "hard" ] || [ "$LEARNING_AGENT_TB_SEED_CORPUS" != 1 ]; then
         echo "corpus not seeded (task/track config: agent acquires or works without it)" >&2
-    elif [ -z "$(yaml_top "$SEED_ROOT/workspace_setup/task_configs/$LEARNING_AGENT_TB_ASSETS_TASK.yaml" corpus)" ]; then
+    elif [ -z "$(yaml_top "$SEED_ROOT/task_configs/$LEARNING_AGENT_TB_ASSETS_TASK.yaml" corpus)" ]; then
         # No `corpus:` key: an env task (alfworld) ships no study material — the
         # environment IS the material. Absence is the design, not a missing file.
         echo "task $TASK declares no corpus: nothing to seed" >&2

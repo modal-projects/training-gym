@@ -3,8 +3,8 @@
 Layout on disk (the spec, all pinned by bench/pins.json):
 
     bench/config.yaml        GLOBAL pins only: base model, judge, volumes, splits.
-    workspace_setup/task_configs/<T>.yaml
-                             THE per-task config. A task exists iff this file
+    task_configs/<T>.yaml    THE per-task config — the LAUNCH INPUT
+                             (run_agent.sh takes it as its argument). A task exists iff this file
                              exists — bench.py choices, runner whitelists, and
                              integrity pinning all derive from it. Holds identity
                              (archetype, corpus, dev/test/sys, secondary) plus
@@ -37,7 +37,7 @@ from pathlib import Path
 import yaml
 
 GLOBAL_CONFIG = "bench/config.yaml"
-TASK_CONFIG_DIR = "workspace_setup/task_configs"
+TASK_CONFIG_DIR = "task_configs"
 
 
 def task_config_path(root: Path, task: str) -> Path:
