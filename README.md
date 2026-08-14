@@ -172,5 +172,6 @@ Models with a built-in training recipe, with the `ModelConfig` and recipe classe
 | `Qwen/Qwen3.6-35B-A3B` | `slime` | `Qwen3_6_35B` | `Qwen3_6_35b_Recipe` |
 | `moonshotai/Kimi-K2.5` | `miles` | `Kimi_K2_5` | `Kimi_K2_5_LoRA_Recipe` |
 | `moonshotai/Kimi-K2.6` | `miles` | `Kimi_K2_6` | `Kimi_K2_6_LoRA_Recipe` |
+| `thinkingmachines/Inkling-Small` | `miles` | `Inkling_Small` | `Inkling_Small_Recipe`, `Inkling_Small_LoRA_Recipe` |
 | `zai-org/GLM-4.7` | `slime` | `GLM_4_7` | `GLM_4_7_Recipe` |
 <!-- END MODELS TABLE -->
