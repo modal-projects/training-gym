@@ -1,0 +1,1 @@
+We want to train the student model Qwen/Qwen3.5-9B to answer expert questions about a domain corpus it has never seen. [demo fixture — truncated task spec]

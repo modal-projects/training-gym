@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent Docs · Evaluation &amp; Scoring</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a><a href="/docs" style="font-weight:600;">docs</a><a href="/tools">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="docs-shell">
+<nav id="docs-nav"></nav>
+<main class="docs-page">
+  <h1>Evaluation &amp; Scoring</h1>
+  <p class="lede">The bench has two evaluation layers. The <em>dev</em> layer belongs to the
+  agent: the agent can rebuild it and judge it however it wants, and its numbers are used
+  only to guide the agent's own work. The <em>test</em> layer belongs to the operator and is
+  frozen: a pinned reference harness, a pinned rubric judge, held-out questions that were
+  never present in any workspace, and a margin over the untrained base model's score.</p>
+
+  <h2 id="splits">dev vs test</h2>
+  <p>Each qa-archetype task ships <code>dev.json</code> and <code>test.json</code> with the
+  same row shape: <code>{id, topic, question, gold_answer, rubric, evidence}</code>, where
+  <code>rubric</code> is a list of weighted claims. <code>test.json</code> is deleted from
+  every workspace at seeding; on the medium and hard tracks, <code>dev.json</code> is
+  deleted too. The agent iterates against dev. Only the test score is reported.</p>
+
+  <h2 id="reference">The reference harness (base floor + <code>bench.py score</code>)</h2>
+  <p><code>harness/eval.py</code> serves a checkpoint on Modal (one image per task, with the
+  corpus baked in at <code>/corpus</code>) and runs a fixed ReAct search agent over it. The
+  agent emits actions in this format:</p>
+  <pre><code>ACTION: {"tool": "grep",      "args": {"pattern": "&lt;regex&gt;", "glob": "&lt;task glob&gt;"}}
+ACTION: {"tool": "glob",      "args": {"pattern": "&lt;glob pattern&gt;"}}
+ACTION: {"tool": "read_file", "args": {"path": "&lt;path under /corpus&gt;", "start_line": …, "end_line": …}}
+FINAL: &lt;task-specific answer hint&gt;</code></pre>
+  <p>Tool output is truncated to keep the context bounded: grep returns at most 40 hits,
+  glob at most 80 files, <code>read_file</code> at most 200 lines. The model searches until
+  it emits <code>FINAL</code>, typically after about 8 tool calls. The pinned
+  <code>eval_budget: 50</code> is an upper limit on tool calls, not a step count runs are
+  expected to reach. Decoding uses temperature 0. Candidate answers are written to
+  <code>runs/&lt;tag&gt;/budget_&lt;b&gt;/candidates.json</code> as <code>{id: answer}</code>.
+  <code>submission/eval.py</code> writes the same format, so operator scoring judges both
+  sources with the same code.</p>
+
+  <h2 id="judge">The rubric judge</h2>
+  <p><code>harness/judge.py</code> scores one candidate answer against one row's weighted
+  claims. The judge receives the question, the gold answer, the rubric, and the candidate
+  answer. It returns strict JSON verdicts, one per claim. The scoring rules:</p>
+  <ol>
+    <li>Per-claim scoring is binary: 1 if the claim is satisfied, 0 if not. 0.5 is allowed
+        only when a claim has genuinely separable parts. Vague references and hedged
+        non-answers earn no credit. Some claims name both a correct approach and a decoy;
+        only the correct one earns credit.</li>
+    <li>The question score is the weighted mean over claims. The run score is the mean over
+        questions.</li>
+    <li>Every question is judged <code>n_votes: 3</code> times at temperature 0 with forced
+        structured output (function-call/tool schema). The per-claim result is the majority
+        vote, with the median on ties.</li>
+    <li>A failed judge call never counts as a zero score. 429/5xx/parse failures retry 3
+        times with backoff. A question that still fails is recorded
+        <code>failed: true</code> and excluded: the run score is the mean over judged
+        questions, or null if all questions failed. A run where all questions failed writes
+        no leaderboard row.</li>
+    <li>Uncertainty is reported as a 95% bootstrap confidence interval over question
+        scores: 10,000 resamples, seed 0. The CI reproduces bit-identically.</li>
+    <li>Each task also has a deterministic secondary check
+        (<code>python_compiles</code>, <code>ts_symbol_grounding</code>, or
+        <code>edgar_ref_grounding</code>). It is reported next to the rubric mean and is
+        never combined with it (<code>grade_mode: lenient</code>).</li>
+  </ol>
+
+  <h2 id="backends">Judge backends and canonicality</h2>
+  <div class="tblwrap"><table>
+    <tr><th>backend</th><th>transport</th><th>canonical?</th></tr>
+    <tr><td class="mono">openai</td><td>OpenAI Chat Completions with forced function-call
+        output; pinned snapshot <code>gpt-5.6-luna</code></td>
+        <td>yes, when the model equals the pin</td></tr>
+    <tr><td class="mono">api</td><td>Anthropic Messages with forced tool schema; pinned
+        snapshot</td><td>yes, when the model equals the pin</td></tr>
+    <tr><td class="mono">cli-claude / cli-codex</td><td>logged-in CLI sessions</td>
+        <td>no. Sampling is uncontrolled, so results are stamped
+        <code>canonical: false</code>. Usable for dev signal; not comparable across
+        machines.</td></tr>
+  </table></div>
+  <p>Every result embeds full provenance: judge model and pinned model, backend, vote count,
+  judge-prompt hash, harness hash, sys/gold/config hashes, corpus pin, budget, temperature,
+  seed, integrity status, and timestamp. To check whether two numbers are comparable, diff
+  their provenance. A judge model other than the pin runs normally but is stamped
+  <code>canonical: false</code>. Smoke runs (<code>--limit</code>) write
+  <code>smoke_*</code> artifacts and never write the full-run result files.</p>
+
+  <h2 id="service">The judge service</h2>
+  <p>Sealed workspaces contain no provider API key. Before the judge service existed, in-run
+  dev evals therefore fell back to CLI judges (<code>canonical: false</code>) — a different
+  judge than the one used for scoring, and dev and test numbers diverged.
+  <code>harness/judge_service.py</code> removes that mismatch, using the same pattern as the
+  user simulator for conversational tasks: the operator runs the service, the service holds
+  the OpenAI key, and it serves the single pinned judge model (<code>gpt-5.6-luna</code>)
+  over an OpenAI-compatible endpoint. Whatever model name a caller sends is ignored. Each
+  workspace gets <code>LEARNING_AGENT_JUDGE_URL</code> and a revocable <code>LEARNING_AGENT_JUDGE_TOKEN</code> in
+  its <code>.env</code>, and the toolbox judge loads them automatically. The agent's dev-set
+  evals, and its intermediate-checkpoint evals during training, therefore run on the same
+  judge that scores the submission, stamped <code>canonical: true</code>.</p>
+  <ol>
+    <li>Model pinning is server-side. The caller cannot change the judge model.</li>
+    <li>Each session has a completion-token budget cap. The endpoint grades rubrics; it is
+        not a general-purpose model API. Every call is logged with session, token cost, and
+        a request fingerprint.</li>
+    <li>The evaluation boundary is unchanged: the answer path still makes no external LLM
+        calls, and the trace audit checks for violations after every run.</li>
+    <li>Deploy: <code>modal secret create lab-judge-secrets
+        OPENAI_API_KEY=… LEARNING_AGENT_JUDGE_TOKEN=…</code>, then <code>modal deploy
+        harness/judge_service.py</code>. <code>/health</code> reports the model and
+        revision.</li>
+  </ol>
+
+  <h2 id="margin">Margins</h2>
+  <p>The reported number for a run is
+  <code>margin = submission_mean − base_floor_mean</code>. The base floor is the score of
+  the untrained base model (Qwen3.5-9B) run through the reference harness, judged by the
+  same judge configuration in the same scoring session as the submission. A floor scored
+  under a different judge is not a valid comparison point; when the judge changes, re-judge
+  the floor.</p>
+
+  <h2 id="operator">Scoring a finished run, step by step</h2>
+  <pre><code># 1. questions only (ids + text) from the held-out set
+python3 - &lt;&lt;'EOF'
+import json; t=json.load(open("tasks/&lt;task&gt;/test.json"))
+json.dump([{"id":r["id"],"question":r["question"]} for r in t], open("q.json","w"))
+EOF
+# 2. the submission answers them (the agent's own serving + retrieval)
+cd agents/_runs/ws_&lt;run&gt;/workspace &amp;&amp; python submission/eval.py --input q.json --output answers.json
+# 3. wrap as candidates and judge (same judge for submission AND floor)
+mkdir -p runs/&lt;sub_tag&gt;/budget_50 &amp;&amp; cp answers.json runs/&lt;sub_tag&gt;/budget_50/candidates.json
+python3 harness/judge_cli.py --task &lt;task&gt; --tag &lt;sub_tag&gt;     --split test --backend openai
+python3 harness/judge_cli.py --task &lt;task&gt; --tag base_floor_test --split test --backend openai
+# 4. append the run-level margin row to runs/LEADERBOARD.jsonl; publish to the dashboard
+python3 -m observatory.cli sync-scores</code></pre>
+
+  <h2 id="calibration">Dev-vs-test calibration</h2>
+  <p>Runs that predate the judge service self-reported dev scores judged by whatever judge
+  the agent built: a different model, a different vote count, a different scale. Those
+  numbers are not comparable across runs, and they routinely sat far above the held-out
+  score (observed: dev 0.372 → test 0.069, and dev 0.562 → test 0.252 on the same task).
+  With the judge service available in the workspace, dev scores judged through it use the
+  same judge as scoring, so any remaining dev-vs-test gap measures question difficulty and
+  gold-answer quality, not judge mismatch. On the medium and hard tracks the agent wrote its
+  own gold answers, so that gap is itself part of what the benchmark measures: building a
+  trustworthy eval is scored behavior. The dashboard flags self-reported dev scores and
+  shows both columns side by side.</p>
+</main>
+</div>
+<script src="/assets/docs.js"></script>
+</body>
+</html>

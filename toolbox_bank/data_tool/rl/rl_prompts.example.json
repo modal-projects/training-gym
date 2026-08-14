@@ -1,0 +1,35 @@
+[
+ {
+  "question": "REPLACE: a corpus-grounded question the task model should learn to answer.",
+  "label": {
+   "question": "REPLACE: a corpus-grounded question the task model should learn to answer.",
+   "gold_answer": "REPLACE: the reference answer the reward grades against.",
+   "rubric": [
+    {
+     "claim_id": "c1",
+     "weight": 2,
+     "statement": "REPLACE: a fact a correct answer must state."
+    },
+    {
+     "claim_id": "c2",
+     "weight": 1,
+     "statement": "REPLACE: a second, separable requirement."
+    }
+   ]
+  }
+ },
+ {
+  "question": "REPLACE: another question — a few hundred rows is a normal starting set.",
+  "label": {
+   "question": "REPLACE: another question — a few hundred rows is a normal starting set.",
+   "gold_answer": "REPLACE",
+   "rubric": [
+    {
+     "claim_id": "c1",
+     "weight": 1,
+     "statement": "REPLACE"
+    }
+   ]
+  }
+ }
+]

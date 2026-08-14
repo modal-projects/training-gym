@@ -1,0 +1,22 @@
+# GLM-5.2 frontier-reference sampling for tau2 rollouts — pass with --config.
+#
+# The task.yaml `agent:` block is the Qwen3.5 thinking-mode recipe (the
+# leaderboard protocol for the STUDENT); GLM-5.2 reference rollouts run the
+# provider-recommended sampling instead: temperature 1.0 / top_p 0.95, no
+# repetition penalties, top_k off. Everything env-side (splits, trials, seed,
+# max_steps, user sim) stays the pinned task protocol.
+#
+# Reference baselines only: GLM can never be a submission (rule 5) — run with
+# --no-record and point --base-url at the team's served GLM-5.2 endpoint:
+#
+#   python bench.py rollout --task tau2_<domain> --split dev \
+#       --base-url https://modal-labs-lab-dev--ep-glm-5-2-fp8-server.us-east.modal.direct/v1 \
+#       --model zai-org/GLM-5.2-FP8 --config dev/glm52_baseline.yaml \
+#       --no-record --allow-dirty --tag tau2_<domain>_glm52_dev
+
+agent:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: -1
+  presence_penalty: 0.0
+  max_tokens: 81920

@@ -1,0 +1,21 @@
+# THE per-task config — loaded by harness/config.py for bench.py, judge_cli.py,
+# integrity pins, and the agent runners. A task exists iff this file exists.
+# Defaults here; override per run with `--config <override.yaml>`, then CLI flags.
+task: fav2
+archetype: qa
+
+corpus: tasks/fav2/corpus               # SEC EDGAR snapshot: 2415 filings, 41 issuers,
+corpus_version: "edgar-20260708-norm1"  #   2023-01-01..2026-07-08, normalizer v1
+dev: tasks/fav2/dev.json                # 6 rows, gold + weighted rubric (readable)
+test: tasks/fav2/test.json              # HIDDEN 13-question test (final number only)
+sys: tasks/fav2/sys.txt
+glob: "**/*.txt"
+secondary: edgar_ref_grounding          # explicit EDGAR refs (accessions/paths/
+refs: tasks/fav2/refs.json               #   exchange-prefixed tickers) resolve
+                                        #   against the pinned pack manifest
+
+
+session:                                # agent-session defaults (agents/run*.sh --config)
+  scaffold: modal_glm52
+  track: easy
+  hours: 24

@@ -1,0 +1,26 @@
+{
+ "dspy_024049972dfc": {
+  "tool_calls": 3,
+  "completion_tokens": 900
+ },
+ "dspy_03a1b2c3d4e5": {
+  "tool_calls": 5,
+  "completion_tokens": 937
+ },
+ "dspy_05f6a7b8c9da": {
+  "tool_calls": 0,
+  "completion_tokens": 974
+ },
+ "dspy_07e8f9a0b1c2": {
+  "tool_calls": 4,
+  "completion_tokens": 1011
+ },
+ "dspy_091a2b3c4d5e": {
+  "tool_calls": 2,
+  "completion_tokens": 1048
+ },
+ "dspy_0b3c4d5e6f7a": {
+  "tool_calls": 5,
+  "completion_tokens": 1085
+ }
+}

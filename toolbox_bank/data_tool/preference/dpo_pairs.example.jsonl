@@ -1,0 +1,2 @@
+{"system": "OPTIONAL: the task sys.txt text — train framing should match eval framing", "prompt": "REPLACE: the question", "chosen": "REPLACE: the better answer (e.g. judge claim_score 0.8)", "rejected": "REPLACE: the worse answer (e.g. claim_score 0.2)"}
+{"prompt": "REPLACE: rows without a system field get the task sys.txt at train time", "chosen": "REPLACE", "rejected": "REPLACE"}

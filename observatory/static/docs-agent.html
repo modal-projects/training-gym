@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent Docs · The Learning Agent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a><a href="/docs" style="font-weight:600;">docs</a><a href="/tools">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="docs-shell">
+<nav id="docs-nav"></nav>
+<main class="docs-page">
+  <h1>The Learning Agent</h1>
+  <p class="lede">A frontier model running a CLI coding harness in a container. Its
+  workspace is the seeded <code>learning_agent_workspace/</code> directory plus one task.
+  The model decides what to do; the harness executes tools and runs the session loop.</p>
+
+  <h2 id="workflow">The workflow</h2>
+  <p>One run, end to end:</p>
+  <ol>
+    <li><strong>Launch.</strong>
+        <code>agents/run_sandbox_modal.sh --track easy codex_kimi3 fav2 6</code> —
+        scaffold, task, budget in hours. Seeding builds the workspace (the
+        <code>learning_agent_workspace/</code> folder, the run machinery, the one task,
+        held-out files deleted), assembles the prompt from the pinned template, and
+        starts the agent.</li>
+    <li><strong>Make training data.</strong> The agent implements a method from the
+        <code>toolbox/data_tool/</code> cards or invents one, and cleans every dataset
+        with <code>data_tool/pool/dedup_decontam</code>.</li>
+    <li><strong>Train, or improve the harness.</strong> It drives a pinned package in
+        <code>toolbox/training_tool/</code> on H200s. Merged checkpoints land at
+        <code>/out/models/&lt;tag&gt;/merged</code>.</li>
+    <li><strong>Evaluate.</strong> It answers its dev set through
+        <code>submission/eval.py</code>'s own pipeline and judges the answers with
+        <code>toolbox/eval_tool/rubric_eval.py</code> — the judge service serves the
+        same pinned judge that scores the submission.</li>
+    <li><strong>Record and wire.</strong> One line per experiment in
+        <code>runs/LEARNING_LOG.jsonl</code>; the current best system stays wired into
+        <code>submission/eval.py</code> at all times. Repeat from step 2 until the
+        budget ends.</li>
+    <li><strong>Score.</strong> The operator runs the submission on held-out questions
+        and reports the margin over the untrained student
+        (<a href="/docs/eval">Evaluation &amp; Scoring</a>).</li>
+  </ol>
+
+  <h2 id="where">Where it runs</h2>
+  <p>Never on the operator machine. A session is one container: the Modal app
+  <code>lab-agent</code> (standard; image pins <code>@openai/codex@0.145.0</code> and
+  <code>opencode-ai@1.18.8</code>) or a local Docker twin
+  (<code>agents/run_sandbox_docker.sh</code>). A Modal session lives on the
+  <code>lab-agent-workspace</code> volume at <code>&lt;task&gt;/&lt;session&gt;/</code>:
+  <code>workspace/</code> holds everything the agent writes, <code>logs/</code> holds
+  the CLI's own session state. Run artifacts (<code>trace.jsonl</code> — commands, outputs, and the model's
+  chain of thought — plus <code>prompt.txt</code>, <code>audit.json</code>) are archived
+  to the <code>lab-observatory</code> volume when the run ends.</p>
+
+  <h2 id="scaffolds">Scaffolds</h2>
+  <p>A scaffold is a directory under <code>agents/</code> with a <code>solve.sh</code>
+  (launch the harness with a given model) and a trace parser. Model and harness are
+  independent axes; adding a model on any OpenAI-compatible endpoint is a config file
+  (<code>agents/lib/kimi_k3_endpoint.env</code>, <code>glm52_endpoint.env</code>), not new code.</p>
+  <div class="tblwrap"><table>
+    <tr><th>scaffold</th><th>harness</th><th>model transport</th></tr>
+    <tr><td class="mono">codex_kimi3 (default)</td><td>Codex CLI</td>
+        <td>team Kimi K3 endpoint via the Responses→Chat shim</td></tr>
+    <tr><td class="mono">codex_glm52</td><td>Codex CLI</td>
+        <td>team GLM-5.2 endpoint via the Responses→Chat shim</td></tr>
+    <tr><td class="mono">modal_glm52</td><td>OpenCode</td>
+        <td>team GLM-5.2 endpoint, chat wire directly</td></tr>
+    <tr><td class="mono">claude*, codex*, gemini, opencode, glm5, qwen3max</td>
+        <td>Claude Code / Codex CLI / Gemini CLI / OpenCode</td>
+        <td>vendor APIs</td></tr>
+  </table></div>
+  <p>The shim (<code>agents/lib/responses_shim.py</code>): Codex speaks only the
+  Responses API, and the endpoint's server cannot serve function tools on it, so the
+  shim translates Codex's Responses traffic to the endpoint's chat wire on localhost.
+  It also translates the model's <code>reasoning_content</code> into Responses
+  reasoning items, so the chain of thought lands in <code>trace.jsonl</code> as
+  ordinary thinking events — collapsed on the run page like tool calls.</p>
+
+  <h2 id="budget">Budget</h2>
+  <ol>
+    <li><code>timer.sh</code> in the workspace tells the agent how much wall-clock
+        remains; the prompt says to stop at zero.</li>
+    <li>Re-prompt: if the model ends its session with budget left, the scaffold resumes
+        it ("You still have Xh Ym remaining") until under 30 minutes remain.</li>
+    <li>Hard kill: <code>agents/run.sh</code> kills the whole process group at
+        budget + 5 minutes.</li>
+  </ol>
+
+  <h2 id="record">What a run leaves behind</h2>
+  <p>The agent's own record is <code>runs/LEARNING_LOG.jsonl</code>: one line per
+  experiment, <code>what</code> and <code>why</code> required, dev score and artifact
+  paths attached. The run warns if it ends with the log empty. Everything else is
+  captured mechanically: the full command trace, the chain-of-thought record, GPU usage
+  (<code>runs/GPU_LOG.jsonl</code>), and a deterministic audit that checks the trace for
+  held-out data access.</p>
+</main>
+</div>
+<script src="/assets/docs.js"></script>
+</body>
+</html>

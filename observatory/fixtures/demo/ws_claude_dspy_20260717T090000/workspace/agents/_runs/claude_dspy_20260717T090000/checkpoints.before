@@ -1,0 +1,1 @@
+{"tag": "oc_pilot_qa_v1", "task": "openclaw", "model_path": "/out/models/oc_pilot_qa_v1/merged", "dev_score": 0.0188, "method": "pilot row from earlier run (fixture)"}

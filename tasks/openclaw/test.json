@@ -1,0 +1,1215 @@
+[
+  {
+    "id": "openclaw_42496734d80e",
+    "topic": "new_plugin_provider_and_channel_integration_requests",
+    "question": "We added a TinyFish (agentic web-extraction API) integration so the agent can pull structured data off JS-heavy, bot-protected pages. Right now it's bolted on as an external command the agent shells out to, and it feels second-class: it doesn't show up alongside our other page-fetch backends, and the agent can't call it directly with a real argument schema.\n\nI want to make it native. The way I read the bundled Firecrawl plugin, the web-fetch provider is the single source of truth \u2014 its createTool factory is what surfaces the callable tool to the agent. So my plan is to register one TinyFish web-fetch provider and put all the richness in that provider's createTool: it should take a target URL plus a natural-language extraction goal, with optional stealth mode and an optional proxy country, resolve the TinyFish API key from the plugin's config (falling back to the environment), and hand the agent back parsed structured JSON rather than a blob of text. That gives me the fetch backend and the rich tool in one registration.\n\nWire this up from the plugin entry. Does putting everything on the provider's createTool get the agent a directly-callable TinyFish tool with that schema, or am I missing a step?",
+    "gold_answer": "Register both surfaces from the same plugin entry: the web-fetch provider gives OpenClaw a generic capability, while the named tool exposes TinyFish-specific options.\n\n```ts\nimport { Type } from \"@sinclair/typebox\";\nimport { definePluginEntry, type AnyAgentTool, type OpenClawPluginApi } from \"openclaw/plugin-sdk/plugin-entry\";\nimport { jsonResult, readStringParam, type WebFetchProviderPlugin } from \"openclaw/plugin-sdk/provider-web-fetch\";\n\ntype TinyFishConfig = { apiKey?: string; endpoint?: string };\nconst credentialPath = \"plugins.entries.tinyfish.config.webFetch.apiKey\";\n\nfunction apiKeyFrom(config?: TinyFishConfig) {\n  return config?.apiKey || process.env.TINYFISH_API_KEY;\n}\n\nasync function runTinyFish(config: TinyFishConfig | undefined, args: Record<string, unknown>) {\n  const apiKey = apiKeyFrom(config);\n  if (!apiKey) throw new Error(\"TinyFish API key is not configured.\");\n  const response = await fetch(config?.endpoint || \"https://agent.tinyfish.ai/v1/automation/run\", {\n    method: \"POST\",\n    headers: { \"content-type\": \"application/json\", \"x-api-key\": apiKey },\n    body: JSON.stringify({\n      url: String(args.url || \"\"),\n      goal: String(args.goal || \"\"),\n      browser_profile: args.stealth === true ? \"stealth\" : \"default\",\n      proxy_config: typeof args.proxyCountry === \"string\" ? { enabled: true, country_code: args.proxyCountry } : undefined,\n    }),\n  });\n  const text = await response.text();\n  if (!response.ok) throw new Error(`TinyFish returned ${response.status}: ${text}`);\n  return JSON.parse(text) as Record<string, unknown>;\n}\n\nfunction createTinyFishProvider(): WebFetchProviderPlugin {\n  return {\n    id: \"tinyfish\",\n    label: \"TinyFish Web Agent\",\n    hint: \"Hosted browser automation for interactive pages.\",\n    credentialLabel: \"TinyFish API key\",\n    envVars: [\"TINYFISH_API_KEY\"],\n    placeholder: \"tf_...\",\n    signupUrl: \"https://agent.tinyfish.ai/\",\n    credentialPath,\n    getCredentialValue: (fetchConfig) => (fetchConfig as TinyFishConfig | undefined)?.apiKey,\n    setCredentialValue: (target, value) => { target.apiKey = value; },\n    getConfiguredCredentialValue: (config) =>\n      (config?.plugins?.entries?.tinyfish?.config as { webFetch?: TinyFishConfig } | undefined)?.webFetch?.apiKey,\n    setConfiguredCredentialValue: (configTarget, value) => {\n      const entries = ((configTarget.plugins ??= {}).entries ??= {});\n      const entry = (entries.tinyfish ??= { config: {} });\n      ((entry.config as { webFetch?: Record<string, unknown> }).webFetch ??= {}).apiKey = value;\n    },\n    createTool: ({ fetchConfig }) => ({\n      description: \"Run a browser automation goal and return structured data.\",\n      parameters: { type: \"object\", required: [\"url\", \"goal\"], properties: { url: { type: \"string\" }, goal: { type: \"string\" } } },\n      execute: (args) => runTinyFish(fetchConfig as TinyFishConfig | undefined, args),\n    }),\n  };\n}\n\nfunction createTinyFishTool(api: OpenClawPluginApi): AnyAgentTool {\n  return {\n    name: \"tinyfish_web_agent\",\n    label: \"TinyFish Web Agent\",\n    description: \"Run a TinyFish browser automation task.\",\n    parameters: Type.Object({ url: Type.String(), goal: Type.String(), stealth: Type.Optional(Type.Boolean()), proxyCountry: Type.Optional(Type.String()) }),\n    execute: async (_id, raw) => jsonResult(await runTinyFish((api.pluginConfig || {}) as TinyFishConfig, {\n      url: readStringParam(raw, \"url\", { required: true }),\n      goal: readStringParam(raw, \"goal\", { required: true }),\n      stealth: raw.stealth === true,\n      proxyCountry: readStringParam(raw, \"proxyCountry\"),\n    })),\n  };\n}\n\nexport default definePluginEntry({ id: \"tinyfish\", name: \"TinyFish\", description: \"Browser automation provider.\", register(api) { api.registerWebFetchProvider(createTinyFishProvider()); api.registerTool(createTinyFishTool(api), { optional: true }); } });\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 46,
+        "statement": "From the single plugin entry's register(api), it ALSO registers a SEPARATE named agent tool via api.registerTool(...) IN ADDITION to the web-fetch provider \u2014 this is the missing step. Putting the rich url/goal/stealth/proxy schema only on the web-fetch provider's createTool does NOT satisfy this: that surface flows through web-fetch provider SELECTION into the single generic web_fetch tool, not the agent tool registry, so it is not a directly-callable named tool. (As in extensions/firecrawl/index.ts, which registers both the provider and a separate registerTool'd tool.)",
+        "span_ids": [
+          "s4",
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 24,
+        "statement": "That standalone api.registerTool'd agent tool declares, in its OWN parameter schema, required string url and required string goal plus optional stealth and optional proxy country (e.g. a Type.Object with url/goal as Type.String() and stealth/proxyCountry as Type.Optional(...)). A schema that lives only on the provider's createTool does NOT count.",
+        "span_ids": [
+          "s4",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 16,
+        "statement": "It ALSO registers a web-fetch provider as a WebFetchProviderPlugin object (api.registerWebFetchProvider(...)) from the same entry, giving TinyFish a selectable page-fetch backend alongside the named tool.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 8,
+        "statement": "Resolves the TinyFish API key from plugin config with a fallback to the TINYFISH_API_KEY environment variable (e.g. config?.apiKey || process.env.TINYFISH_API_KEY).",
+        "span_ids": [
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 6,
+        "statement": "The standalone agent tool hands back parsed JSON structured data (e.g. JSON.parse(...) / response.json(), wrapped via jsonResult), not a raw text blob.",
+        "span_ids": [
+          "s5",
+          "s2"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/plugins/web-provider-types.ts",
+        "start_line": 101,
+        "end_line": 123,
+        "excerpt": "0101: export type WebFetchProviderPlugin = {\n0102:   id: WebFetchProviderId;\n0103:   label: string;\n0104:   hint: string;\n0105:   requiresCredential?: boolean;\n0106:   credentialLabel?: string;\n0107:   envVars: string[];\n0108:   placeholder: string;\n0109:   signupUrl: string;\n0110:   docsUrl?: string;\n0111:   autoDetectOrder?: number;\n0112:   credentialPath: string;\n0113:   inactiveSecretPaths?: string[];\n0114:   getCredentialValue: (fetchConfig?: Record<string, unknown>) => unknown;\n0115:   setCredentialValue: (fetchConfigTarget: Record<string, unknown>, value: unknown) => void;\n0116:   getConfiguredCredentialValue?: (config?: OpenClawConfig) => unknown;\n0117:   setConfiguredCredentialValue?: (configTarget: OpenClawConfig, value: unknown) => void;\n0118:   applySelectionConfig?: (config: OpenClawConfig) => OpenClawConfig;\n0119:   resolveRuntimeMetadata?: (\n0120:     ctx: WebFetchRuntimeMetadataContext,\n0121:   ) => Partial<RuntimeWebFetchMetadata> | Promise<Partial<RuntimeWebFetchMetadata>>;\n0122:   createTool: (ctx: WebFetchProviderContext) => WebFetchProviderToolDefinition | null;\n0123: };"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/plugin-sdk/provider-web-fetch.ts",
+        "start_line": 1,
+        "end_line": 30,
+        "excerpt": "0001: // Public web-fetch registration helpers for provider plugins.\n0002: \n0003: import type {\n0004:   WebFetchCredentialResolutionSource,\n0005:   WebFetchProviderPlugin,\n0006:   WebFetchProviderToolDefinition,\n0007: } from \"../plugins/types.js\";\n0008: export { jsonResult, readNumberParam, readStringParam } from \"../agents/tools/common.js\";\n0009: export {\n0010:   withStrictWebToolsEndpoint,\n0011:   withTrustedWebToolsEndpoint,\n0012: } from \"../agents/tools/web-guarded-fetch.js\";\n0013: export { markdownToText, truncateText } from \"../agents/tools/web-fetch-utils.js\";\n0014: export {\n0015:   DEFAULT_CACHE_TTL_MINUTES,\n0016:   DEFAULT_TIMEOUT_SECONDS,\n0017:   normalizeCacheKey,\n0018:   readCache,\n0019:   readResponseText,\n0020:   resolveCacheTtlMs,\n0021:   resolveTimeoutSeconds,\n0022:   writeCache,\n0023: } from \"../agents/tools/web-shared.js\";\n0024: export { enablePluginInConfig } from \"../plugins/enable.js\";\n0025: export { wrapExternalContent, wrapWebContent } from \"../security/external-content.js\";\n0026: export type {\n0027:   WebFetchCredentialResolutionSource,\n0028:   WebFetchProviderPlugin,\n0029:   WebFetchProviderToolDefinition,\n0030: };"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/plugins/web-provider-types.ts",
+        "start_line": 107,
+        "end_line": 117,
+        "excerpt": "0107:   envVars: string[];\n0108:   placeholder: string;\n0109:   signupUrl: string;\n0110:   docsUrl?: string;\n0111:   autoDetectOrder?: number;\n0112:   credentialPath: string;\n0113:   inactiveSecretPaths?: string[];\n0114:   getCredentialValue: (fetchConfig?: Record<string, unknown>) => unknown;\n0115:   setCredentialValue: (fetchConfigTarget: Record<string, unknown>, value: unknown) => void;\n0116:   getConfiguredCredentialValue?: (config?: OpenClawConfig) => unknown;\n0117:   setConfiguredCredentialValue?: (configTarget: OpenClawConfig, value: unknown) => void;"
+      },
+      {
+        "span_id": "s4",
+        "path": "extensions/firecrawl/index.ts",
+        "start_line": 7,
+        "end_line": 16,
+        "excerpt": "0007: export default definePluginEntry({\n0008:   id: \"firecrawl\",\n0009:   name: \"Firecrawl Plugin\",\n0010:   description: \"Bundled Firecrawl search and scrape plugin\",\n0011:   register(api) {\n0012:     api.registerWebFetchProvider(createFirecrawlWebFetchProvider());\n0013:     api.registerWebSearchProvider(createFirecrawlWebSearchProvider());\n0014:     api.registerTool(createFirecrawlSearchTool(api) as AnyAgentTool);\n0015:     api.registerTool(createFirecrawlScrapeTool(api) as AnyAgentTool);\n0016:   },"
+      },
+      {
+        "span_id": "s5",
+        "path": "src/plugins/web-provider-types.ts",
+        "start_line": 19,
+        "end_line": 23,
+        "excerpt": "0019: export type WebFetchProviderToolDefinition = {\n0020:   description: string;\n0021:   parameters: Record<string, unknown>;\n0022:   execute: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;\n0023: };"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_649f73268aa6",
+    "topic": "model_fallback_and_failover_logic",
+    "question": "Two of our keys for the same vendor are loaded as separate profiles, and we rotate through them on failure. We hit a 429 on one of them while calling our big model, and now the retry path also refuses to try our small/cheap model on that same key, even though only the big model got limited \u2014 it just waits out the timer. I expected a per-model rate-limit to only park that one model, not the whole key. Profiles that got shut off for payment or credential problems should obviously still be skipped entirely for every model. I think our availability check is keying the skip off the active cooldown timestamp window (whichever unusable-until is still in the future) and the model name, so a still-ticking window blocks the key regardless of which model is asking. Show me the exact availability/skip predicate the retry path evaluates per profile when it's deciding whether it can use that key for the requested model, so I can see why the cheap model isn't getting through.",
+    "gold_answer": "```ts\nimport { normalizeProviderId } from \"../model-selection.js\";\nimport type { AuthProfileStore, ProfileUsageStats } from \"./types.js\";\n\nfunction isAuthCooldownBypassedForProvider(provider: string | undefined): boolean {\n  const normalized = normalizeProviderId(provider ?? \"\");\n  return normalized === \"openrouter\" || normalized === \"kilocode\";\n}\n\nfunction isActiveUnusableWindow(until: number | undefined, now: number): boolean {\n  return typeof until === \"number\" && Number.isFinite(until) && until > 0 && now < until;\n}\n\nexport function resolveProfileUnusableUntil(\n  stats: Pick<ProfileUsageStats, \"cooldownUntil\" | \"disabledUntil\">,\n): number | null {\n  const values = [stats.cooldownUntil, stats.disabledUntil]\n    .filter((value): value is number => typeof value === \"number\")\n    .filter((value) => Number.isFinite(value) && value > 0);\n  return values.length === 0 ? null : Math.max(...values);\n}\n\nfunction shouldBypassModelScopedCooldown(\n  stats: Pick<ProfileUsageStats, \"cooldownReason\" | \"cooldownModel\" | \"disabledUntil\">,\n  now: number,\n  forModel?: string,\n): boolean {\n  return !!(\n    forModel &&\n    stats.cooldownReason === \"rate_limit\" &&\n    stats.cooldownModel &&\n    stats.cooldownModel !== forModel &&\n    !isActiveUnusableWindow(stats.disabledUntil, now)\n  );\n}\n\nexport function isProfileInCooldown(\n  store: AuthProfileStore,\n  profileId: string,\n  now?: number,\n  forModel?: string,\n): boolean {\n  if (isAuthCooldownBypassedForProvider(store.profiles[profileId]?.provider)) {\n    return false;\n  }\n  const stats = store.usageStats?.[profileId];\n  if (!stats) {\n    return false;\n  }\n  const ts = now ?? Date.now();\n  if (shouldBypassModelScopedCooldown(stats, ts, forModel)) {\n    return false;\n  }\n  const unusableUntil = resolveProfileUnusableUntil(stats);\n  return unusableUntil ? ts < unusableUntil : false;\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 35,
+        "statement": "The per-model availability decision bypasses the cooldown ONLY when ALL of these hold together: `forModel` is set, `cooldownReason === \"rate_limit\"`, `cooldownModel` is set, AND `cooldownModel !== forModel` (i.e. `shouldBypassModelScopedCooldown`). It MUST gate the per-model bypass on the `rate_limit` reason and on the cooldown's recorded model differing from the requested one \u2014 NOT a bare model-name/timestamp-window match that parks the whole key whenever any cooldown is still ticking, and NOT a bypass that ignores `cooldownReason`.",
+        "span_ids": [
+          "s1",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 25,
+        "statement": "If a per-model rate-limit bypass would otherwise apply, an active `disabledUntil` window (billing/auth disable) MUST still block the key for every model: the bypass requires `!isActiveUnusableWindow(stats.disabledUntil, now)`. This is a dedicated active-window check on `disabledUntil` itself \u2014 NOT folded into a combined/max unusable-until value, and NOT modeled as separate `authOk`/`billingOk`/`disabled` booleans.",
+        "span_ids": [
+          "s1",
+          "s5"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 20,
+        "statement": "When the model-scoped bypass holds, `isProfileInCooldown` returns false (profile available) immediately, BEFORE it ever computes/consults the combined unusable-until timestamp (`resolveProfileUnusableUntil`).",
+        "span_ids": [
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "The active-unusable-window helper used by the bypass treats a window as active only when `until` is a finite number with `until > 0` and `now < until`.",
+        "span_ids": [
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "When the bypass does not apply, the profile's unusable-until time is the max of the valid positive `cooldownUntil` and `disabledUntil` values (`resolveProfileUnusableUntil`), and the profile is in cooldown iff `now < unusableUntil`.",
+        "span_ids": [
+          "s2",
+          "s6"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/agents/auth-profiles/usage.ts",
+        "start_line": 239,
+        "end_line": 262,
+        "excerpt": "0239:  */\n0240: export function isProfileInCooldown(\n0241:   store: AuthProfileStore,\n0242:   profileId: string,\n0243:   now?: number,\n0244:   forModel?: string,\n0245: ): boolean {\n0246:   if (isAuthCooldownBypassedForProvider(store.profiles[profileId]?.provider)) {\n0247:     return false;\n0248:   }\n0249:   const stats = store.usageStats?.[profileId];\n0250:   if (!stats) {\n0251:     return false;\n0252:   }\n0253:   const ts = now ?? Date.now();\n0254:   // Model-aware bypass: if the cooldown was caused by a rate_limit on a\n0255:   // specific model and the caller is requesting a *different* model, allow it.\n0256:   // We still honour any active billing/auth disable (`disabledUntil`) \u2014 those\n0257:   // are profile-wide and must not be short-circuited by model scoping.\n0258:   if (shouldBypassModelScopedCooldown(stats, ts, forModel)) {\n0259:     return false;\n0260:   }\n0261:   const unusableUntil = resolveProfileUnusableUntil(stats);\n0262:   return unusableUntil ? ts < unusableUntil : false;"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/agents/auth-profiles/usage.ts",
+        "start_line": 240,
+        "end_line": 262,
+        "excerpt": "0240: export function isProfileInCooldown(\n0241:   store: AuthProfileStore,\n0242:   profileId: string,\n0243:   now?: number,\n0244:   forModel?: string,\n0245: ): boolean {\n0246:   if (isAuthCooldownBypassedForProvider(store.profiles[profileId]?.provider)) {\n0247:     return false;\n0248:   }\n0249:   const stats = store.usageStats?.[profileId];\n0250:   if (!stats) {\n0251:     return false;\n0252:   }\n0253:   const ts = now ?? Date.now();\n0254:   // Model-aware bypass: if the cooldown was caused by a rate_limit on a\n0255:   // specific model and the caller is requesting a *different* model, allow it.\n0256:   // We still honour any active billing/auth disable (`disabledUntil`) \u2014 those\n0257:   // are profile-wide and must not be short-circuited by model scoping.\n0258:   if (shouldBypassModelScopedCooldown(stats, ts, forModel)) {\n0259:     return false;\n0260:   }\n0261:   const unusableUntil = resolveProfileUnusableUntil(stats);\n0262:   return unusableUntil ? ts < unusableUntil : false;"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/agents/auth-profiles/usage.ts",
+        "start_line": 265,
+        "end_line": 267,
+        "excerpt": "0265: function isActiveUnusableWindow(until: number | undefined, now: number): boolean {\n0266:   return typeof until === \"number\" && Number.isFinite(until) && until > 0 && now < until;\n0267: }"
+      },
+      {
+        "span_id": "s4",
+        "path": "src/agents/auth-profiles/usage.ts",
+        "start_line": 396,
+        "end_line": 408,
+        "excerpt": "0396: function shouldBypassModelScopedCooldown(\n0397:   stats: Pick<ProfileUsageStats, \"cooldownReason\" | \"cooldownModel\" | \"disabledUntil\">,\n0398:   now: number,\n0399:   forModel?: string,\n0400: ): boolean {\n0401:   return !!(\n0402:     forModel &&\n0403:     stats.cooldownReason === \"rate_limit\" &&\n0404:     stats.cooldownModel &&\n0405:     stats.cooldownModel !== forModel &&\n0406:     !isActiveUnusableWindow(stats.disabledUntil, now)\n0407:   );\n0408: }"
+      },
+      {
+        "span_id": "s5",
+        "path": "src/agents/auth-profiles/usage.test.ts",
+        "start_line": 159,
+        "end_line": 204,
+        "excerpt": "0159:   it(\"returns false for a different model when cooldown is model-scoped (rate_limit)\", () => {\n0160:     const store = makeStore({\n0161:       \"github-copilot:github\": {\n0162:         cooldownUntil: Date.now() + 60_000,\n0163:         cooldownReason: \"rate_limit\",\n0164:         cooldownModel: \"claude-sonnet-4.6\",\n0165:       },\n0166:     });\n0167:     // Different model bypasses the cooldown\n0168:     expect(isProfileInCooldown(store, \"github-copilot:github\", undefined, \"gpt-4.1\")).toBe(false);\n0169:     // Same model is still blocked\n0170:     expect(\n0171:       isProfileInCooldown(store, \"github-copilot:github\", undefined, \"claude-sonnet-4.6\"),\n0172:     ).toBe(true);\n0173:     // No model specified \u2014 blocked (conservative)\n0174:     expect(isProfileInCooldown(store, \"github-copilot:github\")).toBe(true);\n0175:   });\n0176: \n0177:   it(\"returns true for all models when cooldownModel is undefined (profile-wide)\", () => {\n0178:     const store = makeStore({\n0179:       \"github-copilot:github\": {\n0180:         cooldownUntil: Date.now() + 60_000,\n0181:         cooldownReason: \"rate_limit\",\n0182:         cooldownModel: undefined,\n0183:       },\n0184:     });\n0185:     expect(\n0186:       isProfileInCooldown(store, \"github-copilot:github\", undefined, \"claude-sonnet-4.6\"),\n0187:     ).toBe(true);\n0188:     expect(isProfileInCooldown(store, \"github-copilot:github\", undefined, \"gpt-4.1\")).toBe(true);\n0189:   });\n0190: \n0191:   it(\"does not bypass model-scoped cooldown when disabledUntil is active\", () => {\n0192:     const store = makeStore({\n0193:       \"github-copilot:github\": {\n0194:         cooldownUntil: Date.now() + 60_000,\n0195:         cooldownReason: \"rate_limit\",\n0196:         cooldownModel: \"claude-sonnet-4.6\",\n0197:         disabledUntil: Date.now() + 120_000,\n0198:         disabledReason: \"billing\",\n0199:       },\n0200:     });\n0201:     // Even though cooldownModel is for a different model, billing disable\n0202:     // should keep the profile blocked for all models.\n0203:     expect(isProfileInCooldown(store, \"github-copilot:github\", undefined, \"gpt-4.1\")).toBe(true);\n0204:   });"
+      },
+      {
+        "span_id": "s6",
+        "path": "src/agents/auth-profiles/usage.ts",
+        "start_line": 225,
+        "end_line": 235,
+        "excerpt": "0225: export function resolveProfileUnusableUntil(\n0226:   stats: Pick<ProfileUsageStats, \"cooldownUntil\" | \"disabledUntil\">,\n0227: ): number | null {\n0228:   const values = [stats.cooldownUntil, stats.disabledUntil]\n0229:     .filter((value): value is number => typeof value === \"number\")\n0230:     .filter((value) => Number.isFinite(value) && value > 0);\n0231:   if (values.length === 0) {\n0232:     return null;\n0233:   }\n0234:   return Math.max(...values);\n0235: }"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_76f766ba3f55",
+    "topic": "memory_core_dreaming_and_promotion_pipeline",
+    "question": "Our agents' daily notes have become unreliable for factual recall: the nightly memory-consolidation job is dumping its dream-diary prose and its Light/REM phase write-ups straight into that day's `memory/<date>.md` note, so a file that should read like clean daily facts is full of flowery narrative and staged-candidate dumps.\n\nI started a fix in the phase write path: when each phase finishes I now build the narrative entry and the phase write-up and append both into the current day's `memory/<date>.md` note (under per-phase headings), and I left the narrative going there too since that's where the daily rollup lives. That stopped some of the bleed but the daily note is still getting clobbered on a normal run, and reviewers say diary prose still doesn't belong in the daily note at all.\n\nMake a normal consolidation run not write the daily note at all unless the operator has explicitly opted into folding phase output into it; otherwise each phase's structured write-up should land in its own dedicated per-phase file, and the narrative belongs in the diary file, never the daily note. Wire it so the decision is made once for both phases rather than re-derived at each call site, and make sure whatever completion bookkeeping the job emits still reflects exactly which files a run actually produced.",
+    "gold_answer": "Keep the storage decision centralized in the phase markdown writer and preserve memory host events for both inline and separate modes.\n\n```typescript\nimport fs from 'node:fs/promises';\nimport path from 'node:path';\nimport { formatMemoryDreamingDay, type MemoryDreamingPhaseName, type MemoryDreamingStorageConfig } from 'openclaw/plugin-sdk/memory-core-host-status';\nimport { appendMemoryHostEvent } from 'openclaw/plugin-sdk/memory-host-events';\nimport { replaceManagedMarkdownBlock, withTrailingNewline } from 'openclaw/plugin-sdk/memory-host-markdown';\n\nfunction shouldWriteInline(storage: MemoryDreamingStorageConfig): boolean {\n  return storage.mode === 'inline' || storage.mode === 'both';\n}\n\nfunction shouldWriteSeparate(storage: MemoryDreamingStorageConfig): boolean {\n  return storage.mode === 'separate' || storage.mode === 'both' || storage.separateReports;\n}\n\nexport async function writeDailyDreamingPhaseBlock(params: { workspaceDir: string; phase: Exclude<MemoryDreamingPhaseName, 'deep'>; bodyLines: string[]; nowMs?: number; timezone?: string; storage: MemoryDreamingStorageConfig }): Promise<{ inlinePath?: string; reportPath?: string }> {\n  const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();\n  const day = formatMemoryDreamingDay(nowMs, params.timezone);\n  const body = params.bodyLines.length > 0 ? params.bodyLines.join('\\n') : '- No notable updates.';\n  let inlinePath: string | undefined;\n  let reportPath: string | undefined;\n\n  if (shouldWriteInline(params.storage)) {\n    inlinePath = path.join(params.workspaceDir, 'memory', `${day}.md`);\n    await fs.mkdir(path.dirname(inlinePath), { recursive: true });\n    const original = await fs.readFile(inlinePath, 'utf-8').catch((err: NodeJS.ErrnoException) => err.code === 'ENOENT' ? '' : Promise.reject(err));\n    const updated = replaceManagedMarkdownBlock({ original, heading: params.phase === 'light' ? '## Light Sleep' : '## REM Sleep', startMarker: `<!-- openclaw:dreaming:${params.phase}:start -->`, endMarker: `<!-- openclaw:dreaming:${params.phase}:end -->`, body });\n    await fs.writeFile(inlinePath, withTrailingNewline(updated), 'utf-8');\n  }\n\n  if (shouldWriteSeparate(params.storage)) {\n    reportPath = path.join(params.workspaceDir, 'memory', 'dreaming', params.phase, `${day}.md`);\n    await fs.mkdir(path.dirname(reportPath), { recursive: true });\n    await fs.writeFile(reportPath, `# ${params.phase === 'light' ? 'Light Sleep' : 'REM Sleep'}\\n\\n${body}\\n`, 'utf-8');\n  }\n\n  await appendMemoryHostEvent(params.workspaceDir, { type: 'memory.dream.completed', timestamp: new Date(nowMs).toISOString(), phase: params.phase, inlinePath, reportPath, lineCount: params.bodyLines.length, storageMode: params.storage.mode });\n  return { inlinePath, reportPath };\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 30,
+        "statement": "Anti-decoy gate: the default/unconfigured storage mode is SEPARATE (mode='separate', e.g. DEFAULT_MEMORY_DREAMING_STORAGE_MODE), so on a normal run each phase's structured write-up MUST be written as a per-phase report at memory/dreaming/<phase>/YYYY-MM-DD.md \u2014 NOT dumped into the daily note and NOT under an invented layout like memory/phases/<phase>/. If the answer writes a phase report, it MUST use the memory/dreaming/<phase>/<date>.md path and a separate-by-default selection.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 24,
+        "statement": "Anti-decoy gate: if the answer ever writes the daily memory/YYYY-MM-DD.md note, that write MUST be gated on the existing storage-mode union (mode==='inline' || mode==='both'), so a separate-only default run does not touch the daily note \u2014 NOT an always-write-then-redirect and NOT a bolt-on foldIntoDailyNote/opt-in boolean layered over an otherwise always-on daily write.",
+        "span_ids": [
+          "s3",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 18,
+        "statement": "The single inline-vs-separate decision is centralized inside the phase markdown writer (writeDailyDreamingPhaseBlock, via shouldWriteInline/shouldWriteSeparate) and serves BOTH Light and REM through that one writer; it is NOT re-derived or re-branched at each phase call site.",
+        "span_ids": [
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "core",
+        "weight": 16,
+        "statement": "Anti-decoy gate: the answer's daily-note write contains only the structured per-phase block (the managed markdown block body), never dream-diary/narrative prose; narrative remains routed to the DREAMS.md/dreams.md diary file (appendNarrativeEntry) and MUST NOT be relocated into the daily note or a new memory/diary/<date>.md file.",
+        "span_ids": [
+          "s5",
+          "s6"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 12,
+        "statement": "The completion bookkeeping is the memory.dream.completed host event (appendMemoryHostEvent), and it records inlinePath and reportPath only for the outputs a run actually wrote (omitting the one not produced) \u2014 not a generic producedFiles[] list in place of the event fields.",
+        "span_ids": [
+          "s7"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/memory-host-sdk/dreaming.ts",
+        "start_line": 12,
+        "end_line": 16,
+        "excerpt": "0012: export const DEFAULT_MEMORY_DREAMING_ENABLED = false;\n0013: export const DEFAULT_MEMORY_DREAMING_TIMEZONE = undefined;\n0014: export const DEFAULT_MEMORY_DREAMING_VERBOSE_LOGGING = false;\n0015: export const DEFAULT_MEMORY_DREAMING_STORAGE_MODE = \"separate\";\n0016: export const DEFAULT_MEMORY_DREAMING_SEPARATE_REPORTS = false;"
+      },
+      {
+        "span_id": "s2",
+        "path": "extensions/memory-core/src/dreaming-markdown.ts",
+        "start_line": 40,
+        "end_line": 56,
+        "excerpt": "0040: function resolveSeparateReportPath(\n0041:   workspaceDir: string,\n0042:   phase: MemoryDreamingPhaseName,\n0043:   epochMs: number,\n0044:   timezone?: string,\n0045: ): string {\n0046:   const isoDay = formatMemoryDreamingDay(epochMs, timezone);\n0047:   return path.join(workspaceDir, \"memory\", \"dreaming\", phase, `${isoDay}.md`);\n0048: }\n0049: \n0050: function shouldWriteInline(storage: MemoryDreamingStorageConfig): boolean {\n0051:   return storage.mode === \"inline\" || storage.mode === \"both\";\n0052: }\n0053: \n0054: function shouldWriteSeparate(storage: MemoryDreamingStorageConfig): boolean {\n0055:   return storage.mode === \"separate\" || storage.mode === \"both\" || storage.separateReports;\n0056: }"
+      },
+      {
+        "span_id": "s3",
+        "path": "extensions/memory-core/src/dreaming-markdown.ts",
+        "start_line": 58,
+        "end_line": 106,
+        "excerpt": "0058: export async function writeDailyDreamingPhaseBlock(params: {\n0059:   workspaceDir: string;\n0060:   phase: Exclude<MemoryDreamingPhaseName, \"deep\">;\n0061:   bodyLines: string[];\n0062:   nowMs?: number;\n0063:   timezone?: string;\n0064:   storage: MemoryDreamingStorageConfig;\n0065: }): Promise<{ inlinePath?: string; reportPath?: string }> {\n0066:   const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();\n0067:   const body = params.bodyLines.length > 0 ? params.bodyLines.join(\"\\n\") : \"- No notable updates.\";\n0068:   let inlinePath: string | undefined;\n0069:   let reportPath: string | undefined;\n0070: \n0071:   if (shouldWriteInline(params.storage)) {\n0072:     inlinePath = resolveDailyMemoryPath(params.workspaceDir, nowMs, params.timezone);\n0073:     await fs.mkdir(path.dirname(inlinePath), { recursive: true });\n0074:     const original = await fs.readFile(inlinePath, \"utf-8\").catch((err: unknown) => {\n0075:       if ((err as NodeJS.ErrnoException)?.code === \"ENOENT\") {\n0076:         return \"\";\n0077:       }\n0078:       throw err;\n0079:     });\n0080:     const markers = resolvePhaseMarkers(params.phase);\n0081:     const updated = replaceManagedMarkdownBlock({\n0082:       original,\n0083:       heading: DAILY_PHASE_HEADINGS[params.phase],\n0084:       startMarker: markers.start,\n0085:       endMarker: markers.end,\n0086:       body,\n0087:     });\n0088:     await fs.writeFile(inlinePath, withTrailingNewline(updated), \"utf-8\");\n0089:   }\n0090: \n0091:   if (shouldWriteSeparate(params.storage)) {\n0092:     reportPath = resolveSeparateReportPath(\n0093:       params.workspaceDir,\n0094:       params.phase,\n0095:       nowMs,\n0096:       params.timezone,\n0097:     );\n0098:     await fs.mkdir(path.dirname(reportPath), { recursive: true });\n0099:     const report = [\n0100:       `# ${params.phase === \"light\" ? \"Light Sleep\" : \"REM Sleep\"}`,\n0101:       \"\",\n0102:       body,\n0103:       \"\",\n0104:     ].join(\"\\n\");\n0105:     await fs.writeFile(reportPath, report, \"utf-8\");\n0106:   }"
+      },
+      {
+        "span_id": "s4",
+        "path": "extensions/memory-core/src/dreaming-markdown.ts",
+        "start_line": 35,
+        "end_line": 52,
+        "excerpt": "0035: function resolveDailyMemoryPath(workspaceDir: string, epochMs: number, timezone?: string): string {\n0036:   const isoDay = formatMemoryDreamingDay(epochMs, timezone);\n0037:   return path.join(workspaceDir, \"memory\", `${isoDay}.md`);\n0038: }\n0039: \n0040: function resolveSeparateReportPath(\n0041:   workspaceDir: string,\n0042:   phase: MemoryDreamingPhaseName,\n0043:   epochMs: number,\n0044:   timezone?: string,\n0045: ): string {\n0046:   const isoDay = formatMemoryDreamingDay(epochMs, timezone);\n0047:   return path.join(workspaceDir, \"memory\", \"dreaming\", phase, `${isoDay}.md`);\n0048: }\n0049: \n0050: function shouldWriteInline(storage: MemoryDreamingStorageConfig): boolean {\n0051:   return storage.mode === \"inline\" || storage.mode === \"both\";\n0052: }"
+      },
+      {
+        "span_id": "s5",
+        "path": "extensions/memory-core/src/dreaming-narrative.ts",
+        "start_line": 273,
+        "end_line": 288,
+        "excerpt": "0273: // \u2500\u2500 DREAMS.md file I/O \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n0274: \n0275: async function resolveDreamsPath(workspaceDir: string): Promise<string> {\n0276:   for (const name of DREAMS_FILENAMES) {\n0277:     const target = path.join(workspaceDir, name);\n0278:     try {\n0279:       await fs.access(target);\n0280:       return target;\n0281:     } catch (err) {\n0282:       if ((err as NodeJS.ErrnoException)?.code !== \"ENOENT\") {\n0283:         throw err;\n0284:       }\n0285:     }\n0286:   }\n0287:   return path.join(workspaceDir, DREAMS_FILENAMES[0]);\n0288: }"
+      },
+      {
+        "span_id": "s6",
+        "path": "extensions/memory-core/src/dreaming-narrative.ts",
+        "start_line": 611,
+        "end_line": 642,
+        "excerpt": "0611: export async function appendNarrativeEntry(params: {\n0612:   workspaceDir: string;\n0613:   narrative: string;\n0614:   nowMs: number;\n0615:   timezone?: string;\n0616: }): Promise<string> {\n0617:   const dateStr = formatNarrativeDate(params.nowMs, params.timezone);\n0618:   const entry = buildDiaryEntry(params.narrative, dateStr);\n0619:   return await updateDreamsFile({\n0620:     workspaceDir: params.workspaceDir,\n0621:     updater: (existing, dreamsPath) => {\n0622:       let updated: string;\n0623:       if (existing.includes(DIARY_START_MARKER) && existing.includes(DIARY_END_MARKER)) {\n0624:         const endIdx = existing.lastIndexOf(DIARY_END_MARKER);\n0625:         updated = existing.slice(0, endIdx) + entry + \"\\n\" + existing.slice(endIdx);\n0626:       } else if (existing.includes(DIARY_START_MARKER)) {\n0627:         const startIdx = existing.indexOf(DIARY_START_MARKER) + DIARY_START_MARKER.length;\n0628:         updated =\n0629:           existing.slice(0, startIdx) +\n0630:           entry +\n0631:           \"\\n\" +\n0632:           DIARY_END_MARKER +\n0633:           \"\\n\" +\n0634:           existing.slice(startIdx);\n0635:       } else {\n0636:         const diarySection = `# Dream Diary\\n\\n${DIARY_START_MARKER}${entry}\\n${DIARY_END_MARKER}\\n`;\n0637:         updated = existing.trim().length === 0 ? diarySection : `${diarySection}\\n${existing}`;\n0638:       }\n0639:       return { content: updated, result: dreamsPath };\n0640:     },\n0641:   });\n0642: }"
+      },
+      {
+        "span_id": "s7",
+        "path": "extensions/memory-core/src/dreaming-markdown.ts",
+        "start_line": 108,
+        "end_line": 121,
+        "excerpt": "0108:   await appendMemoryHostEvent(params.workspaceDir, {\n0109:     type: \"memory.dream.completed\",\n0110:     timestamp: new Date(nowMs).toISOString(),\n0111:     phase: params.phase,\n0112:     ...(inlinePath ? { inlinePath } : {}),\n0113:     ...(reportPath ? { reportPath } : {}),\n0114:     lineCount: params.bodyLines.length,\n0115:     storageMode: params.storage.mode,\n0116:   });\n0117: \n0118:   return {\n0119:     ...(inlinePath ? { inlinePath } : {}),\n0120:     ...(reportPath ? { reportPath } : {}),\n0121:   };"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_834d221a80c6",
+    "topic": "new_plugin_provider_and_channel_integration_requests",
+    "question": "I'm bringing my iPhone's Apple Health data into OpenClaw ahead of the proper native mobile bridge. My phone already runs as a paired node on my Gateway, and a little iOS shortcut on it POSTs me a signed health snapshot (steps, heart rate, sleep) every morning, with an HMAC signature header so the Gateway can trust it came from my device.\n\nI want OpenClaw to treat this iPhone health feed as a first-class inbound source: stand it up the way the bundled device-backed messaging integrations do \u2014 the entry helper that wires up the device-facing capability, register the source so the Gateway knows about it, and hang the device's webhook receiver off the lazily-installed inbound route that those integrations use so multiple devices can share the path and it cleans itself up. Verify the HMAC on each POST and keep each device's most recent snapshot available for this running Gateway.\n\nOn top of that, expose a read-only agent tool that returns a health summary for a given device over a date range, rejecting malformed device ids or dates.\n\nBuild the plugin.",
+    "gold_answer": "The plugin keeps the native boundary outside core: mobile nodes post signed snapshots, and agents only read normalized summaries through a tool.\n\n```ts\nimport { createHmac, timingSafeEqual } from \"node:crypto\";\nimport type { IncomingMessage } from \"node:http\";\nimport { Type } from \"@sinclair/typebox\";\nimport { definePluginEntry, type AnyAgentTool, type OpenClawPluginApi } from \"openclaw/plugin-sdk/plugin-entry\";\nimport { jsonResult, readStringParam } from \"openclaw/plugin-sdk/channel-actions\";\n\ntype Snapshot = { deviceId: string; capturedAt: string; steps: number; sleepMinutes: number; workouts: number };\ntype HealthConfig = { signingSecret?: string };\nconst snapshots = new Map<string, Snapshot>();\nlet lastDeviceId = \"default\";\n\nfunction readBody(req: IncomingMessage): Promise<string> {\n  return new Promise((resolve, reject) => {\n    let body = \"\";\n    req.setEncoding(\"utf8\");\n    req.on(\"data\", (chunk) => { body += chunk; });\n    req.on(\"end\", () => resolve(body));\n    req.on(\"error\", reject);\n  });\n}\n\nfunction requireDeviceId(value: unknown): string {\n  const deviceId = typeof value === \"string\" ? value.trim() : \"\";\n  if (!/^[A-Za-z0-9._:-]{1,80}$/.test(deviceId)) throw new Error(\"Invalid deviceId.\");\n  return deviceId;\n}\n\nfunction parseDate(value: string | undefined, label: string): number | undefined {\n  if (!value) return undefined;\n  const ms = Date.parse(value);\n  if (!Number.isFinite(ms)) throw new Error(`${label} must be an ISO date or timestamp.`);\n  return ms;\n}\n\nfunction verifySignature(secret: string, body: string, signature: unknown): boolean {\n  if (typeof signature !== \"string\" || !signature.trim()) return false;\n  const expected = createHmac(\"sha256\", secret).update(body).digest(\"hex\");\n  const left = Buffer.from(signature.replace(/^sha256=/, \"\"), \"hex\");\n  const right = Buffer.from(expected, \"hex\");\n  return left.length === right.length && timingSafeEqual(left, right);\n}\n\nfunction normalizeSnapshot(raw: Record<string, unknown>): Snapshot {\n  const capturedAt = typeof raw.capturedAt === \"string\" ? raw.capturedAt : new Date().toISOString();\n  parseDate(capturedAt, \"capturedAt\");\n  return {\n    deviceId: requireDeviceId(raw.deviceId),\n    capturedAt,\n    steps: Math.max(0, Math.trunc(Number(raw.steps || 0))),\n    sleepMinutes: Math.max(0, Math.trunc(Number(raw.sleepMinutes || 0))),\n    workouts: Math.max(0, Math.trunc(Number(raw.workouts || 0))),\n  };\n}\n\nfunction healthSummaryTool(): AnyAgentTool {\n  return {\n    name: \"health_summary\",\n    label: \"Health Summary\",\n    description: \"Read the latest posted Apple Health summary for a device.\",\n    parameters: Type.Object({ deviceId: Type.Optional(Type.String()), startDate: Type.Optional(Type.String()), endDate: Type.Optional(Type.String()) }),\n    execute: async (_id, raw) => {\n      const deviceId = raw.deviceId === undefined ? lastDeviceId : requireDeviceId(raw.deviceId);\n      const snapshot = snapshots.get(deviceId);\n      if (!snapshot) return jsonResult({ status: \"missing\", deviceId });\n      const captured = Date.parse(snapshot.capturedAt);\n      const start = parseDate(readStringParam(raw, \"startDate\"), \"startDate\");\n      const end = parseDate(readStringParam(raw, \"endDate\"), \"endDate\");\n      if ((start !== undefined && captured < start) || (end !== undefined && captured > end)) {\n        return jsonResult({ status: \"outside_range\", deviceId, capturedAt: snapshot.capturedAt });\n      }\n      return jsonResult({ status: \"ok\", ...snapshot });\n    },\n  };\n}\n\nexport default definePluginEntry({\n  id: \"healthkit-bridge\",\n  name: \"HealthKit Bridge\",\n  description: \"Read-only Apple Health snapshot bridge.\",\n  register(api: OpenClawPluginApi) {\n    api.registerHttpRoute({ path: \"/plugins/healthkit/snapshot\", auth: \"plugin\", handler: async (req, res) => {\n      const body = await readBody(req);\n      const secret = ((api.pluginConfig || {}) as HealthConfig).signingSecret;\n      if (!secret || !verifySignature(secret, body, req.headers[\"x-openclaw-health-signature\"])) { res.statusCode = 401; res.end(\"invalid signature\"); return true; }\n      const snapshot = normalizeSnapshot(JSON.parse(body) as Record<string, unknown>);\n      snapshots.set(snapshot.deviceId, snapshot); lastDeviceId = snapshot.deviceId;\n      res.setHeader(\"content-type\", \"application/json\"); res.end(JSON.stringify({ ok: true, deviceId: snapshot.deviceId })); return true;\n    } });\n    api.registerTool(healthSummaryTool(), { name: \"health_summary\" });\n  },\n});\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 40,
+        "statement": "Registers the device webhook as a plugin-owned STATIC HTTP route via api.registerHttpRoute({ auth: 'plugin', ... }) and verifies the per-POST device HMAC inside that handler with a constant-time comparison (e.g. crypto.timingSafeEqual) -- NOT the dynamic per-target registerWebhookTargetWithPluginRoute / registerPluginHttpRoute lazy lifecycle helper, and NOT auth: 'gateway'. (If it installs an inbound route at all, that route MUST be the static plugin-owned api.registerHttpRoute with auth:'plugin'.)",
+        "span_ids": [
+          "s3",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 15,
+        "statement": "Defines a NON-channel plugin via definePluginEntry -- it does NOT model the health feed as a messaging channel (no defineChannelPluginEntry / api.registerChannel / ChannelPlugin) and does not register it as a gateway chat source.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 30,
+        "statement": "Keeps only the single most-recent snapshot PER DEVICE in in-process memory for the current Gateway process (e.g. a Map<deviceId, Snapshot> overwritten on each POST) -- NOT a per-date / multi-snapshot history keyed by date, and NOT persisted to disk / stateDir.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 8,
+        "statement": "Registers a read-only agent tool (via api.registerTool) that returns a health summary read from the stored snapshots for a given device over the requested date range.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 7,
+        "statement": "The tool validates the device identifier and validates the start/end date inputs, rejecting malformed device ids or dates.",
+        "span_ids": [
+          "s1"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/plugins/types.ts",
+        "start_line": 1872,
+        "end_line": 1903,
+        "excerpt": "1872: /** Main registration API injected into native plugin entry files. */\n1873: export type OpenClawPluginApi = {\n1874:   id: string;\n1875:   name: string;\n1876:   version?: string;\n1877:   description?: string;\n1878:   source: string;\n1879:   rootDir?: string;\n1880:   registrationMode: PluginRegistrationMode;\n1881:   config: OpenClawConfig;\n1882:   pluginConfig?: Record<string, unknown>;\n1883:   /**\n1884:    * In-process runtime helpers for trusted native plugins.\n1885:    *\n1886:    * This surface is broader than hooks. Prefer hooks for third-party\n1887:    * automation/integration unless you need native registry integration.\n1888:    */\n1889:   runtime: PluginRuntime;\n1890:   logger: PluginLogger;\n1891:   registerTool: (\n1892:     tool: AnyAgentTool | OpenClawPluginToolFactory,\n1893:     opts?: OpenClawPluginToolOptions,\n1894:   ) => void;\n1895:   registerHook: (\n1896:     events: string | string[],\n1897:     handler: InternalHookHandler,\n1898:     opts?: OpenClawPluginHookOptions,\n1899:   ) => void;\n1900:   registerHttpRoute: (params: OpenClawPluginHttpRouteParams) => void;\n1901:   /** Register a native messaging channel plugin (channel capability). */\n1902:   registerChannel: (registration: OpenClawPluginChannelRegistration | ChannelPlugin) => void;\n1903:   /**"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/plugin-sdk/plugin-entry.ts",
+        "start_line": 174,
+        "end_line": 181,
+        "excerpt": "0174: /**\n0175:  * Canonical entry helper for non-channel plugins.\n0176:  *\n0177:  * Use this for provider, tool, command, service, memory, and context-engine\n0178:  * plugins. Channel plugins should use `defineChannelPluginEntry(...)` from\n0179:  * `openclaw/plugin-sdk/core` so they inherit the channel capability wiring.\n0180:  */\n0181: export function definePluginEntry({"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/plugins/loader.test.ts",
+        "start_line": 2799,
+        "end_line": 2833,
+        "excerpt": "2799:   it(\"registers plugin http routes\", () => {\n2800:     useNoBundledPlugins();\n2801:     const scenarios = [\n2802:       {\n2803:         label: \"defaults exact match\",\n2804:         pluginId: \"http-route-demo\",\n2805:         routeOptions:\n2806:           '{ path: \"/demo\", auth: \"gateway\", handler: async (_req, res) => { res.statusCode = 200; res.end(\"ok\"); } }',\n2807:         expectedPath: \"/demo\",\n2808:         expectedAuth: \"gateway\",\n2809:         expectedMatch: \"exact\",\n2810:         assert: expectRegisteredHttpRoute,\n2811:       },\n2812:       {\n2813:         label: \"keeps explicit auth and match options\",\n2814:         pluginId: \"http-demo\",\n2815:         routeOptions:\n2816:           '{ path: \"/webhook\", auth: \"plugin\", match: \"prefix\", handler: async () => false }',\n2817:         expectedPath: \"/webhook\",\n2818:         expectedAuth: \"plugin\",\n2819:         expectedMatch: \"prefix\",\n2820:         assert: expectRegisteredHttpRoute,\n2821:       },\n2822:     ] as const;\n2823: \n2824:     runSinglePluginRegistryScenarios(\n2825:       scenarios.map((scenario) =>\n2826:         Object.assign({}, scenario, {\n2827:           body: `module.exports = { id: \"${scenario.pluginId}\", register(api) {\n2828:   api.registerHttpRoute(${scenario.routeOptions});\n2829: } };`,\n2830:         }),\n2831:       ),\n2832:     );\n2833:   });"
+      },
+      {
+        "span_id": "s4",
+        "path": "src/plugins/loader.test.ts",
+        "start_line": 2999,
+        "end_line": 3096,
+        "excerpt": "2999:   it(\"enforces plugin http route validation and conflict rules\", () => {\n3000:     useNoBundledPlugins();\n3001:     const scenarios = [\n3002:       {\n3003:         label: \"missing auth is rejected\",\n3004:         buildPlugins: () => [\n3005:           writePlugin({\n3006:             id: \"http-route-missing-auth\",\n3007:             filename: \"http-route-missing-auth.cjs\",\n3008:             body: `module.exports = { id: \"http-route-missing-auth\", register(api) {\n3009:   api.registerHttpRoute({ path: \"/demo\", handler: async () => true });\n3010: } };`,\n3011:           }),\n3012:         ],\n3013:         assert: (registry: ReturnType<typeof loadOpenClawPlugins>) => {\n3014:           expect(\n3015:             registry.httpRoutes.find((entry) => entry.pluginId === \"http-route-missing-auth\"),\n3016:           ).toBeUndefined();\n3017:           expect(\n3018:             registry.diagnostics.some((diag) =>\n3019:               diag.message.includes(\"http route registration missing or invalid auth\"),\n3020:             ),\n3021:           ).toBe(true);\n3022:         },\n3023:       },\n3024:       {\n3025:         label: \"same plugin can replace its own route\",\n3026:         buildPlugins: () => [\n3027:           writePlugin({\n3028:             id: \"http-route-replace-self\",\n3029:             filename: \"http-route-replace-self.cjs\",\n3030:             body: `module.exports = { id: \"http-route-replace-self\", register(api) {\n3031:   api.registerHttpRoute({ path: \"/demo\", auth: \"plugin\", handler: async () => false });\n3032:   api.registerHttpRoute({ path: \"/demo\", auth: \"plugin\", replaceExisting: true, handler: async () => true });\n3033: } };`,\n3034:           }),\n3035:         ],\n3036:         assert: (registry: ReturnType<typeof loadOpenClawPlugins>) => {\n3037:           const routes = registry.httpRoutes.filter(\n3038:             (entry) => entry.pluginId === \"http-route-replace-self\",\n3039:           );\n3040:           expect(routes).toHaveLength(1);\n3041:           expect(routes[0]?.path).toBe(\"/demo\");\n3042:           expect(registry.diagnostics).toEqual([]);\n3043:         },\n3044:       },\n3045:       {\n3046:         label: \"cross-plugin replaceExisting is rejected\",\n3047:         buildPlugins: () => [\n3048:           writePlugin({\n3049:             id: \"http-route-owner-a\",\n3050:             filename: \"http-route-owner-a.cjs\",\n3051:             body: `module.exports = { id: \"http-route-owner-a\", register(api) {\n3052:   api.registerHttpRoute({ path: \"/demo\", auth: \"plugin\", handler: async () => false });\n3053: } };`,\n3054:           }),\n3055:           writePlugin({\n3056:             id: \"http-route-owner-b\",\n3057:             filename: \"http-route-owner-b.cjs\",\n3058:             body: `module.exports = { id: \"http-route-owner-b\", register(api) {\n3059:   api.registerHttpRoute({ path: \"/demo\", auth: \"plugin\", replaceExisting: true, handler: async () => true });\n3060: } };`,\n3061:           }),\n3062:         ],\n3063:         assert: (registry: ReturnType<typeof loadOpenClawPlugins>) => {\n3064:           const route = registry.httpRoutes.find((entry) => entry.path === \"/demo\");\n3065:           expect(route?.pluginId).toBe(\"http-route-owner-a\");\n3066:           expect(\n3067:             registry.diagnostics.some((diag) =>\n3068:               diag.message.includes(\"http route replacement rejected\"),\n3069:             ),\n3070:           ).toBe(true);\n3071:         },\n3072:       },\n3073:       {\n3074:         label: \"mixed-auth overlaps are rejected\",\n3075:         buildPlugins: () => [\n3076:           writePlugin({\n3077:             id: \"http-route-overlap\",\n3078:             filename: \"http-route-overlap.cjs\",\n3079:             body: `module.exports = { id: \"http-route-overlap\", register(api) {\n3080:   api.registerHttpRoute({ path: \"/plugin/secure\", auth: \"gateway\", match: \"prefix\", handler: async () => true });\n3081:   api.registerHttpRoute({ path: \"/plugin/secure/report\", auth: \"plugin\", match: \"exact\", handler: async () => true });\n3082: } };`,\n3083:           }),\n3084:         ],\n3085:         assert: (registry: ReturnType<typeof loadOpenClawPlugins>) => {\n3086:           const routes = registry.httpRoutes.filter(\n3087:             (entry) => entry.pluginId === \"http-route-overlap\",\n3088:           );\n3089:           expect(routes).toHaveLength(1);\n3090:           expect(routes[0]?.path).toBe(\"/plugin/secure\");\n3091:           expect(\n3092:             registry.diagnostics.some((diag) =>\n3093:               diag.message.includes(\"http route overlap rejected\"),\n3094:             ),\n3095:           ).toBe(true);\n3096:         },"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_83eed774ba0b",
+    "topic": "cross_session_channel_context_and_session_behavior_requests",
+    "question": "We run an HTTP webhook service (a small ops dashboard) that sits outside OpenClaw. Each incoming conversation already carries its own durable conversation id that our side mints and keeps stable across requests, and we always target one specific assistant profile. From a Node/TypeScript module that lives inside the OpenClaw repo, we want to talk to our already-running local assistant backend programmatically \u2014 reading whatever local connection settings the backend normally uses \u2014 instead of shelling out to the CLI per call.\n\nFor a given incoming conversation we need to: make sure the matching conversation exists on the backend (and just attach to it if it's already there, so repeated webhook hits don't fork it), switch that one conversation over to a specific model and turn its step-by-step reasoning display to a chosen level, post one user turn into it (built so a webhook retry of the same delivery doesn't double-post), pull back a tiny preview of the latest few lines so we can echo recent state into our dashboard, then shrink that conversation's stored history and finally clear it back to a clean slate.\n\nRight now we're driving all of this by posting the control instructions as ordinary chat text into the conversation (the same /-prefixed lines a human would type to flip model and reasoning), and reusing our incoming conversation id verbatim as the backend's lookup id. It mostly works but feels fragile. Write the repo-local TypeScript helper that does this end to end, and make the per-conversation control changes land as durable settings on the conversation rather than as chat lines.",
+    "gold_answer": "```ts\nimport { randomUUID } from 'node:crypto';\nimport { loadConfig } from './src/config/config.js';\nimport { resolveGatewayClientBootstrap } from './src/gateway/client-bootstrap.js';\nimport { GatewayClient } from './src/gateway/client.js';\nimport type { SessionsListResult, SessionsPreviewResult } from './src/gateway/session-utils.types.js';\n\nasync function connectGateway(): Promise<GatewayClient> {\n  const config = loadConfig();\n  const bootstrap = await resolveGatewayClientBootstrap({ config });\n\n  return await new Promise<GatewayClient>((resolve, reject) => {\n    let settled = false;\n    const finish = (error?: unknown, client?: GatewayClient) => {\n      if (settled) {\n        return;\n      }\n      settled = true;\n      clearTimeout(timer);\n      if (error) {\n        reject(error instanceof Error ? error : new Error(String(error)));\n      } else {\n        resolve(client as GatewayClient);\n      }\n    };\n\n    const client = new GatewayClient({\n      url: bootstrap.url,\n      token: bootstrap.auth.token,\n      password: bootstrap.auth.password,\n      onHelloOk: () => finish(undefined, client),\n      onConnectError: (error) => finish(error),\n      onClose: (code, reason) => finish(new Error(`gateway closed (${code}): ${reason}`)),\n    });\n\n    const timer = setTimeout(() => finish(new Error('gateway connect timeout')), 10_000);\n    timer.unref?.();\n    client.start();\n  });\n}\n\nexport async function driveExternalChatSession(params: {\n  agentId: string;\n  externalChatId: string;\n  message: string;\n}) {\n  const client = await connectGateway();\n\n  try {\n    const created = await client.request<{ ok: true; key: string }>('sessions.create', {\n      key: `external-chat:${params.externalChatId}`,\n      agentId: params.agentId,\n    });\n    const key = created.key;\n\n    await client.request('sessions.patch', {\n      key,\n      model: 'openai/gpt-5.4',\n      reasoningLevel: 'on',\n    });\n\n    await client.request('sessions.send', {\n      key,\n      message: params.message,\n      idempotencyKey: randomUUID(),\n    });\n\n    const [list, preview] = await Promise.all([\n      client.request<SessionsListResult>('sessions.list', {\n        search: key,\n        limit: 50,\n        includeGlobal: true,\n        includeUnknown: true,\n      }),\n      client.request<SessionsPreviewResult>('sessions.preview', {\n        keys: [key],\n        limit: 6,\n        maxChars: 160,\n      }),\n    ]);\n\n    await client.request('sessions.compact', { key });\n    await client.request('sessions.reset', { key, reason: 'new' });\n\n    return {\n      key,\n      session: list.sessions.find((entry) => entry.key === key),\n      preview: preview.previews.find((entry) => entry.key === key)?.items ?? [],\n    };\n  } finally {\n    await client.stopAndWait().catch(() => client.stop());\n  }\n}\n\nconst agentId = process.argv[2] ?? 'main';\nconst externalChatId = process.argv[3] ?? 'demo-chat';\nconst message = process.argv[4] ?? 'Give me a one-line session-health summary.';\n\nconsole.dir(await driveExternalChatSession({ agentId, externalChatId, message }), { depth: null });\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 30,
+        "statement": "If it issues gateway RPCs, it MUST do so through a SINGLE persistent GatewayClient that it bootstraps once from local config -- loadConfig() + resolveGatewayClientBootstrap({config}) for the url/auth, then new GatewayClient({url, token, password, ...}) + client.start(), waiting for the connection to be ready (onHelloOk) -- and reuse that one client's client.request(...) for every subsequent call; it must NOT issue per-call one-shot connects via callGateway(...) (or a hand-rolled HTTP/REST client) that reconnect for each RPC.",
+        "span_ids": [
+          "s1",
+          "s2",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 25,
+        "statement": "Posts the single user turn via the sessions.send RPC (param named `key`, plus `message`) carrying an `idempotencyKey` so a webhook retry of the same delivery does not double-post -- it must NOT send the turn via the chat.send RPC (whose param is `sessionKey`) nor any other chat.* method.",
+        "span_ids": [
+          "s7",
+          "s8"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 20,
+        "statement": "Sets the conversation's model and reasoning level as durable session settings via the structured sessions.patch RPC (passing the `model` and `reasoningLevel` fields) -- it must NOT effect these changes by sending '/model'/'/reasoning' (or any other) slash-command text as a chat message turn.",
+        "span_ids": [
+          "s6"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "core",
+        "weight": 10,
+        "statement": "Ensures-or-attaches the backend session by calling sessions.create with `agentId` and a `key` DERIVED from the external chat id (e.g. an `external-chat:<externalChatId>` prefix, i.e. the agent:<agentId>:<rest> store-key form), and uses the canonical `key` returned by sessions.create for the later RPCs -- it must NOT pass the raw incoming external conversation id verbatim as the create `key`.",
+        "span_ids": [
+          "s4",
+          "s5"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 8,
+        "statement": "Fetches the small live snapshot through the session read RPCs -- sessions.list filtered to the key (e.g. via `search`) AND sessions.preview with `keys:[key]` and a small `limit`/`maxChars` -- NOT via chat.history or another chat.* read.",
+        "span_ids": [
+          "s9",
+          "s10",
+          "s11"
+        ]
+      },
+      {
+        "claim_id": "c6",
+        "claim_type": "supporting",
+        "weight": 7,
+        "statement": "Shrinks then clears the conversation by calling sessions.compact for the key followed by sessions.reset for the key, and tears the persistent client down afterward (stopAndWait() / stop()).",
+        "span_ids": [
+          "s12",
+          "s13",
+          "s14"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/config/config.ts",
+        "start_line": 1,
+        "end_line": 24,
+        "excerpt": "0001: export {\n0002:   clearConfigCache,\n0003:   ConfigRuntimeRefreshError,\n0004:   clearRuntimeConfigSnapshot,\n0005:   registerConfigWriteListener,\n0006:   createConfigIO,\n0007:   getRuntimeConfig,\n0008:   getRuntimeConfigSnapshot,\n0009:   getRuntimeConfigSourceSnapshot,\n0010:   projectConfigOntoRuntimeSourceSnapshot,\n0011:   loadConfig,\n0012:   readBestEffortConfig,\n0013:   readSourceConfigBestEffort,\n0014:   parseConfigJson5,\n0015:   readConfigFileSnapshot,\n0016:   readConfigFileSnapshotForWrite,\n0017:   readSourceConfigSnapshot,\n0018:   readSourceConfigSnapshotForWrite,\n0019:   resetConfigRuntimeState,\n0020:   resolveConfigSnapshotHash,\n0021:   setRuntimeConfigSnapshotRefreshHandler,\n0022:   setRuntimeConfigSnapshot,\n0023:   writeConfigFile,\n0024: } from \"./io.js\";"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/gateway/client-bootstrap.ts",
+        "start_line": 16,
+        "end_line": 45,
+        "excerpt": "0016: export async function resolveGatewayClientBootstrap(params: {\n0017:   config: OpenClawConfig;\n0018:   gatewayUrl?: string;\n0019:   explicitAuth?: ExplicitGatewayAuth;\n0020:   env?: NodeJS.ProcessEnv;\n0021: }): Promise<{\n0022:   url: string;\n0023:   urlSource: string;\n0024:   auth: {\n0025:     token?: string;\n0026:     password?: string;\n0027:   };\n0028: }> {\n0029:   const connection = buildGatewayConnectionDetailsWithResolvers({\n0030:     config: params.config,\n0031:     url: params.gatewayUrl,\n0032:   });\n0033:   const urlOverrideSource = resolveGatewayUrlOverrideSource(connection.urlSource);\n0034:   const auth = await resolveGatewayConnectionAuth({\n0035:     config: params.config,\n0036:     explicitAuth: params.explicitAuth,\n0037:     env: params.env ?? process.env,\n0038:     urlOverride: urlOverrideSource ? connection.url : undefined,\n0039:     urlOverrideSource,\n0040:   });\n0041:   return {\n0042:     url: connection.url,\n0043:     urlSource: connection.urlSource,\n0044:     auth,\n0045:   };"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/gateway/client.ts",
+        "start_line": 175,
+        "end_line": 210,
+        "excerpt": "0175: export class GatewayClient {\n0176:   private ws: WebSocket | null = null;\n0177:   private opts: GatewayClientOptions;\n0178:   private pending = new Map<string, Pending>();\n0179:   private backoffMs = 1000;\n0180:   private closed = false;\n0181:   private lastSeq: number | null = null;\n0182:   private connectNonce: string | null = null;\n0183:   private connectSent = false;\n0184:   private connectTimer: NodeJS.Timeout | null = null;\n0185:   private pendingDeviceTokenRetry = false;\n0186:   private deviceTokenRetryBudgetUsed = false;\n0187:   private pendingConnectErrorDetailCode: string | null = null;\n0188:   // Track last tick to detect silent stalls.\n0189:   private lastTick: number | null = null;\n0190:   private tickIntervalMs = 30_000;\n0191:   private tickTimer: NodeJS.Timeout | null = null;\n0192:   private readonly requestTimeoutMs: number;\n0193:   private pendingStop: PendingStop | null = null;\n0194:   private socketOpened = false;\n0195: \n0196:   constructor(opts: GatewayClientOptions) {\n0197:     this.opts = {\n0198:       ...opts,\n0199:       deviceIdentity:\n0200:         opts.deviceIdentity === null\n0201:           ? undefined\n0202:           : (opts.deviceIdentity ?? loadOrCreateDeviceIdentity()),\n0203:     };\n0204:     this.requestTimeoutMs =\n0205:       typeof opts.requestTimeoutMs === \"number\" && Number.isFinite(opts.requestTimeoutMs)\n0206:         ? Math.max(1, Math.min(Math.floor(opts.requestTimeoutMs), 2_147_483_647))\n0207:         : 30_000;\n0208:   }\n0209: \n0210:   start() {"
+      },
+      {
+        "span_id": "s4",
+        "path": "src/gateway/protocol/schema/sessions.ts",
+        "start_line": 84,
+        "end_line": 95,
+        "excerpt": "0084: export const SessionsCreateParamsSchema = Type.Object(\n0085:   {\n0086:     key: Type.Optional(NonEmptyString),\n0087:     agentId: Type.Optional(NonEmptyString),\n0088:     label: Type.Optional(SessionLabelString),\n0089:     model: Type.Optional(NonEmptyString),\n0090:     parentSessionKey: Type.Optional(NonEmptyString),\n0091:     task: Type.Optional(Type.String()),\n0092:     message: Type.Optional(Type.String()),\n0093:   },\n0094:   { additionalProperties: false },\n0095: );"
+      },
+      {
+        "span_id": "s5",
+        "path": "src/gateway/server-methods/sessions.ts",
+        "start_line": 783,
+        "end_line": 842,
+        "excerpt": "0783:   \"sessions.create\": async ({ req, params, respond, context, client, isWebchatConnect }) => {\n0784:     if (!assertValidParams(params, validateSessionsCreateParams, \"sessions.create\", respond)) {\n0785:       return;\n0786:     }\n0787:     const p = params;\n0788:     const cfg = loadConfig();\n0789:     const requestedKey = normalizeOptionalString(p.key);\n0790:     const agentId = normalizeAgentId(\n0791:       normalizeOptionalString(p.agentId) ?? resolveDefaultAgentId(cfg),\n0792:     );\n0793:     if (requestedKey) {\n0794:       const requestedAgentId = parseAgentSessionKey(requestedKey)?.agentId;\n0795:       if (requestedAgentId && requestedAgentId !== agentId && normalizeOptionalString(p.agentId)) {\n0796:         respond(\n0797:           false,\n0798:           undefined,\n0799:           errorShape(\n0800:             ErrorCodes.INVALID_REQUEST,\n0801:             `sessions.create key agent (${requestedAgentId}) does not match agentId (${agentId})`,\n0802:           ),\n0803:         );\n0804:         return;\n0805:       }\n0806:     }\n0807:     const parentSessionKey = normalizeOptionalString(p.parentSessionKey);\n0808:     let canonicalParentSessionKey: string | undefined;\n0809:     if (parentSessionKey) {\n0810:       const parent = loadSessionEntry(parentSessionKey);\n0811:       if (!parent.entry?.sessionId) {\n0812:         respond(\n0813:           false,\n0814:           undefined,\n0815:           errorShape(ErrorCodes.INVALID_REQUEST, `unknown parent session: ${parentSessionKey}`),\n0816:         );\n0817:         return;\n0818:       }\n0819:       canonicalParentSessionKey = parent.canonicalKey;\n0820:     }\n0821:     const loweredRequestedKey = normalizeOptionalLowercaseString(requestedKey);\n0822:     const key = requestedKey\n0823:       ? loweredRequestedKey === \"global\" || loweredRequestedKey === \"unknown\"\n0824:         ? loweredRequestedKey\n0825:         : toAgentStoreSessionKey({\n0826:             agentId,\n0827:             requestKey: requestedKey,\n0828:             mainKey: cfg.session?.mainKey,\n0829:           })\n0830:       : buildDashboardSessionKey(agentId);\n0831:     const target = resolveGatewaySessionStoreTarget({ cfg, key });\n0832:     const targetAgentId = resolveAgentIdFromSessionKey(target.canonicalKey);\n0833:     const created = await updateSessionStore(target.storePath, async (store) => {\n0834:       const patched = await applySessionsPatchToStore({\n0835:         cfg,\n0836:         store,\n0837:         storeKey: target.canonicalKey,\n0838:         patch: {\n0839:           key: target.canonicalKey,\n0840:           label: normalizeOptionalString(p.label),\n0841:           model: normalizeOptionalString(p.model),\n0842:         },"
+      },
+      {
+        "span_id": "s6",
+        "path": "src/gateway/protocol/schema/sessions.ts",
+        "start_line": 131,
+        "end_line": 172,
+        "excerpt": "0131: export const SessionsPatchParamsSchema = Type.Object(\n0132:   {\n0133:     key: NonEmptyString,\n0134:     label: Type.Optional(Type.Union([SessionLabelString, Type.Null()])),\n0135:     thinkingLevel: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0136:     fastMode: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),\n0137:     verboseLevel: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0138:     traceLevel: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0139:     reasoningLevel: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0140:     responseUsage: Type.Optional(\n0141:       Type.Union([\n0142:         Type.Literal(\"off\"),\n0143:         Type.Literal(\"tokens\"),\n0144:         Type.Literal(\"full\"),\n0145:         // Backward compat with older clients/stores.\n0146:         Type.Literal(\"on\"),\n0147:         Type.Null(),\n0148:       ]),\n0149:     ),\n0150:     elevatedLevel: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0151:     execHost: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0152:     execSecurity: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0153:     execAsk: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0154:     execNode: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0155:     model: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0156:     spawnedBy: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0157:     spawnedWorkspaceDir: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),\n0158:     spawnDepth: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),\n0159:     subagentRole: Type.Optional(\n0160:       Type.Union([Type.Literal(\"orchestrator\"), Type.Literal(\"leaf\"), Type.Null()]),\n0161:     ),\n0162:     subagentControlScope: Type.Optional(\n0163:       Type.Union([Type.Literal(\"children\"), Type.Literal(\"none\"), Type.Null()]),\n0164:     ),\n0165:     sendPolicy: Type.Optional(\n0166:       Type.Union([Type.Literal(\"allow\"), Type.Literal(\"deny\"), Type.Null()]),\n0167:     ),\n0168:     groupActivation: Type.Optional(\n0169:       Type.Union([Type.Literal(\"mention\"), Type.Literal(\"always\"), Type.Null()]),\n0170:     ),\n0171:   },\n0172:   { additionalProperties: false },"
+      },
+      {
+        "span_id": "s7",
+        "path": "src/gateway/protocol/schema/sessions.ts",
+        "start_line": 97,
+        "end_line": 107,
+        "excerpt": "0097: export const SessionsSendParamsSchema = Type.Object(\n0098:   {\n0099:     key: NonEmptyString,\n0100:     message: Type.String(),\n0101:     thinking: Type.Optional(Type.String()),\n0102:     attachments: Type.Optional(Type.Array(Type.Unknown())),\n0103:     timeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),\n0104:     idempotencyKey: Type.Optional(NonEmptyString),\n0105:   },\n0106:   { additionalProperties: false },\n0107: );"
+      },
+      {
+        "span_id": "s8",
+        "path": "src/gateway/server-methods/sessions.ts",
+        "start_line": 1184,
+        "end_line": 1195,
+        "excerpt": "1184:   \"sessions.send\": async ({ req, params, respond, context, client, isWebchatConnect }) => {\n1185:     await handleSessionSend({\n1186:       method: \"sessions.send\",\n1187:       req,\n1188:       params,\n1189:       respond,\n1190:       context,\n1191:       client,\n1192:       isWebchatConnect,\n1193:       interruptIfActive: false,\n1194:     });\n1195:   },"
+      },
+      {
+        "span_id": "s9",
+        "path": "src/gateway/protocol/schema/sessions.ts",
+        "start_line": 38,
+        "end_line": 60,
+        "excerpt": "0038: export const SessionsListParamsSchema = Type.Object(\n0039:   {\n0040:     limit: Type.Optional(Type.Integer({ minimum: 1 })),\n0041:     activeMinutes: Type.Optional(Type.Integer({ minimum: 1 })),\n0042:     includeGlobal: Type.Optional(Type.Boolean()),\n0043:     includeUnknown: Type.Optional(Type.Boolean()),\n0044:     /**\n0045:      * Read first 8KB of each session transcript to derive title from first user message.\n0046:      * Performs a file read per session - use `limit` to bound result set on large stores.\n0047:      */\n0048:     includeDerivedTitles: Type.Optional(Type.Boolean()),\n0049:     /**\n0050:      * Read last 16KB of each session transcript to extract most recent message preview.\n0051:      * Performs a file read per session - use `limit` to bound result set on large stores.\n0052:      */\n0053:     includeLastMessage: Type.Optional(Type.Boolean()),\n0054:     label: Type.Optional(SessionLabelString),\n0055:     spawnedBy: Type.Optional(NonEmptyString),\n0056:     agentId: Type.Optional(NonEmptyString),\n0057:     search: Type.Optional(Type.String()),\n0058:   },\n0059:   { additionalProperties: false },\n0060: );"
+      },
+      {
+        "span_id": "s10",
+        "path": "src/gateway/protocol/schema/sessions.ts",
+        "start_line": 62,
+        "end_line": 69,
+        "excerpt": "0062: export const SessionsPreviewParamsSchema = Type.Object(\n0063:   {\n0064:     keys: Type.Array(NonEmptyString, { minItems: 1 }),\n0065:     limit: Type.Optional(Type.Integer({ minimum: 1 })),\n0066:     maxChars: Type.Optional(Type.Integer({ minimum: 20 })),\n0067:   },\n0068:   { additionalProperties: false },\n0069: );"
+      },
+      {
+        "span_id": "s11",
+        "path": "src/gateway/session-utils.types.ts",
+        "start_line": 79,
+        "end_line": 90,
+        "excerpt": "0079: export type SessionsPreviewEntry = {\n0080:   key: string;\n0081:   status: \"ok\" | \"empty\" | \"missing\" | \"error\";\n0082:   items: SessionPreviewItem[];\n0083: };\n0084: \n0085: export type SessionsPreviewResult = {\n0086:   ts: number;\n0087:   previews: SessionsPreviewEntry[];\n0088: };\n0089: \n0090: export type SessionsListResult = SessionsListResultBase<GatewaySessionsDefaults, GatewaySessionRow>;"
+      },
+      {
+        "span_id": "s12",
+        "path": "src/gateway/protocol/schema/sessions.ts",
+        "start_line": 175,
+        "end_line": 180,
+        "excerpt": "0175: export const SessionsResetParamsSchema = Type.Object(\n0176:   {\n0177:     key: NonEmptyString,\n0178:     reason: Type.Optional(Type.Union([Type.Literal(\"new\"), Type.Literal(\"reset\")])),\n0179:   },\n0180:   { additionalProperties: false },"
+      },
+      {
+        "span_id": "s13",
+        "path": "src/gateway/protocol/schema/sessions.ts",
+        "start_line": 193,
+        "end_line": 199,
+        "excerpt": "0193: export const SessionsCompactParamsSchema = Type.Object(\n0194:   {\n0195:     key: NonEmptyString,\n0196:     maxLines: Type.Optional(Type.Integer({ minimum: 1 })),\n0197:   },\n0198:   { additionalProperties: false },\n0199: );"
+      },
+      {
+        "span_id": "s14",
+        "path": "src/gateway/client.ts",
+        "start_line": 341,
+        "end_line": 372,
+        "excerpt": "0341:   stop() {\n0342:     void this.beginStop();\n0343:   }\n0344: \n0345:   async stopAndWait(opts?: { timeoutMs?: number }): Promise<void> {\n0346:     // Some callers need teardown ordering, not just \"close requested\". Wait for\n0347:     // the socket to close or the terminate fallback to fire.\n0348:     const stopPromise = this.beginStop();\n0349:     if (!stopPromise) {\n0350:       return;\n0351:     }\n0352:     const timeoutMs =\n0353:       typeof opts?.timeoutMs === \"number\" && Number.isFinite(opts.timeoutMs)\n0354:         ? Math.max(1, Math.floor(opts.timeoutMs))\n0355:         : STOP_AND_WAIT_TIMEOUT_MS;\n0356:     let timeout: NodeJS.Timeout | null = null;\n0357:     try {\n0358:       await Promise.race([\n0359:         stopPromise,\n0360:         new Promise<never>((_, reject) => {\n0361:           timeout = setTimeout(() => {\n0362:             reject(new Error(`gateway client stop timed out after ${timeoutMs}ms`));\n0363:           }, timeoutMs);\n0364:           timeout.unref?.();\n0365:         }),\n0366:       ]);\n0367:     } finally {\n0368:       if (timeout) {\n0369:         clearTimeout(timeout);\n0370:       }\n0371:     }\n0372:   }"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_86039432fcf8",
+    "topic": "cross_session_channel_context_and_session_behavior_requests",
+    "question": "Our long sessions are blowing the context window and the model keeps re-reading stale turns, so I'm building a custom plugin that takes over how the conversation is fed to the model: I only want to surface the last handful of turns each prompt, and I still want the model to get our usual \"save this to memory / cite your sources\" house rules, but only on runs where the memory tools are actually loaded. The one thing I do NOT want to reinvent is the summarizer \u2014 when the window finally overflows or someone runs the manual cleanup command, it should just reuse whatever OpenClaw already does to shrink the transcript.\n\nSince my plugin is the thing now deciding what goes to the model and when the transcript gets trimmed, I set it up to own the trimming lifecycle so the host's automatic trimming doesn't fight mine, and I left the manual/overflow cleanup hook empty for now expecting the host to cover that case on its own. With that ownership flag set, my house-rules text still isn't showing up on memory-enabled runs, and manual cleanup does nothing. Wire up the plugin registration and the implementation so the recent-turns window, the conditional house-rules text, and the reuse of the existing shrink behavior all work.",
+    "gold_answer": "```ts\nimport type { AgentMessage } from '@mariozechner/pi-agent-core';\nimport {\n  buildMemorySystemPromptAddition,\n  delegateCompactionToRuntime,\n  type ContextEngine,\n} from 'openclaw/plugin-sdk';\nimport { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';\n\nconst MAX_BUFFER = 24;\nconst MAX_WORKING_SET = 8;\n\nexport default definePluginEntry({\n  id: 'viewport-context',\n  name: 'Viewport Context',\n  description: 'Keep a short working set in front of the model.',\n  register(api) {\n    api.registerContextEngine('viewport-context', () => {\n      const bySession = new Map<string, AgentMessage[]>();\n\n      return {\n        info: {\n          id: 'viewport-context',\n          name: 'Viewport Context',\n          ownsCompaction: false,\n        },\n        async ingest({ sessionId, message }) {\n          const next = [...(bySession.get(sessionId) ?? []), message].slice(-MAX_BUFFER);\n          bySession.set(sessionId, next);\n          return { ingested: true };\n        },\n        async assemble({ sessionId, messages, availableTools, citationsMode }) {\n          const workingSet = (bySession.get(sessionId) ?? messages).slice(-MAX_WORKING_SET);\n          const estimatedTokens = Math.ceil(\n            workingSet.reduce((sum, message) => sum + JSON.stringify(message).length / 4, 0),\n          );\n\n          return {\n            messages: workingSet,\n            estimatedTokens,\n            systemPromptAddition: buildMemorySystemPromptAddition({\n              availableTools: availableTools ?? new Set<string>(),\n              citationsMode,\n            }),\n          };\n        },\n        compact: delegateCompactionToRuntime,\n        async dispose() {\n          bySession.clear();\n        },\n      } satisfies ContextEngine;\n    });\n  },\n});\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 30,
+        "statement": "Registers the engine through the plugin API method api.registerContextEngine(id, factory) with a custom id and returns a ContextEngine from the factory. If the answer instead reaches for the bundled/internal registerContextEngineForOwner or the bundled LegacyContextEngine, or wires an unrelated plugin surface (registerProvider/sanitizeReplayHistory, registerSystemPromptContribution, registerReplayCompactionHandler) or an invented host hook (e.g. registerConversationPlugin/buildPrompt), it does NOT satisfy this claim.",
+        "span_ids": [
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 22,
+        "statement": "The ContextEngine's assemble() returns only a recent subset of messages (a short working window via a tail slice), NOT the full transcript.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 24,
+        "statement": "assemble() builds its systemPromptAddition by calling buildMemorySystemPromptAddition({ availableTools, citationsMode }) using the assemble inputs availableTools and citationsMode (which yields the house-rules text only when memory tools/builder are loaded). It must NOT hand-roll the house-rules text from a config string or by manually inspecting the tool list.",
+        "span_ids": [
+          "s1",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "core",
+        "weight": 14,
+        "statement": "compact() delegates to delegateCompactionToRuntime (e.g. compact: delegateCompactionToRuntime) so manual/overflow compaction reuses OpenClaw's built-in runtime path. It must NOT be left empty/no-op and must NOT call an invented summarizer such as summarizeWithFallback or host.shrinkContext.",
+        "span_ids": [
+          "s2",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "info.ownsCompaction is set to FALSE (and the answer does NOT introduce an ownsTranscriptLifecycle:true / lifecycle-ownership flag). Setting ownership true is the question's trap: it disables the built-in compaction the user wants to keep and suppresses the assemble/system-prompt path.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/context-engine/types.ts",
+        "start_line": 240,
+        "end_line": 274,
+        "excerpt": "0240:   assemble(params: {\n0241:     sessionId: string;\n0242:     sessionKey?: string;\n0243:     messages: AgentMessage[];\n0244:     tokenBudget?: number;\n0245:     /** Tool names available for this run so engines can align prompt guidance with runtime tool access. */\n0246:     availableTools?: Set<string>;\n0247:     /** Active memory citation mode when engines want to mirror memory prompt guidance. */\n0248:     citationsMode?: MemoryCitationsMode;\n0249:     /** Current model identifier (e.g. \"claude-opus-4\", \"gpt-4o\", \"qwen2.5-7b\").\n0250:      *  Allows context engine plugins to adapt formatting per model. */\n0251:     model?: string;\n0252:     /** The incoming user prompt for this turn (useful for retrieval-oriented engines). */\n0253:     prompt?: string;\n0254:   }): Promise<AssembleResult>;\n0255: \n0256:   /**\n0257:    * Compact context to reduce token usage.\n0258:    * May create summaries, prune old turns, etc.\n0259:    */\n0260:   compact(params: {\n0261:     sessionId: string;\n0262:     sessionKey?: string;\n0263:     sessionFile: string;\n0264:     tokenBudget?: number;\n0265:     /** Force compaction even below the default trigger threshold. */\n0266:     force?: boolean;\n0267:     /** Optional live token estimate from the caller's active context. */\n0268:     currentTokenCount?: number;\n0269:     /** Controls convergence target; defaults to budget. */\n0270:     compactionTarget?: \"budget\" | \"threshold\";\n0271:     customInstructions?: string;\n0272:     /** Optional runtime-owned context for engines that need caller state. */\n0273:     runtimeContext?: ContextEngineRuntimeContext;\n0274:   }): Promise<CompactResult>;"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/context-engine/delegate.ts",
+        "start_line": 20,
+        "end_line": 35,
+        "excerpt": "0020: /**\n0021:  * Delegate a context-engine compaction request to OpenClaw's built-in runtime compaction path.\n0022:  *\n0023:  * This is the same bridge used by the legacy context engine. Third-party\n0024:  * engines can call it from their own `compact()` implementations when they do\n0025:  * not own the compaction algorithm but still need `/compact` and overflow\n0026:  * recovery to use the stock runtime behavior.\n0027:  *\n0028:  * Note: `compactionTarget` is part of the public `compact()` contract, but the\n0029:  * built-in runtime compaction path does not expose that knob. This helper\n0030:  * ignores it to preserve legacy behavior; engines that need target-specific\n0031:  * compaction should implement their own `compact()` algorithm.\n0032:  */\n0033: export async function delegateCompactionToRuntime(\n0034:   params: Parameters<ContextEngine[\"compact\"]>[0],\n0035: ): Promise<CompactResult> {"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/context-engine/delegate.ts",
+        "start_line": 82,
+        "end_line": 100,
+        "excerpt": "0082: /**\n0083:  * Build a context-engine-ready systemPromptAddition from the active memory\n0084:  * plugin prompt path. This lets non-legacy engines explicitly opt into the\n0085:  * same memory/wiki guidance that the legacy engine gets via system prompt\n0086:  * assembly, without reimplementing memory prompt formatting.\n0087:  */\n0088: export function buildMemorySystemPromptAddition(params: {\n0089:   availableTools: Set<string>;\n0090:   citationsMode?: MemoryCitationsMode;\n0091: }): string | undefined {\n0092:   const lines = buildMemoryPromptSection({\n0093:     availableTools: params.availableTools,\n0094:     citationsMode: params.citationsMode,\n0095:   });\n0096:   if (lines.length === 0) {\n0097:     return undefined;\n0098:   }\n0099:   const normalized = normalizeStructuredPromptSection(lines.join(\"\\n\"));\n0100:   return normalized || undefined;"
+      },
+      {
+        "span_id": "s4",
+        "path": "src/plugins/types.ts",
+        "start_line": 1971,
+        "end_line": 1976,
+        "excerpt": "1971:   registerCommand: (command: OpenClawPluginCommandDefinition) => void;\n1972:   /** Register a context engine implementation (exclusive slot - only one active at a time). */\n1973:   registerContextEngine: (\n1974:     id: string,\n1975:     factory: import(\"../context-engine/registry.js\").ContextEngineFactory,\n1976:   ) => void;"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_86eeaa64c72f",
+    "topic": "cross_session_channel_context_and_session_behavior_requests",
+    "question": "On my single agent the model choice ends up far too sticky. The moment a message looks like real coding work I switch it onto a stronger provider/model, but that switch then bleeds into the rest of the conversation \u2014 the next \"what's the capital of X\" style one-liner is still pinned to the heavyweight model instead of being decided fresh on its own prompt. What I actually want: keep exactly one agent, but on every incoming prompt look at that prompt, decide whether it's coding work or a lightweight factual question, send just that one turn to the matching provider/model, and quietly slip a one-line note about which lane it picked into the prompt the agent assembles \u2014 with zero carry-over to later turns.\n\nThe way I'm doing it now is the problem: when I classify a turn I stamp the chosen provider and model onto that conversation's stored entry so the run can pick them up, but of course the next turn just reads the same stamped entry back and stays on the big model. I'd rather not babysit a per-conversation override record at all. Give me a single self-contained bundled plugin entry (id/name/description plus its registration body) that wires this whole thing up through the plugin's own lifecycle, so the choice lives and dies inside one prompt. A short, copy-pasteable entry is fine.",
+    "gold_answer": "```ts\nimport { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';\n\ntype RouteDecision = {\n  provider: string;\n  model: string;\n  note: string;\n};\n\nfunction pickRoute(prompt: string): RouteDecision | undefined {\n  const text = prompt.toLowerCase();\n\n  if (['code', 'debug', 'refactor', 'fix', 'typescript', 'javascript', 'python'].some((token) => text.includes(token))) {\n    return {\n      provider: 'anthropic',\n      model: 'sonnet-4.6',\n      note: 'coding-style prompt -> anthropic/sonnet-4.6',\n    };\n  }\n\n  if (\n    text.length < 240 &&\n    ['weather', 'time', 'translate', 'summarize', 'who is', 'what is'].some((token) => text.includes(token))\n  ) {\n    return {\n      provider: 'openai',\n      model: 'gpt-5.4-mini',\n      note: 'light factual prompt -> openai/gpt-5.4-mini',\n    };\n  }\n\n  return undefined;\n}\n\nexport default definePluginEntry({\n  id: 'smart-model-router',\n  name: 'Smart Model Router',\n  description: 'Per-message model selection without sticky session overrides.',\n  register(api) {\n    api.on('before_model_resolve', async (event) => {\n      const route = pickRoute(event.prompt);\n      return route\n        ? {\n            providerOverride: route.provider,\n            modelOverride: route.model,\n          }\n        : undefined;\n    });\n\n    api.on('before_prompt_build', async (event) => {\n      const route = pickRoute(event.prompt);\n      return route\n        ? {\n            prependContext: `Routing note: ${route.note}`,\n          }\n        : undefined;\n    });\n  },\n});\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 18,
+        "statement": "Exports exactly ONE self-contained bundled plugin entry built with `definePluginEntry({...})` (the canonical non-channel entry helper imported from `openclaw/plugin-sdk/plugin-entry`) carrying id/name/description plus a `register(api)` body \u2014 NOT a hand-rolled `export default {}` object literal and NOT an invented/host-specific plugin framework shape.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 32,
+        "statement": "If it picks the per-run provider/model, it MUST do so by registering an `api.on('before_model_resolve', ...)` handler whose returned object carries `providerOverride` and/or `modelOverride` for that single run \u2014 NOT by writing/stamping a sticky `modelOverride`/`providerOverride` onto the persisted session/conversation entry, and NOT via a custom `ProviderPlugin`/`registerProvider`+`normalizeModelId` path or an invented `selectModel` hook returning `{provider, model}`.",
+        "span_ids": [
+          "s2",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 22,
+        "statement": "If it adds the one-line routing note, it MUST come from an `api.on('before_prompt_build', ...)` handler that RETURNS `prependContext` (the per-run prompt-injection result field) \u2014 NOT by mutating stored session/prompt state, e.g. a `setSystemPrompt(...)` callback or a provider `transformSystemPrompt`.",
+        "span_ids": [
+          "s3",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "core",
+        "weight": 14,
+        "statement": "Classifies the current incoming prompt as coding work vs lightweight factual and maps each class to a different concrete provider/model pair (so each run is decided fresh from that prompt).",
+        "span_ids": [
+          "s2",
+          "s3"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 14,
+        "statement": "Wires the behavior through the TWO granular per-run hooks (`before_model_resolve` + `before_prompt_build`) registered via `api.on`, NOT through the legacy combined `before_agent_start` hook.",
+        "span_ids": [
+          "s2",
+          "s3",
+          "s5"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/plugin-sdk/plugin-entry.ts",
+        "start_line": 174,
+        "end_line": 181,
+        "excerpt": "0174: /**\n0175:  * Canonical entry helper for non-channel plugins.\n0176:  *\n0177:  * Use this for provider, tool, command, service, memory, and context-engine\n0178:  * plugins. Channel plugins should use `defineChannelPluginEntry(...)` from\n0179:  * `openclaw/plugin-sdk/core` so they inherit the channel capability wiring.\n0180:  */\n0181: export function definePluginEntry({"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/plugins/hook-before-agent-start.types.ts",
+        "start_line": 1,
+        "end_line": 12,
+        "excerpt": "0001: // before_model_resolve hook\n0002: export type PluginHookBeforeModelResolveEvent = {\n0003:   /** User prompt for this run. No session messages are available yet in this phase. */\n0004:   prompt: string;\n0005: };\n0006: \n0007: export type PluginHookBeforeModelResolveResult = {\n0008:   /** Override the model for this agent run. E.g. \"llama3.3:8b\" */\n0009:   modelOverride?: string;\n0010:   /** Override the provider for this agent run. E.g. \"local-provider\" */\n0011:   providerOverride?: string;\n0012: };"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/plugins/hook-before-agent-start.types.ts",
+        "start_line": 14,
+        "end_line": 34,
+        "excerpt": "0014: // before_prompt_build hook\n0015: export type PluginHookBeforePromptBuildEvent = {\n0016:   prompt: string;\n0017:   /** Session messages prepared for this run. */\n0018:   messages: unknown[];\n0019: };\n0020: \n0021: export type PluginHookBeforePromptBuildResult = {\n0022:   systemPrompt?: string;\n0023:   prependContext?: string;\n0024:   /**\n0025:    * Prepended to the agent system prompt so providers can cache it (e.g. prompt caching).\n0026:    * Use for static plugin guidance instead of prependContext to avoid per-turn token cost.\n0027:    */\n0028:   prependSystemContext?: string;\n0029:   /**\n0030:    * Appended to the agent system prompt so providers can cache it (e.g. prompt caching).\n0031:    * Use for static plugin guidance instead of prependContext to avoid per-turn token cost.\n0032:    */\n0033:   appendSystemContext?: string;\n0034: };"
+      },
+      {
+        "span_id": "s4",
+        "path": "src/plugins/types.ts",
+        "start_line": 2017,
+        "end_line": 2022,
+        "excerpt": "2017:   /** Register a lifecycle hook handler */\n2018:   on: <K extends PluginHookName>(\n2019:     hookName: K,\n2020:     handler: PluginHookHandlerMap[K],\n2021:     opts?: { priority?: number },\n2022:   ) => void;"
+      },
+      {
+        "span_id": "s5",
+        "path": "src/plugins/hook-before-agent-start.types.ts",
+        "start_line": 52,
+        "end_line": 60,
+        "excerpt": "0052: // before_agent_start hook (legacy compatibility: combines both phases)\n0053: export type PluginHookBeforeAgentStartEvent = {\n0054:   prompt: string;\n0055:   /** Optional because legacy hook can run in pre-session phase. */\n0056:   messages?: unknown[];\n0057: };\n0058: \n0059: export type PluginHookBeforeAgentStartResult = PluginHookBeforePromptBuildResult &\n0060:   PluginHookBeforeModelResolveResult;"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_8eca7a1eac56",
+    "topic": "new_plugin_provider_and_channel_integration_requests",
+    "question": "Our team ships a community provider plugin for OpenClaw. To keep our own imports tidy we added a small sdk.ts barrel in our package that pulls the OpenClaw plugin helpers we use and re-exports them, so the rest of our package imports from ./sdk instead of reaching into openclaw/... everywhere. Right now sdk.ts just does `export * from \"openclaw/plugin-sdk\"` (plus a couple of named re-exports from the same module), and our package entry imports its plugin-entry helper and the channel schema helpers from that local barrel.\n\nWe're adding a tiny \"smoke\" surface so our package-discovery check exercises both the messaging-channel and the text-inference integration paths end to end: one throwaway channel and one throwaway inference provider, wired through the package's default entry. The provider should actually yield a provider+model definition when discovery probes it, not just sit there as an id.\n\nWrite the package entry (the default export) and show what the local sdk.ts barrel needs to re-export to support it. Keep the local barrel as the single import surface for our package code.",
+    "gold_answer": "A package can expose a narrow local surface while consuming scoped OpenClaw SDK imports internally.\n\n```ts\nexport { definePluginEntry } from \"openclaw/plugin-sdk/plugin-entry\";\nexport { defineChannelPluginEntry, type ChannelPlugin } from \"openclaw/plugin-sdk/channel-core\";\nexport { jsonResult } from \"openclaw/plugin-sdk/channel-actions\";\n\nimport { Type } from \"@sinclair/typebox\";\nimport { definePluginEntry, type OpenClawPluginApi } from \"openclaw/plugin-sdk/plugin-entry\";\nimport { jsonResult } from \"openclaw/plugin-sdk/channel-actions\";\nimport type { ChannelPlugin } from \"openclaw/plugin-sdk/channel-core\";\n\nconst smokeChannel = {\n  id: \"community-smoke-channel\",\n  meta: { id: \"community-smoke-channel\", label: \"Community Smoke\", selectionLabel: \"Community Smoke\", docsPath: \"/channels/community-smoke\", blurb: \"Smoke-test channel for package discovery.\" },\n  capabilities: { chatTypes: [\"direct\"] },\n  config: { listAccountIds: () => [\"default\"], defaultAccountId: () => \"default\", resolveAccount: () => ({ accountId: \"default\" }) },\n  agentTools: [\n    { name: \"community_smoke\", label: \"Community Smoke\", description: \"Return a structured smoke result.\", parameters: Type.Object({}), execute: async () => jsonResult({ ok: true, surface: \"channel\" }) },\n  ],\n} satisfies ChannelPlugin<{ accountId: string }>;\n\nfunction registerSmokeProvider(api: OpenClawPluginApi) {\n  api.registerProvider({\n    id: \"community-smoke-provider\",\n    label: \"Community Smoke Provider\",\n    docsPath: \"/providers/community-smoke\",\n    auth: [],\n    catalog: {\n      order: \"simple\",\n      run: async () => ({ provider: { baseUrl: \"http://127.0.0.1:9/v1\", api: \"openai-completions\", models: [{ id: \"smoke-model\", name: \"Smoke Model\", reasoning: false, input: [\"text\"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1024, maxTokens: 256 }] } }),\n    },\n  });\n}\n\nexport default definePluginEntry({\n  id: \"community-sdk-smoke\",\n  name: \"Community SDK Smoke\",\n  description: \"Narrow SDK barrel plus smoke channel/provider registration.\",\n  register(api) { api.registerChannel({ plugin: smokeChannel }); registerSmokeProvider(api); },\n});\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 44,
+        "statement": "The local sdk.ts re-exports the plugin/channel VALUE helpers it needs from explicit Plugin SDK subpaths -- definePluginEntry from `openclaw/plugin-sdk/plugin-entry`, the channel-entry helper (e.g. defineChannelPluginEntry) and ChannelPlugin from `openclaw/plugin-sdk/channel-core`, and the channel result helper (e.g. jsonResult) from `openclaw/plugin-sdk/channel-actions`. It does NOT rely on `export * from \"openclaw/plugin-sdk\"` (the root barrel) to supply these value helpers (the root barrel is intentionally type-only plus a few unrelated runtime values and does not export definePluginEntry or the channel value helpers); a harmless `export *` of the root barrel may also be present but the entry helpers must come from the explicit subpaths.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 28,
+        "statement": "The package entry registers the smoke channel by calling `api.registerChannel(...)` with a ChannelPlugin value (passed directly or wrapped as `{ plugin: ... }`) -- NOT by registering a generic agent tool via `api.registerTool(...)`/`api.registerAgentTool(...)` and NOT by declaring a `channels: [...]` array on the plugin definition.",
+        "span_ids": [
+          "s5"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 8,
+        "statement": "The package's default export is produced by `definePluginEntry({ ... })` (the curated SDK entry helper), used as the stable plugin entrypoint.",
+        "span_ids": [
+          "s3",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "core",
+        "weight": 8,
+        "statement": "Inside the entry's register(api) callback, the smoke provider is registered via `api.registerProvider(...)`.",
+        "span_ids": [
+          "s5"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 12,
+        "statement": "The smoke provider supplies a `catalog.run` (the ProviderPluginCatalog hook) whose async return is a ProviderCatalogResult provider/model payload (a `{ provider: ... }` or `{ providers: ... }` object carrying at least one model definition), so discovery exercises the provider path -- not just a bare `{ id, label, auth }` provider stub with no catalog/discovery hook.",
+        "span_ids": [
+          "s7",
+          "s8"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/plugin-sdk/entrypoints.ts",
+        "start_line": 12,
+        "end_line": 20,
+        "excerpt": "0012: /** List the public package specifiers that should resolve to plugin SDK entrypoints. */\n0013: export function buildPluginSdkSpecifiers() {\n0014:   return pluginSdkEntrypoints.map((entry) =>\n0015:     entry === \"index\" ? \"openclaw/plugin-sdk\" : `openclaw/plugin-sdk/${entry}`,\n0016:   );\n0017: }\n0018: \n0019: /** Build the package.json exports map for all plugin SDK subpaths. */\n0020: export function buildPluginSdkPackageExports() {"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/plugins/contracts/plugin-sdk-subpaths.test.ts",
+        "start_line": 1096,
+        "end_line": 1120,
+        "excerpt": "1096:   it(\"keeps runtime entry subpaths importable\", async () => {\n1097:     const coreSdk = await importResolvedPluginSdkSubpath(\"openclaw/plugin-sdk/core\");\n1098:     const channelActionsSdk = await importResolvedPluginSdkSubpath(\n1099:       \"openclaw/plugin-sdk/channel-actions\",\n1100:     );\n1101:     const globalSingletonSdk = await importResolvedPluginSdkSubpath(\n1102:       \"openclaw/plugin-sdk/global-singleton\",\n1103:     );\n1104:     const textRuntimeSdk = await importResolvedPluginSdkSubpath(\"openclaw/plugin-sdk/text-runtime\");\n1105:     const pluginEntrySdk = await importResolvedPluginSdkSubpath(\"openclaw/plugin-sdk/plugin-entry\");\n1106:     const channelLifecycleSdk = await importResolvedPluginSdkSubpath(\n1107:       \"openclaw/plugin-sdk/channel-lifecycle\",\n1108:     );\n1109:     const channelPairingSdk = await importResolvedPluginSdkSubpath(\n1110:       \"openclaw/plugin-sdk/channel-pairing\",\n1111:     );\n1112:     const channelReplyPipelineSdk = await importResolvedPluginSdkSubpath(\n1113:       \"openclaw/plugin-sdk/channel-reply-pipeline\",\n1114:     );\n1115:     const representativeModules = [];\n1116:     for (const id of representativeRuntimeSmokeSubpaths) {\n1117:       representativeModules.push(await importResolvedPluginSdkSubpath(`openclaw/plugin-sdk/${id}`));\n1118:     }\n1119: \n1120:     expect(coreSdk.definePluginEntry).toBe(pluginEntrySdk.definePluginEntry);"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/plugins/contracts/plugin-sdk-subpaths.test.ts",
+        "start_line": 400,
+        "end_line": 411,
+        "excerpt": "0400: \n0401:   it(\"keeps helper subpaths aligned\", () => {\n0402:     expectSourceMentions(\"core\", [\n0403:       \"emptyPluginConfigSchema\",\n0404:       \"definePluginEntry\",\n0405:       \"defineChannelPluginEntry\",\n0406:       \"defineSetupPluginEntry\",\n0407:       \"createChatChannelPlugin\",\n0408:       \"createChannelPluginBase\",\n0409:       \"isSecretRef\",\n0410:       \"optionalStringEnum\",\n0411:     ]);"
+      },
+      {
+        "span_id": "s4",
+        "path": "src/plugins/contracts/plugin-sdk-subpaths.test.ts",
+        "start_line": 1104,
+        "end_line": 1121,
+        "excerpt": "1104:     const textRuntimeSdk = await importResolvedPluginSdkSubpath(\"openclaw/plugin-sdk/text-runtime\");\n1105:     const pluginEntrySdk = await importResolvedPluginSdkSubpath(\"openclaw/plugin-sdk/plugin-entry\");\n1106:     const channelLifecycleSdk = await importResolvedPluginSdkSubpath(\n1107:       \"openclaw/plugin-sdk/channel-lifecycle\",\n1108:     );\n1109:     const channelPairingSdk = await importResolvedPluginSdkSubpath(\n1110:       \"openclaw/plugin-sdk/channel-pairing\",\n1111:     );\n1112:     const channelReplyPipelineSdk = await importResolvedPluginSdkSubpath(\n1113:       \"openclaw/plugin-sdk/channel-reply-pipeline\",\n1114:     );\n1115:     const representativeModules = [];\n1116:     for (const id of representativeRuntimeSmokeSubpaths) {\n1117:       representativeModules.push(await importResolvedPluginSdkSubpath(`openclaw/plugin-sdk/${id}`));\n1118:     }\n1119: \n1120:     expect(coreSdk.definePluginEntry).toBe(pluginEntrySdk.definePluginEntry);\n1121:     expect(typeof coreSdk.optionalStringEnum).toBe(\"function\");"
+      },
+      {
+        "span_id": "s5",
+        "path": "src/plugins/types.ts",
+        "start_line": 1900,
+        "end_line": 1944,
+        "excerpt": "1900:   registerHttpRoute: (params: OpenClawPluginHttpRouteParams) => void;\n1901:   /** Register a native messaging channel plugin (channel capability). */\n1902:   registerChannel: (registration: OpenClawPluginChannelRegistration | ChannelPlugin) => void;\n1903:   /**\n1904:    * Register a gateway RPC method for this plugin.\n1905:    *\n1906:    * Reserved core admin namespaces (`config.*`, `exec.approvals.*`,\n1907:    * `wizard.*`, `update.*`) always normalize to `operator.admin` even if a\n1908:    * narrower scope is requested.\n1909:    */\n1910:   registerGatewayMethod: (\n1911:     method: string,\n1912:     handler: GatewayRequestHandler,\n1913:     opts?: { scope?: OperatorScope },\n1914:   ) => void;\n1915:   registerCli: (\n1916:     registrar: OpenClawPluginCliRegistrar,\n1917:     opts?: {\n1918:       /** Explicit top-level command roots owned by this registrar. */\n1919:       commands?: string[];\n1920:       /**\n1921:        * Parse-time command descriptors for lazy root CLI registration.\n1922:        *\n1923:        * When descriptors cover every top-level command root, OpenClaw can keep\n1924:        * the plugin registrar lazy in the normal root CLI path. Command-only\n1925:        * registrations stay on the eager compatibility path.\n1926:        */\n1927:       descriptors?: OpenClawPluginCliCommandDescriptor[];\n1928:     },\n1929:   ) => void;\n1930:   registerReload: (registration: OpenClawPluginReloadRegistration) => void;\n1931:   registerNodeHostCommand: (command: OpenClawPluginNodeHostCommand) => void;\n1932:   registerSecurityAuditCollector: (collector: OpenClawPluginSecurityAuditCollector) => void;\n1933:   registerService: (service: OpenClawPluginService) => void;\n1934:   /** Register a text-only CLI backend used by the local CLI runner. */\n1935:   registerCliBackend: (backend: CliBackendPlugin) => void;\n1936:   /** Register plugin-owned prompt/message compatibility text transforms. */\n1937:   registerTextTransforms: (transforms: PluginTextTransformRegistration) => void;\n1938:   /** Register a lightweight config migration that can run before plugin runtime loads. */\n1939:   registerConfigMigration: (migrate: PluginConfigMigration) => void;\n1940:   /** Register a lightweight config probe that can auto-enable this plugin generically. */\n1941:   registerAutoEnableProbe: (probe: PluginSetupAutoEnableProbe) => void;\n1942:   /** Register a native model/provider plugin (text inference capability). */\n1943:   registerProvider: (provider: ProviderPlugin) => void;\n1944:   /** Register a speech synthesis provider (speech capability). */"
+      },
+      {
+        "span_id": "s6",
+        "path": "src/plugins/types.ts",
+        "start_line": 104,
+        "end_line": 119,
+        "excerpt": "0104:   ProviderResolveExternalOAuthProfilesContext,\n0105:   ProviderResolveSyntheticAuthContext,\n0106:   ProviderSyntheticAuthResult,\n0107: } from \"./provider-external-auth.types.js\";\n0108: import type { createVpsAwareOAuthHandlers } from \"./provider-oauth-flow.js\";\n0109: import type { ProviderRuntimeModel } from \"./provider-runtime-model.types.js\";\n0110: import type {\n0111:   ProviderDefaultThinkingPolicyContext,\n0112:   ProviderThinkingPolicyContext,\n0113: } from \"./provider-thinking.types.js\";\n0114: import type { PluginRuntime } from \"./runtime/types.js\";\n0115: import type {\n0116:   OpenClawPluginHookOptions,\n0117:   OpenClawPluginToolContext,\n0118:   OpenClawPluginToolFactory,\n0119:   OpenClawPluginToolOptions,"
+      },
+      {
+        "span_id": "s7",
+        "path": "src/plugins/types.ts",
+        "start_line": 1341,
+        "end_line": 1384,
+        "excerpt": "1341:   /**\n1342:    * Provider-owned failover error classification.\n1343:    *\n1344:    * Return a failover reason when the provider recognizes a provider-specific\n1345:    * raw error shape. Return undefined to fall back to generic classification.\n1346:    */\n1347:   classifyFailoverReason?: (ctx: ProviderFailoverErrorContext) => FailoverReason | null | undefined;\n1348:   /**\n1349:    * Provider-owned cache TTL eligibility.\n1350:    *\n1351:    * Use this when a proxy provider supports Anthropic-style prompt caching for\n1352:    * only a subset of upstream models.\n1353:    */\n1354:   isCacheTtlEligible?: (ctx: ProviderCacheTtlEligibilityContext) => boolean | undefined;\n1355:   /**\n1356:    * Provider-owned missing-auth message override.\n1357:    *\n1358:    * Return a custom message when the provider wants a more specific recovery\n1359:    * hint than OpenClaw's generic auth-store guidance.\n1360:    */\n1361:   buildMissingAuthMessage?: (\n1362:     ctx: ProviderBuildMissingAuthMessageContext,\n1363:   ) => string | null | undefined;\n1364:   /**\n1365:    * Provider-owned unknown-model hint override.\n1366:    *\n1367:    * Return a suffix when the provider wants a more specific recovery hint than\n1368:    * OpenClaw's generic `Unknown model` error after catalog/runtime lookup\n1369:    * fails.\n1370:    */\n1371:   buildUnknownModelHint?: (ctx: ProviderBuildUnknownModelHintContext) => string | null | undefined;\n1372:   /**\n1373:    * Provider-owned built-in model suppression.\n1374:    *\n1375:    * Return `{ suppress: true }` to hide a stale upstream row. Include\n1376:    * `errorMessage` when OpenClaw should surface a provider-specific hint for\n1377:    * direct model resolution failures.\n1378:    */\n1379:   suppressBuiltInModel?: (\n1380:     ctx: ProviderBuiltInModelSuppressionContext,\n1381:   ) => ProviderBuiltInModelSuppressionResult | null | undefined;\n1382:   /**\n1383:    * Provider-owned final catalog augmentation.\n1384:    *"
+      },
+      {
+        "span_id": "s8",
+        "path": "src/plugins/types.ts",
+        "start_line": 366,
+        "end_line": 375,
+        "excerpt": "0366: export type ProviderCatalogResult =\n0367:   | { provider: ModelProviderConfig }\n0368:   | { providers: Record<string, ModelProviderConfig> }\n0369:   | null\n0370:   | undefined;\n0371: \n0372: export type ProviderPluginCatalog = {\n0373:   order?: ProviderCatalogOrder;\n0374:   run: (ctx: ProviderCatalogContext) => Promise<ProviderCatalogResult>;\n0375: };"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_9962b90fd048",
+    "topic": "memory_core_dreaming_and_promotion_pipeline",
+    "question": "Our short-term-memory promotion engine ranks snippets by how often they get recalled. It works when humans drive recall from the `openclaw memory search` command, but when the model calls the `memory_search` tool during a session, those recalls never show up in the promotion store, so model-driven usage never promotes anything.\n\nI wired the tool the same way the command does: right after the semantic search returns, I fire the recall recorder with the search results, without awaiting it so a slow write can't stall the tool, swallowing any error. I pull the timezone off the agent's configured user timezone so the day buckets line up with when the user is active. But promotions still look off \u2014 snippets that the model clearly leaned on aren't getting promoted, and some stored entries look weirdly mangled (they have trailing `Source:` reference lines baked into them, and a few look cut off mid-sentence). Other entries that the model never even saw seem to be getting counted.\n\nWalk me through what the tool path actually has to do differently from the command path here, and why my current wiring produces those mangled / phantom entries. What exactly should get handed to the recorder, and keyed how?",
+    "gold_answer": "```ts\nimport type {\n  MemorySearchManager,\n  MemorySearchResult,\n  MemorySearchRuntimeDebug,\n} from 'openclaw/plugin-sdk/memory-core-host-runtime-files';\nimport type { OpenClawConfig } from 'openclaw/plugin-sdk/memory-core-host-runtime-core';\nimport {\n  resolveMemoryCorePluginConfig,\n  resolveMemoryDeepDreamingConfig,\n} from 'openclaw/plugin-sdk/memory-core-host-status';\nimport { recordShortTermRecalls } from './short-term-promotion.js';\nimport { clampResultsByInjectedChars, decorateCitations } from './tools.citations.js';\nimport { loadMemoryToolRuntime } from './tools.shared.js';\n\n// The promotion store keys recalls by the snapshot's stable result identity:\n// (source, path, startLine, endLine) \u2014 NOT by snippet text or a tool-call id.\nfunction buildRecallKey(\n  result: Pick<MemorySearchResult, 'source' | 'path' | 'startLine' | 'endLine'>,\n): string {\n  return `${result.source}:${result.path}:${result.startLine}:${result.endLine}`;\n}\n\n// The tool path's extra step the command path never needs: map each result that\n// was actually SURFACED to the model (post-decorate + post-qmd-clamp) back to its\n// RAW counterpart, so the recorded snippet is the raw body \u2014 not the citation-\n// decorated (\"Source:\" line baked in) / clamp-truncated text the model saw.\nfunction resolveRecallTrackingResults(\n  rawResults: MemorySearchResult[],\n  surfacedResults: MemorySearchResult[],\n): MemorySearchResult[] {\n  if (surfacedResults.length === 0 || rawResults.length === 0) {\n    return surfacedResults;\n  }\n  const rawByKey = new Map<string, MemorySearchResult>();\n  for (const raw of rawResults) {\n    const key = buildRecallKey(raw);\n    if (!rawByKey.has(key)) {\n      rawByKey.set(key, raw);\n    }\n  }\n  return surfacedResults.map((surfaced) => rawByKey.get(buildRecallKey(surfaced)) ?? surfaced);\n}\n\nfunction queueShortTermRecallTracking(params: {\n  workspaceDir?: string;\n  query: string;\n  rawResults: MemorySearchResult[];\n  surfacedResults: MemorySearchResult[];\n  timezone?: string;\n}): void {\n  const trackingResults = resolveRecallTrackingResults(params.rawResults, params.surfacedResults);\n  // Best-effort: fire without awaiting and swallow errors so a slow/failed\n  // recall write can never stall or fail the memory_search tool.\n  void recordShortTermRecalls({\n    workspaceDir: params.workspaceDir,\n    query: params.query,\n    results: trackingResults,\n    timezone: params.timezone,\n  }).catch(() => {\n    // Recall tracking is best-effort and must never block memory recall.\n  });\n}\n\n// Inside the memory_search tool's execute closure, after semantic search:\nasync function wireToolRecallTracking(args: {\n  cfg: OpenClawConfig;\n  agentId: string;\n  query: string;\n  maxResults?: number;\n  minScore?: number;\n  includeCitations: boolean;\n  memory: { manager: MemorySearchManager };\n  options: { agentSessionKey?: string };\n}): Promise<MemorySearchResult[]> {\n  const { cfg, agentId, query, maxResults, minScore, includeCitations, memory, options } = args;\n  const { resolveMemoryBackendConfig } = await loadMemoryToolRuntime();\n  const runtimeDebug: MemorySearchRuntimeDebug[] = [];\n\n  const rawResults = await memory.manager.search(query, {\n    maxResults,\n    minScore,\n    sessionKey: options.agentSessionKey,\n    onDebug: (debug) => {\n      runtimeDebug.push(debug);\n    },\n  });\n  const status = memory.manager.status();\n  const decorated = decorateCitations(rawResults, includeCitations);\n  const resolved = resolveMemoryBackendConfig({ cfg, agentId });\n  const memoryResults =\n    status.backend === 'qmd'\n      ? clampResultsByInjectedChars(decorated, resolved.qmd?.limits.maxInjectedChars)\n      : decorated;\n\n  // Day buckets must line up with the Dreaming engine, so the timezone comes from\n  // the memory-core Dreaming config \u2014 NOT agents.defaults.userTimezone.\n  const timezone = resolveMemoryDeepDreamingConfig({\n    pluginConfig: resolveMemoryCorePluginConfig(cfg),\n    cfg,\n  }).timezone;\n\n  queueShortTermRecallTracking({\n    workspaceDir: status.workspaceDir,\n    query,\n    rawResults,\n    surfacedResults: memoryResults,\n    timezone,\n  });\n\n  return memoryResults;\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 35,
+        "statement": "Queues recall tracking AFTER citation-decoration + qmd-clamp using the SURFACED subset (what the model actually saw), but remaps each surfaced result back to its RAW counterpart so the stored snippet is the raw body. It must NOT hand the recorder the full raw/manager.search result list (which records phantom entries the model never saw after the clamp dropped them) and must NOT hand it the decorated/clamp-truncated snippets (which bake in the trailing 'Source:' citation line and mid-sentence cut-offs).",
+        "span_ids": [
+          "s2",
+          "s3",
+          "s4"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 22,
+        "statement": "Keys/identifies each recorded result by the stable (source, path, startLine, endLine) tuple that recordShortTermRecalls uses for its entry identity (e.g. building a `${source}:${path}:${startLine}:${endLine}` key for the surfaced->raw remap) \u2014 NOT by a fabricated canonical snippet-id, a per-tool-call id, or the snippet text.",
+        "span_ids": [
+          "s3",
+          "s8"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 23,
+        "statement": "Resolves the day-bucket timezone from the memory-core Dreaming config via resolveMemoryDeepDreamingConfig (over resolveMemoryCorePluginConfig(cfg)) and passes it into recordShortTermRecalls \u2014 NOT from agents.defaults.userTimezone / the agent's configured user timezone.",
+        "span_ids": [
+          "s7",
+          "s8"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 12,
+        "statement": "Invokes recordShortTermRecalls WITHOUT awaiting it and swallows failures (void + .catch, best-effort, non-blocking) \u2014 affirming the existing fire-and-forget wiring rather than converting it to an awaited/blocking call.",
+        "span_ids": [
+          "s5",
+          "s6"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 8,
+        "statement": "Passes the memory workspace dir (status.workspaceDir) and the query into the queued recordShortTermRecalls call.",
+        "span_ids": [
+          "s2"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "extensions/memory-core/src/tools.ts",
+        "start_line": 24,
+        "end_line": 32,
+        "excerpt": "0024:   buildMemorySearchUnavailableResult,\n0025:   createMemoryTool,\n0026:   getMemoryCorpusSupplementResult,\n0027:   getMemoryManagerContext,\n0028:   getMemoryManagerContextWithPurpose,\n0029:   loadMemoryToolRuntime,\n0030:   MemoryGetSchema,\n0031:   MemorySearchSchema,\n0032:   searchMemoryCorpusSupplements,"
+      },
+      {
+        "span_id": "s2",
+        "path": "extensions/memory-core/src/tools.ts",
+        "start_line": 249,
+        "end_line": 270,
+        "excerpt": "0249:             const status = memory.manager.status();\n0250:             const decorated = decorateCitations(rawResults, includeCitations);\n0251:             const resolved = resolveMemoryBackendConfig({ cfg, agentId });\n0252:             const memoryResults =\n0253:               status.backend === \"qmd\"\n0254:                 ? clampResultsByInjectedChars(decorated, resolved.qmd?.limits.maxInjectedChars)\n0255:                 : decorated;\n0256:             surfacedMemoryResults = memoryResults.map((result) => ({\n0257:               ...result,\n0258:               corpus: \"memory\" as const,\n0259:             }));\n0260:             const sleepTimezone = resolveMemoryDeepDreamingConfig({\n0261:               pluginConfig: resolveMemoryCorePluginConfig(cfg),\n0262:               cfg,\n0263:             }).timezone;\n0264:             queueShortTermRecallTracking({\n0265:               workspaceDir: status.workspaceDir,\n0266:               query,\n0267:               rawResults,\n0268:               surfacedResults: memoryResults,\n0269:               timezone: sleepTimezone,\n0270:             });"
+      },
+      {
+        "span_id": "s3",
+        "path": "extensions/memory-core/src/tools.ts",
+        "start_line": 35,
+        "end_line": 55,
+        "excerpt": "0035: function buildRecallKey(\n0036:   result: Pick<MemorySearchResult, \"source\" | \"path\" | \"startLine\" | \"endLine\">,\n0037: ): string {\n0038:   return `${result.source}:${result.path}:${result.startLine}:${result.endLine}`;\n0039: }\n0040: \n0041: function resolveRecallTrackingResults(\n0042:   rawResults: MemorySearchResult[],\n0043:   surfacedResults: MemorySearchResult[],\n0044: ): MemorySearchResult[] {\n0045:   if (surfacedResults.length === 0 || rawResults.length === 0) {\n0046:     return surfacedResults;\n0047:   }\n0048:   const rawByKey = new Map<string, MemorySearchResult>();\n0049:   for (const raw of rawResults) {\n0050:     const key = buildRecallKey(raw);\n0051:     if (!rawByKey.has(key)) {\n0052:       rawByKey.set(key, raw);\n0053:     }\n0054:   }\n0055:   return surfacedResults.map((surfaced) => rawByKey.get(buildRecallKey(surfaced)) ?? surfaced);"
+      },
+      {
+        "span_id": "s4",
+        "path": "extensions/memory-core/src/tools.recall-tracking.test.ts",
+        "start_line": 46,
+        "end_line": 90,
+        "excerpt": "0046:   it(\"records only surfaced results after qmd clamp\", async () => {\n0047:     setMemoryBackend(\"qmd\");\n0048:     setMemorySearchImpl(async () => [\n0049:       {\n0050:         path: \"memory/2026-04-03.md\",\n0051:         startLine: 1,\n0052:         endLine: 2,\n0053:         score: 0.95,\n0054:         snippet: \"A\".repeat(80),\n0055:         source: \"memory\" as const,\n0056:       },\n0057:       {\n0058:         path: \"memory/2026-04-02.md\",\n0059:         startLine: 1,\n0060:         endLine: 2,\n0061:         score: 0.92,\n0062:         snippet: \"B\".repeat(80),\n0063:         source: \"memory\" as const,\n0064:       },\n0065:     ]);\n0066: \n0067:     const tool = createSearchTool(\n0068:       asOpenClawConfig({\n0069:         agents: { list: [{ id: \"main\", default: true }] },\n0070:         memory: {\n0071:           backend: \"qmd\",\n0072:           citations: \"on\",\n0073:           qmd: { limits: { maxInjectedChars: 100 } },\n0074:         },\n0075:       }),\n0076:     );\n0077: \n0078:     const result = await tool.execute(\"call_recall_clamp\", { query: \"backup glacier\" });\n0079:     const details = result.details as { results: Array<{ path: string }> };\n0080:     expect(details.results).toHaveLength(1);\n0081:     expect(details.results[0]?.path).toBe(\"memory/2026-04-03.md\");\n0082: \n0083:     expect(recallTrackingMock.recordShortTermRecalls).toHaveBeenCalledTimes(1);\n0084:     const [firstCall] = recallTrackingMock.recordShortTermRecalls.mock.calls;\n0085:     expect(firstCall).toBeDefined();\n0086:     const recallParams = firstCall[0];\n0087:     expect(recallParams.results).toHaveLength(1);\n0088:     expect(recallParams.results[0]?.path).toBe(\"memory/2026-04-03.md\");\n0089:     expect(recallParams.results[0]?.snippet).not.toContain(\"Source:\");\n0090:   });"
+      },
+      {
+        "span_id": "s5",
+        "path": "extensions/memory-core/src/tools.ts",
+        "start_line": 58,
+        "end_line": 73,
+        "excerpt": "0058: function queueShortTermRecallTracking(params: {\n0059:   workspaceDir?: string;\n0060:   query: string;\n0061:   rawResults: MemorySearchResult[];\n0062:   surfacedResults: MemorySearchResult[];\n0063:   timezone?: string;\n0064: }): void {\n0065:   const trackingResults = resolveRecallTrackingResults(params.rawResults, params.surfacedResults);\n0066:   void recordShortTermRecalls({\n0067:     workspaceDir: params.workspaceDir,\n0068:     query: params.query,\n0069:     results: trackingResults,\n0070:     timezone: params.timezone,\n0071:   }).catch(() => {\n0072:     // Recall tracking is best-effort and must never block memory recall.\n0073:   });"
+      },
+      {
+        "span_id": "s6",
+        "path": "extensions/memory-core/src/tools.recall-tracking.test.ts",
+        "start_line": 92,
+        "end_line": 138,
+        "excerpt": "0092:   it(\"does not block tool results on slow best-effort recall writes\", async () => {\n0093:     let resolveRecall: (() => void) | undefined;\n0094:     recallTrackingMock.recordShortTermRecalls.mockImplementationOnce(\n0095:       async () =>\n0096:         await new Promise<void>((resolve) => {\n0097:           resolveRecall = resolve;\n0098:         }),\n0099:     );\n0100: \n0101:     const tool = createSearchTool(\n0102:       asOpenClawConfig({\n0103:         agents: { list: [{ id: \"main\", default: true }] },\n0104:       }),\n0105:     );\n0106:     setMemorySearchImpl(async () => [\n0107:       {\n0108:         path: \"memory/2026-04-03.md\",\n0109:         startLine: 1,\n0110:         endLine: 2,\n0111:         score: 0.95,\n0112:         snippet: \"Move backups to S3 Glacier.\",\n0113:         source: \"memory\" as const,\n0114:       },\n0115:     ]);\n0116: \n0117:     let timeout: NodeJS.Timeout | undefined;\n0118:     try {\n0119:       const result = await Promise.race([\n0120:         tool.execute(\"call_recall_non_blocking\", { query: \"glacier\" }),\n0121:         new Promise<never>((_, reject) => {\n0122:           timeout = setTimeout(() => {\n0123:             reject(new Error(\"memory_search waited on recall persistence\"));\n0124:           }, 200);\n0125:         }),\n0126:       ]);\n0127: \n0128:       const details = result.details as { results: Array<{ path: string }> };\n0129:       expect(details.results).toHaveLength(1);\n0130:       expect(details.results[0]?.path).toBe(\"memory/2026-04-03.md\");\n0131:       expect(recallTrackingMock.recordShortTermRecalls).toHaveBeenCalledTimes(1);\n0132:     } finally {\n0133:       if (timeout) {\n0134:         clearTimeout(timeout);\n0135:       }\n0136:       resolveRecall?.();\n0137:     }\n0138:   });"
+      },
+      {
+        "span_id": "s7",
+        "path": "extensions/memory-core/src/tools.ts",
+        "start_line": 12,
+        "end_line": 16,
+        "excerpt": "0012: import {\n0013:   resolveMemoryCorePluginConfig,\n0014:   resolveMemoryDeepDreamingConfig,\n0015: } from \"openclaw/plugin-sdk/memory-core-host-status\";\n0016: import { recordShortTermRecalls } from \"./short-term-promotion.js\";"
+      },
+      {
+        "span_id": "s8",
+        "path": "extensions/memory-core/src/short-term-promotion.ts",
+        "start_line": 877,
+        "end_line": 908,
+        "excerpt": "0877: export async function recordShortTermRecalls(params: {\n0878:   workspaceDir?: string;\n0879:   query: string;\n0880:   results: MemorySearchResult[];\n0881:   signalType?: \"recall\" | \"daily\";\n0882:   dedupeByQueryPerDay?: boolean;\n0883:   dayBucket?: string;\n0884:   nowMs?: number;\n0885:   timezone?: string;\n0886: }): Promise<void> {\n0887:   const workspaceDir = params.workspaceDir?.trim();\n0888:   if (!workspaceDir) {\n0889:     return;\n0890:   }\n0891:   const query = params.query.trim();\n0892:   if (!query) {\n0893:     return;\n0894:   }\n0895:   const relevant = params.results.filter(\n0896:     (result) => result.source === \"memory\" && isShortTermMemoryPath(result.path),\n0897:   );\n0898:   if (relevant.length === 0) {\n0899:     return;\n0900:   }\n0901: \n0902:   const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();\n0903:   const nowIso = new Date(nowMs).toISOString();\n0904:   const signalType = params.signalType ?? \"recall\";\n0905:   const queryHash = hashQuery(query);\n0906:   const todayBucket =\n0907:     normalizeIsoDay(params.dayBucket ?? \"\") ?? formatMemoryDreamingDay(nowMs, params.timezone);\n0908:   await withShortTermLock(workspaceDir, async () => {"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_a1d9fbf2f012",
+    "topic": "memory_core_dreaming_and_promotion_pipeline",
+    "question": "During nightly Dreaming we keep seeing junk show up in the promoted long-term notes \u2014 lines that are obviously the assistant talking to itself mid-task, like `Assistant: Need commit PR.` and `Assistant: Now inspect.`. They get picked as promotion material even though they're just turn-by-turn process narration.\n\nWe already drop the dreaming-diary echo (the `Candidate: \u2026 confidence: \u2026 status: staged` style lines) when we rank/apply promotions, so I started by widening that same promotion-time snippet check to also throw out these terse \"Assistant: Need/Now/inspect/commit\" lines. It's not really working the way I want \u2014 the noise still comes back, and worse, I'm nervous I'll start eating the lines I actually care about: the ones recording a confirmed decision, a verification passing/failing, a PR number, or a commit SHA.\n\nWhere should this actually live so the self-talk gets dropped but those durable, evidence-bearing lines stay, and can you implement it? Lines that record a real outcome \u2014 a confirmation, a verification result, a `PR #1234`, or a 40-char commit hash \u2014 must always survive.",
+    "gold_answer": "```ts\nimport { normalizeLowercaseStringOrEmpty } from 'openclaw/plugin-sdk/text-runtime';\n\nconst ASSISTANT_PROCESS_CHATTER_RE = /^(?:assistant:\\s*)?(?:need|now|oops)\\b/i;\nconst TERSE_PROCESS_ACTION_RE = /^(?:assistant:\\s*)?(?:inspect|commit|push|merge|poll|rebase|checkout|status)[.!]?$/i;\nconst DURABLE_SIGNAL_RE = /\\b(?:confirmed|decided|approved|rejected|corrected|accepted|verified|pass|failed|merged)\\b/i;\nconst DURABLE_ARTIFACT_RE = /\\b(?:pr\\s*#\\d+|commit\\s+[a-f0-9]{7,40}|[a-f0-9]{40})\\b/i;\n\nfunction normalizeSnippetForHygiene(raw: string): string {\n  return normalizeLowercaseStringOrEmpty(raw.normalize('NFKC').replace(/\\s+/g, ' ').trim());\n}\n\nexport function shouldRejectDreamingSessionCorpusSnippet(raw: string): boolean {\n  const snippet = normalizeSnippetForHygiene(raw);\n  if (snippet.length === 0) return false;\n  if (DURABLE_SIGNAL_RE.test(snippet) || DURABLE_ARTIFACT_RE.test(snippet)) return false;\n  return ASSISTANT_PROCESS_CHATTER_RE.test(snippet) || TERSE_PROCESS_ACTION_RE.test(snippet);\n}\n\n// --- Integration point: collectSessionIngestionBatches' per-line ingestion loop in\n// dreaming-phases.ts (~824-859). These module-private helpers/consts already exist there;\n// shown inline so the loop body below typechecks as a faithful drop-in.\nconst SESSION_INGESTION_MAX_SNIPPET_CHARS = 280;\nconst SESSION_INGESTION_MIN_SNIPPET_CHARS = 12;\n\ntype SessionIngestionMessage = {\n  day: string;\n  snippet: string;\n  rendered: string;\n};\n\nfunction normalizeSessionCorpusSnippet(value: string): string {\n  return value.replace(/\\s+/g, \" \").trim().slice(0, SESSION_INGESTION_MAX_SNIPPET_CHARS);\n}\n\nfunction buildSessionRenderedLine(params: {\n  agentId: string;\n  sessionPath: string;\n  lineNumber: number;\n  snippet: string;\n}): string {\n  const source = `${params.agentId}/${params.sessionPath}#L${params.lineNumber}`;\n  return `[${source}] ${params.snippet}`.slice(0, SESSION_INGESTION_MAX_SNIPPET_CHARS + 64);\n}\n\ndeclare const lines: string[];\ndeclare const entry: { lineMap: number[] };\ndeclare const file: { agentId: string; sessionPath: string };\ndeclare const day: string;\ndeclare const batchByDay: Map<string, SessionIngestionMessage[]>;\n\nfor (let index = 0; index < lines.length; index += 1) {\n  const rawSnippet = lines[index] ?? \"\";\n  const snippet = normalizeSessionCorpusSnippet(rawSnippet);\n  if (snippet.length < SESSION_INGESTION_MIN_SNIPPET_CHARS) {\n    continue;\n  }\n  // NEW: drop assistant process scratch before this snippet is rendered/appended.\n  if (shouldRejectDreamingSessionCorpusSnippet(snippet)) {\n    continue;\n  }\n  const lineNumber = entry.lineMap[index] ?? index + 1;\n  const rendered = buildSessionRenderedLine({\n    agentId: file.agentId,\n    sessionPath: file.sessionPath,\n    lineNumber,\n    snippet,\n  });\n  const bucket = batchByDay.get(day) ?? [];\n  bucket.push({ day, snippet, rendered });\n  batchByDay.set(day, bucket);\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 60,
+        "statement": "Adds the hygiene reject INSIDE the session-corpus ingestion per-line loop (collectSessionIngestionBatches, dreaming-phases.ts ~824-859) \u2014 right after the line is normalized (normalizeSessionCorpusSnippet) and the SESSION_INGESTION_MIN_SNIPPET_CHARS length check, and BEFORE the snippet is rendered (buildSessionRenderedLine) / pushed into batchByDay / appended to session-corpus, so the rejected text never reaches downstream phases. It must NOT instead live at the candidate rank/apply or recordShortTermRecalls promotion stage (which runs after the snippet is already persisted to session-corpus), and must NOT be implemented by widening the existing isContaminatedDreamingSnippet diary-echo check.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 15,
+        "statement": "A snippet that carries a durable outcome is exempted from the reject and stays eligible: a confirmation/decision/verification result (e.g. confirmed/verified/pass/failed) OR a durable artifact reference (a PR number like `PR #1234` or a 7-40 char / 40-char commit SHA) short-circuits the filter to keep the line, even if it otherwise looks terse/process-like.",
+        "span_ids": [
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "supporting",
+        "weight": 12,
+        "statement": "Rejects obvious assistant process scratch: 'Assistant: Need/Now/...' chatter and terse action-only lines (e.g. inspect/commit/push/merge), via the snippet-text predicate that drives the reject.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 13,
+        "statement": "Normalizes the snippet with a single cleanup step (e.g. NFKC + collapse whitespace + trim/lowercase) BEFORE the keep/reject predicates run, so the filter matches against cleaned text rather than raw transcript formatting.",
+        "span_ids": [
+          "s1"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "extensions/memory-core/src/dreaming-phases.ts",
+        "start_line": 824,
+        "end_line": 859,
+        "excerpt": "0824:     let fileCount = 0;\n0825:     let lastScannedContentLine = cursor;\n0826:     for (let index = cursor; index < lines.length; index += 1) {\n0827:       if (fileCount >= fileCap || remaining <= 0) {\n0828:         break;\n0829:       }\n0830:       lastScannedContentLine = index + 1;\n0831:       const rawSnippet = lines[index] ?? \"\";\n0832:       const snippet = normalizeSessionCorpusSnippet(rawSnippet);\n0833:       if (snippet.length < SESSION_INGESTION_MIN_SNIPPET_CHARS) {\n0834:         continue;\n0835:       }\n0836:       const lineNumber = entry.lineMap[index] ?? index + 1;\n0837:       const messageTimestampMs = entry.messageTimestampsMs[index] ?? 0;\n0838:       const day = formatMemoryDreamingDay(\n0839:         messageTimestampMs > 0 ? messageTimestampMs : fingerprint.mtimeMs,\n0840:         params.timezone,\n0841:       );\n0842:       if (!isDayWithinLookback(day, cutoffMs)) {\n0843:         continue;\n0844:       }\n0845:       const dedupeBasis =\n0846:         messageTimestampMs > 0 ? `ts:${Math.floor(messageTimestampMs)}` : `line:${lineNumber}`;\n0847:       const messageHash = hashSessionMessageId(`${sessionScope}\\n${dedupeBasis}\\n${snippet}`);\n0848:       if (seenSet.has(messageHash)) {\n0849:         continue;\n0850:       }\n0851:       const rendered = buildSessionRenderedLine({\n0852:         agentId: file.agentId,\n0853:         sessionPath: file.sessionPath,\n0854:         lineNumber,\n0855:         snippet,\n0856:       });\n0857:       const bucket = batchByDay.get(day) ?? [];\n0858:       bucket.push({ day, snippet, rendered });\n0859:       batchByDay.set(day, bucket);"
+      },
+      {
+        "span_id": "s2",
+        "path": "extensions/memory-core/src/short-term-promotion.ts",
+        "start_line": 877,
+        "end_line": 916,
+        "excerpt": "0877: export async function recordShortTermRecalls(params: {\n0878:   workspaceDir?: string;\n0879:   query: string;\n0880:   results: MemorySearchResult[];\n0881:   signalType?: \"recall\" | \"daily\";\n0882:   dedupeByQueryPerDay?: boolean;\n0883:   dayBucket?: string;\n0884:   nowMs?: number;\n0885:   timezone?: string;\n0886: }): Promise<void> {\n0887:   const workspaceDir = params.workspaceDir?.trim();\n0888:   if (!workspaceDir) {\n0889:     return;\n0890:   }\n0891:   const query = params.query.trim();\n0892:   if (!query) {\n0893:     return;\n0894:   }\n0895:   const relevant = params.results.filter(\n0896:     (result) => result.source === \"memory\" && isShortTermMemoryPath(result.path),\n0897:   );\n0898:   if (relevant.length === 0) {\n0899:     return;\n0900:   }\n0901: \n0902:   const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();\n0903:   const nowIso = new Date(nowMs).toISOString();\n0904:   const signalType = params.signalType ?? \"recall\";\n0905:   const queryHash = hashQuery(query);\n0906:   const todayBucket =\n0907:     normalizeIsoDay(params.dayBucket ?? \"\") ?? formatMemoryDreamingDay(nowMs, params.timezone);\n0908:   await withShortTermLock(workspaceDir, async () => {\n0909:     const store = await readStore(workspaceDir, nowIso);\n0910: \n0911:     for (const result of relevant) {\n0912:       const normalizedPath = normalizeMemoryPath(result.path);\n0913:       const snippet = normalizeSnippet(result.snippet);\n0914:       if (!snippet || isContaminatedDreamingSnippet(snippet)) {\n0915:         continue;\n0916:       }"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_bfd0faac09b9",
+    "topic": "model_fallback_and_failover_logic",
+    "question": "Bug report on /status: a teammate forced a one-off model switch with /model mid-session (they're on openai/gpt-4.1-mini but a /model to a temporary runtime model is still in effect), and /status printed an \"active fallback\" arrow line pointing at that runtime model \u2014 even though no automatic fallback ever fired for the model they actually selected. They've also noticed the configured standby list sometimes shows the wrong models.\n\nWe render the configured standby list and the active-fallback arrow in /status by comparing the session's selected model label against its current runtime/active model label: when those two differ we treat a fallback as active, print the arrow with the active model, and derive the standby list from whatever fallback chain the runtime resolved for that active model. That \"selected vs. active differ\" comparison is the same approach our /model summary uses for its \"Active: \u2026 (runtime)\" line, so we assumed it was right here too.\n\nWrite the model-section logic for /status so the standby list and the active-fallback line are each produced correctly. Show the exact conditions under which the active-fallback line is and isn't emitted, and where the standby list comes from. Make sure a plain mid-session /model switch (runtime differs from selected, but no fallback was recorded) does not produce the arrow line.",
+    "gold_answer": "```ts\nimport type { SessionEntry } from \"../config/sessions.js\";\nimport { resolveActiveFallbackState } from \"../status/fallback-notice-state.js\";\nimport { resolveSelectedAndActiveModel } from \"./model-runtime.js\";\n\ntype ModelSectionParams = {\n  selectedProvider: string;\n  selectedModel: string;\n  configuredFallbacks?: string[];\n  sessionEntry?: Pick<\n    SessionEntry,\n    | \"modelProvider\"\n    | \"model\"\n    | \"fallbackNoticeSelectedModel\"\n    | \"fallbackNoticeActiveModel\"\n    | \"fallbackNoticeReason\"\n  >;\n  selectedAuthLabel?: string;\n  activeAuthLabel?: string;\n};\n\nexport function buildModelSectionLines(params: ModelSectionParams): string[] {\n  const modelRefs = resolveSelectedAndActiveModel({\n    selectedProvider: params.selectedProvider,\n    selectedModel: params.selectedModel,\n    sessionEntry: params.sessionEntry,\n  });\n  const fallbackState = resolveActiveFallbackState({\n    selectedModelRef: modelRefs.selected.label,\n    activeModelRef: modelRefs.active.label,\n    state: params.sessionEntry,\n  });\n  const configuredFallbacksLine = params.configuredFallbacks?.length\n    ? `\ud83d\udd04 Fallbacks: ${params.configuredFallbacks.join(\", \")}`\n    : null;\n  const showFallbackAuth =\n    params.activeAuthLabel && params.activeAuthLabel !== params.selectedAuthLabel;\n  const fallbackLine = fallbackState.active\n    ? `\u21aa\ufe0f Fallback: ${modelRefs.active.label}${\n        showFallbackAuth ? ` \u00b7 \ud83d\udd11 ${params.activeAuthLabel}` : \"\"\n      } (${fallbackState.reason ?? \"selected model unavailable\"})`\n    : null;\n\n  return [\n    `\ud83e\udde0 Model: ${modelRefs.selected.label}${\n      params.selectedAuthLabel ? ` \u00b7 \ud83d\udd11 ${params.selectedAuthLabel}` : \"\"\n    }`,\n    configuredFallbacksLine,\n    fallbackLine,\n  ].filter((line): line is string => Boolean(line));\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 35,
+        "statement": "If the code emits the active-fallback arrow line, it MUST gate that emission on the persisted fallback-notice consistency check (selected ref != active ref AND the session's fallbackNoticeSelectedModel field is the selected ref AND its fallbackNoticeActiveModel field is the active ref, e.g. via resolveActiveFallbackState), and MUST NOT emit it on a bare selected!=active / activeDiffers / runtime-drift comparison \u2014 so a plain mid-session /model switch (runtime differs from selected but no matching notice was recorded) produces no arrow line.",
+        "span_ids": [
+          "span_2",
+          "span_3"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 30,
+        "statement": "If the code renders the configured standby/fallbacks line, it MUST build that line directly from the static configured fallbacks list (the agent model config's fallbacks array) joined as-is, and MUST NOT build it from a list inferred from the runtime-resolved fallback chain or the recorded fallback-notice chain for the active model.",
+        "span_ids": [
+          "span_1",
+          "span_5"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 15,
+        "statement": "Computes the selected and active model labels from the live session state (resolving them, e.g. via resolveSelectedAndActiveModel, rather than reading caller-supplied raw label strings), and uses those resolved selected/active labels when forming the model line and the active-fallback line.",
+        "span_ids": [
+          "span_1"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "When the active-fallback line is shown, it includes the persisted fallback reason text, defaulting to the literal 'selected model unavailable' when the reason is absent.",
+        "span_ids": [
+          "span_1"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "When the active-fallback line is shown, it appends the active auth label only if that auth label exists and differs from the selected auth label.",
+        "span_ids": [
+          "span_1",
+          "span_4"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "span_1",
+        "path": "src/auto-reply/status.ts",
+        "start_line": 813,
+        "end_line": 830,
+        "excerpt": "0813:   // Show configured fallback models (from agent model config)\n0814:   const configuredFallbacks = (() => {\n0815:     const modelConfig = args.agent?.model;\n0816:     if (typeof modelConfig === \"object\" && modelConfig && Array.isArray(modelConfig.fallbacks)) {\n0817:       return modelConfig.fallbacks;\n0818:     }\n0819:     return undefined;\n0820:   })();\n0821:   const configuredFallbacksLine = configuredFallbacks?.length\n0822:     ? `\ud83d\udd04 Fallbacks: ${configuredFallbacks.join(\", \")}`\n0823:     : null;\n0824: \n0825:   const showFallbackAuth = activeAuthLabelValue && activeAuthLabelValue !== selectedAuthLabelValue;\n0826:   const fallbackLine = fallbackState.active\n0827:     ? `\u21aa\ufe0f Fallback: ${activeModelLabel}${\n0828:         showFallbackAuth ? ` \u00b7 \ud83d\udd11 ${activeAuthLabelValue}` : \"\"\n0829:       } (${fallbackState.reason ?? \"selected model unavailable\"})`\n0830:     : null;"
+      },
+      {
+        "span_id": "span_2",
+        "path": "src/status/fallback-notice-state.ts",
+        "start_line": 9,
+        "end_line": 24,
+        "excerpt": "0009: export function resolveActiveFallbackState(params: {\n0010:   selectedModelRef: string;\n0011:   activeModelRef: string;\n0012:   state?: FallbackNoticeState;\n0013: }): { active: boolean; reason?: string } {\n0014:   const selected = normalizeOptionalString(params.state?.fallbackNoticeSelectedModel);\n0015:   const active = normalizeOptionalString(params.state?.fallbackNoticeActiveModel);\n0016:   const reason = normalizeOptionalString(params.state?.fallbackNoticeReason);\n0017:   const fallbackActive =\n0018:     params.selectedModelRef !== params.activeModelRef &&\n0019:     selected === params.selectedModelRef &&\n0020:     active === params.activeModelRef;\n0021:   return {\n0022:     active: fallbackActive,\n0023:     reason: fallbackActive ? reason : undefined,\n0024:   };"
+      },
+      {
+        "span_id": "span_3",
+        "path": "src/auto-reply/status.test.ts",
+        "start_line": 922,
+        "end_line": 948,
+        "excerpt": "0922:   it(\"omits active fallback details when runtime drift does not match fallback state\", () => {\n0923:     const text = buildStatusMessage({\n0924:       agent: {\n0925:         model: \"openai/gpt-4.1-mini\",\n0926:         contextTokens: 32_000,\n0927:       },\n0928:       sessionEntry: {\n0929:         sessionId: \"runtime-drift-only\",\n0930:         updatedAt: 0,\n0931:         modelProvider: \"anthropic\",\n0932:         model: \"claude-haiku-4-5\",\n0933:         fallbackNoticeSelectedModel: \"fireworks/accounts/fireworks/routers/kimi-k2p5-turbo\",\n0934:         fallbackNoticeActiveModel: \"deepinfra/moonshotai/Kimi-K2.5\",\n0935:         fallbackNoticeReason: \"rate limit\",\n0936:       },\n0937:       sessionKey: \"agent:main:main\",\n0938:       sessionScope: \"per-sender\",\n0939:       queue: { mode: \"collect\", depth: 0 },\n0940:       modelAuth: \"api-key\",\n0941:       activeModelAuth: \"api-key di_123\u2026abc (deepinfra:default)\",\n0942:     });\n0943: \n0944:     const normalized = normalizeTestText(text);\n0945:     expect(normalized).toContain(\"Model: openai/gpt-4.1-mini\");\n0946:     expect(normalized).not.toContain(\"Fallback:\");\n0947:     expect(normalized).not.toContain(\"(rate limit)\");\n0948:   });"
+      },
+      {
+        "span_id": "span_4",
+        "path": "src/auto-reply/status.test.ts",
+        "start_line": 888,
+        "end_line": 920,
+        "excerpt": "0888:   it(\"shows selected model and active runtime model when they differ\", () => {\n0889:     const text = buildStatusMessage({\n0890:       agent: {\n0891:         model: \"anthropic/claude-opus-4-6\",\n0892:         contextTokens: 32_000,\n0893:       },\n0894:       sessionEntry: {\n0895:         sessionId: \"override-1\",\n0896:         updatedAt: 0,\n0897:         providerOverride: \"openai\",\n0898:         modelOverride: \"gpt-4.1-mini\",\n0899:         modelProvider: \"anthropic\",\n0900:         model: \"claude-haiku-4-5\",\n0901:         fallbackNoticeSelectedModel: \"openai/gpt-4.1-mini\",\n0902:         fallbackNoticeActiveModel: \"anthropic/claude-haiku-4-5\",\n0903:         fallbackNoticeReason: \"rate limit\",\n0904:         contextTokens: 32_000,\n0905:       },\n0906:       sessionKey: \"agent:main:main\",\n0907:       sessionScope: \"per-sender\",\n0908:       queue: { mode: \"collect\", depth: 0 },\n0909:       modelAuth: \"api-key\",\n0910:       activeModelAuth: \"api-key di_123\u2026abc (deepinfra:default)\",\n0911:     });\n0912: \n0913:     const normalized = normalizeTestText(text);\n0914:     expect(normalized).toContain(\"Model: openai/gpt-4.1-mini\");\n0915:     expect(normalized).toContain(\"Fallback: anthropic/claude-haiku-4-5\");\n0916:     expect(normalized).toContain(\"(rate limit)\");\n0917:     expect(normalized).not.toContain(\" - Reason:\");\n0918:     expect(normalized).not.toContain(\"Active:\");\n0919:     expect(normalized).toContain(\"di_123...abc\");\n0920:   });"
+      },
+      {
+        "span_id": "span_5",
+        "path": "src/auto-reply/status.test.ts",
+        "start_line": 973,
+        "end_line": 1006,
+        "excerpt": "0973:   it(\"shows configured fallback models when provided\", () => {\n0974:     const text = buildStatusMessage({\n0975:       agent: {\n0976:         model: {\n0977:           primary: \"anthropic/claude-opus-4-6\",\n0978:           fallbacks: [\"google/gemini-2.5-flash\", \"openai/gpt-5-mini\"],\n0979:         },\n0980:       },\n0981:       sessionEntry: { sessionId: \"fb1\", updatedAt: 0 },\n0982:       sessionKey: \"agent:main:main\",\n0983:       sessionScope: \"per-sender\",\n0984:       queue: { mode: \"collect\", depth: 0 },\n0985:       modelAuth: \"api-key\",\n0986:     });\n0987: \n0988:     const normalized = normalizeTestText(text);\n0989:     expect(normalized).toContain(\"Fallbacks: google/gemini-2.5-flash, openai/gpt-5-mini\");\n0990:   });\n0991: \n0992:   it(\"omits configured fallbacks line when no fallbacks provided\", () => {\n0993:     const text = buildStatusMessage({\n0994:       agent: {\n0995:         model: \"anthropic/claude-opus-4-6\",\n0996:       },\n0997:       sessionEntry: { sessionId: \"fb2\", updatedAt: 0 },\n0998:       sessionKey: \"agent:main:main\",\n0999:       sessionScope: \"per-sender\",\n1000:       queue: { mode: \"collect\", depth: 0 },\n1001:       modelAuth: \"api-key\",\n1002:     });\n1003: \n1004:     const normalized = normalizeTestText(text);\n1005:     expect(normalized).not.toContain(\"Fallbacks:\");\n1006:   });"
+      }
+    ]
+  },
+  {
+    "id": "openclaw_d8d3198cd0e1",
+    "topic": "model_fallback_and_failover_logic",
+    "question": "Our bot pins a temporary provider/model (and matching auth profile) onto the session when the primary model gets rate-limited and we fall through to a backup, so the status card and the next message keep targeting the model that actually answered. That pin is only allowed to overwrite the session's selection when the current selection wasn't something the user deliberately picked.\n\nThe problem is the cleanup after a backup attempt that itself fails. Right now, before we try a backup candidate we snapshot the session entry's selection fields, and in the failure handler we write those snapshotted values back so the entry returns to where it started. But a tool callback running concurrently can change the model mid-flight (the user hits /model while the backup is in progress), and our restore stomps that newer pick back to the stale snapshot \u2014 the user's deliberate switch silently disappears on certain failures.\n\nAlso, when the backup candidate turns out to be the same provider+model the run is already on, we still rewrite the fields and bump the entry timestamp, which churns the persisted store and the status surface for no reason.\n\nWrite the session-entry mutators we should be using here: one that applies a backup candidate's selection onto the entry (provider, model, the matching auth profile, and the bookkeeping that marks this selection as machine-chosen rather than user-chosen), and one that undoes it after a failed candidate. Make the apply path idempotent for a same-as-current candidate, and make the undo path safe against a concurrent user switch. Keep them as plain entry mutators (no IO).",
+    "gold_answer": "```ts\nimport type { SessionEntry } from \"../../config/sessions.js\";\nimport { resolveRunAuthProfile } from \"./agent-runner-auth-profile.js\";\nimport type { FollowupRun } from \"./queue.js\";\n\ntype FallbackSelectionState = Pick<\n  SessionEntry,\n  | \"providerOverride\"\n  | \"modelOverride\"\n  | \"modelOverrideSource\"\n  | \"authProfileOverride\"\n  | \"authProfileOverrideSource\"\n  | \"authProfileOverrideCompactionCount\"\n>;\n\nconst KEYS = [\n  \"providerOverride\",\n  \"modelOverride\",\n  \"modelOverrideSource\",\n  \"authProfileOverride\",\n  \"authProfileOverrideSource\",\n  \"authProfileOverrideCompactionCount\",\n] as const satisfies ReadonlyArray<keyof FallbackSelectionState>;\n\nfunction applyFallbackSelectionState(\n  entry: SessionEntry,\n  nextState: FallbackSelectionState,\n  now = Date.now(),\n): boolean {\n  let updated = false;\n  for (const key of KEYS) {\n    const nextValue = nextState[key];\n    if (nextValue === undefined) {\n      if (Object.hasOwn(entry, key)) {\n        delete entry[key];\n        updated = true;\n      }\n      continue;\n    }\n    if (entry[key] !== nextValue) {\n      (entry as Record<string, unknown>)[key] = nextValue;\n      updated = true;\n    }\n  }\n  if (updated) {\n    entry.updatedAt = now;\n  }\n  return updated;\n}\n\nexport function applyFallbackCandidateSelectionToEntry(params: {\n  entry: SessionEntry;\n  run: FollowupRun[\"run\"];\n  provider: string;\n  model: string;\n  now?: number;\n}): { updated: boolean; nextState?: FallbackSelectionState } {\n  if (params.provider === params.run.provider && params.model === params.run.model) {\n    return { updated: false };\n  }\n  const scopedAuthProfile = resolveRunAuthProfile(params.run, params.provider);\n  const nextState: FallbackSelectionState = {\n    providerOverride: params.provider,\n    modelOverride: params.model,\n    modelOverrideSource: \"auto\",\n    authProfileOverride: scopedAuthProfile.authProfileId,\n    authProfileOverrideSource: scopedAuthProfile.authProfileId\n      ? scopedAuthProfile.authProfileIdSource\n      : undefined,\n    authProfileOverrideCompactionCount: undefined,\n  };\n  return {\n    updated: applyFallbackSelectionState(params.entry, nextState, params.now),\n    nextState,\n  };\n}\n\nexport function rollbackFallbackSelectionStateIfUnchanged(\n  entry: SessionEntry,\n  expectedState: FallbackSelectionState,\n  previousState: FallbackSelectionState,\n  now = Date.now(),\n): boolean {\n  let updated = false;\n  for (const key of KEYS) {\n    if (entry[key] !== expectedState[key]) {\n      continue;\n    }\n    const previousValue = previousState[key];\n    if (previousValue === undefined) {\n      if (Object.hasOwn(entry, key)) {\n        delete entry[key];\n        updated = true;\n      }\n      continue;\n    }\n    if (entry[key] !== previousValue) {\n      (entry as Record<string, unknown>)[key] = previousValue;\n      updated = true;\n    }\n  }\n  if (updated) {\n    entry.updatedAt = now;\n  }\n  return updated;\n}\n```",
+    "rubric": [
+      {
+        "claim_id": "c1",
+        "claim_type": "core",
+        "weight": 42,
+        "statement": "The undo/rollback mutator is a per-field unchanged-restore, NOT an unconditional snapshot writeback: it iterates the fallback selection keys and, for each key, skips it (leaves the entry untouched) unless the entry's current value still equals the previously-applied (expected/'auto') value; for the keys that still match it writes the captured PREVIOUS value back (deleting the field when the previous value was undefined). It must NOT restore the whole snapshot after a single overall 'still on the candidate' check, and must NOT clear/overwrite a field whose value has diverged (e.g. a concurrent user /model switch), so the newer user pick survives.",
+        "span_ids": [
+          "s4",
+          "s5"
+        ]
+      },
+      {
+        "claim_id": "c2",
+        "claim_type": "core",
+        "weight": 22,
+        "statement": "The apply mutator's idempotence short-circuit compares the candidate provider+model to the RUN's current provider+model (run.provider / run.model) and returns no-update (no field rewrite, no updatedAt bump) when they are equal. It must NOT instead test the candidate against the entry's current/effective selection (providerOverride/modelOverride/modelProvider) as the equality condition.",
+        "span_ids": [
+          "s1"
+        ]
+      },
+      {
+        "claim_id": "c3",
+        "claim_type": "core",
+        "weight": 18,
+        "statement": "When it does pin a candidate, apply marks the selection machine-chosen by setting modelOverrideSource to the string literal 'auto' (NOT 'user', and NOT an invented value such as 'machine') AND clears authProfileOverrideCompactionCount (sets/leaves it undefined so the field is removed). Both must be present.",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c4",
+        "claim_type": "supporting",
+        "weight": 10,
+        "statement": "Apply derives the auth-profile override by resolving it provider-scoped to the candidate against the run (e.g. resolveRunAuthProfile(run, provider) / resolveProviderScopedAuthProfile), rather than taking a candidate-supplied authProfileId verbatim, and stores authProfileOverrideSource only when a profile id actually resolves (undefined otherwise).",
+        "span_ids": [
+          "s1",
+          "s2"
+        ]
+      },
+      {
+        "claim_id": "c5",
+        "claim_type": "supporting",
+        "weight": 8,
+        "statement": "The shared field-apply step, over the fallback selection key set, deletes a field when its next value is undefined (only when the field is currently present), writes only the values that actually changed, and sets entry.updatedAt only if at least one field changed.",
+        "span_ids": [
+          "s3"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "span_id": "s1",
+        "path": "src/auto-reply/reply/agent-runner-execution.ts",
+        "start_line": 205,
+        "end_line": 225,
+        "excerpt": "0205: export function applyFallbackCandidateSelectionToEntry(params: {\n0206:   entry: SessionEntry;\n0207:   run: FollowupRun[\"run\"];\n0208:   provider: string;\n0209:   model: string;\n0210:   now?: number;\n0211: }): { updated: boolean; nextState?: FallbackSelectionState } {\n0212:   if (params.provider === params.run.provider && params.model === params.run.model) {\n0213:     return { updated: false };\n0214:   }\n0215:   const scopedAuthProfile = resolveRunAuthProfile(params.run, params.provider);\n0216:   const nextState = buildFallbackSelectionState({\n0217:     provider: params.provider,\n0218:     model: params.model,\n0219:     authProfileId: scopedAuthProfile.authProfileId,\n0220:     authProfileIdSource: scopedAuthProfile.authProfileIdSource,\n0221:   });\n0222:   return {\n0223:     updated: applyFallbackSelectionState(params.entry, nextState, params.now),\n0224:     nextState,\n0225:   };"
+      },
+      {
+        "span_id": "s2",
+        "path": "src/auto-reply/reply/agent-runner-execution.ts",
+        "start_line": 189,
+        "end_line": 203,
+        "excerpt": "0189: function buildFallbackSelectionState(params: {\n0190:   provider: string;\n0191:   model: string;\n0192:   authProfileId?: string;\n0193:   authProfileIdSource?: \"auto\" | \"user\";\n0194: }): FallbackSelectionState {\n0195:   return {\n0196:     providerOverride: params.provider,\n0197:     modelOverride: params.model,\n0198:     modelOverrideSource: \"auto\",\n0199:     authProfileOverride: params.authProfileId,\n0200:     authProfileOverrideSource: params.authProfileId ? params.authProfileIdSource : undefined,\n0201:     authProfileOverrideCompactionCount: undefined,\n0202:   };\n0203: }"
+      },
+      {
+        "span_id": "s3",
+        "path": "src/auto-reply/reply/agent-runner-execution.ts",
+        "start_line": 228,
+        "end_line": 251,
+        "excerpt": "0228: function applyFallbackSelectionState(\n0229:   entry: SessionEntry,\n0230:   nextState: FallbackSelectionState,\n0231:   now = Date.now(),\n0232: ): boolean {\n0233:   let updated = false;\n0234:   for (const key of FALLBACK_SELECTION_STATE_KEYS) {\n0235:     const nextValue = nextState[key];\n0236:     if (nextValue === undefined) {\n0237:       if (Object.hasOwn(entry, key)) {\n0238:         delete entry[key];\n0239:         updated = true;\n0240:       }\n0241:       continue;\n0242:     }\n0243:     if (entry[key] !== nextValue) {\n0244:       updated = setFallbackSelectionStateField(entry, key, nextValue) || updated;\n0245:     }\n0246:   }\n0247:   if (updated) {\n0248:     entry.updatedAt = now;\n0249:   }\n0250:   return updated;\n0251: }"
+      },
+      {
+        "span_id": "s4",
+        "path": "src/auto-reply/reply/agent-runner-execution.ts",
+        "start_line": 253,
+        "end_line": 280,
+        "excerpt": "0253: function rollbackFallbackSelectionStateIfUnchanged(\n0254:   entry: SessionEntry,\n0255:   expectedState: FallbackSelectionState,\n0256:   previousState: FallbackSelectionState,\n0257:   now = Date.now(),\n0258: ): boolean {\n0259:   let updated = false;\n0260:   for (const key of FALLBACK_SELECTION_STATE_KEYS) {\n0261:     if (entry[key] !== expectedState[key]) {\n0262:       continue;\n0263:     }\n0264:     const previousValue = previousState[key];\n0265:     if (previousValue === undefined) {\n0266:       if (Object.hasOwn(entry, key)) {\n0267:         delete entry[key];\n0268:         updated = true;\n0269:       }\n0270:       continue;\n0271:     }\n0272:     if (entry[key] !== previousValue) {\n0273:       updated = setFallbackSelectionStateField(entry, key, previousValue) || updated;\n0274:     }\n0275:   }\n0276:   if (updated) {\n0277:     entry.updatedAt = now;\n0278:   }\n0279:   return updated;\n0280: }"
+      },
+      {
+        "span_id": "s5",
+        "path": "src/auto-reply/reply/agent-runner-execution.test.ts",
+        "start_line": 1609,
+        "end_line": 1666,
+        "excerpt": "1609:   it(\"does not roll back newer override changes after a failed fallback candidate\", async () => {\n1610:     state.runWithModelFallbackMock.mockImplementation(\n1611:       async (params: { run: (provider: string, model: string) => Promise<unknown> }) => {\n1612:         await expect(params.run(\"openai\", \"gpt-5.4\")).rejects.toThrow(\"fallback failed\");\n1613:         throw new Error(\"fallback failed\");\n1614:       },\n1615:     );\n1616:     const sessionEntry: SessionEntry = {\n1617:       sessionId: \"session\",\n1618:       updatedAt: Date.now(),\n1619:       providerOverride: \"anthropic\",\n1620:       modelOverride: \"claude\",\n1621:       authProfileOverride: \"anthropic:default\",\n1622:       authProfileOverrideSource: \"user\",\n1623:     };\n1624:     const sessionStore = { main: sessionEntry };\n1625:     state.runEmbeddedPiAgentMock.mockImplementationOnce(async () => {\n1626:       sessionEntry.providerOverride = \"zai\";\n1627:       sessionEntry.modelOverride = \"glm-5\";\n1628:       sessionEntry.authProfileOverride = \"zai:work\";\n1629:       sessionEntry.authProfileOverrideSource = \"user\";\n1630:       throw new Error(\"fallback failed\");\n1631:     });\n1632: \n1633:     const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();\n1634:     const result = await runAgentTurnWithFallback({\n1635:       commandBody: \"hello\",\n1636:       followupRun: createFollowupRun(),\n1637:       sessionCtx: {\n1638:         Provider: \"whatsapp\",\n1639:         MessageSid: \"msg\",\n1640:       } as unknown as TemplateContext,\n1641:       opts: {},\n1642:       typingSignals: createMockTypingSignaler(),\n1643:       blockReplyPipeline: null,\n1644:       blockStreamingEnabled: false,\n1645:       resolvedBlockStreamingBreak: \"message_end\",\n1646:       applyReplyToMode: (payload) => payload,\n1647:       shouldEmitToolResult: () => true,\n1648:       shouldEmitToolOutput: () => false,\n1649:       pendingToolTasks: new Set(),\n1650:       resetSessionAfterCompactionFailure: async () => false,\n1651:       resetSessionAfterRoleOrderingConflict: async () => false,\n1652:       isHeartbeat: false,\n1653:       sessionKey: \"main\",\n1654:       getActiveSessionEntry: () => sessionEntry,\n1655:       activeSessionStore: sessionStore,\n1656:       resolvedVerboseLevel: \"off\",\n1657:     });\n1658: \n1659:     expect(result.kind).toBe(\"final\");\n1660:     expect(sessionEntry.providerOverride).toBe(\"zai\");\n1661:     expect(sessionEntry.modelOverride).toBe(\"glm-5\");\n1662:     expect(sessionEntry.authProfileOverride).toBe(\"zai:work\");\n1663:     expect(sessionEntry.authProfileOverrideSource).toBe(\"user\");\n1664:     expect(sessionStore.main.providerOverride).toBe(\"zai\");\n1665:     expect(sessionStore.main.modelOverride).toBe(\"glm-5\");\n1666:   });"
+      }
+    ]
+  }
+]

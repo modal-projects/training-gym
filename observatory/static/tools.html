@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent · Learning tools</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+<style>
+  .tools-shell { display: grid; grid-template-columns: 260px 1fr; gap: 0; max-width: 1200px; margin: 0 auto; }
+  #tool-tree { border-right: 1px solid var(--border); padding: 22px 14px 60px 8px;
+    position: sticky; top: 0; align-self: start; max-height: 100vh; overflow-y: auto; }
+  #tool-tree .cat { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--fg-faint); margin: 14px 0 4px 8px; }
+  #tool-tree a { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px;
+    border-radius: 5px; font-size: 0.84rem; color: var(--fg-muted); text-decoration: none; }
+  #tool-tree a:hover { background: var(--bg-inset); color: var(--fg); }
+  #tool-tree a.active { background: var(--bg-inset); color: var(--accent); font-weight: 600; }
+  #tool-tree .kind { font-family: var(--mono); font-size: 0.62rem; color: var(--fg-faint); }
+  #tool-detail { padding: 26px 20px 80px 34px; min-width: 0; }
+  .tool-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .tool-head h1 { font-family: var(--mono); font-size: 1.25rem; margin: 4px 0; }
+  .chip { font-family: var(--mono); font-size: 0.64rem; border-radius: 99px; padding: 2px 9px; }
+  .chip-kind { background: var(--blue-bg); color: var(--blue); }
+  .chip-cost { background: var(--amber-bg); color: var(--amber); }
+  .chip-seed { background: var(--green-bg); color: var(--green); }
+  .chip-invented { background: var(--violet-bg); color: var(--violet); }
+  .tool-path { font-family: var(--mono); font-size: 0.74rem; color: var(--fg-muted); margin: 2px 0 14px; }
+  .args-table td:first-child { font-family: var(--mono); font-size: 0.74rem; white-space: nowrap; }
+  #tool-readme { margin-top: 18px; }
+  #tool-readme h1, #tool-readme h2 { border: none; padding: 0; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a><a href="/docs">docs</a>
+    <a href="/tools" aria-current="page" style="font-weight:600;">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="tools-shell">
+  <nav id="tool-tree"><p class="cat">loading…</p></nav>
+  <main id="tool-detail" class="docs-page">
+    <h1>Learning tools</h1>
+    <p class="lede">Every tool the learning agent can call — self-described by its
+    <code>tool.yaml</code> card and skill-style README (contract:
+    <a href="/docs/toolbox">docs → toolbox</a>). Select a tool from the tree.</p>
+  </main>
+</div>
+<script src="/assets/tools.js"></script>
+</body>
+</html>

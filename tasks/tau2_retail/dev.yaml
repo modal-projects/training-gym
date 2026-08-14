@@ -1,0 +1,19 @@
+# Cheap-iteration override for tau2_retail — pass with --config:
+#
+#   python bench.py rollout --task tau2_retail --split dev \
+#       --model /out/models/<tag>/merged --config tasks/tau2_retail/dev.yaml
+#
+# The customer simulator is NOT changed here: dev and scoring both run the
+# pinned gpt-5.6-luna through the operator's user-sim service (LEARNING_AGENT_USER_SIM_URL
+# is already in your .env — you never hold the key), so a dev score means the
+# same thing a scored one does. Only the trial count is reduced: scoring uses
+# num_trials 4 (pass^4), and 1 trial is ~4x cheaper for a fitness signal.
+#
+# Raise num_trials back to 4 before trusting a number — a single trial cannot
+# tell a reliable policy from a lucky one, which is exactly what pass^4 measures.
+#
+# This file is a convenience, not part of the pinned measurement surface.
+task: tau2_retail
+
+env:
+  num_trials: 1

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent Docs · Runs &amp; Observability</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a><a href="/docs" style="font-weight:600;">docs</a><a href="/tools">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="docs-shell">
+<nav id="docs-nav"></nav>
+<main class="docs-page">
+  <h1>Runs &amp; Observability</h1>
+  <p class="lede">Every run uses the same launch shape, and every run — live or finished —
+  is normalized into the same record structure this dashboard renders: events, sessions,
+  scores, the learning timeline, telemetry, and the workspace itself.</p>
+
+  <h2 id="runners">Where a run executes</h2>
+  <div class="tblwrap"><table>
+    <tr><th>runner</th><th>executes on</th><th>workspace lives at</th></tr>
+    <tr><td class="mono">agents/run_sandbox_modal.sh</td>
+        <td>a container under Modal app <code>lab-agent</code>, one per session</td>
+        <td class="mono">volume lab-agent-workspace: &lt;task&gt;/&lt;session&gt;/workspace</td></tr>
+    <tr><td class="mono">agents/run_sandbox_docker.sh</td><td>a local Docker container</td>
+        <td class="mono">agents/_container_runs/&lt;task&gt;/&lt;session&gt;/workspace</td></tr>
+  </table></div>
+  <p>Agents never execute as bare processes on the operator machine. The historical local
+  runner, <code>agents/run_sandbox.sh</code>, is retired. Runs before 2026-08-11 were
+  launched with it; their records live on the observatory volume.</p>
+  <p>All runners share the launch shape
+  <code>&lt;scaffold&gt; &lt;task&gt; [hours] [model]</code> and one seeding routine, so the
+  sandbox is identical wherever it runs. Container sessions also carry:</p>
+  <ol>
+    <li><code>&lt;task&gt;/&lt;session&gt;/logs</code>, a directory beside the workspace.
+        <code>HOME</code> points inside it, so the CLI's native session state persists with
+        the run record.</li>
+    <li>A Modal token, so in-container training jobs and live ingest work.</li>
+  </ol>
+  <p>Modal budgets clamp to 23.75 h: the platform's 24 h container ceiling must outlive the
+  runner's grace kill. The agent's model calls go to its API endpoint. Its GPU jobs always
+  go to Modal. Local runs require the operator machine to stay awake.</p>
+
+  <h2 id="storage">Where everything is stored</h2>
+  <div class="tblwrap"><table>
+    <tr><th>artifact</th><th>location</th></tr>
+    <tr><td>run trace + per-run artifacts</td>
+        <td class="mono">workspace/agents/_runs/&lt;run&gt;/ — trace.jsonl, trace.txt,
+            prompt.txt, solve.err, solve_status.txt, audit.json, submitted.jsonl</td></tr>
+    <tr><td>trained checkpoints</td>
+        <td class="mono">Modal volume lab-out: /out/models/&lt;tag&gt;/merged</td></tr>
+    <tr><td>run records (what this app reads)</td>
+        <td class="mono">Modal volume lab-observatory: runs/&lt;run_id&gt;/{record,workspace,status}.json
+            + raw/ (verbatim trace, prompt, audit, workspace.tar.gz)</td></tr>
+    <tr><td>operator scores</td>
+        <td class="mono">runs/LEADERBOARD.jsonl (repo) → leaderboard.jsonl (volume root, via
+            sync-scores)</td></tr>
+  </table></div>
+
+  <h2 id="watcher">Live ingest</h2>
+  <p>A watcher (<code>observatory.cli watch</code>) checks the run every 30–60 s. On each
+  pass it:</p>
+  <ol>
+    <li>stamps an arrival time on each new trace line;</li>
+    <li>samples CPU and memory (Modal GPU jobs add their own telemetry via the drop-in
+        sampler);</li>
+    <li>rebuilds the record and uploads it.</li>
+  </ol>
+  <p>The final pass is triggered by <code>solve_status.txt</code>. It archives the workspace
+  as <code>raw/workspace.tar.gz</code> (excluding corpus, .git, and venvs), so anyone can
+  pull a finished submission and score it without the machine that ran it. Local runs opt in
+  with <code>--watch</code>. Container runs always watch themselves, using a read-only seed
+  copy of the observatory code, so the agent cannot rewrite its own reporter.</p>
+
+  <h2 id="record">The run record</h2>
+  <p>Every scaffold's trace normalizes into one schema, defined in
+  <code>observatory/schema.py</code>. A record contains:</p>
+  <ol>
+    <li><code>index_row</code> — state, task, scaffold, track, best dev score, learning
+        counts, canonical/integrity/audit flags, cost, and duration.</li>
+    <li><code>events</code> — each with hoisted content blocks (thinking / text / tool_use /
+        tool_result), so one rendering path serves every harness.</li>
+    <li><code>sessions</code>.</li>
+    <li><code>scores</code> — the workspace's checkpoint ledger, leaderboard rows, and every
+        results file the run produced.</li>
+    <li><code>judgements</code> — the audit verdict.</li>
+    <li><code>system_monitor</code> — telemetry samples.</li>
+    <li><code>learning</code> — the timeline described below.</li>
+  </ol>
+
+  <h2 id="timeline">The learning timeline</h2>
+  <p>Every traced shell command is classified against the tool registry
+  (<a href="/docs/toolbox">two pattern families</a>) into a <code>LearningAction</code>.
+  Each action records:</p>
+  <ol>
+    <li>the kind: <code>data | train | eval | evolve | tool</code>;</li>
+    <li>the tool identity and the full command;</li>
+    <li>extracted flags (<code>--tag</code>, <code>--rows</code>, …);</li>
+    <li><code>nth_use</code> — a per-tool reuse counter in event order;</li>
+    <li>provenance: <code>seed</code> (the command matched a registry pattern),
+        <code>invented</code> (an executed script absent from the run's seed manifest but
+        present in the final workspace snapshot), or <code>unknown</code> (runs predating
+        seed manifests).</li>
+  </ol>
+  <p>A temporary script deleted before run end is deliberately not counted. The run page
+  renders this timeline; the index shows per-kind counts.</p>
+
+  <h2 id="scores-cols">Dev and test columns</h2>
+  <p>The runs table shows two score columns:</p>
+  <ol>
+    <li><strong>dev</strong> is self-reported. It is the best harness dev result if the
+        workspace produced one, otherwise the best <code>dev_score</code> in the agent's
+        checkpoint ledger (the fallback has no CI).</li>
+    <li><strong>test</strong> is official. <code>sync-scores</code> uploads the operator
+        leaderboard, and run-level rows (run id + submission mean) overlay onto the table,
+        with the margin in parentheses and the judge in the tooltip. Re-scorings supersede
+        earlier ones: later rows win.</li>
+  </ol>
+
+  <h2 id="playbook">Operator playbook</h2>
+  <pre><code>bash launch/preflight.sh &lt;task&gt;          # every free check that predicts run survival
+bash launch/detach_run.sh --watch --track easy &lt;scaffold&gt; &lt;task&gt; &lt;hours&gt;
+# … the run survives terminal/SSH loss; follow it live on this dashboard …
+# on finish: score (see Evaluation &amp; Scoring), append the margin row, then
+python3 -m observatory.cli sync-scores    # publish test scores to the dashboard</code></pre>
+</main>
+</div>
+<script src="/assets/docs.js"></script>
+</body>
+</html>

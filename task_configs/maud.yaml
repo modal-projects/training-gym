@@ -1,0 +1,19 @@
+# THE per-task config — loaded by harness/config.py for bench.py, judge_cli.py,
+# integrity pins, and the agent runners. A task exists iff this file exists.
+# Defaults here; override per run with `--config <override.yaml>`, then CLI flags.
+task: maud
+archetype: qa
+
+corpus: tasks/maud/corpus               # 152 definitive merger agreements (MAUD deals)
+corpus_version: "maud-M-095c61b5ecdb"   # derived: sha over the shipped manifest
+                                        #   (see tasks/maud/manifest.jsonl)
+dev: tasks/maud/dev.json                # 30 rows, gold + weighted rubric (readable)
+test: tasks/maud/test.json              # (mirror of dev for this exploratory pack)
+sys: tasks/maud/sys.txt
+glob: "**/*.txt"
+secondary: none                         # no deterministic secondary metric for legal prose
+
+session:                                # agent-session defaults (agents/run*.sh --config)
+  scaffold: modal_glm52
+  track: easy
+  hours: 24

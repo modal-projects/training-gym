@@ -1,0 +1,44 @@
+# secrets — never commit keys
+.env
+
+# python
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
+
+# local run artifacts (candidates/results are per-user; LEADERBOARD is curated separately)
+runs/*/
+
+# the agent-side GPU ledger — written per run, never curated in the repo
+learning_agent_workspace/runs/GPU_LOG.jsonl
+
+# large pinned corpora are distributed separately (see README)
+tasks/*/corpus/
+
+# fav2 questions/golds derive from a proprietary dataset (private research use
+# only — must never be published or leave the local machine)
+tasks/fav2/dev.json
+tasks/fav2/test.json
+
+# agent-run artifacts (traces/prompts/audits per run) and the ephemeral timer
+agents/_runs/
+agents/_container_runs/
+timer.sh
+
+# subscription-auth credentials for non-API scaffolds — never commit
+agents/*/auth.json
+agents/*/oauth_token
+
+# written into the repo root by the opencode scaffold at launch
+opencode.json
+
+# cloned reference packages — pinned in toolbox_bank/repos.yaml, materialized
+# by toolbox_bank/clone_repos.py (workspace setup runs it automatically)
+toolbox_bank/training_tool/axolotl/
+toolbox_bank/training_tool/self_distillation/
+toolbox_bank/training_tool/training_gym/

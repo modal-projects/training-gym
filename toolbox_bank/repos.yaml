@@ -1,0 +1,26 @@
+# repos.yaml: the FULL registry of cloned packages, pinned. Lives in the
+# tool bank; each seeded workspace gets a filtered copy holding only the
+# packages its task's training methods need.
+#
+# THE single source of truth for what third-party code the toolbox carries
+# and at which commit. training_tool/ IS the shelf: the packages sit there
+# directly and the agent drives them itself (their own docs/recipes; run any
+# command on GPUs via toolbox/gpu_tools/gpu_launcher.py). Clones are gitignored;
+# `python3 toolbox/clone_repos.py` materializes any missing one at its exact
+# pin — workspace setup runs it automatically. Nested .git dirs are stripped:
+# a clone is a plain pinned tree, updated only by editing the pin here.
+axolotl:
+  repo: https://github.com/axolotl-ai-cloud/axolotl
+  commit: f6ddae34fc63acd5067d0bc4496df05f42c19277
+  dest: toolbox/training_tool/axolotl
+  notes: config-driven SFT/LoRA/DPO trainer (rl:dpo wraps TRL DPOTrainer; see its docs/rlhf.qmd).
+self_distillation:
+  repo: https://github.com/idanshen/Self-Distillation
+  commit: d77573212fa0a3ae2eeb64b9b44db1c251f75e3e
+  dest: toolbox/training_tool/self_distillation
+  notes: on-policy SDFT (arXiv:2601.19897); teacher = the same model with context in-window, per-token KL. main.py is the entry; pins save_steps=100 (runs under 100 optimizer steps save nothing).
+training_gym:
+  repo: https://github.com/modal-projects/training-gym
+  commit: 64dd5ae0f969a02e33daa72a4f211378b743763b
+  dest: toolbox/training_tool/training_gym
+  notes: the Training Gym SDK (modal-training-gym) — RL (GRPO) on Modal, managed, with a live dashboard. Drive it directly (TrainConfig + SlimeRecipe, your prompts + async rm reward); its skills/ folder holds the step-by-step playbooks; how-to in training_tool/README.md; a worked agent loop is in its tutorials/agent/.

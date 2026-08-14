@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>run · Learning Agent Observatory</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <span id="crumb" class="crumb"></span>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div id="fatal" class="error-banner" hidden></div>
+
+<main class="run-layout">
+  <aside id="left-rail" class="rail left-rail" aria-label="run overview">
+    <div class="rail-card empty">loading…</div>
+  </aside>
+
+  <section class="center">
+    <nav class="tabs" id="tabs" aria-label="run sections">
+      <button data-tab="trace" type="button">Trace</button>
+      <button data-tab="judge" type="button">Judge</button>
+      <button data-tab="learning" type="button">Learning</button>
+      <button data-tab="scores" type="button">Scores</button>
+      <button data-tab="workspace" type="button">Workspace</button>
+    </nav>
+    <div id="panel-trace" class="tab-panel"></div>
+    <div id="panel-judge" class="tab-panel"></div>
+    <div id="panel-learning" class="tab-panel"></div>
+    <div id="panel-scores" class="tab-panel"></div>
+    <div id="panel-workspace" class="tab-panel"></div>
+  </section>
+
+  <aside id="right-rail" class="rail right-rail" aria-label="system telemetry">
+    <div class="rail-card empty">loading…</div>
+  </aside>
+</main>
+
+<div id="chart-modal" class="modal hidden" role="dialog" aria-label="system charts">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>system telemetry</h2>
+      <button id="modal-close" type="button">close ✕</button>
+    </div>
+    <div id="modal-grid" class="modal-grid"></div>
+  </div>
+</div>
+
+<noscript><div class="error-banner">The observatory needs JavaScript.</div></noscript>
+<script type="module" src="/assets/run.js"></script>
+</body>
+</html>

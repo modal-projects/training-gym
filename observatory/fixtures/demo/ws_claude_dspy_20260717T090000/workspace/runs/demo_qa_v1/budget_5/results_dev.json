@@ -1,0 +1,118 @@
+{
+ "mean": 0.57,
+ "bootstrap_ci95": [
+  0.31,
+  0.72
+ ],
+ "n": 5,
+ "n_failed": 1,
+ "all_failed": false,
+ "failed": [
+  "dspy_05f6a7b8c9da"
+ ],
+ "secondary_metric": "python_compiles",
+ "secondary_mean": 0.83,
+ "canonical": false,
+ "integrity": "OK",
+ "provenance": {
+  "judge_model": "claude-opus-4-20250514",
+  "pinned_judge_model": "claude-opus-4-20250514",
+  "judge_backend": "cli-claude",
+  "canonical": false,
+  "n_votes": 3,
+  "judge_prompt_sha": "66cbb96800000000000000000000000000000000000000000000000000000000",
+  "harness_sha": "7458d98600000000000000000000000000000000000000000000000000000000",
+  "sys_sha": "3582711200000000000000000000000000000000000000000000000000000000",
+  "gold_sha": "a9576aad00000000000000000000000000000000000000000000000000000000",
+  "config_sha": "5c256fe800000000000000000000000000000000000000000000000000000000",
+  "corpus_pin": "v3.2.1",
+  "budget": 5,
+  "limit": 0,
+  "eval_temperature": 0.0,
+  "seed": 0,
+  "integrity": "OK",
+  "timestamp": "2026-07-17T11:05:00+00:00"
+ },
+ "per_question": {
+  "dspy_024049972dfc": {
+   "failed": false,
+   "claim_score": 0.55,
+   "verdicts": {
+    "c1": 0.65,
+    "c2": 0.55,
+    "c3": 0.65
+   },
+   "secondary": {
+    "kind": "python_compiles",
+    "score": 1.0,
+    "detail": {}
+   }
+  },
+  "dspy_03a1b2c3d4e5": {
+   "failed": false,
+   "claim_score": 0.7,
+   "verdicts": {
+    "c1": 0.8,
+    "c2": 0.7,
+    "c3": 0.8
+   },
+   "secondary": {
+    "kind": "python_compiles",
+    "score": 1.0,
+    "detail": {}
+   }
+  },
+  "dspy_05f6a7b8c9da": {
+   "failed": true,
+   "claim_score": null,
+   "verdicts": {},
+   "secondary": {
+    "kind": "python_compiles",
+    "score": 0.0,
+    "detail": {}
+   }
+  },
+  "dspy_07e8f9a0b1c2": {
+   "failed": false,
+   "claim_score": 0.35,
+   "verdicts": {
+    "c1": 0.45,
+    "c2": 0.35,
+    "c3": 0.45
+   },
+   "secondary": {
+    "kind": "python_compiles",
+    "score": 1.0,
+    "detail": {}
+   }
+  },
+  "dspy_091a2b3c4d5e": {
+   "failed": false,
+   "claim_score": 0.8,
+   "verdicts": {
+    "c1": 0.9,
+    "c2": 0.8,
+    "c3": 0.9
+   },
+   "secondary": {
+    "kind": "python_compiles",
+    "score": 1.0,
+    "detail": {}
+   }
+  },
+  "dspy_0b3c4d5e6f7a": {
+   "failed": false,
+   "claim_score": 0.45,
+   "verdicts": {
+    "c1": 0.55,
+    "c2": 0.45,
+    "c3": 0.55
+   },
+   "secondary": {
+    "kind": "python_compiles",
+    "score": 1.0,
+    "detail": {}
+   }
+  }
+ }
+}

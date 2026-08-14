@@ -1,0 +1,42 @@
+# THE per-task config — loaded by harness/config.py for bench.py, rollout.py,
+# integrity pins, and the agent runners. A task exists iff this file exists.
+task: alfworld
+archetype: agentic
+
+adapter: harness/adapters/alfworld.py
+dev: tasks/alfworld/dev.json            # 50 valid_seen games (seeded sample)
+test: tasks/alfworld/test.json          # 50 valid_unseen games — generalization split
+sys: tasks/alfworld/sys.txt
+
+env:
+  pin: "alfworld==0.4.2"                # + game data via alfworld-download at image
+                                        #   build (see harness/rollout_modal.py)
+  max_steps: 40                         # per-episode step budget (= the budget_ dir)
+  num_trials: 1                         # sparse deterministic env: one episode per game
+  seed: 0
+  show_admissible: false                # PINNED protocol choice; measured on the
+                                        #   first 10 dev rows with base Qwen3.5-9B:
+                                        #   hidden -> floor 0.0 (full margin range,
+                                        #   the literature regime); shown -> 0.9
+                                        #   (near ceiling, no headroom). See task.md.
+
+agent:
+  driver: tools                         # NATIVE OpenAI tool calls over the action
+                                        #   schema in harness/adapters/alfworld.py —
+                                        #   the interface deployed agents use, and
+                                        #   what the student's tool-use post-training
+                                        #   optimized. The endpoint MUST be served
+                                        #   with a tool-call parser.
+                                        #   `react` (ACTION:/FINAL: text) is the same
+                                        #   action space for text-only policies, e.g.
+                                        #   a CLI reference baseline.
+  temperature: 0.0
+  max_tokens: 2048                      # one tool call per turn needs very little
+  extra_body:                           # thinking OFF: 40 steps x a reasoning block
+    chat_template_kwargs:               #   would dominate wall-clock, and the QA
+      enable_thinking: false            #   eval pins the same choice (harness/eval.py)
+
+session:                                # agent-session defaults (agents/run*.sh --config)
+  scaffold: modal_glm52
+  track: easy
+  hours: 24

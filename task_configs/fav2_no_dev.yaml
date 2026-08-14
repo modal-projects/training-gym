@@ -1,0 +1,12 @@
+# fav2 variant: no dev gold seeded. Same corpus and hidden test as fav2.
+task: fav2_no_dev
+extends: fav2
+
+seed:
+  dev: false
+instructions: instructions/data_access/medium.md
+
+session:
+  scaffold: codex_glm52
+  track: easy
+  hours: 24

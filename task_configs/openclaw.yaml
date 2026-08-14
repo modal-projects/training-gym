@@ -1,0 +1,19 @@
+# THE per-task config — loaded by harness/config.py for bench.py, judge_cli.py,
+# integrity pins, and the agent runners. A task exists iff this file exists.
+# Defaults here; override per run with `--config <override.yaml>`, then CLI flags.
+task: openclaw
+archetype: qa
+
+corpus: tasks/openclaw/corpus           # OpenClaw TypeScript framework
+corpus_commit: da228660
+dev: tasks/openclaw/dev.json
+test: tasks/openclaw/test.json          # HIDDEN
+sys: tasks/openclaw/sys.txt
+glob: "**/*.ts"
+secondary: ts_symbol_grounding          # fraction of referenced symbols that are real
+symbols: tasks/openclaw/symbols.json     # real OpenClaw symbol set (24958 symbols)
+
+session:                                # agent-session defaults (agents/run*.sh --config)
+  scaffold: modal_glm52
+  track: easy
+  hours: 24

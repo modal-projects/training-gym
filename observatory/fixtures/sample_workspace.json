@@ -1,0 +1,114 @@
+{
+ "built_at": "2026-07-17T12:00:00Z",
+ "root": "/Users/junlin/Documents/Research/learning_agent/learning-agent/observatory/fixtures/demo/ws_claude_dspy_20260717T090000/workspace",
+ "total_files": 15,
+ "total_bytes": 6868,
+ "inlined_files": 15,
+ "files": [
+  {
+   "path": "README.md",
+   "size": 55,
+   "inline": true,
+   "content": "Demo workspace (fixture) for observatory ingest tests.\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/CHECKPOINTS.jsonl",
+   "size": 377,
+   "inline": true,
+   "content": "{\"tag\": \"oc_pilot_qa_v1\", \"task\": \"openclaw\", \"model_path\": \"/out/models/oc_pilot_qa_v1/merged\", \"dev_score\": 0.0188, \"method\": \"pilot row from earlier run (fixture)\"}\n{\"tag\": \"demo_qa_v1\", \"task\": \"dspy\", \"model_path\": \"/out/models/demo_qa_v1/merged\", \"dev_score\": 0.2104, \"method\": \"Demo: LoRA-SFT (r32 a64 lr2e-4 3ep, seed 0) on 60 corpus-grounded QA rows (fixture data).\"}\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/LEADERBOARD.jsonl",
+   "size": 986,
+   "inline": true,
+   "content": "{\"task\": \"dspy\", \"tag\": \"demo_qa_v1\", \"split\": \"dev\", \"score\": 0.57, \"ci\": [0.31, 0.72], \"n\": 5, \"failed\": false, \"n_failed\": 1, \"secondary_mean\": 0.83, \"judge_model\": \"claude-opus-4-20250514\", \"backend\": \"cli-claude\", \"canonical\": false, \"integrity\": \"OK\", \"provenance\": {\"judge_model\": \"claude-opus-4-20250514\", \"pinned_judge_model\": \"claude-opus-4-20250514\", \"judge_backend\": \"cli-claude\", \"canonical\": false, \"n_votes\": 3, \"judge_prompt_sha\": \"66cbb96800000000000000000000000000000000000000000000000000000000\", \"harness_sha\": \"7458d98600000000000000000000000000000000000000000000000000000000\", \"sys_sha\": \"3582711200000000000000000000000000000000000000000000000000000000\", \"gold_sha\": \"a9576aad00000000000000000000000000000000000000000000000000000000\", \"config_sha\": \"5c256fe800000000000000000000000000000000000000000000000000000000\", \"corpus_pin\": \"v3.2.1\", \"budget\": 5, \"limit\": 0, \"eval_temperature\": 0.0, \"seed\": 0, \"integrity\": \"OK\", \"timestamp\": \"2026-07-17T11:05:00+00:00\"}}\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/demo_qa_v1/budget_5/candidates.json",
+   "size": 423,
+   "inline": true,
+   "content": "{\n \"dspy_024049972dfc\": \"Demo answer for dspy_024049972dfc (fixture).\",\n \"dspy_03a1b2c3d4e5\": \"Demo answer for dspy_03a1b2c3d4e5 (fixture).\",\n \"dspy_05f6a7b8c9da\": \"Demo answer for dspy_05f6a7b8c9da (fixture).\",\n \"dspy_07e8f9a0b1c2\": \"Demo answer for dspy_07e8f9a0b1c2 (fixture).\",\n \"dspy_091a2b3c4d5e\": \"Demo answer for dspy_091a2b3c4d5e (fixture).\",\n \"dspy_0b3c4d5e6f7a\": \"Demo answer for dspy_0b3c4d5e6f7a (fixture).\"\n}\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/demo_qa_v1/budget_5/eval_meta.json",
+   "size": 450,
+   "inline": true,
+   "content": "{\n \"dspy_024049972dfc\": {\n  \"tool_calls\": 3,\n  \"completion_tokens\": 900\n },\n \"dspy_03a1b2c3d4e5\": {\n  \"tool_calls\": 5,\n  \"completion_tokens\": 937\n },\n \"dspy_05f6a7b8c9da\": {\n  \"tool_calls\": 0,\n  \"completion_tokens\": 974\n },\n \"dspy_07e8f9a0b1c2\": {\n  \"tool_calls\": 4,\n  \"completion_tokens\": 1011\n },\n \"dspy_091a2b3c4d5e\": {\n  \"tool_calls\": 2,\n  \"completion_tokens\": 1048\n },\n \"dspy_0b3c4d5e6f7a\": {\n  \"tool_calls\": 5,\n  \"completion_tokens\": 1085\n }\n}\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/demo_qa_v1/budget_5/results_dev.json",
+   "size": 2376,
+   "inline": true,
+   "content": "{\n \"mean\": 0.57,\n \"bootstrap_ci95\": [\n  0.31,\n  0.72\n ],\n \"n\": 5,\n \"n_failed\": 1,\n \"all_failed\": false,\n \"failed\": [\n  \"dspy_05f6a7b8c9da\"\n ],\n \"secondary_metric\": \"python_compiles\",\n \"secondary_mean\": 0.83,\n \"canonical\": false,\n \"integrity\": \"OK\",\n \"provenance\": {\n  \"judge_model\": \"claude-opus-4-20250514\",\n  \"pinned_judge_model\": \"claude-opus-4-20250514\",\n  \"judge_backend\": \"cli-claude\",\n  \"canonical\": false,\n  \"n_votes\": 3,\n  \"judge_prompt_sha\": \"66cbb96800000000000000000000000000000000000000000000000000000000\",\n  \"harness_sha\": \"7458d98600000000000000000000000000000000000000000000000000000000\",\n  \"sys_sha\": \"3582711200000000000000000000000000000000000000000000000000000000\",\n  \"gold_sha\": \"a9576aad00000000000000000000000000000000000000000000000000000000\",\n  \"config_sha\": \"5c256fe800000000000000000000000000000000000000000000000000000000\",\n  \"corpus_pin\": \"v3.2.1\",\n  \"budget\": 5,\n  \"limit\": 0,\n  \"eval_temperature\": 0.0,\n  \"seed\": 0,\n  \"integrity\": \"OK\",\n  \"timestamp\": \"2026-07-17T11:05:00+00:00\"\n },\n \"per_question\": {\n  \"dspy_024049972dfc\": {\n   \"failed\": false,\n   \"claim_score\": 0.55,\n   \"verdicts\": {\n    \"c1\": 0.65,\n    \"c2\": 0.55,\n    \"c3\": 0.65\n   },\n   \"secondary\": {\n    \"kind\": \"python_compiles\",\n    \"score\": 1.0,\n    \"detail\": {}\n   }\n  },\n  \"dspy_03a1b2c3d4e5\": {\n   \"failed\": false,\n   \"claim_score\": 0.7,\n   \"verdicts\": {\n    \"c1\": 0.8,\n    \"c2\": 0.7,\n    \"c3\": 0.8\n   },\n   \"secondary\": {\n    \"kind\": \"python_compiles\",\n    \"score\": 1.0,\n    \"detail\": {}\n   }\n  },\n  \"dspy_05f6a7b8c9da\": {\n   \"failed\": true,\n   \"claim_score\": null,\n   \"verdicts\": {},\n   \"secondary\": {\n    \"kind\": \"python_compiles\",\n    \"score\": 0.0,\n    \"detail\": {}\n   }\n  },\n  \"dspy_07e8f9a0b1c2\": {\n   \"failed\": false,\n   \"claim_score\": 0.35,\n   \"verdicts\": {\n    \"c1\": 0.45,\n    \"c2\": 0.35,\n    \"c3\": 0.45\n   },\n   \"secondary\": {\n    \"kind\": \"python_compiles\",\n    \"score\": 1.0,\n    \"detail\": {}\n   }\n  },\n  \"dspy_091a2b3c4d5e\": {\n   \"failed\": false,\n   \"claim_score\": 0.8,\n   \"verdicts\": {\n    \"c1\": 0.9,\n    \"c2\": 0.8,\n    \"c3\": 0.9\n   },\n   \"secondary\": {\n    \"kind\": \"python_compiles\",\n    \"score\": 1.0,\n    \"detail\": {}\n   }\n  },\n  \"dspy_0b3c4d5e6f7a\": {\n   \"failed\": false,\n   \"claim_score\": 0.45,\n   \"verdicts\": {\n    \"c1\": 0.55,\n    \"c2\": 0.45,\n    \"c3\": 0.55\n   },\n   \"secondary\": {\n    \"kind\": \"python_compiles\",\n    \"score\": 1.0,\n    \"detail\": {}\n   }\n  }\n }\n}\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/demo_qa_v1/budget_5/verdicts_dev/dspy_024049972dfc.json",
+   "size": 260,
+   "inline": true,
+   "content": "{\n \"n_votes\": 3,\n \"backend\": \"cli-claude\",\n \"canonical\": false,\n \"votes\": {\n  \"c1\": [\n   0.65,\n   0.65,\n   0.65\n  ],\n  \"c2\": [\n   0.55,\n   0.55,\n   0.55\n  ],\n  \"c3\": [\n   0.65,\n   0.65,\n   0.65\n  ]\n },\n \"final\": {\n  \"c1\": 0.65,\n  \"c2\": 0.55,\n  \"c3\": 0.65\n }\n}\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/demo_qa_v1/budget_5/verdicts_dev/dspy_03a1b2c3d4e5.json",
+   "size": 248,
+   "inline": true,
+   "content": "{\n \"n_votes\": 3,\n \"backend\": \"cli-claude\",\n \"canonical\": false,\n \"votes\": {\n  \"c1\": [\n   0.8,\n   0.8,\n   0.8\n  ],\n  \"c2\": [\n   0.7,\n   0.7,\n   0.7\n  ],\n  \"c3\": [\n   0.8,\n   0.8,\n   0.8\n  ]\n },\n \"final\": {\n  \"c1\": 0.8,\n  \"c2\": 0.7,\n  \"c3\": 0.8\n }\n}\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/demo_qa_v1/budget_5/verdicts_dev/dspy_07e8f9a0b1c2.json",
+   "size": 260,
+   "inline": true,
+   "content": "{\n \"n_votes\": 3,\n \"backend\": \"cli-claude\",\n \"canonical\": false,\n \"votes\": {\n  \"c1\": [\n   0.45,\n   0.45,\n   0.45\n  ],\n  \"c2\": [\n   0.35,\n   0.35,\n   0.35\n  ],\n  \"c3\": [\n   0.45,\n   0.45,\n   0.45\n  ]\n },\n \"final\": {\n  \"c1\": 0.45,\n  \"c2\": 0.35,\n  \"c3\": 0.45\n }\n}\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/demo_qa_v1/budget_5/verdicts_dev/dspy_091a2b3c4d5e.json",
+   "size": 248,
+   "inline": true,
+   "content": "{\n \"n_votes\": 3,\n \"backend\": \"cli-claude\",\n \"canonical\": false,\n \"votes\": {\n  \"c1\": [\n   0.9,\n   0.9,\n   0.9\n  ],\n  \"c2\": [\n   0.8,\n   0.8,\n   0.8\n  ],\n  \"c3\": [\n   0.9,\n   0.9,\n   0.9\n  ]\n },\n \"final\": {\n  \"c1\": 0.9,\n  \"c2\": 0.8,\n  \"c3\": 0.9\n }\n}\n",
+   "truncated": false
+  },
+  {
+   "path": "runs/demo_qa_v1/budget_5/verdicts_dev/dspy_0b3c4d5e6f7a.json",
+   "size": 260,
+   "inline": true,
+   "content": "{\n \"n_votes\": 3,\n \"backend\": \"cli-claude\",\n \"canonical\": false,\n \"votes\": {\n  \"c1\": [\n   0.55,\n   0.55,\n   0.55\n  ],\n  \"c2\": [\n   0.45,\n   0.45,\n   0.45\n  ],\n  \"c3\": [\n   0.55,\n   0.55,\n   0.55\n  ]\n },\n \"final\": {\n  \"c1\": 0.55,\n  \"c2\": 0.45,\n  \"c3\": 0.55\n }\n}\n",
+   "truncated": false
+  },
+  {
+   "path": "scripts/quick_dev_probe.py",
+   "size": 554,
+   "inline": true,
+   "content": "\"\"\"Ad hoc dev-set spot check the agent wrote instead of always going\nthrough toolbox/eval_toolbox/rubric_eval.py (fixture: an invented,\nnon-seed tool, used twice in this demo run).\n\"\"\"\nimport argparse\nimport json\n\n\ndef main() -> None:\n    p = argparse.ArgumentParser()\n    p.add_argument(\"--answers\", required=True)\n    p.add_argument(\"--verbose\", action=\"store_true\")\n    args = p.parse_args()\n    rows = json.loads(open(args.answers).read())\n    print(f\"quick probe: {len(rows)}/{len(rows)} candidates present\")\n\n\nif __name__ == \"__main__\":\n    main()\n",
+   "truncated": false
+  },
+  {
+   "path": "submission/eval.py",
+   "size": 161,
+   "inline": true,
+   "content": "\"\"\"Demo submission stub (fixture).\"\"\"\nWEIGHTS = \"/out/models/demo_qa_v1/merged\"\n\n\ndef generate_answers(questions):\n    raise NotImplementedError(\"demo fixture\")\n",
+   "truncated": false
+  },
+  {
+   "path": "tasks/dspy/ROUNDS.md",
+   "size": 159,
+   "inline": true,
+   "content": "# dspy rounds\n\n## Round 1 (demo)\n- LoRA-SFT r32 a64 lr2e-4 3ep on 60 QA rows -> dev 0.57 [0.31,0.72], tag `demo_qa_v1`\n- avg tool_calls 3.2 (search preserved)\n",
+   "truncated": false
+  },
+  {
+   "path": "timer.sh",
+   "size": 51,
+   "inline": true,
+   "content": "echo \"Remaining time (hours:minutes):\"\necho \"0:00\"\n",
+   "truncated": false
+  }
+ ]
+}

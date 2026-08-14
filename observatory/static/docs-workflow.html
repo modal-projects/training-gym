@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent Docs · The Workflow</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+<style>
+  .flow { width: 100%; height: auto; display: block; margin: 12px 0 4px; }
+  .flow text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .flow .box { fill: var(--bg-panel); stroke: var(--fg-faint); stroke-width: 1.2; }
+  .flow .box-hot { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+  .flow .lbl { fill: var(--fg); font-size: 13px; }
+  .flow .sub { fill: var(--fg-muted); font-size: 10.5px; }
+  .flow .edge { stroke: var(--fg-muted); stroke-width: 1.4; fill: none; }
+  .flow .edge-hot { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+  .flow .cap { fill: var(--fg-muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a><a href="/docs" style="font-weight:600;">docs</a><a href="/tools">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="docs-shell">
+<nav id="docs-nav"></nav>
+<main class="docs-page">
+  <h1>The Workflow</h1>
+  <p class="lede">One run of the bench: seed a workspace, let the agent train the student
+  for its budget, score what it wired in. The margin over the untrained student is the
+  result.</p>
+
+  <h2 id="cycle">The run, end to end</h2>
+  <svg class="flow" viewBox="0 0 960 190" role="img" aria-label="Run pipeline: seed workspace, agent session, run record, score, margin">
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--fg-muted)"/>
+      </marker>
+      <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+      </marker>
+    </defs>
+    <rect class="box" x="4" y="52" width="170" height="76" rx="8"/>
+    <text class="lbl" x="88" y="82" text-anchor="middle">seed workspace</text>
+    <text class="sub" x="88" y="99" text-anchor="middle">learning_agent_workspace/</text>
+    <text class="sub" x="88" y="113" text-anchor="middle">one task, held-out deleted</text>
+
+    <rect class="box-hot" x="222" y="40" width="220" height="100" rx="8"/>
+    <text class="lbl" x="332" y="70" text-anchor="middle">agent session</text>
+    <text class="sub" x="332" y="87" text-anchor="middle">Modal / Docker container</text>
+    <text class="sub" x="332" y="101" text-anchor="middle">data → train → eval → record</text>
+    <text class="sub" x="332" y="115" text-anchor="middle">budget: N hours</text>
+    <path class="edge-hot" d="M 292 40 C 292 14, 372 14, 372 40" marker-end="url(#ar2)"/>
+    <text class="cap" x="332" y="12" text-anchor="middle">iterate</text>
+
+    <rect class="box" x="488" y="52" width="176" height="76" rx="8"/>
+    <text class="lbl" x="576" y="82" text-anchor="middle">run record</text>
+    <text class="sub" x="576" y="99" text-anchor="middle">trace · cot · learning log</text>
+    <text class="sub" x="576" y="113" text-anchor="middle">audit · workspace archive</text>
+
+    <rect class="box" x="710" y="52" width="150" height="76" rx="8"/>
+    <text class="lbl" x="785" y="82" text-anchor="middle">score</text>
+    <text class="sub" x="785" y="99" text-anchor="middle">submission on test.json</text>
+    <text class="sub" x="785" y="113" text-anchor="middle">pinned judge, 3 votes</text>
+
+    <rect class="box-hot" x="892" y="62" width="60" height="56" rx="8"/>
+    <text class="lbl" x="922" y="86" text-anchor="middle">margin</text>
+    <text class="sub" x="922" y="102" text-anchor="middle">vs base</text>
+
+    <line class="edge" x1="168" y1="90" x2="216" y2="90" marker-end="url(#ar)"/>
+    <line class="edge" x1="442" y1="90" x2="490" y2="90" marker-end="url(#ar)"/>
+    <line class="edge" x1="656" y1="90" x2="704" y2="90" marker-end="url(#ar)"/>
+    <line class="edge" x1="860" y1="90" x2="886" y2="90" marker-end="url(#ar)"/>
+
+    <text class="cap" x="88" y="152" text-anchor="middle">run_sandbox_modal.sh</text>
+    <text class="cap" x="332" y="152" text-anchor="middle">volume lab-agent-workspace</text>
+    <text class="cap" x="576" y="152" text-anchor="middle">volume lab-observatory</text>
+    <text class="cap" x="785" y="152" text-anchor="middle">bench.py judge / score</text>
+    <text class="cap" x="922" y="152" text-anchor="middle">LEADERBOARD</text>
+  </svg>
+  <ol>
+    <li><strong>Launch:</strong>
+        <code>agents/run_sandbox_modal.sh --track easy codex_kimi3 fav2 24</code> —
+        scaffold, task, budget in hours. The Docker runner takes the same arguments.</li>
+    <li><strong>Session:</strong> the agent iterates its loop (next section) until
+        <code>timer.sh</code> runs out.</li>
+    <li><strong>Record:</strong> the trace, chain of thought, learning log, audit
+        verdict, and workspace archive land on the <code>lab-observatory</code> volume
+        and appear on this dashboard.</li>
+    <li><strong>Score:</strong> the operator runs
+        <code>python3 submission/eval.py --input tasks/&lt;task&gt;/test.json --output
+        answers.json</code>, stages the answers as
+        <code>runs/&lt;tag&gt;/budget_50/candidates.json</code>, and judges them with
+        <code>bench.py judge</code> (pinned <code>gpt-5.6-luna</code>, 3 votes per
+        answer, bootstrap confidence interval).</li>
+    <li><strong>Margin:</strong> submission score minus the base floor (the untrained
+        student through the reference harness, same judge). Both rows go to
+        <code>runs/LEADERBOARD.jsonl</code>.</li>
+  </ol>
+
+  <h2 id="loop">The agent's loop</h2>
+  <svg class="flow" viewBox="0 0 960 210" role="img" aria-label="Agent loop: make data, train or improve harness, evaluate, record, wire submission, repeat">
+    <rect class="box" x="8" y="30" width="168" height="72" rx="8"/>
+    <text class="lbl" x="92" y="58" text-anchor="middle">make data</text>
+    <text class="sub" x="92" y="75" text-anchor="middle">data_tool/ method cards</text>
+    <text class="sub" x="92" y="89" text-anchor="middle">dedup_decontam gate</text>
+
+    <rect class="box-hot" x="230" y="30" width="190" height="72" rx="8"/>
+    <text class="lbl" x="325" y="52" text-anchor="middle">train the student</text>
+    <text class="sub" x="325" y="69" text-anchor="middle">SFT → DPO → RL (GRPO)</text>
+    <text class="sub" x="325" y="83" text-anchor="middle">training_tool/ on H200s</text>
+    <path class="edge" d="M 325 102 C 325 130, 325 130, 325 130" marker-end="url(#ar)"/>
+    <rect class="box" x="240" y="132" width="170" height="46" rx="8"/>
+    <text class="sub" x="325" y="151" text-anchor="middle">or: improve the harness</text>
+    <text class="sub" x="325" y="166" text-anchor="middle">retrieval · prompts · tools</text>
+
+    <rect class="box" x="474" y="30" width="180" height="72" rx="8"/>
+    <text class="lbl" x="564" y="58" text-anchor="middle">evaluate</text>
+    <text class="sub" x="564" y="75" text-anchor="middle">full harness on dev set</text>
+    <text class="sub" x="564" y="89" text-anchor="middle">pinned judge (service)</text>
+
+    <rect class="box" x="708" y="30" width="160" height="72" rx="8"/>
+    <text class="lbl" x="788" y="58" text-anchor="middle">record + wire</text>
+    <text class="sub" x="788" y="75" text-anchor="middle">LEARNING_LOG.jsonl</text>
+    <text class="sub" x="788" y="89" text-anchor="middle">submission/eval.py</text>
+
+    <line class="edge" x1="176" y1="66" x2="224" y2="66" marker-end="url(#ar)"/>
+    <line class="edge" x1="420" y1="66" x2="468" y2="66" marker-end="url(#ar)"/>
+    <line class="edge" x1="654" y1="66" x2="702" y2="66" marker-end="url(#ar)"/>
+    <path class="edge-hot" d="M 868 66 C 940 66, 940 206, 480 206 C 130 206, 92 162, 92 108" marker-end="url(#ar2)"/>
+    <text class="cap" x="480" y="196" text-anchor="middle">repeat until the budget ends — keep what raised the dev score, drop what didn't</text>
+  </svg>
+  <p>Training moves the weights; the harness moves how the weights are used. The margin
+  usually needs both, and weight moves compound: SFT on generated data first, then
+  preference pairs (DPO) or RL with a judge-based reward once SFT plateaus. A run that
+  only rewrites the harness leaves the student itself unchanged.</p>
+
+  <h2 id="workspace">What is in the workspace</h2>
+  <p>Everything the agent can see, at the moment it starts:</p>
+  <pre><code>workspace/
+  AGENTS.md    the assignment: objective, submission contract, rules
+  timer.sh             remaining wall-clock budget
+  .env                 judge-service pointers (LEARNING_AGENT_JUDGE_URL/TOKEN), Modal env — no provider keys
+  task/                the ONE task, copied in at setup: task.md, sys.txt,
+                       corpus/ (per track), dev.json (easy)
+  model/               the untrained task model's weights (pinned snapshot,
+                       downloaded in at setup)
+  toolbox/
+    TOOLS.md           the toolbox manual: workflow, specifications, rules, catalog
+    data_tool/         method cards (.md) + dedup_decontam, mix (runnable)
+    training_tool/     pinned packages: axolotl (SFT + DPO), training_gym (RL)
+    eval_tool/         gen_eval, rubric_eval (judge service client)
+    harness_tool/      answering programs: completion_qa, react_loop, react_*, mini_swe_agent
+    inference_tool/    vllm_serve, sglang_serve
+    gpu_tools/         gpu_launcher.py, gpu_sandbox.py + Modal how-to docs
+    api_clients/       judge/LLM client library
+  submission/          the scoring surface: eval.py (contract), agent.py, serve.py
+  runs/                LEARNING_LOG.jsonl (empty), GPU_LOG.jsonl (written by tools)
+  agents/, bench/      run machinery + prompt material (injected at seed time)</code></pre>
+  <p>Not in the workspace: held-out <code>test.json</code>, other tasks, the judge and
+  scoring code, integrity pins, this dashboard's code, and any provider API key.</p>
+</main>
+</div>
+<script src="/assets/docs.js"></script>
+</body>
+</html>

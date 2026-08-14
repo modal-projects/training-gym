@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent Docs · Integrity Model</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a><a href="/docs" style="font-weight:600;">docs</a><a href="/tools">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="docs-shell">
+<nav id="docs-nav"></nav>
+<main class="docs-page">
+  <h1>Integrity Model</h1>
+  <p class="lede">A benchmark number is meaningful only if the measurement code and data
+  were identical across runs and the agent had no access to the held-out data. The bench enforces
+  both mechanically: content hashes cover every file that defines the measurement, and
+  held-out files are physically absent from workspaces.</p>
+
+  <h2 id="pins">Pins</h2>
+  <p><code>bench/pins.json</code> stores a sha256 hash for every file that defines the
+  measurement: the harness code (<code>eval.py</code>, <code>judge.py</code>,
+  <code>judge_cli.py</code>, <code>grader.py</code>, <code>integrity.py</code> itself,
+  <code>envfile.py</code>), <code>bench.py</code>, <code>bench/config.yaml</code>, the
+  contestant template <code>AGENTS.md</code> and the three track blocks, and per
+  task: <code>task.yaml</code>, <code>sys.txt</code>, <code>dev.json</code>,
+  <code>test.json</code>, <code>task.md</code>, <code>brief.md</code>, the secondary-metric
+  data files, and the corpus as a content tree-hash (volatile entries excluded). The judge
+  prompt is additionally pinned as a hash of its source function, so an edit to the prompt
+  is detected even if the file that contains it moves.</p>
+  <ol>
+    <li><code>python bench.py verify</code> reports drift against the pins. It exits 0 if
+        and only if everything matches.</li>
+    <li><code>python bench.py freeze</code> re-records the pins after an intended change.
+        Freeze is strict: every pinned file must exist, because a partial tree cannot define
+        the benchmark.</li>
+    <li>Scoring refuses to run when pins do not match. <code>score</code> and
+        <code>judge</code> verify pins first. <code>--allow-dirty</code> overrides the check
+        but stamps <code>integrity: DIRTY</code> into the provenance and the leaderboard
+        row, permanently.</li>
+    <li><code>harness/integrity.py</code> is itself pinned. The pinned entrypoints hash it
+        directly against <code>pins.json</code> before calling its <code>verify_pins</code>
+        function, so a modified verifier is detected by its callers instead of being trusted
+        to check itself.</li>
+  </ol>
+  <div class="note">Team rule: any commit that touches a pinned file includes the
+  <code>freeze</code> re-pin in the same change. Every drift incident so far was a forgotten
+  <code>freeze</code>, caught by the six integrity tests that assert a clean surface.</div>
+
+  <h2 id="sandbox">Workspace sealing</h2>
+  <p>Agents never run in the seed repository. <code>agents/run.sh</code> refuses to start
+  unless the <code>.learning_agent_sandbox</code> marker file is present, and only the sandbox
+  preparation writes that marker. Seeding
+  (<code>agents/lib/prepare_workspace.sh</code>, the same script used verbatim by the
+  local, Modal, and Docker runners) does the following, in order:</p>
+  <ol>
+    <li>Runs <code>git archive HEAD</code> on <code>learning_agent_workspace/</code>. The
+        agent surface (AGENTS.md, toolbox, submission, ledgers) becomes the
+        workspace root. Seeding also copies in the run machinery
+        (<code>agents/run.sh</code> plus its lib and the one chosen scaffold), the prompt
+        material (<code>bench/config.yaml</code>, <code>bench/tracks/</code>), and the one
+        task's committed files. Only the committed tree is exported: no <code>.git</code>
+        directory and no history, and no <code>harness/</code>,
+        <code>observatory/</code>, or <code>bench.py</code> at all.</li>
+    <li>Deletes the seeded task's <code>test.json</code>; on medium and hard, also its
+        <code>dev.json</code>. Held-out data is absent from the workspace, not hidden in
+        it, and other tasks' material never enters the workspace in the first place.</li>
+    <li>Truncates <code>runs/LEARNING_LOG.jsonl</code>. A fresh workspace carries no output
+        from earlier runs: earlier generations' scores and methods must not leak into a run
+        that is supposed to discover its own.</li>
+    <li>Seeds the gitignored inputs for the track (the corpus, and dev gold on easy) and a
+        <code>.env</code> with all API keys stripped. Operator judge credentials are used
+        for end-of-run scoring only and never enter a workspace.</li>
+    <li>Writes the sandbox marker; a seed manifest (<code>git ls-tree</code> over exactly
+        the seeded file set, with workspace-relative paths — the baseline used to detect
+        tools invented during the run); and run metadata. Then runs <code>git init</code>
+        to create a fresh history so the agent can version its own work.</li>
+  </ol>
+
+  <h2 id="audit">Trace audit</h2>
+  <p>After every run, <code>agents/lib/audit_trace.py</code> scans the full trace for any
+  attempt to reach held-out evaluation data. It checks path patterns, quoted content, and
+  exfiltration shapes. It is a deterministic scanner, not an LLM. The verdict is stored
+  with the run record and on the leaderboard as <code>audit: CLEAN</code> or
+  <code>CONTAMINATED</code>; a hit invalidates the run.</p>
+
+  <h2 id="firewall">Corpus construction</h2>
+  <p>For new tasks, held-out material is kept out of the corpus by how the corpus is built.
+  The pack builder publishes two separate artifacts: the evaluation file (questions,
+  options, gold answers) and the source-only corpus. The corpus builder stops with an error
+  if any evaluation key appears anywhere in its input tree. Filtering after the fact
+  (n-gram decontamination) is a data-cleaning tool; it is not the containment mechanism.
+  Containment comes from building the two artifacts separately.</p>
+
+  <h2 id="ledgers">Result provenance</h2>
+  <p>Every scored result records: judge model and pinned model, backend,
+  <code>canonical</code> flag, vote count, judge-prompt/harness/sys/gold/config hashes,
+  corpus pin, eval budget, temperature, seed, integrity status, and timestamp. The
+  leaderboard (<code>runs/LEADERBOARD.jsonl</code>) is append-only: re-scorings append new
+  rows instead of editing old ones, and run-level margin rows name the run id they
+  score.</p>
+
+  <h2 id="known">Known open issues</h2>
+  <ol>
+    <li>Shared-volume tag collisions. Trained weights live in a flat namespace on
+        <code>lab-out</code>, so a run that reuses another run's tag overwrites that run's
+        artifact. The planned fix is per-run namespacing of <code>/out/models/</code>.
+        Until then, use run-unique tags.</li>
+    <li>Public viewer. This dashboard is deliberately public and unauthenticated (a v1
+        decision). Everything ingested to the shared volume is world-readable, including
+        workspace archives. Before ingesting a run, check whether its workspace embeds
+        proprietary gold answers.</li>
+    <li>Dev-signal dependence on local CLIs. Agents that judge themselves through
+        logged-in CLI sessions lose that judge in containerized runs. The endpoint-backed
+        judge in the toolbox is the replacement.</li>
+  </ol>
+</main>
+</div>
+<script src="/assets/docs.js"></script>
+</body>
+</html>

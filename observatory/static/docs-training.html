@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Agent Docs · Training Pipeline</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%232e7d74' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%232e7d74'/%3E%3C/svg%3E">
+<script src="/assets/theme.js"></script>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/docs.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">Learning Agent<span class="dim">·Observatory</span></a>
+  <nav style="margin-left:18px; display:flex; gap:14px; font-size:0.85rem;">
+    <a href="/">runs</a><a href="/docs" style="font-weight:600;">docs</a><a href="/tools">tools</a>
+  </nav>
+  <span class="spacer"></span>
+  <button id="theme-toggle" class="theme-toggle" title="toggle theme" aria-label="toggle theme">◐</button>
+</header>
+
+<div class="docs-shell">
+<nav id="docs-nav"></nav>
+<main class="docs-page">
+  <h1>Training Pipeline</h1>
+  <p class="lede">Training changes the weights of the task model.
+  The agent trains by running the packages in <code>training_tool/</code> — axolotl
+  for SFT and DPO, training_gym for RL. Every method produces the same output:
+  a merged full-model directory that the evaluation serves directly. The agent chooses
+  the data, the method, and the hyperparameters, and composes each package's own
+  commands.</p>
+
+  <h2 id="rows">Training-row formats</h2>
+  <p>Training data is JSONL. There are exactly two row shapes. Do not mix them
+  unintentionally:</p>
+  <pre><code>{"question": "...", "answer": "..."}   # answer in the task's answer format
+{"messages": [ {"role": "...", "content": "..."}, ... ]}   # full chat transcript</code></pre>
+  <ol>
+    <li><strong>QA mode</strong> — each <code>question</code>/<code>answer</code> row
+        becomes one chat exchange under the task's verbatim <code>sys.txt</code> system
+        prompt. The prompt is read from the task config and injected exactly as the
+        evaluation harness injects it, so train-time and eval-time framing match
+        byte-for-byte.</li>
+    <li><strong>Trace mode</strong> — if <em>any</em> row carries <code>messages</code>,
+        the whole file trains as chat transcripts, with the loss masked to assistant
+        turns only. This is how search behavior is trained: multi-turn ReAct traces
+        come from <code>data_tool/agentic/react_trace_gen</code>.</li>
+    <li><strong>Open-book rows</strong> — a row may carry its own <code>note</code>
+        field, or <code>--note-file</code> injects one shared note into every row's
+        system message. The note is prepended exactly as the eval harness prepends
+        it.</li>
+  </ol>
+
+  <h2 id="sft">Training uses the packages directly</h2>
+  <p>There are no wrapper scripts around the trainers. The agent drives the packages in
+  <code>toolbox/training_tool/</code> directly: it reads each package's own docs,
+  composes that package's commands, and runs the GPU work through
+  <code>toolbox/gpu_tools/gpu_launcher.py</code>, which starts Modal H200 sandboxes with
+  the standard volumes mounted.</p>
+  <div class="tblwrap"><table>
+    <tr><th>method</th><th>packages</th></tr>
+    <tr><td class="mono">SFT</td><td>axolotl (LoRA and full fine-tuning)</td></tr>
+    <tr><td class="mono">DPO</td><td>axolotl (<span class="mono">rl: dpo</span>)</td></tr>
+    <tr><td class="mono">RL (GRPO)</td><td>training_gym (the Training Gym SDK —
+      the agent writes grading rubrics for its own generated questions, judges
+      rollouts with the pinned gpt-5.6-luna API as the reward, and monitors the
+      run on the gym's live dashboard; playbooks in its
+      <span class="mono">skills/</span> folder)</td></tr>
+  </table></div>
+  <p><strong>Checkpoint output contract:</strong> every trained checkpoint must end up
+  at <code>/out/models/&lt;tag&gt;/merged</code> on the volume <code>lab-out</code>.
+  Serving and scoring both read checkpoints from that path.</p>
+  <div class="note warn"><strong>Namespace discipline:</strong> <code>/out/models/</code>
+  is shared by all runs; since 2026-08-13 each run writes under its own
+  <code>/out/models/$LEARNING_AGENT_RUN_ID/</code> namespace (the runner exports
+  <code>LEARNING_AGENT_RUN_ID</code> and <code>gpu_launcher.py</code> injects it into every
+  sandbox). Runs launched before then used flat <code>/out/models/&lt;tag&gt;</code>
+  paths — a tag collision once overwrote another run's checkpoint — so old
+  artifacts keep their flat paths and only new runs namespace.</div>
+
+  <h2 id="records">What the agent must record</h2>
+  <pre><code># one line per experiment in runs/LEARNING_LOG.jsonl:
+{"ts": "&lt;iso&gt;", "kind": "checkpoint", "tag": "...",
+ "model_path": "/out/models/&lt;tag&gt;/merged", "dev_score": &lt;float&gt;,
+ "what": "&lt;what was done&gt;", "why": "&lt;why it was tried&gt;", "artifacts": [...]}
+# kinds: checkpoint | submission (a wiring change) | note (an observation)</code></pre>
+  <ol>
+    <li>Write one JSON line per experiment to <code>runs/LEARNING_LOG.jsonl</code>. The
+        <code>kind</code> field is one of: <code>checkpoint</code> (a trained model),
+        <code>submission</code> (a wiring change), or <code>note</code> (an
+        observation).</li>
+    <li><code>what</code> and <code>why</code> are required on every line. The log is
+        the only record of the agent's reasoning that survives the run.</li>
+    <li>Record every checkpoint. The observatory's dev-score column reads harness
+        results when they exist and otherwise falls back to the log's checkpoint
+        entries (older runs used CHECKPOINTS.jsonl). A checkpoint that is not in the
+        log is invisible to both the operator and the dashboard.</li>
+    <li>run.sh warns when a run ends with an empty log.</li>
+  </ol>
+
+  <h2 id="costs">Observed costs</h2>
+  <ul>
+    <li>SFT smoke test: 1×H200 ≈ 10 minutes, plus a one-time ≈18 GB base-model download
+        into <code>lab-hf-cache</code>.</li>
+    <li>Real SFT runs at fav2 scale (10²–10³ rows, ≤16k tokens): minutes, not hours.
+        Agents typically fit 3–16 such training rounds into a run.</li>
+    <li>RL end-to-end smoke test (2 rollout iterations): 2×H200 ≈ 15 minutes. Real GRPO
+        runs are the most expensive operation in the toolbox.</li>
+  </ul>
+</main>
+</div>
+<script src="/assets/docs.js"></script>
+</body>
+</html>

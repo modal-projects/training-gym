@@ -1,0 +1,41 @@
+# Learning Agent
+# GLOBAL pins only. Per-task config lives in tasks/<task>/task.yaml (one file
+# per task — a task exists iff that file exists); harness/config.py is the one
+# loader every canonical tool (bench.py, harness/judge_cli.py, harness/
+# rollout.py) goes through. Changing a number here changes the
+# benchmark, so treat this file as the spec — edit deliberately.
+
+global:
+  base_model: Qwen/Qwen3.5-9B      # the task model the learning agent trains
+  base_model_revision: c202236235762e1c871ad0ccb60c8ee5ba337b9a  # HF snapshot pin; runners ensure lab-hf-cache holds it
+  eval_budget: 50                   # NOT a fixed budget — a safety cap only. The model searches
+                                    # (grep/read) until it emits FINAL; it self-terminates (~8 calls),
+                                    # so 50 never binds. No artificial 20-step limit.
+  modal_volume: la-ula-out          # Modal volume holding eval/train outputs
+  runs_dir: runs                    # candidates + results land under runs/<tag>/
+  setup_instructions: instructions/setup/modal.md  # infrastructure block stitched into AGENTS.md
+  leaderboard: runs/LEADERBOARD.jsonl
+
+  judge:
+    model: gpt-5.6-luna             # pinned judge SNAPSHOT for reproducible scoring
+    backend: openai                 # CANONICAL: direct OpenAI Chat Completions
+                                    #   (api.openai.com) with forced function-call structured
+                                    #   output. `api` (Anthropic Messages) is the alternative
+                                    #   canonical backend; cli-* fallbacks are NON-CANONICAL
+                                    #   (results stamped canonical:false).
+    fallbacks: [cli-claude, cli-codex]  # `claude -p` / `codex exec` headless sessions
+    n_votes: 3                      # self-consistency: judge each question n times; per-claim
+                                    #   final score = majority vote (median on ties)
+    temperature: 0.0                # judge sampling temperature (pinned)
+    max_tokens: 4096                # judge response cap (verdicts are small; this never binds)
+    max_retries: 3                  # retries w/ backoff on 429/5xx/parse failure; a question
+                                    #   that still fails -> failed=true (never a silent 0)
+    grade_mode: lenient             # rubric-only weighted-claim score; deterministic
+                                    #   checks reported as a SECONDARY metric, not folded in
+    bootstrap_resamples: 10000      # for the 95% bootstrap CI on the mean
+    bootstrap_seed: 0               # fixed RNG seed -> the CI reproduces bit-identically
+
+  pins: bench/pins.json             # integrity lock (written by `bench.py freeze`, verified
+                                    #   before every score/judge; mismatch -> refuse)
+
+  splits: [dev, test]               # dev drives the loop; test is LOCKED (final number only)

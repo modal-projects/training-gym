@@ -1,0 +1,2 @@
+{"tag": "oc_pilot_qa_v1", "task": "openclaw", "model_path": "/out/models/oc_pilot_qa_v1/merged", "dev_score": 0.0188, "method": "pilot row from earlier run (fixture)"}
+{"tag": "demo_qa_v1", "task": "dspy", "model_path": "/out/models/demo_qa_v1/merged", "dev_score": 0.2104, "method": "Demo: LoRA-SFT (r32 a64 lr2e-4 3ep, seed 0) on 60 corpus-grounded QA rows (fixture data)."}
