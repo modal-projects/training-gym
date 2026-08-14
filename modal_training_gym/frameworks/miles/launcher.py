@@ -535,6 +535,7 @@ def build_miles_app(
             if miles.wandb is None
             else [Secret.from_name(miles.wandb.modal_wandb_secret_name)]
         ),
+        *hf_secrets(),
         *proxy_auth_secrets(),
     ]
     train_experimental_options: dict[str, Any] = (

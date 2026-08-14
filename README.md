@@ -170,6 +170,7 @@ Models with a built-in training recipe, with the `ModelConfig` and recipe classe
 | `Qwen/Qwen3.5-9B` | `slime` | `Qwen3_5_9B` | `Qwen3_5_9b_Recipe` |
 | `Qwen/Qwen3.6-27B` | `slime` | `Qwen3_6_27B` | `Qwen3_6_27b_Recipe` |
 | `Qwen/Qwen3.6-35B-A3B` | `slime` | `Qwen3_6_35B` | `Qwen3_6_35b_Recipe` |
+| `google/gemma-4-26B-A4B-it` | `miles` | `Gemma4_26B_A4B` | `Gemma4_26B_A4B_Recipe` |
 | `moonshotai/Kimi-K2.5` | `miles` | `Kimi_K2_5` | `Kimi_K2_5_LoRA_Recipe` |
 | `moonshotai/Kimi-K2.6` | `miles` | `Kimi_K2_6` | `Kimi_K2_6_LoRA_Recipe` |
 | `zai-org/GLM-4.7` | `slime` | `GLM_4_7` | `GLM_4_7_Recipe` |
