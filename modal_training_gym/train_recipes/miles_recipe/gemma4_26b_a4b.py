@@ -4,7 +4,7 @@ import dataclasses as _dc
 from collections.abc import Mapping
 from dataclasses import field
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
@@ -13,6 +13,9 @@ from pydantic_core import ArgsKwargs
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.patches import encode_patch
 from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
+
+if TYPE_CHECKING:
+    from modal_training_gym.common.models import ModelConfig
 
 _PATCH_DIR = (
     Path(__file__).resolve().parents[2]
@@ -277,3 +280,14 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
                 "rm_type=... to choose a built-in deliberately."
             )
         return self
+
+    def validate_model_parallelism(self, model: "ModelConfig") -> None:
+        super().validate_model_parallelism(model)
+        if self.pipeline_model_parallel_size != 1:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs pipeline_model_parallel_size=1: the "
+                "Megatron bridge loads the vision tower and the tied input/output "
+                "embedding onto a single pipeline stage, so a split only fails once "
+                f"Megatron builds the model. Got {self.pipeline_model_parallel_size}; "
+                "scale with tensor_model_parallel_size or expert_model_parallel_size."
+            )

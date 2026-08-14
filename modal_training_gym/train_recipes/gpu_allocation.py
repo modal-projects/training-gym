@@ -130,24 +130,6 @@ def validate_num_experts_divisible_by_expert_parallel_size(
     )
 
 
-def validate_pipeline_parallel_supported(config: Any, model: Any) -> None:
-    if getattr(model, "supports_pipeline_parallel", True):
-        return
-
-    pipeline_parallel_size = getattr(config, "pipeline_model_parallel_size", None)
-    if pipeline_parallel_size is None or int(pipeline_parallel_size) == 1:
-        return
-
-    name = getattr(model, "model_name", "") or type(model).__name__
-    raise GpuAllocationError(
-        f"{name} does not support pipeline parallelism: the Megatron bridge loads "
-        "this checkpoint onto a single pipeline stage, so a split only fails once "
-        "Megatron builds the model. Got "
-        f"pipeline_model_parallel_size={pipeline_parallel_size}; leave it at 1 and "
-        "scale with tensor_model_parallel_size or expert_model_parallel_size."
-    )
-
-
 def _critic_gpus(config: Any, actor_nodes: int, gpus_per_node: int) -> int:
     if not bool(getattr(config, "use_critic", False)):
         return 0

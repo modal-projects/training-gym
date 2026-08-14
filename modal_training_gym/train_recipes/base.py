@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from modal_training_gym.train_recipes.gpu_allocation import (
     GpuAllocation,
     resolve_gpu_allocation,
-    validate_pipeline_parallel_supported,
 )
 
 if TYPE_CHECKING:
@@ -98,8 +97,8 @@ class BaseTrainRecipe(ABC):
         return None
 
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
-        """Preflight the parallelism plan. Extended per framework."""
-        validate_pipeline_parallel_supported(self, model)
+        """Preflight the parallelism plan. Overridden per framework."""
+        return None
 
     # ── Container → framework flag converters ────────────────────────────────
 

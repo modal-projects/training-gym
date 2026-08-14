@@ -174,18 +174,12 @@ class ModelConfig:
     Set ``response_parser`` to a function that converts raw model output
     into a :class:`ParsedResponse`.  For example, Qwen3 models set
     ``response_parser = parse_qwen3_response``.
-
-    Set ``supports_pipeline_parallel = False`` for a checkpoint the framework's
-    Megatron bridge loads onto a single pipeline stage. Recipes then reject a
-    ``pipeline_model_parallel_size`` above 1 at config time, rather than failing
-    once Megatron builds the model.
     """
 
     model_name: str = ""
     model_path: str | None = None
     architecture: ModelArchitecture | None = None
     response_parser: ResponseParser | None = None
-    supports_pipeline_parallel: bool = True
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
