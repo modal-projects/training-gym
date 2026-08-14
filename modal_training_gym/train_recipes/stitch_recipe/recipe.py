@@ -31,7 +31,7 @@ part of the same app.
 
 from __future__ import annotations
 
-import json
+import dataclasses
 from dataclasses import field
 from typing import Any
 
@@ -63,33 +63,19 @@ __all__ = [
     "JSON_CONFIG_FIELDS",
     "YAML_CONFIG_FIELDS",
     "StitchRecipe",
+    "StitchTrainPayload",
     "StitchServeConfig",
     "StitchTrainConfig",
-    "fields_to_argv",
 ]
 
 
-def fields_to_argv(fields: dict[str, Any]) -> list[str]:
-    """miles argv for a field dict, matching :meth:`MilesRecipe.cli_args`.
+@dataclasses.dataclass(frozen=True)
+class StitchTrainPayload:
+    """The trainer half resolved to plain data, for the remote trainer."""
 
-    The trainer runs from a plain field dict rather than the recipe object (the
-    recipe doesn't survive the trip to a Ray actor), so the same encoding lives
-    here as a function.
-    """
-    out: list[str] = []
-    for key, val in fields.items():
-        if val is None or val is False or val == "":
-            continue
-        flag = f"--{key.replace('_', '-')}"
-        if val is True:
-            out.append(flag)
-        elif isinstance(val, dict) and key in JSON_CONFIG_FIELDS:
-            out += [flag, json.dumps(val)]
-        elif isinstance(val, list):
-            out += [flag] + [str(v) for v in val]
-        else:
-            out += [flag, str(val)]
-    return out
+    fields: dict[str, Any]
+    async_mode: bool
+    miles_model_script: str
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
@@ -148,16 +134,6 @@ class StitchRecipe(BaseTrainRecipe):
                 "train.update_weight_transfer_mode must be 'disk-delta', got "
                 f"{train.update_weight_transfer_mode!r}"
             )
-        # The replicas serve — and apply deltas against — exactly what checkpoint
-        # prep built for the trainer to export from.
-        if not serve.served_checkpoint_path:
-            serve.served_checkpoint_path = train.hf_checkpoint
-        elif serve.served_checkpoint_path != train.hf_checkpoint:
-            raise ValueError(
-                "the pool's baseline must be the trainer's export baseline: "
-                f"serve.served_checkpoint_path={serve.served_checkpoint_path!r} "
-                f"!= train.hf_checkpoint={train.hf_checkpoint!r}"
-            )
         if train.served_checkpoint_format == "nvfp4":
             # A quantized baseline is built by prepare_checkpoints, so it has to
             # be a local path on the checkpoints Volume, not a repo id — and the
@@ -175,44 +151,42 @@ class StitchRecipe(BaseTrainRecipe):
                 )
         return self
 
+    @classmethod
+    def get_base_recipe(cls, model_config: ModelConfig) -> "StitchRecipe | None":
+        """The model's disaggregated recipe, as the other frameworks expose it.
+
+        A stitch recipe is a trainer half plus a serving half, so there is no
+        architecture-derived default: a model has one only if it is paired here.
+        """
+        from modal_training_gym.train_recipes.stitch_recipe.qwen3_30b_a3b import (
+            Qwen3_30B_A3B_Stitch_Recipe,
+        )
+
+        if model_config.model_name == "Qwen/Qwen3-30B-A3B":
+            return Qwen3_30B_A3B_Stitch_Recipe()
+        return None
+
     # ── Converters (delegated to the trainer half) ──────────────────────────
 
     @staticmethod
     def _resolve_data_paths(ds: DatasetConfig) -> tuple[str, dict[str, str] | None]:
         return StitchTrainConfig._resolve_data_paths(ds)
 
-    def miles_fields(
-        self,
-        *,
-        model: ModelConfig | None = None,
-        dataset: DatasetConfig | None = None,
-    ) -> dict[str, Any]:
-        """Resolved miles CLI fields (name → value), excluding infra + the fields
-        the trainer injects per launch (``rollout_endpoint_url``,
-        ``update_weight_disk_dir``, ``custom_config_path``)."""
-        return self.train._fields(dataset=dataset, model=model)
-
-    def cli_args(
-        self,
-        *,
-        model: ModelConfig | None = None,
-        dataset: DatasetConfig | None = None,
-    ) -> list[str]:
-        """The trainer half's miles CLI argv. YAML config fields
-        (:data:`YAML_CONFIG_FIELDS`) are materialized to files by the launcher,
-        which then appends the resolved flags."""
-        return self.train.cli_args(dataset=dataset, model=model)
-
     def to_payload(
         self,
         *,
         model: ModelConfig | None = None,
         dataset: DatasetConfig | None = None,
-    ) -> dict[str, Any]:
-        """Plain-data miles args the trainer runs with."""
-        train = self.train
-        return {
-            "fields": self.miles_fields(model=model, dataset=dataset),
-            "async_mode": train.async_mode,
-            "miles_model_script": train.miles_model_script,
-        }
+    ) -> StitchTrainPayload:
+        """Plain-data miles args the trainer runs with.
+
+        Resolved here rather than remotely because the recipe object doesn't
+        survive the trip into a Ray actor. Excludes the fields the trainer
+        injects per launch (``rollout_endpoint_url``, ``update_weight_disk_dir``,
+        ``custom_config_path``).
+        """
+        return StitchTrainPayload(
+            fields=self.train._fields(dataset=dataset, model=model),
+            async_mode=self.train.async_mode,
+            miles_model_script=self.train.miles_model_script,
+        )

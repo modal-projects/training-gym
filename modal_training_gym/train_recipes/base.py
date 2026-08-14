@@ -27,6 +27,29 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimodal_keys")
 
 
+def fields_to_argv(fields: dict[str, Any]) -> list[str]:
+    """Framework CLI argv for a resolved field dict.
+
+    A function as well as :meth:`BaseTrainRecipe.cli_args` because a launcher may
+    only have the field dict: a recipe object doesn't survive the trip to a
+    remote worker.
+    """
+    out: list[str] = []
+    for key, val in fields.items():
+        if val is None or val is False or val == "":
+            continue
+        flag = f"--{key.replace('_', '-')}"
+        if val is True:
+            out.append(flag)
+        elif isinstance(val, dict) and key in JSON_CONFIG_FIELDS:
+            out += [flag, json.dumps(val)]
+        elif isinstance(val, list):
+            out += [flag] + [str(v) for v in val]
+        else:
+            out += [flag, str(val)]
+    return out
+
+
 class RecipeType(Enum):
     SLIME = "slime"
     MILES = "miles"
@@ -198,20 +221,7 @@ class BaseTrainRecipe(ABC):
         dataset: "DatasetConfig | None" = None,
         model: "ModelConfig | None" = None,
     ) -> list[str]:
-        out: list[str] = []
-        for key, val in self._fields(dataset=dataset, model=model).items():
-            if val is None or val is False or val == "":
-                continue
-            flag = f"--{key.replace('_', '-')}"
-            if val is True:
-                out.append(flag)
-            elif isinstance(val, dict) and key in JSON_CONFIG_FIELDS:
-                out += [flag, json.dumps(val)]
-            elif isinstance(val, list):
-                out += [flag] + [str(v) for v in val]
-            else:
-                out += [flag, str(val)]
-        return out
+        return fields_to_argv(self._fields(dataset=dataset, model=model))
 
     # ── Cluster topology ──────────────────────────────────────────────────────
 

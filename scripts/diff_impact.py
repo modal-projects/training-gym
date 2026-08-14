@@ -184,16 +184,9 @@ def _base_recipe_for(framework, model_config):
 
         return MilesRecipe.get_base_recipe(model_config)
     if framework is Framework.STITCH:
-        try:
-            # Run as a script: sys.path[0] is scripts/.
-            from validation_backends.stitch import _BASE_RECIPES
-        except ImportError:  # imported as scripts.diff_impact, e.g. by tests
-            from scripts.validation_backends.stitch import _BASE_RECIPES
+        from modal_training_gym.train_recipes.stitch_recipe import StitchRecipe
 
-        # An instance, like the other branches: the caller indexes by
-        # type(recipe).__name__.
-        recipe_cls = _BASE_RECIPES.get(model_config.model_name)
-        return recipe_cls() if recipe_cls is not None else None
+        return StitchRecipe.get_base_recipe(model_config)
     raise ValueError(f"no base recipe lookup for framework {framework!r}")
 
 

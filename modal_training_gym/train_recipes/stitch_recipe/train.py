@@ -27,7 +27,6 @@ from modal_training_gym.train_recipes.gpu_allocation import (
 )
 from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 from modal_training_gym.train_recipes.stitch_recipe.pins import (
-    MEGATRON_PATH,
     MILES_IMAGE_TAG,
     MILES_REPO_REF,
     MILES_REPO_URL,
@@ -197,11 +196,6 @@ class StitchTrainConfig(MilesRecipe):
             rollout_engines=0,
             colocate=False,
         )
-
-    @property
-    def megatron_pythonpath(self) -> str:
-        """Where the trainer's Ray actors find source-only ``megatron.training``."""
-        return MEGATRON_PATH
 
     def _fields(
         self,

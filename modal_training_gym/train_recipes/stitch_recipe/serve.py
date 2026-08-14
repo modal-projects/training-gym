@@ -80,11 +80,6 @@ class StitchServeConfig:
         recipe name at build time.
     bulletin_root : str
         Mount path of the bulletin volume, in both halves.
-    served_checkpoint_path : str
-        Local checkpoint the replicas serve, and the baseline every sparse delta
-        is applied against. Empty → the trainer half's ``hf_checkpoint`` (which
-        is what the checkpoint-prep step builds), so the two halves can't
-        disagree on the byte-exact baseline.
     env : dict[str, str]
         Extra environment for the serving image — the sampler side of a
         quantization contract (e.g. the ``FLASHINFER_NVFP4_*`` mirror of the
@@ -114,8 +109,7 @@ class StitchServeConfig:
     delta_volume_name: str = ""
     bulletin_root: str = "/delta-bulletin"
 
-    # ── Served baseline + runtime env ────────────────────────────────────────
-    served_checkpoint_path: str = ""
+    # ── Runtime env ──────────────────────────────────────────────────────────
     env: dict[str, str] = field(default_factory=dict)
     memory: tuple[int, int] | None = None
     ephemeral_disk: int | None = None

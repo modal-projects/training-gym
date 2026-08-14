@@ -3,9 +3,15 @@
 import dataclasses
 import inspect
 
+from modal_training_gym.common.models.qwen3_30b import Qwen3_30B
 from modal_training_gym.common.status import MilesStatus, resolve_framework_status
 from modal_training_gym.frameworks.stitch import launcher as stitch_launcher
-from modal_training_gym.train_recipes.stitch_recipe import Qwen3_30B_A3B_Stitch_Train
+from modal_training_gym.train_recipes.stitch_recipe import (
+    Qwen3_30B_A3B_Stitch_Recipe,
+    Qwen3_30B_A3B_Stitch_Train,
+    StitchRecipe,
+    StitchServeConfig,
+)
 
 
 def _fields(**overrides) -> dict:
@@ -60,3 +66,18 @@ def test_trainer_exports_the_dashboard_reporting_env() -> None:
         "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN",
     ):
         assert name in source
+
+
+def test_get_base_recipe_pairs_the_model_like_the_other_frameworks() -> None:
+    """The validation harness and diff_impact index every framework the same
+    way, so a stitch model is looked up through the recipe, not a private map in
+    the validation backend."""
+    assert isinstance(StitchRecipe.get_base_recipe(Qwen3_30B()), StitchRecipe)
+
+
+def test_the_pool_serves_the_trainers_export_baseline() -> None:
+    """One baseline, derived: a delta is defined against the bytes the trainer
+    exports from, so the serving half has nothing of its own to disagree with."""
+    recipe = Qwen3_30B_A3B_Stitch_Recipe()
+    assert not hasattr(StitchServeConfig, "served_checkpoint_path")
+    assert recipe.train.hf_checkpoint.startswith("/")

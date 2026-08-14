@@ -37,7 +37,12 @@ import cloudpickle
 import modal
 import modal.experimental
 
-from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS, modal_tag_value
+from modal_training_gym.common import (
+    COMMON_TRAINING_GYM_TAGS,
+    hf_secrets,
+    modal_tag_value,
+    proxy_auth_secrets,
+)
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
@@ -69,6 +74,7 @@ from modal_training_gym.train_recipes.stitch_recipe.pins import (
     MILES_ROOT,
     stitch_install_commands,
 )
+from modal_training_gym.train_recipes.base import fields_to_argv
 from modal_training_gym.train_recipes.stitch_recipe.recipe import (
     CHECKPOINTS_PATH,
     DATA_PATH,
@@ -76,7 +82,6 @@ from modal_training_gym.train_recipes.stitch_recipe.recipe import (
     HOOK_CONFIG_FIELDS,
     YAML_CONFIG_FIELDS,
     StitchRecipe,
-    fields_to_argv,
 )
 from modal_training_gym.train_recipes.stitch_recipe.train import StitchTrainConfig
 
@@ -472,11 +477,9 @@ def build_stitch_app(
     run_bulletin_root = f"{delta_bulletin_root}/{run_id}"
     # miles owns <run>/updates; stitch owns the pointer beside it.
     update_weight_disk_dir = f"{run_bulletin_root}/updates"
-    # What the pool serves: the prepared baseline for a quantized run, else the
-    # model's own checkpoint.
-    served_model = serve_recipe.served_checkpoint_path or (
-        model.model_path or model.model_name
-    )
+    # What the pool serves is what the trainer exports against: the prepared
+    # baseline for a quantized run, else the model's own checkpoint.
+    served_model = train_recipe.hf_checkpoint or (model.model_path or model.model_name)
     rollout_concurrency = serve_recipe.concurrency
     n_train_nodes = train_recipe.actor_num_nodes
     _multi_node = n_train_nodes > 1
@@ -528,8 +531,9 @@ def build_stitch_app(
         delta_bulletin_root: delta_volume,
     }
 
-    hf_secret = modal.Secret.from_name("huggingface-secret")
-    train_secrets = [hf_secret]
+    # Optional, per AGENTS.md: a public model needs no HF token.
+    hf_secret_list = hf_secrets()
+    train_secrets = [*hf_secret_list, *proxy_auth_secrets()]
     if recipe.wandb is not None:
         train_secrets.append(modal.Secret.from_name("wandb-secret"))
 
@@ -549,7 +553,7 @@ def build_stitch_app(
             str(CHECKPOINTS_PATH): checkpoints_volume,
             delta_bulletin_root: delta_volume,
         },
-        secrets=[hf_secret],
+        secrets=hf_secret_list,
         memory=serve_recipe.memory,
         ephemeral_disk=serve_recipe.ephemeral_disk,
         min_containers=serve_recipe.min_containers,
@@ -564,7 +568,7 @@ def build_stitch_app(
         exit_grace_period=25,
         startup_timeout=SERVER_STARTUP_TIMEOUT,
     )
-    @modal.concurrent(target_inputs=rollout_concurrency)
+    @modal.concurrent(target_inputs=rollout_concurrency, max_inputs=rollout_concurrency)
     class Server:
         """One SGLang rollout server plus the stitch weight-sync sidecar."""
 
@@ -644,7 +648,7 @@ def build_stitch_app(
                 # PYTHONPATH, and the bulletin's store imports ``modal`` from
                 # inside a Ray actor, which inherits this.
                 "PYTHONPATH": os.pathsep.join(
-                    [train_recipe.megatron_pythonpath, os.environ.get("PYTHONPATH", "")]
+                    [MEGATRON_PATH, os.environ.get("PYTHONPATH", "")]
                 ).rstrip(os.pathsep),
                 # Only the RDMA nodes take the host's libibverbs, so only they
                 # want the libmlx5 built against it (see RDMA_LIB_DIR). Set
@@ -701,6 +705,11 @@ def build_stitch_app(
             start_ray_worker(my_ip, master_addr)
             while True:
                 time.sleep(10)
+                # A volume mount is a snapshot: rank 0 prepares the dataset and
+                # warms the HF cache inside this same call, so a worker's Ray
+                # actors only see those files if this node keeps refreshing.
+                for volume in (hf_cache_volume, data_volume, checkpoints_volume):
+                    volume.reload()
         start_ray_head(my_ip, n_train_nodes, worker_wait_retries=180)
         for volume in (hf_cache_volume, data_volume, checkpoints_volume):
             volume.reload()
@@ -728,9 +737,9 @@ def build_stitch_app(
 
         payload = recipe.to_payload(model=model, dataset=dataset)
         cfg = _MilesArgs(
-            payload["fields"],
-            async_mode=payload["async_mode"],
-            miles_model_script=payload["miles_model_script"],
+            payload.fields,
+            async_mode=payload.async_mode,
+            miles_model_script=payload.miles_model_script,
         )
         cfg.te_precision_config_file = cfg_yaml_owner.te_precision_config_file
         # The pool's Flash gateway, resolved by whoever launched this call (see
@@ -870,7 +879,7 @@ def build_stitch_app(
         image=image,
         volumes={str(HF_CACHE_PATH): hf_cache_volume},
         timeout=2 * 60 * MINUTES,
-        secrets=[hf_secret],
+        secrets=hf_secret_list,
         serialized=True,
         name="download",
     )
@@ -894,7 +903,7 @@ def build_stitch_app(
             str(CHECKPOINTS_PATH): checkpoints_volume,
         },
         timeout=6 * 60 * MINUTES,
-        secrets=[hf_secret],
+        secrets=hf_secret_list,
         ephemeral_disk=train_recipe.ephemeral_disk,
         serialized=True,
         name="prepare_checkpoints",
@@ -916,6 +925,9 @@ def build_stitch_app(
                 or train_recipe.hf_checkpoint,
                 BF16_CHECKPOINT_PATH=train_recipe.bf16_checkpoint_path,
                 SERVED_CHECKPOINT_FORMAT=train_recipe.served_checkpoint_format,
+                # A bf16 run with no masters path serves (and trains from) the
+                # source snapshot itself; there is nothing to materialize.
+                MATERIALIZE_BF16_MASTERS=bool(train_recipe.bf16_checkpoint_path),
                 PREP_ENV=dict(train_recipe.prep_env),
                 miles=train_recipe,
             ),
@@ -930,7 +942,7 @@ def build_stitch_app(
         image=image,
         volumes={str(DATA_PATH): data_volume},
         timeout=2 * 60 * MINUTES,
-        secrets=[hf_secret],
+        secrets=hf_secret_list,
         serialized=True,
         name="prepare_dataset",
     )

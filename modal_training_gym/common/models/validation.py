@@ -100,9 +100,6 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
         Moonlight_16B_A3B_Instruct,
         Framework.MILES,
     ),
-    # Disaggregated: 8 B200 trainer plus a B200 rollout pool, and its served
-    # baseline is a one-off NVFP4 conversion — dispatch-only.
-    _ValidationConfig(
-        "Qwen3-30B-A3B-stitch", Qwen3_30B, Framework.STITCH, run_on_pr=False
-    ),
+    # Disaggregated: an 8×B200 trainer plus a B200 rollout pool.
+    _ValidationConfig("Qwen3-30B-A3B-stitch", Qwen3_30B, Framework.STITCH),
 }

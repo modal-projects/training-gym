@@ -498,7 +498,7 @@ class TrainConfig:
         )
 
     def _initializing_status(self) -> FrameworkStatus:
-        # stitch runs miles in the trainer, so it reports miles' phases too.
+        # Currently, we run miles in the stitch trainer.
         if self.recipe.recipe_type == RecipeType.STITCH:
             return MilesStatus.INITIALIZING
         if isinstance(self.recipe, SlimeRecipe):

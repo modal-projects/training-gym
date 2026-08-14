@@ -236,16 +236,24 @@ def run_base_training(
     train_recipe, dataset = build_recipe_and_dataset(
         config.framework, model_config, step_count
     )
-    train_recipe.num_rollout = step_count
+    # A stitch recipe is two halves, so the trainer flags live on ``.train``.
+    trainer = getattr(train_recipe, "train", train_recipe)
+    trainer.num_rollout = step_count
     if eval_interval is not None:
-        train_recipe.eval_interval = eval_interval
+        trainer.eval_interval = eval_interval
     if save_interval is not None:
-        train_recipe.save_interval = save_interval
+        trainer.save_interval = save_interval
     if non_colocated:
-        train_recipe.colocate = False
-        if train_recipe.rollout_num_gpus is None:
-            train_recipe.rollout_num_gpus = (
-                train_recipe.actor_num_nodes * train_recipe.actor_num_gpus_per_node
+        if config.framework is Framework.STITCH:
+            raise SystemExit(
+                "--non-colocated does not apply to "
+                f"{model_name}: a stitch run is always disaggregated, with its "
+                "rollout GPUs in the serving half's Flash pool"
+            )
+        trainer.colocate = False
+        if trainer.rollout_num_gpus is None:
+            trainer.rollout_num_gpus = (
+                trainer.actor_num_nodes * trainer.actor_num_gpus_per_node
             )
     _ship_dataset_definition(dataset)
 
