@@ -45,10 +45,16 @@ prepare_workspace() {
 
     # HEAD:<path> forms resolve from the GIT ROOT, which is no longer the
     # seed root when learning_agent/ lives as a subtree inside another repo
-    # (the training gym). show-prefix is "" at a repo root, "<subdir>/" in a
-    # subtree — prepend it everywhere a tree path is named.
-    local GITPFX
+    # (the training gym): show-prefix is "" at a repo root, "<subdir>/" in a
+    # subtree — prepend it everywhere a tree path is named. AND those
+    # commands must run FROM the toplevel: git archive silently filters the
+    # output to the current directory when run inside a subdir, producing a
+    # valid empty tar (observed 2026-08-15). Pathspec-form commands
+    # (archive HEAD -- <paths>) stay on $SEED_ROOT: their paths are
+    # cwd-relative in and out.
+    local GITPFX GITROOT
     GITPFX="$(git -C "$SEED_ROOT" rev-parse --show-prefix 2>/dev/null)"
+    GITROOT="$(git -C "$SEED_ROOT" rev-parse --show-toplevel 2>/dev/null || echo "$SEED_ROOT")"
 
     # 0) the seeding plan: task_configs/<task>.yaml (with extends + toolbox
     #    resolution) says which harnesses, training methods, and packages this
@@ -62,7 +68,7 @@ prepare_workspace() {
     #    learning_agent_workspace/ subtree; the run machinery, the prompt
     #    material, and the ONE task ride in beside it (their repo-relative
     #    paths equal their workspace-relative paths).
-    git -C "$SEED_ROOT" archive "HEAD:${GITPFX}learning_agent_workspace" | tar -x -C "$WS"
+    git -C "$GITROOT" archive "HEAD:${GITPFX}learning_agent_workspace" | tar -x -C "$WS"
     git -C "$SEED_ROOT" archive HEAD -- \
         agents/run.sh agents/lib "agents/$SCAFFOLD" \
         bench/config.yaml | tar -x -C "$WS"
@@ -96,12 +102,12 @@ prepare_workspace() {
     #    sets never enter the workspace: test.json always deleted, dev.json
     #    deleted too on medium/hard.
     if [ "$LEARNING_AGENT_TB_ASSETS_TASK" != "$TASK" ]; then
-        git -C "$SEED_ROOT" archive "HEAD:${GITPFX}tasks/$LEARNING_AGENT_TB_ASSETS_TASK" | tar -x -C "$WS/task"
+        git -C "$GITROOT" archive "HEAD:${GITPFX}tasks/$LEARNING_AGENT_TB_ASSETS_TASK" | tar -x -C "$WS/task"
     fi
     # a variant may have no asset folder of its own (its config lives in
     # task_configs/, which never enters a workspace)
-    if git -C "$SEED_ROOT" cat-file -e "HEAD:${GITPFX}tasks/$TASK" 2>/dev/null; then
-        git -C "$SEED_ROOT" archive "HEAD:${GITPFX}tasks/$TASK" | tar -x -C "$WS/task"
+    if git -C "$GITROOT" cat-file -e "HEAD:${GITPFX}tasks/$TASK" 2>/dev/null; then
+        git -C "$GITROOT" archive "HEAD:${GITPFX}tasks/$TASK" | tar -x -C "$WS/task"
     fi
     rm -f "$WS/task/test.json"
     if [ "$TRACK" != "easy" ] || [ "$LEARNING_AGENT_TB_SEED_DEV" != 1 ]; then
@@ -162,7 +168,7 @@ prepare_workspace() {
     #     by name below), data-card families (copied by training method below),
     #     and the full repos.yaml registry (a filtered one is generated below).
     local BANK_TMP; BANK_TMP="$(mktemp -d)"
-    git -C "$SEED_ROOT" archive "HEAD:${GITPFX}toolbox_bank" | tar -x -C "$BANK_TMP"
+    git -C "$GITROOT" archive "HEAD:${GITPFX}toolbox_bank" | tar -x -C "$BANK_TMP"
     rm -f "$BANK_TMP/repos.yaml"
     rm -rf "$BANK_TMP/harness_tool"
     local fam
@@ -192,19 +198,19 @@ PYREPOS
     # 3d) the selected modules: harness starters by name, data cards by
     #     training method.
     mkdir -p "$WS/toolbox/harness_tool"
-    git -C "$SEED_ROOT" archive "HEAD:${GITPFX}toolbox_bank/harness_tool" -- README.md 2>/dev/null \
+    git -C "$GITROOT" archive "HEAD:${GITPFX}toolbox_bank/harness_tool" -- README.md 2>/dev/null \
         | tar -x -C "$WS/toolbox/harness_tool" 2>/dev/null || true
     local h
     for h in $LEARNING_AGENT_TB_HARNESSES; do
-        if git -C "$SEED_ROOT" cat-file -e "HEAD:${GITPFX}toolbox_bank/harness_tool/$h.py" 2>/dev/null; then
-            git -C "$SEED_ROOT" show "HEAD:${GITPFX}toolbox_bank/harness_tool/$h.py" \
+        if git -C "$GITROOT" cat-file -e "HEAD:${GITPFX}toolbox_bank/harness_tool/$h.py" 2>/dev/null; then
+            git -C "$GITROOT" show "HEAD:${GITPFX}toolbox_bank/harness_tool/$h.py" \
                 > "$WS/toolbox/harness_tool/$h.py"
         else
             echo "warn: no harness starter '$h' in toolbox_bank/harness_tool" >&2
         fi
     done
     _pw_bank_cards() {  # copy one data-card family from the bank
-        git -C "$SEED_ROOT" archive "HEAD:${GITPFX}toolbox_bank/data_tool/$1" \
+        git -C "$GITROOT" archive "HEAD:${GITPFX}toolbox_bank/data_tool/$1" \
             | { mkdir -p "$WS/toolbox/data_tool/$1"; tar -x -C "$WS/toolbox/data_tool/$1"; }
     }
     local card
@@ -232,15 +238,15 @@ PYREPOS
     #    tell seed tools from invented ones) + run metadata.
     #    Written into RUN_PARENT (not the workspace — not part of the agent's own repo).
     {
-        git -C "$SEED_ROOT" ls-tree -r "HEAD:${GITPFX}learning_agent_workspace"
+        git -C "$GITROOT" ls-tree -r "HEAD:${GITPFX}learning_agent_workspace"
         git -C "$SEED_ROOT" ls-tree -r HEAD -- \
             agents/run.sh agents/lib "agents/$SCAFFOLD" \
             bench/config.yaml
         git -C "$SEED_ROOT" ls-tree -r HEAD -- toolbox_bank | sed $'s#\ttoolbox_bank/#\ttoolbox/#'
         if [ "$LEARNING_AGENT_TB_ASSETS_TASK" != "$TASK" ]; then
-            git -C "$SEED_ROOT" ls-tree -r "HEAD:${GITPFX}tasks/$LEARNING_AGENT_TB_ASSETS_TASK" | sed $'s#\t#\ttask/#'
+            git -C "$GITROOT" ls-tree -r "HEAD:${GITPFX}tasks/$LEARNING_AGENT_TB_ASSETS_TASK" | sed $'s#\t#\ttask/#'
         fi
-        git -C "$SEED_ROOT" ls-tree -r "HEAD:${GITPFX}tasks/$TASK" 2>/dev/null | sed $'s#\t#\ttask/#' || true
+        git -C "$GITROOT" ls-tree -r "HEAD:${GITPFX}tasks/$TASK" 2>/dev/null | sed $'s#\t#\ttask/#' || true
     } | while IFS=$'\t' read -r meta path; do
         # the manifest must list what was ACTUALLY seeded: toolbox composition
         # prunes harnesses/packages/cards, so drop entries whose file is absent
