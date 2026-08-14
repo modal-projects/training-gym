@@ -82,6 +82,12 @@ MINUTES = 60
 SIDECAR_PORT = 8000
 SGLANG_PORT = 8001
 SERVER_STARTUP_TIMEOUT = 35 * MINUTES
+# A replica boots with the app, i.e. while prepare_checkpoints may still be
+# building the baseline it serves. Waiting it out has to fit inside the startup
+# budget, so a longer conversion means the replica exits and Modal reboots it
+# into another wait rather than the engine failing on a missing checkpoint.
+BASELINE_WAIT_TIMEOUT = SERVER_STARTUP_TIMEOUT - 2 * MINUTES
+BASELINE_POLL_SECONDS = 30
 # Ephemeral host-local full HF checkpoint the sidecar patches in place per delta.
 LOCAL_CHECKPOINT_PATH = "/local-checkpoint"
 # What the engine needs to seed a delta from the base checkpoint: weights plus the
@@ -129,17 +135,28 @@ class _MilesArgs:
         return fields_to_argv(fields)
 
 
-def _local_checkpoint(model_name: str) -> str:
+def _local_checkpoint(model_name: str, volume_name: str) -> str:
     """The served baseline as a local directory.
 
-    A prepared (quantized) baseline on the checkpoints Volume is already a path;
-    a repo id is materialized from the HF cache volume.
+    A repo id is materialized from the HF cache volume. A prepared (quantized)
+    baseline is already a path, but the pool comes up with the app, so it can be
+    waited on: ``prepare_checkpoints`` builds into a ``.partial`` sibling and
+    renames, so the path appearing means the baseline is complete.
     """
     from huggingface_hub import snapshot_download
 
-    if model_name.startswith("/"):
-        return model_name
-    return snapshot_download(model_name, allow_patterns=_CHECKPOINT_PATTERNS)
+    if not model_name.startswith("/"):
+        return snapshot_download(model_name, allow_patterns=_CHECKPOINT_PATTERNS)
+
+    volume = modal.Volume.from_name(volume_name)
+    deadline = time.monotonic() + BASELINE_WAIT_TIMEOUT
+    while not os.path.isdir(model_name):
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"served baseline {model_name} never appeared")
+        print(f"waiting for the served baseline at {model_name}...")
+        time.sleep(BASELINE_POLL_SECONDS)
+        volume.reload()
+    return model_name
 
 
 def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
@@ -481,7 +498,7 @@ def build_stitch_app(
                 # A local path (both the engine's model and the sidecar's delta
                 # baseline): the sidecar can't seed a delta from a repo id, and a
                 # post-boot resolve would race the cache SGLang warms itself.
-                model_name=_local_checkpoint(served_model),
+                model_name=_local_checkpoint(served_model, checkpoints_volume_name),
                 sglang_args=sglang_server_args,
                 tp=gpus_per_replica,
                 concurrency=rollout_concurrency,

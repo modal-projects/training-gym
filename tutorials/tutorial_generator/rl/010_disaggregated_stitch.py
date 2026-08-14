@@ -83,18 +83,9 @@ def _warning():
 @markdown
 def _run_instructions():
     """
-    Run locally (your machine drives the Modal GPU workers):
-
+    Run with:
     ```
-    cd training-gym
-    uv sync
     uv run tutorials/rl/010_disaggregated_stitch/010_disaggregated_stitch.py
-    ```
-
-    To detach and watch it from the Modal dashboard instead:
-
-    ```
-    uv run modal run -d tutorials/rl/010_disaggregated_stitch/010_disaggregated_stitch.py
     ```
     """
 
