@@ -513,6 +513,7 @@ def generate_index_page(manifest: list[dict]) -> str:
     lines = [
         "---",
         "title: API Reference",
+        "pagefind: false",
         "---",
     ]
 

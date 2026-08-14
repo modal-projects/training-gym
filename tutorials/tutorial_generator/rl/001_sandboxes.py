@@ -10,10 +10,9 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "HarborDataset",
         "CustomDeployment",
-        "Qwen3_4B",
+        "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
-        "score_in_sandbox",
         "extract_code",
     ],
 }
@@ -30,13 +29,13 @@ def _intro():
     What if you have a task where you want to score model outputs by running them in an environment?
 
     This tutorial trains a model on the
-    [hello-world](https://hub.harborframework.com/tasks/harbor/hello-world/latest)
+    [hello-world](https://hub.harborframework.com/datasets/harbor/hello-world/latest)
     task from Harbor Hub, scoring solutions by spawning and executing them in Modal sandboxes.
 
     Workflow:
     1. Pull the hello-world task from Harbor Hub via `HarborDataset`.
     2. Score model outputs by running them in a Modal sandbox.
-    3. Reuse the same `score_in_sandbox` helper as a SLIME `custom_rm_function`.
+    3. Reuse the same scorer as a SLIME `custom_rm_function`.
     4. Train and compare base vs. trained behavior.
     """
 
@@ -72,12 +71,11 @@ def _imports():
     from modal_training_gym import (
         CustomDeployment,
         HarborDataset,
-        Qwen3_4B,
+        Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
         extract_code,
         list_checkpoints,
-        score_in_sandbox,
     )
 
 
@@ -92,9 +90,9 @@ def _dataset_intro():
     - `task.toml` — metadata (difficulty, category)
     - `tests/` — verification tests (format varies by task)
 
-    The hello-world task uses pytest-based verification rather than
-    `*.in`/`*.out` file pairs, so we define stdin/stdout test cases
-    inline and pass them to `score_in_sandbox` via the `test_cases` field.
+    The hello-world task asks the agent to create `hello.txt` with
+    `Hello, world!` as its content. We check this file in our eval
+    and reward function, matching the task's verifier.
 
     A single dataset instance handles both training and eval —
     `prepare()` writes train and eval splits to the volume,
@@ -104,18 +102,17 @@ def _dataset_intro():
 
 @code
 def _dataset():
-    HELLO_WORLD_TESTS = [{"input": "", "expected_output": "Hello, world!\n"}]
+    EXPECTED_HELLO = "Hello, world!"
 
     dataset = HarborDataset(
         dataset_name="harbor/hello-world",
         label_metadata_path="task.toml",
         train_repeats=20,
-        always_prepare=True, # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
+        always_prepare=True,  # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
         system_prompt=(
             "You are an expert Python programmer. "
             "Solve the given problem by writing a complete Python program. "
-            "Your program must print the answer to stdout using print(). "
-            "Do not create or write any files. "
+            "Your program may create or modify files as needed. "
             "Put your solution in a ```python code fence."
         ),
     )
@@ -141,26 +138,65 @@ def _dataset_preview_code():
 @markdown
 def _harbor_eval_intro():
     """
-    ## Evaluate with sandboxed scoring
+    ## Evaluate with a file-based sandbox check
 
-    The sandbox scoring loop:
-    1. Sends each task's prompt to the deployed model.
-    2. Extracts Python code from the response (stripping thinking tags,
-       chat-template artifacts, and code fences via `extract_code`).
-    3. Runs the extracted code in a Modal sandbox against the test cases.
-    4. Returns a score = fraction of test cases passed.
+    The custom eval sends the Harbor instruction to the model, extracts its
+    Python program with `extract_code`, and executes that program with `/app`
+    as the working directory in a Modal Sandbox. It then reads `/app/hello.txt`
+    directly with `sandbox.filesystem.read_text` and awards a point only when
+    the content matches `Hello, world!`. We keep that sandbox logic in one
+    local helper so the eval and training reward use exactly the same check.
 
-    Since hello-world doesn't ship `*.in`/`*.out` file pairs, we pass
-    `test_cases` directly to `score_in_sandbox`.
-
-    Passing `model=Qwen3_4B()` into `extract_code` enables model-aware
+    Passing `model=Qwen3_5_4B()` into `extract_code` enables model-aware
     response parsing.
     """
 
 
 @code
+def _sandbox_scorer():
+    def score_hello_file(code):
+        sandbox_app = modal.App.lookup(
+            "training-gym-hello-world",
+            create_if_missing=True,
+        )
+        sandbox_image = modal.Image.debian_slim(python_version="3.12").run_commands(
+            "mkdir -p /app",
+        )
+        sandbox = modal.Sandbox._experimental_create(
+            "sleep",
+            "infinity",
+            app=sandbox_app,
+            image=sandbox_image,
+            workdir="/app",
+            timeout=10,
+            cpu=0.125,
+            memory=128,
+        )
+
+        stderr = None
+
+        try:
+            process = sandbox.exec("python", "-c", code, timeout=3)
+            process.wait()
+            stderr = process.stderr.read()
+            content = sandbox.filesystem.read_text("/app/hello.txt")
+            score = float(content.strip() == EXPECTED_HELLO)
+            metadata = {"hello_txt": content, "stderr": stderr}
+        except modal.exception.SandboxFilesystemError:
+            score = 0.0
+            metadata = {"error": "hello.txt was not created or not readable", "stderr": stderr}
+        except modal.exception.SandboxTerminatedError:
+            score = 0.0
+            metadata = {"error": "Sandbox was terminated during execution", "stderr": stderr}
+        finally:
+            sandbox.terminate()
+            sandbox.detach()
+        return score, metadata
+
+
+@code
 def _serve_eval_base():
-    base_model = Qwen3_4B()
+    base_model = Qwen3_5_4B()
     base_deployment = CustomDeployment.launch(
         base_model,
         unauthenticated=True,
@@ -174,18 +210,17 @@ def _serve_eval_base():
 
         def _score_one(example):
             prompt = example["instruction"]
-            messages = [
-                {"role": "system", "content": dataset.system_prompt},
-                {"role": "user", "content": prompt},
-            ]
             response = deployment.generate(
                 prompt,
                 ensure_ready=False,
-                messages=messages,
+                messages=[
+                    {"role": "system", "content": dataset.system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
             )
             code = extract_code(response, model=base_model)
-            reward, _meta = score_in_sandbox(code, test_cases=HELLO_WORLD_TESTS)
-            return float(reward)
+            score, _metadata = score_hello_file(code)
+            return score
 
         with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
             rewards = list(executor.map(_score_one, dataset.load()))
@@ -201,17 +236,8 @@ def _train_intro():
     """
     ## Train with SLIME and sandbox reward
 
-    For training, we reuse the same `score_in_sandbox` and `extract_code`
-    helpers — wrapped in an async reward function for SLIME's
-    `custom_rm_function`.
-
-    `score_in_sandbox` enforces `sandbox_cpu`/`sandbox_memory` with a
-    `"limit"` policy by default: rather than reserving that capacity up
-    front, the values become burst ceilings, so Modal bills each sandbox
-    by actual CPU-/RAM-second usage instead of the (usually idle)
-    reservation. Pass `cpu_policy="ignore"` to let rollouts burst above
-    the configured values, or `"reserve"` for the legacy fixed-reservation
-    behavior.
+    For training, we reuse the same `extract_code` and `score_hello_file`
+    helpers — wrapped in an async reward function for SLIME's `custom_rm_function`.
     """
 
 
@@ -221,14 +247,12 @@ def _train():
         import asyncio
 
         code = extract_code(sample.response, model=base_model)
-        reward, meta = await asyncio.to_thread(
-            score_in_sandbox, code, test_cases=HELLO_WORLD_TESTS,
-        )
+        reward, meta = await asyncio.to_thread(score_hello_file, code)
         sample.metadata = {**(getattr(sample, "metadata", None) or {}), "sandbox": meta}
-        return float(reward)
+        return reward
 
     training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=dataset,
         recipe=SlimeRecipe(
             custom_rm_function=sandbox_rm,
@@ -251,7 +275,7 @@ def _train():
             max_tokens_per_gpu=4096,
             save_interval=10,
             image_overlay=lambda image: image.run_commands(
-                "uv pip install --system modal>=1.2.0",
+                "uv pip install --system 'modal>=1.5.2'",
             ),
         ),
     )
@@ -271,10 +295,10 @@ def _serve_trained_intro():
 def _serve_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     trained_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
+        Qwen3_5_4B(),
         checkpoint=checkpoint,
-        app_name="qwen3-4b-hello-world-serve",
-        served_model_name="qwen3-4b-hello-world",
+        app_name="qwen3-5-4b-hello-world-serve",
+        served_model_name="qwen3-5-4b-hello-world",
         unauthenticated=True,
     )
     print(f"Trained model URL: {trained_deployment.url}")

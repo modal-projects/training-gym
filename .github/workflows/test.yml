@@ -34,6 +34,7 @@ jobs:
           test -z "$(git ls-files --others --exclude-standard -- README.md tutorials/)"
           uv run scripts/generate_llms_txt.py
           git diff --exit-code -- docs-next/public/llms.txt
+          uv run scripts/generate_models_table.py --check
 
       - name: Run tests
         run: uv run pytest tests/ -v

@@ -32,6 +32,10 @@ uv run scripts/generate_all.py --skip-build   # regen API reference + tutorial p
 cd docs-next && npm ci && npm run dev                 # local dev server
 uv run scripts/generate_all.py                 # full regen + build
 
+# Models table (generated from the recipe registries)
+uv run scripts/generate_models_table.py         # regenerate
+uv run scripts/generate_models_table.py --check # CI freshness check
+
 # Deploy
 # IMPORTANT: These commands are only for development of the gym itself.
 # Consumers of the gym should use `training-gym setup` instead.
@@ -108,6 +112,7 @@ Each source declares `TUTORIAL_METADATA` dict with `framework`, `cluster_shape`,
 
 - Use `uv` for all Python operations. Never install packages at the system level.
 - Never edit `tutorials/<bucket>/<name>/<name>.py` or `.ipynb` — they are generated. Edit `tutorials/tutorial_generator/<bucket>/<name>.py` and run the generator.
+- Never hand-edit the Models table in README.md — it is generated from `__all__` of each `train_recipes/*_recipe/__init__.py`; add the recipe (and a matching `ModelConfig` export) and rerun `scripts/generate_models_table.py`.
 - Ruff excludes `tutorials/**` — generated tutorial code is not linted.
 - Python 3.12 is pinned. Modal's `serialized=True` requires local ↔ remote Python version match.
 - Modal Secrets `huggingface-secret` (HF_TOKEN) and `wandb-secret` (WANDB_API_KEY) are optional: HF auth is only needed for gated/rate-limited Hub access, and `wandb-secret` only when a `WandbConfig` is passed.

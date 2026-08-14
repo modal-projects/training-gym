@@ -3,6 +3,7 @@ title: Support
 tableOfContents: false
 prev: false
 next: false
+pagefind: false
 ---
 
 For questions about Training Gym, or to request access to Modal's multi-node
