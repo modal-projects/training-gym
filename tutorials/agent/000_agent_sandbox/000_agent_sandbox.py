@@ -154,7 +154,9 @@ def _main_impl() -> None:
     # Endpoints already return structured `tool_calls`, so the OpenAI
     # SDK can use them as-is.
 
-    deployment = Endpoint.launch(Qwen3_5_9B(), unauthenticated=True)
+    deployment = Endpoint.launch(
+        Qwen3_5_9B(), unauthenticated=True, recreate_if_existing=True
+    )
     deployment.wait_until_ready(timeout=15 * 60)
     print(f"Model URL: {deployment.url}")
 

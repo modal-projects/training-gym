@@ -123,7 +123,7 @@ def _main_impl() -> None:
     print(f"Checkpoint: {checkpoint.path}")
 
     deployment = Endpoint.launch(
-        GLM_4_7(), checkpoint, unauthenticated=True
+        GLM_4_7(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     deployment.wait_until_ready(timeout=45 * 60)
     print(f"Deployed to {deployment.url}")

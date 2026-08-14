@@ -107,7 +107,9 @@ def _main_impl() -> None:
     # is what `wait_until_ready` waits for.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    endpoint = Endpoint.launch(model, checkpoint, unauthenticated=True)
+    endpoint = Endpoint.launch(
+        model, checkpoint, unauthenticated=True, recreate_if_existing=True
+    )
     endpoint.wait_until_ready(timeout=45 * 60)
     print(f"Trained model URL: {endpoint.url}")
 

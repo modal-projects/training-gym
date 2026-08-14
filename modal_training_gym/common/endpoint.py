@@ -29,7 +29,22 @@ def _create_endpoint_and_wait_for_url(
     environment: str | None,
     routing_region: str | None,
     wait_timeout_sec: float,
+    recreate_if_existing: bool,
 ) -> str:
+    if recreate_if_existing:
+        stop = [
+            sys.executable,
+            "-m",
+            "modal",
+            "endpoint",
+            "stop",
+            endpoint_name,
+            "--yes",
+        ]
+        if environment:
+            stop.extend(["--env", environment])
+        subprocess.run(stop, check=False, capture_output=True, timeout=120)
+
     command = [
         sys.executable,
         "-m",
@@ -130,6 +145,7 @@ class Endpoint:
         environment: str | None = None,
         routing_region: str | None = None,
         wait_timeout_sec: float = 300,
+        recreate_if_existing: bool = False,
     ):
         """Provision a Modal endpoint for ``model`` and return a handle to it.
 
@@ -140,6 +156,11 @@ class Endpoint:
         When ``endpoint_name`` is omitted, an endpoint name is derived for you.
 
         Endpoints require proxy auth if ``unauthenticated=False``.
+
+        ``modal endpoint create`` fails when the name already exists. Pass
+        ``recreate_if_existing=True`` to stop an endpoint with the same name
+        before creating. The default is ``False`` so existing callers keep a
+        live endpoint.
 
         Returns once the endpoint has a URL, which may occur before it can serve
         traffic; call ``wait_until_ready()`` to wait for the model to become ready.
@@ -186,6 +207,7 @@ class Endpoint:
             environment=environment,
             routing_region=routing_region,
             wait_timeout_sec=wait_timeout_sec,
+            recreate_if_existing=recreate_if_existing,
         )
 
         return cls(

@@ -207,7 +207,9 @@ def _main_impl() -> None:
     # Let's run the math eval on our base serving model before training.
 
     base_model = Qwen3_5_4B()
-    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Base model URL: {base_deployment.url}")
 
     print("--- Evaluating base model... ---")
@@ -310,7 +312,7 @@ def _main_impl() -> None:
     print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
-        Qwen3_5_4B(), checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

@@ -184,7 +184,9 @@ def _main_impl() -> None:
             "Install it before running: uv pip install -q nltk"
         )
 
-    base_model_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_model_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     base_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Base model deployed to {base_model_deployment.url}")
 
@@ -241,7 +243,7 @@ def _main_impl() -> None:
     print(checkpoint.path)
 
     trained_model_deployment = Endpoint.launch(
-        Qwen3_5_4B(), checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     trained_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Trained model deployed to {trained_model_deployment.url}")
@@ -301,7 +303,7 @@ def _main_impl() -> None:
     print(new_checkpoint.path)
 
     new_model_deployment = Endpoint.launch(
-        Qwen3_5_4B(), new_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), new_checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     new_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Newly trained model deployed to {new_model_deployment.url}")

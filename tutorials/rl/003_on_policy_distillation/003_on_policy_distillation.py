@@ -249,7 +249,9 @@ def _main_impl() -> None:
     # See [this LoRA adapter for making Qwen3-4B successful at structured output](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora) for an example of adapting a small Qwen model to strict output formats.
 
     base_model = Qwen3_5_4B()
-    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Student URL: {base_deployment.url}")
 
     print("--- Evaluating base student... ---")
@@ -327,7 +329,7 @@ def _main_impl() -> None:
     print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
-        Qwen3_5_4B(), checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 

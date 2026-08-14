@@ -510,7 +510,9 @@ def _run_baseline_eval():
             print(f"{'Parsed tool call':<25} {_frac(rows, 'parsed_call'):>10.1%}")
             print(f"{'First-call tool match':<25} {_frac(rows, 'tool_match'):>10.1%}")
 
-    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Student URL: {base_deployment.url}")
 
     teacher_mean = None
@@ -1193,7 +1195,7 @@ def _eval_trained():
     print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
-        Qwen3_6_35B(), checkpoint, unauthenticated=True
+        Qwen3_6_35B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 

@@ -115,7 +115,9 @@ def _serve_base_intro():
 @code
 def _serve_base_model():
     base_model = Qwen3_5_4B()
-    base_model_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_model_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     base_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Base model deployed to {base_model_deployment.url}")
 
@@ -368,7 +370,7 @@ def _serve_and_eval_trained():
     print(checkpoint.path)
 
     trained_model_deployment = Endpoint.launch(
-        Qwen3_5_4B(), checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     trained_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Trained model deployed to {trained_model_deployment.url}")
@@ -448,7 +450,7 @@ def _trained_eval_off_of_a_checkpoint_code():
     print(new_checkpoint.path)
 
     new_model_deployment = Endpoint.launch(
-        Qwen3_5_4B(), new_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), new_checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     new_model_deployment.wait_until_ready(timeout=15 * 60)
     print(f"Newly trained model deployed to {new_model_deployment.url}")

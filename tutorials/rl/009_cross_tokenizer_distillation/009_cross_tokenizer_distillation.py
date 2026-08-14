@@ -975,7 +975,9 @@ def _main_impl() -> None:
 
     dataset = BfclMultiTurnDataset(split="train", config=dataset_config)
 
-    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Student URL: {base_deployment.url}")
 
     teacher_mean = None
@@ -1116,7 +1118,7 @@ def _main_impl() -> None:
     print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
-        Qwen3_6_35B(), checkpoint, unauthenticated=True
+        Qwen3_6_35B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 

@@ -197,7 +197,9 @@ def _sandbox_scorer():
 @code
 def _serve_eval_base():
     base_model = Qwen3_5_4B()
-    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Base model URL: {base_deployment.url}")
 
     def run_eval(deployment, *, max_concurrency: int = 2) -> float:
@@ -291,7 +293,7 @@ def _serve_trained_intro():
 def _serve_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     trained_deployment = Endpoint.launch(
-        Qwen3_5_4B(), checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 
