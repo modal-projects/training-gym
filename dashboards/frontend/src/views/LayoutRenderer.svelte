@@ -2,6 +2,10 @@
   import { onMount } from "svelte";
   import { builtinViews, resolveLayout, resolveView } from "./registry.js";
   import ViewBoundary from "./ViewBoundary.svelte";
+  import AuthoredView from "./AuthoredView.svelte";
+  import ViewEditor from "./ViewEditor.svelte";
+  import LayoutEditor from "./LayoutEditor.svelte";
+  import Drawer from "../components/Drawer.svelte";
   import JsonView from "./builtin/JsonView.svelte";
   import Tabs from "../components/Tabs.svelte";
 
@@ -15,6 +19,9 @@
   } = $props();
   let remoteViews = $state([]);
   let remoteLayouts = $state([]);
+  let editingDoc = $state(null);
+  let editingLayout = $state(false);
+  let jsonDoc = $state(null);
 
   onMount(async () => {
     function readTab() {
@@ -58,21 +65,65 @@
   function viewFor(entry) {
     const doc = resolveView(remoteViews, entry.view, context);
     if (!doc) return null;
-    if (doc.code) return JsonView;
+    if (doc.code) return AuthoredView;
     return builtinViews[doc.component] || JsonView;
   }
 
+  function docFor(entry) {
+    return resolveView(remoteViews, entry.view, context);
+  }
+
   function propsFor(entry) {
+    const doc = docFor(entry);
     return {
       ...viewProps,
-      config: { ...(resolveView(remoteViews, entry.view, context)?.config || {}), ...(entry.config || {}) },
+      config: { ...(doc?.config || {}), ...(entry.config || {}) },
       // Layout capabilities are the only shared channel between views.
       // Views may use navigation and run context values, but never another
       // view's private state.
       context: { ...context, layout: { selectTab, navigate: (path) => window.history.pushState({}, "", path) } },
       data: null,
       navigate: (path) => window.history.pushState({}, "", path),
+      source: doc?.code || "",
+      props: {
+        ...viewProps,
+        config: { ...(doc?.config || {}), ...(entry.config || {}) },
+        context: { ...context, layout: { selectTab, navigate: (path) => window.history.pushState({}, "", path) } },
+        data: null,
+        navigate: (path) => window.history.pushState({}, "", path),
+      },
     };
+  }
+
+  function openEditor(entry) {
+    editingDoc = docFor(entry);
+  }
+
+  function openJson(entry) {
+    jsonDoc = docFor(entry);
+  }
+
+  async function resetView(entry) {
+    const doc = docFor(entry);
+    if (!doc || doc.scope === "builtin") return;
+    const response = await fetch(`/api/ui/views/${doc.scope}/${encodeURIComponent(doc.id)}`, { method: "DELETE" });
+    if (response.ok) {
+      remoteViews = remoteViews.filter((item) => !(item.scope === doc.scope && item.id === doc.id));
+    }
+  }
+
+  function closeEditor() {
+    editingDoc = null;
+  }
+
+  function handleSaved(doc) {
+    remoteViews = [...remoteViews.filter((item) => !(item.scope === doc.scope && item.id === doc.id)), doc];
+    editingDoc = doc;
+  }
+
+  function handleLayoutSaved(doc) {
+    remoteLayouts = [...remoteLayouts.filter((item) => !(item.scope === doc.scope && item.id === doc.id)), doc];
+    editingLayout = false;
   }
 </script>
 
@@ -83,24 +134,41 @@
           <div class="view-slot view-slot-header">
             {#each tab.slots.header.filter((entry) => !entry.hidden) as entry, index (entry.id ?? index)}
               {#if viewFor(entry)}
-                <ViewBoundary component={viewFor(entry)} props={propsFor(entry)} />
+                <div class="view-instance">
+                  <div class="view-instance-actions">
+                    <button type="button" onclick={() => openEditor(entry)}>Edit</button>
+                    <button type="button" onclick={() => resetView(entry)}>Reset</button>
+                    <button type="button" onclick={() => openJson(entry)}>JSON</button>
+                  </div>
+                  <ViewBoundary component={viewFor(entry)} props={propsFor(entry)} />
+                </div>
               {/if}
             {/each}
           </div>
         {/if}
         {#if layout.tabs?.length > 1}
-          <Tabs
-            active={selectedTab}
-            onSelect={selectTab}
-            tabs={layout.tabs.map((item) => ({ value: item.id, label: item.label, count: item.count }))}
-          />
+          <div class="layout-toolbar">
+            <Tabs
+              active={selectedTab}
+              onSelect={selectTab}
+              tabs={layout.tabs.map((item) => ({ value: item.id, label: item.label, count: item.count }))}
+            />
+            <button class="layout-edit-button" type="button" onclick={() => (editingLayout = true)}>Edit layout</button>
+          </div>
         {/if}
         <div class="view-layout-grid">
           {#each Object.entries(tab.slots || {}).filter(([slot]) => slot !== "header") as [slot, entries] (slot)}
             <div class={`view-slot view-slot-${slot}`}>
               {#each entries.filter((entry) => !entry.hidden) as entry, index (entry.id ?? index)}
                 {#if viewFor(entry)}
-                  <ViewBoundary component={viewFor(entry)} props={propsFor(entry)} />
+                  <div class="view-instance">
+                    <div class="view-instance-actions">
+                      <button type="button" onclick={() => openEditor(entry)}>Edit</button>
+                      <button type="button" onclick={() => resetView(entry)}>Reset</button>
+                      <button type="button" onclick={() => openJson(entry)}>JSON</button>
+                    </div>
+                    <ViewBoundary component={viewFor(entry)} props={propsFor(entry)} />
+                  </div>
                 {/if}
               {/each}
             </div>
@@ -110,4 +178,34 @@
     </div>
 {:else}
   <JsonView data={{ error: "Layout not found", layoutId }} />
+{/if}
+
+{#if editingDoc}
+  <ViewEditor
+    open={true}
+    doc={editingDoc}
+    context={context}
+    viewProps={viewProps}
+    onclose={closeEditor}
+    onsaved={handleSaved}
+  />
+{/if}
+
+{#if editingLayout}
+  <LayoutEditor
+    open={true}
+    layout={layout}
+    onclose={() => (editingLayout = false)}
+    onsaved={handleLayoutSaved}
+  />
+{/if}
+
+{#if jsonDoc}
+  <Drawer open={true} onclose={() => (jsonDoc = null)} width="min(620px, 100vw)">
+    <div class="authoring-drawer">
+      <div class="authoring-eyebrow">Resolved view document</div>
+      <h2>{jsonDoc.title || jsonDoc.id}</h2>
+      <pre class="view-json-output">{JSON.stringify(jsonDoc, null, 2)}</pre>
+    </div>
+  </Drawer>
 {/if}

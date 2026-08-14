@@ -1,10 +1,7 @@
 <script>
   import { onMount } from "svelte";
-  import RunSummary from "../../components/RunSummary.svelte";
-  import StepTimings from "../../components/StepTimings.svelte";
-  import ChartSkeleton from "../../components/ChartSkeleton.svelte";
-  import LineChart from "../../components/LineChart.svelte";
-  import { fetchRun, fetchRunRollouts } from "../../lib/api.js";
+  import { ChartSkeleton, LineChart, RunSummary, StepTimings } from "$host/components";
+  import { fetchRun, fetchRunRollouts } from "$host/data";
 
   let {
     runId,

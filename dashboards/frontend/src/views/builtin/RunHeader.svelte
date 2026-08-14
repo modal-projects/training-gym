@@ -1,8 +1,8 @@
 <script>
   import { onMount } from "svelte";
-  import { ArrowLeft, ExternalLink, Minimize2 } from "lucide-svelte";
-  import StatusPill from "../../components/StatusPill.svelte";
-  import { fetchRun } from "../../lib/api.js";
+  import { ArrowLeft, ExternalLink, Minimize2 } from "$host/icons";
+  import { StatusPill } from "$host/components";
+  import { fetchRun } from "$host/data";
 
   let {
     runId,

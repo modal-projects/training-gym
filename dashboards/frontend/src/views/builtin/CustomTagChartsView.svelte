@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
-  import LineChart from "../../components/LineChart.svelte";
-  import { fetchRunRollouts } from "../../lib/api.js";
+  import { LineChart } from "$host/components";
+  import { fetchRunRollouts } from "$host/data";
   let { runId } = $props();
   let rows = $state([]);
   onMount(async () => { rows = await fetchRunRollouts(runId); });

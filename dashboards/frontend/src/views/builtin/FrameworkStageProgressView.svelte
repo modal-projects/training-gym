@@ -1,5 +1,5 @@
 <script>
-  import FrameworkStageProgress from "../../components/FrameworkStageProgress.svelte";
+  import { FrameworkStageProgress } from "$host/components";
   let { run = null } = $props();
   let progress = $derived.by(() => {
     const value = run?.framework_progress;

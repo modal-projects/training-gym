@@ -10,6 +10,16 @@ import AdvantageDistributionView from "./builtin/AdvantageDistributionView.svelt
 import StepTimingsView from "./builtin/StepTimingsView.svelte";
 import JsonView from "./builtin/JsonView.svelte";
 import trainingRunLayout from "./layouts/training-run.default.json";
+import runHeaderSource from "./builtin/RunHeader.svelte?raw";
+import runSummarySource from "./builtin/RunSummaryView.svelte?raw";
+import frameworkStageSource from "./builtin/FrameworkStageProgressView.svelte?raw";
+import rewardChartSource from "./builtin/RewardChartView.svelte?raw";
+import customTagsSource from "./builtin/CustomTagChartsView.svelte?raw";
+import scoreDistributionSource from "./builtin/ScoreDistributionView.svelte?raw";
+import advantageDistributionSource from "./builtin/AdvantageDistributionView.svelte?raw";
+import stepTimingsSource from "./builtin/StepTimingsView.svelte?raw";
+import rolloutExplorerSource from "./builtin/RolloutExplorerView.svelte?raw";
+import runLogsSource from "./builtin/RunLogsView.svelte?raw";
 
 export const builtinViews = {
   "run-header": RunHeader,
@@ -33,24 +43,86 @@ export const builtinViewDocs = [
     component: "json",
     code: null,
   },
-  ...[
-    ["run-header", "Run header"],
-    ["run-summary-card", "Run summary card"],
-    ["framework-stage-progress", "Framework stage progress"],
-    ["reward-chart", "Reward chart"],
-    ["custom-tag-charts", "Custom tag charts"],
-    ["score-distribution", "Score distribution"],
-    ["advantage-distribution", "Advantage distribution"],
-    ["step-timings", "Step timings"],
-    ["rollout-explorer", "Rollout explorer"],
-    ["run-logs", "Run logs"],
-  ].map(([id, title]) => ({
-    id,
+  {
+    id: "run-header",
     scope: "builtin",
-    title,
-    component: id,
+    title: "Run header",
+    component: "run-header",
     code: null,
-  })),
+    source: runHeaderSource,
+  },
+  {
+    id: "run-summary-card",
+    scope: "builtin",
+    title: "Run summary card",
+    component: "run-summary-card",
+    code: null,
+    source: runSummarySource,
+  },
+  {
+    id: "framework-stage-progress",
+    scope: "builtin",
+    title: "Framework stage progress",
+    component: "framework-stage-progress",
+    code: null,
+    source: frameworkStageSource,
+  },
+  {
+    id: "reward-chart",
+    scope: "builtin",
+    title: "Reward chart",
+    component: "reward-chart",
+    code: null,
+    source: rewardChartSource,
+  },
+  {
+    id: "custom-tag-charts",
+    scope: "builtin",
+    title: "Custom tag charts",
+    component: "custom-tag-charts",
+    code: null,
+    source: customTagsSource,
+  },
+  {
+    id: "score-distribution",
+    scope: "builtin",
+    title: "Score distribution",
+    component: "score-distribution",
+    code: null,
+    source: scoreDistributionSource,
+  },
+  {
+    id: "advantage-distribution",
+    scope: "builtin",
+    title: "Advantage distribution",
+    component: "advantage-distribution",
+    code: null,
+    source: advantageDistributionSource,
+  },
+  {
+    id: "step-timings",
+    scope: "builtin",
+    title: "Step timings",
+    component: "step-timings",
+    code: null,
+    source: stepTimingsSource,
+  },
+  {
+    id: "rollout-explorer",
+    scope: "builtin",
+    title: "Rollout explorer",
+    component: "rollout-explorer",
+    code: null,
+    source: rolloutExplorerSource,
+  },
+  {
+    id: "run-logs",
+    scope: "builtin",
+    title: "Run logs",
+    component: "run-logs",
+    code: null,
+    source: runLogsSource,
+  },
 ];
 
 export const builtinLayouts = {

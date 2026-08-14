@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { fetchRun, fetchRunLogs } from "../../lib/api.js";
+  import { fetchRun, fetchRunLogs } from "$host/data";
 
   let { runId, initialRun = null } = $props();
   let run = $state(null);
@@ -97,17 +97,35 @@
       <span class="text-[10px] text-(--muted)">{streamState}</span>
     </div>
   {:else}
-    <div class="rounded-[6px] [border:1px_solid_var(--border,#2f2f2f)] bg-(--color-c-gray-08,#1c1c1c) p-[8px] mb-[8px]">
-      <div class="flex flex-wrap items-center gap-[8px]">
-        <input class="log-search flex-1 min-w-[180px]" bind:value={search} aria-label="Filter log lines" placeholder="filter substring…" />
-        <span class="dot dot-dim"></span><span class="text-[10px] text-(--muted) uppercase">stored logs</span>
+    <div class="flex flex-col gap-[12px] mb-[12px] p-[12px_14px] rounded-[8px] bg-(--color-c-gray-08,#161616) [border:1px_solid_var(--border,#2f2f2f)]">
+      <div class="flex items-center gap-[12px]">
+        <input
+          class="flex-1 min-w-0 bg-(--color-c-gray-10,#1c1c1c) text-(--text) [border:1px_solid_var(--border,#3a3a3a)] rounded-[5px] p-[6px_10px] text-[12px] [font-family:inherit] focus:outline-none focus:[border-color:color-mix(in_srgb,var(--accent)_55%,transparent)]"
+          type="search"
+          bind:value={search}
+          aria-label="Filter log lines"
+          placeholder="filter substring…"
+        />
+        <span class="inline-flex items-center gap-[6px] text-[11px] text-(--muted) uppercase tracking-[0.04em] shrink-0">
+          <span class="dot dot-dim"></span> stored logs
+        </span>
       </div>
-      <div class="flex flex-wrap items-center gap-[6px] mt-[8px]">
-        <span class="text-[10px] text-(--muted) uppercase">time range</span>
-        <input class="log-range-input" bind:value={since} aria-label="Show logs since" placeholder="YYYY-MM-DD HH:MM" />
-        <span class="text-(--muted)">→</span>
-        <input class="log-range-input" bind:value={until} aria-label="Show logs until" placeholder="YYYY-MM-DD HH:MM" />
-        <button class="log-button text-[11px] px-[10px] py-[4px]" onclick={resetRange}>Reset</button>
+      <div class="flex flex-wrap items-center gap-[10px]">
+        <span class="text-(--muted) text-[11px] uppercase tracking-[0.04em]">Time range</span>
+        <input
+          class="w-[160px] bg-(--color-c-gray-10,#1c1c1c) text-(--text) [border:1px_solid_var(--border,#3a3a3a)] rounded-[5px] p-[5px_8px] text-[12px] [font-family:inherit] [font-variant-numeric:tabular-nums] focus:outline-none focus:[border-color:color-mix(in_srgb,var(--accent)_55%,transparent)]"
+          bind:value={since}
+          aria-label="Show logs since"
+          placeholder="YYYY-MM-DD HH:MM"
+        />
+        <span class="text-(--muted-strong) text-[13px]">→</span>
+        <input
+          class="w-[160px] bg-(--color-c-gray-10,#1c1c1c) text-(--text) [border:1px_solid_var(--border,#3a3a3a)] rounded-[5px] p-[5px_8px] text-[12px] [font-family:inherit] [font-variant-numeric:tabular-nums] focus:outline-none focus:[border-color:color-mix(in_srgb,var(--accent)_55%,transparent)]"
+          bind:value={until}
+          aria-label="Show logs until"
+          placeholder="YYYY-MM-DD HH:MM"
+        />
+        <button class="log-button text-[11px] px-[10px] py-[4px]" onclick={resetRange} title="Reset to the run's time range">Reset</button>
       </div>
     </div>
   {/if}
@@ -121,10 +139,13 @@
     <div class="bg-(--color-c-gray-08,#0e0e0e) rounded-[6px] p-[8px_12px] max-h-[420px] overflow-y-auto overflow-x-auto [font-family:ui-monospace,SFMono-Regular,Menlo,monospace] text-[12px] leading-[1.45] text-(--text)">
       {#each filtered as entry, index (entry.id ?? index)}
         <div class="flex gap-[10px] whitespace-pre">
-          <span class="text-(--muted)">{entry.ts ? new Date(Number(entry.ts) * 1000).toLocaleTimeString() : ""}</span>
-          <span>{entry.line || entry}</span>
+          <span class="shrink-0 text-(--muted) text-[10px] min-w-[64px] overflow-hidden text-ellipsis">{entry.task_id || ""}</span>
+          <span class="flex-1 whitespace-pre-wrap break-all">{entry.line || entry}</span>
         </div>
       {/each}
+    </div>
+    <div class="mt-[6px] text-[11px] text-(--muted) [font-variant-numeric:tabular-nums]">
+      Showing {filtered.length} line{filtered.length === 1 ? "" : "s"}
     </div>
   {/if}
 </div>

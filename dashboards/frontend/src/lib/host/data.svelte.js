@@ -1,5 +1,19 @@
 import { fetchRun, fetchRuns } from "../api.js";
 
+export {
+  fetchDeployments,
+  fetchEvalDetail,
+  fetchEvals,
+  fetchRun,
+  fetchRunAdvantages,
+  fetchRunAdvantageStep,
+  fetchRunLogs,
+  fetchRunRollouts,
+  fetchRollout,
+  fetchRuns,
+  fetchTrainResult,
+} from "../api.js";
+
 const SERVER = "/api";
 
 function pointer(value, path) {

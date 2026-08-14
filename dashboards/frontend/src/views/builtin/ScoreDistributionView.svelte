@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
-  import ComparativeBarChart from "../../components/ComparativeBarChart.svelte";
-  import { fetchRunRollouts, fetchRollout } from "../../lib/api.js";
+  import { ComparativeBarChart } from "$host/components";
+  import { fetchRunRollouts, fetchRollout } from "$host/data";
   let { runId } = $props();
   let series = $state([]);
   onMount(async () => {

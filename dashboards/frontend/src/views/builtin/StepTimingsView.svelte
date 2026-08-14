@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
-  import StepTimings from "../../components/StepTimings.svelte";
-  import { fetchRun } from "../../lib/api.js";
+  import { StepTimings } from "$host/components";
+  import { fetchRun } from "$host/data";
   let { runId } = $props();
   let run = $state(null);
   onMount(async () => { run = await fetchRun(runId); });

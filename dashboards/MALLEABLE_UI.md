@@ -119,7 +119,7 @@ MetadataStore.UI_LAYOUTS  = "ui-layouts"   # key: "{scope}__{id}"
 ```
 
 ```
-GET    /api/ui/views                  -> [ViewDoc]     (builtins merged in, see §5)
+GET    /api/ui/views                  -> [ViewDoc]     (persisted volume documents only)
 PUT    /api/ui/views/{scope}/{id}     <- ViewDoc        (write)
 DELETE /api/ui/views/{scope}/{id}                       (revert to shadowed doc)
 GET    /api/ui/layouts, PUT, DELETE   -> same shape
@@ -138,7 +138,8 @@ inside a run — can author a view without a browser.
 Resolution order, later shadowing earlier: `builtin < org < user < run`.
 
 - `builtin` views live in the frontend bundle (`src/views/builtin/*.svelte` +
-  `src/views/registry.js`) and are listed by the server as synthetic ViewDocs.
+  `src/views/registry.js`). The server lists only persisted volume documents;
+  the frontend merges its bundled builtin registry at resolution time.
 - Editing a builtin writes a copy at the current scope with
   `forked_from: "builtin:<id>"`. The builtin is untouched; `DELETE` restores it.
 - `run` scope is keyed by `training_run_id` and lets a producer ship UI with its
@@ -182,12 +183,15 @@ Compile pipeline, in `src/lib/views/compile.js`:
 1. `const { compile } = await import("svelte/compiler")` — lazy chunk, only
    fetched when the editor opens or an authored view is first rendered.
 2. `compile(source, {generate: "client", runes: true, name: "AuthoredView"})`.
-3. Rewrite the emitted module's static imports into lookups against a host
-   registry (`svelte/internal/client`, `svelte`, `$host/*`), and its
-   `export default X` into `return X`; instantiate with
-   `new Function("__require", body)`.
-4. Cache the compiled module keyed by `sha256(source)` in memory, and store the
-   hash on the ViewDoc so a reload skips recompilation of an unchanged view.
+3. Rewrite the emitted module's static imports (namespace, named, aliased
+   named, default, and mixed default/named forms) into destructuring lookups
+   against a fixed host registry (`svelte/internal/client`, `svelte`,
+   `$host/*`), and its `export default X` into `return X`; instantiate with
+   `new Function("__require", body)`. The registry imports the app's own
+   `svelte/internal/client` module so authored components share the same
+   runtime instance as the host.
+4. Cache the compiled module keyed by `sha256(source)` in memory so repeated
+   renders of an unchanged view skip recompilation.
 
 Host registry (`$host/*`, the only imports an authored view may use besides
 `svelte`):
@@ -208,7 +212,11 @@ class that appears only in a runtime-authored view has no CSS. Authored views us
 a `<style>` block plus the theme CSS variables (`--text-bright`, `--muted`,
 `--green`, `--yellow`, `--color-c-gray-10`, …) — or, better, reuse
 `$host/components`, which already carry their styling. This is documented in the
-editor's starter template.
+editor's starter template. The editor uses a plain monospace textarea with a
+debounced live preview; each view instance exposes Edit, Reset to builtin, and
+Open as JSON actions. Editing a builtin starts from its bundled `?raw` source
+and saves a user-scope fork with `forked_from`; layout editing supports per-slot
+reorder, hide/show, and reset through the same persistence routes.
 
 ## 8. Failure containment
 
