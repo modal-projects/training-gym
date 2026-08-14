@@ -711,7 +711,7 @@
                     class:ws-file-active={wsSelected?.path === file.path}
                     disabled={!file.inline}
                     onclick={() => openWorkspaceFile(file)}
-                    title={file.path}
+                    title={file.inline ? file.path : `${file.path} — content not in snapshot (over the 64 KB per-file inline cap); the full file is in the observatory workspace archive`}
                   >
                     <span class="ws-file-name">{file.path}</span>
                     <span class="ws-file-size">{fmtBytes(file.size)}</span>
@@ -1061,7 +1061,7 @@
       class:ws-file-active={wsSelected?.path === file.path}
       disabled={!file.inline}
       onclick={() => openWorkspaceFile(file)}
-      title={file.path}
+      title={file.inline ? file.path : `${file.path} — content not in snapshot (over the 64 KB per-file inline cap); the full file is in the observatory workspace archive`}
     >
       <span class="ws-file-name">{file.name}</span>
       <span class="ws-file-size">{fmtBytes(file.size)}</span>
