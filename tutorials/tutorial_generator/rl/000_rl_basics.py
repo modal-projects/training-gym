@@ -2,7 +2,7 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 1×H100",
+    "cluster_shape": "1 × 8×H100",
     "summary": "Writing correct haikus",
     "difficulty": "Beginner",
     "order": 10,
@@ -377,8 +377,8 @@ def _trained_eval_section():
 @code
 def _eval_trained():
     print("running checkpoint evaluation...")
-    base_mean = run_eval(base_model_deployment)
-    print(f"average score: {base_mean:.1f}")
+    trained_mean = run_eval(trained_model_deployment)
+    print(f"average score: {trained_mean:.1f}")
 
 
 @markdown
@@ -442,5 +442,5 @@ def _trained_eval_off_of_a_checkpoint_code():
     print(f"new checkpoint deployed to {new_model_deployment.url}")
 
     print("running new checkpoint evaluation...")
-    base_mean = run_eval(base_model_deployment)
-    print(f"average score: {base_mean:.1f}")
+    new_mean = run_eval(new_model_deployment)
+    print(f"average score: {new_mean:.1f}")

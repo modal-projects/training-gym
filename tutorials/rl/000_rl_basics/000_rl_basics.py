@@ -266,8 +266,8 @@ def _main_impl() -> None:
     # Now, let's run the same eval as before.
 
     print("running checkpoint evaluation...")
-    base_mean = run_eval(base_model_deployment)
-    print(f"average score: {base_mean:.1f}")
+    trained_mean = run_eval(trained_model_deployment)
+    print(f"average score: {trained_mean:.1f}")
 
     # ## Continuing training off the checkpoint
     # Hmm, it looks like the trained model is still not doing very well.
@@ -315,8 +315,8 @@ def _main_impl() -> None:
     print(f"new checkpoint deployed to {new_model_deployment.url}")
 
     print("running new checkpoint evaluation...")
-    base_mean = run_eval(base_model_deployment)
-    print(f"average score: {base_mean:.1f}")
+    new_mean = run_eval(new_model_deployment)
+    print(f"average score: {new_mean:.1f}")
 
 @tutorial_cli_app.local_entrypoint()
 def main() -> None:
