@@ -228,18 +228,6 @@ def _await_convert_peers(run_id: str, nnodes: int) -> None:
     multi-node conversion interrupted after rank 0's write leaves a directory that
     passes ``_is_complete_torch_dist_checkpoint`` with shards missing, and the next
     run reports a cache hit and trains on partial weights.
-
-    What holds ``.metadata`` back is that it stays in the staging directory on
-    container-local disk until this returns — not that it stays uncommitted. Modal
-    mounts are created with ``allow_background_commits``, and uncommitted changes are
-    also flushed on container exit, so "written to the mount but not committed" is
-    not a state anything may rely on. Multi-node conversion therefore requires
-    staging, enforced where the conversion topology is resolved.
-
-    The signal lives in a ``modal.Dict`` because it is coordination state rather than
-    checkpoint data: it needs an atomic compare-and-set for the sibling claim, and
-    keeping it out of ``ref_load`` leaves no marker files in a user-visible checkpoint
-    directory and nothing to garbage-collect there.
     """
     barrier = _convert_barrier_dict()
     deadline = time.time() + _CONVERT_BARRIER_TIMEOUT_S
