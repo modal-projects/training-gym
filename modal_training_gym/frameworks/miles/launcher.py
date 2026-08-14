@@ -113,11 +113,11 @@ def _convert_barrier_key(run_id: str, node_rank: int) -> str:
     return f"{run_id}:rank{node_rank}"
 
 
-def _convert_lock_key(save_path: str) -> str:
-    return f"lock:{save_path}"
+def _convert_lock_key(volume_name: str, save_path: str) -> str:
+    return f"lock:{volume_name}:{save_path}"
 
 
-def _acquire_convert_lock(run_id: str, save_path: str) -> str:
+def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
     """Claim the right to convert into ``save_path``; return the current holder.
 
     Two launches of the same recipe share one ``ref_load``, so without this the
@@ -132,7 +132,7 @@ def _acquire_convert_lock(run_id: str, save_path: str) -> str:
     owner.
     """
     barrier = _convert_barrier_dict()
-    key = _convert_lock_key(save_path)
+    key = _convert_lock_key(volume_name, save_path)
     claim = {"run_id": run_id, "claimed_at": time.time()}
     if barrier.put(key, claim, skip_if_exists=True):
         return run_id
@@ -159,14 +159,14 @@ def _acquire_convert_lock(run_id: str, save_path: str) -> str:
     return run_id
 
 
-def _refresh_convert_lock(run_id: str, save_path: str) -> None:
+def _refresh_convert_lock(run_id: str, volume_name: str, save_path: str) -> None:
     """Extend an existing claim of this run's; never create one.
 
     A refresh that wrote unconditionally would resurrect the claim when a tick
     straddles the release, leaving it held with nobody to give it back.
     """
     barrier = _convert_barrier_dict()
-    key = _convert_lock_key(save_path)
+    key = _convert_lock_key(volume_name, save_path)
     holder = barrier.get(key)
     if not isinstance(holder, dict) or str(holder.get("run_id") or "") != run_id:
         return
@@ -174,7 +174,7 @@ def _refresh_convert_lock(run_id: str, save_path: str) -> None:
 
 
 @contextlib.contextmanager
-def _convert_lock_heartbeat(run_id: str, save_path: str):
+def _convert_lock_heartbeat(run_id: str, volume_name: str, save_path: str):
     """Keep this run's claim fresh for as long as the body runs.
 
     Refreshing on elapsed time rather than on work done: a torch_dist conversion
@@ -187,7 +187,7 @@ def _convert_lock_heartbeat(run_id: str, save_path: str):
     def beat() -> None:
         while not stop.wait(_CONVERT_LOCK_REFRESH_S):
             try:
-                _refresh_convert_lock(run_id, save_path)
+                _refresh_convert_lock(run_id, volume_name, save_path)
             except Exception as exc:
                 print(f"WARNING: could not refresh conversion claim: {exc}")
 
@@ -200,10 +200,10 @@ def _convert_lock_heartbeat(run_id: str, save_path: str):
         thread.join(timeout=5.0)
 
 
-def _release_convert_lock(run_id: str, save_path: str) -> None:
+def _release_convert_lock(run_id: str, volume_name: str, save_path: str) -> None:
     """Drop the conversion claim, but only if this run still holds it."""
     barrier = _convert_barrier_dict()
-    key = _convert_lock_key(save_path)
+    key = _convert_lock_key(volume_name, save_path)
     holder = barrier.get(key)
     if isinstance(holder, dict) and str(holder.get("run_id") or "") != run_id:
         return
@@ -672,7 +672,9 @@ def build_miles_app(
                 flush_status_reporter(timeout_seconds=2.0)
             return None
 
-        holder = _acquire_convert_lock(training_run_id, save_path)
+        holder = _acquire_convert_lock(
+            training_run_id, checkpoints_volume_name, save_path
+        )
         if holder != training_run_id:
             raise RuntimeError(
                 f"Run {holder} is already converting into {save_path}. Two runs of "
@@ -722,7 +724,7 @@ def build_miles_app(
             )
             return resolve_checkpoint_ref(conversion_hf_checkpoint)
         except BaseException:
-            _release_convert_lock(training_run_id, save_path)
+            _release_convert_lock(training_run_id, checkpoints_volume_name, save_path)
             raise
 
     @app.function(
@@ -838,11 +840,11 @@ def build_miles_app(
         )
         print(f"Running: bash -c {cmd!r}")
         if node_rank == 0:
-            _refresh_convert_lock(training_run_id, save_path)
+            _refresh_convert_lock(training_run_id, checkpoints_volume_name, save_path)
             if nnodes > 1:
                 _clear_convert_barrier(training_run_id, nnodes)
         heartbeat = (
-            _convert_lock_heartbeat(training_run_id, save_path)
+            _convert_lock_heartbeat(training_run_id, checkpoints_volume_name, save_path)
             if node_rank == 0
             else contextlib.nullcontext()
         )
@@ -912,10 +914,14 @@ def build_miles_app(
             if node_rank == 0:
                 if nnodes > 1:
                     _clear_convert_barrier(training_run_id, nnodes)
-                _release_convert_lock(training_run_id, save_path)
+                _release_convert_lock(
+                    training_run_id, checkpoints_volume_name, save_path
+                )
         except BaseException:
             if node_rank == 0:
-                _release_convert_lock(training_run_id, save_path)
+                _release_convert_lock(
+                    training_run_id, checkpoints_volume_name, save_path
+                )
             raise
 
         if training_run_id:
