@@ -71,18 +71,10 @@ class StitchServeConfig:
         checkpoint copy and reloads from it; ``"cpu"`` applies against a pinned
         CPU weight cache (needs ``--enable-cpu-weight-cache`` in the engine
         args).
-    disk_load_format : str
-        Loader used for a delta apply when it should differ from the boot
-        loader. Empty (default) reuses the server's ``--load-format``. Note
-        SGLang keeps the server's ``--model-loader-extra-config`` for online
-        updates too, so a format that rejects those keys needs them dropped as
-        well.
     flush_cache_on_commit : bool
         Drop the engine's KV cache when a version commits. Off by default: the
         engine namespaces cached prefixes per version, so flushing only costs
         recompute.
-    debug_requests : bool
-        Log every gated rollout request in the sidecar.
     delta_volume_name : str
         Modal Volume backing the bulletin board. Empty → derived from the
         recipe name at build time.
@@ -116,9 +108,7 @@ class StitchServeConfig:
     # ── Weight-sync sidecar ─────────────────────────────────────────────────
     commit_mode: str = "in_place"
     delta_update_mode: str = "disk"
-    disk_load_format: str = ""
     flush_cache_on_commit: bool = False
-    debug_requests: bool = False
 
     # ── Bulletin board (shared with the trainer half) ────────────────────────
     delta_volume_name: str = ""

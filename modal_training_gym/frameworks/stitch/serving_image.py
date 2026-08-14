@@ -1,10 +1,12 @@
 """The weight-sync SGLang image the rollout pool serves on.
 
-Vendored from the stitch cookbook (``cookbook/common/serving_image.py``). The pool
-runs a forked SGLang whose ``/stage_weight_update`` prepares and checksums the next
-version while the engine keeps serving, so it is a *different* image from the miles
-trainer image: no trainer package is installed, and precision comes from the served
-checkpoint rather than a ``--quantization`` flag.
+Modeled on the stitch cookbook (``cookbook/common/serving_image.py``); it stays
+local because a ``modal.Image`` is built client-side, before any container the
+cookbook could be imported from exists. The pool runs a forked SGLang whose
+``/stage_weight_update`` prepares and checksums the next version while the engine
+keeps serving, so it is a *different* image from the miles trainer image: no
+trainer package is installed, and precision comes from the served checkpoint
+rather than a ``--quantization`` flag.
 """
 
 from __future__ import annotations
@@ -15,9 +17,8 @@ import modal
 
 from modal_training_gym.train_recipes.stitch_recipe.pins import (
     DEFAULT_SGLANG_RUNTIME,
-    STITCH_REPO_REF,
-    STITCH_REPO_URL,
     SGLangRuntime,
+    stitch_install_commands,
 )
 
 SGLANG_CACHE_PATH = "/root/.cache/sglang"  # kernel/JIT cache; survives cold starts
@@ -43,8 +44,8 @@ def build_serving_image(
     runtime: SGLangRuntime = DEFAULT_SGLANG_RUNTIME,
 ) -> modal.Image:
     """The rollout-pool image: the pinned SGLang fork overlaid on its base image,
-    the sidecar's runtime deps, and stitch + the training-gym package (the sidecar
-    runs as ``python3 -m modal_training_gym.frameworks.stitch.sidecar``)."""
+    the sidecar's runtime deps, and the stitch checkout (the sidecar runs as
+    ``python3 -m cookbook.common.sidecar``)."""
     return (
         modal.Image.from_registry(runtime.image)
         .run_commands(
@@ -69,7 +70,7 @@ def build_serving_image(
             "fastsafetensors",
             *extra_packages,
         )
-        .pip_install(f"stitch @ git+{STITCH_REPO_URL}@{STITCH_REPO_REF}")
+        .run_commands(*stitch_install_commands())
         .env(
             {
                 **_SERVING_ENV,
@@ -81,5 +82,7 @@ def build_serving_image(
         # The kernel-cache volume can't mount over a non-empty path — clear it as the
         # final filesystem step (it repopulates on boot).
         .run_commands(f"rm -rf {SGLANG_CACHE_PATH}")
+        # The serialized Server class carries recipe objects in its closure, so the
+        # package has to be importable when Modal deserializes it.
         .add_local_python_source("modal_training_gym", copy=True)
     )

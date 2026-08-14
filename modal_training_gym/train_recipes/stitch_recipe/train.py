@@ -85,7 +85,7 @@ class StitchTrainConfig(MilesRecipe):
     miles_repo_url: str = MILES_REPO_URL
     miles_repo_ref: str = MILES_REPO_REF
     # git patches applied to the Megatron source tree at container start, by
-    # absolute in-image path (the trainer image mounts this package's patches).
+    # absolute in-image path (see ``pins.MEGATRON_PATCH_DIR``).
     megatron_runtime_patches: list[str] = field(default_factory=list)
 
     gpu_type: str = "B200"
@@ -124,15 +124,13 @@ class StitchTrainConfig(MilesRecipe):
     update_weight_delta_encoding: str = "xor"
     update_weight_delta_checksum: str = "xxh3-128"
     # rank-0 publish hook: advance the pointer, commit the Volume, wake the pool.
-    custom_update_weight_post_write_path: str = (
-        "modal_training_gym.frameworks.stitch.bulletin_hooks.commit_and_wake"
-    )
+    custom_update_weight_post_write_path: str = "cookbook.common.hooks.commit_and_wake"
 
     # ── Rollout request gating (stitch hooks) ───────────────────────────────
     # Pins each rollout request to a served weight version; a lagging replica
     # returns a retryable 409 so requests flow across a weight update.
     custom_rollout_request_hook_path: str = (
-        "modal_training_gym.frameworks.stitch.bulletin_hooks.gated_rollout_request_hook"
+        "cookbook.common.hooks.gated_rollout_request_hook"
     )
     rollout_request_weight_version_mode: str = "exact"
     rollout_request_weight_version_lag: int = 0
@@ -167,6 +165,13 @@ class StitchTrainConfig(MilesRecipe):
             raise ValueError(
                 "served_checkpoint_format must be 'bf16' or 'nvfp4', got "
                 f"{self.served_checkpoint_format!r}"
+            )
+        # prepare_checkpoints always materializes the masters, and a bf16 run
+        # serves them directly.
+        if self.bf16_checkpoint_path and not self.bf16_checkpoint_path.startswith("/"):
+            raise ValueError(
+                "bf16_checkpoint_path must be an in-container path, got "
+                f"{self.bf16_checkpoint_path!r}"
             )
         validate_megatron_actor_parallelism(self)
         return self

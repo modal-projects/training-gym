@@ -1,9 +1,9 @@
 """Disaggregated miles training on Modal via stitch.
 
-``build_stitch_app`` is exported lazily: the serving image runs this package's
-sidecar (``python3 -m ...stitch.sidecar``) and imports ``sidecar_process`` from
-here, and it has no trainer stack — an eager launcher import would make every
-recipe/launcher dependency a serving-image requirement.
+``build_stitch_app`` is exported lazily: the serving image imports this package
+when Modal deserializes the pool's ``Server`` class, and it has no trainer stack
+— an eager launcher import would make every recipe/launcher dependency a
+serving-image requirement.
 """
 
 from typing import TYPE_CHECKING, Any

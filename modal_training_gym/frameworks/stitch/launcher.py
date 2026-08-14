@@ -61,11 +61,9 @@ from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.wandb import preflight_wandb
 from modal_training_gym.frameworks.stitch import serving_image
 from modal_training_gym.train_recipes.stitch_recipe.pins import (
-    MEGATRON_PATCH_DIR,
     MEGATRON_PATH,
     MILES_ROOT,
-    STITCH_REPO_REF,
-    STITCH_REPO_URL,
+    stitch_install_commands,
 )
 from modal_training_gym.train_recipes.stitch_recipe.recipe import (
     CHECKPOINTS_PATH,
@@ -79,16 +77,25 @@ from modal_training_gym.train_recipes.stitch_recipe.recipe import (
 from modal_training_gym.train_recipes.stitch_recipe.train import StitchTrainConfig
 
 MINUTES = 60
+# The cookbook's own ports (``cookbook.common.constants``), repeated because the
+# ``@app.cls`` decorators are evaluated client-side, where it isn't importable.
 SIDECAR_PORT = 8000
 SGLANG_PORT = 8001
 SERVER_STARTUP_TIMEOUT = 35 * MINUTES
 # Ephemeral host-local full HF checkpoint the sidecar patches in place per delta.
 LOCAL_CHECKPOINT_PATH = "/local-checkpoint"
-# Where each replica tees its sidecar log (its own volume — see below).
-ROLLOUT_LOG_PATH = "/rollout-logs"
-# The vendored Megatron patches, mounted into the trainer image at the path the
-# recipe's ``megatron_runtime_patches`` name.
-_PATCH_SOURCE_DIR = str(Path(__file__).resolve().parent / "patches")
+# What the engine needs to seed a delta from the base checkpoint: weights plus the
+# config/tokenizer files beside them. Restricting the resolve to these keeps it
+# from failing on a cache SGLang populated itself (it fetches no README/figures,
+# and a snapshot missing *any* file is "incomplete").
+_CHECKPOINT_PATTERNS = [
+    "*.safetensors",
+    "*.safetensors.index.json",
+    "*.json",
+    "*.txt",
+    "*.model",
+    "*.py",
+]
 
 
 class _MilesArgs:
@@ -120,6 +127,19 @@ class _MilesArgs:
     def cli_args(self) -> list[str]:
         fields = {k: v for k, v in vars(self).items() if k not in self._CONTROL}
         return fields_to_argv(fields)
+
+
+def _local_checkpoint(model_name: str) -> str:
+    """The served baseline as a local directory.
+
+    A prepared (quantized) baseline on the checkpoints Volume is already a path;
+    a repo id is materialized from the HF cache volume.
+    """
+    from huggingface_hub import snapshot_download
+
+    if model_name.startswith("/"):
+        return model_name
+    return snapshot_download(model_name, allow_patterns=_CHECKPOINT_PATTERNS)
 
 
 def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
@@ -159,9 +179,7 @@ def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
             "xxhash",
             "blake3",
         )
-        .pip_install(f"stitch @ git+{STITCH_REPO_URL}@{STITCH_REPO_REF}")
-        # Applied to the Megatron checkout at container start, not at build time.
-        .add_local_dir(_PATCH_SOURCE_DIR, MEGATRON_PATCH_DIR, copy=True)
+        .run_commands(*stitch_install_commands())
         .env(
             {
                 "HF_XET_HIGH_PERFORMANCE": "1",
@@ -388,30 +406,10 @@ def build_stitch_app(
         extra_env=serve_recipe.env,
     )
     sglang_server_args = serve_recipe.engine_args(model_name=served_model)
-    # Everything the sidecar needs, resolved here so the recipe is the only source
-    # of truth; the replica adds only what it can't know until it has booted (the
-    # engine's own checkpoint dir).
-    sidecar_flags = [
-        "--bulletin-root",
-        run_bulletin_root,
-        "--local-checkpoint-dir",
-        LOCAL_CHECKPOINT_PATH,
-        "--delta-update-mode",
-        serve_recipe.delta_update_mode,
-        "--disk-load-format",
-        serve_recipe.disk_load_format
-        or str(sglang_server_args.get("--load-format", "auto")),
-        "--volume-name",
-        delta_volume_name,
-        "--run-id",
-        run_id,
-        "--commit-mode",
-        serve_recipe.commit_mode,
-    ]
-    if serve_recipe.flush_cache_on_commit:
-        sidecar_flags.append("--flush-cache-on-commit")
-    if serve_recipe.debug_requests:
-        sidecar_flags.append("--debug-requests")
+    delta_update_mode = serve_recipe.delta_update_mode
+    commit_mode = serve_recipe.commit_mode
+    flush_cache_on_commit = serve_recipe.flush_cache_on_commit
+    gpus_per_replica = serve_recipe.gpus_per_replica
 
     hf_cache_volume = modal.Volume.from_name(
         "huggingface-cache", create_if_missing=True
@@ -427,13 +425,6 @@ def build_stitch_app(
         delta_volume_name, create_if_missing=True, version=2
     )
     sglang_cache_volume = modal.Volume.from_name("sglang-cache", create_if_missing=True)
-    # Durable per-replica sidecar logs. Deliberately NOT the bulletin volume: an
-    # open file there makes the reconciler's Volume.reload() fail with "there are
-    # open files preventing the operation". v2 so writes are visible without an
-    # explicit commit from a replica that may be killed at any time.
-    rollout_log_volume = modal.Volume.from_name(
-        f"{volume_prefix}-rollout-logs", create_if_missing=True, version=2
-    )
     train_volumes: dict[str | PurePosixPath, modal.Volume | modal.CloudBucketMount] = {
         str(HF_CACHE_PATH): hf_cache_volume,
         str(DATA_PATH): data_volume,
@@ -461,7 +452,6 @@ def build_stitch_app(
             # so the replicas mount it read-only alongside the bulletin board.
             str(CHECKPOINTS_PATH): checkpoints_volume,
             delta_bulletin_root: delta_volume,
-            ROLLOUT_LOG_PATH: rollout_log_volume,
         },
         secrets=[hf_secret],
         memory=serve_recipe.memory,
@@ -484,25 +474,30 @@ def build_stitch_app(
 
         @modal.enter()
         def startup(self) -> None:
-            from modal_training_gym.frameworks.stitch import server
+            from cookbook.common import server
 
             server.serve_startup(
                 self,
-                model_name=served_model,
+                # A local path (both the engine's model and the sidecar's delta
+                # baseline): the sidecar can't seed a delta from a repo id, and a
+                # post-boot resolve would race the cache SGLang warms itself.
+                model_name=_local_checkpoint(served_model),
                 sglang_args=sglang_server_args,
-                sidecar_flags=sidecar_flags,
-                delta_update_mode=serve_recipe.delta_update_mode,
-                tp=serve_recipe.gpus_per_replica,
+                tp=gpus_per_replica,
                 concurrency=rollout_concurrency,
-                sidecar_port=SIDECAR_PORT,
-                sglang_port=SGLANG_PORT,
-                log_dir=ROLLOUT_LOG_PATH,
+                bulletin_root=run_bulletin_root,
+                local_checkpoint_dir=LOCAL_CHECKPOINT_PATH,
+                delta_update_mode=delta_update_mode,
+                volume_name=delta_volume_name,
+                run_id=run_id,
+                commit_mode=commit_mode,
+                flush_cache_on_commit=flush_cache_on_commit,
                 startup_timeout=SERVER_STARTUP_TIMEOUT,
             )
 
         @modal.exit()
         def stop(self) -> None:
-            from modal_training_gym.frameworks.stitch import server
+            from cookbook.common import server
 
             server.serve_stop(self)
 
@@ -531,9 +526,11 @@ def build_stitch_app(
     ) -> dict:
         """Bring up Ray, claim the rollout pool for this run, and drive miles."""
         del modal_app_url  # derived from modal_app_id in the run record
-        from modal_training_gym.frameworks.stitch import bulletin_hooks, trainer_helpers
+        from cookbook.common import hooks, launch, process, ray_cluster
 
-        rank, master_addr, my_ip = trainer_helpers.modal_cluster_context(n_train_nodes)
+        from modal_training_gym.frameworks.stitch import trainer_helpers
+
+        rank, master_addr, my_ip = ray_cluster.get_modal_cluster_context(n_train_nodes)
         os.environ.update(
             {
                 "MILES_HOST_IP": my_ip,
@@ -555,7 +552,7 @@ def build_stitch_app(
         # reshardable optimizer step arrive as patches. Applied on every node,
         # before the rank gate: each node's Ray actors import their own copy.
         if train_recipe.megatron_runtime_patches:
-            trainer_helpers.apply_git_patches(
+            process.apply_git_patches(
                 train_recipe.megatron_runtime_patches, MEGATRON_PATH, "megatron-patch"
             )
         # Same reason: a Ray actor on another node re-reads this file by path, so
@@ -565,9 +562,7 @@ def build_stitch_app(
             async_mode=train_recipe.async_mode,
             miles_model_script=train_recipe.miles_model_script,
         )
-        trainer_helpers.materialize_node_local_yaml(
-            cfg_yaml_owner, "te_precision_config_file"
-        )
+        launch.materialize_node_local_yaml(cfg_yaml_owner, "te_precision_config_file")
 
         # Rank 0 drives the run; the other ranks only host Ray workers, and stay
         # alive until Modal tears the cluster down with rank 0's input.
@@ -632,7 +627,7 @@ def build_stitch_app(
         )
         custom_config.update(
             {
-                "update_weight_delta_volume_name": delta_volume_name,
+                "experiment_volume_name": delta_volume_name,
                 "rollout_modal_flash_app_name": app_name,
                 "rollout_modal_flash_server_cls_name": "Server",
                 "run_id": run_id,
@@ -645,16 +640,14 @@ def build_stitch_app(
         # YAML_CONFIG_FIELDS) and renamed after. Here it is already renamed, so
         # it has to be materialized under its final name or miles is handed a
         # dict repr as a filename.
-        trainer_helpers.prepare_config(
+        launch.resolve_config(
             cfg, tempfile.mkdtemp(), (*YAML_CONFIG_FIELDS, "custom_config_path")
         )
-        cmd = trainer_helpers.build_train_cmd(
-            cfg, MILES_ROOT, model_script_attr="miles_model_script"
-        )
+        cmd = launch.build_train_cmd(cfg, MILES_ROOT, "miles_model_script")
 
         # Claim the pool for this run before miles publishes: write the empty
         # pointer and wake the pool so every replica resets to base now.
-        bulletin_hooks.claim_pool(
+        hooks.claim_pool(
             SimpleNamespace(
                 update_weight_disk_dir=cfg.update_weight_disk_dir,
                 **custom_config,
@@ -766,9 +759,21 @@ def build_stitch_app(
         the baseline each sparse delta is applied against, so it must be the
         byte-exact output of the same quantizer the trainer exports with.
         """
-        from modal_training_gym.frameworks.stitch import prep
+        from cookbook.miles_disagg import prep
 
-        prep.prepare_checkpoints(train_recipe, checkpoints_volume)
+        # The cookbook's prep reads its constants off an experiment *module*; the
+        # recipe is the same values under gym names.
+        prep.prepare_checkpoints(
+            SimpleNamespace(
+                SOURCE_MODEL=train_recipe.source_hf_checkpoint
+                or train_recipe.hf_checkpoint,
+                BF16_CHECKPOINT_PATH=train_recipe.bf16_checkpoint_path,
+                SERVED_CHECKPOINT_FORMAT=train_recipe.served_checkpoint_format,
+                PREP_ENV=dict(train_recipe.prep_env),
+                miles=train_recipe,
+            ),
+            checkpoints_volume,
+        )
         hf_cache_volume.commit()
 
     @app.function(
