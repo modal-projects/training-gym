@@ -4,7 +4,7 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 8×H100",
-    "summary": "Turn a plain-language objective into an end-to-end Qwen3-4B training run",
+    "summary": "Install the Training Gym skill, launch an agent-built run, and inspect it with the CLI",
     "difficulty": "Intermediate",
     "order": 70,
     "api_classes": [
@@ -22,25 +22,25 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Agent-driven RL for rhyming with Qwen3-4B
+    # Drive a training run with an agent and the Training Gym CLI
 
-    This entire training project started with one sentence:
+    Training Gym gives an agent more than an API for writing a training
+    configuration. Its bundled skill teaches the agent how to own the full
+    lifecycle—preflight, prove one step, smoke test, inspect real rollouts,
+    diagnose problems, and promote a healthy run.
 
-    > can you post train a model to rhyme in its output
+    This tutorial is a hands-on walkthrough of that loop. You will:
 
-    That was enough for the agent to turn a rough idea into a working RL
-    experiment on Modal. It chose **Qwen3-4B**, designed a reward that balances
-    rhyme with relevance, prepared a dataset, wrote the GRPO configuration,
-    debugged the remote environment, and managed the run from a one-step proof
-    all the way through full training.
+    1. install the Training Gym agent skills,
+    2. give an agent a plain-language training objective,
+    3. launch the Qwen3-4B configuration it produces, and
+    4. use the CLI to inspect status, rewards, logs, and rollout traces.
 
-    The result: answers meeting the rhyme threshold rose from **27% to 84%**,
-    while relevance held steady. The model learned to rhyme *in addition to*
-    answering the question.
-
-    This tutorial walks through two things: what the agent built, and more 
-    importantly, how it used Training Gym's observability through the CLI 
-    to prove that such a simple prompt could produce a real behavior change.
+    We use a real request—**post-train a model to answer in rhyme**—throughout.
+    The goal is not to repeat every option in the
+    [CLI reference](/reference/cli/). It is to practice the small set of
+    commands that answers the questions an agent must ask while a run is live:
+    Is it progressing? Is reward improving? What is the model actually doing?
     """
 
 
@@ -48,7 +48,7 @@ def _intro():
 @markdown
 def _run_instructions():
     """
-    Run locally (your machine drives the Modal GPU workers):
+    Run the generated Python tutorial locally:
 
     ```
     cd training-gym
@@ -56,11 +56,8 @@ def _run_instructions():
     uv run tutorials/rl/010_agent_driven_training/010_agent_driven_training.py
     ```
 
-    To detach and watch it from the Modal dashboard instead:
-
-    ```
-    uv run modal run -d tutorials/rl/010_agent_driven_training/010_agent_driven_training.py
-    ```
+    The script launches the one-step proof as a detached Modal app and prints
+    its run ID. Use that ID with the CLI commands shown below.
     """
 
 
@@ -80,29 +77,84 @@ def _notebook_setup():
 @markdown
 def _confirmations():
     """
-    ## Turn one sentence into a training objective
+    ## 1. Meet the CLI
 
-    The initial prompt was intentionally underspecified. The agent did not need
-    a finished reward function or training recipe from the user; it came up with 
-    decisions on all components of the training workflow on its ownand only prompted 
-    the user once to confirm the decisions that'd materially affect behavior and cost:
+    The package installs the `training-gym` command. Start by looking at its
+    top-level command groups. In the notebook, cells beginning with `!` run in
+    your shell, so you can execute the walkthrough instead of only reading it.
 
-    - **Model:** Qwen3-4B.
-    - **Dataset:** tatsu-lab/alpaca
-    - **Reward function:** reward rhyme only when the response remains relevant
-      to the question
+    ```bash
+    training-gym --help
+    ```
+    """
+
+
+@notebook_only
+@shell("!training-gym --help")
+def _cli_help():
+    pass
+
+
+@markdown
+def _install_skill_intro():
+    """
+    ## 2. Install the agent skills
+
+    Install the bundled skills into the current project:
+
+    ```bash
+    training-gym skills install --project-dir .
+    ```
+    """
+
+
+@notebook_only
+@shell("!training-gym skills install --project-dir .")
+def _install_skills():
+    pass
+
+
+@markdown
+def _skill_details():
+    """
+    This creates `.agents/skills/agent-driven-training` along with supporting
+    skills for model selection, validation, and Modal infrastructure. Compatible
+    agents discover these files as project instructions.
+
+    The `agent-driven-training` skill tells the agent to:
+
+    - confirm behavior- and cost-sensitive choices before implementation,
+    - validate the dataset and reward locally before using GPUs,
+    - advance from a one-step proof to a short smoke test and then a full run,
+    - inspect rollout traces at every stage, and
+    - diagnose suspicious rewards instead of trusting a rising number.
+
+    You do not have to translate that lifecycle into a long prompt. Ask your
+    agent:
+
+    > Post-train a model to rhyme in its output. Keep the answers relevant, and
+    > own the run through proof, smoke test, and full training.
+
+    The request is deliberately incomplete. The agent proposes the model,
+    dataset, reward, and cluster shape, then asks you to confirm the choices
+    that affect behavior and cost. For this run it selected **Qwen3-4B**,
+    `tatsu-lab/alpaca`, and a reward that grants rhyme credit only when the
+    response remains relevant.
     """
 
 
 @markdown
 def _code_summary():
     """
-    ## Dataset
+    ## 3. Review the code the agent generated
 
-    We use `tatsu-lab/alpaca`, keeping only self-contained instructions whose
-    optional `input` field is empty. Each row provides an instruction for the
-    rollout and a reference answer for the relevance reward. The agent checked
-    representative formatted rows locally before launching a training run.
+    Training Gym gives the agent the framework primitives and lifecycle
+    guidance; the result is ordinary Python that you can inspect, edit, and run.
+    The rest of this section is the rhyming configuration produced for the
+    request above.
+
+    The dataset keeps self-contained Alpaca instructions and uses each reference
+    answer to measure whether a rhyming response stayed on topic.
     """
 
 
@@ -159,7 +211,7 @@ def _dataset():
 @markdown
 def _reward_intro():
     """
-    ## Reward function
+    ### Reward function
 
     The agent combined a deterministic rhyme score with an embedding-based
     relevance score. Relevance gates rhyme so unrelated verse cannot win, and
@@ -343,7 +395,7 @@ def _combined_reward():
 @markdown
 def _reward_details():
     """
-    ## Training
+    ### Training configuration
 
     The agent assembled the validated Qwen3-4B recipe, custom reward, dataset,
     and image dependencies into one `TrainConfig`. The important process
@@ -392,42 +444,147 @@ def _config_excerpt():
 @markdown
 def _how_it_works():
     """
-    ## How it ran and monitored the loop
-    
-    Writing the config is only the start. From here the agent, following 
-    the repository's `agent-driven-training` skill, ran the job as a 
-    lifecycle, scaling up only as each stage checked out:
-    
-    1. **Preflight** locally (dataset formatting, adversarial reward cases) 
-    before any GPU time.
-    2. **Prove one step** with a single rollout.
-    3. **Smoke test** at ~10 steps.
-    4. **Promote** to the full run.
-    
-    The agent decides when to advance at each step, based on what it observes 
-    of the run. After each launch it grabs the run ID and polls the run directly, 
-    mostly through `training-gym run get <run-id> --verbose` for stage, step, and 
-    reward trajectory, and `training-gym run logs <run-id> --follow` when something 
-    stalls. The CLI also captures sample traces, so before promoting a run the agent 
-    can read the actual generated prompts and responses and confirm the reward isn't 
-    being gamed.
+    ## 4. Launch the one-step proof
 
-    Kicking off the first, cheapest stage is a single call:
+    The first remote stage is intentionally cheap. `launch()` starts a detached
+    Modal app and returns immediately with a run ID. Closing the notebook does
+    not stop training.
     """
 
 
 @code
 def _run_proof():
     training_run = build_config(num_rollout=1, n_rows=512, save_interval=1)
-    train_result = training_run.train()
-    print(f"training_run_id: {train_result.training_run_id}")
+    run = training_run.launch()
+    RUN_ID = run.training_run_id
+    print(f"training_run_id: {RUN_ID}")
+
+
+@markdown
+def _cli_walkthrough():
+    """
+    ## 5. Inspect the run with the CLI
+
+    A reference tells you which flags exist; this walkthrough shows when each
+    command becomes useful.
+
+    First, verify that the run was recorded. `run list` is also how you recover
+    an ID after closing a terminal or notebook.
+
+    ```bash
+    training-gym run list --since 2h
+    ```
+    """
+
+
+@notebook_only
+@shell("!training-gym run list --since 2h")
+def _run_list():
+    pass
+
+
+@markdown
+def _run_get_intro():
+    """
+    Use `run get --verbose` as the normal progress check. It reports the current
+    stage and step plus reward history and rollout summaries. Startup can take
+    several minutes; a slow initialization is not itself a failed run.
+
+    ```bash
+    training-gym run get <run-id> --verbose
+    ```
+    """
+
+
+@notebook_only
+@shell("!training-gym run get {RUN_ID} --verbose")
+def _run_get():
+    pass
+
+
+@markdown
+def _run_logs_intro():
+    """
+    If progress stops advancing or the run fails, inspect logs. A bounded tail
+    is friendlier in a notebook than `--follow`, which keeps the cell running.
+
+    ```bash
+    training-gym run logs <run-id> --tail 100
+    ```
+    """
+
+
+@notebook_only
+@shell("!training-gym run logs {RUN_ID} --tail 100")
+def _run_logs():
+    pass
+
+
+@markdown
+def _run_trace_intro():
+    """
+    Reward is only a proxy. Before promoting the proof, download its rollout
+    traces and read the actual prompts, responses, and per-sample rewards. The
+    dry run previews the download; the second command writes traces beneath
+    `./traces/<run-id>/`.
+
+    ```bash
+    training-gym run trace <run-id> --out ./traces --dry-run
+    training-gym run trace <run-id> --out ./traces --yes
+    ```
+    """
+
+
+@notebook_only
+@shell(
+    "!training-gym run trace {RUN_ID} --out ./traces --dry-run\n"
+    "!training-gym run trace {RUN_ID} --out ./traces --yes"
+)
+def _run_traces():
+    pass
+
+
+@markdown
+def _promotion():
+    """
+    The agent uses the same sequence at every scale:
+
+    1. **Prove one step:** require one completed rollout, nonempty reward, no
+       traceback, and sensible samples.
+    2. **Smoke test:** launch about ten steps and inspect the trajectory plus
+       baseline, transition, and recent traces.
+    3. **Promote:** launch the full horizon only when the signal is informative
+       and the responses are genuinely improving.
+
+    Repeat `run get`, `run logs`, and `run trace` with each new run ID. The
+    agent can consume `--json` output when monitoring automatically; the
+    human-readable output used here is easier to learn from.
+    """
 
 
 @markdown
 def _success():
     """
-    ## Results
+    ## 6. Watch the agent catch reward hacking
+
+    The demo below shows the loop in practice. A rising reward initially looked
+    healthy, but trace inspection exposed responses gaming the rhyme signal with
+    repeated end words and undersized lines. The agent tightened the scorer,
+    reran the cheap stage, and checked real samples again before promotion.
+
+    <video controls playsinline width="100%">
+      <source src="https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/agent-driven-training-rhyme.mp4" type="video/mp4">
+      <a href="https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/agent-driven-training-rhyme.mp4">Watch the agent-driven training demo.</a>
+    </video>
+
+    This is why traces belong in the normal workflow: a reward curve can tell
+    you that optimization found *something*, but only samples tell you whether
+    it found the behavior you intended.
+
+    ## 7. Results
+
     The full run finished in **46 minutes**, and the numbers tell the story:
+
     - Rhyme score: 0.475 → 0.908
     - Answers above the rhyme threshold: 27% → 84%
     - Non-rhyming answers: 35/128 → 0/128
@@ -442,17 +599,16 @@ def _success():
 @markdown
 def _lessons():
     """
-    ## Why agent-driven training works in practice
-    
-    The agent's value was not limited to writing a training configuration. It
-    managed the messy parts of the lifecycle too: a backgrounded launch was
-    terminated, a build-time download blocked a shared volume mount, and a
-    missing local dependency sent a verification app into a crash loop.
-    
-    Using the Training Gym CLI's run state, logs, and traces, the agent 
-    identified each cause, adjusted the workflow, and continued. Those same 
-    signals let it inspect real samples for reward hacking and decide when 
-    each stage was ready to advance. That closed feedback loop turned a 
-    one-sentence objective into a validated behavior change despite real 
-    infrastructure setbacks.
+    ## What to take away
+
+    Installing the skill turns “post-train a model to rhyme” into a repeatable
+    process, not a one-shot code-generation request. The generated Python is
+    only the starting artifact. The CLI closes the loop by giving the agent
+    direct evidence about progress, failures, reward behavior, and real model
+    outputs.
+
+    Keep the CLI reference nearby for exhaustive syntax. For day-to-day
+    agent-driven training, remember the workflow practiced here:
+    **install the skill → launch cheaply → inspect status and logs → read
+    traces → promote only with evidence**.
     """
