@@ -1,8 +1,10 @@
 """The stitch trainer's argv, where it deviates from the miles defaults."""
 
 import dataclasses
+import inspect
 
 from modal_training_gym.common.status import MilesStatus, resolve_framework_status
+from modal_training_gym.frameworks.stitch import launcher as stitch_launcher
 from modal_training_gym.train_recipes.stitch_recipe import Qwen3_30B_A3B_Stitch_Train
 
 
@@ -41,3 +43,20 @@ def test_rollout_gating_matches_the_cookbook_config() -> None:
     train = Qwen3_30B_A3B_Stitch_Train()
     assert train.rollout_request_weight_version_mode == "min"
     assert train.rollout_request_weight_version_lag == 1
+
+
+def test_trainer_exports_the_dashboard_reporting_env() -> None:
+    """miles' phase/rollout hooks run in Ray actors that read their run identity
+    from the environment. The colocated launcher hands it over as a Ray
+    runtime_env; this one runs miles as a subprocess, so it has to export the
+    same names or every report is dropped and the dashboard stalls at launch."""
+    source = inspect.getsource(stitch_launcher)
+    for name in (
+        "TRAINING_GYM_TRAINING_RUN_ID",
+        "TRAINING_GYM_APP_NAME",
+        "TRAINING_GYM_TOTAL_STEPS",
+        "TRAINING_GYM_RESPONSE_PARSER_PATH",
+        "TRAINING_GYM_FRAMEWORK_STATUS_URL",
+        "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN",
+    ):
+        assert name in source

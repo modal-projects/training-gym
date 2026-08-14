@@ -166,6 +166,17 @@ def _local_checkpoint(model_name: str, volume_name: str) -> str:
     return model_name
 
 
+def _response_parser_path(model: ModelConfig | None) -> str:
+    """Import path of the model's response parser so the rollout recorder can
+    resolve and apply it remotely. Empty when the model sets no parser."""
+    fn = model.response_parser if model is not None else None
+    if fn is None:
+        return ""
+    module = getattr(fn, "__module__", "")
+    qualname = getattr(fn, "__qualname__", "") or getattr(fn, "__name__", "")
+    return f"{module}.{qualname}" if module and qualname else ""
+
+
 def _trainer_failed(
     log_path: Path, returncode: int, lines: int = 50, budget: int = 1500
 ) -> str:
@@ -654,6 +665,20 @@ def build_stitch_app(
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
         if framework_status_token:
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
+        # miles' phase/rollout hooks run inside the Ray actors and read their run
+        # identity from the environment; the colocated launcher passes it as a Ray
+        # runtime_env, which a submitted job carries and this subprocess flow does
+        # not. Set before Ray starts on every rank, since a raylet's workers
+        # inherit the container env they were started with — without a run id the
+        # reports are dropped and the dashboard sees nothing after launch.
+        os.environ.update(
+            {
+                "TRAINING_GYM_TRAINING_RUN_ID": training_run_id or run_id,
+                "TRAINING_GYM_APP_NAME": app_name,
+                "TRAINING_GYM_TOTAL_STEPS": str(train_recipe.num_rollout),
+                "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
+            }
+        )
         # Megatron is a source checkout in the image, so R3 dispatch + the
         # reshardable optimizer step arrive as patches. Applied on every node,
         # before the rank gate: each node's Ray actors import their own copy.
