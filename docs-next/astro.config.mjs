@@ -9,6 +9,11 @@ export default defineConfig({
     rehypePlugins: [rehypeTableWrapper],
   },
   site: 'https://gym.modal.dev',
+  redirects: {
+    '/tutorials/tools/000_observability_dashboard':
+      '/guides/tools/observability-dashboard/',
+    '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration/',
+  },
   integrations: [
     starlight({
       title: 'Training Gym',
