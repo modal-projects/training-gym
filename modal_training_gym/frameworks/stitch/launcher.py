@@ -159,6 +159,17 @@ def _local_checkpoint(model_name: str, volume_name: str) -> str:
     return model_name
 
 
+def _trainer_failed(log_path: Path, returncode: int, lines: int = 50) -> str:
+    """What the trainer's exit code and the tail of its log say, as one message."""
+    try:
+        tail = log_path.read_text(errors="replace").splitlines()[-lines:]
+    except OSError as exc:
+        tail = [f"(no log at {log_path}: {exc})"]
+    return "\n".join(
+        [f"miles exited {returncode}; last {lines} lines of {log_path}:", *tail]
+    )
+
+
 def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
     """The miles trainer image. The rollout pool serves on a different image
     (:func:`serving_image.build_serving_image`): it installs no trainer package, and
@@ -710,6 +721,12 @@ def build_stitch_app(
                 ],
                 check=True,
             )
+        except subprocess.CalledProcessError as exc:
+            status = TrainingRunStatus.FAILED
+            # A CalledProcessError carries the whole miles argv, which Modal
+            # won't return to the client ("an exception that was too large"),
+            # so the failure that matters is replaced by the log's tail.
+            raise RuntimeError(_trainer_failed(trainer_log, exc.returncode)) from None
         except BaseException:
             status = TrainingRunStatus.FAILED
             raise
