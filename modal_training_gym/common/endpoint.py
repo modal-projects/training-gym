@@ -43,7 +43,10 @@ def _create_endpoint_and_wait_for_url(
         ]
         if environment:
             stop.extend(["--env", environment])
-        subprocess.run(stop, check=False, capture_output=True, timeout=120)
+        try:
+            subprocess.run(stop, check=False, capture_output=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            pass
 
     command = [
         sys.executable,
