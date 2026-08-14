@@ -455,6 +455,42 @@ def test_chat_posts_the_conversation_and_returns_the_assistant_message(
     assert captured["headers"] == {}
 
 
+def test_chat_serializes_tool_arguments_without_mutating_messages(
+    monkeypatch: pytest.MonkeyPatch, clock: _FakeClock
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _post(url: str, **kwargs: Any) -> _FakeResponse:
+        captured.update(kwargs)
+        return _FakeResponse(message={"role": "assistant", "content": ""})
+
+    monkeypatch.setattr(endpoint_module.httpx, "post", _post)
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_0",
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "arguments": {"key": "value"},
+                    },
+                }
+            ],
+        }
+    ]
+
+    _endpoint().chat(messages)
+
+    assert captured["json"]["messages"][0]["tool_calls"][0]["function"][
+        "arguments"
+    ] == ('{"key": "value"}')
+    assert messages[0]["tool_calls"][0]["function"]["arguments"] == {"key": "value"}
+
+
 def test_chat_sends_proxy_headers_when_required(
     monkeypatch: pytest.MonkeyPatch, clock: _FakeClock
 ) -> None:
