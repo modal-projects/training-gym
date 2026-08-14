@@ -4,14 +4,14 @@
 task: fav2
 archetype: qa
 
-corpus: tasks/fav2/corpus               # SEC EDGAR snapshot: 2415 filings, 41 issuers,
+corpus: workspace_setup/tasks/fav2/corpus               # SEC EDGAR snapshot: 2415 filings, 41 issuers,
 corpus_version: "edgar-20260708-norm1"  #   2023-01-01..2026-07-08, normalizer v1
-dev: tasks/fav2/dev.json                # 6 rows, gold + weighted rubric (readable)
-test: tasks/fav2/test.json              # HIDDEN 13-question test (final number only)
-sys: tasks/fav2/sys.txt
+dev: workspace_setup/tasks/fav2/dev.json                # 6 rows, gold + weighted rubric (readable)
+test: workspace_setup/tasks/fav2/test.json              # HIDDEN 13-question test (final number only)
+sys: workspace_setup/tasks/fav2/sys.txt
 glob: "**/*.txt"
 secondary: edgar_ref_grounding          # explicit EDGAR refs (accessions/paths/
-refs: tasks/fav2/refs.json               #   exchange-prefixed tickers) resolve
+refs: workspace_setup/tasks/fav2/refs.json               #   exchange-prefixed tickers) resolve
                                         #   against the pinned pack manifest
 
 

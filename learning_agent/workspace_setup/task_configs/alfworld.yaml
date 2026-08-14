@@ -4,9 +4,9 @@ task: alfworld
 archetype: agentic
 
 adapter: harness/adapters/alfworld.py
-dev: tasks/alfworld/dev.json            # 50 valid_seen games (seeded sample)
-test: tasks/alfworld/test.json          # 50 valid_unseen games — generalization split
-sys: tasks/alfworld/sys.txt
+dev: workspace_setup/tasks/alfworld/dev.json            # 50 valid_seen games (seeded sample)
+test: workspace_setup/tasks/alfworld/test.json          # 50 valid_unseen games — generalization split
+sys: workspace_setup/tasks/alfworld/sys.txt
 
 env:
   pin: "alfworld==0.4.2"                # + game data via alfworld-download at image

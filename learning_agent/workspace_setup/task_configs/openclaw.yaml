@@ -4,14 +4,14 @@
 task: openclaw
 archetype: qa
 
-corpus: tasks/openclaw/corpus           # OpenClaw TypeScript framework
+corpus: workspace_setup/tasks/openclaw/corpus           # OpenClaw TypeScript framework
 corpus_commit: da228660
-dev: tasks/openclaw/dev.json
-test: tasks/openclaw/test.json          # HIDDEN
-sys: tasks/openclaw/sys.txt
+dev: workspace_setup/tasks/openclaw/dev.json
+test: workspace_setup/tasks/openclaw/test.json          # HIDDEN
+sys: workspace_setup/tasks/openclaw/sys.txt
 glob: "**/*.ts"
 secondary: ts_symbol_grounding          # fraction of referenced symbols that are real
-symbols: tasks/openclaw/symbols.json     # real OpenClaw symbol set (24958 symbols)
+symbols: workspace_setup/tasks/openclaw/symbols.json     # real OpenClaw symbol set (24958 symbols)
 
 session:                                # agent-session defaults (agents/run*.sh --config)
   scaffold: modal_glm52

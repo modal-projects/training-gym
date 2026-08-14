@@ -4,12 +4,12 @@
 task: maud
 archetype: qa
 
-corpus: tasks/maud/corpus               # 152 definitive merger agreements (MAUD deals)
+corpus: workspace_setup/tasks/maud/corpus               # 152 definitive merger agreements (MAUD deals)
 corpus_version: "maud-M-095c61b5ecdb"   # derived: sha over the shipped manifest
-                                        #   (see tasks/maud/manifest.jsonl)
-dev: tasks/maud/dev.json                # 30 rows, gold + weighted rubric (readable)
-test: tasks/maud/test.json              # (mirror of dev for this exploratory pack)
-sys: tasks/maud/sys.txt
+                                        #   (see workspace_setup/tasks/maud/manifest.jsonl)
+dev: workspace_setup/tasks/maud/dev.json                # 30 rows, gold + weighted rubric (readable)
+test: workspace_setup/tasks/maud/test.json              # (mirror of dev for this exploratory pack)
+sys: workspace_setup/tasks/maud/sys.txt
 glob: "**/*.txt"
 secondary: none                         # no deterministic secondary metric for legal prose
 

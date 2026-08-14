@@ -4,7 +4,7 @@ extends: fav2
 
 seed:
   dev: false
-instructions: instructions/data_access/medium.md
+instructions: workspace_setup/instructions/data_access/medium.md
 
 session:
   scaffold: codex_glm52

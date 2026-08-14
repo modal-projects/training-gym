@@ -10,10 +10,10 @@ task: tau2_banking
 archetype: agentic
 
 adapter: harness/adapters/tau2.py
-dev: tasks/tau2_banking/dev.json        # 58 ids — Learning Agent split, see below
-test: tasks/tau2_banking/test.json      # 39 ids — Learning Agent split, see below
-sys: tasks/tau2_banking/sys.txt
-corpus: tasks/tau2_banking/corpus       # study corpus: knowledge documents + db snapshot
+dev: workspace_setup/tasks/tau2_banking/dev.json        # 58 ids — Learning Agent split, see below
+test: workspace_setup/tasks/tau2_banking/test.json      # 39 ids — Learning Agent split, see below
+sys: workspace_setup/tasks/tau2_banking/sys.txt
+corpus: workspace_setup/tasks/tau2_banking/corpus       # study corpus: knowledge documents + db snapshot
 corpus_version: "tau2-aa74303c-banking_knowledge"
 
 # tau2 ships no split_tasks.json for this domain (97 tasks total). Learning Agent split:

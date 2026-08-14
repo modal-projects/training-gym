@@ -3,19 +3,21 @@
 Layout on disk (the spec, all pinned by bench/pins.json):
 
     bench/config.yaml        GLOBAL pins only: base model, judge, volumes, splits.
-    task_configs/<T>.yaml    THE per-task config. A task exists iff this file
+    workspace_setup/task_configs/<T>.yaml
+                             THE per-task config. A task exists iff this file
                              exists — bench.py choices, runner whitelists, and
                              integrity pinning all derive from it. Holds identity
                              (archetype, corpus, dev/test/sys, secondary) plus
                              per-task defaults (eval/env/agent/judge/session).
-    tasks/<T>/               the task ASSETS only (corpus, dev/test json,
+    workspace_setup/tasks/<T>/
+                             the task ASSETS only (corpus, dev/test json,
                              sys.txt, task.md, brief.md) — the folder seeding
                              copies into a workspace. The config never enters
                              a workspace: the operator reads it, agents don't.
 
 Resolution for a run (later wins):
 
-    task_configs/<T>.yaml  ->  --config <override.yaml>  ->  CLI flags
+    task config  ->  --config <override.yaml>  ->  CLI flags
 
 `resolve()` performs the first two; the CLI layer applies its own flags on top
 (a flag the user didn't pass falls back to the resolved value). The RESOLVED
@@ -35,7 +37,7 @@ from pathlib import Path
 import yaml
 
 GLOBAL_CONFIG = "bench/config.yaml"
-TASK_CONFIG_DIR = "task_configs"
+TASK_CONFIG_DIR = "workspace_setup/task_configs"
 
 
 def task_config_path(root: Path, task: str) -> Path:
@@ -210,7 +212,7 @@ def instructions_config(tcfg: dict) -> dict:
         raise SystemExit(f"[config] instructions: unknown keys {sorted(unknown)}")
     archetype = tcfg.get("archetype", "qa")
     return {
-        "objective": ins.get("objective") or f"instructions/objective/{archetype}.md",
+        "objective": ins.get("objective") or f"workspace_setup/instructions/objective/{archetype}.md",
         "data_access": ins.get("data_access"),
         "setup": ins.get("setup"),
         "rules": ins.get("rules"),

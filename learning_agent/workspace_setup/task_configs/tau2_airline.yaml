@@ -1,18 +1,18 @@
 # THE per-task config — loaded by harness/config.py for bench.py, rollout.py,
 # integrity pins, and the agent runners. A task exists iff this file exists.
-task: tau2_retail
+task: tau2_airline
 archetype: agentic
 
 adapter: harness/adapters/tau2.py
-dev: tasks/tau2_retail/dev.json         # tau2 shipped split_tasks.json "train" (74 ids)
-test: tasks/tau2_retail/test.json       # tau2 shipped split_tasks.json "test" (40 ids)
-sys: tasks/tau2_retail/sys.txt
-corpus: tasks/tau2_retail/corpus        # study corpus: the domain policy + db snapshot
-corpus_version: "tau2-1901a301-retail"
+dev: workspace_setup/tasks/tau2_airline/dev.json        # tau2 shipped split_tasks.json "train" (30 ids)
+test: workspace_setup/tasks/tau2_airline/test.json      # tau2 shipped split_tasks.json "test" (20 ids)
+sys: workspace_setup/tasks/tau2_airline/sys.txt
+corpus: workspace_setup/tasks/tau2_airline/corpus       # study corpus: the domain policy + db snapshot
+corpus_version: "tau2-1901a301-airline"
 
 env:
   pin: "git+https://github.com/sierra-research/tau2-bench@1901a301961cbbe3fd11f3e84a2a376530c759e3"
-  domain: retail
+  domain: airline
   max_steps: 200                        # leaderboard protocol (tau2 default)
   num_trials: 4                         # pass^4 secondary, leaderboard protocol
   seed: 300                             # leaderboard protocol base seed

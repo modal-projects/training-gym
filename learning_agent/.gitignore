@@ -18,12 +18,12 @@ runs/*/
 learning_agent_workspace/runs/GPU_LOG.jsonl
 
 # large pinned corpora are distributed separately (see README)
-tasks/*/corpus/
+workspace_setup/tasks/*/corpus/
 
 # fav2 questions/golds derive from a proprietary dataset (private research use
 # only — must never be published or leave the local machine)
-tasks/fav2/dev.json
-tasks/fav2/test.json
+workspace_setup/tasks/fav2/dev.json
+workspace_setup/tasks/fav2/test.json
 
 # agent-run artifacts (traces/prompts/audits per run) and the ephemeral timer
 agents/_runs/
@@ -39,6 +39,6 @@ opencode.json
 
 # cloned reference packages — pinned in toolbox_bank/repos.yaml, materialized
 # by toolbox_bank/clone_repos.py (workspace setup runs it automatically)
-toolbox_bank/training_tool/axolotl/
-toolbox_bank/training_tool/self_distillation/
-toolbox_bank/training_tool/training_gym/
+workspace_setup/toolbox_bank/training_tool/axolotl/
+workspace_setup/toolbox_bank/training_tool/self_distillation/
+workspace_setup/toolbox_bank/training_tool/training_gym/

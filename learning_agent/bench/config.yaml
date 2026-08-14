@@ -13,7 +13,7 @@ global:
                                     # so 50 never binds. No artificial 20-step limit.
   modal_volume: la-ula-out          # Modal volume holding eval/train outputs
   runs_dir: runs                    # candidates + results land under runs/<tag>/
-  setup_instructions: instructions/setup/modal.md  # infrastructure block stitched into AGENTS.md
+  setup_instructions: workspace_setup/instructions/setup/modal.md  # infrastructure block stitched into AGENTS.md
   leaderboard: runs/LEADERBOARD.jsonl
 
   judge:

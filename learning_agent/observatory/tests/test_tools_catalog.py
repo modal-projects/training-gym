@@ -40,7 +40,7 @@ class TestToolsCatalog(unittest.TestCase):
         """The bank TOOLS.md is the source superset of PROSE only: the catalog
         is generated per workspace at seeding (--catalog-for), so nothing may
         be committed below the marker."""
-        tools_md = REPO / "toolbox_bank" / "TOOLS.md"
+        tools_md = REPO / "workspace_setup" / "toolbox_bank" / "TOOLS.md"
         self.assertTrue(tools_md.is_file())
         sys.path.insert(0, str(REPO / "observatory"))
         try:
@@ -60,7 +60,7 @@ class TestToolsCatalog(unittest.TestCase):
             import validate_tools as vt
         finally:
             sys.path.pop(0)
-        md = vt.catalog_for(REPO / "toolbox_bank")
+        md = vt.catalog_for(REPO / "workspace_setup" / "toolbox_bank")
         self.assertIn("## harness_tool", md)
         self.assertIn("react_loop.py", md)
         self.assertIn("## cloned packages", md)

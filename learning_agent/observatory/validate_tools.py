@@ -36,7 +36,7 @@ TOOLBOX = WS_ROOT / "toolbox"
 # Selectable modules live OUTSIDE the workspace and are copied in at seeding
 # (workspace_setup/prepare_workspace.sh); their catalog paths still read toolbox/…
 # because that is where they land in a seeded workspace.
-TOOLBOX_BANK = REPO / "toolbox_bank"
+TOOLBOX_BANK = REPO / "workspace_setup" / "toolbox_bank"
 CATALOG_PATH = REPO / "observatory" / "static" / "assets" / "tools.json"
 TOOLS_MD = TOOLBOX_BANK / "TOOLS.md"
 MARKER = "<!-- CATALOG BELOW IS GENERATED at seeding from the tools in THIS workspace — do not edit -->"

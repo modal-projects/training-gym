@@ -102,12 +102,12 @@ prepare_workspace() {
     #    sets never enter the workspace: test.json always deleted, dev.json
     #    deleted too on medium/hard.
     if [ "$LEARNING_AGENT_TB_ASSETS_TASK" != "$TASK" ]; then
-        git -C "$GITROOT" archive "HEAD:${GITPFX}tasks/$LEARNING_AGENT_TB_ASSETS_TASK" | tar -x -C "$WS/task"
+        git -C "$GITROOT" archive "HEAD:${GITPFX}workspace_setup/tasks/$LEARNING_AGENT_TB_ASSETS_TASK" | tar -x -C "$WS/task"
     fi
     # a variant may have no asset folder of its own (its config lives in
     # task_configs/, which never enters a workspace)
-    if git -C "$GITROOT" cat-file -e "HEAD:${GITPFX}tasks/$TASK" 2>/dev/null; then
-        git -C "$GITROOT" archive "HEAD:${GITPFX}tasks/$TASK" | tar -x -C "$WS/task"
+    if git -C "$GITROOT" cat-file -e "HEAD:${GITPFX}workspace_setup/tasks/$TASK" 2>/dev/null; then
+        git -C "$GITROOT" archive "HEAD:${GITPFX}workspace_setup/tasks/$TASK" | tar -x -C "$WS/task"
     fi
     rm -f "$WS/task/test.json"
     if [ "$TRACK" != "easy" ] || [ "$LEARNING_AGENT_TB_SEED_DEV" != 1 ]; then
@@ -127,10 +127,10 @@ prepare_workspace() {
     #    copy() uses APFS copy-on-write when available (instant for multi-hundred-MB
     #    corpora), plain copy elsewhere.
     _pw_copy() { cp -Rc "$1" "$2" 2>/dev/null || cp -R "$1" "$2"; }
-    local ASSETS="$SEED_ROOT/tasks/$LEARNING_AGENT_TB_ASSETS_TASK"
+    local ASSETS="$SEED_ROOT/workspace_setup/tasks/$LEARNING_AGENT_TB_ASSETS_TASK"
     if [ "$TRACK" = "hard" ] || [ "$LEARNING_AGENT_TB_SEED_CORPUS" != 1 ]; then
         echo "corpus not seeded (task/track config: agent acquires or works without it)" >&2
-    elif [ -z "$(yaml_top "$SEED_ROOT/task_configs/$LEARNING_AGENT_TB_ASSETS_TASK.yaml" corpus)" ]; then
+    elif [ -z "$(yaml_top "$SEED_ROOT/workspace_setup/task_configs/$LEARNING_AGENT_TB_ASSETS_TASK.yaml" corpus)" ]; then
         # No `corpus:` key: an env task (alfworld) ships no study material — the
         # environment IS the material. Absence is the design, not a missing file.
         echo "task $TASK declares no corpus: nothing to seed" >&2
@@ -138,7 +138,7 @@ prepare_workspace() {
         if [ -d "$ASSETS/corpus" ]; then
             _pw_copy "$ASSETS/corpus" "$WS/task/corpus"
         else
-            echo "warn: no corpus at tasks/$LEARNING_AGENT_TB_ASSETS_TASK/corpus — seed the workspace manually" >&2
+            echo "warn: no corpus at workspace_setup/tasks/$LEARNING_AGENT_TB_ASSETS_TASK/corpus — seed the workspace manually" >&2
         fi
     fi
     if [ "$TRACK" = "easy" ] && [ "$LEARNING_AGENT_TB_SEED_DEV" = 1 ] && [ -f "$ASSETS/dev.json" ] && [ ! -f "$WS/task/dev.json" ]; then
@@ -168,7 +168,7 @@ prepare_workspace() {
     #     by name below), data-card families (copied by training method below),
     #     and the full repos.yaml registry (a filtered one is generated below).
     local BANK_TMP; BANK_TMP="$(mktemp -d)"
-    git -C "$GITROOT" archive "HEAD:${GITPFX}toolbox_bank" | tar -x -C "$BANK_TMP"
+    git -C "$GITROOT" archive "HEAD:${GITPFX}workspace_setup/toolbox_bank" | tar -x -C "$BANK_TMP"
     rm -f "$BANK_TMP/repos.yaml"
     rm -rf "$BANK_TMP/harness_tool"
     local fam
@@ -185,32 +185,32 @@ prepare_workspace() {
     python3 - "$SEED_ROOT" "$WS" "$LEARNING_AGENT_TB_PACKAGES" <<'PYREPOS'
 import sys, yaml
 root, ws, wanted = sys.argv[1], sys.argv[2], set(sys.argv[3].split())
-full = yaml.safe_load(open(f"{root}/toolbox_bank/repos.yaml"))
+full = yaml.safe_load(open(f"{root}/workspace_setup/toolbox_bank/repos.yaml"))
 kept = {k: v for k, v in full.items() if k in wanted}
 header = ("# repos.yaml: the cloned packages pinned for THIS task's training methods\n"
           "# (generated at seeding from the tool bank registry).\n")
 open(f"{ws}/toolbox/repos.yaml", "w").write(
     header + yaml.safe_dump(kept, sort_keys=False, allow_unicode=True, width=10000))
 PYREPOS
-    python3 "$WS/toolbox/clone_repos.py" --copy-from "$SEED_ROOT/toolbox_bank" >&2 \
+    python3 "$WS/toolbox/clone_repos.py" --copy-from "$SEED_ROOT/workspace_setup/toolbox_bank" >&2 \
         || echo "warn: package materialization incomplete (see toolbox/repos.yaml)" >&2
 
     # 3d) the selected modules: harness starters by name, data cards by
     #     training method.
     mkdir -p "$WS/toolbox/harness_tool"
-    git -C "$GITROOT" archive "HEAD:${GITPFX}toolbox_bank/harness_tool" -- README.md 2>/dev/null \
+    git -C "$GITROOT" archive "HEAD:${GITPFX}workspace_setup/toolbox_bank/harness_tool" -- README.md 2>/dev/null \
         | tar -x -C "$WS/toolbox/harness_tool" 2>/dev/null || true
     local h
     for h in $LEARNING_AGENT_TB_HARNESSES; do
-        if git -C "$GITROOT" cat-file -e "HEAD:${GITPFX}toolbox_bank/harness_tool/$h.py" 2>/dev/null; then
-            git -C "$GITROOT" show "HEAD:${GITPFX}toolbox_bank/harness_tool/$h.py" \
+        if git -C "$GITROOT" cat-file -e "HEAD:${GITPFX}workspace_setup/toolbox_bank/harness_tool/$h.py" 2>/dev/null; then
+            git -C "$GITROOT" show "HEAD:${GITPFX}workspace_setup/toolbox_bank/harness_tool/$h.py" \
                 > "$WS/toolbox/harness_tool/$h.py"
         else
             echo "warn: no harness starter '$h' in toolbox_bank/harness_tool" >&2
         fi
     done
     _pw_bank_cards() {  # copy one data-card family from the bank
-        git -C "$GITROOT" archive "HEAD:${GITPFX}toolbox_bank/data_tool/$1" \
+        git -C "$GITROOT" archive "HEAD:${GITPFX}workspace_setup/toolbox_bank/data_tool/$1" \
             | { mkdir -p "$WS/toolbox/data_tool/$1"; tar -x -C "$WS/toolbox/data_tool/$1"; }
     }
     local card
@@ -242,11 +242,11 @@ PYREPOS
         git -C "$SEED_ROOT" ls-tree -r HEAD -- \
             agents/run.sh agents/lib "agents/$SCAFFOLD" \
             bench/config.yaml
-        git -C "$SEED_ROOT" ls-tree -r HEAD -- toolbox_bank | sed $'s#\ttoolbox_bank/#\ttoolbox/#'
+        git -C "$SEED_ROOT" ls-tree -r HEAD -- workspace_setup/toolbox_bank | sed $'s#\tworkspace_setup/toolbox_bank/#\ttoolbox/#'
         if [ "$LEARNING_AGENT_TB_ASSETS_TASK" != "$TASK" ]; then
-            git -C "$GITROOT" ls-tree -r "HEAD:${GITPFX}tasks/$LEARNING_AGENT_TB_ASSETS_TASK" | sed $'s#\t#\ttask/#'
+            git -C "$GITROOT" ls-tree -r "HEAD:${GITPFX}workspace_setup/tasks/$LEARNING_AGENT_TB_ASSETS_TASK" | sed $'s#\t#\ttask/#'
         fi
-        git -C "$GITROOT" ls-tree -r "HEAD:${GITPFX}tasks/$TASK" 2>/dev/null | sed $'s#\t#\ttask/#' || true
+        git -C "$GITROOT" ls-tree -r "HEAD:${GITPFX}workspace_setup/tasks/$TASK" 2>/dev/null | sed $'s#\t#\ttask/#' || true
     } | while IFS=$'\t' read -r meta path; do
         # the manifest must list what was ACTUALLY seeded: toolbox composition
         # prunes harnesses/packages/cards, so drop entries whose file is absent

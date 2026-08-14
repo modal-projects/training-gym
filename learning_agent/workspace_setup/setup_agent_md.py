@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stitch the AGENTS.md handed to a learning agent from instructions/ blocks.
 
-The template is instructions/AGENTS.md (pinned, never edited by this script).
+The template is workspace_setup/instructions/AGENTS.md (pinned, never edited by this script).
 It holds slots that this script fills for a concrete run:
 
   <OBJECTIVE>    instructions/objective/<archetype>.md (qa or agentic),
@@ -39,7 +39,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-TEMPLATE = "instructions/AGENTS.md"
+TEMPLATE = "workspace_setup/instructions/AGENTS.md"
 TRACKS = ("easy", "medium", "hard")
 ARCHETYPES = ("qa", "agentic")
 
@@ -64,7 +64,7 @@ def default_setup_path(root: Path) -> str:
     import yaml
     cfg = yaml.safe_load((root / "bench" / "config.yaml").read_text())
     return str((cfg.get("global") or {}).get(
-        "setup_instructions", "instructions/setup/modal.md"))
+        "setup_instructions", "workspace_setup/instructions/setup/modal.md"))
 
 
 def load_block(root: Path, rel: str, what: str) -> str:
@@ -130,19 +130,19 @@ def resolve_blocks(root: Path, track: str, archetype: str,
         raise SystemExit(f"unknown training methods {unknown} — known: {METHOD_TAGS}")
     return {
         "OBJECTIVE": load_block(
-            root, objective or f"instructions/objective/{archetype}.md", "objective"),
+            root, objective or f"workspace_setup/instructions/objective/{archetype}.md", "objective"),
         "DATA_ACCESS": load_block(
-            root, data_access or f"instructions/data_access/{track}.md", "data_access"),
+            root, data_access or f"workspace_setup/instructions/data_access/{track}.md", "data_access"),
         "SETUP": load_block(root, setup or default_setup_path(root), "setup"),
         "METHODS": "".join(
-            load_block(root, f"instructions/methods/{m}.md", f"method {m}")
+            load_block(root, f"workspace_setup/instructions/methods/{m}.md", f"method {m}")
             for m in selected).rstrip(),
         "HARNESS": load_block(
-            root, harness or f"instructions/harness/{archetype}.md", "harness"),
+            root, harness or f"workspace_setup/instructions/harness/{archetype}.md", "harness"),
         "TRAINING_TIPS": load_block(
-            root, tips or f"instructions/tips/{archetype}.md", "tips"),
+            root, tips or f"workspace_setup/instructions/tips/{archetype}.md", "tips"),
         "RULES": load_block(
-            root, rules or "instructions/rules/default.md", "rules"),
+            root, rules or "workspace_setup/instructions/rules/default.md", "rules"),
     }
 
 

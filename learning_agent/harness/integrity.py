@@ -65,23 +65,23 @@ HARNESS_FILES = [
     # the contestant instruction IS part of the benchmark surface: the
     # template plus every block it can be stitched from (see
     # workspace_setup/setup_agent_md.py and instructions/README.md)
-    "instructions/AGENTS.md",
-    "instructions/objective/qa.md",
-    "instructions/objective/agentic.md",
-    "instructions/data_access/easy.md",
-    "instructions/data_access/medium.md",
-    "instructions/data_access/hard.md",
-    "instructions/setup/modal.md",
-    "instructions/methods/sft.md",
-    "instructions/methods/dpo.md",
-    "instructions/methods/rl.md",
-    "instructions/methods/opd.md",
-    "instructions/methods/sdft.md",
-    "instructions/harness/qa.md",
-    "instructions/harness/agentic.md",
-    "instructions/tips/qa.md",
-    "instructions/tips/agentic.md",
-    "instructions/rules/default.md",
+    "workspace_setup/instructions/AGENTS.md",
+    "workspace_setup/instructions/objective/qa.md",
+    "workspace_setup/instructions/objective/agentic.md",
+    "workspace_setup/instructions/data_access/easy.md",
+    "workspace_setup/instructions/data_access/medium.md",
+    "workspace_setup/instructions/data_access/hard.md",
+    "workspace_setup/instructions/setup/modal.md",
+    "workspace_setup/instructions/methods/sft.md",
+    "workspace_setup/instructions/methods/dpo.md",
+    "workspace_setup/instructions/methods/rl.md",
+    "workspace_setup/instructions/methods/opd.md",
+    "workspace_setup/instructions/methods/sdft.md",
+    "workspace_setup/instructions/harness/qa.md",
+    "workspace_setup/instructions/harness/agentic.md",
+    "workspace_setup/instructions/tips/qa.md",
+    "workspace_setup/instructions/tips/agentic.md",
+    "workspace_setup/instructions/rules/default.md",
 ]
 TASK_FILES = ["sys.txt", "dev.json", "test.json", "task.md", "brief.md"]
 # Per-task config keys naming pinned DATA files (secondary-metric inputs, and
@@ -188,7 +188,7 @@ def compute_pins(root: Path | None = None, allow_missing: bool = False) -> dict:
         # the config is always pinned; a variant task (extends: parent)
         # carries nothing else of its own — the asset files it inherits are
         # pinned under the parent task already.
-        crel = f"task_configs/{task}.yaml"
+        crel = f"workspace_setup/task_configs/{task}.yaml"
         cp = root / crel
         if cp.exists():
             files[crel] = _sha256_file(cp)
@@ -196,7 +196,7 @@ def compute_pins(root: Path | None = None, allow_missing: bool = False) -> dict:
             missing.append(crel)
         names = TASK_FILES if not tcfg.get("extends") else []
         for name in names:
-            rel = f"tasks/{task}/{name}"
+            rel = f"workspace_setup/tasks/{task}/{name}"
             p = root / rel
             if p.exists():
                 files[rel] = _sha256_file(p)
