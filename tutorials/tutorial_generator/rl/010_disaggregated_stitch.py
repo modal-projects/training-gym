@@ -131,8 +131,8 @@ def _dataset_intro():
 def _dataset():
     class DAPOMath(HuggingFaceDataset):
         hf_repo = "zhuzilin/dapo-math-17k"
-        input_column = "prompt"
-        output_column = "label"
+        input_key = "prompt"
+        label_key = "label"
         output_format = "jsonl"
         apply_chat_template = True
 

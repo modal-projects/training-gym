@@ -125,7 +125,6 @@ class Qwen3_30B_A3B_Stitch_Train(StitchTrainConfig):
     memory: tuple[int, int] | None = (128 * 1024, 2 * 1024 * 1024)
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
-    num_gpus_per_node: int = 8
     # R3 routing replay needs Megatron's dropless-dispatch fix; the reshardable
     # step lets the CPU-offloaded optimizer survive a changed DP layout.
     megatron_runtime_patches: list[str] = field(
