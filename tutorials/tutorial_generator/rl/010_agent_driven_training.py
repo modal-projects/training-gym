@@ -83,17 +83,14 @@ def _confirmations():
     ## Turn one sentence into a training objective
 
     The initial prompt was intentionally underspecified. The agent did not need
-    a finished reward function or training recipe from the user; it only prompted 
-    the user once to confirm its decisions for the few choices that materially 
-    affect behavior and cost:
+    a finished reward function or training recipe from the user; it came up with 
+    decisions on all components of the training workflow on its ownand only prompted 
+    the user once to confirm the decisions that'd materially affect behavior and cost:
 
     - **Model:** Qwen3-4B.
     - **Dataset:** tatsu-lab/alpaca
     - **Reward function:** reward rhyme only when the response remains relevant
       to the question
-
-    With those answers, the agent had the confirmation it needed to implement
-    and validate the complete training workflow below.
     """
 
 
@@ -409,11 +406,11 @@ def _how_it_works():
     
     The agent decides when to advance at each step, based on what it observes 
     of the run. After each launch it grabs the run ID and polls the run directly, 
-    mostly through two commands — `training-gym run get <run-id> --verbose` for 
-    stage, step, and reward trajectory, and `training-gym run logs <run-id> --follow` 
-    when something stalls. The CLI also captures sample traces, so before promoting a 
-    run the agent can read the actual generated prompts and responses and confirm the 
-    reward isn't being gamed.
+    mostly through `training-gym run get <run-id> --verbose` for stage, step, and 
+    reward trajectory, and `training-gym run logs <run-id> --follow` when something 
+    stalls. The CLI also captures sample traces, so before promoting a run the agent 
+    can read the actual generated prompts and responses and confirm the reward isn't 
+    being gamed.
 
     Kicking off the first, cheapest stage is a single call:
     """
@@ -429,13 +426,7 @@ def _run_proof():
 @markdown
 def _success():
     """
-    ## What one prompt produced
-    
-    The agent promoted the job only after each stage passed cleanly — a one-step 
-    proof (mean reward 0.785, healthy reward spread), then a 10-step smoke test 
-    where traces showed rhyme rising while relevance held, and finally the full 
-    100-step run, checked at milestones and reassessed at the midpoint.
-    
+    ## Results
     The full run finished in **46 minutes**, and the numbers tell the story:
     - Rhyme score: 0.475 → 0.908
     - Answers above the rhyme threshold: 27% → 84%
@@ -451,13 +442,17 @@ def _success():
 @markdown
 def _lessons():
     """
-    ## A note on what went wrong (and how it recovered)
+    ## Why agent-driven training works in practice
     
-    The real trace wasn't clean, and that's the point. A launch got accidentally 
-    backgrounded and torn down; a build-time download polluted the Hugging Face 
-    cache and blocked Modal from mounting the shared model volume; a verification 
-    app crash-looped on a missing local-only import. In each case the fix came 
-    from reading run state, logs, and traces. That's the whole shape of agent-driven 
-    training: tell startup apart from a crash loop, verify rewards on real traces, 
-    and change course when the observability contradicts its assumptions.
+    The agent's value was not limited to writing a training configuration. It
+    managed the messy parts of the lifecycle too: a backgrounded launch was
+    terminated, a build-time download blocked a shared volume mount, and a
+    missing local dependency sent a verification app into a crash loop.
+    
+    Using the Training Gym CLI's run state, logs, and traces, the agent 
+    identified each cause, adjusted the workflow, and continued. Those same 
+    signals let it inspect real samples for reward hacking and decide when 
+    each stage was ready to advance. That closed feedback loop turned a 
+    one-sentence objective into a validated behavior change despite real 
+    infrastructure setbacks.
     """
