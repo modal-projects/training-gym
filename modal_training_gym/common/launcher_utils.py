@@ -206,17 +206,16 @@ def get_checkpoint_conversion_policy(
             "Megatron otherwise defaults ETP to TP and the expert world size no "
             "longer matches tp*pp"
         )
-    if ep and etp and (etp * ep * pp) != (tp * pp):
-        raise ValueError(
-            f"checkpoint conversion expert world size etp*ep*pp={etp}*{ep}*{pp}"
-            f"={etp * ep * pp} does not match dense world size tp*pp={tp}*{pp}"
-            f"={tp * pp}"
-        )
-
     if single_rank_mtp and tp == 1 and pp == 1 and getattr(cfg, "mtp_num_layers", 0):
         world_size = 1
     else:
         world_size = tp * pp if (tp > 1 or pp > 1) else gpus_per_node
+
+    if ep and etp and (etp * ep * pp) != world_size:
+        raise ValueError(
+            f"checkpoint conversion expert world size etp*ep*pp={etp}*{ep}*{pp}"
+            f"={etp * ep * pp} does not match the conversion world size {world_size}"
+        )
     max_world_size = actor_nodes * gpus_per_node
     if world_size > max_world_size:
         raise ValueError(

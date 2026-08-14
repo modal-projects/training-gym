@@ -93,6 +93,7 @@ class _InklingSmallRecipe(MilesRecipe):
     conversion_pipeline_model_parallel_size: int = 1
     conversion_expert_model_parallel_size: int = 8
     conversion_expert_tensor_parallel_size: int = 1
+    convert_via_local_staging: bool = True
     # The BF16 torch_dist checkpoint is ~550 GB and is staged on local disk before
     # being moved onto the Volume (see convert_via_local_staging), so the conversion
     # container needs room for it plus the Volume's write buffer for the ~34 GB shard

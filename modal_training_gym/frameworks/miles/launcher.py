@@ -101,8 +101,8 @@ _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PAT
 _CONVERT_BARRIER_DICT_NAME = "training-gym-convert-barrier"
 _CONVERT_BARRIER_TIMEOUT_S = 7200.0
 _CONVERT_BARRIER_POLL_S = 5.0
-_CONVERT_LOCK_TTL_S = 5400.0
-_CONVERT_LOCK_REFRESH_S = 1800.0
+_CONVERT_LOCK_TTL_S = 900.0
+_CONVERT_LOCK_REFRESH_S = 300.0
 
 
 def _convert_barrier_dict() -> Any:
@@ -125,9 +125,11 @@ def _acquire_convert_lock(run_id: str, save_path: str) -> str:
 
     ``Dict.put(..., skip_if_exists=True)`` is the atomic compare-and-set that decides
     the winner; a read-then-write claim would let two runs both observe an unheld lock
-    and both proceed. The claim expires after ``_CONVERT_LOCK_TTL_S`` so a crashed run
-    cannot wedge the path: taking a stale claim over is a racy delete followed by the
-    same atomic put, so concurrent takers still yield exactly one owner.
+    and both proceed. The claim expires after ``_CONVERT_LOCK_TTL_S``, sized against the
+    heartbeat interval so a holder that cannot run its release path frees the path in a
+    TTL rather than a conversion's worth of time. Taking a stale claim over is a racy
+    delete followed by the same atomic put, so concurrent takers still yield exactly one
+    owner.
     """
     barrier = _convert_barrier_dict()
     key = _convert_lock_key(save_path)

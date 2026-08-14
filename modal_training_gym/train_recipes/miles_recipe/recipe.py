@@ -510,12 +510,14 @@ class MilesRecipe(BaseTrainRecipe):
     conversion_pipeline_model_parallel_size: int | None = None
     conversion_expert_model_parallel_size: int | None = None
     conversion_expert_tensor_parallel_size: int | None = None
-    # Run HF -> torch_dist against container-local disk and copy the result onto the
+    # Run HF -> torch_dist against container-local disk and move the result onto the
     # checkpoints Volume afterwards. torch_dist's writer does positional writes that
     # desync on a Volume once the per-file data is large (see the comment in
-    # frameworks/miles/launcher.py: convert_checkpoint). Costs one extra local copy;
-    # set False only if the container lacks disk for a second copy of the checkpoint.
-    convert_via_local_staging: bool = True
+    # frameworks/miles/launcher.py: convert_checkpoint), and staging is also what lets
+    # a multi-node conversion withhold .metadata until every peer's shards land. Off by
+    # default because it requires convert_ephemeral_disk_mb to be sized for the whole
+    # checkpoint: turn it on per recipe, as the Inkling recipes do at 550 GB.
+    convert_via_local_staging: bool = False
     # Ephemeral disk (MiB) for the conversion container. Local staging needs room for
     # the whole torch_dist checkpoint plus the Volume's write buffer for the shard in
     # flight; the default container disk is not enough for a 276B model.
