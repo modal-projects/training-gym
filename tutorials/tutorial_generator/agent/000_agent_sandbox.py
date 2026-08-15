@@ -3,14 +3,13 @@
 
 TUTORIAL_METADATA = {
     "framework": "Modal Sandbox",
-    "cluster_shape": "1 × 1×H100",
+    "cluster_shape": "—",
     "summary": "Build an LLM agent harness with a self-hosted model and Modal Sandbox tool execution",
     "difficulty": "Beginner",
     "order": 10,
     "api_classes": [
-        "CustomDeployment",
-        "Qwen3_8B",
-        "SglangRecipe",
+        "Endpoint",
+        "Qwen3_5_9B",
     ],
 }
 
@@ -31,7 +30,7 @@ def _intro():
     isolated container with its own filesystem.
 
     What you'll learn:
-    1. Deploy a model with `CustomDeployment` and get an
+    1. Deploy a model with `Endpoint.launch` and get an
        OpenAI-compatible endpoint.
     2. Use the OpenAI Python SDK pointed at your self-hosted
        endpoint (no API key needed).
@@ -81,10 +80,9 @@ def _imports():
     import openai
 
     from modal_training_gym import (
-        CustomDeployment,
-        Qwen3_8B,
+        Endpoint,
+        Qwen3_5_9B,
     )
-    from modal_training_gym.deploy_recipes import SglangRecipe
 
 
 @markdown
@@ -168,29 +166,20 @@ def _deploy_section():
     """
     ## Deploy the model
 
-    `CustomDeployment.launch()` launches an sglang-backed inference
-    server on Modal and returns a `CustomDeployment` with a live URL.
-    The server exposes an **OpenAI-compatible** `/v1/chat/completions`
-    endpoint, so we point the standard OpenAI Python SDK at it.
-
-    We pass `extra_server_args={"--tool-call-parser": "qwen25"}` to
-    the `SglangRecipe` so the server parses Qwen3's tool-call
-    format into structured `tool_calls` in the response. Without
-    this, the model emits tool calls as raw text.
+    `Endpoint.launch` provisions a Modal endpoint that serves
+    Qwen3.5-9B behind an OpenAI-compatible Chat Completions API.
+    Point the standard OpenAI Python SDK at that URL.     Dedicated
+    Endpoints already return structured `tool_calls`, so the OpenAI
+    SDK can use them as-is.
     """
 
 
 @code
 def _deploy_model():
-    recipe = SglangRecipe(
-        extra_server_args={"--tool-call-parser": "qwen25"},
+    deployment = Endpoint.launch(
+        Qwen3_5_9B(), unauthenticated=True, recreate_if_existing=True
     )
-    deployment = CustomDeployment.launch(
-        Qwen3_8B(),
-        recipe=recipe,
-        unauthenticated=True,
-    )
-    deployment.wait_until_ready()
+    deployment.wait_until_ready(timeout=15 * 60)
     print(f"Model URL: {deployment.url}")
 
     client = openai.OpenAI(
@@ -279,15 +268,17 @@ def _agent_loop_section():
     3. Repeat until the model produces a final text response.
 
     We cap iterations at 10 to avoid runaway loops. We also pass
-    `enable_thinking=False` in `chat_template_kwargs` so Qwen3
+    `enable_thinking=False` in `chat_template_kwargs` so Qwen3.5
     skips its internal chain-of-thought block and responds
-    directly — this keeps tool-call parsing clean.
+    directly. Read `content` first and fall back to
+    `reasoning_content` so a thinking-only turn still prints an
+    answer.
     """
 
 
 @code
 def _agent_loop():
-    MODEL = deployment.served_model_name
+    MODEL = deployment.model_name
     MAX_ITERATIONS = 10
 
     messages = [
@@ -316,7 +307,13 @@ def _agent_loop():
         choice = response.choices[0]
 
         if choice.finish_reason == "stop":
-            print(f"Agent response:\n{choice.message.content}")
+            # `enable_thinking=False` is a chat-template hint the server
+            # is free to ignore. Fall back to reasoning_content so a
+            # thinking-only turn still prints something instead of None.
+            final = choice.message.content or getattr(
+                choice.message, "reasoning_content", None
+            )
+            print(f"Agent response:\n{final}")
             break
 
         messages.append(choice.message)
@@ -370,8 +367,8 @@ def _next_steps():
     - **Add a `write_file` tool** using
       `sandbox.filesystem.write_text` so the agent can modify
       code.
-    - **Swap models** — try `Qwen3_8B` for harder tasks, or
-      `Qwen3_4B` for lower cost.
+    - **Swap models** — try `Qwen3_6_27B` for harder tasks, or
+      `Qwen3_5_4B` for lower cost.
     - **Snapshot the filesystem** with
       `sandbox.snapshot_filesystem()` to create a reusable
       `modal.Image` from the sandbox state.

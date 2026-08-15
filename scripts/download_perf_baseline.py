@@ -149,8 +149,8 @@ def models_with_results(results_dir: Path) -> list[str]:
     A baseline is only ever compared against a result from the same run, so
     the results directory — not the registry — is the right list. Asking the
     registry would scan artifacts for models the run never validated: every
-    model the diff didn't select, plus dispatch-only ones like Kimi, which can
-    have no PR artifact at all.
+    model the diff didn't select, plus dispatch-only models, which can have no
+    PR artifact at all.
     """
     names = set()
     for path in sorted(results_dir.glob(f"{ARTIFACT_PREFIX}*.json")):

@@ -3,14 +3,14 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 1×H100",
+    "cluster_shape": "1 × 8×H100",
     "summary": "Multi-turn number-guessing RL with custom generate and reward functions",
     "difficulty": "Intermediate",
     "order": 30,
     "api_classes": [
         "DatasetConfig",
-        "CustomDeployment",
-        "Qwen3_4B",
+        "Endpoint",
+        "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
     ],
@@ -71,8 +71,8 @@ def _imports():
 
     from modal_training_gym import (
         DatasetConfig,
-        CustomDeployment,
-        Qwen3_4B,
+        Endpoint,
+        Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
         list_checkpoints,
@@ -304,7 +304,7 @@ def _eval_intro():
 @code
 def _eval_helpers():
     def run_guessing_trajectory(
-        deployment: CustomDeployment,
+        deployment: Endpoint,
         *,
         target: int,
         max_turns: int = _MAX_TURNS,
@@ -312,10 +312,11 @@ def _eval_helpers():
         trace = ""
         for turn in range(max_turns):
             prompt = f"{_PROMPT}\n{trace}".strip()
-            response = deployment.generate(
-                prompt,
+            msg = deployment.chat(
+                [{"role": "user", "content": prompt}],
                 chat_template_kwargs={"enable_thinking": False},
             )
+            response = msg.get("content") or msg.get("reasoning_content") or ""
             guess = _extract_answer(response)
             if guess is None:
                 return {
@@ -341,7 +342,7 @@ def _eval_helpers():
         }
 
     def guessing_eval_fn(
-        deployment: CustomDeployment,
+        deployment: Endpoint,
         example: dict,
     ) -> dict:
         target = int(example["target"])
@@ -383,7 +384,7 @@ def _eval_helpers():
     ) -> tuple[float, list[dict]]:
         from concurrent.futures import ThreadPoolExecutor
 
-        deployment.wait_until_ready(timeout=3000)
+        deployment.wait_until_ready(timeout=15 * 60)
 
         def _score_one(example):
             return guessing_eval_fn(deployment, example)
@@ -403,9 +404,10 @@ def _serve_base_intro():
 
 @code
 def _serve_base():
-    base_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
+    base_deployment = Endpoint.launch(
+        Qwen3_5_4B(),
         unauthenticated=True,
+        recreate_if_existing=True,
     )
     print(f"Base model URL: {base_deployment.url}")
     base_mean, base_rows = run_eval(base_deployment)
@@ -427,8 +429,8 @@ def _train_intro():
       (Megatron) ranks.
     - `colocate=True` — share the same GPUs between rollout and training, alternating
       between the two. Set `False` to give sglang dedicated GPUs (faster, more expensive).
-    - `tensor_model_parallel_size=1` — Megatron tensor-parallel degree. `1` keeps the
-      4B model on a single GPU; bump it for larger models that don't fit.
+    - `tensor_model_parallel_size=1` — Megatron tensor-parallel degree. The 4B
+      preset still uses 8 H100s; bump TP for larger models that outgrow one GPU.
     - `sequence_parallel=False` — only meaningful when `tensor_model_parallel_size > 1`.
     - `rollout_num_gpus_per_engine=1` — GPUs per sglang inference engine (sglang's TP).
 
@@ -452,7 +454,7 @@ def _train_intro():
 @code
 def _train():
     training_run = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=train_dataset,
         recipe=SlimeRecipe(
             custom_generate_function=number_guess_generate,
@@ -494,12 +496,8 @@ def _trained_eval_intro():
 @code
 def _trained_eval():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-4b-guessing-multiturn-serve",
-        served_model_name="qwen3-4b-guessing-multiturn",
-        unauthenticated=True,
+    trained_deployment = Endpoint.launch(
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

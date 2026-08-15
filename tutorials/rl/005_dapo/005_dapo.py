@@ -3,7 +3,7 @@
 
 # # Decoupled Clip and Dynamic Sampling Policy Optimization (DAPO)
 #
-# This tutorial trains **Qwen3-4B** according to DAPO as presented in Yu et al.,
+# This tutorial trains **Qwen3.5-4B** according to DAPO as presented in Yu et al.,
 # 2025 on the provided dataset `zhuzilin/dapo-math-17k`.
 #
 # DAPO presents four changes to the vanilla GRPO recipe aimed to improve long
@@ -48,9 +48,9 @@ import re
 from typing import Any
 
 from modal_training_gym import (
-    CustomDeployment,
+    Endpoint,
     HuggingFaceDataset,
-    Qwen3_4B,
+    Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
     list_checkpoints,
@@ -111,15 +111,15 @@ def _check_math(response: str, label: str) -> bool:
         pass
     return pred == gt
 
-def math_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+def math_eval_fn(deployment: Endpoint, example: dict) -> dict:
     prompt = example["prompt"][0]["content"]
     label = example["label"]
 
-    response = deployment.generate(
-        prompt,
-        ensure_ready=False,
+    msg = deployment.chat(
+        [{"role": "user", "content": prompt}],
         chat_template_kwargs={"enable_thinking": True},
     )
+    response = msg.get("content") or msg.get("reasoning_content") or ""
 
     correct = _check_math(response, label)
     pred = _normalize_answer(_extract_answer(response))
@@ -137,7 +137,7 @@ def run_eval(
 ) -> tuple[float, list[dict]]:
     from concurrent.futures import ThreadPoolExecutor
 
-    deployment.wait_until_ready(timeout=3000)
+    deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
         return math_eval_fn(deployment, example)
@@ -206,10 +206,9 @@ def _main_impl() -> None:
     #
     # Let's run the math eval on our base serving model before training.
 
-    base_model = Qwen3_4B()
-    base_deployment = CustomDeployment.launch(
-        base_model,
-        unauthenticated=True,
+    base_model = Qwen3_5_4B()
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Base model URL: {base_deployment.url}")
 
@@ -221,7 +220,7 @@ def _main_impl() -> None:
 
     # ## Training
     #
-    # The recipe below is slime's reference Qwen3-4B layout (TP=2, 8192-token
+    # The recipe below is slime's reference Qwen3.5-4B layout (TP=2, 8192-token
     # responses, `max_tokens_per_gpu=9216`) with the DAPO modifications  on
     # top of GRPO. We follow ([the paper's recipe](https://arxiv.org/abs/2503.14476)) for the most part, 
     # but with some modifications for speed:
@@ -312,12 +311,8 @@ def _main_impl() -> None:
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-4b-dapo-serve",
-        served_model_name="qwen3-4b-dapo",
-        unauthenticated=True,
+    trained_deployment = Endpoint.launch(
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

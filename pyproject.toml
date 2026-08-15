@@ -23,6 +23,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["modal_training_gym"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "modal_training_gym/_skills"
+
+[tool.hatch.build.targets.sdist.force-include]
+"skills" = "skills"
+
 [project.scripts]
 training-gym = "modal_training_gym.cli:main"
 
@@ -36,7 +42,7 @@ dev = [
     "ruff>=0.15.17",
     "ipykernel>=6.29.0",
     "uv>=0.11.0",
-    "mini-swe-agent==2.3.0",
+    "pyyaml>=6.0.3",
 ]
 docs = [
     "mkdocs-gen-files>=0.6.1",

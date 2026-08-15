@@ -3,14 +3,15 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 2×H100",
+    "cluster_shape": "1 × 1×H100 (teacher) + 1 × 8×H100 (train)",
     "summary": "On-policy distillation on math",
     "difficulty": "Intermediate",
     "order": 30,
     "api_classes": [
-        "Qwen3_4B",
-        "Qwen3_8B",
+        "Qwen3_5_4B",
+        "Qwen3_5_9B",
         "CustomDeployment",
+        "Endpoint",
         "SlimeRecipe",
         "TrainConfig",
     ],
@@ -24,8 +25,8 @@ def _intro():
     """
     # On-policy distillation: Teacher model trains a student model
 
-    In this tutorial, we take two models, Qwen3-8B and Qwen3-4B, and use 
-    the larger 8B model to teach the smaller 4B model on its generation logprobs.
+    In this tutorial, we take two models, Qwen3.5-9B and Qwen3.5-4B, and use 
+    the larger 9B model to teach the smaller 4B model on its generation logprobs.
 
     Using the Slime framework and Modal Training Gym, we can easily self-host the
     teacher model on a H100 machine, hit the /generate endpoint with "return_logprob=True",
@@ -33,9 +34,9 @@ def _intro():
 
     The tutorial follows these steps:
 
-    1. **Deploy the teacher** (Qwen3-8B) on an SGLang server with `CustomDeployment`.
+    1. **Deploy the teacher** (Qwen3.5-9B) on an SGLang server with `CustomDeployment`.
     2. **Load a math dataset** (`dapo-math-17k`) and define a verifiable eval that checks `Answer: \\boxed{N}`.
-    3. **Evaluate the base student** (Qwen3-4B) to get a baseline accuracy.
+    3. **Evaluate the base student** (Qwen3.5-4B) on an `Endpoint` to get a baseline accuracy.
     4. **Define a reward function** that calls the teacher's `/generate` endpoint with `return_logprob=True` and combines the teacher log-probs with a math correctness score.
     5. **Train with GRPO + OPD** using `SlimeRecipe` — slime applies a per-token reverse KL penalty from the teacher log-probs on top of the GRPO advantage.
     6. **Evaluate the trained student** and compare accuracy before vs after.
@@ -96,9 +97,10 @@ def _imports():
 
     from modal_training_gym import (
         CustomDeployment,
+        Endpoint,
         HuggingFaceDataset,
-        Qwen3_4B,
-        Qwen3_8B,
+        Qwen3_5_4B,
+        Qwen3_5_9B,
         SlimeRecipe,
         TrainConfig,
         list_checkpoints,
@@ -120,15 +122,16 @@ def _deploy_intro():
 
 @code
 def _deploy_teacher():
-    teacher_model = Qwen3_8B()
+    teacher_model = Qwen3_5_9B()
     teacher_deployment = CustomDeployment.launch(
         teacher_model,
         recipe=SglangRecipe(gpu="H100"),
-        app_name="opd-teacher-qwen3-8b",
-        served_model_name="qwen3-8b-teacher",
+        app_name="opd-teacher-qwen3-5-9b",
+        served_model_name="qwen3-5-9b-teacher",
         unauthenticated=True,
     )
     print(f"Teacher URL: {teacher_deployment.url}")
+    teacher_deployment.wait_until_ready(timeout=15 * 60)
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 
@@ -137,7 +140,7 @@ def _deploy_teacher():
 @markdown
 def _teacher_test_intro():
     """
-    Is our teacher good at answering math problems? For a 8B model, it may not be the best
+    Is our teacher good at answering math problems? For a 9B model, it may not be the best
     but will surely outperform our smaller, 4B model by a large margin. Every parameter counts!
     """
 
@@ -145,12 +148,18 @@ def _teacher_test_intro():
 @notebook_only
 @code
 def _teacher_test():
-    response = teacher_deployment.generate(
-        "Solve the following math problem step by step. The last line of your "
-        "response should be of the form Answer: \\boxed{$Answer} where $Answer "
-        "is the answer to the problem.\n\nWhat is 17 * 23?",
+    msg = teacher_deployment.chat(
+        [{
+            "role": "user",
+            "content": (
+                "Solve the following math problem step by step. The last line of your "
+                "response should be of the form Answer: \\boxed{$Answer} where $Answer "
+                "is the answer to the problem.\n\nWhat is 17 * 23?"
+            ),
+        }],
         chat_template_kwargs={"enable_thinking": True},
     )
+    response = msg.get("content") or msg.get("reasoning_content") or ""
     print(response[-200:])
 
 
@@ -225,15 +234,15 @@ def _eval_fn():
             pass
         return pred == gt
 
-    def math_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+    def math_eval_fn(deployment: Endpoint, example: dict) -> dict:
         prompt = example["prompt"][0]["content"]
         label = example["label"]
 
-        response = deployment.generate(
-            prompt,
-            ensure_ready=False,
+        msg = deployment.chat(
+            [{"role": "user", "content": prompt}],
             chat_template_kwargs={"enable_thinking": True},
         )
+        response = msg.get("content") or msg.get("reasoning_content") or ""
 
         correct = _check_math(response, label)
         pred = _normalize_answer(_extract_answer(response))
@@ -251,7 +260,7 @@ def _eval_fn():
     ) -> tuple[float, list[dict]]:
         from concurrent.futures import ThreadPoolExecutor
 
-        deployment.wait_until_ready(timeout=3000)
+        deployment.wait_until_ready(timeout=15 * 60)
 
         def _score_one(example):
             return math_eval_fn(deployment, example)
@@ -273,16 +282,15 @@ def _eval_base_intro():
     Let's run the math eval on our base serving model. Thankfully, our dataset requires
     simple-enough answers that a tiny, 4B model should not cause issues for our deterministic parser.
     In our own experience, requiring a strict JSON output format can cause evaluation issues!
-    See [this LoRA adapter for making Qwen3-4B successful at structured output](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora). 
+    See [this LoRA adapter for making Qwen3-4B successful at structured output](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora) for an example of adapting a small Qwen model to strict output formats. 
     """
 
 
 @code
 def _eval_base():
-    base_model = Qwen3_4B()
-    base_deployment = CustomDeployment.launch(
-        base_model,
-        unauthenticated=True,
+    base_model = Qwen3_5_4B()
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Student URL: {base_deployment.url}")
 
@@ -369,7 +377,7 @@ def _train_intro():
     """
     ## Training
 
-    The training recipe uses 1 H100 GPU per actor and rollout engine. The actor engine
+    The training recipe uses one 8×H100 node. The actor engine
     runs the training and the rollout engine runs the model for inference/forward passes.
     You may want to tune the batch size for fitting the memory requirements of your GPU
     and increase the samples per prompt parameter for generating more variants per group.
@@ -425,8 +433,8 @@ def _train():
 
     print("--- Starting OPD training... ---")
     print(f"  Teacher: {teacher_deployment.url}")
-    print(f"  Student: Qwen3-4B")
-    print(f"  Dataset: dapo-math-17k (100 problems)")
+    print("  Student: Qwen3.5-4B")
+    print("  Dataset: dapo-math-17k (100 problems)")
     train_result = training_run.train()
     print(f"Training run id: {train_result.training_run_id}")
     print("--- Training complete ---")
@@ -450,12 +458,8 @@ def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-4b-opd-trained-serve",
-        served_model_name="qwen3-4b-opd",
-        unauthenticated=True,
+    trained_deployment = Endpoint.launch(
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 
@@ -503,14 +507,14 @@ def _next_steps():
     ## Next steps
     
     Some cool ways to extend and improve this example:
-    1. Use a bigger teacher: Qwen3 offers models in the 32B parameter range. 
-    This model will fit on a 4xH100 GPU setup and can show measurable improvements
+    1. Use a bigger teacher: Qwen3.5 offers larger MoE variants, up to 35B. 
+    A bigger model will fit on a 4xH100 GPU setup and can show measurable improvements
     on the student model evaluation delta.
     2. Tweak the composite reward signal: Try applying a coefficient like *2* to the
     binary integer reward signal used in the custom reward function to value correct answers
     over student-teacher alignment.
     3. Try cross-family distillation: Use a teacher from a different model family (e.g. Kimi K2)
-    to train our Qwen3-4B student model. You may run into cross-tokenizer differences, so
+    to train our Qwen3.5-4B student model. You may run into cross-tokenizer differences, so
     be careful to only grade logprobs on tokens that exist in both models' vocabularies and
     align 1:1 on a per-character basis. 
     """

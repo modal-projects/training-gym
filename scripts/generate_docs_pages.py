@@ -233,6 +233,7 @@ def starlight_frontmatter(destination: str) -> str:
             title: Training Gym SDK
             description: Open-source Python SDK for GRPO and RL post-training of LLMs on Modal.
             next: false
+            pagefind: false
             tableOfContents:
               minHeadingLevel: 2
               maxHeadingLevel: 2
@@ -247,6 +248,7 @@ def starlight_frontmatter(destination: str) -> str:
         description: Examples for using the Training Gym SDK.
         prev: false
         next: false
+        pagefind: false
         ---
         """
     )

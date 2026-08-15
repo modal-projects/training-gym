@@ -14,10 +14,16 @@ Repo: https://github.com/modal-projects/training-gym
 ## Docs
 
 - [Overview](https://gym.modal.dev/): Product overview and getting started
+- [Guides](https://gym.modal.dev/guides/): Concepts and practical workflows
 - [All Tutorials](https://gym.modal.dev/tutorials/): Tutorial catalog
 - [API Reference](https://gym.modal.dev/reference/): Public class reference
 - [CLI Reference](https://gym.modal.dev/reference/cli/): `modal-training-gym` CLI
 - [Support](https://gym.modal.dev/support/): Support and contribution notes
+
+## Guides
+
+- [The observability dashboard](https://gym.modal.dev/guides/tools/observability-dashboard/): Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings.
+- [Weights & Biases integration](https://gym.modal.dev/guides/tools/wandb-integration/): Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links.
 
 ## Tutorials
 
@@ -36,11 +42,6 @@ Repo: https://github.com/modal-projects/training-gym
 ### Agents
 
 - [000_agent_sandbox](https://gym.modal.dev/tutorials/agent/000_agent_sandbox/): Build an LLM agent harness with a self-hosted model and Modal Sandbox tool execution
-
-### Tools
-
-- [000_observability_dashboard](https://gym.modal.dev/tutorials/tools/000_observability_dashboard/): Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings
-- [001_wandb_integration](https://gym.modal.dev/tutorials/tools/001_wandb_integration/): Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links
 
 ## API Reference
 
@@ -68,7 +69,12 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3-1.7B](https://gym.modal.dev/reference/models/qwen3_1_7b/): `Qwen3_1_7B`
 - [Qwen3-4B](https://gym.modal.dev/reference/models/qwen3_4b/): `Qwen3_4B`
 - [Qwen3-8B](https://gym.modal.dev/reference/models/qwen3_8b/): `Qwen3_8B`
+- [Qwen3.5-0.8B](https://gym.modal.dev/reference/models/qwen3_5_0_8b/): `Qwen3_5_0_8B`
+- [Qwen3.5-2B](https://gym.modal.dev/reference/models/qwen3_5_2b/): `Qwen3_5_2B`
+- [Qwen3.5-4B](https://gym.modal.dev/reference/models/qwen3_5_4b/): `Qwen3_5_4B`
+- [Qwen3.5-9B](https://gym.modal.dev/reference/models/qwen3_5_9b/): `Qwen3_5_9B`
 - [Qwen3-30B-A3B](https://gym.modal.dev/reference/models/qwen3_30b/): `Qwen3_30B`
+- [Moonlight-16B-A3B-Instruct](https://gym.modal.dev/reference/models/moonlight_16b_a3b_instruct/): `Moonlight_16B_A3B_Instruct`
 - [Qwen3.6-35B-A3B](https://gym.modal.dev/reference/models/qwen3_6_35b/): `Qwen3_6_35B`
 - [Qwen3.6-27B](https://gym.modal.dev/reference/models/qwen3_6_27b/): `Qwen3_6_27B`
 
@@ -79,8 +85,14 @@ Repo: https://github.com/modal-projects/training-gym
 - [TrainingGroup](https://gym.modal.dev/reference/training/traininggroup/): `TrainingGroup`
 - [SlimeRecipe](https://gym.modal.dev/reference/training/slimerecipe/): `SlimeRecipe`
 - [MilesRecipe](https://gym.modal.dev/reference/training/milesrecipe/): `MilesRecipe`
+- [Qwen3_5_4b_Miles_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_miles_recipe/): `Qwen3_5_4b_Miles_Recipe`
+- [Moonlight_16B_A3B_Recipe](https://gym.modal.dev/reference/training/moonlight_16b_a3b_recipe/): `Moonlight_16B_A3B_Recipe`
 - [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe/): `Qwen3_6_35b_Recipe`
 - [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe/): `Qwen3_6_27b_Recipe`
+- [Qwen3.5-0.8b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_0_8b_recipe/): `Qwen3_5_0_8b_Recipe`
+- [Qwen3.5-2b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_2b_recipe/): `Qwen3_5_2b_Recipe`
+- [Qwen3.5-4b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_recipe/): `Qwen3_5_4b_Recipe`
+- [Qwen3.5-9b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_9b_recipe/): `Qwen3_5_9b_Recipe`
 
 ### Deployment
 

@@ -10,6 +10,7 @@ TUTORIAL_METADATA = {
     "api_classes": [
         "Qwen3_6_35B",
         "CustomDeployment",
+        "Endpoint",
         "Qwen3_6_35b_Recipe",
         "TrainConfig",
     ],
@@ -24,7 +25,7 @@ def _intro():
     # On-policy Distillation (OPD) Across Model Families
 
     In the 003 tutorial, we learned the basics of OPD: minimize the reverse-KL of a teacher and student model. Our toy environment
-    used Qwen3-8B to distill basic math answering capabilities to Qwen3-4B. What if we want our teacher model to be from a different,
+    used Qwen3.5-9B to distill basic math answering capabilities to Qwen3.5-4B. What if we want our teacher model to be from a different,
     more powerful model family? We can't compute reverse-KL divergence betweeen teacher and token logprobs because their
     tokenizer vocabularies are different! 
 
@@ -73,6 +74,7 @@ def _imports():
 
     from modal_training_gym import (
         CustomDeployment,
+        Endpoint,
         Qwen3_6_35B,
         TrainConfig,
         list_checkpoints,
@@ -91,7 +93,6 @@ def _imports():
     )
     from modal_training_gym.deploy_recipes.sglang_recipe import (
         DeepSeek_V4_Flash_SglangRecipe,
-        Qwen3_6_35b_SglangRecipe,
     )
     from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_35b_Recipe
 
@@ -109,6 +110,8 @@ def _deploy_intro():
 @code
 def _deploy_teacher():
     TEACHER_READY_TIMEOUT = 30 * 60
+    STUDENT_READY_TIMEOUT = 15 * 60
+
     # OPD fires one /generate prefill per trajectory. With 16×8=128 traj/step, the
     # default max_running_requests=16 saturates and returns 503s for minutes — raise
     # the teacher queue and throttle client-side (see TEACHER_RM_CONCURRENCY below).
@@ -365,7 +368,6 @@ def _eval_base():
 
     EVAL_MAX_TURNS = EVAL_TAIL_STEPS * 2
     MAX_CONSECUTIVE_TOOL_ERRORS = 3
-    DEPLOYMENT_READY_TIMEOUT = 1200
 
     def _prompt_token_count(messages, tools=None) -> int:
         try:
@@ -385,20 +387,15 @@ def _eval_base():
         if capped <= 0:
             return {"content": "", "tool_calls": []}
 
-        kwargs = {
+        extra = {
             "temperature": 0.0,
             "max_tokens": capped,
         }
         if tools is not None:
-            kwargs["tools"] = tools
+            extra["tools"] = tools
         if qwen_thinking is not None:
-            kwargs["chat_template_kwargs"] = {"enable_thinking": qwen_thinking}
-        return deployment.chat(
-            messages,
-            ensure_ready=False,
-            max_attempts=max_attempts,
-            **kwargs,
-        )
+            extra["chat_template_kwargs"] = {"enable_thinking": qwen_thinking}
+        return deployment.chat(messages, max_attempts=max_attempts, **extra)
 
     def _actions_from_message(msg: dict) -> tuple[str, list[ToolCall]]:
         """Prefer structured API tool_calls (DeepSeek); else parse Qwen wire text."""
@@ -426,7 +423,7 @@ def _eval_base():
 
 @code
 def _eval_function():
-    def bfcl_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+    def bfcl_eval_fn(deployment, example: dict) -> dict:
         label = json.loads(example["label"])
         task_id = label["task_id"]
         N = label["total_steps"]
@@ -434,10 +431,8 @@ def _eval_function():
         K = max(0, N - EVAL_TAIL_STEPS)
         expert_call = flattened_calls[K] if K < len(flattened_calls) else {}
 
-        served = deployment.served_model_name
+        served = getattr(deployment, "served_model_name", None)
         is_student = served != "deepseek-v4-flash"
-
-        deployment.wait_until_ready(timeout=DEPLOYMENT_READY_TIMEOUT)
 
         episode = run_bfcl_episode(
             label,
@@ -483,10 +478,10 @@ def _eval_function():
             },
         }
 
-    def run_eval(deployment, *, max_concurrency: int = 4):
+    def run_eval(deployment, *, ready_timeout, max_concurrency: int = 4):
         from concurrent.futures import ThreadPoolExecutor
 
-        deployment.wait_until_ready(timeout=3000)
+        deployment.wait_until_ready(timeout=ready_timeout)
 
         def _score_one(example):
             return bfcl_eval_fn(deployment, example)
@@ -515,15 +510,20 @@ def _run_baseline_eval():
             print(f"{'Parsed tool call':<25} {_frac(rows, 'parsed_call'):>10.1%}")
             print(f"{'First-call tool match':<25} {_frac(rows, 'tool_match'):>10.1%}")
 
-    student_recipe = Qwen3_6_35b_SglangRecipe(context_length=SERVED_CONTEXT_LEN)
-    base_deployment = CustomDeployment.launch(base_model, recipe=student_recipe)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Student URL: {base_deployment.url}")
 
     teacher_mean = None
     teacher_rows = None
     print("--- Evaluating teacher (DeepSeek V4 Flash)... ---")
     try:
-        teacher_mean, teacher_rows = run_eval(teacher_deployment, max_concurrency=4)
+        teacher_mean, teacher_rows = run_eval(
+            teacher_deployment,
+            ready_timeout=TEACHER_READY_TIMEOUT,
+            max_concurrency=4,
+        )
         print(f"Teacher shaped reward: {teacher_mean:.3f}")
         _print_eval_summary("Teacher", teacher_mean, teacher_rows)
     except Exception as e:
@@ -534,7 +534,11 @@ def _run_baseline_eval():
 
     print("--- Evaluating base student (shaped live reward + terminal verdict metadata)... ---")
     try:
-        base_mean, base_rows = run_eval(base_deployment, max_concurrency=4)
+        base_mean, base_rows = run_eval(
+            base_deployment,
+            ready_timeout=STUDENT_READY_TIMEOUT,
+            max_concurrency=4,
+        )
         print(f"Base shaped reward: {base_mean:.3f}")
         _print_eval_summary("Base", base_mean, base_rows)
     except Exception as e:
@@ -1167,10 +1171,10 @@ def _train():
     )
 
     print("--- Starting GRPO + cross-tokenizer OPD training... ---")
-    print(f"  Teacher: DeepSeek V4 Flash")
-    print(f"  Student: Qwen3.6-35B-A3B")
-    print(f"  Dataset: BFCL multi_turn_base, prefix-conditioned (task, K) rows")
-    print(f"  Reward: schema + live exec + structural match + terminal state/response verdict")
+    print("  Teacher: DeepSeek V4 Flash")
+    print("  Student: Qwen3.6-35B-A3B")
+    print("  Dataset: BFCL multi_turn_base, prefix-conditioned (task, K) rows")
+    print("  Reward: schema + live exec + structural match + terminal state/response verdict")
     train_result = training_run.train()
     print(f"Training run id: {train_result.training_run_id}")
     print("--- Training complete ---")
@@ -1190,17 +1194,17 @@ def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_6_35B(),
-        recipe=student_recipe,
-        checkpoint=checkpoint,
-        app_name="qwen3-6-35b-bfcl-trained",
-        served_model_name="qwen3-6-35b-bfcl-trained",
+    trained_deployment = Endpoint.launch(
+        Qwen3_6_35B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 
     print("--- Evaluating trained student (shaped live reward + terminal verdict metadata)... ---")
-    trained_mean, trained_rows = run_eval(trained_deployment, max_concurrency=4)
+    trained_mean, trained_rows = run_eval(
+        trained_deployment,
+        ready_timeout=STUDENT_READY_TIMEOUT,
+        max_concurrency=4,
+    )
     print(f"Trained shaped reward: {trained_mean:.3f}")
 
 

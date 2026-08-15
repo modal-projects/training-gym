@@ -45,6 +45,18 @@ image = (
 app = modal.App("training-gym-docs", image=image)
 
 
+def cache_control_value(path: str, content_type: str) -> str | None:
+    if path.startswith("/_astro/"):
+        return "public, max-age=31536000, immutable"
+    if path.startswith("/pagefind/"):
+        if path.endswith((".pf_index", ".pf_fragment", ".pf_meta")):
+            return "public, max-age=31536000, immutable"
+        return "public, max-age=3600, stale-while-revalidate=86400"
+    if path.endswith(".html") or "text/html" in content_type:
+        return "public, max-age=3600, stale-while-revalidate=86400"
+    return None
+
+
 @app.function(min_containers=1)
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app(custom_domains=["gym.modal.dev"])
@@ -59,15 +71,11 @@ def serve():
     @web.middleware("http")
     async def cache_control(request: Request, call_next):
         response: Response = await call_next(request)
-        path = request.url.path
-        if path.startswith("/_astro/"):
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-        elif path.endswith(".html") or "text/html" in response.headers.get(
-            "content-type", ""
-        ):
-            response.headers["Cache-Control"] = (
-                "public, max-age=3600, stale-while-revalidate=86400"
-            )
+        value = cache_control_value(
+            request.url.path, response.headers.get("content-type", "")
+        )
+        if value and response.status_code in (200, 206):
+            response.headers["Cache-Control"] = value
         return response
 
     web.mount("/", StaticFiles(directory=REMOTE_DIST, html=True), name="static")

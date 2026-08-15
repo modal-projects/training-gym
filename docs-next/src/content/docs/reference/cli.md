@@ -12,6 +12,45 @@ pip install git+https://github.com/modal-projects/training-gym.git@main
 Run `training-gym --help` or `training-gym <command> --help` to see the
 available commands and options.
 
+## Agent skills
+
+Use the `training-gym skills` commands to manage bundled agent skills in a
+project.
+
+### `training-gym skills install`
+
+Install the Training Gym skill bundle into the current project:
+
+```bash
+training-gym skills install
+```
+
+The bundle currently contains:
+
+- `agent-driven-training`
+- `example-validation`
+- `modal-infrastructure`
+- `model-support`
+- `training-gym-overview`
+
+The command finds the nearest Git repository and copies every bundled skill to
+`.agents/skills/<skill-name>`. Canonical installation is completed before the
+command configures Claude compatibility.
+
+When `.claude/skills` is safe to manage, the command creates
+`.claude/skills/<skill-name>` as a relative symbolic link to each canonical
+copy. Existing Claude paths are preserved without `--force`. If `.claude` or
+`.claude/skills` is itself a symbolic link, the command skips Claude links with
+a warning; canonical installation still succeeds.
+
+Options:
+
+- `--project-dir DIR`: install into a specific project instead of discovering
+  the nearest Git repository.
+- `--force`: replace existing canonical skills or manageable Claude child
+  paths. Without this option, locally modified or conflicting paths are
+  preserved with a warning while unaffected skills continue installing.
+
 ## Dashboard configuration
 
 The dashboard commands require a Modal account with `modal token set` already

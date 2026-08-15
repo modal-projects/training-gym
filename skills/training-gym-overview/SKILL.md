@@ -48,7 +48,7 @@ tutorials/
                               tutorials/<bucket>/<name>/<name>.py + .ipynb
 
 tests/                      <- plain-script tests (uv run tests/<x>.py)
-.claude/skills/             <- agent-facing skills (you are here)
+skills/                     <- packaged agent skills (you are here)
 ```
 
 **Never edit `tutorials/<bucket>/<name>/<name>.py` or `.ipynb` directly -- they are
@@ -82,7 +82,6 @@ Built-in subclasses:
 | `Qwen3_4B` | `Qwen/Qwen3-4B` | yes | slime-ready |
 | `GLM_4_7` | `zai-org/GLM-4.7` | yes | MoE; slime-ready |
 | `Llama2_7B` | `meta-llama/Llama-2-7b-hf` | no | torchrun-based workflows |
-| `Kimi_K2_5` | `moonshotai/Kimi-K2.5` | no | **overrides `download`**: HF snapshot + seeds transformers dynamic-module cache (INT4→BF16 is recipe-side, not `download`) |
 
 **Rule of thumb for slime**: slime emits architecture fields as CLI flags,
 so it requires `architecture` to be a populated `ModelArchitecture(...)`.
@@ -133,12 +132,7 @@ Any cross-framework script lives at `modal_training_gym/tools/`. Every
 launcher mounts this directory at **`/opt/training-gym/tools`** on its
 remote image(s) via `common.framework.mount_tools_dir`, so scripts are at a
 predictable path regardless of which framework's container calls them.
-Framework-agnostic `ModelConfig.download` overrides (e.g.
-`Kimi_K2_5`) use this path.
-
-Current tools:
-
-- `convert_kimi_int4_to_bf16.py` -- INT4 -> BF16 conversion for Kimi K2.5.
+Framework-agnostic `ModelConfig.download` overrides use this path.
 
 To add a new tool: drop the script in `modal_training_gym/tools/`, commit.
 It's automatically mounted via `add_local_dir(TOOLS_LOCAL_PATH,
@@ -159,8 +153,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
            num_layers=..., hidden_size=..., ...,
        )
        # Optional: override download only if the default HF
-       # snapshot_download isn't enough (e.g. Kimi_K2_5 needs a post-
-       # conversion step).
+       # snapshot_download isn't enough.
    ```
 
 2. **Export in `common/models/__init__.py`**:
@@ -184,7 +177,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 - Extra post-processing (format conversion, weight repacking, tokenizer
   tweaks) -> override `download` in the subclass. Reference
   `tools/<script>.py` via the canonical `/opt/training-gym/tools` path.
-  Do **not** put this logic in a framework launcher -- it keeps Kimi-style
+  Do **not** put this logic in a framework launcher -- keep model-specific
   quirks with the model spec, not the framework plumbing.
 
 ## Adding a new tutorial

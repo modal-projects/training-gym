@@ -9,6 +9,11 @@ export default defineConfig({
     rehypePlugins: [rehypeTableWrapper],
   },
   site: 'https://gym.modal.dev',
+  redirects: {
+    '/tutorials/tools/000_observability_dashboard':
+      '/guides/tools/observability-dashboard/',
+    '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration/',
+  },
   integrations: [
     starlight({
       title: 'Training Gym',
@@ -111,12 +116,23 @@ export default defineConfig({
       customCss: ['./src/styles/custom.css'],
       components: {
         Header: './src/components/Header.astro',
+        Search: './src/components/Search.astro',
         Sidebar: './src/components/Sidebar.astro',
         PageSidebar: './src/components/PageSidebar.astro',
         PageTitle: './src/components/PageTitle.astro',
       },
       sidebar: [
         { label: 'Overview', link: '/' },
+        {
+          label: 'Guides',
+          items: [
+            { label: 'Overview', link: '/guides/' },
+            {
+              label: 'Tools',
+              autogenerate: { directory: 'guides/tools' },
+            },
+          ],
+        },
         {
           label: 'Tutorials',
           items: [
@@ -128,10 +144,6 @@ export default defineConfig({
             {
               label: 'Agents',
               autogenerate: { directory: 'tutorials/agent' },
-            },
-            {
-              label: 'Tools',
-              autogenerate: { directory: 'tutorials/tools' },
             },
           ],
         },
@@ -165,7 +177,11 @@ export default defineConfig({
                 { label: 'Qwen3-4B', link: '/reference/models/qwen3_4b/' },
                 { label: 'Qwen3-8B', link: '/reference/models/qwen3_8b/' },
                 { label: 'Qwen3-30B-A3B', link: '/reference/models/qwen3_30b/' },
-                
+                { label: 'Qwen3.5-4B', link: '/reference/models/qwen3_5_4b/' },
+                {
+                  label: 'Moonlight-16B-A3B-Instruct',
+                  link: '/reference/models/moonlight_16b_a3b_instruct/',
+                },
                 { label: 'Qwen3.6-35B-A3B', link: '/reference/models/qwen3_6_35b/' },
                 { label: 'Qwen3.6-27B', link: '/reference/models/qwen3_6_27b/' },
               ],
@@ -175,7 +191,15 @@ export default defineConfig({
               items: [
                 { label: 'TrainConfig', link: '/reference/training/trainconfig/' },
                 { label: 'SlimeRecipe', link: '/reference/training/slimerecipe/' },
-                
+                { label: 'MilesRecipe', link: '/reference/training/milesrecipe/' },
+                {
+                  label: 'Qwen3_5_4b_Miles_Recipe',
+                  link: '/reference/training/qwen3_5_4b_miles_recipe/',
+                },
+                {
+                  label: 'Moonlight_16B_A3B_Recipe',
+                  link: '/reference/training/moonlight_16b_a3b_recipe/',
+                },
                 { label: 'Qwen3_6_35b_Recipe', link: '/reference/training/qwen3_6_35b_recipe/' },
                 { label: 'Qwen3_6_27b_Recipe', link: '/reference/training/qwen3_6_27b_recipe/' },
               ],
