@@ -38,9 +38,6 @@ _STATUS_TOKEN_ENV = "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"
 
 
 def _resolve_url() -> str:
-    url = os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL", "").strip()
-    if url:
-        return url
     try:
         from modal_training_gym.common.config import get_framework_status_url
 
