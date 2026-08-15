@@ -21,7 +21,6 @@ from modal_training_gym.common import (
 )
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
-from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import (
     Framework,
     mount_tools_dir,
@@ -98,19 +97,13 @@ _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
 
 
-_CONVERT_BARRIER_DICT_NAME = "training-gym-convert-barrier"
-_CONVERT_BARRIER_TIMEOUT_S = 7200.0
-_CONVERT_BARRIER_POLL_S = 5.0
+_CONVERT_LOCK_DICT_NAME = "training-gym-convert-lock"
 _CONVERT_LOCK_TTL_S = 900.0
 _CONVERT_LOCK_REFRESH_S = 300.0
 
 
-def _convert_barrier_dict() -> Any:
-    return ModalDict.from_name(_CONVERT_BARRIER_DICT_NAME, create_if_missing=True)
-
-
-def _convert_barrier_key(run_id: str, node_rank: int) -> str:
-    return f"{run_id}:rank{node_rank}"
+def _convert_lock_dict() -> Any:
+    return ModalDict.from_name(_CONVERT_LOCK_DICT_NAME, create_if_missing=True)
 
 
 def _convert_lock_key(volume_name: str, save_path: str) -> str:
@@ -131,13 +124,13 @@ def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
     delete followed by the same atomic put, so concurrent takers still yield exactly one
     owner.
     """
-    barrier = _convert_barrier_dict()
+    locks = _convert_lock_dict()
     key = _convert_lock_key(volume_name, save_path)
     claim = {"run_id": run_id, "claimed_at": time.time()}
-    if barrier.put(key, claim, skip_if_exists=True):
+    if locks.put(key, claim, skip_if_exists=True):
         return run_id
 
-    holder = barrier.get(key)
+    holder = locks.get(key)
     if isinstance(holder, dict):
         owner = str(holder.get("run_id") or "")
         claimed_at = holder.get("claimed_at")
@@ -150,10 +143,10 @@ def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
         ):
             return owner
 
-    barrier.pop(key, None)
-    if barrier.put(key, claim, skip_if_exists=True):
+    locks.pop(key, None)
+    if locks.put(key, claim, skip_if_exists=True):
         return run_id
-    holder = barrier.get(key)
+    holder = locks.get(key)
     if isinstance(holder, dict) and holder.get("run_id"):
         return str(holder["run_id"])
     return run_id
@@ -165,12 +158,12 @@ def _refresh_convert_lock(run_id: str, volume_name: str, save_path: str) -> None
     A refresh that wrote unconditionally would resurrect the claim when a tick
     straddles the release, leaving it held with nobody to give it back.
     """
-    barrier = _convert_barrier_dict()
+    locks = _convert_lock_dict()
     key = _convert_lock_key(volume_name, save_path)
-    holder = barrier.get(key)
+    holder = locks.get(key)
     if not isinstance(holder, dict) or str(holder.get("run_id") or "") != run_id:
         return
-    barrier[key] = {"run_id": run_id, "claimed_at": time.time()}
+    locks[key] = {"run_id": run_id, "claimed_at": time.time()}
 
 
 @contextlib.contextmanager
@@ -202,52 +195,12 @@ def _convert_lock_heartbeat(run_id: str, volume_name: str, save_path: str):
 
 def _release_convert_lock(run_id: str, volume_name: str, save_path: str) -> None:
     """Drop the conversion claim, but only if this run still holds it."""
-    barrier = _convert_barrier_dict()
+    locks = _convert_lock_dict()
     key = _convert_lock_key(volume_name, save_path)
-    holder = barrier.get(key)
+    holder = locks.get(key)
     if isinstance(holder, dict) and str(holder.get("run_id") or "") != run_id:
         return
-    barrier.pop(key, None)
-
-
-def _signal_convert_rank_moved(run_id: str, node_rank: int) -> None:
-    """Record that this rank's shards are committed to the Volume."""
-    _convert_barrier_dict()[_convert_barrier_key(run_id, node_rank)] = time.time()
-
-
-def _clear_convert_barrier(run_id: str, nnodes: int) -> None:
-    """Drop this run's barrier keys."""
-    barrier = _convert_barrier_dict()
-    for rank in range(1, nnodes):
-        barrier.pop(_convert_barrier_key(run_id, rank), None)
-
-
-def _await_convert_peers(run_id: str, nnodes: int) -> None:
-    """Block on rank 0 until every peer rank has committed its shards.
-
-    ``.metadata`` is what makes a checkpoint look finished, so rank 0 may only
-    publish it once every peer's shards are on the Volume. Without this wait a
-    multi-node conversion interrupted after rank 0's write leaves a directory that
-    passes ``_is_complete_torch_dist_checkpoint`` with shards missing, and the next
-    run reports a cache hit and trains on partial weights.
-    """
-    barrier = _convert_barrier_dict()
-    deadline = time.time() + _CONVERT_BARRIER_TIMEOUT_S
-    while True:
-        missing = [
-            rank
-            for rank in range(1, nnodes)
-            if _convert_barrier_key(run_id, rank) not in barrier
-        ]
-        if not missing:
-            return
-        if time.time() >= deadline:
-            raise RuntimeError(
-                f"Timed out after {_CONVERT_BARRIER_TIMEOUT_S:.0f}s waiting for "
-                f"conversion ranks {missing} to commit their shards; refusing to "
-                "publish .metadata over an incomplete checkpoint."
-            )
-        time.sleep(_CONVERT_BARRIER_POLL_S)
+    locks.pop(key, None)
 
 
 def _is_resumable_checkpoint(path: str) -> bool:
@@ -605,21 +558,6 @@ def build_miles_app(
 
     convert_nnodes = get_checkpoint_conversion_policy(miles, model=model)[0]
     convert_multi_node = convert_nnodes > 1
-    if (
-        convert_multi_node
-        and not miles.convert_via_local_staging
-        and miles.megatron_to_hf_mode != "bridge"
-    ):
-        raise TrainingGymConfigError(
-            f"{type(miles).__name__} converts on {convert_nnodes} nodes with "
-            "convert_via_local_staging=False. Writing straight to the Volume cannot be "
-            "made safe across nodes: the converter puts .metadata on the mount as soon "
-            "as rank 0 finishes, Modal mounts allow background commits, and that "
-            "publishes a checkpoint that passes the completeness check while peer "
-            "shards are still being written. Leave convert_via_local_staging on, which "
-            "keeps .metadata on container-local disk until every peer's shards are "
-            "committed."
-        )
 
     @app.function(
         image=image,
@@ -765,17 +703,6 @@ def build_miles_app(
         # writes to a Volume are fine (the 550GB HF download lands on one), so the
         # fix is to let the writer work on local disk and copy the finished
         # checkpoint over afterwards.
-        staging_path = ""
-        if miles.convert_via_local_staging:
-            staging_path = os.path.join(
-                "/tmp", "training_gym_convert", os.path.basename(save_path.rstrip("/"))
-            )
-            shutil.rmtree(staging_path, ignore_errors=True)
-            os.makedirs(staging_path, exist_ok=True)
-            write_path = staging_path
-        else:
-            write_path = save_path
-
         if num_nodes == 1:
             node_rank, master_addr, nnodes = 0, "127.0.0.1", 1
         else:
@@ -813,7 +740,7 @@ def build_miles_app(
                 f"source {MILES_ROOT}/{miles.miles_model_script} && "
                 f"torchrun {' '.join(torchrun_args)} {convert_script} "
                 f"${{MODEL_ARGS[@]}} {' '.join(extra_args)} "
-                f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(write_path)}"
+                f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(save_path)}"
             )
         elif model_args_cmd := model_args_command(miles, MILES_ROOT):
             cmd = (
@@ -821,13 +748,13 @@ def build_miles_app(
                 f'read -ra MODEL_ARGS <<< "$MODEL_ARGS_LINE"; '
                 f"torchrun {' '.join(torchrun_args)} {convert_script} "
                 f"${{MODEL_ARGS[@]}} {' '.join(extra_args)} "
-                f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(write_path)}"
+                f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(save_path)}"
             )
         else:
             cmd = (
                 f"torchrun {' '.join(torchrun_args)} {convert_script} "
                 f"{' '.join(extra_args)} "
-                f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(write_path)}"
+                f"--hf-checkpoint {shlex.quote(hf_path)} --save {shlex.quote(save_path)}"
             )
 
         env = {**os.environ, **miles.environment}
@@ -841,8 +768,6 @@ def build_miles_app(
         print(f"Running: bash -c {cmd!r}")
         if node_rank == 0:
             _refresh_convert_lock(training_run_id, checkpoints_volume_name, save_path)
-            if nnodes > 1:
-                _clear_convert_barrier(training_run_id, nnodes)
         heartbeat = (
             _convert_lock_heartbeat(training_run_id, checkpoints_volume_name, save_path)
             if node_rank == 0
@@ -852,53 +777,7 @@ def build_miles_app(
             with heartbeat:
                 subprocess.run(["bash", "-c", cmd], check=True, env=env)
 
-                if staging_path:
-                    # Move file by file, committing after each, rather than copytree: the
-                    # Volume buffers writes to local disk before a commit, so copying wants
-                    # the whole checkpoint on local disk twice and a 276B model hits ENOSPC.
-                    # Moving drains the staging copy as the destination fills and each commit
-                    # flushes the Volume's buffer, keeping peak local usage at ~1x.
-                    # Every node moves only its own rank-specific shards, so multi-node
-                    # conversions still assemble additively.
-                    print(f"Moving converted checkpoint {staging_path} -> {save_path}")
-                    move_start = time.time()
-                    moved = 0
-                    deferred: list[tuple[str, str]] = []
-                    for root, _dirs, files in os.walk(staging_path):
-                        rel = os.path.relpath(root, staging_path)
-                        dst_dir = (
-                            save_path if rel == "." else os.path.join(save_path, rel)
-                        )
-                        os.makedirs(dst_dir, exist_ok=True)
-                        for filename in sorted(
-                            files, key=lambda n: (n == ".metadata", n)
-                        ):
-                            src = os.path.join(root, filename)
-                            dst = os.path.join(dst_dir, filename)
-                            if (
-                                filename == ".metadata"
-                                and nnodes > 1
-                                and node_rank == 0
-                            ):
-                                deferred.append((src, dst))
-                                continue
-                            shutil.move(src, dst)
-                            moved += 1
-                            checkpoints_volume.commit()
-                    if nnodes > 1:
-                        if node_rank == 0:
-                            _await_convert_peers(training_run_id, nnodes)
-                        else:
-                            _signal_convert_rank_moved(training_run_id, node_rank)
-                    for src, dst in deferred:
-                        shutil.move(src, dst)
-                        moved += 1
-                        checkpoints_volume.commit()
-                    print(f"Moved {moved} files in {time.time() - move_start:.0f}s")
-                    shutil.rmtree(staging_path, ignore_errors=True)
-                    checkpoints_volume.commit()
-                else:
-                    checkpoints_volume.commit()
+                checkpoints_volume.commit()
 
                 if node_rank == 0:
                     print(f"Saved Megatron torch_dist checkpoint to {save_path}")
@@ -912,8 +791,6 @@ def build_miles_app(
                             "torch_dist checkpoint (missing .metadata)."
                         )
             if node_rank == 0:
-                if nnodes > 1:
-                    _clear_convert_barrier(training_run_id, nnodes)
                 _release_convert_lock(
                     training_run_id, checkpoints_volume_name, save_path
                 )

@@ -1,4 +1,3 @@
-import warnings
 from collections.abc import Callable
 from dataclasses import field
 from typing import Any, ClassVar
@@ -63,7 +62,6 @@ _MILES_SKIP = {
     "conversion_pipeline_model_parallel_size",
     "conversion_expert_model_parallel_size",
     "conversion_expert_tensor_parallel_size",
-    "convert_via_local_staging",
     "convert_ephemeral_disk_mb",
     "train_ephemeral_disk_mb",
     "capture_trace",
@@ -510,14 +508,6 @@ class MilesRecipe(BaseTrainRecipe):
     conversion_pipeline_model_parallel_size: int | None = None
     conversion_expert_model_parallel_size: int | None = None
     conversion_expert_tensor_parallel_size: int | None = None
-    # Run HF -> torch_dist against container-local disk and move the result onto the
-    # checkpoints Volume afterwards. torch_dist's writer does positional writes that
-    # desync on a Volume once the per-file data is large (see the comment in
-    # frameworks/miles/launcher.py: convert_checkpoint), and staging is also what lets
-    # a multi-node conversion withhold .metadata until every peer's shards land. Off by
-    # default because it requires convert_ephemeral_disk_mb to be sized for the whole
-    # checkpoint: turn it on per recipe, as the Inkling recipes do at 550 GB.
-    convert_via_local_staging: bool = False
     # Ephemeral disk (MiB) for the conversion container. Local staging needs room for
     # the whole torch_dist checkpoint plus the Volume's write buffer for the shard in
     # flight; the default container disk is not enough for a 276B model.
@@ -694,23 +684,6 @@ class MilesRecipe(BaseTrainRecipe):
     @model_validator(mode="after")
     def _validate_gpu_allocation(self) -> "MilesRecipe":
         resolve_gpu_allocation(self)
-        return self
-
-    @model_validator(mode="after")
-    def _warn_unsized_conversion_staging(self) -> "MilesRecipe":
-        if (
-            self.megatron_to_hf_mode != "bridge"
-            and self.convert_via_local_staging
-            and not self.convert_ephemeral_disk_mb
-        ):
-            warnings.warn(
-                "convert_via_local_staging is True, but convert_ephemeral_disk_mb "
-                "has not been set. This may cause out-of-space errors when "
-                "converting the model. Size convert_ephemeral_disk_mb appropriately "
-                "for the checkpoint and scratch space, or disable local staging by "
-                "setting convert_via_local_staging to False.",
-                stacklevel=2,
-            )
         return self
 
     # ── Container → miles flag converters ────────────────────────────────────

@@ -93,11 +93,10 @@ class _InklingSmallRecipe(MilesRecipe):
     conversion_pipeline_model_parallel_size: int = 1
     conversion_expert_model_parallel_size: int = 8
     conversion_expert_tensor_parallel_size: int = 1
-    convert_via_local_staging: bool = True
-    # The BF16 torch_dist checkpoint is ~550 GB and is staged on local disk before
-    # being moved onto the Volume (see convert_via_local_staging), so the conversion
-    # container needs room for it plus the Volume's write buffer for the ~34 GB shard
-    # in flight. 1 TiB leaves comfortable headroom; the default disk does not fit it.
+    # A Volume buffers writes to container-local disk before they are committed, so
+    # writing this ~550 GB checkpoint needs that much scratch even though nothing is
+    # staged. Undersizing it exhausts the buffer mid-write and surfaces as the zip
+    # writer's "unexpected pos", not as a clean ENOSPC.
     convert_ephemeral_disk_mb: int | None = 1024 * 1024
 
     # ── Cluster + parallelism ────────────────────────────────────────────────
