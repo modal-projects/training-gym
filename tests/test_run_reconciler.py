@@ -297,3 +297,91 @@ def test_load_running_runs_reads_canonical_store_not_only_summary(fake_volume):
 
     loaded = _load_running_runs()
     assert {run.training_run_id for run in loaded} == {"canonical-only"}
+
+
+def test_reconcile_stops_modal_app_of_still_live_orphan(fake_volume, monkeypatch):
+    now = int(time.time())
+    stale_run = _run(
+        training_run_id="orphan-queued",
+        modal_app_id="ap-queued",
+        updated_at=now - 60,
+        metadata={
+            "framework_progress": {
+                "phase": "download_model",
+                "is_active": False,
+                "updated_at": now - QUEUED_STAGE_TIMEOUT_SECONDS - 60,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "modal_training_gym.common.run_reconciler._load_running_runs",
+        lambda: [stale_run],
+    )
+    stopped: list[str] = []
+
+    results = reconcile_orphan_runs(
+        now=now,
+        get_lifecycle_state=lambda _app_id: 1,
+        has_train_result=lambda _run_id: False,
+        stop_modal_app=stopped.append,
+    )
+    assert [r.reason for r in results] == ["stale_queued_stage"]
+    assert results[0].stopped_modal_app is True
+    assert stopped == ["ap-queued"]
+    assert stale_run.metadata["stopped_modal_app_at"] == now
+
+
+def test_reconcile_does_not_stop_already_dead_modal_app(fake_volume, monkeypatch):
+    now = int(time.time())
+    stale_run = _run(
+        training_run_id="orphan-dead",
+        modal_app_id="ap-dead",
+        updated_at=now - 120,
+    )
+    monkeypatch.setattr(
+        "modal_training_gym.common.run_reconciler._load_running_runs",
+        lambda: [stale_run],
+    )
+    stopped: list[str] = []
+
+    results = reconcile_orphan_runs(
+        now=now,
+        get_lifecycle_state=lambda _app_id: 99,
+        has_train_result=lambda _run_id: False,
+        stop_modal_app=stopped.append,
+    )
+    assert [r.reason for r in results] == ["stale_modal_app_terminated"]
+    assert results[0].stopped_modal_app is False
+    assert stopped == []
+    assert "stopped_modal_app_at" not in (stale_run.metadata or {})
+
+
+def test_reconcile_dry_run_does_not_stop_modal_app(fake_volume, monkeypatch):
+    now = int(time.time())
+    stale_run = _run(
+        training_run_id="orphan-dry",
+        modal_app_id="ap-queued",
+        updated_at=now - 60,
+        metadata={
+            "framework_progress": {
+                "phase": "download_model",
+                "is_active": False,
+                "updated_at": now - QUEUED_STAGE_TIMEOUT_SECONDS - 60,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "modal_training_gym.common.run_reconciler._load_running_runs",
+        lambda: [stale_run],
+    )
+    stopped: list[str] = []
+
+    results = reconcile_orphan_runs(
+        dry_run=True,
+        now=now,
+        get_lifecycle_state=lambda _app_id: 1,
+        has_train_result=lambda _run_id: False,
+        stop_modal_app=stopped.append,
+    )
+    assert results[0].stopped_modal_app is True
+    assert stopped == []
