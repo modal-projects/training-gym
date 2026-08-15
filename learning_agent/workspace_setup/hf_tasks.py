@@ -17,7 +17,7 @@ then `upload --task <T>`. A fresh checkout restores assets with `fetch`.
 
 fetch never downloads test.json unless --with-test is passed: seeding
 machines don't need it, only the scoring operator does. The repo id comes
-from LEARNING_AGENT_TASKS_DATASET (default leonmodal/learning-agent-tasks);
+from LEARNING_AGENT_TASKS_DATASET (default universal-learning-agent/tasks);
 the token from HUGGINGFACEHUB_API_TOKEN (env, then .env). The repo is
 created private and STAYS private — it holds the held-out gold.
 """
