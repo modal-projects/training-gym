@@ -15,3 +15,17 @@ turns the repo's folders into one agent workspace. Folder to folder:
 spec: `python3 workspace_setup/setup_agent_md.py --task fav2 --root .`).
 The block files themselves live in `instructions/` — see its README for
 the knobs.
+
+## Task assets on HuggingFace
+
+Git carries only the small tracked task files. The heavy and the held-out
+assets (corpus/, dev.json, test.json) live in ONE private HF dataset
+(`leonmodal/learning-agent-tasks`), managed by `hf_tasks.py`:
+
+    python3 workspace_setup/hf_tasks.py upload --task <T>   # after authoring a task
+    python3 workspace_setup/hf_tasks.py fetch --task <T>    # fresh checkout: corpus + dev
+    python3 workspace_setup/hf_tasks.py fetch --task <T> --with-test   # scoring operator only
+
+`fetch` never downloads test.json unless `--with-test` is passed. The
+token is `HUGGINGFACEHUB_API_TOKEN` in `.env`; the script refuses to
+upload if the dataset repo is not private.
