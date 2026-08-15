@@ -13,7 +13,7 @@
 # 2. Give an agent a plain-language training objective.
 # 3. Watch the agent build the Qwen3-4B configuration it produces.
 # 4. Watch as the agent uses the CLI to inspect status, rewards, logs, 
-# and rollout traces to see how the agent is progressing.
+# and rollout traces to see how the run is progressing.
 #
 # We use the training objective to **post-train a model to answer in rhyme** throughout.
 # The goal is to practice the small set of commands that answers the questions an
@@ -343,8 +343,7 @@ def build_config(
 # training-gym run list --since 2h
 # ```
 # Use `run get --verbose` as the normal progress check. It reports the current
-# stage and step plus reward history and rollout summaries. Startup can take
-# several minutes; a slow initialization is not itself a failed run.
+# stage and step plus reward history and rollout summaries.
 #
 # ```bash
 # training-gym run get <run-id> --verbose
@@ -407,14 +406,14 @@ def build_config(
 # the agent knows to preflight locally, prove one step, smoke test, diagnose
 # problems, and promote only when a run is healthy.
 #
-# The CLI unlocks the observability needed to make those training judgments.
-# Run status and logs distinguish slow startup from failure, reward history
-# shows whether learning is occurring, and rollout traces reveal whether the
-# model is improving or merely gaming the reward.
+# The CLI provideds the observability that unlocks the agent's ability to make 
+# those training judgments. Run status and logs distinguish slow startup from 
+# failure, reward history shows whether learning is occurring, and rollout traces 
+# reveal whether the model is improving or merely gaming the reward.
 #
 # Together, the skill provides the learning judgment and the CLI provides the evidence:
-# **install the skill, then let the CLI's observability guide each training 
-# decision**.
+# install the skill, then let the CLI's observability guide each training 
+# decision.
 
 import modal
 
