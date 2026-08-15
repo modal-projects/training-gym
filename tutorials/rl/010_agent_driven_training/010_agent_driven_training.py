@@ -389,7 +389,7 @@ def build_config(
 #
 # ## 7. Results
 #
-# The full run finished in **46 minutes**, and the numbers tell the story:
+# The full run finished in 46 minutes, and the numbers tell the story:
 #
 # - Rhyme score: 0.475 → 0.908
 # - Answers above the rhyme threshold: 27% → 84%
