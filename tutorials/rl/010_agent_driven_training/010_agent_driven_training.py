@@ -406,7 +406,7 @@ def build_config(
 # the agent knows to preflight locally, prove one step, smoke test, diagnose
 # problems, and promote only when a run is healthy.
 #
-# The CLI provideds the observability that unlocks the agent's ability to make 
+# The CLI provides the observability that unlocks the agent's ability to make 
 # those training judgments. Run status and logs distinguish slow startup from 
 # failure, reward history shows whether learning is occurring, and rollout traces 
 # reveal whether the model is improving or merely gaming the reward.
