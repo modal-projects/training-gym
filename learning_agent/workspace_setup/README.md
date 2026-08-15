@@ -20,7 +20,7 @@ the knobs.
 
 Git carries only the small tracked task files. The heavy and the held-out
 assets (corpus/, dev.json, test.json) live in ONE private HF dataset
-(`leonmodal/learning-agent-tasks`), managed by `hf_tasks.py`:
+(`universal-learning-agent/tasks`), managed by `hf_tasks.py`:
 
     python3 workspace_setup/hf_tasks.py upload --task <T>   # after authoring a task
     python3 workspace_setup/hf_tasks.py fetch --task <T>    # fresh checkout: corpus + dev

@@ -30,7 +30,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TASKS_DIR = ROOT / "workspace_setup" / "tasks"
-DEFAULT_REPO = "leonmodal/learning-agent-tasks"
+DEFAULT_REPO = "universal-learning-agent/tasks"
 
 
 def token() -> str:
