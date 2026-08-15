@@ -111,20 +111,11 @@
   // the auto-refresh hands us a new `run` object with the same status (which
   // would otherwise tear down and rebuild the log stream, flashing the tail).
   let runStatus = $derived(String(run?.status || "").toLowerCase());
-  let wandbUrl = $derived.by(() => {
-    const directUrl = run?.train_result?.wandb_url || run?.config_summary?.wandb_url || "";
-    if (directUrl) return directUrl;
-
-    const project = run?.config_summary?.wandb_project || "";
-    return project ? `https://wandb.ai/home?search=${encodeURIComponent(project)}` : "";
-  });
-  let wandbLinks = $derived.by(() =>
-    run?.wandb_links?.length
-      ? run.wandb_links
-      : wandbUrl
-        ? [{ label: "Open in W&B", url: wandbUrl }]
-        : [],
-  );
+  // Metric links come from the server already rendered and labelled, so that a
+  // deployment logging somewhere other than wandb.ai gets links that work. A
+  // run the server couldn't build a link for gets none, rather than a guessed
+  // wandb.ai search that would be wrong for those deployments.
+  let wandbLinks = $derived(run?.wandb_links || []);
 
   $effect(() => {
     const id = runId;

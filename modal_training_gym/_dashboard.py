@@ -131,6 +131,12 @@ MODAL_CREDS_SECRET_NAME = "_training-gym-modal-creds"
 # Set a real value via ``training-gym set-password``.
 DASHBOARD_PASSWORD_SECRET_NAME = "_training-gym-dashboard-password"
 
+# Optional, operator-created (hence no underscore prefix: nothing auto-manages
+# it). Holds TRAINING_GYM_TRACKER_LABEL / _RUN_URL_TEMPLATE /
+# _PROJECT_URL_TEMPLATE, which point each run's metric link at a tracker other
+# than wandb.ai — see modal_training_gym.common.tracker and dashboards/README.md.
+TRACKER_SECRET_NAME = "training-gym-tracker"
+
 # Routes that must bypass Basic Auth. Write endpoints authenticate with their
 # own per-run bearer token; the proxy-auth status route must report only the
 # Modal-layer setting, independent of dashboard password protection.
@@ -279,14 +285,14 @@ def ensure_creds_secret(interactive: bool = False) -> bool:
         return False
 
 
-def _password_secret_exists() -> bool:
-    """True if the operator has configured a dashboard password Secret.
+def _secret_exists(name: str) -> bool:
+    """True if a Secret by this name is configured in the environment.
 
-    Checked at deploy time (local) to decide whether to mount the Secret on
-    the ASGI function — if it was never created, the dashboard stays open.
+    Checked at deploy time (local) to decide whether to mount an optional
+    Secret on the ASGI function.
     """
     try:
-        modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME).hydrate()
+        modal.Secret.from_name(name).hydrate()
         return True
     except Exception:
         return False
@@ -295,12 +301,14 @@ def _password_secret_exists() -> bool:
 def _function_secrets() -> list[modal.Secret]:
     """Secrets mounted on the ASGI function.
 
-    The password Secret is optional and mounted only when it exists; absent
-    it, ``DASHBOARD_PASSWORD`` is never injected and the dashboard is open.
+    Both optional Secrets are mounted only when they exist: absent the
+    password one, ``DASHBOARD_PASSWORD`` is never injected and the dashboard
+    is open; absent the tracker one, metric links point at wandb.ai.
     """
     secrets = [modal.Secret.from_name(MODAL_CREDS_SECRET_NAME)]
-    if _password_secret_exists():
-        secrets.append(modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME))
+    for optional in (DASHBOARD_PASSWORD_SECRET_NAME, TRACKER_SECRET_NAME):
+        if _secret_exists(optional):
+            secrets.append(modal.Secret.from_name(optional))
     return secrets
 
 

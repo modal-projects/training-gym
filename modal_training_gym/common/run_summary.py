@@ -5,12 +5,12 @@ from __future__ import annotations
 import datetime as dt
 import math
 from typing import Any, cast
-from urllib.parse import quote
 
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.fields import FieldInfo
 
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
+from modal_training_gym.common.tracker import tracker_config
 
 
 JsonDict = dict[str, object]
@@ -220,6 +220,20 @@ def _text(value: object) -> str:
     return "" if value is None else str(value)
 
 
+def _identifier(value: object) -> str:
+    """A tracker identifier — entity, project, group or run id — or "".
+
+    ``_text`` stringifies whatever it is handed, which is what display fields
+    want but not this: a link built out of ``"0"`` or ``"{'value': ''}"`` points
+    nowhere, and it would let a malformed record pass for a configured tracker.
+    These fields are declared as strings, so anything else here means the record
+    is broken; ``""`` says so and suppresses the link. That covers a wrapper
+    nested more than once too — the inner wrapper isn't a string.
+    """
+    value = _unwrap(value)
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _mapping(value: object) -> JsonDict:
     value = _unwrap(value)
     return dict(value) if isinstance(value, dict) else {}
@@ -286,22 +300,29 @@ def _modal_app_url(modal_app_id: str) -> str | None:
     return modal_app_dashboard_url(app_id)
 
 
-def _wandb_url(entity: object, project: object, run_id: object) -> str | None:
-    clean_entity = _text(entity).strip()
-    clean_project = _text(project).strip()
-    clean_run_id = _text(run_id).strip()
-    if not clean_entity or not clean_project:
-        return None
-    base = f"https://wandb.ai/{quote(clean_entity, safe='')}/{quote(clean_project, safe='')}"
-    return f"{base}/runs/{quote(clean_run_id, safe='')}" if clean_run_id else base
+def _wandb_url(
+    entity: object, project: object, run_id: object, group: object = ""
+) -> str | None:
+    """Link to this run in whichever tracker the dashboard points at.
+
+    wandb.ai by default; see :mod:`modal_training_gym.common.tracker`.
+    """
+    return tracker_config().url(
+        entity=_identifier(entity),
+        project=_identifier(project),
+        group=_identifier(group),
+        run_id=_identifier(run_id),
+    )
 
 
 def _wandb_summary(
     *, entity: object, project: object, group: object = "", run_id: object = ""
 ) -> dict[str, Any]:
-    url = _wandb_url(entity, project, run_id)
+    url = _wandb_url(entity, project, run_id, group)
     link = (
-        [WandbLink(label="W&B", url=url, run_id=_text(run_id).strip())] if url else []
+        [WandbLink(label=tracker_config().label, url=url, run_id=_identifier(run_id))]
+        if url
+        else []
     )
     return {
         "wandb_project": _text(project),
@@ -313,7 +334,7 @@ def _wandb_summary(
     }
 
 
-def _config_summary(config: object, training_run_id: str) -> ConfigSummary | JsonDict:
+def _config_summary(config: object) -> ConfigSummary | JsonDict:
     if not isinstance(config, dict):
         return {}
     model = _mapping(config.get("model"))
@@ -325,7 +346,11 @@ def _config_summary(config: object, training_run_id: str) -> ConfigSummary | Jso
         or _text(dataset.get("prompt_data"))
         or _text(dataset.get("name"))
     )
-    wandb_run_id = _text(wandb.get("run_id")) or training_run_id[:8]
+    # Only a recorded run id, never one derived from the training run id: where
+    # no launcher recorded one, this side does not know what the tracker named
+    # the run, so a derived id links to a run that does not exist. Empty falls
+    # back to the project link, which resolves.
+    wandb_run_id = _identifier(wandb.get("run_id"))
     return ConfigSummary(
         model_name=_text(model.get("model_name")),
         dataset_name=dataset_name,
@@ -339,7 +364,7 @@ def _config_summary(config: object, training_run_id: str) -> ConfigSummary | Jso
             entity=wandb.get("entity"),
             project=wandb.get("project"),
             group=wandb.get("group"),
-            run_id=wandb_run_id if wandb.get("project") and wandb.get("entity") else "",
+            run_id=wandb_run_id,
         ),
     )
 
@@ -457,18 +482,22 @@ def _wandb_attempt_links(metadata: JsonDict) -> list[WandbLink]:
     attempts = metadata.get("wandb_attempts")
     if not isinstance(attempts, list):
         return []
+    label = tracker_config().label
     links: list[WandbLink] = []
     for raw_attempt in attempts:
         attempt = _mapping(raw_attempt)
         attempt_number = _integer(attempt.get("attempt"))
-        run_id = _text(attempt.get("run_id"))
+        run_id = _identifier(attempt.get("run_id"))
         url = _wandb_url(
-            attempt.get("entity"), attempt.get("project"), attempt.get("run_id")
+            attempt.get("entity"),
+            attempt.get("project"),
+            attempt.get("run_id"),
+            attempt.get("group"),
         )
         if url:
             links.append(
                 WandbLink(
-                    label=f"W&B a{attempt_number}" if attempt_number > 1 else "W&B",
+                    label=f"{label} a{attempt_number}" if attempt_number > 1 else label,
                     url=url,
                     run_id=run_id,
                     attempt=attempt_number or None,
@@ -502,7 +531,7 @@ def build_run_summary(
     metadata = _mapping(run.get("metadata"))
     raw_config = run.get("config")
     config = _mapping(raw_config)
-    config_summary = _config_summary(raw_config, training_run_id)
+    config_summary = _config_summary(raw_config)
     result_summary = _train_result_summary(result) if result else None
     group_id = (
         _text(run.get("group_id"))

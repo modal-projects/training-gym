@@ -250,7 +250,7 @@
 
     {#if wandbLinks.length}
       <section class="summary-section">
-        <h3 class="summary-section-title">W&B</h3>
+        <h3 class="summary-section-title">Metrics</h3>
         <div class="flex flex-wrap gap-[6px]">
           {#each wandbLinks as link (link.url)}
             <a

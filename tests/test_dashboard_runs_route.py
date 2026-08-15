@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from modal_training_gym import _dashboard
+from modal_training_gym.common import tracker
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.train_result import TrainResult
@@ -28,7 +29,7 @@ def _client(monkeypatch, tmp_path) -> TestClient:
     return TestClient(_dashboard.fastapi_app.local())
 
 
-def _save_records() -> None:
+def _save_records(wandb: dict | None = None) -> None:
     TrainingRun(
         training_run_id="run-route-1",
         modal_app_id="ap-route",
@@ -37,6 +38,7 @@ def _save_records() -> None:
             "model": {"model_name": "Qwen/Qwen3-4B"},
             "dataset": {"hf_repo": "openai/gsm8k"},
             "recipe": {"gpu_type": "H100"},
+            **({"wandb": wandb} if wandb else {}),
         },
         created_at=100,
         started_at=100,
@@ -295,3 +297,32 @@ def test_run_logs_rejects_invalid_time_bound(bound, fake_volume, monkeypatch, tm
     assert response.json()["detail"].startswith(
         f"{bound} must be epoch seconds, ISO 8601, or a relative time"
     )
+
+
+@pytest.mark.parametrize("path", ["/api/runs", "/api/runs/run-route-1"])
+def test_a_malformed_tracker_template_cannot_break_the_run_routes(
+    path, fake_volume, monkeypatch, tmp_path
+):
+    """Both routes turn an exception during summary construction into an error
+    or an empty list, so a typo in one env var could otherwise blank the whole
+    dashboard. The bad template must cost only its own link.
+
+    The record carries tracker metadata a working template would link, so an
+    empty ``wandb_links`` here is the bad template being suppressed rather than
+    there having been nothing to link in the first place."""
+    monkeypatch.setenv(
+        tracker.RUN_URL_TEMPLATE_ENV, "https://metrics.example.com/{project!r}"
+    )
+    tracker.tracker_config.cache_clear()
+    _save_records(wandb={"project": "training", "run_id": "recorded-id"})
+
+    try:
+        with _client(monkeypatch, tmp_path) as client:
+            response = client.get(path)
+    finally:
+        tracker.tracker_config.cache_clear()
+
+    assert response.status_code == 200
+    summary = response.json()[0] if path == "/api/runs" else response.json()
+    assert summary["training_run_id"] == "run-route-1"
+    assert summary["wandb_links"] == []

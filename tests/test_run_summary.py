@@ -3,10 +3,27 @@ from __future__ import annotations
 import pytest
 
 from modal_training_gym.common import run_summary as run_summary_module
+from modal_training_gym.common import tracker as tracker_module
 from modal_training_gym.common.run_summary import (
     build_run_summaries,
     build_run_summary,
 )
+
+CUSTOM_PROJECT_URL = "https://metrics.example.com/?project={project}"
+
+
+@pytest.fixture(autouse=True)
+def default_tracker(monkeypatch):
+    """These assert wandb.ai links, so the developer's own tracker env must not leak in."""
+    for name in (
+        tracker_module.LABEL_ENV,
+        tracker_module.RUN_URL_TEMPLATE_ENV,
+        tracker_module.PROJECT_URL_TEMPLATE_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    tracker_module.tracker_config.cache_clear()
+    yield
+    tracker_module.tracker_config.cache_clear()
 
 
 def _run(**overrides):
@@ -171,9 +188,9 @@ def test_config_summary_fallbacks_and_wandb_defaults():
                 "entity": "entity",
                 "project": "project",
                 "group": "group",
+                "run_id": "abcdefgh",
             },
-        },
-        "abcdefghijk",
+        }
     )
 
     assert summary.model_name == "model"
@@ -184,7 +201,7 @@ def test_config_summary_fallbacks_and_wandb_defaults():
     assert summary.global_batch_size == 0
     assert summary.wandb_training_run_id == "abcdefgh"
     assert summary.wandb_url == "https://wandb.ai/entity/project/runs/abcdefgh"
-    assert run_summary_module._config_summary(None, "run-id") == {}
+    assert run_summary_module._config_summary(None) == {}
 
 
 def test_progress_rollout_and_resume_helpers_handle_missing_and_invalid_values():
@@ -341,6 +358,135 @@ def test_build_current_summary_joins_result_and_derives_public_fields():
     assert [link.label for link in summary.wandb_links] == ["W&B a2", "W&B"]
 
 
+def test_a_custom_tracker_relabels_and_relinks_recorded_runs(monkeypatch):
+    """Links are derived at read time, so switching backends also repairs the
+    runs recorded before the switch."""
+    monkeypatch.setenv(tracker_module.LABEL_ENV, "metrics")
+    monkeypatch.setenv(
+        tracker_module.RUN_URL_TEMPLATE_ENV,
+        "https://metrics.example.com/?project={project}&run={run_id}",
+    )
+    monkeypatch.setenv(
+        tracker_module.PROJECT_URL_TEMPLATE_ENV,
+        "https://metrics.example.com/?project={project}",
+    )
+    tracker_module.tracker_config.cache_clear()
+
+    run = _run(framework_status="generate_rollouts")
+    run["config"]["wandb"]["run_id"] = "run-1"
+
+    summary = build_run_summary(run, _result())
+
+    assert [link.label for link in summary.wandb_links] == ["metrics a2", "metrics"]
+    assert summary.wandb_links[0].url == (
+        "https://metrics.example.com/?project=training&run=run-1-a2"
+    )
+    assert summary.config_summary.wandb_url == (
+        "https://metrics.example.com/?project=training&run=run-1"
+    )
+
+
+def test_a_tracker_without_entities_still_links(monkeypatch):
+    """An entity is required only by templates that name one. A backend whose
+    URLs have no notion of an entity must still link a run that never recorded
+    one."""
+    monkeypatch.setenv(
+        tracker_module.RUN_URL_TEMPLATE_ENV,
+        "https://metrics.example.com/?project={project}&run={run_id}",
+    )
+    tracker_module.tracker_config.cache_clear()
+
+    run = _run()
+    run["config"]["wandb"] = {  # no entity
+        "project": "training",
+        "group": "g",
+        "run_id": "recorded-id",
+    }
+    run["metadata"].pop("wandb_attempts")
+
+    summary = build_run_summary(run, None)
+
+    assert summary.config_summary.wandb_url == (
+        "https://metrics.example.com/?project=training&run=recorded-id"
+    )
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "https://metrics.example.com/?project={project}&run={run_id}",
+        # A template needing only the run id must not turn the training run id
+        # into a link for a run that never logged metrics.
+        "https://metrics.example.com/runs/{run_id}",
+    ],
+)
+@pytest.mark.parametrize(
+    "wandb_config",
+    # One per rejection reason; the full set of shapes `_identifier` has to cope
+    # with is enumerated against `_identifier` itself, below.
+    [{}, {"project": "   "}, {"project": 0}],
+)
+def test_a_run_with_no_tracker_metadata_gets_no_link(
+    monkeypatch, template, wandb_config
+):
+    monkeypatch.setenv(tracker_module.RUN_URL_TEMPLATE_ENV, template)
+    tracker_module.tracker_config.cache_clear()
+
+    run = _run()
+    run["config"]["wandb"] = wandb_config
+    run["metadata"].pop("wandb_attempts")
+
+    summary = build_run_summary(run, None)
+
+    assert summary.config_summary.wandb_training_run_id == ""
+    assert summary.config_summary.wandb_url is None
+    assert summary.wandb_links == []
+
+
+def test_a_recorded_run_id_links_even_without_a_project(monkeypatch):
+    """`WandbConfig.project` defaults to "", but a recorded run id is the run's
+    real identity: it must be linked, not discarded along with the project."""
+    monkeypatch.setenv(
+        tracker_module.RUN_URL_TEMPLATE_ENV, "https://metrics.example.com/runs/{run_id}"
+    )
+    tracker_module.tracker_config.cache_clear()
+
+    run = _run()
+    run["config"]["wandb"] = {"project": "", "run_id": "real-id"}
+    run["metadata"].pop("wandb_attempts")
+
+    summary = build_run_summary(run, None)
+
+    assert summary.config_summary.wandb_training_run_id == "real-id"
+    assert (
+        summary.config_summary.wandb_url == "https://metrics.example.com/runs/real-id"
+    )
+
+
+def test_tracker_identifiers_unwrap_historical_shapes_and_reject_non_strings():
+    """These feed URLs, so `_text`'s "stringify anything" is wrong for them: it
+    would put a Python repr in an href and let a broken record pass for a run."""
+    cyclic: dict[str, object] = {}
+    cyclic["value"] = cyclic
+
+    assert run_summary_module._identifier("  spaced  ") == "spaced"
+    assert run_summary_module._identifier({"value": "wrapped"}) == "wrapped"
+    for rejected in (
+        None,
+        0,
+        1,
+        False,
+        True,
+        [],
+        ["id"],
+        {},
+        {"source": "legacy"},
+        {"value": {"value": "nested"}},  # unwrapped once; the rest isn't a string
+        cyclic,  # unwrapping until a string would never return
+    ):
+        assert run_summary_module._identifier(rejected) == ""
+
+
 def test_build_historical_summary_accepts_aliases_wrappers_and_iso_timestamps():
     historical = {
         "run_id": "legacy-1",
@@ -476,3 +622,42 @@ def test_malformed_records_do_not_hide_valid_runs():
     )
 
     assert [summary.training_run_id for summary in summaries] == ["valid-run"]
+
+
+@pytest.mark.parametrize(
+    ("recorded", "expected"),
+    [({"value": "wrapped-id"}, "wrapped-id"), (0, "")],
+)
+def test_an_attempt_link_carries_a_normalized_run_id(monkeypatch, recorded, expected):
+    """The link payload carries run_id for the UI, so a broken attempt record must
+    not surface as "0" or "{'value': 'x'}" on an otherwise working project link."""
+    monkeypatch.setenv(tracker_module.PROJECT_URL_TEMPLATE_ENV, CUSTOM_PROJECT_URL)
+    tracker_module.tracker_config.cache_clear()
+
+    run = _run()
+    run["config"]["wandb"] = {}
+    run["metadata"]["wandb_attempts"] = [
+        {"attempt": 1, "project": "training", "run_id": recorded}
+    ]
+
+    links = build_run_summary(run, None).wandb_links
+
+    assert [link.url for link in links] == [
+        "https://metrics.example.com/?project=training"
+    ]
+    assert links[0].run_id == expected
+
+
+def test_a_record_with_no_recorded_run_id_links_to_the_project_not_a_guess():
+    """Every launcher records the id it passed to the tracker, so a config
+    without one predates that — and such runs started with no WANDB_RUN_ID, so
+    the tracker minted an id this side never saw. Deriving one from the training
+    run id would link to a run that does not exist."""
+    run = _run(training_run_id="electric-batter-6362579afd91")
+    run["config"]["wandb"] = {"entity": "e", "project": "p"}
+    run["metadata"].pop("wandb_attempts")
+
+    summary = build_run_summary(run, None)
+
+    assert summary.config_summary.wandb_training_run_id == ""
+    assert summary.config_summary.wandb_url == "https://wandb.ai/e/p"
