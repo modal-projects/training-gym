@@ -16,7 +16,7 @@ from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.run import TrainingRun
+from modal_training_gym.common.run import TrainingRun, wandb_run_id_for_attempt
 from modal_training_gym.common.status import (
     FrameworkStatus,
     MilesStatus,
@@ -513,7 +513,7 @@ class TrainConfig:
                     "project": wandb.project,
                     "entity": getattr(wandb, "entity", ""),
                     "group": wandb.group,
-                    "run_id": training_run_id[:8],
+                    "run_id": wandb_run_id_for_attempt(training_run_id, 1),
                 }
                 if wandb
                 else {}

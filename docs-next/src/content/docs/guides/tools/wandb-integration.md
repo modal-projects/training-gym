@@ -78,14 +78,14 @@ fix — or to drop `wandb=` if you didn't want logging at all.
 
 ## How runs map to W&B runs
 
-Each training run gets an id like `tender-ranch-2275c004a3bf`; its W&B
-run id is the first 8 characters of that id, so runs are easy to
-correlate across the dashboard, W&B, and your terminal:
+Each training run gets an id like `tender-ranch-2275c004a3bf`, and that id
+is its W&B run id, so runs are easy to correlate across the dashboard,
+W&B, and your terminal:
 
-- First attempt → W&B run id `<first 8 chars of the run id>`.
+- First attempt → W&B run id `tender-ranch-2275c004a3bf`.
 - If a run is **preempted and retried**, attempt *N* logs to
-  `<first-8>-aN` with resume enabled, so each attempt's curves stay
-  separate but linked.
+  `tender-ranch-2275c004a3bf-aN` with resume enabled, so each attempt's
+  curves stay separate but linked.
 
 The dashboard records the entity, project, group, and run id for every
 attempt — the **W&B** button on a run's detail page (see the

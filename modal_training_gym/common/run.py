@@ -438,8 +438,9 @@ def record_resume_checkpoint(
 
 
 def wandb_run_id_for_attempt(training_run_id: str, attempt_count: int) -> str:
-    base_run_id = training_run_id[:8]
-    return base_run_id if attempt_count <= 1 else f"{base_run_id}-a{attempt_count}"
+    return (
+        training_run_id if attempt_count <= 1 else f"{training_run_id}-a{attempt_count}"
+    )
 
 
 def record_wandb_attempt(
