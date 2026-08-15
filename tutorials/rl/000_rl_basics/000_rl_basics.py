@@ -36,7 +36,7 @@ from modal_training_gym import (
 
 # ## Running the base model
 #
-# As with all training tasks, we need a baseline to decide if we should even train a model at all!
+# As with all training tasks, we need a baseline to decide how much training we need.
 # To do that, we need a way to run inference on the base model so that we can try it out.
 #
 # Luckily, [Endpoints](https://modal.com/docs/guide/endpoints) allows us to easily deploy a
@@ -107,9 +107,8 @@ def score_haiku(response: str) -> float:
 
 # ## Creating a dataset for training and validation
 #
-# So far not great! Now, we've determined that we need to train the model make it better.
-# How do we do that? First, we'll have to curate a dataset and get concrete numbers on its
-# performance. Luckily,
+# Note that we've only qualitatively assessed its performance. Now, we should get concrete
+# numbers. How do we do that? First, we'll have to curate a dataset. Luckily,
 # [statworx/haiku](https://huggingface.co/datasets/statworx/haiku) from Huggingface
 # already exists, so we don't have to create one ourselves.
 #
