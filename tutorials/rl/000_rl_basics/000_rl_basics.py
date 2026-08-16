@@ -34,12 +34,12 @@ from modal_training_gym import (
     list_checkpoints,
 )
 
-# ## Running the base model
+# ## Deploy the base model
 #
 # As with all training tasks, we need a baseline to decide how much training we need.
 # To do that, we need a way to run inference on the base model so that we can try it out.
 #
-# Luckily, [Endpoints](https://modal.com/docs/guide/endpoints) allows us to easily deploy a
+# Luckily, [Endpoints](https://gym.modal.dev/reference/deployment/endpoint/) allows us to easily deploy a
 # production-ready LLM inference endpoint on Modal's managed infrastructure. It supports both open
 # model weights in addition to custom fine tunes, sourced from either a Hugging Face repo or a
 # [Modal Volume](https://modal.com/docs/guide/volumes).
@@ -50,7 +50,7 @@ from modal_training_gym import (
 
 base_model = Qwen3_5_4B()
 
-# ## Defining a scoring function
+# ## Define a scoring function
 #
 # To evaluate the base model, we need a function that takes as input a haiku and outputs a score
 # (a.k.a. reward when we're training) to represent whether it follows the 5-7-5 syllable format.
@@ -105,7 +105,7 @@ def score_haiku(response: str) -> float:
     )
     return -float(total_diff)
 
-# ## Creating a dataset for training and validation
+# ## Get the dataset
 #
 # Note that we've only qualitatively assessed its performance. Now, we should get concrete
 # numbers. How do we do that? First, we'll have to curate a dataset. Luckily,
@@ -135,7 +135,7 @@ class HaikuDataset(HuggingFaceDataset):
 
 eval_dataset = HaikuDataset(n_rows=5)
 
-# ## Evaluating the base model
+# ## Evaluate the base model
 #
 # All we need to do now is, for each sample in our eval dataset,
 # call the Endpoint, score each response, and calculate the mean.
@@ -161,7 +161,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         scores = list(executor.map(_score_one, eval_dataset.load()))
     return sum(scores) / len(scores) if scores else float("nan")
 
-# ## Training the model
+# ## Train the model
 #
 # Finally, onto the training. The Gym supports both the
 # [Slime](https://github.com/THUDM/slime) and
@@ -211,16 +211,16 @@ def _main_impl() -> None:
             "Install it before running: uv pip install -q nltk"
         )
 
-    base_model_deployment = Endpoint.launch(
+    base_deployment = Endpoint.launch(
         base_model, unauthenticated=True, recreate_if_existing=True
     )
-    base_model_deployment.wait_until_ready(timeout=15 * 60)
-    print(f"base model deployed to {base_model_deployment.url}")
+    base_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"base model deployed to {base_deployment.url}")
 
     train_dataset = HaikuDataset(n_rows=10)
 
     print("running base model evaluation...")
-    base_mean = run_eval(base_model_deployment)
+    base_mean = run_eval(base_deployment)
     print(f"average score: {base_mean:.1f}")
 
     train_run = TrainConfig(
@@ -254,7 +254,7 @@ def _main_impl() -> None:
     # We'll get the latest checkpoint and create a new Endpoint so we may evaluate it.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(checkpoint.path)
+    print(f"checkpoint: {checkpoint.path}")
 
     trained_model_deployment = Endpoint.launch(
         Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
@@ -268,7 +268,7 @@ def _main_impl() -> None:
     trained_mean = run_eval(trained_model_deployment)
     print(f"average score: {trained_mean:.1f}")
 
-    # ## Continuing training off the checkpoint
+    # ## Continue training off the checkpoint
     # Hmm, it looks like the trained model is still not doing very well.
     # A likely cause is that it only trained for 10 iterations.
     # Let's continue training, starting from the last checkpoint.

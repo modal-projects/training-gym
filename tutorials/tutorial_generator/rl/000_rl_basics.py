@@ -83,14 +83,14 @@ def _imports():
 
 
 @markdown
-def _serve_base_intro():
+def _deploy_base_intro():
     """
-    ## Running the base model
+    ## Deploy the base model
 
     As with all training tasks, we need a baseline to decide how much training we need.
     To do that, we need a way to run inference on the base model so that we can try it out.
 
-    Luckily, [Endpoints](https://modal.com/docs/guide/endpoints) allows us to easily deploy a
+    Luckily, [Endpoints](https://gym.modal.dev/reference/deployment/endpoint/) allows us to easily deploy a
     production-ready LLM inference endpoint on Modal's managed infrastructure. It supports both open
     model weights in addition to custom fine tunes, sourced from either a Hugging Face repo or a
     [Modal Volume](https://modal.com/docs/guide/volumes).
@@ -102,19 +102,19 @@ def _serve_base_intro():
 
 
 @code
-def _serve_base_model():
+def _deploy_base():
     base_model = Qwen3_5_4B()
-    base_model_deployment = Endpoint.launch(
+    base_deployment = Endpoint.launch(
         base_model, unauthenticated=True, recreate_if_existing=True
     )
-    base_model_deployment.wait_until_ready(timeout=15 * 60)
-    print(f"base model deployed to {base_model_deployment.url}")
+    base_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"base model deployed to {base_deployment.url}")
 
 
 @markdown
-def _scoring_intro():
+def _score_fn_intro():
     """
-    ## Defining a scoring function
+    ## Define a scoring function
 
     To evaluate the base model, we need a function that takes as input a haiku and outputs a score
     (a.k.a. reward when we're training) to represent whether it follows the 5-7-5 syllable format.
@@ -137,7 +137,7 @@ def _scoring_intro():
 
 
 @code
-def _score_haiku():
+def _score_fn():
     _cmudict_cache = {}
 
     def _get_cmudict() -> dict:
@@ -176,8 +176,8 @@ def _score_haiku():
 
 @notebook_only
 @code
-def _score_haiku_demo():
-    msg = base_model_deployment.chat(
+def _score_fn_demo():
+    msg = base_deployment.chat(
         [{"role": "user", "content": "Write a haiku about cat."}],
         chat_template_kwargs={"enable_thinking": False},
     )
@@ -188,9 +188,9 @@ def _score_haiku_demo():
 
 
 @markdown
-def _define_dataset():
+def _dataset_intro():
     """
-    ## Creating a dataset for training and validation
+    ## Get the dataset
 
     Note that we've only qualitatively assessed its performance. Now, we should get concrete
     numbers. How do we do that? First, we'll have to curate a dataset. Luckily,
@@ -212,7 +212,7 @@ def _define_dataset():
 
 
 @code
-def _define_dataset_code():
+def _dataset():
     class HaikuDataset(HuggingFaceDataset):
         hf_repo = "statworx/haiku"
         input_column = "keywords"
@@ -228,7 +228,7 @@ def _define_dataset_code():
 
 @notebook_only
 @markdown
-def _eval_dataset_head():
+def _dataset_peek_intro():
     """
     Let's take a quick peek at the eval set:
     """
@@ -236,16 +236,16 @@ def _eval_dataset_head():
 
 @notebook_only
 @code
-def _eval_dataset_head_code():
+def _dataset_peek():
     df = eval_dataset.to_pandas()
     print(len(df))
     df.head(5)
 
 
 @markdown
-def _grade_haiku_into_eval():
+def _eval_base_intro():
     """
-    ## Evaluating the base model
+    ## Evaluate the base model
 
     All we need to do now is, for each sample in our eval dataset,
     call the Endpoint, score each response, and calculate the mean.
@@ -256,7 +256,7 @@ def _grade_haiku_into_eval():
 
 
 @code
-def _eval_base_model():
+def _eval_base():
     def run_eval(deployment, max_concurrency: int = 2) -> float:
         from concurrent.futures import ThreadPoolExecutor
 
@@ -276,14 +276,14 @@ def _eval_base_model():
         return sum(scores) / len(scores) if scores else float("nan")
 
     print("running base model evaluation...")
-    base_mean = run_eval(base_model_deployment)
+    base_mean = run_eval(base_deployment)
     print(f"average score: {base_mean:.1f}")
 
 
 @markdown
 def _train_intro():
     """
-    ## Training the model
+    ## Train the model
 
     Finally, onto the training. The Gym supports both the
     [Slime](https://github.com/THUDM/slime) and
@@ -313,7 +313,7 @@ def _train_intro():
 
 
 @code
-def _define_training_run():
+def _train():
     async def haiku_rm(args, sample, **kwargs) -> float:
         response = base_model.parse_response(sample.response)
         return score_haiku(response.content)
@@ -346,7 +346,7 @@ def _define_training_run():
 
 
 @markdown
-def _trained_eval_intro():
+def _eval_trained_intro():
     """
     ## Serve and evaluate the trained checkpoint
 
@@ -355,9 +355,9 @@ def _trained_eval_intro():
 
 
 @code
-def _serve_and_eval_trained():
+def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(checkpoint.path)
+    print(f"checkpoint: {checkpoint.path}")
 
     trained_model_deployment = Endpoint.launch(
         Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
@@ -383,7 +383,7 @@ def _eval_trained():
 @markdown
 def _continue_to_train_off_of_a_checkpoint():
     """
-    ## Continuing training off the checkpoint
+    ## Continue training off the checkpoint
     Hmm, it looks like the trained model is still not doing very well.
     A likely cause is that it only trained for 10 iterations.
     Let's continue training, starting from the last checkpoint.
