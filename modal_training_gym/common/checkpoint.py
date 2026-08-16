@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-import json
 import os
 import time
 
@@ -20,6 +19,7 @@ from modal_training_gym.deploy_recipes import SglangRecipe, VllmRecipe
 
 
 _CHECKPOINTS_MOUNT_FALLBACK = "/checkpoints"
+_CONVERT_COMPLETE_MARKER = ".training_gym_convert_complete"
 
 
 class CheckpointType(Enum):
@@ -193,43 +193,7 @@ def convert_megatron_checkpoint_to_hf(
         if name:
             names.add(name)
 
-    if "config.json" in names:
-        shards = None
-        for index_name in (
-            "model.safetensors.index.json",
-            "pytorch_model.bin.index.json",
-        ):
-            if index_name in names:
-                index_path = f"{rel}/{index_name}" if rel else index_name
-                try:
-                    payload = json.loads(b"".join(volume.read_file(index_path)))
-                except (
-                    FileNotFoundError,
-                    NotFoundError,
-                    OSError,
-                    TypeError,
-                    UnicodeDecodeError,
-                    ValueError,
-                    json.JSONDecodeError,
-                ):
-                    payload = None
-                weight_map = (
-                    payload.get("weight_map") if isinstance(payload, dict) else None
-                )
-                shards = (
-                    {str(filename) for filename in weight_map.values()}
-                    if isinstance(weight_map, dict) and weight_map
-                    else set()
-                )
-                break
-        if shards is None:
-            ready = "model.safetensors" in names or "pytorch_model.bin" in names
-        else:
-            ready = bool(shards) and shards <= names
-    else:
-        ready = False
-
-    if ready:
+    if _CONVERT_COMPLETE_MARKER in names:
         return Checkpoint(
             checkpoint_type=CheckpointType.hf,
             name=os.path.basename(output_path.rstrip("/")),
@@ -312,6 +276,8 @@ def convert_megatron_checkpoint_to_hf(
         )
         print(f"Converting checkpoint for serving: {cmd}")
         subprocess.run(["bash", "-c", cmd], check=True)
+        with open(os.path.join(output_dir, _CONVERT_COMPLETE_MARKER), "w"):
+            pass
         checkpoints_volume.commit()
         return output_dir
 

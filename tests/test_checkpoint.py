@@ -55,10 +55,12 @@ def test_convert_megatron_checkpoint_to_hf_returns_hf_checkpoints_unchanged() ->
     assert result is checkpoint
 
 
-def test_convert_reuses_a_complete_hf_sibling(monkeypatch) -> None:
+def test_convert_reuses_when_marker_present(monkeypatch) -> None:
     _patch_volume(
         monkeypatch,
-        _CheckpointVolume(["config.json", "model.safetensors"]),
+        _CheckpointVolume(
+            ["config.json", "model.safetensors", ".training_gym_convert_complete"]
+        ),
     )
 
     result = convert_megatron_checkpoint_to_hf(
@@ -70,8 +72,16 @@ def test_convert_reuses_a_complete_hf_sibling(monkeypatch) -> None:
     assert result.name == "iter_10_hf"
 
 
-def test_convert_runs_when_the_hf_sibling_is_incomplete(monkeypatch) -> None:
-    _patch_volume(monkeypatch, _CheckpointVolume(["config.json"]))
+@pytest.mark.parametrize(
+    "names",
+    [
+        [],
+        ["config.json", "model.safetensors"],
+    ],
+    ids=["missing", "unmarked"],
+)
+def test_convert_runs_without_marker(monkeypatch, names: list[str]) -> None:
+    _patch_volume(monkeypatch, _CheckpointVolume(names))
     monkeypatch.setattr(
         modal,
         "App",
