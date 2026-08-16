@@ -261,7 +261,7 @@ def _main_impl() -> None:
 
     # ## Training
     #
-    # The training recipe uses one 8×H100 node. The actor engine
+    # The training recipe uses two H100s. The actor engine
     # runs the training and the rollout engine runs the model for inference/forward passes.
     # You may want to tune the batch size for fitting the memory requirements of your GPU
     # and increase the samples per prompt parameter for generating more variants per group.
@@ -276,8 +276,9 @@ def _main_impl() -> None:
 
             gpu_type="H100",
             colocate=True,
-            actor_num_gpus_per_node=8,
-            rollout_num_gpus=8,
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=2,
+            rollout_num_gpus=2,
             tensor_model_parallel_size=1,
             sequence_parallel=False,
             rollout_num_gpus_per_engine=1,

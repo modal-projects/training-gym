@@ -3,7 +3,7 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 4×B200 (teacher) + 2 × 8×H100 (train) + 1 × 8×H100 (rollout)",
+    "cluster_shape": "1 × 4×B200 (teacher) + 1 × 8×H100 (train) + 1 × 8×H100 (rollout)",
     "summary": "Cross-tokenizer agentic distillation on BFCL v3 multi-turn",
     "difficulty": "Advanced",
     "order": 60,
@@ -1100,7 +1100,7 @@ def _train_intro():
     lengthens the remaining horizon by one (`T ← T + 1`). Tune `rollout_temperature` and
     `num_rollout` if you want more exploration or a longer run.
 
-    Training uses **2×8 H100** actor nodes.
+    Training uses **1×8 H100** actor node.
     """
 
 @code
@@ -1123,7 +1123,7 @@ def _train():
 
             gpu_type="H100",
             colocate=False,
-            actor_num_nodes=2,
+            actor_num_nodes=1,
             actor_num_gpus_per_node=8,
             rollout_num_gpus=8,
             tensor_model_parallel_size=2,

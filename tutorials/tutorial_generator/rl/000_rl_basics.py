@@ -2,7 +2,7 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 8×H100",
+    "cluster_shape": "1 × 2×H100",
     "summary": "Haiku evaluation with verifiable rewards",
     "difficulty": "Beginner",
     "order": 10,
@@ -315,6 +315,8 @@ def _define_training_run():
 
             gpu_type="H100",
             colocate=True,
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=2,
             tensor_model_parallel_size=1,
             sequence_parallel=False,
             rollout_num_gpus_per_engine=1,
@@ -414,6 +416,8 @@ def _continue_to_train_off_of_a_checkpoint_code():
 
             gpu_type="H100",
             colocate=True,
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=2,
             tensor_model_parallel_size=1,
             sequence_parallel=False,
             rollout_num_gpus_per_engine=1,

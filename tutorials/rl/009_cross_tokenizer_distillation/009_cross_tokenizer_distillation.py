@@ -1034,7 +1034,7 @@ def _main_impl() -> None:
     # lengthens the remaining horizon by one (`T ← T + 1`). Tune `rollout_temperature` and
     # `num_rollout` if you want more exploration or a longer run.
     #
-    # Training uses **2×8 H100** actor nodes.
+    # Training uses **1×8 H100** actor node.
 
     training_run = TrainConfig(
         model=base_model,
@@ -1054,7 +1054,7 @@ def _main_impl() -> None:
 
             gpu_type="H100",
             colocate=False,
-            actor_num_nodes=2,
+            actor_num_nodes=1,
             actor_num_gpus_per_node=8,
             rollout_num_gpus=8,
             tensor_model_parallel_size=2,

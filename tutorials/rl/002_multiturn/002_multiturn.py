@@ -369,8 +369,9 @@ def _main_impl() -> None:
     #   (Megatron) ranks.
     # - `colocate=True` — share the same GPUs between rollout and training, alternating
     #   between the two. Set `False` to give sglang dedicated GPUs (faster, more expensive).
-    # - `tensor_model_parallel_size=1` — Megatron tensor-parallel degree. The 4B
-    #   preset still uses 8 H100s; bump TP for larger models that outgrow one GPU.
+    # - `tensor_model_parallel_size=1` — Megatron tensor-parallel degree. This
+    #   tutorial uses 2 H100s with TP=1 so data-parallel splits the optimizer.
+    #   One GPU OOMs in fused Adam on Qwen3.5-4B.
     # - `sequence_parallel=False` — only meaningful when `tensor_model_parallel_size > 1`.
     # - `rollout_num_gpus_per_engine=1` — GPUs per sglang inference engine (sglang's TP).
     #
@@ -402,6 +403,8 @@ def _main_impl() -> None:
 
             gpu_type="H100",
             colocate=True,
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=2,
             tensor_model_parallel_size=1,
             sequence_parallel=False,
             rollout_num_gpus_per_engine=1,

@@ -319,14 +319,14 @@ def _main_impl() -> None:
     #   teaching the decoder to *read out* coordinates from features the ViT already
     #   provides. It's also cheaper — no optimizer state or backward pass for the ViT.
     # - Padded (bshd) batches for the vision encoder
-    # - TP=4 for the 8B model across 8 H100s
+    # - TP=4 for the 8B model across 4 H100s
     # - Short response cap (64 tokens — coordinates are brief)
     # - A high SGLang KV-cache fraction (0.75) for fast colocated rollouts
     #
-    # The recipe overrides below are tuned to speed up training (~30m → ~19m on
-    # one 8×H100 node) while preserving the reward curve, uniquely fitted to this
-    # tutorial's short coordinate outputs. Short outputs let us increase rollout
-    # concurrency, which sets the memory budget, which sets the shard count.
+    # The recipe overrides below are tuned to speed up training (~30m → ~19m on a
+    # prior 8-GPU measurement) while preserving the reward curve, uniquely fitted
+    # to this tutorial's short coordinate outputs. Short outputs let us increase
+    # rollout concurrency, which sets the memory budget, which sets the shard count.
     #
     # This tutorial runs 15 rollouts as a quick demo. For a more meaningful
     # accuracy gain, increase `num_rollout`.
@@ -343,6 +343,8 @@ def _main_impl() -> None:
             # TP=4 shards the 8B weights across 4 GPUs, freeing enough VRAM per
             # GPU for the large 0.75 KV pool below. (TP=2 OOMs at mem=0.75.)
             tensor_model_parallel_size=4,
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=4,
             custom_rm_function=grounding_reward,
             num_rollout=15,
             rollout_batch_size=8,

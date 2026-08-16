@@ -3,7 +3,7 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 8×H100",
+    "cluster_shape": "1 × 2×H100",
     "summary": "Code RL with Harbor sandboxed evals",
     "difficulty": "Intermediate",
     "order": 20,
@@ -256,6 +256,8 @@ def _train():
 
             gpu_type="H100",
             colocate=True,
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=2,
             tensor_model_parallel_size=1,
             sequence_parallel=False,
             rollout_num_gpus_per_engine=1,

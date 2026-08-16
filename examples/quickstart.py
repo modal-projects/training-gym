@@ -1,7 +1,7 @@
 from modal_training_gym import (
     HuggingFaceDataset,
-    Qwen3_4B,
-    Qwen3_4b_Recipe,
+    Qwen3_5_4B,
+    Qwen3_5_4b_Recipe,
     TrainConfig,
 )
 
@@ -16,11 +16,12 @@ class MathDataset(HuggingFaceDataset):
 
 def main() -> None:
     result = TrainConfig(
-        model=Qwen3_4B(),
+        model=Qwen3_5_4B(),
         dataset=MathDataset(n_rows=120),
-        recipe=Qwen3_4b_Recipe(
+        recipe=Qwen3_5_4b_Recipe(
             rm_type="deepscaler",
-            actor_num_gpus_per_node=1,
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=2,
             num_rollout=1,
             n_samples_per_prompt=4,
             rollout_batch_size=8,

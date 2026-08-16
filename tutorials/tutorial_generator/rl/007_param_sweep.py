@@ -3,7 +3,7 @@
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
-    "cluster_shape": "1 × 8×H100",
+    "cluster_shape": "1 × 2×H100",
     "summary": "Sweep hyperparameters across runs",
     "difficulty": "Intermediate",
     "order": 40,
@@ -130,7 +130,7 @@ def _base():
             gpu_type="H100",
             colocate=True,
             actor_num_nodes=1,
-            actor_num_gpus_per_node=8,
+            actor_num_gpus_per_node=2,
             tensor_model_parallel_size=2,
             sequence_parallel=True,
             rollout_num_gpus_per_engine=1,
