@@ -53,6 +53,8 @@ def list_checkpoints(training_run_id: str) -> list[Checkpoint]:
         Framework.SLIME.value,
         Framework.MILES,
         Framework.MILES.value,
+        Framework.STITCH,
+        Framework.STITCH.value,
     }:
         return _list_checkpoints(result)
     raise TrainingGymConfigError(f"Unsupported framework: {result.framework}")

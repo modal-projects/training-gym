@@ -462,6 +462,34 @@ class TrainConfig:
                 name=training_run_id,
                 group_id=self.group_id,
             )
+        if recipe_type == RecipeType.STITCH:
+            from modal_training_gym.frameworks.stitch import build_stitch_app
+            from modal_training_gym.train_recipes.stitch_recipe.recipe import (
+                StitchRecipe,
+            )
+
+            if not isinstance(self.recipe, StitchRecipe):
+                raise TrainingGymConfigError(
+                    f"Recipe type {recipe_type} requires StitchRecipe, got {type(self.recipe).__name__}"
+                )
+            stitch = cast(StitchRecipe, self.recipe)
+            # The parallelism preflight lives on the trainer half, so resolve
+            # that (stitch has no model presets, so merging is a documented
+            # no-op) rather than the outer recipe, which has no such check.
+            _resolve_recipe(
+                self.model,
+                stitch.train,
+                merge_model_recipe=self.merge_model_recipe,
+            )
+            return build_stitch_app(
+                training_run_id=training_run_id,
+                recipe=stitch,
+                model=self.model,
+                dataset=self.dataset,
+                checkpoint=self.checkpoint,
+                name=training_run_id,
+                group_id=self.group_id,
+            )
         raise TrainingGymConfigError(f"Unknown recipe type: {recipe_type}")
 
     # ── Run-record helpers ─────────────────────────────────────────────────
@@ -472,6 +500,8 @@ class TrainConfig:
             return Framework.SLIME
         if isinstance(self.recipe, MilesRecipe):
             return Framework.MILES
+        if self.recipe.recipe_type == RecipeType.STITCH:
+            return Framework.STITCH
         raise TrainingGymConfigError(
             f"Unknown recipe type: {type(self.recipe).__name__}"
         )
@@ -480,6 +510,10 @@ class TrainConfig:
         if isinstance(self.recipe, SlimeRecipe):
             return SlimeStatus.INITIALIZING
         if isinstance(self.recipe, MilesRecipe):
+            return MilesStatus.INITIALIZING
+        from modal_training_gym.train_recipes.stitch_recipe import StitchRecipe
+
+        if isinstance(self.recipe, StitchRecipe):
             return MilesStatus.INITIALIZING
         raise TrainingGymConfigError(
             f"Unknown recipe type: {type(self.recipe).__name__}"
@@ -512,7 +546,9 @@ class TrainConfig:
             "global_batch_size": getattr(recipe, "global_batch_size", None),
         }
 
-        if isinstance(recipe, SlimeRecipe | MilesRecipe):
+        from modal_training_gym.train_recipes.stitch_recipe import StitchRecipe
+
+        if isinstance(recipe, (SlimeRecipe, MilesRecipe)):
             from modal_training_gym.common.launcher_utils import (
                 serialize_recipe_params,
             )
@@ -527,6 +563,23 @@ class TrainConfig:
                 "gpu_type": getattr(combined, "gpu_type", None),
                 **serialize_recipe_params(combined, dataset=dataset, model=model),
             }
+        elif isinstance(recipe, StitchRecipe):
+            summary["lr"] = recipe.train.lr
+            summary["global_batch_size"] = recipe.train.global_batch_size
+            summary["recipe"] = {
+                "gpu_type": recipe.train.gpu_type,
+                "actor_num_nodes": recipe.train.actor_num_nodes,
+                "actor_num_gpus_per_node": recipe.train.actor_num_gpus_per_node,
+                "served_checkpoint_format": recipe.served_checkpoint_format,
+                "rollout_gpu": recipe.serve.gpu,
+                "rollout_gpus_per_replica": recipe.serve.gpus_per_replica,
+                "rollout_min_containers": recipe.serve.min_containers,
+                "rollout_max_containers": recipe.serve.max_containers,
+            }
+        else:
+            raise TrainingGymConfigError(
+                f"Unknown recipe type: {type(recipe).__name__}"
+            )
 
         return summary
 
@@ -573,8 +626,13 @@ class TrainConfig:
         )
 
     def _resolved_recipe_for_logging(self) -> BaseTrainRecipe:
+        recipe: BaseTrainRecipe = self.recipe
+        from modal_training_gym.train_recipes.stitch_recipe import StitchRecipe
+
+        if isinstance(recipe, StitchRecipe):
+            recipe = recipe.train
         return _resolve_recipe(
-            self.model, self.recipe, merge_model_recipe=self.merge_model_recipe
+            self.model, recipe, merge_model_recipe=self.merge_model_recipe
         )
 
     def context_plan_line(self) -> str | None:
@@ -659,6 +717,7 @@ class TrainConfig:
         print(f"TrainingRun recorded: {training_run_id}")
 
         app = self._build_app(training_run_id)
+        function_call: modal.FunctionCall | None = None
         output_context = modal.enable_output() if show_output else nullcontext()
         with output_context:
             with app.run(detach=True):
@@ -705,6 +764,17 @@ class TrainConfig:
                                 framework_status_url=framework_status_url,
                                 framework_status_token=framework_status_token,
                             )
+                    elif self.recipe.recipe_type == RecipeType.STITCH:
+                        # No torch_dist conversion: the stitch trainer loads the
+                        # HF masters through megatron-bridge. It does need its
+                        # served baseline built, which is what a delta applies
+                        # against, so that replaces the conversion step.
+                        _set_status(MilesStatus.DOWNLOAD_MODEL, is_active=False)
+                        app.download.remote()
+                        _set_status(MilesStatus.PREPARE_DATASET, is_active=False)
+                        app.prepare_dataset.remote()
+                        _set_status(MilesStatus.CONVERT_MODEL, is_active=False)
+                        app.prepare_checkpoints.remote()
                     elif isinstance(self.recipe, MilesRecipe) and needs_conversion:
                         _set_status(MilesStatus.DOWNLOAD_MODEL, is_active=False)
                         app.download.remote(
@@ -727,6 +797,14 @@ class TrainConfig:
                     framework_status_token=framework_status_token,
                 )
 
+        if function_call is None:
+            # Modal exits ``app.run`` cleanly on an interrupt, so the input
+            # preparation above can be cut short without raising.
+            raise RuntimeError(
+                f"training was never spawned for {training_run_id}: the Modal app "
+                "run ended while preparing inputs. The app is detached and its "
+                "prepared inputs persist, so re-running resumes from them."
+            )
         run_record.function_call_id = function_call.object_id
         run_record._function_call = function_call
         run_record._status_display = status_display if show_output else None

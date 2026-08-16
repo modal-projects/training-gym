@@ -30,6 +30,7 @@ JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimoda
 class RecipeType(Enum):
     SLIME = "slime"
     MILES = "miles"
+    STITCH = "stitch"
 
 
 class BaseTrainRecipe(ABC):

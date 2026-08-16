@@ -14,6 +14,7 @@ from .base import ModelConfig
 from .moonlight_16b_a3b_instruct import Moonlight_16B_A3B_Instruct
 from .qwen3_0_6b import Qwen3_0_6B
 from .qwen3_1_7b import Qwen3_1_7B
+from .qwen3_30b import Qwen3_30B
 from .qwen3_4b import Qwen3_4B
 from .qwen3_5_0_8b import Qwen3_5_0_8B
 from .qwen3_5_2b import Qwen3_5_2B
@@ -99,4 +100,5 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
         Moonlight_16B_A3B_Instruct,
         Framework.MILES,
     ),
+    _ValidationConfig("Qwen3-30B-A3B-stitch", Qwen3_30B, Framework.STITCH),
 }

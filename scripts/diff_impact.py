@@ -67,6 +67,12 @@ FRAMEWORK_VALIDATION_HARNESS_PATHS: dict[str, frozenset[Path]] = {
             VALIDATION_BACKEND_ROOT / "miles.py",
         }
     ),
+    "stitch": frozenset(
+        {
+            REPO_ROOT / "modal_training_gym" / "frameworks" / "stitch" / "launcher.py",
+            VALIDATION_BACKEND_ROOT / "stitch.py",
+        }
+    ),
 }
 
 
@@ -177,6 +183,10 @@ def _base_recipe_for(framework, model_config):
         from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
         return MilesRecipe.get_base_recipe(model_config)
+    if framework is Framework.STITCH:
+        from modal_training_gym.train_recipes.stitch_recipe import StitchRecipe
+
+        return StitchRecipe.get_base_recipe(model_config)
     raise ValueError(f"no base recipe lookup for framework {framework!r}")
 
 

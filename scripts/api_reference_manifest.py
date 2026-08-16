@@ -227,6 +227,27 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Moonlight_16B_A3B_Recipe",
     },
     {
+        "class_name": "StitchRecipe",
+        "module": "modal_training_gym.train_recipes.stitch_recipe.recipe",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "StitchRecipe",
+    },
+    {
+        "class_name": "StitchTrainConfig",
+        "module": "modal_training_gym.train_recipes.stitch_recipe.train",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "StitchTrainConfig",
+    },
+    {
+        "class_name": "StitchServeConfig",
+        "module": "modal_training_gym.train_recipes.stitch_recipe.serve",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "StitchServeConfig",
+    },
+    {
         "class_name": "Qwen3_6_35b_Recipe",
         "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b",
         "group": "training",

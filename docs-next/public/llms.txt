@@ -32,6 +32,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [007_param_sweep](https://gym.modal.dev/tutorials/rl/007_param_sweep/): Sweep hyperparameters across runs
 - [008_computer_use](https://gym.modal.dev/tutorials/rl/008_computer_use/): GUI grounding to predict click coordinates
 - [009_cross_tokenizer_distillation](https://gym.modal.dev/tutorials/rl/009_cross_tokenizer_distillation/): Cross-tokenizer agentic distillation on BFCL v3 multi-turn
+- [010_disaggregated_rl](https://gym.modal.dev/tutorials/rl/010_disaggregated_rl/): Disaggregated DAPO-math RL with sparse weight deltas
 
 ### Agents
 
@@ -86,6 +87,9 @@ Repo: https://github.com/modal-projects/training-gym
 - [MilesRecipe](https://gym.modal.dev/reference/training/milesrecipe/): `MilesRecipe`
 - [Qwen3_5_4b_Miles_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_miles_recipe/): `Qwen3_5_4b_Miles_Recipe`
 - [Moonlight_16B_A3B_Recipe](https://gym.modal.dev/reference/training/moonlight_16b_a3b_recipe/): `Moonlight_16B_A3B_Recipe`
+- [StitchRecipe](https://gym.modal.dev/reference/training/stitchrecipe/): `StitchRecipe`
+- [StitchTrainConfig](https://gym.modal.dev/reference/training/stitchtrainconfig/): `StitchTrainConfig`
+- [StitchServeConfig](https://gym.modal.dev/reference/training/stitchserveconfig/): `StitchServeConfig`
 - [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe/): `Qwen3_6_35b_Recipe`
 - [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe/): `Qwen3_6_27b_Recipe`
 - [Qwen3.5-0.8b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_0_8b_recipe/): `Qwen3_5_0_8b_Recipe`
