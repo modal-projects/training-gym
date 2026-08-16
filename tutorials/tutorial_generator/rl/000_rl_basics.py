@@ -132,7 +132,7 @@ def _qualitative_eval_of_base_model():
 def _qualitative_eval_of_base_model_code():
     msg = base_model_deployment.chat(
         [{"role": "user", "content": "Write a haiku about cat."}],
-        chat_template_kwargs={"enable_thinking": False},
+        chat_template_kwargs={"enable_thinking": True},
     )
     response = msg.get("content") or msg.get("reasoning_content") or ""
     print(response)
@@ -196,7 +196,7 @@ def _score_haiku():
 def _score_haiku_demo():
     msg = base_model_deployment.chat(
         [{"role": "user", "content": "Write a haiku about cat."}],
-        chat_template_kwargs={"enable_thinking": False},
+        chat_template_kwargs={"enable_thinking": True},
     )
     response = msg.get("content") or msg.get("reasoning_content") or ""
     print(response)
@@ -276,7 +276,7 @@ def _eval_base_model():
             prompt = eval_dataset.prompt_template.format(input=topic)
             msg = deployment.chat(
                 [{"role": "user", "content": prompt}],
-                chat_template_kwargs={"enable_thinking": False},
+                chat_template_kwargs={"enable_thinking": True},
             )
             return score_haiku(msg.get("content") or msg.get("reasoning_content") or "")
 
@@ -325,7 +325,7 @@ def _define_training_run():
             rollout_temperature=1.0,
 
             save_interval=5,
-            apply_chat_template_kwargs='{"enable_thinking": false}',
+            apply_chat_template_kwargs='{"enable_thinking": true}',
 
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp 'nltk>=3.8.0'",
@@ -424,7 +424,7 @@ def _continue_to_train_off_of_a_checkpoint_code():
             rollout_temperature=1.0,
 
             save_interval=10,
-            apply_chat_template_kwargs='{"enable_thinking": false}',
+            apply_chat_template_kwargs='{"enable_thinking": true}',
 
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp 'nltk>=3.8.0'",

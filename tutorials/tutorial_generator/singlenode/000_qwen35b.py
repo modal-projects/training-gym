@@ -154,6 +154,7 @@ def _train():
         recipe=Qwen3_6_35b_Recipe(
             rm_type="deepscaler",
             num_rollout=10,
+            apply_chat_template_kwargs='{"enable_thinking": true}',
         ),
     )
     print("Starting training...")

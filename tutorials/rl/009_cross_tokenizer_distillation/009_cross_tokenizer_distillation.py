@@ -76,7 +76,7 @@ BFCL_EVAL_TAIL = 30
 MAX_TURNS = 16
 CURRICULUM_TAIL_MIN = 1
 EVAL_TAIL_STEPS = CURRICULUM_TAIL_MIN
-STUDENT_ENABLE_THINKING = False
+STUDENT_ENABLE_THINKING = True
 OPD_SKIP_ON_TEACHER_FAILURE = True
 
 dataset_config = BfclMultiTurnConfig(eval_tail=BFCL_EVAL_TAIL)
@@ -1081,6 +1081,7 @@ def _main_impl() -> None:
             # The demo has five rollouts, so save one model-only checkpoint at the end.
             save_interval=5,
             no_save_optim=True,
+            apply_chat_template_kwargs='{"enable_thinking": true}',
 
             environment={
                 "PYTHONPATH": "/root/Megatron-LM/:/root",

@@ -148,6 +148,7 @@ def _base():
             max_tokens_per_gpu=9216,
             sglang_mem_fraction_static=0.75,
             save_interval=10,
+            apply_chat_template_kwargs='{"enable_thinking": true}',
         ),
     )
 

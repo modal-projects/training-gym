@@ -115,7 +115,9 @@ def _build_and_run():
         return TrainConfig(
             model=Qwen3_6_27B(),
             dataset=MathDataset(n_rows=10),
-            recipe=Qwen3_6_27b_Recipe(),
+            recipe=Qwen3_6_27b_Recipe(
+                apply_chat_template_kwargs='{"enable_thinking": true}',
+            ),
         )
 
     training_run = build_training_config()

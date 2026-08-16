@@ -65,7 +65,9 @@ def build_training_config() -> TrainConfig:
     return TrainConfig(
         model=Qwen3_6_27B(),
         dataset=MathDataset(n_rows=10),
-        recipe=Qwen3_6_27b_Recipe(),
+        recipe=Qwen3_6_27b_Recipe(
+            apply_chat_template_kwargs='{"enable_thinking": true}',
+        ),
     )
 
 import modal

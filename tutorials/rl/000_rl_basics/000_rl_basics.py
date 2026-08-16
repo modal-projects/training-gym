@@ -146,7 +146,7 @@ def run_eval(deployment, *, max_concurrency: int = 2) -> float:
         prompt = eval_dataset.prompt_template.format(input=topic)
         msg = deployment.chat(
             [{"role": "user", "content": prompt}],
-            chat_template_kwargs={"enable_thinking": False},
+            chat_template_kwargs={"enable_thinking": True},
         )
         return score_haiku(msg.get("content") or msg.get("reasoning_content") or "")
 
@@ -214,7 +214,7 @@ def _main_impl() -> None:
             rollout_temperature=1.0,
 
             save_interval=5,
-            apply_chat_template_kwargs='{"enable_thinking": false}',
+            apply_chat_template_kwargs='{"enable_thinking": true}',
 
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp 'nltk>=3.8.0'",
@@ -283,7 +283,7 @@ def _main_impl() -> None:
             rollout_temperature=1.0,
 
             save_interval=10,
-            apply_chat_template_kwargs='{"enable_thinking": false}',
+            apply_chat_template_kwargs='{"enable_thinking": true}',
 
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp 'nltk>=3.8.0'",

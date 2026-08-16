@@ -85,6 +85,7 @@ def _enable_example():
         dataset=my_dataset,  # any DatasetConfig
         recipe=Qwen3_5_4b_Recipe(
             num_rollout=40,
+            apply_chat_template_kwargs='{"enable_thinking": true}',
             wandb=WandbConfig(
                 project="my-rl-project",
                 group="lr-sweep",  # optional: organize related runs

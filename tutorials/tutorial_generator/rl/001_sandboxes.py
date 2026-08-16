@@ -213,6 +213,7 @@ def _serve_eval_base():
                     {"role": "system", "content": dataset.system_prompt},
                     {"role": "user", "content": prompt},
                 ],
+                chat_template_kwargs={"enable_thinking": True},
             )
             response = msg.get("content") or msg.get("reasoning_content") or ""
             code = extract_code(response, model=base_model)
@@ -271,6 +272,7 @@ def _train():
             n_samples_per_eval_prompt=8,
             max_tokens_per_gpu=4096,
             save_interval=10,
+            apply_chat_template_kwargs='{"enable_thinking": true}',
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system 'modal>=1.5.2'",
             ),

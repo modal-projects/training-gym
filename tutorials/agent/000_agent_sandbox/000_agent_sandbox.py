@@ -231,12 +231,11 @@ def _main_impl() -> None:
     #    sandbox and append the results as `tool` messages.
     # 3. Repeat until the model produces a final text response.
     #
-    # We cap iterations at 10 to avoid runaway loops. We also pass
-    # `enable_thinking=False` in `chat_template_kwargs` so Qwen3.5
-    # skips its internal chain-of-thought block and responds
-    # directly. Read `content` first and fall back to
-    # `reasoning_content` so a thinking-only turn still prints an
-    # answer.
+    # We cap iterations at 10 to avoid runaway loops. We pass
+    # `enable_thinking=True` in `chat_template_kwargs` so Qwen3.5
+    # can emit a chain-of-thought block before tool calls.
+    # Read `content` first and fall back to `reasoning_content`
+    # so a thinking-only turn still prints an answer.
 
     MODEL = deployment.model_name
     MAX_ITERATIONS = 10
@@ -261,15 +260,14 @@ def _main_impl() -> None:
             max_tokens=4096,
             tools=TOOL_DEFINITIONS,
             messages=messages,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            extra_body={"chat_template_kwargs": {"enable_thinking": True}},
         )
 
         choice = response.choices[0]
 
         if choice.finish_reason == "stop":
-            # `enable_thinking=False` is a chat-template hint the server
-            # is free to ignore. Fall back to reasoning_content so a
-            # thinking-only turn still prints something instead of None.
+            # Fall back to reasoning_content so a thinking-only turn
+            # still prints something instead of None.
             final = choice.message.content or getattr(
                 choice.message, "reasoning_content", None
             )
