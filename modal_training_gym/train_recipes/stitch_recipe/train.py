@@ -49,6 +49,17 @@ HOOK_CONFIG_FIELDS = frozenset(
     }
 )
 
+_UNSHIPPED_CALLER_HOOK_FIELDS = (
+    "custom_rm_function",
+    "custom_generate_function",
+    "custom_reward_post_process_function",
+    "custom_rollout_log_function",
+    "custom_eval_rollout_log_function",
+    "rollout_function",
+    "custom_megatron_before_log_prob_hook",
+    "custom_megatron_before_train_step_hook",
+)
+
 # Inherited MilesRecipe fields that must NOT reach this trainer's command line:
 # they configure a local rollout engine, which a disaggregated run does not have
 # (the Flash pool's engines are configured by the serving half instead).
@@ -72,8 +83,11 @@ _TRAINER_DROP = frozenset(
 class StitchTrainConfig(MilesRecipe):
     """miles trainer for a disaggregated stitch run.
 
-    Don't see the flag you need? Every :class:`MilesRecipe` field applies here,
-    and any additional class attribute becomes a miles CLI flag.
+    Don't see the flag you need? Every non-hook :class:`MilesRecipe` field
+    applies here, and any additional class attribute becomes a miles CLI flag.
+    Caller-side custom hooks are not supported: stitch does not mount the caller
+    script or write Miles' custom reward/generate paths. Use the colocated
+    :class:`MilesRecipe` for those hooks.
     """
 
     # ── The miles fork + image that speak the bulletin protocol ─────────────
@@ -149,6 +163,41 @@ class StitchTrainConfig(MilesRecipe):
         ``rollout_num_gpus=0``. Here the engines are a separate Flash pool,
         sized by the serving half, so only the actor cluster is checked."""
         validate_megatron_actor_parallelism(self)
+        return self
+
+    @staticmethod
+    def _caller_hook_error(fields: list[str]) -> ValueError:
+        names = ", ".join(fields)
+        return ValueError(
+            f"StitchTrainConfig does not ship caller-side hooks ({names}): "
+            "a stitch run has no caller-script mount and does not write "
+            "`custom_rm_path` or `custom_generate_function_path`. Use "
+            "MilesRecipe in modal_training_gym/train_recipes/miles_recipe/recipe.py "
+            "for caller-side hooks."
+        )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_explicit_caller_hooks(cls, values: Any) -> Any:
+        raw_values = getattr(values, "kwargs", values)
+        fields = [
+            name
+            for name in _UNSHIPPED_CALLER_HOOK_FIELDS
+            if isinstance(raw_values, dict) and raw_values.get(name) is not None
+        ]
+        if fields:
+            raise cls._caller_hook_error(fields)
+        return values
+
+    @model_validator(mode="after")
+    def _reject_default_caller_hooks(self) -> "StitchTrainConfig":
+        fields = [
+            name
+            for name in _UNSHIPPED_CALLER_HOOK_FIELDS
+            if getattr(self, name) is not None
+        ]
+        if fields:
+            raise self._caller_hook_error(fields)
         return self
 
     @property

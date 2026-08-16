@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.diff_impact import analyze_diff
+from scripts.diff_impact import affected_models, analyze_diff
 
 
 def test_model_file_diff_maps_to_related_tutorials() -> None:
@@ -39,3 +39,16 @@ def test_generated_tutorial_diff_maps_back_to_source() -> None:
     assert "rl/003_on_policy_distillation" in {
         slug for slug, _, _ in report.affected_tutorials
     }
+
+
+def test_stitch_train_package_diff_maps_to_stitch_model() -> None:
+    diff = (
+        "diff --git a/modal_training_gym/train_recipes/stitch_recipe/train.py "
+        "b/modal_training_gym/train_recipes/stitch_recipe/train.py\n"
+        "index 1234567..89abcde 100644\n"
+        "--- a/modal_training_gym/train_recipes/stitch_recipe/train.py\n"
+        "+++ b/modal_training_gym/train_recipes/stitch_recipe/train.py\n"
+        "@@ -1,3 +1,3 @@\n"
+    )
+
+    assert "Qwen3-30B-A3B-stitch" in affected_models(diff)

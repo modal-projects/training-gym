@@ -95,7 +95,6 @@ MINUTES = 60
 # ``@app.cls`` decorators are evaluated client-side, where it isn't importable.
 SIDECAR_PORT = 8000
 SGLANG_PORT = 8001
-SERVER_STARTUP_TIMEOUT = 60 * MINUTES
 # A replica serves for as long as the run does, so it gets the trainer's bound
 # rather than one a long rollout wave can reach.
 SERVER_TIMEOUT = 24 * 60 * MINUTES
@@ -103,7 +102,6 @@ SERVER_TIMEOUT = 24 * 60 * MINUTES
 # building the baseline it serves. Waiting it out has to fit inside the startup
 # budget, so a longer conversion means the replica exits and Modal reboots it
 # into another wait rather than the engine failing on a missing checkpoint.
-BASELINE_WAIT_TIMEOUT = SERVER_STARTUP_TIMEOUT - 2 * MINUTES
 BASELINE_POLL_SECONDS = 30
 # Ephemeral host-local full HF checkpoint the sidecar patches in place per delta.
 LOCAL_CHECKPOINT_PATH = "/local-checkpoint"
@@ -153,7 +151,9 @@ class _MilesArgs(BaseTrainRecipe):
         return {k: v for k, v in vars(self).items() if k not in self._CONTROL}
 
 
-def _local_checkpoint(model_name: str, volume: modal.Volume) -> str:
+def _local_checkpoint(
+    model_name: str, volume: modal.Volume, *, baseline_wait_timeout: int
+) -> str:
     """The served baseline as a local directory.
 
     A repo id is materialized from the HF cache volume. A prepared (quantized)
@@ -166,7 +166,7 @@ def _local_checkpoint(model_name: str, volume: modal.Volume) -> str:
     if not model_name.startswith("/"):
         return snapshot_download(model_name, allow_patterns=_CHECKPOINT_PATTERNS)
 
-    deadline = time.monotonic() + BASELINE_WAIT_TIMEOUT
+    deadline = time.monotonic() + baseline_wait_timeout
     while not os.path.isdir(model_name):
         if time.monotonic() > deadline:
             raise RuntimeError(f"served baseline {model_name} never appeared")
@@ -604,7 +604,7 @@ def build_stitch_app(
         port=SIDECAR_PORT,
         proxy_regions=serve_recipe.proxy_regions,
         exit_grace_period=25,
-        startup_timeout=SERVER_STARTUP_TIMEOUT,
+        startup_timeout=serve_recipe.startup_timeout,
     )
     @modal.concurrent(target_inputs=rollout_concurrency, max_inputs=rollout_concurrency)
     class Server:
@@ -619,7 +619,14 @@ def build_stitch_app(
                 # A local path (both the engine's model and the sidecar's delta
                 # baseline): the sidecar can't seed a delta from a repo id, and a
                 # post-boot resolve would race the cache SGLang warms itself.
-                model_name=_local_checkpoint(served_model, checkpoints_volume),
+                model_name=_local_checkpoint(
+                    served_model,
+                    checkpoints_volume,
+                    baseline_wait_timeout=max(
+                        serve_recipe.startup_timeout - 2 * MINUTES,
+                        2 * BASELINE_POLL_SECONDS,
+                    ),
+                ),
                 sglang_args=sglang_server_args,
                 tp=gpus_per_replica,
                 concurrency=rollout_concurrency,
@@ -630,7 +637,7 @@ def build_stitch_app(
                 run_id=run_id,
                 commit_mode=commit_mode,
                 flush_cache_on_commit=flush_cache_on_commit,
-                startup_timeout=SERVER_STARTUP_TIMEOUT,
+                startup_timeout=serve_recipe.startup_timeout,
             )
 
         @modal.exit()
@@ -783,7 +790,7 @@ def build_stitch_app(
         # Flash holds requests through a cold-starting pool, but the trainer's
         # first rollout would otherwise meet engines that are still loading.
         trainer_helpers.await_gateway_ready(
-            cfg.rollout_endpoint_url, timeout_seconds=SERVER_STARTUP_TIMEOUT
+            cfg.rollout_endpoint_url, timeout_seconds=serve_recipe.startup_timeout
         )
         cfg.update_weight_disk_dir = update_weight_disk_dir
         # Run-scope the saves, as the colocated miles launcher does: the

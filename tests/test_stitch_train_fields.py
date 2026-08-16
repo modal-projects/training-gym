@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from modal_training_gym.common.models.qwen3_30b import Qwen3_30B
 from modal_training_gym.common.status import MilesStatus, resolve_framework_status
+from modal_training_gym.deploy_recipes.sglang_recipe.recipe import SglangRecipe
 from modal_training_gym.frameworks.miles.modal_helpers.patches import PATCHES_DIR
 from modal_training_gym.frameworks.stitch import launcher as stitch_launcher
 from modal_training_gym.train_recipes.stitch_recipe import (
@@ -14,6 +15,7 @@ from modal_training_gym.train_recipes.stitch_recipe import (
     Qwen3_30B_A3B_Stitch_Train,
     StitchRecipe,
     StitchServeConfig,
+    StitchTrainConfig,
 )
 from modal_training_gym.train_recipes.stitch_recipe.pins import MILES_ROOT
 
@@ -53,6 +55,56 @@ def test_rollout_gating_matches_the_cookbook_config() -> None:
     train = Qwen3_30B_A3B_Stitch_Train()
     assert train.rollout_request_weight_version_mode == "min"
     assert train.rollout_request_weight_version_lag == 1
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "custom_rm_function",
+        "custom_generate_function",
+        "custom_reward_post_process_function",
+        "custom_rollout_log_function",
+        "custom_eval_rollout_log_function",
+        "rollout_function",
+        "custom_megatron_before_log_prob_hook",
+        "custom_megatron_before_train_step_hook",
+    ],
+)
+def test_caller_side_hooks_are_rejected(field: str) -> None:
+    with pytest.raises(
+        ValidationError,
+        match=rf"{field}.*does not ship caller-side hooks|does not ship caller-side hooks.*{field}",
+    ):
+        StitchTrainConfig(**{field: "caller_module.hook"})
+
+
+def test_default_stitch_configs_keep_gym_reporting_hooks() -> None:
+    expected = {
+        "custom_rollout_log_function_path": (
+            "modal_training_gym.frameworks.miles.phase_reporting.log_rollout_data"
+        ),
+        "custom_eval_rollout_log_function_path": (
+            "modal_training_gym.frameworks.miles.phase_reporting.log_eval_rollout_data"
+        ),
+        "custom_megatron_before_log_prob_hook_path": (
+            "modal_training_gym.frameworks.miles.phase_reporting.before_log_prob_hook"
+        ),
+        "custom_megatron_before_train_step_hook_path": (
+            "modal_training_gym.frameworks.miles.phase_reporting.before_train_step_hook"
+        ),
+    }
+
+    for train in (StitchTrainConfig(), Qwen3_30B_A3B_Stitch_Train()):
+        fields = train._fields()
+        assert {key: fields[key] for key in expected} == expected
+
+
+def test_stitch_startup_timeout_is_owned_by_the_pool() -> None:
+    assert StitchServeConfig().startup_timeout == 60 * 60
+    assert StitchServeConfig(startup_timeout=123).startup_timeout == 123
+
+    with pytest.raises(ValidationError, match="StitchServeConfig.startup_timeout"):
+        StitchServeConfig(sglang=SglangRecipe(startup_timeout=123))
 
 
 def test_trainer_exports_the_dashboard_reporting_env() -> None:

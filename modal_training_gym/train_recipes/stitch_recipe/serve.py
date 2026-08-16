@@ -84,10 +84,14 @@ class StitchServeConfig:
         roughly twice the checkpoint resident, plus staging headroom.
     ephemeral_disk : int | None
         Container disk MiB, for a disk-mode replica's local checkpoint copy.
+    startup_timeout : int
+        Seconds gating Modal's container startup timeout, the cookbook
+        ``serve_startup`` budget, and the served-baseline wait.
     """
 
     sglang: SglangRecipe = field(default_factory=SglangRecipe)
     runtime: SGLangRuntime = DEFAULT_SGLANG_RUNTIME
+    startup_timeout: int = 60 * 60
 
     # ── Flash pool shape ────────────────────────────────────────────────────
     concurrency: int = 64
@@ -114,6 +118,12 @@ class StitchServeConfig:
                     "pool does not use; it serves on the forked runtime from "
                     "StitchServeConfig.runtime, brought up with the training app."
                 )
+        if self.sglang.startup_timeout != defaults.startup_timeout:
+            raise ValueError(
+                "SglangRecipe.startup_timeout is a deployment field the stitch "
+                "rollout pool does not use; set StitchServeConfig.startup_timeout "
+                "instead."
+            )
         if self.commit_mode not in ("in_place", "quiesce"):
             raise ValueError(
                 f"commit_mode must be 'in_place' or 'quiesce', got {self.commit_mode!r}"
@@ -131,10 +141,6 @@ class StitchServeConfig:
     @property
     def gpu(self) -> str:
         return str(self.sglang.gpu)
-
-    @property
-    def startup_timeout(self) -> int:
-        return self.sglang.startup_timeout
 
     def engine_args(self, *, model_name: str) -> dict[str, str]:
         """SGLang server args for a replica.
