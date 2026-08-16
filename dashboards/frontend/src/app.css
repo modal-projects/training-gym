@@ -2530,7 +2530,6 @@ table.deployments-table tr.row-selected td {
   background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
-
 .deploy-open-modal-link {
   display: inline-flex;
   align-items: center;

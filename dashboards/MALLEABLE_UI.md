@@ -119,10 +119,12 @@ MetadataStore.UI_LAYOUTS  = "ui-layouts"   # key: "{scope}__{id}"
 ```
 
 ```
-GET    /api/ui/views                  -> [ViewDoc]     (persisted volume documents only)
+GET    /api/docs/ui/views             -> [ViewDoc]     (persisted volume documents only)
 PUT    /api/ui/views/{scope}/{id}     <- ViewDoc        (write)
 DELETE /api/ui/views/{scope}/{id}                       (revert to shadowed doc)
-GET    /api/ui/layouts, PUT, DELETE   -> same shape
+GET    /api/docs/ui/layouts           -> [LayoutDoc]   (persisted volume documents only)
+PUT    /api/ui/layouts/{scope}/{id}   <- LayoutDoc      (write)
+DELETE /api/ui/layouts/{scope}/{id}                     (revert to shadowed doc)
 GET    /api/ui/schema                 -> JSON Schema for ViewDoc + LayoutDoc
 ```
 

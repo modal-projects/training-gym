@@ -451,9 +451,6 @@ def fastapi_app():
         "train_results",
         "evals",
         "deployments",
-        "docs_gym_runs",
-        "docs_gym_evals",
-        "docs_gym_deployments",
         "docs_ui_views",
         "docs_ui_layouts",
     )
@@ -666,17 +663,17 @@ def fastapi_app():
     # narrow: a document path is data access, not a general-purpose volume
     # browser.
     run_id_re = re.compile(r"^[A-Za-z0-9._-]+$")
-    doc_path_patterns = (
-        re.compile(r"^runs$"),
-        re.compile(r"^runs/([A-Za-z0-9._-]+)$"),
-        re.compile(r"^runs/([A-Za-z0-9._-]+)/rollouts$"),
-        re.compile(r"^runs/([A-Za-z0-9._-]+)/rollouts/([0-9]+)$"),
-        re.compile(r"^runs/([A-Za-z0-9._-]+)/advantages$"),
-        re.compile(r"^runs/([A-Za-z0-9._-]+)/advantages/([0-9]+)$"),
-        re.compile(r"^train-results/([A-Za-z0-9._-]+)$"),
-        re.compile(r"^evals/([A-Za-z0-9._-]+)$"),
-        re.compile(r"^deployments/([A-Za-z0-9._-]+)$"),
-    )
+    doc_path_patterns = {
+        "run-list": re.compile(r"^runs$"),
+        "run": re.compile(r"^runs/([A-Za-z0-9._-]+)$"),
+        "rollouts": re.compile(r"^runs/([A-Za-z0-9._-]+)/rollouts$"),
+        "rollout": re.compile(r"^runs/([A-Za-z0-9._-]+)/rollouts/([0-9]+)$"),
+        "advantages": re.compile(r"^runs/([A-Za-z0-9._-]+)/advantages$"),
+        "advantage": re.compile(r"^runs/([A-Za-z0-9._-]+)/advantages/([0-9]+)$"),
+        "train-result": re.compile(r"^train-results/([A-Za-z0-9._-]+)$"),
+        "eval": re.compile(r"^evals/([A-Za-z0-9._-]+)$"),
+        "deployment": re.compile(r"^deployments/([A-Za-z0-9._-]+)$"),
+    }
     ui_path_patterns = (
         re.compile(r"^(views|layouts)$"),
         re.compile(
@@ -719,7 +716,7 @@ def fastapi_app():
 
     def _validate_doc_path(source: str, path: str) -> None:
         patterns = (
-            doc_path_patterns
+            tuple(doc_path_patterns.values())
             if source == "gym"
             else ui_path_patterns
             if source == "ui"
@@ -734,12 +731,12 @@ def fastapi_app():
 
     async def _gym_doc(path: str):
         if path == "runs":
-            return await get_cached_list("docs_gym_runs", load_runs)
+            return await get_cached_list("runs", load_runs)
         if path == "evals":
-            return await get_cached_list("docs_gym_evals", load_eval_summaries)
+            return await get_cached_list("evals", load_eval_summaries)
         if path == "deployments":
-            return await get_cached_list("docs_gym_deployments", load_deployments)
-        match = doc_path_patterns[1].fullmatch(path)
+            return await get_cached_list("deployments", load_deployments)
+        match = doc_path_patterns["run"].fullmatch(path)
         if match:
             key = match.group(1)
             run = await _get_run_or_404(key)
@@ -752,12 +749,12 @@ def fastapi_app():
             except KeyError:
                 result = None
             return build_run_summary(run.model_dump(mode="json"), result)
-        match = doc_path_patterns[2].fullmatch(path)
+        match = doc_path_patterns["rollouts"].fullmatch(path)
         if match:
             return await run_in_threadpool(
                 TrainingRolloutResult.list_summaries_for_run, match.group(1)
             )
-        match = doc_path_patterns[3].fullmatch(path)
+        match = doc_path_patterns["rollout"].fullmatch(path)
         if match:
             try:
                 return await run_in_threadpool(
@@ -769,12 +766,12 @@ def fastapi_app():
                 raise HTTPException(
                     status_code=404, detail="Document not found"
                 ) from None
-        match = doc_path_patterns[4].fullmatch(path)
+        match = doc_path_patterns["advantages"].fullmatch(path)
         if match:
             return await run_in_threadpool(
                 AdvantageDistribution.list_steps_for_run, match.group(1)
             )
-        match = doc_path_patterns[5].fullmatch(path)
+        match = doc_path_patterns["advantage"].fullmatch(path)
         if match:
             value = await run_in_threadpool(
                 AdvantageDistribution.merged_for_step,
@@ -785,22 +782,19 @@ def fastapi_app():
                 raise HTTPException(status_code=404, detail="Document not found")
             return value
         stores = {
-            "train-results": MetadataStore.TRAIN_RESULTS,
-            "evals": MetadataStore.EVAL_RESULTS,
-            "deployments": MetadataStore.DEPLOYMENTS,
+            "train-result": MetadataStore.TRAIN_RESULTS,
+            "eval": MetadataStore.EVAL_RESULTS,
+            "deployment": MetadataStore.DEPLOYMENTS,
         }
-        match = re.fullmatch(
-            r"(train-results|evals|deployments)/([A-Za-z0-9._-]+)", path
-        )
-        if match:
-            try:
-                return await run_in_threadpool(
-                    vol_get, stores[match.group(1)], match.group(2)
-                )
-            except KeyError:
-                raise HTTPException(
-                    status_code=404, detail="Document not found"
-                ) from None
+        for kind, store in stores.items():
+            match = doc_path_patterns[kind].fullmatch(path)
+            if match:
+                try:
+                    return await run_in_threadpool(vol_get, store, match.group(1))
+                except KeyError:
+                    raise HTTPException(
+                        status_code=404, detail="Document not found"
+                    ) from None
         raise HTTPException(status_code=404, detail="Document not found")
 
     @web.get("/api/docs")
@@ -867,17 +861,6 @@ def fastapi_app():
     UI_LAYOUT_ID_RE = re.compile(r"^[a-z0-9-]+(?:\.[a-z0-9-]+)?$")
     UI_MAX_BYTES = 256 * 1024
     UI_MAX_DOCS = 512
-
-    @web.get("/api/ui/{kind}")
-    async def list_ui_documents(kind: str):
-        if kind not in {"views", "layouts"}:
-            raise HTTPException(status_code=404, detail="Unknown UI document kind")
-        store = MetadataStore.UI_VIEWS if kind == "views" else MetadataStore.UI_LAYOUTS
-        values = await get_cached_list(
-            f"docs_ui_{kind}",
-            lambda: _load_ui_store(store),
-        )
-        return JSONResponse(values)
 
     @web.put("/api/ui/{kind}/{scope}/{item_id}")
     async def put_ui_document(kind: str, scope: str, item_id: str, document: dict):
@@ -971,21 +954,6 @@ def fastapi_app():
                 ],
             }
         )
-
-    # Starlette matches routes in declaration order; keep the static schema
-    # route ahead of the dynamic collection route.
-    _schema_route = next(
-        route
-        for route in web.router.routes
-        if getattr(route, "path", None) == "/api/ui/schema"
-    )
-    web.router.routes.remove(_schema_route)
-    _dynamic_ui_index = next(
-        index
-        for index, route in enumerate(web.router.routes)
-        if getattr(route, "path", None) == "/api/ui/{kind}"
-    )
-    web.router.routes.insert(_dynamic_ui_index, _schema_route)
 
     def _bearer_token(authorization: str | None) -> str:
         scheme, _, token = (authorization or "").partition(" ")

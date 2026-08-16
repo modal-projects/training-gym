@@ -50,8 +50,8 @@
     }
     try {
       const [viewResponse, layoutResponse] = await Promise.all([
-        fetch("/api/ui/views"),
-        fetch("/api/ui/layouts"),
+        fetch("/api/docs/ui/views"),
+        fetch("/api/docs/ui/layouts"),
       ]);
       if (viewResponse.ok) remoteViews = await viewResponse.json();
       if (layoutResponse.ok) remoteLayouts = await layoutResponse.json();
