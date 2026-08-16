@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import json
 import os
 import time
 
@@ -76,7 +77,7 @@ def _to_volume_path(checkpoint_dir: str, checkpoints_mount_path: str) -> str:
 
 def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
     checkpoint_dir = train_result.checkpoint_dir.rstrip("/")
-    if not checkpoint_dir:
+    if checkpoint_dir == "":
         return []
 
     def _entry_name(entry: object) -> str:
@@ -121,21 +122,19 @@ def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
         key=lambda entry: _entry_name(entry),
     ):
         name = _entry_name(entry)
-        if not name.startswith(prefix):
-            continue
-
-        checkpoints.append(
-            Checkpoint(
-                checkpoint_type=_checkpoint_type(name),
-                name=name,
-                path=os.path.join(checkpoint_dir, name),
-                timestamp=float(getattr(entry, "mtime", 0.0)),
-                training_run_id=train_result.training_run_id,
-                app_name=train_result.app_name,
-                checkpoints_volume_name=checkpoints_volume_name,
-                checkpoints_mount_path=checkpoints_mount_path,
+        if name.startswith(prefix):
+            checkpoints.append(
+                Checkpoint(
+                    checkpoint_type=_checkpoint_type(name),
+                    name=name,
+                    path=os.path.join(checkpoint_dir, name),
+                    timestamp=float(getattr(entry, "mtime", 0.0)),
+                    training_run_id=train_result.training_run_id,
+                    app_name=train_result.app_name,
+                    checkpoints_volume_name=checkpoints_volume_name,
+                    checkpoints_mount_path=checkpoints_mount_path,
+                )
             )
-        )
     return checkpoints
 
 
@@ -148,7 +147,7 @@ def _conversion_gpu_spec(
             training_run = TrainingRun.from_id(run_id)
         except KeyError:
             training_run = None
-        if training_run is not None:
+        if training_run:
             recipe_config = training_run.config.get("recipe", {})
             gpu_type = recipe_config.get("gpu_type")
             n_gpu = recipe_config.get("actor_num_gpus_per_node")
@@ -173,20 +172,80 @@ def convert_megatron_checkpoint_to_hf(
     if checkpoint.checkpoint_type == CheckpointType.hf:
         return checkpoint
 
-    import modal
-    from modal import App, Volume
-
     checkpoints_volume_name = checkpoint.checkpoints_volume_name
-    if not checkpoints_volume_name:
+    if checkpoints_volume_name in (None, ""):
         raise TrainingGymConfigError(
             "Cannot convert checkpoint without checkpoints volume metadata."
         )
     checkpoints_mount_path = (
         checkpoint.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
     )
+    output_path = f"{checkpoint.path}_hf"
+    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=True)
+    rel = _to_volume_path(output_path, checkpoints_mount_path)
+    try:
+        entries = list(volume.iterdir(rel or "/", recursive=False))
+    except (FileNotFoundError, NotFoundError):
+        entries = []
+    names: set[str] = set()
+    for entry in entries:
+        name = getattr(entry, "path", "").rstrip("/").rsplit("/", 1)[-1]
+        if name:
+            names.add(name)
+
+    if "config.json" in names:
+        shards = None
+        for index_name in (
+            "model.safetensors.index.json",
+            "pytorch_model.bin.index.json",
+        ):
+            if index_name in names:
+                index_path = f"{rel}/{index_name}" if rel else index_name
+                try:
+                    payload = json.loads(b"".join(volume.read_file(index_path)))
+                except (
+                    FileNotFoundError,
+                    NotFoundError,
+                    OSError,
+                    TypeError,
+                    UnicodeDecodeError,
+                    ValueError,
+                    json.JSONDecodeError,
+                ):
+                    payload = None
+                weight_map = (
+                    payload.get("weight_map") if isinstance(payload, dict) else None
+                )
+                shards = (
+                    {str(filename) for filename in weight_map.values()}
+                    if isinstance(weight_map, dict) and weight_map
+                    else set()
+                )
+                break
+        if shards is None:
+            ready = "model.safetensors" in names or "pytorch_model.bin" in names
+        else:
+            ready = bool(shards) and shards <= names
+    else:
+        ready = False
+
+    if ready:
+        return Checkpoint(
+            checkpoint_type=CheckpointType.hf,
+            name=os.path.basename(output_path.rstrip("/")),
+            path=output_path,
+            timestamp=checkpoint.timestamp,
+            training_run_id=checkpoint.training_run_id,
+            app_name=checkpoint.app_name,
+            checkpoints_volume_name=checkpoints_volume_name,
+            checkpoints_mount_path=checkpoints_mount_path,
+        )
+
+    import modal
+    from modal import App
 
     model_ref = model.model_name or model.model_path
-    if not model_ref:
+    if model_ref in (None, ""):
         raise TrainingGymConfigError(
             "Cannot convert a megatron checkpoint without model_name or model_path."
         )
@@ -239,10 +298,10 @@ def convert_megatron_checkpoint_to_hf(
         spec = importlib.util.find_spec(
             "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf"
         )
-        convert_script = spec.origin if spec is not None else None
-        if not convert_script:
+        convert_script = spec.origin if spec else None
+        if convert_script in (None, ""):
             raise RuntimeError(
-                "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf not found"
+                "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf is missing"
             )
         cmd = (
             f"python {convert_script} "
@@ -256,7 +315,6 @@ def convert_megatron_checkpoint_to_hf(
         checkpoints_volume.commit()
         return output_dir
 
-    output_path = f"{checkpoint.path}_hf"
     with modal.enable_output():
         with conversion_app.run():
             output_path = convert_megatron_to_hf.remote(
