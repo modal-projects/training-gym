@@ -99,6 +99,11 @@ class StitchTrainConfig(MilesRecipe):
     megatron_runtime_patches: list[str] = field(default_factory=list)
 
     gpu_type: str = "B200"
+    # Megatron's validator treats inherited None fields as missing despite its
+    # default=1 fallback, so a bare StitchTrainConfig must set these explicitly.
+    context_parallel_size: int = 1
+    expert_model_parallel_size: int = 1
+    expert_tensor_parallel_size: int = 1
     ephemeral_disk: int | None = None
 
     # Inline dict → a node-local YAML file every Ray actor re-reads at the same
