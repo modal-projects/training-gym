@@ -11,6 +11,7 @@ class Qwen3_5_9b_Recipe(SlimeRecipe):
     gpu_type: str = "H100"
     colocate: bool = True
     tensor_model_parallel_size: int = 1
+    conversion_tensor_model_parallel_size: int = 1
     sequence_parallel: bool = False
     rollout_num_gpus_per_engine: int = 1
 

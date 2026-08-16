@@ -147,6 +147,9 @@ _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATC
 _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
+_PATCH_VOLUME_COMMIT_ON_SAVE_B64 = encode_patch(
+    "patch_volume_commit_on_save", _SLIME_PATCHES
+)
 
 
 def _build_slime_base_image() -> "Image":
@@ -168,6 +171,7 @@ def _build_slime_base_image() -> "Image":
             f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
             f"echo {_PATCH_ZERO_STD_METRICS_B64} | base64 -d | python3",
             f"echo {_PATCH_SGLANG_PARALLEL_ALIASES_B64} | base64 -d | python3",
+            f"echo {_PATCH_VOLUME_COMMIT_ON_SAVE_B64} | base64 -d | python3",
         )
     )
 
@@ -1236,6 +1240,10 @@ def build_slime_app(
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
             }
+            if slime.total_nodes > 1:
+                runtime_env["env_vars"]["TRAINING_GYM_CHECKPOINTS_VOLUME"] = (
+                    checkpoints_volume_name
+                )
 
             mode = "async" if slime.async_mode else "sync"
             print(
