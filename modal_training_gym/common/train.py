@@ -14,7 +14,7 @@ from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.checkpoint import Checkpoint
+from modal_training_gym.common.checkpoint import Checkpoint, apply_train_checkpoint
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.status import (
     FrameworkStatus,
@@ -361,8 +361,12 @@ class TrainConfig:
         training framework and carries Modal infra settings (GPU type, node
         count, image) plus framework CLI flags.
     checkpoint : Checkpoint | None
-        Checkpoint to resume training from. When ``None``, training starts
-        from the base model weights. Default ``None``.
+        Checkpoint to resume training from. A Megatron ``iter_*`` sets
+        ``recipe.load`` to the resume root. ``--hf-checkpoint`` stays the
+        Hub id or existing HF path. An HF export becomes
+        ``--hf-checkpoint``; megatron resume uses the sibling ``iter_*``
+        parent when that export is ``iter_*_hf``. Omit to start from the
+        base model weights. Default ``None``.
     merge_model_recipe : bool
         When ``True``, merges the known-model preset recipe (e.g.
         ``Qwen3_4b_Recipe``) onto recipe fields you left unset. Set
@@ -420,6 +424,15 @@ class TrainConfig:
             self.model.model_path or "",
         )
 
+    def _prepare_recipe(self) -> BaseTrainRecipe:
+        recipe = _resolve_recipe(
+            self.model,
+            self.recipe,
+            merge_model_recipe=self.merge_model_recipe,
+        )
+        apply_train_checkpoint(recipe, self.model, self.checkpoint)
+        return recipe
+
     def _build_app(self, training_run_id: str | None = None):
         _warn_if_external_build_app()
         if training_run_id is None:
@@ -432,11 +445,7 @@ class TrainConfig:
                 )
             return build_miles_app(
                 training_run_id=training_run_id,
-                miles=_resolve_recipe(
-                    self.model,
-                    cast(MilesRecipe, self.recipe),
-                    merge_model_recipe=self.merge_model_recipe,
-                ),
+                miles=cast(MilesRecipe, self._prepare_recipe()),
                 model=self.model,
                 dataset=self.dataset,
                 checkpoint=self.checkpoint,
@@ -448,14 +457,9 @@ class TrainConfig:
                 raise TrainingGymConfigError(
                     f"Recipe type {recipe_type} requires SlimeRecipe, got {type(self.recipe).__name__}"
                 )
-            combined = _resolve_recipe(
-                self.model,
-                cast(SlimeRecipe, self.recipe),
-                merge_model_recipe=self.merge_model_recipe,
-            )
             return build_slime_app(
                 training_run_id=training_run_id,
-                slime=combined,
+                slime=cast(SlimeRecipe, self._prepare_recipe()),
                 model=self.model,
                 dataset=self.dataset,
                 checkpoint=self.checkpoint,

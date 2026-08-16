@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 import os
 import time
+from typing import Any
 
 from modal import Volume
 from modal.exception import NotFoundError
@@ -44,6 +45,40 @@ class Checkpoint:
         return _to_volume_path(
             self.path, self.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
         )
+
+
+def apply_train_checkpoint(
+    recipe: Any,
+    model: Any,
+    checkpoint: Checkpoint | None,
+) -> None:
+    if checkpoint is None or checkpoint.path == "":
+        return
+
+    path = checkpoint.path.rstrip("/")
+    name = (checkpoint.name or os.path.basename(path)).rstrip("/")
+    if name.endswith("_hf"):
+        if name.startswith("iter_"):
+            load_root = os.path.dirname(path) or None
+        else:
+            load_root = None
+    elif checkpoint.checkpoint_type == CheckpointType.hf:
+        load_root = None
+    elif name.startswith("iter_") or name == "release":
+        load_root = os.path.dirname(path) or path
+    else:
+        load_root = path
+    if load_root and getattr(recipe, "load", "") == "":
+        object.__setattr__(recipe, "load", load_root)
+
+    if checkpoint.checkpoint_type == CheckpointType.hf:
+        fields = getattr(recipe, "__dataclass_fields__", {})
+        if "hf_checkpoint" in fields:
+            if getattr(recipe, "hf_checkpoint", "") == "":
+                object.__setattr__(recipe, "hf_checkpoint", checkpoint.path)
+            return
+        if getattr(model, "model_path", None) in (None, ""):
+            model.model_path = checkpoint.path
 
 
 def list_checkpoints(training_run_id: str) -> list[Checkpoint]:

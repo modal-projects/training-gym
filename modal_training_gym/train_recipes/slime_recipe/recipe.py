@@ -257,8 +257,11 @@ class SlimeRecipe(BaseTrainRecipe):
     save_interval : int
         Save a checkpoint every N rollout steps.
     load : str
-        Checkpoint directory to resume from; empty starts from the converted
-        HF weights.
+        Megatron checkpoint directory to resume from (parent of ``iter_*``);
+        empty starts from the converted HF weights.
+    hf_checkpoint : str
+        Hugging Face model dir or Hub id for ``--hf-checkpoint``. Empty uses
+        ``model.model_path`` or ``model.model_name``.
     no_save_optim : bool
         Omit optim state from checkpoints (smaller, but no exact resume).
     megatron_to_hf_mode : str
@@ -590,6 +593,7 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── Checkpointing (optional) ───────────────────────────────────────────
     save: str = "/checkpoints"
     load: str = ""
+    hf_checkpoint: str = ""
     no_save_optim: bool = False
     no_load_optim: bool = False
     megatron_to_hf_mode: str = ""
@@ -819,7 +823,10 @@ class SlimeRecipe(BaseTrainRecipe):
         if model is not None:
             self.validate_model_parallelism(model)
             if not self.slime_model_script:
-                fields.update(self._model_to_fields(model))
+                for key, value in self._model_to_fields(model).items():
+                    if key == "hf_checkpoint" and fields.get(key):
+                        continue
+                    fields[key] = value
         if self.wandb is not None:
             fields.update(self._wandb_to_fields(self.wandb))
         out = self._emit_fields(fields)

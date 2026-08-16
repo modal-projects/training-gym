@@ -317,9 +317,6 @@ def build_miles_app(
             default_mount_path=str(CHECKPOINTS_PATH),
         )
     )
-    if checkpoint is not None and checkpoint.path and not model.model_path:
-        model.model_path = checkpoint.path
-
     all_volumes: dict[str | PurePosixPath, Any] = {
         str(HF_CACHE_PATH): hf_cache_volume,
         str(DATA_PATH): data_volume,

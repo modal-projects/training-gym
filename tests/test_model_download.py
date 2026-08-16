@@ -1,9 +1,7 @@
 """``HFModelConfiguration.download()`` against a populated ``model_path``.
 
-Launchers point ``model_path`` at a resumed checkpoint
-(``frameworks/slime/launcher.py``, ``frameworks/miles/launcher.py``) and then
-call ``download()``, so mirroring the base snapshot there must not replace
-trained weights.
+A populated ``model_path`` already holds the weights to load, so mirroring
+the base snapshot there must not replace them.
 """
 
 from __future__ import annotations
