@@ -14,7 +14,7 @@ takes the trainer as a field rather than being one.
 from __future__ import annotations
 
 from dataclasses import field
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
@@ -85,9 +85,8 @@ class StitchTrainConfig(MilesRecipe):
 
     Don't see the flag you need? Every non-hook :class:`MilesRecipe` field
     applies here, and any additional class attribute becomes a miles CLI flag.
-    Caller-side custom hooks are not supported: stitch does not mount the caller
-    script or write Miles' custom reward/generate paths. Use the colocated
-    :class:`MilesRecipe` for those hooks.
+    Caller-side custom hooks are not supported because stitch does not mount the
+    caller script. Use the colocated :class:`MilesRecipe` for those hooks.
     """
 
     # ── The miles fork + image that speak the bulletin protocol ─────────────
@@ -161,6 +160,12 @@ class StitchTrainConfig(MilesRecipe):
         }
     )
 
+    # The inherited annotations reject dotted paths before the Stitch validator
+    # can explain that caller-side hooks are unsupported.
+    custom_rm_function: Callable | str | None = None
+    custom_generate_function: Callable | str | None = None
+    custom_reward_post_process_function: Callable | str | None = None
+
     @model_validator(mode="after")
     def _validate_gpu_allocation(self) -> "StitchTrainConfig":
         """Replaces MilesRecipe's allocator, which reads ``colocate=False`` as
@@ -174,28 +179,12 @@ class StitchTrainConfig(MilesRecipe):
     def _caller_hook_error(fields: list[str]) -> ValueError:
         names = ", ".join(fields)
         return ValueError(
-            f"StitchTrainConfig does not ship caller-side hooks ({names}): "
-            "a stitch run has no caller-script mount and does not write "
-            "`custom_rm_path` or `custom_generate_function_path`. Use "
-            "MilesRecipe in modal_training_gym/train_recipes/miles_recipe/recipe.py "
-            "for caller-side hooks."
+            f"StitchTrainConfig does not ship caller-side hooks ({names}); "
+            "use MilesRecipe for caller-side hooks."
         )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_explicit_caller_hooks(cls, values: Any) -> Any:
-        raw_values = getattr(values, "kwargs", values)
-        fields = [
-            name
-            for name in _UNSHIPPED_CALLER_HOOK_FIELDS
-            if isinstance(raw_values, dict) and raw_values.get(name) is not None
-        ]
-        if fields:
-            raise cls._caller_hook_error(fields)
-        return values
-
     @model_validator(mode="after")
-    def _reject_default_caller_hooks(self) -> "StitchTrainConfig":
+    def _reject_caller_hooks(self) -> "StitchTrainConfig":
         fields = [
             name
             for name in _UNSHIPPED_CALLER_HOOK_FIELDS

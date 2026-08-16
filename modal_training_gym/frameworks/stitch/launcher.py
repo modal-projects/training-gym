@@ -98,10 +98,9 @@ SGLANG_PORT = 8001
 # A replica serves for as long as the run does, so it gets the trainer's bound
 # rather than one a long rollout wave can reach.
 SERVER_TIMEOUT = 24 * 60 * MINUTES
-# A replica boots with the app, i.e. while prepare_checkpoints may still be
-# building the baseline it serves. Waiting it out has to fit inside the startup
-# budget, so a longer conversion means the replica exits and Modal reboots it
-# into another wait rather than the engine failing on a missing checkpoint.
+# A replica boots with the app while prepare_checkpoints may still be building
+# its baseline. Leave two minutes of the startup budget for engine initialization,
+# but always allow at least two baseline polls.
 BASELINE_POLL_SECONDS = 30
 # Ephemeral host-local full HF checkpoint the sidecar patches in place per delta.
 LOCAL_CHECKPOINT_PATH = "/local-checkpoint"
@@ -517,6 +516,10 @@ def build_stitch_app(
     # baseline for a quantized run, else the model's own checkpoint.
     served_model = recipe.served_baseline(model)
     rollout_concurrency = serve_recipe.concurrency
+    baseline_wait_timeout = max(
+        serve_recipe.startup_timeout - 2 * MINUTES,
+        2 * BASELINE_POLL_SECONDS,
+    )
     n_train_nodes = train_recipe.actor_num_nodes
     _multi_node = n_train_nodes > 1
 
@@ -622,10 +625,7 @@ def build_stitch_app(
                 model_name=_local_checkpoint(
                     served_model,
                     checkpoints_volume,
-                    baseline_wait_timeout=max(
-                        serve_recipe.startup_timeout - 2 * MINUTES,
-                        2 * BASELINE_POLL_SECONDS,
-                    ),
+                    baseline_wait_timeout=baseline_wait_timeout,
                 ),
                 sglang_args=sglang_server_args,
                 tp=gpus_per_replica,
