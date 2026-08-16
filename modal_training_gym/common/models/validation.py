@@ -100,5 +100,7 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
         Moonlight_16B_A3B_Instruct,
         Framework.MILES,
     ),
-    _ValidationConfig("Qwen3-30B-A3B-stitch", Qwen3_30B, Framework.STITCH),
+    _ValidationConfig(
+        "Qwen3-30B-A3B-stitch", Qwen3_30B, Framework.STITCH, run_on_pr=False
+    ),
 }
