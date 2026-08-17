@@ -7,6 +7,7 @@ from enum import Enum
 import os
 import time
 
+import modal
 from modal import Volume
 from modal.exception import NotFoundError
 
@@ -205,9 +206,6 @@ def convert_megatron_checkpoint_to_hf(
             checkpoints_mount_path=checkpoints_mount_path,
         )
 
-    import modal
-    from modal import App
-
     model_ref = model.model_name or model.model_path
     if model_ref in (None, ""):
         raise TrainingGymConfigError(
@@ -225,7 +223,7 @@ def convert_megatron_checkpoint_to_hf(
     image = _build_slime_base_image().add_local_python_source(
         "modal_training_gym", copy=True
     )
-    conversion_app = App("training-gym-checkpoint-convert")
+    conversion_app = modal.App("training-gym-checkpoint-convert")
     gpu_spec = _conversion_gpu_spec(checkpoint, recipe)
 
     @conversion_app.function(
