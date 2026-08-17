@@ -136,6 +136,9 @@ async def math_opd_rm(args, sample, **kwargs):
     label = getattr(sample, "label", "") or ""
     score = score_answer(sample.response, label)
     sample.score = score
+    if not isinstance(getattr(sample, "metadata", None), dict):
+        sample.metadata = {}
+    sample.metadata["shaped_reward"] = float(score)
 
     return teacher_response
 
