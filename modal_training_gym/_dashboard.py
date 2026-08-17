@@ -517,12 +517,11 @@ def fastapi_app():
                 cache_entries[key] = (now + cache_ttl_seconds, values, loaded_at)
             return values
 
-    def invalidate_cache(key: str) -> None:
-        # Force the next read to revalidate, but keep the last values and the
-        # "loaded once" marker so it refreshes in the background instead of
-        # blocking on a cold rebuild.
+    def invalidate_cache(key: str, *, force_refresh: bool = False) -> None:
+        # Force the next read to revalidate. UI writes clear the loaded marker
+        # so the next read blocks for the new volume contents.
         _expires_at, values, loaded_at = cache_entries[key]
-        cache_entries[key] = (0.0, values, loaded_at)
+        cache_entries[key] = (0.0, values, 0.0 if force_refresh else loaded_at)
 
     async def get_cached_list(key: str, loader: SummaryLoader) -> list[JsonDict]:
         now = time.monotonic()
@@ -893,7 +892,7 @@ def fastapi_app():
         if not exists and count >= UI_MAX_DOCS:
             raise HTTPException(status_code=413, detail="UI document store is full")
         await run_in_threadpool(vol_put, store, key, payload)
-        invalidate_cache(f"docs_ui_{kind}")
+        invalidate_cache(f"docs_ui_{kind}", force_refresh=True)
         return JSONResponse(payload)
 
     @web.delete("/api/ui/{kind}/{scope}/{item_id}")
@@ -908,7 +907,7 @@ def fastapi_app():
             raise HTTPException(status_code=404, detail="Invalid UI document path")
         store = MetadataStore.UI_VIEWS if kind == "views" else MetadataStore.UI_LAYOUTS
         removed = await run_in_threadpool(vol_remove, store, f"{scope}__{item_id}")
-        invalidate_cache(f"docs_ui_{kind}")
+        invalidate_cache(f"docs_ui_{kind}", force_refresh=True)
         if not removed:
             raise HTTPException(status_code=404, detail="UI document not found")
         return JSONResponse({"status": "ok"})

@@ -16,6 +16,9 @@
   let loading = $state(true);
   let error = $state("");
   let activeSampleIndex = $state(0);
+  let autoSelectionDone = $state(false);
+  let closedByUser = $state(false);
+  let selectionRequest = 0;
 
   onMount(() => {
     let disposed = false;
@@ -24,8 +27,14 @@
         const next = await fetchRunRollouts(runId);
         if (!disposed) {
           rows = next;
-          if (!selected && next.length) {
+          if (!autoSelectionDone && !closedByUser && next.length) {
+            autoSelectionDone = true;
             void openRollout(next[0]);
+          } else if (selected?.row) {
+            const current = next.find(
+              (row) => row.rollout_id === selected.row.rollout_id,
+            );
+            if (current) selected = { ...selected, row: current };
           }
           error = "";
         }
@@ -44,14 +53,23 @@
   });
 
   async function openRollout(row) {
+    closedByUser = false;
+    autoSelectionDone = true;
+    const request = ++selectionRequest;
     selected = { loading: true, row };
     activeSampleIndex = 0;
     const detail = await fetchRollout(runId, row.rollout_id);
-    selected = { row, detail, loading: false };
+    if (request !== selectionRequest) return;
+    const current = rows.find(
+      (candidate) => candidate.rollout_id === row.rollout_id,
+    );
+    selected = { row: current || row, detail, loading: false };
   }
 
   let samples = $derived(selected?.detail?.samples || []);
   function close() {
+    selectionRequest += 1;
+    closedByUser = true;
     selected = null;
     activeSampleIndex = 0;
   }

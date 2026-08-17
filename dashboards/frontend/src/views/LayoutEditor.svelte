@@ -7,7 +7,7 @@
   let message = $state("");
 
   $effect(() => {
-    if (layout) draft = structuredClone(layout);
+    if (layout) draft = structuredClone($state.snapshot(layout));
   });
 
   function entriesFor(tab, slot) {

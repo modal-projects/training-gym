@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from "svelte";
   import { compileAuthoredView } from "../lib/views/compile.js";
 
   let { source = "", props = {} } = $props();
@@ -7,8 +6,9 @@
   let error = $state("");
   let loading = $state(true);
 
-  onMount(() => {
+  $effect(() => {
     let disposed = false;
+    component = null;
     loading = true;
     error = "";
     compileAuthoredView(source)
