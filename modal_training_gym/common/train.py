@@ -660,7 +660,12 @@ class TrainConfig:
         try:
             return launch.result(stop_app_on_success=True)
         except BaseException:
-            if not self.detach and launch.modal_app_id:
+            # A detached app is normally left running on failure so its logs and
+            # containers can be inspected. A stitch app is the exception: its
+            # rollout pool keeps warm GPU replicas independent of the trainer
+            # call, so leaving it up would hold them for the app's whole timeout.
+            teardown = not self.detach or self.recipe.recipe_type == RecipeType.STITCH
+            if teardown and launch.modal_app_id:
                 stop_app(launch.modal_app_id)
             raise
 

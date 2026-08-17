@@ -219,6 +219,16 @@ class StitchRecipe(BaseTrainRecipe):
                     "bf16_checkpoint_path must be a path, got "
                     f"{self.bf16_checkpoint_path!r}"
                 )
+            # served_checkpoint_path is the quantizer's *output*, so it cannot
+            # also be its input: the weights to convert have to be named
+            # separately.
+            if not train.source_hf_checkpoint:
+                raise ValueError(
+                    "an nvfp4 run converts a BF16 source into "
+                    f"{self.served_checkpoint_path!r}, which is the quantizer's "
+                    "own output; set train.source_hf_checkpoint to the Hub repo "
+                    "id or path holding the weights to convert"
+                )
         return self
 
     @classmethod

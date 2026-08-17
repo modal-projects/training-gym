@@ -150,31 +150,6 @@ class _MilesArgs(BaseTrainRecipe):
         return {k: v for k, v in vars(self).items() if k not in self._CONTROL}
 
 
-def _local_checkpoint(
-    model_name: str, volume: modal.Volume, *, baseline_wait_timeout: int
-) -> str:
-    """The served baseline as a local directory.
-
-    A repo id is materialized from the HF cache volume. A prepared (quantized)
-    baseline is already a path, but the pool comes up with the app, so it can be
-    waited on: ``prepare_checkpoints`` builds into a ``.partial`` sibling and
-    renames, so the path appearing means the baseline is complete.
-    """
-    from huggingface_hub import snapshot_download
-
-    if not model_name.startswith("/"):
-        return snapshot_download(model_name, allow_patterns=_CHECKPOINT_PATTERNS)
-
-    deadline = time.monotonic() + baseline_wait_timeout
-    while not os.path.isdir(model_name):
-        if time.monotonic() > deadline:
-            raise RuntimeError(f"served baseline {model_name} never appeared")
-        print(f"waiting for the served baseline at {model_name}...")
-        time.sleep(BASELINE_POLL_SECONDS)
-        volume.reload()
-    return model_name
-
-
 def _response_parser_path(model: ModelConfig | None) -> str:
     """Import path of the model's response parser so the rollout recorder can
     resolve and apply it remotely. Empty when the model sets no parser."""
@@ -582,6 +557,33 @@ def build_stitch_app(
     memory = train_recipe.memory
     app = modal.App(app_name, tags=tags)
 
+    # Defined here, not at module scope: cloudpickle pickles a module-level
+    # function *by reference*, so a replica deserializing ``Server`` would import
+    # this launcher — and with it the trainer-side recipe graph the serving image
+    # is deliberately built without (see the package docstring). A closure is
+    # pickled by value, together with the constants it reads.
+    def local_checkpoint(model_name: str) -> str:
+        """The served baseline as a local directory.
+
+        A repo id is materialized from the HF cache volume. A prepared (quantized)
+        baseline is already a path, but the pool comes up with the app, so it can be
+        waited on: ``prepare_checkpoints`` builds into a ``.partial`` sibling and
+        renames, so the path appearing means the baseline is complete.
+        """
+        from huggingface_hub import snapshot_download
+
+        if not model_name.startswith("/"):
+            return snapshot_download(model_name, allow_patterns=_CHECKPOINT_PATTERNS)
+
+        deadline = time.monotonic() + baseline_wait_timeout
+        while not os.path.isdir(model_name):
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"served baseline {model_name} never appeared")
+            print(f"waiting for the served baseline at {model_name}...")
+            time.sleep(BASELINE_POLL_SECONDS)
+            checkpoints_volume.reload()
+        return model_name
+
     @app.cls(
         image=server_image,
         gpu=f"{serve_recipe.gpu}:{serve_recipe.gpus_per_replica}",
@@ -623,11 +625,7 @@ def build_stitch_app(
                 # A local path (both the engine's model and the sidecar's delta
                 # baseline): the sidecar can't seed a delta from a repo id, and a
                 # post-boot resolve would race the cache SGLang warms itself.
-                model_name=_local_checkpoint(
-                    served_model,
-                    checkpoints_volume,
-                    baseline_wait_timeout=baseline_wait_timeout,
-                ),
+                model_name=local_checkpoint(served_model),
                 sglang_args=sglang_server_args,
                 tp=gpus_per_replica,
                 concurrency=rollout_concurrency,

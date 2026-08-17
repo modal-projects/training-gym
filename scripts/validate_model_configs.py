@@ -288,8 +288,9 @@ def run_base_training(
         substep_times=training_run.substep_times,
         framework=config.framework.value,
         recipe_name=type(train_recipe).__name__,
-        # Only frameworks that pin an image have the field to report.
-        docker_image=getattr(train_recipe, "docker_image", None),
+        # Only frameworks that pin an image have the field to report, and for a
+        # two-half recipe it is the trainer that pins one.
+        docker_image=getattr(trainer, "docker_image", None),
     )
 
 

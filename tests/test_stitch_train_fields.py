@@ -183,6 +183,34 @@ def test_shared_fields_are_added_to_the_trainer_payload() -> None:
     assert fields["update_weight_delta_checksum"] == "sha256"
 
 
+def test_a_quantized_run_needs_a_source_to_convert() -> None:
+    """``served_checkpoint_path`` is the quantizer's output, so it can't also be
+    its input: without a source, prepare_checkpoints would convert the very
+    directory it is building."""
+    with pytest.raises(ValidationError, match="source_hf_checkpoint"):
+        Qwen3_30B_A3B_Stitch_Recipe(
+            train=Qwen3_30B_A3B_Stitch_Train(source_hf_checkpoint=None),
+            served_checkpoint_path="/checkpoints/served",
+            served_checkpoint_format="nvfp4",
+            bf16_checkpoint_path="/checkpoints/bf16",
+        )
+
+    recipe = Qwen3_30B_A3B_Stitch_Recipe(
+        served_checkpoint_path="/checkpoints/served",
+        served_checkpoint_format="nvfp4",
+        bf16_checkpoint_path="/checkpoints/bf16",
+    )
+    assert recipe.train.source_hf_checkpoint == "Qwen/Qwen3-30B-A3B"
+
+
+def test_the_serving_half_is_not_pickled_by_reference_to_the_launcher() -> None:
+    """A replica deserializing ``Server`` must not have to import the launcher —
+    it would pull in the trainer-side recipe graph its image is built without —
+    so the helpers the class body calls are closures, not module-level
+    functions."""
+    assert not hasattr(stitch_launcher, "_local_checkpoint")
+
+
 def test_reporting_patches_target_the_stitch_miles_checkout() -> None:
     """The trainer image reuses miles' reporting patches, which rewrite the
     checkout at a hardcoded path — so stitch has to clone miles there."""
