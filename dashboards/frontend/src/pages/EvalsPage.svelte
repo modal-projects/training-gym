@@ -91,9 +91,8 @@
     return nonPlaceholderText(group.meta.dataset) || fallback.dataset || "Unknown";
   }
 
-  function evalBaseModel(run, group) {
-    const model = nonPlaceholderText(run.eval.model_name) || nonPlaceholderText(group.meta.model);
-    return model || "[unknown Base Model]";
+  function evalBaseModel(run) {
+    return nonPlaceholderText(run.eval.model_name) || "—";
   }
 
   function evalId(run) {
@@ -325,7 +324,7 @@
       status: display.bucket,
       pillStatus: display.pill,
       statusLabel: display.label,
-      model: evalBaseModel(run, group),
+      model: evalBaseModel(run),
       config: nonPlaceholderText(meta.dataset) || "—",
       grading: nonPlaceholderText(meta.evalFn || meta.judge) || "—",
       avgScore: run.avgScore,
@@ -537,7 +536,7 @@
                 <tbody>
                   {#each group.visibleRuns as run, runIndex (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}-${runIndex}`)}
                     {@const id = evalId(run)}
-                    {@const baseModel = evalBaseModel(run, group)}
+                    {@const baseModel = evalBaseModel(run)}
                     {@const dataset = groupDataset(group)}
                     <tr
                       class="eval-row-clickable"

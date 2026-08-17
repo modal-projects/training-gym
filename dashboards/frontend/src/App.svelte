@@ -470,12 +470,7 @@
       safeText(evalConfig?.dataset_name) ||
       safeText(ev?.dataset_name) ||
       "—";
-    const model =
-      safeText(ev?.model_name) ||
-      safeText(config?.model?.model_name) ||
-      safeText(sourceConfig?.model?.model_name) ||
-      safeText(evalConfig?.model?.model_name) ||
-      "—";
+    const model = safeText(ev?.model_name) || "—";
     const split =
       safeText(config?.dataset?.split) ||
       safeText(sourceConfig?.dataset?.split) ||
