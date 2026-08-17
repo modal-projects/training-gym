@@ -612,7 +612,7 @@ def build_stitch_app(
         exit_grace_period=25,
         startup_timeout=serve_recipe.startup_timeout,
     )
-    @modal.concurrent(target_inputs=rollout_concurrency, max_inputs=rollout_concurrency)
+    @modal.concurrent(target_inputs=rollout_concurrency)
     class Server:
         """One SGLang rollout server plus the stitch weight-sync sidecar."""
 
