@@ -20,8 +20,10 @@ jobs:
 
       - uses: astral-sh/ruff-action@v3
         with:
+          version: "0.15.19"
           args: "check"
 
       - uses: astral-sh/ruff-action@v3
         with:
+          version: "0.15.19"
           args: "format --check"
