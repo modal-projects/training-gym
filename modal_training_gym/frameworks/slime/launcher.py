@@ -217,6 +217,38 @@ def _is_complete_torch_dist_checkpoint(path: str) -> bool:
     return "common.pt" in names and any(name.endswith(".distcp") for name in names)
 
 
+_PIPELINE_SPLIT_FLAGS = (
+    "--decoder-first-pipeline-num-layers",
+    "--decoder-last-pipeline-num-layers",
+)
+
+
+def _conversion_config_matches(stored: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether a recorded conversion still describes the current layout.
+
+    The record stores the emitted ``extra_args``, so a checkpoint converted before
+    the pipeline-split flags stopped being emitted at conversion PP1 would otherwise
+    read as stale and be re-converted for nothing. Dropping those flags is tolerated;
+    changing their values is not, since at PP>1 they define the split.
+    """
+    if stored == current:
+        return True
+    stored_rest, current_rest = dict(stored), dict(current)
+    stored_args = stored_rest.pop("extra_args", None)
+    current_args = current_rest.pop("extra_args", None)
+    if stored_rest != current_rest:
+        return False
+    if not isinstance(stored_args, list) or not isinstance(current_args, list):
+        return False
+    if [a for a in stored_args if not a.startswith(_PIPELINE_SPLIT_FLAGS)] != [
+        a for a in current_args if not a.startswith(_PIPELINE_SPLIT_FLAGS)
+    ]:
+        return False
+    return {a for a in current_args if a.startswith(_PIPELINE_SPLIT_FLAGS)} <= {
+        a for a in stored_args if a.startswith(_PIPELINE_SPLIT_FLAGS)
+    }
+
+
 def _checkpoint_conversion_cache_status(
     save_path: str, current_config: dict[str, Any]
 ) -> tuple[str, dict[str, Any] | None]:
@@ -238,7 +270,7 @@ def _checkpoint_conversion_cache_status(
             stored_config = json.load(f)
     except (OSError, json.JSONDecodeError):
         return "stale", None
-    if stored_config != current_config:
+    if not _conversion_config_matches(stored_config, current_config):
         return "stale", stored_config
     return "hit", stored_config
 
