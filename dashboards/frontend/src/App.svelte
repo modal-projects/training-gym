@@ -471,14 +471,9 @@
       safeText(ev?.dataset_name) ||
       "—";
     const model =
-      safeText(config?.deployment?.model_name) ||
-      safeText(config?.deployment?.served_model_name) ||
+      safeText(ev?.model_name) ||
       safeText(config?.model?.model_name) ||
-      safeText(sourceConfig?.deployment?.model_name) ||
-      safeText(sourceConfig?.deployment?.served_model_name) ||
       safeText(sourceConfig?.model?.model_name) ||
-      safeText(evalConfig?.deployment?.model_name) ||
-      safeText(evalConfig?.deployment?.served_model_name) ||
       safeText(evalConfig?.model?.model_name) ||
       "—";
     const split =
@@ -576,18 +571,6 @@
           (run) => run.status === "Pending",
         ).length;
         const failedCount = sortedRuns.filter((run) => run.status === "Failed").length;
-        const deploymentCount = new Set(
-          sortedRuns
-            .map(
-              (run) =>
-                safeText(
-                  run.eval.config?.deployment?.url ||
-                    run.eval.config?.deployment?.model_name ||
-                    run.eval.config?.deployment?.served_model_name,
-                ) || null,
-            )
-            .filter(Boolean),
-        ).size;
         return {
           ...group,
           meta: evalConfigMeta(group.config, sortedRuns[0]?.eval),
@@ -597,7 +580,6 @@
           completedCount,
           pendingCount,
           failedCount,
-          deploymentCount,
           runs: sortedRuns,
         };
       })
@@ -722,11 +704,6 @@
   function closeTrainingDrawer() {
     drawerRunId = null;
   }
-
-  function openTrainingRun(runId) {
-    search = runId;
-    setActivePage("training");
-  }
 </script>
 
 <div class="h-[100dvh] grid grid-rows-[auto_1fr] bg-(--bg) overflow-x-hidden">
@@ -823,7 +800,6 @@
         {fetchEvalDetail}
         {getEvalDisplay}
         {evalConfigMeta}
-        onOpenTrainingRun={openTrainingRun}
       />
     {/if}
     </main>

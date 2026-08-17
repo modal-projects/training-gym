@@ -1423,24 +1423,6 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
   font-size: 0.84rem;
 }
 
-.cross-link {
-  border: 0;
-  background: transparent;
-  color: color-mix(in srgb, var(--text) 86%, white);
-  padding: 0;
-  font-size: 0.74rem;
-  cursor: pointer;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
-.cross-link:hover {
-  color: var(--text-bright);
-}
-
 .open-modal-link-disabled {
   opacity: 0.5;
   pointer-events: none;

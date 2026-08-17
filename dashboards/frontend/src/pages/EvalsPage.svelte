@@ -29,7 +29,6 @@
     fetchEvalDetail,
     getEvalDisplay,
     evalConfigMeta,
-    onOpenTrainingRun,
   } = $props();
 
   let search = $state("");
@@ -41,9 +40,8 @@
   let expandedInitialized = $state(false);
   let seenDatasets = new Set();
   const evalColumns = [
-    { key: "name", label: "Name", width: 220, minWidth: 140 },
+    { key: "eval_id", label: "Eval ID", width: 220, minWidth: 140 },
     { key: "dataset", label: "Dataset", width: 180, minWidth: 120 },
-    { key: "training", label: "Training run", width: 180, minWidth: 130 },
     { key: "model", label: "Base model", width: 210, minWidth: 140 },
     { key: "status", label: "Status", width: 130, minWidth: 96 },
     { key: "score", label: "Average score", width: 130, minWidth: 110 },
@@ -85,7 +83,6 @@
       nonPlaceholderText(group.meta.evalFn || group.meta.judge) || fallback.evalFn;
     if (dataset) parts.push(dataset);
     if (fnName) parts.push(fnName);
-    parts.push(`${group.deploymentCount} deployment${group.deploymentCount === 1 ? "" : "s"}`);
     return parts.join(" • ");
   }
 
@@ -95,41 +92,12 @@
   }
 
   function evalBaseModel(run, group) {
-    const config = run.eval.config || {};
-    const configModel = safeText(
-      config.model?.model_name ||
-        config.deployment?.model_name ||
-        config.deployment?.served_model_name ||
-        group.meta.model,
-    ).trim();
-    if (configModel) return configModel;
-    return "[unknown Base Model]";
+    const model = nonPlaceholderText(run.eval.model_name) || nonPlaceholderText(group.meta.model);
+    return model || "[unknown Base Model]";
   }
 
-  function evalDeploymentName(run) {
-    const config = run.eval.config || {};
-    const deployment = config.deployment || {};
-    if (deployment.app_name) return deployment.app_name;
-    if (deployment.deployment_name) return deployment.deployment_name;
-    if (deployment.name) return deployment.name;
-    if (deployment.url) {
-      const value = safeText(deployment.url);
-      try {
-        return new URL(value).host;
-      } catch {
-        return value;
-      }
-    }
+  function evalId(run) {
     return safeText(run.eval.eval_id).trim() || "—";
-  }
-
-  function evalTrainingRunId(run) {
-    const config = run.eval.config || {};
-    return safeText(
-      run.eval.training_run_id ||
-        config.training_run_id ||
-        config.deployment?.training_run_id,
-    ).trim();
   }
 
   function toggleGroup(evalConfigId) {
@@ -222,12 +190,9 @@
             includesText(group.meta.evalFn, query);
           if (!groupMatches) {
             runs = runs.filter((run) => {
-              const config = run.eval.config || {};
               return (
                 includesText(run.eval.eval_id, query) ||
-                includesText(config.deployment?.model_name, query) ||
-                includesText(config.deployment?.served_model_name, query) ||
-                includesText(config.deployment?.url, query)
+                includesText(run.eval.model_name, query)
               );
             });
           }
@@ -360,14 +325,13 @@
       status: display.bucket,
       pillStatus: display.pill,
       statusLabel: display.label,
-      model: nonPlaceholderText(meta.model) || "—",
+      model: evalBaseModel(run, group),
       config: nonPlaceholderText(meta.dataset) || "—",
       grading: nonPlaceholderText(meta.evalFn || meta.judge) || "—",
       avgScore: run.avgScore,
       totalRows: run.totalRows,
       createdAt: run.createdAt,
       modalAppUrl: ev.modal_app_url || null,
-      deploymentName: evalDeploymentName(run),
     };
   });
 </script>
@@ -572,35 +536,19 @@
               <ResizableTable class="evals-runs-table" columns={evalColumns} stickyFirstColumn>
                 <tbody>
                   {#each group.visibleRuns as run, runIndex (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}-${runIndex}`)}
-                    {@const deploymentName = evalDeploymentName(run)}
-                    {@const trainingRunId = evalTrainingRunId(run)}
+                    {@const id = evalId(run)}
                     {@const baseModel = evalBaseModel(run, group)}
                     {@const dataset = groupDataset(group)}
                     <tr
                       class="eval-row-clickable"
                       class:row-selected={selectedEval?.run?.eval?.eval_id === run.eval.eval_id}
-                      onclick={(event) => {
-                        if (event.target.closest(".cross-link")) return;
-                        openEvalDrawer(run, group);
-                      }}
+                      onclick={() => openEvalDrawer(run, group)}
                     >
-                      <td class="evals-mono evals-name-cell" title={deploymentName}>
-                        <span class="truncate-text">{deploymentName}</span>
+                      <td class="evals-mono evals-name-cell" title={id}>
+                        <span class="truncate-text">{id}</span>
                       </td>
                       <td class="evals-dataset-cell" title={dataset}>
                         <span class="truncate-text">{dataset}</span>
-                      </td>
-                      <td class="max-w-0" title={trainingRunId || "—"}>
-                        {#if trainingRunId}
-                          <button
-                            class="cross-link"
-                            onclick={() => onOpenTrainingRun?.(trainingRunId)}
-                          >
-                            {trainingRunId}
-                          </button>
-                        {:else}
-                          —
-                        {/if}
                       </td>
                       <td class="base-model-cell" title={baseModel}>
                         <span class="truncate-text">{baseModel}</span>
@@ -657,10 +605,6 @@
       </div>
 
       <section class="p-[0_24px_16px]">
-        <div class="drawer-meta-row">
-          <span class="drawer-meta-key">Deployment</span>
-          <span class="drawer-meta-value">{drawerMeta.deploymentName || "—"}</span>
-        </div>
         <div class="drawer-meta-row">
           <span class="drawer-meta-key">Model</span>
           <span class="drawer-meta-value">{drawerMeta.model}</span>
