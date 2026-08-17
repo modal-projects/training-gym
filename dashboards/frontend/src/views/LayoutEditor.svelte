@@ -1,7 +1,13 @@
 <script>
   import Drawer from "../components/Drawer.svelte";
 
-  let { open = false, layout, onclose = () => {}, onsaved = () => {} } = $props();
+  let {
+    open = false,
+    layout,
+    onclose = () => {},
+    onsaved = () => {},
+    onreset = () => {},
+  } = $props();
   let draft = $state(null);
   let saving = $state(false);
   let message = $state("");
@@ -52,7 +58,7 @@
 
   async function reset() {
     const response = await fetch(`/api/ui/layouts/user/${encodeURIComponent(draft.id)}`, { method: "DELETE" });
-    if (response.ok || response.status === 404) onclose();
+    if (response.ok || response.status === 404) onreset({ scope: "user", id: draft.id });
     else message = `Reset failed: HTTP ${response.status}`;
   }
 </script>

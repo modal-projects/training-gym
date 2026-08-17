@@ -135,6 +135,11 @@
     remoteLayouts = [...remoteLayouts.filter((item) => !(item.scope === doc.scope && item.id === doc.id)), doc];
     editingLayout = false;
   }
+
+  function handleLayoutReset(doc) {
+    remoteLayouts = remoteLayouts.filter((item) => !(item.scope === doc.scope && item.id === doc.id));
+    editingLayout = false;
+  }
 </script>
 
   {#if layout}
@@ -211,6 +216,7 @@
     layout={layout}
     onclose={() => (editingLayout = false)}
     onsaved={handleLayoutSaved}
+    onreset={handleLayoutReset}
   />
 {/if}
 
