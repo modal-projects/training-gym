@@ -108,7 +108,7 @@ _PATCH_BRIDGE_PER_TOKEN_LOSS_B64 = encode_patch(
 _PATCH_STOP_TOKEN_DIAG_B64 = encode_patch("patch_stop_token_diagnostic", _SLIME_PATCHES)
 # The Qwen3-ASR Megatron->HF converter (registers the qwen3_asr mapping incl. the
 # audio tower). It lives in the base image — not the ASR recipe — because torch_dist
-# -> HF conversion runs in the shared convert_checkpoint_to_hf path (deploy/eval),
+# -> HF conversion runs in the shared convert_megatron_checkpoint_to_hf path (deploy/eval),
 # which has no recipe; baking it here makes both train-time export and deploy-time
 # conversion ASR-capable. Additive + idempotent, so non-ASR runs are untouched.
 _PATCH_QWEN3_ASR_EXPORT_B64 = encode_patch(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import threading
 from enum import Enum
 from typing import Any
@@ -15,9 +14,10 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from modal_training_gym.common.checkpoint import (
     Checkpoint,
     CheckpointType,
-    convert_checkpoint_to_hf,
+    convert_megatron_checkpoint_to_hf,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.openai_messages import _messages_to_openai
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
@@ -111,32 +111,6 @@ def _raise_for_proxy_auth(status_code: int, url: str) -> None:
         "unauthenticated=False) to "
         "require proxy auth."
     )
-
-
-def _messages_to_openai(messages: list[dict]) -> list[dict]:
-    """Serialize internal tool-call arguments without mutating caller messages."""
-    wire_messages = []
-    for message in messages:
-        wire_message = dict(message)
-        tool_calls = message.get("tool_calls")
-        if isinstance(tool_calls, list):
-            wire_tool_calls = []
-            for tool_call in tool_calls:
-                if not isinstance(tool_call, dict):
-                    wire_tool_calls.append(tool_call)
-                    continue
-                wire_tool_call = dict(tool_call)
-                function = tool_call.get("function")
-                if isinstance(function, dict):
-                    wire_function = dict(function)
-                    arguments = function.get("arguments")
-                    if isinstance(arguments, dict):
-                        wire_function["arguments"] = json.dumps(arguments)
-                    wire_tool_call["function"] = wire_function
-                wire_tool_calls.append(wire_tool_call)
-            wire_message["tool_calls"] = wire_tool_calls
-        wire_messages.append(wire_message)
-    return wire_messages
 
 
 class DeploymentStatus(Enum):
@@ -282,7 +256,7 @@ class CustomDeployment(BaseModel):
             checkpoint is not None
             and checkpoint.checkpoint_type == CheckpointType.megatron
         ):
-            checkpoint = convert_checkpoint_to_hf(
+            checkpoint = convert_megatron_checkpoint_to_hf(
                 checkpoint=checkpoint,
                 model=model,
                 recipe=recipe,
@@ -404,24 +378,25 @@ class CustomDeployment(BaseModel):
     def chat(
         self,
         messages: list[dict],
-        ensure_ready: bool = True,
-        max_attempts: int = 4,
         timeout: int = 120,
-        **kwargs,
+        max_attempts: int = 4,
+        **extra,
     ) -> dict:
         """Return one OpenAI-compatible chat-completion message while
         preserving structured fields like tool_calls and reasoning_content.
+
+        Extra keyword arguments are Chat Completions body fields. Call
+        ``wait_until_ready`` before chatting if the deployment may still be
+        starting.
         """
         import time
 
         import requests
 
-        if ensure_ready:
-            self.wait_until_ready()
         body = {
             "model": self.served_model_name,
             "messages": _messages_to_openai(messages),
-            **kwargs,
+            **extra,
         }
         transient_status_codes = {429, 500, 502, 503, 504}
 
@@ -441,7 +416,6 @@ class CustomDeployment(BaseModel):
                         f"Transient generation error {resp.status_code} from {self.url}; "
                         f"retrying ({attempt}/{max_attempts})..."
                     )
-                    self.wait_until_ready(timeout=120)
                     time.sleep(min(2 * attempt, 5))
                     continue
                 _raise_for_proxy_auth(resp.status_code, self.url)
@@ -454,7 +428,6 @@ class CustomDeployment(BaseModel):
                     f"Transient generation transport error from {self.url}: {exc}; "
                     f"retrying ({attempt}/{max_attempts})..."
                 )
-                self.wait_until_ready(timeout=120)
                 time.sleep(min(2 * attempt, 5))
 
         raise RuntimeError(
@@ -464,7 +437,6 @@ class CustomDeployment(BaseModel):
     def generate(
         self,
         prompt: str | list[dict],
-        ensure_ready: bool = True,
         **kwargs,
     ) -> str:
         messages = kwargs.pop("messages", None)
@@ -472,7 +444,6 @@ class CustomDeployment(BaseModel):
             messages = [{"role": "user", "content": prompt}]
         message = self.chat(
             messages,
-            ensure_ready=ensure_ready,
             **kwargs,
         )
         content = message.get("content")

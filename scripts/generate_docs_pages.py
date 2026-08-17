@@ -6,6 +6,7 @@ import posixpath
 import re
 import subprocess
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 REPO_URL = "https://github.com/modal-projects/training-gym"
@@ -158,23 +159,57 @@ def rewrite_images(markdown: str, *, source_dir: PurePosixPath) -> str:
     return MARKDOWN_IMAGE.sub(replace, markdown)
 
 
-_TUTORIAL_TABLE_BEGIN = "<!-- BEGIN TUTORIAL TABLE -->"
-_TUTORIAL_TABLE_END = "<!-- END TUTORIAL TABLE -->"
+@dataclass(frozen=True)
+class Catalog:
+    begin: str
+    end: str
+    css_class: str
+    column_tracks: tuple[str, ...]
+
+    @property
+    def grid_template(self) -> str:
+        return " ".join(f"minmax(0, {track})" for track in self.column_tracks)
 
 
-def wrap_tutorial_catalog(markdown: str) -> str:
-    if _TUTORIAL_TABLE_BEGIN not in markdown or _TUTORIAL_TABLE_END not in markdown:
-        return markdown
-    markdown = markdown.replace(
-        _TUTORIAL_TABLE_BEGIN,
-        f'<div class="tutorial-catalog">\n\n{_TUTORIAL_TABLE_BEGIN}',
-        1,
-    )
-    return markdown.replace(
-        _TUTORIAL_TABLE_END,
-        f"{_TUTORIAL_TABLE_END}\n\n</div>",
-        1,
-    )
+CATALOGS: tuple[Catalog, ...] = (
+    Catalog(
+        begin="<!-- BEGIN TUTORIAL TABLE -->",
+        end="<!-- END TUTORIAL TABLE -->",
+        css_class="tutorial-catalog",
+        column_tracks=("1.6fr", "2.6fr", "0.9fr", "1fr", "1fr"),
+    ),
+    Catalog(
+        begin="<!-- BEGIN MODELS TABLE -->",
+        end="<!-- END MODELS TABLE -->",
+        css_class="models-catalog",
+        column_tracks=("1.7fr", "0.7fr", "1.1fr", "1.6fr"),
+    ),
+)
+
+
+def wrap_catalogs(markdown: str) -> str:
+    for catalog in CATALOGS:
+        has_begin = catalog.begin in markdown
+        has_end = catalog.end in markdown
+        if not has_begin and not has_end:
+            continue
+        if has_begin != has_end:
+            raise ValueError(f"catalog {catalog.css_class} has a one-sided marker pair")
+        markdown = markdown.replace(
+            catalog.begin,
+            (
+                f'<div class="catalog {catalog.css_class}" '
+                f'style="--catalog-columns: {catalog.grid_template}">\n\n'
+                f"{catalog.begin}"
+            ),
+            1,
+        )
+        markdown = markdown.replace(
+            catalog.end,
+            f"{catalog.end}\n\n</div>",
+            1,
+        )
+    return markdown
 
 
 def strip_first_heading(markdown: str) -> str:
@@ -213,7 +248,7 @@ def transform_markdown(
 ) -> str:
     page = source.read_text()
     page = strip_developer_guide(page)
-    page = wrap_tutorial_catalog(page)
+    page = wrap_catalogs(page)
     page = convert_github_callouts(page)
     page = rewrite_images(page, source_dir=source_dir)
     page = rewrite_links(

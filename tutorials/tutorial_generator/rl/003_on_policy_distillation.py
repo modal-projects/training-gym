@@ -11,6 +11,7 @@ TUTORIAL_METADATA = {
         "Qwen3_5_4B",
         "Qwen3_5_9B",
         "CustomDeployment",
+        "Endpoint",
         "SlimeRecipe",
         "TrainConfig",
     ],
@@ -35,7 +36,7 @@ def _intro():
 
     1. **Deploy the teacher** (Qwen3.5-9B) on an SGLang server with `CustomDeployment`.
     2. **Load a math dataset** (`dapo-math-17k`) and define a verifiable eval that checks `Answer: \\boxed{N}`.
-    3. **Evaluate the base student** (Qwen3.5-4B) to get a baseline accuracy.
+    3. **Evaluate the base student** (Qwen3.5-4B) on an `Endpoint` to get a baseline accuracy.
     4. **Define a reward function** that calls the teacher's `/generate` endpoint with `return_logprob=True` and combines the teacher log-probs with a math correctness score.
     5. **Train with GRPO + OPD** using `SlimeRecipe` — slime applies a per-token reverse KL penalty from the teacher log-probs on top of the GRPO advantage.
     6. **Evaluate the trained student** and compare accuracy before vs after.
@@ -96,6 +97,7 @@ def _imports():
 
     from modal_training_gym import (
         CustomDeployment,
+        Endpoint,
         HuggingFaceDataset,
         Qwen3_5_4B,
         Qwen3_5_9B,
@@ -129,6 +131,7 @@ def _deploy_teacher():
         unauthenticated=True,
     )
     print(f"Teacher URL: {teacher_deployment.url}")
+    teacher_deployment.wait_until_ready(timeout=15 * 60)
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 
@@ -145,12 +148,18 @@ def _teacher_test_intro():
 @notebook_only
 @code
 def _teacher_test():
-    response = teacher_deployment.generate(
-        "Solve the following math problem step by step. The last line of your "
-        "response should be of the form Answer: \\boxed{$Answer} where $Answer "
-        "is the answer to the problem.\n\nWhat is 17 * 23?",
+    msg = teacher_deployment.chat(
+        [{
+            "role": "user",
+            "content": (
+                "Solve the following math problem step by step. The last line of your "
+                "response should be of the form Answer: \\boxed{$Answer} where $Answer "
+                "is the answer to the problem.\n\nWhat is 17 * 23?"
+            ),
+        }],
         chat_template_kwargs={"enable_thinking": True},
     )
+    response = msg.get("content") or msg.get("reasoning_content") or ""
     print(response[-200:])
 
 
@@ -225,15 +234,15 @@ def _eval_fn():
             pass
         return pred == gt
 
-    def math_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
+    def math_eval_fn(deployment: Endpoint, example: dict) -> dict:
         prompt = example["prompt"][0]["content"]
         label = example["label"]
 
-        response = deployment.generate(
-            prompt,
-            ensure_ready=False,
+        msg = deployment.chat(
+            [{"role": "user", "content": prompt}],
             chat_template_kwargs={"enable_thinking": True},
         )
+        response = msg.get("content") or msg.get("reasoning_content") or ""
 
         correct = _check_math(response, label)
         pred = _normalize_answer(_extract_answer(response))
@@ -251,7 +260,7 @@ def _eval_fn():
     ) -> tuple[float, list[dict]]:
         from concurrent.futures import ThreadPoolExecutor
 
-        deployment.wait_until_ready(timeout=3000)
+        deployment.wait_until_ready(timeout=15 * 60)
 
         def _score_one(example):
             return math_eval_fn(deployment, example)
@@ -280,9 +289,8 @@ def _eval_base_intro():
 @code
 def _eval_base():
     base_model = Qwen3_5_4B()
-    base_deployment = CustomDeployment.launch(
-        base_model,
-        unauthenticated=True,
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Student URL: {base_deployment.url}")
 
@@ -425,8 +433,8 @@ def _train():
 
     print("--- Starting OPD training... ---")
     print(f"  Teacher: {teacher_deployment.url}")
-    print(f"  Student: Qwen3.5-4B")
-    print(f"  Dataset: dapo-math-17k (100 problems)")
+    print("  Student: Qwen3.5-4B")
+    print("  Dataset: dapo-math-17k (100 problems)")
     train_result = training_run.train()
     print(f"Training run id: {train_result.training_run_id}")
     print("--- Training complete ---")
@@ -450,12 +458,8 @@ def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"Checkpoint: {checkpoint.path}")
 
-    trained_deployment = CustomDeployment.launch(
-        Qwen3_5_4B(),
-        checkpoint=checkpoint,
-        app_name="qwen3-5-4b-opd-trained-serve",
-        served_model_name="qwen3-5-4b-opd",
-        unauthenticated=True,
+    trained_deployment = Endpoint.launch(
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 
