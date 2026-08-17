@@ -1,7 +1,7 @@
 """``HFModelConfiguration.download()`` against a populated ``model_path``.
 
-A populated ``model_path`` already holds the weights to load, so mirroring
-the base snapshot there must not replace them.
+A populated ``model_path`` already holds the weights to load. Mirroring the
+base snapshot preserves those weights.
 """
 
 from __future__ import annotations

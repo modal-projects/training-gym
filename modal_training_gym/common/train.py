@@ -1,4 +1,5 @@
 import dataclasses as _dc
+import os
 import secrets as _secrets
 import sys
 import threading
@@ -9,12 +10,12 @@ from typing import Any
 from typing import TypeVar
 from typing import cast
 
+from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.checkpoint import Checkpoint, apply_train_checkpoint
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.status import (
     FrameworkStatus,
@@ -361,12 +362,10 @@ class TrainConfig:
         training framework and carries Modal infra settings (GPU type, node
         count, image) plus framework CLI flags.
     checkpoint : Checkpoint | None
-        Checkpoint to resume training from. A Megatron ``iter_*`` sets
-        ``recipe.load`` to the resume root. ``--hf-checkpoint`` stays the
-        Hub id or existing HF path. An HF export becomes
-        ``--hf-checkpoint``; megatron resume uses the sibling ``iter_*``
-        parent when that export is ``iter_*_hf``. Omit to start from the
-        base model weights. Default ``None``.
+        Megatron checkpoint to resume training from. The checkpoint's parent
+        directory becomes the recipe's ``load`` path; the attached model
+        remains the Hugging Face source for tokenizer and architecture data.
+        Omit to start from the base model weights. Default ``None``.
     merge_model_recipe : bool
         When ``True``, merges the known-model preset recipe (e.g.
         ``Qwen3_4b_Recipe``) onto recipe fields you left unset. Set
@@ -430,7 +429,18 @@ class TrainConfig:
             self.recipe,
             merge_model_recipe=self.merge_model_recipe,
         )
-        apply_train_checkpoint(recipe, self.model, self.checkpoint)
+        if self.checkpoint is None:
+            return recipe
+        if self.checkpoint.checkpoint_type != CheckpointType.megatron:
+            raise TrainingGymConfigError(
+                "Training can only resume from a Megatron checkpoint; "
+                "Hugging Face exports are serving artifacts."
+            )
+        if isinstance(recipe, (MilesRecipe, SlimeRecipe)):
+            recipe = _dc.replace(
+                recipe,
+                load=os.path.dirname(self.checkpoint.path.rstrip("/")),
+            )
         return recipe
 
     def _build_app(self, training_run_id: str | None = None):
@@ -521,9 +531,7 @@ class TrainConfig:
                 serialize_recipe_params,
             )
 
-            combined = _resolve_recipe(
-                model, recipe, merge_model_recipe=self.merge_model_recipe
-            )
+            combined = self._prepare_recipe()
             summary["recipe"] = {
                 # gpu_type is a launcher-only field (in _MILES_SKIP) so it is
                 # absent from serialize_recipe_params for miles; the dashboard
