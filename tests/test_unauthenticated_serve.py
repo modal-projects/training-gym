@@ -188,7 +188,6 @@ def test_save_preserves_dashboard_metadata_shape(monkeypatch) -> None:
         modal_app_id="ap-test",
         modal_app_url="https://modal.com/apps/ap-test",
         url="https://example.modal.run",
-        status="running",
     )
 
     def put(_store, _key, payload) -> None:
@@ -212,3 +211,4 @@ def test_save_preserves_dashboard_metadata_shape(monkeypatch) -> None:
         "served_model_name": "model",
         "unauthenticated": True,
     }
+    assert "status" not in captured["payload"]

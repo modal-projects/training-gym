@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import threading
-from enum import Enum
-from typing import Any
 
 from modal.experimental import list_deployed_apps
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -26,7 +24,6 @@ from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 from modal_training_gym.deploy_recipes.vllm_recipe import VllmRecipe
 from modal_training_gym.utils.metadata import (
     MetadataStore,
-    vol_get,
     vol_put,
     vol_upsert_summary_item,
 )
@@ -113,47 +110,6 @@ def _raise_for_proxy_auth(status_code: int, url: str) -> None:
     )
 
 
-class DeploymentStatus(Enum):
-    RUNNING = "running"
-    STOPPED = "stopped"
-    READY = "ready"
-    INITIALIZING = "initializing"
-    INACTIVE = "inactive"
-
-
-def update_deployment_status(
-    deployment_id: str,
-    status: str,
-    *,
-    seed: dict[str, Any] | None = None,
-) -> bool:
-    """Update a deployment's status in both individual record and summary.
-
-    Returns ``True`` when the write succeeds. If the canonical record is
-    missing, ``seed`` (e.g. a summary-only row) is used to create it.
-    """
-    try:
-        payload = vol_get(MetadataStore.DEPLOYMENTS, deployment_id)
-    except KeyError:
-        if seed is None:
-            return False
-        payload = dict(seed)
-        payload["deployment_id"] = deployment_id
-    payload["status"] = status
-    vol_put(MetadataStore.DEPLOYMENTS, deployment_id, payload)
-    vol_upsert_summary_item(
-        MetadataStore.DEPLOYMENTS_SUMMARY,
-        payload,
-        item_id_key="deployment_id",
-        sort_key=lambda item: (
-            str(item.get("deployment_config", {}).get("app_name", "")),
-            str(item.get("deployment_id", "")),
-        ),
-        reverse=True,
-    )
-    return True
-
-
 class _CrashloopDetector:
     """Crashloop heuristic over periodic container-count samples.
 
@@ -215,7 +171,6 @@ class CustomDeployment(BaseModel):
     modal_app_id: str = ""
     modal_app_url: str = ""
     url: str
-    status: str = DeploymentStatus.RUNNING.value
 
     @model_validator(mode="before")
     @classmethod
@@ -308,7 +263,6 @@ class CustomDeployment(BaseModel):
                 served_model_name=served_model_name,
                 checkpoints_volume=checkpoints_volume,
                 checkpoints_mount_path=checkpoints_mount_path,
-                deployment_id=deployment_id,
                 unauthenticated=unauthenticated,
             )
         elif isinstance(recipe, VllmRecipe):
@@ -323,7 +277,6 @@ class CustomDeployment(BaseModel):
                 served_model_name=served_model_name,
                 checkpoints_volume=checkpoints_volume,
                 checkpoints_mount_path=checkpoints_mount_path,
-                deployment_id=deployment_id,
                 unauthenticated=unauthenticated,
             )
         else:
@@ -368,7 +321,6 @@ class CustomDeployment(BaseModel):
             modal_app_id=modal_app_id,
             modal_app_url=modal_app_dashboard_url(modal_app_id),
             url=url,
-            status=DeploymentStatus.RUNNING.value,
         )
         deployment.save()
         return deployment
@@ -478,7 +430,6 @@ class CustomDeployment(BaseModel):
             "modal_app_id": self.modal_app_id,
             "modal_app_url": self.modal_app_url,
             "url": self.url,
-            "status": self.status,
         }
         vol_put(
             MetadataStore.DEPLOYMENTS,

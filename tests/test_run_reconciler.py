@@ -297,3 +297,19 @@ def test_load_running_runs_reads_canonical_store_not_only_summary(fake_volume):
 
     loaded = _load_running_runs()
     assert {run.training_run_id for run in loaded} == {"canonical-only"}
+
+
+def test_resolve_app_liveness_fetches_lifecycle_once():
+    from modal_training_gym.common.modal_lifecycle import resolve_app_liveness
+
+    calls: list[str] = []
+
+    def get_state(app_id: str) -> int:
+        calls.append(app_id)
+        return 99
+
+    state, live = resolve_app_liveness("ap-123", get_lifecycle_state=get_state)
+
+    assert calls == ["ap-123"]
+    assert state == 99
+    assert live is False

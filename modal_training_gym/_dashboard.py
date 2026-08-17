@@ -355,7 +355,7 @@ def compact_summaries() -> None:
     timeout=1800,
 )
 def reconcile() -> None:
-    """Reconcile orphaned training runs and deployments every 30 minutes."""
+    """Reconcile orphaned training runs every 30 minutes."""
     from modal_training_gym.common.reconcile import reconcile as _reconcile
 
     outcome = _reconcile()
@@ -365,13 +365,6 @@ def reconcile() -> None:
             print(f"  {result.training_run_id}: {result.reason}")
     else:
         print("No orphaned runs to reconcile.")
-
-    if outcome.deployments:
-        print(f"Reconciled {len(outcome.deployments)} orphaned deployment(s):")
-        for result in outcome.deployments:
-            print(f"  {result.deployment_id}: {result.reason}")
-    else:
-        print("No orphaned deployments to reconcile.")
 
 
 @app.function(
