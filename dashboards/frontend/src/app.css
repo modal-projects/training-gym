@@ -297,16 +297,6 @@ input {
   }
 }
 
-/* ===== components/Loading.svelte ===== */
-@keyframes loading-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* ===== components/ChartSkeleton.svelte ===== */
 .cs-pulse {
   display: block;
@@ -697,17 +687,6 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
 
 .tab.tabs-active .tab-count {
   color: var(--text-bright);
-}
-
-/* ===== components/CollapsibleSection.svelte ===== */
-.collapsible-chevron {
-  flex-shrink: 0;
-  color: var(--muted);
-  transition: transform 0.2s ease;
-}
-
-.collapsible-chevron.collapsible-open {
-  transform: rotate(180deg);
 }
 
 /* ===== components/FilterBar.svelte ===== */
@@ -1337,108 +1316,6 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
   overscroll-behavior: contain;
 }
 
-/* ===== FrameworkSection.svelte ===== */
-.framework-section {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 0.7rem;
-  overflow: hidden;
-}
-.collapse-arrow {
-  color: var(--muted-strong);
-  font-size: 0.7em;
-  transition: transform 0.2s;
-}
-.framework-section.collapsed .collapse-arrow {
-  transform: rotate(-90deg);
-}
-/* ===== RunRow.svelte ===== */
-tr.framework-run-row td {
-  padding: 0.5rem 0.8rem;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-  font-size: 0.79rem;
-}
-tr.framework-run-row:hover td {
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-}
-tr.framework-run-row.clickable td {
-  cursor: pointer;
-}
-tr.framework-run-row.clickable:focus-visible td {
-  outline: 1px solid var(--accent-border);
-  outline-offset: -1px;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-tr.framework-run-row:last-child td {
-  border-bottom: none;
-}
-.run-row-mono {
-  font-family: var(--font-mono);
-}
-.config-tag {
-  display: inline-block;
-  padding: 0.12rem 0.4rem;
-  background: var(--panel-alt);
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  font-size: 0.67rem;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.result-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.12rem 0.55rem;
-  border-radius: 9999px;
-  font-size: 0.71rem;
-  font-weight: 500;
-  border: 1px solid transparent;
-}
-.result-badge::before {
-  content: "";
-  width: 0.38rem;
-  height: 0.38rem;
-  border-radius: 9999px;
-  background: currentColor;
-}
-.result-pending {
-  border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
-  background: color-mix(in srgb, var(--yellow) 10%, transparent);
-  color: var(--yellow);
-}
-.result-meta {
-  margin-top: 0.18rem;
-  font-size: 0.7rem;
-  color: var(--muted-strong);
-}
-.tag {
-  display: inline-block;
-  padding: 0.12rem 0.45rem;
-  margin: 0 0.2rem 0.15rem 0;
-  background: var(--panel-alt);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.68rem;
-  color: var(--muted);
-  cursor: default;
-}
-.framework-run-row .tag strong {
-  color: var(--text-bright);
-  font-weight: 500;
-}
-.pill-link {
-  display: inline-block;
-  padding: 0.14rem 0.48rem;
-  margin-right: 0.3rem;
-  border-radius: 6px;
-  font-size: 0.68rem;
-  font-weight: 500;
-  text-decoration: none;
-}
 /* ============================================================
    Shared patterns (deduplicated from per-page/per-component copies)
    ============================================================ */
