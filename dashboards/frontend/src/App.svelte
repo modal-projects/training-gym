@@ -1,25 +1,22 @@
 <script>
   import { onMount } from "svelte";
-  import { Book, CheckCircle2, Rocket, Zap } from "lucide-svelte";
+  import { Book, CheckCircle2, Zap } from "lucide-svelte";
   import "./app.css";
   import Sidebar from "./components/Sidebar.svelte";
   import DashboardHeader from "./components/DashboardHeader.svelte";
   import TrainingPage from "./pages/TrainingPage.svelte";
   import TrainingRunDetailPage from "./pages/TrainingRunDetailPage.svelte";
-  import DeploymentsPage from "./pages/DeploymentsPage.svelte";
   import EvalsPage from "./pages/EvalsPage.svelte";
-  import { fetchRuns, fetchEvals, fetchDeployments, fetchEvalDetail } from "./lib/api.js";
+  import { fetchRuns, fetchEvals, fetchEvalDetail } from "./lib/api.js";
   import logoSvg from "./lib/logo.svg";
-  import { fmtDuration, truncateId } from "./lib/format.js";
+  import { fmtDuration } from "./lib/format.js";
 
   const DOCS_URL = "https://gym.modal.dev";
 
   let allRuns = $state([]);
   let allEvals = $state([]);
-  let allDeployments = $state([]);
   let loading = $state(true);
   let loadingEvals = $state(false);
-  let loadingDeployments = $state(false);
   let error = $state(null);
   let search = $state("");
   let activeRecipes = $state(new Set());
@@ -45,26 +42,20 @@
   let hasLoadedRuns = false;
   let initialRunsLoadStarted = false;
   let evalsRequestId = 0;
-  let deploymentsRequestId = 0;
   let hasLoadedEvals = $state(false);
-  let hasLoadedDeployments = $state(false);
-  let pendingDeploymentFocus = $state(null);
 
   const pageMeta = {
     training: { title: "Training runs" },
-    deployments: { title: "Deployments" },
     evals: { title: "Evals" },
   };
 
   const pagePaths = {
     training: "/training",
-    deployments: "/deployments",
     evals: "/evals",
   };
 
   function pageFromPath(pathname) {
     if (pathname === "/" || pathname.startsWith("/training")) return "training";
-    if (pathname.startsWith("/deployments")) return "deployments";
     if (pathname.startsWith("/evals")) return "evals";
     return "training";
   }
@@ -77,7 +68,6 @@
 
   const navItems = [
     { key: "training", label: "Training runs", Icon: Zap, path: pagePaths.training },
-    { key: "deployments", label: "Deployments", Icon: Rocket, path: pagePaths.deployments },
     { key: "evals", label: "Evals", Icon: CheckCircle2, path: pagePaths.evals },
   ];
 
@@ -92,7 +82,10 @@
       activeTrainingRunId = runIdFromPath(window.location.pathname);
     };
 
-    if (window.location.pathname === "/") {
+    if (
+      window.location.pathname === "/" ||
+      window.location.pathname.startsWith("/deployments")
+    ) {
       window.history.replaceState({}, "", pagePaths.training);
     } else {
       syncPageWithPath();
@@ -155,17 +148,6 @@
     return safeText(value).toLowerCase().includes(query);
   }
 
-  function normalizePath(value) {
-    return safeText(value).replace(/\/+$/, "");
-  }
-
-  function pathMatches(left, right) {
-    const a = normalizePath(left);
-    const b = normalizePath(right);
-    if (!a || !b) return false;
-    return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
-  }
-
   function getErrorMessage(value) {
     if (value instanceof Error) return value.message;
     if (typeof value === "string") return value;
@@ -186,52 +168,6 @@
           throw new Error(`${label} request timed out after ${timeoutMs}ms`);
         throw err;
       });
-  }
-
-  function deploymentLabel(deployment) {
-    return (
-      deployment?.app_name ||
-      deployment?.served_model_name ||
-      deployment?.model_name ||
-      "Deployment"
-    );
-  }
-
-  function findRunForDeployment(deployment) {
-    const deploymentAppName = safeText(deployment?.app_name || "");
-    const deploymentModelName = safeText(deployment?.model_name || "");
-    const deploymentModelPath = normalizePath(deployment?.model_path || "");
-    const deploymentCheckpointPath = normalizePath(deployment?.checkpoint_path || "");
-
-    return (
-      allRuns.find((run) => {
-        const result = run.train_result || {};
-        const runModelName = safeText(
-          result.model_name || run.config_summary?.model_name || "",
-        );
-        const runModelPath = normalizePath(result.model_path || "");
-        const runCheckpointDir = normalizePath(result.checkpoint_dir || "");
-
-        if (run.deployment_id && deploymentAppName && run.deployment_id === deploymentAppName) {
-          return true;
-        }
-        if (
-          deploymentCheckpointPath &&
-          (pathMatches(deploymentCheckpointPath, runCheckpointDir) ||
-            pathMatches(deploymentCheckpointPath, runModelPath))
-        ) {
-          return true;
-        }
-        if (
-          deploymentModelPath &&
-          (pathMatches(deploymentModelPath, runCheckpointDir) ||
-            pathMatches(deploymentModelPath, runModelPath))
-        ) {
-          return true;
-        }
-        return !!deploymentModelName && deploymentModelName === runModelName;
-      }) || null
-    );
   }
 
   async function loadRuns() {
@@ -317,32 +253,12 @@
     if (!isStale()) loadingEvals = false;
   }
 
-  async function loadDeployments() {
-    const requestId = ++deploymentsRequestId;
-    const isStale = () => requestId !== deploymentsRequestId;
-
-    if (!allDeployments.length) loadingDeployments = true;
-    try {
-      const deployments = await fetchWithTimeout(fetchDeployments, 15000, "deployments");
-      if (isStale()) return;
-      allDeployments = deployments;
-      hasLoadedDeployments = true;
-    } catch (reason) {
-      if (isStale()) return;
-      if (!allDeployments.length) allDeployments = [];
-      console.warn(getErrorMessage(reason));
-    }
-    if (!isStale()) loadingDeployments = false;
-  }
-
   async function load() {
     refreshing = true;
     try {
       const tasks = [loadRuns()];
       if (activePage === "evals") {
-        tasks.push(loadEvals(), loadDeployments());
-      } else if (activePage === "deployments") {
-        tasks.push(loadDeployments());
+        tasks.push(loadEvals());
       }
       await Promise.all(tasks);
     } finally {
@@ -363,15 +279,6 @@
     }
     if (activePage === "evals" && !hasLoadedEvals) {
       void loadEvals();
-    }
-    if (activePage === "evals" && !hasLoadedDeployments) {
-      void loadDeployments();
-    }
-    if (activePage === "deployments" && !hasLoadedEvals) {
-      void loadEvals();
-    }
-    if (activePage === "deployments" && !hasLoadedDeployments) {
-      void loadDeployments();
     }
   });
 
@@ -467,19 +374,6 @@
   let failedTotal = $derived(allRuns.filter((run) => getStatus(run) === "failed").length);
   let runningTotal = $derived(
     allRuns.length - completedTotal - cancelledTotal - stoppedTotal - failedTotal,
-  );
-
-  let deploymentRows = $derived.by(() =>
-    [...allDeployments]
-      .map((deployment) => ({
-        deployment,
-        run: findRunForDeployment(deployment),
-      }))
-      .sort((a, b) => {
-        const tsA = a.deployment.created_at || a.run?.created_at || 0;
-        const tsB = b.deployment.created_at || b.run?.created_at || 0;
-        return (tsB || 0) - (tsA || 0);
-      }),
   );
 
   function evalAccuracy(ev) {
@@ -735,12 +629,9 @@
     if (activePage === "training" && activeTrainingRunId) return "run details";
     if (activePage === "training" && loading) return "loading...";
     if (activePage === "evals" && loadingEvals) return "loading...";
-    if (activePage === "deployments" && loadingDeployments) return "loading...";
     if (error) return "error";
     if (activePage === "evals")
       return `${allEvals.length} eval${allEvals.length === 1 ? "" : "s"}`;
-    if (activePage === "deployments")
-      return `${allDeployments.length} deployment${allDeployments.length === 1 ? "" : "s"}`;
     if (!allRuns.length) return "0 runs";
     return `${filteredRuns.length} of ${allRuns.length} runs`;
   });
@@ -840,18 +731,6 @@
     search = runId;
     setActivePage("training");
   }
-
-  function openDeployment(deploymentRef) {
-    const value = safeText(deploymentRef).trim();
-    if (!value) return;
-    pendingDeploymentFocus = value;
-    setActivePage("deployments");
-    if (!hasLoadedDeployments) void loadDeployments();
-  }
-
-  function clearDeploymentFocus() {
-    pendingDeploymentFocus = null;
-  }
 </script>
 
 <div class="h-[100dvh] grid grid-rows-[auto_1fr] bg-(--bg) overflow-x-hidden">
@@ -936,24 +815,9 @@
         onSelectAllGroups={selectAllGroups}
         onClearGroups={clearGroups}
       />
-    {:else if activePage === "deployments"}
-      <DeploymentsPage
-        {allDeployments}
-        {allEvals}
-        loading={loadingDeployments}
-        {error}
-        {deploymentRows}
-        {deploymentLabel}
-        {truncateId}
-        {getStatus}
-        focusDeploymentRef={pendingDeploymentFocus}
-        onFocusResolved={clearDeploymentFocus}
-        onOpenTrainingRun={openTrainingRun}
-      />
     {:else if activePage === "evals"}
       <EvalsPage
         {allEvals}
-        {deploymentRows}
         {evalCompletedTotal}
         {evalPendingTotal}
         {evalFailedTotal}
@@ -964,7 +828,6 @@
         {getEvalDisplay}
         {evalConfigMeta}
         onOpenTrainingRun={openTrainingRun}
-        onOpenDeployment={openDeployment}
       />
     {/if}
     </main>

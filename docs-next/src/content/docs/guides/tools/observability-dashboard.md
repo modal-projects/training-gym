@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-Every training run, deployment, and eval launched through
+Every training run and eval launched through
 `modal-training-gym` writes metadata to a shared Modal Volume. The
 **observability dashboard** is a Modal web app that reads that volume and
 gives you a live view of everything the package is doing in your
@@ -51,9 +51,8 @@ The landing page lists every training run in your workspace:
 
 ![Training runs list with annotated components](/observability_dashboard_1_annotated.png)
 
-1. **Sections** — switch between *Training runs*, *Deployments* (models
-   served with `CustomDeployment`), and *Evals* (saved evaluation
-   results written to the metadata volume).
+1. **Sections** — switch between *Training runs* and *Evals* (saved
+   evaluation results written to the metadata volume).
 2. **Status cards** — workspace-wide counts of completed, pending,
    stopped, and failed runs.
 3. **Search and filters** — search by run name and filter by status,

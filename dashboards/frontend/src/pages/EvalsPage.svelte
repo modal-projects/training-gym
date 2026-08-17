@@ -20,7 +20,6 @@
 
   let {
     allEvals,
-    deploymentRows,
     evalCompletedTotal,
     evalPendingTotal,
     evalFailedTotal,
@@ -31,7 +30,6 @@
     getEvalDisplay,
     evalConfigMeta,
     onOpenTrainingRun,
-    onOpenDeployment,
   } = $props();
 
   let search = $state("");
@@ -97,131 +95,8 @@
     return nonPlaceholderText(group.meta.dataset) || fallback.dataset || "Unknown";
   }
 
-  function deploymentIdValue(deployment) {
-    return safeText(deployment?.deployment_id || deployment?.id).trim();
-  }
-
-  function normalizePath(value) {
-    return safeText(value).replace(/\/+$/, "").toLowerCase();
-  }
-
-  function toTimestampSeconds(value) {
-    if (value && typeof value === "object" && "value" in value) {
-      return toTimestampSeconds(value.value);
-    }
-    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-    const text = safeText(value).trim();
-    if (!text) return 0;
-    const numeric = Number(text);
-    if (Number.isFinite(numeric)) return numeric;
-    const epochMs = Date.parse(text);
-    if (Number.isFinite(epochMs)) return Math.floor(epochMs / 1000);
-    return 0;
-  }
-
-  function deploymentModelValue(deployment) {
-    return safeText(
-      deployment?.model_name ||
-        deployment?.deployment_config?.model?.model_name ||
-        deployment?.served_model_name ||
-        deployment?.deployment_config?.served_model_name,
-    ).trim();
-  }
-
-  let deploymentsById = $derived.by(() => {
-    const byId = new Map();
-    for (const row of deploymentRows || []) {
-      const deployment = row?.deployment || {};
-      const deploymentId = deploymentIdValue(deployment);
-      const appName = safeText(deployment?.app_name).trim();
-      if (deploymentId && !byId.has(deploymentId)) byId.set(deploymentId, row);
-      if (appName && !byId.has(appName)) byId.set(appName, row);
-    }
-    return byId;
-  });
-
-  let deploymentsByUrl = $derived.by(() => {
-    const byUrl = new Map();
-    for (const row of deploymentRows || []) {
-      const deployment = row?.deployment || {};
-      const normalized = normalizePath(deployment?.url);
-      if (normalized && !byUrl.has(normalized)) byUrl.set(normalized, row);
-    }
-    return byUrl;
-  });
-
-  let deploymentsByModel = $derived.by(() => {
-    const byModel = new Map();
-    for (const row of deploymentRows || []) {
-      const deployment = row?.deployment || {};
-      const model = deploymentModelValue(deployment).toLowerCase();
-      if (!model) continue;
-      if (!byModel.has(model)) byModel.set(model, []);
-      byModel.get(model).push(row);
-    }
-    for (const rows of byModel.values()) {
-      rows.sort(
-        (a, b) =>
-          toTimestampSeconds(b?.deployment?.created_at) -
-          toTimestampSeconds(a?.deployment?.created_at),
-      );
-    }
-    return byModel;
-  });
-
-  function findDeploymentRow(run, group) {
+  function evalBaseModel(run, group) {
     const config = run.eval.config || {};
-    const deploymentConfig = config.deployment || {};
-    const directKeys = [
-      run.eval.deployment_id,
-      deploymentConfig.deployment_id,
-      deploymentConfig.app_name,
-    ];
-    for (const key of directKeys) {
-      const value = safeText(key).trim();
-      if (!value) continue;
-      const matched = deploymentsById.get(value);
-      if (matched) return matched;
-    }
-    const evalUrl = normalizePath(deploymentConfig.url || deploymentConfig.endpoint);
-    if (evalUrl) {
-      const byUrl = deploymentsByUrl.get(evalUrl);
-      if (byUrl) return byUrl;
-    }
-    const modelKey = safeText(
-      deploymentConfig.model_name ||
-        deploymentConfig.served_model_name ||
-        config.model?.model_name ||
-        group.meta.model,
-    )
-      .trim()
-      .toLowerCase();
-    if (modelKey) {
-      const byModel = deploymentsByModel.get(modelKey);
-      if (byModel?.length) return byModel[0];
-    }
-    return null;
-  }
-
-  function deploymentRefValue(deploymentRow) {
-    const deployment = deploymentRow?.deployment || {};
-    return safeText(
-      deployment.deployment_id || deployment.app_name || deployment.url || deployment.modal_app_id,
-    ).trim();
-  }
-
-  function linkedTrainingRunId(deploymentRow) {
-    return safeText(
-      deploymentRow?.run?.run_id || deploymentRow?.run?.train_result?.training_run_id,
-    ).trim();
-  }
-
-  function evalBaseModel(run, group, deploymentRow = null) {
-    const config = run.eval.config || {};
-    if (deploymentRow?.deployment) {
-      const deploymentModel = deploymentModelValue(deploymentRow.deployment);
-      if (deploymentModel) return deploymentModel;
-    }
     const configModel = safeText(
       config.model?.model_name ||
         config.deployment?.model_name ||
@@ -232,14 +107,7 @@
     return "[unknown Base Model]";
   }
 
-  function evalDeploymentName(run, deploymentRow = null) {
-    if (deploymentRow?.deployment) {
-      const deployment = deploymentRow.deployment;
-      const deploymentName = safeText(
-        deployment.deployment_id || deployment.app_name || deploymentIdValue(deployment),
-      ).trim();
-      if (deploymentName) return deploymentName;
-    }
+  function evalDeploymentName(run) {
     const config = run.eval.config || {};
     const deployment = config.deployment || {};
     if (run.eval.deployment_id) return run.eval.deployment_id;
@@ -256,6 +124,27 @@
       }
     }
     return safeText(run.eval.eval_id).trim() || "—";
+  }
+
+  function evalDeploymentRef(run) {
+    const config = run.eval.config || {};
+    const deployment = config.deployment || {};
+    return safeText(
+      run.eval.deployment_id ||
+        deployment.deployment_id ||
+        deployment.app_name ||
+        deployment.url ||
+        deployment.endpoint,
+    ).trim();
+  }
+
+  function evalTrainingRunId(run) {
+    const config = run.eval.config || {};
+    return safeText(
+      run.eval.training_run_id ||
+        config.training_run_id ||
+        config.deployment?.training_run_id,
+    ).trim();
   }
 
   function toggleGroup(evalConfigId) {
@@ -480,8 +369,6 @@
     const { run, group } = selectedEval;
     const ev = run.eval;
     const meta = evalConfigMeta(group.config, ev);
-    const linkedDeployment = findDeploymentRow(run, group);
-    const depRef = deploymentRefValue(linkedDeployment);
     const display = getEvalDisplay(ev);
     return {
       evalId: ev.eval_id || "",
@@ -495,8 +382,7 @@
       totalRows: run.totalRows,
       createdAt: run.createdAt,
       modalAppUrl: ev.modal_app_url || null,
-      deploymentName: evalDeploymentName(run, linkedDeployment),
-      deploymentRef: depRef,
+      deploymentName: evalDeploymentName(run),
     };
   });
 </script>
@@ -701,11 +587,10 @@
               <ResizableTable class="evals-runs-table" columns={evalColumns} stickyFirstColumn>
                 <tbody>
                   {#each group.visibleRuns as run, runIndex (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}-${runIndex}`)}
-                    {@const linkedDeployment = findDeploymentRow(run, group)}
-                    {@const deploymentName = evalDeploymentName(run, linkedDeployment)}
-                    {@const deploymentRef = deploymentRefValue(linkedDeployment)}
-                    {@const trainingRunId = linkedTrainingRunId(linkedDeployment)}
-                    {@const baseModel = evalBaseModel(run, group, linkedDeployment)}
+                    {@const deploymentName = evalDeploymentName(run)}
+                    {@const deploymentRef = evalDeploymentRef(run)}
+                    {@const trainingRunId = evalTrainingRunId(run)}
+                    {@const baseModel = evalBaseModel(run, group)}
                     {@const dataset = groupDataset(group)}
                     <tr
                       class="eval-row-clickable"
@@ -793,18 +678,7 @@
       <section class="p-[0_24px_16px]">
         <div class="drawer-meta-row">
           <span class="drawer-meta-key">Deployment</span>
-          <span class="drawer-meta-value">
-            {#if drawerMeta.deploymentRef}
-              <button
-                class="cross-link"
-                onclick={() => onOpenDeployment?.(drawerMeta.deploymentRef)}
-              >
-                {drawerMeta.deploymentName}
-              </button>
-            {:else}
-              {drawerMeta.deploymentName || "—"}
-            {/if}
-          </span>
+          <span class="drawer-meta-value">{drawerMeta.deploymentName || "—"}</span>
         </div>
         <div class="drawer-meta-row">
           <span class="drawer-meta-key">Model</span>

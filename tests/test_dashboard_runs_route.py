@@ -295,3 +295,11 @@ def test_run_logs_rejects_invalid_time_bound(bound, fake_volume, monkeypatch, tm
     assert response.json()["detail"].startswith(
         f"{bound} must be epoch seconds, ISO 8601, or a relative time"
     )
+
+
+def test_deployments_api_is_removed(fake_volume, monkeypatch, tmp_path):
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.get("/api/deployments")
+
+    assert response.status_code == 200
+    assert not response.headers.get("content-type", "").startswith("application/json")
