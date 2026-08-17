@@ -660,14 +660,20 @@ class TrainConfig:
         try:
             return launch.result(stop_app_on_success=True)
         except BaseException:
-            # A detached app is normally left running on failure so its logs and
-            # containers can be inspected. A stitch app is the exception: its
-            # rollout pool keeps warm GPU replicas independent of the trainer
-            # call, so leaving it up would hold them for the app's whole timeout.
-            teardown = not self.detach or self.recipe.recipe_type == RecipeType.STITCH
-            if teardown and launch.modal_app_id:
+            if self._stop_app_on_failure and launch.modal_app_id:
                 stop_app(launch.modal_app_id)
             raise
+
+    @property
+    def _stop_app_on_failure(self) -> bool:
+        """Whether a failed run's app has to be stopped rather than left up.
+
+        A detached app is normally left running so its logs and containers can be
+        inspected. A stitch app is the exception: its rollout pool keeps warm GPU
+        replicas independent of the trainer call, so leaving it up would hold them
+        for the app's whole timeout.
+        """
+        return not self.detach or self.recipe.recipe_type == RecipeType.STITCH
 
     def launch(
         self,
@@ -682,6 +688,7 @@ class TrainConfig:
             CONFIG_PATH,
             get_framework_status_url,
         )
+        from modal_training_gym.common.modal_lifecycle import stop_app
         from modal_training_gym.common.status_reporter import enqueue_framework_status
         from modal_training_gym.cli.setup import ensure_dashboard_deployed
 
@@ -804,7 +811,11 @@ class TrainConfig:
 
         if function_call is None:
             # Modal exits ``app.run`` cleanly on an interrupt, so the input
-            # preparation above can be cut short without raising.
+            # preparation above can be cut short without raising. This is outside
+            # ``train``'s teardown, so a pool that came up with the app has to be
+            # stopped here.
+            if self._stop_app_on_failure and modal_app_id:
+                stop_app(modal_app_id)
             raise RuntimeError(
                 f"training was never spawned for {training_run_id}: the Modal app "
                 "run ended while preparing inputs. The app is detached and its "
