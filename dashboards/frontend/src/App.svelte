@@ -82,10 +82,7 @@
       activeTrainingRunId = runIdFromPath(window.location.pathname);
     };
 
-    if (
-      window.location.pathname === "/" ||
-      window.location.pathname.startsWith("/deployments")
-    ) {
+    if (window.location.pathname === "/") {
       window.history.replaceState({}, "", pagePaths.training);
     } else {
       syncPageWithPath();
