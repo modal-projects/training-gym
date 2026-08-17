@@ -163,6 +163,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Moonlight-16B-A3B-Instruct",
     },
     {
+        "class_name": "Inkling_Small",
+        "module": "modal_training_gym.common.models.inkling_small",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Inkling-Small",
+    },
+    {
         "class_name": "Qwen3_6_35B",
         "module": "modal_training_gym.common.models.qwen3_6_35b",
         "group": "models",
@@ -225,6 +232,20 @@ API_REFERENCE_MANIFEST = [
         "group": "training",
         "class_type": "config_data",
         "sidebar_label": "Moonlight_16B_A3B_Recipe",
+    },
+    {
+        "class_name": "Inkling_Small_Recipe",
+        "module": "modal_training_gym.train_recipes.miles_recipe.inkling",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Inkling_Small_Recipe",
+    },
+    {
+        "class_name": "Inkling_Small_LoRA_Recipe",
+        "module": "modal_training_gym.train_recipes.miles_recipe.inkling",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Inkling_Small_LoRA_Recipe",
     },
     {
         "class_name": "Qwen3_6_35b_Recipe",

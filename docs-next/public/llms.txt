@@ -74,6 +74,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3.5-9B](https://gym.modal.dev/reference/models/qwen3_5_9b/): `Qwen3_5_9B`
 - [Qwen3-30B-A3B](https://gym.modal.dev/reference/models/qwen3_30b/): `Qwen3_30B`
 - [Moonlight-16B-A3B-Instruct](https://gym.modal.dev/reference/models/moonlight_16b_a3b_instruct/): `Moonlight_16B_A3B_Instruct`
+- [Inkling-Small](https://gym.modal.dev/reference/models/inkling_small/): `Inkling_Small`
 - [Qwen3.6-35B-A3B](https://gym.modal.dev/reference/models/qwen3_6_35b/): `Qwen3_6_35B`
 - [Qwen3.6-27B](https://gym.modal.dev/reference/models/qwen3_6_27b/): `Qwen3_6_27B`
 
@@ -86,6 +87,8 @@ Repo: https://github.com/modal-projects/training-gym
 - [MilesRecipe](https://gym.modal.dev/reference/training/milesrecipe/): `MilesRecipe`
 - [Qwen3_5_4b_Miles_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_miles_recipe/): `Qwen3_5_4b_Miles_Recipe`
 - [Moonlight_16B_A3B_Recipe](https://gym.modal.dev/reference/training/moonlight_16b_a3b_recipe/): `Moonlight_16B_A3B_Recipe`
+- [Inkling_Small_Recipe](https://gym.modal.dev/reference/training/inkling_small_recipe/): `Inkling_Small_Recipe`
+- [Inkling_Small_LoRA_Recipe](https://gym.modal.dev/reference/training/inkling_small_lora_recipe/): `Inkling_Small_LoRA_Recipe`
 - [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe/): `Qwen3_6_35b_Recipe`
 - [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe/): `Qwen3_6_27b_Recipe`
 - [Qwen3.5-0.8b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_0_8b_recipe/): `Qwen3_5_0_8b_Recipe`
