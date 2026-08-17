@@ -33,6 +33,8 @@ class MetadataStore(Enum):
     EVAL_CONFIGS = "eval-configs"
     DEPLOYMENTS = "deployments"
     DEPLOYMENTS_SUMMARY = "deployments-summary"
+    UI_VIEWS = "ui-views"
+    UI_LAYOUTS = "ui-layouts"
 
 
 SUMMARY_KEY = "summary"

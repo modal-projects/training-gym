@@ -1,0 +1,35 @@
+{
+  "id": "training-run.default",
+  "scope": "builtin",
+  "title": "Training run",
+  "route": "/training/:run_id",
+  "context": ["run_id"],
+  "tabs": [
+    {
+      "id": "summary",
+      "label": "Summary",
+      "slots": {
+        "header": [{ "id": "run-header", "view": "run-header" }],
+        "main": [
+          { "id": "run-summary", "view": "run-summary-card" }
+        ]
+      }
+    },
+    {
+      "id": "rollouts",
+      "label": "Rollouts",
+      "slots": {
+        "header": [{ "id": "run-header", "view": "run-header" }],
+        "main": [{ "id": "rollout-explorer", "view": "rollout-explorer" }]
+      }
+    },
+    {
+      "id": "logs",
+      "label": "Logs",
+      "slots": {
+        "header": [{ "id": "run-header", "view": "run-header" }],
+        "main": [{ "id": "run-logs", "view": "run-logs" }]
+      }
+    }
+  ]
+}

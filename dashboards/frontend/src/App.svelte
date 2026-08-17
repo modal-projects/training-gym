@@ -5,7 +5,8 @@
   import Sidebar from "./components/Sidebar.svelte";
   import DashboardHeader from "./components/DashboardHeader.svelte";
   import TrainingPage from "./pages/TrainingPage.svelte";
-  import TrainingRunDetailPage from "./pages/TrainingRunDetailPage.svelte";
+  import LayoutRenderer from "./views/LayoutRenderer.svelte";
+  import { safeMode } from "./lib/views/runtime.js";
   import DeploymentsPage from "./pages/DeploymentsPage.svelte";
   import EvalsPage from "./pages/EvalsPage.svelte";
   import { fetchRuns, fetchEvals, fetchDeployments, fetchEvalDetail } from "./lib/api.js";
@@ -886,16 +887,20 @@
       />
 
     {#if activePage === "training" && activeTrainingRunId}
-      <TrainingRunDetailPage
-        runId={activeTrainingRunId}
-        initialRun={activeTrainingRun}
-        {modelName}
-        {getStatus}
-        {getFrameworkStatus}
-        {showFrameworkStatus}
-        {fmtDuration}
-        onBack={backToTrainingList}
-        onCollapse={collapseTrainingRunToDrawer}
+      <LayoutRenderer
+        context={{ run_id: activeTrainingRunId }}
+        safe={safeMode()}
+        viewProps={{
+          runId: activeTrainingRunId,
+          initialRun: activeTrainingRun,
+          modelName,
+          getStatus,
+          getFrameworkStatus,
+          showFrameworkStatus,
+          fmtDuration,
+          onBack: backToTrainingList,
+          onCollapse: collapseTrainingRunToDrawer,
+        }}
       />
     {:else if activePage === "training"}
       <TrainingPage

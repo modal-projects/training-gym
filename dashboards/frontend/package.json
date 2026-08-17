@@ -11,12 +11,12 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tailwindcss/vite": "^4.3.2",
-    "svelte": "^5.28.2",
     "tailwindcss": "^4.3.2",
     "vite": "^6.3.2"
   },
   "dependencies": {
     "date-fns": "^4.1.0",
-    "lucide-svelte": "^1.0.1"
+    "lucide-svelte": "^1.0.1",
+    "svelte": "^5.28.2"
   }
 }

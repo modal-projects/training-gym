@@ -8,7 +8,9 @@ it uses the local ``dashboards/frontend`` directory instead.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import secrets as _secrets
 import time
 from pathlib import Path
@@ -401,10 +403,14 @@ def fastapi_app():
     from modal_training_gym.common.modal_urls import modal_app_dashboard_url
     from modal_training_gym.utils.metadata import (
         MetadataStore,
+        vol_count_items,
+        vol_list,
         summary_items_from_payload,
         vol_get,
         vol_get_summary_items_healed,
         vol_put_summary_items,
+        vol_put,
+        vol_remove,
     )
 
     web = FastAPI()
@@ -440,7 +446,14 @@ def fastapi_app():
         return os.environ.get(DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY, "false") == "true"
 
     cache_ttl_seconds = 30.0
-    cache_keys = ("runs", "train_results", "evals", "deployments")
+    cache_keys = (
+        "runs",
+        "train_results",
+        "evals",
+        "deployments",
+        "docs_ui_views",
+        "docs_ui_layouts",
+    )
     # Each entry holds (expires_at, values, loaded_at). ``loaded_at == 0.0``
     # means "never successfully loaded", which lets the very first request block
     # for real data instead of flashing an empty list.
@@ -504,12 +517,11 @@ def fastapi_app():
                 cache_entries[key] = (now + cache_ttl_seconds, values, loaded_at)
             return values
 
-    def invalidate_cache(key: str) -> None:
-        # Force the next read to revalidate, but keep the last values and the
-        # "loaded once" marker so it refreshes in the background instead of
-        # blocking on a cold rebuild.
+    def invalidate_cache(key: str, *, force_refresh: bool = False) -> None:
+        # Force the next read to revalidate. UI writes clear the loaded marker
+        # so the next read blocks for the new volume contents.
         _expires_at, values, loaded_at = cache_entries[key]
-        cache_entries[key] = (0.0, values, loaded_at)
+        cache_entries[key] = (0.0, values, 0.0 if force_refresh else loaded_at)
 
     async def get_cached_list(key: str, loader: SummaryLoader) -> list[JsonDict]:
         now = time.monotonic()
@@ -645,6 +657,302 @@ def fastapi_app():
 
     async def load_deployments() -> list[JsonDict]:
         return await load_list_summary(MetadataStore.DEPLOYMENTS_SUMMARY)
+
+    # Addressable substrate documents.  Keep this allowlist deliberately
+    # narrow: a document path is data access, not a general-purpose volume
+    # browser.
+    run_id_re = re.compile(r"^[A-Za-z0-9._-]+$")
+    doc_path_patterns = {
+        "run-list": re.compile(r"^runs$"),
+        "run": re.compile(r"^runs/([A-Za-z0-9._-]+)$"),
+        "rollouts": re.compile(r"^runs/([A-Za-z0-9._-]+)/rollouts$"),
+        "rollout": re.compile(r"^runs/([A-Za-z0-9._-]+)/rollouts/([0-9]+)$"),
+        "advantages": re.compile(r"^runs/([A-Za-z0-9._-]+)/advantages$"),
+        "advantage": re.compile(r"^runs/([A-Za-z0-9._-]+)/advantages/([0-9]+)$"),
+        "train-result": re.compile(r"^train-results/([A-Za-z0-9._-]+)$"),
+        "eval": re.compile(r"^evals/([A-Za-z0-9._-]+)$"),
+        "deployment": re.compile(r"^deployments/([A-Za-z0-9._-]+)$"),
+    }
+    ui_path_patterns = (
+        re.compile(r"^(views|layouts)$"),
+        re.compile(
+            r"^(views|layouts)/(builtin|org|user|run)/"
+            r"([A-Za-z0-9._-]+)$"
+        ),
+    )
+
+    def _json_pointer(value, pointer: str):
+        if not pointer:
+            return value
+        if not pointer.startswith("/"):
+            raise HTTPException(
+                status_code=400, detail="ptr must be an RFC 6901 JSON pointer"
+            )
+        current = value
+        for raw_token in pointer[1:].split("/"):
+            token = raw_token.replace("~1", "/").replace("~0", "~")
+            try:
+                if isinstance(current, list):
+                    current = current[int(token)]
+                elif isinstance(current, dict):
+                    current = current[token]
+                else:
+                    raise KeyError(token)
+            except (KeyError, IndexError, TypeError, ValueError):
+                raise HTTPException(
+                    status_code=404, detail="JSON pointer not found"
+                ) from None
+        return current
+
+    def _json_ready(value):
+        if hasattr(value, "model_dump"):
+            return value.model_dump(mode="json")
+        if isinstance(value, list):
+            return [_json_ready(item) for item in value]
+        if isinstance(value, dict):
+            return {key: _json_ready(item) for key, item in value.items()}
+        return value
+
+    def _validate_doc_path(source: str, path: str) -> None:
+        patterns = (
+            tuple(doc_path_patterns.values())
+            if source == "gym"
+            else ui_path_patterns
+            if source == "ui"
+            else ()
+        )
+        if not any(pattern.fullmatch(path) for pattern in patterns):
+            raise HTTPException(status_code=404, detail="Document not found")
+
+    async def _load_ui_store(store: MetadataStore) -> list[JsonDict]:
+        values = await run_in_threadpool(vol_list, store)
+        return [value for value in values if isinstance(value, dict)]
+
+    async def _gym_doc(path: str):
+        if path == "runs":
+            return await get_cached_list("runs", load_runs)
+        if path == "evals":
+            return await get_cached_list("evals", load_eval_summaries)
+        if path == "deployments":
+            return await get_cached_list("deployments", load_deployments)
+        match = doc_path_patterns["run"].fullmatch(path)
+        if match:
+            key = match.group(1)
+            run = await _get_run_or_404(key)
+            try:
+                result = await vol_get(
+                    MetadataStore.TRAIN_RESULTS,
+                    key,
+                    is_async=True,
+                )
+            except KeyError:
+                result = None
+            return build_run_summary(run.model_dump(mode="json"), result)
+        match = doc_path_patterns["rollouts"].fullmatch(path)
+        if match:
+            return await run_in_threadpool(
+                TrainingRolloutResult.list_summaries_for_run, match.group(1)
+            )
+        match = doc_path_patterns["rollout"].fullmatch(path)
+        if match:
+            try:
+                return await run_in_threadpool(
+                    vol_get,
+                    MetadataStore.TRAINING_ROLLOUTS,
+                    f"{match.group(1)}__{int(match.group(2)):08d}",
+                )
+            except KeyError:
+                raise HTTPException(
+                    status_code=404, detail="Document not found"
+                ) from None
+        match = doc_path_patterns["advantages"].fullmatch(path)
+        if match:
+            return await run_in_threadpool(
+                AdvantageDistribution.list_steps_for_run, match.group(1)
+            )
+        match = doc_path_patterns["advantage"].fullmatch(path)
+        if match:
+            value = await run_in_threadpool(
+                AdvantageDistribution.merged_for_step,
+                match.group(1),
+                int(match.group(2)),
+            )
+            if value is None:
+                raise HTTPException(status_code=404, detail="Document not found")
+            return value
+        stores = {
+            "train-result": MetadataStore.TRAIN_RESULTS,
+            "eval": MetadataStore.EVAL_RESULTS,
+            "deployment": MetadataStore.DEPLOYMENTS,
+        }
+        for kind, store in stores.items():
+            match = doc_path_patterns[kind].fullmatch(path)
+            if match:
+                try:
+                    return await run_in_threadpool(vol_get, store, match.group(1))
+                except KeyError:
+                    raise HTTPException(
+                        status_code=404, detail="Document not found"
+                    ) from None
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    @web.get("/api/docs")
+    async def list_documents():
+        return [
+            {
+                "name": "gym",
+                "kind": "volume",
+                "description": "Training Gym metadata",
+                "paths": [
+                    "runs",
+                    "runs/{id}",
+                    "runs/{id}/rollouts",
+                    "runs/{id}/rollouts/{rollout_id}",
+                    "runs/{id}/advantages",
+                    "runs/{id}/advantages/{rollout_id}",
+                    "train-results/{id}",
+                    "evals/{id}",
+                    "deployments/{id}",
+                ],
+            },
+            {
+                "name": "ui",
+                "kind": "volume",
+                "description": "Dashboard view and layout documents",
+                "paths": [
+                    "views",
+                    "views/{scope}/{id}",
+                    "layouts",
+                    "layouts/{scope}/{id}",
+                ],
+            },
+        ]
+
+    @web.get("/api/docs/{source}/{path:path}")
+    async def get_document(source: str, path: str, ptr: str = ""):
+        _validate_doc_path(source, path)
+        if source == "gym":
+            value = await _gym_doc(path)
+        else:
+            kind, *parts = path.split("/")
+            store = (
+                MetadataStore.UI_VIEWS if kind == "views" else MetadataStore.UI_LAYOUTS
+            )
+            if len(parts) == 0:
+                value = await get_cached_list(
+                    f"docs_ui_{kind}",
+                    lambda: _load_ui_store(store),
+                )
+            else:
+                scope, item_id = parts
+                try:
+                    value = await run_in_threadpool(
+                        vol_get, store, f"{scope}__{item_id}"
+                    )
+                except KeyError:
+                    raise HTTPException(
+                        status_code=404, detail="Document not found"
+                    ) from None
+        return JSONResponse(_json_ready(_json_pointer(value, ptr)))
+
+    UI_SCOPES = {"builtin", "org", "user", "run"}
+    UI_VIEW_ID_RE = re.compile(r"^[a-z0-9-]+$")
+    UI_LAYOUT_ID_RE = re.compile(r"^[a-z0-9-]+(?:\.[a-z0-9-]+)?$")
+    UI_MAX_BYTES = 256 * 1024
+    UI_MAX_DOCS = 512
+
+    @web.put("/api/ui/{kind}/{scope}/{item_id}")
+    async def put_ui_document(kind: str, scope: str, item_id: str, document: dict):
+        id_re = UI_VIEW_ID_RE if kind == "views" else UI_LAYOUT_ID_RE
+        if (
+            kind not in {"views", "layouts"}
+            or scope not in UI_SCOPES
+            or not id_re.fullmatch(item_id)
+            or (scope == "run" and not run_id_re.fullmatch(item_id))
+        ):
+            raise HTTPException(status_code=404, detail="Invalid UI document path")
+        payload = dict(document)
+        payload.setdefault("id", item_id)
+        payload.setdefault("scope", scope)
+        if payload["id"] != item_id or payload["scope"] != scope:
+            raise HTTPException(
+                status_code=400, detail="Document id and scope must match the path"
+            )
+        encoded = json.dumps(payload, separators=(",", ":")).encode()
+        if len(encoded) > UI_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="UI document exceeds 256 KB")
+        store = MetadataStore.UI_VIEWS if kind == "views" else MetadataStore.UI_LAYOUTS
+        count = await run_in_threadpool(vol_count_items, store)
+        key = f"{scope}__{item_id}"
+        try:
+            await run_in_threadpool(vol_get, store, key)
+            exists = True
+        except KeyError:
+            exists = False
+        if not exists and count >= UI_MAX_DOCS:
+            raise HTTPException(status_code=413, detail="UI document store is full")
+        await run_in_threadpool(vol_put, store, key, payload)
+        invalidate_cache(f"docs_ui_{kind}", force_refresh=True)
+        return JSONResponse(payload)
+
+    @web.delete("/api/ui/{kind}/{scope}/{item_id}")
+    async def delete_ui_document(kind: str, scope: str, item_id: str):
+        id_re = UI_VIEW_ID_RE if kind == "views" else UI_LAYOUT_ID_RE
+        if (
+            kind not in {"views", "layouts"}
+            or scope not in UI_SCOPES
+            or not id_re.fullmatch(item_id)
+            or (scope == "run" and not run_id_re.fullmatch(item_id))
+        ):
+            raise HTTPException(status_code=404, detail="Invalid UI document path")
+        store = MetadataStore.UI_VIEWS if kind == "views" else MetadataStore.UI_LAYOUTS
+        removed = await run_in_threadpool(vol_remove, store, f"{scope}__{item_id}")
+        invalidate_cache(f"docs_ui_{kind}", force_refresh=True)
+        if not removed:
+            raise HTTPException(status_code=404, detail="UI document not found")
+        return JSONResponse({"status": "ok"})
+
+    @web.get("/api/ui/schema")
+    async def ui_schema():
+        return JSONResponse(
+            {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "oneOf": [
+                    {
+                        "title": "ViewDoc",
+                        "type": "object",
+                        "required": ["id", "scope", "title"],
+                        "properties": {
+                            "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+                            "scope": {"enum": ["builtin", "org", "user", "run"]},
+                            "title": {"type": "string"},
+                            "accepts": {"type": "string"},
+                            "source": {"type": ["object", "null"]},
+                            "config": {"type": "object"},
+                            "lens": {"type": ["string", "null"]},
+                            "code": {"type": ["string", "null"]},
+                            "component": {"type": ["string", "null"]},
+                        },
+                    },
+                    {
+                        "title": "LayoutDoc",
+                        "type": "object",
+                        "required": ["id", "scope", "title", "route", "tabs"],
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)?$",
+                            },
+                            "scope": {"enum": ["builtin", "org", "user", "run"]},
+                            "title": {"type": "string"},
+                            "route": {"type": "string"},
+                            "context": {"type": "array", "items": {"type": "string"}},
+                            "tabs": {"type": "array"},
+                        },
+                    },
+                ],
+            }
+        )
 
     def _bearer_token(authorization: str | None) -> str:
         scheme, _, token = (authorization or "").partition(" ")
