@@ -317,6 +317,7 @@ def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
         image = image.env(train.image_env)
     if train.image_overlay is not None:
         image = train.image_overlay(image)
+        object.__setattr__(train, "image_overlay", None)
     # Mount the package so the trainer and the Ray workers can import the hooks.
     image = image.add_local_python_source("modal_training_gym", copy=True)
     # A model's download/convert may shell out to the shared tools, as on every
