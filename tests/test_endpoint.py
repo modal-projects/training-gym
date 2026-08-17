@@ -61,15 +61,22 @@ class _FakeModalCli:
 
     DEFAULT_URL = "https://ws--ep-test.modal.run"
 
-    def __init__(self, urls: list[str | None | BaseException] | None) -> None:
+    def __init__(
+        self,
+        urls: list[str | None | BaseException] | None,
+        stop_returncode: int = 0,
+    ) -> None:
         self.commands: list[list[str]] = []
         self.run_kwargs: list[dict[str, Any]] = []
         self.servers: list[tuple[str, str, str | None]] = []
         self._urls = urls
+        self._stop_returncode = stop_returncode
 
     def run(self, command: list[str], **kwargs: Any) -> SimpleNamespace:
         self.commands.append(list(command))
         self.run_kwargs.append(kwargs)
+        if "stop" in command:
+            return SimpleNamespace(returncode=self._stop_returncode)
         return SimpleNamespace(returncode=0)
 
     def from_name(
@@ -103,8 +110,11 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
 
 @pytest.fixture
 def fake_modal_cli(monkeypatch: pytest.MonkeyPatch, clock: _FakeClock):
-    def _install(urls: list[str | None | BaseException] | None = None) -> _FakeModalCli:
-        cli = _FakeModalCli(urls)
+    def _install(
+        urls: list[str | None | BaseException] | None = None,
+        stop_returncode: int = 0,
+    ) -> _FakeModalCli:
+        cli = _FakeModalCli(urls, stop_returncode=stop_returncode)
         monkeypatch.setattr(endpoint_module.subprocess, "run", cli.run)
         monkeypatch.setattr(
             endpoint_module,
@@ -234,6 +244,70 @@ def test_launch_mounts_the_checkpoint_relative_to_the_volume_root(
     assert cli.flag_value("--custom-volume-path") == expected
 
 
+def test_launch_converts_megatron_checkpoints_before_create(
+    fake_modal_cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = fake_modal_cli()
+    megatron = Checkpoint(
+        checkpoint_type=CheckpointType.megatron,
+        name="iter_10",
+        path="/checkpoints/run-1/iter_10",
+        timestamp=0.0,
+        training_run_id="run-1",
+        checkpoints_volume_name="gym-checkpoints",
+        checkpoints_mount_path="/checkpoints",
+    )
+    converted = _checkpoint("/checkpoints/run-1/iter_10_hf")
+    seen: dict[str, Any] = {}
+
+    def convert(checkpoint, model, **kwargs):
+        seen["checkpoint"] = checkpoint
+        seen["model"] = model
+        return converted
+
+    monkeypatch.setattr(endpoint_module, "convert_megatron_checkpoint_to_hf", convert)
+
+    Endpoint.launch("Qwen/Qwen3-4B", megatron, unauthenticated=True)
+
+    assert seen["checkpoint"] is megatron
+    assert seen["model"].model_name == "Qwen/Qwen3-4B"
+    assert cli.flag_value("--custom-volume-path") == "run-1/iter_10_hf"
+
+
+def test_launch_leaves_hf_checkpoints_unchanged(
+    fake_modal_cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = fake_modal_cli()
+    checkpoint = _checkpoint()
+    seen: list[tuple[Checkpoint, Checkpoint]] = []
+    original = endpoint_module.convert_megatron_checkpoint_to_hf
+
+    def convert(checkpoint, model, **kwargs):
+        result = original(checkpoint, model)
+        seen.append((checkpoint, result))
+        return result
+
+    monkeypatch.setattr(endpoint_module, "convert_megatron_checkpoint_to_hf", convert)
+
+    Endpoint.launch("Qwen/Qwen3-4B", checkpoint, unauthenticated=True)
+
+    assert seen == [(checkpoint, checkpoint)]
+    assert cli.flag_value("--custom-volume-path") == "run-1/iter_10_hf"
+
+
+def test_launch_skips_conversion_for_hub_models(
+    fake_modal_cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_modal_cli()
+
+    def convert(*args, **kwargs):
+        raise AssertionError("hub launch converted a checkpoint")
+
+    monkeypatch.setattr(endpoint_module, "convert_megatron_checkpoint_to_hf", convert)
+
+    Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
+
+
 def test_launch_derives_stable_names_from_the_serving_spec(fake_modal_cli) -> None:
     fake_modal_cli()
 
@@ -280,6 +354,84 @@ def test_launch_uses_an_explicit_endpoint_name(fake_modal_cli) -> None:
     assert endpoint.endpoint_name == "my-ft"
     assert cli.flag_value("--name") == "my-ft"
     assert cli.servers[-1][:2] == ("ep-my-ft", "Server")
+
+
+def test_launch_does_not_stop_by_default(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+
+    Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
+
+    assert [command[4] for command in cli.commands] == ["create"]
+
+
+def test_launch_stops_then_creates_when_recreate_if_existing(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+
+    endpoint = Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        endpoint_name="my-ft",
+        unauthenticated=True,
+        recreate_if_existing=True,
+    )
+
+    assert [command[4] for command in cli.commands] == ["stop", "create"]
+    assert cli.commands[0][5:] == ["my-ft", "--yes"]
+    assert cli.run_kwargs[0] == {
+        "check": False,
+        "capture_output": True,
+        "timeout": 120,
+    }
+    assert cli.flag_value("--name") == "my-ft"
+    assert endpoint.endpoint_name == "my-ft"
+
+
+def test_recreate_stop_forwards_environment(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+
+    Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        endpoint_name="my-ft",
+        unauthenticated=True,
+        environment="dev",
+        recreate_if_existing=True,
+    )
+
+    assert cli.commands[0][1:] == [
+        "-m",
+        "modal",
+        "endpoint",
+        "stop",
+        "my-ft",
+        "--yes",
+        "--env",
+        "dev",
+    ]
+    assert cli.flag_value("--env") == "dev"
+
+
+def test_recreate_continues_when_stop_fails(fake_modal_cli) -> None:
+    cli = fake_modal_cli(stop_returncode=1)
+
+    endpoint = Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        endpoint_name="my-ft",
+        unauthenticated=True,
+        recreate_if_existing=True,
+    )
+
+    assert [command[4] for command in cli.commands] == ["stop", "create"]
+    assert endpoint.endpoint_name == "my-ft"
+
+
+def test_recreate_does_not_change_derived_name(fake_modal_cli) -> None:
+    fake_modal_cli()
+
+    created = Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
+    recreated = Endpoint.launch(
+        "Qwen/Qwen3-4B", unauthenticated=True, recreate_if_existing=True
+    )
+
+    assert created.endpoint_name == recreated.endpoint_name
 
 
 def test_launch_polls_until_the_server_publishes_a_url(

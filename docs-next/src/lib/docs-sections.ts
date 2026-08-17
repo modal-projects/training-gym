@@ -1,5 +1,6 @@
 export const DOCS_NAV = [
   { section: 'Overview', prefix: '/' },
+  { section: 'Guides', prefix: '/guides/' },
   { section: 'Tutorials', prefix: '/tutorials/' },
   { section: 'API Reference', prefix: '/reference/' },
   { section: 'Support', prefix: '/support/' },

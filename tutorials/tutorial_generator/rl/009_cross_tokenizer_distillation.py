@@ -77,7 +77,6 @@ def _imports():
         Endpoint,
         Qwen3_6_35B,
         TrainConfig,
-        convert_checkpoint_to_hf,
         list_checkpoints,
     )
     from modal_training_gym.common.models.base import HFModelConfiguration, ToolCall
@@ -511,7 +510,9 @@ def _run_baseline_eval():
             print(f"{'Parsed tool call':<25} {_frac(rows, 'parsed_call'):>10.1%}")
             print(f"{'First-call tool match':<25} {_frac(rows, 'tool_match'):>10.1%}")
 
-    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Student URL: {base_deployment.url}")
 
     teacher_mean = None
@@ -1170,10 +1171,10 @@ def _train():
     )
 
     print("--- Starting GRPO + cross-tokenizer OPD training... ---")
-    print(f"  Teacher: DeepSeek V4 Flash")
-    print(f"  Student: Qwen3.6-35B-A3B")
-    print(f"  Dataset: BFCL multi_turn_base, prefix-conditioned (task, K) rows")
-    print(f"  Reward: schema + live exec + structural match + terminal state/response verdict")
+    print("  Teacher: DeepSeek V4 Flash")
+    print("  Student: Qwen3.6-35B-A3B")
+    print("  Dataset: BFCL multi_turn_base, prefix-conditioned (task, K) rows")
+    print("  Reward: schema + live exec + structural match + terminal state/response verdict")
     train_result = training_run.train()
     print(f"Training run id: {train_result.training_run_id}")
     print("--- Training complete ---")
@@ -1191,11 +1192,10 @@ def _eval_trained_intro():
 @code
 def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_6_35B())
-    print(f"Checkpoint: {hf_checkpoint.path}")
+    print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
-        Qwen3_6_35B(), hf_checkpoint, unauthenticated=True
+        Qwen3_6_35B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 

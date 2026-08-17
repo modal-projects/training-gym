@@ -176,7 +176,9 @@ def _deploy_section():
 
 @code
 def _deploy_model():
-    deployment = Endpoint.launch(Qwen3_5_9B(), unauthenticated=True)
+    deployment = Endpoint.launch(
+        Qwen3_5_9B(), unauthenticated=True, recreate_if_existing=True
+    )
     deployment.wait_until_ready(timeout=15 * 60)
     print(f"Model URL: {deployment.url}")
 

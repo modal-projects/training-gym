@@ -103,7 +103,6 @@ def _imports():
         Qwen3_5_9B,
         SlimeRecipe,
         TrainConfig,
-        convert_checkpoint_to_hf,
         list_checkpoints,
     )
     from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
@@ -290,7 +289,9 @@ def _eval_base_intro():
 @code
 def _eval_base():
     base_model = Qwen3_5_4B()
-    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Student URL: {base_deployment.url}")
 
     print("--- Evaluating base student... ---")
@@ -432,8 +433,8 @@ def _train():
 
     print("--- Starting OPD training... ---")
     print(f"  Teacher: {teacher_deployment.url}")
-    print(f"  Student: Qwen3.5-4B")
-    print(f"  Dataset: dapo-math-17k (100 problems)")
+    print("  Student: Qwen3.5-4B")
+    print("  Dataset: dapo-math-17k (100 problems)")
     train_result = training_run.train()
     print(f"Training run id: {train_result.training_run_id}")
     print("--- Training complete ---")
@@ -455,11 +456,10 @@ def _eval_trained_intro():
 @code
 def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
-    print(f"Checkpoint: {hf_checkpoint.path}")
+    print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
-        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained student URL: {trained_deployment.url}")
 

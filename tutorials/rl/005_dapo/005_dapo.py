@@ -53,7 +53,6 @@ from modal_training_gym import (
     Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
-    convert_checkpoint_to_hf,
     list_checkpoints,
 )
 
@@ -208,7 +207,9 @@ def _main_impl() -> None:
     # Let's run the math eval on our base serving model before training.
 
     base_model = Qwen3_5_4B()
-    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Base model URL: {base_deployment.url}")
 
     print("--- Evaluating base model... ---")
@@ -308,11 +309,10 @@ def _main_impl() -> None:
     # Let's run the same eval on the trained checkpoint.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
-    print(f"Checkpoint: {hf_checkpoint.path}")
+    print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
-        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

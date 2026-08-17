@@ -92,7 +92,6 @@ def _imports():
         Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
-        convert_checkpoint_to_hf,
         list_checkpoints,
     )
 
@@ -225,7 +224,9 @@ def _eval_base_intro():
 @code
 def _eval_base():
     base_model = Qwen3_5_4B()
-    base_deployment = Endpoint.launch(base_model, unauthenticated=True)
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
     print(f"Base model URL: {base_deployment.url}")
 
     print("--- Evaluating base model... ---")
@@ -398,11 +399,10 @@ def _eval_trained_intro():
 @code
 def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
-    print(f"Checkpoint: {hf_checkpoint.path}")
+    print(f"Checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
-        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

@@ -3,7 +3,7 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 8×H100",
-    "summary": "Haiku evaluation with verifiable rewards",
+    "summary": "Writing correct haikus",
     "difficulty": "Beginner",
     "order": 10,
     "api_classes": [
@@ -22,25 +22,16 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # RL basics: verifiable rewards, haiku edition
+    # Getting started with RL
 
-    This tutorial uses Qwen3.5-4B and haiku poems to introduce the
-    **verifiable reward** pattern that underpins RL post-training:
-
-    1. Serve the base model.
-    2. Define a scoring function with a verifiable reward (syllable structure).
-    3. Evaluate the base model against that scorer.
-    4. GRPO-train the model with [slime](https://github.com/THUDM/slime) using the reward function.
-    5. Serve the trained checkpoint.
-    6. Evaluate it with the same scorer and compare.
-
-    **Why haikus?** A haiku has two attributes you can score
-    automatically — whether it follows the 5-7-5 syllable format
-    (deterministic, cheap) and whether the poem is actually good. That split between
-    *verifiable* and *subjective* rewards is exactly the landscape
-    RL post-training operates in. This tutorial covers the
-    verifiable half. In a later tutorial, we will cover the subjective half.
+    This tutorial introduces some core features of the Training Gym by walking through 
+    a simple example of Reinforcement Learning with Verifiable Rewards (RLVR), a
+    foundational method of RL post-training. Here, we teach
+    [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)
+    how to write correct haikus. Step by step, we'll show the foundations of running
+    training jobs on the Gym.
     """
+
 
 @py_only
 @markdown
@@ -57,8 +48,6 @@ def run_instructions():
 @shell(
     "import importlib.util\n"
     "\n"
-    "# Skip if modal_training_gym is already importable (e.g. a local editable\n"
-    "# checkout) so your edits keep taking effect and the env stays synced.\n"
     "if importlib.util.find_spec('modal_training_gym') is None:\n"
     "    %uv pip install -q git+https://github.com/modal-projects/training-gym.git@main\n"
     "if importlib.util.find_spec('nltk') is None:\n"
@@ -89,7 +78,6 @@ def _imports():
         Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
-        convert_checkpoint_to_hf,
         list_checkpoints,
     )
 
@@ -97,64 +85,57 @@ def _imports():
 @markdown
 def _serve_base_intro():
     """
-    ## Serve the base model
+    ## Running the base model
 
-    So, how does Qwen3.5-4B currently fare at writing haikus? We can
-    serve the base model and find out.
+    As with all training tasks, we need a baseline to decide how much training we need.
+    To do that, we need a way to run inference on the base model so that we can try it out.
 
-    The training gym has several config classes so you can define deployment, training, and evaluation configurations,
-    and reuse them across different runs for parameter sweeps.
+    Luckily, [Endpoints](https://modal.com/docs/guide/endpoints) allows us to easily deploy a
+    production-ready LLM inference endpoint on Modal's managed infrastructure. It supports both open
+    model weights in addition to custom fine tunes, sourced from either a Hugging Face repo or a
+    [Modal Volume](https://modal.com/docs/guide/volumes).
 
-    `Endpoint.launch` provisions a Modal endpoint that serves Qwen3.5-4B
-    behind an OpenAI-compatible Chat Completions API. Pass
-    `unauthenticated=True` so the endpoint is reachable without Modal
-    proxy-auth tokens. `launch` returns once the endpoint has a URL;
-    `wait_until_ready` waits until it can serve.
+    It will take a moment to download the model weights onto a Modal Volume and boot containers past the
+    [cold-start](https://modal.com/docs/guide/cold-start#what-is-a-cold-start).
+    Once you see the URL has been printed, you're ready to move on!
     """
 
 
 @code
 def _serve_base_model():
     base_model = Qwen3_5_4B()
-    base_model_deployment = Endpoint.launch(base_model, unauthenticated=True)
-    base_model_deployment.wait_until_ready(timeout=15 * 60)
-    print(f"Base model deployed to {base_model_deployment.url}")
-
-@notebook_only
-@markdown
-def _qualitative_eval_of_base_model():
-    """
-    The model will take a moment to download and spin up, but once it's ready, we can request it to write a haiku about a topic.
-    """
-
-@notebook_only
-@code
-def _qualitative_eval_of_base_model_code():
-    msg = base_model_deployment.chat(
-        [{"role": "user", "content": "Write a haiku about cat."}],
-        chat_template_kwargs={"enable_thinking": False},
+    base_model_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
     )
-    response = msg.get("content") or msg.get("reasoning_content") or ""
-    print(response)
+    base_model_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"base model deployed to {base_model_deployment.url}")
 
 
 @markdown
 def _scoring_intro():
     """
-    Let's now cover the evaluation part of the tutorial.
+    ## Defining a scoring function
 
-    A good eval takes a particular outcome and assigns a score to it. It can be binary (pass/fail) or continuous (0-100),
-    deterministic or subjective, and cheap or expensive to compute.
+    To evaluate the base model, we need a function that takes as input a haiku and outputs a score
+    (a.k.a. reward when we're training) to represent whether it follows the 5-7-5 syllable format.
+    We can do that using NLTK's
+    [CMU Pronouncing Dictionary](https://github.com/prosegrinder/python-cmudict),
 
-    In our case, we want our model to be good at writing haiku poems, so how do we evaluate if an llm response was a good haiku or not?
-    
-    Well, a haiku must follow the 5-7-5 syllable format, so we can count syllables using NLTK's CMU Pronouncing Dictionary
-    (with a regex fallback for words not in the dictionary)
-    and score how close each line is to its target syllable count.
+    How should we define our scoring function? We could give it a score of 0 if it doesn't follow
+    the format and 1 if it does, but that's not very informative for both the models being trained, and,
+    more importantly, the human training the models! Instead, we want the score to provide sufficient
+    granularity such that it's immediately obvious what the failure mode is (if any). Below, we implement
+    the following function:
 
-    We can give it score 0 if it doesn't follow the 5-7-5 syllable format, and 1 if it does. But that's not very informative.
-    Instead, we can score it based on how close it is to the target syllable count for each line.
+    - Return `-10` if the model was so incompetent that failed to return three lines.
+    - Otherwise, return the negative sum of absolute differences between the predicted and target
+    syllable count for each line.
+
+    What does this mean? That the model will receive increasingly negative scores the further off
+    its haiku is, with a maximum score of `0`. Let's now see how it does.
     """
+
+
 @code
 def _score_haiku():
     _cmudict_cache = {}
@@ -163,6 +144,7 @@ def _score_haiku():
         if not _cmudict_cache:
             import nltk
             from nltk.corpus import cmudict
+
             nltk.download("cmudict", quiet=True)
             _cmudict_cache.update(cmudict.dict())
         return _cmudict_cache
@@ -191,6 +173,7 @@ def _score_haiku():
         )
         return -float(total_diff)
 
+
 @notebook_only
 @code
 def _score_haiku_demo():
@@ -199,20 +182,34 @@ def _score_haiku_demo():
         chat_template_kwargs={"enable_thinking": False},
     )
     response = msg.get("content") or msg.get("reasoning_content") or ""
-    print(response)
-    print(f"Score: {score_haiku(response)}")
+    print(f"haiku: {response}")
+    score = score_haiku(response)
+    print(f"score: {score}")
+
 
 @markdown
 def _define_dataset():
     """
-    Let's also define a Haiku dataset.
-    Here, we use the statworx/haiku dataset from HuggingFace.
-    Each row has a `keywords` topic and a reference `text` haiku.
-    We can use this dataset to train our model.
+    ## Creating a dataset for training and validation
 
-    Datasets for training models can take many form factors, and huggingface dataset is just one of them.
-    If you're curious about other options, check out the [DatasetConfig](https://gym.modal.dev/reference/core/datasetconfig/) documentation.
+    Note that we've only qualitatively assessed its performance. Now, we should get concrete
+    numbers. How do we do that? First, we'll have to curate a dataset. Luckily,
+    [statworx/haiku](https://huggingface.co/datasets/statworx/haiku) from Huggingface
+    already exists, so we don't have to create one ourselves.
+
+    Note that for more complex tasks, it is almost certainly the case that you will be 
+    creating your own dataset. Why? Because the task you're trying to get your model
+    to do is either too expensive or simply too hard for a bigger model. In either case,
+    this is because the task is sufficiently out-of-distribution, and no existing dataset 
+    will serve your needs.
+    
+    See the
+    [multi-turn example](https://gym.modal.dev/tutorials/rl/002_multiturn/) for a basic
+    example of creating your own dataset, or the
+    [DatasetConfig](https://gym.modal.dev/reference/core/datasetconfig/) documentation
+    for a deeper dive.
     """
+
 
 @code
 def _define_dataset_code():
@@ -222,23 +219,20 @@ def _define_dataset_code():
         output_column = "text"
         output_format = "jsonl"
         apply_chat_template = True
-        system_prompt = (
-            "You are a haiku poet. Write a haiku about the given topic. "
-            "Use the 5-7-5 syllable format across three lines."
-        )
         prompt_template = "Write a haiku about {input}."
-        always_prepare = True # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
+        always_prepare = True
 
     train_dataset = HaikuDataset(n_rows=10)
     eval_dataset = HaikuDataset(n_rows=5)
+
 
 @notebook_only
 @markdown
 def _eval_dataset_head():
     """
-    Let's take a look at the eval set. Each row has a `keywords`
-    topic and a reference `text` haiku.
+    Let's take a quick peek at the eval set:
     """
+
 
 @notebook_only
 @code
@@ -247,26 +241,23 @@ def _eval_dataset_head_code():
     print(len(df))
     df.head(5)
 
+
 @markdown
 def _grade_haiku_into_eval():
     """
-    Seems straightforward enough, right? How do we run an eval on our base model with this dataset?
-    Well, we already have a way to determine if a response is a good haiku or not: `score_haiku`!
-    So all we need to do is loop the eval dataset, call the deployment, score each response, and aggregate.
+    ## Evaluating the base model
+
+    All we need to do now is, for each sample in our eval dataset,
+    call the Endpoint, score each response, and calculate the mean.
+    By default, Endpoints can process multiple inputs
+    [concurrently](https://modal.com/docs/guide/servers#concurrency-and-autoscaling),
+    so we loop over samples in parallel to speed up eval.
     """
 
-
-@notebook_only
-@markdown
-def _eval_base_intro():
-    """
-    ## Evaluate the base model
-
-    """
 
 @code
 def _eval_base_model():
-    def run_eval(deployment, *, max_concurrency: int = 2) -> float:
+    def run_eval(deployment, max_concurrency: int = 2) -> float:
         from concurrent.futures import ThreadPoolExecutor
 
         deployment.wait_until_ready(timeout=15 * 60)
@@ -284,72 +275,74 @@ def _eval_base_model():
             scores = list(executor.map(_score_one, eval_dataset.load()))
         return sum(scores) / len(scores) if scores else float("nan")
 
-    print("——— Running base model evaluation... ———")
+    print("running base model evaluation...")
     base_mean = run_eval(base_model_deployment)
-    print(f"Average haiku score: {base_mean:.1f}")
-    print("——— Base model evaluation complete ———")
+    print(f"average score: {base_mean:.1f}")
+
 
 @markdown
 def _train_intro():
     """
-    ## Train with slime
+    ## Training the model
 
-    Now, let's actually train the model to write good haikus.
-    Here, we use the slime framework (https://github.com/THUDM/slime) on Modal.
+    Finally, onto the training. The Gym supports both the
+    [Slime](https://github.com/THUDM/slime) and
+    [Miles](https://github.com/radixark/miles) frameworks.
+    Here, we use Slime for demonstration purposes.
 
-    All flags that are native to slime can be passed to the `TrainConfig` object.
-    You can also add patches to slime using the `image_overlay` argument.
+    Training is simple: pass in the model you intend to train,
+    the dataset you wish to train on, and a recipe for how you want
+    training to occur. The recipe wraps all
+    [framework-native flags](https://thudm.github.io/slime/get_started/usage.html)
+    in addition to providing Modal-specific ones.
+
+    An explanation of some of the knobs we set below:
+
+    - `colocate` shares the same GPUs between rollout and training, alternating between the two.
+    This is simply for demonstration purposes: set to `False` to give rollouts dedicated GPUs and 
+    go even faster.
+    - `num_rollout` sets the total rollout/train iterations to run. Each iteration samples a batch, 
+    scores it, and applies one policy update.
+    - `rollout_batch_size` determines the number of prompts sampled per rollout iteration.
+    - `custom_rm_function` allows us to use our scoring function we defined above as a reward function
+    during training.
+
+    Once we run the code below, training kicks off and we'll immediately get a run ID, which we may
+    use to watch the run's progress in the dashboard.
     """
+
 
 @code
 def _define_training_run():
     async def haiku_rm(args, sample, **kwargs) -> float:
         response = base_model.parse_response(sample.response)
         return score_haiku(response.content)
-    
-    training_run = TrainConfig(
+
+    train_run = TrainConfig(
         model=base_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
-            custom_rm_function=haiku_rm,
-
             gpu_type="H100",
-            colocate=True,
             tensor_model_parallel_size=1,
-            sequence_parallel=False,
             rollout_num_gpus_per_engine=1,
-
+            sequence_parallel=False,
+            colocate=True,
             num_rollout=10,
             rollout_batch_size=16,
             rollout_max_response_len=4096,
             rollout_temperature=1.0,
-
             save_interval=5,
             apply_chat_template_kwargs='{"enable_thinking": false}',
-
+            custom_rm_function=haiku_rm,
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp 'nltk>=3.8.0'",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
             ),
         ),
     )
-
-
-@markdown
-def _train_section():
-    """
-    ## Train
-
-    `TrainConfig.train()` builds the Modal app, runs training, and
-    returns a `TrainResult` with the run ID and checkpoint path.
-    """
-
-
-@code
-def _invoke_train():
-    print("——— Running training... ———")
-    train_result = training_run.train()
-    print("——— Training complete ———")
+    
+    train_result = train_run.train()
+    print(f"run id: {train_result.training_run_id}")
 
 
 @markdown
@@ -357,130 +350,96 @@ def _trained_eval_intro():
     """
     ## Serve and evaluate the trained checkpoint
 
-    The returned `TrainResult` has the checkpoint path and volume
-    metadata attached. Endpoints require Hugging Face weights, so convert
-    the Megatron checkpoint first, then pass it to `Endpoint.launch`.
+    We'll get the latest checkpoint and create a new Endpoint so we may evaluate it.
     """
 
 
 @code
 def _serve_and_eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
-    print(hf_checkpoint.path)
+    print(checkpoint.path)
 
     trained_model_deployment = Endpoint.launch(
-        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     trained_model_deployment.wait_until_ready(timeout=15 * 60)
-    print(f"Trained model deployed to {trained_model_deployment.url}")
+    print(f"checkpoint deployed to {trained_model_deployment.url}")
 
 
 @markdown
 def _trained_eval_section():
     """
-    ## Evaluate the first checkpoint
-
-    Now let's run the same eval on the trained model and compare.
+    Now, let's run the same eval as before.
     """
 
 
 @code
 def _eval_trained():
-    print("——— Running trained model evaluation... ———")
+    print("running checkpoint evaluation...")
     trained_mean = run_eval(trained_model_deployment)
-    print(f"Trained haiku score: {trained_mean:.1f}")
-    print("——— Trained model evaluation complete ———")
+    print(f"average score: {trained_mean:.1f}")
+
 
 @markdown
 def _continue_to_train_off_of_a_checkpoint():
     """
-    ## Train off of a checkpoint
-    Hmm, looks like the trained model is not doing very well.
-    Maybe it's because it only trained for 10 iterations.
-
-    What happens if we train it for more?
-    We want to train it off of the latest checkpoint, not from scratch.
+    ## Continuing training off the checkpoint
+    Hmm, it looks like the trained model is still not doing very well.
+    A likely cause is that it only trained for 10 iterations.
+    Let's continue training, starting from the last checkpoint.
     """
+
 
 @code
 def _continue_to_train_off_of_a_checkpoint_code():
-    new_training_run = TrainConfig(
+    new_train_run = TrainConfig(
         model=Qwen3_5_4B(),
         dataset=train_dataset,
         checkpoint=checkpoint,
         recipe=SlimeRecipe(
             custom_rm_function=haiku_rm,
-
             gpu_type="H100",
             colocate=True,
             tensor_model_parallel_size=1,
             sequence_parallel=False,
             rollout_num_gpus_per_engine=1,
-
             num_rollout=20,
             rollout_batch_size=16,
             rollout_max_response_len=4096,
             rollout_temperature=1.0,
-
             save_interval=10,
             apply_chat_template_kwargs='{"enable_thinking": false}',
-
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp 'nltk>=3.8.0'",
                 "python -c \"import nltk; nltk.download('cmudict', quiet=True)\"",
             ),
         ),
     )
-    print("——— Running new training... ———")
-    new_train_result = new_training_run.train()
-    print("——— New training complete ———")
+
+    new_train_result = new_train_run.train()
+    print(f"run id: {new_train_result.training_run_id}")
+
 
 @markdown
 def _trained_eval_off_of_a_checkpoint():
     """
-    ## Evaluate the continued checkpoint
+    ## Evals Evals Evals
 
-    Now let's run the same eval on the newly trained model and compare.
+    Once again, we'll create a new Endpoint for the new checkpoint and run evals on it.
     """
+
 
 @code
 def _trained_eval_off_of_a_checkpoint_code():
     new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
-    new_hf_checkpoint = convert_checkpoint_to_hf(new_checkpoint, Qwen3_5_4B())
-    print(new_hf_checkpoint.path)
+    print(new_checkpoint.path)
 
     new_model_deployment = Endpoint.launch(
-        Qwen3_5_4B(), new_hf_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), new_checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     new_model_deployment.wait_until_ready(timeout=15 * 60)
-    print(f"Newly trained model deployed to {new_model_deployment.url}")
+    print(f"new checkpoint deployed to {new_model_deployment.url}")
 
-@markdown
-def _trained_eval_off_of_a_checkpoint_results():
-    """
-    ## Compare second-run results
-
-    Now let's compare the results of the newly trained model and the base model.
-    """
-
-@code
-def _trained_eval_off_of_a_checkpoint_results_code():
-    print("——— Running trained model evaluation... ———")
+    print("running new checkpoint evaluation...")
     new_mean = run_eval(new_model_deployment)
-    print(f"Trained model (new) haiku score: {new_mean:.1f}")
-    print("——— Trained model (new) evaluation complete ———")
-
-@markdown
-def _compare_results():
-    """
-    ## Compare all runs
-
-    Now let's compare the results across all three checkpoints.
-    """
-
-@code
-def _compare_results_code():
-    print(f"Base model haiku score: {base_mean:.1f}")
-    print(f"Trained model haiku score: {trained_mean:.1f}")
-    print(f"Trained model (new) haiku score: {new_mean:.1f}")
+    print(f"average score: {new_mean:.1f}")

@@ -75,7 +75,6 @@ def _imports():
         Qwen3_5_4B,
         SlimeRecipe,
         TrainConfig,
-        convert_checkpoint_to_hf,
         list_checkpoints,
     )
 
@@ -408,6 +407,7 @@ def _serve_base():
     base_deployment = Endpoint.launch(
         Qwen3_5_4B(),
         unauthenticated=True,
+        recreate_if_existing=True,
     )
     print(f"Base model URL: {base_deployment.url}")
     base_mean, base_rows = run_eval(base_deployment)
@@ -496,9 +496,8 @@ def _trained_eval_intro():
 @code
 def _trained_eval():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(checkpoint, Qwen3_5_4B())
     trained_deployment = Endpoint.launch(
-        Qwen3_5_4B(), hf_checkpoint, unauthenticated=True
+        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     print(f"Trained model URL: {trained_deployment.url}")
 

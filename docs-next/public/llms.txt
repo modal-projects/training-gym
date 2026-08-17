@@ -14,16 +14,22 @@ Repo: https://github.com/modal-projects/training-gym
 ## Docs
 
 - [Overview](https://gym.modal.dev/): Product overview and getting started
+- [Guides](https://gym.modal.dev/guides/): Concepts and practical workflows
 - [All Tutorials](https://gym.modal.dev/tutorials/): Tutorial catalog
 - [API Reference](https://gym.modal.dev/reference/): Public class reference
 - [CLI Reference](https://gym.modal.dev/reference/cli/): `modal-training-gym` CLI
 - [Support](https://gym.modal.dev/support/): Support and contribution notes
 
+## Guides
+
+- [The observability dashboard](https://gym.modal.dev/guides/tools/observability-dashboard/): Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings.
+- [Weights & Biases integration](https://gym.modal.dev/guides/tools/wandb-integration/): Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links.
+
 ## Tutorials
 
 ### Reinforcement Learning
 
-- [000_rl_basics](https://gym.modal.dev/tutorials/rl/000_rl_basics/): Haiku evaluation with verifiable rewards
+- [000_rl_basics](https://gym.modal.dev/tutorials/rl/000_rl_basics/): Writing correct haikus
 - [001_sandboxes](https://gym.modal.dev/tutorials/rl/001_sandboxes/): Code RL with Harbor sandboxed evals
 - [002_multiturn](https://gym.modal.dev/tutorials/rl/002_multiturn/): Multi-turn number-guessing RL with custom generate and reward functions
 - [003_on_policy_distillation](https://gym.modal.dev/tutorials/rl/003_on_policy_distillation/): On-policy distillation on math
@@ -37,11 +43,6 @@ Repo: https://github.com/modal-projects/training-gym
 ### Agents
 
 - [000_agent_sandbox](https://gym.modal.dev/tutorials/agent/000_agent_sandbox/): Build an LLM agent harness with a self-hosted model and Modal Sandbox tool execution
-
-### Tools
-
-- [000_observability_dashboard](https://gym.modal.dev/tutorials/tools/000_observability_dashboard/): Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings
-- [001_wandb_integration](https://gym.modal.dev/tutorials/tools/001_wandb_integration/): Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links
 
 ## API Reference
 
