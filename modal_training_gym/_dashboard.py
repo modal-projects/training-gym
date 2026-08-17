@@ -336,7 +336,6 @@ def _run_compact_sync() -> None:
     for summary_store in (
         MetadataStore.TRAINING_RUNS_SUMMARY,
         MetadataStore.TRAIN_RESULTS_SUMMARY,
-        MetadataStore.DEPLOYMENTS_SUMMARY,
     ):
         compact_summary_store(summary_store)
 

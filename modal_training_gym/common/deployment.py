@@ -22,13 +22,6 @@ from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.deploy_recipes.base import DeployRecipeType
 from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 from modal_training_gym.deploy_recipes.vllm_recipe import VllmRecipe
-from modal_training_gym.utils.metadata import (
-    MetadataStore,
-    vol_put,
-    vol_upsert_summary_item,
-)
-
-DEPLOYMENTS_STORE_NAME = MetadataStore.DEPLOYMENTS.value
 
 
 def _run_coro(coro):
@@ -322,7 +315,6 @@ class CustomDeployment(BaseModel):
             modal_app_url=modal_app_dashboard_url(modal_app_id),
             url=url,
         )
-        deployment.save()
         return deployment
 
     # TODO(atoniolo76): A future PR should update all existing tutorials to
@@ -404,48 +396,6 @@ class CustomDeployment(BaseModel):
         if content is None:
             return message.get("reasoning_content", "")
         return str(content)
-
-    def save(self) -> None:
-        payload = {
-            "deployment_id": self.deployment_id,
-            "deployment_config": {
-                "model": {
-                    "model_name": getattr(self.model, "model_name", ""),
-                    "model_path": getattr(self.model, "model_path", None),
-                    "checkpoints_volume_name": getattr(
-                        self.model,
-                        "checkpoints_volume_name",
-                        None,
-                    ),
-                    "checkpoints_mount_path": getattr(
-                        self.model,
-                        "checkpoints_mount_path",
-                        None,
-                    ),
-                },
-                "app_name": self.app_name,
-                "served_model_name": self.served_model_name,
-                "unauthenticated": self.unauthenticated,
-            },
-            "modal_app_id": self.modal_app_id,
-            "modal_app_url": self.modal_app_url,
-            "url": self.url,
-        }
-        vol_put(
-            MetadataStore.DEPLOYMENTS,
-            self.deployment_id,
-            payload,
-        )
-        vol_upsert_summary_item(
-            MetadataStore.DEPLOYMENTS_SUMMARY,
-            payload,
-            item_id_key="deployment_id",
-            sort_key=lambda item: (
-                str(item.get("deployment_config", {}).get("app_name", "")),
-                str(item.get("deployment_id", "")),
-            ),
-            reverse=True,
-        )
 
     def _start_log_tailer(self) -> "threading.Thread | None":
         """Spawn a daemon thread that streams deployed-app logs to stdout.

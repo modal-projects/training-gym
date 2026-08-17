@@ -31,8 +31,6 @@ class MetadataStore(Enum):
     EVALS = "evals"
     EVAL_SUMMARIES = "eval-summaries"
     EVAL_CONFIGS = "eval-configs"
-    DEPLOYMENTS = "deployments"
-    DEPLOYMENTS_SUMMARY = "deployments-summary"
 
 
 SUMMARY_KEY = "summary"
@@ -67,15 +65,6 @@ _SUMMARY_COMPACTION: dict[MetadataStore, _SummaryCompaction] = {
         item_store=MetadataStore.TRAIN_RESULTS,
         item_id_key="training_run_id",
         sort_key=lambda item: str(item.get("training_run_id", "")),
-        reverse=True,
-    ),
-    MetadataStore.DEPLOYMENTS_SUMMARY: _SummaryCompaction(
-        item_store=MetadataStore.DEPLOYMENTS,
-        item_id_key="deployment_id",
-        sort_key=lambda item: (
-            str(item.get("deployment_config", {}).get("app_name", "")),
-            str(item.get("deployment_id", "")),
-        ),
         reverse=True,
     ),
 }

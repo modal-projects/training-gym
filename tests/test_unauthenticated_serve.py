@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from modal_training_gym import CustomDeployment
-from modal_training_gym.common import deployment as deployment_module
 from modal_training_gym.common.models.base import ModelConfig
 from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 from modal_training_gym.deploy_recipes.sglang_recipe.serve_sglang import (
@@ -91,10 +90,6 @@ def test_sglang_serve_forwards_unauthenticated() -> None:
             "modal_training_gym.common.deployment._run_coro",
             return_value="https://example.modal.run",
         ),
-        patch(
-            "modal_training_gym.common.deployment.CustomDeployment.save",
-            return_value=None,
-        ),
     ):
         deployment = CustomDeployment.launch(
             "test/model",
@@ -125,10 +120,6 @@ def _serve_vllm(*, unauthenticated: bool = True) -> tuple[object, MagicMock]:
         patch(
             "modal_training_gym.common.deployment._run_coro",
             return_value="https://example.modal.run",
-        ),
-        patch(
-            "modal_training_gym.common.deployment.CustomDeployment.save",
-            return_value=None,
         ),
         patch(
             "modal_training_gym.common.deployment.modal_app_dashboard_url",
@@ -174,41 +165,3 @@ def test_from_config_missing_unauthenticated_defaults_true() -> None:
     assert deployment.model.model_name == "test/model"
     assert deployment.app_name == "test-serve"
     assert deployment.served_model_name == "model"
-
-
-def test_save_preserves_dashboard_metadata_shape(monkeypatch) -> None:
-    captured: dict = {}
-    deployment = CustomDeployment.model_construct(
-        deployment_id="dep-1",
-        model=ModelConfig(model_name="test/model"),
-        recipe=VllmRecipe(),
-        app_name="test-serve",
-        served_model_name="model",
-        unauthenticated=True,
-        modal_app_id="ap-test",
-        modal_app_url="https://modal.com/apps/ap-test",
-        url="https://example.modal.run",
-    )
-
-    def put(_store, _key, payload) -> None:
-        captured["payload"] = payload
-
-    monkeypatch.setattr(deployment_module, "vol_put", put)
-    monkeypatch.setattr(
-        deployment_module, "vol_upsert_summary_item", lambda *_args, **_kwargs: None
-    )
-
-    deployment.save()
-
-    assert captured["payload"]["deployment_config"] == {
-        "model": {
-            "model_name": "test/model",
-            "model_path": None,
-            "checkpoints_volume_name": None,
-            "checkpoints_mount_path": None,
-        },
-        "app_name": "test-serve",
-        "served_model_name": "model",
-        "unauthenticated": True,
-    }
-    assert "status" not in captured["payload"]
