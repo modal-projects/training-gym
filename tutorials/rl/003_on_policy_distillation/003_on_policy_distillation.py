@@ -144,7 +144,7 @@ def math_opd_post_process(args, samples, **kwargs):
 
     _, _ = _opd_post(args, samples, **kwargs)
 
-    math_rewards = [getattr(sample, "score", False) for sample in samples]
+    math_rewards = [getattr(sample, "score", -1) for sample in samples]
     return math_rewards, math_rewards  # quirk of slime
 
 # ## Get the dataset
@@ -197,7 +197,9 @@ def run_eval(
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
         scores = list(executor.map(_score_one, eval_dataset.load()))
-    percent_correct = len([s for s in score if s==1]) / len(scores)
+    percent_correct = (
+        len([s for s in scores if s == 1]) / len(scores) if scores else float("nan")
+    )
     return percent_correct
 
 import modal
@@ -230,7 +232,6 @@ def _main_impl() -> None:
     base_teacher_deployment = CustomDeployment.launch(
         base_teacher_model,
         unauthenticated=True,
-        recreate_if_existing=True
     )
 
     base_student_deployment.wait_until_ready(timeout=15 * 60)
