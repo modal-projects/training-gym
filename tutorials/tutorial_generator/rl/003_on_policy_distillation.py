@@ -308,11 +308,11 @@ def _eval_base():
 
     print("running teacher base model evaluation...")
     base_teacher_correct = run_eval(base_teacher_deployment)
-    print(f"percent correct: {base_teacher_correct:.1f}")
+    print(f"percent correct: {base_teacher_correct:.1%}")
 
     print("running student base model evaluation...")
     base_student_correct = run_eval(base_student_deployment)
-    print(f"percent correct: {base_student_correct:.1f}")
+    print(f"percent correct: {base_student_correct:.1%}")
 
 
 
@@ -393,4 +393,4 @@ def _eval_trained():
 
     print("running student checkpoint evaluation...")
     trained_student_correct = run_eval(trained_student_deployment)
-    print(f"percent correct: {trained_student_correct:.1f}")
+    print(f"percent correct: {trained_student_correct:.1%}")
