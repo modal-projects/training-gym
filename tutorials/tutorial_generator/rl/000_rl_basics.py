@@ -90,11 +90,12 @@ def _deploy_base_intro():
     As with all training tasks, we need a baseline to decide how much training we need.
     To do that, we need a way to run inference on the base model so that we can try it out.
 
-    Luckily, [Endpoints](https://gym.modal.dev/reference/deployment/endpoint/) allows us to easily deploy a
-    production-ready LLM inference endpoint on Modal's managed infrastructure. It supports both open
-    model weights in addition to custom fine tunes, sourced from either a Hugging Face repo or a
-    [Modal Volume](https://modal.com/docs/guide/volumes).
-
+    Luckily, [Endpoints](https://modal.com/docs/guide/endpoints) allows us to easily deploy a
+    production-ready LLM inference endpoint on Modal's managed infrastructure. It supports both 
+    open model weights in addition to custom fine tunes, sourced from either a Hugging Face repo or a
+    [Modal Volume](https://modal.com/docs/guide/volumes). To use it, we provide a 
+    [class](https://gym.modal.dev/reference/deployment/endpoint/) to instantiate programatically.
+    
     It will take a moment to download the model weights onto a Modal Volume and boot containers past the
     [cold-start](https://modal.com/docs/guide/cold-start#what-is-a-cold-start).
     Once you see the URL has been printed, you're ready to move on!
@@ -355,7 +356,7 @@ def _eval_trained_intro():
 
 
 @code
-def _eval_trained():
+def _deploy_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
     print(f"checkpoint: {checkpoint.path}")
 
