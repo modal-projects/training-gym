@@ -200,7 +200,10 @@ def _release_convert_lock(run_id: str, volume_name: str, save_path: str) -> None
     holder = locks.get(key)
     if isinstance(holder, dict) and str(holder.get("run_id") or "") != run_id:
         return
-    locks.pop(key, None)
+    try:
+        locks.pop(key)
+    except KeyError:
+        pass
 
 
 def _is_resumable_checkpoint(path: str) -> bool:
