@@ -2373,7 +2373,6 @@ table.rollout-table th:nth-child(4) .column-label {
 
   .evals-name-cell .truncate-text,
   .evals-dataset-cell .truncate-text,
-  .evals-deployment-cell .truncate-text,
   .base-model-cell .truncate-text {
     display: block;
     width: 100%;
@@ -2383,8 +2382,7 @@ table.rollout-table th:nth-child(4) .column-label {
     white-space: nowrap;
   }
 
-  .evals-dataset-cell,
-  .evals-deployment-cell {
+  .evals-dataset-cell {
     max-width: 0;
   }
 

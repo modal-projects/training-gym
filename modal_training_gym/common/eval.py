@@ -184,7 +184,6 @@ class EvalResult(BaseModel):
 
     eval_id: str
     eval_config_id: str
-    deployment_id: str
     created_at: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC)
     )
@@ -369,7 +368,6 @@ class EvalConfig:
         )
         result = EvalResult(
             eval_id=eval_id,
-            deployment_id=deployment.deployment_id,
             eval_config_id=self.eval_config_id,
             created_at=datetime.datetime.now(datetime.UTC),
             status="deploying_model",

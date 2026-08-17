@@ -584,7 +584,6 @@
             .map(
               (run) =>
                 safeText(
-                  run.eval.deployment_id ||
                   run.eval.config?.deployment?.url ||
                     run.eval.config?.deployment?.model_name ||
                     run.eval.config?.deployment?.served_model_name,

@@ -43,7 +43,6 @@
   const evalColumns = [
     { key: "name", label: "Name", width: 220, minWidth: 140 },
     { key: "dataset", label: "Dataset", width: 180, minWidth: 120 },
-    { key: "deployment", label: "Deployment", width: 180, minWidth: 120 },
     { key: "training", label: "Training run", width: 180, minWidth: 130 },
     { key: "model", label: "Base model", width: 210, minWidth: 140 },
     { key: "status", label: "Status", width: 130, minWidth: 96 },
@@ -110,11 +109,9 @@
   function evalDeploymentName(run) {
     const config = run.eval.config || {};
     const deployment = config.deployment || {};
-    if (run.eval.deployment_id) return run.eval.deployment_id;
     if (deployment.app_name) return deployment.app_name;
     if (deployment.deployment_name) return deployment.deployment_name;
     if (deployment.name) return deployment.name;
-    if (deployment.deployment_id) return deployment.deployment_id;
     if (deployment.url) {
       const value = safeText(deployment.url);
       try {
@@ -124,18 +121,6 @@
       }
     }
     return safeText(run.eval.eval_id).trim() || "—";
-  }
-
-  function evalDeploymentRef(run) {
-    const config = run.eval.config || {};
-    const deployment = config.deployment || {};
-    return safeText(
-      run.eval.deployment_id ||
-        deployment.deployment_id ||
-        deployment.app_name ||
-        deployment.url ||
-        deployment.endpoint,
-    ).trim();
   }
 
   function evalTrainingRunId(run) {
@@ -588,7 +573,6 @@
                 <tbody>
                   {#each group.visibleRuns as run, runIndex (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}-${runIndex}`)}
                     {@const deploymentName = evalDeploymentName(run)}
-                    {@const deploymentRef = evalDeploymentRef(run)}
                     {@const trainingRunId = evalTrainingRunId(run)}
                     {@const baseModel = evalBaseModel(run, group)}
                     {@const dataset = groupDataset(group)}
@@ -605,9 +589,6 @@
                       </td>
                       <td class="evals-dataset-cell" title={dataset}>
                         <span class="truncate-text">{dataset}</span>
-                      </td>
-                      <td class="evals-mono evals-deployment-cell" title={deploymentRef || "—"}>
-                        <span class="truncate-text">{deploymentRef || "—"}</span>
                       </td>
                       <td class="max-w-0" title={trainingRunId || "—"}>
                         {#if trainingRunId}

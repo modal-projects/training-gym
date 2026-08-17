@@ -588,9 +588,7 @@ def fastapi_app():
             merged = dict(summary)
             result = results_by_id.get(str(summary.get("eval_id") or ""))
             if result:
-                merge_missing_fields(
-                    merged, result, ("deployment_id", "config", "status")
-                )
+                merge_missing_fields(merged, result, ("config", "status"))
             eval_config = configs_by_id.get(str(summary.get("eval_config_id") or ""))
             if eval_config:
                 merged["eval_config"] = eval_config
