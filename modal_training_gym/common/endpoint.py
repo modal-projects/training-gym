@@ -10,7 +10,6 @@ from typing import Any
 import httpx
 import modal
 
-from modal_training_gym.common import hf_token
 from modal_training_gym.common.checkpoint import (
     Checkpoint,
     convert_megatron_checkpoint_to_hf,
@@ -30,9 +29,6 @@ def _create_endpoint_and_wait_for_url(
     routing_region: str | None,
     environment: str | None,
     colocate_compute: bool,
-    custom_hf_repo: str | None,
-    custom_hf_revision: str | None,
-    resolved_hf_token: str | None,
     wait_timeout_sec: float,
     recreate_if_existing: bool,
 ) -> str:
@@ -73,12 +69,6 @@ def _create_endpoint_and_wait_for_url(
         command.extend(["--env", environment])
     if colocate_compute:
         command.append("--colocate-compute")
-    if custom_hf_repo:
-        command.extend(["--custom-hf-repo", custom_hf_repo])
-    if custom_hf_revision:
-        command.extend(["--custom-hf-revision", custom_hf_revision])
-    if resolved_hf_token:
-        command.extend(["--custom-hf-token", resolved_hf_token])
 
     if checkpoint:
         command.extend(["--custom-volume-name", checkpoint.checkpoints_volume_name])
@@ -161,8 +151,6 @@ class Endpoint:
         routing_region: str | None = None,
         environment: str | None = None,
         colocate_compute: bool = False,
-        custom_hf_repo: str | None = None,
-        custom_hf_revision: str | None = None,
         wait_timeout_sec: float = 300,
         recreate_if_existing: bool = False,
     ):
@@ -175,11 +163,11 @@ class Endpoint:
         When ``endpoint_name`` is omitted, an endpoint name is derived for you.
 
         Endpoints require proxy auth if ``unauthenticated=False``.
-        ``colocate_compute=True`` keeps containers in the routing region, and
-        ``custom_hf_repo`` serves fine-tuned weights from Hugging Face.
-        ``custom_hf_revision`` applies only with that repo. A repo also
-        requires ``HF_TOKEN`` or ``HUGGING_FACE_HUB_TOKEN`` in the launching
-        shell. A ``checkpoint`` and ``custom_hf_repo`` cannot be combined.
+        ``colocate_compute=True`` keeps containers in the routing region.
+
+        Every ``modal endpoint create`` flag has a parameter here. Custom
+        weights are a ``Checkpoint`` passed as ``checkpoint``, which maps to
+        ``--custom-volume-name`` and ``--custom-volume-path``.
 
         ``modal endpoint create`` fails when the name already exists. Pass
         ``recreate_if_existing=True`` to stop an endpoint with the same name
@@ -193,22 +181,6 @@ class Endpoint:
         Megatron training checkpoints are converted to Hugging Face format
         before create.
         """
-        if checkpoint and custom_hf_repo:
-            raise TrainingGymConfigError(
-                "checkpoint and custom_hf_repo cannot both be set"
-            )
-        if custom_hf_repo:
-            resolved_hf_token = hf_token()
-            if resolved_hf_token is None:
-                raise TrainingGymConfigError(
-                    "custom_hf_repo requires HF_TOKEN or HUGGING_FACE_HUB_TOKEN "
-                    "in the launching shell"
-                )
-        elif custom_hf_revision:
-            raise TrainingGymConfigError("custom_hf_revision requires custom_hf_repo")
-        else:
-            resolved_hf_token = None
-
         if checkpoint:
             model_config = (
                 model
@@ -235,10 +207,6 @@ class Endpoint:
                 )
             if colocate_compute:
                 spec["colocate_compute"] = True
-            if custom_hf_repo:
-                spec["custom_hf_repo"] = custom_hf_repo
-            if custom_hf_repo and custom_hf_revision:
-                spec["custom_hf_revision"] = custom_hf_revision
 
             digest = hashlib.sha256(
                 json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
@@ -253,9 +221,6 @@ class Endpoint:
             routing_region=routing_region,
             environment=environment,
             colocate_compute=colocate_compute,
-            custom_hf_repo=custom_hf_repo,
-            custom_hf_revision=custom_hf_revision,
-            resolved_hf_token=resolved_hf_token,
             wait_timeout_sec=wait_timeout_sec,
             recreate_if_existing=recreate_if_existing,
         )
