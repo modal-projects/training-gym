@@ -40,7 +40,7 @@ class _InklingSmallRecipe(MilesRecipe):
     docker_image: str = "radixark/miles:dev-202608041247"
     gpu_type: str = "H200"
     # Full-param offloads the optimizer to host RAM; LoRA inherits the request
-    # harmlessly. Same shape as the Kimi recipes.
+    # harmlessly.
     memory: tuple[int, int] = (1024, int(2 * 1024 * 1024))
 
     # Inkling's args (relative attention, ShortConv, shared-expert sink, the custom
@@ -64,12 +64,10 @@ class _InklingSmallRecipe(MilesRecipe):
             "MILES_SGLANG_DUMMY_LOAD": "0",
             "SGLANG_SERVER_ENGINE_ROLLOUT_RETURN_LOGPROB": "1",
             "RAY_memory_monitor_refresh_ms": "0",
-            # Upstream sets these for GB300. MNNVL is absent on Modal H200, and
-            # enabling it is a no-op there rather than a hang: NCCL probes for the
-            # fabric and falls back to NVLink/PCIe. Kept at upstream's value because
-            # all four validation runs came up clean with it; NCCL_NVLS_ENABLE is the
-            # one that had to deviate. Still the first var to try dropping if a future
-            # NCCL init hangs during bring-up.
+            # Upstream sets these for GB300. MNNVL is absent on Modal H200, where
+            # enabling it is a no-op rather than a hang: NCCL probes for the fabric
+            # and falls back to NVLink/PCIe. NCCL_NVLS_ENABLE is the one that had to
+            # deviate.
             "NCCL_MNNVL_ENABLE": "1",
             "NCCL_NVLS_ENABLE": "0",
             "NCCL_RAS_ENABLE": "0",
@@ -199,17 +197,10 @@ class Inkling_Small_Recipe(_InklingSmallRecipe):
     use_dynamic_batch_size: bool = False
     micro_batch_size: int = 1
 
-    # 276 B of params + grads + fp32 optimizer state does not fit 32 H200s, so the
-    # optimizer state and the paused actor spill to host RAM. Upstream's launcher
-    # defaults to node-local NVMe instead; the Inkling-Small doc overrides it to CPU
-    # ("no NVMe streaming needed, unlike the 975 B recipe"), which is also the safer
-    # bet on Modal.
-    # Back to upstream's launcher default of spilling the paused actor to node-local
-    # NVMe rather than host RAM. The earlier "cpu" choice (from the Inkling-Small doc's
-    # quickstart) put another ~138 GB/node of weights in host RAM on top of the
-    # CPU-offloaded optimizer's ~830 GB, and attempt 1 of medium-octree-4032a9243f9b
-    # lost a node right after its save with the OOM-killer signature. Viable now that
-    # the train container requests train_ephemeral_disk_mb of scratch.
+    # 276 B of params, grads and fp32 optimizer state does not fit 32 H200s. The
+    # optimizer offloads to host RAM and the paused actor spills to node-local disk,
+    # which is upstream's launcher default; putting the actor in host RAM as well
+    # exceeded it.
     offload_train_target: str = "disk"
     offload_train_disk_dir: str = "/tmp/train_offload"
     optimizer_cpu_offload: bool = True
@@ -223,15 +214,14 @@ class Inkling_Small_Recipe(_InklingSmallRecipe):
     # Save policy weights only, not distributed-optimizer state. Megatron saves both by
     # default: 276 B x 2 B (bf16 params) + 276 B x 12 B (fp32 main params + two Adam
     # moments) is ~3.9 TB, i.e. ~966 GB per node, and a Modal Volume buffers all of it
-    # to container-local disk because nothing commits mid-save. That exhausted the disk
-    # and the save died (run wide-molding-7361d61dca3d). Params alone are ~138 GB per
-    # node. Trade-off: a resumed run restarts Adam moments rather than continuing them.
+    # to container-local disk because nothing commits mid-save, which exhausts it.
+    # Params alone are ~138 GB per node. Trade-off: a resumed run restarts the Adam
+    # moments rather than continuing them.
     no_save_optim: bool = True
     # Must be paired with no_save_optim: Megatron's load_checkpoint does
     # `optimizer.load_state_dict(state_dict['optimizer'])` unconditionally unless this
     # is set (checkpointing.py:1809), so resuming a params-only checkpoint dies with
-    # KeyError: 'optimizer' (run medium-octree-4032a9243f9b, attempts 2-4). Resume
-    # therefore restores weights and restarts the Adam moments.
+    # KeyError: 'optimizer'.
     no_load_optim: bool = True
     # Headroom for the Volume's local write buffer during the remaining ~138 GB/node
     # params save, on top of the CPU-offloaded optimizer's own host/disk usage.

@@ -86,11 +86,8 @@ _REPORTING_PATCH_COMMANDS = (
     f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
 )
 
-# Megatron-level torch_dist save fixes, shared with the slime image. Only needed on
-# the HF -> torch_dist path (megatron_to_hf_mode != "bridge"), which no miles recipe
-# exercised before Inkling-Small: without them the async dist-checkpoint writer dies
-# in inline_container.cc with "unexpected pos". Both are guarded no-ops when their
-# target source doesn't match, so they are safe for every miles image.
+# Megatron-level torch_dist save fixes, shared with the slime image. Guarded no-ops
+# when their target source doesn't match, so they are safe for every miles image.
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
@@ -695,17 +692,6 @@ def build_miles_app(
             miles, model=model
         )
 
-        # torch_dist's async writer torch.save()s each tensor into a .distcp stream and
-        # asserts the stream position matches the offset miniz asks for. Writing those
-        # positional/seeky streams straight onto a Modal Volume desyncs once the
-        # per-file data gets large, and the save dies with
-        #   [enforce fail at inline_container.cc] . unexpected pos <a> vs <b>
-        # Bisected on Inkling-Small (276B): identical command, flags, and writer
-        # succeed at 4 and 8 layers but fail at 42 when --save points at the volume,
-        # and succeed at 42 when it points at container-local disk. Sequential bulk
-        # writes to a Volume are fine (the 550GB HF download lands on one), so the
-        # fix is to let the writer work on local disk and copy the finished
-        # checkpoint over afterwards.
         if num_nodes == 1:
             node_rank, master_addr, nnodes = 0, "127.0.0.1", 1
         else:
