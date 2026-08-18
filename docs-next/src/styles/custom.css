@@ -838,6 +838,25 @@ a:hover {
   -webkit-mask-position: center;
 }
 
+/* Narrow viewports: drop the label so the button covers as little of the
+   horizontally scrolling code as possible. */
+@media (max-width: 30rem) {
+  .expressive-code .copy button,
+  .expressive-code .frame:hover .copy button:not(:hover) {
+    width: 1.375rem;
+    padding: 0;
+  }
+
+  .expressive-code .copy button div::after {
+    content: none;
+  }
+
+  .expressive-code .copy button::after {
+    inset: 0;
+    width: auto;
+  }
+}
+
 .sl-markdown-content blockquote {
   border-inline-start: 4px solid var(--tg-border-strong);
   color: var(--sl-color-gray-2);
