@@ -24,6 +24,8 @@ workspace_setup/tasks/*/corpus/
 # only — must never be published or leave the local machine)
 workspace_setup/tasks/fav2/dev.json
 workspace_setup/tasks/fav2/test.json
+workspace_setup/tasks/longhealth/dev.json
+workspace_setup/tasks/longhealth/test.json
 
 # agent-run artifacts (traces/prompts/audits per run) and the ephemeral timer
 agents/_runs/

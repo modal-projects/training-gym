@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "frozen_at": "2026-08-18T20:28:09.501238+00:00",
+  "frozen_at": "2026-08-18T20:30:25.574169+00:00",
   "eval_budget": 50,
   "judge_prompt_sha": "66cbb968630817de615bb84a8772e64e8d3cc7ee0ed9f2e005a3dfeb4d2a7230",
   "files": {
@@ -49,6 +49,12 @@
     "workspace_setup/tasks/fav2/refs.json": "5aab19cf8eb3ebc7fb09ab31effd59ceea629d3232a3db27b81b56fb32b7b179",
     "task_configs/fav2_no_dev.yaml": "dc90585fde663f991e269d85ebe4d2ecb849e6ed72b924f6a9293c3e0994ca60",
     "task_configs/fav2_rl.yaml": "7aed7281902f03199a8847f6ef26ff07a21f3bfabc76462edc4191d846ced5e8",
+    "task_configs/longhealth.yaml": "ba87d72241604662e38523cd6e7ebed0e0ad4fa5bf460902a5e2cc94c5a86b28",
+    "workspace_setup/tasks/longhealth/sys.txt": "1f50f08a09c41a6b057b6745e64d8acb34168dd04697161ce1d13de22cc7b357",
+    "workspace_setup/tasks/longhealth/dev.json": "dbd44491fd244a8a0679e26cee0b1b0bd6ebdec060d4a376a6bb21ae19bf1975",
+    "workspace_setup/tasks/longhealth/test.json": "22c4d52c24f1e821f32309d7912cc87d132e808672044aae298f158ba6e74ed7",
+    "workspace_setup/tasks/longhealth/task.md": "24eef2776888942c4407e0880042a161ade8b82eb14f08c9fa6e92c195926b9f",
+    "workspace_setup/tasks/longhealth/brief.md": "6f9e651223c59a4dbbecaa5f7e8307ba9cfb9ff07df0f04be3388b73b4de9e89",
     "task_configs/maud.yaml": "f306889a393e58129833b9d6c50e9faae12e88364516bf565cab2c3113089295",
     "workspace_setup/tasks/maud/sys.txt": "7093fa7090fcedab67be5e6b6b8e2a859c69545e6d32bb57d7cf854fdb8ce555",
     "workspace_setup/tasks/maud/dev.json": "3bcd06feddbf5ac198771303dc81a77122350a0f5df68fd702744141d33f1aab",
@@ -72,6 +78,7 @@
   },
   "corpora": {
     "workspace_setup/tasks/fav2/corpus": "e37e529c126e016836038906473bc67f0b42c775edfcde3fd68bfd01dd081a65",
+    "workspace_setup/tasks/longhealth/corpus": "8a2ddf0863319f48944a6fefe03d0bfb34cb306840fa710a8851dbcd4e7a462f",
     "workspace_setup/tasks/maud/corpus": "absent",
     "workspace_setup/tasks/openclaw/corpus": "c6faca4302b475f2fa5fcf794e97d31f8f7fc22e9901d3c418453703315d0394",
     "workspace_setup/tasks/tau2_banking/corpus": "absent"

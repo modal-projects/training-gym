@@ -1,0 +1,29 @@
+# THE per-task config — loaded by harness/config.py for bench.py, judge_cli.py,
+# integrity pins, and the agent runners. A task exists iff this file exists.
+# Defaults here; override per run with `--config <override.yaml>`, then CLI flags.
+task: longhealth
+archetype: qa
+surface: "weights + serving (submission/serve.py) + the whole answering harness
+  (submission/agent.py answer/answer_batch) — the operator scores build()"
+
+corpus: workspace_setup/tasks/longhealth/corpus   # LongHealth benchmark_v5: 20 synthetic
+corpus_version: "longhealth-benchmark-v5"         #   patients, 133 clinical notes
+dev: workspace_setup/tasks/longhealth/dev.json    # 25 questions (seed 0, spread over patients)
+test: workspace_setup/tasks/longhealth/test.json  # HELD-OUT 75 questions, disjoint
+sys: workspace_setup/tasks/longhealth/sys.txt
+glob: "**/*.txt"
+secondary: none                         # no deterministic secondary metric for clinical prose
+
+# What the workspace is composed of (explicit; the loader would default to
+# the same values — spelled out so the file IS the task's full description).
+toolbox:
+  harnesses: [search_qa, completion_qa]    # qa starters: tool-using search agent + closed-book
+  training: [sft, rl]                      # methods -> packages + data cards + AGENTS.md blocks
+seed:
+  dev: true                                # dev.json into the workspace
+  corpus: true                             # corpus/ into the workspace
+
+session:                                # agent-session defaults (agents/run*.sh --config)
+  scaffold: modal_glm52
+  track: easy
+  hours: 24
