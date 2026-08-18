@@ -20,7 +20,7 @@ deliberate deviations from ``run_inkling.py``, and expected step timings.
 from __future__ import annotations
 
 from dataclasses import field
-from typing import Any
+from typing import Any, ClassVar, Literal
 
 from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
@@ -34,6 +34,13 @@ _EPHEMERAL_DISK_MIB = 768 * 1024
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class _InklingSmallRecipe(MilesRecipe):
+    _SKIP_FIELDS: ClassVar[frozenset[str]] = MilesRecipe._SKIP_FIELDS | {"modality"}
+
+    # Selects the model provider below, the same way Gemma4_26B_A4B_Recipe's flag picks
+    # its mode. A vision run also needs a MultimodalDataset with apply_chat_template
+    # off and its images materialized as files.
+    modality: Literal["text", "vision"] = "text"
+
     # Inkling landed upstream on 2026-08-03 (miles 5c517599 / 92ccb87d), well after
     # MilesRecipe's default image was built, so this recipe pins its own. Do not use
     # the `radixark/miles:inkling` tag from the upstream docs: it is arm64-only
@@ -161,10 +168,10 @@ class _InklingSmallRecipe(MilesRecipe):
     sglang_context_length: int = 4096
     sglang_disable_custom_all_reduce: bool = True
 
-    # Resolved from the dataset by ``_fields`` — a MultimodalDataset selects the
-    # multimodal provider. Set it explicitly to pin one regardless of the dataset.
-    # MODEL_ARGS precede the recipe's flags on the command line, so whichever value
-    # lands here overrides the text provider baked into the model script.
+    # Resolved from ``modality`` by ``_fields``. Set it explicitly to pin a provider
+    # regardless of the mode. MODEL_ARGS precede the recipe's flags on the command line,
+    # so whichever value lands here overrides the text provider baked into the model
+    # script.
     custom_model_provider_path: str | None = None
 
     def _fields(self, dataset=None, model=None) -> dict[str, Any]:
@@ -177,8 +184,7 @@ class _InklingSmallRecipe(MilesRecipe):
         # InklingTrainProcessor off the checkpoint's model_type and forwards its
         # patch tensors into forward() generically.
         if (
-            dataset is not None
-            and getattr(dataset, "multimodal_keys", None)
+            self.modality == "vision"
             and not self.custom_model_provider_path
             and "custom_model_provider_path" not in self._escape_hatch_keys()
         ):
