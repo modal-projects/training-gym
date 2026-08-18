@@ -17,9 +17,6 @@ scripts: you write the generator, they tell you what has to be true.
 - `rl/` — the RL data contract: prompts file shape + how to write the
   reward (its own README).
 <!-- endif:rl,opd -->
-<!-- if:dpo -->
-- `preference/` — judge-ranked chosen/rejected DPO pairs (its own README).
-<!-- endif:dpo -->
 <!-- if:opd -->
 - `self_distill/` — the self-distillation data-transform card (its own md).
 <!-- endif:opd -->
@@ -40,8 +37,8 @@ Rules:
    No external datasets.
 3. Never train on dev questions — `pool/dedup_decontam` with
    `--eval-questions` is the gate, and it now hard-fails when skipped
-   (explicit `--allow-no-eval` to opt out). It accepts `{question, answer}`,
-   `{messages}`, and DPO `{prompt, chosen, rejected}` shapes.
+   (explicit `--allow-no-eval` to opt out). It accepts `{question, answer}`
+   and `{messages}` shapes.
 4. Write your generators as Python files UNDER `data_tool/` (any name,
    docstring first line = what it does). A conforming file is automatically
    a tool: the run timeline picks up every executed toolbox path, so your

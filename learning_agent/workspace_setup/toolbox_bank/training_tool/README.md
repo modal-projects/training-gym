@@ -3,12 +3,11 @@
 The packages pinned for your task's training methods, in
 `toolbox/repos.yaml` (materialized by `clone_repos.py`):
 
-<!-- if:sft,dpo -->
-- `axolotl/`: SFT and DPO. Config-driven: LoRA, full fine-tuning, and
-  preference training (`rl: dpo`; see its docs/rlhf.qmd). Read its own
-  docs, compose its commands, run them on GPUs with
+<!-- if:sft -->
+- `axolotl/`: SFT. Config-driven: LoRA and full fine-tuning. Read its
+  own docs, compose its commands, run them on GPUs with
   `toolbox/gpu_tools/gpu_launcher.py`.
-<!-- endif:sft,dpo -->
+<!-- endif:sft -->
 <!-- if:rl,opd -->
 - `training_gym/`: RL (GRPO) and on-policy distillation, through the
   Training Gym SDK. The full guide is below; the playbooks in

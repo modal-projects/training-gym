@@ -73,7 +73,6 @@ HARNESS_FILES = [
     "workspace_setup/instructions/data_access/hard.md",
     "workspace_setup/instructions/setup/modal.md",
     "workspace_setup/instructions/methods/sft.md",
-    "workspace_setup/instructions/methods/dpo.md",
     "workspace_setup/instructions/methods/rl.md",
     "workspace_setup/instructions/methods/opd.md",
     "workspace_setup/instructions/harness/qa.md",

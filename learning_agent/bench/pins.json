@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "frozen_at": "2026-08-18T20:18:30.475710+00:00",
+  "frozen_at": "2026-08-18T20:22:37.339048+00:00",
   "eval_budget": 50,
   "judge_prompt_sha": "66cbb968630817de615bb84a8772e64e8d3cc7ee0ed9f2e005a3dfeb4d2a7230",
   "files": {
@@ -8,9 +8,9 @@
     "harness/judge.py": "a33e99029992d1cfb91bc7cc475bd9af9ed09c4010b508d2b7f4e3d50ff107d4",
     "harness/judge_cli.py": "a006fd70b26c874d5e4b3225d90ac2392839dbbf7cdcdb90a29793c57496d457",
     "harness/grader.py": "c923a8be1edec2168a9fcab896be650cd1b57d2f8eb8bec636409ca2e187f1e8",
-    "harness/integrity.py": "b9d45779b3a43a6f911caad8f1aad171c99cd927ad2a3b08efc5e7332daae2aa",
+    "harness/integrity.py": "d92bac3d669fb20d6a05a1721a5f62b8ba4e324beef134e60ead5c659776aedf",
     "harness/envfile.py": "9a1a1035d1a945e9d61bc544aa31ddfd96279cc23f4ac9cd2472d1a95552fefb",
-    "harness/config.py": "e103b66e2c94b5ea75417615b3dfa4dfd992f39cfef3ac4a1033e001be05f06b",
+    "harness/config.py": "eea9ea243459d9d8ac4b7d17133e2793366a76237bde315fd008376661aa5b9f",
     "harness/rollout.py": "4658d02bdb1de71df4b03598ec20736d7cc86e19243c4a8fded3fa2bcc5a5fec",
     "harness/rollout_modal.py": "14d742baaa82f21d06b77e401f07325af87d3855dd59414e1e18f569421853cf",
     "harness/user_sim.py": "d0827c8f3714d7ab1eea6fc6aef290f3e819cfa7dc13bff73d9b216155bfb967",
@@ -26,7 +26,6 @@
     "workspace_setup/instructions/data_access/hard.md": "b644fa47a1724c80baa32cc1606f5f929c97c0575881ce117180dd4a23310925",
     "workspace_setup/instructions/setup/modal.md": "5ea2d94554e89f4538fe71c2930708d55016179b5611908f24c22af8e8c2c550",
     "workspace_setup/instructions/methods/sft.md": "5ea6be5b32d1c4f618393e99f901847550b05e3e3245997035e8242ff3c3e76a",
-    "workspace_setup/instructions/methods/dpo.md": "8f6c880fea2d5e83cf1951385f067b934a81c1d76c334ea2899c70dba6ddaba9",
     "workspace_setup/instructions/methods/rl.md": "80a8a16bcf9eb1539e4eefe8bbb8bfd63baa1befec51351cb12310b946c1c0c3",
     "workspace_setup/instructions/methods/opd.md": "7ad4c742798c86433e94ce81497c0f512d1058881f6d6a475b02902cbaa953d7",
     "workspace_setup/instructions/harness/qa.md": "b99a1211ca7672c34cdd05c95dc4898060ba6bd6ff949bf8abcf06a0731caa0c",
