@@ -117,9 +117,13 @@ def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
     the winner; a read-then-write claim would let two runs both observe an unheld lock
     and both proceed. The claim expires after ``_CONVERT_LOCK_TTL_S``, sized against the
     heartbeat interval so a holder that cannot run its release path frees the path in a
-    TTL rather than a conversion's worth of time. Taking a stale claim over is a racy
-    delete followed by the same atomic put, so concurrent takers still yield exactly one
-    owner.
+    TTL rather than a conversion's worth of time.
+
+    Taking a stale claim over cannot be a delete followed by a put: two runs that both
+    read the same stale holder would delete each other's fresh claim and both come away
+    believing they own the path. Instead each contender first claims a token naming the
+    stale holder it saw, which only one can win, and only that winner replaces the
+    claim.
     """
     locks = _convert_lock_dict()
     key = _convert_lock_key(volume_name, save_path)
@@ -127,6 +131,7 @@ def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
     if locks.put(key, claim, skip_if_exists=True):
         return run_id
 
+    owner, claimed_at = "", None
     holder = locks.get(key)
     if isinstance(holder, dict):
         owner = str(holder.get("run_id") or "")
@@ -139,6 +144,13 @@ def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
             and time.time() - claimed_at < _CONVERT_LOCK_TTL_S
         ):
             return owner
+
+    takeover_key = f"{key}:takeover:{owner}:{claimed_at}"
+    if not locks.put(takeover_key, run_id, skip_if_exists=True):
+        winner = locks.get(takeover_key)
+        if isinstance(winner, str) and winner:
+            return winner
+        return owner or run_id
 
     try:
         locks.pop(key)

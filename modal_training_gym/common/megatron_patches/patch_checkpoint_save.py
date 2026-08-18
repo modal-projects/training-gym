@@ -25,11 +25,6 @@ import re
 torch_py = pathlib.Path(
     "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
 )
-
-if not torch_py.exists():
-    print(f"WARNING: {torch_py} not found — skipping checkpoint-save patch")
-    raise SystemExit(0)
-
 src = torch_py.read_text()
 patched = False
 
