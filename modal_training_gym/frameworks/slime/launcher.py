@@ -1334,7 +1334,7 @@ def build_slime_app(
             )
             print(slime.gpu_allocation.summary())
             if trackio_env:
-                # TRACKIO_SERVER_URL carries the server write token.
+                # TRACKIO_WRITE_TOKEN is secret, so don't print runtime_env.
                 print(f"Command: {cmd}")
             else:
                 print(f"Command: {cmd}, runtime_env: {runtime_env}")

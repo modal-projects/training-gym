@@ -426,8 +426,6 @@ def trackio_dashboard() -> None:
     """Serve all Trackio projects from one persistent, stable endpoint."""
     import threading
 
-    import trackio
-
     from modal_training_gym.common.auth_proxy import start_auth_proxy
 
     write_token = os.environ["TRACKIO_WRITE_TOKEN"]
@@ -441,6 +439,10 @@ def trackio_dashboard() -> None:
     )
     os.makedirs(TRACKIO_DATA_PATH, exist_ok=True)
 
+    # Trackio resolves TRACKIO_DIR when its modules are imported, so configure
+    # the mounted persistent directory before importing it.
+    import trackio
+
     trackio.show(
         open_browser=False,
         block_thread=False,
@@ -452,6 +454,7 @@ def trackio_dashboard() -> None:
         target_port=TRACKIO_SERVER_PORT,
         username="training-gym",
         password=os.environ.get("DASHBOARD_PASSWORD", ""),
+        ignore_username=True,
         write_token=write_token,
         realm="Training Gym Trackio",
         bind_port=TRACKIO_PROXY_PORT,
