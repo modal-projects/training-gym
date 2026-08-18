@@ -211,10 +211,10 @@ def get_checkpoint_conversion_policy(
     else:
         world_size = tp * pp if (tp > 1 or pp > 1) else gpus_per_node
 
-    if ep and etp and (etp * ep * pp) != world_size:
+    if ep and etp and world_size % (etp * ep * pp) != 0:
         raise ValueError(
             f"checkpoint conversion expert world size etp*ep*pp={etp}*{ep}*{pp}"
-            f"={etp * ep * pp} does not match the conversion world size {world_size}"
+            f"={etp * ep * pp} does not divide the conversion world size {world_size}"
         )
     max_world_size = actor_nodes * gpus_per_node
     if world_size > max_world_size:
