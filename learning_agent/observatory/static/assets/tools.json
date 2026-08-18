@@ -133,7 +133,7 @@
    "repo": "https://github.com/axolotl-ai-cloud/axolotl",
    "commit": "f6ddae34fc63acd5067d0bc4496df05f42c19277",
    "dest": "toolbox/training_tool/axolotl",
-   "notes": "config-driven SFT/LoRA/DPO trainer (rl:dpo wraps TRL DPOTrainer; see its docs/rlhf.qmd)."
+   "notes": "config-driven SFT/LoRA trainer; read its own docs and compose its commands."
   },
   {
    "name": "self_distillation",
