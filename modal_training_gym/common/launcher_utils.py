@@ -231,7 +231,8 @@ def get_checkpoint_conversion_policy(
             continue
 
         extra_args: list[str] = []
-        if tp > 1 or pp > 1:
+        pins_layout = tp > 1 or pp > 1
+        if pins_layout:
             extra_args += [
                 f"--tensor-model-parallel-size {tp}",
                 f"--pipeline-model-parallel-size {pp}",
@@ -244,8 +245,10 @@ def get_checkpoint_conversion_policy(
             # A recipe carries one ``decoder_{first,last}_pipeline_num_layers`` pair
             # shared by conversion and training. It describes a split across >1
             # pipeline stages, so it is meaningless (and rejected by Megatron) when
-            # the conversion layout is PP1.
-            if pp == 1 and attr in _PIPELINE_SPLIT_ARGS:
+            # the conversion layout is PP1. Only drop it when that PP1 is pinned on the
+            # command line: with no layout flags the converter picks its own PP, and
+            # dropping the split would then describe a layout nobody asked for.
+            if pp == 1 and pins_layout and attr in _PIPELINE_SPLIT_ARGS:
                 continue
             if x := getattr(cfg, attr, None):
                 extra_args.append(f"--{flag} {x}")

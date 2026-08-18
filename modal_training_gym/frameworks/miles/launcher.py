@@ -103,6 +103,7 @@ _MEGATRON_TORCH_STRATEGY_PY = (
 _CONVERT_LOCK_DICT_NAME = "training-gym-convert-lock"
 _CONVERT_LOCK_TTL_S = 900.0
 _CONVERT_LOCK_REFRESH_S = 300.0
+_CONVERT_TOKEN_TTL_S = 4 * _CONVERT_LOCK_TTL_S
 
 
 def _convert_lock_dict() -> Any:
@@ -111,6 +112,27 @@ def _convert_lock_dict() -> Any:
 
 def _convert_lock_key(volume_name: str, save_path: str) -> str:
     return f"lock:{volume_name}:{save_path}"
+
+
+def _sweep_convert_tokens(locks: Any, key: str) -> None:
+    """Drop takeover tokens old enough that no live contender can act on one.
+
+    A token has to outlive the takeover it settles, or a contender still holding the
+    stale read it was written for could win a fresh one and pop the new owner's claim.
+    Past that it is only litter, and nothing else reclaims it, so tokens are swept on
+    release and on the next takeover for the same path.
+    """
+    prefix = f"{key}:takeover:"
+    cutoff = time.time() - _CONVERT_TOKEN_TTL_S
+    try:
+        names = [str(name) for name in locks.keys() if str(name).startswith(prefix)]
+        for name in names:
+            token = locks.get(name)
+            written_at = token.get("at") if isinstance(token, dict) else None
+            if not isinstance(written_at, (int, float)) or written_at < cutoff:
+                locks.pop(name, None)
+    except Exception as exc:
+        print(f"WARNING: could not sweep stale conversion tokens: {exc}")
 
 
 def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
@@ -129,7 +151,7 @@ def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
     read the same stale holder would delete each other's fresh claim and both come away
     believing they own the path. Instead each contender first claims a token naming the
     stale holder it saw, which only one can win, and only that winner replaces the
-    claim.
+    claim. Those tokens are swept by age, not on use — see ``_sweep_convert_tokens``.
     """
     locks = _convert_lock_dict()
     key = _convert_lock_key(volume_name, save_path)
@@ -152,12 +174,14 @@ def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
             return owner
 
     takeover_key = f"{key}:takeover:{owner}:{claimed_at}"
-    if not locks.put(takeover_key, run_id, skip_if_exists=True):
+    token = {"run_id": run_id, "at": time.time()}
+    if not locks.put(takeover_key, token, skip_if_exists=True):
         winner = locks.get(takeover_key)
-        if isinstance(winner, str) and winner:
-            return winner
+        if isinstance(winner, dict) and winner.get("run_id"):
+            return str(winner["run_id"])
         return owner or run_id
 
+    _sweep_convert_tokens(locks, key)
     try:
         locks.pop(key)
     except KeyError:
@@ -222,6 +246,7 @@ def _release_convert_lock(run_id: str, volume_name: str, save_path: str) -> None
         locks.pop(key)
     except KeyError:
         pass
+    _sweep_convert_tokens(locks, key)
 
 
 def _is_resumable_checkpoint(path: str) -> bool:
