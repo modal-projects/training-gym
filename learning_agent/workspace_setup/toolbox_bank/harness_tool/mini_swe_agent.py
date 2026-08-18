@@ -4,7 +4,7 @@
 The minimal POLICY for agentic terminal tasks: given a natural-language
 instruction and a shell, loop {model -> ONE bash command -> observation} until
 the model declares DONE or the turn budget runs out. This is the agentic
-counterpart of harness_toolbox/react_loop.py (which searches a corpus to ANSWER;
+counterpart of harness_tool/search_qa.py (which searches a corpus to ANSWER;
 this one acts on an environment to CHANGE it — scored by the task's verifier
 re-running afterward, not by a judge reading prose).
 

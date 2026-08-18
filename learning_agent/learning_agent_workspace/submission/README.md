@@ -44,7 +44,7 @@ by the operator's `task_configs/<task>.yaml` under `agent:` (the protocol is
 restated in `task/task.md`). The per-archetype minimal agents
 (`react_env_agent`, `mini_swe_agent`, `react_tool_agent`) ship into
 `toolbox/harness_tool/` — a QA workspace carries the QA starters
-(`react_loop`, `completion_qa`) there instead
+(`search_qa`, `completion_qa`) there instead
 (see `workspace_setup/prepare_workspace.sh`).
 
 ## Notes

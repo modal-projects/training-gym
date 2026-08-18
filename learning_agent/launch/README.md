@@ -29,7 +29,7 @@ cp .env.example .env         # then edit:
 #                                       # placeholder value: it breaks auto-fallback.
 ```
 
-- `toolbox/training/_vendor/{axolotl,slime}` must exist as a sibling checkout.
+- pinned training packages materialize from `workspace_setup/toolbox_bank/repos.yaml` (clone_repos.py; seeding runs it).
 - `modal token` authenticated; the chosen environment must contain the
   `huggingface-secret` (needed by training and eval serving — see
   dev/MODAL.md for which envs have it).

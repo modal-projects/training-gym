@@ -35,9 +35,9 @@ else bad "test suites — run: python3 -m pytest observatory/tests/ -q"; fi
     || warn "tasks/$TASK/brief.md missing — hard track unavailable"
 
 # 4. trainers
-[ -d "learning_agent_workspace/toolbox/training_tool/axolotl" ] && [ -d "learning_agent_workspace/toolbox/training_tool/slime" ] \
-    && ok "pinned training packages (axolotl + slime materialized)" \
-    || bad "learning_agent_workspace/toolbox/training_tool/{axolotl,slime} missing — run toolbox/clone_repos.py"
+[ -d "workspace_setup/toolbox_bank/training_tool/automodel" ] && [ -d "workspace_setup/toolbox_bank/training_tool/training_gym" ] \
+    && ok "pinned training packages cached (automodel + training_gym)" \
+    || warn "bank clone cache incomplete — seeding will clone at pin (workspace_setup/toolbox_bank/clone_repos.py)"
 
 # 5. .env + judge path
 if [ ! -f .env ]; then

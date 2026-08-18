@@ -18,7 +18,7 @@ secondary: none                         # no deterministic secondary metric for 
 # What the workspace is composed of (explicit; the loader would default to
 # the same values — spelled out so the file IS the task's full description).
 toolbox:
-  harnesses: [react_loop, completion_qa]   # qa starters seeded into toolbox/harness_tool/
+  harnesses: [search_qa, completion_qa]    # qa starters: tool-using search agent + closed-book
   training: [sft, rl]                 # methods -> packages + data cards + AGENTS.md blocks
 seed:
   dev: true                                # dev.json into the workspace

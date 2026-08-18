@@ -39,7 +39,7 @@ opencode.json
 
 # cloned reference packages — pinned in toolbox_bank/repos.yaml, materialized
 # by toolbox_bank/clone_repos.py (workspace setup runs it automatically)
-workspace_setup/toolbox_bank/training_tool/axolotl/
+workspace_setup/toolbox_bank/training_tool/automodel/
 workspace_setup/toolbox_bank/training_tool/self_distillation/
 workspace_setup/toolbox_bank/training_tool/training_gym/
 .cache/

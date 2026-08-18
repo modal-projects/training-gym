@@ -8,13 +8,13 @@ and executes the command in a Modal Sandbox — no per-tool Modal apps, no
 function registration, nothing tool-specific.
 
     python3 toolbox/gpu_tools/gpu_launcher.py \
-        --pip-e toolbox/training_tool/axolotl \
+        --pip-e toolbox/training_tool/automodel \
         --gpu H200 --timeout-min 240 \
         --upload runs/job1:/root/job \
         -- python /root/job/train.py
 
 Image sources (pick one base, then layer):
-  --image <ref>            docker registry image (e.g. axolotlai/axolotl:main-latest)
+  --image <ref>            docker registry image from any registry
   --python <ver>           debian_slim base with this python (default 3.12)
 Layers, applied in order given:
   --requirements <file>    pip install -r <file>

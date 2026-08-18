@@ -1,5 +1,6 @@
 - **RL (GRPO)**: through the Training Gym SDK
-  (`toolbox/training_tool/training_gym/`); its `skills/` folder holds
+  (`toolbox/training_tool/training_gym/`;
+  github.com/modal-projects/training-gym); its `skills/` folder holds
   step-by-step playbooks, so read the relevant skill before driving it.
   The RL workflow is yours end to end: generate questions from the
   corpus, write grading rubrics for them, set up the RL task (a prompts

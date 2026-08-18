@@ -4,9 +4,10 @@ The packages pinned for your task's training methods, in
 `toolbox/repos.yaml` (materialized by `clone_repos.py`):
 
 <!-- if:sft -->
-- `axolotl/`: SFT. Config-driven: LoRA and full fine-tuning. Read its
-  own docs, compose its commands, run them on GPUs with
-  `toolbox/gpu_tools/gpu_launcher.py`.
+- `automodel/`: SFT, through NVIDIA NeMo AutoModel
+  (github.com/nvidia-nemo/automodel). LoRA and full fine-tuning for HF
+  models. Read its own docs, compose its commands, run them on GPUs
+  with `toolbox/gpu_tools/gpu_launcher.py`.
 <!-- endif:sft -->
 <!-- if:rl,opd -->
 - `training_gym/`: RL (GRPO) and on-policy distillation, through the

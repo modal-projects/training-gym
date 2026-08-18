@@ -26,7 +26,7 @@ adapter picks it from the resolved config (task.yaml `agent: driver:`):
 
 Internals are THE AGENT'S TO MODIFY — the starting QA harness is already a
 ReAct search loop over the task corpus (grep/glob/read_file, the toolbox's
-react_loop tools); improve it, tune the mini-swe loop, replace the
+search_qa tools); improve it, tune the mini-swe loop, replace the
 tool-calling strategy. The contract
 that must survive: `build(**overrides)` returns an object exposing the three
 methods above with these signatures and dict/str returns. `execute` /
@@ -34,7 +34,7 @@ methods above with these signatures and dict/str returns. `execute` /
 scored environment.
 
 The per-archetype minimal agents ship into toolbox/harness_tool/ per the task
-config (QA: react_loop + completion_qa; agentic: react_env_agent +
+config (QA: search_qa + completion_qa; agentic: react_env_agent +
 react_tool_agent + mini_swe_agent — see workspace_setup/prepare_workspace.sh),
 so imports are guarded: calling a method whose starter is absent raises a
 clear error instead of an ImportError at module load.
@@ -103,9 +103,9 @@ class Agent:
 
     def _react_answer(self, question: str, corpus_root: str) -> dict:
         """ACTION/OBSERVATION/FINAL loop using the toolbox's corpus tools
-        (toolbox/harness_tool/react_loop.py — same grammar as the reference
+        (toolbox/harness_tool/search_qa.py — same grammar as the reference
         harness)."""
-        from harness_tool.react_loop import (build_react_sys, extract_json,
+        from harness_tool.search_qa import (build_react_sys, extract_json,
                                              run_tool, strip_think)
         msgs = [{"role": "system",
                  "content": build_react_sys(_task_sys_prompt())},

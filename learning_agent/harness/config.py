@@ -180,7 +180,7 @@ def snapshot(resolved: dict, dest: Path) -> Path:
 # ---- toolbox composition (what gets seeded into a workspace) -----------------
 
 HARNESSES_BY_ARCHETYPE = {
-    "qa": ["react_loop", "completion_qa"],
+    "qa": ["search_qa", "completion_qa"],
     "agentic": ["react_env_agent", "react_tool_agent", "mini_swe_agent"],
 }
 ALL_TRAINING_METHODS = ["sft", "rl"]     # the default set; tasks may also select opd
@@ -188,7 +188,7 @@ ALL_TRAINING_METHODS = ["sft", "rl"]     # the default set; tasks may also selec
 # opd covers the whole on-policy distillation family: a teacher endpoint
 # through the gym, and self-distillation (same model, privileged context)
 # through the self_distillation package.
-PACKAGES_BY_METHOD = {"sft": ["axolotl"], "rl": ["training_gym"],
+PACKAGES_BY_METHOD = {"sft": ["automodel"], "rl": ["training_gym"],
                       "opd": ["training_gym", "self_distillation"]}
 # method -> data-card families copied in from toolbox_bank/data_tool/
 CARDS_BY_METHOD = {"sft": ["synthetic", "agentic"],

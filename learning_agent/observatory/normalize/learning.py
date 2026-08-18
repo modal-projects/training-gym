@@ -65,7 +65,7 @@ def _folder_re(category: str) -> re.Pattern:
 # observatory/tests/test_learning.py), and filenames that are entrypoints/
 # internals/libraries rather than tools (run.py, _-prefixed, registry,
 # corpus_sampling).
-_REPO_DIRS = ("axolotl", "training_gym",
+_REPO_DIRS = ("automodel", "axolotl", "training_gym",
               # dropped from repos.yaml (2026-08-12/13 toolbox slimming) —
               # keep excluding forever so old run records still classify
               "self_distillation", "cartridges", "gepa", "unsloth", "trl",

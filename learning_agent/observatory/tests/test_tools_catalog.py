@@ -62,7 +62,7 @@ class TestToolsCatalog(unittest.TestCase):
             sys.path.pop(0)
         md = vt.catalog_for(REPO / "workspace_setup" / "toolbox_bank")
         self.assertIn("## harness_tool", md)
-        self.assertIn("react_loop.py", md)
+        self.assertIn("search_qa.py", md)
         self.assertIn("## cloned packages", md)
         self.assertIn("training_gym", md)
 

@@ -9,11 +9,11 @@
 # `python3 toolbox/clone_repos.py` materializes any missing one at its exact
 # pin — workspace setup runs it automatically. Nested .git dirs are stripped:
 # a clone is a plain pinned tree, updated only by editing the pin here.
-axolotl:
-  repo: https://github.com/axolotl-ai-cloud/axolotl
-  commit: f6ddae34fc63acd5067d0bc4496df05f42c19277
-  dest: toolbox/training_tool/axolotl
-  notes: config-driven SFT/LoRA trainer; read its own docs and compose its commands.
+automodel:
+  repo: https://github.com/nvidia-nemo/automodel
+  commit: 6909712004d4f22b9a901e52bb3e6ab3e46583f9
+  dest: toolbox/training_tool/automodel
+  notes: NVIDIA NeMo AutoModel — SFT/PEFT for HF models (github.com/nvidia-nemo/automodel); read its own docs and compose its commands.
 self_distillation:
   repo: https://github.com/idanshen/Self-Distillation
   commit: d77573212fa0a3ae2eeb64b9b44db1c251f75e3e

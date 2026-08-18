@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""react_loop — configurable ReAct rollout sandbox (NOT the scored instrument).
+"""search_qa — tool-using search agent over the corpus (NOT the scored instrument).
 
 An EDITABLE mirror of the frozen measurement harness: serves/queries
 a model, exposes `grep`/`glob`/`read_file` over a `--corpus` (path-sandboxed), runs the
@@ -22,7 +22,7 @@ Backends (heavy imports guarded, so --help always works): vllm, sglang (same eng
 frozen harness), openai (any OpenAI-compatible endpoint), cli-claude (debug the LOOP on a
 keyless host), mock (dependency-free scripted glob->grep->FINAL smoke test).
 
-    python3 toolbox/harness_tool/react_loop.py --backend mock --corpus <corpus> --glob '**/*.txt' --question "..."
+    python3 toolbox/harness_tool/search_qa.py --backend mock --corpus <corpus> --glob '**/*.txt' --question "..."
 
 `build_engine`, `react_rollout`, and the corpus tools are importable so transfer_eval.py can
 drive a rollout with a self-modified config.

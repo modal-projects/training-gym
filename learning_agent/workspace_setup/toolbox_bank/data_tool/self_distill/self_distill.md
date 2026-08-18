@@ -28,7 +28,7 @@ pipeline.
    to restate the answer in its own words, preserving all content.
 2. Emit the rewrite as the new `answer`. Drop empty rewrites — and COUNT the
    drops; a 40% silent drop rate looks like a smaller-but-fine pool.
-3. Train the result with a plain SFT package (`training_tool/axolotl` /
+3. Train the result with a plain SFT package (`training_tool/automodel` /
    `unsloth`).
 
 ## Pitfalls

@@ -5,7 +5,7 @@ extends: fav2
 
 # overrides fav2's toolbox wholesale (lists replace, never merge)
 toolbox:
-  harnesses: [react_loop]                  # one starter: the gym is the only trainer
+  harnesses: [search_qa]                   # one starter: the gym is the only trainer
   training: [rl]                           # -> training_gym package, rl cards, RL-only AGENTS.md
 
 session:
