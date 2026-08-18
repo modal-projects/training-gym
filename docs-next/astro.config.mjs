@@ -81,13 +81,17 @@ export default defineConfig({
         themes: ['dark-plus'],
         useStarlightUiThemeColors: false,
         defaultProps: { frame: 'none' },
+        // The code surface is translucent white, which Expressive Code's
+        // contrast pass reads as a light background and compensates for by
+        // darkening every token color. Off, so dark-plus renders as-is.
+        minSyntaxHighlightingColorContrast: 0,
         styleOverrides: {
           borderColor: '#2f2f2f',
           borderRadius: '0.25rem',
           borderWidth: '1px',
           codeBackground: 'rgba(255, 255, 255, 0.06)',
           codeForeground: '#d4d4d4',
-          codeFontFamily: "var(--sl-font-mono)",
+          codeFontFamily: 'var(--sl-font-mono)',
           codeFontSize: '0.875rem',
           codeLineHeight: '1.4286',
           codePaddingBlock: '0.875rem',
