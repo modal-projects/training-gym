@@ -13,7 +13,7 @@ axolotl:
   repo: https://github.com/axolotl-ai-cloud/axolotl
   commit: f6ddae34fc63acd5067d0bc4496df05f42c19277
   dest: toolbox/training_tool/axolotl
-  notes: config-driven SFT/LoRA/DPO trainer (rl:dpo wraps TRL DPOTrainer; see its docs/rlhf.qmd).
+  notes: config-driven SFT/LoRA trainer; read its own docs and compose its commands.
 self_distillation:
   repo: https://github.com/idanshen/Self-Distillation
   commit: d77573212fa0a3ae2eeb64b9b44db1c251f75e3e
