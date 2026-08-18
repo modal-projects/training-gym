@@ -21,7 +21,7 @@ refs: workspace_setup/tasks/fav2/refs.json               #   exchange-prefixed t
 # the same values — spelled out so the file IS the task's full description).
 toolbox:
   harnesses: [react_loop, completion_qa]   # qa starters seeded into toolbox/harness_tool/
-  training: [sft, dpo, rl]                 # methods -> packages + data cards + AGENTS.md blocks
+  training: [sft, rl]                 # methods -> packages + data cards + AGENTS.md blocks
 seed:
   dev: true                                # dev.json into the workspace
   corpus: true                             # corpus/ into the workspace

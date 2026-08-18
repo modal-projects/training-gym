@@ -183,7 +183,7 @@ HARNESSES_BY_ARCHETYPE = {
     "qa": ["react_loop", "completion_qa"],
     "agentic": ["react_env_agent", "react_tool_agent", "mini_swe_agent"],
 }
-ALL_TRAINING_METHODS = ["sft", "dpo", "rl"]     # the default set; tasks opt into more
+ALL_TRAINING_METHODS = ["sft", "rl"]     # the default set; tasks opt into more (dpo/opd/sdft stay selectable)
 # method -> pinned package (toolbox_bank/repos.yaml key) that trains it
 PACKAGES_BY_METHOD = {"sft": "axolotl", "dpo": "axolotl", "rl": "training_gym",
                       "opd": "training_gym", "sdft": "self_distillation"}

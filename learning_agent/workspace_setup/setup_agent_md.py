@@ -117,7 +117,7 @@ def fill_spec(spec: str, task: str, task_model: str, blocks: dict[str, str]) -> 
 
 def resolve_blocks(root: Path, track: str, archetype: str,
                    objective: str = "", data_access: str = "",
-                   setup: str = "", methods: str = "sft dpo rl",
+                   setup: str = "", methods: str = "sft rl",
                    rules: str = "", harness: str = "", tips: str = "") -> dict[str, str]:
     """Load the prose blocks, explicit paths beating the defaults."""
     if track not in TRACKS:
@@ -169,7 +169,7 @@ def main() -> None:
                     help="path to a harness block md; overrides --archetype")
     ap.add_argument("--tips", default="",
                     help="path to a training-tips block md; overrides --archetype")
-    ap.add_argument("--methods", default="sft dpo rl",
+    ap.add_argument("--methods", default="sft rl",
                     help="training methods to keep (if:/endif: markers)")
     ap.add_argument("--strip-only", default="",
                     help="strip method markers in THIS file in place and exit")
