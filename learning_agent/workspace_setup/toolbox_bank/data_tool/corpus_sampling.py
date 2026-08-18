@@ -1,4 +1,4 @@
-"""Shared corpus-access helpers for the data-toolbox generators + eval_toolbox.
+"""Shared corpus-access helpers for the data-toolbox generators + eval_tool.
 
 Two sampling styles, both stdlib-only and behaviour-identical to the copies they replace:
 

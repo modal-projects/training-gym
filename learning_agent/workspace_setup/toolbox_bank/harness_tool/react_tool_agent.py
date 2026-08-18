@@ -26,7 +26,7 @@ The SERVER must be launched with tool-call parsing enabled (e.g. vLLM
 otherwise the model's calls come back as prose and never reach the env.
 
 Offline smoke (no model, no network):
-    python toolbox/agentic_toolbox/react_tool_agent.py --self-test
+    python toolbox/harness_tool/react_tool_agent.py --self-test
 """
 from __future__ import annotations
 

@@ -6,44 +6,37 @@ adapted to Learning Agent.
 
 ## Run one
 
-```bash
-agents/run_sandbox.sh <scaffold> <task> [hours] [model]
-
-agents/run_sandbox.sh claude_reprompt fav2 24    # Claude Code (kept alive), fav2, 24h
-agents/run_sandbox.sh codex  dspy     24 gpt-5.1-codex
-agents/run_sandbox.sh gemini dspy     24         # Gemini CLI, model=gemini-3.1-pro
-agents/run_sandbox.sh opencode dspy   24 zai/glm-5  # OpenCode (provider/model form)
-```
-
-`run_sandbox.sh` prepares the agent's own sandbox copy of the repo — committed tree
-only, every `tasks/*/test.json` physically absent, corpus/dev seeded, fresh git
-history — then runs `run.sh` inside it. The finished sandbox is the submission:
-score it with `python submission/eval.py --input <held-out questions> --output
-answers.json` from the sandbox root.
-
-Agents never run in the seed repo. The agent edits code (data, training, harness,
-submission), so a launch here would let it modify the benchmark itself; `run.sh`
-(the inner primitive: prompt, timer, trace, audit) refuses to start unless the
-`.learning_agent_sandbox` marker written by `run_sandbox.sh` is present
-(`LEARNING_AGENT_ALLOW_IN_PLACE=1` overrides, for operator smoke tests only).
-
-## Container runs
-
-Two containerized twins share `run_sandbox.sh`'s shape (`<scaffold> <task>
-[hours] [model]`), its seeding routine (`workspace_setup/prepare_workspace.sh`), and one
-in-container entry script (`lib/container_entry.sh` — points `HOME` inside the
-session's `logs/` so CLI-native session state persists, starts the observatory
-watcher from a read-only seed copy, then runs `run.sh`):
+Two containerized runners share one shape (`[--config <yaml>] [--track ...]
+<scaffold> <task> [hours] [model]`), one seeding routine
+(`workspace_setup/prepare_workspace.sh`), and one in-container entry script
+(`lib/container_entry.sh` — points `HOME` inside the session's `logs/` so
+CLI-native session state persists, starts the observatory watcher from a
+read-only seed copy, then runs `run.sh`):
 
 ```bash
 agents/run_sandbox_modal.sh  modal_glm52 fav2 23.5   # container under Modal app `lab-agent`
 agents/run_sandbox_docker.sh modal_glm52 fav2 24     # local Docker container
+
+agents/run_sandbox_modal.sh --config task_configs/fav2.yaml   # the task's own session defaults
 ```
+
+The runners prepare the agent's own sandbox copy of the repo — committed tree
+only, every `tasks/*/test.json` physically absent, corpus/dev seeded, fresh git
+history — then run `run.sh` inside it. The finished workspace is the submission:
+score it with `python submission/eval.py --input <held-out questions> --output
+answers.json` from the workspace root.
+
+Agents never run in the seed repo. The agent edits code (data, training, harness,
+submission), so a launch here would let it modify the benchmark itself; `run.sh`
+(the inner primitive: prompt, timer, trace, audit) refuses to start unless the
+`.learning_agent_sandbox` marker written at seeding is present
+(`LEARNING_AGENT_ALLOW_IN_PLACE=1` overrides, for operator smoke tests only).
 
 Modal sessions live on the `lab-agent-workspace` volume as
 `<task>/<session>/{workspace,logs}` (session = `<scaffold>_<student>_<stamp>`);
-the corpus and `training-toolbox` upload once to `_shared/` and are copied
-volume-side per session. Containers carry the `lab-agent-modal-token` secret so
+the whole session — task, corpus, and materialized training packages riding
+inside the workspace — uploads per session (no shared state between sessions).
+Containers carry the `lab-agent-modal-token` secret so
 the agent's own `bench.py train`/`score` jobs and live dashboard ingest work
 from inside. Docker sessions mirror the same layout under
 `agents/_container_runs/`. Live observability is always on for container runs —
@@ -111,7 +104,7 @@ The runner exits non-zero if the audit finds contamination, so CI can gate on it
 ## The sandbox
 
 Each run gets a fresh copy of the repo under `agents/_runs/ws_*/workspace/`,
-prepared by `run_sandbox.sh`:
+prepared by the runners:
 
 - `git archive` of HEAD — the sandbox has no git history to mine, and the agent's
   own `git init` starts at run start.
@@ -160,6 +153,6 @@ the answers externally:
 ```bash
 cd agents/_runs/ws_<...>/workspace
 python submission/eval.py --input <held-out questions.json> --output answers.json
-python toolbox/eval_toolbox/rubric_eval.py --dev <held-out gold.json> \
+python toolbox/eval_tool/rubric_eval.py --dev <held-out gold.json> \
     --answers answers.json --task <task> --out results.json
 ```

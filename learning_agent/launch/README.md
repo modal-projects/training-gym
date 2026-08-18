@@ -19,8 +19,8 @@ cp .env.example .env         # then edit:
 #   MODAL_OBS_VOLUME=lab-observatory
 #   ANTHROPIC_API_KEY=<real key>        # OPERATOR-ONLY: used for the canonical
 #                                       # judge at END-of-run scoring (step 5).
-#                                       # run_sandbox.sh strips API keys from the
-#                                       # .env it seeds — the agent evaluates
+#                                       # prepare_workspace.sh strips API keys from
+#                                       # the .env it seeds — the agent evaluates
 #                                       # itself during the run (its own judgment
 #                                       # or the CLI-backed judge instruments).
 #                                       # Leave the line out if you have no key —
@@ -33,7 +33,10 @@ cp .env.example .env         # then edit:
 - `modal token` authenticated; the chosen environment must contain the
   `huggingface-secret` (needed by training and eval serving — see
   dev/MODAL.md for which envs have it).
-- Task corpora on disk under `tasks/<task>/corpus/` (distributed separately).
+- Task corpora on disk under `tasks/<task>/corpus/` — fetch from the private
+  HF dataset `universal-learning-agent/tasks` with
+  `python3 workspace_setup/hf_tasks.py fetch` (needs an org-scoped token, HUGGINGFACEHUB_API_TOKEN in .env;
+  the pull ends by running `bench.py verify`, the arbiter of consistency).
 - The team viewer, once: `modal deploy observatory/app.py`
   (uses `MODAL_ENVIRONMENT` from your shell; `-e <env>` to override).
 
@@ -54,7 +57,7 @@ A 3-minute budget through the ENTIRE chain — prepare, launch, trace, watcher
 upload, viewer, kill, audit:
 
 ```bash
-bash agents/run_sandbox.sh --watch --track easy claude_reprompt fav2 0.05
+bash agents/run_sandbox_docker.sh --track easy modal_glm52 fav2 0.05
 ```
 
 Then open the viewer: the run should appear on the index within a minute,
@@ -65,24 +68,28 @@ pipeline works.
 ## 3 · The real run
 
 ```bash
-# fav2, easy track, Claude agent with re-prompting, 24h budget — DETACHED:
-bash launch/detach_run.sh --watch --track easy claude_reprompt fav2 24
+# fav2, easy track, opencode + team GLM endpoint, 23.5h budget — DETACHED:
+bash agents/run_sandbox_modal.sh --track easy modal_glm52 fav2 23.5
 ```
 
-- **Always launch multi-hour runs via `launch/detach_run.sh`** — it starts the
-  run in its own session + process group (`setsid` semantics; macOS ships no
-  setsid binary, the script uses python's `start_new_session`). A run launched
-  as a plain foreground/background job dies with the terminal, the SSH
+- **Always launch multi-hour runs via `agents/run_sandbox_modal.sh`** — the
+  session runs in its own Modal container, detached from your terminal
+  (the launcher spawns `run_session` and exits; it prints the call id, the
+  session name, and the exact cancel command). A run launched as a plain
+  foreground/background job on the host dies with the terminal, the SSH
   connection, or a session-scoped task manager — this killed a real 24h run
-  1h39m in on 2026-07-21. The script prints the pid, the log path, and the
-  exact kill command.
-- `--track medium|hard` for the harder variants (see README "Tracks").
-- Scaffolds live under `agents/` (claude_reprompt, codex_xhigh_reprompt, …);
-  `claude*` scaffolds use the machine's logged-in `claude` CLI.
-- The hard kill fires at budget+5 min regardless of how it was launched.
-- `--watch` starts the detached observatory watcher: live trace at the
-  viewer while the run goes, final ingest + workspace archive when it ends.
-  Its log: `agents/_runs/ws_<...>/obs_watch.log`.
+  1h39m in on 2026-07-21.
+- `--config task_configs/<task>.yaml` fills scaffold/track/hours from the
+  task's own `session:` defaults; `--track medium|hard` for harder variants
+  (see README "Tracks").
+- Scaffolds live under `agents/` (modal_glm52, codex_kimi3, …); the container
+  image pins the opencode and codex CLIs.
+- The hard kill fires at budget+5 min regardless of how it was launched;
+  Modal budgets are clamped to 23.75 h so it beats the platform's 24 h ceiling.
+- Live observability is always on for container runs: the container starts the
+  observatory watcher itself (no --watch flag) — live trace at the viewer
+  while the run goes, final ingest + workspace archive when it ends.
+  Its log: `<task>/<session>/logs/obs_watch.log` on the session volume.
 
 ## 4 · While it runs (all read-only)
 
@@ -93,8 +100,9 @@ cat agents/_runs/ws_<...>/obs_watch.log                              # watcher h
 ```
 
 Or just watch the viewer: index row → run page → Trace / Learning /
-Scores tabs update live. Kill a runaway run by killing the run_sandbox
-process group; the watcher exits on its own.
+Scores tabs update live. Kill a runaway run with the cancel command the
+launcher printed (Modal) or by stopping the container (Docker); the
+watcher exits on its own.
 
 ## 5 · Scoring (after the run ends)
 
@@ -127,7 +135,7 @@ touches the workspace: run it only after the agent is done and audited.
 |---|---|
 | judge errors `backend 'api' needs ANTHROPIC_API_KEY` | placeholder or missing key in `.env`. Remove the line (CLI fallback, canonical:false) or put a real key |
 | training dies with image-processor / HF download errors | `huggingface-secret` missing in this Modal environment, or `lab-hf-cache` was wiped (it repopulates automatically, ~18 GB once) |
-| `refusing to launch: not a prepared sandbox` | you ran `agents/run.sh` directly in the seed repo — always launch via `run_sandbox.sh` |
+| `refusing to launch: not a prepared sandbox` | you ran `agents/run.sh` directly in the seed repo — always launch via `run_sandbox_modal.sh` / `run_sandbox_docker.sh` |
 | weights/records land in the wrong Modal env | `MODAL_ENVIRONMENT` not in `.env` (runs) or not exported in your shell (manual commands) |
 | viewer shows nothing | watcher not started (`--watch` missing)? check `obs_watch.log`; ingest manually: `python3 -m observatory.cli ingest agents/_runs/ws_<...> --archive-workspace` |
-| run won't die | kill the process group: `kill -- -<pid of run_sandbox>`; the +5 min hard kill also reaps children |
+| run won't die | Modal: the cancel command printed at launch; Docker: `docker stop <container>`; the +5 min hard kill also reaps children |

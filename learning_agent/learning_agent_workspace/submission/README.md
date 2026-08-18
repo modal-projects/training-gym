@@ -21,7 +21,7 @@ against hidden gold + rubrics:
 
 ```bash
 python submission/eval.py --input <heldout-questions.json> --output answers.json
-python toolbox/eval_toolbox/rubric_eval.py --dev <heldout-gold.json> \
+python toolbox/eval_tool/rubric_eval.py --dev <heldout-gold.json> \
     --answers answers.json --task <task> --out results.json
 ```
 
@@ -40,10 +40,11 @@ agent.tool_turn(messages, tools, execute_tool=env_tool)   # tau2 dev-time turn
 ```
 
 The driver (`react` default, `mini_swe` for terminal tasks) is pinned per task
-in `task/task.yaml` under `agent:`. The per-archetype minimal agents
-(`react_env_agent`, `mini_swe_agent`, `react_tool_agent`) come from the mounted
-`toolbox/agentic_toolbox/` — a QA workspace doesn't carry them, and an agentic
-workspace doesn't carry the QA judge toolboxes
+by the operator's `task_configs/<task>.yaml` under `agent:` (the protocol is
+restated in `task/task.md`). The per-archetype minimal agents
+(`react_env_agent`, `mini_swe_agent`, `react_tool_agent`) ship into
+`toolbox/harness_tool/` — a QA workspace carries the QA starters
+(`react_loop`, `completion_qa`) there instead
 (see `workspace_setup/prepare_workspace.sh`).
 
 ## Notes

@@ -3,6 +3,8 @@
 # Defaults here; override per run with `--config <override.yaml>`, then CLI flags.
 task: fav2
 archetype: qa
+surface: "weights + serving (submission/serve.py) + the whole answering harness
+  (submission/agent.py answer/answer_batch) — the operator scores build()"
 
 corpus: workspace_setup/tasks/fav2/corpus               # SEC EDGAR snapshot: 2415 filings, 41 issuers,
 corpus_version: "edgar-20260708-norm1"  #   2023-01-01..2026-07-08, normalizer v1

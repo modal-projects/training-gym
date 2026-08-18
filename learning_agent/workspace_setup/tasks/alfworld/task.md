@@ -19,7 +19,8 @@ contract it exercises is the one every env task uses (adapter + rollout).
   rows, near ceiling with almost no headroom. Flipping this knob changes the
   benchmark — re-freeze deliberately and never compare across the settings.
 
-## Base floors (Qwen3.5-9B, dev, 50 games, admissible hidden)
+## Base floors (Qwen3.5-9B, PRE-2026-08-17 50-game dev, admissible hidden —
+## re-measure on the new 25-game dev before comparing)
 
 | driver | score | wins | env-rejected actions | median steps |
 |---|---|---|---|---|
@@ -48,11 +49,13 @@ planning, not better-formed commands.
   `heat`/`cool`/`clean`, `use`, `examine`, `look`, `inventory`) with typed
   arguments, rendered back to ALFWorld's text commands by the adapter. This is
   the interface deployed agents actually use and the one the student's
-  tool-use post-training optimized. **The endpoint must be served with a
-  tool-call parser** or every call arrives as prose (the driver detects this
-  and says so instead of scoring 0).
+  tool-use post-training optimized. **Serving is part of your submission**:
+  scoring calls `build(weights=...)`, which serves through your
+  `submission/serve.py`. The endpoint must be served with a tool-call parser
+  or every call arrives as prose (the driver detects this and says so instead
+  of scoring 0) — the baseline `serve.py` already enables it.
 - The `react` driver (`ACTION: <command>` per turn,
-  `toolbox/agentic_toolbox/react_env_agent.py`) remains available over the
+  `toolbox/harness_tool/react_env_agent.py`) remains available over the
   SAME action space, for text-only policies such as a CLI reference baseline.
   Numbers from the two drivers are not interchangeable — `provenance.driver`
   records which produced a run.
@@ -62,11 +65,12 @@ planning, not better-formed commands.
 ## Splits
 
 Seeded samples generated once by
-`modal run harness/rollout_modal.py::alfworld_splits` (seed 0) and pinned:
+`modal run harness/rollout_modal.py::alfworld_splits` (seed 0) and pinned
+(25/75 since 2026-08-17; was 50/50 before):
 
-- `dev.json`  — 50 games from upstream **valid_seen** (rooms seen in training
+- `dev.json`  — 25 games from upstream **valid_seen** (rooms seen in training
   data; the agent's iteration signal)
-- `test.json` — 50 games from upstream **valid_unseen** (unseen rooms; the
+- `test.json` — 75 games from upstream **valid_unseen** (unseen rooms; the
   held-out generalization number)
 
 Rows: `{"id", "game_file" (relative to $ALFWORLD_DATA), "task_type"}`.

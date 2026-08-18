@@ -79,6 +79,59 @@ def _user_simulator(cfg: dict) -> tuple[str, dict]:
         "operator machine.")
 
 
+BRIDGE_AGENT_NAME = "learning_agent_submission"
+
+
+def _register_bridge(policy) -> str:
+    """Register the SUBMISSION as a tau2 agent (task.yaml `agent.driver: bridge`).
+
+    tau2's orchestrator keeps everything that defines the benchmark — user-sim
+    turn-taking, tool EXECUTION, termination, and the transcript its evaluator
+    reads (action + communication checks) — while each assistant turn is
+    computed by the submission's policy_turn(messages, tools) instead of
+    tau2's stock litellm call. The bridge translates tau2 messages to OpenAI
+    format with tau2's OWN converter and the reply back into tau2's native
+    AssistantMessage/ToolCall objects, so the evaluator sees a transcript
+    byte-compatible with the stock loop's.
+
+    Registered per-process (run_domain builds one bridge instance per
+    simulation via the factory; `policy` is shared — it only POSTs to the
+    submission endpoint, so concurrent trials are safe)."""
+    from tau2.agent.llm_agent import LLMAgent
+    from tau2.data_model.message import AssistantMessage, MultiToolMessage, ToolCall
+    from tau2.registry import registry
+    from tau2.utils.llm_utils import to_litellm_messages
+
+    class SubmissionBridge(LLMAgent):
+        def _generate_next_message(self, message, state):
+            # Same state bookkeeping as the stock LLMAgent...
+            if isinstance(message, MultiToolMessage):
+                state.messages.extend(message.tool_messages)
+            else:
+                state.messages.append(message)
+            oai_msgs = to_litellm_messages(state.system_messages + state.messages)
+            oai_tools = [t.openai_schema for t in self.tools]
+            # ...but the turn is the SUBMISSION's to compute.
+            reply = policy.policy_turn(oai_msgs, oai_tools) or {}
+            calls = [
+                ToolCall(id=(tc.get("id") or f"call_{i}"),
+                         name=tc["function"]["name"],
+                         arguments=json.loads(tc["function"]["arguments"] or "{}"))
+                for i, tc in enumerate(reply.get("tool_calls") or [])
+            ] or None
+            return AssistantMessage(role="assistant",
+                                    content=reply.get("content"),
+                                    tool_calls=calls)
+
+    def factory(tools, domain_policy, llm=None, llm_args=None, **kwargs):
+        return SubmissionBridge(tools=tools, domain_policy=domain_policy,
+                                llm=llm or "submission", llm_args={})
+
+    if registry.get_agent_factory(BRIDGE_AGENT_NAME) is None:
+        registry.register_agent_factory(factory, BRIDGE_AGENT_NAME)
+    return BRIDGE_AGENT_NAME
+
+
 def run_split(agent, rows, cfg: dict) -> dict:
     from tau2.data_model.simulation import TextRunConfig
     from tau2.runner.batch import run_domain
@@ -102,11 +155,24 @@ def run_split(agent, rows, cfg: dict) -> dict:
     }
     llm_user, llm_args_user = _user_simulator(cfg)
 
+    # driver: native (default) = tau2's stock llm_agent computes each turn
+    # (surface: weights only). driver: bridge = the submission's policy_turn
+    # computes each turn inside tau2's orchestrator (surface: + per-turn
+    # policy). Flipping this changes the benchmark protocol — re-measure the
+    # base floor before comparing across drivers (provenance.driver records it).
+    driver = acfg.get("driver", "native")
+    if driver == "bridge":
+        agent_name = _register_bridge(agent)
+    elif driver == "native":
+        agent_name = "llm_agent"
+    else:
+        raise ValueError(f"unknown tau2 driver {driver!r} (native | bridge)")
+
     save_to = tempfile.mkdtemp(prefix="tau2_rollout_")
     config = TextRunConfig(
         domain=env["domain"],
         task_ids=task_ids,
-        agent="llm_agent",
+        agent=agent_name,
         llm_agent=f"openai/{agent.model}",
         llm_args_agent=llm_args_agent,
         user="user_simulator",

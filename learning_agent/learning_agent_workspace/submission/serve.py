@@ -14,7 +14,12 @@ Importable (used by submission/agent.py and the operator harnesses):
 
 The serving stack is THE AGENT'S TO MODIFY (vLLM flags, sglang, LoRA adapters,
 quantization — your call); the contract that must survive is just "an
-OpenAI-compatible /v1 endpoint that serves the submitted task model".
+OpenAI-compatible /v1 endpoint that serves the submitted task model". For QA
+and env tasks scored through act(driver="tools") (e.g. alfworld), THIS file is
+how the scored system serves — the operator calls build(weights=...) and your
+serving rides into the score. tau2_* is the exception: tau2's native
+orchestrator is served by the operator's pinned recipe, so only the weights
+carry there.
 """
 from __future__ import annotations
 
@@ -36,13 +41,23 @@ MAX_MODEL_LEN = 32768
 
 def serve_vllm(weights: str, port: int = 8000, max_len: int = MAX_MODEL_LEN) -> str:
     """Start a local vLLM OpenAI server for `weights`; return its base_url.
-    Blocks until /v1/models responds. Requires vllm installed and local weights."""
-    cmd = ["vllm", "serve", weights, "--port", str(port), "--max-model-len", str(max_len)]
+    Blocks until /v1/models responds. Requires vllm installed and local weights.
+
+    --enable-auto-tool-choice + --tool-call-parser are LOAD-BEARING for env
+    tasks: act(driver="tools") sends OpenAI function schemas, and without a
+    parser the model's tool calls come back as prose and never reach the
+    environment (the driver detects this and errors instead of scoring 0).
+    The parser names match the Qwen3.5 student; change them if you serve a
+    different family."""
+    cmd = ["vllm", "serve", weights, "--served-model-name", weights,
+           "--port", str(port), "--max-model-len", str(max_len),
+           "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_coder",
+           "--reasoning-parser", "qwen3"]
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}/v1"
-    # Poll readiness every 5s for up to 15 min (180 * 5s): a cold vLLM start (weight
+    # Poll readiness every 5s for up to 30 min: a cold vLLM start (weight
     # load + CUDA-graph capture) routinely takes several minutes on the first serve.
-    for _ in range(180):
+    for _ in range(360):
         try:
             urllib.request.urlopen(f"{base}/models", timeout=2)
             return base

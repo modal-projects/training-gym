@@ -42,3 +42,4 @@ opencode.json
 workspace_setup/toolbox_bank/training_tool/axolotl/
 workspace_setup/toolbox_bank/training_tool/self_distillation/
 workspace_setup/toolbox_bank/training_tool/training_gym/
+.cache/

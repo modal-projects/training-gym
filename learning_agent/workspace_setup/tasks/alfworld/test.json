@@ -1,252 +1,377 @@
 [
  {
   "id": "alfworld_test_0000",
-  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-Bowl-None-DeskLamp-308/trial_T20190907_133935_066606/game.tw-pddl",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-AlarmClock-None-DeskLamp-308/trial_T20190908_222917_366542/game.tw-pddl",
   "task_type": "look_at_obj_in_light"
  },
  {
   "id": "alfworld_test_0001",
-  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-CD-None-DeskLamp-308/trial_T20190908_141942_810052/game.tw-pddl",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-AlarmClock-None-DeskLamp-308/trial_T20190908_222933_607649/game.tw-pddl",
   "task_type": "look_at_obj_in_light"
  },
  {
   "id": "alfworld_test_0002",
-  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-CD-None-DeskLamp-308/trial_T20190908_141958_463362/game.tw-pddl",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-Bowl-None-DeskLamp-308/trial_T20190907_133935_066606/game.tw-pddl",
   "task_type": "look_at_obj_in_light"
  },
  {
   "id": "alfworld_test_0003",
-  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-Mug-None-DeskLamp-308/trial_T20190908_161733_213242/game.tw-pddl",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-Bowl-None-DeskLamp-308/trial_T20190907_133953_562557/game.tw-pddl",
   "task_type": "look_at_obj_in_light"
  },
  {
   "id": "alfworld_test_0004",
-  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-Pencil-None-DeskLamp-308/trial_T20190908_220656_510400/game.tw-pddl",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-CD-None-DeskLamp-308/trial_T20190908_141942_810052/game.tw-pddl",
   "task_type": "look_at_obj_in_light"
  },
  {
   "id": "alfworld_test_0005",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-CD-None-DeskLamp-308/trial_T20190908_141958_463362/game.tw-pddl",
+  "task_type": "look_at_obj_in_light"
+ },
+ {
+  "id": "alfworld_test_0006",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-CD-None-DeskLamp-308/trial_T20190908_142046_281296/game.tw-pddl",
+  "task_type": "look_at_obj_in_light"
+ },
+ {
+  "id": "alfworld_test_0007",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-Mug-None-DeskLamp-308/trial_T20190908_161733_213242/game.tw-pddl",
+  "task_type": "look_at_obj_in_light"
+ },
+ {
+  "id": "alfworld_test_0008",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-Mug-None-DeskLamp-308/trial_T20190908_201421_021646/game.tw-pddl",
+  "task_type": "look_at_obj_in_light"
+ },
+ {
+  "id": "alfworld_test_0009",
+  "game_file": "json_2.1.1/valid_unseen/look_at_obj_in_light-Pencil-None-DeskLamp-308/trial_T20190908_220656_510400/game.tw-pddl",
+  "task_type": "look_at_obj_in_light"
+ },
+ {
+  "id": "alfworld_test_0010",
   "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-Mug-None-Desk-308/trial_T20190908_125200_737896/game.tw-pddl",
   "task_type": "pick_and_place_simple"
  },
  {
-  "id": "alfworld_test_0006",
-  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-PepperShaker-None-Drawer-10/trial_T20190918_154424_844749/game.tw-pddl",
-  "task_type": "pick_and_place_simple"
- },
- {
-  "id": "alfworld_test_0007",
-  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Cabinet-10/trial_T20190906_191429_743650/game.tw-pddl",
-  "task_type": "pick_and_place_simple"
- },
- {
-  "id": "alfworld_test_0008",
-  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Drawer-10/trial_T20190909_021728_339782/game.tw-pddl",
-  "task_type": "pick_and_place_simple"
- },
- {
-  "id": "alfworld_test_0009",
-  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SoapBottle-None-Toilet-424/trial_T20190907_004321_405868/game.tw-pddl",
-  "task_type": "pick_and_place_simple"
- },
- {
-  "id": "alfworld_test_0010",
-  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205204_244321/game.tw-pddl",
-  "task_type": "pick_and_place_simple"
- },
- {
   "id": "alfworld_test_0011",
-  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-Watch-None-Safe-219/trial_T20190907_074524_006355/game.tw-pddl",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-Mug-None-Desk-308/trial_T20190909_203041_433487/game.tw-pddl",
   "task_type": "pick_and_place_simple"
  },
  {
   "id": "alfworld_test_0012",
-  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-Watch-None-Safe-219/trial_T20190907_074556_124850/game.tw-pddl",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-PepperShaker-None-Drawer-10/trial_T20190906_184021_215264/game.tw-pddl",
   "task_type": "pick_and_place_simple"
  },
  {
   "id": "alfworld_test_0013",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-PepperShaker-None-Drawer-10/trial_T20190918_154424_844749/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0014",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Cabinet-10/trial_T20190906_191429_743650/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0015",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Cabinet-10/trial_T20190906_191445_723170/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0016",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Drawer-10/trial_T20190909_021613_077537/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0017",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Drawer-10/trial_T20190909_021650_880235/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0018",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Drawer-10/trial_T20190909_021728_339782/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0019",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SoapBottle-None-Toilet-424/trial_T20190907_004321_405868/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0020",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-SoapBottle-None-Toilet-424/trial_T20190907_004404_604165/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0021",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205204_244321/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0022",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-Watch-None-Safe-219/trial_T20190907_074524_006355/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0023",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-Watch-None-Safe-219/trial_T20190907_074556_124850/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0024",
+  "game_file": "json_2.1.1/valid_unseen/pick_and_place_simple-Watch-None-Safe-219/trial_T20190907_074643_810052/game.tw-pddl",
+  "task_type": "pick_and_place_simple"
+ },
+ {
+  "id": "alfworld_test_0025",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Bowl-None-Cabinet-10/trial_T20190909_061130_844814/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0014",
+  "id": "alfworld_test_0026",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Cloth-None-Cabinet-424/trial_T20190908_022321_380927/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0015",
+  "id": "alfworld_test_0027",
+  "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Egg-None-Microwave-10/trial_T20190909_120712_273910/game.tw-pddl",
+  "task_type": "pick_clean_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0028",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_221208_560499/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0016",
+  "id": "alfworld_test_0029",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_221300_362511/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0017",
+  "id": "alfworld_test_0030",
+  "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_221355_558505/game.tw-pddl",
+  "task_type": "pick_clean_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0031",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_032543_712058/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0018",
+  "id": "alfworld_test_0032",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Plate-None-CounterTop-10/trial_T20190908_213356_017769/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0019",
+  "id": "alfworld_test_0033",
+  "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Plate-None-CounterTop-10/trial_T20190908_213420_728917/game.tw-pddl",
+  "task_type": "pick_clean_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0034",
+  "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Plate-None-CounterTop-10/trial_T20190908_213533_897289/game.tw-pddl",
+  "task_type": "pick_clean_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0035",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-Cabinet-424/trial_T20190908_214926_337906/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0020",
+  "id": "alfworld_test_0036",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-Cabinet-424/trial_T20190908_215019_162873/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0021",
+  "id": "alfworld_test_0037",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-CounterTop-424/trial_T20190907_074106_050405/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0022",
+  "id": "alfworld_test_0038",
+  "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-CounterTop-424/trial_T20190907_074124_966890/game.tw-pddl",
+  "task_type": "pick_clean_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0039",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Spatula-None-Drawer-10/trial_T20190907_080730_211959/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0023",
+  "id": "alfworld_test_0040",
   "game_file": "json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Spatula-None-Drawer-10/trial_T20190907_080800_275989/game.tw-pddl",
   "task_type": "pick_clean_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0024",
+  "id": "alfworld_test_0041",
   "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Bread-None-CounterTop-10/trial_T20190908_091811_414150/game.tw-pddl",
   "task_type": "pick_cool_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0025",
+  "id": "alfworld_test_0042",
   "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Lettuce-None-CounterTop-10/trial_T20190909_174807_646433/game.tw-pddl",
   "task_type": "pick_cool_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0026",
+  "id": "alfworld_test_0043",
   "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Lettuce-None-CounterTop-10/trial_T20190909_174840_771703/game.tw-pddl",
   "task_type": "pick_cool_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0027",
+  "id": "alfworld_test_0044",
   "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_121559_082363/game.tw-pddl",
   "task_type": "pick_cool_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0028",
+  "id": "alfworld_test_0045",
+  "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_121635_622676/game.tw-pddl",
+  "task_type": "pick_cool_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0046",
   "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_121710_650938/game.tw-pddl",
   "task_type": "pick_cool_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0029",
+  "id": "alfworld_test_0047",
+  "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_183715_299073/game.tw-pddl",
+  "task_type": "pick_cool_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0048",
   "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_114656_768805/game.tw-pddl",
   "task_type": "pick_cool_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0030",
+  "id": "alfworld_test_0049",
   "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Potato-None-Microwave-10/trial_T20190907_033306_962974/game.tw-pddl",
   "task_type": "pick_cool_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0031",
+  "id": "alfworld_test_0050",
   "game_file": "json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Tomato-None-Microwave-10/trial_T20190909_102710_795182/game.tw-pddl",
   "task_type": "pick_cool_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0032",
+  "id": "alfworld_test_0051",
+  "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-Fridge-10/trial_T20190906_182259_116320/game.tw-pddl",
+  "task_type": "pick_heat_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0052",
   "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-Fridge-10/trial_T20190906_182435_622538/game.tw-pddl",
   "task_type": "pick_heat_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0033",
+  "id": "alfworld_test_0053",
   "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-GarbageCan-10/trial_T20190908_145143_820541/game.tw-pddl",
   "task_type": "pick_heat_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0034",
+  "id": "alfworld_test_0054",
+  "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Cup-None-Cabinet-10/trial_T20190907_083346_800823/game.tw-pddl",
+  "task_type": "pick_heat_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0055",
   "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Cup-None-Cabinet-10/trial_T20190907_083507_594820/game.tw-pddl",
   "task_type": "pick_heat_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0035",
+  "id": "alfworld_test_0056",
   "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Egg-None-GarbageCan-10/trial_T20190908_113432_673307/game.tw-pddl",
   "task_type": "pick_heat_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0036",
+  "id": "alfworld_test_0057",
   "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Egg-None-GarbageCan-10/trial_T20190908_113523_123938/game.tw-pddl",
   "task_type": "pick_heat_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0037",
+  "id": "alfworld_test_0058",
+  "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_021100_341887/game.tw-pddl",
+  "task_type": "pick_heat_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0059",
   "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_021200_669381/game.tw-pddl",
   "task_type": "pick_heat_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0038",
+  "id": "alfworld_test_0060",
+  "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_021247_306737/game.tw-pddl",
+  "task_type": "pick_heat_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0061",
   "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_171806_406231/game.tw-pddl",
   "task_type": "pick_heat_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0039",
+  "id": "alfworld_test_0062",
   "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Tomato-None-GarbageCan-10/trial_T20190908_225046_020282/game.tw-pddl",
   "task_type": "pick_heat_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0040",
+  "id": "alfworld_test_0063",
+  "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Tomato-None-GarbageCan-10/trial_T20190908_225359_617900/game.tw-pddl",
+  "task_type": "pick_heat_then_place_in_recep"
+ },
+ {
+  "id": "alfworld_test_0064",
   "game_file": "json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Tomato-None-GarbageCan-10/trial_T20190908_225453_272533/game.tw-pddl",
   "task_type": "pick_heat_then_place_in_recep"
  },
  {
-  "id": "alfworld_test_0041",
+  "id": "alfworld_test_0065",
   "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-CD-None-Safe-308/trial_T20190907_051013_060265/game.tw-pddl",
   "task_type": "pick_two_obj_and_place"
  },
  {
-  "id": "alfworld_test_0042",
+  "id": "alfworld_test_0066",
   "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-PepperShaker-None-Drawer-10/trial_T20190908_010306_215435/game.tw-pddl",
   "task_type": "pick_two_obj_and_place"
  },
  {
-  "id": "alfworld_test_0043",
+  "id": "alfworld_test_0067",
   "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-PepperShaker-None-Drawer-10/trial_T20190912_221016_460197/game.tw-pddl",
   "task_type": "pick_two_obj_and_place"
  },
  {
-  "id": "alfworld_test_0044",
+  "id": "alfworld_test_0068",
   "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-PepperShaker-None-Drawer-10/trial_T20190912_221141_608117/game.tw-pddl",
   "task_type": "pick_two_obj_and_place"
  },
  {
-  "id": "alfworld_test_0045",
+  "id": "alfworld_test_0069",
   "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-Pillow-None-Sofa-219/trial_T20190907_163240_345855/game.tw-pddl",
   "task_type": "pick_two_obj_and_place"
  },
  {
-  "id": "alfworld_test_0046",
+  "id": "alfworld_test_0070",
   "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-Pillow-None-Sofa-219/trial_T20190907_163408_914117/game.tw-pddl",
   "task_type": "pick_two_obj_and_place"
  },
  {
-  "id": "alfworld_test_0047",
+  "id": "alfworld_test_0071",
   "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-Cabinet-424/trial_T20190909_081720_491733/game.tw-pddl",
   "task_type": "pick_two_obj_and_place"
  },
  {
-  "id": "alfworld_test_0048",
+  "id": "alfworld_test_0072",
   "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-Cabinet-424/trial_T20190909_081746_857594/game.tw-pddl",
   "task_type": "pick_two_obj_and_place"
  },
  {
-  "id": "alfworld_test_0049",
+  "id": "alfworld_test_0073",
   "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-GarbageCan-424/trial_T20190909_064053_839817/game.tw-pddl",
+  "task_type": "pick_two_obj_and_place"
+ },
+ {
+  "id": "alfworld_test_0074",
+  "game_file": "json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-GarbageCan-424/trial_T20190909_064221_368939/game.tw-pddl",
   "task_type": "pick_two_obj_and_place"
  }
 ]

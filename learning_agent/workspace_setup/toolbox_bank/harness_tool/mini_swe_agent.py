@@ -26,9 +26,9 @@ Result dict:
      "actions": [{"cmd": str, "exit": int, "output_tail": str}, ...]}
 
 Offline smoke (no model, no network — scripted client):
-    python toolbox/agentic_toolbox/mini_swe_agent.py --self-test
+    python toolbox/harness_tool/mini_swe_agent.py --self-test
 Live, against any OpenAI-compatible endpoint (e.g. submission/serve.py):
-    python toolbox/agentic_toolbox/mini_swe_agent.py --base-url http://127.0.0.1:8000/v1 \
+    python toolbox/harness_tool/mini_swe_agent.py --base-url http://127.0.0.1:8000/v1 \
         --model <name> --instruction "create hello.txt containing hi" --cwd /tmp/sandbox
 """
 from __future__ import annotations

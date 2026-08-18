@@ -155,7 +155,7 @@ bench/              config.yaml (global pins) + pins.json (integrity lock) + tra
 harness/            fixed instrument: config loader, eval, judge, judge service, integrity
 tasks/<task>/       task.yaml (per-task config), corpus/, dev.json, test.json (hidden),
                     sys.txt, task.md, ROUNDS.md — the ONE task is injected at seed time
-agents/             contestant runner (run_sandbox.sh -> run.sh) + one scaffold dir per CLI agent
+agents/             contestant runner (run_sandbox_modal.sh | run_sandbox_docker.sh -> run.sh) + one scaffold dir per CLI agent
 runs/               operator ledgers: LEADERBOARD.jsonl, per-tag results
 ```
 
@@ -180,13 +180,12 @@ one knob, not a different workflow — point `MODAL_ENVIRONMENT` (see
 | run records (traces/results/telemetry) | a local directory via the observatory's `--data-dir` | Modal volume `lab-observatory` |
 | viewer | `python3 observatory/app.py --data-dir <dir>` | `modal deploy observatory/app.py` (team URL) |
 
-The agent itself can execute in three places, all sharing one launch shape and
-one seeding routine (`workspace_setup/prepare_workspace.sh`): on the operator
-machine (`agents/run_sandbox.sh`), in a container under the Modal app
-`lab-agent` (`agents/run_sandbox_modal.sh` — workspace and CLI session logs
-persist on `lab-agent-workspace`; containers carry a Modal token so
-`bench.py train` and the live watcher work inside), or in local Docker
-(`agents/run_sandbox_docker.sh`).
+The agent itself can execute in two places, both sharing one launch shape and
+one seeding routine (`workspace_setup/prepare_workspace.sh`): in a container
+under the Modal app `lab-agent` (`agents/run_sandbox_modal.sh` — workspace and
+CLI session logs persist on `lab-agent-workspace`; containers carry a Modal
+token so `bench.py train` and the live watcher work inside), or in local
+Docker (`agents/run_sandbox_docker.sh`).
 
 Per-run learning activity (data/train/eval/evolve actions) and the track
 (easy/medium/hard) an agent ran under are visible in the observatory — see
@@ -206,10 +205,10 @@ every member's `.env` as `MODAL_ENVIRONMENT=<team-env>`, and deploy the viewer
 there once (`modal deploy observatory/app.py`). Then a shared run is:
 
 ```bash
-agents/run_sandbox.sh --watch --track easy claude_reprompt fav2 24
+agents/run_sandbox_modal.sh --track easy modal_glm52 fav2 23.5
 ```
 
-`--watch` starts a detached observatory watcher next to the run. While the
+Container runs start the observatory watcher themselves (no flag). While the
 agent works, teammates follow it live at the deployed viewer URL; when it
 finishes, the run record carries the full trace, judge results, learning
 timeline, and `raw/workspace.tar.gz` — the submission folder itself (minus

@@ -9,9 +9,9 @@ pinned at commit `aa74303ce5ff89a675297a3930b825bf1096f3fa` (pin by SHA).
 git clone https://github.com/sierra-research/tau2-bench
 git -C tau2-bench checkout aa74303ce5ff89a675297a3930b825bf1096f3fa
 cp -R tau2-bench/data/tau2/domains/banking_knowledge/documents \
-      tasks/tau2_banking/corpus/documents
+      workspace_setup/tasks/tau2_banking/corpus/documents
 cp    tau2-bench/data/tau2/domains/banking_knowledge/db.json \
-      tasks/tau2_banking/corpus/
+      workspace_setup/tasks/tau2_banking/corpus/
 ```
 
 Corpus files (byte-identical to the source; normalizer = identity):
@@ -32,7 +32,7 @@ scenarios). Tools/scenarios are harness + eval material, not corpus.
 ```python
 ids = [t["id"] for t in tasks]             # shipped order
 random.Random(0).shuffle(ids)
-dev, test = sorted(ids[:58]), sorted(ids[58:])   # 58 dev / 39 test
+dev, test = sorted(ids[:24]), sorted(ids[24:])   # 24 dev / 73 test (25/75, 2026-08-17)
 ```
 
 `dev.json` / `test.json` carry these ids with each scenario's shipped

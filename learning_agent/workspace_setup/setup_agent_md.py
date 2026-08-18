@@ -132,7 +132,11 @@ def resolve_blocks(root: Path, track: str, archetype: str,
         "OBJECTIVE": load_block(
             root, objective or f"workspace_setup/instructions/objective/{archetype}.md", "objective"),
         "DATA_ACCESS": load_block(
-            root, data_access or f"workspace_setup/instructions/data_access/{track}.md", "data_access"),
+            root, data_access or
+            (f"workspace_setup/instructions/data_access/{track}_agentic.md"
+             if archetype == "agentic" else
+             f"workspace_setup/instructions/data_access/{track}.md"),
+            "data_access"),
         "SETUP": load_block(root, setup or default_setup_path(root), "setup"),
         "METHODS": "".join(
             load_block(root, f"workspace_setup/instructions/methods/{m}.md", f"method {m}")

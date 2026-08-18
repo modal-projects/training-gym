@@ -128,7 +128,7 @@ _REGISTRY: list[tuple[str, "str | None", re.Pattern]] = [
     ("train", "sft", re.compile(r"pipeline/train\.py")),
     ("train", "rl", re.compile(r"bench\.py\s+rl\b")),
     ("train", "rl", re.compile(r"pipeline/rl\.py")),
-    ("eval", "rubric_eval", re.compile(r"toolbox/eval_toolbox/rubric_eval\.py")),
+    ("eval", "rubric_eval", re.compile(r"toolbox/eval_tool(?:box)?/rubric_eval\.py")),
     ("eval", "bench_score", re.compile(r"bench\.py\s+score\b")),
     ("evolve", "run_recipe", re.compile(r"toolbox/evolve/run_recipe\.py")),
 ]

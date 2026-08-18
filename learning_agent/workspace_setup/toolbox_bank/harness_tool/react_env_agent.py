@@ -31,7 +31,7 @@ Reward is deliberately absent: the task's verifier/adapter computes it from the
 env after the episode — the policy never grades itself.
 
 Offline smoke (no model, no network — scripted client + fake env):
-    python toolbox/agentic_toolbox/react_env_agent.py --self-test
+    python toolbox/harness_tool/react_env_agent.py --self-test
 """
 from __future__ import annotations
 
