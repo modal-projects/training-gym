@@ -1,50 +1,38 @@
-# pyright: reportUndefinedVariable=false, reportMissingImports=false
 """Tutorial source for `005_dapo` — parsed by generate_tutorial.py."""
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 8×H100",
-    "summary": "DAPO on math",
+    "summary": "Large-scale RL for everyone",
     "difficulty": "Advanced",
     "order": 35,
     "api_classes": [
-        "Qwen3_5_4B",
         "Endpoint",
         "HuggingFaceDataset",
+        "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
-        "list_checkpoints",
+   
     ],
 }
 
 from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 
-@markdown
+@markdown   
 def _intro():
-    """
-    # Decoupled Clip and Dynamic Sampling Policy Optimization (DAPO)
+    """ 
+    # Better long chain-of-thought reasoning
 
-    This tutorial trains **Qwen3.5-4B** according to DAPO as presented in Yu et al.,
-    2025 on the provided dataset `zhuzilin/dapo-math-17k`.
+    Decoupled Clip and Dynamic Sampling Policy Optimization (DAPO) is a modified version
+    of GRPO that substantially improves long chain-of-thought (COT) reasoning,
+    enabling large-scale RL for all. This tutorial trains 
+    [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) using DAPO on olympiad-style 
+    math problems sourced from the
+    [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k)
+    Huggingface dataset.
 
-    DAPO presents four changes to the vanilla GRPO recipe aimed to improve long
-    chain-of-thought RL.
-
-    1. **Clip-Higher** addresses entropy collapse by using asymmetric clipping,
-       with the upper clip loosened (`1 + ε_high`) so tokens with positive
-       advantage can be reinforced more aggressively while the lower clip stays
-       the same for stability.
-    2. **Dynamic Sampling** over-samples prompts and drops batches with the same
-       reward (no variance → no advantage → no gradient update) to create
-       higher signal for each batch.
-    3. **Token-level policy-gradient loss** calculates average loss over tokens
-       instead of sequences, so long correct answers aren't down-weighted.
-    4. **Overlong Reward Shaping** applies a soft length penalty so good
-       reasoning is not confused with answers that are simply too long.
-
-    DAPO also **removes the KL penalty** (`use_kl_loss=False`) because the long
-    CoT reasoning model is expected to diverge significantly during training.
+    You can read more about the algorithm in [the paper](https://arxiv.org/abs/2503.14476).
     """
 
 
@@ -52,18 +40,10 @@ def _intro():
 @markdown
 def _run_instructions():
     """
-    Run locally (your machine drives the Modal GPU workers):
+    Run with:
 
     ```
-    cd training-gym
-    uv sync
     uv run tutorials/rl/005_dapo/005_dapo.py
-    ```
-
-    To detach and watch it from the Modal dashboard instead:
-
-    ```
-    uv run modal run -d tutorials/rl/005_dapo/005_dapo.py
     ```
     """
 
@@ -72,8 +52,6 @@ def _run_instructions():
 @shell(
     "import importlib.util\n"
     "\n"
-    "# Skip if modal_training_gym is already importable (e.g. a local editable\n"
-    "# checkout) so your edits keep taking effect and the env stays synced.\n"
     "if importlib.util.find_spec('modal_training_gym') is None:\n"
     "    %uv pip install -q git+https://github.com/modal-projects/training-gym.git@main"
 )
@@ -84,7 +62,6 @@ def _install():
 @code
 def _imports():
     import re
-    from typing import Any
 
     from modal_training_gym import (
         Endpoint,
@@ -97,22 +74,67 @@ def _imports():
 
 
 @markdown
+def _deploy_base_intro():
+    """
+    ## Deploy the base model
+
+    We first deploy the base model with an
+    [Endpoint](https://modal.com/docs/guide/endpoints)
+    to get a baseline for performance.
+    """
+
+
+@code
+def _deploy_base():
+    base_model = Qwen3_5_4B()
+    base_deployment = Endpoint.launch(
+        base_model, unauthenticated=True, recreate_if_existing=True
+    )
+    base_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"base model deployed to {base_deployment.url}")
+
+
+@markdown
+def _score_fn_intro():
+    r"""
+    ## Define a scoring function
+
+    Following the paper, we'll normalize as they do and return 1 for correct answers 
+    and -1 for incorrect answers. Although we'd like to give a more granular score 
+    for predictions, we can't simply use the numerical difference between a prediction
+    and a ground-truth answer, since a numerically-close answer can be more wrong 
+    than one further away.
+    """
+
+@code
+def _score_fn():
+    def _extract_answer(response: str) -> str:
+        match = re.findall(r"(?i)Answer\s*:\s*([^\n]+)", response)
+        return match[-1].strip() if match else "[INVALID]"
+
+    def _normalize_answer(answer: str) -> str:
+        answer = str(answer).strip()
+        answer = answer.split("=")[-1]
+        for old, new in [("$", ""), ("\\$", ""), (",", ""), (" ", ""),
+                          ("\\text{", ""), ("}", ""), ("\\boxed{", "")]:
+            answer = answer.replace(old, new)
+        return answer.strip()
+
+    def score_answer(response: str, label: str) -> int:
+        pred = _normalize_answer(_extract_answer(response))
+        gt = _normalize_answer(label)
+        try:
+            gt = str(int(float(gt)))
+        except (ValueError, OverflowError):
+            pass
+        return 1 if pred == gt else -1
+
+@markdown
 def _dataset_intro():
     """
-    ## Dataset
+    ## Get the dataset
 
-    We use the same math dataset as the original paper: competition math problems
-    where the model is asked to answer with `Answer: \\boxed{N}`.
-
-    [Here's the link to `zhuzilin/dapo-math-17k`](https://huggingface.co/datasets/zhuzilin/dapo-math-17k)
-
-    Each row contains a `prompt` field with the original chat message and a
-    `label` containing the integer answer. Since the prompt is already stored as
-    chat messages, we point `input_key` directly at `prompt` and let slime apply
-    the model's chat template during training.
-
-    For this tutorial, we train on 2,000 prompts and hold out 100 prompts for
-    evaluation, using a row offset so the two splits never overlap.
+    Let's train on 200 samples and hold out 10 for evaluation.
     """
 
 
@@ -124,10 +146,10 @@ def _dataset():
         label_key = "label"
         output_format = "jsonl"
         apply_chat_template = True
-        row_offset = 0
         always_prepare = True
+        row_offset = 0
 
-        def load(self, split: str = "all") -> Any:
+        def load(self, split: str = "all"):
             from datasets import load_dataset
 
             ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
@@ -135,149 +157,81 @@ def _dataset():
             stop = len(ds) if not self.n_rows else min(start + self.n_rows, len(ds))
             return ds.select(range(start, stop))
 
-
-@code
-def _make_datasets():
-    train_dataset = MathDataset(n_rows=2_000)
-    eval_dataset = MathDataset(n_rows=100, row_offset=16_000)
+    train_dataset = MathDataset(n_rows=200)
+    eval_dataset = MathDataset(n_rows=10, row_offset=200)
 
 
 @notebook_only
 @code
 def _dataset_peek():
-    rows = eval_dataset.load()
-    for row in rows.select(range(2)):
-        print(row["prompt"][0]["content"][:200])
-        print(f"  label: {row['label']}")
-        print()
-
-
-@code
-def _eval_helpers():
-    def _normalize_answer(answer: str) -> str:
-        answer = str(answer).strip()
-        answer = answer.split("=")[-1]
-        for old, new in [("$", ""), ("\\$", ""), (",", ""), (" ", ""),
-                          ("\\text{", ""), ("}", ""), ("\\boxed{", "")]:
-            answer = answer.replace(old, new)
-        return answer.strip()
-
-    def _extract_answer(response: str) -> str:
-        match = re.findall(r"(?i)Answer\s*:\s*([^\n]+)", response)
-        return match[-1].strip() if match else "[INVALID]"
-
-    def _check_math(response: str, label: str) -> bool:
-        pred = _normalize_answer(_extract_answer(response))
-        gt = _normalize_answer(label)
-        try:
-            gt = str(int(float(gt)))
-        except (ValueError, OverflowError):
-            pass
-        return pred == gt
-
-    def math_eval_fn(deployment: Endpoint, example: dict) -> dict:
-        prompt = example["prompt"][0]["content"]
-        label = example["label"]
-
-        msg = deployment.chat(
-            [{"role": "user", "content": prompt}],
-            chat_template_kwargs={"enable_thinking": True},
-        )
-        response = msg.get("content") or msg.get("reasoning_content") or ""
-
-        correct = _check_math(response, label)
-        pred = _normalize_answer(_extract_answer(response))
-
-        return {
-            "score": 1.0 if correct else 0.0,
-            "response": response,
-            "correct": correct,
-            "pred": pred,
-            "label": label,
-        }
-
-    def run_eval(
-        deployment, *, max_concurrency: int = 2
-    ) -> tuple[float, list[dict]]:
-        from concurrent.futures import ThreadPoolExecutor
-
-        deployment.wait_until_ready(timeout=15 * 60)
-
-        def _score_one(example):
-            return math_eval_fn(deployment, example)
-
-        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-            rows = list(executor.map(_score_one, eval_dataset.load()))
-        mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
-        return mean, rows
+    df = eval_dataset.to_pandas()
+    print(len(df))
+    df.head(5)
 
 
 @markdown
 def _eval_base_intro():
     """
-    ## Baseline Eval
+    ## Evaluate the base model
 
-    Let's run the math eval on our base serving model before training.
+    Let's get our baseline measure of performance.
     """
-
 
 @code
 def _eval_base():
-    base_model = Qwen3_5_4B()
-    base_deployment = Endpoint.launch(
-        base_model, unauthenticated=True, recreate_if_existing=True
-    )
-    print(f"Base model URL: {base_deployment.url}")
+    def run_eval(deployment, max_concurrency: int = 2) -> float:
+        from concurrent.futures import ThreadPoolExecutor
 
-    print("--- Evaluating base model... ---")
-    base_mean, base_rows = run_eval(base_deployment)
-    n_correct = sum(1 for r in base_rows if r.get("correct"))
-    print(f"Base accuracy: {n_correct}/{len(base_rows)} "
-          f"({base_mean:.1%})")
+        deployment.wait_until_ready(timeout=15 * 60)
 
+        def _score_one(example):
+            prompt = example["prompt"][0]["content"]
+            msg = deployment.chat(
+                [{"role": "user", "content": prompt}],
+                chat_template_kwargs={"enable_thinking": True},
+            )
+            response = msg.get("content") or msg.get("reasoning_content") or ""
+            return score_answer(response, example["label"])
 
-@notebook_only
-@code
-def _base_examples():
-    for r in base_rows[:3]:
-        status = "CORRECT" if r["correct"] else "WRONG"
-        print(f"[{status}] label={r['label']}, pred={r['pred']}")
-        print(f"  ...{r['response'][-150:]}")
-        print()
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            scores = list(executor.map(_score_one, eval_dataset.load()))
+        percent_correct = (
+            len([s for s in scores if s == 1]) / len(scores) if scores else float("nan")
+        )
+        return percent_correct
+
+    print("running base model evaluation...")
+    base_mean = run_eval(base_deployment)
+    print(f"average score: {base_mean:.1f}")
 
 
 @markdown
-def _rm_intro():
-    """
-    ## Reward function
+def _rm_fn_intro():
+    r"""
+    ## Creating a reward function
 
-    The correctness term comes from slime's DAPO math scorer. It gives +1 for
-    correct answers and -1 for incorrect answers.
+    Our scoring function is good for evaluation, but we can improve the signal granularity
+    during training. How? For example, DAPO adds a soft penalty for overlong responses,
+    ensuring it learns to answer questions correctly and with fewer tokens.
 
-    DAPO also adds a soft penalty for overlong responses. For speed, we use a
-    smaller response cap than the paper:
+    $$
+    R_{\text{length}} =
+    \begin{cases}
+    0 & \text{if } |y| \le L_{\text{max}} - L_{\text{cache}} \\
+    \dfrac{(L_{\text{max}} - L_{\text{cache}}) - |y|}{L_{\text{cache}}} & \text{if } L_{\text{max}} - L_{\text{cache}} < |y| \le L_{\text{max}} \\
+    -1 & \text{if } |y| > L_{\text{max}}
+    \end{cases}
+    $$
 
-    ```text
-    R_length = 0                                      if |y| <= L_max - L_cache
-             = ((L_max - L_cache) - |y|) / L_cache   if L_max - L_cache < |y| <= L_max
-             = -1                                     if |y| > L_max
-    ```
-
-    The goal is that the model can still get credit for correct reasoning while
-    learning to finish within the token budget. We set `L_max` to the generation
-    cap, 8192, and `L_cache` to 2048, matching the paper's 4:1 ratio
-    (16384/4096) scaled for this tutorial.
+    For demonstration purposes, we set $L_\text{max}$ to the generation cap, 8192,
+    and $L_\text{cache}$ to 2048, lower than the original values, 16384 and 4096,
+    respectively. These values, however, do maintain the paper's 4:1 ratio.
     """
 
 @code
-def _reward_helpers():
+def _rm_fn():
     async def dapo_overlong_rm(args, sample, **kwargs) -> float:
-        from slime.rollout.rm_hub.math_dapo_utils import (
-            compute_score as compute_score_dapo,
-        )
-
-        payload = compute_score_dapo(sample.response, sample.label)
-        base = float(payload["score"] if isinstance(payload, dict) else payload)
+        base = score_answer(sample.response, sample.label)
 
         L_max = args.rollout_max_response_len
         L_cache = 2048
@@ -296,26 +250,12 @@ def _reward_helpers():
 @markdown
 def _train_intro():
     """
-    ## Training
+    ## Commence training
 
-    The recipe below is slime's reference Qwen3.5-4B layout (TP=2, 8192-token
-    responses, `max_tokens_per_gpu=9216`) with the DAPO modifications  on
-    top of GRPO. We follow ([the paper's recipe](https://arxiv.org/abs/2503.14476)) for the most part, 
-    but with some modifications for speed:
-
-    Mentioned in the paper:
-    - **Clip-Higher** (`eps_clip=0.2`, `eps_clip_high=0.28`)  
-    - **No KL penalty** (`use_kl_loss=False`, `kl_coef=0.0`)  
-    - **Token-level policy-gradient loss** (`calculate_per_token_loss=True`)  
-    - **Dynamic sampling** (`over_sampling_batch_size=48` plus the zero-variance reward filter)
-
-    Modified for speed:
-    - **8 samples per prompt** (`n_samples_per_prompt=8`) 
-    - **Overlong buffer of 2048 tokens** (`L_cache=2048`)
-    - **8192-token response cap** (`L_max=8192`)
-
-    This tutorial runs a short 15-rollout job to demonstrate the DAPO training setup.
-    For a more meaningful accuracy gain, increase the rollout count.
+    In addition to model-specific parameters, the recipe below also includes
+    [DAPO-specific](https://arxiv.org/abs/2503.14476)
+    modifications. Note that some parameters have been limited for
+    demonstration purposes.
     """
 
 
@@ -325,22 +265,21 @@ def _train():
         model=base_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
-            rm_type="dapo",
-            custom_rm_function=dapo_overlong_rm,
             gpu_type="H100",
-            colocate=True,
             actor_num_nodes=1,
             actor_num_gpus_per_node=8,
             tensor_model_parallel_size=2,
             sequence_parallel=True,
+            rollout_num_gpus=8,
             rollout_num_gpus_per_engine=1,
+            colocate=True,
             num_rollout=15,
             rollout_batch_size=16,
             n_samples_per_prompt=8,
+            global_batch_size=32,
             rollout_max_response_len=8192,
             rollout_temperature=1.0,
             rollout_shuffle=True,
-            global_batch_size=32,
             lr=1e-6,
             lr_decay_style="constant",
             weight_decay=0.1,
@@ -361,11 +300,8 @@ def _train():
             accumulate_allreduce_grads_in_fp32=True,
             attention_softmax_in_fp32=True,
             sglang_mem_fraction_static=0.75,
-            save_interval=10,
-            eval_interval=None,
-            eval_top_p=1.0,
-            eval_max_response_len=8192,
-            n_samples_per_eval_prompt=8,
+            save_interval=5,
+            custom_rm_function=dapo_overlong_rm,
             apply_chat_template_kwargs='{"enable_thinking": true}',
             environment={
                 "PYTHONPATH": "/root/Megatron-LM/:/root",
@@ -383,8 +319,9 @@ def _train():
             rollout_top_p=1.0,
         ),
     )
+
     train_result = training_run.train()
-    print(f"Training run id: {train_result.training_run_id}")
+    print(f"run id: {train_result.training_run_id}")
 
 
 @markdown
@@ -399,47 +336,14 @@ def _eval_trained_intro():
 @code
 def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(f"Checkpoint: {checkpoint.path}")
+    print(f"checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
         Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
-    print(f"Trained model URL: {trained_deployment.url}")
+    trained_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"checkpoint deployed to {trained_deployment.url}")
 
-    print("--- Evaluating trained model... ---")
-    trained_mean, trained_rows = run_eval(trained_deployment)
-    n_correct = sum(1 for r in trained_rows if r.get("correct"))
-    print(f"Trained accuracy: {n_correct}/{len(trained_rows)} "
-          f"({trained_mean:.1%})")
-
-
-@notebook_only
-@code
-def _trained_examples():
-    for base_r, trained_r in zip(base_rows[:3], trained_rows[:3]):
-        label = base_r["label"]
-        b_status = "CORRECT" if base_r["correct"] else "WRONG"
-        t_status = "CORRECT" if trained_r["correct"] else "WRONG"
-        print(f"label={label}")
-        print(f"  Base:    [{b_status}] pred={base_r['pred']}")
-        print(f"  Trained: [{t_status}] pred={trained_r['pred']}")
-        print()
-
-
-@markdown
-def _compare_intro():
-    """
-    ## Results
-
-    Let's see if our model works better!
-    """
-
-
-@code
-def _compare():
-    base_correct = sum(1 for r in base_rows if r.get("correct"))
-    trained_correct = sum(1 for r in trained_rows if r.get("correct"))
-    total = len(base_rows)
-    print(f"Base model:    {base_correct}/{total} ({base_mean:.1%})")
-    print(f"Trained model: {trained_correct}/{total} ({trained_mean:.1%})")
-    print(f"Delta:         {trained_mean - base_mean:+.1%}")
+    print("running checkpoint evaluation...")
+    trained_correct = run_eval(trained_deployment)
+    print(f"percent score: {trained_correct:.1f}")

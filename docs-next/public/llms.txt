@@ -33,7 +33,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [001_sandboxes](https://gym.modal.dev/tutorials/rl/001_sandboxes/): Code RL with Harbor sandboxed evals
 - [002_multiturn](https://gym.modal.dev/tutorials/rl/002_multiturn/): Multi-turn number-guessing RL with custom generate and reward functions
 - [003_on_policy_distillation](https://gym.modal.dev/tutorials/rl/003_on_policy_distillation/): Teacher-student (OPD) distillation
-- [005_dapo](https://gym.modal.dev/tutorials/rl/005_dapo/): DAPO on math
+- [005_dapo](https://gym.modal.dev/tutorials/rl/005_dapo/): Large-scale RL for everyone
 - [006_audio_asr](https://gym.modal.dev/tutorials/rl/006_audio_asr/): Audio GRPO for transcribing LibriSpeech
 - [007_param_sweep](https://gym.modal.dev/tutorials/rl/007_param_sweep/): Sweep hyperparameters across runs
 - [008_computer_use](https://gym.modal.dev/tutorials/rl/008_computer_use/): GUI grounding to predict click coordinates

@@ -35,8 +35,8 @@ Then, it's as easy to use as:
 ```python
 from modal_training_gym import (
     HuggingFaceDataset,
-    Qwen3_5_4B,
-    Qwen3_5_4b_Recipe,
+    Qwen3_4B,
+    Qwen3_4b_Recipe,
     TrainConfig,
 )
 
@@ -50,21 +50,24 @@ class MathDataset(HuggingFaceDataset):
 
 
 result = TrainConfig(
-    model=Qwen3_5_4B(),
+    model=Qwen3_4B(),
     dataset=MathDataset(n_rows=120),
-    recipe=Qwen3_5_4b_Recipe(
-        rm_type="deepscaler",
+    recipe=Qwen3_4b_Recipe(
         gpu_type="H100",
-        colocate=True,
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=8,
         tensor_model_parallel_size=1,
         sequence_parallel=False,
+        rollout_num_gpus=8,
         rollout_num_gpus_per_engine=1,
+        colocate=True,
         num_rollout=1,
         n_samples_per_prompt=4,
         rollout_batch_size=8,
         rollout_max_response_len=2048,
         max_tokens_per_gpu=4096,
         sglang_mem_fraction_static=0.6,
+        rm_type="deepscaler",
     ),
 ).train()
 print(result.training_run_id)
@@ -147,7 +150,7 @@ Difficulty is a rough signal for where to start:
 | [`001_sandboxes`](https://gym.modal.dev/tutorials/rl/001_sandboxes/) | Code RL with Harbor sandboxed evals | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F001_sandboxes%2F001_sandboxes.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`002_multiturn`](https://gym.modal.dev/tutorials/rl/002_multiturn/) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F002_multiturn%2F002_multiturn.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`003_on_policy_distillation`](https://gym.modal.dev/tutorials/rl/003_on_policy_distillation/) | Teacher-student (OPD) distillation | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F003_on_policy_distillation%2F003_on_policy_distillation.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`005_dapo`](https://gym.modal.dev/tutorials/rl/005_dapo/) | DAPO on math | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F005_dapo%2F005_dapo.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`005_dapo`](https://gym.modal.dev/tutorials/rl/005_dapo/) | Large-scale RL for everyone | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F005_dapo%2F005_dapo.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`006_audio_asr`](https://gym.modal.dev/tutorials/rl/006_audio_asr/) | Audio GRPO for transcribing LibriSpeech | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F006_audio_asr%2F006_audio_asr.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`007_param_sweep`](https://gym.modal.dev/tutorials/rl/007_param_sweep/) | Sweep hyperparameters across runs | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F007_param_sweep%2F007_param_sweep.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`008_computer_use`](https://gym.modal.dev/tutorials/rl/008_computer_use/) | GUI grounding to predict click coordinates | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F008_computer_use%2F008_computer_use.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
