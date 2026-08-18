@@ -45,7 +45,7 @@ ARCHETYPES = ("qa", "agentic")
 
 MARK_IF = "<!-- if:{tag} -->"
 MARK_END = "<!-- endif:{tag} -->"
-METHOD_TAGS = ("sft", "dpo", "rl", "opd", "sdft")
+METHOD_TAGS = ("sft", "dpo", "rl", "opd")
 
 
 def default_task_model(root: Path) -> str:

@@ -20,9 +20,9 @@ scripts: you write the generator, they tell you what has to be true.
 <!-- if:dpo -->
 - `preference/` — judge-ranked chosen/rejected DPO pairs (its own README).
 <!-- endif:dpo -->
-<!-- if:sdft -->
-- `self_distill/` — the SDFT data-transform card (its own md).
-<!-- endif:sdft -->
+<!-- if:opd -->
+- `self_distill/` — the self-distillation data-transform card (its own md).
+<!-- endif:opd -->
 - `pool/` — dedup_decontam and mix, the two RUNNABLE tools here. They are
   the contract, not a method: run dedup_decontam on EVERY dataset before
   training.

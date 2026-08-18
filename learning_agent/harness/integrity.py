@@ -76,7 +76,6 @@ HARNESS_FILES = [
     "workspace_setup/instructions/methods/dpo.md",
     "workspace_setup/instructions/methods/rl.md",
     "workspace_setup/instructions/methods/opd.md",
-    "workspace_setup/instructions/methods/sdft.md",
     "workspace_setup/instructions/harness/qa.md",
     "workspace_setup/instructions/harness/agentic.md",
     "workspace_setup/instructions/tips/qa.md",

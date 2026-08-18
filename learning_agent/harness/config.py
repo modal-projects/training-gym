@@ -183,13 +183,16 @@ HARNESSES_BY_ARCHETYPE = {
     "qa": ["react_loop", "completion_qa"],
     "agentic": ["react_env_agent", "react_tool_agent", "mini_swe_agent"],
 }
-ALL_TRAINING_METHODS = ["sft", "rl"]     # the default set; tasks opt into more (dpo/opd/sdft stay selectable)
-# method -> pinned package (toolbox_bank/repos.yaml key) that trains it
-PACKAGES_BY_METHOD = {"sft": "axolotl", "dpo": "axolotl", "rl": "training_gym",
-                      "opd": "training_gym", "sdft": "self_distillation"}
+ALL_TRAINING_METHODS = ["sft", "rl"]     # the default set; tasks opt into more (dpo/opd stay selectable)
+# method -> pinned packages (toolbox_bank/repos.yaml keys) that train it.
+# opd covers the whole on-policy distillation family: a teacher endpoint
+# through the gym, and self-distillation (same model, privileged context)
+# through the self_distillation package.
+PACKAGES_BY_METHOD = {"sft": ["axolotl"], "dpo": ["axolotl"], "rl": ["training_gym"],
+                      "opd": ["training_gym", "self_distillation"]}
 # method -> data-card families copied in from toolbox_bank/data_tool/
 CARDS_BY_METHOD = {"sft": ["synthetic", "agentic"], "dpo": ["preference"],
-                   "rl": ["rl"], "opd": ["rl"], "sdft": ["self_distill"]}
+                   "rl": ["rl"], "opd": ["rl", "self_distill"]}
 
 
 def instructions_config(tcfg: dict) -> dict:
@@ -239,7 +242,7 @@ def toolbox_config(tcfg: dict) -> dict:
         if m not in PACKAGES_BY_METHOD:
             raise SystemExit(f"[config] unknown training method {m!r} "
                              f"(known: {ALL_TRAINING_METHODS})")
-    packages = sorted({PACKAGES_BY_METHOD[m] for m in training})
+    packages = sorted({p for m in training for p in PACKAGES_BY_METHOD[m]})
     cards = sorted({c for m in training for c in CARDS_BY_METHOD[m]})
     seed = tcfg.get("seed") or {}
     return {

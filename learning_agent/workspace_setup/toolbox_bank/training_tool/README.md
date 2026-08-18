@@ -15,15 +15,16 @@ The packages pinned for your task's training methods, in
   `training_gym/skills/` cover the whole lifecycle
   (`agent-driven-training` first).
 <!-- endif:rl,opd -->
-<!-- if:sdft -->
-- `self_distillation/`: on-policy self-distillation (SDFT). The teacher
+<!-- if:opd -->
+- `self_distillation/`: on-policy SELF-distillation (the OPD variant
+  with no separate teacher). The teacher
   is the same model with a context file in its window; the task model
   learns to answer without it. `main.py` is the entry; it saves only
   every 100 optimizer steps, so runs shorter than 100 steps save
   nothing. The data-transform variant (rewrite reference answers in the
   model's own words, then normal SFT) is described in
   `data_tool/self_distill/self_distill.md`.
-<!-- endif:sdft -->
+<!-- endif:opd -->
 
 Rules:
 
