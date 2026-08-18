@@ -12,7 +12,7 @@ TUTORIAL_METADATA = {
         "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
-   
+        "list_checkpoints",
     ],
 }
 
@@ -134,7 +134,7 @@ def _dataset_intro():
     """
     ## Get the dataset
 
-    Let's train on 200 samples and hold out 10 for evaluation.
+    Let's train on 2000 samples and hold out 100 for evaluation.
     """
 
 
@@ -157,8 +157,8 @@ def _dataset():
             stop = len(ds) if not self.n_rows else min(start + self.n_rows, len(ds))
             return ds.select(range(start, stop))
 
-    train_dataset = MathDataset(n_rows=200)
-    eval_dataset = MathDataset(n_rows=10, row_offset=200)
+    train_dataset = MathDataset(n_rows=2000)
+    eval_dataset = MathDataset(n_rows=100, row_offset=2000)
 
 
 @notebook_only
@@ -202,7 +202,7 @@ def _eval_base():
 
     print("running base model evaluation...")
     base_mean = run_eval(base_deployment)
-    print(f"average score: {base_mean:.1f}")
+    print(f"percent correct: {base_mean:.1%}")
 
 
 @markdown
@@ -301,6 +301,7 @@ def _train():
             attention_softmax_in_fp32=True,
             sglang_mem_fraction_static=0.75,
             save_interval=5,
+            eval_interval=None,
             custom_rm_function=dapo_overlong_rm,
             apply_chat_template_kwargs='{"enable_thinking": true}',
             environment={
@@ -346,4 +347,4 @@ def _eval_trained():
 
     print("running checkpoint evaluation...")
     trained_correct = run_eval(trained_deployment)
-    print(f"percent score: {trained_correct:.1f}")
+    print(f"percent correct: {trained_correct:.1%}")

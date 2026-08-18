@@ -12,7 +12,8 @@
 # Run with:
 #
 # ```
-# uv run --with nltk python tutorials/rl/000_rl_basics/000_rl_basics.py
+# uv run --with nltk \
+#     python tutorials/rl/000_rl_basics/000_rl_basics.py
 # ```
 # ## Prerequisites
 #
@@ -303,6 +304,7 @@ def _main_impl() -> None:
             rollout_max_response_len=4096,
             rollout_temperature=1.0,
             save_interval=10,
+            eval_interval=None,
             apply_chat_template_kwargs='{"enable_thinking": false}',
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp 'nltk>=3.8.0'",

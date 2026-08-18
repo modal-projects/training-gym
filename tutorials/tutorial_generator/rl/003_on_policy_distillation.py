@@ -14,7 +14,7 @@ TUTORIAL_METADATA = {
         "Qwen3_5_9B",
         "SlimeRecipe",
         "TrainConfig",
-   
+        "list_checkpoints",
     ],
 }
 
@@ -187,8 +187,8 @@ def _dataset_intro():
 def _dataset():
     class MathDataset(HuggingFaceDataset):
         hf_repo = "zhuzilin/dapo-math-17k"
-        input_column = "prompt"
-        output_column = "label"
+        input_key = "prompt"
+        label_key = "label"
         output_format = "jsonl"
         apply_chat_template = True
         always_prepare = True
@@ -373,6 +373,7 @@ def _train():
             rollout_temperature=1.0,
             lr=1e-6,
             save_interval=5,
+            eval_interval=None,
             custom_rm_function=math_opd_rm,
             apply_chat_template_kwargs='{"enable_thinking": true}',
             environment={

@@ -67,7 +67,7 @@ def score_answer(response: str, label: str) -> int:
 
 # ## Get the dataset
 #
-# Let's train on 200 samples and hold out 10 for evaluation.
+# Let's train on 2000 samples and hold out 100 for evaluation.
 
 class MathDataset(HuggingFaceDataset):
     hf_repo = "zhuzilin/dapo-math-17k"
@@ -86,7 +86,7 @@ class MathDataset(HuggingFaceDataset):
         stop = len(ds) if not self.n_rows else min(start + self.n_rows, len(ds))
         return ds.select(range(start, stop))
 
-eval_dataset = MathDataset(n_rows=10, row_offset=200)
+eval_dataset = MathDataset(n_rows=100, row_offset=2000)
 
 # ## Evaluate the base model
 #
@@ -174,11 +174,11 @@ def _main_impl() -> None:
     base_deployment.wait_until_ready(timeout=15 * 60)
     print(f"base model deployed to {base_deployment.url}")
 
-    train_dataset = MathDataset(n_rows=200)
+    train_dataset = MathDataset(n_rows=2000)
 
     print("running base model evaluation...")
     base_mean = run_eval(base_deployment)
-    print(f"average score: {base_mean:.1f}")
+    print(f"percent correct: {base_mean:.1%}")
 
     # ## Commence training
     #
@@ -227,6 +227,7 @@ def _main_impl() -> None:
             attention_softmax_in_fp32=True,
             sglang_mem_fraction_static=0.75,
             save_interval=5,
+            eval_interval=None,
             custom_rm_function=dapo_overlong_rm,
             apply_chat_template_kwargs='{"enable_thinking": true}',
             environment={
@@ -264,7 +265,7 @@ def _main_impl() -> None:
 
     print("running checkpoint evaluation...")
     trained_correct = run_eval(trained_deployment)
-    print(f"percent score: {trained_correct:.1f}")
+    print(f"percent correct: {trained_correct:.1%}")
 
 @tutorial_cli_app.local_entrypoint()
 def main() -> None:
