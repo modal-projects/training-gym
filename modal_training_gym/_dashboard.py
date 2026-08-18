@@ -336,7 +336,6 @@ def _run_compact_sync() -> None:
     for summary_store in (
         MetadataStore.TRAINING_RUNS_SUMMARY,
         MetadataStore.TRAIN_RESULTS_SUMMARY,
-        MetadataStore.DEPLOYMENTS_SUMMARY,
     ):
         compact_summary_store(summary_store)
 
@@ -355,7 +354,7 @@ def compact_summaries() -> None:
     timeout=1800,
 )
 def reconcile() -> None:
-    """Reconcile orphaned training runs and deployments every 30 minutes."""
+    """Reconcile orphaned training runs every 30 minutes."""
     from modal_training_gym.common.reconcile import reconcile as _reconcile
 
     outcome = _reconcile()
@@ -365,13 +364,6 @@ def reconcile() -> None:
             print(f"  {result.training_run_id}: {result.reason}")
     else:
         print("No orphaned runs to reconcile.")
-
-    if outcome.deployments:
-        print(f"Reconciled {len(outcome.deployments)} orphaned deployment(s):")
-        for result in outcome.deployments:
-            print(f"  {result.deployment_id}: {result.reason}")
-    else:
-        print("No orphaned deployments to reconcile.")
 
 
 @app.function(
@@ -440,7 +432,7 @@ def fastapi_app():
         return os.environ.get(DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY, "false") == "true"
 
     cache_ttl_seconds = 30.0
-    cache_keys = ("runs", "train_results", "evals", "deployments")
+    cache_keys = ("runs", "train_results", "evals")
     # Each entry holds (expires_at, values, loaded_at). ``loaded_at == 0.0``
     # means "never successfully loaded", which lets the very first request block
     # for real data instead of flashing an empty list.
@@ -596,9 +588,7 @@ def fastapi_app():
             merged = dict(summary)
             result = results_by_id.get(str(summary.get("eval_id") or ""))
             if result:
-                merge_missing_fields(
-                    merged, result, ("deployment_id", "config", "status")
-                )
+                merge_missing_fields(merged, result, ("config", "status", "model_name"))
             eval_config = configs_by_id.get(str(summary.get("eval_config_id") or ""))
             if eval_config:
                 merged["eval_config"] = eval_config
@@ -642,9 +632,6 @@ def fastapi_app():
 
     async def load_train_results() -> list[JsonDict]:
         return await load_list_summary(MetadataStore.TRAIN_RESULTS_SUMMARY)
-
-    async def load_deployments() -> list[JsonDict]:
-        return await load_list_summary(MetadataStore.DEPLOYMENTS_SUMMARY)
 
     def _bearer_token(authorization: str | None) -> str:
         scheme, _, token = (authorization or "").partition(" ")
@@ -1145,16 +1132,6 @@ def fastapi_app():
             )
         if isinstance(data, dict):
             _apply_parsed(data.get("rows"))
-        return JSONResponse(data)
-
-    # ── Deployments ──────────────────────────────────────────────────────
-
-    @web.get("/api/deployments")
-    async def deployments():
-        try:
-            data = await get_cached_list("deployments", load_deployments)
-        except Exception:
-            data = []
         return JSONResponse(data)
 
     @web.get("/favicon.svg", include_in_schema=False)

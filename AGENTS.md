@@ -28,7 +28,7 @@ uv run tutorials/generate_tutorial.py              # regenerate all .py + .ipynb
 uv run tutorials/generate_tutorial.py path/to/src  # regenerate one
 
 # Docs (Astro/Starlight site at docs-next/)
-uv run scripts/generate_all.py --skip-build   # regen API reference + tutorial pages
+uv run scripts/generate_all.py --skip-build   # regen models table, API reference, tutorial pages
 cd docs-next && npm ci && npm run dev                 # local dev server
 uv run scripts/generate_all.py                 # full regen + build
 
@@ -106,7 +106,7 @@ Each source declares `TUTORIAL_METADATA` dict with `framework`, `cluster_shape`,
 
 ### Dashboard
 
-`dashboards/app.py` is a Modal app with a Svelte frontend (built at image-build time). Training runs, deployments, and evals write metadata to a shared Modal Volume (`training-gym-metadata`) via `modal_training_gym.utils.metadata`. The ASGI endpoint serves the pre-built SPA + JSON APIs (`/api/runs`, `/api/train-results`, `/api/evals`, `/api/deployments`) that read summary JSON from the volume on demand.
+`dashboards/app.py` is a Modal app with a Svelte frontend (built at image-build time). Training runs and evals write metadata to a shared Modal Volume (`training-gym-metadata`) via `modal_training_gym.utils.metadata`. The ASGI endpoint serves the pre-built SPA + JSON APIs (`/api/runs`, `/api/train-results`, `/api/evals`) that read summary JSON from the volume on demand.
 
 ## Working rules
 

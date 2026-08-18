@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import threading
-from enum import Enum
-from typing import Any
 
 from modal.experimental import list_deployed_apps
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -15,23 +12,16 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from modal_training_gym.common.checkpoint import (
     Checkpoint,
     CheckpointType,
-    convert_checkpoint_to_hf,
+    convert_megatron_checkpoint_to_hf,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.openai_messages import _messages_to_openai
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.deploy_recipes.base import DeployRecipeType
 from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 from modal_training_gym.deploy_recipes.vllm_recipe import VllmRecipe
-from modal_training_gym.utils.metadata import (
-    MetadataStore,
-    vol_get,
-    vol_put,
-    vol_upsert_summary_item,
-)
-
-DEPLOYMENTS_STORE_NAME = MetadataStore.DEPLOYMENTS.value
 
 
 def _run_coro(coro):
@@ -113,73 +103,6 @@ def _raise_for_proxy_auth(status_code: int, url: str) -> None:
     )
 
 
-def _messages_to_openai(messages: list[dict]) -> list[dict]:
-    """Serialize internal tool-call arguments without mutating caller messages."""
-    wire_messages = []
-    for message in messages:
-        wire_message = dict(message)
-        tool_calls = message.get("tool_calls")
-        if isinstance(tool_calls, list):
-            wire_tool_calls = []
-            for tool_call in tool_calls:
-                if not isinstance(tool_call, dict):
-                    wire_tool_calls.append(tool_call)
-                    continue
-                wire_tool_call = dict(tool_call)
-                function = tool_call.get("function")
-                if isinstance(function, dict):
-                    wire_function = dict(function)
-                    arguments = function.get("arguments")
-                    if isinstance(arguments, dict):
-                        wire_function["arguments"] = json.dumps(arguments)
-                    wire_tool_call["function"] = wire_function
-                wire_tool_calls.append(wire_tool_call)
-            wire_message["tool_calls"] = wire_tool_calls
-        wire_messages.append(wire_message)
-    return wire_messages
-
-
-class DeploymentStatus(Enum):
-    RUNNING = "running"
-    STOPPED = "stopped"
-    READY = "ready"
-    INITIALIZING = "initializing"
-    INACTIVE = "inactive"
-
-
-def update_deployment_status(
-    deployment_id: str,
-    status: str,
-    *,
-    seed: dict[str, Any] | None = None,
-) -> bool:
-    """Update a deployment's status in both individual record and summary.
-
-    Returns ``True`` when the write succeeds. If the canonical record is
-    missing, ``seed`` (e.g. a summary-only row) is used to create it.
-    """
-    try:
-        payload = vol_get(MetadataStore.DEPLOYMENTS, deployment_id)
-    except KeyError:
-        if seed is None:
-            return False
-        payload = dict(seed)
-        payload["deployment_id"] = deployment_id
-    payload["status"] = status
-    vol_put(MetadataStore.DEPLOYMENTS, deployment_id, payload)
-    vol_upsert_summary_item(
-        MetadataStore.DEPLOYMENTS_SUMMARY,
-        payload,
-        item_id_key="deployment_id",
-        sort_key=lambda item: (
-            str(item.get("deployment_config", {}).get("app_name", "")),
-            str(item.get("deployment_id", "")),
-        ),
-        reverse=True,
-    )
-    return True
-
-
 class _CrashloopDetector:
     """Crashloop heuristic over periodic container-count samples.
 
@@ -241,7 +164,6 @@ class CustomDeployment(BaseModel):
     modal_app_id: str = ""
     modal_app_url: str = ""
     url: str
-    status: str = DeploymentStatus.RUNNING.value
 
     @model_validator(mode="before")
     @classmethod
@@ -282,7 +204,7 @@ class CustomDeployment(BaseModel):
             checkpoint is not None
             and checkpoint.checkpoint_type == CheckpointType.megatron
         ):
-            checkpoint = convert_checkpoint_to_hf(
+            checkpoint = convert_megatron_checkpoint_to_hf(
                 checkpoint=checkpoint,
                 model=model,
                 recipe=recipe,
@@ -334,7 +256,6 @@ class CustomDeployment(BaseModel):
                 served_model_name=served_model_name,
                 checkpoints_volume=checkpoints_volume,
                 checkpoints_mount_path=checkpoints_mount_path,
-                deployment_id=deployment_id,
                 unauthenticated=unauthenticated,
             )
         elif isinstance(recipe, VllmRecipe):
@@ -349,7 +270,6 @@ class CustomDeployment(BaseModel):
                 served_model_name=served_model_name,
                 checkpoints_volume=checkpoints_volume,
                 checkpoints_mount_path=checkpoints_mount_path,
-                deployment_id=deployment_id,
                 unauthenticated=unauthenticated,
             )
         else:
@@ -394,9 +314,7 @@ class CustomDeployment(BaseModel):
             modal_app_id=modal_app_id,
             modal_app_url=modal_app_dashboard_url(modal_app_id),
             url=url,
-            status=DeploymentStatus.RUNNING.value,
         )
-        deployment.save()
         return deployment
 
     # TODO(atoniolo76): A future PR should update all existing tutorials to
@@ -404,24 +322,25 @@ class CustomDeployment(BaseModel):
     def chat(
         self,
         messages: list[dict],
-        ensure_ready: bool = True,
-        max_attempts: int = 4,
         timeout: int = 120,
-        **kwargs,
+        max_attempts: int = 4,
+        **extra,
     ) -> dict:
         """Return one OpenAI-compatible chat-completion message while
         preserving structured fields like tool_calls and reasoning_content.
+
+        Extra keyword arguments are Chat Completions body fields. Call
+        ``wait_until_ready`` before chatting if the deployment may still be
+        starting.
         """
         import time
 
         import requests
 
-        if ensure_ready:
-            self.wait_until_ready()
         body = {
             "model": self.served_model_name,
             "messages": _messages_to_openai(messages),
-            **kwargs,
+            **extra,
         }
         transient_status_codes = {429, 500, 502, 503, 504}
 
@@ -441,7 +360,6 @@ class CustomDeployment(BaseModel):
                         f"Transient generation error {resp.status_code} from {self.url}; "
                         f"retrying ({attempt}/{max_attempts})..."
                     )
-                    self.wait_until_ready(timeout=120)
                     time.sleep(min(2 * attempt, 5))
                     continue
                 _raise_for_proxy_auth(resp.status_code, self.url)
@@ -454,7 +372,6 @@ class CustomDeployment(BaseModel):
                     f"Transient generation transport error from {self.url}: {exc}; "
                     f"retrying ({attempt}/{max_attempts})..."
                 )
-                self.wait_until_ready(timeout=120)
                 time.sleep(min(2 * attempt, 5))
 
         raise RuntimeError(
@@ -464,7 +381,6 @@ class CustomDeployment(BaseModel):
     def generate(
         self,
         prompt: str | list[dict],
-        ensure_ready: bool = True,
         **kwargs,
     ) -> str:
         messages = kwargs.pop("messages", None)
@@ -472,7 +388,6 @@ class CustomDeployment(BaseModel):
             messages = [{"role": "user", "content": prompt}]
         message = self.chat(
             messages,
-            ensure_ready=ensure_ready,
             **kwargs,
         )
         content = message.get("content")
@@ -481,49 +396,6 @@ class CustomDeployment(BaseModel):
         if content is None:
             return message.get("reasoning_content", "")
         return str(content)
-
-    def save(self) -> None:
-        payload = {
-            "deployment_id": self.deployment_id,
-            "deployment_config": {
-                "model": {
-                    "model_name": getattr(self.model, "model_name", ""),
-                    "model_path": getattr(self.model, "model_path", None),
-                    "checkpoints_volume_name": getattr(
-                        self.model,
-                        "checkpoints_volume_name",
-                        None,
-                    ),
-                    "checkpoints_mount_path": getattr(
-                        self.model,
-                        "checkpoints_mount_path",
-                        None,
-                    ),
-                },
-                "app_name": self.app_name,
-                "served_model_name": self.served_model_name,
-                "unauthenticated": self.unauthenticated,
-            },
-            "modal_app_id": self.modal_app_id,
-            "modal_app_url": self.modal_app_url,
-            "url": self.url,
-            "status": self.status,
-        }
-        vol_put(
-            MetadataStore.DEPLOYMENTS,
-            self.deployment_id,
-            payload,
-        )
-        vol_upsert_summary_item(
-            MetadataStore.DEPLOYMENTS_SUMMARY,
-            payload,
-            item_id_key="deployment_id",
-            sort_key=lambda item: (
-                str(item.get("deployment_config", {}).get("app_name", "")),
-                str(item.get("deployment_id", "")),
-            ),
-            reverse=True,
-        )
 
     def _start_log_tailer(self) -> "threading.Thread | None":
         """Spawn a daemon thread that streams deployed-app logs to stdout.

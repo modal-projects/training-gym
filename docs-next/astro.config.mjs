@@ -9,6 +9,11 @@ export default defineConfig({
     rehypePlugins: [rehypeTableWrapper],
   },
   site: 'https://gym.modal.dev',
+  redirects: {
+    '/tutorials/tools/000_observability_dashboard':
+      '/guides/tools/observability-dashboard/',
+    '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration/',
+  },
   integrations: [
     starlight({
       title: 'Training Gym',
@@ -119,6 +124,16 @@ export default defineConfig({
       sidebar: [
         { label: 'Overview', link: '/' },
         {
+          label: 'Guides',
+          items: [
+            { label: 'Overview', link: '/guides/' },
+            {
+              label: 'Tools',
+              autogenerate: { directory: 'guides/tools' },
+            },
+          ],
+        },
+        {
           label: 'Tutorials',
           items: [
             { label: 'All Tutorials', link: '/tutorials/' },
@@ -129,10 +144,6 @@ export default defineConfig({
             {
               label: 'Agents',
               autogenerate: { directory: 'tutorials/agent' },
-            },
-            {
-              label: 'Tools',
-              autogenerate: { directory: 'tutorials/tools' },
             },
           ],
         },

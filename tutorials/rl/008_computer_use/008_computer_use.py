@@ -230,12 +230,15 @@ def grounding_eval_fn(
     label = example["label"]
     images = example["images"]
 
-    # Build the OpenAI chat content: text + one image_url part per screenshot.
+    # OpenAI multimodal user message: text + one image_url part per screenshot.
     content = [
         {"type": "text", "text": prompt},
         *({"type": "image_url", "image_url": {"url": img}} for img in images),
     ]
-    response = deployment.generate(content, ensure_ready=False)
+    msg = deployment.chat(
+        [{"role": "user", "content": content}],
+    )
+    response = msg.get("content") or msg.get("reasoning_content") or ""
 
     pred = _parse_coordinates(response)
     box = _parse_bbox(label)

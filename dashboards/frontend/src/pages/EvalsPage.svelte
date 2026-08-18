@@ -20,7 +20,6 @@
 
   let {
     allEvals,
-    deploymentRows,
     evalCompletedTotal,
     evalPendingTotal,
     evalFailedTotal,
@@ -30,8 +29,6 @@
     fetchEvalDetail,
     getEvalDisplay,
     evalConfigMeta,
-    onOpenTrainingRun,
-    onOpenDeployment,
   } = $props();
 
   let search = $state("");
@@ -43,10 +40,8 @@
   let expandedInitialized = $state(false);
   let seenDatasets = new Set();
   const evalColumns = [
-    { key: "name", label: "Name", width: 220, minWidth: 140 },
+    { key: "eval_id", label: "Eval ID", width: 220, minWidth: 140 },
     { key: "dataset", label: "Dataset", width: 180, minWidth: 120 },
-    { key: "deployment", label: "Deployment", width: 180, minWidth: 120 },
-    { key: "training", label: "Training run", width: 180, minWidth: 130 },
     { key: "model", label: "Base model", width: 210, minWidth: 140 },
     { key: "status", label: "Status", width: 130, minWidth: 96 },
     { key: "score", label: "Average score", width: 130, minWidth: 110 },
@@ -88,7 +83,6 @@
       nonPlaceholderText(group.meta.evalFn || group.meta.judge) || fallback.evalFn;
     if (dataset) parts.push(dataset);
     if (fnName) parts.push(fnName);
-    parts.push(`${group.deploymentCount} deployment${group.deploymentCount === 1 ? "" : "s"}`);
     return parts.join(" • ");
   }
 
@@ -97,164 +91,11 @@
     return nonPlaceholderText(group.meta.dataset) || fallback.dataset || "Unknown";
   }
 
-  function deploymentIdValue(deployment) {
-    return safeText(deployment?.deployment_id || deployment?.id).trim();
+  function evalBaseModel(run) {
+    return nonPlaceholderText(run.eval.model_name) || "—";
   }
 
-  function normalizePath(value) {
-    return safeText(value).replace(/\/+$/, "").toLowerCase();
-  }
-
-  function toTimestampSeconds(value) {
-    if (value && typeof value === "object" && "value" in value) {
-      return toTimestampSeconds(value.value);
-    }
-    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-    const text = safeText(value).trim();
-    if (!text) return 0;
-    const numeric = Number(text);
-    if (Number.isFinite(numeric)) return numeric;
-    const epochMs = Date.parse(text);
-    if (Number.isFinite(epochMs)) return Math.floor(epochMs / 1000);
-    return 0;
-  }
-
-  function deploymentModelValue(deployment) {
-    return safeText(
-      deployment?.model_name ||
-        deployment?.deployment_config?.model?.model_name ||
-        deployment?.served_model_name ||
-        deployment?.deployment_config?.served_model_name,
-    ).trim();
-  }
-
-  let deploymentsById = $derived.by(() => {
-    const byId = new Map();
-    for (const row of deploymentRows || []) {
-      const deployment = row?.deployment || {};
-      const deploymentId = deploymentIdValue(deployment);
-      const appName = safeText(deployment?.app_name).trim();
-      if (deploymentId && !byId.has(deploymentId)) byId.set(deploymentId, row);
-      if (appName && !byId.has(appName)) byId.set(appName, row);
-    }
-    return byId;
-  });
-
-  let deploymentsByUrl = $derived.by(() => {
-    const byUrl = new Map();
-    for (const row of deploymentRows || []) {
-      const deployment = row?.deployment || {};
-      const normalized = normalizePath(deployment?.url);
-      if (normalized && !byUrl.has(normalized)) byUrl.set(normalized, row);
-    }
-    return byUrl;
-  });
-
-  let deploymentsByModel = $derived.by(() => {
-    const byModel = new Map();
-    for (const row of deploymentRows || []) {
-      const deployment = row?.deployment || {};
-      const model = deploymentModelValue(deployment).toLowerCase();
-      if (!model) continue;
-      if (!byModel.has(model)) byModel.set(model, []);
-      byModel.get(model).push(row);
-    }
-    for (const rows of byModel.values()) {
-      rows.sort(
-        (a, b) =>
-          toTimestampSeconds(b?.deployment?.created_at) -
-          toTimestampSeconds(a?.deployment?.created_at),
-      );
-    }
-    return byModel;
-  });
-
-  function findDeploymentRow(run, group) {
-    const config = run.eval.config || {};
-    const deploymentConfig = config.deployment || {};
-    const directKeys = [
-      run.eval.deployment_id,
-      deploymentConfig.deployment_id,
-      deploymentConfig.app_name,
-    ];
-    for (const key of directKeys) {
-      const value = safeText(key).trim();
-      if (!value) continue;
-      const matched = deploymentsById.get(value);
-      if (matched) return matched;
-    }
-    const evalUrl = normalizePath(deploymentConfig.url || deploymentConfig.endpoint);
-    if (evalUrl) {
-      const byUrl = deploymentsByUrl.get(evalUrl);
-      if (byUrl) return byUrl;
-    }
-    const modelKey = safeText(
-      deploymentConfig.model_name ||
-        deploymentConfig.served_model_name ||
-        config.model?.model_name ||
-        group.meta.model,
-    )
-      .trim()
-      .toLowerCase();
-    if (modelKey) {
-      const byModel = deploymentsByModel.get(modelKey);
-      if (byModel?.length) return byModel[0];
-    }
-    return null;
-  }
-
-  function deploymentRefValue(deploymentRow) {
-    const deployment = deploymentRow?.deployment || {};
-    return safeText(
-      deployment.deployment_id || deployment.app_name || deployment.url || deployment.modal_app_id,
-    ).trim();
-  }
-
-  function linkedTrainingRunId(deploymentRow) {
-    return safeText(
-      deploymentRow?.run?.run_id || deploymentRow?.run?.train_result?.training_run_id,
-    ).trim();
-  }
-
-  function evalBaseModel(run, group, deploymentRow = null) {
-    const config = run.eval.config || {};
-    if (deploymentRow?.deployment) {
-      const deploymentModel = deploymentModelValue(deploymentRow.deployment);
-      if (deploymentModel) return deploymentModel;
-    }
-    const configModel = safeText(
-      config.model?.model_name ||
-        config.deployment?.model_name ||
-        config.deployment?.served_model_name ||
-        group.meta.model,
-    ).trim();
-    if (configModel) return configModel;
-    return "[unknown Base Model]";
-  }
-
-  function evalDeploymentName(run, deploymentRow = null) {
-    if (deploymentRow?.deployment) {
-      const deployment = deploymentRow.deployment;
-      const deploymentName = safeText(
-        deployment.deployment_id || deployment.app_name || deploymentIdValue(deployment),
-      ).trim();
-      if (deploymentName) return deploymentName;
-    }
-    const config = run.eval.config || {};
-    const deployment = config.deployment || {};
-    if (run.eval.deployment_id) return run.eval.deployment_id;
-    if (deployment.app_name) return deployment.app_name;
-    if (deployment.deployment_name) return deployment.deployment_name;
-    if (deployment.name) return deployment.name;
-    if (deployment.deployment_id) return deployment.deployment_id;
-    if (deployment.url) {
-      const value = safeText(deployment.url);
-      try {
-        return new URL(value).host;
-      } catch {
-        return value;
-      }
-    }
+  function evalId(run) {
     return safeText(run.eval.eval_id).trim() || "—";
   }
 
@@ -348,12 +189,9 @@
             includesText(group.meta.evalFn, query);
           if (!groupMatches) {
             runs = runs.filter((run) => {
-              const config = run.eval.config || {};
               return (
                 includesText(run.eval.eval_id, query) ||
-                includesText(config.deployment?.model_name, query) ||
-                includesText(config.deployment?.served_model_name, query) ||
-                includesText(config.deployment?.url, query)
+                includesText(run.eval.model_name, query)
               );
             });
           }
@@ -480,23 +318,19 @@
     const { run, group } = selectedEval;
     const ev = run.eval;
     const meta = evalConfigMeta(group.config, ev);
-    const linkedDeployment = findDeploymentRow(run, group);
-    const depRef = deploymentRefValue(linkedDeployment);
     const display = getEvalDisplay(ev);
     return {
       evalId: ev.eval_id || "",
       status: display.bucket,
       pillStatus: display.pill,
       statusLabel: display.label,
-      model: nonPlaceholderText(meta.model) || "—",
+      model: evalBaseModel(run),
       config: nonPlaceholderText(meta.dataset) || "—",
       grading: nonPlaceholderText(meta.evalFn || meta.judge) || "—",
       avgScore: run.avgScore,
       totalRows: run.totalRows,
       createdAt: run.createdAt,
       modalAppUrl: ev.modal_app_url || null,
-      deploymentName: evalDeploymentName(run, linkedDeployment),
-      deploymentRef: depRef,
     };
   });
 </script>
@@ -701,40 +535,19 @@
               <ResizableTable class="evals-runs-table" columns={evalColumns} stickyFirstColumn>
                 <tbody>
                   {#each group.visibleRuns as run, runIndex (run.eval.eval_id || `${group.evalConfigId}-${run.eval.created_at || 0}-${runIndex}`)}
-                    {@const linkedDeployment = findDeploymentRow(run, group)}
-                    {@const deploymentName = evalDeploymentName(run, linkedDeployment)}
-                    {@const deploymentRef = deploymentRefValue(linkedDeployment)}
-                    {@const trainingRunId = linkedTrainingRunId(linkedDeployment)}
-                    {@const baseModel = evalBaseModel(run, group, linkedDeployment)}
+                    {@const id = evalId(run)}
+                    {@const baseModel = evalBaseModel(run)}
                     {@const dataset = groupDataset(group)}
                     <tr
                       class="eval-row-clickable"
                       class:row-selected={selectedEval?.run?.eval?.eval_id === run.eval.eval_id}
-                      onclick={(event) => {
-                        if (event.target.closest(".cross-link")) return;
-                        openEvalDrawer(run, group);
-                      }}
+                      onclick={() => openEvalDrawer(run, group)}
                     >
-                      <td class="evals-mono evals-name-cell" title={deploymentName}>
-                        <span class="truncate-text">{deploymentName}</span>
+                      <td class="evals-mono evals-name-cell" title={id}>
+                        <span class="truncate-text">{id}</span>
                       </td>
                       <td class="evals-dataset-cell" title={dataset}>
                         <span class="truncate-text">{dataset}</span>
-                      </td>
-                      <td class="evals-mono evals-deployment-cell" title={deploymentRef || "—"}>
-                        <span class="truncate-text">{deploymentRef || "—"}</span>
-                      </td>
-                      <td class="max-w-0" title={trainingRunId || "—"}>
-                        {#if trainingRunId}
-                          <button
-                            class="cross-link"
-                            onclick={() => onOpenTrainingRun?.(trainingRunId)}
-                          >
-                            {trainingRunId}
-                          </button>
-                        {:else}
-                          —
-                        {/if}
                       </td>
                       <td class="base-model-cell" title={baseModel}>
                         <span class="truncate-text">{baseModel}</span>
@@ -791,21 +604,6 @@
       </div>
 
       <section class="p-[0_24px_16px]">
-        <div class="drawer-meta-row">
-          <span class="drawer-meta-key">Deployment</span>
-          <span class="drawer-meta-value">
-            {#if drawerMeta.deploymentRef}
-              <button
-                class="cross-link"
-                onclick={() => onOpenDeployment?.(drawerMeta.deploymentRef)}
-              >
-                {drawerMeta.deploymentName}
-              </button>
-            {:else}
-              {drawerMeta.deploymentName || "—"}
-            {/if}
-          </span>
-        </div>
         <div class="drawer-meta-row">
           <span class="drawer-meta-key">Model</span>
           <span class="drawer-meta-value">{drawerMeta.model}</span>

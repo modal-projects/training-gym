@@ -165,11 +165,14 @@ def _conversion_gpu_spec(
     return f"{gpu}:{n_gpu}" if n_gpu > 1 else str(gpu)
 
 
-def convert_checkpoint_to_hf(
+def convert_megatron_checkpoint_to_hf(
     checkpoint: Checkpoint,
     model: ModelConfig,
     recipe: VllmRecipe | SglangRecipe = SglangRecipe(),
 ) -> Checkpoint:
+    if checkpoint.checkpoint_type == CheckpointType.hf:
+        return checkpoint
+
     import modal
     from modal import App, Volume
 

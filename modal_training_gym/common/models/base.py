@@ -186,9 +186,8 @@ class ModelConfig:
     ``architecture``) as class attributes, then override ``download()``
     to materialize weights into the shared model volume.
 
-    ``model_path`` is the directory the weights load from. Launchers point it
-    at a resumed checkpoint, so ``download()`` must leave a populated
-    ``model_path`` as it found it.
+    ``model_path`` is the HF directory the weights load from. A populated
+    path is left untouched by ``download()``.
 
     Set ``response_parser`` to a function that converts raw model output
     into a :class:`ParsedResponse`.  For example, Qwen3 models set

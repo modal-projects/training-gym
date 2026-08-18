@@ -42,7 +42,7 @@ dev = [
     "ruff>=0.15.17",
     "ipykernel>=6.29.0",
     "uv>=0.11.0",
-    "mini-swe-agent==2.3.0",
+    "pyyaml>=6.0.3",
 ]
 docs = [
     "mkdocs-gen-files>=0.6.1",

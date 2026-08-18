@@ -10,9 +10,13 @@ from typing import Any
 import httpx
 import modal
 
-from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
+from modal_training_gym.common.checkpoint import (
+    Checkpoint,
+    convert_megatron_checkpoint_to_hf,
+)
 from modal_training_gym.common.config import modal_proxy_auth_headers
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.openai_messages import _messages_to_openai
 from modal_training_gym.model import ModelConfig
 
 
@@ -25,7 +29,25 @@ def _create_endpoint_and_wait_for_url(
     environment: str | None,
     routing_region: str | None,
     wait_timeout_sec: float,
+    recreate_if_existing: bool,
 ) -> str:
+    if recreate_if_existing:
+        stop = [
+            sys.executable,
+            "-m",
+            "modal",
+            "endpoint",
+            "stop",
+            endpoint_name,
+            "--yes",
+        ]
+        if environment:
+            stop.extend(["--env", environment])
+        try:
+            subprocess.run(stop, check=False, capture_output=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            pass
+
     command = [
         sys.executable,
         "-m",
@@ -126,6 +148,7 @@ class Endpoint:
         environment: str | None = None,
         routing_region: str | None = None,
         wait_timeout_sec: float = 300,
+        recreate_if_existing: bool = False,
     ):
         """Provision a Modal endpoint for ``model`` and return a handle to it.
 
@@ -137,15 +160,25 @@ class Endpoint:
 
         Endpoints require proxy auth if ``unauthenticated=False``.
 
+        ``modal endpoint create`` fails when the name already exists. Pass
+        ``recreate_if_existing=True`` to stop an endpoint with the same name
+        before creating. The default is ``False`` so existing callers keep a
+        live endpoint.
+
         Returns once the endpoint has a URL, which may occur before it can serve
         traffic; call ``wait_until_ready()`` to wait for the model to become ready.
         Raises ``TimeoutError`` if no URL is published within ``wait_timeout_sec``.
+
+        Megatron training checkpoints are converted to Hugging Face format
+        before create.
         """
-        if checkpoint and checkpoint.checkpoint_type is not CheckpointType.hf:
-            raise TrainingGymConfigError(
-                "Checkpoint must be in Hugging Face format. Convert it with "
-                "`convert_checkpoint_to_hf()` first."
+        if checkpoint:
+            model_config = (
+                model
+                if isinstance(model, ModelConfig)
+                else ModelConfig(model_name=model)
             )
+            checkpoint = convert_megatron_checkpoint_to_hf(checkpoint, model_config)
 
         model_name = model if isinstance(model, str) else model.model_name
 
@@ -177,6 +210,7 @@ class Endpoint:
             environment=environment,
             routing_region=routing_region,
             wait_timeout_sec=wait_timeout_sec,
+            recreate_if_existing=recreate_if_existing,
         )
 
         return cls(
@@ -197,14 +231,14 @@ class Endpoint:
                 )
         return headers
 
-    def wait_until_ready(self, timeout_sec: float = 30 * 60) -> None:
+    def wait_until_ready(self, timeout: float = 30 * 60) -> None:
         """Block until the endpoint can serve traffic.
 
         Raises ``TimeoutError`` if the endpoint is still not ready by then, and
         ``RuntimeError`` if the endpoint rejects the proxy credentials.
         """
         last_error: Exception | None = None
-        deadline = time.monotonic() + timeout_sec
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
                 response = httpx.get(
@@ -237,15 +271,15 @@ class Endpoint:
         messages: list[dict[str, Any]],
         timeout: int = 120,
         max_attempts: int = 4,
-        extra_parameters: dict[str, Any] | None = None,
+        **extra: Any,
     ):
         """POST one chat completion to ``/v1/chat/completions``.
 
-        ``messages`` is a list of ``{"role": ..., "content": ...}`` dicts, and
-        ``extra_parameters`` carries any other body fields the OpenAI Chat
-        Completions API accepts, such as ``temperature`` or ``max_tokens``.
-        Returns the assistant message as a dict, preserving structured fields
-        like ``tool_calls`` and ``reasoning_content``.
+        ``messages`` is a list of ``{"role": ..., "content": ...}`` dicts.
+        Extra keyword arguments are Chat Completions body fields such as
+        ``temperature`` or ``max_tokens``. Returns the assistant message as a
+        dict, preserving structured fields like ``tool_calls`` and
+        ``reasoning_content``.
 
         Requests are retried up to ``max_attempts`` times with a short backoff,
         while ``timeout`` bounds each individual request. Raises ``RuntimeError``
@@ -253,9 +287,11 @@ class Endpoint:
         underlying ``httpx`` error on failure.
         """
         url = f"{self.url}/v1/chat/completions"
-        body: dict[str, Any] = {"model": self.model_name, "messages": messages}
-        if extra_parameters:
-            body.update(extra_parameters)
+        body: dict[str, Any] = {
+            "model": self.model_name,
+            "messages": _messages_to_openai(messages),
+            **extra,
+        }
 
         headers = self._headers()
         transient = {429, 500, 502, 503, 504}

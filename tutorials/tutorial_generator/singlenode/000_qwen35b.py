@@ -70,12 +70,10 @@ def _install():
 @code
 def _imports():
     from modal_training_gym import (
-        CheckpointType,
         Endpoint,
         HuggingFaceDataset,
         Qwen3_6_35B,
         TrainConfig,
-        convert_checkpoint_to_hf,
         list_checkpoints,
     )
     from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_35b_Recipe
@@ -162,31 +160,14 @@ def _train():
 
 
 @markdown
-def _convert_intro():
-    """
-    ## Convert the checkpoint to HuggingFace format
-
-    Slime writes Megatron-format checkpoints. We can convert them to HuggingFace
-    format using `convert_checkpoint_to_hf`, which will run the conversion on a
-    GPU function and write the result back to the volume.
-    """
-
-
-@code
-def _convert_checkpoint():
-    megatron_checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    hf_checkpoint = convert_checkpoint_to_hf(megatron_checkpoint, model)
-    print(f"Serving checkpoint: {hf_checkpoint.path}")
-
-
-@markdown
 def _serve_intro():
     """
     ## Serve the trained model
 
     `Endpoint.launch` provisions a Modal endpoint that mounts the
     checkpoint volume and serves the weights behind an OpenAI-compatible
-    API. The endpoint name is derived from the model and checkpoint.
+    API. Slime Megatron checkpoints are converted to Hugging Face format
+    during launch. The endpoint name is derived from the model and checkpoint.
 
     `launch` returns as soon as the endpoint has a URL; loading a 35B MoE
     checkpoint off the volume takes considerably longer than that, which
@@ -196,6 +177,9 @@ def _serve_intro():
 
 @code
 def _serve_trained():
-    endpoint = Endpoint.launch(model, hf_checkpoint, unauthenticated=True)
-    endpoint.wait_until_ready(timeout_sec=45 * 60)
+    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+    endpoint = Endpoint.launch(
+        model, checkpoint, unauthenticated=True, recreate_if_existing=True
+    )
+    endpoint.wait_until_ready(timeout=45 * 60)
     print(f"Trained model URL: {endpoint.url}")
