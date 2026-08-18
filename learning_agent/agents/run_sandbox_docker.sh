@@ -1,5 +1,5 @@
 #!/bin/bash
-# Learning Agent workspace runner — Docker container edition. Same shape as run_sandbox.sh:
+# Learning Agent workspace runner — Docker container edition (same shape as the Modal twin):
 #
 #   agents/run_sandbox_docker.sh [--prepare-only] [--track easy|medium|hard] <scaffold> <task> [hours] [model]
 #

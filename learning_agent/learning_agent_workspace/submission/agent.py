@@ -33,11 +33,11 @@ methods above with these signatures and dict/str returns. `execute` /
 `execute_tool` are injected by the caller and are the ONLY bridge into the
 scored environment.
 
-The per-archetype minimal agents come from the mounted toolbox (a workspace
-carries toolbox/eval_tool+toolbox/harness_tool for QA tasks OR agentic_toolbox for
-agentic tasks — see workspace_setup/prepare_workspace.sh), so imports are guarded:
-calling a method whose toolbox is absent raises a clear error instead of an
-ImportError at module load.
+The per-archetype minimal agents ship into toolbox/harness_tool/ per the task
+config (QA: react_loop + completion_qa; agentic: react_env_agent +
+react_tool_agent + mini_swe_agent — see workspace_setup/prepare_workspace.sh),
+so imports are guarded: calling a method whose starter is absent raises a
+clear error instead of an ImportError at module load.
 """
 from __future__ import annotations
 
@@ -177,27 +177,63 @@ class Agent:
                                  max_steps=max_turns, temperature=temperature,
                                  max_tokens=max_tokens, log=log)
             if driver == "mini_swe":
-                from agentic_toolbox.mini_swe_agent import run_agent
+                from harness_tool.mini_swe_agent import run_agent
                 return run_agent(instruction, self.client, execute,
                                  max_turns=max_turns, temperature=temperature,
                                  max_tokens=max_tokens, log=log)
         except ImportError as e:
             raise RuntimeError(
-                "act() needs toolbox/agentic_toolbox (mounted for agentic tasks "
-                "only — this workspace looks QA-shaped)") from e
+                "act() needs the agentic starters in toolbox/harness_tool "
+                "(seeded for agentic tasks only — this workspace looks "
+                "QA-shaped)") from e
         raise ValueError(f"unknown act() driver {driver!r} "
                          "(tools | react | mini_swe)")
 
     # -- conversational tool use (tau2_*) ------------------------------------ #
+    def policy_turn(self, messages: list[dict], tools: list[dict]) -> dict:
+        """ONE raw assistant turn for conversational envs (the tau2 bridge seam):
+        OpenAI-format messages + tool schemas in -> the assistant message dict
+        out ({"content": str|None, "tool_calls": [...]|None}). The ENVIRONMENT's
+        orchestrator executes any tool calls — this method must never execute
+        tools or append to the conversation itself.
+
+        THIS IS THE HARNESS SURFACE for tau2 tasks under driver: bridge —
+        rewrite prompt shaping (messages is the full conversation INCLUDING the
+        system message: transform it freely before calling the model),
+        sampling, retries, self-checks. The baseline below is the pinned
+        Qwen3.5 thinking-mode recipe, matching the native-orchestrator
+        protocol the floors were measured under."""
+        if not self.base_url:
+            raise RuntimeError("policy_turn() needs a real endpoint (build with "
+                               "weights/base_url, not backend='mock')")
+        import json as _json
+        import urllib.request
+        body = {"model": self.model, "messages": messages,
+                "tools": tools or None, "tool_choice": "auto" if tools else None,
+                "temperature": 1.0, "top_p": 0.95, "max_tokens": 81920,
+                "presence_penalty": 1.5,
+                "top_k": 20, "min_p": 0.0,
+                "chat_template_kwargs": {"enable_thinking": True}}
+        body = {k: v for k, v in body.items() if v is not None}
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=_json.dumps(body).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {getattr(self.client, 'api_key', 'EMPTY') or 'EMPTY'}"})
+        with urllib.request.urlopen(req, timeout=600) as r:
+            reply = _json.loads(r.read())
+        return reply["choices"][0]["message"]
+
     def tool_turn(self, messages: list[dict], tools: list[dict], execute_tool) -> tuple[str, list[dict]]:
         """One assistant turn in a τ²-style conversation; tool calls execute via
         `execute_tool(name, args) -> str`. -> (assistant_text, updated_messages)."""
         try:
-            from agentic_toolbox.react_tool_agent import agent_turn
+            from harness_tool.react_tool_agent import agent_turn
         except ImportError as e:
             raise RuntimeError(
-                "tool_turn() needs toolbox/agentic_toolbox (mounted for agentic "
-                "tasks only — this workspace looks QA-shaped)") from e
+                "tool_turn() needs toolbox/harness_tool/react_tool_agent.py "
+                "(seeded for agentic tasks only — this workspace looks "
+                "QA-shaped)") from e
         if not self.base_url:
             raise RuntimeError("tool_turn() needs a real endpoint (build with "
                                "weights/base_url, not backend='mock')")

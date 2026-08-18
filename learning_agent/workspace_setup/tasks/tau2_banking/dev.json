@@ -1,19 +1,11 @@
 [
  {
-  "id": "task_001",
-  "purpose": "Task: task_001"
- },
- {
   "id": "task_002",
   "purpose": "Task: task_002"
  },
  {
   "id": "task_003",
   "purpose": "Task: task_003"
- },
- {
-  "id": "task_005",
-  "purpose": "Task: task_005"
  },
  {
   "id": "task_007",
@@ -40,32 +32,12 @@
   "purpose": "Task: task_017"
  },
  {
-  "id": "task_018",
-  "purpose": "Task: task_018"
- },
- {
-  "id": "task_019",
-  "purpose": "Task: task_019"
- },
- {
   "id": "task_020",
   "purpose": "Task: task_020"
  },
  {
   "id": "task_023",
   "purpose": "Task: task_023"
- },
- {
-  "id": "task_024",
-  "purpose": "Task: task_024"
- },
- {
-  "id": "task_025",
-  "purpose": "Task: task_025"
- },
- {
-  "id": "task_026",
-  "purpose": "Task: task_026"
  },
  {
   "id": "task_027",
@@ -76,48 +48,8 @@
   "purpose": "Task: task_028"
  },
  {
-  "id": "task_029",
-  "purpose": "Task: task_029"
- },
- {
-  "id": "task_033",
-  "purpose": "Task: task_033"
- },
- {
-  "id": "task_034",
-  "purpose": "Task: task_034"
- },
- {
-  "id": "task_035",
-  "purpose": "Task: task_035"
- },
- {
-  "id": "task_036",
-  "purpose": "Task: task_036"
- },
- {
-  "id": "task_039",
-  "purpose": "Task: task_039"
- },
- {
-  "id": "task_043",
-  "purpose": "Task: task_043"
- },
- {
   "id": "task_047",
   "purpose": "Task: task_047"
- },
- {
-  "id": "task_049",
-  "purpose": "Task: task_049"
- },
- {
-  "id": "task_050",
-  "purpose": "Task: task_050"
- },
- {
-  "id": "task_052",
-  "purpose": "Task: task_052"
  },
  {
   "id": "task_053",
@@ -128,24 +60,12 @@
   "purpose": "Task: task_054"
  },
  {
-  "id": "task_056",
-  "purpose": "Task: task_056"
- },
- {
   "id": "task_058",
   "purpose": "Task: task_058"
  },
  {
   "id": "task_060",
   "purpose": "Task: task_060"
- },
- {
-  "id": "task_063",
-  "purpose": "Task: task_063"
- },
- {
-  "id": "task_065",
-  "purpose": "Task: task_065"
  },
  {
   "id": "task_069",
@@ -156,52 +76,12 @@
   "purpose": "Task: task_072"
  },
  {
-  "id": "task_073",
-  "purpose": "Task: task_073"
- },
- {
-  "id": "task_075",
-  "purpose": "Task: task_075"
- },
- {
-  "id": "task_076",
-  "purpose": "Task: task_076"
- },
- {
-  "id": "task_078",
-  "purpose": "Task: task_078"
- },
- {
-  "id": "task_079",
-  "purpose": "Task: task_079"
- },
- {
-  "id": "task_081",
-  "purpose": "Task: task_081"
- },
- {
   "id": "task_082",
   "purpose": "Task: task_082"
  },
  {
-  "id": "task_083",
-  "purpose": "Task: task_083"
- },
- {
   "id": "task_084",
   "purpose": "Task: task_084"
- },
- {
-  "id": "task_087",
-  "purpose": "Task: task_087"
- },
- {
-  "id": "task_088",
-  "purpose": "Task: task_088"
- },
- {
-  "id": "task_090",
-  "purpose": "Task: task_090"
  },
  {
   "id": "task_091",
@@ -212,23 +92,7 @@
   "purpose": "Task: task_095"
  },
  {
-  "id": "task_097",
-  "purpose": "Task: task_097"
- },
- {
   "id": "task_098",
   "purpose": "Task: task_098"
- },
- {
-  "id": "task_100",
-  "purpose": "Task: task_100"
- },
- {
-  "id": "task_101",
-  "purpose": "Task: task_101"
- },
- {
-  "id": "task_102",
-  "purpose": "Task: task_102"
  }
 ]

@@ -72,18 +72,44 @@ def _base_image():
     )
 
 
+def _with_dev_splits(img):
+    """Mount every task's dev.json + sys.txt (tiny, and exactly what
+    dev_rollout may serve to a workspace — test.json NEVER rides along).
+    Touches the filesystem, so it must no-op on the IN-CONTAINER import of
+    this module (ROOT there is not a checkout; the images are already
+    built) — unlike the plain add_local_dir calls, which only build path
+    strings."""
+    tasks_dir = ROOT / "workspace_setup" / "tasks"
+    if not tasks_dir.is_dir():
+        return img
+    for tdir in sorted(tasks_dir.iterdir()):
+        for name in ("dev.json", "sys.txt"):
+            p = tdir / name
+            if p.is_file():
+                img = img.add_local_file(str(p), f"/repo/tasks/{tdir.name}/{name}")
+    return img
+
+
 def _with_repo(img):
     """The operator-side code an episode needs, mounted under /repo (the
     remote fn inserts these on sys.path). toolbox/ is mounted selectively:
-    only the driver + client packages, not the vendored trainers."""
-    return (img
-            .add_local_dir(str(ROOT / "harness"), "/repo/harness")
-            .add_local_dir(str(ROOT / "submission"), "/repo/submission")
-            .add_local_dir(str(ROOT / "toolbox" / "harness_tool"),
-                           "/repo/toolbox/harness_tool")
-            .add_local_dir(str(ROOT / "toolbox" / "api_clients"),
-                           "/repo/toolbox/api_clients")
-            .add_local_dir(str(ROOT / "bench"), "/repo/bench"))
+    only the driver + client packages, not the vendored trainers.
+    task_configs/ + the dev splits ride along for dev_rollout (the workspace
+    dev-eval service): protocol and ids resolve SERVER-side, and test.json
+    never enters an image."""
+    return _with_dev_splits(
+        img
+        .add_local_dir(str(ROOT / "harness"), "/repo/harness")
+        .add_local_dir(str(ROOT / "submission"), "/repo/submission")
+        .add_local_dir(str(ROOT / "task_configs"), "/repo/task_configs")
+        # source = toolbox_bank/ (the tool bank; the untracked legacy toolbox/
+        # dir at the repo root is NOT the source of anything) — container path
+        # stays /repo/toolbox/ so in-container imports are unchanged.
+        .add_local_dir(str(ROOT / "workspace_setup" / "toolbox_bank" / "harness_tool"),
+                       "/repo/toolbox/harness_tool")
+        .add_local_dir(str(ROOT / "workspace_setup" / "toolbox_bank" / "api_clients"),
+                       "/repo/toolbox/api_clients")
+        .add_local_dir(str(ROOT / "bench"), "/repo/bench"))
 
 
 ALFWORLD_IMAGE = _with_repo(
@@ -161,44 +187,63 @@ OPENAI_SECRET = modal.Secret.from_dict({
     "LEARNING_AGENT_USER_SIM_URL": _user_sim_url()})
 
 
+def _code_paths(snapshot: bytes) -> list[str]:
+    """sys.path entries for one episode run. Empty snapshot = the seed repo's
+    submission (official scoring). A snapshot (tar.gz of submission/ +
+    toolbox/, sent by a workspace's dev_eval client) is extracted and takes
+    the submission+toolbox slots, so dev numbers measure the AGENT'S harness
+    exactly as final scoring would."""
+    if not snapshot:
+        return ["/repo/harness", "/repo/submission", "/repo/toolbox"]
+    import io
+    import tarfile
+    import tempfile
+    d = tempfile.mkdtemp(prefix="submission_snapshot_")
+    with tarfile.open(fileobj=io.BytesIO(snapshot), mode="r:*") as tf:
+        tf.extractall(d, filter="data")
+    return ["/repo/harness", f"{d}/submission", f"{d}/toolbox"]
+
+
 def _remote_rollout(task: str, rows: list, model: str, tcfg: dict, tp: int,
-                    backend: str = "", base_url: str = ""):
-    """Runs INSIDE the task image: serve student -> build submission agent ->
+                    backend: str = "", base_url: str = "", snapshot: bytes = b""):
+    """Runs INSIDE the task image: build the submission agent (the SUBMISSION
+    serves the student — build(weights=...) -> submission/serve.py, so the
+    agent's serving stack is part of the scored system, same as QA) ->
     adapter episodes. Returns (per_question, episodes). backend='cli-claude'
     skips serving and drives the claude CLI instead (reference baselines);
     base_url skips serving and drives an already-served endpoint (reference
-    baselines against e.g. the team's GLM-5.2 — use the CPU binding)."""
-    sys.path[:0] = ["/repo/harness", "/repo/submission", "/repo/toolbox"]
+    baselines against e.g. the team's GLM-5.2 — use the CPU binding);
+    snapshot swaps in a workspace's own submission (dev_rollout)."""
+    sys.path[:0] = _code_paths(snapshot)
     import rollout as RO           # /repo/harness/rollout.py
     from adapters import load_adapter
     from agent import build        # /repo/submission/agent.py — THE submission
-    proc = None
-    try:
-        if backend == "cli-claude":
-            agent = build(backend="cli-claude", model=model)
-        elif base_url:
-            agent = build(base_url=base_url, model=model)
-        else:
-            base, proc = _serve_vllm_qwen(model, tp=tp)
-            agent = build(base_url=base, model=model)
-        adapter = load_adapter(Path("/repo"), tcfg["adapter"])
-        episodes: list[tuple] = []
-        per_question = RO.rollout_rows(
-            rows, adapter, agent, tcfg,
-            save_episode=lambda qid, t, ep: episodes.append((qid, t, ep)))
-    finally:
-        if proc is not None:
-            proc.terminate()
+    if backend == "cli-claude":
+        agent = build(backend="cli-claude", model=model)
+    elif base_url:
+        agent = build(base_url=base_url, model=model)
+    else:
+        # The submission's own serving (baseline serve.py = vLLM with the
+        # tool-call parser enabled; whatever the agent rewrote rides along).
+        # The vLLM child dies with the container — no handle to reap here.
+        agent = build(weights=model)
+    adapter = load_adapter(Path("/repo"), tcfg["adapter"])
+    episodes: list[tuple] = []
+    per_question = RO.rollout_rows(
+        rows, adapter, agent, tcfg,
+        save_episode=lambda qid, t, ep: episodes.append((qid, t, ep)))
     return per_question, episodes
 
 
 def _serve_vllm_qwen(model: str, tp: int = 1, port: int = 8000,
                      max_model_len: int = 262144, max_num_seqs: int = 8):
-    """THE serving command for every env task: the leaderboard-protocol vllm
-    0.25 line for Qwen3.5. `--enable-auto-tool-choice --tool-call-parser
-    qwen3_coder` is what makes driver: tools work at all — without it the
-    model's calls come back as prose and never reach the environment.
-    Returns (base_url, process)."""
+    """THE serving command for tau2_* tasks: the leaderboard-protocol vllm
+    0.25 line for Qwen3.5. tau2's native orchestrator is part of the pinned
+    environment, so its endpoint is served by the OPERATOR with this exact
+    recipe — only the weights are the submission's. (Other env tasks serve
+    through the submission's own serve.py via build(weights=...): serving is
+    part of their scored surface, and the baseline serve.py enables the
+    tool-call parser that driver: tools needs.) Returns (base_url, process)."""
     import subprocess
     import time
     import urllib.request
@@ -234,9 +279,9 @@ def _serve_vllm_qwen(model: str, tp: int = 1, port: int = 8000,
               volumes={HF_CACHE_DIR: HF_CACHE, "/out": OUT},
               secrets=[modal.Secret.from_name("huggingface-secret"), CLAUDE_SECRET])
 def rollout_alfworld(rows: list, model: str, tcfg: dict, tp: int = 1,
-                     backend: str = "", base_url: str = ""):
+                     backend: str = "", base_url: str = "", snapshot: bytes = b""):
     return _remote_rollout("alfworld", rows, model, tcfg, tp,
-                           backend=backend, base_url=base_url)
+                           backend=backend, base_url=base_url, snapshot=snapshot)
 
 
 # cli-claude / external-endpoint episodes never touch the GPU: a separate
@@ -245,13 +290,13 @@ def rollout_alfworld(rows: list, model: str, tcfg: dict, tp: int = 1,
 @app.function(image=ALFWORLD_IMAGE, timeout=180 * 60,
               secrets=[modal.Secret.from_name("huggingface-secret"), CLAUDE_SECRET])
 def rollout_alfworld_cpu(rows: list, model: str, tcfg: dict, tp: int = 1,
-                         backend: str = "", base_url: str = ""):
+                         backend: str = "", base_url: str = "", snapshot: bytes = b""):
     return _remote_rollout("alfworld", rows, model, tcfg, tp,
-                           backend=backend, base_url=base_url)
+                           backend=backend, base_url=base_url, snapshot=snapshot)
 
 
 def _tau2_episodes(rows: list, model: str, tcfg: dict, tp: int, backend: str,
-                   base_url: str = ""):
+                   base_url: str = "", snapshot: bytes = b""):
     """Runs INSIDE a tau2 image: serve the student (or point tau2 at an
     already-served endpoint when base_url is given), hand tau2's native
     orchestrator the endpoint, collect judge-shaped episodes. Shared by every
@@ -260,7 +305,7 @@ def _tau2_episodes(rows: list, model: str, tcfg: dict, tp: int, backend: str,
         raise RuntimeError("tau2 drives the policy through litellm (its native "
                            "orchestrator) — an external frontier policy needs a "
                            "real ANTHROPIC_API_KEY, not the claude CLI")
-    sys.path[:0] = ["/repo/harness", "/repo/submission", "/repo/toolbox"]
+    sys.path[:0] = _code_paths(snapshot)
     import rollout as RO
     from adapters import load_adapter
     proc = None
@@ -288,16 +333,18 @@ def _tau2_episodes(rows: list, model: str, tcfg: dict, tp: int, backend: str,
               volumes={HF_CACHE_DIR: HF_CACHE, "/out": OUT},
               secrets=[modal.Secret.from_name("huggingface-secret"), OPENAI_SECRET])
 def rollout_tau2(rows: list, model: str, tcfg: dict, tp: int = 1,
-                 backend: str = "", base_url: str = ""):
-    return _tau2_episodes(rows, model, tcfg, tp, backend, base_url=base_url)
+                 backend: str = "", base_url: str = "", snapshot: bytes = b""):
+    return _tau2_episodes(rows, model, tcfg, tp, backend, base_url=base_url,
+                          snapshot=snapshot)
 
 
 @app.function(image=TAU2_BANKING_IMAGE, gpu="H200", timeout=300 * 60,
               volumes={HF_CACHE_DIR: HF_CACHE, "/out": OUT},
               secrets=[modal.Secret.from_name("huggingface-secret"), OPENAI_SECRET])
 def rollout_tau2_banking(rows: list, model: str, tcfg: dict, tp: int = 1,
-                         backend: str = "", base_url: str = ""):
-    return _tau2_episodes(rows, model, tcfg, tp, backend, base_url=base_url)
+                         backend: str = "", base_url: str = "", snapshot: bytes = b""):
+    return _tau2_episodes(rows, model, tcfg, tp, backend, base_url=base_url,
+                          snapshot=snapshot)
 
 
 ROLLOUT_FN = {"alfworld": rollout_alfworld,
@@ -306,6 +353,80 @@ ROLLOUT_FN = {"alfworld": rollout_alfworld,
               "tau2_telecom": rollout_tau2,
               "tau2_banking": rollout_tau2_banking}
 CPU_ROLLOUT_FN = {"alfworld": rollout_alfworld_cpu}
+
+
+DEV_DISPATCH_IMAGE = _with_repo(
+    modal.Image.debian_slim(python_version="3.12").pip_install("pyyaml"))
+
+
+@app.function(image=DEV_DISPATCH_IMAGE, timeout=310 * 60, volumes={"/out": OUT})
+def dev_rollout(task: str, model: str, snapshot: bytes = b"", trials: int = 1,
+                session: str = "", base_url: str = "", track: str = "") -> dict:
+    """The workspace DEV-EVAL service (called by toolbox eval_tool/dev_eval.py).
+
+    The judge-service pattern applied to env tasks: the client sends only its
+    checkpoint (`model`), optionally its harness code (`snapshot`, a tar.gz of
+    submission/ + toolbox/ — required semantics for tasks whose surface
+    includes act()/policy_turn internals; ignored by tau2 driver: native), and
+    a session id for budget attribution. EVERYTHING that defines the
+    measurement — task config, env pin, user-sim, and the DEV ids — resolves
+    server-side from the deployed image, so a dev number is the official
+    instrument at reduced trial count, and test ids are unreachable (they are
+    not in the image). Episodes land on /out (lab-out volume) under
+    dev_eval/<session>/ for the workspace to pull; the return value is the
+    summary."""
+    import time as _time
+    sys.path.insert(0, "/repo/harness")
+    from config import load_task
+    tcfg = load_task(Path("/repo"), task)
+    if tcfg.get("archetype") != "agentic":
+        raise ValueError(f"dev_rollout serves agentic tasks only; {task!r} is "
+                         f"{tcfg.get('archetype')!r} — QA dev-eval runs in the "
+                         "workspace (submission/eval.py + rubric_eval.py)")
+    if task not in ROLLOUT_FN:
+        raise ValueError(f"no rollout binding for task {task!r}")
+    rows = json.loads(Path(f"/repo/tasks/{task}/dev.json").read_text())
+    env = dict(tcfg.get("env") or {})
+    # dev protocol = official protocol at reduced trials, never above the pin
+    env["num_trials"] = max(1, min(int(trials), int(env.get("num_trials", 1))))
+    tcfg = {**tcfg, "env": env, "_session": session or "dev-eval"}
+    sys_p = Path(f"/repo/tasks/{task}/sys.txt")
+    tcfg["_sys_text"] = sys_p.read_text() if sys_p.is_file() else ""
+
+    fn = ROLLOUT_FN[task]
+    if base_url:  # externally-served policy: no GPU needs holding
+        fn = CPU_ROLLOUT_FN.get(task, fn)
+    per_question, episodes = fn.remote(rows, model, tcfg, tp=1,
+                                       base_url=base_url, snapshot=snapshot)
+
+    def _row_mean(entry: dict) -> float:
+        rs = entry.get("rewards")
+        if not rs:
+            rs = [entry.get("reward", 0.0)]
+        return sum(float(r) for r in rs) / max(1, len(rs))
+
+    per_q = {qid: {"mean": round(_row_mean(e), 4),
+                   "rewards": e.get("rewards"), "steps": e.get("steps")}
+             for qid, e in per_question.items()}
+    mean = round(sum(v["mean"] for v in per_q.values()) / max(1, len(per_q)), 4)
+
+    stamp = _time.strftime("%Y%m%d_%H%M%S")
+    out_dir = Path("/out/dev_eval") / (session or "dev-eval") / f"{task}_{stamp}"
+    (out_dir / "episodes").mkdir(parents=True, exist_ok=True)
+    for qid, trial, ep in episodes:
+        (out_dir / "episodes" / f"{qid}_t{trial}.json").write_text(json.dumps(ep))
+    # track is recorded, not gated: for agentic tasks the dev IDS were never
+    # the withheld secret (the env computes reward; there is no gold to hide),
+    # so medium/hard withhold the local episode list and (hard) the corpus,
+    # while measurement stays identical on every track — and the record shows
+    # which track a claim was earned under.
+    summary = {"task": task, "split": "dev", "model": model, "mean": mean,
+               "n": len(per_q), "trials": env["num_trials"],
+               "snapshot": bool(snapshot), "track": track or "unstated",
+               "per_question": per_q, "episodes_path": str(out_dir)}
+    (out_dir / "results.json").write_text(json.dumps(summary, indent=1))
+    OUT.commit()
+    return summary
 
 
 @app.function(image=ALFWORLD_IMAGE, timeout=15 * 60)
@@ -322,9 +443,10 @@ def _list_alfworld_games() -> dict:
 
 
 @app.local_entrypoint()
-def alfworld_splits(dev_n: int = 50, test_n: int = 50, seed: int = 0):
+def alfworld_splits(dev_n: int = 25, test_n: int = 75, seed: int = 0):
     """(Re)generate tasks/alfworld/{dev,test}.json: a seeded sample of
-    valid_seen -> dev and valid_unseen -> test. Pack files are pinned, so
+    valid_seen -> dev and valid_unseen -> test. Defaults = the pinned 25/75
+    split (2026-08-17; was 50/50 before). Pack files are pinned, so
     rerunning this is benchmark drift — freeze deliberately afterward."""
     import random
     games = _list_alfworld_games.remote()
@@ -336,7 +458,7 @@ def alfworld_splits(dev_n: int = 50, test_n: int = 50, seed: int = 0):
                  "game_file": f,
                  "task_type": Path(f).parts[2].split("-")[0]}
                 for i, f in enumerate(picked)]
-        out = ROOT / "tasks" / "alfworld" / f"{name}.json"
+        out = ROOT / "workspace_setup" / "tasks" / "alfworld" / f"{name}.json"
         out.write_text(json.dumps(rows, indent=1) + "\n")
         print(f"[alfworld-splits] {name}: {len(rows)}/{len(files)} games "
               f"from {src} (seed {seed}) -> {out}")

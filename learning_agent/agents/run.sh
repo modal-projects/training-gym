@@ -15,11 +15,11 @@
 #
 #   env LEARNING_AGENT_TRACK : easy|medium|hard (default easy) — which `instructions/data_access/<track>.md`
 #                   block gets assembled into the prompt. Not a
-#                   positional (keeps the 4-arg signature); run_sandbox.sh exports it
+#                   positional (keeps the 4-arg signature); the runner exports it
 #                   before invoking this script inside the prepared workspace.
 #
 # Runs IN-PLACE against whatever repo root it lives under. For a scored run use
-# agents/run_sandbox.sh, which first gives the agent its own workspace copy (the
+# the run_sandbox_modal.sh / run_sandbox_docker.sh runners, which first give the agent its own workspace copy (the
 # workspace is the submission) and then invokes this script inside it.
 #
 # What it does, mirroring PostTrainBench's run_task.sh but adapted for Learning Agent:
@@ -61,7 +61,7 @@ if [ -n "$CONFIG_FILE" ]; then
     SCAFFOLD="${SCAFFOLD:-$(lab_yaml_session "$CONFIG_FILE" scaffold)}"
     HOURS="${HOURS:-$(lab_yaml_session "$CONFIG_FILE" hours)}"
     MODEL="${MODEL:-$(lab_yaml_session "$CONFIG_FILE" model)}"
-    # LEARNING_AGENT_TRACK (exported by run_sandbox.sh) wins; config fills only when unset
+    # LEARNING_AGENT_TRACK (exported by the runner) wins; config fills only when unset
     LEARNING_AGENT_TRACK="${LEARNING_AGENT_TRACK:-$(lab_yaml_session "$CONFIG_FILE" track)}"
 fi
 [ -n "$SCAFFOLD" ] && [ -n "$TASK" ] || { echo "$USAGE" >&2; exit 2; }
@@ -69,11 +69,11 @@ HOURS="${HOURS:-24}"
 
 # Agents run ONLY in prepared sandboxes, never in the seed repo: the agent edits
 # code (data, training, harness, submission), so launching it here would let it
-# modify the benchmark itself. run_sandbox.sh writes the marker checked below.
+# modify the benchmark itself. prepare_workspace.sh writes the marker checked below.
 # LEARNING_AGENT_ALLOW_IN_PLACE=1 overrides for operator smoke tests only.
 if [ ! -f "$ROOT/.learning_agent_sandbox" ] && [ "${LEARNING_AGENT_ALLOW_IN_PLACE:-0}" != "1" ]; then
     echo "refusing to launch: $ROOT is not a prepared sandbox (no .learning_agent_sandbox marker)." >&2
-    echo "use: agents/run_sandbox.sh <scaffold> <task> [hours] [model]" >&2
+    echo "use: agents/run_sandbox_modal.sh <scaffold> <task> [hours] [model]" >&2
     exit 2
 fi
 

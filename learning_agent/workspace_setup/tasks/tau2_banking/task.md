@@ -48,11 +48,11 @@ tau2 ships **no** `split_tasks.json` for this domain (97 scenarios in
 ```python
 ids = [t["id"] for t in tasks.json]        # shipped order
 random.Random(0).shuffle(ids)
-dev, test = sorted(ids[:58]), sorted(ids[58:])   # 58 / 39, ≈60/40 like airline
+dev, test = sorted(ids[:24]), sorted(ids[24:])   # 24 / 73 (25%/75%, 2026-08-17)
 ```
 
-- `dev.json`  — 58 scenarios (your iteration signal)
-- `test.json` — 39 scenarios (the held-out number)
+- `dev.json`  — 24 scenarios (your iteration signal)
+- `test.json` — 73 scenarios (the held-out number)
 
 ## Running it
 
@@ -71,13 +71,15 @@ python bench.py score --task tau2_banking --model <weights> --split dev
 # untrained base floor (--model Qwen/Qwen3.5-9B), as everywhere in Learning Agent.
 ```
 
-Base floor on this protocol (Qwen3.5-9B, dev, 58 scenarios x 4 trials,
+Base floor on the PRE-2026-08-17 58-scenario dev split (Qwen3.5-9B, 4 trials,
 gpt-5.6-luna simulator, 2026-08-09): **0.0776** mean reward
 (CI [0.03, 0.13]), **pass^4 = 0.0** — the untrained student essentially
 floors: it cannot navigate the 698-document knowledge base and land the
 right account actions. Frontier reference (GLM-5.2-FP8, provider sampling
 per dev/glm52_baseline.yaml): 0.3664 / pass^4 0.1552 — hard for everyone,
-but a ~0.29 mean-reward gap. The widest margin headroom in the tau2 suite.
+but a ~0.29 mean-reward gap. The widest margin headroom in the tau2 suite. NOTE: the split moved to
+24 dev / 73 test on 2026-08-17 (new dev is a subset of the old) — re-measure
+the floor on the new dev before comparing numbers.
 
 Requires the agentic-shell sandbox binaries wherever episodes run (srt +
 ripgrep, plus bubblewrap + socat on Linux) — the default `alltools`

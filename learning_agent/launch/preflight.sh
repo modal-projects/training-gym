@@ -25,13 +25,13 @@ if python3 -m pytest observatory/tests/ -q >/dev/null 2>&1; then
 else bad "test suites — run: python3 -m pytest observatory/tests/ -q"; fi
 
 # 3. task inputs
-[ -d "tasks/$TASK/corpus" ] && ok "corpus on disk (tasks/$TASK/corpus)" \
-    || bad "corpus missing at tasks/$TASK/corpus (distributed separately)"
-[ -f "tasks/$TASK/dev.json" ] && ok "dev.json present" || bad "tasks/$TASK/dev.json missing"
-[ -f "tasks/$TASK/test.json" ] && ok "test.json present (operator-side scoring input)" \
-    || warn "tasks/$TASK/test.json not on this machine — scoring must happen elsewhere"
-[ -f "tasks/$TASK/task.md" ] && ok "task.md present" || bad "tasks/$TASK/task.md missing"
-[ -f "tasks/$TASK/brief.md" ] && ok "brief.md present (hard track input)" \
+[ -d "workspace_setup/tasks/$TASK/corpus" ] && ok "corpus on disk (tasks/$TASK/corpus)" \
+    || bad "corpus missing at workspace_setup/tasks/$TASK/corpus (fetch: python3 workspace_setup/hf_tasks.py fetch --task $TASK)"
+[ -f "workspace_setup/tasks/$TASK/dev.json" ] && ok "dev.json present" || bad "workspace_setup/tasks/$TASK/dev.json missing"
+[ -f "workspace_setup/tasks/$TASK/test.json" ] && ok "test.json present (operator-side scoring input)" \
+    || warn "workspace_setup/tasks/$TASK/test.json not on this machine — scoring must happen elsewhere"
+[ -f "workspace_setup/tasks/$TASK/task.md" ] && ok "task.md present" || bad "workspace_setup/tasks/$TASK/task.md missing"
+[ -f "workspace_setup/tasks/$TASK/brief.md" ] && ok "brief.md present (hard track input)" \
     || warn "tasks/$TASK/brief.md missing — hard track unavailable"
 
 # 4. trainers
@@ -80,7 +80,7 @@ command -v claude >/dev/null 2>&1 && ok "claude CLI on PATH (claude* scaffolds)"
     || warn "no claude CLI — only codex/gemini/opencode scaffolds usable"
 
 # 8. modal_glm52 scaffold: opencode CLI + the team's Modal GLM endpoint
-source agents/modal_glm52/config.env
+source agents/lib/glm52_endpoint.env
 command -v opencode >/dev/null 2>&1 \
     && ok "opencode CLI on PATH (modal_glm52 + opencode scaffolds)" \
     || warn "opencode CLI missing — modal_glm52/opencode scaffolds unusable"
@@ -100,8 +100,8 @@ fi
 
 echo
 if [ "$FAIL" = 0 ]; then
-    echo "PREFLIGHT PASSED — launch (detached) with:"
-    echo "  bash launch/detach_run.sh --watch --track easy claude_reprompt $TASK 24"
+    echo "PREFLIGHT PASSED — launch (detached, container-side) with:"
+    echo "  bash agents/run_sandbox_modal.sh --track easy modal_glm52 $TASK 23.5"
 else
     echo "PREFLIGHT FAILED — fix the FAIL lines above before spending a run."
 fi

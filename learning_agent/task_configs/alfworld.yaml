@@ -2,10 +2,12 @@
 # integrity pins, and the agent runners. A task exists iff this file exists.
 task: alfworld
 archetype: agentic
+surface: "weights + serving (submission/serve.py, build(weights=...)) + act()
+  driver internals — env, reward, and step budget are pinned"
 
 adapter: harness/adapters/alfworld.py
-dev: workspace_setup/tasks/alfworld/dev.json            # 50 valid_seen games (seeded sample)
-test: workspace_setup/tasks/alfworld/test.json          # 50 valid_unseen games — generalization split
+dev: workspace_setup/tasks/alfworld/dev.json            # 25 valid_seen games (seeded sample; 25/75 since 2026-08-17)
+test: workspace_setup/tasks/alfworld/test.json          # 75 valid_unseen games — generalization split
 sys: workspace_setup/tasks/alfworld/sys.txt
 
 env:
@@ -25,8 +27,10 @@ agent:
                                         #   schema in harness/adapters/alfworld.py —
                                         #   the interface deployed agents use, and
                                         #   what the student's tool-use post-training
-                                        #   optimized. The endpoint MUST be served
-                                        #   with a tool-call parser.
+                                        #   optimized. Serving is the SUBMISSION's
+                                        #   (build(weights=...) -> serve.py); the
+                                        #   endpoint MUST be served with a tool-call
+                                        #   parser — baseline serve.py enables it.
                                         #   `react` (ACTION:/FINAL: text) is the same
                                         #   action space for text-only policies, e.g.
                                         #   a CLI reference baseline.

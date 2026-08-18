@@ -40,7 +40,11 @@ def token() -> str:
             if line.startswith("HUGGINGFACEHUB_API_TOKEN="):
                 tok = line.split("=", 1)[1].strip().strip('"').strip("'")
     if not tok:
-        raise SystemExit("no HUGGINGFACEHUB_API_TOKEN in env or .env")
+        for var in ("HF_TOKEN_JUNLIN", "HF_TOKEN"):   # operator-shell fallbacks
+        if os.environ.get(var):
+            return os.environ[var]
+    raise SystemExit("no HUGGINGFACEHUB_API_TOKEN in env or .env "
+                     "(HF_TOKEN_JUNLIN / HF_TOKEN also accepted)")
     return tok
 
 
@@ -90,6 +94,9 @@ def fetch(task: str, with_test: bool) -> None:
                       allow_patterns=patterns, ignore_patterns=ignore,
                       local_dir=str(dest))
     print(f"fetched {task} -> {dest / task}" + ("" if with_test else "  (test.json excluded)"))
+    # the arbiter of "consistent with the codebase": the integrity pins
+    import subprocess
+    subprocess.run([sys.executable, str(ROOT / "bench.py"), "verify"], cwd=ROOT)
 
 
 def main() -> None:

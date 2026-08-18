@@ -12,8 +12,8 @@ Volume layout ($MODAL_AGENT_VOLUME, default lab-agent-workspace):
     <task>/<session>/logs        session home: CLI-native session state
                                  (opencode storage / claude session jsonl),
                                  obs watcher log, filled task spec
-    _shared/corpus/<task>        corpus, uploaded once, copied volume-side
-                                 into each session's workspace
+    (the task and its corpus ride inside each session's workspace at task/ —
+     no shared state between sessions)
 
 The container carries the `lab-agent-modal-token` secret so the agent's own
 Modal GPU jobs (gpu_launcher.py / its own apps) and the live observatory

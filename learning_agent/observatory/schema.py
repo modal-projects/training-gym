@@ -219,7 +219,7 @@ class LearningAction(TypedDict, total=False):
     kind: "data"   — toolbox/data_toolbox/gen/*.py (a corpus-generation script)
           "train"  — bench.py train / pipeline/train.py (SFT), or
                       bench.py rl / pipeline/rl.py (RL)
-          "eval"   — toolbox/eval_toolbox/rubric_eval.py, or bench.py score
+          "eval"   — toolbox/eval_tool/rubric_eval.py, or bench.py score
           "evolve" — toolbox/evolve/run_recipe.py
           "tool"   — an invented tool: an executed script that matched none of
                       the four kinds above (see provenance)

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Learning Agent workspace runner — Modal container edition. Same shape as run_sandbox.sh:
+# Learning Agent workspace runner — Modal container edition:
 #
 #   agents/run_sandbox_modal.sh [--prepare-only] [--track easy|medium|hard] <scaffold> <task> [hours] [model]
 #

@@ -276,6 +276,10 @@ def _emit_seed_env(root: Path, task: str) -> None:
     print(f'LEARNING_AGENT_TB_INSTR_TIPS="{ins["tips"] or ""}"')                 # empty -> tips/<archetype>.md
     print(f'LEARNING_AGENT_TB_ASSETS_TASK="{tb["assets_task"]}"')
     print(f'LEARNING_AGENT_TB_ARCHETYPE="{tcfg.get("archetype", "qa")}"')
+    # The scored policy surface, verbatim from task.yaml `surface:` — seeded
+    # into the workspace as task/task_meta.yaml so the agent knows which layers
+    # its edits can move (weights only? +serving? +harness internals?).
+    print(f'LEARNING_AGENT_TB_SURFACE="{tcfg.get("surface", "")}"')
 
 
 if __name__ == "__main__":

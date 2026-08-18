@@ -119,6 +119,19 @@ prepare_workspace() {
     #    repo root, outside the seeded surface.
     : > "$WS/runs/LEARNING_LOG.jsonl"
 
+    # 3a) task/task_meta.yaml — the machine-readable task identity the tools in
+    #     the workspace read (toolbox/eval_tool/dev_eval.py dispatches on
+    #     archetype; `surface` tells the agent which layers its edits can move).
+    #     Generated from the task config, which itself never enters a workspace.
+    mkdir -p "$WS/task"
+    {
+        printf '# Generated at seeding from the operator task config. Read-only facts;\n'
+        printf '# editing this changes nothing about how the submission is scored.\n'
+        printf 'task: %s\n' "$TASK"
+        printf 'archetype: %s\n' "$LEARNING_AGENT_TB_ARCHETYPE"
+        printf 'surface: "%s"\n' "$LEARNING_AGENT_TB_SURFACE"
+    } > "$WS/task/task_meta.yaml"
+
     # 2b) task ARCHETYPE (qa vs agentic) is recorded for the run metadata —
     #     resolved by the config loader in step 0.
     local ARCHETYPE="$LEARNING_AGENT_TB_ARCHETYPE"

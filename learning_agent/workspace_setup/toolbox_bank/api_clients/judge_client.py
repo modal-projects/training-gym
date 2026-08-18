@@ -27,7 +27,7 @@ is set — so --help works with nothing installed.
 
 Rubric claim shape: {"claim_id","weight","statement","claim_type"?} (weight defaults to 1).
 
-    python toolbox/eval_toolbox/judge_client.py --input row.json --n-votes 3
+    python toolbox/api_clients/judge_client.py --input row.json --n-votes 3
     # {question, candidate|answer, rubric, gold_answer?}; or --question/--rubric inline
 """
 from __future__ import annotations
