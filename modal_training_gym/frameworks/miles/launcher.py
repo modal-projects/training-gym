@@ -86,12 +86,18 @@ _REPORTING_PATCH_COMMANDS = (
     f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
 )
 
-# Megatron-level torch_dist save fixes, shared with the slime image. Guarded no-ops
-# when their target source doesn't match, so they are safe for every miles image.
+# Megatron-level torch_dist save fixes, shared with the slime image. Both no-op when
+# their target source doesn't match, so they are safe for every miles image; the
+# checkpoint-save one is skipped in the shell below when its target is absent
+# entirely, since guarding inside the script would change the bytes the slime image
+# already builds from.
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_MEGATRON_TORCH_STRATEGY_PY = (
+    "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
+)
 
 
 _CONVERT_LOCK_DICT_NAME = "training-gym-convert-lock"
@@ -285,7 +291,12 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
             f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
-            f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3",
+            (
+                f"if test -f {_MEGATRON_TORCH_STRATEGY_PY}; then "
+                f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3; "
+                f"else echo 'WARNING: {_MEGATRON_TORCH_STRATEGY_PY} not found, "
+                "skipping checkpoint-save patch'; fi"
+            ),
             *_REPORTING_PATCH_COMMANDS,
         )
     )
