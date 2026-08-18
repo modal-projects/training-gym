@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, field, fields
 from typing import Any, Callable
 
 
@@ -159,6 +160,208 @@ class ModelArchitecture:
     no_rope_fusion: bool = False
 
 
+_MISSING = object()
+
+
+def _config_value(config: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in config and config[key] is not None:
+            return config[key]
+    return _MISSING
+
+
+def _load_hf_config(model_name: str, model_path: str | None) -> dict[str, Any]:
+    local_config = os.path.join(str(model_path), "config.json") if model_path else None
+    if local_config and os.path.isfile(local_config) and os.path.getsize(local_config):
+        config_path = local_config
+    else:
+        from huggingface_hub import hf_hub_download
+
+        try:
+            config_path = hf_hub_download(repo_id=model_name, filename="config.json")
+        except Exception:
+            try:
+                config_path = hf_hub_download(
+                    repo_id=model_name, filename="config.json", local_files_only=True
+                )
+            except Exception as offline_error:
+                raise RuntimeError(
+                    f"Unable to load config.json for HuggingFace model {model_name!r}. "
+                    "Provide a populated model_path containing config.json, ensure "
+                    "HF access is configured (HF_TOKEN for gated/rate-limited repos), "
+                    "or make the model available in the local HuggingFace cache."
+                ) from offline_error
+
+    try:
+        with open(config_path) as config_file:
+            config = json.load(config_file)
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Invalid HuggingFace config at {config_path!r}") from error
+    if not isinstance(config, dict):
+        raise RuntimeError(f"HuggingFace config at {config_path!r} is not an object")
+    return config
+
+
+def _text_config(config: Mapping[str, Any]) -> Mapping[str, Any]:
+    thinker_config = config.get("thinker_config")
+    if isinstance(thinker_config, Mapping):
+        config = thinker_config
+    text_config = config.get("text_config")
+    if isinstance(text_config, Mapping):
+        config = text_config
+    return config
+
+
+def resolve_model_architecture(
+    model_name: str,
+    model_path: str | None = None,
+    overrides: Mapping[str, Any] | None = None,
+) -> ModelArchitecture:
+    """Resolve Megatron architecture fields from a HuggingFace config."""
+    config = _text_config(_load_hf_config(model_name, model_path))
+    values: dict[str, Any] = {}
+
+    direct_fields = {
+        "num_hidden_layers": "num_layers",
+        "hidden_size": "hidden_size",
+        "intermediate_size": "ffn_hidden_size",
+        "num_attention_heads": "num_attention_heads",
+        "vocab_size": "vocab_size",
+        "rms_norm_eps": "norm_epsilon",
+        "rope_theta": "rotary_base",
+        "partial_rotary_factor": "rotary_percent",
+        "num_key_value_heads": "num_query_groups",
+        "head_dim": "kv_channels",
+        "tie_word_embeddings": "tie_word_embeddings",
+    }
+    for source, destination in direct_fields.items():
+        value = _config_value(config, source)
+        if value is not _MISSING:
+            if destination == "tie_word_embeddings":
+                values["untie_embeddings_and_output_weights"] = not value
+            else:
+                values[destination] = value
+
+    values.setdefault("rotary_percent", 1.0)
+    num_heads = config.get("num_attention_heads")
+    num_kv_heads = config.get("num_key_value_heads")
+    if num_kv_heads is not None and num_heads is not None:
+        values["group_query_attention"] = num_kv_heads != num_heads
+    if "kv_channels" not in values and num_heads and config.get("hidden_size"):
+        values["kv_channels"] = config["hidden_size"] // num_heads
+
+    hidden_act = _config_value(config, "hidden_act", "hidden_activation")
+    if hidden_act is not _MISSING:
+        values["swiglu"] = hidden_act in ("silu",)
+    if "rms_norm_eps" in config:
+        values["normalization"] = "RMSNorm"
+
+    bias = _config_value(
+        config,
+        "attention_bias",
+        "qkv_bias",
+        "query_key_value_bias",
+        "q_proj_bias",
+    )
+    if bias is _MISSING:
+        bias_values = [
+            config[key]
+            for key in ("q_proj_bias", "k_proj_bias", "v_proj_bias")
+            if isinstance(config.get(key), bool)
+        ]
+        if bias_values:
+            bias = any(bias_values)
+    if bias is not _MISSING and isinstance(bias, bool):
+        values["disable_bias_linear"] = not bias
+
+    qk_norm = _config_value(
+        config, "qk_layernorm", "use_qk_norm", "use_qk_layernorm", "qk_norm"
+    )
+    if qk_norm is not _MISSING and isinstance(qk_norm, bool):
+        values["qk_layernorm"] = qk_norm
+
+    moe_fields = {
+        "num_experts": "num_experts",
+        "n_routed_experts": "num_experts",
+        "num_local_experts": "num_experts",
+        "moe_intermediate_size": "moe_ffn_hidden_size",
+        "num_experts_per_tok": "moe_router_topk",
+    }
+    for source, destination in moe_fields.items():
+        value = _config_value(config, source)
+        if value is not _MISSING:
+            values[destination] = value
+    shared_size = _config_value(config, "shared_expert_intermediate_size")
+    if shared_size is _MISSING:
+        shared_count = _config_value(config, "n_shared_experts")
+        moe_size = _config_value(config, "moe_intermediate_size")
+        if shared_count is not _MISSING and moe_size is not _MISSING:
+            shared_size = shared_count * moe_size
+    if shared_size is not _MISSING:
+        values["moe_shared_expert_intermediate_size"] = shared_size
+
+    mla_fields = {
+        "kv_lora_rank": "kv_lora_rank",
+        "qk_nope_head_dim": "qk_head_dim",
+        "qk_rope_head_dim": "qk_pos_emb_head_dim",
+        "v_head_dim": "v_head_dim",
+    }
+    for source, destination in mla_fields.items():
+        value = _config_value(config, source)
+        if value is not _MISSING:
+            values[destination] = value
+    if "kv_lora_rank" in values:
+        values["multi_latent_attention"] = True
+
+    rope_scaling = config.get("rope_scaling")
+    if isinstance(rope_scaling, Mapping):
+        for source, destination in (
+            ("mscale", "mscale"),
+            ("mscale_all_dim", "mscale_all_dim"),
+            ("factor", "rotary_scaling_factor"),
+        ):
+            value = rope_scaling.get(source)
+            if value is not None:
+                values[destination] = value
+
+    if overrides:
+        valid_fields = {item.name for item in fields(ModelArchitecture)}
+        unknown = set(overrides) - valid_fields
+        if unknown:
+            raise ValueError(
+                f"Unknown ModelArchitecture override(s): {', '.join(sorted(unknown))}"
+            )
+        values.update(overrides)
+    return ModelArchitecture(**values)
+
+
+class _LazyArchitecture:
+    def __get__(
+        self, instance: ModelConfig | None, owner: type[ModelConfig]
+    ) -> ModelArchitecture | None:
+        if instance is None:
+            return None
+        if "_resolved_architecture" not in instance.__dict__:
+            try:
+                instance.__dict__["_resolved_architecture"] = (
+                    resolve_model_architecture(
+                        instance.model_name,
+                        instance.model_path,
+                        instance.architecture_overrides,
+                    )
+                )
+            except Exception as error:
+                raise RuntimeError(
+                    f"Could not resolve architecture for {owner.__name__} "
+                    f"({instance.model_name!r}). Ensure config.json is available "
+                    "locally or that HuggingFace Hub access is configured."
+                ) from error
+        return instance.__dict__["_resolved_architecture"]
+
+    def __set__(self, instance: ModelConfig, value: ModelArchitecture | None) -> None:
+        instance.__dict__["_resolved_architecture"] = value
+
+
 @dataclass
 class ToolCall:
     """A parsed tool invocation from model output."""
@@ -233,6 +436,9 @@ class HFModelConfiguration(ModelConfig):
     seeded from the snapshot; a populated one already holds the weights to
     load and is left untouched.
     """
+
+    architecture_overrides: dict[str, Any] = {}
+    architecture = _LazyArchitecture()
 
     def download(self) -> None:
         from huggingface_hub import snapshot_download

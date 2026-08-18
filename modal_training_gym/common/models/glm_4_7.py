@@ -4,7 +4,6 @@ import subprocess
 
 from .base import (
     HFModelConfiguration,
-    ModelArchitecture,
     disable_mtp_in_config,
     parse_glm_response,
 )
@@ -17,42 +16,23 @@ class GLM_4_7(HFModelConfiguration):
 
     Mixture-of-Experts with 160 routed experts + 1 shared expert,
     8 active per token. First 3 layers are dense.
-    Pre-configured with base ``ModelArchitecture`` for Megatron-based
-    frameworks (slime). Downloads from ``zai-org/GLM-4.7`` on HuggingFace.
+    Architecture is resolved from ``config.json`` for Megatron-based frameworks.
     """
 
     response_parser = staticmethod(parse_glm_response)
 
     model_name = "zai-org/GLM-4.7"
-    architecture = ModelArchitecture(
-        num_layers=92,
-        hidden_size=5120,
-        ffn_hidden_size=12288,
-        num_attention_heads=96,
-        group_query_attention=True,
-        num_query_groups=8,
-        kv_channels=128,
-        vocab_size=151552,
-        normalization="RMSNorm",
-        norm_epsilon=1e-5,
-        swiglu=True,
-        disable_bias_linear=False,
-        qk_layernorm=True,
-        untie_embeddings_and_output_weights=True,
-        use_rotary_position_embeddings=True,
-        rotary_base=1000000,
-        num_experts=160,
-        moe_ffn_hidden_size=1536,
-        moe_shared_expert_intermediate_size=1536,
-        moe_grouped_gemm=True,
-        moe_shared_expert_gate=True,
-        moe_router_topk=8,
-        moe_router_score_function="softmax",
-        moe_token_drop_policy="probs",
-        moe_router_dtype="fp32",
-        moe_permute_fusion=True,
-        moe_aux_loss_coeff=0,
-    )
+    architecture_overrides = {
+        "untie_embeddings_and_output_weights": True,
+        "moe_grouped_gemm": True,
+        "moe_shared_expert_gate": True,
+        "moe_router_score_function": "softmax",
+        "moe_token_drop_policy": "probs",
+        "moe_router_dtype": "fp32",
+        "moe_permute_fusion": True,
+        "moe_aux_loss_coeff": 0,
+        "rotary_percent": 1.0,
+    }
 
     def download(self) -> None:
         from huggingface_hub import snapshot_download

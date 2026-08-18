@@ -1,34 +1,22 @@
 """Qwen3-30B-A3B model spec as a concrete HFModelConfiguration subclass."""
 
-from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_response
+from .base import HFModelConfiguration, parse_qwen3_response
 
 
 class Qwen3_30B(HFModelConfiguration):
     """Qwen3-30B-A3B (30B total, ~3B active) MoE model from Alibaba.
 
     Mixture-of-Experts with 128 experts, 8 active per token.
-    Pre-configured with base ``ModelArchitecture`` for Megatron-based
-    frameworks (slime). Downloads from ``Qwen/Qwen3-30B-A3B`` on HuggingFace.
+    Architecture is resolved from ``config.json`` for Megatron-based frameworks.
     """
 
     response_parser = staticmethod(parse_qwen3_response)
 
     model_name = "Qwen/Qwen3-30B-A3B"
-    architecture = ModelArchitecture(
-        num_layers=48,
-        hidden_size=2048,
-        ffn_hidden_size=6144,
-        num_attention_heads=32,
-        group_query_attention=True,
-        num_query_groups=4,
-        kv_channels=128,
-        vocab_size=151936,
-        normalization="RMSNorm",
-        norm_epsilon=1e-6,
-        swiglu=True,
-        disable_bias_linear=True,
-        qk_layernorm=True,
-        untie_embeddings_and_output_weights=True,
-        use_rotary_position_embeddings=True,
-        rotary_base=1000000,
-    )
+    architecture_overrides = {
+        "qk_layernorm": True,
+        "num_experts": 0,
+        "moe_ffn_hidden_size": 0,
+        "moe_router_topk": 0,
+        "untie_embeddings_and_output_weights": True,
+    }

@@ -8,6 +8,7 @@ from .base import (
     parse_glm_response,
     parse_qwen3_6_response,
     parse_qwen3_response,
+    resolve_model_architecture,
 )
 from .gemma4_26b_a4b import Gemma4_26B_A4B
 from .glm_4_7 import GLM_4_7
@@ -45,6 +46,7 @@ __all__ = [
     "parse_glm_response",
     "parse_qwen3_6_response",
     "parse_qwen3_response",
+    "resolve_model_architecture",
     "Qwen3_5_0_8B",
     "Qwen3_5_2B",
     "Qwen3_5_4B",
