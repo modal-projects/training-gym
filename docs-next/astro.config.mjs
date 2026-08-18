@@ -1,12 +1,15 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import rehypeKatex from 'rehype-katex';
+import remarkMath from 'remark-math';
 import { modalReferenceThemes } from './modal-reference-theme.mjs';
 import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
 
 export default defineConfig({
   markdown: {
-    rehypePlugins: [rehypeTableWrapper],
+    remarkPlugins: [remarkMath],
+    rehypePlugins: [rehypeKatex, rehypeTableWrapper],
   },
   site: 'https://gym.modal.dev',
   redirects: {

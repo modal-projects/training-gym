@@ -279,8 +279,6 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
     )
     if miles.image_env:
         image = image.env(miles.image_env)
-    if miles.image_run_commands:
-        image = image.run_commands(*miles.image_run_commands)
     return image
 
 
@@ -372,7 +370,7 @@ def build_miles_app(
             ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
         )
         # The local checkout just overwrote the patched miles sources;
-        # re-apply every build-time patch.
+        # re-apply the built-in patches.
         image = image.run_commands(
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
             " || echo 'WARNING: sglang abort patch did not apply to the"
@@ -380,6 +378,9 @@ def build_miles_app(
             " cleanup may crash the run'",
             *_REPORTING_PATCH_COMMANDS,
         )
+
+    if miles.image_run_commands:
+        image = image.run_commands(*miles.image_run_commands)
 
     if miles.image_overlay is not None:
         image = miles.image_overlay(image)
@@ -795,26 +796,46 @@ def build_miles_app(
 
     _multi_node = miles.total_nodes > 1
 
+    train_secrets = [
+        *(
+            []
+            if miles.wandb is None
+            else [Secret.from_name(miles.wandb.modal_wandb_secret_name)]
+        ),
+        *hf_secrets(),
+        *proxy_auth_secrets(),
+    ]
+    train_experimental_options: dict[str, Any] = (
+        {"efa_enabled": True} if _multi_node else {}
+    )
+
+    train_function_kwargs = dict(miles.train_function_kwargs or {})
+    user_secrets = train_function_kwargs.pop("secrets", None)
+    if user_secrets is not None:
+        if not isinstance(user_secrets, (list, tuple)):
+            user_secrets = [user_secrets]
+        train_secrets.extend(user_secrets)
+    user_experimental_options = train_function_kwargs.pop("experimental_options", None)
+    if user_experimental_options is not None:
+        train_experimental_options.update(user_experimental_options)
+    train_ephemeral_disk = train_function_kwargs.pop("ephemeral_disk", None)
+    if train_function_kwargs:
+        unsupported = ", ".join(sorted(train_function_kwargs))
+        raise TypeError(f"Unsupported miles.train_function_kwargs keys: {unsupported}")
+
     @app.function(
         image=image,
         gpu=gpu_spec,
         memory=miles.memory,
+        ephemeral_disk=train_ephemeral_disk,
         cloud=miles.cloud,
         region=miles.region,
         volumes=all_volumes,
-        ephemeral_disk=miles.train_ephemeral_disk_mb,
-        secrets=[
-            *(
-                []
-                if miles.wandb is None
-                else [Secret.from_name(miles.wandb.modal_wandb_secret_name)]
-            ),
-            *proxy_auth_secrets(),
-        ],
+        secrets=train_secrets,
         timeout=24 * 60 * 60,
         retries=Retries(max_retries=10, initial_delay=0.0),
         single_use_containers=True,
-        experimental_options={"efa_enabled": True} if _multi_node else {},
+        experimental_options=train_experimental_options,
         serialized=True,
         name="train",
     )
@@ -1093,12 +1114,6 @@ def build_miles_app(
                     ),
                     "TRAINING_GYM_TRACE_SAMPLE_LIMIT": str(
                         getattr(miles, "trace_sample_limit", 16)
-                    ),
-                    "TRAINING_GYM_IMAGE_SAMPLE_LIMIT": str(
-                        getattr(miles, "image_sample_limit", 16)
-                    ),
-                    "TRAINING_GYM_TRAJECTORY_SAMPLE_LIMIT": str(
-                        getattr(miles, "trajectory_sample_limit", 16)
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                 },

@@ -36,6 +36,12 @@ def modal_tag_value(value: object) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_name).strip("-_.")
 
 
+def hf_token() -> str | None:
+    """Return ``HF_TOKEN`` or ``HUGGING_FACE_HUB_TOKEN`` from the launching process."""
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    return token or None
+
+
 def hf_secrets() -> list:
     """Return a list of Modal Secrets providing ``HF_TOKEN`` to containers.
 
@@ -48,9 +54,9 @@ def hf_secrets() -> list:
     """
     from modal import Secret
 
-    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-    if hf_token:
-        return [Secret.from_dict({"HF_TOKEN": hf_token})]
+    token = hf_token()
+    if token:
+        return [Secret.from_dict({"HF_TOKEN": token})]
 
     try:
         secret = Secret.from_name("huggingface-secret")
@@ -92,6 +98,7 @@ __all__ = [
     "modal_tag_value",
     "register_modal_cloudpickle_reducers",
     "hf_secrets",
+    "hf_token",
     "proxy_auth_secrets",
     "vol_get",
     "vol_list",

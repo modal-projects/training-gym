@@ -62,10 +62,7 @@ from modal_training_gym.common.launcher_helpers import (
     ship_callable,
 )
 from modal_training_gym.common.launcher_utils import (
-    is_sensitive_recipe_field,
-    serialize_recipe_param_value,
     serialize_recipe_params,
-    serialize_recipe_value,
 )
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.status import SlimeStatus
@@ -275,11 +272,6 @@ def _checkpoint_conversion_cache_status(
     return "hit", stored_config
 
 
-# Framework-agnostic implementations live in common.launcher_utils; these keep the
-# historical private names used elsewhere in this module.
-_serialize_recipe_value = serialize_recipe_value
-_is_sensitive_recipe_field = is_sensitive_recipe_field
-_serialize_slime_param_value = serialize_recipe_param_value
 _serialize_slime_params = serialize_recipe_params
 
 
@@ -1253,12 +1245,6 @@ def build_slime_app(
                     ),
                     "TRAINING_GYM_TRACE_SAMPLE_LIMIT": str(
                         getattr(slime, "trace_sample_limit", 16)
-                    ),
-                    "TRAINING_GYM_IMAGE_SAMPLE_LIMIT": str(
-                        getattr(slime, "image_sample_limit", 16)
-                    ),
-                    "TRAINING_GYM_TRAJECTORY_SAMPLE_LIMIT": str(
-                        getattr(slime, "trajectory_sample_limit", 16)
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                     **wandb_env,

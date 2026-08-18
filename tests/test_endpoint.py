@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import modal
 import pytest
+from modal.cli.endpoint import create as modal_endpoint_create
 
 from modal_training_gym.common import endpoint as endpoint_module
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
@@ -164,6 +166,10 @@ def test_launch_creates_a_public_endpoint(fake_modal_cli) -> None:
     assert "--env" not in cli.last_command
     assert "--routing-region" not in cli.last_command
     assert "--custom-volume-name" not in cli.last_command
+    assert "--colocate-compute" not in cli.last_command
+    assert "--custom-hf-repo" not in cli.last_command
+    assert "--custom-hf-revision" not in cli.last_command
+    assert "--custom-hf-token" not in cli.last_command
     assert cli.run_kwargs[-1] == {"check": True, "timeout": 120}
     assert endpoint.model_name == "Qwen/Qwen3-4B"
     assert endpoint.requires_proxy_auth is False
@@ -191,6 +197,14 @@ def test_launch_forwards_environment_and_routing_region(fake_modal_cli) -> None:
     assert cli.flag_value("--env") == "dev"
     assert cli.flag_value("--routing-region") == "us-east"
     assert cli.servers[-1][2] == "dev"
+
+
+def test_launch_appends_colocate_compute(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+
+    Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True, colocate_compute=True)
+
+    assert "--colocate-compute" in cli.last_command
 
 
 def _checkpoint(
@@ -308,6 +322,49 @@ def test_launch_skips_conversion_for_hub_models(
     Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
 
 
+def test_launch_covers_every_pinned_endpoint_create_flag() -> None:
+    named_by_launch = {
+        "name",
+        "model",
+        "env",
+        "unauthenticated",
+        "routing_region",
+        "colocate_compute",
+    }
+    named_by_checkpoint = {"custom_volume_name", "custom_volume_path"}
+    unsupported = {"custom_hf_repo", "custom_hf_revision", "custom_hf_token"}
+
+    click_dests = frozenset(
+        param.name for param in modal_endpoint_create.params if param.name
+    )
+    assert click_dests == named_by_launch | named_by_checkpoint | unsupported
+
+    launch_params = set(inspect.signature(Endpoint.launch).parameters)
+    assert "kwargs" not in launch_params
+    assert not unsupported & launch_params
+
+
+def test_launch_rejects_unknown_endpoint_options(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+
+    with pytest.raises(TypeError):
+        Endpoint.launch(
+            "Qwen/Qwen3-4B",
+            unauthenticated=True,
+            custom_hf_token="hf_test_token",
+        )
+
+    assert cli.commands == []
+
+
+def test_launch_never_puts_an_hf_token_on_the_command_line(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+
+    Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
+
+    assert cli.last_command.count("--custom-hf-token") == 0
+
+
 def test_launch_derives_stable_names_from_the_serving_spec(fake_modal_cli) -> None:
     fake_modal_cli()
 
@@ -342,6 +399,20 @@ def test_launch_derives_stable_names_from_the_serving_spec(fake_modal_cli) -> No
         )
         == 6
     )
+    assert public.endpoint_name == "training-gym-814a133f9cff"
+
+
+def test_launch_derived_name_changes_for_colocate(
+    fake_modal_cli,
+) -> None:
+    fake_modal_cli()
+
+    default = Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
+    colocated = Endpoint.launch(
+        "Qwen/Qwen3-4B", unauthenticated=True, colocate_compute=True
+    )
+
+    assert default.endpoint_name != colocated.endpoint_name
 
 
 def test_launch_uses_an_explicit_endpoint_name(fake_modal_cli) -> None:

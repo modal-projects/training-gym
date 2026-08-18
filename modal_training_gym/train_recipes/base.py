@@ -97,6 +97,10 @@ class BaseTrainRecipe(ABC):
         """
         return None
 
+    def validate_model_parallelism(self, model: "ModelConfig") -> None:
+        """Preflight the parallelism plan. Overridden per framework."""
+        return None
+
     # ── Container → framework flag converters ────────────────────────────────
 
     @staticmethod

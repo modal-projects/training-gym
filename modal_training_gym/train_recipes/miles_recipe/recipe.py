@@ -56,14 +56,14 @@ _MILES_SKIP = {
     "rollout_function",
     "custom_megatron_before_log_prob_hook",
     "custom_megatron_before_train_step_hook",
-    # Conversion-only parallelism + local-disk staging: launcher-side, never
-    # forwarded to the miles CLI.
+    "train_function_kwargs",
+    # Conversion-only parallelism and scratch: launcher-side, never forwarded to
+    # the miles CLI.
     "conversion_tensor_model_parallel_size",
     "conversion_pipeline_model_parallel_size",
     "conversion_expert_model_parallel_size",
     "conversion_expert_tensor_parallel_size",
     "convert_ephemeral_disk_mb",
-    "train_ephemeral_disk_mb",
     "capture_trace",
     "trace_sample_limit",
 }
@@ -155,6 +155,9 @@ class MilesRecipe(BaseTrainRecipe):
         Extra shell commands run while building the image.
     image_env : dict[str, str]
         Extra env vars baked into the image.
+    train_function_kwargs : dict[str, Any]
+        Extra Modal Function kwargs for the train function; supports
+        ``ephemeral_disk`` (MiB), ``secrets`` and ``experimental_options``.
     capture_trace : bool
         Attach miles' per-sample execution trace (generate/reward/tool-call
         timeline) to recorded rollouts for the dashboard.
@@ -217,6 +220,8 @@ class MilesRecipe(BaseTrainRecipe):
         Extra token ids that terminate generation.
     use_miles_router : bool
         Route rollout requests through Miles' router, not engines directly.
+    rollout_top_k : int | None
+        Top-k for rollout generation; ``None`` leaves Miles' own default.
     use_rollout_routing_replay : bool
         Reuse the rollout's MoE expert routing in training.
 
@@ -360,6 +365,9 @@ class MilesRecipe(BaseTrainRecipe):
 
     use_dynamic_batch_size : bool
         Pack samples up to ``max_tokens_per_gpu`` instead of a fixed micro batch.
+    micro_batch_size : int | None
+        Fixed micro-batch size when dynamic batching is off; ``None`` leaves
+        Miles' own default.
     max_tokens_per_gpu : int
         Token budget per GPU per micro-batch when dynamic batching is on.
 
@@ -435,6 +443,20 @@ class MilesRecipe(BaseTrainRecipe):
         Fall back to NCCL all-reduce instead of sglang's custom kernel.
     sglang_cuda_graph_bs : list[int] | None
         Batch sizes to capture CUDA graphs for.
+    sglang_attention_backend : str | None
+        sglang attention kernel backend, e.g. ``"triton"``. ``None`` leaves
+        sglang's own selection (FlashAttention) in place.
+    sglang_disable_cuda_graph : bool
+        Run the engines in eager mode instead of capturing CUDA graphs.
+    sglang_disable_overlap_schedule : bool
+        Disable sglang's overlapped scheduler.
+    sglang_disable_radix_cache : bool
+        Disable prefix (radix) caching across requests.
+    no_offload_train : bool
+        Keep the training weights and optimizer resident instead of offloading
+        them between rollout and train phases (colocated runs).
+    no_offload_rollout : bool
+        Keep the rollout engines resident instead of offloading them.
     sglang_moe_runner_backend : str | None
         MoE GEMM runner for the engines, e.g. ``"triton"``. ``None`` leaves
         sglang's ``auto`` selection in place.
@@ -512,10 +534,6 @@ class MilesRecipe(BaseTrainRecipe):
     # the whole torch_dist checkpoint plus the Volume's write buffer for the shard in
     # flight; the default container disk is not enough for a 276B model.
     convert_ephemeral_disk_mb: int | None = None
-    # Ephemeral disk (MiB) for the training containers. A Modal Volume buffers writes
-    # to container-local disk and nothing commits mid-save, so a checkpoint save needs
-    # roughly its own per-node size in local scratch on top of normal usage.
-    train_ephemeral_disk_mb: int | None = None
 
     # ── Fault tolerance and health checks ───────────────────────────────────
     # Miles' own argparse default; slime defaults this on instead.
@@ -539,6 +557,7 @@ class MilesRecipe(BaseTrainRecipe):
     rollout_stop_token_ids: list[int] | None = None
     rollout_num_gpus_per_engine: int = 1
     use_miles_router: bool = False
+    rollout_top_k: int | None = None
     use_rollout_routing_replay: bool = False
 
     # ── Parallelism ─────────────────────────────────────────────────────────
@@ -607,6 +626,7 @@ class MilesRecipe(BaseTrainRecipe):
 
     # ── Dynamic batching ────────────────────────────────────────────────────
     use_dynamic_batch_size: bool = True
+    micro_batch_size: int | None = None
     max_tokens_per_gpu: int = 9216
 
     # ── Eval ────────────────────────────────────────────────────────────────
@@ -625,6 +645,12 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_enable_dp_lm_head: bool = False
     sglang_disable_custom_all_reduce: bool = False
     sglang_cuda_graph_bs: list[int] | None = None
+    sglang_attention_backend: str | None = None
+    sglang_disable_cuda_graph: bool = False
+    sglang_disable_overlap_schedule: bool = False
+    sglang_disable_radix_cache: bool = False
+    no_offload_train: bool = False
+    no_offload_rollout: bool = False
     sglang_moe_runner_backend: str | None = None
     sglang_max_running_requests: int | None = None
     sglang_server_concurrency: int | None = None
@@ -653,6 +679,7 @@ class MilesRecipe(BaseTrainRecipe):
     # generate/reward/tool-call timeline) to the first `trace_sample_limit`
     # samples of each rollout. Off by default — traces inflate payloads, so
     # sampling keeps the added volume well under 1%. Not a miles CLI flag.
+    train_function_kwargs: dict[str, Any] = field(default_factory=dict)
     capture_trace: bool = False
     trace_sample_limit: int = 16
 
@@ -812,6 +839,9 @@ class MilesRecipe(BaseTrainRecipe):
 
     @classmethod
     def get_base_recipe(cls, model_config: ModelConfig) -> "MilesRecipe | None":
+        from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
+            Gemma4_26B_A4B_Recipe,
+        )
         from modal_training_gym.train_recipes.miles_recipe.inkling import (
             Inkling_Small_LoRA_Recipe,
             Inkling_Small_Recipe,
@@ -827,6 +857,8 @@ class MilesRecipe(BaseTrainRecipe):
             return Qwen3_5_4b_Miles_Recipe()
         if model_config.model_name == "moonshotai/Moonlight-16B-A3B-Instruct":
             return Moonlight_16B_A3B_Recipe()
+        if model_config.model_name == "google/gemma-4-26B-A4B-it":
+            return Gemma4_26B_A4B_Recipe()
         if model_config.model_name == "thinkingmachines/Inkling-Small":
             if issubclass(cls, Inkling_Small_LoRA_Recipe):
                 return Inkling_Small_LoRA_Recipe()

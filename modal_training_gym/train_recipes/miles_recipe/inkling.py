@@ -223,9 +223,11 @@ class Inkling_Small_Recipe(_InklingSmallRecipe):
     # is set (checkpointing.py:1809), so resuming a params-only checkpoint dies with
     # KeyError: 'optimizer'.
     no_load_optim: bool = True
-    # Headroom for the Volume's local write buffer during the remaining ~138 GB/node
-    # params save, on top of the CPU-offloaded optimizer's own host/disk usage.
-    train_ephemeral_disk_mb: int | None = 768 * 1024
+    # Headroom for the Volume's local write buffer during the ~138 GB/node params
+    # save, on top of the CPU-offloaded optimizer's own host/disk usage.
+    train_function_kwargs: dict[str, int] = field(
+        default_factory=lambda: {"ephemeral_disk": 768 * 1024}
+    )
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))

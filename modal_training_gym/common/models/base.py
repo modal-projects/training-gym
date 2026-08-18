@@ -448,3 +448,90 @@ def parse_glm_response(text: str) -> ParsedResponse:
         tool_calls=tool_calls,
         thinking=thinking,
     )
+
+
+# ── Gemma family (Gemma 4) ─────────────────────────────────────────────
+
+# Gemma 4 mirrors its delimiters (``<|x>`` … ``<x|>``) and wraps tool-call
+# strings in ``<|"|>``:
+#
+#   <|turn>model
+#   <|channel>thought
+#   ...reasoning...
+#   <channel|>
+#   <|tool_call>call:get_weather{city:<|"|>Beijing<|"|>,days:3}<tool_call|>
+#   <turn|>
+#
+_GEMMA4_THOUGHT_RE = re.compile(r"<\|channel>thought\n?(.*?)\n?<channel\|>", re.DOTALL)
+_GEMMA4_TOOL_CALL_RE = re.compile(
+    r"<\|tool_call>call:([^{]*)(\{.*?\})<tool_call\|>", re.DOTALL
+)
+_GEMMA4_STR_DELIM = '<|"|>'
+_GEMMA4_BARE_KEY_RE = re.compile(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_.\-]*)\s*:")
+_JSON_STRING_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
+def _quote_bare_keys(raw: str) -> str:
+    """Quote Gemma's unquoted object keys, skipping string contents.
+
+    A blind substitution would corrupt a value like ``"a,b:c"``.
+    """
+    out: list[str] = []
+    last = 0
+    for match in _JSON_STRING_RE.finditer(raw):
+        out.append(_GEMMA4_BARE_KEY_RE.sub(r'\1"\2":', raw[last : match.start()]))
+        out.append(match.group(0))
+        last = match.end()
+    out.append(_GEMMA4_BARE_KEY_RE.sub(r'\1"\2":', raw[last:]))
+    return "".join(out)
+
+
+def _parse_gemma4_tool_block(name: str, body: str) -> ToolCall:
+    """Parse a ``call:NAME`` body: JSON with bare keys and ``<|"|>`` for quotes."""
+    try:
+        args = json.loads(_quote_bare_keys(body.replace(_GEMMA4_STR_DELIM, '"')))
+    except json.JSONDecodeError:
+        args = {}
+    return ToolCall(name=name, arguments=args if isinstance(args, dict) else {})
+
+
+def parse_gemma4_response(text: str) -> ParsedResponse:
+    """Parse Gemma 4 output into structured content.
+
+    Handles the ``<|turn>ROLE``/``<turn|>`` turn delimiters, the
+    ``<|channel>thought``/``<channel|>`` reasoning channel, and
+    ``<|tool_call>call:NAME{...}<tool_call|>`` blocks whose string arguments are
+    wrapped in ``<|"|>``.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    if "<|turn>model" in text:
+        text = text.rsplit("<|turn>model", 1)[-1]
+    # Anything past the turn terminator belongs to a following turn, not output.
+    text = text.split("<turn|>", 1)[0]
+
+    thoughts = [match.strip() for match in _GEMMA4_THOUGHT_RE.findall(text)]
+    text = _GEMMA4_THOUGHT_RE.sub("", text)
+    # The generation prompt opens the thought channel, so a response can begin
+    # inside one and close it with a bare ``<channel|>``.
+    if "<channel|>" in text:
+        head, text = text.split("<channel|>", 1)
+        thoughts.insert(0, head.replace("<|channel>thought", "").strip())
+    # A channel left open means the model never stopped reasoning.
+    if "<|channel>thought" in text:
+        text, tail = text.split("<|channel>thought", 1)
+        thoughts.append(tail.strip())
+    thinking = "\n".join(thought for thought in thoughts if thought) or None
+
+    tool_calls = [
+        _parse_gemma4_tool_block(name.strip(), body)
+        for name, body in _GEMMA4_TOOL_CALL_RE.findall(text)
+        if name.strip()
+    ]
+    content = _GEMMA4_TOOL_CALL_RE.sub("", text).strip()
+
+    return ParsedResponse(
+        content=content,
+        tool_calls=tool_calls,
+        thinking=thinking,
+    )

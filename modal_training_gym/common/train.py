@@ -699,7 +699,10 @@ class TrainConfig:
                         is_active=is_active,
                     )
 
-                megatron_to_hf_mode = getattr(self.recipe, "megatron_to_hf_mode", "")
+                # Resolved, not self.recipe: the preset decides bridge mode, which loads
+                # the HF weights directly and needs no torch_dist conversion.
+                resolved = self._resolved_recipe_for_logging()
+                megatron_to_hf_mode = getattr(resolved, "megatron_to_hf_mode", "")
                 needs_conversion = megatron_to_hf_mode != "bridge"
                 if prepare_inputs:
                     if isinstance(self.recipe, SlimeRecipe):

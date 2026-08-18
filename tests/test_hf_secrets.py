@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from modal_training_gym.common import hf_secrets
+from modal_training_gym.common import hf_secrets, hf_token
 
 
 def _mock_secret_cls():
@@ -15,6 +15,31 @@ def _mock_secret_cls():
 def _clean_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+
+
+def test_hf_token_reads_hf_token(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HF_TOKEN", "hf_test_token_123")
+    assert hf_token() == "hf_test_token_123"
+
+
+def test_hf_token_reads_legacy_hub_token(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HUGGING_FACE_HUB_TOKEN", "hf_legacy_456")
+    assert hf_token() == "hf_legacy_456"
+
+
+def test_hf_token_prefers_hf_token(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HF_TOKEN", "hf_primary")
+    monkeypatch.setenv("HUGGING_FACE_HUB_TOKEN", "hf_legacy")
+    assert hf_token() == "hf_primary"
+
+
+def test_hf_token_empty_string_is_absent(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HF_TOKEN", "")
+    assert hf_token() is None
+
+
+def test_hf_token_missing_is_none():
+    assert hf_token() is None
 
 
 def test_local_hf_token(monkeypatch: pytest.MonkeyPatch):
