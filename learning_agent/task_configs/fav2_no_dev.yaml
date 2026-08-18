@@ -2,8 +2,9 @@
 task: fav2_no_dev
 extends: fav2
 
+# inherits fav2's toolbox; only the seeding and instructions change
 seed:
-  dev: false
+  dev: false                               # corpus still seeds (inherited true)
 instructions: workspace_setup/instructions/data_access/medium.md
 
 session:

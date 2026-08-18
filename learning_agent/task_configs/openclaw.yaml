@@ -15,6 +15,15 @@ glob: "**/*.ts"
 secondary: ts_symbol_grounding          # fraction of referenced symbols that are real
 symbols: workspace_setup/tasks/openclaw/symbols.json     # real OpenClaw symbol set (24958 symbols)
 
+# What the workspace is composed of (explicit; the loader would default to
+# the same values — spelled out so the file IS the task's full description).
+toolbox:
+  harnesses: [react_loop, completion_qa]   # qa starters seeded into toolbox/harness_tool/
+  training: [sft, dpo, rl]                 # methods -> packages + data cards + AGENTS.md blocks
+seed:
+  dev: true                                # dev.json into the workspace
+  corpus: true                             # corpus/ into the workspace
+
 session:                                # agent-session defaults (agents/run*.sh --config)
   scaffold: modal_glm52
   track: easy

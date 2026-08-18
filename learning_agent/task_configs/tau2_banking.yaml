@@ -49,6 +49,15 @@ agent:
   presence_penalty: 1.5
   max_tokens: 81920
 
+# What the workspace is composed of (explicit; the loader would default to
+# the same values — spelled out so the file IS the task's full description).
+toolbox:
+  harnesses: [react_env_agent, react_tool_agent, mini_swe_agent]  # agentic starters
+  training: [sft, dpo, rl]                 # methods -> packages + data cards + AGENTS.md blocks
+seed:
+  dev: true                                # dev.json into the workspace
+  corpus: true                             # (no corpus: key on env tasks -> nothing to seed)
+
 session:                                # agent-session defaults (agents/run*.sh --config)
   scaffold: modal_glm52
   track: easy
