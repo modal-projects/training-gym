@@ -35,6 +35,7 @@ RUNS_PREFIX = "runs"                  # <volume-root>/runs/<run_id>/
 RECORD_FILE = "record.json"
 WORKSPACE_FILE = "workspace.json"
 STATUS_FILE = "status.json"
+TRAJECTORY_FILE = "trajectory.json"   # Harbor ATIF-v1.7, written at ingest
 RAW_DIR = "raw"
 
 # Workspace snapshot limits.
@@ -305,5 +306,6 @@ def run_paths(run_id: str) -> dict[str, str]:
         "record": f"{base}/{RECORD_FILE}",
         "workspace": f"{base}/{WORKSPACE_FILE}",
         "status": f"{base}/{STATUS_FILE}",
+        "trajectory": f"{base}/{TRAJECTORY_FILE}",
         "raw": f"{base}/{RAW_DIR}",
     }

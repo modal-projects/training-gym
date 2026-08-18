@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 
 from . import local_monitor, schema, volume_io
-from .normalize import collect
+from .normalize import atif, collect
 
 RAW_FILES = ("trace.jsonl", "audit.json", "prompt.txt", "solve.err", "solve_status.txt")
 
@@ -88,6 +88,8 @@ def stage(record: dict, ws_snapshot, run_dir: Path, stage_dir: Path) -> Path:
     if ws_snapshot is not None:
         _write_json(stage_dir / schema.WORKSPACE_FILE, ws_snapshot)
     _write_json(stage_dir / schema.STATUS_FILE, collect.build_status(record))
+    _write_json(stage_dir / schema.TRAJECTORY_FILE,
+                atif.events_to_atif(record, record.get("events") or []))
     for name in RAW_FILES:
         src = run_dir / name
         if src.exists():

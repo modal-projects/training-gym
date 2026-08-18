@@ -1,13 +1,14 @@
-"""Convert an observatory run record into a Harbor ATIF trajectory.
+"""Convert a run record into a Harbor ATIF trajectory (ATIF-v1.7).
 
-FALLBACK COPY: the canonical converter is
-learning_agent/observatory/normalize/atif.py, which writes trajectory.json
-at ingest. This copy only serves runs ingested before that existed — keep
-the two in sync.
-
-ATIF (Agent Trajectory Interchange Format, ATIF-v1.7) is the Harbor
-framework's JSON spec for full agent interaction histories:
+ATIF (Agent Trajectory Interchange Format) is the Harbor framework's JSON
+spec for full agent interaction histories:
 https://www.harborframework.com/docs/agents/trajectory-format
+
+This is the CANONICAL converter: `observatory/cli.py stage()` calls it at
+ingest to write runs/<run_id>/trajectory.json next to record.json, so the
+trajectory is a stored artifact, not an on-demand conversion. The dashboard
+(modal_training_gym/_atif.py) keeps a copy of this module only as a fallback
+for runs ingested before trajectory.json existed — keep the two in sync.
 
 Mapping from the observatory's normalized events (observatory/schema.py):
 
@@ -23,12 +24,15 @@ Mapping from the observatory's normalized events (observatory/schema.py):
     result event             -> one step, source "system" with the final
                                 result text; cost feeds final_metrics
 
-Step ids are re-numbered sequentially from 1 as the validator requires, so
-they do NOT match the observatory event indices (an event index maps to at
-most one step, and tool-result events collapse into earlier steps). Events
-carry no timestamps in some LAB trace formats; the last known timestamp
-(falling back to the run's launch time) is used so every step still has an
-ISO 8601 value.
+Step ids are re-numbered sequentially from 1 as the ATIF validator
+requires, so they do NOT match the observatory event indices. Events carry
+no timestamps in some trace formats; the last known timestamp (falling
+back to the run's launch time) is used so every step still has an ISO 8601
+value. Codex resumes reuse tool-call ids across sessions, so results
+resolve by (session_idx, call_id) first and fall back to the latest
+bare-id match. Run-specific details with no first-class ATIF home ride in
+`extra` fields — that convention is documented in
+dashboards/LEARNING_AGENT_DASHBOARD.md.
 """
 
 from __future__ import annotations

@@ -404,11 +404,22 @@ class LearningAgentRunStore:
         return loaded[1].get(path)
 
     def get_trajectory(self, run_id: str) -> dict[str, Any] | None:
-        """The full trace as a Harbor ATIF-v1.7 trajectory (see _learning_agent_atif)."""
+        """The full trace as a Harbor ATIF-v1.7 trajectory.
+
+        The observatory writes trajectory.json at ingest (canonical
+        converter: learning_agent/observatory/normalize/atif.py); serve that
+        file when present. Runs ingested before it existed fall back to
+        converting record.json on the fly with the local copy (_atif).
+        """
         if not _RUN_ID_RE.match(run_id):
             return None
         self._maybe_reload()
-        record_path = _runs_root() / run_id / "record.json"
+        run_dir = _runs_root() / run_id
+        stored = _read_json_file(run_dir / "trajectory.json")
+        if isinstance(stored, dict):
+            return stored
+
+        record_path = run_dir / "record.json"
         record = _read_json_file(record_path)
         if not isinstance(record, dict):
             record = _read_json_file(record_path)
