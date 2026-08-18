@@ -22,13 +22,14 @@ from __future__ import annotations
 from dataclasses import field
 from typing import Any
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 
 # Same function as the text provider with mm_towers=True; see _fields below.
 _MM_MODEL_PROVIDER = "miles_plugins.models.inkling.model.inkling_mm_model_provider"
+_EPHEMERAL_DISK_MIB = 768 * 1024
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
@@ -225,9 +226,25 @@ class Inkling_Small_Recipe(_InklingSmallRecipe):
     no_load_optim: bool = True
     # Headroom for the Volume's local write buffer during the ~138 GB/node params
     # save, on top of the CPU-offloaded optimizer's own host/disk usage.
-    train_function_kwargs: dict[str, int] = field(
-        default_factory=lambda: {"ephemeral_disk": 768 * 1024}
+    train_function_kwargs: dict[str, Any] = field(
+        default_factory=lambda: {"ephemeral_disk": _EPHEMERAL_DISK_MIB}
     )
+
+    @model_validator(mode="after")
+    def _keep_disk_reservation(self) -> "Inkling_Small_Recipe":
+        """Keep the reservation when a caller supplies their own kwargs.
+
+        Passing ``{"secrets": [...]}`` would otherwise drop it and the params-only
+        save would exhaust local disk. A caller who names ``ephemeral_disk`` wins.
+        """
+        kwargs = self.train_function_kwargs or {}
+        if "ephemeral_disk" not in kwargs:
+            object.__setattr__(
+                self,
+                "train_function_kwargs",
+                {"ephemeral_disk": _EPHEMERAL_DISK_MIB, **kwargs},
+            )
+        return self
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
