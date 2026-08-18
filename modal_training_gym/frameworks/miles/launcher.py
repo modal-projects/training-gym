@@ -140,7 +140,10 @@ def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
         ):
             return owner
 
-    locks.pop(key, None)
+    try:
+        locks.pop(key)
+    except KeyError:
+        pass
     if locks.put(key, claim, skip_if_exists=True):
         return run_id
     holder = locks.get(key)
@@ -170,7 +173,7 @@ def _convert_lock_heartbeat(run_id: str, volume_name: str, save_path: str):
     Refreshing on elapsed time rather than on work done: a torch_dist conversion
     writes only about one file per rank, so any progress-based cadence never fires,
     and the claim would lapse mid-conversion and let a later launch delete the output
-    being written. The subprocess and the shard move are both covered.
+    being written.
     """
     stop = threading.Event()
 
