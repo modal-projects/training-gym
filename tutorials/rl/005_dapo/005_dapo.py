@@ -78,15 +78,7 @@ class MathDataset(HuggingFaceDataset):
     always_prepare = True
     row_offset = 0
 
-    def load(self, split: str = "all"):
-        from datasets import load_dataset
-
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        start = min(self.row_offset, len(ds))
-        stop = len(ds) if not self.n_rows else min(start + self.n_rows, len(ds))
-        return ds.select(range(start, stop))
-
-eval_dataset = MathDataset(n_rows=100, row_offset=2000)
+eval_dataset = MathDataset(hf_split="train[2000:2100]")
 
 # ## Evaluate the base model
 #
@@ -174,7 +166,7 @@ def _main_impl() -> None:
     base_deployment.wait_until_ready(timeout=15 * 60)
     print(f"base model deployed to {base_deployment.url}")
 
-    train_dataset = MathDataset(n_rows=2000)
+    train_dataset = MathDataset(hf_split="train[:2000]")
 
     print("running base model evaluation...")
     base_mean = run_eval(base_deployment)
@@ -184,8 +176,14 @@ def _main_impl() -> None:
     #
     # In addition to model-specific parameters, the recipe below also includes
     # [DAPO-specific](https://arxiv.org/abs/2503.14476)
-    # modifications. Note that some parameters have been limited for
-    # demonstration purposes.
+    # modifications. Those include:
+    #
+    # - Clip-Higher: `eps_clip=0.2`, `eps_clip_high=0.28`
+    # - No KL penalty: `use_kl_loss=False`, `kl_coef=0.0`
+    # - Token-level policy-gradient loss: `calculate_per_token_loss=True`
+    # - Dynamic sampling: `over_sampling_batch_size=48` and `dynamic_sampling_filter_path`
+    #
+    # Again, for demonstration purposes, we set `n_samples_per_prompt=8`.
 
     training_run = TrainConfig(
         model=base_model,

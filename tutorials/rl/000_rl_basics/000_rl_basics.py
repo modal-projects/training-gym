@@ -66,7 +66,7 @@ base_model = Qwen3_5_4B()
 # granularity such that it's immediately obvious what the failure mode is (if any). Below, we implement
 # the following function:
 #
-# - Return -10 if the model was so incompetent that failed to return three lines.
+# - Return -10 if the model was so incompetent that it failed to return three lines.
 # - Otherwise, return the negative sum of absolute differences between the predicted and target
 # syllable count for each line.
 #
@@ -133,20 +133,10 @@ class HaikuDataset(HuggingFaceDataset):
     output_column = "text"
     output_format = "jsonl"
     apply_chat_template = True
-    always_prepare = True
-    row_offset = 0
-
+    always_prepare = True        
     prompt_template = "Write a haiku about {input}."
 
-    def load(self, split: str = "all"):
-        from datasets import load_dataset
-
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        start = min(self.row_offset, len(ds))
-        stop = len(ds) if not self.n_rows else min(start + self.n_rows, len(ds))
-        return ds.select(range(start, stop))
-
-eval_dataset = HaikuDataset(n_rows=5, row_offset=10)
+eval_dataset = HaikuDataset(hf_split="train[10:15]")
 
 # ## Evaluate the base model
 #
@@ -176,8 +166,8 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
 
 # ## Creating a reward function
 #
-# To make our scoring function a reward function, we just need to ensure the output produced
-# by the model during training can be parsed and scored. Simple enough.
+# To make our scoring function a reward function, we just need to extract the text from the 
+# model's response and pass it to our existing score_haiku. Simple enough.
 
 async def haiku_rm(args, sample, **kwargs) -> float:
     response = base_model.parse_response(sample.response)
@@ -208,7 +198,7 @@ def _main_impl() -> None:
     base_deployment.wait_until_ready(timeout=15 * 60)
     print(f"base model deployed to {base_deployment.url}")
 
-    train_dataset = HaikuDataset(n_rows=10)
+    train_dataset = HaikuDataset(hf_split="train[:10]")
 
     print("running base model evaluation...")
     base_mean = run_eval(base_deployment)

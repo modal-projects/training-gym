@@ -12,7 +12,6 @@ TUTORIAL_METADATA = {
         "Qwen3_5_4B",
         "SlimeRecipe",
         "TrainConfig",
-        "list_checkpoints",
     ],
 }
 
@@ -223,21 +222,11 @@ def _dataset():
         output_column = "text"
         output_format = "jsonl"
         apply_chat_template = True
-        always_prepare = True
-        row_offset = 0
-        
+        always_prepare = True        
         prompt_template = "Write a haiku about {input}."
 
-        def load(self, split: str = "all"):
-            from datasets import load_dataset
-
-            ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-            start = min(self.row_offset, len(ds))
-            stop = len(ds) if not self.n_rows else min(start + self.n_rows, len(ds))
-            return ds.select(range(start, stop))
-
-    train_dataset = HaikuDataset(n_rows=10)
-    eval_dataset = HaikuDataset(n_rows=5, row_offset=10)
+    train_dataset = HaikuDataset(hf_split="train[:10]")
+    eval_dataset = HaikuDataset(hf_split="train[10:15]")
 
 
 @notebook_only
@@ -299,8 +288,8 @@ def _rm_fn_intro():
     """
     ## Creating a reward function
 
-    To make our scoring function a reward function, we just need to ensure the output produced
-    by the model during training can be parsed and scored. Simple enough.
+    To make our scoring function a reward function, we just need to extract the text from the 
+    model's response and pass it to our existing score_haiku. Simple enough.
     """
 
 @code

@@ -102,17 +102,8 @@ class MathDataset(HuggingFaceDataset):
     output_format = "jsonl"
     apply_chat_template = True
     always_prepare = True
-    row_offset = 0
 
-    def load(self, split: str = "all"):
-        from datasets import load_dataset
-
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        start = min(self.row_offset, len(ds))
-        stop = len(ds) if not self.n_rows else min(start + self.n_rows, len(ds))
-        return ds.select(range(start, stop))
-
-eval_dataset = MathDataset(n_rows=20, row_offset=100)
+eval_dataset = MathDataset(hf_split="train[100:120]")
 
 # ## Evaluate the base models
 #
@@ -261,7 +252,7 @@ def _main_impl() -> None:
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 
-    train_dataset = MathDataset(n_rows=100)
+    train_dataset = MathDataset(hf_split="train[:100]")
 
     print("running teacher base model evaluation...")
     teacher_correct = run_eval(teacher_deployment)
