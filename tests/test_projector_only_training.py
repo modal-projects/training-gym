@@ -143,6 +143,15 @@ def test_tensor_parallelism_without_sequence_parallelism_is_rejected():
     ).validate_model_parallelism(GLM_5_2())
 
 
+def test_projector_starts_at_the_bases_embedding_scale():
+    """A unit-std LayerNorm output is ~100x the scale of a token embedding."""
+    spec = ProjectorSpec()
+    assert spec.output_scale == 0.01
+    assert spec.to_args_dict()["output_scale"] == 0.01
+    with pytest.raises(ValidationError, match="output_scale=0.0 must be positive"):
+        ProjectorSpec(output_scale=0.0)
+
+
 def test_renaming_the_positions_column_is_rejected():
     """Miles offsets packed-batch keys only when they end in ``_positions``."""
     with pytest.raises(ValidationError, match="must end in '_positions'"):

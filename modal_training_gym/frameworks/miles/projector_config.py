@@ -59,6 +59,12 @@ class ProjectorSpec:
         the interval does not divide the step count.
     load : str
         Projector checkpoint (file or directory) to resume from.
+    output_scale : float
+        Scale the projector's final ``LayerNorm`` starts at, and so the scale of
+        the rows it writes into the embedding stream. A ``LayerNorm`` output is
+        unit-std, a decoder's token embeddings are ~1e-2 std, so the default
+        keeps the injected rows in the base's distribution instead of ~50-100x
+        above it. Learnable, so training can grow it.
     init_seed : int
         Seed the projector's weights are initialized from. Every rank holds a
         replica whose gradients are all-reduced, so the initialization must not
@@ -74,17 +80,24 @@ class ProjectorSpec:
     save_dir: str = ""
     save_interval: int = 10
     load: str = ""
+    output_scale: float = 0.01
     init_seed: int = 0
 
     @model_validator(mode="after")
-    def _positions_key_keeps_miles_suffix(self) -> "ProjectorSpec":
-        """Miles only offsets packed-batch keys whose name ends in ``_positions``.
+    def _reject_silently_wrong_settings(self) -> "ProjectorSpec":
+        """Both of these produce a run that trains on garbage without erroring.
 
-        Positions are absolute offsets into the packed sequence, which only holds
-        because miles adds each sample's start offset to those keys. Under any
-        other name the offset is silently skipped and every sample's embeddings
-        land on the first sample's tokens.
+        Miles offsets a packed-batch key by the sample's start in the packed
+        sequence only when the key's name ends in ``_positions``; under any other
+        name the offset is skipped and every sample's embeddings land on the first
+        sample's tokens.
         """
+        if self.output_scale <= 0:
+            raise ValueError(
+                f"output_scale={self.output_scale} must be positive: it is the "
+                "initial gain of the projector's output LayerNorm, and zero "
+                "would start training from a projector that writes nothing."
+            )
         if not self.positions_key.endswith("_positions"):
             raise ValueError(
                 f"positions_key={self.positions_key!r} must end in '_positions': "
@@ -94,7 +107,7 @@ class ProjectorSpec:
             )
         return self
 
-    def to_args_dict(self) -> dict[str, int | str | None]:
+    def to_args_dict(self) -> dict[str, int | float | str | None]:
         return {
             "input_dim": self.input_dim,
             "hidden_dim": self.hidden_dim,
@@ -105,6 +118,7 @@ class ProjectorSpec:
             "save_dir": self.save_dir,
             "save_interval": self.save_interval,
             "load": self.load,
+            "output_scale": self.output_scale,
             "init_seed": self.init_seed,
         }
 

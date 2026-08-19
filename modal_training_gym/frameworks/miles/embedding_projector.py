@@ -80,8 +80,18 @@ class EmbeddingProjector(nn.Module):
         return self.norm(self.mlp(embeddings))
 
 
-def init_projector(projector: EmbeddingProjector, seed: int) -> None:
+def init_projector(
+    projector: EmbeddingProjector, seed: int, output_scale: float = 1.0
+) -> None:
     """Initialize from ``seed`` alone, so every replica agrees.
+
+    ``output_scale`` goes into the final ``LayerNorm``'s weight, which sets the
+    scale of everything the projector writes into the embedding stream. It has to
+    be small: a ``LayerNorm`` output is unit-std by construction, while a decoder's
+    token embeddings are ~1e-2 std, so a weight of 1.0 injects rows ~50-100x out
+    of distribution — which is what produced NaN gradients on exactly the ranks
+    holding projected positions on real hardware. It stays learnable, so training
+    can grow it if the data wants more.
 
     The projector is replicated and its gradients are all-reduced, so ranks that
     start from different weights stay different forever — silently, since the
@@ -106,7 +116,7 @@ def init_projector(projector: EmbeddingProjector, seed: int) -> None:
                         )
                     )
             elif isinstance(module, nn.LayerNorm):
-                module.weight.fill_(1.0)
+                module.weight.fill_(output_scale)
                 module.bias.zero_()
 
 
@@ -257,7 +267,20 @@ def _scatter_projected(
     if not local.numel():
         return unmerged()
     merged = embeddings_out.clone()
-    merged[local, 0] = embeds.to(merged.dtype)
+    kept = embeds.to(merged.dtype)
+    with torch.no_grad():
+        # The scales have to be comparable: a projector row far above the base's
+        # embedding scale is out of the decoder's distribution and overflows the
+        # forward, which shows up as NaN gradients on exactly the merging ranks.
+        logger.info(
+            "projector merge scale: base rms=%.6g absmax=%.6g, projected "
+            "rms=%.6g absmax=%.6g",
+            float(embeddings_out.detach().float().pow(2).mean().sqrt()),
+            float(embeddings_out.detach().float().abs().max()),
+            float(kept.detach().float().pow(2).mean().sqrt()),
+            float(kept.detach().float().abs().max()),
+        )
+    merged[local, 0] = kept
     return merged
 
 
@@ -372,7 +395,7 @@ def projector_model_provider(
             output_dim=cfg.output_dim or model.config.hidden_size,
             num_layers=cfg.num_layers,
         )
-        init_projector(projector, cfg.init_seed)
+        init_projector(projector, cfg.init_seed, cfg.output_scale)
         projector.to(
             device=torch.cuda.current_device(), dtype=model.config.params_dtype
         )
