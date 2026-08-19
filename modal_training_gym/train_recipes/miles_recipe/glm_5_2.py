@@ -243,6 +243,16 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
         ``ref_load`` have nothing to offer here and a strict key check would
         fail. Resume by pointing ``projector.load`` at a
         ``projector_iter_*.pt``; the base comes from ``hf_checkpoint``.
+
+        Safe because of the bridge-mode branch in the pinned image's
+        ``miles/utils/arguments.py``: with no usable ``--load`` directory it sets
+        ``args.load = args.ref_load or args.hf_checkpoint``, and
+        ``megatron_utils/checkpoint.py`` routes a non-Megatron directory into
+        ``_load_checkpoint_hf``. ``ref_load`` is therefore an alternative
+        spelling of the same load here, not the only one — bridge recipes that
+        set it (``Gemma4_26B_A4B_Recipe``) point it at the same HF reference as
+        ``hf_checkpoint``. ``_require_pretrained_base`` keeps that fallback
+        populated.
         """
         if self.load or self.ref_load:
             raise TrainingGymConfigError(
@@ -251,6 +261,36 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
                 f"ref_load={self.ref_load!r}). The frozen base is loaded from "
                 f"hf_checkpoint={self.hf_checkpoint!r} and only the projector "
                 "is ever written."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_pretrained_base(self) -> "GLM_5_2_Projector_Recipe":
+        """Require the one field that makes the frozen base a pretrained base.
+
+        With ``load`` and ``ref_load`` both rejected, ``hf_checkpoint`` is the
+        only source the bridge-mode fallback
+        (``args.load = args.ref_load or args.hf_checkpoint``) has left. Were it
+        empty, miles would log one ``--load '' is empty; starting from
+        model_provider-initialized weights`` warning and train the projector
+        against a *randomly initialized* base — a run that costs a full GPU
+        budget and produces an adapter for a model that does not exist. Same for
+        a non-bridge ``megatron_to_hf_mode``, whose branch falls back to
+        ``ref_load`` alone.
+        """
+        if not self.hf_checkpoint:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs hf_checkpoint set: it is the only "
+                "source the frozen base can be loaded from once load/ref_load "
+                "are rejected, and miles would otherwise train the projector "
+                "against randomly initialized base weights."
+            )
+        if self.megatron_to_hf_mode != "bridge":
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} requires megatron_to_hf_mode='bridge' "
+                f"(got {self.megatron_to_hf_mode!r}): only the bridge branch "
+                "falls back to hf_checkpoint for the base weights, and this "
+                "recipe rejects the ref_load the other branch needs."
             )
         return self
 

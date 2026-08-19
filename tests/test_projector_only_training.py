@@ -82,6 +82,31 @@ def test_missing_spec_is_a_clear_error():
         from_miles_args(_FakeArgs.__new__(_FakeArgs))
 
 
+@pytest.mark.parametrize("container", ["extra_config", "custom_config"])
+def test_spec_is_also_found_nested_under_the_config_containers(container: str):
+    """Mirrors the gym's other in-container readers, which try both spellings.
+
+    The pinned image flattens ``extra_config`` onto ``args``; a plumbing change
+    that kept the dict nested must not silently lose the projector.
+    """
+    args = _FakeArgs.__new__(_FakeArgs)
+    setattr(args, container, {ARGS_KEY: ProjectorSpec(input_dim=7).to_args_dict()})
+    assert from_miles_args(args).input_dim == 7
+
+
+def test_frozen_base_cannot_be_left_uninitialized():
+    """``hf_checkpoint`` is the only base-weight source once ref_load is rejected.
+
+    Bridge mode falls back to ``args.load = args.ref_load or args.hf_checkpoint``,
+    so an empty one would train the projector against random base weights.
+    """
+    with pytest.raises(ValidationError, match="hf_checkpoint"):
+        GLM_5_2_Projector_Recipe(hf_checkpoint="")
+    with pytest.raises(ValidationError, match="bridge"):
+        GLM_5_2_Projector_Recipe(megatron_to_hf_mode="dist")
+    assert GLM_5_2_Projector_Recipe().hf_checkpoint == "zai-org/GLM-5.2"
+
+
 def test_recipe_emits_supervised_engine_free_flags():
     recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
     flags = _flags(recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer()))

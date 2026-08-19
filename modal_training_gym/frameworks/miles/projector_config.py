@@ -153,12 +153,27 @@ def should_save_projector(
 
 
 def from_miles_args(args: object) -> ProjectorSpec:
-    """Rebuild the spec the recipe serialized, from miles' parsed ``args``."""
-    raw = vars(args).get(ARGS_KEY)
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"miles arg '{ARGS_KEY}' is missing or not a dict (got {raw!r}). A "
-            "projector-only run needs the recipe to serialize a ProjectorSpec "
-            "into extra_config."
-        )
-    return ProjectorSpec(**raw)
+    """Rebuild the spec the recipe serialized, from miles' parsed ``args``.
+
+    The pinned image flattens every ``extra_config`` entry onto ``args``, which
+    is where this looks first. The nested containers are read as a fallback for
+    the same reason the gym's other in-container readers do
+    (:func:`modal_training_gym.common.reporting._arg_value`): a run must not
+    lose its projector to a config-plumbing change that keeps the dict nested.
+    """
+    candidates = [getattr(args, ARGS_KEY, None)]
+    for container_name in ("extra_config", "custom_config"):
+        container = getattr(args, container_name, None)
+        if isinstance(container, dict):
+            candidates.append(container.get(ARGS_KEY))
+
+    for raw in candidates:
+        if isinstance(raw, dict):
+            return ProjectorSpec(**raw)
+
+    raise ValueError(
+        f"miles arg '{ARGS_KEY}' is missing or not a dict (looked at args."
+        f"{ARGS_KEY}, args.extra_config and args.custom_config, got "
+        f"{candidates!r}). A projector-only run needs the recipe to serialize a "
+        "ProjectorSpec into extra_config."
+    )

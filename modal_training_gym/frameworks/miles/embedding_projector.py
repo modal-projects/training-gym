@@ -637,6 +637,13 @@ class _ProjectorSaver:
     the artifact survives a run that performs a different number of steps than
     ``train_iters`` predicted; ``save_interval`` and that prediction decide only
     which steps keep a numbered file too.
+
+    Hanging a collective (the projector gradient all-reduce) off ``optimizer.step``
+    is safe because the hook is per-rank: the pinned image calls
+    ``custom_before_train_step_hook`` unconditionally inside
+    ``megatron_utils/model.py``'s train step, with no rank guard, so every
+    training rank installs this wrapper. A rank that has no projector to reduce
+    would break that symmetry, so ``__init__`` refuses to install instead.
     """
 
     def __init__(self, args, model, optimizer) -> None:
@@ -646,6 +653,20 @@ class _ProjectorSaver:
         )
         chunks = model if isinstance(model, list) else [model]
         self._projectors = [p for c in chunks if (p := get_projector(c)) is not None]
+        if not self._projectors:
+            # Every rank's chunk holds a projector replica (the provider builds
+            # one, and PP>1 is rejected so there is only ever one stage). If one
+            # rank found none, its peers would enter the all-reduce below alone:
+            # fail here rather than hang there, or train replicas that silently
+            # diverge and write a checkpoint from one of them.
+            raise RuntimeError(
+                "projector-only training installed no saver: none of the "
+                f"{len(chunks)} model chunk(s) handed to miles' "
+                "before-train-step hook holds an EmbeddingProjector. The "
+                "custom model provider is what attaches it — check that "
+                "custom_model_provider_path points at "
+                "projector_model_provider."
+            )
         for chunk in chunks:
             direct = chunk.__dict__.get("_training_gym_projector")
             logger.info(
@@ -712,13 +733,6 @@ class _ProjectorSaver:
             )
 
     def _save(self, numbered: bool = True) -> None:
-        if not self._projectors:
-            logger.warning(
-                "projector checkpoint skipped at step %d: no projector found on "
-                "any model chunk handed to the before-train-step hook",
-                self._steps,
-            )
-            return
         if not _is_projector_writer():
             return
         write_projector_checkpoint(
