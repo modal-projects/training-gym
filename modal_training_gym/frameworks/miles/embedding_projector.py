@@ -142,17 +142,56 @@ def _build_base_model(args, pre_process: bool, post_process: bool, vp_stage):
     )
 
 
-def _mark_sequence_parallel(module: nn.Module) -> None:
-    """Tag replicated parameters so Megatron all-reduces their grads over TP.
+def projector_parameters(projector: nn.Module) -> list[tuple[str, torch.Tensor]]:
+    """Projector parameters in an order identical on every rank.
 
-    With sequence parallelism each tensor-parallel rank holds a different slice
-    of the sequence, so each sees a different subset of projected positions and
-    computes a different gradient for the same replicated weight. Megatron's
-    ``finalize_model_grads`` all-reduces exactly the parameters carrying this
-    attribute (the convention its LayerNorm weights use).
+    The gradient all-reduce below enqueues one collective per parameter, so the
+    iteration order has to agree across ranks or the collectives pair up wrongly
+    and deadlock. ``named_parameters`` walks the module tree deterministically
+    and every rank holds the same replica, but it is sorted anyway so the
+    guarantee does not rest on that.
     """
-    for param in module.parameters():
-        param.sequence_parallel = True
+    return sorted(projector.named_parameters(), key=lambda item: item[0])
+
+
+def all_reduce_projector_grads(projector: nn.Module) -> int:
+    """Sum the replicated projector's gradients across the tensor-parallel group.
+
+    Under sequence parallelism each tensor-parallel rank holds a disjoint slice
+    of the packed sequence, so each computes the gradient of the same replicated
+    weight with respect to a different subset of the projected positions. The
+    whole-sequence gradient is their **sum**, not their average; the
+    data-parallel average is DDP's job and is left alone.
+
+    Every rank enters this unconditionally, once per optimizer step, with a
+    tensor of the same shape for every parameter — materializing a zero gradient
+    when one is missing rather than skipping the collective. Riding Megatron's
+    ``sequence_parallel`` attribute instead (which
+    ``_allreduce_non_tensor_model_parallel_grads`` honors) is what deadlocked:
+    that path is entered per-rank depending on what that rank's gradients look
+    like, and a replicated module whose gradients are data-dependent cannot
+    safely take part.
+    """
+    import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
+
+    if ps.get_tensor_model_parallel_world_size() <= 1:
+        return 0
+    group = ps.get_tensor_model_parallel_group()
+    reduced = 0
+    for _, param in projector_parameters(projector):
+        grad = getattr(param, "main_grad", None)
+        if grad is None:
+            if param.grad is None:
+                # No gradient on this rank: still enter the collective, with a
+                # zero of the right shape, and leave the reduced result where
+                # the optimizer will read it.
+                param.grad = torch.zeros_like(param)
+            grad = param.grad
+        torch.distributed.all_reduce(
+            grad, op=torch.distributed.ReduceOp.SUM, group=group
+        )
+        reduced += 1
+    return reduced
 
 
 def _scatter_projected(sequence_parallel, embeddings_out, embeds, positions):
@@ -183,6 +222,12 @@ def _scatter_projected(sequence_parallel, embeddings_out, embeds, positions):
     else:
         local = positions
     if not local.numel():
+        # None of the projected positions live on this rank's sequence shard, so
+        # the projector contributes nothing here and its gradient stays at the
+        # zero Megatron's grad buffers start the iteration at. Keeping it in the
+        # graph with a zero multiplier instead would be a ``0 * inf`` trap; the
+        # unconditional all-reduce in ``all_reduce_projector_grads`` is what
+        # keeps the collectives symmetric.
         return embeddings_out
     merged = embeddings_out.clone()
     merged[local, 0] = embeds.to(merged.dtype)
@@ -257,9 +302,28 @@ class _ProjectorMerge:
 
 
 def get_projector(model) -> EmbeddingProjector | None:
-    """The projector attached to ``model``, if this rank holds one."""
-    projector = model.__dict__.get("_training_gym_projector")
-    return projector if isinstance(projector, EmbeddingProjector) else None
+    """The projector attached to ``model``, if this rank holds one.
+
+    Tolerates wrapping: by the time miles' hooks run, a model chunk is a
+    ``DistributedDataParallel(Float16Module(GPTModel))``, and ``__dict__``
+    indexing does not follow the wrappers' ``__getattr__`` forwarding. The
+    projector is registered with ``add_module("embedding_projector", ...)``, so
+    unwrapping ``.module`` and finally scanning the module tree always reaches
+    it.
+    """
+    obj, depth = model, 0
+    while obj is not None and depth <= 8:
+        projector = obj.__dict__.get("_training_gym_projector")
+        if isinstance(projector, EmbeddingProjector):
+            return projector
+        obj = getattr(obj, "module", None)
+        depth += 1
+    modules = getattr(model, "modules", None)
+    if callable(modules):
+        for sub in modules():
+            if isinstance(sub, EmbeddingProjector):
+                return sub
+    return None
 
 
 def projector_model_provider(
@@ -285,8 +349,6 @@ def projector_model_provider(
             device=torch.cuda.current_device(), dtype=model.config.params_dtype
         )
         projector.requires_grad_(True)
-        if model.config.sequence_parallel:
-            _mark_sequence_parallel(projector)
         model.__dict__["_training_gym_projector"] = projector
         # Registered so Megatron's DDP and the optimizer see the parameters.
         model.add_module("embedding_projector", projector)
@@ -433,13 +495,24 @@ def write_projector_checkpoint(cfg: ProjectorSpec, save_dir: str, projector, ste
             "input_dim": cfg.input_dim,
             "hidden_dim": cfg.hidden_dim,
             "num_layers": cfg.num_layers,
-            "output_dim": cfg.output_dim,
+            # The resolved width, not ``cfg.output_dim``, which is None whenever
+            # the projector's output was sized from the model's hidden size — a
+            # checkpoint has to describe its own shape.
+            "output_dim": _projector_output_dim(projector),
         },
     }
     path = os.path.join(save_dir, f"projector_iter_{step:07d}.pt")
     torch.save(state, path)
     torch.save(state, os.path.join(save_dir, _LATEST))
     logger.info("saved projector checkpoint %s", path)
+
+
+def _projector_output_dim(projector) -> int:
+    """The projector's actual output width, read off its last linear layer."""
+    linears = [m for m in projector.modules() if isinstance(m, nn.Linear)]
+    if linears:
+        return int(linears[-1].out_features)
+    return int(projector.norm.normalized_shape[0])
 
 
 class _ProjectorSaver:
@@ -461,13 +534,24 @@ class _ProjectorSaver:
         )
         chunks = model if isinstance(model, list) else [model]
         self._projectors = [p for c in chunks if (p := get_projector(c)) is not None]
+        for chunk in chunks:
+            direct = chunk.__dict__.get("_training_gym_projector")
+            logger.info(
+                "projector lookup: chunk type=%s bare __dict__ lookup=%s resolved=%s",
+                type(chunk).__name__,
+                "found" if isinstance(direct, EmbeddingProjector) else "None",
+                "found" if get_projector(chunk) is not None else "NOT FOUND",
+            )
         self._total_steps = int(getattr(args, "train_iters", 0) or 0)
         self._steps = 0
         self._original_step = optimizer.step
         optimizer.step = self._step
 
     def _step(self, *fargs, **fkwargs):
+        for projector in self._projectors:
+            all_reduce_projector_grads(projector)
         out = self._original_step(*fargs, **fkwargs)
+        self._log_replica_state()
         # Megatron returns (success, grad_norm, num_zeros); a step that did not
         # apply (gradient overflow) left the projector unchanged.
         if isinstance(out, tuple) and out and out[0] is False:
@@ -479,8 +563,40 @@ class _ProjectorSaver:
             self._save()
         return out
 
+    def _log_replica_state(self) -> None:
+        """Log a per-rank fingerprint of the projector, so replicas can be compared.
+
+        Every rank holds a replica whose gradients are all-reduced, so after a
+        step the weights must be bit-identical across ranks; a divergence here
+        means the all-reduce is misplaced and the ranks have silently forked.
+        """
+        import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
+
+        for projector in self._projectors:
+            name, param = projector_parameters(projector)[0]
+            with torch.no_grad():
+                checksum = float(param.detach().float().abs().sum().item())
+                norm = float(param.detach().float().norm().item())
+            logger.info(
+                "projector replica after step %d: tp_rank=%d dp_rank=%d %s "
+                "norm=%.8f abs_sum=%.8f",
+                self._steps + 1,
+                ps.get_tensor_model_parallel_rank(),
+                ps.get_data_parallel_rank(),
+                name,
+                norm,
+                checksum,
+            )
+
     def _save(self) -> None:
-        if not self._projectors or not _is_projector_writer():
+        if not self._projectors:
+            logger.warning(
+                "projector checkpoint skipped at step %d: no projector found on "
+                "any model chunk handed to the before-train-step hook",
+                self._steps,
+            )
+            return
+        if not _is_projector_writer():
             return
         write_projector_checkpoint(
             self._cfg, self._save_dir, self._projectors[0], self._steps
