@@ -76,12 +76,6 @@ body::before {
 }
 
 .header {
-  position: sticky;
-  top: 0;
-  z-index: var(--sl-z-index-navbar);
-}
-
-.header {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   border-bottom: 1px solid #2f2f2f;
@@ -678,7 +672,6 @@ body::before {
 
 @media (min-width: 72rem) {
   .tg-page-head__actions {
-    margin-top: -1.5rem;
     margin-bottom: 1.5rem;
   }
 }
