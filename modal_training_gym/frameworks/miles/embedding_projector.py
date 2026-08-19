@@ -32,6 +32,7 @@ arg (the recipe writes it into ``extra_config``, whose keys miles sets on
 """
 
 import logging
+import math
 import os
 
 import torch  # pyright: ignore[reportMissingImports]  # torch is installed only in training images
@@ -77,6 +78,36 @@ class EmbeddingProjector(nn.Module):
 
     def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
         return self.norm(self.mlp(embeddings))
+
+
+def init_projector(projector: EmbeddingProjector, seed: int) -> None:
+    """Initialize from ``seed`` alone, so every replica agrees.
+
+    The projector is replicated and its gradients are all-reduced, so ranks that
+    start from different weights stay different forever — silently, since the
+    updates do agree. Torch's default init draws from the ambient RNG, whose
+    state depends on how the base model's build consumed it (TP/EP shards, MoE
+    expert counts, the DSA indexer), so it is not relied on here: a private
+    generator plus PyTorch's own ``nn.Linear`` bounds gives identical weights on
+    every rank without a collective, and without assuming the projector exists
+    on a rank that could take part in one.
+    """
+    gen = torch.Generator(device="cpu").manual_seed(seed)
+    with torch.no_grad():
+        for module in projector.modules():
+            if isinstance(module, nn.Linear):
+                bound = 1.0 / math.sqrt(module.weight.shape[1])
+                for param in (module.weight, module.bias):
+                    if param is None:
+                        continue
+                    param.copy_(
+                        torch.empty(param.shape, dtype=torch.float32).uniform_(
+                            -bound, bound, generator=gen
+                        )
+                    )
+            elif isinstance(module, nn.LayerNorm):
+                module.weight.fill_(1.0)
+                module.bias.zero_()
 
 
 def freeze_base_model(model: nn.Module) -> int:
@@ -132,7 +163,8 @@ def _scatter_projected(sequence_parallel, embeddings_out, embeds, positions):
     shard (either reduce-scattered inside the vocab embedding or scattered right
     after it), so positions are rebased onto the shard and the ones belonging to
     other ranks dropped. miles packs a microbatch into one sequence, so the batch
-    dimension is 1.
+    dimension is 1. Context parallelism would shard the sequence a second way,
+    with its own chunking, which is why the recipe rejects ``CP > 1``.
     """
     import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
 
@@ -208,7 +240,14 @@ class _ProjectorMerge:
         if self._pending is None:
             return output
         embeddings, positions = self._pending
-        projected = self._projector(embeddings.to(device=output.device))
+        projected = self._projector(
+            embeddings.to(
+                device=output.device,
+                # The rollout emits fp32; the projector carries the model's
+                # params_dtype, bf16 for these recipes.
+                dtype=next(self._projector.parameters()).dtype,
+            )
+        )
         return _scatter_projected(
             self._model.config.sequence_parallel,
             output,
@@ -241,6 +280,7 @@ def projector_model_provider(
             output_dim=cfg.output_dim or model.config.hidden_size,
             num_layers=cfg.num_layers,
         )
+        init_projector(projector, cfg.init_seed)
         projector.to(
             device=torch.cuda.current_device(), dtype=model.config.params_dtype
         )

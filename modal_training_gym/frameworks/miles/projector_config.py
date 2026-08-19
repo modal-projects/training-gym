@@ -58,6 +58,10 @@ class ProjectorSpec:
         the interval does not divide the step count.
     load : str
         Projector checkpoint (file or directory) to resume from.
+    init_seed : int
+        Seed the projector's weights are initialized from. Every rank holds a
+        replica whose gradients are all-reduced, so the initialization must not
+        depend on the ambient RNG state a rank happens to be in.
     """
 
     input_dim: int = 1536
@@ -69,6 +73,7 @@ class ProjectorSpec:
     save_dir: str = ""
     save_interval: int = 10
     load: str = ""
+    init_seed: int = 0
 
     def to_args_dict(self) -> dict[str, int | str | None]:
         return {
@@ -81,6 +86,7 @@ class ProjectorSpec:
             "save_dir": self.save_dir,
             "save_interval": self.save_interval,
             "load": self.load,
+            "init_seed": self.init_seed,
         }
 
 

@@ -123,6 +123,13 @@ def test_pipeline_parallelism_is_rejected():
         recipe.validate_model_parallelism(GLM_5_2())
 
 
+def test_context_parallelism_is_rejected():
+    """CP shards the sequence its own way; the merge rebases only TP/SP."""
+    recipe = GLM_5_2_Projector_Recipe(context_parallel_size=2)
+    with pytest.raises(TrainingGymConfigError, match="context_parallel_size=1"):
+        recipe.validate_model_parallelism(GLM_5_2())
+
+
 def test_megatron_checkpoint_loading_is_rejected():
     """The projector is a submodule, so base state dicts lack its keys."""
     with pytest.raises(ValidationError, match="resumes through projector.load"):

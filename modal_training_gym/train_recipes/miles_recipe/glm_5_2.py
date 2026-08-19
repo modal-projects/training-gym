@@ -84,8 +84,9 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     turns them into per-sample tensors that miles concatenates over the packed
     batch and splats into ``forward``.
 
-    *Checkpointing.* The before-train-step hook writes the projector's own state
-    dict (:mod:`modal_training_gym.frameworks.miles.embedding_projector`). The
+    *Checkpointing.* Every ``projector.save_interval`` optimizer steps, and
+    always on the run's last one, the projector's own state dict is written
+    (:mod:`modal_training_gym.frameworks.miles.embedding_projector`). The
     frozen base needs no checkpoint: it stays byte-identical to the HF
     checkpoint the run started from, so the projector file plus that model name
     describe the trained artifact completely. ``save_interval`` is left far
@@ -94,8 +95,10 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
 
     ``pipeline_model_parallel_size`` is 1: with the base frozen only the first
     pipeline stage holds trainable parameters, so later stages would build an
-    optimizer over an empty parameter set. Scale with tensor, context or expert
-    parallelism instead.
+    optimizer over an empty parameter set. ``context_parallel_size`` is 1 too,
+    because the merge rebases the data's token positions onto a tensor/sequence
+    shard and not onto Megatron's context-parallel chunking. Scale with tensor
+    or expert parallelism.
     """
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = MilesRecipe._SKIP_FIELDS | {"projector"}
@@ -245,7 +248,16 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
                 "projector lives on the first pipeline stage and the base is frozen, "
                 "so every later stage would build an optimizer over an empty "
                 f"parameter set. Got {self.pipeline_model_parallel_size}; scale with "
-                "tensor_model_parallel_size, context_parallel_size or "
+                "tensor_model_parallel_size or expert_model_parallel_size."
+            )
+        if self.context_parallel_size != 1:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs context_parallel_size=1: the "
+                "projected embeddings are written into the input embeddings at "
+                "the dataset's token positions, which are rebased onto a "
+                "tensor/sequence shard but not onto Megatron's context-parallel "
+                f"chunking, so CP={self.context_parallel_size} would land them "
+                "on the wrong tokens. Scale with tensor_model_parallel_size or "
                 "expert_model_parallel_size."
             )
 
