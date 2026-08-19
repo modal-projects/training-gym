@@ -253,6 +253,14 @@ def _scatter_projected(
     other ranks dropped. miles packs a microbatch into one sequence, so the batch
     dimension is 1. Context parallelism would shard the sequence a second way,
     with its own chunking, which is why the recipe rejects ``CP > 1``.
+
+    ``positions`` index the *micro*-batch that reached this forward: miles adds
+    each sample's offset inside ``get_batch``, from that micro-batch's own
+    ``unconcat_tokens`` (``miles/backends/training_utils/data.py``), and
+    ``get_batch`` runs per micro-batch from ``forward_step``. A position past the
+    packed sequence therefore means that contract changed, so it raises rather
+    than being dropped: under sequence parallelism it would otherwise fall off
+    every rank's shard and the run would train with no projector gradient at all.
     """
     import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
 
@@ -270,7 +278,20 @@ def _scatter_projected(
             f"microbatch, but the embedding output has batch {embeddings_out.shape[1]}"
         )
     s_local = embeddings_out.shape[0]
-    if sequence_parallel and ps.get_tensor_model_parallel_world_size() > 1:
+    tp_size = ps.get_tensor_model_parallel_world_size()
+    sharded = sequence_parallel and tp_size > 1
+    packed_len = s_local * tp_size if sharded else s_local
+    outside = int(((positions < 0) | (positions >= packed_len)).sum())
+    if outside:
+        raise ValueError(
+            f"{outside} of {int(positions.numel())} projector position(s) fall "
+            f"outside the micro-batch's {packed_len}-token packed sequence "
+            f"(min {int(positions.min())}, max {int(positions.max())}). "
+            "Positions have to be offsets into the packed micro-batch that "
+            "reaches forward, which is what miles' '_positions' offsetting "
+            "produces."
+        )
+    if sharded:
         local = positions - ps.get_tensor_model_parallel_rank() * s_local
         keep = (local >= 0) & (local < s_local)
         local, embeds = local[keep], embeds[keep]
@@ -552,13 +573,22 @@ def _is_projector_writer() -> bool:
     )
 
 
-def write_projector_checkpoint(cfg: ProjectorSpec, save_dir: str, projector, step: int):
+def write_projector_checkpoint(
+    cfg: ProjectorSpec, save_dir: str, projector, step: int, numbered: bool = True
+):
     """Write ``projector``'s state dict plus enough config to rebuild it.
 
     Optimizer state is not saved — the projector's Adam moments are cheap to
     rebuild, and reading Megatron's distributed optimizer state for a replicated
     module would need the base model's sharding machinery. The frozen base is not
     saved either: it stays byte-identical to the run's ``hf_checkpoint``.
+
+    ``projector_latest.pt`` is always written; ``numbered`` additionally keeps the
+    step's own ``projector_iter_*.pt``, which is what ``save_interval``
+    schedules. Refreshing ``projector_latest.pt`` after every applied step is
+    what makes "a finished run leaves the adapter it produced" independent of any
+    prediction of how many steps the run will perform — tens of megabytes,
+    against a step of a 744B forward and backward.
     """
     os.makedirs(save_dir, exist_ok=True)
     state = {
@@ -576,10 +606,14 @@ def write_projector_checkpoint(cfg: ProjectorSpec, save_dir: str, projector, ste
             "output_dim": _projector_output_dim(projector),
         },
     }
-    path = os.path.join(save_dir, f"projector_iter_{step:07d}.pt")
-    torch.save(state, path)
-    torch.save(state, os.path.join(save_dir, _LATEST))
-    logger.info("saved projector checkpoint %s", path)
+    latest = os.path.join(save_dir, _LATEST)
+    torch.save(state, latest)
+    if numbered:
+        path = os.path.join(save_dir, f"projector_iter_{step:07d}.pt")
+        torch.save(state, path)
+        logger.info("saved projector checkpoint %s", path)
+    else:
+        logger.info("refreshed projector checkpoint %s (step %d)", latest, step)
 
 
 def _projector_output_dim(projector) -> int:
@@ -599,7 +633,10 @@ class _ProjectorSaver:
     ever persist state one step stale and would miss the final step entirely, so
     the hook is used just to get hold of the optimizer, and the write hangs off
     ``optimizer.step``: counted in optimizer steps, so ``save_interval`` means
-    what it says, and the last step of the run always lands.
+    what it says. ``projector_latest.pt`` is refreshed on every applied step, so
+    the artifact survives a run that performs a different number of steps than
+    ``train_iters`` predicted; ``save_interval`` and that prediction decide only
+    which steps keep a numbered file too.
     """
 
     def __init__(self, args, model, optimizer) -> None:
@@ -636,10 +673,17 @@ class _ProjectorSaver:
         # which is what decides whether this was the last chance to write.
         if not (isinstance(out, tuple) and out and out[0] is False):
             self._steps += 1
-        if should_save_projector(
-            self._steps, self._attempts, self._total_steps, self._cfg.save_interval
-        ):
-            self._save()
+            # Every applied step refreshes projector_latest.pt, so the run leaves
+            # what it trained however many steps it turns out to take;
+            # ``train_iters`` only decides which steps also keep a numbered file.
+            self._save(
+                numbered=should_save_projector(
+                    self._steps,
+                    self._attempts,
+                    self._total_steps,
+                    self._cfg.save_interval,
+                )
+            )
         return out
 
     def _log_replica_state(self) -> None:
@@ -667,7 +711,7 @@ class _ProjectorSaver:
                 checksum,
             )
 
-    def _save(self) -> None:
+    def _save(self, numbered: bool = True) -> None:
         if not self._projectors:
             logger.warning(
                 "projector checkpoint skipped at step %d: no projector found on "
@@ -678,7 +722,11 @@ class _ProjectorSaver:
         if not _is_projector_writer():
             return
         write_projector_checkpoint(
-            self._cfg, self._save_dir, self._projectors[0], self._steps
+            self._cfg,
+            self._save_dir,
+            self._projectors[0],
+            self._steps,
+            numbered=numbered,
         )
 
 

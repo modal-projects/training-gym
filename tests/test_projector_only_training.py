@@ -174,8 +174,14 @@ def test_megatron_checkpoint_loading_is_rejected():
         GLM_5_2_Projector_Recipe(ref_load="/checkpoints/glm")
 
 
-def test_a_finished_run_always_leaves_a_projector_checkpoint():
-    """The run's last optimizer step saves even when the interval misses it."""
+def test_numbered_checkpoints_do_not_depend_on_the_predicted_step_count():
+    """``train_iters`` is a prediction; only numbered files may depend on it."""
+    total = 10
+    # A run that outlives the prediction keeps one numbered file, not one per
+    # step from then on. Every applied step refreshes projector_latest.pt.
+    assert [
+        s for s in range(1, 14) if should_save_projector(s, s, total, save_interval=0)
+    ] == [total]
     assert [
         s for s in range(1, 11) if should_save_projector(s, s, 10, save_interval=4)
     ] == [4, 8, 10]
@@ -215,6 +221,8 @@ def test_expert_parallel_size_must_divide_the_model_scripts_experts():
 def test_no_eval_pass_is_configured():
     """The rollout raises on evaluation, so the run must not schedule one."""
     assert GLM_5_2_Projector_Recipe().skip_eval_before_train is True
+    with pytest.raises(ValidationError, match="cannot evaluate"):
+        GLM_5_2_Projector_Recipe(eval_interval=5)
 
 
 def test_synthetic_validation_data_is_regenerated_per_run():

@@ -255,6 +255,24 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
         return self
 
     @model_validator(mode="after")
+    def _reject_evaluation(self) -> "GLM_5_2_Projector_Recipe":
+        """Reject an eval schedule: the rollout function cannot evaluate.
+
+        ``projector_sft_rollout`` raises on ``evaluation=True`` — a supervised
+        projector run has no generation path to evaluate with — so an
+        ``eval_interval`` would kill the run partway through instead of at
+        launch.
+        """
+        if self.eval_interval is not None:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} cannot evaluate (got "
+                f"eval_interval={self.eval_interval}): its rollout function is "
+                "supervised and does not generate, so miles' eval pass has "
+                "nothing to run. Leave eval_interval unset."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _reject_distributed_optimizer(self) -> "GLM_5_2_Projector_Recipe":
         """Reject the distributed optimizer: it shards the gradient we sum.
 
