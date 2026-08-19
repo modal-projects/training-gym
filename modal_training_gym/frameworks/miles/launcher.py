@@ -519,13 +519,11 @@ def build_miles_app(
         spec = importlib.util.find_spec(
             "modal_training_gym.frameworks.miles.modal_helpers.convert_hf_to_torch_dist"
         )
-        convert_script = (
-            spec.origin
-            if spec is not None and num_nodes > 1
-            else f"{MILES_ROOT}/tools/convert_hf_to_torch_dist.py"
-        )
+        convert_script = spec.origin if spec is not None else None
         if not convert_script:
-            raise RuntimeError("Miles checkpoint conversion script not found")
+            raise RuntimeError(
+                "modal_training_gym.frameworks.miles.modal_helpers.convert_hf_to_torch_dist not found"
+            )
 
         if miles.miles_model_script:
             cmd = (
@@ -550,6 +548,8 @@ def build_miles_app(
             )
 
         env = {**os.environ, **miles.environment}
+        if any(arg.startswith("--pipeline-model-parallel-size ") for arg in extra_args):
+            env["CONVERT_KEEP_PP1"] = "1"
         if num_nodes > 1:
             env["SKIP_RELEASE_RENAME"] = "1"
 
