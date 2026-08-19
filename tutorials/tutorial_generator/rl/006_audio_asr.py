@@ -111,6 +111,8 @@ def _score_fn():
     def score_transcript(response: str, label: str) -> float:
         import jiwer
 
+        response = (response or "").lower().strip()
+        label = (label or "").lower().strip()
         if not label:
             return 0.0
         return float(jiwer.wer(label, response))
@@ -139,10 +141,7 @@ def _dataset():
         always_prepare = True
         apply_chat_template = False  # ensures the data URI is valid throughout the rollout
 
-        def __init__(self, **kwargs):
-            super().__init__(rows=[], **kwargs)
-
-        def _build_rows(self) -> list[dict]:
+        def load(self) -> list[dict]:
             import base64 as b64
             import io
 
@@ -174,26 +173,9 @@ def _dataset():
                 )
             return rows
 
-        def load(self, split: str = "all") -> list[dict]:
-            return self._build_rows()
-
-        def prepare(self, path, eval_paths=None):
-            rows = self._build_rows()
-            self._write_jsonl(rows, path)
-            if eval_paths:
-                for eval_path in eval_paths.values():
-                    self._write_jsonl(rows, eval_path)
-
     train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
     eval_dataset = LibriSpeechASRDataset(hf_split="validation[8:16]")
 
-
-@notebook_only
-@code
-def _dataset_peek():
-    df = eval_dataset.to_pandas()
-    print(f"{len(df)} rows")
-    df.head(5)
 
 
 @markdown
@@ -246,7 +228,7 @@ def _eval_base():
 
     print("running base model evaluation...")
     base_mean = run_eval(base_deployment)
-    print(f"average WER: {base_mean:.1f}")
+    print(f"average WER: {base_mean:.1%}")
 
 
 @markdown
@@ -320,4 +302,4 @@ def _eval_trained():
 
     print("running checkpoint evaluation...")
     trained_mean = run_eval(trained_deployment)
-    print(f"average WER: {trained_mean:.1f}")
+    print(f"average WER: {trained_mean:.1%}")

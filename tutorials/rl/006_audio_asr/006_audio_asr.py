@@ -43,6 +43,8 @@ from modal_training_gym import (
 def score_transcript(response: str, label: str) -> float:
     import jiwer
 
+    response = (response or "").lower().strip()
+    label = (label or "").lower().strip()
     if not label:
         return 0.0
     return float(jiwer.wer(label, response))
@@ -62,10 +64,7 @@ class LibriSpeechASRDataset(MultimodalDataset):
     always_prepare = True
     apply_chat_template = False  # ensures the data URI is valid throughout the rollout
 
-    def __init__(self, **kwargs):
-        super().__init__(rows=[], **kwargs)
-
-    def _build_rows(self) -> list[dict]:
+    def load(self) -> list[dict]:
         import base64 as b64
         import io
 
@@ -96,16 +95,6 @@ class LibriSpeechASRDataset(MultimodalDataset):
                 }
             )
         return rows
-
-    def load(self, split: str = "all") -> list[dict]:
-        return self._build_rows()
-
-    def prepare(self, path, eval_paths=None):
-        rows = self._build_rows()
-        self._write_jsonl(rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_jsonl(rows, eval_path)
 
 eval_dataset = LibriSpeechASRDataset(hf_split="validation[8:16]")
 
@@ -190,7 +179,7 @@ def _main_impl() -> None:
 
     print("running base model evaluation...")
     base_mean = run_eval(base_deployment)
-    print(f"average WER: {base_mean:.1f}")
+    print(f"average WER: {base_mean:.1%}")
 
     # ## Begin training
     #
@@ -233,7 +222,7 @@ def _main_impl() -> None:
 
     print("running checkpoint evaluation...")
     trained_mean = run_eval(trained_deployment)
-    print(f"average WER: {trained_mean:.1f}")
+    print(f"average WER: {trained_mean:.1%}")
 
 @tutorial_cli_app.local_entrypoint()
 def main() -> None:
