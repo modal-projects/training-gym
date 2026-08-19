@@ -246,7 +246,7 @@ def _eval_base():
 
     print("running base model evaluation...")
     base_mean = run_eval(base_deployment)
-    print(f"average WER: {base_mean:.1%}")
+    print(f"average WER: {base_mean:.1f}")
 
 
 @markdown
