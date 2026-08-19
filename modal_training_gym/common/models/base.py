@@ -5,6 +5,7 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
+from types import MappingProxyType
 from typing import Any, Callable
 
 
@@ -245,7 +246,10 @@ def resolve_model_architecture(
     values.setdefault("rotary_percent", 1.0)
     num_heads = config.get("num_attention_heads")
     num_kv_heads = config.get("num_key_value_heads")
-    if num_kv_heads is not None and num_heads is not None:
+    if num_heads is not None:
+        if num_kv_heads is None:
+            num_kv_heads = num_heads
+        values["num_query_groups"] = num_kv_heads
         values["group_query_attention"] = num_kv_heads != num_heads
     if "kv_channels" not in values and num_heads and config.get("hidden_size"):
         values["kv_channels"] = config["hidden_size"] // num_heads
@@ -437,7 +441,7 @@ class HFModelConfiguration(ModelConfig):
     load and is left untouched.
     """
 
-    architecture_overrides: dict[str, Any] = {}
+    architecture_overrides: Mapping[str, Any] = MappingProxyType({})
     architecture = _LazyArchitecture()
 
     def download(self) -> None:
