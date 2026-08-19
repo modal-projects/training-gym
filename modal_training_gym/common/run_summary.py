@@ -398,15 +398,16 @@ def _resume_state(metadata: JsonDict) -> ResumeState | None:
     attempt_count = _integer(metadata.get("attempt_count"))
     checkpoint_path = _text(metadata.get("resume_checkpoint_path"))
     resumed = metadata.get("resumed_from_checkpoint") is True or bool(checkpoint_path)
+    raw_attempt_starts = metadata.get("attempt_starts")
     attempt_starts = (
         sorted(
             {
                 parsed
-                for item in metadata.get("attempt_starts", [])
+                for item in raw_attempt_starts
                 if (parsed := _optional_int(item)) is not None
             }
         )[-50:]
-        if isinstance(metadata.get("attempt_starts"), list)
+        if isinstance(raw_attempt_starts, list)
         else []
     )
     if attempt_count <= 1 and not resumed:

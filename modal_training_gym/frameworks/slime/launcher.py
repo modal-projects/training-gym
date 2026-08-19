@@ -1092,7 +1092,7 @@ def build_slime_app(
                     error = RuntimeError(
                         f"{message} (training_run_id={training_run_id})"
                     )
-                    error.training_run_id = training_run_id
+                    setattr(error, "training_run_id", training_run_id)
                     run_record.error_message = str(error)
                     raise error
                 print(f"Ray job completed: {result.status}")

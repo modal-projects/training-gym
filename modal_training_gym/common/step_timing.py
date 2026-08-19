@@ -80,10 +80,13 @@ class RoleTimingRecord(BaseModel):
             if len(name) <= MAX_PHASE_NAME_LENGTH and finite_phase(phase)
         }
         trimmed = trim_invocation_lists(
-            {name: phase.invocations for name, phase in self.phases.items()}
+            {
+                name: [list(pair) for pair in phase.invocations]
+                for name, phase in self.phases.items()
+            }
         )
         for name, phase in self.phases.items():
-            phase.invocations = trimmed[name]
+            phase.invocations = [(start, end) for start, end in trimmed[name]]
         return self
 
     @property
@@ -235,7 +238,12 @@ def legacy_run_to_records(
         if not step_key.isdigit():
             continue
         lane_start = min(
-            (sub["start"] for sub in subs.values() if sub.get("start") is not None),
+            (
+                float(start)
+                for sub in subs.values()
+                if isinstance(start := sub.get("start"), (int, float))
+                and not isinstance(start, bool)
+            ),
             default=None,
         )
         if lane_start is None:

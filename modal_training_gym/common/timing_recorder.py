@@ -6,7 +6,7 @@ import threading
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Callable, Iterator
+from typing import Callable, Iterator, cast
 
 from modal_training_gym.common import reporting
 
@@ -248,7 +248,7 @@ class RoleRecorder:
                         reason = "queued"
 
         if reason == "queued":
-            reporting._enqueue_timing(snapshot, final=final)
+            reporting._enqueue_timing(cast(dict[str, object], snapshot), final=final)
         _timing_debug(
             "publish",
             outcome="queued" if reason == "queued" else "skipped",
@@ -321,7 +321,7 @@ def _lowest_rank_publishes() -> bool | None:
             continue
         break
     try:
-        import torch.distributed as dist
+        import torch.distributed as dist  # pyright: ignore[reportMissingImports]  # torch is installed only in training images
     except ImportError:
         return rank == 0 if rank is not None else True
     if not dist.is_initialized():

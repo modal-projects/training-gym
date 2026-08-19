@@ -13,7 +13,7 @@ import os
 import secrets as _secrets
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict
+from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict, cast
 
 import modal
 from modal.exception import Error
@@ -517,7 +517,8 @@ def fastapi_app():
                 records[storage_key] = record
         grouped: dict[int | None, list[JsonDict]] = {}
         for record in [*entry.legacy_records, *records.values()]:
-            grouped.setdefault(record["rollout_id"], []).append(record)
+            rollout_id = cast(int | None, record["rollout_id"])
+            grouped.setdefault(rollout_id, []).append(record)
         entry.lanes = {
             ("pre-loop" if rollout_id is None else str(rollout_id)): rollout_lanes(
                 rollout_records
@@ -1155,7 +1156,8 @@ def fastapi_app():
         def response() -> JsonDict:
             if not entry.stale:
                 return entry.lanes
-            metadata = dict(entry.lanes.get("metadata", {}))
+            metadata_value = entry.lanes.get("metadata")
+            metadata = metadata_value if isinstance(metadata_value, dict) else {}
             return {
                 **entry.lanes,
                 "metadata": {**metadata, "timing_stale": True},

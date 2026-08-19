@@ -9,7 +9,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar, cast, overload
 
 T = TypeVar("T")
 
@@ -76,6 +76,24 @@ _SUMMARY_COMPACTION: dict[MetadataStore, _SummaryCompaction] = {
 _SUMMARY_CANONICAL_STORES: dict[MetadataStore, MetadataStore] = {
     summary: cfg.item_store for summary, cfg in _SUMMARY_COMPACTION.items()
 }
+
+
+@overload
+def _canonical_items_for(
+    store: MetadataStore | str,
+    item_id_key: str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[list[dict[str, Any]]]: ...
+
+
+@overload
+def _canonical_items_for(
+    store: MetadataStore | str,
+    item_id_key: str,
+    *,
+    is_async: Literal[False] = False,
+) -> list[dict[str, Any]]: ...
 
 
 def _canonical_items_for(
@@ -181,6 +199,26 @@ def vol_remove(store: MetadataStore | str, key: str) -> bool:
         raise
 
 
+@overload
+def vol_put(
+    store: MetadataStore | str,
+    key: str,
+    value: dict[str, Any],
+    *,
+    is_async: Literal[True],
+) -> Awaitable[None]: ...
+
+
+@overload
+def vol_put(
+    store: MetadataStore | str,
+    key: str,
+    value: dict[str, Any],
+    *,
+    is_async: Literal[False] = False,
+) -> None: ...
+
+
 def vol_put(
     store: MetadataStore | str,
     key: str,
@@ -206,6 +244,24 @@ def vol_put(
         batch.put_file(io.BytesIO(data), path)
 
 
+@overload
+def vol_put_many(
+    store: MetadataStore | str,
+    values: dict[str, dict[str, Any]],
+    *,
+    is_async: Literal[True],
+) -> Awaitable[None]: ...
+
+
+@overload
+def vol_put_many(
+    store: MetadataStore | str,
+    values: dict[str, dict[str, Any]],
+    *,
+    is_async: Literal[False] = False,
+) -> None: ...
+
+
 def vol_put_many(
     store: MetadataStore | str,
     values: dict[str, dict[str, Any]],
@@ -229,6 +285,24 @@ def vol_put_many(
     with vol.batch_upload(force=True) as batch:
         for path, payload in data.items():
             batch.put_file(io.BytesIO(payload), path)
+
+
+@overload
+def vol_get(
+    store: MetadataStore | str,
+    key: str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[dict[str, Any]]: ...
+
+
+@overload
+def vol_get(
+    store: MetadataStore | str,
+    key: str,
+    *,
+    is_async: Literal[False] = False,
+) -> dict[str, Any]: ...
 
 
 def vol_get(
@@ -261,6 +335,22 @@ def vol_get(
         raise KeyError(key) from None
 
 
+@overload
+def vol_list(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[list[dict[str, Any]]]: ...
+
+
+@overload
+def vol_list(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[False] = False,
+) -> list[dict[str, Any]]: ...
+
+
 def vol_list(
     store: MetadataStore | str,
     *,
@@ -270,13 +360,15 @@ def vol_list(
     if is_async:
 
         async def _run() -> list[dict[str, Any]]:
-            records, failure = await result
+            records, failure = await cast(
+                Awaitable[tuple[list[dict[str, Any]], BaseException | None]], result
+            )
             if failure is not None:
                 raise failure
             return records
 
         return _run()
-    records, failure = result
+    records, failure = cast(tuple[list[dict[str, Any]], BaseException | None], result)
     if failure is not None:
         raise failure
     return records
@@ -347,6 +439,22 @@ def _list_metadata_entries(
     raise AssertionError("unreachable")
 
 
+@overload
+def _read_metadata_records(
+    entries: list[dict[str, Any]],
+    *,
+    is_async: Literal[True],
+) -> Awaitable[tuple[list[dict[str, Any]], BaseException | None]]: ...
+
+
+@overload
+def _read_metadata_records(
+    entries: list[dict[str, Any]],
+    *,
+    is_async: Literal[False] = False,
+) -> tuple[list[dict[str, Any]], BaseException | None]: ...
+
+
 def _read_metadata_records(
     entries: list[dict[str, Any]],
     *,
@@ -388,6 +496,7 @@ def _read_metadata_records(
 
     records: list[dict[str, Any]] = []
     for entry in entries:
+        record: Any = None
         for attempt in range(_LIST_ATTEMPTS):
             try:
                 record = json.loads(b"".join(vol.read_file(entry["path"])))
@@ -410,6 +519,22 @@ def _read_metadata_records(
     return records, None
 
 
+@overload
+def _vol_list_core(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[tuple[list[dict[str, Any]], BaseException | None]]: ...
+
+
+@overload
+def _vol_list_core(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[False] = False,
+) -> tuple[list[dict[str, Any]], BaseException | None]: ...
+
+
 def _vol_list_core(
     store: MetadataStore | str,
     *,
@@ -422,16 +547,36 @@ def _vol_list_core(
     if is_async:
 
         async def _run() -> tuple[list[dict[str, Any]], BaseException | None]:
-            entries_result, failure = await entries
+            entries_result, failure = await cast(
+                Awaitable[tuple[list[dict[str, Any]], BaseException | None]], entries
+            )
             if failure is not None:
                 return [], failure
             return await _read_metadata_records(entries_result, is_async=True)
 
         return _run()
-    entries_result, failure = entries
+    entries_result, failure = cast(
+        tuple[list[dict[str, Any]], BaseException | None], entries
+    )
     if failure is not None:
         return [], failure
     return _read_metadata_records(entries_result)
+
+
+@overload
+def vol_list_metadata_with_failures(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[tuple[list[dict[str, Any]], bool]]: ...
+
+
+@overload
+def vol_list_metadata_with_failures(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[False] = False,
+) -> tuple[list[dict[str, Any]], bool]: ...
 
 
 def vol_list_metadata_with_failures(
@@ -443,11 +588,15 @@ def vol_list_metadata_with_failures(
     if is_async:
 
         async def _run() -> tuple[list[dict[str, Any]], bool]:
-            entries_result, failure = await entries
+            entries_result, failure = await cast(
+                Awaitable[tuple[list[dict[str, Any]], BaseException | None]], entries
+            )
             return entries_result, failure is not None
 
         return _run()
-    entries_result, failure = entries
+    entries_result, failure = cast(
+        tuple[list[dict[str, Any]], BaseException | None], entries
+    )
     return entries_result, failure is not None
 
 
@@ -560,6 +709,26 @@ def summary_items_from_payload(
     if not isinstance(items, list):
         return []
     return [item for item in items if isinstance(item, dict)]
+
+
+@overload
+def vol_get_summary_items(
+    store: MetadataStore | str,
+    *,
+    key: str = SUMMARY_KEY,
+    payload_key: str = SUMMARY_ITEMS_KEY,
+    is_async: Literal[True],
+) -> Awaitable[list[dict[str, Any]] | None]: ...
+
+
+@overload
+def vol_get_summary_items(
+    store: MetadataStore | str,
+    *,
+    key: str = SUMMARY_KEY,
+    payload_key: str = SUMMARY_ITEMS_KEY,
+    is_async: Literal[False] = False,
+) -> list[dict[str, Any]] | None: ...
 
 
 def vol_get_summary_items(

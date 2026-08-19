@@ -11,7 +11,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pydantic import BaseModel, PrivateAttr, computed_field, field_validator
 
@@ -196,7 +196,7 @@ class TrainingRun(BaseModel):
                     except (AttributeError, TypeError):
                         pass
                 try:
-                    exc.training_run_id = self.training_run_id
+                    setattr(exc, "training_run_id", self.training_run_id)
                 except AttributeError:
                     pass
                 raise
@@ -400,6 +400,18 @@ class TrainingRun(BaseModel):
         return _save_async()
 
     @classmethod
+    @overload
+    def from_id(
+        cls, run_id: str, *, is_async: Literal[True]
+    ) -> Awaitable[TrainingRun]: ...
+
+    @classmethod
+    @overload
+    def from_id(
+        cls, run_id: str, *, is_async: Literal[False] = False
+    ) -> TrainingRun: ...
+
+    @classmethod
     def from_id(
         cls, run_id: str, *, is_async: bool = False
     ) -> TrainingRun | Awaitable[TrainingRun]:
@@ -581,7 +593,10 @@ def record_resume_checkpoint(
         if isinstance(progress, dict):
             progress = dict(progress)
             try:
-                resume_iteration = int(resume_checkpoint.get("resume_from_iteration"))
+                raw_resume_iteration = resume_checkpoint.get("resume_from_iteration")
+                resume_iteration = (
+                    None if raw_resume_iteration is None else int(raw_resume_iteration)
+                )
             except (TypeError, ValueError):
                 resume_iteration = None
             if resume_iteration is None:
