@@ -274,7 +274,7 @@ class TrainingGroup:
                         launched.append(
                             (
                                 overrides,
-                                cfg.launch(show_output=False, prepare_inputs=True),
+                                cfg.launch(show_output=False),
                             )
                         )
                     except BaseException as exc:  # noqa: BLE001
@@ -297,9 +297,8 @@ class TrainingGroup:
         self,
         *,
         continue_on_error: bool = True,
-        prepare_inputs: bool = False,
     ) -> list[TrainingRun]:
-        """Start every variant as a detached Modal call and return immediately."""
+        """Start every variant as a detached Modal call."""
         variants = self.iter_variants()
         launches: list[TrainingRun] = []
         failures: list[tuple[dict[str, Any], BaseException]] = []
@@ -308,10 +307,7 @@ class TrainingGroup:
         self._print_variant_plan(variants)
         for overrides, cfg in variants:
             try:
-                launch = cfg.launch(
-                    show_output=False,
-                    prepare_inputs=prepare_inputs,
-                )
+                launch = cfg.launch(show_output=False)
                 launches.append(launch)
                 print(
                     f"[TrainingGroup] launched {overrides!r}: "

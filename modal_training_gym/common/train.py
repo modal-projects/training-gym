@@ -610,7 +610,7 @@ class TrainConfig:
         """Build the app, run training, and return the TrainResult."""
         from modal_training_gym.common.modal_lifecycle import stop_app
 
-        launch = self.launch(show_output=show_output, prepare_inputs=True)
+        launch = self.launch(show_output=show_output)
         try:
             return launch.result(stop_app_on_success=True)
         except BaseException:
@@ -622,9 +622,12 @@ class TrainConfig:
         self,
         *,
         show_output: bool = True,
-        prepare_inputs: bool = False,
     ) -> TrainingRun:
-        """Start training in a detached Modal app and return immediately."""
+        """Start training in a detached Modal app.
+
+        Inputs are prepared on CPU-only functions first, so the GPU cluster is
+        provisioned only once the weights are ready.
+        """
         import modal
 
         from modal_training_gym.common.config import (
@@ -704,36 +707,28 @@ class TrainConfig:
                 resolved = self._resolved_recipe_for_logging()
                 megatron_to_hf_mode = getattr(resolved, "megatron_to_hf_mode", "")
                 needs_conversion = megatron_to_hf_mode != "bridge"
-                if prepare_inputs:
-                    if isinstance(self.recipe, SlimeRecipe):
-                        _set_status(SlimeStatus.DOWNLOAD_MODEL, is_active=False)
-                        app.download.remote(
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
-                        if needs_conversion:
-                            _set_status(SlimeStatus.CONVERT_MODEL, is_active=False)
-                            _convert_checkpoint_on_cache_miss(
-                                app,
-                                training_run_id=training_run_id,
-                                framework_status_url=framework_status_url,
-                                framework_status_token=framework_status_token,
-                            )
-                    elif isinstance(self.recipe, MilesRecipe) and needs_conversion:
-                        _set_status(MilesStatus.DOWNLOAD_MODEL, is_active=False)
-                        app.download.remote(
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
-                        _set_status(MilesStatus.CONVERT_MODEL, is_active=False)
-                        _convert_checkpoint_on_cache_miss(
-                            app,
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
+                # `download` also runs the recipe's post_process_model() (e.g.
+                # the Kimi INT4/BF16 conversion), so it runs in bridge mode too
+                # — inside train() it would idle the whole cluster.
+                download_status, convert_status = (
+                    (SlimeStatus.DOWNLOAD_MODEL, SlimeStatus.CONVERT_MODEL)
+                    if isinstance(self.recipe, SlimeRecipe)
+                    else (MilesStatus.DOWNLOAD_MODEL, MilesStatus.CONVERT_MODEL)
+                )
+                _set_status(download_status, is_active=False)
+                app.download.remote(
+                    training_run_id=training_run_id,
+                    framework_status_url=framework_status_url,
+                    framework_status_token=framework_status_token,
+                )
+                if needs_conversion:
+                    _set_status(convert_status, is_active=False)
+                    _convert_checkpoint_on_cache_miss(
+                        app,
+                        training_run_id=training_run_id,
+                        framework_status_url=framework_status_url,
+                        framework_status_token=framework_status_token,
+                    )
 
                 function_call = app.train.spawn(
                     modal_app_id=modal_app_id,

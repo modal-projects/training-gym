@@ -80,7 +80,7 @@ class MathDataset(HuggingFaceDataset):
 #   bad fields/values *before* anything launches.
 # * `train(max_parallel=...)` fans the sweep out across Modal; `group.failures`
 #   isolates any run that didn't make it.
-# * `launch(prepare_inputs=True)` fans the sweep out across Modal and returns
+# * `launch()` fans the sweep out across Modal and returns
 #   `TrainingRun` handles; `group.failures` isolates any run that didn't
 #   launch.
 # * Use `launch.result()` to wait on a specific launched run, or
@@ -194,16 +194,14 @@ def _main_impl() -> None:
     # `TrainingRun` handles. Each handle has the `training_run_id`, Modal app URL,
     # function-call id, and shared `group_id`.
     #
-    # Pass `prepare_inputs=True` to run the model/download conversion steps before
-    # spawning training, matching the one-shot `TrainConfig.train()` behavior. A
-    # single launch failure is recorded in `group.failures` instead of sinking the
-    # rest of the sweep.
+    # A single launch failure is recorded in `group.failures` instead of sinking
+    # the rest of the sweep.
     #
     # Call `launch.result()` to wait for a handle's trained `TrainResult`. If you
     # don't need the handles, `group.train(max_parallel=...)` wraps this pattern
     # and returns the successful `TrainResult`s directly.
 
-    launches = group.launch(prepare_inputs=True)
+    launches = group.launch()
     print(f"group {group.group_id}: {len(launches)} runs launched")
     for launch in launches:
         print(
