@@ -67,6 +67,11 @@ from modal_training_gym.frameworks.miles.modal_helpers.utils import (
 
 MILES_ROOT = "/root/miles"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
+RDMA_RUNTIME_INSTALL_COMMAND = (
+    "apt-get update && apt-get install -y --no-install-recommends "
+    "--reinstall libibverbs1 ibverbs-providers && "
+    "rm -rf /var/lib/apt/lists/*"
+)
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
@@ -95,6 +100,8 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             *_REPORTING_PATCH_COMMANDS,
         )
     )
+    if miles.total_nodes > 1:
+        image = image.run_commands(RDMA_RUNTIME_INSTALL_COMMAND)
     if miles.image_env:
         image = image.env(miles.image_env)
     return image
