@@ -131,7 +131,7 @@ def _score_fn_intro():
     granularity such that it's immediately obvious what the failure mode is (if any). Below, we implement
     the following function:
 
-    - Return -10 if the model was so incompetent that failed to return three lines.
+    - Return -10 if the model was so incompetent that it failed to return three lines.
     - Otherwise, return the negative sum of absolute differences between the predicted and target
     syllable count for each line.
 
