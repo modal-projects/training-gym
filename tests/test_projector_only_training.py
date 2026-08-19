@@ -202,6 +202,21 @@ def test_a_finished_run_always_leaves_a_projector_checkpoint():
     assert not should_save_projector(0, total, total, 0)
 
 
+def test_expert_parallel_size_must_divide_the_model_scripts_experts():
+    """GLM-5.2 has no ModelArchitecture, so the gym's own EP preflight is a no-op."""
+    with pytest.raises(TrainingGymConfigError, match="256 routed experts"):
+        GLM_5_2_Projector_Recipe(
+            expert_model_parallel_size=24
+        ).validate_model_parallelism(GLM_5_2())
+    for recipe in (GLM_5_2_Projector_Recipe(), GLM_5_2_5Layer_Projector_Recipe()):
+        recipe.validate_model_parallelism(GLM_5_2())
+
+
+def test_no_eval_pass_is_configured():
+    """The rollout raises on evaluation, so the run must not schedule one."""
+    assert GLM_5_2_Projector_Recipe().skip_eval_before_train is True
+
+
 def test_synthetic_validation_data_is_regenerated_per_run():
     """The on-volume path is class-derived, so stale rows would be reused."""
     assert EmbeddingProjectorDataset.synthetic(n_rows=2, input_dim=4).always_prepare

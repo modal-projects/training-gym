@@ -39,6 +39,14 @@ if TYPE_CHECKING:
 # container's default disk.
 _EPHEMERAL_DISK_MIB = 1_048_576
 
+# Routed experts in miles' ``scripts/models/glm5.2-744B-A40B.py`` (``--num-experts
+# 256``, top-8, 1 shared), which the 5-layer checkpoint keeps. The gym's
+# expert-parallel preflight reads this off a model's ``ModelArchitecture``, and
+# GLM-5.2 has none — the DSA spec and the indexer are not representable there,
+# so the model script owns the arch args. Kept here instead, where the model
+# script is pinned, so changing EP is still checked before the cluster starts.
+_NUM_ROUTED_EXPERTS = 256
+
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class GLM_5_2_Projector_Recipe(MilesRecipe):
@@ -130,6 +138,12 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     calculate_per_token_loss: bool = True
     num_epoch: int | None = 1
     n_samples_per_prompt: int = 1
+    # No evaluation pass: the rollout function has nothing to generate with, so
+    # it raises when miles calls it with ``evaluation=True``. Leaving this to
+    # miles' own gate on ``eval_interval`` would make a user-launched run's
+    # survival depend on that gate, while the dataset still emits
+    # ``--eval-prompt-data``.
+    skip_eval_before_train: bool = True
     ref_load: str = ""
 
     actor_num_nodes: int = 8
@@ -283,6 +297,15 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
                 f"chunking, so CP={self.context_parallel_size} would land them "
                 "on the wrong tokens. Scale with tensor_model_parallel_size or "
                 "expert_model_parallel_size."
+            )
+        if (
+            self.expert_model_parallel_size
+            and _NUM_ROUTED_EXPERTS % self.expert_model_parallel_size
+        ):
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs expert_model_parallel_size to "
+                f"divide the model script's {_NUM_ROUTED_EXPERTS} routed "
+                f"experts, got EP={self.expert_model_parallel_size}."
             )
         if self.tensor_model_parallel_size > 1 and not self.sequence_parallel:
             raise TrainingGymConfigError(
