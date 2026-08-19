@@ -32,6 +32,24 @@ _EXPORTS = {
         "Gemma4_26B_A4B_Recipe",
     ),
     "GLM_4_7": ("modal_training_gym.common.models", "GLM_4_7"),
+    "GLM_5_2": ("modal_training_gym.common.models", "GLM_5_2"),
+    "GLM_5_2_5Layer": ("modal_training_gym.common.models", "GLM_5_2_5Layer"),
+    "GLM_5_2_Projector_Recipe": (
+        "modal_training_gym.train_recipes.miles_recipe",
+        "GLM_5_2_Projector_Recipe",
+    ),
+    "GLM_5_2_5Layer_Projector_Recipe": (
+        "modal_training_gym.train_recipes.miles_recipe",
+        "GLM_5_2_5Layer_Projector_Recipe",
+    ),
+    "ProjectorSpec": (
+        "modal_training_gym.frameworks.miles.projector_config",
+        "ProjectorSpec",
+    ),
+    "EmbeddingProjectorDataset": (
+        "modal_training_gym.common.dataset",
+        "EmbeddingProjectorDataset",
+    ),
     "HFModelConfiguration": (
         "modal_training_gym.common.models",
         "HFModelConfiguration",
@@ -143,6 +161,12 @@ __all__ = [
     "Gemma4_26B_A4B",
     "Gemma4_26B_A4B_Recipe",
     "GLM_4_7",
+    "GLM_5_2",
+    "GLM_5_2_5Layer",
+    "GLM_5_2_Projector_Recipe",
+    "GLM_5_2_5Layer_Projector_Recipe",
+    "ProjectorSpec",
+    "EmbeddingProjectorDataset",
     "HarborDataset",
     "EvalConfig",
     "EvalConfigDurable",

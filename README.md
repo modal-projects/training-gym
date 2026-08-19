@@ -112,6 +112,7 @@ Models with a built-in training recipe, with the `ModelConfig` and recipe classe
 
 | Model | Framework | ModelConfig | Recipe |
 |---|---|---|---|
+| `Pinaster/GLM-5.2_5layer` | `miles` | `GLM_5_2_5Layer` | `GLM_5_2_5Layer_Projector_Recipe` |
 | `Qwen/Qwen3-0.6B` | `slime` | `Qwen3_0_6B` | `Qwen3_0_6b_Recipe` |
 | `Qwen/Qwen3-1.7B` | `slime` | `Qwen3_1_7B` | `Qwen3_1_7b_Recipe` |
 | `Qwen/Qwen3-4B` | `slime` | `Qwen3_4B` | `Qwen3_4b_Recipe` |
@@ -128,6 +129,7 @@ Models with a built-in training recipe, with the `ModelConfig` and recipe classe
 | `google/gemma-4-26B-A4B-it` | `miles` | `Gemma4_26B_A4B` | `Gemma4_26B_A4B_Recipe` |
 | `moonshotai/Moonlight-16B-A3B-Instruct` | `miles` | `Moonlight_16B_A3B_Instruct` | `Moonlight_16B_A3B_Recipe` |
 | `zai-org/GLM-4.7` | `slime` | `GLM_4_7` | `GLM_4_7_Recipe` |
+| `zai-org/GLM-5.2` | `miles` | `GLM_5_2` | `GLM_5_2_Projector_Recipe` |
 <!-- END MODELS TABLE -->
 
 ## Tutorials

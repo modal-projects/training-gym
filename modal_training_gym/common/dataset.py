@@ -631,3 +631,131 @@ class MultimodalDataset(DatasetConfig):
         if eval_paths:
             for eval_path in eval_paths.values():
                 self._write_jsonl(rows, eval_path)
+
+
+class EmbeddingProjectorDataset(DatasetConfig):
+    """Supervised dataset for projector training: messages plus token embeddings.
+
+    Each row is a chat conversation together with the embeddings an external
+    encoder produced and the token positions they occupy::
+
+        EmbeddingProjectorDataset(
+            rows=[
+                {
+                    "messages": [
+                        {"role": "user", "content": "<emb> what does this bind?"},
+                        {"role": "assistant", "content": "..."},
+                    ],
+                    "embeddings": [[0.1, ...], [0.2, ...]],  # [n_tokens, input_dim]
+                    "positions": [3, 4],                     # positions in the token ids
+                },
+            ]
+        )
+
+    The embeddings ride in the ``metadata`` column, which miles carries onto
+    ``Sample.metadata`` untouched, and the projector rollout function turns them
+    into the tensors the model's forward takes. Positions index the row's own
+    token sequence; miles offsets them when it packs samples together.
+
+    Targets come from the conversation itself, so ``label_key`` holds nothing a
+    reward function would read — supervised training has no reward — but the
+    column exists because the loaders index it.
+    """
+
+    input_key: str = "messages"
+    label_key: str = "label"
+    embeddings_key: str = "projector_embeddings"
+    positions_key: str = "projector_positions"
+    output_format: str = "jsonl"
+    # The conversation reaches miles as a list of messages, which the loss-mask
+    # generator needs; a rendered string would leave it nothing to split on.
+    apply_chat_template: bool = False
+    # Synthetic rows are described, not stored: see ``synthetic()``.
+    synthetic_rows: int = 0
+    synthetic_input_dim: int = 0
+    synthetic_seed: int = 0
+
+    def __init__(self, rows: list[dict[str, Any]] | None = None, **kwargs: Any) -> None:
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        self._rows = list(rows or [])
+        if not self.dataset_id:
+            self.dataset_id = f"projector-{uuid.uuid4()}"
+        self._validate()
+        for row in self._rows:
+            self._check_row(row)
+
+    @staticmethod
+    def _check_row(row: dict[str, Any]) -> None:
+        embeddings, positions = row.get("embeddings"), row.get("positions")
+        if embeddings is None or positions is None:
+            raise TrainingGymConfigError(
+                "each EmbeddingProjectorDataset row needs 'embeddings' and "
+                f"'positions'; got keys {sorted(row)}"
+            )
+        if len(embeddings) != len(positions):
+            raise TrainingGymConfigError(
+                f"{len(embeddings)} embedding row(s) for {len(positions)} "
+                "position(s): every embedding occupies exactly one token"
+            )
+
+    @classmethod
+    def synthetic(
+        cls, n_rows: int, input_dim: int, seed: int = 0
+    ) -> "EmbeddingProjectorDataset":
+        """Random embeddings on a fixed conversation, for wiring validation.
+
+        A projector-only run needs an encoder's embeddings, and no public dataset
+        ships them, so a smoke test that only has to prove the plumbing (data →
+        rollout → forward → loss → projector gradient) generates them. Loss goes
+        down on noise no more than it should — read this as a wiring check, not a
+        learning curve.
+
+        The rows are generated at prepare time from the seed rather than held in
+        the instance: the dataset is cloudpickled into the container, and a
+        thousand 1536-wide vectors do not belong in that payload.
+        """
+        return cls(
+            synthetic_rows=n_rows, synthetic_input_dim=input_dim, synthetic_seed=seed
+        )
+
+    def _synthetic_rows(self) -> list[dict[str, Any]]:
+        rng = random.Random(self.synthetic_seed)
+        return [
+            {
+                "messages": [
+                    {"role": "user", "content": f"<emb> describe sample {i}."},
+                    {"role": "assistant", "content": f"Sample {i} is a placeholder."},
+                ],
+                "embeddings": [
+                    [rng.gauss(0.0, 1.0) for _ in range(self.synthetic_input_dim)]
+                ],
+                "positions": [1],
+            }
+            for i in range(self.synthetic_rows)
+        ]
+
+    @property
+    def rows(self) -> list[DatasetRow]:
+        return self._rows or self._synthetic_rows()
+
+    def _to_row(self, r: dict[str, Any]) -> DatasetRow:
+        return {
+            self.input_key: r["messages"],
+            self.label_key: r.get("label", ""),
+            "metadata": {
+                self.embeddings_key: [list(e) for e in r["embeddings"]],
+                self.positions_key: [int(p) for p in r["positions"]],
+            },
+        }
+
+    def load(self) -> list[DatasetRow]:
+        return [self._to_row(r) for r in self.rows]
+
+    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
+        rows = self.load()
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        for target in [path, *(eval_paths or {}).values()]:
+            with open(target, "w") as f:
+                for row in rows:
+                    f.write(json.dumps(row) + "\n")

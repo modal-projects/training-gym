@@ -272,6 +272,19 @@ class MilesRecipe(BaseTrainRecipe):
         Entropy bonus coefficient.
     calculate_per_token_loss : bool
         Average the loss over tokens instead of over samples.
+    loss_type : str | None
+        Training objective; ``None`` keeps miles' policy-gradient default and
+        ``"sft_loss"`` trains on the dataset's own targets.
+    disable_compute_advantages_and_returns : bool
+        Skip advantage/return computation — required by supervised objectives,
+        which have no rewards to normalize.
+    debug_train_only : bool
+        Run the training path alone: no SGLang engines, no rollout, no weight
+        sync. Supervised runs need no engines, and it makes a one-step proof of
+        a large model cheap.
+    num_epoch : int | None
+        Passes over the dataset, for supervised runs that iterate a fixed set
+        instead of generating rollouts.
     ref_load : str
         Checkpoint the reference model is read from (for KL terms).
     use_tis : bool
@@ -406,6 +419,11 @@ class MilesRecipe(BaseTrainRecipe):
         Hook run in the Megatron trainer before log-prob computation.
     custom_megatron_before_train_step_hook : Callable | str | None
         Hook run in the Megatron trainer before each train step.
+    custom_model_provider_path : str | None
+        Import path of the function building the Megatron model, replacing the
+        provider the model script selects. Used to wrap the upstream model —
+        freezing it and attaching an adapter, say — rather than to reimplement
+        it.
 
     ## Config Overrides
 
@@ -585,6 +603,10 @@ class MilesRecipe(BaseTrainRecipe):
     use_kl_loss: bool = False
     calculate_per_token_loss: bool = False
     rm_type: str | None = None
+    loss_type: str | None = None
+    disable_compute_advantages_and_returns: bool = False
+    debug_train_only: bool = False
+    num_epoch: int | None = None
 
     # ── Dynamic sampling (DAPO) ────────────────────────────────────────────
     over_sampling_batch_size: int | None = None
@@ -652,6 +674,7 @@ class MilesRecipe(BaseTrainRecipe):
     custom_eval_rollout_log_function: Callable | str | None = None
     custom_megatron_before_log_prob_hook: Callable | str | None = None
     custom_megatron_before_train_step_hook: Callable | str | None = None
+    custom_model_provider_path: str | None = None
 
     # ── Per-sample execution tracing (dashboard timeline) ───────────────────
     # When True, the rollout recorder attaches miles' per-sample trace (the
@@ -821,6 +844,10 @@ class MilesRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
             Gemma4_26B_A4B_Recipe,
         )
+        from modal_training_gym.train_recipes.miles_recipe.glm_5_2 import (
+            GLM_5_2_5Layer_Projector_Recipe,
+            GLM_5_2_Projector_Recipe,
+        )
         from modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b import (
             Moonlight_16B_A3B_Recipe,
         )
@@ -834,6 +861,12 @@ class MilesRecipe(BaseTrainRecipe):
             return Moonlight_16B_A3B_Recipe()
         if model_config.model_name == "google/gemma-4-26B-A4B-it":
             return Gemma4_26B_A4B_Recipe()
+        # GLM-5.2's only gym recipe is the projector one: full-weight or LoRA
+        # GLM-5.2 RL is upstream's 32-node script, not a gym preset.
+        if model_config.model_name == "zai-org/GLM-5.2":
+            return GLM_5_2_Projector_Recipe()
+        if model_config.model_name == "Pinaster/GLM-5.2_5layer":
+            return GLM_5_2_5Layer_Projector_Recipe()
         return None
 
     def download_model(self) -> None:

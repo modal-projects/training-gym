@@ -1,0 +1,411 @@
+"""Projector-only training on miles: a trainable adapter over a frozen base model.
+
+Runs inside the miles containers, not on the launching machine. Three entry
+points, all reached by dotted path:
+
+``projector_model_provider``
+    miles' ``--custom-model-provider-path``. Builds the model the model script
+    asks for (so GLM-5.2's DSA spec, MoE routing and indexer come from
+    upstream verbatim), freezes every base parameter, and attaches an
+    :class:`EmbeddingProjector` on the first pipeline stage. The projector maps
+    externally computed per-token embeddings — protein/DNA encoder outputs, for
+    instance — into the decoder's hidden space and writes them into the input
+    embeddings at the positions the data gives, following the merge that
+    ``miles_plugins.models.inkling.mm_towers`` does for its vision/audio towers.
+``save_projector_checkpoint``
+    miles' before-train-step hook. Writes the projector (a few hundred MB at
+    most) instead of the base model, which at 744B is terabytes of sharded
+    weights that never change during a projector-only run.
+``load_projector_checkpoint``
+    Called by the provider when ``load`` is set, and usable standalone for
+    inspection or export.
+
+The trainable-parameter set is what makes this cheap: freezing the base before
+Megatron builds the optimizer keeps optimizer state, gradient buffers and
+checkpoints proportional to the projector, not to the model — LoRA-free, and
+without the full-parameter memory bill.
+
+Configuration arrives as one dict under the ``training_gym_projector`` miles
+arg (the recipe writes it into ``extra_config``, whose keys miles sets on
+``args``), so no new miles CLI flags are needed.
+"""
+
+import logging
+import os
+
+import torch  # pyright: ignore[reportMissingImports]  # torch is installed only in training images
+import torch.nn as nn  # pyright: ignore[reportMissingImports]
+
+from modal_training_gym.frameworks.miles.projector_config import (
+    ProjectorSpec,
+    from_miles_args,
+)
+
+logger = logging.getLogger(__name__)
+
+_LATEST = "projector_latest.pt"
+
+
+class EmbeddingProjector(nn.Module):
+    """MLP mapping external embeddings into the decoder's hidden space.
+
+    Replicated on every rank rather than tensor-parallel: at a few hundred MB
+    it is not worth sharding, and replication keeps the checkpoint a single
+    plain state dict that loads anywhere.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        num_layers: int = 2,
+    ) -> None:
+        super().__init__()
+        if num_layers < 1:
+            raise ValueError(f"projector num_layers must be >= 1, got {num_layers}")
+        dims = [input_dim] + [hidden_dim] * (num_layers - 1) + [output_dim]
+        layers: list[nn.Module] = []
+        for i in range(num_layers):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+            if i < num_layers - 1:
+                layers.append(nn.GELU())
+        self.mlp = nn.Sequential(*layers)
+        self.norm = nn.LayerNorm(output_dim)
+
+    def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
+        return self.norm(self.mlp(embeddings))
+
+
+def freeze_base_model(model: nn.Module) -> int:
+    """Freeze every parameter of ``model``; returns how many were frozen.
+
+    Called before Megatron builds the optimizer, which skips parameters
+    without ``requires_grad`` — that is what keeps optimizer state and
+    gradient buffers proportional to the projector.
+    """
+    frozen = 0
+    for param in model.parameters():
+        if param.requires_grad:
+            param.requires_grad_(False)
+            frozen += 1
+    return frozen
+
+
+def _build_base_model(args, pre_process: bool, post_process: bool, vp_stage):
+    """Build the model miles would have built without this provider."""
+    from miles.backends.megatron_utils.model_provider import (  # pyright: ignore[reportMissingImports]
+        get_model_provider_func,
+    )
+
+    saved = args.custom_model_provider_path
+    args.custom_model_provider_path = None
+    try:
+        provider = get_model_provider_func(args)
+    finally:
+        args.custom_model_provider_path = saved
+    return provider(
+        pre_process=pre_process, post_process=post_process, vp_stage=vp_stage
+    )
+
+
+def _mark_sequence_parallel(module: nn.Module) -> None:
+    """Tag replicated parameters so Megatron all-reduces their grads over TP.
+
+    With sequence parallelism each tensor-parallel rank holds a different slice
+    of the sequence, so each sees a different subset of projected positions and
+    computes a different gradient for the same replicated weight. Megatron's
+    ``finalize_model_grads`` all-reduces exactly the parameters carrying this
+    attribute (the convention its LayerNorm weights use).
+    """
+    for param in module.parameters():
+        param.sequence_parallel = True
+
+
+def _scatter_projected(sequence_parallel, embeddings_out, embeds, positions):
+    """Write ``embeds`` into ``embeddings_out`` at ``positions`` (sequence-first).
+
+    ``LanguageModelEmbedding.forward`` returns ``[sequence, batch, hidden]``, and
+    under sequence parallelism the sequence dimension is already this rank's
+    shard (either reduce-scattered inside the vocab embedding or scattered right
+    after it), so positions are rebased onto the shard and the ones belonging to
+    other ranks dropped. miles packs a microbatch into one sequence, so the batch
+    dimension is 1.
+    """
+    import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
+
+    if positions.numel() == 0:
+        return embeddings_out
+    if embeddings_out.shape[1] != 1:
+        raise ValueError(
+            "projector training expects miles' packed layout, one sequence per "
+            f"microbatch, but the embedding output has batch {embeddings_out.shape[1]}"
+        )
+    s_local = embeddings_out.shape[0]
+    if sequence_parallel and ps.get_tensor_model_parallel_world_size() > 1:
+        local = positions - ps.get_tensor_model_parallel_rank() * s_local
+        keep = (local >= 0) & (local < s_local)
+        local, embeds = local[keep], embeds[keep]
+    else:
+        local = positions
+    if not local.numel():
+        return embeddings_out
+    merged = embeddings_out.clone()
+    merged[local, 0] = embeds.to(merged.dtype)
+    return merged
+
+
+class _ProjectorMerge:
+    """Moves the batch's embeddings from ``model.forward`` into the embedding layer.
+
+    miles splats ``multimodal_train_inputs`` straight into ``model(**kwargs)``
+    (``miles/backends/megatron_utils/model.py``), but ``GPTModel.forward`` takes
+    no such arguments, so they are stripped there and merged where the input
+    embeddings actually exist: a forward hook on ``model.embedding``, which is
+    the only place whose output layout and sequence-parallel sharding are already
+    settled. Recomputing the embedding here instead would duplicate the vocab
+    embedding's reduce-scatter and position-embedding branches.
+    """
+
+    def __init__(
+        self, model, projector: EmbeddingProjector, cfg: ProjectorSpec
+    ) -> None:
+        self._model = model
+        self._projector = projector
+        self._embeddings_key = cfg.embeddings_key
+        self._positions_key = cfg.positions_key
+        self._pending: tuple[torch.Tensor, torch.Tensor] | None = None
+        self._original_forward = model.forward
+        model.forward = self._forward
+        if model.pre_process:
+            model.embedding.register_forward_hook(self._embedding_hook)
+
+    def _forward(self, *fargs, **fkwargs):
+        embeddings = fkwargs.pop(self._embeddings_key, None)
+        positions = fkwargs.pop(self._positions_key, None)
+        if embeddings is None or not self._model.pre_process:
+            return self._original_forward(*fargs, **fkwargs)
+        if positions is None:
+            raise ValueError(
+                f"'{self._embeddings_key}' was passed without "
+                f"'{self._positions_key}'; the dataset must emit the token "
+                "positions the embeddings occupy."
+            )
+        if positions.numel() != embeddings.shape[0]:
+            raise ValueError(
+                f"{positions.numel()} projector position(s) for "
+                f"{embeddings.shape[0]} embedding row(s)"
+            )
+        self._pending = (embeddings, positions)
+        try:
+            return self._original_forward(*fargs, **fkwargs)
+        finally:
+            self._pending = None
+
+    def _embedding_hook(self, module, inputs, output):
+        if self._pending is None:
+            return output
+        embeddings, positions = self._pending
+        projected = self._projector(embeddings.to(device=output.device))
+        return _scatter_projected(
+            self._model.config.sequence_parallel,
+            output,
+            projected,
+            positions.to(output.device),
+        )
+
+
+def get_projector(model) -> EmbeddingProjector | None:
+    """The projector attached to ``model``, if this rank holds one."""
+    projector = model.__dict__.get("_training_gym_projector")
+    return projector if isinstance(projector, EmbeddingProjector) else None
+
+
+def projector_model_provider(
+    pre_process: bool = True, post_process: bool = True, vp_stage=None
+):
+    """miles ``--custom-model-provider-path``: frozen base + trainable projector."""
+    from megatron.training import get_args  # pyright: ignore[reportMissingImports]
+
+    args = get_args()
+    cfg = from_miles_args(args)
+    model = _build_base_model(args, pre_process, post_process, vp_stage)
+    frozen = freeze_base_model(model)
+
+    if pre_process:
+        projector = EmbeddingProjector(
+            input_dim=cfg.input_dim,
+            hidden_dim=cfg.hidden_dim,
+            output_dim=cfg.output_dim or model.config.hidden_size,
+            num_layers=cfg.num_layers,
+        )
+        projector.to(
+            device=torch.cuda.current_device(), dtype=model.config.params_dtype
+        )
+        projector.requires_grad_(True)
+        if model.config.sequence_parallel:
+            _mark_sequence_parallel(projector)
+        model.__dict__["_training_gym_projector"] = projector
+        # Registered so Megatron's DDP and the optimizer see the parameters.
+        model.add_module("embedding_projector", projector)
+        if cfg.load:
+            load_projector_checkpoint(cfg.load, projector)
+        model.__dict__["_training_gym_projector_merge"] = _ProjectorMerge(
+            model, projector, cfg
+        )
+        trainable = sum(p.numel() for p in projector.parameters())
+        logger.info(
+            "projector-only training: froze %d base parameter tensors, "
+            "%d trainable projector parameters",
+            frozen,
+            trainable,
+        )
+    else:
+        # Later pipeline stages get no projector, but miles still splats the
+        # batch's embedding tensors into every stage's forward, so they have to
+        # be stripped before they reach ``GPTModel.forward``.
+        model.__dict__["_training_gym_projector_merge"] = _ProjectorMerge(
+            model, EmbeddingProjector(1, 1, 1, 1), cfg
+        )
+
+    return model
+
+
+def projector_sft_rollout(args, rollout_id: int, data_buffer, evaluation: bool = False):
+    """miles ``--rollout-function-path``: supervised samples carrying embeddings.
+
+    miles' own ``sft_rollout.generate_rollout`` builds tokens and the loss mask
+    from each conversation, which is all a text SFT run needs. This does the
+    same and additionally lifts the dataset's embeddings out of
+    ``Sample.metadata`` into ``multimodal_train_inputs``, the per-sample tensor
+    dict miles concatenates across a packed batch — adding each sample's offset
+    to keys ending in ``_positions`` — and splats into ``model.forward``, where
+    the projector picks them up.
+    """
+    from miles.utils.mask_utils import (  # pyright: ignore[reportMissingImports]
+        MultiTurnLossMaskGenerator,
+    )
+    from miles.utils.processing_utils import (  # pyright: ignore[reportMissingImports]
+        load_tokenizer,
+    )
+
+    if evaluation:
+        raise ValueError("projector_sft_rollout does not generate, so cannot evaluate")
+    cfg = from_miles_args(args)
+    tokenizer = load_tokenizer(
+        args.hf_checkpoint,
+        chat_template_path=args.chat_template_path,
+        trust_remote_code=True,
+    )
+    mask_generator = MultiTurnLossMaskGenerator(
+        tokenizer, tokenizer_type=args.loss_mask_type
+    )
+
+    samples = data_buffer.get_samples(args.rollout_batch_size)
+    for sample in samples:
+        (sample,) = sample
+        messages = sample.prompt
+        token_ids, loss_mask = mask_generator.get_loss_mask(
+            messages, tools=sample.metadata.get("tools")
+        )
+        response_length = mask_generator.get_response_lengths([loss_mask])[0]
+        sample.tokens = token_ids
+        sample.response_length = response_length
+        sample.reward = 0
+        sample.loss_mask = loss_mask[-response_length:]
+
+        embeddings = sample.metadata.get(cfg.embeddings_key)
+        positions = sample.metadata.get(cfg.positions_key)
+        if embeddings is None or positions is None:
+            raise ValueError(
+                f"sample {sample.index} carries no '{cfg.embeddings_key}'/"
+                f"'{cfg.positions_key}' metadata; a projector-only run has "
+                "nothing to train without embeddings."
+            )
+        embeddings_t = torch.tensor(embeddings, dtype=torch.float32)
+        if embeddings_t.shape[-1] != cfg.input_dim:
+            raise ValueError(
+                f"sample {sample.index} has {embeddings_t.shape[-1]}-wide "
+                f"embeddings but the projector expects {cfg.input_dim}"
+            )
+        max_position = max(positions, default=-1)
+        if max_position >= len(token_ids):
+            raise ValueError(
+                f"sample {sample.index} places an embedding at token "
+                f"{max_position} of a {len(token_ids)}-token sequence"
+            )
+        sample.multimodal_train_inputs = {
+            cfg.embeddings_key: embeddings_t,
+            cfg.positions_key: torch.tensor(positions, dtype=torch.long),
+        }
+    return samples
+
+
+def load_projector_checkpoint(path: str, projector: EmbeddingProjector) -> int:
+    """Load a projector checkpoint (file or directory) into ``projector``.
+
+    Returns the iteration it was saved at. A directory resolves to the run's
+    ``projector_latest.pt``.
+    """
+    resolved = os.path.join(path, _LATEST) if os.path.isdir(path) else path
+    state = torch.load(resolved, map_location="cpu", weights_only=True)
+    projector.load_state_dict(state["state_dict"])
+    iteration = int(state.get("iteration", 0))
+    logger.info("loaded projector checkpoint %s (iteration %d)", resolved, iteration)
+    return iteration
+
+
+def _is_projector_writer() -> bool:
+    """True on exactly one rank per projector replica group."""
+    import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
+
+    return (
+        ps.get_tensor_model_parallel_rank() == 0
+        and ps.get_data_parallel_rank() == 0
+        and ps.get_expert_model_parallel_rank() == 0
+    )
+
+
+def save_projector_checkpoint(
+    args, rollout_id: int, step_id: int, model, optimizer=None, opt_param_scheduler=None
+) -> None:
+    """miles before-train-step hook: save the projector, not the base model.
+
+    Fires at the first micro step of a rollout and writes the state the
+    previous rollout produced, so the file lands outside the training step
+    itself. Optimizer state is not saved — the projector's Adam moments are
+    cheap to rebuild, and reading Megatron's distributed optimizer state for a
+    replicated module would need the base model's sharding machinery.
+    """
+    if step_id != 0 or rollout_id <= 0:
+        return
+    cfg = from_miles_args(args)
+    save_dir = cfg.save_dir or os.path.join(
+        str(args.save or "/checkpoints"), "projector"
+    )
+    if cfg.save_interval <= 0 or rollout_id % cfg.save_interval != 0:
+        return
+
+    chunks = model if isinstance(model, list) else [model]
+    for chunk in chunks:
+        projector = get_projector(chunk)
+        if projector is None or not _is_projector_writer():
+            continue
+        os.makedirs(save_dir, exist_ok=True)
+        state = {
+            "iteration": rollout_id,
+            "state_dict": {
+                k: v.detach().to("cpu") for k, v in projector.state_dict().items()
+            },
+            "config": {
+                "input_dim": cfg.input_dim,
+                "hidden_dim": cfg.hidden_dim,
+                "num_layers": cfg.num_layers,
+                "output_dim": cfg.output_dim,
+            },
+        }
+        path = os.path.join(save_dir, f"projector_iter_{rollout_id:07d}.pt")
+        torch.save(state, path)
+        torch.save(state, os.path.join(save_dir, _LATEST))
+        logger.info("saved projector checkpoint %s", path)
+        return
