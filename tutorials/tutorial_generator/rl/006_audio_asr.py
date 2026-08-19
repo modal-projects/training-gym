@@ -91,7 +91,6 @@ def _deploy_base():
     base_deployment = CustomDeployment.launch(
         model,
         unauthenticated=True,
-        recreate_if_existing=True
     )
     base_deployment.wait_until_ready(timeout=15 * 60)
     print(f"base model deployed to {base_deployment.url}")
@@ -109,12 +108,12 @@ def _score_fn_intro():
 
 @code
 def _score_fn():
-    async def score_transcript(response: str, label: str) -> float:
+    def score_transcript(response: str, label: str) -> float:
         import jiwer
 
         if not label:
             return 0.0
-        return -float(jiwer.wer(label, response))
+        return float(jiwer.wer(label, response))
 
 
 
@@ -239,7 +238,7 @@ def _eval_base():
             )
             resp.raise_for_status()
             hypothesis = (resp.json().get("text") or "").lower().strip()
-            wer = score_transcript(hypothesis, reference)
+            return score_transcript(hypothesis, reference)
 
         with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
             wers = list(executor.map(_score_one, eval_dataset.load()))
@@ -255,7 +254,7 @@ def _rm_fn_intro():
     """
     ## Creating a reward function
 
-    To make our scoring function a reward function, we must return the 
+    To make our scoring function a reward function, we must return the
     negative WER so that lower WER leads to higher rewards.
     """
 
@@ -263,8 +262,7 @@ def _rm_fn_intro():
 @code
 def _rm_fn():
     async def wer_rm(args, sample, **kwargs) -> float:
-        wer = score_transcript(sample.response, sample.label)
-        return -wer
+        return -score_transcript(sample.response, sample.label)
 
 
 @markdown
@@ -289,7 +287,7 @@ def _train():
             actor_num_nodes=1,
             actor_num_gpus_per_node=2,
             tensor_model_parallel_size=1,
-            sequence_parallel=False,       
+            sequence_parallel=False,
             rollout_num_gpus=2,
             rollout_num_gpus_per_engine=1,
             custom_rm_function=wer_rm,
@@ -316,7 +314,6 @@ def _eval_trained():
         model,
         checkpoint,
         unauthenticated=True,
-        recreate_if_existing=True
     )
     trained_deployment.wait_until_ready(timeout=15 * 60)
     print(f"checkpoint deployed to {trained_deployment.url}")

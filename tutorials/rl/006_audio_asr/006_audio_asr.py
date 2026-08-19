@@ -40,12 +40,12 @@ from modal_training_gym import (
 # As mentioned before, we measure capability by lower WER, so that's what we'll use.
 # We can use the `jiwer` library to calculate this so we don't have to ourselves.
 
-async def score_transcript(response: str, label: str) -> float:
+def score_transcript(response: str, label: str) -> float:
     import jiwer
 
     if not label:
         return 0.0
-    return -float(jiwer.wer(label, response))
+    return float(jiwer.wer(label, response))
 
 # ## Get the dataset
 #
@@ -109,72 +109,54 @@ class LibriSpeechASRDataset(MultimodalDataset):
 
 eval_dataset = LibriSpeechASRDataset(hf_split="validation[8:16]")
 
-async def word_error_rate_reward(args, sample, **kwargs) -> float:
-    import jiwer
-
-    response = (getattr(sample, "response", "") or "").lower().strip()
-    reference = (getattr(sample, "label", "") or "").lower().strip()
-    if not reference:
-        return 0.0
-    return -float(jiwer.wer(reference, response))
-
-# ## Evaluate the trained checkpoint
+# ## Evaluate the base model
 #
-# `CustomDeployment.launch()` serves the trained checkpoint on SGLang
-# (converting the Megatron checkpoint to HuggingFace first, audio tower included).
-# Then we `POST` each clip to `/v1/audio/transcriptions`, scoring word
-# accuracy (`1 − WER`), and print the mean WER and mean accuracy.
+# Let's get our baseline measure of performance.
 
-def transcribe_and_score(
-    deployment: CustomDeployment, example: dict
-) -> dict:
+def run_eval(deployment, max_concurrency: int = 2) -> float:
+    from concurrent.futures import ThreadPoolExecutor
     import base64
     import io
 
-    import jiwer
     import requests
     import soundfile as sf
 
-    data_uri = example["audios"][0]
-    reference = (example["label"] or "").lower().strip()
-    b64 = data_uri.split(",", 1)[1] if data_uri.startswith("data:") else data_uri
-    arr, sr = sf.read(io.BytesIO(base64.b64decode(b64)))
 
-    buf = io.BytesIO()
-    sf.write(buf, arr, sr, format="WAV")
-    buf.seek(0)
-    resp = requests.post(
-        f"{deployment.url}/v1/audio/transcriptions",
-        files={"file": ("clip.wav", buf, "audio/wav")},
-        data={
-            "model": deployment.served_model_name,
-            "temperature": "0.0",
-        },
-        timeout=120,
-    )
-    resp.raise_for_status()
-    hypothesis = (resp.json().get("text") or "").lower().strip()
-    wer = float(jiwer.wer(reference, hypothesis)) if reference else 0.0
-
-    return {
-        "score": max(0.0, 1.0 - wer),
-        "response": hypothesis,
-        "wer": wer,
-        "reference": reference,
-    }
-
-def run_eval(
-    deployment, *, max_concurrency: int = 2
-) -> list[dict]:
-    from concurrent.futures import ThreadPoolExecutor
-
-    deployment.wait_until_ready(timeout=3000)
+    deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
-        return transcribe_and_score(deployment, example)
+        data_uri = example["audios"][0]
+        reference = (example["label"] or "").lower().strip()
+        b64 = data_uri.split(",", 1)[1] if data_uri.startswith("data:") else data_uri
+        arr, sr = sf.read(io.BytesIO(base64.b64decode(b64)))
+
+        buf = io.BytesIO()
+        sf.write(buf, arr, sr, format="WAV")
+        buf.seek(0)
+        resp = requests.post(
+            f"{deployment.url}/v1/audio/transcriptions",
+            files={"file": ("clip.wav", buf, "audio/wav")},
+            data={
+                "model": deployment.served_model_name,
+                "temperature": "0.0",
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        hypothesis = (resp.json().get("text") or "").lower().strip()
+        return score_transcript(hypothesis, reference)
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        return list(executor.map(_score_one, eval_dataset.load()))
+        wers = list(executor.map(_score_one, eval_dataset.load()))
+    return sum(wers) / len(wers) if wers else float("nan")
+
+# ## Creating a reward function
+#
+# To make our scoring function a reward function, we must return the
+# negative WER so that lower WER leads to higher rewards.
+
+async def wer_rm(args, sample, **kwargs) -> float:
+    return -score_transcript(sample.response, sample.label)
 
 import modal
 
@@ -196,56 +178,62 @@ def _main_impl() -> None:
     # [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment/)
     # to deploy the base and trained models.
 
-    base_model = Qwen3_ASR_1_7B()
+    model = Qwen3_ASR_1_7B()
     base_deployment = CustomDeployment.launch(
-        base_model,
+        model,
         unauthenticated=True,
-        recreate_if_existing=True
     )
     base_deployment.wait_until_ready(timeout=15 * 60)
     print(f"base model deployed to {base_deployment.url}")
 
     train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
 
-    # ## Train
-    #
-    # `Qwen3_ASR_1_7b_Recipe` carries the ASR-specific defaults — the transcription
-    # rollout, padded (bshd) batches, the lighter SGLang memory fraction, and the
-    # many-samples/high-temperature settings that surface reward variance — so the
-    # recipe you write only sets the reward. It defaults to a `H100:2` single node;
-    # pass `actor_num_gpus_per_node=8` (and a larger `num_rollout`) to use a full node.
-    #
-    # To log training curves to W&B, also pass `wandb=WandbConfig(project="…")` to the
-    # recipe — that needs a W&B account with write access, supplied via the
-    # `wandb-secret` Modal secret.
-    #
-    # `TrainConfig.train()` builds the Modal app, runs GRPO, and saves the trained
-    # model as a Megatron checkpoint (exported to HuggingFace on demand at deploy).
+    print("running base model evaluation...")
+    base_mean = run_eval(base_deployment)
+    print(f"average WER: {base_mean:.1%}")
 
-    training_run = TrainConfig(
+    # ## Begin training
+    #
+    # There are many ASR-specific changes to the default framework recipes such as
+    # the transcription rollout, padded (bshd) batches, and the many-samples/high-temperature
+    # settings that surface reward variance. To not pass the burden of specifying onto you,
+    # we created `Qwen3_ASR_1_7b_Recipe` so that you can focus on training.
+
+    train_run = TrainConfig(
         model=Qwen3_ASR_1_7B(),
         dataset=train_dataset,
-        recipe=Qwen3_ASR_1_7b_Recipe(custom_rm_function=word_error_rate_reward),
+        recipe=Qwen3_ASR_1_7b_Recipe(
+            gpu_type="H100",
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=2,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,
+            rollout_num_gpus=2,
+            rollout_num_gpus_per_engine=1,
+            custom_rm_function=wer_rm,
+        ),
     )
-    print("Starting training...")
-    train_result = training_run.train()
-    print(f"Training run id: {train_result.training_run_id}")
+    train_result = train_run.train()
+    print(f"run id: {train_result.training_run_id}")
+
+    # ## Evaluate the trained checkpoint
+    #
+    # Let's run the same eval on the trained checkpoint.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    deployment = CustomDeployment.launch(
-        Qwen3_ASR_1_7B(),
-        checkpoint=checkpoint,
+    print(f"checkpoint: {checkpoint.path}")
+
+    trained_deployment = CustomDeployment.launch(
+        model,
+        checkpoint,
         unauthenticated=True,
     )
-    print(f"Serving trained model at {deployment.url}")
+    trained_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"checkpoint deployed to {trained_deployment.url}")
 
-    rows = run_eval(deployment)
-    mean_wer = sum(r["wer"] for r in rows) / len(rows) if rows else float("nan")
-    mean_acc = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
-    print(
-        f"Eval: mean WER {mean_wer:.3f} "
-        f"(accuracy {mean_acc:.3f}) over {len(rows)} clips"
-    )
+    print("running checkpoint evaluation...")
+    trained_mean = run_eval(trained_deployment)
+    print(f"average WER: {trained_mean:.1f}")
 
 @tutorial_cli_app.local_entrypoint()
 def main() -> None:

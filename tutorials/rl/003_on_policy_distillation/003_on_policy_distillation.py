@@ -233,9 +233,9 @@ def _main_impl() -> None:
     # [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment/)
     # to serve the teacher.
 
-    base_student_model = Qwen3_5_4B()
+    student_model = Qwen3_5_4B()
     base_student_deployment = Endpoint.launch(
-        base_student_model, unauthenticated=True, recreate_if_existing=True
+        student_model, unauthenticated=True, recreate_if_existing=True
     )
 
     teacher_model = Qwen3_5_9B()
@@ -269,7 +269,7 @@ def _main_impl() -> None:
     # framework-necessary environment variables and flags.
 
     train_run = TrainConfig(
-        model=base_student_model,
+        model=student_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
             gpu_type="H100",
@@ -320,7 +320,7 @@ def _main_impl() -> None:
     print(f"checkpoint: {checkpoint.path}")
 
     trained_student_deployment = Endpoint.launch(
-        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
+        student_model, checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     trained_student_deployment.wait_until_ready(timeout=15 * 60)
     print(f"checkpoint deployed to {trained_student_deployment.url}")
