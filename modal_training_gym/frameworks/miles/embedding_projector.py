@@ -199,8 +199,13 @@ def all_reduce_projector_grads(projector: nn.Module, sequence_parallel: bool) ->
     which is why the flag is honored rather than assumed.
 
     Every rank enters this unconditionally, once per optimizer step, with a
-    tensor of the same shape for every parameter — materializing a zero gradient
-    when one is missing rather than skipping the collective. Riding Megatron's
+    tensor of the same shape *and dtype* for every parameter — materializing a
+    zero gradient when one is missing rather than skipping the collective, and
+    reducing in fp32 so the collective's element size cannot depend on which
+    buffer a rank happened to have (Megatron's ``main_grad`` is fp32 under
+    ``accumulate_allreduce_grads_in_fp32``, a materialized ``param.grad``
+    carries ``params_dtype``, and a collective whose ranks disagree is
+    undefined). Riding Megatron's
     ``sequence_parallel`` attribute instead (which
     ``_allreduce_non_tensor_model_parallel_grads`` honors) is what deadlocked:
     that path is entered per-rank depending on what that rank's gradients look
@@ -227,9 +232,11 @@ def all_reduce_projector_grads(projector: nn.Module, sequence_parallel: bool) ->
                 # the optimizer will read it.
                 param.grad = torch.zeros_like(param)
             grad = param.grad
+        buffer = grad.float()
         torch.distributed.all_reduce(
-            grad, op=torch.distributed.ReduceOp.SUM, group=group
+            buffer, op=torch.distributed.ReduceOp.SUM, group=group
         )
+        grad.copy_(buffer)
         reduced += 1
     return reduced
 
@@ -344,7 +351,13 @@ class _ProjectorMerge:
 
     def _embedding_hook(self, module, inputs, output):
         if self._pending is None:
-            return output
+            # No embeddings in this microbatch, so nothing to merge — but the
+            # base is frozen, so returning the embeddings untouched would leave
+            # this rank's loss without a ``grad_fn`` and it would skip a
+            # backward its peers wait on. Today's rollout rejects a sample
+            # without embeddings, so this is the shape of a future rollout that
+            # mixes in text-only samples rather than a path taken now.
+            return output + projector_graph_tap(self._projector, output.dtype)
         embeddings, positions = self._pending
         projected = self._projector(
             embeddings.to(
