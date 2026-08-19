@@ -240,6 +240,30 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
             )
         return self
 
+    @model_validator(mode="after")
+    def _reject_distributed_optimizer(self) -> "GLM_5_2_Projector_Recipe":
+        """Reject the distributed optimizer: it shards the gradient we sum.
+
+        The projector's tensor-parallel gradient sum reads each parameter's
+        ``main_grad`` whole. Under ``use_distributed_optimizer`` that buffer is
+        a reduce-scattered shard of a bucket, and summing shards across the
+        tensor-parallel group is not the replicated weight's whole-sequence
+        gradient — it would train on a silently wrong gradient rather than
+        fail. There is nothing to gain either: the optimizer state a
+        projector-only run carries is the projector's, tens of megabytes, so
+        sharding it saves nothing against a frozen 744B base.
+        """
+        if self.use_distributed_optimizer:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs use_distributed_optimizer=False: "
+                "the replicated projector's gradients are summed across the "
+                "tensor-parallel group from whole main_grad buffers, which the "
+                "distributed optimizer replaces with reduce-scattered shards. "
+                "Its only benefit is sharding optimizer state, and the base is "
+                "frozen, so this run's optimizer state is the projector's alone."
+            )
+        return self
+
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
         super().validate_model_parallelism(model)
         if self.pipeline_model_parallel_size != 1:

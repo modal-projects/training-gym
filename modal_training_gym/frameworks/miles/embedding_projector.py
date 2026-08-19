@@ -136,7 +136,13 @@ def freeze_base_model(model: nn.Module) -> int:
 
 
 def _build_base_model(args, pre_process: bool, post_process: bool, vp_stage):
-    """Build the model miles would have built without this provider."""
+    """Build the model miles would have built without this provider.
+
+    The build happens with ``custom_model_provider_path`` still cleared, not
+    just the lookup: whether miles resolves the choice when handing back the
+    provider or when the provider runs is its business, and re-entering this
+    function would recurse until the stack overflows.
+    """
     from miles.backends.megatron_utils.model_provider import (  # pyright: ignore[reportMissingImports]
         get_model_provider_func,
     )
@@ -145,11 +151,11 @@ def _build_base_model(args, pre_process: bool, post_process: bool, vp_stage):
     args.custom_model_provider_path = None
     try:
         provider = get_model_provider_func(args)
+        return provider(
+            pre_process=pre_process, post_process=post_process, vp_stage=vp_stage
+        )
     finally:
         args.custom_model_provider_path = saved
-    return provider(
-        pre_process=pre_process, post_process=post_process, vp_stage=vp_stage
-    )
 
 
 def projector_parameters(projector: nn.Module) -> list[tuple[str, torch.Tensor]]:
@@ -200,6 +206,11 @@ def all_reduce_projector_grads(projector: nn.Module, sequence_parallel: bool) ->
     that path is entered per-rank depending on what that rank's gradients look
     like, and a replicated module whose gradients are data-dependent cannot
     safely take part.
+
+    ``main_grad`` is read whole, so this assumes the non-distributed optimizer —
+    with ``use_distributed_optimizer`` it is a reduce-scattered shard of a
+    bucket and summing shards across the group means nothing. The recipe rejects
+    that flag rather than leaving the assumption implicit here.
     """
     import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
 

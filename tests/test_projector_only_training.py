@@ -143,6 +143,13 @@ def test_tensor_parallelism_without_sequence_parallelism_is_rejected():
     ).validate_model_parallelism(GLM_5_2())
 
 
+def test_distributed_optimizer_is_rejected():
+    """It replaces the main_grad buffers the projector's TP sum reads whole."""
+    with pytest.raises(ValidationError, match="use_distributed_optimizer=False"):
+        GLM_5_2_Projector_Recipe(use_distributed_optimizer=True)
+    assert GLM_5_2_Projector_Recipe().use_distributed_optimizer is False
+
+
 def test_projector_starts_at_the_bases_embedding_scale():
     """A unit-std LayerNorm output is ~100x the scale of a token embedding."""
     spec = ProjectorSpec()
