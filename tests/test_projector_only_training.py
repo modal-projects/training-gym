@@ -177,7 +177,7 @@ def test_megatron_checkpoint_loading_is_rejected():
 def test_a_finished_run_always_leaves_a_projector_checkpoint():
     """The run's last optimizer step saves even when the interval misses it."""
     assert [
-        s for s in range(1, 11) if should_save_projector(s, 10, save_interval=4)
+        s for s in range(1, 11) if should_save_projector(s, s, 10, save_interval=4)
     ] == [4, 8, 10]
     # The shipped defaults: one save, at the end of the run.
     recipe = GLM_5_2_Projector_Recipe()
@@ -190,11 +190,16 @@ def test_a_finished_run_always_leaves_a_projector_checkpoint():
     assert [
         s
         for s in range(1, total + 1)
-        if should_save_projector(s, total, recipe.projector.save_interval)
+        if should_save_projector(s, s, total, recipe.projector.save_interval)
     ] == [total]
     # An interval of 0 turns periodic saves off, but not the final one.
-    assert not should_save_projector(3, total, 0)
-    assert should_save_projector(total, total, 0)
+    assert not should_save_projector(3, 3, total, 0)
+    assert should_save_projector(total, total, total, 0)
+    # A skipped update (gradient overflow) consumed one of the run's steps, so
+    # the last attempt still saves what the applied steps produced.
+    assert should_save_projector(total - 1, total, total, 0)
+    # ...but a run where nothing ever applied has no trained adapter to write.
+    assert not should_save_projector(0, total, total, 0)
 
 
 def test_synthetic_validation_data_is_regenerated_per_run():

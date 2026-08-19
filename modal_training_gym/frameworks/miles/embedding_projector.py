@@ -620,6 +620,7 @@ class _ProjectorSaver:
         self._sequence_parallel = bool(getattr(args, "sequence_parallel", False))
         self._total_steps = int(getattr(args, "train_iters", 0) or 0)
         self._steps = 0
+        self._attempts = 0
         self._original_step = optimizer.step
         optimizer.step = self._step
 
@@ -628,13 +629,15 @@ class _ProjectorSaver:
             all_reduce_projector_grads(projector, self._sequence_parallel)
         out = self._original_step(*fargs, **fkwargs)
         self._log_replica_state()
+        self._attempts += 1
         # Megatron returns (success, grad_norm, num_zeros); a step that did not
-        # apply (gradient overflow) left the projector unchanged.
-        if isinstance(out, tuple) and out and out[0] is False:
-            return out
-        self._steps += 1
+        # apply (gradient overflow) left the projector unchanged, so it does not
+        # advance the interval — but it still consumed one of the run's steps,
+        # which is what decides whether this was the last chance to write.
+        if not (isinstance(out, tuple) and out and out[0] is False):
+            self._steps += 1
         if should_save_projector(
-            self._steps, self._total_steps, self._cfg.save_interval
+            self._steps, self._attempts, self._total_steps, self._cfg.save_interval
         ):
             self._save()
         return out

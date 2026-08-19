@@ -124,17 +124,31 @@ class ProjectorSpec:
 
 
 def should_save_projector(
-    steps_done: int, total_steps: int, save_interval: int
+    steps_applied: int, steps_attempted: int, total_steps: int, save_interval: int
 ) -> bool:
-    """Whether the projector should be written after ``steps_done`` steps.
+    """Whether the projector should be written, after an optimizer step.
 
-    Steps are optimizer steps, and the run's last one always saves: a finished
-    run has to leave the adapter it spent its GPU budget producing, whether or
-    not the interval happens to divide the step count.
+    The run's last step always saves: a finished run has to leave the adapter it
+    spent its GPU budget producing, whether or not the interval happens to
+    divide the step count.
+
+    Which step is the last one is decided by ``steps_attempted`` against
+    ``total_steps`` (miles' ``train_iters``, a count of attempts), while the
+    interval counts ``steps_applied`` — so ``save_interval`` means what it says
+    and skipped updates do not shift it. Counting only applied steps for both
+    would lose the whole artifact on a run whose interval saves nothing and
+    where one update was skipped for a gradient overflow: the count would end
+    one short of the total, the final-step guarantee would never fire, and the
+    run would exit having written nothing.
+
+    Nothing is written before an update has applied, so a projector still at its
+    initialization is never mistaken for a trained one.
     """
-    if total_steps > 0 and steps_done >= total_steps:
+    if steps_applied <= 0:
+        return False
+    if total_steps > 0 and steps_attempted >= total_steps:
         return True
-    return save_interval > 0 and steps_done % save_interval == 0
+    return save_interval > 0 and steps_applied % save_interval == 0
 
 
 def from_miles_args(args: object) -> ProjectorSpec:
