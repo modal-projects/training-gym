@@ -154,14 +154,33 @@ def projector_parameters(projector: nn.Module) -> list[tuple[str, torch.Tensor]]
     return sorted(projector.named_parameters(), key=lambda item: item[0])
 
 
-def all_reduce_projector_grads(projector: nn.Module) -> int:
+def projector_graph_tap(projector: nn.Module, dtype) -> torch.Tensor:
+    """A differentiable, exactly-zero scalar tying ``projector`` into the graph.
+
+    Needed on a rank whose sequence shard holds none of the projected positions:
+    the base is frozen, so the projector is the only thing in the forward that
+    requires grad, and dropping it there would leave the rank's loss without a
+    ``grad_fn`` — it would then skip the backward its peers are waiting on.
+
+    Built from the parameters rather than from the projector's output: parameters
+    are finite by construction, whereas multiplying an activation by zero is a
+    ``0 * inf`` trap that poisons the whole embedding tensor with NaN.
+    """
+    total = sum(param.sum() for _, param in projector_parameters(projector))
+    return (total * 0.0).to(dtype)
+
+
+def all_reduce_projector_grads(projector: nn.Module, sequence_parallel: bool) -> int:
     """Sum the replicated projector's gradients across the tensor-parallel group.
 
     Under sequence parallelism each tensor-parallel rank holds a disjoint slice
     of the packed sequence, so each computes the gradient of the same replicated
     weight with respect to a different subset of the projected positions. The
     whole-sequence gradient is their **sum**, not their average; the
-    data-parallel average is DDP's job and is left alone.
+    data-parallel average is DDP's job and is left alone. Without sequence
+    parallelism every tensor-parallel rank merges every position and so already
+    holds the whole gradient — summing there would scale it by the group size,
+    which is why the flag is honored rather than assumed.
 
     Every rank enters this unconditionally, once per optimizer step, with a
     tensor of the same shape for every parameter — materializing a zero gradient
@@ -174,7 +193,7 @@ def all_reduce_projector_grads(projector: nn.Module) -> int:
     """
     import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
 
-    if ps.get_tensor_model_parallel_world_size() <= 1:
+    if not sequence_parallel or ps.get_tensor_model_parallel_world_size() <= 1:
         return 0
     group = ps.get_tensor_model_parallel_group()
     reduced = 0
@@ -194,7 +213,9 @@ def all_reduce_projector_grads(projector: nn.Module) -> int:
     return reduced
 
 
-def _scatter_projected(sequence_parallel, embeddings_out, embeds, positions):
+def _scatter_projected(
+    sequence_parallel, embeddings_out, embeds, positions, projector=None
+):
     """Write ``embeds`` into ``embeddings_out`` at ``positions`` (sequence-first).
 
     ``LanguageModelEmbedding.forward`` returns ``[sequence, batch, hidden]``, and
@@ -207,8 +228,14 @@ def _scatter_projected(sequence_parallel, embeddings_out, embeds, positions):
     """
     import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
 
+    def unmerged():
+        """``embeddings_out``, with the projector still in the graph at zero weight."""
+        if projector is None:
+            return embeddings_out
+        return embeddings_out + projector_graph_tap(projector, embeddings_out.dtype)
+
     if positions.numel() == 0:
-        return embeddings_out
+        return unmerged()
     if embeddings_out.shape[1] != 1:
         raise ValueError(
             "projector training expects miles' packed layout, one sequence per "
@@ -221,14 +248,14 @@ def _scatter_projected(sequence_parallel, embeddings_out, embeds, positions):
         local, embeds = local[keep], embeds[keep]
     else:
         local = positions
+    logger.info(
+        "projector merge: %d of %d position(s) on this rank's %d-token shard",
+        int(local.numel()),
+        int(positions.numel()),
+        s_local,
+    )
     if not local.numel():
-        # None of the projected positions live on this rank's sequence shard, so
-        # the projector contributes nothing here and its gradient stays at the
-        # zero Megatron's grad buffers start the iteration at. Keeping it in the
-        # graph with a zero multiplier instead would be a ``0 * inf`` trap; the
-        # unconditional all-reduce in ``all_reduce_projector_grads`` is what
-        # keeps the collectives symmetric.
-        return embeddings_out
+        return unmerged()
     merged = embeddings_out.clone()
     merged[local, 0] = embeds.to(merged.dtype)
     return merged
@@ -298,6 +325,7 @@ class _ProjectorMerge:
             output,
             projected,
             positions.to(output.device),
+            self._projector,
         )
 
 
@@ -542,6 +570,7 @@ class _ProjectorSaver:
                 "found" if isinstance(direct, EmbeddingProjector) else "None",
                 "found" if get_projector(chunk) is not None else "NOT FOUND",
             )
+        self._sequence_parallel = bool(getattr(args, "sequence_parallel", False))
         self._total_steps = int(getattr(args, "train_iters", 0) or 0)
         self._steps = 0
         self._original_step = optimizer.step
@@ -549,7 +578,7 @@ class _ProjectorSaver:
 
     def _step(self, *fargs, **fkwargs):
         for projector in self._projectors:
-            all_reduce_projector_grads(projector)
+            all_reduce_projector_grads(projector, self._sequence_parallel)
         out = self._original_step(*fargs, **fkwargs)
         self._log_replica_state()
         # Megatron returns (success, grad_norm, num_zeros); a step that did not

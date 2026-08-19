@@ -130,6 +130,26 @@ def test_context_parallelism_is_rejected():
         recipe.validate_model_parallelism(GLM_5_2())
 
 
+def test_tensor_parallelism_without_sequence_parallelism_is_rejected():
+    """Summing the replicated projector's grads over TP assumes disjoint shards."""
+    recipe = GLM_5_2_Projector_Recipe(sequence_parallel=False)
+    with pytest.raises(TrainingGymConfigError, match="sequence_parallel=True"):
+        recipe.validate_model_parallelism(GLM_5_2())
+    # TP=1 has nothing to sum over, so the combination is fine there.
+    GLM_5_2_Projector_Recipe(
+        sequence_parallel=False,
+        tensor_model_parallel_size=1,
+        expert_model_parallel_size=1,
+    ).validate_model_parallelism(GLM_5_2())
+
+
+def test_renaming_the_positions_column_is_rejected():
+    """Miles offsets packed-batch keys only when they end in ``_positions``."""
+    with pytest.raises(ValidationError, match="must end in '_positions'"):
+        ProjectorSpec(positions_key="proj_pos")
+    assert ProjectorSpec(positions_key="protein_positions").positions_key
+
+
 def test_megatron_checkpoint_loading_is_rejected():
     """The projector is a submodule, so base state dicts lack its keys."""
     with pytest.raises(ValidationError, match="resumes through projector.load"):

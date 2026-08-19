@@ -7,7 +7,7 @@ every ``extra_config`` key on ``args``, and
 inside the container. No new miles CLI flags are involved.
 """
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 # Miles arg carrying the serialized ProjectorSpec.
@@ -48,7 +48,8 @@ class ProjectorSpec:
         Dataset column (and ``forward`` keyword) holding the per-token
         embeddings, as one ``[num_tokens, input_dim]`` tensor per sample.
     positions_key : str
-        Dataset column holding the token positions those embeddings occupy.
+        Dataset column holding the token positions those embeddings occupy. Has
+        to keep the ``_positions`` suffix miles' packing convention keys off.
     save_dir : str
         Directory for projector checkpoints; empty puts them under
         ``<save>/projector``.
@@ -74,6 +75,24 @@ class ProjectorSpec:
     save_interval: int = 10
     load: str = ""
     init_seed: int = 0
+
+    @model_validator(mode="after")
+    def _positions_key_keeps_miles_suffix(self) -> "ProjectorSpec":
+        """Miles only offsets packed-batch keys whose name ends in ``_positions``.
+
+        Positions are absolute offsets into the packed sequence, which only holds
+        because miles adds each sample's start offset to those keys. Under any
+        other name the offset is silently skipped and every sample's embeddings
+        land on the first sample's tokens.
+        """
+        if not self.positions_key.endswith("_positions"):
+            raise ValueError(
+                f"positions_key={self.positions_key!r} must end in '_positions': "
+                "miles adds each sample's offset in the packed batch only to keys "
+                "with that suffix, and the projector's positions are absolute "
+                "offsets into the packed sequence."
+            )
+        return self
 
     def to_args_dict(self) -> dict[str, int | str | None]:
         return {

@@ -260,6 +260,17 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
                 "on the wrong tokens. Scale with tensor_model_parallel_size or "
                 "expert_model_parallel_size."
             )
+        if self.tensor_model_parallel_size > 1 and not self.sequence_parallel:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs sequence_parallel=True when "
+                f"tensor_model_parallel_size > 1 (got "
+                f"TP={self.tensor_model_parallel_size}). The projector is "
+                "replicated across the tensor-parallel group and its gradients "
+                "are summed over it, which is the whole-sequence gradient only "
+                "while each rank merges a disjoint sequence shard; without "
+                "sequence parallelism every rank merges every position, so the "
+                "sum would scale the projector's gradient by TP."
+            )
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
