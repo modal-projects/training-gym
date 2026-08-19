@@ -36,6 +36,14 @@ from modal_training_gym import (
     list_checkpoints,
 )
 
+# ## Deploy the base model
+#
+# We first deploy the base model with an
+# [Endpoint](https://modal.com/docs/guide/endpoints)
+# to get a baseline for performance.
+
+base_model = Qwen3_5_4B()
+
 # ## Define a scoring function
 #
 # Following the paper, we'll normalize as they do and return 1 for correct answers 
@@ -125,7 +133,8 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
 # respectively. These values, however, do maintain the paper's 4:1 ratio.
 
 async def dapo_overlong_rm(args, sample, **kwargs) -> float:
-    base = score_answer(sample.response, sample.label)
+    response = base_model.parse_response(sample.response)
+    base = score_answer(response.content, sample.label)
 
     L_max = args.rollout_max_response_len
     L_cache = 2048
@@ -153,13 +162,6 @@ def _main_impl() -> None:
             "https://modal.com/secrets with an HF_TOKEN entry, then re-run."
         ) from e
 
-    # ## Deploy the base model
-    #
-    # We first deploy the base model with an
-    # [Endpoint](https://modal.com/docs/guide/endpoints)
-    # to get a baseline for performance.
-
-    base_model = Qwen3_5_4B()
     base_deployment = Endpoint.launch(
         base_model, unauthenticated=True, recreate_if_existing=True
     )

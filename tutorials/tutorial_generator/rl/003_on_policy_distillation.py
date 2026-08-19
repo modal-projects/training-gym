@@ -314,7 +314,8 @@ def _rm_fn():
 
         teacher_response = await _opd_reward(args, sample, **kwargs)
 
-        score = score_answer(sample.response, sample.label)
+        response = student_model.parse_response(sample.response)
+        score = score_answer(response.content, sample.label)
         sample.score = score
         if not isinstance(getattr(sample, "metadata", None), dict):
             sample.metadata = {}

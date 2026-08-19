@@ -54,7 +54,8 @@ def score_transcript(response: str, label: str) -> float:
 # Since this dataset contains audio files, we create a `MultimodalDataset`
 # to pass the audio clips to rollouts. We do some pre-processing with
 # `soundfile` and store as base64 inline for demonstration purposes.
-# In a production use case, you'd likely instead store by reference.
+# In a production use case, you'd likely instead store references and
+# resolve them in a custom `generate` function.
 
 class LibriSpeechASRDataset(MultimodalDataset):
     modality = "audio"

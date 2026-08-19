@@ -222,7 +222,8 @@ def _rm_fn_intro():
 @code
 def _rm_fn():
     async def dapo_overlong_rm(args, sample, **kwargs) -> float:
-        base = score_answer(sample.response, sample.label)
+        response = base_model.parse_response(sample.response)
+        base = score_answer(response.content, sample.label)
 
         L_max = args.rollout_max_response_len
         L_cache = 2048
