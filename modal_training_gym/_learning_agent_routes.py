@@ -215,11 +215,21 @@ class LearningAgentRunStore:
                     return None
                 index_row = dict(index_row)
                 # The record is already parsed here, so surface the research
-                # log size on the list row (index_row itself doesn't carry it).
+                # log size and the run's score trajectory on the list row
+                # (index_row itself carries neither).
                 log = (record.get("scores") or {}).get("learning_log")
                 index_row["learning_log_entries"] = (
                     len(log) if isinstance(log, list) else 0
                 )
+                series = []
+                if isinstance(log, list):
+                    for entry in log:
+                        if not isinstance(entry, dict):
+                            continue
+                        score = entry.get("dev_score")
+                        if isinstance(score, (int, float)) and entry.get("ts"):
+                            series.append([entry["ts"], score])
+                index_row["score_series"] = series[:200]
                 self._index_cache[run_id] = (record_mtime, index_row)
                 row = dict(index_row)
 

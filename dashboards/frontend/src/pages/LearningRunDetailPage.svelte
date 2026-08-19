@@ -1,7 +1,8 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { ArrowLeft, ChevronDown, ExternalLink } from "lucide-svelte";
   import LineChart from "../components/LineChart.svelte";
+  import RunChronicle from "../components/RunChronicle.svelte";
   import Loading from "../components/Loading.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
@@ -352,6 +353,21 @@
   let results = $derived(
     Array.isArray(detail?.scores?.results) ? detail.scores.results : [],
   );
+  let gpuLogRows = $derived(
+    Array.isArray(detail?.scores?.gpu_log) ? detail.scores.gpu_log : [],
+  );
+
+  // Timeline mark click: open the log, expand that entry, scroll to it.
+  async function jumpToLogEntry(index) {
+    logOpen = true;
+    const next = new Set(expandedLog);
+    next.add(index);
+    expandedLog = next;
+    await tick();
+    document
+      .getElementById(`log-entry-${index}`)
+      ?.scrollIntoView({ block: "center" });
+  }
 
   const KIND_STYLES = {
     checkpoint: "log-kind-checkpoint",
@@ -600,11 +616,13 @@
   {:else if error && !detail}
     <div class="page-empty">Failed to load: {error}</div>
   {:else}
-    <header class="flex items-center gap-[12px] flex-wrap">
-      <h2 class="m-0 text-(--text-bright) text-[18px] font-medium [font-family:var(--font-mono)] break-all">
-        {row.run_id || runId}
-      </h2>
-      <StatusPill status={runPillStatus(runState)} label={runState || null} />
+    <header class="flex flex-col gap-[3px]">
+      <div class="section-eyebrow">learning run · {row.task || "task"} · {row.track || "—"} track</div>
+      <div class="flex items-baseline gap-[12px] flex-wrap">
+        <h2 class="lockup-title">{row.scaffold || "agent"}</h2>
+        <StatusPill status={runPillStatus(runState)} label={runState || null} />
+      </div>
+      <div class="lockup-id">{row.run_id || runId}</div>
     </header>
 
     <div class="info-band">
@@ -634,9 +652,33 @@
       </div>
     </div>
 
+    {#if learningLog.length || gpuLogRows.length}
+      <section class="flex flex-col gap-[8px]">
+        <div class="flex items-center justify-between gap-[12px] flex-wrap">
+          <h3 class="section-eyebrow">Timeline</h3>
+          <div class="chron-legend" aria-hidden="true">
+            <span><i class="leg-line"></i> dev score</span>
+            <span><i class="leg-diamond"></i> checkpoint</span>
+            <span><i class="leg-diamond leg-hollow"></i> submission</span>
+            <span><i class="leg-dot"></i> note</span>
+            <span><i class="leg-band"></i> gpu job</span>
+          </div>
+        </div>
+        <div class="rounded-[6px] [background:rgba(255,255,255,0.03)] p-[10px_12px_4px]">
+          <RunChronicle
+            entries={learningLog}
+            gpuLog={gpuLogRows}
+            launchedAt={row.launched_at}
+            runState={runState}
+            onJump={jumpToLogEntry}
+          />
+        </div>
+      </section>
+    {/if}
+
     <section class="flex flex-col gap-[10px]">
       <h3
-        class="m-0 text-(--text-bright) text-[15px] font-medium"
+        class="section-eyebrow"
         title="The agent's CPU container \u2014 GPU jobs run as separate Modal jobs; their hours are in the cumulative gpu-hours chart and runs/GPU_LOG.jsonl"
       >System</h3>
       {#if !monitor.length && gpuHoursSeries.length < 2}
@@ -669,7 +711,7 @@
           onclick={toggleWorkspace}
           aria-expanded={wsOpen}
         >
-          <h3 class="m-0 text-(--text-bright) text-[15px] font-medium">Workspace</h3>
+          <h3 class="section-eyebrow">Workspace</h3>
           <span class="text-[12px] text-(--muted)">
             {wsTree
               ? `${wsTree.total_files} files · ${fmtBytes(wsTree.total_bytes)}`
@@ -747,17 +789,6 @@
       {/if}
     </section>
 
-    {#if scoreSeries.length >= 2}
-      <section class="rounded-[6px] [background:rgba(255,255,255,0.03)] p-[16px]">
-        <LineChart
-          title="Dev score over checkpoints"
-          data={scoreSeries}
-          height={160}
-          formatX={fmtChartDate}
-          formatY={(value) => fmtScore(value)}
-        />
-      </section>
-    {/if}
 
     <section class="flex flex-col gap-[10px]">
       <div class="flex items-center justify-between gap-[12px] flex-wrap">
@@ -766,7 +797,7 @@
           onclick={() => (logOpen = !logOpen)}
           aria-expanded={logOpen}
         >
-          <h3 class="m-0 text-(--text-bright) text-[15px] font-medium">Learning research log</h3>
+          <h3 class="section-eyebrow">Learning research log</h3>
           <span class="text-[12px] text-(--muted)">{learningLog.length} entries</span>
           <span class="text-(--muted) transition-transform" class:rotate-180={logOpen}>
             <ChevronDown size={15} strokeWidth={2.1} />
@@ -823,7 +854,7 @@
               {@const delta = logScoreDeltas.get(entry._i)}
               {@const isBest = bestLogEntryIndex === entry._i}
               {@const gymRun = expanded && kindLabel(entry) === "checkpoint" ? matchGymRun(entry) : null}
-              <li class="log-row-item">
+              <li class="log-row-item" id={`log-entry-${entry._i}`}>
                 <button class="log-row" onclick={() => toggleLogEntry(entry._i)} aria-expanded={expanded}>
                   <span class={`log-kind-pill ${kindClass(entry)}`}>{kindLabel(entry)}</span>
                   {#if entry.tag}
@@ -892,7 +923,7 @@
           onclick={openTrace}
           aria-expanded={traceOpen}
         >
-          <h3 class="m-0 text-(--text-bright) text-[15px] font-medium">Agent trace</h3>
+          <h3 class="section-eyebrow">Agent trace</h3>
           <span class="text-[12px] text-(--muted)">
             {eventsLoadedOnce ? `${eventsTotal} events` : `${row.num_events ?? "—"} events`}
           </span>
@@ -1008,7 +1039,7 @@
 
     {#if results.length}
       <section class="flex flex-col gap-[10px]">
-        <h3 class="m-0 text-(--text-bright) text-[15px] font-medium">Eval results</h3>
+        <h3 class="section-eyebrow">Eval results</h3>
         <div class="table-wrap">
           <table class="minimal-table">
             <thead>
@@ -1122,6 +1153,78 @@
   .trace-type-user {
     color: var(--blue, #60a5fa);
   }
+  .section-eyebrow {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 16px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--text, #c9c9c9) 74%, white);
+  }
+  .lockup-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-feature-settings: "ss01" on;
+    font-size: 26px;
+    line-height: 32px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--text-bright, #e5e5e5);
+  }
+  .lockup-id {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted, #9ca3af);
+    overflow-wrap: anywhere;
+  }
+  .chron-legend {
+    display: flex;
+    gap: 14px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    color: var(--muted, #9ca3af);
+    align-items: center;
+  }
+  .chron-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .chron-legend i {
+    display: inline-block;
+  }
+  .leg-line {
+    width: 12px;
+    height: 2px;
+    background: var(--green, #4ade80);
+  }
+  .leg-diamond {
+    width: 6px;
+    height: 6px;
+    background: var(--green, #4ade80);
+    transform: rotate(45deg);
+  }
+  .leg-hollow {
+    background: none;
+    border: 1.5px solid var(--blue, #60a5fa);
+  }
+  .leg-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.38);
+  }
+  .leg-band {
+    width: 12px;
+    height: 6px;
+    border-radius: 1.5px;
+    background: var(--yellow, #fbbf24);
+    opacity: 0.75;
+  }
+
   .log-row-item + .log-row-item {
     border-top: 1px solid var(--border, #2f2f2f);
   }

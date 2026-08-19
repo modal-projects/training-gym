@@ -1,6 +1,7 @@
 <script>
   import MinimalTable from "../components/MinimalTable.svelte";
   import MinimalTableSkeleton from "../components/MinimalTableSkeleton.svelte";
+  import Sparkline from "../components/Sparkline.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
   import {
@@ -35,12 +36,19 @@
   let finishedTotal = $derived(
     runs.filter((run) => runPillStatus(run.state) === "completed").length,
   );
-  let bestScore = $derived.by(() => {
-    const scores = runs
-      .map((run) => run.best_dev_score)
-      .filter((v) => typeof v === "number" && Number.isFinite(v));
-    return scores.length ? Math.max(...scores) : null;
+  let bestRun = $derived.by(() => {
+    let b = null;
+    for (const run of runs) {
+      const s = run.best_dev_score;
+      if (typeof s === "number" && Number.isFinite(s) && (!b || s > b.best_dev_score)) {
+        b = run;
+      }
+    }
+    return b;
   });
+  let experimentsTotal = $derived(
+    runs.reduce((sum, run) => sum + (run.learning_log_entries || 0), 0),
+  );
 
   function detailPath(runId) {
     return `/learning/${encodeURIComponent(runId)}`;
@@ -54,23 +62,36 @@
   }
 </script>
 
-<section class="summary-sticky grid grid-cols-4 gap-[14px] p-[0_24px] mb-[24px] max-[900px]:grid-cols-2">
-  <article class="summary-card">
-    <span class="summary-label">Total runs</span>
+<section class="stat-band">
+  <div class="stat">
+    <span class="stat-eyebrow">runs</span>
     <strong>{runs.length}</strong>
-  </article>
-  <article class="summary-card">
-    <span class="summary-label">Live runs</span>
-    <strong>{runningTotal}</strong>
-  </article>
-  <article class="summary-card">
-    <span class="summary-label">Finished runs</span>
+  </div>
+  <div class="stat">
+    <span class="stat-eyebrow">live now</span>
+    <strong class:stat-live={runningTotal > 0}>{runningTotal}</strong>
+  </div>
+  <div class="stat">
+    <span class="stat-eyebrow">finished</span>
     <strong>{finishedTotal}</strong>
-  </article>
-  <article class="summary-card">
-    <span class="summary-label">Best dev score</span>
-    <strong>{fmtScore(bestScore)}</strong>
-  </article>
+  </div>
+  <div class="stat">
+    <span class="stat-eyebrow">experiments logged</span>
+    <strong>{experimentsTotal}</strong>
+  </div>
+  <div class="stat stat-wide">
+    <span class="stat-eyebrow">best dev score</span>
+    <span class="stat-best">
+      <strong class="stat-best-num">{bestRun ? fmtScore(bestRun.best_dev_score) : "—"}</strong>
+      {#if bestRun}
+        <a
+          href={detailPath(bestRun.run_id)}
+          class="stat-best-run"
+          onclick={(event) => selectRun(bestRun.run_id, event)}
+        >{bestRun.best_tag ? `${bestRun.best_tag} · ` : ""}{bestRun.run_id}</a>
+      {/if}
+    </span>
+  </div>
 </section>
 
 <section class="[border:0] [background:transparent] flex flex-col gap-[16px] p-[0_24px_16px] max-[900px]:p-[0_16px_24px] min-w-0">
@@ -85,7 +106,7 @@
   {#if loading && !runs.length}
     <div class="table-wrap freeze-header">
       <MinimalTableSkeleton
-        columns={["Run", "Status", "Task", "Scaffold", "Track", "Best dev", "Log entries", "Learning actions", "GPU hours", "Started", "Duration"]}
+        columns={["Run", "Status", "Learning curve", "Best dev", "Task", "Scaffold", "Track", "Log entries", "Learning actions", "GPU hours", "Started", "Duration"]}
         rows={8}
       />
     </div>
@@ -105,10 +126,11 @@
           <tr>
             <th>Run</th>
             <th>Status</th>
+            <th>Learning curve</th>
+            <th>Best dev</th>
             <th>Task</th>
             <th>Scaffold</th>
             <th>Track</th>
-            <th>Best dev</th>
             <th>Log entries</th>
             <th>Learning actions</th>
             <th>GPU hours</th>
@@ -132,15 +154,20 @@
                 </a>
               </td>
               <td><StatusPill status={runPillStatus(run.state)} label={run.state || null} /></td>
-              <td>{run.task || "—"}</td>
-              <td class="[font-family:var(--font-mono)] text-[12px]">{run.scaffold || "—"}</td>
-              <td>{run.track || "—"}</td>
+              <td>
+                <a href={detailPath(run.run_id)} class="inline-block" onclick={(event) => selectRun(run.run_id, event)} aria-label={`Learning curve for ${run.run_id}`}>
+                  <Sparkline series={run.score_series} />
+                </a>
+              </td>
               <td class="[font-variant-numeric:tabular-nums]">
                 {fmtScore(run.best_dev_score)}
                 {#if run.best_tag}
                   <span class="text-(--muted) text-[11px]"> ({run.best_tag})</span>
                 {/if}
               </td>
+              <td>{run.task || "—"}</td>
+              <td class="[font-family:var(--font-mono)] text-[12px]">{run.scaffold || "—"}</td>
+              <td>{run.track || "—"}</td>
               <td class="[font-variant-numeric:tabular-nums]" class:text-(--muted)={!run.learning_log_entries}>{run.learning_log_entries ?? "—"}</td>
               <td class="[font-variant-numeric:tabular-nums]">{learningActionCount(run) ?? "—"}</td>
               <td class="[font-variant-numeric:tabular-nums]">{fmtGpuHours(run.gpu_hours)}</td>
@@ -155,3 +182,79 @@
     </div>
   {/if}
 </section>
+
+<style>
+  .stat-band {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    padding: 4px 24px 22px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 2px 28px 2px 0;
+    margin-right: 28px;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .stat:last-child {
+    border-right: 0;
+    margin-right: 0;
+  }
+  .stat-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted, #9ca3af);
+  }
+  .stat strong {
+    font-family: var(--font-display);
+    font-feature-settings: "ss01" on;
+    font-size: 26px;
+    line-height: 30px;
+    font-weight: 600;
+    color: var(--text-bright, #e5e5e5);
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-live {
+    color: var(--green, #4ade80) !important;
+  }
+  .stat-wide {
+    min-width: 0;
+  }
+  .stat-best {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+  }
+  .stat-best-num {
+    color: var(--green, #4ade80) !important;
+  }
+  .stat-best-run {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted, #9ca3af);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 340px;
+  }
+  .stat-best-run:hover {
+    color: var(--text-bright, #e5e5e5);
+  }
+  @media (max-width: 900px) {
+    .stat-band {
+      padding: 4px 16px 18px;
+      row-gap: 14px;
+    }
+    .stat {
+      padding-right: 18px;
+      margin-right: 18px;
+    }
+  }
+</style>
