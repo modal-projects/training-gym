@@ -33,7 +33,6 @@
     updateTimingFailureState,
   } from "../lib/timing_retry.js";
   import {
-    isLegacyTiming,
     rolloutIdForTimingKey,
     shouldShowTimingSection,
     timingIsAsync,
@@ -681,7 +680,6 @@
 
   let runTimings = $state({});
   let runTimingsSerialized = $state("{}");
-  let legacyTiming = $derived(isLegacyTiming(runTimings));
   let showTimingSection = $derived(shouldShowTimingSection(runTimings));
   let timelineAsync = $derived(timingIsAsync(runTimings));
   let timelineRunOrigin = $derived(timingRunStart(runTimings));
@@ -1740,7 +1738,7 @@
                     {:else if !expandedRollout || !sampleDist}
                       <div class="detail-empty">No rollouts recorded.</div>
                     {:else}
-                      {#if runTimings[r.rollout_id] && !legacyTiming}
+                      {#if runTimings[r.rollout_id]}
                         <div class="rollout-chart">
                           <div class="rollout-chart-title">Substep timing</div>
                           <RunTimeline
