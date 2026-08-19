@@ -204,7 +204,6 @@ export function rolloutIdForTimingKey(id) {
 }
 
 export function shouldShowTimingSection(timings) {
-  if (isLegacyTiming(timings)) return false;
   return (
     timings?.metadata?.timing_stale === true ||
     Object.entries(timings || {}).some(([id, value]) => {

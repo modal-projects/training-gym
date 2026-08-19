@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { clipIdleSpans, nestedHitTargetsForRow, runTimeline } from "./timing.js";
+import {
+  clipIdleSpans,
+  nestedHitTargetsForRow,
+  runTimeline,
+  shouldShowTimingSection,
+} from "./timing.js";
 
 test("nested hit targets cover drawn bars without entering siblings", () => {
   const bars = [
@@ -156,4 +161,27 @@ test("empty packed rollout groups do not produce labelled rows", () => {
   assert.equal(rolloutRows.length, 1);
   assert.equal(rolloutRows[0].key, "rollout-0");
   assert.ok(rolloutRows[0].spans.some((span) => span.name === "generate_samples"));
+});
+
+test("legacy-derived timing lanes show the timing section", () => {
+  const timings = {
+    0: {
+      roles: {
+        driver: {
+          lane_start_unix_s: 100,
+          phases: {
+            train_models: {
+              count: 1,
+              busy_duration_s: 4,
+              first_start_s: 0,
+              last_end_s: 4,
+            },
+          },
+        },
+      },
+    },
+    metadata: { legacy_derived: true },
+  };
+
+  assert.equal(shouldShowTimingSection(timings), true);
 });
