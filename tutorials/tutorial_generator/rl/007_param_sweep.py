@@ -3,7 +3,7 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 8×H100",
-    "summary": "Massively-parallel hyperparameter sweeps",
+    "summary": "Easy grid search",
     "difficulty": "Intermediate",
     "order": 40,
     "api_classes": [
@@ -22,7 +22,7 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Faster ablations with ease
+    # Massively-parallel hyperparameter sweeps
 
     When tuning RL runs, finding the optimal set of hyperparameters is time-consuming
     and error-prone if not properly guided or documented. This is made a first-class
