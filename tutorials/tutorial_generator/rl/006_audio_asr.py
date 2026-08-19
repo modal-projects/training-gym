@@ -3,7 +3,7 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 2×H100",
-    "summary": "Automatic Speech Recognition (Audio)",
+    "summary": "Automatic Speech Recognition",
     "difficulty": "Intermediate",
     "order": 39,
     "api_classes": [
@@ -22,14 +22,14 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Transcribing speech at a fraction of frontier costs
+    # Uncompromising speech transcription
 
     We've shown before that when it comes to speech transcription,
     open models are [100x faster and 100x cheaper](https://modal.com/blog/fast-cheap-batch-transcription)
     than proprietary APIs, and open models still occupy
-    [the top spots](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard).
-    But there's no reason to stop there: we can achieve state-of-the-art
-    performance by post-training open models to get even lower word error rates (WER).
+    [the top spots](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard)
+    in terms of WER. But there's no reason to stop there: we can achieve state-of-the-art
+    performance by post-training open models to redefine your task's Pareto frontier.
     As an example, we show how to post-train
     [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on the 
     [hf-internal-testing/librispeech_asr_dummy](https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy)
@@ -42,6 +42,7 @@ def _intro():
 def _run_instructions():
     """
     Run with:
+    
     ```
     uv run --with soundfile --with librosa --with jiwer --with datasets \\
         python tutorials/rl/006_audio_asr/006_audio_asr.py

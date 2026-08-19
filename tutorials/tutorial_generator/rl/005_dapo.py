@@ -146,7 +146,6 @@ def _dataset():
         output_format = "jsonl"
         apply_chat_template = True
         always_prepare = True
-        row_offset = 0
 
     train_dataset = MathDataset(hf_split="train[:2000]")
     eval_dataset = MathDataset(hf_split="train[2000:2100]")
