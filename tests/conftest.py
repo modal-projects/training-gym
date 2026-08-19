@@ -32,8 +32,10 @@ class FakeVolume:
     class _DirEntry:
         """Simple stand-in for Modal Volume directory entries."""
 
-        def __init__(self, path: str):
+        def __init__(self, path: str, *, mtime: int, size: int):
             self.path = path
+            self.mtime = mtime
+            self.size = size
 
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
@@ -64,7 +66,11 @@ class FakeVolume:
 
     def _iterdir(self, path: str):
         prefix = path.rstrip("/") + "/"
-        return [self._DirEntry(f) for f in self.files if f.startswith(prefix)]
+        return [
+            self._DirEntry(f, mtime=1, size=len(self.files[f]))
+            for f in self.files
+            if f.startswith(prefix)
+        ]
 
     async def _iterdir_async(self, path: str):
         for entry in self._iterdir(path):

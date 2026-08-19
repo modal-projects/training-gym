@@ -23,7 +23,10 @@ from modal_training_gym.common.framework import (
     Framework,
     mount_tools_dir,
 )
-from modal_training_gym.common.launcher_utils import serialize_recipe_params
+from modal_training_gym.common.launcher_utils import (
+    serialize_recipe_params,
+    timing_debug_env,
+)
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import ModalRayCluster
@@ -59,6 +62,7 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import (
 from modal_training_gym.frameworks.miles.modal_helpers.patches import (
     REPORTING_PATCH_COMMANDS,
     SGLANG_ABORT_PATCH_COMMAND,
+    SUBSTEP_TIMING_PATCH_COMMAND,
 )
 from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     build_train_cmd,
@@ -68,8 +72,32 @@ from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     resolve_checkpoint_ref,
 )
 
+
+def _validate_resume_checkpoint(
+    resume_from_iteration: int | None, num_rollout: int
+) -> None:
+    if resume_from_iteration is not None and resume_from_iteration + 1 > num_rollout:
+        raise RuntimeError(
+            f"Resume would start at rollout {resume_from_iteration + 1}, "
+            f"but num_rollout={num_rollout}; nothing would run."
+        )
+    if resume_from_iteration is not None and resume_from_iteration + 1 == num_rollout:
+        print(
+            "WARNING: Resume checkpoint is already at the final configured "
+            "rollout; the retry will exit without running another rollout.",
+            flush=True,
+        )
+
+
 MILES_ROOT = "/root/miles"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
+# libibverbs and the libmlx5 provider come from incompatible rdma package versions for miles multi-node training
+# reinstalling fixes this issue, mooncake transferengine imports successfully
+RDMA_RUNTIME_INSTALL_COMMAND = (
+    "apt-get update && apt-get install -y --no-install-recommends "
+    "--reinstall libibverbs1 ibverbs-providers && "
+    "rm -rf /var/lib/apt/lists/*"
+)
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
@@ -84,12 +112,13 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
             SGLANG_ABORT_PATCH_COMMAND,
             *REPORTING_PATCH_COMMANDS,
+            SUBSTEP_TIMING_PATCH_COMMAND,
         )
     )
+    if miles.total_nodes > 1:
+        image = image.run_commands(RDMA_RUNTIME_INSTALL_COMMAND)
     if miles.image_env:
         image = image.env(miles.image_env)
-    if miles.image_run_commands:
-        image = image.run_commands(*miles.image_run_commands)
     return image
 
 
@@ -119,6 +148,7 @@ def build_ray_runtime_env(
     environment: dict,
     extra_env: dict[str, str] | None = None,
     framework_status_token: str = "",
+    substep_timing: str = "auto",
 ) -> dict:
     """Runtime env for the Ray job that runs miles.
 
@@ -138,10 +168,12 @@ def build_ray_runtime_env(
         "no_proxy": f"127.0.0.1,{head_addr}",
         "MASTER_ADDR": head_addr,
         "LD_LIBRARY_PATH": _compose_ld_library_path(),
+        "TRAINING_GYM_SUBSTEP_TIMING": substep_timing,
     }
     env_vars.update(extra_env or {})
     env_vars.update(wandb_env)
     env_vars.update(environment)
+    env_vars.update(timing_debug_env())
     if framework_status_token:
         # Applied after `environment` so a recipe override can't blank the
         # dashboard auth token by accident.
@@ -181,7 +213,7 @@ def build_miles_app(
             ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
         )
         # The local checkout just overwrote the patched miles sources;
-        # re-apply every build-time patch.
+        # re-apply the built-in patches.
         image = image.run_commands(
             SGLANG_ABORT_PATCH_COMMAND
             + " || echo 'WARNING: sglang abort patch did not apply to the"
@@ -189,6 +221,9 @@ def build_miles_app(
             " cleanup may crash the run'",
             *REPORTING_PATCH_COMMANDS,
         )
+
+    if miles.image_run_commands:
+        image = image.run_commands(*miles.image_run_commands)
 
     if miles.image_overlay is not None:
         image = miles.image_overlay(image)
@@ -308,9 +343,6 @@ def build_miles_app(
             default_mount_path=str(CHECKPOINTS_PATH),
         )
     )
-    if checkpoint is not None and checkpoint.path and not model.model_path:
-        model.model_path = checkpoint.path
-
     all_volumes: dict[str | PurePosixPath, Any] = {
         str(HF_CACHE_PATH): hf_cache_volume,
         str(DATA_PATH): data_volume,
@@ -528,25 +560,46 @@ def build_miles_app(
 
     _multi_node = miles.total_nodes > 1
 
+    train_secrets = [
+        *(
+            []
+            if miles.wandb is None
+            else [Secret.from_name(miles.wandb.modal_wandb_secret_name)]
+        ),
+        *hf_secrets(),
+        *proxy_auth_secrets(),
+    ]
+    train_experimental_options: dict[str, Any] = (
+        {"efa_enabled": True} if _multi_node else {}
+    )
+
+    train_function_kwargs = dict(miles.train_function_kwargs or {})
+    user_secrets = train_function_kwargs.pop("secrets", None)
+    if user_secrets is not None:
+        if not isinstance(user_secrets, (list, tuple)):
+            user_secrets = [user_secrets]
+        train_secrets.extend(user_secrets)
+    user_experimental_options = train_function_kwargs.pop("experimental_options", None)
+    if user_experimental_options is not None:
+        train_experimental_options.update(user_experimental_options)
+    train_ephemeral_disk = train_function_kwargs.pop("ephemeral_disk", None)
+    if train_function_kwargs:
+        unsupported = ", ".join(sorted(train_function_kwargs))
+        raise TypeError(f"Unsupported miles.train_function_kwargs keys: {unsupported}")
+
     @app.function(
         image=image,
         gpu=gpu_spec,
         memory=miles.memory,
+        ephemeral_disk=train_ephemeral_disk,
         cloud=miles.cloud,
         region=miles.region,
         volumes=all_volumes,
-        secrets=[
-            *(
-                []
-                if miles.wandb is None
-                else [Secret.from_name(miles.wandb.modal_wandb_secret_name)]
-            ),
-            *proxy_auth_secrets(),
-        ],
+        secrets=train_secrets,
         timeout=24 * 60 * 60,
         retries=Retries(max_retries=10, initial_delay=0.0),
         single_use_containers=True,
-        experimental_options={"efa_enabled": True} if _multi_node else {},
+        experimental_options=train_experimental_options,
         serialized=True,
         name="train",
     )
@@ -769,6 +822,8 @@ def build_miles_app(
             await run_record.save(is_async=True)
 
             if resume_checkpoint is not None:
+                resume_from_iteration = resume_checkpoint.get("resume_from_iteration")
+                _validate_resume_checkpoint(resume_from_iteration, miles.num_rollout)
                 print(
                     f"WARNING: detected existing checkpoint in "
                     f"{resume_checkpoint['resume_checkpoint_path']}; "
@@ -804,6 +859,7 @@ def build_miles_app(
                 head_addr=cluster.head_addr,
                 wandb_env=wandb_env,
                 environment=miles.environment,
+                substep_timing=miles.substep_timing,
                 extra_env={
                     "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
@@ -814,12 +870,6 @@ def build_miles_app(
                     ),
                     "TRAINING_GYM_TRACE_SAMPLE_LIMIT": str(
                         getattr(miles, "trace_sample_limit", 16)
-                    ),
-                    "TRAINING_GYM_IMAGE_SAMPLE_LIMIT": str(
-                        getattr(miles, "image_sample_limit", 16)
-                    ),
-                    "TRAINING_GYM_TRAJECTORY_SAMPLE_LIMIT": str(
-                        getattr(miles, "trajectory_sample_limit", 16)
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                 },
@@ -836,10 +886,13 @@ def build_miles_app(
             await _set_framework_status(MilesStatus.TRAINING)
             result = await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
             if not result.is_success:
-                run_record.error_message = (
+                message = (
                     result.message or f"Ray job finished with status: {result.status}"
                 )
-                raise RuntimeError(run_record.error_message)
+                error = RuntimeError(f"{message} (training_run_id={training_run_id})")
+                error.training_run_id = training_run_id  # pyright: ignore[reportAttributeAccessIssue]  # exception metadata is consumed by downstream callers
+                run_record.error_message = str(error)
+                raise error
             print(f"Ray job completed: {result.status}")
             print(f"Ray job message: {result.message}")
 

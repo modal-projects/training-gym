@@ -5,20 +5,20 @@ It is used to track the training run and its results.
 
 from __future__ import annotations
 
+import math
+import inspect
 import os
 import time
-from collections.abc import Awaitable, Callable, MutableMapping
+from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pydantic import BaseModel, PrivateAttr, computed_field, field_validator
 
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.status import FrameworkStatus, resolve_framework_status
-from modal_training_gym.common.step_timing import record_step_time_event
 from modal_training_gym.utils.metadata import (
     MetadataStore,
-    _step_times_dict,
     vol_get,
     vol_put_with_summary,
 )
@@ -113,8 +113,14 @@ class TrainingRun(BaseModel):
     completed_at: int | None = None
     updated_at: int = 0
     duration_seconds: int | None = None
+    # TODO(joy): Remove with the legacy timing runs; retained for old runs and
+    # serialized validation-harness results to keep rendering them.
     step_times: dict[str, dict[str, int | None]] | None = None
-    substep_times: dict[str, dict[str, dict[str, float | None]]] | None = None
+    # TODO(joy): Remove with the legacy timing runs; retained for old runs and
+    # serialized validation-harness results to keep rendering them.
+    substep_times: dict[str, dict[str, dict[str, float | int | bool | None]]] | None = (
+        None
+    )
     # Terminal failure message (Ray driver error / exception) for a failed run,
     # so the cause is queryable from the record and shown on the dashboard even
     # after logs roll off. None while running / on success.
@@ -128,6 +134,8 @@ class TrainingRun(BaseModel):
     # Runtime-only handles attached by ``TrainConfig.launch()``; never persisted.
     _function_call: Any = PrivateAttr(default=None)
     _status_display: Any = PrivateAttr(default=None)
+    _metadata_removed_keys: set[str] = PrivateAttr(default_factory=set)
+    _metadata_loaded_keys: set[str] | None = PrivateAttr(default=None)
 
     @computed_field
     @property
@@ -175,7 +183,23 @@ class TrainingRun(BaseModel):
         if self._status_display is not None:
             self._status_display.start_polling(self.training_run_id)
         try:
-            result_dict = self.function_call.get(timeout=timeout)
+            try:
+                result_dict = self.function_call.get(timeout=timeout)
+            except BaseException as exc:
+                message = str(exc)
+                if self.training_run_id not in message:
+                    try:
+                        exc.args = (
+                            f"{message} (training_run_id={self.training_run_id})",
+                            *exc.args[1:],
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+                try:
+                    exc.training_run_id = self.training_run_id  # pyright: ignore[reportAttributeAccessIssue]  # exception metadata is consumed by downstream callers
+                except AttributeError:
+                    pass
+                raise
         finally:
             if self._status_display is not None:
                 self._status_display.stop_polling()
@@ -246,20 +270,18 @@ class TrainingRun(BaseModel):
                     k: v for k, v in existing_progress.items() if k != "is_active"
                 }
             progress = {**existing_progress, **progress}
+            for key in ("current", "rollout_id"):
+                incoming = progress.get(key)
+                existing = existing_progress.get(key)
+                if incoming is None or existing is None:
+                    continue
+                try:
+                    progress[key] = max(int(existing), int(incoming))
+                except (TypeError, ValueError):
+                    pass
         metadata["framework_progress"] = progress
         self.metadata = metadata
 
-        # TODO update step timing
-        if self.framework is Framework.SLIME:
-            current_step = progress.get("current")
-            record_step_time_event(
-                cast(MutableMapping[str, Any], _step_times_dict()),
-                self.training_run_id,
-                current_step,
-                status.value,
-                update.step_event.strip(),
-                update.event_ts or time.time(),
-            )
         return status
 
     def record_latest_rollout(self, rollout: TrainingRolloutResult) -> None:
@@ -278,16 +300,116 @@ class TrainingRun(BaseModel):
 
     def save(self, *, is_async: bool = False) -> None | Awaitable[None]:
         self._touch()
-        return vol_put_with_summary(
-            MetadataStore.TRAINING_RUNS,
-            self.training_run_id,
-            self.model_dump(mode="json"),
-            summary_store=MetadataStore.TRAINING_RUNS_SUMMARY,
-            item_id_key="training_run_id",
-            sort_key=self._summary_sort_key,
-            reverse=True,
-            is_async=is_async,
-        )
+
+        def payload_with_stored_metadata(stored: object) -> dict[str, Any]:
+            payload = self.model_dump(mode="json")
+            stored_metadata = (
+                stored.get("metadata") if isinstance(stored, dict) else None
+            )
+            current_metadata = payload.get("metadata")
+            stored_metadata = (
+                stored_metadata if isinstance(stored_metadata, dict) else {}
+            )
+            current_metadata = (
+                current_metadata if isinstance(current_metadata, dict) else {}
+            )
+            loaded_keys = self._metadata_loaded_keys or set()
+            removed_keys = (loaded_keys - current_metadata.keys()) | (
+                self._metadata_removed_keys
+            )
+            merged_metadata = {
+                key: value
+                for key, value in stored_metadata.items()
+                if key not in removed_keys
+            }
+            merged_metadata.update(
+                {key: value for key, value in current_metadata.items()}
+            )
+            stored_latest = stored_metadata.get("latest_rollout")
+            current_latest = current_metadata.get("latest_rollout")
+            if isinstance(stored_latest, dict) and isinstance(current_latest, dict):
+
+                def rollout_key(value: dict[str, Any]) -> tuple[float, float]:
+                    try:
+                        rollout_id = float(value.get("rollout_id", -1))
+                    except (TypeError, ValueError):
+                        rollout_id = -1
+                    try:
+                        created_at = float(value.get("created_at", 0) or 0)
+                    except (TypeError, ValueError):
+                        created_at = 0
+                    return rollout_id, created_at
+
+                stored_key = rollout_key(stored_latest)
+                current_key = rollout_key(current_latest)
+                merged_metadata["latest_rollout"] = (
+                    current_latest if current_key >= stored_key else stored_latest
+                )
+            elif isinstance(stored_latest, dict):
+                merged_metadata["latest_rollout"] = stored_latest
+            stored_progress = stored_metadata.get("framework_progress")
+            current_progress = current_metadata.get("framework_progress")
+            if isinstance(stored_progress, dict) and isinstance(current_progress, dict):
+                try:
+                    stored_updated_at = int(stored_progress.get("updated_at", 0) or 0)
+                except (TypeError, ValueError):
+                    stored_updated_at = 0
+                try:
+                    current_updated_at = int(current_progress.get("updated_at", 0) or 0)
+                except (TypeError, ValueError):
+                    current_updated_at = 0
+                if stored_updated_at > current_updated_at:
+                    merged_metadata["framework_progress"] = stored_progress
+            elif isinstance(stored_progress, dict):
+                merged_metadata["framework_progress"] = stored_progress
+            payload["metadata"] = merged_metadata
+            return payload
+
+        def write(payload: dict[str, Any]) -> None | Awaitable[None]:
+            return vol_put_with_summary(
+                MetadataStore.TRAINING_RUNS,
+                self.training_run_id,
+                payload,
+                summary_store=MetadataStore.TRAINING_RUNS_SUMMARY,
+                item_id_key="training_run_id",
+                sort_key=self._summary_sort_key,
+                reverse=True,
+                is_async=is_async,
+            )
+
+        try:
+            stored = vol_get(
+                MetadataStore.TRAINING_RUNS, self.training_run_id, is_async=is_async
+            )
+        except Exception:
+            stored = None
+        if not is_async:
+            return write(payload_with_stored_metadata(stored))
+
+        async def _save_async() -> None:
+            stored_data = None
+            if inspect.isawaitable(stored):
+                try:
+                    stored_data = await stored
+                except Exception:
+                    stored_data = None
+            result = write(payload_with_stored_metadata(stored_data))
+            if result is not None:
+                await result
+
+        return _save_async()
+
+    @classmethod
+    @overload
+    def from_id(
+        cls, run_id: str, *, is_async: Literal[True]
+    ) -> Awaitable[TrainingRun]: ...
+
+    @classmethod
+    @overload
+    def from_id(
+        cls, run_id: str, *, is_async: Literal[False] = False
+    ) -> TrainingRun: ...
 
     @classmethod
     def from_id(
@@ -297,10 +419,19 @@ class TrainingRun(BaseModel):
         if is_async:
 
             async def _run() -> TrainingRun:
-                return cls.model_validate(await data)
+                return cls.from_stored_data(await data)
 
             return _run()
-        return cls.model_validate(data)
+        return cls.from_stored_data(data)
+
+    @classmethod
+    def from_stored_data(cls, data: object) -> TrainingRun:
+        """Use for volume records instead of model_validate to snapshot metadata keys."""
+        run = cls.model_validate(data)
+        metadata = data.get("metadata") if isinstance(data, dict) else None
+        if isinstance(metadata, dict):
+            run._metadata_loaded_keys = set(metadata)
+        return run
 
 
 def _resume_checkpoint(path: str, name: str, iteration: int | None) -> dict[str, Any]:
@@ -395,7 +526,22 @@ def mark_training_attempt_started(
     metadata["attempt_count"] = attempt_count
     metadata["last_attempt_started_at"] = started_at
     metadata["last_attempt_status"] = "running"
+    raw_attempt_starts = metadata.get("attempt_starts")
+    attempt_starts: set[int] = set()
+    if isinstance(raw_attempt_starts, list):
+        for value in raw_attempt_starts:
+            if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                continue
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if math.isfinite(parsed) and parsed.is_integer():
+                attempt_starts.add(int(parsed))
+    attempt_starts.add(started_at)
+    metadata["attempt_starts"] = sorted(attempt_starts)[-50:]
     metadata.pop("terminal_reason", None)
+    run._metadata_removed_keys.add("terminal_reason")
 
     run.status = TrainingRunStatus.RUNNING
     run.ended_at = None
@@ -431,15 +577,48 @@ def record_resume_checkpoint(
             "resume_from_iteration",
         ):
             metadata.pop(key, None)
+            run._metadata_removed_keys.add(key)
+        progress = metadata.get("framework_progress")
+        if isinstance(progress, dict):
+            progress = dict(progress)
+            for key in ("current", "rollout_id", "step_id"):
+                progress.pop(key, None)
+            progress["updated_at"] = int(time.time())
+            metadata["framework_progress"] = progress
     else:
         metadata["resumed_from_checkpoint"] = True
         metadata.update(resume_checkpoint)
+        run._metadata_removed_keys.difference_update(resume_checkpoint)
+        progress = metadata.get("framework_progress")
+        if isinstance(progress, dict):
+            progress = dict(progress)
+            try:
+                raw_resume_iteration = resume_checkpoint.get("resume_from_iteration")
+                resume_iteration = (
+                    None if raw_resume_iteration is None else int(raw_resume_iteration)
+                )
+            except (TypeError, ValueError):
+                resume_iteration = None
+            if resume_iteration is None:
+                for key in ("current", "rollout_id", "step_id"):
+                    progress.pop(key, None)
+            else:
+                # Checkpoint iterations are zero-based completed rollouts.
+                # Progress.current is one-based, so the completed-step floor
+                # is resume_iteration + 1; zero-based lane identities use the
+                # checkpoint iteration itself.
+                progress["current"] = resume_iteration + 1
+                progress["rollout_id"] = max(0, resume_iteration)
+                progress["step_id"] = max(0, resume_iteration)
+            progress["updated_at"] = int(time.time())
+            metadata["framework_progress"] = progress
     run.metadata = metadata
 
 
 def wandb_run_id_for_attempt(training_run_id: str, attempt_count: int) -> str:
-    base_run_id = training_run_id[:8]
-    return base_run_id if attempt_count <= 1 else f"{base_run_id}-a{attempt_count}"
+    return (
+        training_run_id if attempt_count <= 1 else f"{training_run_id}-a{attempt_count}"
+    )
 
 
 def record_wandb_attempt(

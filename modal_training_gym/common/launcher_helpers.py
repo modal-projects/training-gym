@@ -389,6 +389,13 @@ async def build_terminal_run_record(run_record: Any, training_run_id: str) -> An
     # below persists it (the fresh fetch wouldn't carry it).
     if run_record.error_message:
         latest_run_record.error_message = run_record.error_message
+    source_metadata = run_record.metadata or {}
+    latest_metadata = dict(latest_run_record.metadata or {})
+    for key in ("last_attempt_status", "last_attempt_ended_at", "terminal_reason"):
+        if key in source_metadata:
+            latest_metadata[key] = source_metadata[key]
+    if latest_metadata:
+        latest_run_record.metadata = latest_metadata
     if latest_run_record.completed_at is None:
         latest_run_record.completed_at = finished_at
     latest_run_record.duration_seconds = max(

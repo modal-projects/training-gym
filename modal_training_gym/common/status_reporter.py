@@ -24,7 +24,7 @@ import os
 import threading
 from queue import Queue
 from typing import Any
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -38,9 +38,6 @@ _STATUS_TOKEN_ENV = "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"
 
 
 def _resolve_url() -> str:
-    url = os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL", "").strip()
-    if url:
-        return url
     try:
         from modal_training_gym.common.config import get_framework_status_url
 
@@ -108,8 +105,14 @@ def _post(item: dict[str, Any]) -> None:
     try:
         with urlopen(request, timeout=timeout) as response:
             response.read()
-    except (OSError, URLError):
+    except (HTTPError, OSError, URLError):
         return
+
+
+def post_item(item: dict[str, Any]) -> None:
+    """Synchronously POST a pre-resolved item (same shape as ``enqueue_item``),
+    blocking up to the item's ``_timeout``. Failures are swallowed."""
+    _post(item)
 
 
 def enqueue_item(item: dict[str, Any]) -> None:
@@ -123,12 +126,6 @@ def enqueue_item(item: dict[str, Any]) -> None:
         _QUEUE.put_nowait(item)
     except Exception:
         pass
-
-
-def post_item(item: dict[str, Any]) -> None:
-    """Synchronously POST a pre-resolved item (same shape as ``enqueue_item``),
-    blocking up to the item's ``_timeout``. Failures are swallowed."""
-    _post(item)
 
 
 def enqueue_framework_status(

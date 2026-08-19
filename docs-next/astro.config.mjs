@@ -1,12 +1,14 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import { modalReferenceThemes } from './modal-reference-theme.mjs';
+import rehypeKatex from 'rehype-katex';
+import remarkMath from 'remark-math';
 import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
 
 export default defineConfig({
   markdown: {
-    rehypePlugins: [rehypeTableWrapper],
+    remarkPlugins: [remarkMath],
+    rehypePlugins: [rehypeKatex, rehypeTableWrapper],
   },
   site: 'https://gym.modal.dev',
   redirects: {
@@ -72,45 +74,48 @@ export default defineConfig({
           href: 'https://github.com/modal-projects/training-gym',
         },
       ],
+      // Code blocks mirror the main Modal docs site (modal.com/docs): shiki's
+      // dark-plus theme, Fira Mono 14px/20px, and a frameless container with a
+      // translucent white surface over the page background.
       expressiveCode: {
-        themes: modalReferenceThemes,
-        useStarlightUiThemeColors: true,
-        customizeTheme: (theme) => {
-          theme.bg = '#1c1c1c';
-          theme.fg = '#d1d1d1';
-          theme.colors['editor.background'] = '#1c1c1c';
-          theme.colors['editor.foreground'] = '#d1d1d1';
-          theme.colors['editor.selectionBackground'] = '#2f2f2f';
-          theme.colors['scrollbarSlider.background'] = '#ffffff17';
-          theme.colors['scrollbarSlider.hoverBackground'] = '#ffffff40';
-          theme.colors['titleBar.activeBackground'] = '#181818';
-          theme.colors['titleBar.activeForeground'] = '#d1d1d1';
-          theme.colors['titleBar.border'] = '#2f2f2f';
-          theme.colors['editorGroupHeader.tabsBackground'] = '#181818';
-          theme.colors['editorGroupHeader.tabsBorder'] = '#2f2f2f';
-          theme.colors['tab.activeBackground'] = '#1c1c1c';
-          theme.colors['tab.activeForeground'] = '#e8e8e8';
-          theme.colors['tab.inactiveBackground'] = '#181818';
-          theme.colors['tab.inactiveForeground'] = '#a3a3a3';
-          theme.colors['tab.activeBorderTop'] = '#7fee64';
-          theme.styleOverrides.frames = {
-            ...theme.styleOverrides.frames,
-            editorBackground: '#1c1c1c',
-            terminalBackground: '#1c1c1c',
-            editorActiveTabBackground: '#1c1c1c',
-            inlineButtonForeground: '#d1d1d1',
-            frameBoxShadowCssValue: 'none',
-          };
-          return theme;
-        },
+        themes: ['dark-plus'],
+        useStarlightUiThemeColors: false,
+        defaultProps: { frame: 'none' },
+        // The code surface is translucent white, which Expressive Code's
+        // contrast pass reads as a light background and compensates for by
+        // darkening every token color. Off, so dark-plus renders as-is.
+        minSyntaxHighlightingColorContrast: 0,
         styleOverrides: {
-          borderRadius: '0.375rem',
-          codeBackground: '#1c1c1c',
-          codeForeground: '#d1d1d1',
-          codeSelectionBackground: '#2f2f2f',
+          borderColor: '#2f2f2f',
+          borderRadius: '0.25rem',
+          borderWidth: '1px',
+          codeBackground: 'rgba(255, 255, 255, 0.06)',
+          codeForeground: '#d4d4d4',
+          codeFontFamily: 'var(--sl-font-mono)',
+          codeFontSize: '0.875rem',
+          codeLineHeight: '1.4286',
+          codePaddingBlock: '0.875rem',
+          codePaddingInline: '0.875rem',
+          codeSelectionBackground: '#264f78',
+          scrollbarThumbColor: '#ffffff17',
+          scrollbarThumbHoverColor: '#ffffff40',
           gutterBorderColor: '#2f2f2f',
           gutterForeground: '#747474',
           gutterHighlightForeground: '#e8e8e8',
+          frames: {
+            frameBoxShadowCssValue: 'none',
+            editorBackground: 'rgba(255, 255, 255, 0.06)',
+            terminalBackground: 'rgba(255, 255, 255, 0.06)',
+            inlineButtonBackground: '#222222',
+            inlineButtonBackgroundIdleOpacity: '1',
+            inlineButtonBackgroundHoverOrFocusOpacity: '1',
+            inlineButtonBackgroundActiveOpacity: '1',
+            inlineButtonBorder: '#464646',
+            inlineButtonBorderOpacity: '1',
+            inlineButtonForeground: '#d1d1d1',
+            tooltipSuccessBackground: '#222222',
+            tooltipSuccessForeground: '#d1d1d1',
+          },
         },
       },
       customCss: ['./src/styles/custom.css'],
@@ -184,6 +189,7 @@ export default defineConfig({
                 },
                 { label: 'Qwen3.6-35B-A3B', link: '/reference/models/qwen3_6_35b/' },
                 { label: 'Qwen3.6-27B', link: '/reference/models/qwen3_6_27b/' },
+                { label: 'Qwen3.8-27B', link: '/reference/models/qwen3_8_27b/' },
               ],
             },
             {
@@ -202,6 +208,7 @@ export default defineConfig({
                 },
                 { label: 'Qwen3_6_35b_Recipe', link: '/reference/training/qwen3_6_35b_recipe/' },
                 { label: 'Qwen3_6_27b_Recipe', link: '/reference/training/qwen3_6_27b_recipe/' },
+                { label: 'Qwen3_8_27b_Recipe', link: '/reference/training/qwen3_8_27b_recipe/' },
               ],
             },
             {

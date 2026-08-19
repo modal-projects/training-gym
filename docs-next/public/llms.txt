@@ -32,8 +32,8 @@ Repo: https://github.com/modal-projects/training-gym
 - [000_rl_basics](https://gym.modal.dev/tutorials/rl/000_rl_basics/): Writing correct haikus
 - [001_sandboxes](https://gym.modal.dev/tutorials/rl/001_sandboxes/): Code RL with Harbor sandboxed evals
 - [002_multiturn](https://gym.modal.dev/tutorials/rl/002_multiturn/): Multi-turn number-guessing RL with custom generate and reward functions
-- [003_on_policy_distillation](https://gym.modal.dev/tutorials/rl/003_on_policy_distillation/): On-policy distillation on math
-- [005_dapo](https://gym.modal.dev/tutorials/rl/005_dapo/): DAPO on math
+- [003_on_policy_distillation](https://gym.modal.dev/tutorials/rl/003_on_policy_distillation/): Teacher-student (OPD) distillation
+- [005_dapo](https://gym.modal.dev/tutorials/rl/005_dapo/): Large-scale RL for everyone
 - [006_audio_asr](https://gym.modal.dev/tutorials/rl/006_audio_asr/): Audio GRPO for transcribing LibriSpeech
 - [007_param_sweep](https://gym.modal.dev/tutorials/rl/007_param_sweep/): Sweep hyperparameters across runs
 - [008_computer_use](https://gym.modal.dev/tutorials/rl/008_computer_use/): GUI grounding to predict click coordinates
@@ -76,8 +76,10 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3.5-9B](https://gym.modal.dev/reference/models/qwen3_5_9b/): `Qwen3_5_9B`
 - [Qwen3-30B-A3B](https://gym.modal.dev/reference/models/qwen3_30b/): `Qwen3_30B`
 - [Moonlight-16B-A3B-Instruct](https://gym.modal.dev/reference/models/moonlight_16b_a3b_instruct/): `Moonlight_16B_A3B_Instruct`
+- [Gemma-4-26B-A4B-it](https://gym.modal.dev/reference/models/gemma4_26b_a4b/): `Gemma4_26B_A4B`
 - [Qwen3.6-35B-A3B](https://gym.modal.dev/reference/models/qwen3_6_35b/): `Qwen3_6_35B`
 - [Qwen3.6-27B](https://gym.modal.dev/reference/models/qwen3_6_27b/): `Qwen3_6_27B`
+- [Qwen3.8-27B](https://gym.modal.dev/reference/models/qwen3_8_27b/): `Qwen3_8_27B`
 
 ### Training
 
@@ -91,8 +93,10 @@ Repo: https://github.com/modal-projects/training-gym
 - [StitchRecipe](https://gym.modal.dev/reference/training/stitchrecipe/): `StitchRecipe`
 - [StitchTrainConfig](https://gym.modal.dev/reference/training/stitchtrainconfig/): `StitchTrainConfig`
 - [StitchServeConfig](https://gym.modal.dev/reference/training/stitchserveconfig/): `StitchServeConfig`
+- [Gemma4_26B_A4B_Recipe](https://gym.modal.dev/reference/training/gemma4_26b_a4b_recipe/): `Gemma4_26B_A4B_Recipe`
 - [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe/): `Qwen3_6_35b_Recipe`
 - [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe/): `Qwen3_6_27b_Recipe`
+- [Qwen3_8_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_8_27b_recipe/): `Qwen3_8_27b_Recipe`
 - [Qwen3.5-0.8b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_0_8b_recipe/): `Qwen3_5_0_8b_Recipe`
 - [Qwen3.5-2b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_2b_recipe/): `Qwen3_5_2b_Recipe`
 - [Qwen3.5-4b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_recipe/): `Qwen3_5_4b_Recipe`

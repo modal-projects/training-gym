@@ -163,6 +163,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Moonlight-16B-A3B-Instruct",
     },
     {
+        "class_name": "Gemma4_26B_A4B",
+        "module": "modal_training_gym.common.models.gemma4_26b_a4b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Gemma-4-26B-A4B-it",
+    },
+    {
         "class_name": "Qwen3_6_35B",
         "module": "modal_training_gym.common.models.qwen3_6_35b",
         "group": "models",
@@ -175,6 +182,13 @@ API_REFERENCE_MANIFEST = [
         "group": "models",
         "class_type": "config_data",
         "sidebar_label": "Qwen3.6-27B",
+    },
+    {
+        "class_name": "Qwen3_8_27B",
+        "module": "modal_training_gym.common.models.qwen3_8_27b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.8-27B",
     },
     # --- Training ---
     {
@@ -248,6 +262,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "StitchServeConfig",
     },
     {
+        "class_name": "Gemma4_26B_A4B_Recipe",
+        "module": "modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Gemma4_26B_A4B_Recipe",
+    },
+    {
         "class_name": "Qwen3_6_35b_Recipe",
         "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b",
         "group": "training",
@@ -261,6 +282,14 @@ API_REFERENCE_MANIFEST = [
         "class_type": "config_data",
         "sidebar_label": "Qwen3_6_27b_Recipe",
     },
+    {
+        "class_name": "Qwen3_8_27b_Recipe",
+        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_8_27b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3_8_27b_Recipe",
+    },
+    # --- Deployment ---
     {
         "class_name": "Qwen3_5_0_8b_Recipe",
         "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_0_8b",

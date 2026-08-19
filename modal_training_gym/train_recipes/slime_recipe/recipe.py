@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from modal_training_gym.train_recipes.base import (
     BaseTrainRecipe,
@@ -63,6 +63,7 @@ _SLIME_SKIP = {
     "image_run_commands",
     "image_env",
     "train_function_kwargs",
+    "substep_timing",
     "conversion_pipeline_model_parallel_size",
     "conversion_tensor_model_parallel_size",
     "conversion_expert_model_parallel_size",
@@ -77,7 +78,6 @@ _HOOK_PATH_CONFIG_KEYS = {
     "custom_megatron_before_log_prob_hook": "training_gym_custom_megatron_before_log_prob_hook_path",
     "custom_megatron_before_train_step_hook": "training_gym_custom_megatron_before_train_step_hook_path",
 }
-
 _HOOK_WRAPPER_PATHS = {
     "custom_rollout_log_function": "modal_training_gym.frameworks.slime.phase_reporting.log_rollout_data",
     "custom_eval_rollout_log_function": "modal_training_gym.frameworks.slime.phase_reporting.log_eval_rollout_data",
@@ -505,6 +505,8 @@ class SlimeRecipe(BaseTrainRecipe):
     image_env: dict[str, str] = field(default_factory=dict)
     train_function_kwargs: dict[str, Any] = field(default_factory=dict)
 
+    substep_timing: Literal["auto", "off"] = "auto"
+
     # ── Per-sample execution tracing (dashboard timeline) ───────────────────
     # When True, the rollout recorder attaches slime's per-sample trace (the
     # generate/reward/tool-call timeline) to the first `trace_sample_limit`
@@ -875,6 +877,9 @@ class SlimeRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b import (
             Qwen3_6_27b_Recipe,
         )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_8_27b import (
+            Qwen3_8_27b_Recipe,
+        )
         from modal_training_gym.train_recipes.slime_recipe.qwen3_asr_1_7b import (
             Qwen3_ASR_1_7b_Recipe,
         )
@@ -908,6 +913,8 @@ class SlimeRecipe(BaseTrainRecipe):
             return Qwen3_6_35b_Recipe()
         if model_config.model_name == "Qwen/Qwen3.6-27B":
             return Qwen3_6_27b_Recipe()
+        if model_config.model_name == "Qwen/Qwen3.8-27B":
+            return Qwen3_8_27b_Recipe()
         raise TrainingGymConfigError(
             f"no base slime recipe for model {model_config.model_name!r}"
         )

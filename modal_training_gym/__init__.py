@@ -26,6 +26,11 @@ _EXPORTS = {
     "Sample": ("modal_training_gym.common.sample", "Sample"),
     "extract_code": ("modal_training_gym.common.eval", "extract_code"),
     "HarborEval": ("modal_training_gym.common.eval", "HarborEval"),
+    "Gemma4_26B_A4B": ("modal_training_gym.common.models", "Gemma4_26B_A4B"),
+    "Gemma4_26B_A4B_Recipe": (
+        "modal_training_gym.train_recipes.miles_recipe",
+        "Gemma4_26B_A4B_Recipe",
+    ),
     "GLM_4_7": ("modal_training_gym.common.models", "GLM_4_7"),
     "HFModelConfiguration": (
         "modal_training_gym.common.models",
@@ -102,6 +107,11 @@ _EXPORTS = {
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_6_27b_Recipe",
     ),
+    "Qwen3_8_27B": ("modal_training_gym.common.models", "Qwen3_8_27B"),
+    "Qwen3_8_27b_Recipe": (
+        "modal_training_gym.train_recipes.slime_recipe",
+        "Qwen3_8_27b_Recipe",
+    ),
     "Qwen3_VL_8B": ("modal_training_gym.common.models", "Qwen3_VL_8B"),
     "Qwen3_VL_8b_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
@@ -143,6 +153,8 @@ __all__ = [
     "convert_megatron_checkpoint_to_hf",
     "DatasetConfig",
     "Endpoint",
+    "Gemma4_26B_A4B",
+    "Gemma4_26B_A4B_Recipe",
     "GLM_4_7",
     "HarborDataset",
     "EvalConfig",
@@ -188,6 +200,8 @@ __all__ = [
     "Qwen3_6_35B",
     "Qwen3_6_27B",
     "Qwen3_6_27b_Recipe",
+    "Qwen3_8_27B",
+    "Qwen3_8_27b_Recipe",
     "Qwen3_ASR_1_7b_Recipe",
     "Qwen3_VL_8b_Recipe",
     "score_in_sandbox",

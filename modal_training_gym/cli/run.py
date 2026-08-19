@@ -132,6 +132,11 @@ def _run_payload(summary: RunSummary) -> dict[str, object]:
         "current_reward": (
             summary.latest_rollout.mean if summary.latest_rollout is not None else None
         ),
+        "resume_state": (
+            summary.resume_state.model_dump(mode="json")
+            if summary.resume_state is not None
+            else None
+        ),
         "model": summary.model or None,
         "dataset": summary.dataset or None,
         "recipe": summary.recipe or None,

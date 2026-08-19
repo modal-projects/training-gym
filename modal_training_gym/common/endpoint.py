@@ -26,8 +26,9 @@ def _create_endpoint_and_wait_for_url(
     model_name: str,
     checkpoint: Checkpoint | None,
     unauthenticated: bool,
-    environment: str | None,
     routing_region: str | None,
+    environment: str | None,
+    colocate_compute: bool,
     wait_timeout_sec: float,
     recreate_if_existing: bool,
 ) -> str:
@@ -60,12 +61,14 @@ def _create_endpoint_and_wait_for_url(
         model_name,
     ]
 
-    if environment:
-        command.extend(["--env", environment])
     if unauthenticated:
         command.append("--unauthenticated")
     if routing_region:
         command.extend(["--routing-region", routing_region])
+    if environment:
+        command.extend(["--env", environment])
+    if colocate_compute:
+        command.append("--colocate-compute")
 
     if checkpoint:
         command.extend(["--custom-volume-name", checkpoint.checkpoints_volume_name])
@@ -145,8 +148,9 @@ class Endpoint:
         *,
         endpoint_name: str | None = None,
         unauthenticated: bool = True,
-        environment: str | None = None,
         routing_region: str | None = None,
+        environment: str | None = None,
+        colocate_compute: bool = False,
         wait_timeout_sec: float = 300,
         recreate_if_existing: bool = False,
     ):
@@ -159,6 +163,11 @@ class Endpoint:
         When ``endpoint_name`` is omitted, an endpoint name is derived for you.
 
         Endpoints require proxy auth if ``unauthenticated=False``.
+        ``colocate_compute=True`` keeps containers in the routing region.
+
+        Every ``modal endpoint create`` flag has a parameter here. Custom
+        weights are a ``Checkpoint`` passed as ``checkpoint``, which maps to
+        ``--custom-volume-name`` and ``--custom-volume-path``.
 
         ``modal endpoint create`` fails when the name already exists. Pass
         ``recreate_if_existing=True`` to stop an endpoint with the same name
@@ -196,6 +205,8 @@ class Endpoint:
                         "checkpoint_name": checkpoint.name,
                     }
                 )
+            if colocate_compute:
+                spec["colocate_compute"] = True
 
             digest = hashlib.sha256(
                 json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
@@ -207,8 +218,9 @@ class Endpoint:
             model_name=model_name,
             checkpoint=checkpoint,
             unauthenticated=unauthenticated,
-            environment=environment,
             routing_region=routing_region,
+            environment=environment,
+            colocate_compute=colocate_compute,
             wait_timeout_sec=wait_timeout_sec,
             recreate_if_existing=recreate_if_existing,
         )

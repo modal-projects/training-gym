@@ -150,6 +150,7 @@ class EvalSummary(BaseModel):
     total: int
     mean: float
     status: EvalStatus = "completed"
+    model_name: str = ""
 
     @classmethod
     def list_summaries(cls) -> list["EvalSummary"]:
@@ -184,11 +185,11 @@ class EvalResult(BaseModel):
 
     eval_id: str
     eval_config_id: str
-    deployment_id: str
     created_at: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC)
     )
     status: EvalStatus = "completed"
+    model_name: str = ""
     rows: list[EvalRowResult] = Field(default_factory=list)
 
     @property
@@ -207,6 +208,7 @@ class EvalResult(BaseModel):
             total=self.total,
             mean=self.mean,
             status=self.status,
+            model_name=self.model_name,
         )
 
     def save(self) -> None:
@@ -369,10 +371,10 @@ class EvalConfig:
         )
         result = EvalResult(
             eval_id=eval_id,
-            deployment_id=deployment.deployment_id,
             eval_config_id=self.eval_config_id,
             created_at=datetime.datetime.now(datetime.UTC),
             status="deploying_model",
+            model_name=deployment.model.model_name,
             rows=[],
         )
         result.save()

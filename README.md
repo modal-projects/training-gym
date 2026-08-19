@@ -35,8 +35,8 @@ Then, it's as easy to use as:
 ```python
 from modal_training_gym import (
     HuggingFaceDataset,
-    Qwen3_5_4B,
-    Qwen3_5_4b_Recipe,
+    Qwen3_4B,
+    Qwen3_4b_Recipe,
     TrainConfig,
 )
 
@@ -50,21 +50,24 @@ class MathDataset(HuggingFaceDataset):
 
 
 result = TrainConfig(
-    model=Qwen3_5_4B(),
+    model=Qwen3_4B(),
     dataset=MathDataset(n_rows=120),
-    recipe=Qwen3_5_4b_Recipe(
-        rm_type="deepscaler",
+    recipe=Qwen3_4b_Recipe(
         gpu_type="H100",
-        colocate=True,
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=8,
         tensor_model_parallel_size=1,
         sequence_parallel=False,
+        rollout_num_gpus=8,
         rollout_num_gpus_per_engine=1,
+        colocate=True,
         num_rollout=1,
         n_samples_per_prompt=4,
         rollout_batch_size=8,
         rollout_max_response_len=2048,
         max_tokens_per_gpu=4096,
         sglang_mem_fraction_static=0.6,
+        rm_type="deepscaler",
     ),
 ).train()
 print(result.training_run_id)
@@ -122,6 +125,8 @@ Models with a built-in training recipe, with the `ModelConfig` and recipe classe
 | `Qwen/Qwen3.5-9B` | `slime` | `Qwen3_5_9B` | `Qwen3_5_9b_Recipe` |
 | `Qwen/Qwen3.6-27B` | `slime` | `Qwen3_6_27B` | `Qwen3_6_27b_Recipe` |
 | `Qwen/Qwen3.6-35B-A3B` | `slime` | `Qwen3_6_35B` | `Qwen3_6_35b_Recipe` |
+| `Qwen/Qwen3.8-27B` | `slime` | `Qwen3_8_27B` | `Qwen3_8_27b_Recipe` |
+| `google/gemma-4-26B-A4B-it` | `miles` | `Gemma4_26B_A4B` | `Gemma4_26B_A4B_Recipe` |
 | `moonshotai/Moonlight-16B-A3B-Instruct` | `miles` | `Moonlight_16B_A3B_Instruct` | `Moonlight_16B_A3B_Recipe` |
 | `zai-org/GLM-4.7` | `slime` | `GLM_4_7` | `GLM_4_7_Recipe` |
 <!-- END MODELS TABLE -->
@@ -146,19 +151,13 @@ Difficulty is a rough signal for where to start:
 | [`000_rl_basics`](https://gym.modal.dev/tutorials/rl/000_rl_basics/) | Writing correct haikus | Beginner | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F000_rl_basics%2F000_rl_basics.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`001_sandboxes`](https://gym.modal.dev/tutorials/rl/001_sandboxes/) | Code RL with Harbor sandboxed evals | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F001_sandboxes%2F001_sandboxes.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`002_multiturn`](https://gym.modal.dev/tutorials/rl/002_multiturn/) | Multi-turn number-guessing RL with custom generate and reward functions | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F002_multiturn%2F002_multiturn.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`003_on_policy_distillation`](https://gym.modal.dev/tutorials/rl/003_on_policy_distillation/) | On-policy distillation on math | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F003_on_policy_distillation%2F003_on_policy_distillation.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`005_dapo`](https://gym.modal.dev/tutorials/rl/005_dapo/) | DAPO on math | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F005_dapo%2F005_dapo.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`003_on_policy_distillation`](https://gym.modal.dev/tutorials/rl/003_on_policy_distillation/) | Teacher-student (OPD) distillation | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F003_on_policy_distillation%2F003_on_policy_distillation.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`005_dapo`](https://gym.modal.dev/tutorials/rl/005_dapo/) | Large-scale RL for everyone | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F005_dapo%2F005_dapo.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`006_audio_asr`](https://gym.modal.dev/tutorials/rl/006_audio_asr/) | Audio GRPO for transcribing LibriSpeech | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F006_audio_asr%2F006_audio_asr.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`007_param_sweep`](https://gym.modal.dev/tutorials/rl/007_param_sweep/) | Sweep hyperparameters across runs | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F007_param_sweep%2F007_param_sweep.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`008_computer_use`](https://gym.modal.dev/tutorials/rl/008_computer_use/) | GUI grounding to predict click coordinates | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F008_computer_use%2F008_computer_use.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`009_cross_tokenizer_distillation`](https://gym.modal.dev/tutorials/rl/009_cross_tokenizer_distillation/) | Cross-tokenizer agentic distillation on BFCL v3 multi-turn | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F009_cross_tokenizer_distillation%2F009_cross_tokenizer_distillation.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`010_disaggregated_rl`](https://gym.modal.dev/tutorials/rl/010_disaggregated_rl/) | Disaggregated DAPO-math RL with sparse weight deltas | Advanced | `miles` + `stitch` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F010_disaggregated_rl%2F010_disaggregated_rl.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-
-### Single Node
-
-| Tutorial | Summary | Difficulty | Framework | Launch |
-|---|---|---|---|---|
-| [`000_qwen35b`](tutorials/singlenode/000_qwen35b/000_qwen35b.ipynb) | Train Qwen3.6-35B-A3B on DAPO-math with GRPO | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Fsinglenode%2F000_qwen35b%2F000_qwen35b.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### Agents
 
@@ -171,7 +170,6 @@ Difficulty is a rough signal for where to start:
 | Tutorial | Summary | Difficulty | Framework | Launch |
 |---|---|---|---|---|
 | [`002_glm_4_7`](tutorials/multinode/002_glm_4_7/002_glm_4_7.ipynb) | GLM-4.7 355B MoE full-weight GSPO training on 64 GPUs with DAPO-Math-17k | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Fmultinode%2F002_glm_4_7%2F002_glm_4_7.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
-| [`003_qwen27b`](tutorials/multinode/003_qwen27b/003_qwen27b.ipynb) | Qwen3.6-27B full-weight GRPO training on 32 GPUs with DAPO-Math-17k | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Fmultinode%2F003_qwen27b%2F003_qwen27b.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 <!-- END TUTORIAL TABLE -->
 
 ## Multi-node access

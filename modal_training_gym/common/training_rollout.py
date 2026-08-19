@@ -61,6 +61,9 @@ _NON_TAG_METADATA_KEYS = frozenset(
 )
 
 
+_GEMMA_MARKER_RE = re.compile(r"<\|(?:turn|channel)>|<(?:turn|channel)\|>")
+
+
 def _clean_prompt(text: str) -> str:
     """Make a chat-templated prompt readable for display.
 
@@ -84,10 +87,18 @@ def _clean_prompt(text: str) -> str:
                     return "\n\n".join(parts).strip()
         except (ValueError, SyntaxError):
             pass
-    cleaned = re.sub(r"<\|[^|]*\|>", "", text)
+    # Gemma-style templates use bare <bos>/<eos> and half-delimited turn markers
+    # (<|turn>, <turn|>) alongside the usual <|...|> tokens, so strip all three.
+    is_gemma = _GEMMA_MARKER_RE.search(text) is not None
+    cleaned = _GEMMA_MARKER_RE.sub("", text)
+    cleaned = re.sub(r"<(?:bos|eos)>", "", cleaned)
+    cleaned = re.sub(r"<\|[^|<>]*\|>", "", cleaned)
     cleaned = re.sub(r"</?think>", "", cleaned)
     # Drop standalone role-header lines left behind by the template.
-    cleaned = re.sub(r"(?m)^(system|user|assistant)\s*$\n?", "", cleaned)
+    roles = (
+        "system|user|assistant|model|thought" if is_gemma else "system|user|assistant"
+    )
+    cleaned = re.sub(rf"(?m)^({roles})\s*$\n?", "", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 

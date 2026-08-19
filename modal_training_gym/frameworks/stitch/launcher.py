@@ -54,6 +54,7 @@ from modal_training_gym.common.framework import (
     resolve_caller_module,
 )
 from modal_training_gym.common.launcher_helpers import compute_save_root
+from modal_training_gym.common.launcher_utils import timing_debug_env
 from modal_training_gym.common.modal_refs import register_modal_cloudpickle_reducers
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
@@ -72,6 +73,7 @@ from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.wandb import preflight_wandb
 from modal_training_gym.frameworks.miles.modal_helpers.patches import (
     REPORTING_PATCH_COMMANDS,
+    SUBSTEP_TIMING_PATCH_COMMAND,
 )
 from modal_training_gym.frameworks.stitch import serving_image
 from modal_training_gym.train_recipes.stitch_recipe.pins import (
@@ -167,21 +169,29 @@ def dashboard_env(
     app_name: str,
     total_steps: int,
     model: ModelConfig | None,
+    substep_timing: str = "auto",
+    capture_trace: bool = False,
+    trace_sample_limit: int = 16,
 ) -> dict[str, str]:
-    """Run identity for miles' phase/rollout hooks, which run inside the Ray
-    actors and read it from the environment.
+    """Run identity and reporting settings for miles' phase/rollout hooks, which
+    run inside the Ray actors and read them from the environment.
 
     The colocated launcher passes it as a Ray ``runtime_env``, which a submitted
     job carries and this subprocess flow does not — so ``train`` exports it on
     every rank before Ray starts (a raylet's workers inherit the container env
     they were started with, and without a run id the reports are dropped and the
-    dashboard sees nothing after launch).
+    dashboard sees nothing after launch). The substep timers and the sample-trace
+    capture are read the same way, by the recorders the patched loop calls.
     """
     return {
         "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
         "TRAINING_GYM_APP_NAME": app_name,
         "TRAINING_GYM_TOTAL_STEPS": str(total_steps),
         "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
+        "TRAINING_GYM_SUBSTEP_TIMING": substep_timing,
+        "TRAINING_GYM_CAPTURE_TRACE": "1" if capture_trace else "",
+        "TRAINING_GYM_TRACE_SAMPLE_LIMIT": str(trace_sample_limit),
+        **timing_debug_env(),
     }
 
 
@@ -269,7 +279,7 @@ def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
         # hook for. Applied after the clone, since they rewrite it in place
         # (the hook wrappers themselves come through the inherited
         # ``custom_*_function_path`` flags).
-        .run_commands(*REPORTING_PATCH_COMMANDS)
+        .run_commands(*REPORTING_PATCH_COMMANDS, SUBSTEP_TIMING_PATCH_COMMAND)
         .pip_install(
             "httpx",  # stitch's pool client (wake fan-out)
             # miles is installed --no-deps, but the trainer-side delta ENCODER needs
@@ -719,6 +729,9 @@ def build_stitch_app(
                 app_name=app_name,
                 total_steps=train_recipe.num_rollout,
                 model=model,
+                substep_timing=train_recipe.substep_timing,
+                capture_trace=train_recipe.capture_trace,
+                trace_sample_limit=train_recipe.trace_sample_limit,
             )
         )
         # Megatron is a source checkout in the image, so R3 dispatch + the

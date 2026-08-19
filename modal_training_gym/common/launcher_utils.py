@@ -15,6 +15,14 @@ from os import PathLike
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+
+def timing_debug_env() -> dict[str, str]:
+    """Forward opt-in timing diagnostics to framework worker processes."""
+    if os.environ.get("TRAINING_GYM_TIMING_DEBUG") == "1":
+        return {"TRAINING_GYM_TIMING_DEBUG": "1"}
+    return {}
+
+
 # (attr_name_on_cfg, cli_flag) — optional per-rank conversion args
 _CONVERSION_EXTRA_ARGS = [
     ("decoder_first_pipeline_num_layers", "decoder-first-pipeline-num-layers"),

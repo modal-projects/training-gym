@@ -9,9 +9,11 @@
 # [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)
 # how to write correct haikus. Step by step, we'll show the foundations of running
 # training jobs on the Gym.
-# To run the tutorial, run the following command:
+# Run with:
+#
 # ```
-# uv run tutorials/rl/000_rl_basics/000_rl_basics.py
+# uv run --with nltk \
+#     python tutorials/rl/000_rl_basics/000_rl_basics.py
 # ```
 # ## Prerequisites
 #
@@ -34,15 +36,16 @@ from modal_training_gym import (
     list_checkpoints,
 )
 
-# ## Running the base model
+# ## Deploy the base model
 #
 # As with all training tasks, we need a baseline to decide how much training we need.
 # To do that, we need a way to run inference on the base model so that we can try it out.
 #
 # Luckily, [Endpoints](https://modal.com/docs/guide/endpoints) allows us to easily deploy a
-# production-ready LLM inference endpoint on Modal's managed infrastructure. It supports both open
-# model weights in addition to custom fine tunes, sourced from either a Hugging Face repo or a
-# [Modal Volume](https://modal.com/docs/guide/volumes).
+# production-ready LLM inference endpoint on Modal's managed infrastructure. It supports both 
+# open model weights in addition to custom fine tunes, sourced from either a Hugging Face repo or a
+# [Modal Volume](https://modal.com/docs/guide/volumes). To use it, we provide a 
+# [class](https://gym.modal.dev/reference/deployment/endpoint/) to instantiate one programatically.
 #
 # It will take a moment to download the model weights onto a Modal Volume and boot containers past the
 # [cold-start](https://modal.com/docs/guide/cold-start#what-is-a-cold-start).
@@ -50,7 +53,7 @@ from modal_training_gym import (
 
 base_model = Qwen3_5_4B()
 
-# ## Defining a scoring function
+# ## Define a scoring function
 #
 # To evaluate the base model, we need a function that takes as input a haiku and outputs a score
 # (a.k.a. reward when we're training) to represent whether it follows the 5-7-5 syllable format.
@@ -63,12 +66,12 @@ base_model = Qwen3_5_4B()
 # granularity such that it's immediately obvious what the failure mode is (if any). Below, we implement
 # the following function:
 #
-# - Return `-10` if the model was so incompetent that failed to return three lines.
+# - Return -10 if the model was so incompetent that it failed to return three lines.
 # - Otherwise, return the negative sum of absolute differences between the predicted and target
 # syllable count for each line.
 #
 # What does this mean? That the model will receive increasingly negative scores the further off
-# its haiku is, with a maximum score of `0`. Let's now see how it does.
+# its haiku is, with a maximum score of 0. Let's now see how it does.
 
 _cmudict_cache = {}
 
@@ -105,7 +108,7 @@ def score_haiku(response: str) -> float:
     )
     return -float(total_diff)
 
-# ## Creating a dataset for training and validation
+# ## Get the dataset
 #
 # Note that we've only qualitatively assessed its performance. Now, we should get concrete
 # numbers. How do we do that? First, we'll have to curate a dataset. Luckily,
@@ -130,12 +133,12 @@ class HaikuDataset(HuggingFaceDataset):
     output_column = "text"
     output_format = "jsonl"
     apply_chat_template = True
+    always_prepare = True        
     prompt_template = "Write a haiku about {input}."
-    always_prepare = True
 
-eval_dataset = HaikuDataset(n_rows=5)
+eval_dataset = HaikuDataset(hf_split="train[10:15]")
 
-# ## Evaluating the base model
+# ## Evaluate the base model
 #
 # All we need to do now is, for each sample in our eval dataset,
 # call the Endpoint, score each response, and calculate the mean.
@@ -161,32 +164,10 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         scores = list(executor.map(_score_one, eval_dataset.load()))
     return sum(scores) / len(scores) if scores else float("nan")
 
-# ## Training the model
+# ## Creating a reward function
 #
-# Finally, onto the training. The Gym supports both the
-# [Slime](https://github.com/THUDM/slime) and
-# [Miles](https://github.com/radixark/miles) frameworks.
-# Here, we use Slime for demonstration purposes.
-#
-# Training is simple: pass in the model you intend to train,
-# the dataset you wish to train on, and a recipe for how you want
-# training to occur. The recipe wraps all
-# [framework-native flags](https://thudm.github.io/slime/get_started/usage.html)
-# in addition to providing Modal-specific ones.
-#
-# An explanation of some of the knobs we set below:
-#
-# - `colocate` shares the same GPUs between rollout and training, alternating between the two.
-# This is simply for demonstration purposes: set to `False` to give rollouts dedicated GPUs and 
-# go even faster.
-# - `num_rollout` sets the total rollout/train iterations to run. Each iteration samples a batch, 
-# scores it, and applies one policy update.
-# - `rollout_batch_size` determines the number of prompts sampled per rollout iteration.
-# - `custom_rm_function` allows us to use our scoring function we defined above as a reward function
-# during training.
-#
-# Once we run the code below, training kicks off and we'll immediately get a run ID, which we may
-# use to watch the run's progress in the dashboard.
+# To make our scoring function a reward function, we just need to extract the text from the 
+# model's response and pass it to our existing score_haiku. Simple enough.
 
 async def haiku_rm(args, sample, **kwargs) -> float:
     response = base_model.parse_response(sample.response)
@@ -208,32 +189,52 @@ def _main_impl() -> None:
     if importlib.util.find_spec("nltk") is None:
         raise RuntimeError(
             "This tutorial requires the 'nltk' package. "
-            "Install it before running: uv pip install -q nltk"
+            "Use the command above to run the tutorial."
         )
 
-    base_model_deployment = Endpoint.launch(
+    base_deployment = Endpoint.launch(
         base_model, unauthenticated=True, recreate_if_existing=True
     )
-    base_model_deployment.wait_until_ready(timeout=15 * 60)
-    print(f"base model deployed to {base_model_deployment.url}")
+    base_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"base model deployed to {base_deployment.url}")
 
-    train_dataset = HaikuDataset(n_rows=10)
+    train_dataset = HaikuDataset(hf_split="train[:10]")
 
     print("running base model evaluation...")
-    base_mean = run_eval(base_model_deployment)
+    base_mean = run_eval(base_deployment)
     print(f"average score: {base_mean:.1f}")
+
+    # ## Train the model
+    #
+    # Finally, onto the training. The Gym supports both the
+    # [Slime](https://github.com/THUDM/slime) and
+    # [Miles](https://github.com/radixark/miles) frameworks.
+    # Here, we use Slime for demonstration purposes.
+    #
+    # Training is simple: pass in the model you intend to train,
+    # the dataset you wish to train on, and a recipe for how you want
+    # training to occur. The recipe wraps all
+    # [framework-native flags](https://thudm.github.io/slime/get_started/usage.html)
+    # in addition to providing Modal-specific ones.
+    #
+    # Once we run the code below, training kicks off and we'll immediately get a run ID, which we may
+    # use to watch the run's progress in the dashboard.
 
     train_run = TrainConfig(
         model=base_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
             gpu_type="H100",
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=8,
             tensor_model_parallel_size=1,
+            sequence_parallel=False,       
+            rollout_num_gpus=8,
             rollout_num_gpus_per_engine=1,
-            sequence_parallel=False,
             colocate=True,
             num_rollout=10,
             rollout_batch_size=16,
+            n_samples_per_prompt=2,
             rollout_max_response_len=4096,
             rollout_temperature=1.0,
             save_interval=5,
@@ -254,21 +255,21 @@ def _main_impl() -> None:
     # We'll get the latest checkpoint and create a new Endpoint so we may evaluate it.
 
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(checkpoint.path)
+    print(f"checkpoint: {checkpoint.path}")
 
-    trained_model_deployment = Endpoint.launch(
+    trained_deployment = Endpoint.launch(
         Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
-    trained_model_deployment.wait_until_ready(timeout=15 * 60)
-    print(f"checkpoint deployed to {trained_model_deployment.url}")
+    trained_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"checkpoint deployed to {trained_deployment.url}")
 
     # Now, let's run the same eval as before.
 
     print("running checkpoint evaluation...")
-    trained_mean = run_eval(trained_model_deployment)
+    trained_mean = run_eval(trained_deployment)
     print(f"average score: {trained_mean:.1f}")
 
-    # ## Continuing training off the checkpoint
+    # ## Continue training off the checkpoint
     # Hmm, it looks like the trained model is still not doing very well.
     # A likely cause is that it only trained for 10 iterations.
     # Let's continue training, starting from the last checkpoint.
@@ -280,15 +281,20 @@ def _main_impl() -> None:
         recipe=SlimeRecipe(
             custom_rm_function=haiku_rm,
             gpu_type="H100",
-            colocate=True,
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=8,
             tensor_model_parallel_size=1,
-            sequence_parallel=False,
+            sequence_parallel=False,       
+            rollout_num_gpus=8,
             rollout_num_gpus_per_engine=1,
+            colocate=True,
             num_rollout=20,
             rollout_batch_size=16,
+            n_samples_per_prompt=2,
             rollout_max_response_len=4096,
             rollout_temperature=1.0,
             save_interval=10,
+            eval_interval=None,
             apply_chat_template_kwargs='{"enable_thinking": false}',
             image_overlay=lambda image: image.run_commands(
                 "uv pip install --system aiohttp 'nltk>=3.8.0'",
@@ -307,14 +313,14 @@ def _main_impl() -> None:
     new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
     print(new_checkpoint.path)
 
-    new_model_deployment = Endpoint.launch(
+    new_deployment = Endpoint.launch(
         Qwen3_5_4B(), new_checkpoint, unauthenticated=True, recreate_if_existing=True
     )
-    new_model_deployment.wait_until_ready(timeout=15 * 60)
-    print(f"new checkpoint deployed to {new_model_deployment.url}")
+    new_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"new checkpoint deployed to {new_deployment.url}")
 
     print("running new checkpoint evaluation...")
-    new_mean = run_eval(new_model_deployment)
+    new_mean = run_eval(new_deployment)
     print(f"average score: {new_mean:.1f}")
 
 @tutorial_cli_app.local_entrypoint()

@@ -39,6 +39,8 @@ PKG_ROOT = REPO_ROOT / "modal_training_gym"
 # fails on a rename or deletion.
 REMOTE_ONLY = frozenset(
     {
+        "modal_training_gym.frameworks.miles.modal_helpers.patches.patch_gemma4_vl_rollout_text",
+        "modal_training_gym.frameworks.miles.modal_helpers.patches.patch_router_startup_timeout",
         "modal_training_gym.frameworks.miles.modal_helpers.patches.patch_sglang_abort",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_advantages",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_bridge_provider_per_token_loss",

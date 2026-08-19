@@ -3,7 +3,7 @@
 The model is served by ``Server``, a Modal *server* class registered with
 ``@app.server`` (Modal's low-latency routing service for inference workloads).
 The endpoint is the Modal class itself — its ``@modal.enter()`` starts the
-``vllm serve`` subprocess; its ``@modal.exit()`` updates deployment status.
+``vllm serve`` subprocess.
 
 ``model_path`` accepts either:
   - a **HuggingFace repo id** (e.g. ``"Qwen/Qwen3-4B"``) — vLLM downloads
@@ -35,7 +35,6 @@ def build_vllm_serve_app(
     served_model_name: str,
     checkpoints_volume: "Volume | str | None" = None,
     checkpoints_mount_path: str | None = None,
-    deployment_id: str | None = None,
     unauthenticated: bool = True,
 ) -> "App":
     import modal
@@ -83,7 +82,6 @@ def build_vllm_serve_app(
     app = App(app_name, tags=tags)
 
     _extra = list(recipe.extra_vllm_args or [])
-    _deployment_id = deployment_id
 
     @app.server(
         image=image,
@@ -130,22 +128,6 @@ def build_vllm_serve_app(
             ]
             print(*cmd)
             subprocess.Popen(" ".join(cmd), shell=True)
-
-            if _deployment_id:
-                from modal_training_gym.common.deployment import (
-                    update_deployment_status,
-                )
-
-                update_deployment_status(_deployment_id, "running")
-
-        @modal.exit()
-        def stop(self):
-            if _deployment_id:
-                from modal_training_gym.common.deployment import (
-                    update_deployment_status,
-                )
-
-                update_deployment_status(_deployment_id, "stopped")
 
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)

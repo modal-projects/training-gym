@@ -1,17 +1,17 @@
-# pyright: reportUndefinedVariable=false, reportMissingImports=false
 """Tutorial source for `003_on_policy_distillation` — parsed by generate_tutorial.py."""
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 1×H100 (teacher) + 1 × 8×H100 (train)",
-    "summary": "On-policy distillation on math",
+    "summary": "Teacher-student (OPD) distillation",
     "difficulty": "Intermediate",
     "order": 30,
     "api_classes": [
-        "Qwen3_5_4B",
-        "Qwen3_5_9B",
         "CustomDeployment",
         "Endpoint",
+        "HuggingFaceDataset",
+        "Qwen3_5_4B",
+        "Qwen3_5_9B",
         "SlimeRecipe",
         "TrainConfig",
     ],
@@ -22,48 +22,40 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 
 @markdown
 def _intro():
-    """
-    # On-policy distillation: Teacher model trains a student model
+    r"""
+    # Efficient inference using on-policy distillation
 
-    In this tutorial, we take two models, Qwen3.5-9B and Qwen3.5-4B, and use 
-    the larger 9B model to teach the smaller 4B model on its generation logprobs.
+    For workloads where you need the throughput and/or cost-savings of a smaller model,
+    but the capabilities afforded by a larger model, on-policy distillation (OPD) is
+    an effective and practical way to hit your targets. In this tutorial, we'll use
+    [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) to teach the smaller 
+    [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) how to better solve 
+    olympiad-style math problems sourced from the
+    [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k)
+    Huggingface dataset.
 
-    Using the Slime framework and Modal Training Gym, we can easily self-host the
-    teacher model on a H100 machine, hit the /generate endpoint with "return_logprob=True",
-    and penalize the student model's logprobs per token in input sequence using reverse KL divergence.
+    <details>
+    <summary>How does OPD work?</summary>
 
-    The tutorial follows these steps:
+    In addition to the standard RL algorithm, during each rollout step,
+    the student's response token IDs are sent to the teacher which returns
+    per-token log-probabilities. This changes the advantage, the extra signal each token
+    gets based on how much better or worse the response was than expected, as follows:
 
-    1. **Deploy the teacher** (Qwen3.5-9B) on an SGLang server with `CustomDeployment`.
-    2. **Load a math dataset** (`dapo-math-17k`) and define a verifiable eval that checks `Answer: \\boxed{N}`.
-    3. **Evaluate the base student** (Qwen3.5-4B) on an `Endpoint` to get a baseline accuracy.
-    4. **Define a reward function** that calls the teacher's `/generate` endpoint with `return_logprob=True` and combines the teacher log-probs with a math correctness score.
-    5. **Train with GRPO + OPD** using `SlimeRecipe` — slime applies a per-token reverse KL penalty from the teacher log-probs on top of the GRPO advantage.
-    6. **Evaluate the trained student** and compare accuracy before vs after.
+    $$
+    A_t = A_t^{\text{GRPO}} - \lambda_{\text{opd}} \cdot (\log \pi_{\text{student}} - \log \pi_{\text{teacher}})
+    $$
 
-    ### How OPD works
+    The first term represents sparse rewards for correct answers,
+    while the second term represents the dense signals that push towards the
+    teacher's token-level distribution. Together, they teach the student
+    what to say (i.e., getting the correct answer) and how to say it (i.e.,
+    how the teacher would respond).
 
-    During each rollout step:
-    1. The student generates a response (math reasoning).
-    2. The student's token IDs are sent to the teacher's SGLang server.
-    3. The teacher returns per-token log-probabilities.
-    4. Slime modifies the advantage at each token:
+    </details>
 
-    $$A_t = A_t^{\\text{GRPO}} - \\lambda_{\\text{opd}} \\cdot (\\log \\pi_{\\text{student}} - \\log \\pi_{\\text{teacher}})$$
-
-    The first term pushes toward correct math answers (sparse reward).
-    The second term pushes toward the teacher's token-level distribution
-    (dense signal at every position). Together they teach the student
-    *what* to say (correct answer) and *how* to say it (teacher-like
-    reasoning).
-
-    ### Dataset
-
-    We use [`zhuzilin/dapo-math-17k`](https://huggingface.co/datasets/zhuzilin/dapo-math-17k),
-    the same math dataset used by slime's own OPD examples. Each row is a math
-    problem with a ground-truth integer answer. The model is prompted to
-    respond with `Answer: \\boxed{N}` — evaluation just checks whether the
-    number matches.
+    To do cross-family OPD (i.e., use a teacher from a different model family such as Deepseek), see
+    [this tutorial](https://gym.modal.dev/tutorials/rl/009_cross_tokenizer_distillation/).
     """
 
 
@@ -72,6 +64,7 @@ def _intro():
 def _run_instructions():
     """
     Run with:
+
     ```
     uv run tutorials/rl/003_on_policy_distillation/003_on_policy_distillation.py
     ```
@@ -82,8 +75,6 @@ def _run_instructions():
 @shell(
     "import importlib.util\n"
     "\n"
-    "# Skip if modal_training_gym is already importable (e.g. a local editable\n"
-    "# checkout) so your edits keep taking effect and the env stays synced.\n"
     "if importlib.util.find_spec('modal_training_gym') is None:\n"
     "    %uv pip install -q git+https://github.com/modal-projects/training-gym.git@main"
 )
@@ -105,114 +96,63 @@ def _imports():
         TrainConfig,
         list_checkpoints,
     )
-    from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
-
-
-# ── Deploy teacher ───────────────────────────────────────────────────────
 
 
 @markdown
-def _deploy_intro():
+def _deploy_base_intro():
     """
-    ## Deploy the teacher model
+    ## Deploy the base models
 
-    We borrow a recipe from Modal's Training Gym repo to deploy our teacher model on an SGLang server.
+    First, we'll deploy the teacher and base models to derive a baseline.
+    We can use an [Endpoint](https://modal.com/docs/guide/endpoints)
+    to serve the student. However, for the teacher model, we need per-token logprobs, 
+    which are not currently supported by Endpoints when speculative decoding is
+    enabled. So we instead use a
+    [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment/)
+    to serve the teacher.
     """
 
 
 @code
-def _deploy_teacher():
+def _deploy_base():
+    base_student_model = Qwen3_5_4B()
+    base_student_deployment = Endpoint.launch(
+        base_student_model, unauthenticated=True, recreate_if_existing=True
+    )
+
     teacher_model = Qwen3_5_9B()
     teacher_deployment = CustomDeployment.launch(
         teacher_model,
-        recipe=SglangRecipe(gpu="H100"),
-        app_name="opd-teacher-qwen3-5-9b",
-        served_model_name="qwen3-5-9b-teacher",
         unauthenticated=True,
     )
-    print(f"Teacher URL: {teacher_deployment.url}")
+
+    base_student_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"student base model deployed to {base_student_deployment.url}")
+
     teacher_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"teacher base model deployed to {teacher_deployment.url}")
 
     TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 
 
-@notebook_only
 @markdown
-def _teacher_test_intro():
+def _score_fn_intro():
     """
-    Is our teacher good at answering math problems? For a 9B model, it may not be the best
-    but will surely outperform our smaller, 4B model by a large margin. Every parameter counts!
-    """
+    ## Define a scoring function
 
-
-@notebook_only
-@code
-def _teacher_test():
-    msg = teacher_deployment.chat(
-        [{
-            "role": "user",
-            "content": (
-                "Solve the following math problem step by step. The last line of your "
-                "response should be of the form Answer: \\boxed{$Answer} where $Answer "
-                "is the answer to the problem.\n\nWhat is 17 * 23?"
-            ),
-        }],
-        chat_template_kwargs={"enable_thinking": True},
-    )
-    response = msg.get("content") or msg.get("reasoning_content") or ""
-    print(response[-200:])
-
-
-# ── Dataset ──────────────────────────────────────────────────────────────
-
-
-@markdown
-def _dataset_intro():
-    """
-    ## Dataset
-
-    We use a simple math dataset containing competition problems that the LLM is tasked
-    with answering via a `Answer: \\boxed{N}` response. This simple format allows
-    for deterministic evaluation!
-
-    [Here's the link to `zhuzilin/dapo-math-17k`](https://huggingface.co/datasets/zhuzilin/dapo-math-17k)
-    
-    Each row contains a `prompt` field with the original chat message and a `label` containing an integer answer.
-
-    [Thinking Machines](https://thinkingmachines.ai/blog/on-policy-distillation/) demonstrates that 
-    using a small number of samples with a larger number of rollouts can be sufficient for OPD.
-    For this tutorial, we take 100 training samples and hold out 20 for evaluation.
+    Following the [DAPO paper](https://arxiv.org/abs/2503.14476), we'll normalize as 
+    they do and return 1 for correct answers and -1 for incorrect answers. Although
+    we'd like to give a more granular score for predictions, we can't simply use
+    the numerical difference between a prediction and a ground-truth answer, since
+    a numerically-close answer can be more wrong than one further away.
     """
 
-
 @code
-def _dataset():
-    class MathDataset(HuggingFaceDataset):
-        hf_repo = "zhuzilin/dapo-math-17k"
-        input_column = "prompt"
-        output_column = "label"
-        output_format = "jsonl"
-        apply_chat_template = False
+def _score_fn():
+    def _extract_answer(response: str) -> str:
+        match = re.findall(r"(?i)Answer\s*:\s*([^\n]+)", response)
+        return match[-1].strip() if match else "[INVALID]"
 
-    train_dataset = MathDataset(n_rows=100)
-    eval_dataset = MathDataset(n_rows=20)
-
-
-@notebook_only
-@code
-def _dataset_peek():
-    rows = eval_dataset.load()
-    for row in rows.select(range(2)):
-        print(row["prompt"][0]["content"][:200])
-        print(f"  label: {row['label']}")
-        print()
-
-
-# ── Math evaluation ──────────────────────────────────────────────────────
-
-
-@code
-def _eval_fn():
     def _normalize_answer(answer: str) -> str:
         answer = str(answer).strip()
         answer = answer.split("=")[-1]
@@ -221,204 +161,216 @@ def _eval_fn():
             answer = answer.replace(old, new)
         return answer.strip()
 
-    def _extract_answer(response: str) -> str:
-        match = re.findall(r"(?i)Answer\s*:\s*([^\n]+)", response)
-        return match[-1].strip() if match else "[INVALID]"
-
-    def _check_math(response: str, label: str) -> bool:
+    def score_answer(response: str, label: str) -> int:
         pred = _normalize_answer(_extract_answer(response))
         gt = _normalize_answer(label)
         try:
             gt = str(int(float(gt)))
         except (ValueError, OverflowError):
             pass
-        return pred == gt
-
-    def math_eval_fn(deployment: Endpoint, example: dict) -> dict:
-        prompt = example["prompt"][0]["content"]
-        label = example["label"]
-
-        msg = deployment.chat(
-            [{"role": "user", "content": prompt}],
-            chat_template_kwargs={"enable_thinking": True},
-        )
-        response = msg.get("content") or msg.get("reasoning_content") or ""
-
-        correct = _check_math(response, label)
-        pred = _normalize_answer(_extract_answer(response))
-
-        return {
-            "score": 1.0 if correct else 0.0,
-            "response": response,
-            "correct": correct,
-            "pred": pred,
-            "label": label,
-        }
-
-    def run_eval(
-        deployment, *, max_concurrency: int = 2
-    ) -> tuple[float, list[dict]]:
-        from concurrent.futures import ThreadPoolExecutor
-
-        deployment.wait_until_ready(timeout=15 * 60)
-
-        def _score_one(example):
-            return math_eval_fn(deployment, example)
-
-        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-            rows = list(executor.map(_score_one, eval_dataset.load()))
-        mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
-        return mean, rows
+        return 1 if pred == gt else -1
 
 
-# ── Evaluate base student ────────────────────────────────────────────────
+@markdown
+def _dataset_intro():
+    """
+    ## Get the dataset
+
+    As [this Thinking Machines blog](https://thinkingmachines.ai/blog/on-policy-distillation/)
+    describes, using a small number of samples with a larger number of rollouts can be
+    sufficient for OPD. Following suit, we'll only use 100 training samples and 20 for evaluation.
+    """
+
+
+@code
+def _dataset():
+    class MathDataset(HuggingFaceDataset):
+        hf_repo = "zhuzilin/dapo-math-17k"
+        input_key = "prompt"
+        label_key = "label"
+        output_format = "jsonl"
+        apply_chat_template = True
+        always_prepare = True
+
+    train_dataset = MathDataset(hf_split="train[:100]")
+    eval_dataset = MathDataset(hf_split="train[100:120]")
+
+
+@notebook_only
+@code
+def _dataset_peek():
+    df = eval_dataset.to_pandas()
+    print(len(df))
+    df.head(5)
 
 
 @markdown
 def _eval_base_intro():
     """
-    ## Baseline Eval
+    ## Evaluate the base models
 
-    Let's run the math eval on our base serving model. Thankfully, our dataset requires
-    simple-enough answers that a tiny, 4B model should not cause issues for our deterministic parser.
-    In our own experience, requiring a strict JSON output format can cause evaluation issues!
-    See [this LoRA adapter for making Qwen3-4B successful at structured output](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora) for an example of adapting a small Qwen model to strict output formats. 
+    First, we should check if our teacher is good enough to, well, be a teacher.
+    Then, we'll see how the student fares in comparison to establish the gap we
+    must close.
+
+    <details>
+    <summary>On strict formats for evaluation</summary>
+    
+    Thankfully, our dataset requires simple-enough answers that a tiny, 
+    4B model shouldn't cause issues for our deterministic parser. In our own experience,
+    requiring a strict JSON output format can cause evaluation issues!
+    See [this LoRA adapter](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora)
+    for an example of adapting a small Qwen model to strict output formats.
+
+    </details>
     """
-
 
 @code
 def _eval_base():
-    base_model = Qwen3_5_4B()
-    base_deployment = Endpoint.launch(
-        base_model, unauthenticated=True, recreate_if_existing=True
-    )
-    print(f"Student URL: {base_deployment.url}")
+    def run_eval(
+        deployment, *, max_concurrency: int = 2
+    ) -> float:
+        from concurrent.futures import ThreadPoolExecutor
 
-    print("--- Evaluating base student... ---")
-    base_mean, base_rows = run_eval(base_deployment)
-    n_correct = sum(1 for r in base_rows if r.get("correct"))
-    print(f"Base accuracy: {n_correct}/{len(base_rows)} "
-          f"({base_mean:.1%})")
+        deployment.wait_until_ready(timeout=15 * 60)
 
+        def _score_one(example):
+            prompt = example["prompt"][0]["content"]
+            msg = deployment.chat(
+                [{"role": "user", "content": prompt}],
+                chat_template_kwargs={"enable_thinking": True},
+            )
+            response = msg.get("content") or msg.get("reasoning_content") or ""
+            return score_answer(response, example["label"])
 
-@notebook_only
-@code
-def _base_examples():
-    for r in base_rows[:3]:
-        status = "CORRECT" if r["correct"] else "WRONG"
-        print(f"[{status}] label={r['label']}, pred={r['pred']}")
-        print(f"  ...{r['response'][-150:]}")
-        print()
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            scores = list(executor.map(_score_one, eval_dataset.load()))
+        percent_correct = (
+            len([s for s in scores if s == 1]) / len(scores) if scores else float("nan")
+        )
+        return percent_correct
 
+    print("running teacher base model evaluation...")
+    teacher_correct = run_eval(teacher_deployment)
+    print(f"percent correct: {teacher_correct:.1%}")
 
-# ── Custom reward for OPD + math ─────────────────────────────────────────
+    print("running student base model evaluation...")
+    base_student_correct = run_eval(base_student_deployment)
+    print(f"percent correct: {base_student_correct:.1%}")
 
 
 @markdown
-def _rm_intro():
+def _rm_fn_intro():
+    r"""
+    ## Creating a reward function
+
+    To use our scoring function for training, we have to modify some framework-specific
+    functions. Luckily, this is relatively painless.
+
+    <details>
+    <summary>How OPD defines KL</summary>
+
+    KL-divergence is defined as:
+
+    $$
+    D_{\mathrm{KL}}(P \| Q) = \sum_x P(x) \log \frac{P(x)}{Q(x)}
+    $$
+
+    where $P$ is the behavior distribution and $Q$ is the target distribution.
+
+    Forward KL treats the teacher model as $P$ and the student model as $Q$. However, the
+    $\log \frac{P(x)}{Q(x)}$ term would then be weighted by the teacher model's probability distribution $P$,
+    resulting in high surprisal on modes unfamiliar to the student model.
+
+    To counter this, OPD uses "reverse" KL divergence to grade the student model's output:
+
+    $$
+    D_{\mathrm{KL}}(\pi_{\mathrm{student}} \| \pi_{\mathrm{teacher}})
+    $$
+
+    where our student model is treated as the behavior distribution and
+    the teacher model is our target distribution.
+
+    When the teacher has high surprisal on a student mode, the term $\log(P(x)) - log(Q(x))$
+    will yield a high positive KL divergence to penalize the student model.
+    Now, the student model only gets penalized on modes relevant to itself.
+
+    </details>
+
+    <details>
+    <summary>A fun exercise</summary>
+
+    Try tweaking the composite reward signal by applying an integer coefficient to the
+    binary integer reward signal used in the custom reward function to value correct answers
+    over student-teacher alignment.
+    
+    </details>
     """
-    ## Reward function
-
-    OPD uses "reverse" KL divergence to grade the student model's output. Remember,
-    KL divergence D_kl(P || Q) is Sigma_x P(x) * log(P(x) / Q(x)), where P is the behavior distribution
-    and Q is the target distribution. Forward KL treats the teacher model as P and the student model as Q.
-    However, the log(P(x) / Q(x)) term would then be weighted by the teacher model's probability distribution P,
-    making the result being high surprisal on modes unfamiliar to the student model.
-
-    Instead, we want to use the reverse KL divergence D_kl(Student || Teacher), where our student model
-    is treated as the behavior distribution and the teacher model is our target distribution. When the teacher has high surprisal on a 
-    student mode, the term log(P(x)) - log(Q(x)) will yield a high positive KL divergence to penalize the student model. 
-    Now, the student model only gets penalized on modes relevant to itself. 
-    """
-
 
 @code
-def _rm():
+def _rm_fn():
     async def math_opd_rm(args, sample, **kwargs):
-        """Collect teacher log-probs AND compute math correctness reward.
-
-        The teacher log-prob collection is handled by slime's built-in OPD
-        reward function. We call it, then add our scalar math reward.
-        """
         from slime.rollout.on_policy_distillation import reward_func as _opd_reward
 
         teacher_response = await _opd_reward(args, sample, **kwargs)
 
-        label = getattr(sample, "label", "") or ""
-        correct = _check_math(sample.response, label)
-        sample.math_correct = correct
+        score = score_answer(sample.response, sample.label)
+        sample.score = score
+        if not isinstance(getattr(sample, "metadata", None), dict):
+            sample.metadata = {}
+        sample.metadata["shaped_reward"] = float(score)
 
         return teacher_response
 
     def math_opd_post_process(args, samples, **kwargs):
-        """Post-process: store teacher log-probs and return math rewards.
-
-        Delegates to slime's built-in post_process_rewards for the teacher
-        log-prob alignment, then overrides the scalar rewards with math
-        correctness scores.
-        """
         from slime.rollout.on_policy_distillation import post_process_rewards as _opd_post
 
         _, _ = _opd_post(args, samples, **kwargs)
 
-        math_rewards = []
-        for sample in samples:
-            correct = getattr(sample, "math_correct", False)
-            math_rewards.append(1.0 if correct else -1.0)
-
-        return math_rewards, math_rewards
-
-
-# ── Training ─────────────────────────────────────────────────────────────
+        math_rewards = [getattr(sample, "score", -1) for sample in samples]
+        return math_rewards, math_rewards  # quirk of slime
 
 
 @markdown
 def _train_intro():
     """
-    ## Training
+    ## Start training
 
-    The training recipe uses one 8×H100 node. The actor engine
-    runs the training and the rollout engine runs the model for inference/forward passes.
-    You may want to tune the batch size for fitting the memory requirements of your GPU
-    and increase the samples per prompt parameter for generating more variants per group.
-    The total_rollouts_per_step is the rollout_batch_size * n_samples_per_prompt, and
-    the total # of rollouts that occur over a training run is the total_rollouts_per_step * num_rollout.
+    In addition to the standard parameters we use for most tutorials,
+    we set parameters such as `environment` and `extra_config` to supply
+    framework-necessary environment variables and flags.
     """
-
 
 @code
 def _train():
-    training_run = TrainConfig(
-        model=base_model,
+    train_run = TrainConfig(
+        model=base_student_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
-            custom_rm_function=math_opd_rm,
-
             gpu_type="H100",
-            colocate=True,
+            actor_num_nodes=1,
             actor_num_gpus_per_node=8,
-            rollout_num_gpus=8,
             tensor_model_parallel_size=1,
-            sequence_parallel=False,
+            sequence_parallel=False,       
+            rollout_num_gpus=8,
             rollout_num_gpus_per_engine=1,
-
+            colocate=True,
             num_rollout=10,
             rollout_batch_size=16,
             n_samples_per_prompt=4,
+            global_batch_size=16,
             rollout_max_response_len=2048,
             rollout_temperature=1.0,
-
-            global_batch_size=16,
             lr=1e-6,
             save_interval=5,
+            eval_interval=None,
+            custom_rm_function=math_opd_rm,
             apply_chat_template_kwargs='{"enable_thinking": true}',
-
             environment={
                 "PYTHONPATH": "/root/Megatron-LM/:/root",
                 "CUDA_DEVICE_MAX_CONNECTIONS": "1",
                 "NCCL_NVLS_ENABLE": "1",
             },
-
             extra_config={
                 "use_opd": True,
                 "opd_type": "sglang",
@@ -431,16 +383,8 @@ def _train():
         ),
     )
 
-    print("--- Starting OPD training... ---")
-    print(f"  Teacher: {teacher_deployment.url}")
-    print("  Student: Qwen3.5-4B")
-    print("  Dataset: dapo-math-17k (100 problems)")
-    train_result = training_run.train()
-    print(f"Training run id: {train_result.training_run_id}")
-    print("--- Training complete ---")
-
-
-# ── Evaluate trained ─────────────────────────────────────────────────────
+    train_result = train_run.train()
+    print(f"run id: {train_result.training_run_id}")
 
 
 @markdown
@@ -448,73 +392,22 @@ def _eval_trained_intro():
     """
     ## Evaluate the trained student
 
-    Let's run the evaluation on our trained model and compare it
-    to the baseline evaluation from earlier. 
+    We'll deploy our trained student and compare it
+    to our baseline evaluation from earlier. 
     """
 
 
 @code
 def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(f"Checkpoint: {checkpoint.path}")
+    print(f"checkpoint: {checkpoint.path}")
 
-    trained_deployment = Endpoint.launch(
+    trained_student_deployment = Endpoint.launch(
         Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
     )
-    print(f"Trained student URL: {trained_deployment.url}")
+    trained_student_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"checkpoint deployed to {trained_student_deployment.url}")
 
-    print("--- Evaluating trained student... ---")
-    trained_mean, trained_rows = run_eval(trained_deployment)
-    n_correct = sum(1 for r in trained_rows if r.get("correct"))
-    print(f"Trained accuracy: {n_correct}/{len(trained_rows)} "
-          f"({trained_mean:.1%})")
-
-@notebook_only
-@code
-def _trained_examples():
-    for base_r, trained_r in zip(base_rows[:3], trained_rows[:3]):
-        label = base_r["label"]
-        b_status = "CORRECT" if base_r["correct"] else "WRONG"
-        t_status = "CORRECT" if trained_r["correct"] else "WRONG"
-        print(f"label={label}")
-        print(f"  Base:    [{b_status}] pred={base_r['pred']}")
-        print(f"  Trained: [{t_status}] pred={trained_r['pred']}")
-        print()
-
-
-@markdown
-def _compare_intro():
-    """
-    ## Results
-
-    Let's hope you see a positive delta on your eval performance!
-    """
-
-
-@code
-def _compare():
-    base_correct = sum(1 for r in base_rows if r.get("correct"))
-    trained_correct = sum(1 for r in trained_rows if r.get("correct"))
-    total = len(base_rows)
-    print(f"Base student:    {base_correct}/{total} ({base_mean:.1%})")
-    print(f"Trained student: {trained_correct}/{total} ({trained_mean:.1%})")
-    print(f"Delta:           {trained_mean - base_mean:+.1%}")
-
-
-@markdown
-def _next_steps():
-    """
-    ## Next steps
-    
-    Some cool ways to extend and improve this example:
-    1. Use a bigger teacher: Qwen3.5 offers larger MoE variants, up to 35B. 
-    A bigger model will fit on a 4xH100 GPU setup and can show measurable improvements
-    on the student model evaluation delta.
-    2. Tweak the composite reward signal: Try applying a coefficient like *2* to the
-    binary integer reward signal used in the custom reward function to value correct answers
-    over student-teacher alignment.
-    3. Try cross-family distillation: Use a teacher from a different model family (e.g. Kimi K2)
-    to train our Qwen3.5-4B student model. You may run into cross-tokenizer differences, so
-    be careful to only grade logprobs on tokens that exist in both models' vocabularies and
-    align 1:1 on a per-character basis. 
-    """
+    print("running student checkpoint evaluation...")
+    trained_student_correct = run_eval(trained_student_deployment)
+    print(f"percent correct: {trained_student_correct:.1%}")

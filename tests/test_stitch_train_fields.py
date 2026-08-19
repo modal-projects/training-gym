@@ -1,6 +1,8 @@
 """The stitch trainer's argv, where it deviates from the miles defaults."""
 
+import ast
 import dataclasses
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -9,6 +11,7 @@ from modal_training_gym.common.models.qwen3_30b import Qwen3_30B
 from modal_training_gym.common.status import MilesStatus, resolve_framework_status
 from modal_training_gym.deploy_recipes.sglang_recipe.recipe import SglangRecipe
 from modal_training_gym.frameworks.miles.modal_helpers.patches import PATCHES_DIR
+from modal_training_gym.frameworks.miles import launcher as miles_launcher
 from modal_training_gym.frameworks.stitch import launcher as stitch_launcher
 from modal_training_gym.train_recipes.stitch_recipe import (
     Qwen3_30B_A3B_Stitch_Recipe,
@@ -117,6 +120,9 @@ def test_trainer_exports_the_dashboard_reporting_env() -> None:
         app_name="stitch-app",
         total_steps=7,
         model=Qwen3_30B(),
+        substep_timing="off",
+        capture_trace=True,
+        trace_sample_limit=4,
     )
     assert env == {
         "TRAINING_GYM_TRAINING_RUN_ID": "tr-123",
@@ -125,7 +131,36 @@ def test_trainer_exports_the_dashboard_reporting_env() -> None:
         "TRAINING_GYM_RESPONSE_PARSER_PATH": (
             "modal_training_gym.common.models.base.parse_qwen3_response"
         ),
+        "TRAINING_GYM_SUBSTEP_TIMING": "off",
+        "TRAINING_GYM_CAPTURE_TRACE": "1",
+        "TRAINING_GYM_TRACE_SAMPLE_LIMIT": "4",
     }
+
+
+def test_trainer_reports_everything_the_colocated_runtime_env_does() -> None:
+    """Same reporting surface, two transports: what miles hands its actors as a
+    Ray runtime_env, the stitch trainer has to export itself. A key added to one
+    and not the other is a timeline or a rollout table that is blank for stitch."""
+    colocated = {
+        node.value
+        for node in ast.walk(ast.parse(Path(miles_launcher.__file__).read_text()))
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.startswith("TRAINING_GYM_")
+    }
+    # Passed as arguments to train() rather than through the reporting env.
+    colocated -= {
+        "TRAINING_GYM_FRAMEWORK_STATUS_URL",
+        "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN",
+    }
+
+    exported = stitch_launcher.dashboard_env(
+        training_run_id="tr-123",
+        app_name="stitch-app",
+        total_steps=7,
+        model=Qwen3_30B(),
+    )
+    assert colocated <= exported.keys()
 
 
 def test_get_base_recipe_pairs_the_model_like_the_other_frameworks() -> None:

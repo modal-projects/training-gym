@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
-from collections.abc import Awaitable, Callable
+import time
+from collections.abc import Awaitable, Callable, Iterable
 from enum import Enum
 from functools import partial
-from typing import Any
+from typing import Any, Literal, TypeVar, cast, overload
+
+T = TypeVar("T")
 
 METADATA_VOLUME_NAME = "training-gym-metadata"
-STEP_TIMES_DICT_NAME = "training-gym-step-times"
 
 
 class MetadataStore(Enum):
@@ -31,8 +34,7 @@ class MetadataStore(Enum):
     EVALS = "evals"
     EVAL_SUMMARIES = "eval-summaries"
     EVAL_CONFIGS = "eval-configs"
-    DEPLOYMENTS = "deployments"
-    DEPLOYMENTS_SUMMARY = "deployments-summary"
+    SUBSTEP_TIMING = "substep-timing"
 
 
 SUMMARY_KEY = "summary"
@@ -69,20 +71,29 @@ _SUMMARY_COMPACTION: dict[MetadataStore, _SummaryCompaction] = {
         sort_key=lambda item: str(item.get("training_run_id", "")),
         reverse=True,
     ),
-    MetadataStore.DEPLOYMENTS_SUMMARY: _SummaryCompaction(
-        item_store=MetadataStore.DEPLOYMENTS,
-        item_id_key="deployment_id",
-        sort_key=lambda item: (
-            str(item.get("deployment_config", {}).get("app_name", "")),
-            str(item.get("deployment_id", "")),
-        ),
-        reverse=True,
-    ),
 }
 
 _SUMMARY_CANONICAL_STORES: dict[MetadataStore, MetadataStore] = {
     summary: cfg.item_store for summary, cfg in _SUMMARY_COMPACTION.items()
 }
+
+
+@overload
+def _canonical_items_for(
+    store: MetadataStore | str,
+    item_id_key: str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[list[dict[str, Any]]]: ...
+
+
+@overload
+def _canonical_items_for(
+    store: MetadataStore | str,
+    item_id_key: str,
+    *,
+    is_async: Literal[False] = False,
+) -> list[dict[str, Any]]: ...
 
 
 def _canonical_items_for(
@@ -125,12 +136,6 @@ def _metadata_volume():
     return modal.Volume.from_name(METADATA_VOLUME_NAME, create_if_missing=True)
 
 
-def _step_times_dict():
-    import modal
-
-    return modal.Dict.from_name(STEP_TIMES_DICT_NAME, create_if_missing=True)
-
-
 def _safe_reload(vol, *, is_async: bool = False):
     if is_async:
 
@@ -153,6 +158,30 @@ def _store_path(store: MetadataStore | str) -> str:
     return store
 
 
+async def bounded_gather_with_retries(
+    readers: Iterable[Callable[[], Awaitable[T]]],
+) -> list[T | BaseException]:
+    from modal.exception import Error
+
+    semaphore = asyncio.Semaphore(16)
+
+    async def _read(reader: Callable[[], Awaitable[T]]) -> T:
+        async with semaphore:
+            for attempt in range(3):
+                try:
+                    return await reader()
+                except Error as exc:
+                    if "rate limit" not in str(exc).lower() or attempt == 2:
+                        raise
+                    await asyncio.sleep(2**attempt)
+        raise AssertionError("unreachable")
+
+    return await asyncio.gather(
+        *(_read(reader) for reader in readers),
+        return_exceptions=True,
+    )
+
+
 def vol_remove(store: MetadataStore | str, key: str) -> bool:
     """Delete a single item from a store. Returns True if removed."""
     from modal.exception import InvalidError, NotFoundError
@@ -168,6 +197,26 @@ def vol_remove(store: MetadataStore | str, key: str) -> bool:
         if "No such file or directory" in str(exc):
             return False
         raise
+
+
+@overload
+def vol_put(
+    store: MetadataStore | str,
+    key: str,
+    value: dict[str, Any],
+    *,
+    is_async: Literal[True],
+) -> Awaitable[None]: ...
+
+
+@overload
+def vol_put(
+    store: MetadataStore | str,
+    key: str,
+    value: dict[str, Any],
+    *,
+    is_async: Literal[False] = False,
+) -> None: ...
 
 
 def vol_put(
@@ -193,6 +242,67 @@ def vol_put(
         return _run()
     with vol.batch_upload(force=True) as batch:
         batch.put_file(io.BytesIO(data), path)
+
+
+@overload
+def vol_put_many(
+    store: MetadataStore | str,
+    values: dict[str, dict[str, Any]],
+    *,
+    is_async: Literal[True],
+) -> Awaitable[None]: ...
+
+
+@overload
+def vol_put_many(
+    store: MetadataStore | str,
+    values: dict[str, dict[str, Any]],
+    *,
+    is_async: Literal[False] = False,
+) -> None: ...
+
+
+def vol_put_many(
+    store: MetadataStore | str,
+    values: dict[str, dict[str, Any]],
+    *,
+    is_async: bool = False,
+) -> None | Awaitable[None]:
+    """Write several keys from one store in a single volume commit."""
+    vol = _metadata_volume()
+    data = {
+        f"{_store_path(store)}/{key}.json": json.dumps(value).encode()
+        for key, value in values.items()
+    }
+    if is_async:
+
+        async def _run() -> None:
+            async with vol.batch_upload(force=True) as batch:
+                for path, payload in data.items():
+                    batch.put_file(io.BytesIO(payload), path)
+
+        return _run()
+    with vol.batch_upload(force=True) as batch:
+        for path, payload in data.items():
+            batch.put_file(io.BytesIO(payload), path)
+
+
+@overload
+def vol_get(
+    store: MetadataStore | str,
+    key: str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[dict[str, Any]]: ...
+
+
+@overload
+def vol_get(
+    store: MetadataStore | str,
+    key: str,
+    *,
+    is_async: Literal[False] = False,
+) -> dict[str, Any]: ...
 
 
 def vol_get(
@@ -225,48 +335,269 @@ def vol_get(
         raise KeyError(key) from None
 
 
+@overload
 def vol_list(
-    store: MetadataStore | str, *, is_async: bool = False
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[list[dict[str, Any]]]: ...
+
+
+@overload
+def vol_list(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[False] = False,
+) -> list[dict[str, Any]]: ...
+
+
+def vol_list(
+    store: MetadataStore | str,
+    *,
+    is_async: bool = False,
 ) -> list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]:
-    from modal.exception import NotFoundError
+    result = _vol_list_core(store, is_async=is_async)
+    if is_async:
+
+        async def _run() -> list[dict[str, Any]]:
+            records, failure = await cast(
+                Awaitable[tuple[list[dict[str, Any]], BaseException | None]], result
+            )
+            if failure is not None:
+                raise failure
+            return records
+
+        return _run()
+    records, failure = cast(tuple[list[dict[str, Any]], BaseException | None], result)
+    if failure is not None:
+        raise failure
+    return records
+
+
+_LIST_ATTEMPTS = 3
+
+
+def _is_rate_limit(exc: BaseException) -> bool:
+    return "rate limit" in str(exc).lower()
+
+
+def _metadata_entry(entry: Any) -> dict[str, Any]:
+    return {
+        "path": entry.path,
+        "mtime": entry.mtime,
+        "size": entry.size,
+    }
+
+
+def _list_metadata_entries(
+    store: MetadataStore | str,
+    *,
+    is_async: bool = False,
+) -> (
+    tuple[list[dict[str, Any]], BaseException | None]
+    | Awaitable[tuple[list[dict[str, Any]], BaseException | None]]
+):
+    from modal.exception import Error, NotFoundError
 
     vol = _metadata_volume()
     if is_async:
 
-        async def _run() -> list[dict[str, Any]]:
+        async def _run() -> tuple[list[dict[str, Any]], BaseException | None]:
             await _safe_reload(vol, is_async=True)
-            results: list[dict[str, Any]] = []
-            try:
-                async for entry in vol.iterdir.aio(_store_path(store)):
-                    if entry.path.endswith(".json"):
-                        chunks = [c async for c in vol.read_file.aio(entry.path)]
-                        results.append(json.loads(b"".join(chunks)))
-            except (FileNotFoundError, NotFoundError):
-                pass
-            return results
+            for attempt in range(_LIST_ATTEMPTS):
+                try:
+                    entries = [
+                        _metadata_entry(entry)
+                        async for entry in vol.iterdir.aio(_store_path(store))
+                        if entry.path.endswith(".json")
+                    ]
+                    return entries, None
+                except (FileNotFoundError, NotFoundError):
+                    return [], None
+                except Error as exc:
+                    if not _is_rate_limit(exc) or attempt == _LIST_ATTEMPTS - 1:
+                        return [], exc
+                    await asyncio.sleep(2**attempt)
+            raise AssertionError("unreachable")
 
         return _run()
 
-    import time as _time
-
     _safe_reload(vol)
-    results: list[dict[str, Any]] = []
-    for attempt in range(3):
+    for attempt in range(_LIST_ATTEMPTS):
         try:
-            for entry in vol.iterdir(_store_path(store)):
-                if entry.path.endswith(".json"):
-                    data = b"".join(vol.read_file(entry.path))
-                    results.append(json.loads(data))
-            return results
+            return [
+                _metadata_entry(entry)
+                for entry in vol.iterdir(_store_path(store))
+                if entry.path.endswith(".json")
+            ], None
         except (FileNotFoundError, NotFoundError):
-            return results
-        except Exception as exc:
-            if "rate limit" in str(exc).lower() and attempt < 2:
-                _time.sleep(2**attempt)
-                results = []
-                continue
-            raise
-    return results
+            return [], None
+        except Error as exc:
+            if not _is_rate_limit(exc) or attempt == _LIST_ATTEMPTS - 1:
+                return [], exc
+            time.sleep(2**attempt)
+    raise AssertionError("unreachable")
+
+
+@overload
+def _read_metadata_records(
+    entries: list[dict[str, Any]],
+    *,
+    is_async: Literal[True],
+) -> Awaitable[tuple[list[dict[str, Any]], BaseException | None]]: ...
+
+
+@overload
+def _read_metadata_records(
+    entries: list[dict[str, Any]],
+    *,
+    is_async: Literal[False] = False,
+) -> tuple[list[dict[str, Any]], BaseException | None]: ...
+
+
+def _read_metadata_records(
+    entries: list[dict[str, Any]],
+    *,
+    is_async: bool = False,
+) -> (
+    tuple[list[dict[str, Any]], BaseException | None]
+    | Awaitable[tuple[list[dict[str, Any]], BaseException | None]]
+):
+    from modal.exception import Error, NotFoundError
+
+    vol = _metadata_volume()
+    if is_async:
+
+        async def _read(path: str) -> dict[str, Any] | None:
+            try:
+                chunks = [chunk async for chunk in vol.read_file.aio(path)]
+                return json.loads(b"".join(chunks))
+            except (FileNotFoundError, NotFoundError):
+                return None
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return None
+
+        async def _run() -> tuple[list[dict[str, Any]], BaseException | None]:
+            results = await bounded_gather_with_retries(
+                [lambda entry=entry: _read(entry["path"]) for entry in entries]
+            )
+            records: list[dict[str, Any]] = []
+            for entry, result in zip(entries, results, strict=True):
+                if result is None:
+                    continue
+                if isinstance(result, BaseException):
+                    return records, result
+                if not isinstance(result, dict):
+                    continue
+                records.append(result)
+            return records, None
+
+        return _run()
+
+    records: list[dict[str, Any]] = []
+    for entry in entries:
+        record: Any = None
+        for attempt in range(_LIST_ATTEMPTS):
+            try:
+                record = json.loads(b"".join(vol.read_file(entry["path"])))
+                break
+            except (FileNotFoundError, NotFoundError):
+                record = None
+                break
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                record = None
+                break
+            except Error as exc:
+                if not _is_rate_limit(exc) or attempt == _LIST_ATTEMPTS - 1:
+                    return records, exc
+                time.sleep(2**attempt)
+        if record is None:
+            continue
+        if not isinstance(record, dict):
+            continue
+        records.append(record)
+    return records, None
+
+
+@overload
+def _vol_list_core(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[tuple[list[dict[str, Any]], BaseException | None]]: ...
+
+
+@overload
+def _vol_list_core(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[False] = False,
+) -> tuple[list[dict[str, Any]], BaseException | None]: ...
+
+
+def _vol_list_core(
+    store: MetadataStore | str,
+    *,
+    is_async: bool = False,
+) -> (
+    tuple[list[dict[str, Any]], BaseException | None]
+    | Awaitable[tuple[list[dict[str, Any]], BaseException | None]]
+):
+    entries = _list_metadata_entries(store, is_async=is_async)
+    if is_async:
+
+        async def _run() -> tuple[list[dict[str, Any]], BaseException | None]:
+            entries_result, failure = await cast(
+                Awaitable[tuple[list[dict[str, Any]], BaseException | None]], entries
+            )
+            if failure is not None:
+                return [], failure
+            return await _read_metadata_records(entries_result, is_async=True)
+
+        return _run()
+    entries_result, failure = cast(
+        tuple[list[dict[str, Any]], BaseException | None], entries
+    )
+    if failure is not None:
+        return [], failure
+    return _read_metadata_records(entries_result)
+
+
+@overload
+def vol_list_metadata_with_failures(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[True],
+) -> Awaitable[tuple[list[dict[str, Any]], bool]]: ...
+
+
+@overload
+def vol_list_metadata_with_failures(
+    store: MetadataStore | str,
+    *,
+    is_async: Literal[False] = False,
+) -> tuple[list[dict[str, Any]], bool]: ...
+
+
+def vol_list_metadata_with_failures(
+    store: MetadataStore | str,
+    *,
+    is_async: bool = False,
+) -> tuple[list[dict[str, Any]], bool] | Awaitable[tuple[list[dict[str, Any]], bool]]:
+    entries = _list_metadata_entries(store, is_async=is_async)
+    if is_async:
+
+        async def _run() -> tuple[list[dict[str, Any]], bool]:
+            entries_result, failure = await cast(
+                Awaitable[tuple[list[dict[str, Any]], BaseException | None]], entries
+            )
+            return entries_result, failure is not None
+
+        return _run()
+    entries_result, failure = cast(
+        tuple[list[dict[str, Any]], BaseException | None], entries
+    )
+    return entries_result, failure is not None
 
 
 def vol_list_prefix(store: MetadataStore | str, prefix: str) -> list[dict[str, Any]]:
@@ -380,6 +711,26 @@ def summary_items_from_payload(
     return [item for item in items if isinstance(item, dict)]
 
 
+@overload
+def vol_get_summary_items(
+    store: MetadataStore | str,
+    *,
+    key: str = SUMMARY_KEY,
+    payload_key: str = SUMMARY_ITEMS_KEY,
+    is_async: Literal[True],
+) -> Awaitable[list[dict[str, Any]] | None]: ...
+
+
+@overload
+def vol_get_summary_items(
+    store: MetadataStore | str,
+    *,
+    key: str = SUMMARY_KEY,
+    payload_key: str = SUMMARY_ITEMS_KEY,
+    is_async: Literal[False] = False,
+) -> list[dict[str, Any]] | None: ...
+
+
 def vol_get_summary_items(
     store: MetadataStore | str,
     *,
@@ -438,7 +789,9 @@ def vol_compact_summary_items(
     summary_items = (
         vol_get_summary_items(summary_store, key=key, payload_key=payload_key) or []
     )
-    canonical_items = vol_list(item_store)
+    canonical_items, failure = _vol_list_core(item_store)
+    if failure is not None:
+        raise failure
 
     items_by_id = {
         item[item_id_key]: item
@@ -521,7 +874,6 @@ def vol_put_with_summary(
     the best-effort summary update. ``summary_item`` defaults to ``payload``
     for stores whose summary rows mirror the canonical shape.
     """
-
     put = partial(vol_put, item_store, key, payload)
     upsert = partial(
         vol_upsert_summary_item,
@@ -548,6 +900,7 @@ __all__ = [
     "SUMMARY_ITEMS_KEY",
     "SUMMARY_KEY",
     "summary_items_from_payload",
+    "bounded_gather_with_retries",
     "vol_get",
     "vol_list",
     "vol_list_prefix",
@@ -555,6 +908,7 @@ __all__ = [
     "compact_summary_store",
     "vol_get_summary_items_healed",
     "vol_put",
+    "vol_put_many",
     "vol_remove",
     "vol_get_summary_items",
     "vol_put_summary_items",

@@ -32,7 +32,6 @@ def build_sglang_serve_app(
     served_model_name: str,
     checkpoints_volume: "Volume | str | None" = None,
     checkpoints_mount_path: str | None = None,
-    deployment_id: str | None = None,
     unauthenticated: bool = True,
 ) -> "App":
     import modal
@@ -103,7 +102,6 @@ def build_sglang_serve_app(
     server_args = recipe.server_args(served_model_name=served_model_name)
     _tp = recipe.tp
     _dp = recipe.dp
-    _deployment_id = deployment_id
 
     @app.server(
         image=image,
@@ -156,12 +154,6 @@ def build_sglang_serve_app(
                 successful_requests=2,
                 request_timeout=60.0,
             )
-            if _deployment_id:
-                from modal_training_gym.common.deployment import (
-                    update_deployment_status,
-                )
-
-                update_deployment_status(_deployment_id, "running")
             print(f"[training-gym] SGLang serving {served_model_name} ready.")
 
         @modal.exit()
@@ -170,12 +162,6 @@ def build_sglang_serve_app(
                 stop_server,
             )
 
-            if _deployment_id:
-                from modal_training_gym.common.deployment import (
-                    update_deployment_status,
-                )
-
-                update_deployment_status(_deployment_id, "stopped")
             stop_server(getattr(self, "proc", None))
 
     for tag, fn in app.registered_functions.items():

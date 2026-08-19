@@ -1,4 +1,5 @@
 import dataclasses as _dc
+import os
 import secrets as _secrets
 import sys
 import threading
@@ -9,13 +10,13 @@ from typing import Any
 from typing import TypeVar
 from typing import cast
 
+from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.checkpoint import Checkpoint
-from modal_training_gym.common.run import TrainingRun
+from modal_training_gym.common.run import TrainingRun, wandb_run_id_for_attempt
 from modal_training_gym.common.status import (
     FrameworkStatus,
     MilesStatus,
@@ -361,8 +362,10 @@ class TrainConfig:
         training framework and carries Modal infra settings (GPU type, node
         count, image) plus framework CLI flags.
     checkpoint : Checkpoint | None
-        Checkpoint to resume training from. When ``None``, training starts
-        from the base model weights. Default ``None``.
+        Megatron checkpoint to resume training from. The checkpoint's parent
+        directory becomes the recipe's ``load`` path; the attached model
+        remains the Hugging Face source for tokenizer and architecture data.
+        Omit to start from the base model weights. Default ``None``.
     merge_model_recipe : bool
         When ``True``, merges the known-model preset recipe (e.g.
         ``Qwen3_4b_Recipe``) onto recipe fields you left unset. Set
@@ -420,6 +423,26 @@ class TrainConfig:
             self.model.model_path or "",
         )
 
+    def _prepare_recipe(self) -> BaseTrainRecipe:
+        recipe = _resolve_recipe(
+            self.model,
+            self.recipe,
+            merge_model_recipe=self.merge_model_recipe,
+        )
+        if self.checkpoint is None:
+            return recipe
+        if self.checkpoint.checkpoint_type != CheckpointType.megatron:
+            raise TrainingGymConfigError(
+                "Training can only resume from a Megatron checkpoint; "
+                "Hugging Face exports are serving artifacts."
+            )
+        if isinstance(recipe, (MilesRecipe, SlimeRecipe)):
+            recipe = _dc.replace(
+                recipe,
+                load=os.path.dirname(self.checkpoint.path.rstrip("/")),
+            )
+        return recipe
+
     def _build_app(self, training_run_id: str | None = None):
         _warn_if_external_build_app()
         if training_run_id is None:
@@ -432,11 +455,7 @@ class TrainConfig:
                 )
             return build_miles_app(
                 training_run_id=training_run_id,
-                miles=_resolve_recipe(
-                    self.model,
-                    cast(MilesRecipe, self.recipe),
-                    merge_model_recipe=self.merge_model_recipe,
-                ),
+                miles=cast(MilesRecipe, self._prepare_recipe()),
                 model=self.model,
                 dataset=self.dataset,
                 checkpoint=self.checkpoint,
@@ -448,14 +467,9 @@ class TrainConfig:
                 raise TrainingGymConfigError(
                     f"Recipe type {recipe_type} requires SlimeRecipe, got {type(self.recipe).__name__}"
                 )
-            combined = _resolve_recipe(
-                self.model,
-                cast(SlimeRecipe, self.recipe),
-                merge_model_recipe=self.merge_model_recipe,
-            )
             return build_slime_app(
                 training_run_id=training_run_id,
-                slime=combined,
+                slime=cast(SlimeRecipe, self._prepare_recipe()),
                 model=self.model,
                 dataset=self.dataset,
                 checkpoint=self.checkpoint,
@@ -533,7 +547,7 @@ class TrainConfig:
                     "project": wandb.project,
                     "entity": getattr(wandb, "entity", ""),
                     "group": wandb.group,
-                    "run_id": training_run_id[:8],
+                    "run_id": wandb_run_id_for_attempt(training_run_id, 1),
                 }
                 if wandb
                 else {}
@@ -553,9 +567,7 @@ class TrainConfig:
                 serialize_recipe_params,
             )
 
-            combined = _resolve_recipe(
-                model, recipe, merge_model_recipe=self.merge_model_recipe
-            )
+            combined = self._prepare_recipe()
             summary["recipe"] = {
                 # gpu_type is a launcher-only field (in _MILES_SKIP) so it is
                 # absent from serialize_recipe_params for miles; the dashboard
@@ -758,7 +770,10 @@ class TrainConfig:
                         is_active=is_active,
                     )
 
-                megatron_to_hf_mode = getattr(self.recipe, "megatron_to_hf_mode", "")
+                # Resolved, not self.recipe: the preset decides bridge mode, which loads
+                # the HF weights directly and needs no torch_dist conversion.
+                resolved = self._resolved_recipe_for_logging()
+                megatron_to_hf_mode = getattr(resolved, "megatron_to_hf_mode", "")
                 needs_conversion = megatron_to_hf_mode != "bridge"
                 if prepare_inputs:
                     if isinstance(self.recipe, SlimeRecipe):

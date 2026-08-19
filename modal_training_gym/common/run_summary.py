@@ -15,7 +15,7 @@ from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 
 JsonDict = dict[str, object]
 StepTimes = dict[str, dict[str, int | None]]
-SubstepTimes = dict[str, dict[str, dict[str, float | None]]]
+SubstepTimes = dict[str, dict[str, dict[str, float | int | bool | None]]]
 
 
 class FrameworkProgress(BaseModel):
@@ -141,6 +141,7 @@ class ResumeState(BaseModel):
     resume_from_iteration: int | None = None
     last_attempt_status: str = ""
     last_attempt_started_at: int = 0
+    attempt_starts: list[int] = Field(default_factory=list)
 
 
 class GroupTag(BaseModel):
@@ -397,6 +398,18 @@ def _resume_state(metadata: JsonDict) -> ResumeState | None:
     attempt_count = _integer(metadata.get("attempt_count"))
     checkpoint_path = _text(metadata.get("resume_checkpoint_path"))
     resumed = metadata.get("resumed_from_checkpoint") is True or bool(checkpoint_path)
+    raw_attempt_starts = metadata.get("attempt_starts")
+    attempt_starts = (
+        sorted(
+            {
+                parsed
+                for item in raw_attempt_starts
+                if (parsed := _optional_int(item)) is not None
+            }
+        )[-50:]
+        if isinstance(raw_attempt_starts, list)
+        else []
+    )
     if attempt_count <= 1 and not resumed:
         return None
     return ResumeState(
@@ -407,6 +420,7 @@ def _resume_state(metadata: JsonDict) -> ResumeState | None:
         resume_from_iteration=_optional_int(metadata.get("resume_from_iteration")),
         last_attempt_status=_text(metadata.get("last_attempt_status")),
         last_attempt_started_at=_timestamp(metadata.get("last_attempt_started_at")),
+        attempt_starts=attempt_starts,
     )
 
 

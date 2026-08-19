@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import modal
 from pydantic import ConfigDict, model_validator
@@ -44,6 +44,7 @@ _MILES_SKIP = {
     "image_env",
     "local_miles",
     "patch_files",
+    "substep_timing",
     "wandb",
     # Callables shipped by value into the containers; the launcher writes the
     # resolved import path into `extra_config` (rm/generate) or back onto the
@@ -56,6 +57,7 @@ _MILES_SKIP = {
     "rollout_function",
     "custom_megatron_before_log_prob_hook",
     "custom_megatron_before_train_step_hook",
+    "train_function_kwargs",
     "capture_trace",
     "trace_sample_limit",
 }
@@ -147,6 +149,9 @@ class MilesRecipe(BaseTrainRecipe):
         Extra shell commands run while building the image.
     image_env : dict[str, str]
         Extra env vars baked into the image.
+    train_function_kwargs : dict[str, Any]
+        Extra Modal Function kwargs for the train function; supports
+        ``ephemeral_disk`` (MiB), ``secrets`` and ``experimental_options``.
     capture_trace : bool
         Attach miles' per-sample execution trace (generate/reward/tool-call
         timeline) to recorded rollouts for the dashboard.
@@ -209,6 +214,8 @@ class MilesRecipe(BaseTrainRecipe):
         Extra token ids that terminate generation.
     use_miles_router : bool
         Route rollout requests through Miles' router, not engines directly.
+    rollout_top_k : int | None
+        Top-k for rollout generation; ``None`` leaves Miles' own default.
     use_rollout_routing_replay : bool
         Reuse the rollout's MoE expert routing in training.
 
@@ -352,6 +359,9 @@ class MilesRecipe(BaseTrainRecipe):
 
     use_dynamic_batch_size : bool
         Pack samples up to ``max_tokens_per_gpu`` instead of a fixed micro batch.
+    micro_batch_size : int | None
+        Fixed micro-batch size when dynamic batching is off; ``None`` leaves
+        Miles' own default.
     max_tokens_per_gpu : int
         Token budget per GPU per micro-batch when dynamic batching is on.
 
@@ -427,6 +437,20 @@ class MilesRecipe(BaseTrainRecipe):
         Fall back to NCCL all-reduce instead of sglang's custom kernel.
     sglang_cuda_graph_bs : list[int] | None
         Batch sizes to capture CUDA graphs for.
+    sglang_attention_backend : str | None
+        sglang attention kernel backend, e.g. ``"triton"``. ``None`` leaves
+        sglang's own selection (FlashAttention) in place.
+    sglang_disable_cuda_graph : bool
+        Run the engines in eager mode instead of capturing CUDA graphs.
+    sglang_disable_overlap_schedule : bool
+        Disable sglang's overlapped scheduler.
+    sglang_disable_radix_cache : bool
+        Disable prefix (radix) caching across requests.
+    no_offload_train : bool
+        Keep the training weights and optimizer resident instead of offloading
+        them between rollout and train phases (colocated runs).
+    no_offload_rollout : bool
+        Keep the rollout engines resident instead of offloading them.
     sglang_moe_runner_backend : str | None
         MoE GEMM runner for the engines, e.g. ``"triton"``. ``None`` leaves
         sglang's ``auto`` selection in place.
@@ -456,6 +480,7 @@ class MilesRecipe(BaseTrainRecipe):
     image_env: dict[str, str] = field(default_factory=dict)
     local_miles: str | None = None
     patch_files: list[str] = field(default_factory=list)
+    substep_timing: Literal["auto", "off"] = "auto"
 
     environment: dict = field(
         default_factory=lambda: {
@@ -511,6 +536,7 @@ class MilesRecipe(BaseTrainRecipe):
     rollout_stop_token_ids: list[int] | None = None
     rollout_num_gpus_per_engine: int = 1
     use_miles_router: bool = False
+    rollout_top_k: int | None = None
     use_rollout_routing_replay: bool = False
 
     # ── Parallelism ─────────────────────────────────────────────────────────
@@ -579,6 +605,7 @@ class MilesRecipe(BaseTrainRecipe):
 
     # ── Dynamic batching ────────────────────────────────────────────────────
     use_dynamic_batch_size: bool = True
+    micro_batch_size: int | None = None
     max_tokens_per_gpu: int = 9216
 
     # ── Eval ────────────────────────────────────────────────────────────────
@@ -597,6 +624,12 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_enable_dp_lm_head: bool = False
     sglang_disable_custom_all_reduce: bool = False
     sglang_cuda_graph_bs: list[int] | None = None
+    sglang_attention_backend: str | None = None
+    sglang_disable_cuda_graph: bool = False
+    sglang_disable_overlap_schedule: bool = False
+    sglang_disable_radix_cache: bool = False
+    no_offload_train: bool = False
+    no_offload_rollout: bool = False
     sglang_moe_runner_backend: str | None = None
     sglang_max_running_requests: int | None = None
     sglang_server_concurrency: int | None = None
@@ -625,6 +658,7 @@ class MilesRecipe(BaseTrainRecipe):
     # generate/reward/tool-call timeline) to the first `trace_sample_limit`
     # samples of each rollout. Off by default — traces inflate payloads, so
     # sampling keeps the added volume well under 1%. Not a miles CLI flag.
+    train_function_kwargs: dict[str, Any] = field(default_factory=dict)
     capture_trace: bool = False
     trace_sample_limit: int = 16
 
@@ -784,6 +818,9 @@ class MilesRecipe(BaseTrainRecipe):
 
     @classmethod
     def get_base_recipe(cls, model_config: ModelConfig) -> "MilesRecipe | None":
+        from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
+            Gemma4_26B_A4B_Recipe,
+        )
         from modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b import (
             Moonlight_16B_A3B_Recipe,
         )
@@ -795,6 +832,8 @@ class MilesRecipe(BaseTrainRecipe):
             return Qwen3_5_4b_Miles_Recipe()
         if model_config.model_name == "moonshotai/Moonlight-16B-A3B-Instruct":
             return Moonlight_16B_A3B_Recipe()
+        if model_config.model_name == "google/gemma-4-26B-A4B-it":
+            return Gemma4_26B_A4B_Recipe()
         return None
 
     def download_model(self) -> None:

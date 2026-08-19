@@ -55,28 +55,6 @@ export function fmtDuration(start, end) {
   return `${s}s`;
 }
 
-export function fmtCluster(summary) {
-  if (!summary) return "—";
-  const gpu = summary.gpu_type || "?";
-  const nodes = summary.actor_num_nodes || 0;
-  const gpusPerNode = summary.actor_num_gpus_per_node || 0;
-  if (!nodes && !gpusPerNode) return gpu || "—";
-  const totalGpus = nodes * gpusPerNode;
-  return `${totalGpus}x ${gpu}`;
-}
-
-export function fmtLr(lr) {
-  if (!lr) return "—";
-  if (lr < 0.001) return lr.toExponential(1);
-  return String(lr);
-}
-
-export function truncateId(id) {
-  if (!id) return "—";
-  if (id.length <= 12) return id;
-  return id.slice(0, 12) + "…";
-}
-
 export function getGroupTags(run) {
   const tags = run?.group_tags || run?.metadata?.group_tags;
   const groupId = tags?.group_id || run?.group_id || run?.metadata?.group_id || "";
