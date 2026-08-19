@@ -68,7 +68,7 @@ from modal_training_gym.frameworks.miles.modal_helpers.utils import (
 MILES_ROOT = "/root/miles"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
 # libibverbs and the libmlx5 provider come from incompatible rdma package versions for miles multi-node training
-# reinstalling fixes this issue, mooncake transferengine imports successfully 
+# reinstalling fixes this issue, mooncake transferengine imports successfully
 RDMA_RUNTIME_INSTALL_COMMAND = (
     "apt-get update && apt-get install -y --no-install-recommends "
     "--reinstall libibverbs1 ibverbs-providers && "
