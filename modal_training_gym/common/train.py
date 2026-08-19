@@ -627,6 +627,16 @@ class TrainConfig:
         """Start training in a detached Modal app and return immediately."""
         import modal
 
+        if not modal.is_local():
+            raise modal.exception.InvalidError(
+                "TrainConfig.launch() and train() must be called from a local "
+                "process because they open a detached Modal app, which cannot "
+                "be done from inside a container. Run the script locally and "
+                "guard module-scope launch code with "
+                '`if __name__ == "__main__":` so it does not execute when '
+                "imported inside a container."
+            )
+
         from modal_training_gym.common.config import (
             CONFIG_PATH,
             get_framework_status_url,

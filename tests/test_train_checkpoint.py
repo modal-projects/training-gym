@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import inspect
+from unittest.mock import Mock
 
+import modal
 import pytest
 
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
@@ -110,3 +112,22 @@ def test_launchers_do_not_replace_model_path_with_checkpoint() -> None:
     assert "model.model_path = checkpoint.path" not in inspect.getsource(
         build_miles_app
     )
+
+
+def test_launch_rejects_container_before_persisting_run(monkeypatch) -> None:
+    config = _config(SlimeRecipe(**_RECIPE_KW), CheckpointType.megatron)
+    save = Mock()
+    vol_put = Mock()
+
+    monkeypatch.setattr(modal, "is_local", lambda: False)
+    monkeypatch.setattr("modal_training_gym.common.train.TrainingRun.save", save)
+    monkeypatch.setattr("modal_training_gym.common.train.vol_put", vol_put)
+
+    with pytest.raises(
+        modal.exception.InvalidError,
+        match="must be called from a local process",
+    ):
+        config.launch(show_output=False)
+
+    save.assert_not_called()
+    vol_put.assert_not_called()
