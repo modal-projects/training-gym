@@ -20,6 +20,7 @@ from modal_training_gym.common import run as run_mod
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
+from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import MetadataStore
 
 
@@ -69,6 +70,169 @@ def test_rollout_async_save_survives_unmounted_volume(fake_volume):
 def test_train_result_payload_is_json_serializable(fw):
     payload = TrainResult(app_name="a", framework=fw, training_run_id="t")._to_dict()
     assert json.loads(json.dumps(payload))["framework"] == fw.value
+
+
+def _put_json(fake_volume, path: str, payload: object) -> None:
+    fake_volume.files[path] = (json.dumps(payload) + "\n").encode()
+
+
+def test_summary_heal_reads_only_missing_canonical_items(fake_volume, monkeypatch):
+    canonical_store = MetadataStore.TRAINING_RUNS.value
+    summary_store = MetadataStore.TRAINING_RUNS_SUMMARY.value
+    for run_id in ("run-1", "run-2", "run-3"):
+        _put_json(
+            fake_volume,
+            f"{canonical_store}/{run_id}.json",
+            {"training_run_id": run_id, "created_at": 1},
+        )
+    _put_json(
+        fake_volume,
+        f"{summary_store}/summary.json",
+        {
+            "items": [
+                {"training_run_id": "run-1", "created_at": 1},
+                {"training_run_id": "run-2", "created_at": 1},
+            ]
+        },
+    )
+
+    read_paths: list[str] = []
+    original_read_file = fake_volume.read_file
+
+    def read_file(path: str):
+        read_paths.append(path)
+        return original_read_file(path)
+
+    monkeypatch.setattr(fake_volume, "read_file", read_file)
+    repaired = metadata.vol_get_summary_items_healed(
+        MetadataStore.TRAINING_RUNS_SUMMARY
+    )
+
+    assert {item["training_run_id"] for item in repaired} == {
+        "run-1",
+        "run-2",
+        "run-3",
+    }
+    assert [path for path in read_paths if path.startswith(f"{canonical_store}/")] == [
+        f"{canonical_store}/run-3.json"
+    ]
+
+
+def test_summary_heal_without_drift_reads_no_canonical_items(fake_volume, monkeypatch):
+    canonical_store = MetadataStore.TRAINING_RUNS.value
+    summary_store = MetadataStore.TRAINING_RUNS_SUMMARY.value
+    for run_id in ("run-1", "run-2"):
+        _put_json(
+            fake_volume,
+            f"{canonical_store}/{run_id}.json",
+            {"training_run_id": run_id, "created_at": 1},
+        )
+    _put_json(
+        fake_volume,
+        f"{summary_store}/summary.json",
+        {
+            "items": [
+                {"training_run_id": "run-1", "created_at": 1},
+                {"training_run_id": "run-2", "created_at": 1},
+            ]
+        },
+    )
+
+    read_paths: list[str] = []
+    original_read_file = fake_volume.read_file
+
+    def read_file(path: str):
+        read_paths.append(path)
+        return original_read_file(path)
+
+    monkeypatch.setattr(fake_volume, "read_file", read_file)
+    metadata.vol_get_summary_items_healed(MetadataStore.TRAINING_RUNS_SUMMARY)
+
+    assert not [path for path in read_paths if path.startswith(f"{canonical_store}/")]
+
+
+def test_summary_heal_drops_stale_summary_items(fake_volume):
+    canonical_store = MetadataStore.TRAINING_RUNS.value
+    summary_store = MetadataStore.TRAINING_RUNS_SUMMARY.value
+    _put_json(
+        fake_volume,
+        f"{canonical_store}/run-1.json",
+        {"training_run_id": "run-1", "created_at": 1},
+    )
+    _put_json(
+        fake_volume,
+        f"{summary_store}/summary.json",
+        {
+            "items": [
+                {"training_run_id": "run-1", "created_at": 1},
+                {"training_run_id": "gone", "created_at": 2},
+            ]
+        },
+    )
+
+    repaired = metadata.vol_get_summary_items_healed(
+        MetadataStore.TRAINING_RUNS_SUMMARY
+    )
+
+    assert repaired == [{"training_run_id": "run-1", "created_at": 1}]
+    stored = json.loads(fake_volume.files[f"{summary_store}/summary.json"])
+    assert stored["items"] == repaired
+
+
+@pytest.mark.parametrize("canonical_keys", [set(), None])
+def test_summary_heal_ignores_empty_or_failed_canonical_listing(
+    fake_volume, monkeypatch, canonical_keys
+):
+    summary_store = MetadataStore.TRAINING_RUNS_SUMMARY.value
+    original_summary = {"items": [{"training_run_id": "run-1", "created_at": 1}]}
+    _put_json(fake_volume, f"{summary_store}/summary.json", original_summary)
+    monkeypatch.setattr(metadata, "vol_list_item_keys", lambda _store: canonical_keys)
+    monkeypatch.setattr(
+        metadata,
+        "vol_put_summary_items",
+        lambda *_args, **_kwargs: pytest.fail("summary should not be rewritten"),
+    )
+
+    assert (
+        metadata.vol_get_summary_items_healed(MetadataStore.TRAINING_RUNS_SUMMARY)
+        == original_summary["items"]
+    )
+    assert (
+        json.loads(fake_volume.files[f"{summary_store}/summary.json"])
+        == original_summary
+    )
+
+
+def test_summary_heal_falls_back_to_compaction_on_incremental_failure(
+    fake_volume, monkeypatch
+):
+    canonical_store = MetadataStore.TRAINING_RUNS.value
+    summary_store = MetadataStore.TRAINING_RUNS_SUMMARY.value
+    for run_id in ("run-1", "run-2"):
+        _put_json(
+            fake_volume,
+            f"{canonical_store}/{run_id}.json",
+            {"training_run_id": run_id, "created_at": 1},
+        )
+    _put_json(
+        fake_volume,
+        f"{summary_store}/summary.json",
+        {"items": [{"training_run_id": "run-1", "created_at": 1}]},
+    )
+    fallback = [{"training_run_id": "from-compaction"}]
+    monkeypatch.setattr(
+        metadata,
+        "_read_metadata_records",
+        lambda _entries: ([], RuntimeError("read failed")),
+    )
+    monkeypatch.setattr(
+        metadata, "compact_summary_store", lambda _summary_store: fallback
+    )
+
+    assert (
+        metadata.vol_get_summary_items_healed(MetadataStore.TRAINING_RUNS_SUMMARY)
+        == fallback
+    )
 
 
 @pytest.mark.skipif(

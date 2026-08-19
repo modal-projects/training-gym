@@ -158,6 +158,14 @@ def _store_path(store: MetadataStore | str) -> str:
     return store
 
 
+def _is_top_level_json_path(store: MetadataStore | str, path: str) -> bool:
+    prefix = f"{_store_path(store).rstrip('/')}/"
+    if not path.startswith(prefix):
+        return False
+    relative_path = path[len(prefix) :]
+    return relative_path.endswith(".json") and "/" not in relative_path
+
+
 async def bounded_gather_with_retries(
     readers: Iterable[Callable[[], Awaitable[T]]],
 ) -> list[T | BaseException]:
@@ -409,7 +417,7 @@ def _list_metadata_entries(
                     entries = [
                         _metadata_entry(entry)
                         async for entry in vol.iterdir.aio(_store_path(store))
-                        if entry.path.endswith(".json")
+                        if _is_top_level_json_path(store, entry.path)
                     ]
                     return entries, None
                 except (FileNotFoundError, NotFoundError):
@@ -428,7 +436,7 @@ def _list_metadata_entries(
             return [
                 _metadata_entry(entry)
                 for entry in vol.iterdir(_store_path(store))
-                if entry.path.endswith(".json")
+                if _is_top_level_json_path(store, entry.path)
             ], None
         except (FileNotFoundError, NotFoundError):
             return [], None
@@ -648,23 +656,17 @@ def vol_remove_keys_with_prefix(store: MetadataStore | str, prefix: str) -> int:
     return removed
 
 
+def vol_list_item_keys(store: MetadataStore | str) -> set[str] | None:
+    """List top-level canonical item keys without reading their payloads."""
+    entries, failure = _list_metadata_entries(store)
+    if failure is not None:
+        return None
+    return {entry["path"].rsplit("/", 1)[-1][: -len(".json")] for entry in entries}
+
+
 def vol_count_items(store: MetadataStore | str) -> int:
-    """Count canonical ``.json`` files in a store without reading them.
-
-    A single directory listing, used to cheaply detect a collapsed summary
-    (summary item count < canonical file count) before paying for a full
-    rebuild via ``vol_list``.
-    """
-    from modal.exception import NotFoundError
-
-    vol = _metadata_volume()
-    _safe_reload(vol)
-    try:
-        return sum(
-            1 for e in vol.iterdir(_store_path(store)) if e.path.endswith(".json")
-        )
-    except (FileNotFoundError, NotFoundError):
-        return 0
+    """Count canonical ``.json`` files in a store without reading them."""
+    return len(vol_list_item_keys(store) or ())
 
 
 def compact_summary_store(summary_store: MetadataStore) -> list[dict[str, Any]]:
@@ -680,20 +682,49 @@ def compact_summary_store(summary_store: MetadataStore) -> list[dict[str, Any]]:
 
 
 def vol_get_summary_items_healed(summary_store: MetadataStore) -> list[dict[str, Any]]:
-    """Read a summary, rebuilding from canonical files if it looks collapsed.
-
-    Self-heals the read path: if a racing writer clobbered the summary down to
-    fewer items than there are canonical files, rebuild from canonical instead
-    of surfacing the truncated list. The canonical count is a cheap one-op
-    directory listing, so the expensive rebuild only runs when actually needed.
-    """
+    """Read a summary and repair only its drift from canonical files."""
     items = vol_get_summary_items(summary_store) or []
     cfg = _SUMMARY_COMPACTION.get(summary_store)
     if cfg is None:
         return items
-    if vol_count_items(cfg.item_store) > len(items):
+
+    canonical_keys = vol_list_item_keys(cfg.item_store)
+    if not canonical_keys:
+        return items
+
+    summary_ids = {
+        item_id for item in items if (item_id := item.get(cfg.item_id_key)) is not None
+    }
+    missing_keys = canonical_keys - summary_ids
+    stale_ids = summary_ids - canonical_keys
+    if not missing_keys and not stale_ids:
+        return items
+
+    try:
+        entries = [
+            {"path": f"{_store_path(cfg.item_store)}/{key}.json"}
+            for key in missing_keys
+        ]
+        canonical_items, failure = _read_metadata_records(entries)
+        if failure is not None:
+            raise failure
+
+        items_by_id = {
+            item[cfg.item_id_key]: item
+            for item in items
+            if item.get(cfg.item_id_key) in canonical_keys
+        }
+        for item in canonical_items:
+            item_id = item.get(cfg.item_id_key)
+            if item_id in canonical_keys:
+                items_by_id[item_id] = {**items_by_id.get(item_id, {}), **item}
+
+        repaired_items = list(items_by_id.values())
+        repaired_items.sort(key=cfg.sort_key, reverse=cfg.reverse)
+        vol_put_summary_items(summary_store, repaired_items)
+        return repaired_items
+    except Exception:
         return compact_summary_store(summary_store)
-    return items
 
 
 def summary_items_from_payload(
@@ -904,6 +935,7 @@ __all__ = [
     "vol_get",
     "vol_list",
     "vol_list_prefix",
+    "vol_list_item_keys",
     "vol_count_items",
     "compact_summary_store",
     "vol_get_summary_items_healed",
