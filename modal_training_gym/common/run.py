@@ -196,7 +196,7 @@ class TrainingRun(BaseModel):
                     except (AttributeError, TypeError):
                         pass
                 try:
-                    setattr(exc, "training_run_id", self.training_run_id)
+                    exc.training_run_id = self.training_run_id  # pyright: ignore[reportAttributeAccessIssue]  # exception metadata is consumed by downstream callers
                 except AttributeError:
                     pass
                 raise
