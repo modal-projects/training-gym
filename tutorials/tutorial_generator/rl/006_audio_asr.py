@@ -1,21 +1,17 @@
-# pyright: reportUndefinedVariable=false
 """Tutorial source for `006_audio_asr` — parsed by generate_tutorial.py."""
 
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "1 × 2×H100",
-    "summary": "Audio GRPO for transcribing LibriSpeech",
+    "summary": "Automatic Speech Recognition (Audio)",
     "difficulty": "Intermediate",
     "order": 39,
     "api_classes": [
+        "CustomDeployment",
+        "MultimodalDataset",
         "Qwen3_ASR_1_7B",
         "Qwen3_ASR_1_7b_Recipe",
-        "MultimodalDataset",
         "TrainConfig",
-        "CustomDeployment",
-    ],
-    "required_modal_secrets": [
-        {"name": "wandb-secret", "key": "WANDB_API_KEY"},
     ],
 }
 
@@ -26,25 +22,18 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Audio GRPO on Qwen3-ASR-1.7B
+    # Transcribing speech at a fraction of frontier costs
 
-    This tutorial demonstrates training [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)-- a speech
-    recognizer — end-to-end with GRPO.
-
-    The loop:
-
-    1. Load LibriSpeech speech clips with a small `MultimodalDataset`
-       (`modality="audio"`).
-    2. slime serves Qwen3-ASR on SGLang's `/v1/audio/transcriptions` endpoint and
-       the gym's audio-transcription rollout posts each clip, collecting the
-       transcript.
-    3. Your `word_error_rate_reward` scores each transcript as **−WER** (word error
-       rate) against the reference text.
-    4. That reward drives a GRPO update through slime/Megatron.
-
-    The Training Gym takes care of the nitty gritty compatibility matching--
-    you just pick `model=Qwen3_ASR_1_7B()` and `recipe=Qwen3_ASR_1_7b_Recipe(...)`,
-    and bring the reward.
+    We've shown before that when it comes to speech transcription,
+    open models are [100x faster and 100x cheaper](https://modal.com/blog/fast-cheap-batch-transcription)
+    than proprietary APIs, and open models still occupy
+    [the top spots](https://huggingface.co/spaces/hf-audio/open_asr_leaderboard).
+    But there's no reason to stop there: we can achieve state-of-the-art
+    performance by post-training open models to get even lower word error rates (WER).
+    As an example, we show how to post-train
+    [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on the 
+    [hf-internal-testing/librispeech_asr_dummy](https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy)
+    dataset.
     """
 
 
@@ -52,10 +41,10 @@ def _intro():
 @markdown
 def _run_instructions():
     """
-    Run with (the eval step decodes audio locally, so bring the audio libs):
+    Run with:
     ```
     uv run --with soundfile --with librosa --with jiwer --with datasets \\
-      python tutorials/rl/006_audio_asr/006_audio_asr.py
+        python tutorials/rl/006_audio_asr/006_audio_asr.py
     ```
     """
 
@@ -64,8 +53,6 @@ def _run_instructions():
 @shell(
     "import importlib.util\n"
     "\n"
-    "# Skip if modal_training_gym is already importable (e.g. a local editable\n"
-    "# checkout) so your edits keep taking effect and the env stays synced.\n"
     "if importlib.util.find_spec('modal_training_gym') is None:\n"
     "    %uv pip install -q git+https://github.com/modal-projects/training-gym.git@main\n"
     "if importlib.util.find_spec('librosa') is None:\n"
@@ -86,44 +73,72 @@ def _imports():
         list_checkpoints,
     )
 
+@markdown
+def _deploy_base_intro():
+    """
+    ## Deploy the base model
+
+    Since audio models are not yet supported on
+    [Endpoints](https://modal.com/docs/guide/endpoints), we use a
+    [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment/)
+    to deploy the base and trained models.
+    """
+
+
+@code
+def _deploy_base():
+    model = Qwen3_ASR_1_7B()
+    base_deployment = CustomDeployment.launch(
+        model,
+        unauthenticated=True,
+        recreate_if_existing=True
+    )
+    base_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"base model deployed to {base_deployment.url}")
+
+
+@markdown
+def _score_fn_intro():
+    """
+    ## Define a scoring function
+
+    As mentioned before, we measure capability by lower WER, so that's what we'll use.
+    We can use the `jiwer` library to calculate this so we don't have to ourselves.
+    """
+
+
+@code
+def _score_fn():
+    async def score_transcript(response: str, label: str) -> float:
+        import jiwer
+
+        if not label:
+            return 0.0
+        return -float(jiwer.wer(label, response))
+
+
 
 @markdown
 def _dataset_intro():
     """
-    ## Load LibriSpeech audio
+    ## Get the dataset
 
-    The dataset is the one piece of boilerplate worth seeing in full. It's a small
-    `MultimodalDataset` (`modality="audio"`) that pulls a few clips from the
-    standard LibriSpeech dummy set: each row is a prompt with an `<audio>`
-    placeholder, the clip itself (base64 `data:audio/wav` URI), and the reference
-    transcript as the label. As a `MultimodalDataset` it tells slime to forward the
-    audio column to the rollout — the same passthrough images and video use.
-
-    We re-encode every clip to WAV and keep `sample.prompt` a message list
-    (`apply_chat_template=False`) so the audio data-URI survives into the rollout.
+    Since this dataset contains audio files, we create a `MultimodalDataset`
+    to pass the audio clips to rollouts. We do some pre-processing with
+    `soundfile` and store as base64 inline for demonstration purposes.
+    In a production use case, you'd likely instead store by reference.
     """
 
 
 @code
 def _dataset():
-    INSTRUCTION = (
-        "<audio>\nTranscribe the speech to text. Respond with only the transcript."
-    )
-
     class LibriSpeechASRDataset(MultimodalDataset):
-        """LibriSpeech ASR rows (prompt + audio data-URI + transcript label)."""
-
         modality = "audio"
         hf_repo = "hf-internal-testing/librispeech_asr_dummy"
         hf_config = "clean"
         hf_split = "validation"
-        n_rows = 8
-        # Re-materialize each run so prompt changes take effect instead of being
-        # shadowed by a stale jsonl on the data volume.
         always_prepare = True
-        # Keep sample.prompt a conversation list (don't collapse to a templated
-        # string) so the audio data-URI survives for the transcription rollout.
-        apply_chat_template = False
+        apply_chat_template = False  # ensures the data URI is valid throughout the rollout
 
         def __init__(self, **kwargs):
             super().__init__(rows=[], **kwargs)
@@ -136,11 +151,7 @@ def _dataset():
             from datasets import Audio, load_dataset
 
             ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-            ds = ds.select(range(min(self.n_rows, len(ds))))
-            # decode=False avoids the torchcodec dependency; decode with soundfile.
-            ds = ds.cast_column("audio", Audio(decode=False))
-            # Demo-scale: materializes every clip as an inline base64 row in memory.
-            # Fine for a handful of clips; for large corpora stream / store by reference.
+            ds = ds.cast_column("audio", Audio(decode=False))  # decode with soundfile instead of torchcodec
             rows = []
             for ex in ds:
                 audio = ex["audio"]
@@ -157,7 +168,7 @@ def _dataset():
                 ).decode("ascii")
                 rows.append(
                     {
-                        self.input_key: INSTRUCTION,
+                        self.input_key: "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
                         self.media_column: [data_uri],
                         self.label_key: ex["text"].lower().strip(),
                     }
@@ -174,168 +185,142 @@ def _dataset():
                 for eval_path in eval_paths.values():
                     self._write_jsonl(rows, eval_path)
 
-    dataset = LibriSpeechASRDataset(n_rows=8)
-
-
-@notebook_only
-@markdown
-def _dataset_preview():
-    """
-    Let's look at a row — text prompt, an audio data-URI, and the reference label.
-    """
+    train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
+    eval_dataset = LibriSpeechASRDataset(hf_split="validation[8:16]")
 
 
 @notebook_only
 @code
-def _dataset_preview_code():
-    row = dataset.load()[0]
-    print("prompt:", row["prompt"])
-    print("audio: ", row["audios"][0][:48], "...")
-    print("label: ", row["label"])
+def _dataset_peek():
+    df = eval_dataset.to_pandas()
+    print(f"{len(df)} rows")
+    df.head(5)
 
 
 @markdown
-def _reward_intro():
+def _eval_base_intro():
     """
-    ## Define the reward
+    ## Evaluate the base model
 
-    This is the one task-specific piece. slime calls the reward once per rollout
-    sample with a `Sample` carrying `.response` (the transcript the model produced)
-    and `.label` (the reference). We score it as **negative word error rate** so
-    that lower WER → higher reward, and GRPO pushes the model toward more accurate
-    transcripts. (`jiwer` is installed for you with the model.)
-
-    Qwen3-ASR is already near-perfect on clean LibriSpeech, so the
-    `Qwen3_ASR_1_7b_Recipe` defaults sample many transcripts per clip at
-    temperature 1.0 — that's what gives the GRPO group enough within-group WER
-    variance to produce a non-zero gradient.
+    Let's get our baseline measure of performance.
     """
 
 
 @code
-def _reward():
-    async def word_error_rate_reward(args, sample, **kwargs) -> float:
-        import jiwer
+def _eval_base():
+    def run_eval(deployment, max_concurrency: int = 2) -> float:
+        from concurrent.futures import ThreadPoolExecutor
+        import base64
+        import io
 
-        response = (getattr(sample, "response", "") or "").lower().strip()
-        reference = (getattr(sample, "label", "") or "").lower().strip()
-        if not reference:
-            return 0.0
-        return -float(jiwer.wer(reference, response))
+        import requests
+        import soundfile as sf
+
+
+        deployment.wait_until_ready(timeout=15 * 60)
+
+        def _score_one(example):
+            data_uri = example["audios"][0]
+            reference = (example["label"] or "").lower().strip()
+            b64 = data_uri.split(",", 1)[1] if data_uri.startswith("data:") else data_uri
+            arr, sr = sf.read(io.BytesIO(base64.b64decode(b64)))
+
+            buf = io.BytesIO()
+            sf.write(buf, arr, sr, format="WAV")
+            buf.seek(0)
+            resp = requests.post(
+                f"{deployment.url}/v1/audio/transcriptions",
+                files={"file": ("clip.wav", buf, "audio/wav")},
+                data={
+                    "model": deployment.served_model_name,
+                    "temperature": "0.0",
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            hypothesis = (resp.json().get("text") or "").lower().strip()
+            wer = score_transcript(hypothesis, reference)
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            wers = list(executor.map(_score_one, eval_dataset.load()))
+        return sum(wers) / len(wers) if wers else float("nan")
+
+    print("running base model evaluation...")
+    base_mean = run_eval(base_deployment)
+    print(f"average WER: {base_mean:.1%}")
+
+
+@markdown
+def _rm_fn_intro():
+    """
+    ## Creating a reward function
+
+    To make our scoring function a reward function, we must return the 
+    negative WER so that lower WER leads to higher rewards.
+    """
+
+
+@code
+def _rm_fn():
+    async def wer_rm(args, sample, **kwargs) -> float:
+        wer = score_transcript(sample.response, sample.label)
+        return -wer
 
 
 @markdown
 def _train_intro():
     """
-    ## Train
+    ## Begin training
 
-    `Qwen3_ASR_1_7b_Recipe` carries the ASR-specific defaults — the transcription
-    rollout, padded (bshd) batches, the lighter SGLang memory fraction, and the
-    many-samples/high-temperature settings that surface reward variance — so the
-    recipe you write only sets the reward. It defaults to a `H100:2` single node;
-    pass `actor_num_gpus_per_node=8` (and a larger `num_rollout`) to use a full node.
-
-    To log training curves to W&B, also pass `wandb=WandbConfig(project="…")` to the
-    recipe — that needs a W&B account with write access, supplied via the
-    `wandb-secret` Modal secret.
-
-    `TrainConfig.train()` builds the Modal app, runs GRPO, and saves the trained
-    model as a Megatron checkpoint (exported to HuggingFace on demand at deploy).
+    There are many ASR-specific changes to the default framework recipes such as
+    the transcription rollout, padded (bshd) batches, and the many-samples/high-temperature
+    settings that surface reward variance. To not pass the burden of specifying onto you,
+    we created `Qwen3_ASR_1_7b_Recipe` so that you can focus on training.
     """
 
 
 @code
 def _train():
-    training_run = TrainConfig(
+    train_run = TrainConfig(
         model=Qwen3_ASR_1_7B(),
-        dataset=dataset,
-        recipe=Qwen3_ASR_1_7b_Recipe(custom_rm_function=word_error_rate_reward),
+        dataset=train_dataset,
+        recipe=Qwen3_ASR_1_7b_Recipe(
+            gpu_type="H100",
+            actor_num_nodes=1,
+            actor_num_gpus_per_node=2,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,       
+            rollout_num_gpus=2,
+            rollout_num_gpus_per_engine=1,
+            custom_rm_function=wer_rm,
+        ),
     )
-    print("Starting training...")
-    train_result = training_run.train()
-    print(f"Training run id: {train_result.training_run_id}")
+    train_result = train_run.train()
+    print(f"run id: {train_result.training_run_id}")
 
 
 @markdown
-def _eval_intro():
+def _eval_trained_intro():
     """
     ## Evaluate the trained checkpoint
 
-    `CustomDeployment.launch()` serves the trained checkpoint on SGLang
-    (converting the Megatron checkpoint to HuggingFace first, audio tower included).
-    Then we `POST` each clip to `/v1/audio/transcriptions`, scoring word
-    accuracy (`1 − WER`), and print the mean WER and mean accuracy.
+    Let's run the same eval on the trained checkpoint.
     """
 
-
 @code
-def _eval_fn():
-    def transcribe_and_score(
-        deployment: CustomDeployment, example: dict
-    ) -> dict:
-        import base64
-        import io
-
-        import jiwer
-        import requests
-        import soundfile as sf
-
-        data_uri = example["audios"][0]
-        reference = (example["label"] or "").lower().strip()
-        b64 = data_uri.split(",", 1)[1] if data_uri.startswith("data:") else data_uri
-        arr, sr = sf.read(io.BytesIO(base64.b64decode(b64)))
-
-        buf = io.BytesIO()
-        sf.write(buf, arr, sr, format="WAV")
-        buf.seek(0)
-        resp = requests.post(
-            f"{deployment.url}/v1/audio/transcriptions",
-            files={"file": ("clip.wav", buf, "audio/wav")},
-            data={
-                "model": deployment.served_model_name,
-                "temperature": "0.0",
-            },
-            timeout=120,
-        )
-        resp.raise_for_status()
-        hypothesis = (resp.json().get("text") or "").lower().strip()
-        wer = float(jiwer.wer(reference, hypothesis)) if reference else 0.0
-
-        return {
-            "score": max(0.0, 1.0 - wer),
-            "response": hypothesis,
-            "wer": wer,
-            "reference": reference,
-        }
-
-
-@code
-def _eval():
+def _eval_trained():
     checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    deployment = CustomDeployment.launch(
-        Qwen3_ASR_1_7B(),
-        checkpoint=checkpoint,
+    print(f"checkpoint: {checkpoint.path}")
+
+    trained_deployment = CustomDeployment.launch(
+        model,
+        checkpoint,
         unauthenticated=True,
+        recreate_if_existing=True
     )
-    print(f"Serving trained model at {deployment.url}")
+    trained_deployment.wait_until_ready(timeout=15 * 60)
+    print(f"checkpoint deployed to {trained_deployment.url}")
 
-    def run_eval(
-        deployment, *, max_concurrency: int = 2
-    ) -> list[dict]:
-        from concurrent.futures import ThreadPoolExecutor
-
-        deployment.wait_until_ready(timeout=3000)
-
-        def _score_one(example):
-            return transcribe_and_score(deployment, example)
-
-        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-            return list(executor.map(_score_one, dataset.load()))
-
-    rows = run_eval(deployment)
-    mean_wer = sum(r["wer"] for r in rows) / len(rows) if rows else float("nan")
-    mean_acc = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
-    print(
-        f"Eval: mean WER {mean_wer:.3f} "
-        f"(accuracy {mean_acc:.3f}) over {len(rows)} clips"
-    )
+    print("running checkpoint evaluation...")
+    trained_mean = run_eval(trained_deployment)
+    print(f"average WER: {trained_mean:.1f}")
