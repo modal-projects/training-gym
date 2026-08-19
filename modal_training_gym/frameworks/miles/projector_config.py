@@ -58,7 +58,9 @@ class ProjectorSpec:
         always saved regardless, so a finished run leaves a checkpoint even when
         the interval does not divide the step count.
     load : str
-        Projector checkpoint (file or directory) to resume from.
+        Projector checkpoint (file or directory) to resume from. The resumed
+        run continues that checkpoint's iteration numbering, so reusing one
+        ``save_dir`` across resumes does not overwrite what came before.
     output_scale : float
         Scale the projector's final ``LayerNorm`` starts at, and so the scale of
         the rows it writes into the embedding stream. A ``LayerNorm`` output is

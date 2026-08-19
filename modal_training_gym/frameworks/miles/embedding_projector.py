@@ -449,7 +449,13 @@ def projector_model_provider(
         # Registered so Megatron's DDP and the optimizer see the parameters.
         model.add_module("embedding_projector", projector)
         if cfg.load:
-            load_projector_checkpoint(cfg.load, projector)
+            # Stashed on the projector because the saver is built later, from a
+            # different hook, and only ever gets the model chunk: a resumed run
+            # continues the numbering rather than overwriting the checkpoints
+            # the previous one left in the same directory.
+            projector._training_gym_loaded_iteration = load_projector_checkpoint(
+                cfg.load, projector
+            )
         model.__dict__["_training_gym_projector_merge"] = _ProjectorMerge(
             model, projector, cfg
         )
@@ -679,6 +685,13 @@ class _ProjectorSaver:
         self._total_steps = int(getattr(args, "train_iters", 0) or 0)
         self._steps = 0
         self._attempts = 0
+        # Steps this run inherited from the checkpoint it resumed, so file names
+        # and the recorded ``iteration`` stay absolute. The counters above stay
+        # relative to this run: ``save_interval`` is this run's cadence, and
+        # ``train_iters`` counts this run's steps alone.
+        self._step_offset = int(
+            getattr(self._projectors[0], "_training_gym_loaded_iteration", 0) or 0
+        )
         self._original_step = optimizer.step
         optimizer.step = self._step
 
@@ -724,7 +737,7 @@ class _ProjectorSaver:
             logger.info(
                 "projector replica after step %d: tp_rank=%d dp_rank=%d %s "
                 "norm=%.8f abs_sum=%.8f",
-                self._steps + 1,
+                self._step_offset + self._steps + 1,
                 ps.get_tensor_model_parallel_rank(),
                 ps.get_data_parallel_rank(),
                 name,
@@ -739,7 +752,7 @@ class _ProjectorSaver:
             self._cfg,
             self._save_dir,
             self._projectors[0],
-            self._steps,
+            self._step_offset + self._steps,
             numbered=numbered,
         )
 
