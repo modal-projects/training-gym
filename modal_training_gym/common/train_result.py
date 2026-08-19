@@ -55,7 +55,9 @@ from modal_training_gym.common.framework import Framework
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get,
+    vol_put_immutable,
     vol_put_with_summary,
+    vol_upsert_summary_item,
 )
 
 if TYPE_CHECKING:
@@ -135,7 +137,72 @@ class TrainResult:
     def _summary_sort_key(item: dict[str, Any]) -> str:
         return str(item.get("training_run_id", ""))
 
-    def save(self, *, is_async: bool = False) -> None | Awaitable[None]:
+    def save(
+        self,
+        *,
+        is_async: bool = False,
+        immutable: bool = False,
+    ) -> None | Awaitable[None]:
+        """Persist this result.
+
+        Launchers use ``immutable=True`` when the result is the acceptance
+        marker for a completed logical training run.  Repeating the identical
+        write is idempotent, while a later attempt cannot replace the accepted
+        checkpoint handle with different bytes.
+        """
+        if immutable:
+            payload = self._to_dict()
+            if is_async:
+
+                async def _save_immutable() -> None:
+                    # Authenticate/create the canonical acceptance item before
+                    # touching its derived summary. A conflicting later result
+                    # therefore cannot overwrite either representation.
+                    await vol_put_immutable(
+                        MetadataStore.TRAIN_RESULTS,
+                        self.training_run_id,
+                        payload,
+                        is_async=True,
+                    )
+                    try:
+                        await vol_upsert_summary_item(
+                            MetadataStore.TRAIN_RESULTS_SUMMARY,
+                            payload,
+                            item_id_key="training_run_id",
+                            sort_key=self._summary_sort_key,
+                            reverse=True,
+                            is_async=True,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - canonical item wins
+                        print(
+                            "Accepted TrainResult saved, but its derived summary "
+                            "could not be refreshed: "
+                            f"{type(exc).__name__}: {exc}",
+                            flush=True,
+                        )
+
+                return _save_immutable()
+            vol_put_immutable(
+                MetadataStore.TRAIN_RESULTS,
+                self.training_run_id,
+                payload,
+            )
+            try:
+                vol_upsert_summary_item(
+                    MetadataStore.TRAIN_RESULTS_SUMMARY,
+                    payload,
+                    item_id_key="training_run_id",
+                    sort_key=self._summary_sort_key,
+                    reverse=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - canonical item wins
+                print(
+                    "Accepted TrainResult saved, but its derived summary "
+                    "could not be refreshed: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+            return None
         return vol_put_with_summary(
             MetadataStore.TRAIN_RESULTS,
             self.training_run_id,

@@ -401,8 +401,10 @@ class ModalRayCluster:
         Async: submit a Ray job, stream logs, return final status.
     stop_ray(timeout_seconds=30)
         Stop this container's Ray processes after diagnostics are captured.
-    wait_forever(poll_seconds=1, head_failure_grace_seconds=60)
-        Async: keep a worker alive until sustained loss of the Ray head.
+    wait_forever(poll_seconds=1, head_failure_grace_seconds=60,
+                 accepted_completion_probe=None)
+        Async: keep a worker alive until accepted completion or sustained loss
+        of the Ray head.
     """
 
     def __init__(self) -> None:
@@ -818,8 +820,15 @@ class ModalRayCluster:
         self,
         poll_seconds: float = _CLUSTER_LIVENESS_POLL_SECONDS,
         head_failure_grace_seconds: float = _WORKER_HEAD_FAILURE_GRACE_SECONDS,
+        accepted_completion_probe: Callable[[], Any] | None = None,
     ) -> None:
-        """Keep a worker alive until loss of the head persists through a grace period."""
+        """Keep a worker alive until accepted completion or sustained head loss.
+
+        The optional completion probe is consulted only after the head becomes
+        unreachable.  A truthy result authenticates intentional post-success
+        shutdown; an absent, false, or failing probe preserves the existing
+        liveness-failure behavior.
+        """
         if poll_seconds <= 0:
             raise ValueError("poll_seconds must be positive")
         if self.is_head:
@@ -835,6 +844,35 @@ class ModalRayCluster:
                 )
                 connection.close()
             except OSError:
+                if accepted_completion_probe is not None:
+                    try:
+                        accepted = accepted_completion_probe()
+                        if inspect.isawaitable(accepted):
+                            accepted = await accepted
+                    except Exception as exc:  # noqa: BLE001 - failure stays causal
+                        print(
+                            "Accepted-result probe was inconclusive; preserving "
+                            "Ray head failure detection: "
+                            f"{type(exc).__name__}: {exc}",
+                            flush=True,
+                        )
+                    else:
+                        if accepted:
+                            print(
+                                "Authenticated accepted TrainResult observed after "
+                                "Ray head shutdown; exiting worker cleanly",
+                                flush=True,
+                            )
+                            try:
+                                self.stop_ray()
+                            except Exception as exc:  # noqa: BLE001
+                                print(
+                                    "Failed to stop worker Ray after accepted "
+                                    "completion: "
+                                    f"{type(exc).__name__}: {exc}",
+                                    flush=True,
+                                )
+                            return
                 first_failure = tracker.started_at is None
                 sustained = tracker.observe(failed=True, now=self._monotonic())
                 if first_failure:

@@ -73,12 +73,15 @@ from modal_training_gym.common.attempts import (
     write_accepted_lineage,
 )
 from modal_training_gym.common.launcher_helpers import (
+    AcceptedTrainResultError,
+    bind_accepted_train_result,
     build_app_tags,
     build_terminal_run_record,
     build_train_result,
     capture_and_record_ray_failure_diagnostic,
     compute_save_root,
     init_training_run_record,
+    load_accepted_train_result,
     mark_run_failed,
     mark_run_stopped,
     record_attempt_failure,
@@ -195,6 +198,13 @@ def _validate_attempt_limit(attempt_count: int, max_attempts: int | None) -> Non
             "logical attempt limit exceeded before Ray bootstrap: "
             f"attempt_count={attempt_count} max_attempts={max_attempts}"
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class _AcceptedTrainResultReplay:
+    """Authenticated result returned without creating another attempt."""
+
+    payload: dict[str, Any] | None
 
 
 _SLIME_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
@@ -1594,6 +1604,24 @@ def build_slime_app(
                 checkpoints_volume.reload.aio(),
             )
 
+            if slime.attempt_mode == "committed":
+                accepted_result = await load_accepted_train_result(
+                    training_run_id,
+                    expected_framework=Framework.SLIME,
+                    expected_run_contract_sha256=scientific_run_contract_sha256,
+                )
+                if accepted_result is not None:
+                    print(
+                        "Authenticated accepted TrainResult already exists; "
+                        "returning it without creating another logical attempt",
+                        flush=True,
+                    )
+                    return _AcceptedTrainResultReplay(
+                        accepted_result._to_dict()
+                        if initialized_cluster.is_head
+                        else None
+                    )
+
             os.environ["SLIME_HOST_IP"] = initialized_cluster.node_ip
             os.environ["SGLANG_HOST_IP"] = initialized_cluster.node_ip
             os.environ["HOST_IP"] = initialized_cluster.node_ip
@@ -1613,7 +1641,27 @@ def build_slime_app(
                 initialized_cluster.start_ray(
                     worker_wait_retries=initialized_wait_retries
                 )
-                await initialized_cluster.wait_forever()
+
+                accepted_completion_probe = None
+                if slime.attempt_mode == "committed":
+
+                    async def _accepted_completion_probe() -> bool:
+                        return (
+                            await load_accepted_train_result(
+                                training_run_id,
+                                expected_framework=Framework.SLIME,
+                                expected_run_contract_sha256=(
+                                    scientific_run_contract_sha256
+                                ),
+                            )
+                            is not None
+                        )
+
+                    accepted_completion_probe = _accepted_completion_probe
+
+                await initialized_cluster.wait_forever(
+                    accepted_completion_probe=accepted_completion_probe
+                )
                 return None
 
             # Create the logical attempt record before the Ray head waits for
@@ -1667,6 +1715,7 @@ def build_slime_app(
                 wandb_cfg=slime.wandb,
                 wandb_entity=initialized_wandb_entity,
                 framework_status_token=framework_status_token,
+                max_attempts=slime.max_attempts,
             )
             initialized_run_record = await _require_d1a_function_call_binding(
                 initialized_run_record
@@ -1683,6 +1732,10 @@ def build_slime_app(
         try:
             initialized = await _initialize_cluster_and_attempt()
         except BaseException as exc:
+            if isinstance(exc, AcceptedTrainResultError):
+                # Authentication failed before attempt creation. Preserve the
+                # already-published logical-run record and artifacts verbatim.
+                raise
             # Only rank 0 owns logical-run state. Worker cancellation and
             # worker-local setup failures are evidence for the head/Ray/Modal
             # diagnostics, not authority to terminalize the shared attempt.
@@ -1698,6 +1751,8 @@ def build_slime_app(
                 )
                 raise RuntimeError(primary_error) from exc
             raise
+        if isinstance(initialized, _AcceptedTrainResultReplay):
+            return initialized.payload
         if initialized is None:
             return
         (
@@ -2184,7 +2239,6 @@ def build_slime_app(
                 wandb_run_id=wandb_run_id,
                 group_id=group_id,
             )
-            await result.save(is_async=True)
             run_record.status = TrainingRunStatus.COMPLETED
             mark_training_attempt_finished(
                 run_record,
@@ -2195,7 +2249,19 @@ def build_slime_app(
                 ),
                 ended_at=int(time.time()),
             )
+            # Publish acceptance only after its checkpoint namespace and
+            # accepted-lineage receipt are durable. The bound result is then
+            # an immutable, idempotent re-entry marker for the logical run.
             await checkpoints_volume.commit.aio()
+            if committed_attempt_mode:
+                bind_accepted_train_result(
+                    result,
+                    run_contract_sha256=scientific_run_contract_sha256,
+                    accepted_attempt_id=accepted_final_attempt_id,
+                )
+                await result.save(is_async=True, immutable=True)
+            else:
+                await result.save(is_async=True)
             print(f"TrainResult saved: {training_run_id}")
             return result._to_dict()
         except KeyboardInterrupt:

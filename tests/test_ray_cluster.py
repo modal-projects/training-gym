@@ -371,6 +371,79 @@ def test_worker_tolerates_transient_head_loss_then_exits_after_grace(
     assert "remained unreachable through the grace period" in output
 
 
+def test_worker_exits_cleanly_on_authenticated_post_success_head_shutdown(
+    monkeypatch, capsys
+):
+    async def _no_sleep(_seconds):
+        return None
+
+    probes = []
+    stops = []
+
+    async def _accepted_completion_probe():
+        probes.append("checked")
+        return True
+
+    monkeypatch.setattr(
+        ray_cluster.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("head stopped")),
+    )
+    monkeypatch.setattr(ray_cluster.asyncio, "sleep", _no_sleep)
+    cluster = ModalRayCluster()
+    cluster.rank = 1
+    cluster.head_addr = "10.0.0.1"
+    cluster._discovered = True
+    monkeypatch.setattr(cluster, "stop_ray", lambda: stops.append("stopped"))
+
+    asyncio.run(
+        cluster.wait_forever(
+            poll_seconds=0.25,
+            head_failure_grace_seconds=60,
+            accepted_completion_probe=_accepted_completion_probe,
+        )
+    )
+
+    assert probes == ["checked"]
+    assert stops == ["stopped"]
+    output = capsys.readouterr().out
+    assert "Authenticated accepted TrainResult" in output
+    assert "grace period" not in output
+
+
+def test_worker_probe_error_preserves_sustained_head_failure_path(monkeypatch, capsys):
+    async def _no_sleep(_seconds):
+        return None
+
+    async def _inconclusive_completion_probe():
+        raise RuntimeError("acceptance record malformed")
+
+    def _head_unreachable(*_args, **_kwargs):
+        raise OSError("head stopped")
+
+    monkeypatch.setattr(ray_cluster.socket, "create_connection", _head_unreachable)
+    monkeypatch.setattr(ray_cluster.asyncio, "sleep", _no_sleep)
+    cluster = ModalRayCluster()
+    cluster.rank = 1
+    cluster.head_addr = "10.0.0.1"
+    cluster._discovered = True
+    clock = iter((0.0, 1.0))
+    monkeypatch.setattr(cluster, "_monotonic", lambda: next(clock))
+
+    asyncio.run(
+        cluster.wait_forever(
+            poll_seconds=0.25,
+            head_failure_grace_seconds=0.5,
+            accepted_completion_probe=_inconclusive_completion_probe,
+        )
+    )
+
+    output = capsys.readouterr().out
+    assert "probe was inconclusive" in output
+    assert "remained unreachable through the grace period" in output
+    assert "exiting worker cleanly" not in output
+
+
 def test_head_reports_only_sustained_worker_loss(monkeypatch):
     import modal.experimental
 

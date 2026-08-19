@@ -22,7 +22,11 @@ from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
 from modal_training_gym.utils import metadata as metadata_mod
-from modal_training_gym.utils.metadata import MetadataStore, vol_get_summary_items, vol_list
+from modal_training_gym.utils.metadata import (
+    MetadataStore,
+    vol_get_summary_items,
+    vol_list,
+)
 
 
 @pytest.mark.parametrize("fw", list(Framework))
@@ -41,6 +45,32 @@ def test_train_result_save_survives_unmounted_volume(fake_volume, fw):
 
     blob = fake_volume.files[f"{MetadataStore.TRAIN_RESULTS.value}/t2.json"]
     assert json.loads(blob)["framework"] == fw.value
+
+
+def test_accepted_train_result_is_idempotent_and_cannot_be_overwritten(fake_volume):
+    accepted = TrainResult(
+        app_name="a",
+        framework=Framework.SLIME,
+        training_run_id="accepted-run",
+        checkpoint_dir="/checkpoints/accepted-run/attempts/" + "a" * 32,
+    )
+    asyncio.run(accepted.save(is_async=True, immutable=True))
+    canonical_path = f"{MetadataStore.TRAIN_RESULTS.value}/accepted-run.json"
+    accepted_bytes = fake_volume.files[canonical_path]
+
+    # Replaying the accepted return is idempotent.
+    asyncio.run(accepted.save(is_async=True, immutable=True))
+    assert fake_volume.files[canonical_path] == accepted_bytes
+
+    conflicting = TrainResult(
+        app_name="a",
+        framework=Framework.SLIME,
+        training_run_id="accepted-run",
+        checkpoint_dir="/checkpoints/accepted-run/attempts/" + "b" * 32,
+    )
+    with pytest.raises(RuntimeError, match="immutable metadata conflict"):
+        asyncio.run(conflicting.save(is_async=True, immutable=True))
+    assert fake_volume.files[canonical_path] == accepted_bytes
 
 
 def test_rollout_async_save_survives_unmounted_volume(fake_volume):

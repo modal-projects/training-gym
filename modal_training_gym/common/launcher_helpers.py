@@ -17,12 +17,17 @@ import secrets as _secrets
 import tempfile
 import textwrap
 import time
+from pathlib import PurePosixPath
 from typing import Any, Callable
 
 import cloudpickle
 from modal import Image, Volume
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS, modal_tag_value
+from modal_training_gym.common.attempts import (
+    validate_attempt_id,
+    validate_run_contract_sha256,
+)
 from modal_training_gym.common.framework import (
     Framework,
     resolve_caller_module,
@@ -39,7 +44,135 @@ from modal_training_gym.common.run import (
 )
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.wandb import WandbConfig
-from modal_training_gym.utils.metadata import MetadataStore, vol_put
+from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_put
+
+
+TRAIN_RESULT_ACCEPTANCE_KEY = "training_gym_acceptance"
+TRAIN_RESULT_ACCEPTANCE_SCHEMA_VERSION = 1
+
+
+class AcceptedTrainResultError(RuntimeError):
+    """An existing result was present but could not authenticate acceptance."""
+
+
+def bind_accepted_train_result(
+    result: TrainResult,
+    *,
+    run_contract_sha256: str,
+    accepted_attempt_id: str,
+) -> TrainResult:
+    """Bind a TrainResult to the immutable attempt it accepts.
+
+    The bound result is published only after checkpoint-volume commit.  It is
+    therefore both the returned handle and the fail-closed marker a clustered
+    wrapper may use to distinguish intentional post-success Ray shutdown from
+    a causal head failure.
+    """
+
+    contract = validate_run_contract_sha256(run_contract_sha256)
+    attempt_id = validate_attempt_id(accepted_attempt_id)
+    checkpoint_dir = str(result.checkpoint_dir or "")
+    checkpoint_parts = PurePosixPath(checkpoint_dir).parts
+    if len(checkpoint_parts) < 2 or checkpoint_parts[-2:] != (
+        "attempts",
+        attempt_id,
+    ):
+        raise ValueError(
+            "accepted TrainResult checkpoint_dir is not owned by its attempt"
+        )
+    receipt = {
+        "schema_version": TRAIN_RESULT_ACCEPTANCE_SCHEMA_VERSION,
+        "run_contract_sha256": contract,
+        "accepted_attempt_id": attempt_id,
+        "checkpoint_dir": checkpoint_dir,
+    }
+    extra = dict(result.extra or {})
+    existing = extra.get(TRAIN_RESULT_ACCEPTANCE_KEY)
+    if existing is not None and existing != receipt:
+        raise ValueError("TrainResult already has a conflicting acceptance binding")
+    extra[TRAIN_RESULT_ACCEPTANCE_KEY] = receipt
+    result.extra = extra
+    return result
+
+
+async def load_accepted_train_result(
+    training_run_id: str,
+    *,
+    expected_framework: Framework,
+    expected_run_contract_sha256: str,
+) -> TrainResult | None:
+    """Load and authenticate the published result for idempotent re-entry.
+
+    Absence means the logical run has not been accepted.  Presence with a
+    missing or conflicting binding is corruption and fails closed rather than
+    allowing another attempt to overwrite the existing result.
+    """
+
+    expected_contract = validate_run_contract_sha256(expected_run_contract_sha256)
+    try:
+        payload = await vol_get(
+            MetadataStore.TRAIN_RESULTS,
+            training_run_id,
+            is_async=True,
+        )
+    except KeyError:
+        return None
+    try:
+        result = TrainResult(**TrainResult._parse_model_config(payload))
+    except Exception as exc:
+        raise AcceptedTrainResultError("existing TrainResult is malformed") from exc
+    framework_value = (
+        result.framework.value
+        if isinstance(result.framework, Framework)
+        else str(result.framework)
+    )
+    if result.training_run_id != training_run_id:
+        raise AcceptedTrainResultError(
+            "existing TrainResult belongs to another logical run"
+        )
+    if framework_value != expected_framework.value:
+        raise AcceptedTrainResultError(
+            "existing TrainResult belongs to another framework"
+        )
+    extra = result.extra if isinstance(result.extra, dict) else {}
+    receipt = extra.get(TRAIN_RESULT_ACCEPTANCE_KEY)
+    if not isinstance(receipt, dict):
+        raise AcceptedTrainResultError(
+            "existing TrainResult lacks an acceptance binding"
+        )
+    if receipt.get("schema_version") != TRAIN_RESULT_ACCEPTANCE_SCHEMA_VERSION:
+        raise AcceptedTrainResultError(
+            "existing TrainResult acceptance schema is unsupported"
+        )
+    try:
+        accepted_attempt_id = validate_attempt_id(
+            str(receipt.get("accepted_attempt_id") or "")
+        )
+        observed_contract = validate_run_contract_sha256(
+            str(receipt.get("run_contract_sha256") or "")
+        )
+    except ValueError as exc:
+        raise AcceptedTrainResultError(
+            "existing TrainResult acceptance binding is malformed"
+        ) from exc
+    if observed_contract != expected_contract:
+        raise AcceptedTrainResultError(
+            "existing TrainResult belongs to another run contract"
+        )
+    checkpoint_dir = str(result.checkpoint_dir or "")
+    if receipt.get("checkpoint_dir") != checkpoint_dir:
+        raise AcceptedTrainResultError(
+            "existing TrainResult checkpoint binding disagrees"
+        )
+    checkpoint_parts = PurePosixPath(checkpoint_dir).parts
+    if len(checkpoint_parts) < 2 or checkpoint_parts[-2:] != (
+        "attempts",
+        accepted_attempt_id,
+    ):
+        raise AcceptedTrainResultError(
+            "existing TrainResult checkpoint is outside its attempt"
+        )
+    return result
 
 
 def resolve_caller_context() -> tuple[Any, str | None]:
@@ -240,6 +373,7 @@ async def init_training_run_record(
     wandb_cfg: "WandbConfig | None",
     wandb_entity: str,
     framework_status_token: str,
+    max_attempts: int | None = None,
 ) -> tuple[Any, str, str]:
     """Create or resume the ``TrainingRun`` record for this attempt and persist
     the framework-status token. Returns
@@ -267,6 +401,25 @@ async def init_training_run_record(
             created_at=created_at,
             started_at=created_at,
         )
+    if max_attempts is not None:
+        if (
+            isinstance(max_attempts, bool)
+            or not isinstance(max_attempts, int)
+            or max_attempts < 1
+        ):
+            raise ValueError("max_attempts must be a positive integer")
+        try:
+            prior_attempt_count = int(
+                (run_record.metadata or {}).get("attempt_count") or 0
+            )
+        except (TypeError, ValueError):
+            prior_attempt_count = 0
+        if prior_attempt_count >= max_attempts:
+            raise RuntimeError(
+                "logical attempt limit exceeded before attempt creation or Ray "
+                "bootstrap: "
+                f"next_attempt={prior_attempt_count + 1} max_attempts={max_attempts}"
+            )
     attempt_count = mark_training_attempt_started(
         run_record, started_at=int(time.time())
     )
