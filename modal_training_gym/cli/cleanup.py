@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import time
 
+from modal.exception import InvalidError, NotFoundError
+
 from modal_training_gym.common.advantage_distribution import AdvantageDistribution
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
+from modal_training_gym.common.step_timing import RoleTimingRecord
+from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get_summary_items,
@@ -31,7 +35,7 @@ def cleanup(*, older_than_days: int = 7, dry_run: bool = False) -> None:
         if "training_run_id" not in raw and "run_id" in raw:
             raw["training_run_id"] = raw["run_id"]
         try:
-            runs.append(TrainingRun.model_validate(raw))
+            runs.append(TrainingRun.from_stored_data(raw))
         except Exception:
             continue
 
@@ -72,6 +76,15 @@ def cleanup(*, older_than_days: int = 7, dry_run: bool = False) -> None:
             MetadataStore.ADVANTAGE_DISTRIBUTIONS,
             AdvantageDistribution.run_prefix(rid),
         )
+        timing_volume = metadata._metadata_volume()
+        metadata._safe_reload(timing_volume)
+        try:
+            timing_volume.remove_file(RoleTimingRecord.store(rid), recursive=True)
+        except (FileNotFoundError, NotFoundError):
+            pass
+        except InvalidError as exc:
+            if "No such file or directory" not in str(exc):
+                raise
         deleted_tokens += 1
 
     rollout_summary = (

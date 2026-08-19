@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "files=$(find src -type f -name '*.test.js' -print | sort); if [ -z \"$files\" ]; then echo 'No test files found under src' >&2; exit 1; fi; node --test $files",
     "preview": "vite preview"
   },
   "devDependencies": {

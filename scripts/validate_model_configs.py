@@ -17,10 +17,12 @@ Usage:
 import argparse
 import json
 import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import cloudpickle
+from modal.exception import Error
 from modal._vendor import cloudpickle as modal_cloudpickle
 
 try:
@@ -34,10 +36,12 @@ from modal_training_gym.common.models.validation import (
     _ValidationConfig,
 )
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
+from modal_training_gym.common.step_timing import measured_run_times
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.train import TrainConfig
 
 COMMENT_MARKER = "<!-- validate-models-comment -->"
+TIMING_SETTLE_WINDOW_S = 30.0
 
 
 def _fmt_secs(seconds: float | int | None) -> str:
@@ -53,6 +57,7 @@ def _fmt_secs(seconds: float | int | None) -> str:
 
 def _substep_label(name: str) -> str:
     _SUBSTEP_LABELS = {
+        "initial_weight_sync": "Initial weight sync",
         "evaluate_rollouts": "Eval (before)",
         "generate_rollouts": "Generate rollouts",
         "offload_rollout": "Offload rollout",
@@ -62,8 +67,23 @@ def _substep_label(name: str) -> str:
         "offload_train": "Offload train",
         "weight_sync": "Weight sync",
         "evaluate_rollouts_end": "Eval (after)",
+        "wait_for_rollout": "Wait for rollout",
+        "wait_for_next_rollout": "Wait for next rollout",
+        "train_models": "Train models",
+        "generate_samples": "Generate samples",
+        "sample_generation": "Sample generation",
+        "forward_backward": "Forward/backward",
+        "reward_batch": "Reward batch",
+        "reward": "Reward",
+        "reward_post_process": "Reward post-process",
+        "trainer_finalize": "Cleanup & offload",
+        "train_step_finalize": "Train step finalize",
     }
 
+    phase_name, separator, role = name.rpartition(" (")
+    if separator and role.endswith(")"):
+        label = _SUBSTEP_LABELS.get(phase_name, phase_name.replace("_", " "))
+        return f"{label} ({role[:-1]})"
     return _SUBSTEP_LABELS.get(name, name.replace("_", " "))
 
 
@@ -79,14 +99,104 @@ def _total_step_time_s(result: "ValidationResult") -> float:
     )
 
 
+def _comparable_step_time_s(
+    result: "ValidationResult", comparable_steps: set[str] | None = None
+) -> float:
+    return float(
+        sum(
+            step.get("duration_s") or 0
+            for key, step in (result.step_times or {}).items()
+            if not step.get("partial")
+            and (comparable_steps is None or key in comparable_steps)
+        )
+    )
+
+
+def _comparable_step_keys(
+    result: "ValidationResult", baseline: "ValidationResult"
+) -> set[str]:
+    return {
+        key
+        for key in set(result.step_times or {}) & set(baseline.step_times or {})
+        if not (result.step_times or {})[key].get("partial")
+        and not (baseline.step_times or {})[key].get("partial")
+    }
+
+
 def _step_keys(result: "ValidationResult") -> list[str]:
     keys = set(result.step_times or {}) | set(result.substep_times or {})
     return sorted(keys, key=lambda k: int(k) if k.isdigit() else k)
 
 
+def _expected_timing_steps(
+    step_count: int | None, resume_from_iteration: int | None
+) -> set[int]:
+    if step_count is None:
+        return set()
+    range_start = resume_from_iteration + 2 if resume_from_iteration is not None else 1
+    return set(range(range_start, step_count + 1))
+
+
+def _covered_timing_steps(
+    step_times: dict | None, substep_times: dict | None
+) -> set[int]:
+    return {
+        int(step)
+        for step in (set(step_times or {}) | set(substep_times or {}))
+        if str(step).isdigit()
+    }
+
+
+def _warn_if_timings_missing(
+    training_run_id: str,
+    status: TrainingRunStatus,
+    step_times: dict | None,
+    substep_times: dict | None,
+    *,
+    timing_read_failed: bool = False,
+    expected_step_count: int | None = None,
+    resume_from_iteration: int | None = None,
+) -> None:
+    if status == TrainingRunStatus.COMPLETED and not step_times and not substep_times:
+        if timing_read_failed:
+            print(
+                f"warning: timing records could not be read for completed run "
+                f"{training_run_id}; the metadata volume read failed"
+            )
+            return
+        print(
+            f"warning: no timing records found for completed run "
+            f"{training_run_id}; the dashboard may have been unreachable or "
+            "substep timing may be disabled"
+        )
+        return
+    if status != TrainingRunStatus.COMPLETED or expected_step_count is None:
+        return
+    covered_steps = _covered_timing_steps(step_times, substep_times)
+    expected_steps = _expected_timing_steps(expected_step_count, resume_from_iteration)
+    if not expected_steps:
+        return
+    range_start = min(expected_steps)
+    range_end = max(expected_steps)
+    covered_steps &= expected_steps
+    missing_steps = expected_steps - covered_steps
+    if missing_steps:
+        print(
+            f"warning: incomplete timing records for completed run "
+            f"{training_run_id}; expected steps {range_start}-{range_end}, "
+            f"found {len(covered_steps)}"
+        )
+        if len(missing_steps) != len(expected_steps):
+            print(
+                f"warning: timing records have holes in executed range "
+                f"{range_start}-{range_end}: "
+                f"{', '.join(map(str, sorted(missing_steps)))}"
+            )
+
+
 def _ordered_substeps(
-    subs: dict[str, dict[str, float | None]],
-) -> list[tuple[str, dict[str, float | None]]]:
+    subs: dict[str, dict[str, float | int | bool | None]],
+) -> list[tuple[str, dict[str, float | int | bool | None]]]:
     return sorted(
         subs.items(),
         key=lambda item: (
@@ -96,6 +206,15 @@ def _ordered_substeps(
     )
 
 
+def _format_substep_timing(entry: dict) -> str:
+    busy = _fmt_secs(entry.get("duration_s"))
+    if not entry.get("concurrent"):
+        return busy
+    count = entry.get("invocation_count", 0)
+    wall = _fmt_secs(entry.get("wall_duration_s"))
+    return f"{count} samples · {busy} busy across {wall} wall clock"
+
+
 @dataclass
 class ValidationResult:
     base_model_name: str
@@ -103,8 +222,10 @@ class ValidationResult:
     training_run_id: str
     training_run_status: TrainingRunStatus
     total_duration_s: float
-    step_times: dict[str, dict[str, int | None]] | None = None
-    substep_times: dict[str, dict[str, dict[str, float | None]]] | None = None
+    step_times: dict[str, dict[str, float | bool | None]] | None = None
+    substep_times: dict[str, dict[str, dict[str, float | int | bool | None]]] | None = (
+        None
+    )
     framework: str = Framework.SLIME.value
     recipe_name: str | None = None
     docker_image: str | None = None
@@ -136,14 +257,15 @@ class ValidationResult:
         for key in keys:
             step = (self.step_times or {}).get(key, {})
             duration = step.get("duration_s")
-            print(f"Step {key} ({_fmt_secs(duration)})")
+            partial = (
+                " — partial; attempt ended mid-step" if step.get("partial") else ""
+            )
+            print(f"Step {key} ({_fmt_secs(duration)}{partial})")
 
             for name, entry in _ordered_substeps(
                 (self.substep_times or {}).get(key, {})
             ):
-                print(
-                    f"    {_substep_label(name)}: {_fmt_secs(entry.get('duration_s'))}"
-                )
+                print(f"    {_substep_label(name)}: {_format_substep_timing(entry)}")
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -269,6 +391,78 @@ def run_base_training(
 
     train_result = train_config.train()
     training_run = TrainingRun.from_id(train_result.training_run_id)
+    previous = None
+    step_times, substep_times = {}, {}
+    timing_read_succeeded = False
+    timing_read_failed = False
+    timing_wait_deadline = time.monotonic() + 2 * TIMING_SETTLE_WINDOW_S + 1.0
+    stable_since: float | None = None
+
+    def _resume_iteration(run: TrainingRun) -> int | None:
+        metadata = getattr(run, "metadata", None) or {}
+        resume_iteration = metadata.get("resume_from_iteration")
+        return int(resume_iteration) if resume_iteration is not None else None
+
+    resume_from_iteration = _resume_iteration(training_run)
+    expected_steps = _expected_timing_steps(step_count, resume_from_iteration)
+    while True:
+        try:
+            latest_training_run = TrainingRun.from_id(train_result.training_run_id)
+        except Exception:
+            latest_training_run = None
+        if latest_training_run is not None:
+            training_run = latest_training_run
+            resume_from_iteration = _resume_iteration(training_run)
+            expected_steps = _expected_timing_steps(step_count, resume_from_iteration)
+
+        try:
+            current_step_times, current_substep_times = measured_run_times(
+                train_result.training_run_id
+            )
+        except (Error, TypeError, KeyError, ValueError):
+            timing_read_failed = True
+            previous = None
+        else:
+            step_times, substep_times = current_step_times, current_substep_times
+            timing_read_succeeded = True
+            current = (step_times, substep_times)
+            if (
+                training_run.status == TrainingRunStatus.COMPLETED
+                and current != ({}, {})
+                and expected_steps
+                and expected_steps <= _covered_timing_steps(*current)
+            ):
+                break
+            # Require a non-empty read to remain stable for the full flush
+            # interval; an early equal read may predate the dashboard flush.
+            now = time.monotonic()
+            if current != ({}, {}) and current == previous:
+                if stable_since is None:
+                    stable_since = now
+                if now - stable_since >= TIMING_SETTLE_WINDOW_S:
+                    break
+            else:
+                stable_since = None
+            previous = current
+        if training_run.status in {
+            TrainingRunStatus.FAILED,
+            TrainingRunStatus.STOPPED,
+            TrainingRunStatus.CANCELLED,
+        }:
+            break
+        if time.monotonic() >= timing_wait_deadline:
+            break
+        time.sleep(min(2.0, max(0.0, timing_wait_deadline - time.monotonic())))
+
+    _warn_if_timings_missing(
+        train_result.training_run_id,
+        training_run.status,
+        step_times,
+        substep_times,
+        timing_read_failed=timing_read_failed and not timing_read_succeeded,
+        expected_step_count=step_count,
+        resume_from_iteration=resume_from_iteration,
+    )
 
     return ValidationResult(
         base_model_name=config.name,
@@ -276,8 +470,8 @@ def run_base_training(
         training_run_id=train_result.training_run_id,
         training_run_status=training_run.status,
         total_duration_s=float(training_run.duration_seconds or 0.0),
-        step_times=training_run.step_times,
-        substep_times=training_run.substep_times,
+        step_times=step_times,
+        substep_times=substep_times,
         framework=config.framework.value,
         recipe_name=type(train_recipe).__name__,
         # Only frameworks that pin an image have the field to report.
@@ -341,10 +535,11 @@ def _format_duration_delta(
     if not baseline_path.is_file():
         return "—"
     baseline = ValidationResult.from_dict(json.loads(baseline_path.read_text()))
+    comparable_steps = _comparable_step_keys(result, baseline)
     delta = (
         _format_secs_delta(
-            _total_step_time_s(result),
-            _total_step_time_s(baseline),
+            _comparable_step_time_s(result, comparable_steps),
+            _comparable_step_time_s(baseline, comparable_steps),
         )
         or "—"
     )
@@ -415,15 +610,28 @@ def _format_result_details(
             ]
         )
 
-    def _row(phase: str, duration: float | int | None, base: float | int | None) -> str:
+    def _row(
+        phase: str,
+        duration: float | int | None,
+        base: float | int | None,
+        *,
+        delta_duration: float | int | None = None,
+        display_duration: str | None = None,
+    ) -> str:
         if baseline is None:
-            return f"| {phase} | {_fmt_secs(duration)} |"
-        delta = _format_secs_delta(duration, base) or "—"
-        return f"| {phase} | {_fmt_secs(duration)} | {delta} |"
+            return f"| {phase} | {display_duration or _fmt_secs(duration)} |"
+        delta = (
+            _format_secs_delta(
+                duration if delta_duration is None else delta_duration, base
+            )
+            or "—"
+        )
+        return f"| {phase} | {display_duration or _fmt_secs(duration)} | {delta} |"
 
     for key in keys:
         step = (result.step_times or {}).get(key) or {}
         baseline_step = ((baseline.step_times or {}).get(key) or {}) if baseline else {}
+        comparable = not step.get("partial") and not baseline_step.get("partial")
         baseline_subs = (
             ((baseline.substep_times or {}).get(key) or {}) if baseline else {}
         )
@@ -435,22 +643,32 @@ def _format_result_details(
                 _row(
                     _substep_label(name),
                     entry.get("duration_s"),
-                    base_entry.get("duration_s"),
+                    base_entry.get("duration_s") if comparable else None,
+                    display_duration=_format_substep_timing(entry),
                 )
             )
         lines.append(
             _row(
-                f"Step {key}",
+                f"Step {key}"
+                + (
+                    " (partial — attempt ended mid-step)" if step.get("partial") else ""
+                ),
                 step.get("duration_s"),
-                baseline_step.get("duration_s"),
+                baseline_step.get("duration_s") if comparable else None,
             )
         )
     if len(keys) > 1:
+        comparable_steps = _comparable_step_keys(result, baseline) if baseline else None
         lines.append(
             _row(
                 "Total step time",
                 _total_step_time_s(result),
-                _total_step_time_s(baseline) if baseline else None,
+                (
+                    _comparable_step_time_s(baseline, comparable_steps)
+                    if baseline
+                    else None
+                ),
+                delta_duration=_comparable_step_time_s(result, comparable_steps),
             )
         )
     lines.extend(["", "</details>", ""])

@@ -30,6 +30,10 @@ jobs:
         run: npm ci
         working-directory: dashboards/frontend
 
+      - name: Test frontend
+        run: npm test
+        working-directory: dashboards/frontend
+
       - name: Build frontend
         run: npm run build
         working-directory: dashboards/frontend

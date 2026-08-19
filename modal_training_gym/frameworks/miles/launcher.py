@@ -23,7 +23,10 @@ from modal_training_gym.common.framework import (
     Framework,
     mount_tools_dir,
 )
-from modal_training_gym.common.launcher_utils import serialize_recipe_params
+from modal_training_gym.common.launcher_utils import (
+    serialize_recipe_params,
+    timing_debug_env,
+)
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import ModalRayCluster
@@ -65,6 +68,23 @@ from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     resolve_checkpoint_ref,
 )
 
+
+def _validate_resume_checkpoint(
+    resume_from_iteration: int | None, num_rollout: int
+) -> None:
+    if resume_from_iteration is not None and resume_from_iteration + 1 > num_rollout:
+        raise RuntimeError(
+            f"Resume would start at rollout {resume_from_iteration + 1}, "
+            f"but num_rollout={num_rollout}; nothing would run."
+        )
+    if resume_from_iteration is not None and resume_from_iteration + 1 == num_rollout:
+        print(
+            "WARNING: Resume checkpoint is already at the final configured "
+            "rollout; the retry will exit without running another rollout.",
+            flush=True,
+        )
+
+
 MILES_ROOT = "/root/miles"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
@@ -78,6 +98,7 @@ _PATCH_ROLLOUT_STATUS_B64 = encode_patch(
     "patch_rollout_status_reporting", _MILES_PATCHES
 )
 _PATCH_ADVANTAGE_DIST_B64 = encode_patch("patch_advantage_distribution", _MILES_PATCHES)
+_PATCH_SUBSTEP_TIMING_B64 = encode_patch("patch_substep_timing", _MILES_PATCHES)
 
 _REPORTING_PATCH_COMMANDS = (
     f"echo {_PATCH_ROLLOUT_STATUS_B64} | base64 -d | python3",
@@ -93,6 +114,7 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
             *_REPORTING_PATCH_COMMANDS,
+            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
         )
     )
     if miles.image_env:
@@ -126,6 +148,7 @@ def build_ray_runtime_env(
     environment: dict,
     extra_env: dict[str, str] | None = None,
     framework_status_token: str = "",
+    substep_timing: str = "auto",
 ) -> dict:
     """Runtime env for the Ray job that runs miles.
 
@@ -145,10 +168,12 @@ def build_ray_runtime_env(
         "no_proxy": f"127.0.0.1,{head_addr}",
         "MASTER_ADDR": head_addr,
         "LD_LIBRARY_PATH": _compose_ld_library_path(),
+        "TRAINING_GYM_SUBSTEP_TIMING": substep_timing,
     }
     env_vars.update(extra_env or {})
     env_vars.update(wandb_env)
     env_vars.update(environment)
+    env_vars.update(timing_debug_env())
     if framework_status_token:
         # Applied after `environment` so a recipe override can't blank the
         # dashboard auth token by accident.
@@ -797,6 +822,8 @@ def build_miles_app(
             await run_record.save(is_async=True)
 
             if resume_checkpoint is not None:
+                resume_from_iteration = resume_checkpoint.get("resume_from_iteration")
+                _validate_resume_checkpoint(resume_from_iteration, miles.num_rollout)
                 print(
                     f"WARNING: detected existing checkpoint in "
                     f"{resume_checkpoint['resume_checkpoint_path']}; "
@@ -832,6 +859,7 @@ def build_miles_app(
                 head_addr=cluster.head_addr,
                 wandb_env=wandb_env,
                 environment=miles.environment,
+                substep_timing=miles.substep_timing,
                 extra_env={
                     "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
@@ -858,10 +886,13 @@ def build_miles_app(
             await _set_framework_status(MilesStatus.TRAINING)
             result = await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
             if not result.is_success:
-                run_record.error_message = (
+                message = (
                     result.message or f"Ray job finished with status: {result.status}"
                 )
-                raise RuntimeError(run_record.error_message)
+                error = RuntimeError(f"{message} (training_run_id={training_run_id})")
+                error.training_run_id = training_run_id
+                run_record.error_message = str(error)
+                raise error
             print(f"Ray job completed: {result.status}")
             print(f"Ray job message: {result.message}")
 
