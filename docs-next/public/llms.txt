@@ -56,6 +56,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [DatasetConfig](https://gym.modal.dev/reference/core/datasetconfig/): `DatasetConfig`
 - [HuggingFaceDataset](https://gym.modal.dev/reference/core/huggingfacedataset/): `HuggingFaceDataset`
 - [HarborDataset](https://gym.modal.dev/reference/core/harbordataset/): `HarborDataset`
+- [EmbeddingProjectorDataset](https://gym.modal.dev/reference/core/embeddingprojectordataset/): `EmbeddingProjectorDataset`
 - [WandbConfig](https://gym.modal.dev/reference/core/wandbconfig/): `WandbConfig`
 - [ModalRayCluster](https://gym.modal.dev/reference/core/modalraycluster/): `ModalRayCluster`
 - [TrainResult](https://gym.modal.dev/reference/core/trainresult/): `TrainResult`
@@ -76,6 +77,8 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3-30B-A3B](https://gym.modal.dev/reference/models/qwen3_30b/): `Qwen3_30B`
 - [Moonlight-16B-A3B-Instruct](https://gym.modal.dev/reference/models/moonlight_16b_a3b_instruct/): `Moonlight_16B_A3B_Instruct`
 - [Gemma-4-26B-A4B-it](https://gym.modal.dev/reference/models/gemma4_26b_a4b/): `Gemma4_26B_A4B`
+- [GLM-5.2](https://gym.modal.dev/reference/models/glm_5_2/): `GLM_5_2`
+- [GLM-5.2-5layer](https://gym.modal.dev/reference/models/glm_5_2_5layer/): `GLM_5_2_5Layer`
 - [Qwen3.6-35B-A3B](https://gym.modal.dev/reference/models/qwen3_6_35b/): `Qwen3_6_35B`
 - [Qwen3.6-27B](https://gym.modal.dev/reference/models/qwen3_6_27b/): `Qwen3_6_27B`
 - [Qwen3.8-27B](https://gym.modal.dev/reference/models/qwen3_8_27b/): `Qwen3_8_27B`
@@ -90,6 +93,9 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3_5_4b_Miles_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_miles_recipe/): `Qwen3_5_4b_Miles_Recipe`
 - [Moonlight_16B_A3B_Recipe](https://gym.modal.dev/reference/training/moonlight_16b_a3b_recipe/): `Moonlight_16B_A3B_Recipe`
 - [Gemma4_26B_A4B_Recipe](https://gym.modal.dev/reference/training/gemma4_26b_a4b_recipe/): `Gemma4_26B_A4B_Recipe`
+- [GLM_5_2_Projector_Recipe](https://gym.modal.dev/reference/training/glm_5_2_projector_recipe/): `GLM_5_2_Projector_Recipe`
+- [GLM_5_2_5Layer_Projector_Recipe](https://gym.modal.dev/reference/training/glm_5_2_5layer_projector_recipe/): `GLM_5_2_5Layer_Projector_Recipe`
+- [ProjectorSpec](https://gym.modal.dev/reference/training/projectorspec/): `ProjectorSpec`
 - [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe/): `Qwen3_6_35b_Recipe`
 - [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe/): `Qwen3_6_27b_Recipe`
 - [Qwen3_8_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_8_27b_recipe/): `Qwen3_8_27b_Recipe`

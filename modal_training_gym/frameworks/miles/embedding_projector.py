@@ -13,9 +13,10 @@ points, all reached by dotted path:
     embeddings at the positions the data gives, following the merge that
     ``miles_plugins.models.inkling.mm_towers`` does for its vision/audio towers.
 ``save_projector_checkpoint``
-    miles' before-train-step hook. Writes the projector (a few hundred MB at
-    most) instead of the base model, which at 744B is terabytes of sharded
-    weights that never change during a projector-only run.
+    miles' before-train-step hook. Installs a wrapper around the optimizer's
+    ``step`` that writes the projector (a few hundred MB at most) instead of the
+    base model, which at 744B is terabytes of sharded weights that never change
+    during a projector-only run.
 ``load_projector_checkpoint``
     Called by the provider when ``load`` is set, and usable standalone for
     inspection or export.
@@ -39,6 +40,7 @@ import torch.nn as nn  # pyright: ignore[reportMissingImports]
 from modal_training_gym.frameworks.miles.projector_config import (
     ProjectorSpec,
     from_miles_args,
+    should_save_projector,
 )
 
 logger = logging.getLogger(__name__)
@@ -356,56 +358,103 @@ def load_projector_checkpoint(path: str, projector: EmbeddingProjector) -> int:
 
 
 def _is_projector_writer() -> bool:
-    """True on exactly one rank per projector replica group."""
+    """True on exactly one rank per projector replica group.
+
+    The projector is replicated, so every rank holds the same weights and one
+    writer is enough; the context-parallel rank is checked explicitly because
+    Megatron's ``get_data_parallel_rank`` defaults to ``with_context_parallel=False``
+    and would leave every ``cp_rank`` writing the same file.
+    """
     import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
 
     return (
         ps.get_tensor_model_parallel_rank() == 0
         and ps.get_data_parallel_rank() == 0
+        and ps.get_context_parallel_rank() == 0
         and ps.get_expert_model_parallel_rank() == 0
     )
+
+
+def write_projector_checkpoint(cfg: ProjectorSpec, save_dir: str, projector, step: int):
+    """Write ``projector``'s state dict plus enough config to rebuild it.
+
+    Optimizer state is not saved — the projector's Adam moments are cheap to
+    rebuild, and reading Megatron's distributed optimizer state for a replicated
+    module would need the base model's sharding machinery. The frozen base is not
+    saved either: it stays byte-identical to the run's ``hf_checkpoint``.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    state = {
+        "iteration": step,
+        "state_dict": {
+            k: v.detach().to("cpu") for k, v in projector.state_dict().items()
+        },
+        "config": {
+            "input_dim": cfg.input_dim,
+            "hidden_dim": cfg.hidden_dim,
+            "num_layers": cfg.num_layers,
+            "output_dim": cfg.output_dim,
+        },
+    }
+    path = os.path.join(save_dir, f"projector_iter_{step:07d}.pt")
+    torch.save(state, path)
+    torch.save(state, os.path.join(save_dir, _LATEST))
+    logger.info("saved projector checkpoint %s", path)
+
+
+class _ProjectorSaver:
+    """Writes the projector after optimizer steps, including the run's last one.
+
+    The before-train-step hook is the only hook miles offers on the training path
+    (``custom_megatron_post_save_hook`` fires off Megatron's own full-model save,
+    which a projector-only run never triggers). Saving *in* that hook would only
+    ever persist state one step stale and would miss the final step entirely, so
+    the hook is used just to get hold of the optimizer, and the write hangs off
+    ``optimizer.step``: counted in optimizer steps, so ``save_interval`` means
+    what it says, and the last step of the run always lands.
+    """
+
+    def __init__(self, args, model, optimizer) -> None:
+        self._cfg = from_miles_args(args)
+        self._save_dir = self._cfg.save_dir or os.path.join(
+            str(args.save or "/checkpoints"), "projector"
+        )
+        chunks = model if isinstance(model, list) else [model]
+        self._projectors = [p for c in chunks if (p := get_projector(c)) is not None]
+        self._total_steps = int(getattr(args, "train_iters", 0) or 0)
+        self._steps = 0
+        self._original_step = optimizer.step
+        optimizer.step = self._step
+
+    def _step(self, *fargs, **fkwargs):
+        out = self._original_step(*fargs, **fkwargs)
+        # Megatron returns (success, grad_norm, num_zeros); a step that did not
+        # apply (gradient overflow) left the projector unchanged.
+        if isinstance(out, tuple) and out and out[0] is False:
+            return out
+        self._steps += 1
+        if should_save_projector(
+            self._steps, self._total_steps, self._cfg.save_interval
+        ):
+            self._save()
+        return out
+
+    def _save(self) -> None:
+        if not self._projectors or not _is_projector_writer():
+            return
+        write_projector_checkpoint(
+            self._cfg, self._save_dir, self._projectors[0], self._steps
+        )
 
 
 def save_projector_checkpoint(
     args, rollout_id: int, step_id: int, model, optimizer=None, opt_param_scheduler=None
 ) -> None:
-    """miles before-train-step hook: save the projector, not the base model.
+    """miles before-train-step hook: arrange for projector-only checkpoints.
 
-    Fires at the first micro step of a rollout and writes the state the
-    previous rollout produced, so the file lands outside the training step
-    itself. Optimizer state is not saved — the projector's Adam moments are
-    cheap to rebuild, and reading Megatron's distributed optimizer state for a
-    replicated module would need the base model's sharding machinery.
+    Idempotent — the hook fires before every train step and the saver is
+    installed on the first one, once per optimizer.
     """
-    if step_id != 0 or rollout_id <= 0:
+    if optimizer is None or getattr(optimizer, "_training_gym_projector_saver", None):
         return
-    cfg = from_miles_args(args)
-    save_dir = cfg.save_dir or os.path.join(
-        str(args.save or "/checkpoints"), "projector"
-    )
-    if cfg.save_interval <= 0 or rollout_id % cfg.save_interval != 0:
-        return
-
-    chunks = model if isinstance(model, list) else [model]
-    for chunk in chunks:
-        projector = get_projector(chunk)
-        if projector is None or not _is_projector_writer():
-            continue
-        os.makedirs(save_dir, exist_ok=True)
-        state = {
-            "iteration": rollout_id,
-            "state_dict": {
-                k: v.detach().to("cpu") for k, v in projector.state_dict().items()
-            },
-            "config": {
-                "input_dim": cfg.input_dim,
-                "hidden_dim": cfg.hidden_dim,
-                "num_layers": cfg.num_layers,
-                "output_dim": cfg.output_dim,
-            },
-        }
-        path = os.path.join(save_dir, f"projector_iter_{rollout_id:07d}.pt")
-        torch.save(state, path)
-        torch.save(state, os.path.join(save_dir, _LATEST))
-        logger.info("saved projector checkpoint %s", path)
-        return
+    optimizer._training_gym_projector_saver = _ProjectorSaver(args, model, optimizer)

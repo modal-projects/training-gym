@@ -714,9 +714,16 @@ class EmbeddingProjectorDataset(DatasetConfig):
         The rows are generated at prepare time from the seed rather than held in
         the instance: the dataset is cloudpickled into the container, and a
         thousand 1536-wide vectors do not belong in that payload.
+
+        ``always_prepare`` is on: the on-volume path is derived from the class
+        name, so without it a later run with a different row count or embedding
+        width would silently train on the file an earlier run left behind.
         """
         return cls(
-            synthetic_rows=n_rows, synthetic_input_dim=input_dim, synthetic_seed=seed
+            synthetic_rows=n_rows,
+            synthetic_input_dim=input_dim,
+            synthetic_seed=seed,
+            always_prepare=True,
         )
 
     def _synthetic_rows(self) -> list[dict[str, Any]]:

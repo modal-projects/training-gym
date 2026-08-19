@@ -53,7 +53,9 @@ class ProjectorSpec:
         Directory for projector checkpoints; empty puts them under
         ``<save>/projector``.
     save_interval : int
-        Save the projector every N rollout steps.
+        Save the projector every N optimizer steps. The final step of a run is
+        always saved regardless, so a finished run leaves a checkpoint even when
+        the interval does not divide the step count.
     load : str
         Projector checkpoint (file or directory) to resume from.
     """
@@ -80,6 +82,20 @@ class ProjectorSpec:
             "save_interval": self.save_interval,
             "load": self.load,
         }
+
+
+def should_save_projector(
+    steps_done: int, total_steps: int, save_interval: int
+) -> bool:
+    """Whether the projector should be written after ``steps_done`` steps.
+
+    Steps are optimizer steps, and the run's last one always saves: a finished
+    run has to leave the adapter it spent its GPU budget producing, whether or
+    not the interval happens to divide the step count.
+    """
+    if total_steps > 0 and steps_done >= total_steps:
+        return True
+    return save_interval > 0 and steps_done % save_interval == 0
 
 
 def from_miles_args(args: object) -> ProjectorSpec:

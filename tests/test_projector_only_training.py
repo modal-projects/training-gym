@@ -27,6 +27,7 @@ from modal_training_gym.frameworks.miles.projector_config import (
     ROLLOUT_PATH,
     SAVE_HOOK_PATH,
     from_miles_args,
+    should_save_projector,
 )
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
@@ -120,6 +121,42 @@ def test_pipeline_parallelism_is_rejected():
     recipe = GLM_5_2_Projector_Recipe(pipeline_model_parallel_size=2)
     with pytest.raises(TrainingGymConfigError, match="pipeline_model_parallel_size=1"):
         recipe.validate_model_parallelism(GLM_5_2())
+
+
+def test_megatron_checkpoint_loading_is_rejected():
+    """The projector is a submodule, so base state dicts lack its keys."""
+    with pytest.raises(ValidationError, match="resumes through projector.load"):
+        GLM_5_2_Projector_Recipe(load="/checkpoints/glm")
+    with pytest.raises(ValidationError, match="resumes through projector.load"):
+        GLM_5_2_Projector_Recipe(ref_load="/checkpoints/glm")
+
+
+def test_a_finished_run_always_leaves_a_projector_checkpoint():
+    """The run's last optimizer step saves even when the interval misses it."""
+    assert [
+        s for s in range(1, 11) if should_save_projector(s, 10, save_interval=4)
+    ] == [4, 8, 10]
+    # The shipped defaults: one save, at the end of the run.
+    recipe = GLM_5_2_Projector_Recipe()
+    total = (
+        recipe.num_rollout
+        * recipe.rollout_batch_size
+        * recipe.n_samples_per_prompt
+        // recipe.global_batch_size
+    )
+    assert [
+        s
+        for s in range(1, total + 1)
+        if should_save_projector(s, total, recipe.projector.save_interval)
+    ] == [total]
+    # An interval of 0 turns periodic saves off, but not the final one.
+    assert not should_save_projector(3, total, 0)
+    assert should_save_projector(total, total, 0)
+
+
+def test_synthetic_validation_data_is_regenerated_per_run():
+    """The on-volume path is class-derived, so stale rows would be reused."""
+    assert EmbeddingProjectorDataset.synthetic(n_rows=2, input_dim=4).always_prepare
 
 
 def test_disk_reservation_survives_caller_supplied_train_kwargs():

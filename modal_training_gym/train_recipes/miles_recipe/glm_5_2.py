@@ -214,6 +214,29 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
             )
         return self
 
+    @model_validator(mode="after")
+    def _reject_megatron_load(self) -> "GLM_5_2_Projector_Recipe":
+        """Reject Megatron checkpoint loading: resume goes through the projector.
+
+        The projector is registered as a submodule of the actor (Megatron's DDP
+        and optimizer only see parameters in the module tree), so it shows up in
+        the model's ``state_dict`` under ``embedding_projector.*``. A Megatron
+        checkpoint written before this recipe existed has no such keys, and the
+        base itself never changes during a projector-only run, so ``load`` /
+        ``ref_load`` have nothing to offer here and a strict key check would
+        fail. Resume by pointing ``projector.load`` at a
+        ``projector_iter_*.pt``; the base comes from ``hf_checkpoint``.
+        """
+        if self.load or self.ref_load:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} resumes through projector.load, not "
+                f"Megatron's load/ref_load (got load={self.load!r}, "
+                f"ref_load={self.ref_load!r}). The frozen base is loaded from "
+                f"hf_checkpoint={self.hf_checkpoint!r} and only the projector "
+                "is ever written."
+            )
+        return self
+
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
         super().validate_model_parallelism(model)
         if self.pipeline_model_parallel_size != 1:
