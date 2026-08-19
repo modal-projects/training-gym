@@ -165,7 +165,7 @@ def _dataset():
 @code
 def _dataset_peek():
     df = eval_dataset.to_pandas()
-    print(len(df))
+    print(f"{len(df)} rows")
     df.head(5)
 
 
