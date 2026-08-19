@@ -243,6 +243,7 @@ def _main_impl() -> None:
     teacher_model = Qwen3_5_9B()
     teacher_deployment = CustomDeployment.launch(
         teacher_model,
+        app_name="qwen3.5-9b-teacher",
         unauthenticated=True,
     )
 

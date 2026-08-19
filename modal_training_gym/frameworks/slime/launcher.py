@@ -717,17 +717,14 @@ def build_slime_app(
         if model and getattr(model, "architecture", None):
             mmt = getattr(model.architecture, "megatron_model_type", "")
 
-        if num_nodes > 1:
-            spec = importlib.util.find_spec(
-                "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        spec = importlib.util.find_spec(
+            "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        )
+        convert_script = spec.origin if spec is not None else None
+        if not convert_script:
+            raise RuntimeError(
+                "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
             )
-            convert_script = spec.origin if spec is not None else None
-            if not convert_script:
-                raise RuntimeError(
-                    "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
-                )
-        else:
-            convert_script = f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"
         if mmt or slime.slime_model_script:
             model_script = (
                 f"{SLIME_ROOT}/{slime.slime_model_script}"
@@ -750,6 +747,8 @@ def build_slime_app(
 
         env = {**os.environ, **slime.environment}
         env.pop("NCCL_NVLS_ENABLE", None)
+        if any(arg.startswith("--pipeline-model-parallel-size ") for arg in extra_args):
+            env["SKIP_PP_AUTOINFLATE"] = "1"
         if num_nodes > 1:
             env["SKIP_RELEASE_RENAME"] = "1"
         print(

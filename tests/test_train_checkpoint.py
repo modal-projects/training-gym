@@ -110,3 +110,22 @@ def test_launchers_do_not_replace_model_path_with_checkpoint() -> None:
     assert "model.model_path = checkpoint.path" not in inspect.getsource(
         build_miles_app
     )
+
+
+def test_slime_conversion_uses_wrapper_with_expected_environment() -> None:
+    source = inspect.getsource(build_slime_app)
+
+    assert (
+        "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        in source
+    )
+    assert (
+        'convert_script = f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"'
+        not in source
+    )
+    assert (
+        'if any(arg.startswith("--pipeline-model-parallel-size ") '
+        "for arg in extra_args):\n"
+        '            env["SKIP_PP_AUTOINFLATE"] = "1"'
+    ) in source
+    assert 'if num_nodes > 1:\n            env["SKIP_RELEASE_RENAME"] = "1"' in source
