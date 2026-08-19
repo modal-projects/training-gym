@@ -99,6 +99,7 @@ def _base():
             actor_num_gpus_per_node=8,
             tensor_model_parallel_size=1,
             sequence_parallel=False,
+            colocate=True,
             rollout_num_gpus=8,
             rollout_num_gpus_per_engine=1,
             num_rollout=15,
