@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import modal
 import pytest
 
@@ -16,8 +14,11 @@ class _CheckpointVolume:
     def __init__(self, names: list[str]):
         self.names = names
 
-    def iterdir(self, path: str, recursive: bool = False):
-        return [SimpleNamespace(path=name) for name in self.names]
+    def read_file(self, path: str):
+        name = path.rstrip("/").rsplit("/", 1)[-1]
+        if name not in self.names:
+            raise FileNotFoundError(path)
+        return []
 
 
 def _megatron_checkpoint() -> Checkpoint:

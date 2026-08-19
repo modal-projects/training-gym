@@ -184,17 +184,14 @@ def convert_megatron_checkpoint_to_hf(
     output_path = f"{checkpoint.path}_hf"
     volume = Volume.from_name(checkpoints_volume_name, create_if_missing=True)
     rel = _to_volume_path(output_path, checkpoints_mount_path)
+    marker_rel = (
+        f"{rel}/{_CONVERT_COMPLETE_MARKER}" if rel else _CONVERT_COMPLETE_MARKER
+    )
     try:
-        entries = list(volume.iterdir(rel or "/", recursive=False))
+        b"".join(volume.read_file(marker_rel))
     except (FileNotFoundError, NotFoundError):
-        entries = []
-    names: set[str] = set()
-    for entry in entries:
-        name = getattr(entry, "path", "").rstrip("/").rsplit("/", 1)[-1]
-        if name:
-            names.add(name)
-
-    if _CONVERT_COMPLETE_MARKER in names:
+        pass
+    else:
         return Checkpoint(
             checkpoint_type=CheckpointType.hf,
             name=os.path.basename(output_path.rstrip("/")),
