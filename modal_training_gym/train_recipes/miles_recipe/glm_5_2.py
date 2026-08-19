@@ -15,6 +15,7 @@ Full-weight or LoRA GLM-5.2 GRPO is not covered here: that is upstream's
 ``scripts/run_glm5_2_744b_a40b.py`` shape at 32 nodes per training group.
 """
 
+import warnings
 from dataclasses import field
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -336,8 +337,38 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
             )
         return self
 
+    def _recheck_mutable_launch_invariants(self) -> None:
+        """Re-run the guards that assignment after construction can defeat.
+
+        Pydantic dataclasses do not re-validate on assignment, and callers do
+        assign: ``scripts/validate_model_configs.py`` sets ``eval_interval`` and
+        ``save_interval`` on the recipe the backend built. Re-checking here (on
+        the preflight ``_fields`` runs while emitting flags) means an override
+        that would kill the run mid-flight fails at launch instead.
+
+        ``save_interval`` is only warned about: it re-enables Megatron's
+        full-model save, which writes the *unchanged* frozen base — terabytes of
+        it at the 744B shape — but a run that pays for it still trains
+        correctly, and the projector's own cadence is ``projector.save_interval``.
+        """
+        self._reject_evaluation()
+        self._reject_lora()
+        self._reject_megatron_load()
+        self._require_pretrained_base()
+        self._reject_distributed_optimizer()
+        if self.save_interval is not None and self.save_interval <= self.num_rollout:
+            warnings.warn(
+                f"{type(self).__name__} has save_interval={self.save_interval} "
+                f"with num_rollout={self.num_rollout}: Megatron will write the "
+                "frozen base (unchanged, and terabytes of it at the 744B shape) "
+                "during the run. Only the projector needs saving; its cadence "
+                "is projector.save_interval.",
+                stacklevel=2,
+            )
+
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
         super().validate_model_parallelism(model)
+        self._recheck_mutable_launch_invariants()
         if self.pipeline_model_parallel_size != 1:
             raise TrainingGymConfigError(
                 f"{type(self).__name__} needs pipeline_model_parallel_size=1: the "

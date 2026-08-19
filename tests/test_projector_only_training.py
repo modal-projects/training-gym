@@ -107,6 +107,25 @@ def test_frozen_base_cannot_be_left_uninitialized():
     assert GLM_5_2_Projector_Recipe().hf_checkpoint == "zai-org/GLM-5.2"
 
 
+def test_overrides_assigned_after_construction_are_still_rejected():
+    """Pydantic dataclasses do not re-validate on assignment, but callers assign.
+
+    ``scripts/validate_model_configs.py`` sets ``eval_interval`` on the recipe
+    the backend built, which would otherwise reach the rollout function's hard
+    raise mid-run.
+    """
+    recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
+    recipe.eval_interval = 5
+    with pytest.raises(TrainingGymConfigError, match="cannot evaluate"):
+        recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer())
+
+    recipe.eval_interval = None
+    recipe.save_interval = 1
+    # Writing the unchanged frozen base is wasteful, not wrong: warn, don't fail.
+    with pytest.warns(UserWarning, match="frozen base"):
+        recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer())
+
+
 def test_recipe_emits_supervised_engine_free_flags():
     recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
     flags = _flags(recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer()))
