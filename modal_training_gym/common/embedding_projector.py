@@ -196,6 +196,47 @@ def all_reduce_projector_grads(projector: nn.Module, sequence_parallel: bool) ->
     return reduced
 
 
+def check_projector_weights(projector: nn.Module) -> str:
+    """Describe the projector's weights, and refuse an all-zero one.
+
+    Called on the first forward rather than at build time, because what this
+    catches happens in between: Megatron allocates the DDP parameter buffer the
+    parameters are re-pointed into inside
+    ``torch_memory_saver.region(tag="param_buffer", enable_cpu_backup=False)``,
+    and a paused region without a backup comes back zeroed. With the base
+    frozen, that buffer holds only the projector, so offloading the train model
+    zeroes exactly the weights being trained. That is not a bad initialization
+    that trains slowly: an all-zero projector writes exactly-zero rows for every
+    embedding the encoder produced, so the run trains on no signal at all, and
+    on real hardware it surfaced as NaN gradients rather than as its cause. The
+    recipes reject the flag that does it; this makes any other route to the same
+    state say so.
+    """
+    parts, all_zero = [], True
+    for name, param in projector_parameters(projector):
+        detached = param.detach().float()
+        rms = float(detached.pow(2).mean().sqrt())
+        all_zero = all_zero and rms == 0.0
+        finite = bool(torch.isfinite(detached).all())
+        parts.append(f"{name} rms={rms:.6g} absmax={float(detached.abs().max()):.6g}")
+        if not finite:
+            raise ValueError(
+                f"projector parameter '{name}' is not finite at the first "
+                "forward; the projector is initialized from a seed and cannot "
+                "reach this state by training."
+            )
+    if all_zero:
+        raise ValueError(
+            "every projector parameter is exactly zero at the first forward, "
+            "which the seeded initialization cannot produce. The train model "
+            "was most likely offloaded: Megatron's parameter buffer (holding "
+            "only the projector, since the base is frozen) lives in a "
+            "torch_memory_saver region with no backup, so pausing it zeroes the "
+            "projector. Launch with no_offload_train=True."
+        )
+    return ", ".join(parts)
+
+
 def projector_graph_tap(projector: nn.Module, dtype) -> torch.Tensor:
     """A differentiable, exactly-zero scalar tying ``projector`` into the graph.
 
@@ -228,6 +269,12 @@ def scatter_projected(
     other ranks dropped. Both trainers pack a microbatch into one sequence, so
     the batch dimension is 1. Context parallelism would shard the sequence a
     second way, with its own chunking, which is why the recipes reject ``CP > 1``.
+
+    ``positions`` index the *micro*-batch that reached this forward, so a
+    position past the packed sequence means the rebasing contract changed and it
+    raises rather than being dropped: under sequence parallelism it would
+    otherwise fall off every rank's shard and the run would train with no
+    projector gradient at all.
     """
     import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
 
@@ -246,7 +293,19 @@ def scatter_projected(
             f"{embeddings_out.shape[1]}"
         )
     s_local = embeddings_out.shape[0]
-    if sequence_parallel and ps.get_tensor_model_parallel_world_size() > 1:
+    tp_size = ps.get_tensor_model_parallel_world_size()
+    sharded = sequence_parallel and tp_size > 1
+    packed_len = s_local * tp_size if sharded else s_local
+    outside = int(((positions < 0) | (positions >= packed_len)).sum())
+    if outside:
+        raise ValueError(
+            f"{outside} of {int(positions.numel())} projector position(s) fall "
+            f"outside the micro-batch's {packed_len}-token packed sequence "
+            f"(min {int(positions.min())}, max {int(positions.max())}). "
+            "Positions have to be offsets into the packed micro-batch that "
+            "reaches forward."
+        )
+    if sharded:
         local = positions - ps.get_tensor_model_parallel_rank() * s_local
         keep = (local >= 0) & (local < s_local)
         local, embeds = local[keep], embeds[keep]
@@ -326,7 +385,7 @@ def projector_output_dim(projector) -> int:
 
 
 def write_projector_checkpoint(
-    cfg: ProjectorSpec, save_dir: str, projector, step: int
+    cfg: ProjectorSpec, save_dir: str, projector, step: int, numbered: bool = True
 ) -> None:
     """Write ``projector``'s state dict plus enough config to rebuild it.
 
@@ -334,6 +393,13 @@ def write_projector_checkpoint(
     rebuild, and reading Megatron's distributed optimizer state for a replicated
     module would need the base model's sharding machinery. The frozen base is not
     saved either: it stays byte-identical to the run's ``hf_checkpoint``.
+
+    ``projector_latest.pt`` is always written; ``numbered`` additionally keeps the
+    step's own ``projector_iter_*.pt``, which is what ``save_interval``
+    schedules. Refreshing ``projector_latest.pt`` after every applied step is
+    what makes "a finished run leaves the adapter it produced" independent of any
+    prediction of how many steps the run will perform — tens of megabytes,
+    against a step of a frozen giant's forward and backward.
     """
     os.makedirs(save_dir, exist_ok=True)
     state = {
@@ -351,10 +417,14 @@ def write_projector_checkpoint(
             "output_dim": projector_output_dim(projector),
         },
     }
-    path = os.path.join(save_dir, f"projector_iter_{step:07d}.pt")
-    torch.save(state, path)
-    torch.save(state, os.path.join(save_dir, LATEST_CHECKPOINT))
-    logger.info("saved projector checkpoint %s", path)
+    latest = os.path.join(save_dir, LATEST_CHECKPOINT)
+    torch.save(state, latest)
+    if numbered:
+        path = os.path.join(save_dir, f"projector_iter_{step:07d}.pt")
+        torch.save(state, path)
+        logger.info("saved projector checkpoint %s", path)
+    else:
+        logger.info("refreshed projector checkpoint %s (step %d)", latest, step)
 
 
 def is_projector_writer() -> bool:

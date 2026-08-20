@@ -219,7 +219,24 @@ class Qwen3_6_35b_Projector_Recipe(Qwen3_6_35b_Recipe):
         return self
 
     def validate_model_parallelism(self, model: ModelConfig) -> None:
+        """Also the launch-time re-check of what a caller can assign away.
+
+        Pydantic dataclasses do not validate on assignment, and callers do
+        assign: ``scripts/validate_model_configs.py`` sets ``eval_interval`` on
+        the recipe the backend built. This runs on the launching path, so the
+        settings whose violation only surfaces mid-run in a container are
+        checked once more here.
+        """
         super().validate_model_parallelism(model)
+        if self.eval_interval is not None:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} cannot evaluate: its rollout function "
+                "generates nothing and raises when slime calls it with "
+                f"evaluation=True, so eval_interval must be None (got "
+                f"{self.eval_interval})."
+            )
+        self._reject_distributed_optimizer()
+        self._reject_rl_objective()
         if self.pipeline_model_parallel_size != 1:
             raise TrainingGymConfigError(
                 f"{type(self).__name__} needs pipeline_model_parallel_size=1: the "

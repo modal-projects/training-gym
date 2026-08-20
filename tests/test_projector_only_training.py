@@ -82,6 +82,50 @@ def test_missing_spec_is_a_clear_error():
         from_miles_args(_FakeArgs.__new__(_FakeArgs))
 
 
+@pytest.mark.parametrize("container", ["extra_config", "custom_config"])
+def test_spec_is_also_found_nested_under_the_config_containers(container: str):
+    """Mirrors the gym's other in-container readers, which try both spellings.
+
+    The pinned image flattens ``extra_config`` onto ``args``; a plumbing change
+    that kept the dict nested must not silently lose the projector.
+    """
+    args = _FakeArgs.__new__(_FakeArgs)
+    setattr(args, container, {ARGS_KEY: ProjectorSpec(input_dim=7).to_args_dict()})
+    assert from_miles_args(args).input_dim == 7
+
+
+def test_frozen_base_cannot_be_left_uninitialized():
+    """``hf_checkpoint`` is the only base-weight source once ref_load is rejected.
+
+    Bridge mode falls back to ``args.load = args.ref_load or args.hf_checkpoint``,
+    so an empty one would train the projector against random base weights.
+    """
+    with pytest.raises(ValidationError, match="hf_checkpoint"):
+        GLM_5_2_Projector_Recipe(hf_checkpoint="")
+    with pytest.raises(ValidationError, match="bridge"):
+        GLM_5_2_Projector_Recipe(megatron_to_hf_mode="dist")
+    assert GLM_5_2_Projector_Recipe().hf_checkpoint == "zai-org/GLM-5.2"
+
+
+def test_overrides_assigned_after_construction_are_still_rejected():
+    """Pydantic dataclasses do not re-validate on assignment, but callers assign.
+
+    ``scripts/validate_model_configs.py`` sets ``eval_interval`` on the recipe
+    the backend built, which would otherwise reach the rollout function's hard
+    raise mid-run.
+    """
+    recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
+    recipe.eval_interval = 5
+    with pytest.raises(TrainingGymConfigError, match="cannot evaluate"):
+        recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer())
+
+    recipe.eval_interval = None
+    recipe.save_interval = 1
+    # Writing the unchanged frozen base is wasteful, not wrong: warn, don't fail.
+    with pytest.warns(UserWarning, match="frozen base"):
+        recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer())
+
+
 def test_recipe_emits_supervised_engine_free_flags():
     recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
     flags = _flags(recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer()))
@@ -174,8 +218,14 @@ def test_megatron_checkpoint_loading_is_rejected():
         GLM_5_2_Projector_Recipe(ref_load="/checkpoints/glm")
 
 
-def test_a_finished_run_always_leaves_a_projector_checkpoint():
-    """The run's last optimizer step saves even when the interval misses it."""
+def test_numbered_checkpoints_do_not_depend_on_the_predicted_step_count():
+    """``train_iters`` is a prediction; only numbered files may depend on it."""
+    total = 10
+    # A run that outlives the prediction keeps one numbered file, not one per
+    # step from then on. Every applied step refreshes projector_latest.pt.
+    assert [
+        s for s in range(1, 14) if should_save_projector(s, s, total, save_interval=0)
+    ] == [total]
     assert [
         s for s in range(1, 11) if should_save_projector(s, s, 10, save_interval=4)
     ] == [4, 8, 10]
@@ -215,6 +265,8 @@ def test_expert_parallel_size_must_divide_the_model_scripts_experts():
 def test_no_eval_pass_is_configured():
     """The rollout raises on evaluation, so the run must not schedule one."""
     assert GLM_5_2_Projector_Recipe().skip_eval_before_train is True
+    with pytest.raises(ValidationError, match="cannot evaluate"):
+        GLM_5_2_Projector_Recipe(eval_interval=5)
 
 
 def test_synthetic_validation_data_is_regenerated_per_run():
@@ -260,3 +312,44 @@ def test_dataset_rejects_mismatched_embeddings_and_positions():
                 }
             ]
         )
+
+
+def test_offloading_the_train_model_is_rejected():
+    """Offloading zeroes the parameter buffer, which holds only the projector.
+
+    Megatron allocates it in a torch_memory_saver region with no backup, and
+    miles' ``sleep()`` pauses every tag, so a projector-only run would wake up
+    training weights that read exactly zero (verified on 8xH200).
+    """
+    with pytest.raises(ValidationError, match="no_offload_train=True"):
+        GLM_5_2_Projector_Recipe(no_offload_train=False)
+    assert GLM_5_2_Projector_Recipe().no_offload_train is True
+    recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
+    recipe.no_offload_train = False
+    with pytest.raises(TrainingGymConfigError, match="no_offload_train=True"):
+        recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer())
+
+
+def test_a_zeroed_projector_is_caught_at_the_first_forward():
+    """Zeroed weights write exactly-zero rows: trained, but on no signal at all."""
+    torch = pytest.importorskip("torch")
+    from modal_training_gym.frameworks.miles.embedding_projector import (
+        EmbeddingProjector,
+        check_projector_weights,
+        init_projector,
+    )
+
+    projector = EmbeddingProjector(input_dim=4, hidden_dim=8, output_dim=6)
+    init_projector(projector, seed=0, output_scale=0.01)
+    stats = check_projector_weights(projector)
+    assert "mlp.0.weight rms=" in stats and "norm.weight rms=0.01" in stats
+    out = projector(torch.zeros(2, 4))
+    assert torch.isfinite(out).all() and float(out.abs().max()) > 0.0
+
+    with torch.no_grad():
+        for param in projector.parameters():
+            param.zero_()
+    with pytest.raises(ValueError, match="no_offload_train=True"):
+        check_projector_weights(projector)
+    # Every row it would merge is exactly zero, whatever the encoder produced.
+    assert float(projector(torch.ones(2, 4)).abs().max()) == 0.0

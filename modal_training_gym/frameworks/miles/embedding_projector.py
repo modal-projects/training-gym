@@ -40,6 +40,7 @@ from modal_training_gym.common.embedding_projector import (
     EmbeddingProjector as EmbeddingProjector,
     all_reduce_projector_grads,
     build_projector,
+    check_projector_weights as check_projector_weights,
     freeze_base_model as freeze_base_model,
     get_projector as get_projector,
     init_projector as init_projector,
@@ -102,6 +103,7 @@ class _ProjectorMerge:
         self._embeddings_key = cfg.embeddings_key
         self._positions_key = cfg.positions_key
         self._pending: tuple[torch.Tensor, torch.Tensor] | None = None
+        self._weights_checked = False
         self._original_forward = model.forward
         model.forward = self._forward
         if model.pre_process:
@@ -139,6 +141,15 @@ class _ProjectorMerge:
             # mixes in text-only samples rather than a path taken now.
             return output + projector_graph_tap(self._projector, output.dtype)
         embeddings, positions = self._pending
+        if not self._weights_checked:
+            # Once per process: the state this catches is set before the first
+            # forward and never changes back, and the check reads every
+            # parameter.
+            self._weights_checked = True
+            logger.info(
+                "projector weights at first forward: %s",
+                check_projector_weights(self._projector),
+            )
         projected = self._projector(
             embeddings.to(
                 device=output.device,
@@ -175,7 +186,13 @@ def projector_model_provider(
         # Registered so Megatron's DDP and the optimizer see the parameters.
         model.add_module("embedding_projector", projector)
         if cfg.load:
-            load_projector_checkpoint(cfg.load, projector)
+            # Stashed on the projector because the saver is built later, from a
+            # different hook, and only ever gets the model chunk: a resumed run
+            # continues the numbering rather than overwriting the checkpoints
+            # the previous one left in the same directory.
+            projector._training_gym_loaded_iteration = load_projector_checkpoint(
+                cfg.load, projector
+            )
         model.__dict__["_training_gym_projector_merge"] = _ProjectorMerge(
             model, projector, cfg
         )
@@ -276,7 +293,17 @@ class _ProjectorSaver:
     ever persist state one step stale and would miss the final step entirely, so
     the hook is used just to get hold of the optimizer, and the write hangs off
     ``optimizer.step``: counted in optimizer steps, so ``save_interval`` means
-    what it says, and the last step of the run always lands.
+    what it says. ``projector_latest.pt`` is refreshed on every applied step, so
+    the artifact survives a run that performs a different number of steps than
+    ``train_iters`` predicted; ``save_interval`` and that prediction decide only
+    which steps keep a numbered file too.
+
+    Hanging a collective (the projector gradient all-reduce) off ``optimizer.step``
+    is safe because the hook is per-rank: the pinned image calls
+    ``custom_before_train_step_hook`` unconditionally inside
+    ``megatron_utils/model.py``'s train step, with no rank guard, so every
+    training rank installs this wrapper. A rank that has no projector to reduce
+    would break that symmetry, so ``__init__`` refuses to install instead.
     """
 
     def __init__(self, args, model, optimizer) -> None:
@@ -286,6 +313,20 @@ class _ProjectorSaver:
         )
         chunks = model if isinstance(model, list) else [model]
         self._projectors = [p for c in chunks if (p := get_projector(c)) is not None]
+        if not self._projectors:
+            # Every rank's chunk holds a projector replica (the provider builds
+            # one, and PP>1 is rejected so there is only ever one stage). If one
+            # rank found none, its peers would enter the all-reduce below alone:
+            # fail here rather than hang there, or train replicas that silently
+            # diverge and write a checkpoint from one of them.
+            raise RuntimeError(
+                "projector-only training installed no saver: none of the "
+                f"{len(chunks)} model chunk(s) handed to miles' "
+                "before-train-step hook holds an EmbeddingProjector. The "
+                "custom model provider is what attaches it — check that "
+                "custom_model_provider_path points at "
+                "projector_model_provider."
+            )
         for chunk in chunks:
             direct = chunk.__dict__.get("_training_gym_projector")
             logger.info(
@@ -298,6 +339,13 @@ class _ProjectorSaver:
         self._total_steps = int(getattr(args, "train_iters", 0) or 0)
         self._steps = 0
         self._attempts = 0
+        # Steps this run inherited from the checkpoint it resumed, so file names
+        # and the recorded ``iteration`` stay absolute. The counters above stay
+        # relative to this run: ``save_interval`` is this run's cadence, and
+        # ``train_iters`` counts this run's steps alone.
+        self._step_offset = int(
+            getattr(self._projectors[0], "_training_gym_loaded_iteration", 0) or 0
+        )
         self._original_step = optimizer.step
         optimizer.step = self._step
 
@@ -313,28 +361,32 @@ class _ProjectorSaver:
         # which is what decides whether this was the last chance to write.
         if not (isinstance(out, tuple) and out and out[0] is False):
             self._steps += 1
-        if should_save_projector(
-            self._steps, self._attempts, self._total_steps, self._cfg.save_interval
-        ):
-            self._save()
+            # Every applied step refreshes projector_latest.pt, so the run leaves
+            # what it trained however many steps it turns out to take;
+            # ``train_iters`` only decides which steps also keep a numbered file.
+            self._save(
+                numbered=should_save_projector(
+                    self._steps,
+                    self._attempts,
+                    self._total_steps,
+                    self._cfg.save_interval,
+                )
+            )
         return out
 
     def _log_replica_state(self) -> None:
         for projector in self._projectors:
-            log_projector_replica(projector, self._steps + 1)
+            log_projector_replica(projector, self._step_offset + self._steps + 1)
 
-    def _save(self) -> None:
-        if not self._projectors:
-            logger.warning(
-                "projector checkpoint skipped at step %d: no projector found on "
-                "any model chunk handed to the before-train-step hook",
-                self._steps,
-            )
-            return
+    def _save(self, numbered: bool = True) -> None:
         if not is_projector_writer():
             return
         write_projector_checkpoint(
-            self._cfg, self._save_dir, self._projectors[0], self._steps
+            self._cfg,
+            self._save_dir,
+            self._projectors[0],
+            self._step_offset + self._steps,
+            numbered=numbered,
         )
 
 

@@ -15,6 +15,7 @@ Full-weight or LoRA GLM-5.2 GRPO is not covered here: that is upstream's
 ``scripts/run_glm5_2_744b_a40b.py`` shape at 32 nodes per training group.
 """
 
+import warnings
 from dataclasses import field
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -116,6 +117,15 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
 
     gpu_type: str = "H200"
     colocate: bool = True
+    # Megatron allocates the DDP parameter buffer inside
+    # ``torch_memory_saver.region(tag="param_buffer", enable_cpu_backup=False)``
+    # (Megatron-LM ``param_and_grad_buffer.py``), and miles' ``sleep()`` pauses
+    # every tag unless ``rematerialize_param_from_master_weight`` is set. Paused
+    # memory without a backup comes back **zeroed**, and with the base frozen
+    # that buffer holds nothing but the projector: offloading a projector-only
+    # run zeroes exactly the weights it is training. There is nothing to make
+    # room for either — ``debug_train_only`` starts no rollout engine.
+    no_offload_train: bool = True
     train_function_kwargs: dict[str, Any] = field(
         default_factory=lambda: {"ephemeral_disk": _EPHEMERAL_DISK_MIB}
     )
@@ -243,6 +253,16 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
         ``ref_load`` have nothing to offer here and a strict key check would
         fail. Resume by pointing ``projector.load`` at a
         ``projector_iter_*.pt``; the base comes from ``hf_checkpoint``.
+
+        Safe because of the bridge-mode branch in the pinned image's
+        ``miles/utils/arguments.py``: with no usable ``--load`` directory it sets
+        ``args.load = args.ref_load or args.hf_checkpoint``, and
+        ``megatron_utils/checkpoint.py`` routes a non-Megatron directory into
+        ``_load_checkpoint_hf``. ``ref_load`` is therefore an alternative
+        spelling of the same load here, not the only one — bridge recipes that
+        set it (``Gemma4_26B_A4B_Recipe``) point it at the same HF reference as
+        ``hf_checkpoint``. ``_require_pretrained_base`` keeps that fallback
+        populated.
         """
         if self.load or self.ref_load:
             raise TrainingGymConfigError(
@@ -251,6 +271,83 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
                 f"ref_load={self.ref_load!r}). The frozen base is loaded from "
                 f"hf_checkpoint={self.hf_checkpoint!r} and only the projector "
                 "is ever written."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_pretrained_base(self) -> "GLM_5_2_Projector_Recipe":
+        """Require the one field that makes the frozen base a pretrained base.
+
+        With ``load`` and ``ref_load`` both rejected, ``hf_checkpoint`` is the
+        only source the bridge-mode fallback
+        (``args.load = args.ref_load or args.hf_checkpoint``) has left. Were it
+        empty, miles would log one ``--load '' is empty; starting from
+        model_provider-initialized weights`` warning and train the projector
+        against a *randomly initialized* base — a run that costs a full GPU
+        budget and produces an adapter for a model that does not exist. Same for
+        a non-bridge ``megatron_to_hf_mode``, whose branch falls back to
+        ``ref_load`` alone.
+        """
+        if not self.hf_checkpoint:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs hf_checkpoint set: it is the only "
+                "source the frozen base can be loaded from once load/ref_load "
+                "are rejected, and miles would otherwise train the projector "
+                "against randomly initialized base weights."
+            )
+        if self.megatron_to_hf_mode != "bridge":
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} requires megatron_to_hf_mode='bridge' "
+                f"(got {self.megatron_to_hf_mode!r}): only the bridge branch "
+                "falls back to hf_checkpoint for the base weights, and this "
+                "recipe rejects the ref_load the other branch needs."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _reject_evaluation(self) -> "GLM_5_2_Projector_Recipe":
+        """Reject an eval schedule: the rollout function cannot evaluate.
+
+        ``projector_sft_rollout`` raises on ``evaluation=True`` — a supervised
+        projector run has no generation path to evaluate with — so an
+        ``eval_interval`` would kill the run partway through instead of at
+        launch.
+        """
+        if self.eval_interval is not None:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} cannot evaluate (got "
+                f"eval_interval={self.eval_interval}): its rollout function is "
+                "supervised and does not generate, so miles' eval pass has "
+                "nothing to run. Leave eval_interval unset."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _reject_offload_train(self) -> "GLM_5_2_Projector_Recipe":
+        """Reject offloading the train model: it zeroes the projector's weights.
+
+        Megatron allocates the DDP parameter buffer in
+        ``torch_memory_saver.region(tag="param_buffer", enable_cpu_backup=False)``,
+        and a region without a backup does not survive a
+        ``pause()``/``resume()`` — it comes back zeroed (verified against the
+        pinned image). miles' ``sleep()`` pauses every tag when
+        ``rematerialize_param_from_master_weight`` is off, which is the only
+        thing that would rebuild that buffer from the optimizer's fp32 master
+        weights. The base being frozen is what makes this fatal rather than
+        redundant: DDP builds buffers only for parameters that require grad, so
+        the paused buffer holds the projector and nothing else. A run offloaded
+        this way wakes up with projector weights that read exactly zero, so it
+        merges zero rows for every embedding its encoder produced and trains on
+        no signal at all — on real hardware it died with NaN gradients instead.
+        """
+        if not self.no_offload_train:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs no_offload_train=True: with the "
+                "base frozen, Megatron's parameter buffer holds only the "
+                "projector, and miles offloads it into a torch_memory_saver "
+                "region that has no backup, so the projector's weights come "
+                "back zeroed after the first rollout. debug_train_only starts "
+                "no engine, so there is nothing to offload for."
             )
         return self
 
@@ -278,8 +375,39 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
             )
         return self
 
+    def _recheck_mutable_launch_invariants(self) -> None:
+        """Re-run the guards that assignment after construction can defeat.
+
+        Pydantic dataclasses do not re-validate on assignment, and callers do
+        assign: ``scripts/validate_model_configs.py`` sets ``eval_interval`` and
+        ``save_interval`` on the recipe the backend built. Re-checking here (on
+        the preflight ``_fields`` runs while emitting flags) means an override
+        that would kill the run mid-flight fails at launch instead.
+
+        ``save_interval`` is only warned about: it re-enables Megatron's
+        full-model save, which writes the *unchanged* frozen base — terabytes of
+        it at the 744B shape — but a run that pays for it still trains
+        correctly, and the projector's own cadence is ``projector.save_interval``.
+        """
+        self._reject_evaluation()
+        self._reject_lora()
+        self._reject_megatron_load()
+        self._require_pretrained_base()
+        self._reject_distributed_optimizer()
+        self._reject_offload_train()
+        if self.save_interval is not None and self.save_interval <= self.num_rollout:
+            warnings.warn(
+                f"{type(self).__name__} has save_interval={self.save_interval} "
+                f"with num_rollout={self.num_rollout}: Megatron will write the "
+                "frozen base (unchanged, and terabytes of it at the 744B shape) "
+                "during the run. Only the projector needs saving; its cadence "
+                "is projector.save_interval.",
+                stacklevel=2,
+            )
+
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
         super().validate_model_parallelism(model)
+        self._recheck_mutable_launch_invariants()
         if self.pipeline_model_parallel_size != 1:
             raise TrainingGymConfigError(
                 f"{type(self).__name__} needs pipeline_model_parallel_size=1: the "

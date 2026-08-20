@@ -53,11 +53,13 @@ class ProjectorSpec:
         Directory for projector checkpoints; empty puts them under
         ``<save>/projector``.
     save_interval : int
-        Save the projector every N optimizer steps. The final step of a run is
-        always saved regardless, so a finished run leaves a checkpoint even when
-        the interval does not divide the step count.
+        Keep a numbered projector checkpoint every N optimizer steps.
+        ``projector_latest.pt`` is refreshed after every applied step whatever
+        this is, so a finished run always leaves the adapter it trained.
     load : str
-        Projector checkpoint (file or directory) to resume from.
+        Projector checkpoint (file or directory) to resume from. The resumed
+        run continues that checkpoint's iteration numbering, so reusing one
+        ``save_dir`` across resumes does not overwrite what came before.
     output_scale : float
         Scale the projector's final ``LayerNorm`` starts at, and so the scale of
         the rows it writes into the embedding stream. A ``LayerNorm`` output is
@@ -123,40 +125,56 @@ class ProjectorSpec:
 
 
 def spec_from_args(args: object, args_key: str, framework: str) -> ProjectorSpec:
-    """Rebuild the spec the recipe serialized, from the trainer's parsed args."""
-    raw = vars(args).get(args_key)
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"{framework} arg '{args_key}' is missing or not a dict (got {raw!r}). "
-            "A projector-only run needs the recipe to serialize a ProjectorSpec "
-            "into extra_config."
-        )
-    return ProjectorSpec(**raw)
+    """Rebuild the spec the recipe serialized, from the trainer's parsed args.
+
+    The pinned images flatten every ``extra_config`` entry onto ``args``, which
+    is where this looks first. The nested containers are read as a fallback for
+    the same reason the gym's other in-container readers do
+    (:func:`modal_training_gym.common.reporting._arg_value`): a run must not
+    lose its projector to a config-plumbing change that keeps the dict nested.
+    """
+    candidates = [getattr(args, args_key, None)]
+    for container_name in ("extra_config", "custom_config"):
+        container = getattr(args, container_name, None)
+        if isinstance(container, dict):
+            candidates.append(container.get(args_key))
+
+    for raw in candidates:
+        if isinstance(raw, dict):
+            return ProjectorSpec(**raw)
+
+    raise ValueError(
+        f"{framework} arg '{args_key}' is missing or not a dict (looked at args."
+        f"{args_key}, args.extra_config and args.custom_config, got "
+        f"{candidates!r}). A projector-only run needs the recipe to serialize a "
+        "ProjectorSpec into extra_config."
+    )
 
 
 def should_save_projector(
     steps_applied: int, steps_attempted: int, total_steps: int, save_interval: int
 ) -> bool:
-    """Whether the projector should be written, after an optimizer step.
+    """Whether this optimizer step keeps its own numbered projector checkpoint.
 
-    The run's last step always saves: a finished run has to leave the adapter it
-    spent its GPU budget producing, whether or not the interval happens to
-    divide the step count.
+    ``projector_latest.pt`` is refreshed after every applied step regardless, so
+    a finished run always leaves the adapter it spent its GPU budget producing;
+    this decides only which steps additionally keep a ``projector_iter_*.pt``.
+    That split is deliberate: ``total_steps`` is the trainer's ``train_iters``,
+    which it derives arithmetically from the rollout counts, and an epoch-driven
+    dynamically batched run need not perform exactly that many optimizer steps —
+    so nothing that matters may depend on the prediction being right.
 
-    Which step is the last one is decided by ``steps_attempted`` against
-    ``total_steps`` (the trainer's ``train_iters``, a count of attempts), while
-    the interval counts ``steps_applied`` — so ``save_interval`` means what it
-    says and skipped updates do not shift it. Counting only applied steps for
-    both would lose the whole artifact on a run whose interval saves nothing and
-    where one update was skipped for a gradient overflow: the count would end
-    one short of the total, the final-step guarantee would never fire, and the
-    run would exit having written nothing.
+    The interval counts ``steps_applied`` (so ``save_interval`` means what it
+    says and an overflow-skipped update does not shift it), while the predicted
+    last step is matched on ``steps_attempted``, which is what ``train_iters``
+    counts. It is an equality, not ``>=``: a run that outlives the prediction
+    should not then keep a numbered checkpoint on every step.
 
     Nothing is written before an update has applied, so a projector still at its
     initialization is never mistaken for a trained one.
     """
     if steps_applied <= 0:
         return False
-    if total_steps > 0 and steps_attempted >= total_steps:
+    if total_steps > 0 and steps_attempted == total_steps:
         return True
     return save_interval > 0 and steps_applied % save_interval == 0
