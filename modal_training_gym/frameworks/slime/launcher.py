@@ -163,6 +163,24 @@ _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
 
+_SLIME_SOURCE_PATCHES_B64 = (
+    _PATCH_MEGATRON_BRIDGE_B64,
+    _PATCH_ADVANTAGES_B64,
+    _PATCH_STOP_TOKEN_DIAG_B64,
+    _PATCH_QWEN3_ASR_EXPORT_B64,
+    _PATCH_QWEN3_VL_EXPORT_B64,
+    _PATCH_QWEN3_VL_TORCH_DIST_B64,
+    _PATCH_ROLLOUT_STATUS_B64,
+    _PATCH_SUBSTEP_TIMING_B64,
+    _PATCH_ADVANTAGE_DIST_B64,
+    _PATCH_ZERO_STD_METRICS_B64,
+    _PATCH_SGLANG_PARALLEL_ALIASES_B64,
+)
+
+
+def _patch_commands(patches: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(f"echo {patch} | base64 -d | python3" for patch in patches)
+
 
 def _build_slime_base_image() -> "Image":
     return (
@@ -186,6 +204,46 @@ def _build_slime_base_image() -> "Image":
             f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
         )
     )
+
+
+def _slime_git_overlay_command(repository: str, revision: str) -> str:
+    """Build the reproducible image command for a fork source overlay."""
+    repo = shlex.quote(repository)
+    sha = shlex.quote(revision)
+    checkout = "/tmp/training-gym-slime"
+    return (
+        "set -eux; "
+        "command -v git >/dev/null; "
+        f"rm -rf {checkout}; "
+        f"git init {checkout}; "
+        f"git -C {checkout} remote add origin {repo}; "
+        f"git -C {checkout} fetch --depth=1 origin {sha}; "
+        f"git -C {checkout} checkout --detach FETCH_HEAD; "
+        f'test "$(git -C {checkout} rev-parse HEAD)" = {sha}; '
+        f"rm -rf {checkout}/.git {SLIME_ROOT}; "
+        f"mv {checkout} {SLIME_ROOT}"
+    )
+
+
+def _overlay_slime_source(image: "Image", slime: SlimeRecipe) -> "Image":
+    if slime.local_slime:
+        image = image.add_local_dir(
+            slime.local_slime,
+            remote_path=SLIME_ROOT,
+            copy=True,
+            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
+        )
+    elif slime.slime_git_repository and slime.slime_git_revision:
+        image = image.run_commands(
+            _slime_git_overlay_command(
+                slime.slime_git_repository, slime.slime_git_revision
+            )
+        )
+    else:
+        return image
+
+    # The source override replaced /root/slime after the base-image patches ran.
+    return image.run_commands(*_patch_commands(_SLIME_SOURCE_PATCHES_B64))
 
 
 def _build_conversion_config(slime_cfg: Any, model: Any = None) -> dict[str, Any]:
@@ -355,13 +413,7 @@ def build_slime_app(
     if isinstance(dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
-    if slime.local_slime:
-        image = image.add_local_dir(
-            slime.local_slime,
-            remote_path=SLIME_ROOT,
-            copy=True,
-            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
-        )
+    image = _overlay_slime_source(image, slime)
 
     if slime.image_run_commands:
         image = image.run_commands(*slime.image_run_commands)
@@ -546,6 +598,8 @@ def build_slime_app(
         recipe_app_tags=slime.app_tags,
         wandb=slime.wandb,
     )
+    if slime.slime_git_revision:
+        tags["slime_git_revision"] = slime.slime_git_revision
     app = App(app_name, tags=tags)
     gpu_spec = f"{slime.gpu_type}:{slime.actor_num_gpus_per_node}"
 
