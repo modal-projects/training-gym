@@ -62,6 +62,16 @@ CUSTOM_BEFORE_TRAIN_STEP_HOOK_PATH_KEY = (
 
 
 def _hook_path_from_args(args: Any, path_key: str) -> str | None:
+    """The user hook this module's wrapper for ``path_key`` should dispatch to.
+
+    A nested container may hold this module's own wrapper path — the flag miles
+    was launched with often lands there too — and dispatching to it would
+    re-enter the wrapper forever, so only this module's own functions are
+    excluded. Other ``modal_training_gym`` hooks are dispatchable: the projector
+    recipe wraps one (its gradient all-reduce and checkpoint writer hang off it),
+    and skipping it would leave a run with unreduced gradients and no
+    checkpoints.
+    """
     direct = getattr(args, path_key, None)
     if isinstance(direct, str) and direct.strip():
         return direct
@@ -76,7 +86,7 @@ def _hook_path_from_args(args: Any, path_key: str) -> str | None:
             if (
                 isinstance(value, str)
                 and value.strip()
-                and not value.startswith("modal_training_gym.")
+                and not value.strip().startswith(f"{__name__}.")
             ):
                 return value
     return None

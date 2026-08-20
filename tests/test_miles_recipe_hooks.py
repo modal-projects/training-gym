@@ -96,3 +96,12 @@ def test_hook_lookup_never_dispatches_to_gym_wrapper() -> None:
         }
     )
     assert _hook_path_from_args(args, _KEY) is None
+
+
+def test_hook_lookup_dispatches_gym_hooks_that_are_not_the_wrapper() -> None:
+    """The projector's grad all-reduce and checkpoint writer hang off one."""
+    from modal_training_gym.frameworks.miles.projector_config import SAVE_HOOK_PATH
+
+    key = "training_gym_custom_megatron_before_train_step_hook_path"
+    args = SimpleNamespace(extra_config={key: SAVE_HOOK_PATH})
+    assert _hook_path_from_args(args, key) == SAVE_HOOK_PATH
