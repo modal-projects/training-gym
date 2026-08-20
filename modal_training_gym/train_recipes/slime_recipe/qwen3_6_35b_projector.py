@@ -207,7 +207,22 @@ class Qwen3_6_35b_Projector_Recipe(Qwen3_6_35b_Recipe):
         would be computed over the dataset's own tokens, which is not the
         objective either flag means. RL over a projector needs a
         projector-aware weight sync first (see the class docstring).
+
+        ``debug_train_only`` itself is required rather than merely defaulted:
+        it is also what keeps the train model resident. The recipe inherits
+        ``colocate=True`` from the RL preset, and a colocated run that owns
+        engines pauses the train model between phases — which, with the base
+        frozen, zeroes the parameter buffer holding only the projector.
         """
+        if not self.debug_train_only:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs debug_train_only=True: engines "
+                "would be started for a run that generates nothing, slime's "
+                "weight sync would walk the projector it has no way to send, "
+                "and under the inherited colocate=True the train model would "
+                "be offloaded — which zeroes Megatron's parameter buffer, "
+                "holding only the projector once the base is frozen."
+            )
         if self.loss_type != "sft_loss":
             raise TrainingGymConfigError(
                 f"{type(self).__name__} is supervised: loss_type must be "

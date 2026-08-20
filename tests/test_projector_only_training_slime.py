@@ -187,6 +187,12 @@ def test_distributed_optimizer_is_rejected():
         Qwen3_6_35b_Projector_Recipe(use_distributed_optimizer=True)
 
 
+def test_engine_owning_runs_are_rejected():
+    """Engines under the inherited colocate=True would offload the projector."""
+    with pytest.raises(ValidationError, match="debug_train_only=True"):
+        Qwen3_6_35b_Projector_Recipe(debug_train_only=False)
+
+
 def test_rl_objectives_are_rejected():
     """No engines run, so a policy loss or KL would score the dataset's tokens."""
     with pytest.raises(ValidationError, match="sft_loss"):

@@ -122,10 +122,18 @@ def rebase_positions(
     silently write to the wrong tokens. The padding segment itself is never
     projected into.
 
-    Segment and row counts are aggregates, so they would also match if the
-    packing ordered its samples differently from the concatenated tensors; each
-    rebased row is therefore checked against its own segment's end, which is
-    where that reordering shows up.
+    Sample order is the same on both sides by construction, not by luck:
+    ``get_batch`` builds ``cu_seqlens`` from ``batch["tokens"]`` and concatenates
+    ``batch["multimodal_train_inputs"]`` in the same list order, one entry per
+    sample. It skips samples whose dict is ``None``, which would pair each row
+    with the wrong segment — so the rollout raises rather than emitting a sample
+    without embeddings.
+
+    Segment and row counts are aggregates, so they would still match if that
+    ever changed; each rebased row is therefore checked against its own
+    segment's end. That check catches a reordering only when a row lands past
+    its segment — a short position in a long segment would pass it — so it is a
+    backstop for the ordering above, not the guarantee.
     """
     num_samples = int(row_counts.numel())
     num_segments = int(cu_seqlens.numel()) - 1
