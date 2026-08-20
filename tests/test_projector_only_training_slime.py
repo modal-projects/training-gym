@@ -286,3 +286,35 @@ def test_a_projector_entry_without_a_recipe_is_rejected():
 
     with pytest.raises(TrainingGymConfigError, match="no projector-only slime"):
         build_recipe_and_dataset(Framework.SLIME, Qwen3_4B(), 1, projector=True)
+
+
+def test_projector_keys_are_hidden_whatever_prefix_megatron_asks_for():
+    """The base checkpoint predates the projector, so its keys must not appear.
+
+    Megatron's checkpointing calls ``sharded_state_dict()`` with the default
+    empty prefix, but ``prefix`` is the signature's first positional argument
+    and a caller passing one prefixes every key — matching the bare name would
+    then leave the projector in and fail the load of a fine base checkpoint.
+    """
+    pytest.importorskip("torch")  # the framework module is import-time torch
+    from modal_training_gym.frameworks.slime.embedding_projector import (
+        _hide_projector_from_megatron_checkpoints,
+    )
+
+    class FakeModel:
+        def sharded_state_dict(self, prefix=""):
+            return {
+                f"{prefix}decoder.layers.0.mlp.weight": object(),
+                f"{prefix}embedding_projector.mlp.0.weight": object(),
+            }
+
+    model = FakeModel()
+    _hide_projector_from_megatron_checkpoints(model)
+
+    assert list(model.sharded_state_dict()) == ["decoder.layers.0.mlp.weight"]
+    assert list(model.sharded_state_dict("module.")) == [
+        "module.decoder.layers.0.mlp.weight"
+    ]
+    assert list(model.sharded_state_dict(prefix="module.")) == [
+        "module.decoder.layers.0.mlp.weight"
+    ]

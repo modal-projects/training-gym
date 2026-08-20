@@ -271,12 +271,17 @@ def _hide_projector_from_megatron_checkpoints(model) -> None:
     :func:`save_projector_checkpoint` and ``ProjectorSpec.load`` instead, which
     is a single small file rather than a resharded slice of the model.
     """
-    prefix = "embedding_projector."
     original = model.sharded_state_dict
 
     def sharded_state_dict(*args, **kwargs):
         state = original(*args, **kwargs)
-        for key in [k for k in state if k.startswith(prefix)]:
+        # Megatron's checkpointing calls this with the default empty prefix, but
+        # a caller passing one (``prefix`` is this signature's first positional
+        # argument) prefixes every key, and matching the bare name would then
+        # keep the projector in and fail the base checkpoint's load.
+        caller_prefix = kwargs.get("prefix", args[0] if args else "")
+        dropped = f"{caller_prefix}embedding_projector."
+        for key in [k for k in state if k.startswith(dropped)]:
             del state[key]
         return state
 
