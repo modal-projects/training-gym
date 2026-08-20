@@ -720,6 +720,11 @@ class EmbeddingProjectorDataset(DatasetConfig):
         name, so without it a later run with a different row count or embedding
         width would silently train on the file an earlier run left behind.
 
+        The filler is one repeated pattern, so it is also nearly free for a base
+        model to predict: expect a training loss two orders of magnitude below
+        what real prose gives (~0.006 rather than ~1.4 on Qwen3.6-35B-A3B). That
+        says nothing about the projector, whose inputs are noise either way.
+
         ``tokens`` is a rough per-sample length, long by default so a
         validation step exercises a sequence a real projector run would see —
         a two-sentence conversation is a few dozen tokens, well under the

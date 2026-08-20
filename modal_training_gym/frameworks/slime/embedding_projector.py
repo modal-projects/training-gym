@@ -325,12 +325,16 @@ def _skip_base_checkpoint_save() -> None:
     if getattr(slime_actor.save, "_training_gym_projector_only", False):
         return
 
-    def skip(iteration, model, optimizer, opt_param_scheduler) -> None:
+    # slime names this parameter ``iteration`` but passes ``rollout_id``, which
+    # is 0-based and counts rollouts rather than the optimizer steps the
+    # projector's own checkpoints are numbered by.
+    def skip(rollout_id, model, optimizer, opt_param_scheduler) -> None:
         logger.info(
-            "projector-only training: skipping slime's base checkpoint at "
-            "iteration %d — the base is frozen, so it would duplicate the "
-            "checkpoint this run loaded; the projector is written separately",
-            iteration,
+            "projector-only training: skipping slime's base checkpoint after "
+            "rollout %d — the base is frozen, so it would duplicate the "
+            "checkpoint this run loaded; the projector is written separately, "
+            "numbered by optimizer step",
+            rollout_id,
         )
 
     skip._training_gym_projector_only = True
