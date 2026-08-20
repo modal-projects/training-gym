@@ -85,7 +85,7 @@ false positive or false negative.
 - Sparse but valid signal: adjust one reward or sampling choice and repeat the
   smoke test.
 - Base model almost never crosses a required correctness gate: propose a
-  stronger model or a justified graded signal/curriculum, then repeat the proof.
+  stronger model or a justified graded signal/curriculum.
 - Model behavior problem: change one training setting and compare fresh runs
   over equivalent steps and samples.
 
