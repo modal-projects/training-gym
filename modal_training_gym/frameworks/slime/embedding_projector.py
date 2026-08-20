@@ -297,6 +297,46 @@ def _hide_projector_from_megatron_checkpoints(model) -> None:
     model.sharded_state_dict = sharded_state_dict
 
 
+def _skip_base_checkpoint_save() -> None:
+    """Stop slime writing the frozen base as a checkpoint.
+
+    slime saves whenever ``should_run_periodic_action`` fires, and that returns
+    True on the last rollout whatever ``save_interval`` is — so even a run that
+    asks for no periodic save writes the full base once. For a projector-only run
+    that output is a byte-for-byte copy of ``ref_load``: at 35B it is ~70 GB of
+    sharded weights and about a minute of the run, produced by a training loop
+    that could not have changed a single one of them.
+
+    The projector is what this run produces, and
+    :class:`_ProjectorSaver` has already written it after every applied step, so
+    nothing is lost. Patched on the attribute ``actor.save_model`` resolved
+    (``from .model import ... save``) rather than on
+    :func:`megatron.training.save_checkpoint`, which the same process also
+    reaches through paths that are not this one — the HF export
+    (``args.save_hf``) still runs if a caller asks for it.
+
+    Called from the provider: it runs in the actor's process during
+    initialization, before any rollout, and only for projector-only runs.
+    """
+    from slime.backends.megatron_utils import (  # pyright: ignore[reportMissingImports]
+        actor as slime_actor,
+    )
+
+    if getattr(slime_actor.save, "_training_gym_projector_only", False):
+        return
+
+    def skip(iteration, model, optimizer, opt_param_scheduler) -> None:
+        logger.info(
+            "projector-only training: skipping slime's base checkpoint at "
+            "iteration %d — the base is frozen, so it would duplicate the "
+            "checkpoint this run loaded; the projector is written separately",
+            iteration,
+        )
+
+    skip._training_gym_projector_only = True
+    slime_actor.save = skip
+
+
 def projector_model_provider(
     pre_process: bool = True, post_process: bool = True, vp_stage=None, **kwargs
 ):
@@ -314,6 +354,7 @@ def projector_model_provider(
     # The saver the step hook installs owns the projector's gradient all-reduce
     # as well as its checkpoints, and neither absence announces itself.
     require_projector_step_hook(args)
+    _skip_base_checkpoint_save()
     if mpu.get_context_parallel_world_size() > 1:
         # Context parallelism shards the packed sequence a second way, with its
         # own two-chunk interleave (``slice_with_cp``) and a ``cu_seqlens`` scaled

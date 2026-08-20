@@ -315,6 +315,44 @@ def test_a_projector_entry_without_a_recipe_is_rejected():
         build_recipe_and_dataset(Framework.SLIME, Qwen3_4B(), 1, projector=True)
 
 
+def test_the_frozen_bases_checkpoint_save_is_patched_out(monkeypatch):
+    """slime saves on the last rollout regardless of ``save_interval``.
+
+    For a frozen base that write is a ~70 GB copy of the checkpoint the run
+    loaded, so the provider replaces the actor's ``save`` with a no-op.
+    """
+    pytest.importorskip("torch")  # the framework module is import-time torch
+    import sys
+    from types import ModuleType
+
+    from modal_training_gym.frameworks.slime.embedding_projector import (
+        _skip_base_checkpoint_save,
+    )
+
+    saved: list[int] = []
+    actor = ModuleType("slime.backends.megatron_utils.actor")
+    actor.save = lambda iteration, model, optimizer, scheduler: saved.append(iteration)
+    package = ModuleType("slime.backends.megatron_utils")
+    package.actor = actor
+    for name, module in {
+        "slime": ModuleType("slime"),
+        "slime.backends": ModuleType("slime.backends"),
+        "slime.backends.megatron_utils": package,
+        "slime.backends.megatron_utils.actor": actor,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    _skip_base_checkpoint_save()
+    patched = actor.save
+    actor.save(7, None, None, None)
+    assert saved == []
+
+    # Idempotent: the provider runs once per model chunk, and re-wrapping would
+    # be harmless but re-patching an already-patched attribute hides mistakes.
+    _skip_base_checkpoint_save()
+    assert actor.save is patched
+
+
 def test_projector_keys_are_hidden_whatever_prefix_megatron_asks_for():
     """The base checkpoint predates the projector, so its keys must not appear.
 

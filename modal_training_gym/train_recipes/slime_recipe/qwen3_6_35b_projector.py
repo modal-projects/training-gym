@@ -82,8 +82,9 @@ class Qwen3_6_35b_Projector_Recipe(Qwen3_6_35b_Recipe):
     trained artifact completely — and the projector is kept out of Megatron's
     own state dicts, so the base checkpoint still loads even though the model
     now has parameters that checkpoint never had. ``save_interval`` is left far
-    above ``num_rollout`` so Megatron never writes tens of gigabytes of
-    unchanged weights.
+    above ``num_rollout``, and because slime saves on the last rollout whatever
+    that interval says, the provider patches that save out — otherwise every run
+    would end by writing ~70 GB of weights identical to the ones it loaded.
 
     Parallelism is TP2/PP1/CP1/EP4 on one 8×H100 node, loading the same
     torch_dist base conversion as the RL recipe (torch_dist reshards on load).
