@@ -302,12 +302,14 @@ class SlimeRecipe(BaseTrainRecipe):
         Average the loss over tokens instead of over samples.
     ref_load : str
         Checkpoint path the reference model is read from (for KL terms).
-    loss_type : str
-        ``"policy_loss"`` (the RL objective), ``"sft_loss"`` for supervised
-        training on the dataset's own targets, or ``"custom_loss"``.
-    loss_mask_type : str
+    loss_type : str | None
+        ``"policy_loss"`` (the RL objective, slime's own default), ``"sft_loss"``
+        for supervised training on the dataset's own targets, or
+        ``"custom_loss"``.
+    loss_mask_type : str | None
         Chat-template family used to build the supervised loss mask, e.g.
-        ``"qwen3_5"``. Only read on the ``sft_loss`` path.
+        ``"qwen3_5"``. Only read on the ``sft_loss`` path; ``None`` leaves
+        slime's own default (``"qwen"``).
     disable_compute_advantages_and_returns : bool
         Skip the advantage/return computation, which has nothing to work on
         outside ``policy_loss``. Set it with ``loss_type="sft_loss"``.
@@ -556,8 +558,10 @@ class SlimeRecipe(BaseTrainRecipe):
     entropy_coef: float = 0.0
     calculate_per_token_loss: bool = False
     ref_load: str = ""
-    loss_type: str = "policy_loss"
-    loss_mask_type: str = "qwen"
+    # Left unset so slime's own defaults apply and no existing recipe's command
+    # line changes; a supervised recipe sets both.
+    loss_type: str | None = None
+    loss_mask_type: str | None = None
     disable_compute_advantages_and_returns: bool = False
     debug_train_only: bool = False
 

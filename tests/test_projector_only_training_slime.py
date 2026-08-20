@@ -96,6 +96,16 @@ def test_recipe_emits_supervised_engine_free_flags():
     assert "--projector" not in flags
 
 
+def test_other_slime_recipes_command_lines_are_untouched():
+    """The supervised flags are opt-in: an RL recipe still emits neither."""
+    flags = _flags(
+        Qwen3_6_35b_Recipe().cli_args(dataset=_dataset(), model=Qwen3_6_35B())
+    )
+    assert "--loss-type" not in flags
+    assert "--loss-mask-type" not in flags
+    assert "--debug-train-only" not in flags
+
+
 def test_no_eval_pass_is_configured():
     """The rollout function raises on evaluation, so none may be scheduled."""
     assert Qwen3_6_35b_Projector_Recipe().eval_interval is None

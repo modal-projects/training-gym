@@ -73,10 +73,11 @@ def _build_base_model(args, pre_process: bool, post_process: bool, kwargs: dict)
 
     The build happens with ``custom_model_provider_path`` still cleared, not just
     the lookup: re-entering this function would recurse until the stack
-    overflows. Only the keyword arguments the underlying provider actually
-    declares are forwarded, the way slime's own freeze wrapper does it, because
-    the signature differs across Megatron versions (``vp_stage``, ``config``,
-    ``pg_collection``).
+    overflows. A keyword argument is forwarded only when slime passed it *and*
+    the underlying provider declares it, the way slime's own wrapper checks for
+    ``vp_stage``: the signature differs across Megatron versions (``vp_stage``,
+    ``config``, ``pg_collection``), and passing an explicit ``None`` for one
+    slime never supplied would override whatever default the provider has.
     """
     import inspect
 
@@ -91,8 +92,8 @@ def _build_base_model(args, pre_process: bool, post_process: bool, kwargs: dict)
         provider_kwargs = {"pre_process": pre_process, "post_process": post_process}
         params = inspect.signature(provider).parameters
         for key in ("vp_stage", "config", "pg_collection"):
-            if key in params:
-                provider_kwargs[key] = kwargs.get(key, None)
+            if key in params and key in kwargs:
+                provider_kwargs[key] = kwargs[key]
         return provider(**provider_kwargs)
     finally:
         args.custom_model_provider_path = saved
