@@ -21,6 +21,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 ## Guides
 
+- [Agent-driven training](https://gym.modal.dev/guides/agent-driven-training)
 - [The observability dashboard](https://gym.modal.dev/guides/tools/observability-dashboard)
 - [Weights & Biases integration](https://gym.modal.dev/guides/tools/wandb-integration)
 
@@ -37,7 +38,6 @@ Repo: https://github.com/modal-projects/training-gym
 - [GUI Grounding with Qwen3-VL-8B](https://gym.modal.dev/tutorials/computer_use)
 - [On-policy Distillation (OPD) Across Model Families](https://gym.modal.dev/tutorials/cross_tokenizer_distillation)
 - [Frontier-scale training](https://gym.modal.dev/tutorials/multinode)
-- [Install the Training Gym skill, launch an agent-built run, and inspect it with the CLI](https://gym.modal.dev/tutorials/rl/010_agent_driven_training)
 
 ## Reference
 

@@ -91,6 +91,7 @@ export default defineConfig({
     '/tutorials/tools/000_observability_dashboard':
       '/guides/tools/observability-dashboard',
     '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration',
+    '/tutorials/rl/010_agent_driven_training': '/guides/agent-driven-training',
   },
   markdown: {
     remarkPlugins: [remarkMath, remarkStripPageTitle],
@@ -212,6 +213,7 @@ export default defineConfig({
         {
           label: 'Guides',
           items: [
+            { label: 'Agent-driven training', link: '/guides/agent-driven-training' },
             {
               label: 'Tools',
               autogenerate: { directory: 'guides/tools' },
