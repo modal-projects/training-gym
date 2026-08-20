@@ -29,6 +29,60 @@ ROLLOUT_PATH = (
 EMBEDDINGS_KEY = "projector_embeddings"
 POSITIONS_KEY = "projector_positions"
 
+_STEP_HOOK_KEY = "training_gym_custom_megatron_before_train_step_hook_path"
+
+
+def _step_hook_path(args) -> str | None:
+    """Resolve the hook miles' reporting wrapper will dispatch to.
+
+    Mirrors ``phase_reporting._hook_path_from_args``: the recipe's own hook
+    travels in ``extra_config`` (miles sets every key on ``args``) while the
+    ``--custom-megatron-before-train-step-hook-path`` flag names the gym's
+    reporting wrapper.
+    """
+    direct = getattr(args, _STEP_HOOK_KEY, None)
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    for container_name in ("extra_config", "custom_config"):
+        container = getattr(args, container_name, None)
+        if isinstance(container, dict):
+            value = container.get(_STEP_HOOK_KEY) or container.get(
+                _STEP_HOOK_KEY.removeprefix("training_gym_")
+            )
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def require_projector_step_hook(args) -> None:
+    """Fail at model construction when the projector's step hook is unwired.
+
+    ``save_projector_checkpoint`` is the only thing that installs the
+    ``optimizer.step`` wrapper, and that wrapper owns two jobs nothing else
+    does: the tensor-parallel all-reduce of the replicated projector's
+    gradients, and writing the projector checkpoints. Neither announces its
+    absence, so a run whose hook never fires would train on
+    tensor-parallel-partial gradients and finish with nothing saved. The wiring
+    is a recipe default, but it reaches the container through ``extra_config``,
+    so the provider checks it — miles has to call the provider for the run to
+    exist at all — rather than trusting it.
+    """
+    wrapper = getattr(args, "custom_megatron_before_train_step_hook_path", None)
+    wrapper = wrapper.strip() if isinstance(wrapper, str) else ""
+    wrapped = _step_hook_path(args)
+    if SAVE_HOOK_PATH in (wrapper, wrapped):
+        return
+    raise ValueError(
+        "projector-only training needs miles' before-train-step hook to reach "
+        f"'{SAVE_HOOK_PATH}', which installs the projector's gradient "
+        "all-reduce and checkpoint writer, but this run resolves "
+        f"--custom-megatron-before-train-step-hook-path to '{wrapper}' and the "
+        f"gym's wrapped hook to '{wrapped}'. Launch through "
+        "GLM_5_2_Projector_Recipe (or point "
+        "custom_megatron_before_train_step_hook at that path) rather than "
+        "training with unreduced gradients and no checkpoints."
+    )
+
 
 @dataclass(config=ConfigDict(extra="forbid"))
 class ProjectorSpec:
