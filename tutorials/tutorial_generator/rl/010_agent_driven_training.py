@@ -38,11 +38,10 @@ def _intro():
 
     1. Install the Training Gym agent skills.
     2. Give your agent a training objective.
-    3. Watch the agent build a Qwen3-4B training configuration.
+    3. Watch the agent scaffold a training configuration.
     4. See how the agent autonomously monitors the run and iterates with the CLI.
 
-    The training objective we'll use in this tutorial is to **post-train a model 
-    to answer in rhyme**.
+    In this tutorial we will **post-train a model to answer in rhyme**.
     """
 
 
@@ -64,10 +63,10 @@ def _confirmations():
     """
     ## 1. Introducing the CLI
 
-    The `training-gym` CLI is the operational interface for agent-driven
-    training. It installs the skills that teach an agent the training workflow
-    and provides commands for monitoring training runs through their status,
-    rewards, logs, and rollout traces.
+    The `training-gym` CLI is the interface for agent-driven training. It 
+    installs the skills that teach an agent the training workflow and provides 
+    commands for monitoring training runs through their status, rewards, logs, 
+    and rollout traces.
 
     The CLI is installed with the package. Start by looking at its top-level
     command groups:
@@ -97,7 +96,9 @@ def _install_skill_intro():
     - inspect actual model outputs to verify that reward reflects the intended behavior
     - investigate suspicious reward trends so metric exploits are not mistaken for learning
 
-    Install the bundled skills into the current project:
+    Install the full skill bundle into the current project. In addition to
+    `agent-driven-training`, it includes skills for example validation, Modal
+    infrastructure, model support, and working with the Training Gym codebase:
 
     ```bash
     training-gym skills install
@@ -114,7 +115,7 @@ def _install_skills():
 @markdown
 def _skill_details():
     """
-    You can just ask your agent:
+    Then you can just ask your agent:
 
     > can you post-train a model to rhyme in its output
 
@@ -137,13 +138,12 @@ def _code_summary():
     request above.
 
     The dataset keeps self-contained Alpaca instructions and uses each reference
-    answer to measure whether a rhyming response stayed on topic.
-
-    The agent combined a deterministic rhyme score with an embedding-based
-    relevance score. Relevance gates rhyme so unrelated verse cannot win, and
-    anti-reward hacking checks penalize repeated end words and one-word lines.
-    Before spending any GPU time, the agent exercised the reward on correct,
-    non-rhyming, off-topic, repeated-word, malformed, and empty responses.
+    answer to measure whether a rhyming response stayed on topic. The agent combined 
+    a deterministic rhyme score with an embedding-based relevance score. Relevance 
+    gates rhyme so unrelated verse cannot win, and anti-reward hacking checks 
+    penalize repeated end words and one-word lines. Before spending any GPU time, 
+    the agent exercised the reward on correct, non-rhyming, off-topic, 
+    repeated-word, malformed, and empty responses.
 
     The complete generated configuration is shown as one file below.
     """
@@ -477,7 +477,7 @@ def _run_logs():
 @markdown
 def _run_trace_intro():
     """
-    Reward is only a proxy. Before promoting the proof, download its rollout
+    Reward is only a proxy. Before promoting the proof run, download its rollout
     traces and read the actual prompts, responses, and per-sample rewards. The
     dry run previews the download; the second command writes traces beneath
     `./traces/<run-id>/`.
@@ -534,7 +534,7 @@ def _success():
 
     ## 7. Results
 
-    The full run finished in 46 minutes, and the numbers tell the story:
+    The full run finished in 46 minutes, and the results are:
 
     - Rhyme score: 0.475 → 0.908
     - Answers above the rhyme threshold: 27% → 84%
