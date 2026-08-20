@@ -170,8 +170,16 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     recompute_granularity: str | None = "full"
     recompute_method: str | None = "uniform"
     recompute_num_layers: int | None = 1
-    use_dynamic_batch_size: bool = True
-    max_tokens_per_gpu: int = 8192
+    # Upstream's GLM-5.2 script forbids dynamic batching outright: "The DSA
+    # kernel backend dictates the query layout; both forbid
+    # --use-dynamic-batch-size, hence --micro-batch-size 1" — tilelang's fused
+    # sparse-MLA kernels index by cu_seqlens, megatron's unfused core attention
+    # wants a 4D query. With it on, the 5-layer base's forward stayed finite
+    # while SparseMLA's backward returned NaN into the embedding stream, on a
+    # run whose projected rows were multiplied by zero — i.e. independent of
+    # anything the projector wrote.
+    use_dynamic_batch_size: bool = False
+    micro_batch_size: int | None = 1
 
     num_rollout: int = 10
     rollout_batch_size: int = 8
@@ -195,15 +203,14 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     attention_backend: str | None = "flash"
     update_weight_buffer_size: int | None = 2 * 1024**3
 
-    # GLM-5.2's MoE args, as upstream's run script emits them for every shape
-    # including the single-node 5-layer test (megatron_use_deepep defaults on).
-    # Without them Megatron falls back to the allgather dispatcher, which the
-    # pinned image warns does not support the variable sequence lengths
-    # ``use_dynamic_batch_size`` produces -- and the first backward of a run
-    # without them returned NaN into the embedding stream from inside the
-    # frozen base.
-    moe_enable_deepep: bool = True
-    moe_token_dispatcher_type: str = "flex"
+    # GLM-5.2's MoE dispatcher, which upstream's run script always names —
+    # ``alltoall`` on its no-DeepEP branch, ``flex`` with ``--moe-enable-deepep``
+    # otherwise. Naming neither leaves Megatron on the allgather dispatcher,
+    # which the pinned image warns does not support variable sequence lengths.
+    # ``alltoall`` rather than DeepEP's ``flex`` because the miles GLM-5.2 model
+    # preset turns on ``moe_shared_expert_overlap``, which Megatron accepts only
+    # with this dispatcher.
+    moe_token_dispatcher_type: str = "alltoall"
     data_pad_size_multiplier: int = 1024
 
     @model_validator(mode="after")
@@ -233,6 +240,30 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
                 self,
                 "train_function_kwargs",
                 {"ephemeral_disk": _EPHEMERAL_DISK_MIB, **kwargs},
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _reject_dynamic_batch_size(self) -> "GLM_5_2_Projector_Recipe":
+        """Reject dynamic batching: GLM-5.2's DSA kernels do not support it.
+
+        Upstream's ``scripts/run_glm5_2_744b_a40b_lora.py`` states the
+        constraint for both DSA backends and pins ``--micro-batch-size 1``
+        instead. A run with it on trained nothing: the sparse-MLA backward
+        returned NaN, and ``check_for_nan_in_loss_and_grad`` aborted the step.
+        """
+        if self.use_dynamic_batch_size:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs use_dynamic_batch_size=False: "
+                "GLM-5.2's DSA attention kernels forbid it (upstream's run "
+                "script pins micro_batch_size=1 for exactly this reason), and "
+                "with it on the base's sparse-MLA backward returns NaN."
+            )
+        if self.micro_batch_size != 1:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs micro_batch_size=1 (got "
+                f"{self.micro_batch_size}), the only batching GLM-5.2's DSA "
+                "kernels take without dynamic batching."
             )
         return self
 
@@ -464,8 +495,7 @@ class GLM_5_2_5Layer_Projector_Recipe(GLM_5_2_Projector_Recipe):
     """The projector path on the 5-layer pruned GLM-5.2, 1×8×H200.
 
     Upstream's own single-node smoke shape (the ``num_nodes == 1`` branch of
-    ``scripts/run_glm5_2_744b_a40b.py``): 5 decoder layers, TP4/EP8, tokens per
-    GPU cut to 2048. Exercises the same freezing, forward merge and projector
+    ``scripts/run_glm5_2_744b_a40b.py``): 5 decoder layers, TP4/EP8. Exercises the same freezing, forward merge and projector
     checkpoint as the 744B recipe for one node's cost. The base is pruned, so
     its outputs mean nothing — this proves plumbing, not quality.
     """
@@ -478,4 +508,3 @@ class GLM_5_2_5Layer_Projector_Recipe(GLM_5_2_Projector_Recipe):
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
     expert_model_parallel_size: int = 8
-    max_tokens_per_gpu: int = 2048

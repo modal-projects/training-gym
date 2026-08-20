@@ -106,6 +106,7 @@ class _ProjectorMerge:
         self._positions_key = cfg.positions_key
         self._pending: tuple[torch.Tensor, torch.Tensor] | None = None
         self._weights_checked = False
+        self._output_logged = False
         self._original_forward = model.forward
         model.forward = self._forward
         if model.pre_process:
@@ -129,9 +130,34 @@ class _ProjectorMerge:
             )
         self._pending = (embeddings, positions)
         try:
-            return self._original_forward(*fargs, **fkwargs)
+            return self._log_output(self._original_forward(*fargs, **fkwargs))
         finally:
             self._pending = None
+
+    def _log_output(self, output):
+        """Describe the frozen base's first forward output, once per process.
+
+        A projector-only run sees a non-finite loss only as a NaN in *the
+        projector's* gradient bucket, because with the base frozen that is the
+        only bucket Megatron checks. This says whether what the base returned
+        was already non-finite — a forward the merge fed out-of-distribution
+        rows, or a base that cannot run this shape — rather than something the
+        backward produced.
+        """
+        if self._output_logged or not isinstance(output, torch.Tensor):
+            return output
+        self._output_logged = True
+        detached = output.detach().float()
+        logger.info(
+            "projector: the frozen base's first forward output rms=%.6g "
+            "absmax=%.6g nan=%d inf=%d of %d",
+            float(detached.pow(2).mean().sqrt()),
+            float(detached.abs().max()),
+            int(detached.isnan().sum()),
+            int(detached.isinf().sum()),
+            int(detached.numel()),
+        )
+        return output
 
     def _embedding_hook(self, module, inputs, output):
         if self._pending is None:
