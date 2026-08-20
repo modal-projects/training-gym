@@ -282,6 +282,39 @@ def all_reduce_projector_grads(projector: nn.Module, sequence_parallel: bool) ->
     return reduced
 
 
+_grads_logged: set[str] = set()
+
+
+def log_incoming_grad(tensor: torch.Tensor, name: str) -> torch.Tensor:
+    """Log the first gradient that reaches ``tensor``, once per ``name``.
+
+    A projector-only run detects nothing but the projector's own gradients:
+    Megatron's grad-norm check covers the DDP buckets, and with the base frozen
+    the only bucket is the projector's. So a base whose backward hands the
+    embedding stream an ``inf`` (bf16 overflow) or a NaN is reported as *the
+    projector's* NaN, with nothing to distinguish it from the projector itself
+    producing one. Logging what arrives at the merge separates the two, and one
+    line per tensor per process is not worth gating behind a flag.
+    """
+    if not tensor.requires_grad or name in _grads_logged:
+        return tensor
+    _grads_logged.add(name)
+
+    def _log(grad: torch.Tensor) -> None:
+        detached = grad.detach().float()
+        logger.info(
+            "projector backward: grad into %s rms=%.6g absmax=%.6g nan=%d inf=%d",
+            name,
+            float(detached.pow(2).mean().sqrt()),
+            float(detached.abs().max()),
+            int(detached.isnan().sum()),
+            int(detached.isinf().sum()),
+        )
+
+    tensor.register_hook(_log)
+    return tensor
+
+
 def _scatter_projected(
     sequence_parallel, embeddings_out, embeds, positions, projector=None
 ):
@@ -309,7 +342,10 @@ def _scatter_projected(
         """``embeddings_out``, with the projector still in the graph at zero weight."""
         if projector is None:
             return embeddings_out
-        return embeddings_out + projector_graph_tap(projector, embeddings_out.dtype)
+        return log_incoming_grad(
+            embeddings_out + projector_graph_tap(projector, embeddings_out.dtype),
+            "the embeddings of a rank with no projected positions",
+        )
 
     if positions.numel() == 0:
         return unmerged()
@@ -360,8 +396,9 @@ def _scatter_projected(
             float(kept.detach().float().pow(2).mean().sqrt()),
             float(kept.detach().float().abs().max()),
         )
+    log_incoming_grad(kept, "the projector's output")
     merged[local, 0] = kept
-    return merged
+    return log_incoming_grad(merged, "the merged embeddings (from the frozen base)")
 
 
 class _ProjectorMerge:
