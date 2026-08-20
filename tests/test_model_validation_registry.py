@@ -96,7 +96,10 @@ def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     fail on a GPU, minutes into a run.
     """
     recipe, dataset = build_recipe_and_dataset(
-        config.framework, config.model_config(), step_count=1
+        config.framework,
+        config.model_config(),
+        step_count=1,
+        projector=config.projector,
     )
     assert recipe is not None
     assert dataset is not None
@@ -175,7 +178,9 @@ def test_validation_dataset_unpickles_without_the_scripts_directory(config, tmp_
 
     from scripts.validate_model_configs import _ship_dataset_definition
 
-    _, dataset = build_recipe_and_dataset(config.framework, config.model_config(), 1)
+    _, dataset = build_recipe_and_dataset(
+        config.framework, config.model_config(), 1, projector=config.projector
+    )
 
     _ship_dataset_definition(dataset)
     payload = serialize(dataset)

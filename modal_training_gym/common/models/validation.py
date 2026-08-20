@@ -41,6 +41,10 @@ class _ValidationConfig:
     # Whether a pull request fans this model out automatically.
     # A workflow_dispatch naming it still runs it.
     run_on_pr: bool = True
+    # Validate the model's projector-only recipe instead of its base one.
+    # A model can have both (Qwen3.6-35B-A3B trains RL and trains a projector),
+    # and ``get_base_recipe`` only knows the base one, so the entry says which.
+    projector: bool = False
 
     @property
     def model_name(self) -> str:
@@ -118,4 +122,13 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
         run_on_pr=False,
     ),
     _ValidationConfig("GLM-5.2-Projector", GLM_5_2, Framework.MILES, run_on_pr=False),
+    # Projector-only Qwen3.6-35B-A3B on slime. One 8xH100 node, but the base is
+    # a 35B MoE conversion, so it is dispatch-only like the other 27B+ entries.
+    _ValidationConfig(
+        "Qwen3.6-35B-A3B-Projector",
+        Qwen3_6_35B,
+        Framework.SLIME,
+        run_on_pr=False,
+        projector=True,
+    ),
 }

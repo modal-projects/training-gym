@@ -4,12 +4,25 @@ from __future__ import annotations
 
 from modal_training_gym.common.dataset import (
     DatasetConfig,
+    EmbeddingProjectorDataset,
     HuggingFaceDataset,
     MultimodalDataset,
 )
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.models.qwen3_6_35b import Qwen3_6_35B
 from modal_training_gym.common.models.qwen3_asr_1_7b import Qwen3_ASR_1_7B
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b_projector import (
+    Qwen3_6_35b_Projector_Recipe,
+)
+
+# Which model each projector-only slime recipe trains a projector against.
+# ``get_base_recipe`` cannot answer this: these models also train RL, and that
+# is the recipe it returns for them.
+PROJECTOR_RECIPES: dict[type[ModelConfig], type[SlimeRecipe]] = {
+    Qwen3_6_35B: Qwen3_6_35b_Projector_Recipe,
+}
 
 VALIDATION_EPHEMERAL_DISK_MIB = 2_097_152
 
@@ -99,13 +112,36 @@ class LibriSpeechASRDataset(MultimodalDataset):
 
 
 def build_slime_validation(
-    model_config: ModelConfig, step_count: int
+    model_config: ModelConfig, step_count: int, projector: bool = False
 ) -> tuple[SlimeRecipe, DatasetConfig]:
-    """The model's base slime recipe and a dataset matching its modality.
+    """The model's slime recipe and a dataset matching what it trains.
 
     Audio models (Qwen3-ASR) need speech clips, so they get LibriSpeech;
     everything else validates against gsm8k, scored by ``deepscaler``.
+
+    A projector-only entry is the exception twice over: the recipe comes from
+    ``PROJECTOR_RECIPES`` rather than ``get_base_recipe``, and it trains
+    supervised on external embeddings that no prompt dataset carries, so it
+    validates on synthetic rows sized to the projector's input dimension.
     """
+    if projector:
+        recipe_class = PROJECTOR_RECIPES.get(type(model_config))
+        if recipe_class is None:
+            raise TrainingGymConfigError(
+                f"no projector-only slime recipe for model "
+                f"{model_config.model_name!r}, which is registered as a "
+                "projector validation target"
+            )
+        projector_recipe = recipe_class()
+        projector_recipe.train_function_kwargs = {
+            **dict(projector_recipe.train_function_kwargs or {}),
+            "ephemeral_disk": VALIDATION_EPHEMERAL_DISK_MIB,
+        }
+        return projector_recipe, EmbeddingProjectorDataset.synthetic(
+            n_rows=projector_recipe.rollout_batch_size * step_count,
+            input_dim=projector_recipe.projector.input_dim,
+        )
+
     recipe = SlimeRecipe.get_base_recipe(model_config)
     recipe.rm_type = "deepscaler"
     recipe.train_function_kwargs = {

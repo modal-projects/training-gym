@@ -20,7 +20,10 @@ if TYPE_CHECKING:
 
 
 def build_recipe_and_dataset(
-    framework: Framework, model_config: "ModelConfig", step_count: int
+    framework: Framework,
+    model_config: "ModelConfig",
+    step_count: int,
+    projector: bool = False,
 ) -> tuple["BaseTrainRecipe", "DatasetConfig"]:
     """The model's base recipe and the dataset it validates against.
 
@@ -28,11 +31,17 @@ def build_recipe_and_dataset(
     scope so validating a slime model never imports the miles recipes: a broken
     miles backend must not be able to take down the slime validation that gates
     PRs.
+
+    ``projector`` asks for the model's projector-only recipe rather than its base
+    one; the registry entry decides, because a model can have both and
+    ``get_base_recipe`` only knows the base one. Miles needs no such flag: its
+    projector models train nothing else, so their base recipe is the projector
+    recipe.
     """
     if framework is Framework.SLIME:
         from .slime import build_slime_validation
 
-        return build_slime_validation(model_config, step_count)
+        return build_slime_validation(model_config, step_count, projector=projector)
     if framework is Framework.MILES:
         from .miles import build_miles_validation
 

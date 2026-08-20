@@ -248,3 +248,41 @@ def test_preset_merge_keeps_the_projector_recipe_class():
     assert merged.pipeline_model_parallel_size == 1
     assert merged.loss_type == "sft_loss"
     assert merged.extra_config[ARGS_KEY]["input_dim"] == 4
+
+
+def test_validation_registry_dispatches_the_projector_recipe_by_name():
+    """``check -m Qwen3.6-35B-A3B-Projector`` has to reach the projector path.
+
+    The registry keys on the ``ModelConfig``, and this model's slime base recipe
+    is the RL one, so the entry carries ``projector=True`` and the backend picks
+    the recipe from its own table. Dispatch-only: it is a 35B MoE on a node.
+    """
+    from modal_training_gym.common.models.validation import (
+        _ValidationConfig,
+        Framework,
+    )
+    from scripts.validation_backends import build_recipe_and_dataset
+
+    config = _ValidationConfig.find("Qwen3.6-35B-A3B-Projector")
+    assert config.projector and not config.run_on_pr
+    assert config.framework is Framework.SLIME
+
+    recipe, dataset = build_recipe_and_dataset(
+        config.framework, config.model_config(), 3, projector=config.projector
+    )
+    assert type(recipe) is Qwen3_6_35b_Projector_Recipe
+    # No public dataset ships encoder embeddings, so the rows are synthetic and
+    # sized to the projector's input width: enough for every step of the run.
+    assert dataset.synthetic_input_dim == recipe.projector.input_dim
+    assert dataset.synthetic_rows == recipe.rollout_batch_size * 3
+
+
+def test_a_projector_entry_without_a_recipe_is_rejected():
+    """A registry entry for a model with no projector recipe must not run RL."""
+    from modal_training_gym.common.errors import TrainingGymConfigError
+    from modal_training_gym.common.models.qwen3_4b import Qwen3_4B
+    from scripts.validation_backends import build_recipe_and_dataset
+    from modal_training_gym.common.models.validation import Framework
+
+    with pytest.raises(TrainingGymConfigError, match="no projector-only slime"):
+        build_recipe_and_dataset(Framework.SLIME, Qwen3_4B(), 1, projector=True)
