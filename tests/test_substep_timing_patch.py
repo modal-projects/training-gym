@@ -234,7 +234,8 @@ def test_miles_package_patch_matches_golden(
     assert patched == golden_path.read_text(), (
         f"golden mismatch for {golden}; rerun with --rewrite to accept"
     )
-    for phase, _ in target.blocks:
+    for block_spec in target.blocks:
+        phase = block_spec[0]
         if phase == "compute_log_probs":
             assert (
                 "with _tg_time_phase(_tg_variant_phase("
@@ -267,7 +268,8 @@ def test_slime_package_patch_matches_golden(
     assert patched == golden_path.read_text(), (
         f"golden mismatch for {golden}; rerun with --rewrite to accept"
     )
-    for phase, _ in target.blocks:
+    for block_spec in target.blocks:
+        phase = block_spec[0]
         if phase == "compute_log_probs":
             assert (
                 "with _tg_time_phase(_tg_variant_phase("

@@ -19,6 +19,7 @@ from pathlib import Path
 
 PREAMBLE_MARKER = "PATCHED_TRAINING_GYM_TIMING_PREAMBLE"
 RECORDER_MARKER = "PATCHED_TRAINING_GYM_TIMING_RECORDER"
+BlockSpec = tuple[str, str] | tuple[str, str, str]
 
 
 def phase_marker(phase: str) -> str:
@@ -214,7 +215,7 @@ class PackageTarget:
 
     path: str
     scope: tuple[str, str, str] | None
-    blocks: tuple[tuple[str, str], ...]
+    blocks: tuple[BlockSpec, ...]
 
 
 # status patcher runs first, so the anchors are the upstream lines.
@@ -413,6 +414,7 @@ PACKAGE_TARGETS: tuple[PackageTarget, ...] = (
                 "                rollout_id=rollout_id,\n"
                 "                store_prefix=store_prefix,\n"
                 "            )\n",
+                "_tg_variant_phase('compute_log_probs', store_prefix)",
             ),
             (
                 "trainer_finalize",
@@ -544,12 +546,9 @@ def _patch_package_file(root: Path, target: PackageTarget) -> None:
         print(f"{target.path} already patched for substep timing")
         return
 
-    for phase, block in target.blocks:
-        phase_expr = (
-            "_tg_variant_phase('compute_log_probs', store_prefix)"
-            if phase == "compute_log_probs"
-            else None
-        )
+    for block_spec in target.blocks:
+        phase, block = block_spec[:2]
+        phase_expr = block_spec[2] if len(block_spec) == 3 else None
         src = replace_once(
             src,
             block,
@@ -560,7 +559,11 @@ def _patch_package_file(root: Path, target: PackageTarget) -> None:
         src = wrap_scope(src, target.scope, path)  # last: it reindents the body
     src = _inject_preamble(src)
 
-    missing = [phase for phase, _ in target.blocks if phase_marker(phase) not in src]
+    missing = [
+        phase
+        for phase, _ in (block_spec[:2] for block_spec in target.blocks)
+        if phase_marker(phase) not in src
+    ]
     if missing:
         raise RuntimeError(f"{path}: phases not instrumented: {missing}")
     if target.scope is not None and RECORDER_MARKER not in src:
