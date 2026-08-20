@@ -2,7 +2,7 @@ import pytest
 
 from modal_training_gym.frameworks.slime.launcher import (
     SLIME_ROOT,
-    _SLIME_BASE_PATCHES_B64,
+    _SLIME_EXTERNAL_PATCHES_B64,
     _SLIME_ROOT_PATCHES_B64,
     _overlay_slime_source,
     _patch_commands,
@@ -30,8 +30,8 @@ class RecordingImage:
         return self
 
 
-def test_slime_root_patches_are_a_subset_of_base_image_patches() -> None:
-    assert set(_SLIME_ROOT_PATCHES_B64) <= set(_SLIME_BASE_PATCHES_B64)
+def test_root_and_external_patches_are_disjoint() -> None:
+    assert not (set(_SLIME_ROOT_PATCHES_B64) & set(_SLIME_EXTERNAL_PATCHES_B64))
 
 
 def test_slime_git_overlay_requires_repository_and_full_revision() -> None:
