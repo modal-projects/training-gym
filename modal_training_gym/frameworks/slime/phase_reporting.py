@@ -21,6 +21,12 @@ import time
 from typing import Any
 
 from modal_training_gym.common.status import SlimeStatus
+from modal_training_gym.common.timing_recorder import (
+    RoleRecorder as RoleRecorder,
+    recording_lane as recording_lane,
+    recording_lane_on_reporting_rank as recording_lane_on_reporting_rank,
+    time_phase as time_phase,
+)
 
 from .advantage_reporting import (
     _advantage_samples_payload as _advantage_samples_payload,
@@ -30,7 +36,6 @@ from modal_training_gym.common.reporting import (
     _STEP_EVENT_TIMEOUT_SECONDS,
     _enqueue,
     _enqueue_rollout,
-    _post_framework_status,
     _run_context,
     _step_progress,
 )
@@ -301,10 +306,10 @@ def report_step_event(
         payload["step_event"] = step_event
     match step_event:
         case "start":
-            _post_framework_status(payload, _STEP_EVENT_TIMEOUT_SECONDS)
+            _enqueue(payload, timeout_seconds=_STEP_EVENT_TIMEOUT_SECONDS)
         case "finish":
             if rollout_id is not None:
-                _post_framework_status(payload, _STEP_EVENT_TIMEOUT_SECONDS)
+                _enqueue(payload, timeout_seconds=_STEP_EVENT_TIMEOUT_SECONDS)
         case _:
             _enqueue(payload)
 
@@ -318,4 +323,8 @@ __all__ = [
     "report_step_event",
     "log_eval_rollout_data",
     "log_rollout_data",
+    "RoleRecorder",
+    "recording_lane",
+    "recording_lane_on_reporting_rank",
+    "time_phase",
 ]

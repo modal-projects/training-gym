@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from modal_training_gym.common.wandb import WandbConfig, preflight_wandb
+from modal_training_gym.common.metrics import WandbConfig, preflight_wandb
 from modal_training_gym.frameworks.slime.launcher import (
     _preflight_wandb as _slime_preflight_wandb,
 )

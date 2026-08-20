@@ -135,7 +135,7 @@ def _format_type(type_hint: Any) -> str:
     raw = raw.replace("typing.", "")
     raw = raw.replace("modal_training_gym.common.models.base.", "")
     raw = raw.replace("modal_training_gym.common.dataset.", "")
-    raw = raw.replace("modal_training_gym.common.wandb.", "")
+    raw = raw.replace("modal_training_gym.common.metrics.", "")
     raw = raw.replace("modal_training_gym.common.eval.", "")
     raw = raw.replace("modal_training_gym.common.deployment.", "")
     raw = raw.replace("modal_training_gym.deploy_recipes.sglang_recipe.recipe.", "")

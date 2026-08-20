@@ -86,9 +86,9 @@ def _result(**overrides):
             "model_name": "Qwen/Qwen3-4B",
             "model_path": "/checkpoints/run-1/iter_0000004",
         },
-        "wandb_entity": "modal",
-        "wandb_project": "training",
-        "wandb_training_run_id": "run-1-a2",
+        "metrics_entity": "modal",
+        "metrics_project": "training",
+        "metrics_run_id": "run-1-a2",
     }
     result.update(overrides)
     return result
@@ -182,9 +182,33 @@ def test_config_summary_fallbacks_and_wandb_defaults():
     assert summary.gpu_type == "H100"
     assert summary.lr == 0
     assert summary.global_batch_size == 0
-    assert summary.wandb_training_run_id == "abcdefgh"
-    assert summary.wandb_url == "https://wandb.ai/entity/project/runs/abcdefgh"
+    assert summary.metrics_run_id == "abcdefgh"
+    assert summary.metrics_url == "https://wandb.ai/entity/project/runs/abcdefgh"
     assert run_summary_module._config_summary(None, "run-id") == {}
+
+
+def test_config_summary_uses_provider_neutral_metrics_link():
+    summary = run_summary_module._config_summary(
+        {
+            "model": {"model_name": "model"},
+            "dataset": {"name": "dataset"},
+            "recipe": {"gpu_type": "H100"},
+            "metrics": {
+                "provider": "trackio",
+                "label": "Trackio",
+                "project": "project",
+                "group": "group",
+                "run_id": "run-1",
+                "url": "https://huggingface.co/spaces/modal/training-gym",
+            },
+        },
+        "abcdefghijk",
+    )
+
+    assert summary.metrics_provider == "trackio"
+    assert summary.metrics_run_id == "run-1"
+    assert summary.metrics_url == "https://huggingface.co/spaces/modal/training-gym"
+    assert summary.metrics_links[0].label == "Trackio"
 
 
 def test_progress_rollout_and_resume_helpers_handle_missing_and_invalid_values():
@@ -263,8 +287,8 @@ def test_group_tag_helper_synthesizes_tags_from_overrides():
     ]
 
 
-def test_wandb_attempt_helpers_skip_invalid_links_and_dedupe_by_url():
-    links = run_summary_module._wandb_attempt_links(
+def test_metric_attempt_helpers_skip_invalid_links_and_dedupe_by_url():
+    links = run_summary_module._metric_attempt_links(
         {
             "wandb_attempts": [
                 None,
@@ -278,11 +302,11 @@ def test_wandb_attempt_helpers_skip_invalid_links_and_dedupe_by_url():
             ]
         }
     )
-    duplicate = run_summary_module.WandbLink(
+    duplicate = run_summary_module.MetricLink(
         label="duplicate",
         url=links[0].url,
     )
-    other = run_summary_module.WandbLink(
+    other = run_summary_module.MetricLink(
         label="other",
         url="https://wandb.ai/entity/project/runs/other",
     )
@@ -338,7 +362,30 @@ def test_build_current_summary_joins_result_and_derives_public_fields():
     assert summary.modal_app_url == "https://modal.com/id/ap-123"
     assert summary.resume_state.attempt_count == 2
     assert summary.group_tags.tags[0].key == "recipe.lr"
-    assert [link.label for link in summary.wandb_links] == ["W&B a2", "W&B"]
+    assert [link.label for link in summary.metrics_links] == ["W&B a2", "W&B"]
+
+
+def test_train_result_summary_accepts_legacy_wandb_fields():
+    summary = build_run_summary(
+        _run(metadata={}),
+        _result(
+            metrics={},
+            metrics_entity=None,
+            metrics_project=None,
+            metrics_run_id=None,
+            wandb_entity="legacy-team",
+            wandb_project="legacy-project",
+            wandb_training_run_id="legacy-run",
+        ),
+    )
+
+    assert summary.train_result.metrics_entity == "legacy-team"
+    assert summary.train_result.metrics_project == "legacy-project"
+    assert summary.train_result.metrics_run_id == "legacy-run"
+    assert (
+        summary.train_result.metrics_url
+        == "https://wandb.ai/legacy-team/legacy-project/runs/legacy-run"
+    )
 
 
 def test_build_historical_summary_accepts_aliases_wrappers_and_iso_timestamps():
@@ -407,15 +454,15 @@ def test_missing_config_and_urls_match_old_frontend_defaults():
     summary = build_run_summary(
         _run(config=None, modal_app_id=""),
         _result(
-            wandb_entity=None,
-            wandb_project=None,
-            wandb_training_run_id=None,
+            metrics_entity=None,
+            metrics_project=None,
+            metrics_run_id=None,
         ),
     )
 
     assert summary.config_summary == {}
     assert summary.modal_app_url is None
-    assert summary.train_result.wandb_url is None
+    assert summary.train_result.metrics_url is None
 
 
 def test_config_defaults_and_fractional_integer_fields_are_rejected():
@@ -432,7 +479,7 @@ def test_config_defaults_and_fractional_integer_fields_are_rejected():
     summary = build_run_summary(run)
 
     assert summary.config_summary.lr == 0
-    assert summary.config_summary.wandb_url is None
+    assert summary.config_summary.metrics_url is None
     assert summary.framework_progress.current is None
     assert summary.framework_progress.total is None
     assert summary.latest_rollout.rollout_id == 0

@@ -73,7 +73,7 @@
     (run?.modal_app_id ? `https://modal.com/id/${run.modal_app_id}` : ""),
   );
   let groupTags = $derived(getGroupTags(run));
-  let wandbLinks = $derived(run?.wandb_links || []);
+  let metricsLinks = $derived(run?.metrics_links || []);
   let attemptMetadata = $derived.by(() => {
     const state = run?.resume_state;
     if (!state) return null;
@@ -248,11 +248,11 @@
       </section>
     {/if}
 
-    {#if wandbLinks.length}
+    {#if metricsLinks.length}
       <section class="summary-section">
-        <h3 class="summary-section-title">W&B</h3>
+        <h3 class="summary-section-title">Metrics</h3>
         <div class="flex flex-wrap gap-[6px]">
-          {#each wandbLinks as link (link.url)}
+          {#each metricsLinks as link (link.url)}
             <a
               class="[border:1px_solid_var(--color-c-gray-10,#2f2f2f)] rounded-[999px] text-(--accent) text-[12px] leading-[16px] p-[2px_8px] [text-decoration:none] hover:[text-decoration:underline] [border-color:color-mix(in_srgb,var(--yellow,#fbbf24)_45%,transparent)] text-(--yellow,#fbbf24)!"
               href={link.url}

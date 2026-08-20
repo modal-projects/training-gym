@@ -33,12 +33,16 @@ from modal_training_gym.common.run import (
     TrainingRunStatus,
     mark_training_attempt_finished,
     mark_training_attempt_started,
-    record_wandb_attempt,
+    metric_run_id_for_attempt,
+    record_metric_attempt,
     run_scoped_save_root,
-    wandb_run_id_for_attempt,
 )
 from modal_training_gym.common.train_result import TrainResult
-from modal_training_gym.common.wandb import WandbConfig
+from modal_training_gym.common.metrics import (
+    MetricConfig,
+    WandbConfig,
+    metrics_metadata,
+)
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
 
 
@@ -155,7 +159,7 @@ def build_app_tags(
     framework: str,
     model: Any,
     recipe_app_tags: dict[str, str],
-    wandb: "WandbConfig | None",
+    metrics: "MetricConfig | None",
 ) -> dict[str, str]:
     """Build the Modal app tag dict for dashboard auto-discovery."""
     tags = {
@@ -164,10 +168,15 @@ def build_app_tags(
         "_modal_model_name": modal_tag_value(model.model_name),
         **recipe_app_tags,
     }
-    if wandb is not None:
-        tags["_modal_wandb_project"] = modal_tag_value(wandb.project)
-        if wandb.group:
-            tags["_modal_wandb_group"] = modal_tag_value(wandb.group)
+    if metrics is not None:
+        tags["_modal_metrics_provider"] = modal_tag_value(metrics.provider)
+        tags["_modal_metrics_project"] = modal_tag_value(metrics.project)
+        if metrics.group:
+            tags["_modal_metrics_group"] = modal_tag_value(metrics.group)
+        if isinstance(metrics, WandbConfig):
+            tags["_modal_wandb_project"] = modal_tag_value(metrics.project)
+            if metrics.group:
+                tags["_modal_wandb_group"] = modal_tag_value(metrics.group)
     return tags
 
 
@@ -234,13 +243,13 @@ async def init_training_run_record(
     framework: "Framework",
     initializing_status: Any,
     config_summary: dict[str, Any],
-    wandb_cfg: "WandbConfig | None",
-    wandb_entity: str,
+    metrics_cfg: "MetricConfig | None",
+    metrics_entity: str,
     framework_status_token: str,
 ) -> tuple[Any, str, str]:
     """Create or resume the ``TrainingRun`` record for this attempt and persist
     the framework-status token. Returns
-    ``(run_record, wandb_run_id, framework_status_token)``.
+    ``(run_record, metrics_run_id, framework_status_token)``.
 
     Reuses the record the local ``TrainConfig.train()`` driver creates before
     invoking download/convert (so those phases are visible in the dashboard);
@@ -267,16 +276,22 @@ async def init_training_run_record(
     attempt_count = mark_training_attempt_started(
         run_record, started_at=int(time.time())
     )
-    wandb_run_id = ""
-    if wandb_cfg is not None:
-        wandb_run_id = wandb_run_id_for_attempt(training_run_id, attempt_count)
-        run_record.config["wandb"]["run_id"] = wandb_run_id
-        record_wandb_attempt(
+    metrics_run_id = ""
+    if metrics_cfg is not None:
+        metrics_run_id = metric_run_id_for_attempt(training_run_id, attempt_count)
+        metric_metadata = metrics_metadata(
+            metrics_cfg, entity=metrics_entity, run_id=metrics_run_id
+        )
+        run_record.config["metrics"] = metric_metadata
+        record_metric_attempt(
             run_record,
-            entity=wandb_entity,
-            project=wandb_cfg.project,
-            group=wandb_cfg.group,
-            run_id=wandb_run_id,
+            provider=metric_metadata.get("provider", metrics_cfg.provider),
+            label=metric_metadata.get("label", metrics_cfg.label),
+            entity=metric_metadata.get("entity", metrics_entity),
+            project=metric_metadata.get("project", metrics_cfg.project),
+            group=metric_metadata.get("group", metrics_cfg.group),
+            run_id=metrics_run_id,
+            url=metric_metadata.get("url", ""),
             attempt_count=attempt_count,
         )
     if attempt_count > 1:
@@ -294,7 +309,7 @@ async def init_training_run_record(
         is_async=True,
     )
     print(f"TrainingRun recorded: {training_run_id}")
-    return run_record, wandb_run_id, framework_status_token
+    return run_record, metrics_run_id, framework_status_token
 
 
 def compute_save_root(
@@ -327,9 +342,9 @@ def build_train_result(
     model: Any,
     checkpoints_volume_name: str,
     checkpoints_mount_path: str,
-    wandb_cfg: "WandbConfig | None",
-    wandb_entity: str,
-    wandb_run_id: str,
+    metrics_cfg: "MetricConfig | None",
+    metrics_entity: str,
+    metrics_run_id: str,
     group_id: str | None,
 ) -> "TrainResult":
     """Construct a ``TrainResult``, filtering to the fields the dataclass
@@ -342,9 +357,9 @@ def build_train_result(
         "model_config": model,
         "checkpoints_volume_name": checkpoints_volume_name,
         "checkpoints_mount_path": checkpoints_mount_path,
-        "wandb_project": wandb_cfg.project if wandb_cfg else "",
-        "wandb_entity": wandb_entity,
-        "wandb_training_run_id": wandb_run_id,
+        "metrics": metrics_metadata(
+            metrics_cfg, entity=metrics_entity, run_id=metrics_run_id
+        ),
         "group_id": group_id or "",
     }
     accepted_fields = set(inspect.signature(TrainResult).parameters)
@@ -389,6 +404,13 @@ async def build_terminal_run_record(run_record: Any, training_run_id: str) -> An
     # below persists it (the fresh fetch wouldn't carry it).
     if run_record.error_message:
         latest_run_record.error_message = run_record.error_message
+    source_metadata = run_record.metadata or {}
+    latest_metadata = dict(latest_run_record.metadata or {})
+    for key in ("last_attempt_status", "last_attempt_ended_at", "terminal_reason"):
+        if key in source_metadata:
+            latest_metadata[key] = source_metadata[key]
+    if latest_metadata:
+        latest_run_record.metadata = latest_metadata
     if latest_run_record.completed_at is None:
         latest_run_record.completed_at = finished_at
     latest_run_record.duration_seconds = max(

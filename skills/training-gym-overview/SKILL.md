@@ -33,7 +33,7 @@ modal_training_gym/         <- installable package
 ├── common/                 <- cross-framework pure data + helpers
 │   ├── dataset.py          <- DatasetConfig base (user subclasses)
 │   ├── models/             <- ModelConfig hierarchy (see below)
-│   ├── wandb.py            <- WandbConfig
+│   ├── metrics.py          <- MetricConfig / WandbConfig / TrackioConfig
 │   ├── framework.py        <- resolve_caller_module, TOOLS_*
 │   └── ray_cluster.py      <- ModalRayCluster helper (used by slime)
 ├── frameworks/             <- one subpackage per training framework

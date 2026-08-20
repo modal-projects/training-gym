@@ -7,10 +7,11 @@ TUTORIAL_METADATA = {
     "difficulty": "Intermediate",
     "order": 30,
     "api_classes": [
-        "Qwen3_5_4B",
-        "Qwen3_5_9B",
         "CustomDeployment",
         "Endpoint",
+        "HuggingFaceDataset",
+        "Qwen3_5_4B",
+        "Qwen3_5_9B",
         "SlimeRecipe",
         "TrainConfig",
     ],
@@ -63,6 +64,7 @@ def _intro():
 def _run_instructions():
     """
     Run with:
+
     ```
     uv run tutorials/rl/003_on_policy_distillation/003_on_policy_distillation.py
     ```
@@ -73,8 +75,6 @@ def _run_instructions():
 @shell(
     "import importlib.util\n"
     "\n"
-    "# Skip if modal_training_gym is already importable (e.g. a local editable\n"
-    "# checkout) so your edits keep taking effect and the env stays synced.\n"
     "if importlib.util.find_spec('modal_training_gym') is None:\n"
     "    %uv pip install -q git+https://github.com/modal-projects/training-gym.git@main"
 )
@@ -96,16 +96,15 @@ def _imports():
         TrainConfig,
         list_checkpoints,
     )
-    from modal_training_gym.deploy_recipes.sglang_recipe import SglangRecipe
 
 
 @markdown
-def _deploy_teacher_intro():
+def _deploy_base_intro():
     """
     ## Deploy the base models
 
     First, we'll deploy the teacher and base models to derive a baseline.
-    We can use an [Endpoint](https://gym.modal.dev/reference/deployment/endpoint/)
+    We can use an [Endpoint](https://modal.com/docs/guide/endpoints)
     to serve the student. However, for the teacher model, we need per-token logprobs, 
     which are not currently supported by Endpoints when speculative decoding is
     enabled. So we instead use a
@@ -116,9 +115,9 @@ def _deploy_teacher_intro():
 
 @code
 def _deploy_base():
-    base_student_model = Qwen3_5_4B()
+    student_model = Qwen3_5_4B()
     base_student_deployment = Endpoint.launch(
-        base_student_model, unauthenticated=True, recreate_if_existing=True
+        student_model, unauthenticated=True, recreate_if_existing=True
     )
 
     teacher_model = Qwen3_5_9B()
@@ -138,53 +137,14 @@ def _deploy_base():
 
 @markdown
 def _score_fn_intro():
-    r"""
+    """
     ## Define a scoring function
 
     Following the [DAPO paper](https://arxiv.org/abs/2503.14476), we'll normalize as 
     they do and return 1 for correct answers and -1 for incorrect answers. Although
-    we'd like to give a more granular reward for predictions, we can't simply use
+    we'd like to give a more granular score for predictions, we can't simply use
     the numerical difference between a prediction and a ground-truth answer, since
     a numerically-close answer can be more wrong than one further away.
-
-    <details>
-    <summary>How OPD defines KL</summary>
-
-    KL-divergence is defined as:
-
-    $$
-    D_{\mathrm{KL}}(P \| Q) = \sum_x P(x) \log \frac{P(x)}{Q(x)}
-    $$
-
-    where $P$ is the behavior distribution and $Q$ is the target distribution.
-
-    Forward KL treats the teacher model as $P$ and the student model as $Q$. However, the
-    $\log \frac{P(x)}{Q(x)}$ term would then be weighted by the teacher model's probability distribution $P$,
-    resulting in high surprisal on modes unfamiliar to the student model.
-
-    To counter this, OPD uses "reverse" KL divergence to grade the student model's output:
-
-    $$
-    D_{\mathrm{KL}}(\pi_{\mathrm{student}} \| \pi_{\mathrm{teacher}})
-    $$
-
-    where our student model is treated as the behavior distribution and
-    the teacher model is our target distribution.
-
-    When the teacher has high surprisal on a student mode, the term $\log(P(x)) - log(Q(x))$
-    will yield a high positive KL divergence to penalize the student model.
-    Now, the student model only gets penalized on modes relevant to itself.
-
-    </details>
-
-    <details>
-    <summary>A fun exercise</summary>
-
-    Try tweaking the composite reward signal by applying an integer coefficient to the
-    binary integer reward signal used in the custom reward function to value correct answers
-    over student-teacher alignment.
-    
-    </details>
     """
 
 @code
@@ -210,28 +170,6 @@ def _score_fn():
             pass
         return 1 if pred == gt else -1
 
-    async def math_opd_rm(args, sample, **kwargs):
-        from slime.rollout.on_policy_distillation import reward_func as _opd_reward
-
-        teacher_response = await _opd_reward(args, sample, **kwargs)
-
-        label = getattr(sample, "label", "") or ""
-        score = score_answer(sample.response, label)
-        sample.score = score
-        if not isinstance(getattr(sample, "metadata", None), dict):
-            sample.metadata = {}
-        sample.metadata["shaped_reward"] = float(score)
-
-        return teacher_response
-
-    def math_opd_post_process(args, samples, **kwargs):
-        from slime.rollout.on_policy_distillation import post_process_rewards as _opd_post
-
-        _, _ = _opd_post(args, samples, **kwargs)
-
-        math_rewards = [getattr(sample, "score", -1) for sample in samples]
-        return math_rewards, math_rewards  # quirk of slime
-
 
 @markdown
 def _dataset_intro():
@@ -248,13 +186,14 @@ def _dataset_intro():
 def _dataset():
     class MathDataset(HuggingFaceDataset):
         hf_repo = "zhuzilin/dapo-math-17k"
-        input_column = "prompt"
-        output_column = "label"
+        input_key = "prompt"
+        label_key = "label"
         output_format = "jsonl"
-        apply_chat_template = False
+        apply_chat_template = True
+        always_prepare = True
 
-    train_dataset = MathDataset(n_rows=100)
-    eval_dataset = MathDataset(n_rows=20)
+    train_dataset = MathDataset(hf_split="train[:100]")
+    eval_dataset = MathDataset(hf_split="train[100:120]")
 
 
 @notebook_only
@@ -320,6 +259,78 @@ def _eval_base():
     print(f"percent correct: {base_student_correct:.1%}")
 
 
+@markdown
+def _rm_fn_intro():
+    r"""
+    ## Creating a reward function
+
+    To use our scoring function for training, we have to modify some framework-specific
+    functions. Luckily, this is relatively painless.
+
+    <details>
+    <summary>How OPD defines KL</summary>
+
+    KL-divergence is defined as:
+
+    $$
+    D_{\mathrm{KL}}(P \| Q) = \sum_x P(x) \log \frac{P(x)}{Q(x)}
+    $$
+
+    where $P$ is the behavior distribution and $Q$ is the target distribution.
+
+    Forward KL treats the teacher model as $P$ and the student model as $Q$. However, the
+    $\log \frac{P(x)}{Q(x)}$ term would then be weighted by the teacher model's probability distribution $P$,
+    resulting in high surprisal on modes unfamiliar to the student model.
+
+    To counter this, OPD uses "reverse" KL divergence to grade the student model's output:
+
+    $$
+    D_{\mathrm{KL}}(\pi_{\mathrm{student}} \| \pi_{\mathrm{teacher}})
+    $$
+
+    where our student model is treated as the behavior distribution and
+    the teacher model is our target distribution.
+
+    When the teacher has high surprisal on a student mode, the term $\log(P(x)) - log(Q(x))$
+    will yield a high positive KL divergence to penalize the student model.
+    Now, the student model only gets penalized on modes relevant to itself.
+
+    </details>
+
+    <details>
+    <summary>A fun exercise</summary>
+
+    Try tweaking the composite reward signal by applying an integer coefficient to the
+    binary integer reward signal used in the custom reward function to value correct answers
+    over student-teacher alignment.
+    
+    </details>
+    """
+
+@code
+def _rm_fn():
+    async def math_opd_rm(args, sample, **kwargs):
+        from slime.rollout.on_policy_distillation import reward_func as _opd_reward
+
+        teacher_response = await _opd_reward(args, sample, **kwargs)
+
+        response = student_model.parse_response(sample.response)
+        score = score_answer(response.content, sample.label)
+        sample.score = score
+        if not isinstance(getattr(sample, "metadata", None), dict):
+            sample.metadata = {}
+        sample.metadata["shaped_reward"] = float(score)
+
+        return teacher_response
+
+    def math_opd_post_process(args, samples, **kwargs):
+        from slime.rollout.on_policy_distillation import post_process_rewards as _opd_post
+
+        _, _ = _opd_post(args, samples, **kwargs)
+
+        math_rewards = [getattr(sample, "score", -1) for sample in samples]
+        return math_rewards, math_rewards  # quirk of slime
+
 
 @markdown
 def _train_intro():
@@ -334,24 +345,26 @@ def _train_intro():
 @code
 def _train():
     train_run = TrainConfig(
-        model=base_student_model,
+        model=student_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
             gpu_type="H100",
-            tensor_model_parallel_size=1,
-            rollout_num_gpus_per_engine=1,
-            sequence_parallel=False,
-            colocate=True,
+            actor_num_nodes=1,
             actor_num_gpus_per_node=8,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,       
             rollout_num_gpus=8,
+            rollout_num_gpus_per_engine=1,
+            colocate=True,
             num_rollout=10,
             rollout_batch_size=16,
             n_samples_per_prompt=4,
+            global_batch_size=16,
             rollout_max_response_len=2048,
             rollout_temperature=1.0,
-            global_batch_size=16,
             lr=1e-6,
             save_interval=5,
+            eval_interval=None,
             custom_rm_function=math_opd_rm,
             apply_chat_template_kwargs='{"enable_thinking": true}',
             environment={
@@ -391,7 +404,7 @@ def _eval_trained():
     print(f"checkpoint: {checkpoint.path}")
 
     trained_student_deployment = Endpoint.launch(
-        Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
+        student_model, checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     trained_student_deployment.wait_until_ready(timeout=15 * 60)
     print(f"checkpoint deployed to {trained_student_deployment.url}")

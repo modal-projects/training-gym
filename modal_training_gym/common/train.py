@@ -15,8 +15,9 @@ from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
+from modal_training_gym.common.metrics import metrics_metadata
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.run import TrainingRun
+from modal_training_gym.common.run import TrainingRun, metric_run_id_for_attempt
 from modal_training_gym.common.status import (
     FrameworkStatus,
     MilesStatus,
@@ -505,18 +506,17 @@ class TrainConfig:
         dataset = self.dataset
         recipe = self.recipe
 
-        wandb = getattr(recipe, "wandb", None)
+        metrics = getattr(recipe, "metrics", None)
         summary: dict[str, Any] = {
             "model": {"model_name": model.model_name} if model else {},
-            "wandb": (
-                {
-                    "project": wandb.project,
-                    "entity": getattr(wandb, "entity", ""),
-                    "group": wandb.group,
-                    "run_id": training_run_id[:8],
-                }
-                if wandb
-                else {}
+            "metrics": metrics_metadata(
+                metrics,
+                entity=getattr(metrics, "entity", "") if metrics is not None else "",
+                run_id=(
+                    metric_run_id_for_attempt(training_run_id, 1)
+                    if metrics is not None
+                    else ""
+                ),
             ),
             "dataset": {
                 "hf_repo": getattr(dataset, "hf_repo", ""),

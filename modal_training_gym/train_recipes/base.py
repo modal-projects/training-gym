@@ -14,8 +14,8 @@ from modal_training_gym.train_recipes.gpu_allocation import (
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
+    from modal_training_gym.common.metrics import MetricConfig
     from modal_training_gym.common.models import ModelConfig
-    from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths (shared by every framework) ───────────────────────────
 
@@ -135,14 +135,10 @@ class BaseTrainRecipe(ABC):
         }
 
     @staticmethod
-    def _wandb_to_fields(w: "WandbConfig") -> dict[str, Any]:
-        return {
-            "use_wandb": True,
-            "wandb_project": w.project,
-            "wandb_group": w.group,
-            "wandb_key": w.key,
-            "disable_wandb_random_suffix": w.disable_random_suffix,
-        }
+    def _metrics_to_fields(metric: "MetricConfig") -> dict[str, Any]:
+        from modal_training_gym.common.metrics import metric_cli_fields
+
+        return metric_cli_fields(metric)
 
     # ── CLI serialization ─────────────────────────────────────────────────────
 
@@ -187,7 +183,7 @@ class BaseTrainRecipe(ABC):
         dataset: "DatasetConfig | None" = None,
         model: "ModelConfig | None" = None,
     ) -> dict[str, Any]:
-        """Recipe fields to emit as CLI flags, merged with dataset/model/wandb.
+        """Recipe fields to emit as CLI flags, merged with dataset/model/metrics.
 
         Not abstract: lightweight subclasses (e.g. test doubles) may skip it,
         in which case ``cli_args`` is unavailable.

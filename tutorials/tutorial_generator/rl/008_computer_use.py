@@ -401,10 +401,10 @@ def _train_intro():
     This tutorial runs 15 rollouts as a quick demo. For a more meaningful
     accuracy gain, increase `num_rollout`.
 
-    We pass `wandb=WandbConfig(project="…")` so reward/KL/length curves stream to
+    We pass `metrics=WandbConfig(project="…")` so reward/KL/length curves stream to
     Weights & Biases — the key comes from the `wandb-secret` Modal secret. The
     Training Gym dashboard picks up the run's project/entity/id and wires up the
-    **Open in W&B** button on the run. Drop `wandb=` to disable logging.
+    **Open in W&B** button on the run. Drop `metrics=` to disable logging.
     """
 
 
@@ -432,7 +432,7 @@ def _train():
             # Skip writing optimizer state to the checkpoint since we only serve the
             # final weights for eval (not resuming training).
             no_save_optim=True,
-            wandb=WandbConfig(project="computer-use-grounding"),
+            metrics=WandbConfig(project="computer-use-grounding"),
         ),
     )
     train_result = training_run.train()

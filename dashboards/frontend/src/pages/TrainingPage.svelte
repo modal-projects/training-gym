@@ -369,9 +369,9 @@
                           <ExternalLink class="training-open-modal-link-icon" size={12} strokeWidth={2.1} />
                         </span>
                       {/if}
-                      {#each run.wandb_links || [] as link (link.url)}
+                      {#each run.metrics_links || [] as link (link.url)}
                         <a
-                          class="training-open-modal-link training-open-wandb-link"
+                          class="training-open-modal-link training-open-metrics-link"
                           href={link.url}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -466,4 +466,3 @@
     </div>
   </Drawer>
 {/if}
-

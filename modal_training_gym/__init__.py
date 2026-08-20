@@ -16,6 +16,8 @@ _EXPORTS = {
     "DatasetConfig": ("modal_training_gym.common.dataset", "DatasetConfig"),
     "Endpoint": ("modal_training_gym.common.endpoint", "Endpoint"),
     "HarborDataset": ("modal_training_gym.common.dataset", "HarborDataset"),
+    "MetricConfig": ("modal_training_gym.common.metrics", "MetricConfig"),
+    "TrackioConfig": ("modal_training_gym.common.metrics", "TrackioConfig"),
     "EvalConfig": ("modal_training_gym.common.eval", "EvalConfig"),
     "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
     "EvalResult": ("modal_training_gym.common.eval", "EvalResult"),
@@ -103,6 +105,11 @@ _EXPORTS = {
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_6_27b_Recipe",
     ),
+    "Qwen3_8_27B": ("modal_training_gym.common.models", "Qwen3_8_27B"),
+    "Qwen3_8_27b_Recipe": (
+        "modal_training_gym.train_recipes.slime_recipe",
+        "Qwen3_8_27b_Recipe",
+    ),
     "Qwen3_VL_8B": ("modal_training_gym.common.models", "Qwen3_VL_8B"),
     "Qwen3_VL_8b_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
@@ -125,7 +132,7 @@ _EXPORTS = {
     "TrainingGroup": ("modal_training_gym.common.training_group", "TrainingGroup"),
     "TrainingRun": ("modal_training_gym.common.run", "TrainingRun"),
     "TrainResult": ("modal_training_gym.common.train_result", "TrainResult"),
-    "WandbConfig": ("modal_training_gym.common.wandb", "WandbConfig"),
+    "WandbConfig": ("modal_training_gym.common.metrics", "WandbConfig"),
 }
 
 __all__ = [
@@ -139,6 +146,8 @@ __all__ = [
     "Gemma4_26B_A4B_Recipe",
     "GLM_4_7",
     "HarborDataset",
+    "MetricConfig",
+    "TrackioConfig",
     "EvalConfig",
     "EvalConfigDurable",
     "EvalResult",
@@ -181,6 +190,8 @@ __all__ = [
     "Qwen3_6_35B",
     "Qwen3_6_27B",
     "Qwen3_6_27b_Recipe",
+    "Qwen3_8_27B",
+    "Qwen3_8_27b_Recipe",
     "Qwen3_ASR_1_7b_Recipe",
     "Qwen3_VL_8b_Recipe",
     "score_in_sandbox",

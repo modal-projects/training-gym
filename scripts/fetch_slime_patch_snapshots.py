@@ -16,6 +16,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTDATA_DIR = REPO_ROOT / "tests" / "testdata" / "slime"
 SLIME_SOURCE_PATHS = {
     "train.py": "/root/slime/train.py",
+    "train_async.py": "/root/slime/train_async.py",
+    "rollout.py": "/root/slime/slime/ray/rollout.py",
+    "rm_hub_init.py": "/root/slime/slime/rollout/rm_hub/__init__.py",
+    "sglang_rollout.py": "/root/slime/slime/rollout/sglang_rollout.py",
+    "actor.py": "/root/slime/slime/backends/megatron_utils/actor.py",
+    "model.py": "/root/slime/slime/backends/megatron_utils/model.py",
 }
 
 app = modal.App("fetch-slime-snapshots")

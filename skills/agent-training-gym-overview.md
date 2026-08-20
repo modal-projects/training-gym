@@ -20,7 +20,7 @@ modal_training_gym/         ← installable package
 ├── common/                 ← cross-framework pure data + helpers
 │   ├── dataset.py          ← DatasetConfig base (user subclasses)
 │   ├── models/             ← ModelConfig hierarchy (see below)
-│   ├── wandb.py            ← WandbConfig
+│   ├── metrics.py          ← MetricConfig / WandbConfig / TrackioConfig
 │   ├── framework.py        ← resolve_caller_module, TOOLS_*
 │   └── ray_cluster.py      ← ModalRayCluster helper (used by slime)
 ├── frameworks/             ← one subpackage per training framework
@@ -90,7 +90,7 @@ Every framework exposes **two** dataclasses:
 - `<F>FrameworkConfig` — Modal infra (gpu, image, n_nodes, gpus_per_node) +
   framework-specific CLI flags. Uses pydantic with `extra="forbid"`, so any
   unknown kwarg fails loudly.
-- `<F>Config` — wraps `dataset`, `model`, `wandb`, `framework_config`.
+- `<F>Config` — wraps `dataset`, `model`, `metrics`, `framework_config`.
   Exposes `build_app()` which delegates to the launcher's
   `build_<f>_app(...)` factory. Typically has `_WRAPPER_FIELDS` (in some
   frameworks) to exclude the wrapper slots from CLI-arg rendering.
@@ -101,7 +101,7 @@ User code builds an app like:
 cfg = MyFrameworkConfig(
     dataset=MyDataset(...),
     model=Qwen3_4B(),
-    wandb=WandbConfig(project="..."),
+    metrics=WandbConfig(project="..."),
     framework_config=MyFrameworkFrameworkConfig(gpu="H100", n_nodes=1, ...),
 )
 app = cfg.build_app()
@@ -214,7 +214,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
        from modal_training_gym.common.dataset import DatasetConfig
        from modal_training_gym.common.models import <BuiltinModelOrModelConfiguration>
-       from modal_training_gym.common.wandb import WandbConfig
+       from modal_training_gym.common.metrics import WandbConfig
        from modal_training_gym.frameworks.<framework> import (
            <F>Config, <F>FrameworkConfig,
        )
@@ -233,7 +233,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
        my_training_run = <F>Config(
            dataset=MyDataset(...),
            model=<BuiltinModel>(),
-           wandb=WandbConfig(project="..."),
+           metrics=WandbConfig(project="..."),
            framework_config=fw_cfg,
        )
 

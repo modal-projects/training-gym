@@ -8,12 +8,23 @@ the shared logic stays in one place.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shlex
 from enum import Enum
 from os import PathLike
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+
+def timing_debug_env() -> dict[str, str]:
+    """Forward opt-in timing diagnostics to framework worker processes."""
+    if os.environ.get("TRAINING_GYM_TIMING_DEBUG") == "1":
+        return {"TRAINING_GYM_TIMING_DEBUG": "1"}
+    return {}
+
 
 # (attr_name_on_cfg, cli_flag) — optional per-rank conversion args
 _CONVERSION_EXTRA_ARGS = [
@@ -356,6 +367,134 @@ def serialize_recipe_param_value(name: str, value: Any) -> Any:
     if is_sensitive_recipe_value(value):
         return REDACTED
     return serialize_recipe_value(value)
+
+
+def redact_url_credentials(value: str) -> str:
+    """Redact userinfo and credential-bearing query params in a URL value."""
+    if "://" not in value:
+        userinfo, at, _ = value.partition("@")
+        if (
+            at
+            and " " not in value
+            and (":" in userinfo or is_sensitive_recipe_value(userinfo))
+        ):
+            return redact_url_credentials("schemeless://" + value).removeprefix(
+                "schemeless://"
+            )
+        return value
+    parts = urlsplit(value)
+    if not parts.query and "@" not in parts.netloc:
+        return value
+    netloc = parts.netloc
+    if "@" in netloc:
+        userinfo, host = netloc.rsplit("@", 1)
+        if ":" in userinfo:
+            netloc = f"{userinfo.split(':', 1)[0]}:{REDACTED}@{host}"
+        else:
+            netloc = f"{REDACTED}@{host}"
+    query = [
+        (
+            key,
+            REDACTED
+            if is_sensitive_recipe_field(key) or is_sensitive_recipe_value(val)
+            else val,
+        )
+        for key, val in parse_qsl(parts.query, keep_blank_values=True)
+    ]
+    return urlunsplit(parts._replace(netloc=netloc, query=urlencode(query)))
+
+
+def redact_env_values(env: dict[str, Any]) -> dict[str, Any]:
+    """Copy of an env-var mapping with credential-bearing values redacted."""
+
+    def _redact(name: str, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(k): _redact(str(k), v) for k, v in value.items()}
+        out = serialize_recipe_param_value(name, value)
+        return redact_url_credentials(out) if isinstance(out, str) else out
+
+    return {str(k): _redact(str(k), v) for k, v in env.items()}
+
+
+_CLI_FLAG_RE = re.compile(r"--[A-Za-z0-9_-]+")
+_CLI_VALUE_RE = re.compile(r"'[^']*'|\"[^\"]*\"|\S+")
+_SHELL_WRAPPER_RE = re.compile(r"^(\s*(?:bash|sh)\s+-c\s+)(.+)$", re.DOTALL)
+
+
+def _redact_json_flag_value(raw: str) -> str:
+    """Redact credentials inside a flag value (JSON dict or URL-bearing)."""
+    quote_ch = raw[0] if raw[:1] in ("'", '"') and raw[-1:] == raw[:1] else ""
+    inner = raw[1:-1] if quote_ch else raw
+    if not inner.startswith("{"):
+        return _requote(redact_url_credentials(inner), quote_ch)
+    try:
+        data = json.loads(inner)
+    except ValueError:
+        return _requote(redact_url_credentials(inner), quote_ch)
+    if not isinstance(data, dict):
+        return raw
+    redacted = json.dumps(
+        {str(k): serialize_recipe_param_value(str(k), v) for k, v in data.items()}
+    )
+    return _requote(redacted, quote_ch)
+
+
+def _requote(value: str, quote_ch: str) -> str:
+    return f"{quote_ch}{value}{quote_ch}" if quote_ch else value
+
+
+def _redact_flag_values(cmd: str) -> str:
+    """Redact flag values in place, leaving all other text untouched."""
+    out: list[str] = []
+    pos = 0
+    for match in _CLI_FLAG_RE.finditer(cmd):
+        if match.start() < pos:
+            continue
+        out.append(cmd[pos : match.end()])
+        pos = match.end()
+        name = match.group().lstrip("-").replace("-", "_")
+        sensitive = is_sensitive_recipe_field(name)
+        if cmd[pos : pos + 1] == "=":
+            value = _CLI_VALUE_RE.match(cmd, pos + 1)
+            if value:
+                out.append("=")
+                out.append(
+                    REDACTED if sensitive else _redact_json_flag_value(value.group())
+                )
+                pos = value.end()
+            continue
+        value = _CLI_VALUE_RE.search(cmd, pos)
+        if not value or not cmd[pos : value.start()].isspace():
+            continue
+        if sensitive:
+            out.append(cmd[pos : value.start()] + REDACTED)
+            pos = value.end()
+        elif not value.group().startswith("--"):
+            out.append(
+                cmd[pos : value.start()] + _redact_json_flag_value(value.group())
+            )
+            pos = value.end()
+    out.append(cmd[pos:])
+    return "".join(out)
+
+
+def redact_cli_command(cmd: str) -> str:
+    """Redact values of credential-bearing CLI flags (e.g. ``--wandb-key``).
+
+    The original command text is preserved except for the redacted values;
+    the payload of a ``bash -c '...'`` wrapper is redacted recursively and
+    re-quoted the same way the launchers quote it (``shlex.quote``).
+    """
+    wrapper = _SHELL_WRAPPER_RE.match(cmd)
+    if wrapper:
+        prefix, payload = wrapper.groups()
+        try:
+            (inner,) = shlex.split(payload)
+        except ValueError:
+            inner = None
+        if inner is not None:
+            return prefix + shlex.quote(redact_cli_command(inner))
+    return _redact_flag_values(cmd)
 
 
 def serialize_recipe_params(
