@@ -170,6 +170,47 @@ def projector_parameters(projector: nn.Module) -> list[tuple[str, torch.Tensor]]
     return sorted(projector.named_parameters(), key=lambda item: item[0])
 
 
+def check_projector_weights(projector: nn.Module) -> str:
+    """Describe the projector's weights, and refuse an all-zero one.
+
+    Called on the first forward rather than at build time, because what this
+    catches happens in between: Megatron allocates the DDP parameter buffer the
+    parameters are re-pointed into inside
+    ``torch_memory_saver.region(tag="param_buffer", enable_cpu_backup=False)``,
+    and a paused region without a backup comes back zeroed. With the base
+    frozen, that buffer holds only the projector, so offloading the train model
+    zeroes exactly the weights being trained. That is not a bad initialization
+    that trains slowly: an all-zero projector writes exactly-zero rows for every
+    embedding the encoder produced, so the run trains on no signal at all, and
+    on real hardware it surfaced as NaN gradients rather than as its cause. The
+    recipe rejects the flag that does it; this makes any other route to the same
+    state say so.
+    """
+    parts, all_zero = [], True
+    for name, param in projector_parameters(projector):
+        detached = param.detach().float()
+        rms = float(detached.pow(2).mean().sqrt())
+        all_zero = all_zero and rms == 0.0
+        finite = bool(torch.isfinite(detached).all())
+        parts.append(f"{name} rms={rms:.6g} absmax={float(detached.abs().max()):.6g}")
+        if not finite:
+            raise ValueError(
+                f"projector parameter '{name}' is not finite at the first "
+                "forward; the projector is initialized from a seed and cannot "
+                "reach this state by training."
+            )
+    if all_zero:
+        raise ValueError(
+            "every projector parameter is exactly zero at the first forward, "
+            "which the seeded initialization cannot produce. The train model "
+            "was most likely offloaded: Megatron's parameter buffer (holding only the "
+            "projector, since the base is frozen) lives in a torch_memory_saver "
+            "region with no backup, so pausing it zeroes the projector. Launch "
+            "with no_offload_train=True."
+        )
+    return ", ".join(parts)
+
+
 def projector_graph_tap(projector: nn.Module, dtype) -> torch.Tensor:
     """A differentiable, exactly-zero scalar tying ``projector`` into the graph.
 
@@ -343,6 +384,7 @@ class _ProjectorMerge:
         self._embeddings_key = cfg.embeddings_key
         self._positions_key = cfg.positions_key
         self._pending: tuple[torch.Tensor, torch.Tensor] | None = None
+        self._weights_checked = False
         self._original_forward = model.forward
         model.forward = self._forward
         if model.pre_process:
@@ -380,6 +422,15 @@ class _ProjectorMerge:
             # mixes in text-only samples rather than a path taken now.
             return output + projector_graph_tap(self._projector, output.dtype)
         embeddings, positions = self._pending
+        if not self._weights_checked:
+            # Once per process: the state this catches is set before the first
+            # forward and never changes back, and the check reads every
+            # parameter.
+            self._weights_checked = True
+            logger.info(
+                "projector weights at first forward: %s",
+                check_projector_weights(self._projector),
+            )
         projected = self._projector(
             embeddings.to(
                 device=output.device,

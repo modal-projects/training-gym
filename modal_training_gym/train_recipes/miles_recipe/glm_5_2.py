@@ -117,6 +117,15 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
 
     gpu_type: str = "H200"
     colocate: bool = True
+    # Megatron allocates the DDP parameter buffer inside
+    # ``torch_memory_saver.region(tag="param_buffer", enable_cpu_backup=False)``
+    # (Megatron-LM ``param_and_grad_buffer.py``), and miles' ``sleep()`` pauses
+    # every tag unless ``rematerialize_param_from_master_weight`` is set. Paused
+    # memory without a backup comes back **zeroed**, and with the base frozen
+    # that buffer holds nothing but the projector: offloading a projector-only
+    # run zeroes exactly the weights it is training. There is nothing to make
+    # room for either — ``debug_train_only`` starts no rollout engine.
+    no_offload_train: bool = True
     train_function_kwargs: dict[str, Any] = field(
         default_factory=lambda: {"ephemeral_disk": _EPHEMERAL_DISK_MIB}
     )
@@ -314,6 +323,35 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
         return self
 
     @model_validator(mode="after")
+    def _reject_offload_train(self) -> "GLM_5_2_Projector_Recipe":
+        """Reject offloading the train model: it zeroes the projector's weights.
+
+        Megatron allocates the DDP parameter buffer in
+        ``torch_memory_saver.region(tag="param_buffer", enable_cpu_backup=False)``,
+        and a region without a backup does not survive a
+        ``pause()``/``resume()`` — it comes back zeroed (verified against the
+        pinned image). miles' ``sleep()`` pauses every tag when
+        ``rematerialize_param_from_master_weight`` is off, which is the only
+        thing that would rebuild that buffer from the optimizer's fp32 master
+        weights. The base being frozen is what makes this fatal rather than
+        redundant: DDP builds buffers only for parameters that require grad, so
+        the paused buffer holds the projector and nothing else. A run offloaded
+        this way wakes up with projector weights that read exactly zero, so it
+        merges zero rows for every embedding its encoder produced and trains on
+        no signal at all — on real hardware it died with NaN gradients instead.
+        """
+        if not self.no_offload_train:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs no_offload_train=True: with the "
+                "base frozen, Megatron's parameter buffer holds only the "
+                "projector, and miles offloads it into a torch_memory_saver "
+                "region that has no backup, so the projector's weights come "
+                "back zeroed after the first rollout. debug_train_only starts "
+                "no engine, so there is nothing to offload for."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _reject_distributed_optimizer(self) -> "GLM_5_2_Projector_Recipe":
         """Reject the distributed optimizer: it shards the gradient we sum.
 
@@ -356,6 +394,7 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
         self._reject_megatron_load()
         self._require_pretrained_base()
         self._reject_distributed_optimizer()
+        self._reject_offload_train()
         if self.save_interval is not None and self.save_interval <= self.num_rollout:
             warnings.warn(
                 f"{type(self).__name__} has save_interval={self.save_interval} "

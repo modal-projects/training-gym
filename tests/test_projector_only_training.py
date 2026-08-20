@@ -312,3 +312,44 @@ def test_dataset_rejects_mismatched_embeddings_and_positions():
                 }
             ]
         )
+
+
+def test_offloading_the_train_model_is_rejected():
+    """Offloading zeroes the parameter buffer, which holds only the projector.
+
+    Megatron allocates it in a torch_memory_saver region with no backup, and
+    miles' ``sleep()`` pauses every tag, so a projector-only run would wake up
+    training weights that read exactly zero (verified on 8xH200).
+    """
+    with pytest.raises(ValidationError, match="no_offload_train=True"):
+        GLM_5_2_Projector_Recipe(no_offload_train=False)
+    assert GLM_5_2_Projector_Recipe().no_offload_train is True
+    recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
+    recipe.no_offload_train = False
+    with pytest.raises(TrainingGymConfigError, match="no_offload_train=True"):
+        recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer())
+
+
+def test_a_zeroed_projector_is_caught_at_the_first_forward():
+    """Zeroed weights write exactly-zero rows: trained, but on no signal at all."""
+    torch = pytest.importorskip("torch")
+    from modal_training_gym.frameworks.miles.embedding_projector import (
+        EmbeddingProjector,
+        check_projector_weights,
+        init_projector,
+    )
+
+    projector = EmbeddingProjector(input_dim=4, hidden_dim=8, output_dim=6)
+    init_projector(projector, seed=0, output_scale=0.01)
+    stats = check_projector_weights(projector)
+    assert "mlp.0.weight rms=" in stats and "norm.weight rms=0.01" in stats
+    out = projector(torch.zeros(2, 4))
+    assert torch.isfinite(out).all() and float(out.abs().max()) > 0.0
+
+    with torch.no_grad():
+        for param in projector.parameters():
+            param.zero_()
+    with pytest.raises(ValueError, match="no_offload_train=True"):
+        check_projector_weights(projector)
+    # Every row it would merge is exactly zero, whatever the encoder produced.
+    assert float(projector(torch.ones(2, 4)).abs().max()) == 0.0
