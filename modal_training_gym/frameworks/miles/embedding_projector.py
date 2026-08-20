@@ -284,6 +284,23 @@ def all_reduce_projector_grads(projector: nn.Module, sequence_parallel: bool) ->
 
 
 _grads_logged: set[str] = set()
+_merges_logged: set[str] = set()
+
+
+def _log_merge_once(key: str) -> bool:
+    """Whether to emit the merge diagnostic ``key`` in this process.
+
+    ``_scatter_projected`` runs from a forward hook on ``model.embedding``, so
+    once per micro-batch per rank, and again for every recomputation of the
+    embedding. The scale line reduces the whole embedding tensor and pulls the
+    result to Python, which drains the stream, so it is worth exactly once — like
+    every other diagnostic here. What these say (which ranks hold projected
+    positions, at what scale the projector writes) does not change between steps.
+    """
+    if key in _merges_logged:
+        return False
+    _merges_logged.add(key)
+    return True
 
 
 def log_incoming_grad(tensor: torch.Tensor, name: str) -> torch.Tensor:
@@ -375,28 +392,31 @@ def _scatter_projected(
         local, embeds = local[keep], embeds[keep]
     else:
         local = positions
-    logger.info(
-        "projector merge: %d of %d position(s) on this rank's %d-token shard",
-        int(local.numel()),
-        int(positions.numel()),
-        s_local,
-    )
+    if _log_merge_once("positions"):
+        logger.info(
+            "projector merge: %d of %d position(s) on this rank's %d-token shard",
+            int(local.numel()),
+            int(positions.numel()),
+            s_local,
+        )
     if not local.numel():
         return unmerged()
     merged = embeddings_out.clone()
     kept = embeds.to(merged.dtype)
-    with torch.no_grad():
-        # The scales have to be comparable: a projector row far above the base's
-        # embedding scale is out of the decoder's distribution and overflows the
-        # forward, which shows up as NaN gradients on exactly the merging ranks.
-        logger.info(
-            "projector merge scale: base rms=%.6g absmax=%.6g, projected "
-            "rms=%.6g absmax=%.6g",
-            float(embeddings_out.detach().float().pow(2).mean().sqrt()),
-            float(embeddings_out.detach().float().abs().max()),
-            float(kept.detach().float().pow(2).mean().sqrt()),
-            float(kept.detach().float().abs().max()),
-        )
+    if _log_merge_once("scale"):
+        with torch.no_grad():
+            # The scales have to be comparable: a projector row far above the
+            # base's embedding scale is out of the decoder's distribution and
+            # overflows the forward, which shows up as NaN gradients on exactly
+            # the merging ranks.
+            logger.info(
+                "projector merge scale: base rms=%.6g absmax=%.6g, projected "
+                "rms=%.6g absmax=%.6g",
+                float(embeddings_out.detach().float().pow(2).mean().sqrt()),
+                float(embeddings_out.detach().float().abs().max()),
+                float(kept.detach().float().pow(2).mean().sqrt()),
+                float(kept.detach().float().abs().max()),
+            )
     log_incoming_grad(kept, "the projector's output")
     merged[local, 0] = kept
     return log_incoming_grad(merged, "the merged embeddings (from the frozen base)")

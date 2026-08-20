@@ -674,6 +674,7 @@ class EmbeddingProjectorDataset(DatasetConfig):
     synthetic_rows: int = 0
     synthetic_input_dim: int = 0
     synthetic_seed: int = 0
+    synthetic_tokens: int = 1600
 
     def __init__(self, rows: list[dict[str, Any]] | None = None, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -701,7 +702,7 @@ class EmbeddingProjectorDataset(DatasetConfig):
 
     @classmethod
     def synthetic(
-        cls, n_rows: int, input_dim: int, seed: int = 0
+        cls, n_rows: int, input_dim: int, seed: int = 0, tokens: int = 1600
     ) -> "EmbeddingProjectorDataset":
         """Random embeddings on a fixed conversation, for wiring validation.
 
@@ -718,21 +719,38 @@ class EmbeddingProjectorDataset(DatasetConfig):
         ``always_prepare`` is on: the on-volume path is derived from the class
         name, so without it a later run with a different row count or embedding
         width would silently train on the file an earlier run left behind.
+
+        ``tokens`` is a rough per-sample length, long by default so a
+        validation step exercises a sequence a real projector run would see —
+        a two-sentence conversation is a few dozen tokens, well under the
+        sparse-attention regime a DSA model like GLM-5.2 trains in.
         """
         return cls(
             synthetic_rows=n_rows,
             synthetic_input_dim=input_dim,
             synthetic_seed=seed,
+            synthetic_tokens=tokens,
             always_prepare=True,
         )
 
     def _synthetic_rows(self) -> list[dict[str, Any]]:
         rng = random.Random(self.synthetic_seed)
+        # ~1 token per word, split so both the prompt and the response the loss
+        # is taken over are long.
+        filler = " ".join(
+            f"token{n}" for n in range(max(self.synthetic_tokens, 8) // 2)
+        )
         return [
             {
                 "messages": [
-                    {"role": "user", "content": f"<emb> describe sample {i}."},
-                    {"role": "assistant", "content": f"Sample {i} is a placeholder."},
+                    {
+                        "role": "user",
+                        "content": f"<emb> describe sample {i}. {filler}",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": f"Sample {i} is a placeholder. {filler}",
+                    },
                 ],
                 "embeddings": [
                     [rng.gauss(0.0, 1.0) for _ in range(self.synthetic_input_dim)]
@@ -751,7 +769,10 @@ class EmbeddingProjectorDataset(DatasetConfig):
             self.input_key: r["messages"],
             self.label_key: r.get("label", ""),
             "metadata": {
-                self.embeddings_key: [list(e) for e in r["embeddings"]],
+                # Normalized element-wise: encoder output arrives as a numpy
+                # array or a torch tensor as often as a list, and neither's
+                # scalars are JSON-serializable.
+                self.embeddings_key: [[float(v) for v in e] for e in r["embeddings"]],
                 self.positions_key: [int(p) for p in r["positions"]],
             },
         }
