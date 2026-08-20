@@ -345,7 +345,7 @@ def _train_intro():
 
 @code
 def _train():
-    train_run = TrainConfig(
+    config = TrainConfig(
         model=student_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
@@ -385,8 +385,8 @@ def _train():
         ),
     )
 
-    train_result = train_run.train()
-    print(f"run id: {train_result.training_run_id}")
+    run = config.launch()
+    print(f"run id: {run.training_run_id}")
 
 
 @markdown
@@ -401,7 +401,8 @@ def _eval_trained_intro():
 
 @code
 def _eval_trained():
-    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+    result = run.result()
+    checkpoint = list_checkpoints(result.training_run_id)[-1]
     print(f"checkpoint: {checkpoint.path}")
 
     trained_student_deployment = Endpoint.launch(

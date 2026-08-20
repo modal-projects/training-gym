@@ -186,7 +186,7 @@ def _main_impl() -> None:
     #
     # Again, for demonstration purposes, we set `n_samples_per_prompt=8`.
 
-    training_run = TrainConfig(
+    config = TrainConfig(
         model=base_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
@@ -246,14 +246,15 @@ def _main_impl() -> None:
         ),
     )
 
-    train_result = training_run.train()
-    print(f"run id: {train_result.training_run_id}")
+    run = config.launch()
+    print(f"run id: {run.training_run_id}")
 
     # ## Evaluate the trained model
     #
     # Let's run the same eval on the trained checkpoint.
 
-    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+    result = run.result()
+    checkpoint = list_checkpoints(result.training_run_id)[-1]
     print(f"checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(

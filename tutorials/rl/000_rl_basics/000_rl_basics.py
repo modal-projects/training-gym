@@ -220,7 +220,7 @@ def _main_impl() -> None:
     # Once we run the code below, training kicks off and we'll immediately get a run ID, which we may
     # use to watch the run's progress in the dashboard.
 
-    train_run = TrainConfig(
+    config = TrainConfig(
         model=base_model,
         dataset=train_dataset,
         recipe=SlimeRecipe(
@@ -247,14 +247,15 @@ def _main_impl() -> None:
         ),
     )
 
-    train_result = train_run.train()
-    print(f"run id: {train_result.training_run_id}")
+    run = config.launch()
+    print(f"run id: {run.training_run_id}")
 
     # ## Serve and evaluate the trained checkpoint
     #
     # We'll get the latest checkpoint and create a new Endpoint so we may evaluate it.
 
-    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+    result = run.result()
+    checkpoint = list_checkpoints(result.training_run_id)[-1]
     print(f"checkpoint: {checkpoint.path}")
 
     trained_deployment = Endpoint.launch(
@@ -274,7 +275,7 @@ def _main_impl() -> None:
     # A likely cause is that it only trained for 10 iterations.
     # Let's continue training, starting from the last checkpoint.
 
-    new_train_run = TrainConfig(
+    new_config = TrainConfig(
         model=Qwen3_5_4B(),
         dataset=train_dataset,
         checkpoint=checkpoint,
@@ -303,14 +304,15 @@ def _main_impl() -> None:
         ),
     )
 
-    new_train_result = new_train_run.train()
-    print(f"run id: {new_train_result.training_run_id}")
+    new_run = new_config.launch()
+    print(f"run id: {new_run.training_run_id}")
 
     # ## Evals Evals Evals
     #
     # Once again, we'll create a new Endpoint for the new checkpoint and run evals on it.
 
-    new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
+    new_result = new_run.result()
+    new_checkpoint = list_checkpoints(new_result.training_run_id)[-1]
     print(new_checkpoint.path)
 
     new_deployment = Endpoint.launch(
