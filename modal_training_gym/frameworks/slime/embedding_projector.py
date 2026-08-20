@@ -312,9 +312,13 @@ def projector_model_provider(
             "projector-only training does not support context parallelism; "
             "set context_parallel_size=1 on the recipe"
         )
-    model = _build_base_model(
-        args, pre_process, post_process, {"vp_stage": vp_stage, **kwargs}
-    )
+    # ``vp_stage`` is only really supplied when it is not ``None``: slime leaves
+    # it out entirely without virtual pipeline parallelism, and forwarding an
+    # explicit ``None`` would override the base provider's own default.
+    supplied = dict(kwargs)
+    if vp_stage is not None:
+        supplied["vp_stage"] = vp_stage
+    model = _build_base_model(args, pre_process, post_process, supplied)
     frozen = freeze_base_model(model)
 
     if pre_process:
