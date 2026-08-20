@@ -9,6 +9,7 @@ on:
       - "dashboards/**"
       - "modal_training_gym/**"
       - "pyproject.toml"
+      - "scripts/deploy_dashboard.py"
       - "uv.lock"
   workflow_dispatch:
 
@@ -21,6 +22,9 @@ concurrency:
 
 jobs:
   deploy:
+    # `workflow_dispatch` can be launched from any ref; the deployed dashboard
+    # is a single shared app, so only main ever reaches it.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: modal-deploy
     env:
