@@ -195,15 +195,16 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     attention_backend: str | None = "flash"
     update_weight_buffer_size: int | None = 2 * 1024**3
 
-    # GLM-5.2's MoE args, as upstream's run script emits them for every shape
-    # including the single-node 5-layer test (megatron_use_deepep defaults on).
-    # Without them Megatron falls back to the allgather dispatcher, which the
-    # pinned image warns does not support the variable sequence lengths
-    # ``use_dynamic_batch_size`` produces -- and the first backward of a run
-    # without them returned NaN into the embedding stream from inside the
-    # frozen base.
-    moe_enable_deepep: bool = True
-    moe_token_dispatcher_type: str = "flex"
+    # GLM-5.2's MoE dispatcher, which upstream's run script always names —
+    # ``alltoall`` on its no-DeepEP branch, ``flex`` with ``--moe-enable-deepep``
+    # otherwise. Naming neither leaves Megatron on the allgather dispatcher,
+    # which the pinned image warns does not support the variable sequence
+    # lengths ``use_dynamic_batch_size`` produces, and a run without it returned
+    # NaN into the embedding stream out of the frozen base's first backward.
+    # ``alltoall`` rather than DeepEP's ``flex`` because the miles GLM-5.2 model
+    # preset turns on ``moe_shared_expert_overlap``, which Megatron accepts only
+    # with this dispatcher.
+    moe_token_dispatcher_type: str = "alltoall"
     data_pad_size_multiplier: int = 1024
 
     @model_validator(mode="after")
