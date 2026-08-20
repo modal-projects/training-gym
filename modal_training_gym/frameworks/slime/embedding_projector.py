@@ -455,6 +455,17 @@ def projector_sft_rollout(args, rollout_id: int, data_buffer, evaluation: bool =
             messages, tools=sample.metadata.get("tools")
         )
         response_length = mask_generator.get_response_lengths([loss_mask])[0]
+        if not response_length:
+            # ``loss_mask[-0:]`` is the whole mask, so a conversation with no
+            # trained-on turn would hand slime a mask of the full sequence
+            # alongside ``response_length=0`` — nothing to learn from, reported
+            # as a mask/length mismatch deep in the loss instead.
+            raise ValueError(
+                f"sample {sample.index} has no tokens to train on: the loss "
+                "mask marks none of its turns as a response. Conversations for "
+                "supervised projector training have to end in an assistant "
+                "message."
+            )
         sample.tokens = token_ids
         sample.response_length = response_length
         sample.reward = 0
