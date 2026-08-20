@@ -16,47 +16,33 @@ TUTORIAL_METADATA = {
 }
 
 
-from tutorial_generator import code, markdown, notebook_only, py_only, shell
+from tutorial_generator import (
+    code,
+    markdown,
+    notebook_only,
+    py_only,
+    shell,
+)
 
 
 @markdown
 def _intro():
     """
-    # Drive a training run with an agent and the Training Gym CLI
+    # Agent-driven Training with the Training Gym CLI
 
-    The Training Gym gives an agent more than an API for writing a training
-    configuration. Its bundled skill teaches the agent how to own the full
+    The Training Gym gives developers more than an API for writing training
+    configurations. Its bundled skill teaches the agent how to own the full
     RL training, monitoring, and debugging lifecycle.
 
     This tutorial is a hands-on walkthrough of that loop. You will:
 
     1. Install the Training Gym agent skills.
-    2. Give an agent a plain-language training objective.
-    3. Watch the agent build the Qwen3-4B configuration it produces.
-    4. Watch as the agent uses the CLI to inspect status, rewards, logs, 
-    and rollout traces to see how the run is progressing.
+    2. Give your agent a training objective.
+    3. Watch the agent build a Qwen3-4B training configuration.
+    4. See how the agent autonomously monitors the run and iterates with the CLI.
 
-    We use the training objective to **post-train a model to answer in rhyme** throughout.
-    The goal is to practice the small set of commands that answers the questions an
-    agent must ask while a run is live: Is it progressing? Is reward improving?
-    What is the model actually doing?
-    """
-
-
-@py_only
-@markdown
-def _run_instructions():
-    """
-    Run the generated Python tutorial locally:
-
-    ```
-    cd training-gym
-    uv sync
-    uv run tutorials/rl/010_agent_driven_training/010_agent_driven_training.py
-    ```
-
-    The script launches the one-step proof as a detached Modal app and prints
-    its run ID. Use that ID with the CLI commands shown below.
+    The training objective we'll use in this tutorial is to **post-train a model 
+    to answer in rhyme**.
     """
 
 
@@ -78,8 +64,13 @@ def _confirmations():
     """
     ## 1. Introducing the CLI
 
-    The package installs the `training-gym` command. Start by looking at its
-    top-level command groups. 
+    The `training-gym` CLI is the operational interface for agent-driven
+    training. It installs the skills that teach an agent the training workflow
+    and provides commands for monitoring training runs through their status,
+    rewards, logs, and rollout traces.
+
+    The CLI is installed with the package. Start by looking at its top-level
+    command groups:
     
     ```bash
     training-gym --help
@@ -98,6 +89,14 @@ def _install_skill_intro():
     """
     ## 2. Install the agent skills
 
+    The bundled `agent-driven-training` skill tells the agent to:
+
+    - ask before making choices that change model behavior or GPU cost
+    - catch dataset and reward bugs locally before they waste GPU time
+    - scale up only after cheaper, shorter test runs show the training pipeline is healthy
+    - inspect actual model outputs to verify that reward reflects the intended behavior
+    - investigate suspicious reward trends so metric exploits are not mistaken for learning
+
     Install the bundled skills into the current project:
 
     ```bash
@@ -115,23 +114,15 @@ def _install_skills():
 @markdown
 def _skill_details():
     """
-    The installed `agent-driven-training` skill tells the agent to:
-
-    - confirm behavior- and cost-sensitive choices before implementation,
-    - validate the dataset and reward locally before using GPUs,
-    - advance from a one-step proof to a short smoke test and then a full run,
-    - inspect rollout traces at every stage, and
-    - diagnose suspicious rewards instead of trusting a rising number.
-
     You can just ask your agent:
 
     > can you post-train a model to rhyme in its output
 
-    The request is deliberately incomplete. The agent proposes the model,
-    dataset, reward, and cluster shape, then asks you to confirm the choices
-    that affect behavior and cost. For this run it selected **Qwen3-4B**,
-    `tatsu-lab/alpaca`, and a reward that grants rhyme credit only when it rhymes 
-    and the response remains relevant.
+    Given an ambiguous request, the agent will propose a model, dataset, reward,
+    and cluster shape, then ask you to confirm the choices
+    that affect behavior and cost. For the example session below, the agent
+    selected **Qwen3-4B**, `tatsu-lab/alpaca`, and a reward that grants rhyme
+    credit only when the response rhymes and remains relevant.
     """
 
 
@@ -147,11 +138,19 @@ def _code_summary():
 
     The dataset keeps self-contained Alpaca instructions and uses each reference
     answer to measure whether a rhyming response stayed on topic.
+
+    The agent combined a deterministic rhyme score with an embedding-based
+    relevance score. Relevance gates rhyme so unrelated verse cannot win, and
+    anti-reward hacking checks penalize repeated end words and one-word lines.
+    Before spending any GPU time, the agent exercised the reward on correct,
+    non-rhyming, off-topic, repeated-word, malformed, and empty responses.
+
+    The complete generated configuration is shown as one file below.
     """
 
 
 @code
-def _imports_and_constants():
+def _generated_configuration():
     import re
 
     from modal_training_gym import HuggingFaceDataset, Qwen3_4B, TrainConfig
@@ -168,8 +167,6 @@ def _imports_and_constants():
     )
 
 
-@code
-def _dataset():
     class RhymeInstructionDataset(HuggingFaceDataset):
         """Self-contained Alpaca instructions; the label is the reference answer.
 
@@ -200,23 +197,6 @@ def _dataset():
             return ds
 
 
-@markdown
-def _reward_intro():
-    """
-    ### Reward function
-
-    The agent combined a deterministic rhyme score with an embedding-based
-    relevance score. Relevance gates rhyme so unrelated verse cannot win, and
-    anti-reward hacking checks penalize repeated end words and one-word lines.
-
-    Before spending any GPU time, the agent exercised the reward on correct,
-    non-rhyming, off-topic, repeated-word, malformed, and empty responses. The
-    full implementation is below.
-    """
-
-
-@code
-def _rhyme_scoring():
     _CMUDICT: dict = {}
     _VOWELS = ("A", "E", "I", "O", "U")
 
@@ -309,8 +289,6 @@ def _rhyme_scoring():
         return scheme * distinct * substantial * length_factor
 
 
-@code
-def _relevance_scoring():
     _EMBEDDER: dict = {}
 
     def _embedder():
@@ -368,8 +346,6 @@ def _relevance_scoring():
         return max(0.0, min(1.0, (cosine - 0.10) / 0.45))
 
 
-@code
-def _combined_reward():
     def rhyme_reward(response: str, reference: str) -> float:
         """Gated rhyme quality plus a smaller standalone relevance term."""
         rhyme = score_rhyme(response)
@@ -384,18 +360,6 @@ def _combined_reward():
         return rhyme_reward(response.content or "", str(reference))
 
 
-@markdown
-def _reward_details():
-    """
-    ### Training configuration
-
-    The agent assembled the validated Qwen3-4B recipe, custom reward, dataset,
-    and image dependencies into one `TrainConfig`.
-    """
-
-
-@code
-def _config_excerpt():
     def _image_overlay(image):
         return image.run_commands(
             "uv pip install --system 'nltk>=3.8.0'",
@@ -436,9 +400,10 @@ def _how_it_works():
     """
     ## 4. Launch the one-step proof
 
-    The first remote stage is intentionally cheap. `launch()` starts a detached
-    Modal app and returns immediately with a run ID. Closing the notebook does
-    not stop training.
+    Start with a one-step proof (`num_rollout=1`) to catch configuration, data,
+    and reward failures before committing to a longer run. `launch()` starts a
+    detached Modal app and returns the run ID the agent uses to monitor it with
+    the CLI.
     """
 
 
@@ -455,7 +420,8 @@ def _cli_walkthrough():
     """
     ## 5. Inspect the run with the CLI
 
-    This walkthrough shows when each `training-gym run` command becomes useful.
+    After writing the initial scaffolding, the agent uses the CLI to monitor the
+    training run.
 
     First, verify that the run was recorded. `run list` is also how you recover
     an ID after closing a terminal or notebook.
@@ -493,16 +459,17 @@ def _run_get():
 @markdown
 def _run_logs_intro():
     """
-    If progress stops advancing or the run fails, inspect logs.
+    Inspect logs when `run get` reports a failure or its step stops
+    advancing.
 
     ```bash
-    training-gym run logs <run-id> --tail 100
+    training-gym run logs <run-id>
     ```
     """
 
 
 @notebook_only
-@shell("!training-gym run logs {RUN_ID} --tail 100")
+@shell("!training-gym run logs {RUN_ID}")
 def _run_logs():
     pass
 
