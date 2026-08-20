@@ -31,6 +31,7 @@ class Qwen3_6_27b_Agentic_Recipe(Qwen3_6_27b_Recipe):
             "PYTHONPATH": "/root/Megatron-LM/:/root/slime",
             "CUDA_DEVICE_MAX_CONNECTIONS": "1",
             "NCCL_NVLS_ENABLE": "1",
+            "NCCL_RAS_ENABLE": "0",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
             "ASYNC_RL_TASK_ROOT": "/data",
             "SLIME_AGENT_SANDBOX_CPU": "2",
@@ -71,7 +72,7 @@ class Qwen3_6_27b_Agentic_Recipe(Qwen3_6_27b_Recipe):
     rollout_max_response_len: int = 8192
     n_samples_per_prompt: int = 8
     global_batch_size: int = 256
-    max_tokens_per_gpu: int = 8192
+    max_tokens_per_gpu: int = 16384
     log_probs_chunk_size: int = 128
     rm_type: str | None = None
 

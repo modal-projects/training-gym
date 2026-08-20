@@ -25,6 +25,7 @@ from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b import (
 )
 from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b_agentic import (
     Qwen3_6_27b_Agentic_Recipe,
+)
 from modal_training_gym.train_recipes.slime_recipe.qwen3_8_27b import (
     Qwen3_8_27b_Recipe,
 )

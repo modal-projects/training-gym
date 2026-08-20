@@ -34,8 +34,9 @@ def test_agentic_recipe_emits_fork_rollout_configuration() -> None:
         recipe.rollout_batch_size * recipe.n_samples_per_prompt
     )
     assert recipe.eval_interval is None
-    assert recipe.max_tokens_per_gpu == 8192
+    assert recipe.max_tokens_per_gpu == 16384
     assert recipe.log_probs_chunk_size == 128
+    assert recipe.environment["NCCL_RAS_ENABLE"] == "0"
     assert recipe.environment["PYTORCH_CUDA_ALLOC_CONF"] == "expandable_segments:True"
     assert recipe.extra_config["custom_generate_function_path"] == (
         "agentic_rl.generate.generate"
@@ -45,6 +46,6 @@ def test_agentic_recipe_emits_fork_rollout_configuration() -> None:
     )
     fields = recipe._fields(model=Qwen3_6_27B())
     assert fields["sglang_server_concurrency"] == 32
-    assert fields["max_tokens_per_gpu"] == 8192
+    assert fields["max_tokens_per_gpu"] == 16384
     assert fields["log_probs_chunk_size"] == 128
     assert fields["save_debug_rollout_data"].endswith("/rollout_{rollout_id}.pt")

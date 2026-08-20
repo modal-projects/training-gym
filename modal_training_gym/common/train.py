@@ -511,6 +511,7 @@ class TrainConfig:
             from modal_training_gym.common.trackio import (
                 deployed_trackio_url,
                 trackio_project_url,
+                trackio_run_name,
             )
 
         summary: dict[str, Any] = {
@@ -528,7 +529,7 @@ class TrainConfig:
             "trackio": (
                 {
                     "project": trackio.project,
-                    "run_name": trackio.run_name or training_run_id,
+                    "run_name": trackio_run_name(trackio, training_run_id),
                     "url": trackio_project_url(deployed_trackio_url(), trackio.project),
                 }
                 if trackio

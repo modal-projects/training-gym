@@ -51,7 +51,7 @@ from modal_training_gym import (
 #
 # The script and recipe both use the shared `slime-data` Modal volume.
 
-DATASET_ROOT = os.environ["AGENTIC_HARBOR_DATASET_ROOT"]
+DATASET_ROOT = os.environ.get("AGENTIC_HARBOR_DATASET_ROOT", "")
 
 # ## Select subsets by filename
 #
@@ -81,6 +81,26 @@ class PreparedHarborSubset(DatasetConfig):
             "run scripts/partition_harbor_dataset.py prepare first"
         )
 
+# ## Verify native train/eval charts cheaply
+#
+# `AGENTIC_SMOKE=1` colocates the actor and four rollout engines on one 8-GPU
+# node, limits each agent to two steps, and disables tracing.
+# With the prepared two-row smoke subsets, two rollouts produce native
+# `rollout/*` train charts and separate `eval/<dataset>` charts in Trackio:
+#
+# ```bash
+# AGENTIC_HARBOR_DATASET_ROOT=snorkel_private_dataset_1 \
+# AGENTIC_SMOKE=1 \
+# AGENTIC_TRAIN_SUBSET=train-2-mixed-smoke \
+# AGENTIC_EVAL_SUBSETS=train-2-smoke,eval-2-smoke \
+# AGENTIC_NUM_ROLLOUT=2 \
+# AGENTIC_EVAL_INTERVAL=1 \
+# AGENTIC_EVAL_SAMPLES=1 \
+#   uv run tutorials/rl/010_agentic_harbor/010_agentic_harbor.py
+# ```
+#
+# This is an integration check for metric routing, not a meaningful learning
+# experiment.
 # ## Probe and make a mixed-reward subset
 #
 # The same tutorial is also the probe launcher. Select a train subset as eval
@@ -141,8 +161,10 @@ def _main_impl() -> None:
     EVAL_SAMPLES = int(os.environ.get("AGENTIC_EVAL_SAMPLES", "1"))
     EVAL_INTERVAL_RAW = os.environ.get("AGENTIC_EVAL_INTERVAL", "")
     EVAL_INTERVAL = int(EVAL_INTERVAL_RAW) if EVAL_INTERVAL_RAW else None
+    SMOKE = os.environ.get("AGENTIC_SMOKE", "") == "1"
     RUN_NAME = os.environ.get("AGENTIC_RUN_NAME", "agentic-harbor")
     TRACKIO_PROJECT = os.environ.get("AGENTIC_TRACKIO_PROJECT", "agentic-harbor")
+    LOAD = os.environ.get("AGENTIC_LOAD", "")
 
     train_dataset = PreparedHarborSubset(TRAIN_SUBSET)
 
@@ -153,19 +175,58 @@ def _main_impl() -> None:
     # fork, non-colocated topology, Harbor environment,
     # `agentic_rl.generate.generate`, and Trackio experiment tracking.
     #
-    # The launcher runs one Trackio server on the Ray head and prints a dashboard
-    # URL that stays live for the duration of training. All Ray actors send
-    # metrics to that server, and its database is persisted in the
-    # `training-gym-trackio` Modal Volume under the training run id. No W&B key or
-    # account is required.
+    # All Ray processes send metrics to the permanent Trackio service deployed by
+    # `training-gym setup`. Its project database is persisted in the
+    # `training-gym-trackio` Modal Volume, with distributed metrics and retries
+    # unified under the Training Gym run id. No W&B key or account is required.
     #
     # Dataset selection is independent from rollout count and eval sampling.
 
+    if not DATASET_ROOT:
+        raise RuntimeError("AGENTIC_HARBOR_DATASET_ROOT must be set")
     data_root = f"/data/{DATASET_ROOT.replace('/', '_')}"
+    smoke_overrides = (
+        {
+            "actor_num_nodes": 1,
+            "rollout_num_gpus": 8,
+            "colocate": True,
+            "context_parallel_size": 1,
+            "rollout_batch_size": 2,
+            "n_samples_per_prompt": 1,
+            "n_samples_per_eval_prompt": 1,
+            "global_batch_size": 2,
+            "rollout_max_response_len": 1024,
+            "eval_max_response_len": 1024,
+            "sglang_server_concurrency": 4,
+            "capture_trace": False,
+            "environment": {
+                "PYTHONPATH": "/root/Megatron-LM/:/root/slime",
+                "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+                "NCCL_NVLS_ENABLE": "1",
+                "NCCL_RAS_ENABLE": "0",
+                "PYTORCH_CUDA_ALLOC_CONF": "",
+                "ASYNC_RL_TASK_ROOT": "/data",
+                "SLIME_AGENT_SANDBOX_CPU": "2",
+                "SLIME_AGENT_SANDBOX_MEMORY_MB": "4096",
+                "ASYNC_RL_REWARD_SHAPE": "binary",
+            },
+            "extra_config": {
+                "custom_generate_function_path": "agentic_rl.generate.generate",
+                "agentic_max_steps": 2,
+                "agentic_episode_timeout": 300,
+                "agentic_eval_timeout": 120,
+                "agentic_exec_timeout": 60,
+                "router_policy": "consistent_hashing",
+            },
+        }
+        if SMOKE
+        else {}
+    )
     recipe = Qwen3_6_27b_Agentic_Recipe(
         num_rollout=NUM_ROLLOUT,
         eval_interval=EVAL_INTERVAL,
-        trackio=TrackioConfig(project=TRACKIO_PROJECT, run_name=RUN_NAME),
+        load=LOAD,
+        trackio=TrackioConfig(project=TRACKIO_PROJECT),
         eval_config={
             "defaults": {
                 "n_samples_per_eval_prompt": EVAL_SAMPLES,
@@ -185,6 +246,7 @@ def _main_impl() -> None:
             f"/checkpoints/agentic_rollout_dumps/{RUN_NAME}/"
             "rollout_{rollout_id}.pt"
         ),
+        **smoke_overrides,
     )
     run = TrainConfig(
         model=Qwen3_6_27B(),

@@ -89,6 +89,7 @@ from modal_training_gym.common.trackio import (
     TRACKIO_SECRET_NAME,
     deployed_trackio_url,
     trackio_project_url,
+    trackio_run_name,
 )
 
 SLIME_ROOT = "/root/slime"
@@ -1123,7 +1124,7 @@ def build_slime_app(
             "trackio": (
                 {
                     "project": slime.trackio.project,
-                    "run_name": slime.trackio.run_name or training_run_id,
+                    "run_name": trackio_run_name(slime.trackio, training_run_id),
                     "url": trackio_project_url(trackio_url, slime.trackio.project),
                 }
                 if slime.trackio
@@ -1303,14 +1304,15 @@ def build_slime_app(
                 trackio_env = {
                     "TRACKIO_SERVER_URL": trackio_url,
                     "TRACKIO_WRITE_TOKEN": write_token,
-                    "TRACKIO_RUN_NAME": slime.trackio.run_name or training_run_id,
+                    "TRACKIO_RUN_NAME": trackio_run_name(
+                        slime.trackio, training_run_id
+                    ),
                 }
 
             runtime_env = {
                 "env_vars": {
                     "no_proxy": f"127.0.0.1,{cluster.head_addr}",
                     "MASTER_ADDR": cluster.head_addr,
-                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(slime.num_rollout),
                     "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
@@ -1322,8 +1324,9 @@ def build_slime_app(
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                     **wandb_env,
-                    **trackio_env,
                     **slime.environment,
+                    **trackio_env,
+                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
             }
