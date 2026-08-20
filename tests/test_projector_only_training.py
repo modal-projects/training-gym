@@ -436,3 +436,22 @@ def test_a_zeroed_projector_is_caught_at_the_first_forward():
         check_projector_weights(projector)
     # Every row it would merge is exactly zero, whatever the encoder produced.
     assert float(projector(torch.ones(2, 4)).abs().max()) == 0.0
+
+
+def test_a_hook_call_without_an_optimizer_fails_rather_than_skipping():
+    """The saver owns the grad all-reduce, so skipping it trains partial grads.
+
+    The pinned image passes the optimizer, and the GPU runs installed the saver
+    and wrote checkpoints; if a future image stops doing so, the run has to stop
+    rather than quietly train tensor-parallel-partial gradients and produce no
+    adapter.
+    """
+    pytest.importorskip("torch")
+    from modal_training_gym.frameworks.miles.embedding_projector import (
+        save_projector_checkpoint,
+    )
+
+    with pytest.raises(RuntimeError, match="without an optimizer"):
+        save_projector_checkpoint(
+            object(), rollout_id=0, step_id=0, model=[], optimizer=None
+        )

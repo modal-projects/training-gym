@@ -928,7 +928,22 @@ def save_projector_checkpoint(
 
     Idempotent — the hook fires before every train step and the saver is
     installed on the first one, once per optimizer.
+
+    The saver owns both the projector's gradient all-reduce and every checkpoint
+    write, so a hook call without an optimizer is not something to skip: it
+    would train unreduced, tensor-parallel-partial gradients and leave no
+    adapter behind, silently. The pinned image passes the optimizer from its
+    train step (and the GPU runs on this branch installed the saver and wrote
+    checkpoints), so this raises if that ever stops being true.
     """
-    if optimizer is None or getattr(optimizer, "_training_gym_projector_saver", None):
+    if optimizer is None:
+        raise RuntimeError(
+            "miles called the before-train-step hook without an optimizer, so "
+            "projector-only training cannot install the wrapper that reduces "
+            "projector gradients across the tensor-parallel group and writes "
+            "the projector checkpoints. Continuing would train partial "
+            "gradients and produce no adapter."
+        )
+    if getattr(optimizer, "_training_gym_projector_saver", None):
         return
     optimizer._training_gym_projector_saver = _ProjectorSaver(args, model, optimizer)
