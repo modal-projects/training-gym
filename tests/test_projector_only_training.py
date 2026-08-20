@@ -204,11 +204,14 @@ def test_tensor_parallelism_without_sequence_parallelism_is_rejected():
     recipe = GLM_5_2_Projector_Recipe(sequence_parallel=False)
     with pytest.raises(TrainingGymConfigError, match="sequence_parallel=True"):
         recipe.validate_model_parallelism(GLM_5_2())
-    # TP=1 has nothing to sum over, so the combination is fine there.
+    # TP=1 has nothing to sum over, so the combination is fine there — at a
+    # batch that still covers the 64 data-parallel ranks TP=1 leaves.
     GLM_5_2_Projector_Recipe(
         sequence_parallel=False,
         tensor_model_parallel_size=1,
         expert_model_parallel_size=1,
+        rollout_batch_size=64,
+        global_batch_size=64,
     ).validate_model_parallelism(GLM_5_2())
 
 
@@ -285,6 +288,16 @@ def test_expert_parallel_size_must_divide_the_model_scripts_experts():
         ).validate_model_parallelism(GLM_5_2())
     for recipe in (GLM_5_2_Projector_Recipe(), GLM_5_2_5Layer_Projector_Recipe()):
         recipe.validate_model_parallelism(GLM_5_2())
+
+
+def test_a_step_must_have_a_sample_for_every_data_parallel_rank():
+    """Both shipped shapes, and a rejection when a topology outgrows the batch."""
+    for recipe in (GLM_5_2_Projector_Recipe(), GLM_5_2_5Layer_Projector_Recipe()):
+        recipe.validate_model_parallelism(GLM_5_2())
+    with pytest.raises(TrainingGymConfigError, match="16 data-parallel rank"):
+        GLM_5_2_Projector_Recipe(
+            rollout_batch_size=8, global_batch_size=8
+        ).validate_model_parallelism(GLM_5_2())
 
 
 def test_no_eval_pass_is_configured():

@@ -185,8 +185,14 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     # which only the ``thd`` layout supplies.
 
     num_rollout: int = 10
-    rollout_batch_size: int = 8
-    global_batch_size: int = 8
+    # One sample per data-parallel rank per step, at this shape's DP width of
+    # 64 GPUs / TP4 = 16. Without dynamic batching Megatron's micro-batch
+    # calculator requires ``global_batch_size % (micro_batch_size * DP) == 0``,
+    # and a rollout of fewer samples than DP ranks cannot be split across them
+    # at all — see ``_require_batch_covers_data_parallel``, which checks this for
+    # any topology a caller sets rather than only for these defaults.
+    rollout_batch_size: int = 16
+    global_batch_size: int = 16
     # Only the projector is written, by the hook.
     save_interval: int = 1_000_000
 
@@ -418,6 +424,46 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
             )
         return self
 
+    def _require_batch_covers_data_parallel(self) -> None:
+        """Require a step's samples to divide evenly among the data-parallel ranks.
+
+        With dynamic batching rejected, Megatron's constant micro-batch
+        calculator asserts ``global_batch_size % (micro_batch_size * DP) == 0``,
+        and a rollout that yields fewer samples than there are data-parallel
+        ranks cannot be split across them however it is batched. Neither is
+        checked before the cluster starts otherwise, so a topology change (more
+        nodes, less tensor parallelism) surfaces as an assertion inside the
+        containers after the base checkpoint has been downloaded.
+        """
+        gpus = self.actor_num_nodes * self.actor_num_gpus_per_node
+        shard = (
+            self.tensor_model_parallel_size
+            * self.pipeline_model_parallel_size
+            * self.context_parallel_size
+        )
+        if not gpus or not shard or gpus % shard:
+            # Divisibility of the GPU count by the model shards is the base
+            # class's preflight; nothing to say about batches until it holds.
+            return
+        data_parallel = gpus // shard
+        per_step = self.rollout_batch_size * self.n_samples_per_prompt
+        micro = self.micro_batch_size or 1
+        if self.global_batch_size % (micro * data_parallel) or per_step % data_parallel:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} spreads {gpus} GPU(s) over "
+                f"TP{self.tensor_model_parallel_size}/"
+                f"PP{self.pipeline_model_parallel_size}/"
+                f"CP{self.context_parallel_size}, so {data_parallel} "
+                f"data-parallel rank(s), but a step has "
+                f"global_batch_size={self.global_batch_size} over "
+                f"micro_batch_size={micro} and the rollout yields {per_step} "
+                f"sample(s) (rollout_batch_size={self.rollout_batch_size} x "
+                f"n_samples_per_prompt={self.n_samples_per_prompt}). Both have "
+                f"to be multiples of {data_parallel}: without dynamic batching "
+                "Megatron divides the global batch by micro-batch size and "
+                "data-parallel width, and each rank needs samples of its own."
+            )
+
     def _recheck_mutable_launch_invariants(self) -> None:
         """Re-run the guards that assignment after construction can defeat.
 
@@ -439,6 +485,7 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
         self._reject_distributed_optimizer()
         self._reject_offload_train()
         self._reject_dynamic_batch_size()
+        self._require_batch_covers_data_parallel()
         if self.save_interval is not None and self.save_interval <= self.num_rollout:
             warnings.warn(
                 f"{type(self).__name__} has save_interval={self.save_interval} "
@@ -510,3 +557,6 @@ class GLM_5_2_5Layer_Projector_Recipe(GLM_5_2_Projector_Recipe):
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
     expert_model_parallel_size: int = 8
+    # One node over TP4 is 2 data-parallel ranks, not the 744B shape's 16.
+    rollout_batch_size: int = 8
+    global_batch_size: int = 8
