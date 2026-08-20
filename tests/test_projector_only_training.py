@@ -179,6 +179,29 @@ def test_an_unwired_step_hook_fails_at_model_construction():
         require_projector_step_hook(wired)
 
 
+def test_only_the_attention_backend_that_keeps_the_gradient_is_allowed():
+    """tilelang's fused sparse-MLA backward hands the embeddings NaN dq.
+
+    Verified on 8xH200: finite forward and finite grads down to the query
+    projection, then NaN out of ``sparse_mla_bwd`` — harmless for the LoRA runs
+    upstream ships, fatal for a projector whose gradient comes from there. The
+    working pairing is unrecomputable, so recompute is rejected with it.
+    """
+    for override in (
+        {"dsa_attention_backend": "tilelang", "qkv_format": "thd"},
+        {"qkv_format": "thd"},
+    ):
+        with pytest.raises(ValidationError, match='dsa_attention_backend="megatron"'):
+            GLM_5_2_Projector_Recipe(**override)
+    with pytest.raises(ValidationError, match="recompute_granularity=None"):
+        GLM_5_2_Projector_Recipe(recompute_granularity="full")
+    recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
+    assert (recipe.dsa_attention_backend, recipe.qkv_format) == ("megatron", "bshd")
+    recipe.recompute_granularity = "full"
+    with pytest.raises(TrainingGymConfigError, match="recompute_granularity=None"):
+        recipe.validate_model_parallelism(GLM_5_2_5Layer())
+
+
 def test_lora_is_rejected():
     # Pydantic wraps the validator's error; the message is what a user reads.
     with pytest.raises(ValidationError, match="lora_rank must be unset"):

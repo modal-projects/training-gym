@@ -167,9 +167,17 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     expert_model_parallel_size: int = 32
     expert_tensor_parallel_size: int = 1
 
-    recompute_granularity: str | None = "full"
-    recompute_method: str | None = "uniform"
-    recompute_num_layers: int | None = 1
+    # No activation recompute, which is not a free choice either: the layout the
+    # only working attention backend needs (see below) is the one the pinned
+    # image refuses to recompute — "DSA cross-layer index-share is not
+    # recompute-safe in the bshd layout ... use --qkv-format thd ... or disable
+    # activation recompute". A projector-only run backpropagates to the input
+    # embeddings, so every layer's activations are live; if the 744B shape runs
+    # out of memory on this, the way out is more nodes or a shorter sequence,
+    # not recompute.
+    recompute_granularity: str | None = None
+    recompute_method: str | None = None
+    recompute_num_layers: int | None = None
     # Upstream's GLM-5.2 script forbids dynamic batching outright: "The DSA
     # kernel backend dictates the query layout; both forbid
     # --use-dynamic-batch-size, hence --micro-batch-size 1" — tilelang's fused
@@ -183,13 +191,17 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     # "bshd"``). miles defaults the backend to ``megatron``, while MilesRecipe
     # defaults the layout to ``thd``, so naming neither pairs megatron's unfused
     # attention with a packed layout it does not implement — the forward returns
-    # finite logits and the backward hands the embedding stream NaN. Named as a
-    # pair here, and ``tilelang`` rather than ``megatron``/``bshd`` because the
-    # latter is not recompute-safe: the pinned image asserts that DSA's
-    # cross-layer index share needs the top-k holder that rides on
-    # ``packed_seq_params``, which only ``thd`` supplies.
-    dsa_attention_backend: str = "tilelang"
-    qkv_format: str = "thd"
+    # finite logits and the backward hands the embedding stream NaN.
+    #
+    # ``megatron``/``bshd`` rather than ``tilelang``/``thd`` because only the
+    # former backpropagates to the embeddings. Both give a finite forward, but
+    # tilelang's ``sparse_mla_bwd`` returns a NaN dq on this shape (localized on
+    # 8xH200 to ``decoder.layers.4.self_attention.linear_q_up_proj``, with every
+    # grad above it finite, and independent of the loss mask and of recompute),
+    # which upstream's own runs never see: LoRA trains weights inside attention
+    # and never needs dq to reach the input embeddings, and a projector does.
+    dsa_attention_backend: str = "megatron"
+    qkv_format: str = "bshd"
 
     num_rollout: int = 10
     # One sample per data-parallel rank per step, at this shape's DP width of
@@ -278,6 +290,36 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
                 f"{type(self).__name__} needs micro_batch_size=1 (got "
                 f"{self.micro_batch_size}), the only batching GLM-5.2's DSA "
                 "kernels take without dynamic batching."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_working_attention_backward(self) -> "GLM_5_2_Projector_Recipe":
+        """Reject the backend/layout/recompute combinations that lose the grad.
+
+        A projector-only run is the one GLM-5.2 shape whose gradient has to
+        reach the input embeddings, so it is the one that cares which DSA
+        backend runs the backward: ``tilelang``'s fused ``sparse_mla_bwd``
+        returns NaN dq (proven on 8xH200, finite forward, finite grad down to
+        the query projection), and ``megatron``'s unfused attention is finite
+        but only ever paired with ``bshd``, which the image will not recompute.
+        """
+        if self.dsa_attention_backend != "megatron" or self.qkv_format != "bshd":
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs "
+                'dsa_attention_backend="megatron" with qkv_format="bshd" (got '
+                f'"{self.dsa_attention_backend}"/"{self.qkv_format}"): it is '
+                "the only pairing whose backward carries a finite gradient to "
+                "the input embeddings, which is the one thing a projector-only "
+                "run cannot do without."
+            )
+        if self.recompute_granularity is not None:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs recompute_granularity=None (got "
+                f'"{self.recompute_granularity}"): the pinned image refuses to '
+                "recompute DSA's cross-layer index share in the bshd layout "
+                "this recipe's attention backend requires. Fit the run with "
+                "nodes or sequence length instead."
             )
         return self
 
@@ -492,6 +534,7 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
         self._reject_distributed_optimizer()
         self._reject_offload_train()
         self._reject_dynamic_batch_size()
+        self._require_working_attention_backward()
         self._require_batch_covers_data_parallel()
         if self.save_interval is not None and self.save_interval <= self.num_rollout:
             warnings.warn(
