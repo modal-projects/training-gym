@@ -879,3 +879,173 @@ class EmbeddingProjectorDataset(DatasetConfig):
             with open(target, "w") as f:
                 for row in rows:
                     f.write(json.dumps(row) + "\n")
+
+
+#: DeepLocBinary annotates membrane vs soluble with single letters; spelled out
+#: so the target is a word the base model has a prior over.
+_DEEPLOC_BINARY_WORDS = {"M": "membrane", "S": "soluble"}
+
+
+class ProteinLocalizationDataset(EmbeddingProjectorDataset):
+    """Projector data from a real protein encoder: ESM-2 over DeepLoc.
+
+    The synthetic modes above answer "does anything reach the projector"; this
+    one is the task a projector-only run exists for. Each row is one protein:
+    the embedding is an ESM-2 encoding of its amino-acid sequence, the prompt
+    asks where the protein localizes, and the assistant turn is the compartment
+    DeepLoc annotates it with. Nothing about the answer is in the prompt — every
+    row's prompt is identical — so held-out accuracy is a statement about the
+    projector, in the same shape as the synthetic control but on data whose
+    structure the projector did not get handed.
+
+    The train and eval files come from DeepLoc's own disjoint splits, so the
+    eval set is held out by construction rather than by sampling; the encoder
+    runs at ``prepare()`` time on the CPU container that materializes the data,
+    which is why the default encoder is one of the small ESM-2 checkpoints.
+    Embedding width is the encoder's hidden size, and it has to match
+    ``ProjectorSpec.input_dim`` — ``prepare()`` fails loudly when it doesn't,
+    rather than leaving the rollout to raise once a cluster is already up.
+
+    Sequences are mean-pooled over residues into one vector per protein, which
+    is the standard way these encoders are consumed for whole-sequence
+    prediction and what makes a protein cost exactly one token here.
+    """
+
+    hf_repo: str = "AI4Protein/DeepLocMulti"
+    hf_config: str | None = None
+    train_split: str = "train"
+    eval_split: str = "test"
+    sequence_key: str = "aa_seq"
+    location_key: str = "location"
+    encoder_model: str = "facebook/esm2_t30_150M_UR50D"
+    # Width the projector is configured for; checked against the encoder's
+    # actual output at prepare() time.
+    input_dim: int = 640
+    prompt: str = (
+        "<protein> Which subcellular compartment does this protein localize to?"
+    )
+    train_rows: int = 512
+    eval_rows: int = 128
+    # Residues per protein handed to the encoder. DeepLoc sequences run to
+    # thousands; ESM-2's attention is quadratic and localization signal is
+    # concentrated in the terminal targeting peptides, so truncation is the
+    # normal treatment.
+    max_residues: int = 512
+    encoder_batch_size: int = 8
+    seed: int = 0
+
+    def __init__(self, **kwargs: Any) -> None:
+        kwargs.setdefault("always_prepare", True)
+        super().__init__(**kwargs)
+
+    @property
+    def name(self) -> str:
+        return self.hf_repo
+
+    def _class_word(self, location: str) -> str:
+        """DeepLoc's location string as the words the model has to produce.
+
+        Multi-class labels arrive as ``"Endoplasmic.reticulum,M"`` (compartment,
+        then the membrane/soluble annotation); binary ones as bare ``"M"`` /
+        ``"S"``. Only the compartment is the target here.
+        """
+        head = str(location).split(",")[0].strip()
+        if head in _DEEPLOC_BINARY_WORDS:
+            return _DEEPLOC_BINARY_WORDS[head]
+        return head.replace(".", " ").replace("/", " or ").lower()
+
+    def _encode(self, sequences: list[str]) -> list[list[float]]:
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(self.encoder_model)
+        encoder = AutoModel.from_pretrained(self.encoder_model)
+        encoder.eval()
+
+        vectors: list[list[float]] = []
+        for start in range(0, len(sequences), self.encoder_batch_size):
+            batch = [
+                seq[: self.max_residues]
+                for seq in sequences[start : start + self.encoder_batch_size]
+            ]
+            tokens = tokenizer(
+                batch,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=self.max_residues + 2,
+            )
+            with torch.no_grad():
+                hidden = encoder(**tokens).last_hidden_state
+            mask = tokens["attention_mask"].unsqueeze(-1).to(hidden.dtype)
+            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1)
+            vectors.extend(pooled.float().tolist())
+            print(
+                f"[{type(self).__name__}] encoded "
+                f"{min(start + self.encoder_batch_size, len(sequences))}"
+                f"/{len(sequences)} sequences",
+                flush=True,
+            )
+        return vectors
+
+    def _split_rows(self, split: str, n_rows: int) -> list[dict[str, Any]]:
+        from datasets import load_dataset
+
+        ds = load_dataset(self.hf_repo, self.hf_config, split=split)
+        # Shuffled before truncation: DeepLoc's files are grouped by
+        # compartment, so the first N rows of a split are one or two classes.
+        ds = ds.shuffle(seed=self.seed)
+        if n_rows:
+            ds = ds.select(range(min(n_rows, len(ds))))
+        records = [dict(row) for row in ds]
+        embeddings = self._encode([str(r[self.sequence_key]) for r in records])
+        width = len(embeddings[0]) if embeddings else 0
+        if width != self.input_dim:
+            raise TrainingGymConfigError(
+                f"{self.encoder_model} produces {width}-wide embeddings but "
+                f"{type(self).__name__}.input_dim is {self.input_dim}. Set both "
+                "this and the recipe's ProjectorSpec.input_dim to the encoder's "
+                "hidden size; the projector's first Linear is built from it."
+            )
+        return [
+            {
+                "messages": [
+                    {"role": "user", "content": self.prompt},
+                    {
+                        "role": "assistant",
+                        "content": self._class_word(record[self.location_key]),
+                    },
+                ],
+                "embeddings": [vector],
+                # Position 1 of the row's own tokens, as with the synthetic
+                # modes: the merge overwrites that token's embedding with the
+                # projected protein, and the prompt carries no answer either
+                # way.
+                "positions": [1],
+                "label": self._class_word(record[self.location_key]),
+            }
+            for record, vector in zip(records, embeddings)
+        ]
+
+    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_split(path, self._split_rows(self.train_split, self.train_rows))
+        for eval_path in (eval_paths or {}).values():
+            Path(eval_path).parent.mkdir(parents=True, exist_ok=True)
+            self._write_split(
+                eval_path, self._split_rows(self.eval_split, self.eval_rows)
+            )
+
+    def _write_split(self, target: str, rows: list[dict[str, Any]]) -> None:
+        counts: dict[str, int] = {}
+        with open(target, "w") as f:
+            for row in rows:
+                counts[row["label"]] = counts.get(row["label"], 0) + 1
+                f.write(json.dumps(self._to_row(row)) + "\n")
+        majority = max(counts.values()) / len(rows) if rows else 0.0
+        print(
+            f"[{type(self).__name__}] wrote {len(rows)} rows to {target}; "
+            f"class counts {dict(sorted(counts.items()))}; "
+            f"majority-class share {majority:.3f}",
+            flush=True,
+        )

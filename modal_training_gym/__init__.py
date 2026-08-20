@@ -50,6 +50,14 @@ _EXPORTS = {
         "modal_training_gym.common.dataset",
         "EmbeddingProjectorDataset",
     ),
+    "ProteinLocalizationDataset": (
+        "modal_training_gym.common.dataset",
+        "ProteinLocalizationDataset",
+    ),
+    "ProjectorEval": (
+        "modal_training_gym.frameworks.miles.projector_eval",
+        "ProjectorEval",
+    ),
     "HFModelConfiguration": (
         "modal_training_gym.common.models",
         "HFModelConfiguration",
@@ -166,7 +174,9 @@ __all__ = [
     "GLM_5_2_Projector_Recipe",
     "GLM_5_2_5Layer_Projector_Recipe",
     "ProjectorSpec",
+    "ProjectorEval",
     "EmbeddingProjectorDataset",
+    "ProteinLocalizationDataset",
     "HarborDataset",
     "EvalConfig",
     "EvalConfigDurable",

@@ -19,6 +19,7 @@ from modal_training_gym import (
     GLM_5_2_5Layer_Projector_Recipe,
     GLM_5_2_Projector_Recipe,
     ProjectorSpec,
+    ProteinLocalizationDataset,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.frameworks.miles.projector_config import (
@@ -490,3 +491,119 @@ def test_a_hook_call_without_an_optimizer_fails_rather_than_skipping():
         save_projector_checkpoint(
             object(), rollout_id=0, step_id=0, model=[], optimizer=None
         )
+
+
+# ── Real biological data: ESM-2 over DeepLoc ──────────────────────────────────
+
+
+def test_protein_dataset_turns_deeploc_locations_into_answer_words():
+    """The target has to be words, since the model answers by generating them.
+
+    DeepLocMulti's label is ``"Endoplasmic.reticulum,M"``; DeepLocBinary's is a
+    bare ``"M"``/``"S"``. Neither is something a decoder should be asked to emit.
+    """
+    dataset = ProteinLocalizationDataset()
+    assert dataset._class_word("Endoplasmic.reticulum,M") == "endoplasmic reticulum"
+    assert dataset._class_word("Nucleus,U") == "nucleus"
+    assert dataset._class_word("M") == "membrane"
+    assert dataset._class_word("S") == "soluble"
+
+
+def test_protein_dataset_holds_its_eval_split_out_by_construction():
+    """Train and eval come from DeepLoc's own disjoint splits, not a resample."""
+    dataset = ProteinLocalizationDataset()
+    assert dataset.train_split != dataset.eval_split
+    assert dataset.always_prepare, "stale rows on the volume would be reused"
+    train_path, eval_paths = MilesRecipe._resolve_data_paths(dataset)
+    assert eval_paths and eval_paths["eval"] != train_path
+
+
+def test_protein_dataset_rejects_an_encoder_the_projector_is_not_shaped_for():
+    """Caught while materializing data, not after a cluster is up."""
+    dataset = ProteinLocalizationDataset(input_dim=1536)
+    dataset._encode = lambda sequences: [[0.0] * 640 for _ in sequences]  # pyright: ignore[reportAttributeAccessIssue]
+    with pytest.raises(TrainingGymConfigError, match="640-wide"):
+        dataset._split_rows("test", 1)
+
+
+def test_protein_rows_carry_the_embedding_in_the_column_miles_reads():
+    dataset = ProteinLocalizationDataset(rows=[])
+    row = dataset._to_row(
+        {
+            "messages": [
+                {"role": "user", "content": dataset.prompt},
+                {"role": "assistant", "content": "nucleus"},
+            ],
+            "embeddings": [[0.5] * 640],
+            "positions": [1],
+            "label": "nucleus",
+        }
+    )
+    assert row["metadata"]["projector_embeddings"] == [[0.5] * 640]
+    assert row["metadata"]["projector_positions"] == [1]
+
+
+def test_the_held_out_eval_reads_targets_and_embeddings_back(tmp_path):
+    """The eval's candidate set is the file's own answers, not a second list."""
+    from modal_training_gym.frameworks.miles.projector_eval import read_eval_rows
+
+    path = tmp_path / "eval.jsonl"
+    dataset = ProteinLocalizationDataset(rows=[])
+    with open(path, "w") as f:
+        for word in ("nucleus", "membrane"):
+            f.write(
+                json.dumps(
+                    dataset._to_row(
+                        {
+                            "messages": [
+                                {"role": "user", "content": dataset.prompt},
+                                {"role": "assistant", "content": word},
+                            ],
+                            "embeddings": [[0.25] * 640],
+                            "positions": [1],
+                            "label": word,
+                        }
+                    )
+                )
+                + "\n"
+            )
+
+    rows = read_eval_rows(str(path), "projector_embeddings", "projector_positions")
+    assert [r["target"] for r in rows] == ["nucleus", "membrane"]
+    # The answer is removed from what the model is shown, or accuracy is free.
+    assert all(m["role"] != "assistant" for r in rows for m in r["messages"])
+    assert rows[0]["embeddings"] == [[0.25] * 640] and rows[0]["positions"] == [1]
+
+
+def test_the_report_states_both_baselines_it_has_to_beat():
+    from modal_training_gym.frameworks.miles.projector_eval import (
+        ProjectorEvalReport,
+        ProjectorEvalRow,
+    )
+
+    def row(target: str, prediction: str) -> ProjectorEvalRow:
+        return ProjectorEvalRow(
+            prompt="p",
+            target=target,
+            prediction=prediction,
+            correct=target == prediction,
+            scores={},
+        )
+
+    report = ProjectorEvalReport(
+        model_name="m",
+        checkpoint="c",
+        iteration=40,
+        classes=["nucleus", "membrane"],
+        rows=[
+            row("nucleus", "nucleus"),
+            row("nucleus", "nucleus"),
+            row("membrane", "membrane"),
+            row("membrane", "nucleus"),
+        ],
+        untrained_rows=[row("nucleus", "nucleus")] + [row("membrane", "nucleus")] * 3,
+    )
+    assert report.accuracy == 0.75
+    assert report.untrained_accuracy == 0.25
+    assert report.majority_accuracy == 0.5
+    assert "trained 0.750" in report.summary()
