@@ -97,6 +97,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [GLM_5_2_5Layer_Projector_Recipe](https://gym.modal.dev/reference/training/glm_5_2_5layer_projector_recipe/): `GLM_5_2_5Layer_Projector_Recipe`
 - [ProjectorSpec](https://gym.modal.dev/reference/training/projectorspec/): `ProjectorSpec`
 - [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe/): `Qwen3_6_35b_Recipe`
+- [Qwen3_6_35b_Projector_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_projector_recipe/): `Qwen3_6_35b_Projector_Recipe`
 - [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe/): `Qwen3_6_27b_Recipe`
 - [Qwen3_8_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_8_27b_recipe/): `Qwen3_8_27b_Recipe`
 - [Qwen3.5-0.8b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_0_8b_recipe/): `Qwen3_5_0_8b_Recipe`
