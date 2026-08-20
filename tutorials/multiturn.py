@@ -63,7 +63,7 @@ class NumberGuessDataset(DatasetConfig):
         return "label"
 
     @property
-    def requires_refresh_before_training(self):
+    def needs_refresh(self):
         return True
 
     def rows(self):

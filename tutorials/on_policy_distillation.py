@@ -120,7 +120,7 @@ class MathDataset(HuggingFaceDataset):
     label_key = "label"
     output_format = "jsonl"
     needs_chat_template = True
-    requires_refresh_before_training = True
+    needs_refresh = True
 
 train_dataset = MathDataset(hf_split="train[:100]")
 

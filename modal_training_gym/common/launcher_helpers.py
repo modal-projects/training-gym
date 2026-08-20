@@ -213,13 +213,13 @@ def write_dataset_if_needed(dataset: Any, path: str) -> bool:
     """Write and validate one dataset unless a reusable materialization exists."""
     import shutil
 
-    refresh = dataset.requires_refresh_before_training
+    refresh = dataset.needs_refresh
     if os.path.exists(path) and not refresh:
         dataset.validate_write(path)
         return False
 
     if os.path.isdir(path):
-        print(f"requires_refresh_before_training=True — removing {path}")
+        print(f"needs_refresh=True — removing {path}")
         shutil.rmtree(path)
     elif os.path.exists(path):
         os.remove(path)

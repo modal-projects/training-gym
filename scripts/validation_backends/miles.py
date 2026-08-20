@@ -18,7 +18,7 @@ class DapoMath17kDataset(HuggingFaceDataset):
     label_key = "label"
     output_format = "jsonl"
     needs_chat_template = True
-    requires_refresh_before_training = True
+    needs_refresh = True
 
 
 def build_miles_validation(

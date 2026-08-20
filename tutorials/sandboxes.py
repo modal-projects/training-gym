@@ -47,7 +47,7 @@ dataset = HarborDataset(
     dataset_name="harbor/hello-world",
     label_metadata_path="task.toml",
     train_repeats=20,
-    requires_refresh_before_training=True,
+    needs_refresh=True,
     system_prompt=(
         "You are an expert Python programmer. "
         "Solve the given problem by writing a complete Python program. "

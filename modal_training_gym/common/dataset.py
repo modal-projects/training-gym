@@ -60,7 +60,7 @@ class DatasetConfig(ABC):
         return True
 
     @property
-    def requires_refresh_before_training(self) -> bool:
+    def needs_refresh(self) -> bool:
         return False
 
     @abstractmethod
@@ -292,7 +292,7 @@ class HarborDataset(DatasetConfig):
         eval_repeats: int | None = None,
         shuffle_tasks: bool | None = None,
         shuffle_seed: int | None = None,
-        requires_refresh_before_training: bool = False,
+        needs_refresh: bool = False,
     ) -> None:
         self.split = split
         # Keep this while framework path resolution still uses ``hf_split``.
@@ -329,7 +329,7 @@ class HarborDataset(DatasetConfig):
             self.shuffle_tasks = shuffle_tasks
         if shuffle_seed is not None:
             self.shuffle_seed = shuffle_seed
-        self._requires_refresh_before_training = requires_refresh_before_training
+        self._needs_refresh = needs_refresh
         if not self.id:
             self.id = f"{self._id_slug()}-{split}-{uuid.uuid4()}"
         super().__init__()
@@ -360,8 +360,8 @@ class HarborDataset(DatasetConfig):
         return "parquet"
 
     @property
-    def requires_refresh_before_training(self) -> bool:
-        return self._requires_refresh_before_training
+    def needs_refresh(self) -> bool:
+        return self._needs_refresh
 
     def _harbor_dataset_ref(self) -> str:
         if "@" in self.dataset_name:

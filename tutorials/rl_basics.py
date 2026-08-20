@@ -125,7 +125,7 @@ class HaikuDataset(HuggingFaceDataset):
     output_column = "text"
     output_format = "jsonl"
     needs_chat_template = True
-    requires_refresh_before_training = True
+    needs_refresh = True
     prompt_template = "Write a haiku about {input}."
 
 train_dataset = HaikuDataset(hf_split="train[:10]")

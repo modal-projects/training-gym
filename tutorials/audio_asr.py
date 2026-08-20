@@ -80,7 +80,7 @@ class LibriSpeechASRDataset(MultimodalDataset):
         super().__init__(rows=[])
 
     @property
-    def requires_refresh_before_training(self):
+    def needs_refresh(self):
         return True
 
     @property
