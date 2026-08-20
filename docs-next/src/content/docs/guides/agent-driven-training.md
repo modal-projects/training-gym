@@ -38,10 +38,7 @@ Install the skill bundle into the current project:
 training-gym skills install
 ```
 
-The command finds the nearest Git repository and copies each bundled skill to
-`.agents/skills/<skill-name>`, then links `.claude/skills/<skill-name>` to the
-canonical copy for Claude compatibility. The bundle contains
-`agent-driven-training`, `example-validation`, `modal-infrastructure`,
+The bundle contains `agent-driven-training`, `example-validation`, `modal-infrastructure`,
 `model-support`, and `training-gym-overview`.
 
 `agent-driven-training` is the skill that owns the lifecycle. It tells the
