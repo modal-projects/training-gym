@@ -57,6 +57,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [HuggingFaceDataset](https://gym.modal.dev/reference/core/huggingfacedataset/): `HuggingFaceDataset`
 - [HarborDataset](https://gym.modal.dev/reference/core/harbordataset/): `HarborDataset`
 - [EmbeddingProjectorDataset](https://gym.modal.dev/reference/core/embeddingprojectordataset/): `EmbeddingProjectorDataset`
+- [ProteinLocalizationDataset](https://gym.modal.dev/reference/core/proteinlocalizationdataset/): `ProteinLocalizationDataset`
 - [WandbConfig](https://gym.modal.dev/reference/core/wandbconfig/): `WandbConfig`
 - [ModalRayCluster](https://gym.modal.dev/reference/core/modalraycluster/): `ModalRayCluster`
 - [TrainResult](https://gym.modal.dev/reference/core/trainresult/): `TrainResult`
@@ -96,6 +97,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [GLM_5_2_Projector_Recipe](https://gym.modal.dev/reference/training/glm_5_2_projector_recipe/): `GLM_5_2_Projector_Recipe`
 - [GLM_5_2_5Layer_Projector_Recipe](https://gym.modal.dev/reference/training/glm_5_2_5layer_projector_recipe/): `GLM_5_2_5Layer_Projector_Recipe`
 - [ProjectorSpec](https://gym.modal.dev/reference/training/projectorspec/): `ProjectorSpec`
+- [ProjectorEval](https://gym.modal.dev/reference/training/projectoreval/): `ProjectorEval`
 - [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe/): `Qwen3_6_35b_Recipe`
 - [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe/): `Qwen3_6_27b_Recipe`
 - [Qwen3_8_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_8_27b_recipe/): `Qwen3_8_27b_Recipe`
