@@ -16,6 +16,7 @@ from modal_training_gym.common.projector_config import (
     EMBEDDINGS_KEY as EMBEDDINGS_KEY,
     POSITIONS_KEY as POSITIONS_KEY,
     ProjectorSpec as ProjectorSpec,
+    require_step_hook,
     should_save_projector as should_save_projector,
     spec_from_args,
 )
@@ -48,6 +49,11 @@ SAVE_HOOK_PATH = (
 ROLLOUT_PATH = (
     "modal_training_gym.frameworks.slime.embedding_projector.projector_sft_rollout"
 )
+
+
+def require_projector_step_hook(args) -> None:
+    """slime-side :func:`require_step_hook`; see it for what the hook owns."""
+    require_step_hook(args, SAVE_HOOK_PATH, "Qwen3_6_35b_Projector_Recipe")
 
 
 def from_slime_args(args: object) -> ProjectorSpec:

@@ -30,6 +30,7 @@ from modal_training_gym.frameworks.slime.projector_config import (
     SAVE_HOOK_PATH,
     TRAINABLE_PARAM_PATTERNS,
     from_slime_args,
+    require_projector_step_hook,
     should_save_projector,
 )
 from modal_training_gym.train_recipes.slime_recipe import (
@@ -128,6 +129,26 @@ def test_save_hook_runs_through_the_gyms_phase_reporting_wrapper():
         ]
         == SAVE_HOOK_PATH
     )
+
+
+def test_an_unwired_step_hook_fails_at_model_construction():
+    """Without the hook there is no grad all-reduce and no checkpoint at all."""
+    from types import SimpleNamespace
+
+    recipe = Qwen3_6_35b_Projector_Recipe()
+    wired = SimpleNamespace(
+        custom_megatron_before_train_step_hook_path=_cli_flags(recipe)[
+            "--custom-megatron-before-train-step-hook-path"
+        ],
+        extra_config=dict(recipe.extra_config or {}),
+    )
+    require_projector_step_hook(wired)
+
+    wired.extra_config.pop(
+        "training_gym_custom_megatron_before_train_step_hook_path", None
+    )
+    with pytest.raises(ValueError, match="unreduced gradients and no checkpoints"):
+        require_projector_step_hook(wired)
 
 
 def test_base_weights_come_from_the_rl_recipes_conversion():

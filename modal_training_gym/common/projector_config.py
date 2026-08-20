@@ -178,3 +178,60 @@ def should_save_projector(
     if total_steps > 0 and steps_attempted == total_steps:
         return True
     return save_interval > 0 and steps_applied % save_interval == 0
+
+
+# Both trainers carry the recipe's own hook under this ``extra_config`` key while
+# the ``--custom-megatron-before-train-step-hook-path`` flag names the gym's
+# phase-reporting wrapper that dispatches to it.
+STEP_HOOK_KEY = "training_gym_custom_megatron_before_train_step_hook_path"
+
+
+def step_hook_path(args) -> str | None:
+    """Resolve the hook the gym's reporting wrapper will dispatch to.
+
+    Mirrors ``phase_reporting._hook_path_from_args``: the value travels in
+    ``extra_config``, whose keys the trainer sets on ``args``, and is also
+    looked for on ``args`` and ``custom_config`` directly.
+    """
+    direct = getattr(args, STEP_HOOK_KEY, None)
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    for container_name in ("extra_config", "custom_config"):
+        container = getattr(args, container_name, None)
+        if isinstance(container, dict):
+            value = container.get(STEP_HOOK_KEY) or container.get(
+                STEP_HOOK_KEY.removeprefix("training_gym_")
+            )
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def require_step_hook(args, save_hook_path: str, recipe_name: str) -> None:
+    """Fail at model construction when the projector's step hook is unwired.
+
+    ``save_projector_checkpoint`` is the only thing that installs the
+    ``optimizer.step`` wrapper, and that wrapper owns two jobs nothing else
+    does: the tensor-parallel all-reduce of the replicated projector's
+    gradients, and writing the projector checkpoints. Neither announces its
+    absence, so a run whose hook never fires would train on
+    tensor-parallel-partial gradients and finish with nothing saved. The wiring
+    is a recipe default, but the field is assignable and reaches the container
+    through ``extra_config``, so the provider checks it — a run only exists if
+    the trainer called the provider — rather than trusting it.
+    """
+    wrapper = getattr(args, "custom_megatron_before_train_step_hook_path", None)
+    wrapper = wrapper.strip() if isinstance(wrapper, str) else ""
+    wrapped = step_hook_path(args)
+    if save_hook_path in (wrapper, wrapped):
+        return
+    raise ValueError(
+        "projector-only training needs the before-train-step hook to reach "
+        f"'{save_hook_path}', which installs the projector's gradient "
+        "all-reduce and checkpoint writer, but this run resolves "
+        f"--custom-megatron-before-train-step-hook-path to '{wrapper}' and the "
+        f"gym's wrapped hook to '{wrapped}'. Launch through "
+        f"{recipe_name} (or point custom_megatron_before_train_step_hook at "
+        "that path) rather than training with unreduced gradients and no "
+        "checkpoints."
+    )

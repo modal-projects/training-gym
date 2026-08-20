@@ -64,6 +64,7 @@ from modal_training_gym.frameworks.slime.projector_config import (
     ROW_COUNTS_KEY,
     ProjectorSpec,
     from_slime_args,
+    require_projector_step_hook,
     should_save_projector,
 )
 
@@ -310,6 +311,9 @@ def projector_model_provider(
 
     args = get_args()
     cfg = from_slime_args(args)
+    # The saver the step hook installs owns the projector's gradient all-reduce
+    # as well as its checkpoints, and neither absence announces itself.
+    require_projector_step_hook(args)
     if mpu.get_context_parallel_world_size() > 1:
         # Context parallelism shards the packed sequence a second way, with its
         # own two-chunk interleave (``slice_with_cp``) and a ``cu_seqlens`` scaled
