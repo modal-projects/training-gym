@@ -112,16 +112,20 @@ def rebase_positions(
     starts at ``cu_seqlens[i]`` and its rows are the ``row_counts[i]`` next
     entries of ``positions``.
 
-    slime appends no padding entry to ``cu_seqlens`` on the non-``allgather_cp``
-    path, so one boundary per sample plus the end is exactly what a well-formed
-    microbatch has; a mismatch means the row-count bookkeeping and the packing
-    disagree and the merge would silently write to the wrong tokens.
+    slime pads the packed stream to a multiple of ``tensor_model_parallel_size *
+    data_pad_size_multiplier`` and, when that padding is non-empty, appends it to
+    ``cu_seqlens`` as one more segment (``slime/backends/megatron_utils/data.py``).
+    So the segment count is the sample count, or one more than it; anything else
+    means the row-count bookkeeping and the packing disagree and the merge would
+    silently write to the wrong tokens. Only the first ``num_samples`` boundaries
+    are read, so the padding segment is ignored either way.
     """
     num_samples = int(row_counts.numel())
-    if int(cu_seqlens.numel()) - 1 != num_samples:
+    num_segments = int(cu_seqlens.numel()) - 1
+    if num_segments not in (num_samples, num_samples + 1):
         raise ValueError(
             f"{num_samples} projector sample(s) in this microbatch but "
-            f"cu_seqlens describes {int(cu_seqlens.numel()) - 1}; the packed "
+            f"cu_seqlens describes {num_segments} segment(s); the packed "
             "layout and the per-sample row counts disagree"
         )
     counts = row_counts.to(device=positions.device, dtype=torch.long)
@@ -130,7 +134,7 @@ def rebase_positions(
             f"row counts sum to {int(counts.sum())} but {int(positions.numel())} "
             "position(s) were passed"
         )
-    starts = cu_seqlens[:-1].to(device=positions.device, dtype=torch.long)
+    starts = cu_seqlens[:num_samples].to(device=positions.device, dtype=torch.long)
     return positions + torch.repeat_interleave(starts, counts)
 
 
