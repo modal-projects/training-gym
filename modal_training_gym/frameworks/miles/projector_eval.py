@@ -291,7 +291,12 @@ def load_projector(checkpoint: str, dtype: Any = None, trained: bool = True):
 
     ``trained=False`` returns the same architecture at the initialization the
     run started from — the baseline that isolates training from the mere
-    presence of a vector in the embedding stream.
+    presence of a vector in the embedding stream. The seed and output scale come
+    from the checkpoint rather than from ``ProjectorSpec()``: a run that
+    customized either started somewhere else, and comparing against the
+    defaults' init would make the baseline a different model. Checkpoints
+    written before those keys existed fall back to the defaults they were
+    written under.
     """
     import torch
 
@@ -313,7 +318,11 @@ def load_projector(checkpoint: str, dtype: Any = None, trained: bool = True):
         projector.load_state_dict(state["state_dict"])
     else:
         defaults = ProjectorSpec()
-        init_projector(projector, defaults.init_seed, defaults.output_scale)
+        init_projector(
+            projector,
+            int(config.get("init_seed", defaults.init_seed)),
+            float(config.get("output_scale", defaults.output_scale)),
+        )
     if dtype is not None:
         projector = projector.to(dtype)
     projector.eval()

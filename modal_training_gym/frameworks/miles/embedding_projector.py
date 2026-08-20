@@ -774,6 +774,12 @@ def write_projector_checkpoint(
             # the projector's output was sized from the model's hidden size — a
             # checkpoint has to describe its own shape.
             "output_dim": _projector_output_dim(projector),
+            # Not needed to rebuild the shape, but needed to rebuild the
+            # *starting point*: an eval's untrained baseline is only the state
+            # training began from if it inits from the same seed and scale this
+            # run used.
+            "init_seed": cfg.init_seed,
+            "output_scale": cfg.output_scale,
         },
     }
     latest = os.path.join(save_dir, _LATEST)

@@ -493,6 +493,37 @@ def test_a_hook_call_without_an_optimizer_fails_rather_than_skipping():
         )
 
 
+def test_the_untrained_baseline_starts_where_the_run_started(tmp_path):
+    """A custom init has to survive into the eval, or the baseline is a different model.
+
+    ``load_projector(trained=False)`` is the "the projector contributes nothing"
+    number, and it only means that if it inits from the seed and scale the run
+    used rather than from ``ProjectorSpec()``'s.
+    """
+    torch = pytest.importorskip("torch")
+    from modal_training_gym.frameworks.miles.embedding_projector import (
+        EmbeddingProjector,
+        init_projector,
+        write_projector_checkpoint,
+    )
+    from modal_training_gym.frameworks.miles.projector_eval import load_projector
+
+    spec = ProjectorSpec(
+        input_dim=4, hidden_dim=8, output_dim=6, init_seed=7, output_scale=0.25
+    )
+    projector = EmbeddingProjector(input_dim=4, hidden_dim=8, output_dim=6)
+    init_projector(projector, spec.init_seed, spec.output_scale)
+    expected = {k: v.clone() for k, v in projector.state_dict().items()}
+    write_projector_checkpoint(spec, str(tmp_path), projector, step=3, numbered=False)
+
+    baseline, iteration = load_projector(
+        str(tmp_path / "projector_latest.pt"), trained=False
+    )
+    assert iteration == 3
+    for name, param in baseline.state_dict().items():
+        assert torch.equal(param, expected[name]), name
+
+
 # ── Real biological data: ESM-2 over DeepLoc ──────────────────────────────────
 
 
