@@ -357,6 +357,41 @@ def test_synthetic_validation_data_is_regenerated_per_run():
     assert EmbeddingProjectorDataset.synthetic(n_rows=2, input_dim=4).always_prepare
 
 
+def test_the_labelled_synthetic_task_puts_the_answer_only_in_the_embedding():
+    """What makes the loss curve mean something: the prompt cannot answer it.
+
+    Every row shares one prompt and the target follows from the embedding alone,
+    so a falling loss is the projector carrying information rather than the base
+    reading the question. The control deletes exactly that information and
+    nothing else.
+    """
+    rows = EmbeddingProjectorDataset.synthetic_classification(
+        n_rows=8, input_dim=16, n_classes=4
+    ).rows
+    prompts = {r["messages"][0]["content"] for r in rows}
+    targets = [r["messages"][1]["content"] for r in rows]
+    assert len(prompts) == 1
+    assert len(set(targets)) == 4
+    # One vector per class, identical across the rows sharing a class.
+    per_class = {t: tuple(r["embeddings"][0]) for t, r in zip(targets, rows)}
+    assert len(set(per_class.values())) == 4
+    assert all(any(v) for v in per_class.values())
+
+    control = EmbeddingProjectorDataset.synthetic_classification(
+        n_rows=8, input_dim=16, n_classes=4, zero_embeddings=True
+    ).rows
+    assert [r["messages"] for r in control] == [r["messages"] for r in rows]
+    assert all(not any(r["embeddings"][0]) for r in control)
+
+
+def test_the_labelled_synthetic_task_rejects_more_classes_than_it_has_words():
+    dataset = EmbeddingProjectorDataset.synthetic_classification(
+        n_rows=2, input_dim=4, n_classes=99
+    )
+    with pytest.raises(TrainingGymConfigError, match="class words"):
+        dataset.rows
+
+
 def test_disk_reservation_survives_caller_supplied_train_kwargs():
     recipe = GLM_5_2_Projector_Recipe(train_function_kwargs={"timeout": 60})
     assert recipe.train_function_kwargs["timeout"] == 60

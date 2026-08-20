@@ -675,6 +675,9 @@ class EmbeddingProjectorDataset(DatasetConfig):
     synthetic_input_dim: int = 0
     synthetic_seed: int = 0
     synthetic_tokens: int = 512
+    # Labelled synthetic mode: see ``synthetic_classification()``.
+    synthetic_classes: int = 0
+    synthetic_zero_embeddings: bool = False
 
     def __init__(self, rows: list[dict[str, Any]] | None = None, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -738,7 +741,91 @@ class EmbeddingProjectorDataset(DatasetConfig):
             always_prepare=True,
         )
 
+    @classmethod
+    def synthetic_classification(
+        cls,
+        n_rows: int,
+        input_dim: int,
+        n_classes: int = 4,
+        zero_embeddings: bool = False,
+        seed: int = 0,
+    ) -> "EmbeddingProjectorDataset":
+        """A task whose answer is *only* in the embedding, to measure learning.
+
+        ``synthetic()`` proves the wiring; its targets are predictable from the
+        prompt, so a falling loss there says nothing about the projector. Here
+        every row carries the same prompt and one of ``n_classes`` fixed random
+        vectors, and the assistant turn is that class's word: the only path from
+        input to target runs through the projector, so loss falling below the
+        entropy of the class prior is the projector carrying information through
+        the frozen base.
+
+        ``zero_embeddings=True`` is the control — the same run with the
+        information deleted. Its curve is what "no learning" looks like on this
+        task, and a trained curve that does not separate from it means the
+        projector is not being used, however healthy the gradients look.
+
+        Rows are generated at prepare time from the seed, like ``synthetic()``:
+        ``n_classes`` vectors of a few thousand floats do not fit in the
+        cloudpickled closure Modal accepts (64 KiB).
+        """
+        return cls(
+            synthetic_rows=n_rows,
+            synthetic_input_dim=input_dim,
+            synthetic_classes=n_classes,
+            synthetic_zero_embeddings=zero_embeddings,
+            synthetic_seed=seed,
+            always_prepare=True,
+        )
+
+    # Short, single-token-ish words so the loss concentrates on the one
+    # decision the embedding determines.
+    _CLASS_WORDS = (
+        "alpha",
+        "bravo",
+        "charlie",
+        "delta",
+        "echo",
+        "foxtrot",
+        "golf",
+        "hotel",
+    )
+
+    def _classification_rows(self) -> list[dict[str, Any]]:
+        n_classes = self.synthetic_classes
+        if n_classes > len(self._CLASS_WORDS):
+            raise TrainingGymConfigError(
+                f"synthetic_classes={n_classes} exceeds the "
+                f"{len(self._CLASS_WORDS)} class words available"
+            )
+        rng = random.Random(self.synthetic_seed)
+        vectors = [
+            [rng.gauss(0.0, 1.0) for _ in range(self.synthetic_input_dim)]
+            for _ in range(n_classes)
+        ]
+        zero = [0.0] * self.synthetic_input_dim
+        rows = []
+        for i in range(self.synthetic_rows):
+            label = i % n_classes
+            rows.append(
+                {
+                    "messages": [
+                        # Identical for every row on purpose: the prompt holds
+                        # no information about the answer.
+                        {"role": "user", "content": "<emb> name it."},
+                        {"role": "assistant", "content": self._CLASS_WORDS[label]},
+                    ],
+                    "embeddings": [
+                        zero if self.synthetic_zero_embeddings else vectors[label]
+                    ],
+                    "positions": [1],
+                }
+            )
+        return rows
+
     def _synthetic_rows(self) -> list[dict[str, Any]]:
+        if self.synthetic_classes:
+            return self._classification_rows()
         rng = random.Random(self.synthetic_seed)
         # Split so both the prompt and the response the loss is taken over are
         # long. See ``synthetic()`` for what a word costs in tokens.
