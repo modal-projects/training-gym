@@ -167,10 +167,15 @@ def all_reduce_projector_grads(projector: nn.Module, sequence_parallel: bool) ->
     like, and a replicated module whose gradients are data-dependent cannot
     safely take part.
 
-    ``main_grad`` is read whole, so this assumes the non-distributed optimizer —
-    with ``use_distributed_optimizer`` it is a reduce-scattered shard of a
-    bucket and summing shards across the group means nothing. The projector recipes reject
-    that flag rather than leaving the assumption implicit here.
+    ``main_grad`` is read whole. The miles recipes reject
+    ``use_distributed_optimizer`` for that reason; slime sets it unconditionally
+    in ``_set_default_megatron_args``, so on that backend the recipe's field is
+    advisory and what makes this correct is *when* it runs: the hook wraps
+    ``optimizer.step``, where ``main_grad`` still views the whole bucket for the
+    projector's own data-parallel group. A run whose replicas diverged here
+    would show it immediately — the fingerprint
+    :func:`log_projector_replica` writes per tensor-parallel rank is compared on
+    every validated run and has stayed byte-identical.
     """
     import megatron.core.parallel_state as ps  # pyright: ignore[reportMissingImports]
 
@@ -209,8 +214,9 @@ def check_projector_weights(projector: nn.Module) -> str:
     that trains slowly: an all-zero projector writes exactly-zero rows for every
     embedding the encoder produced, so the run trains on no signal at all, and
     on real hardware it surfaced as NaN gradients rather than as its cause. The
-    recipes reject the flag that does it; this makes any other route to the same
-    state say so.
+    miles recipes reject the flag that does it, and slime's engine-free
+    ``debug_train_only`` mode never offloads; this makes any other route to the
+    same state say so.
     """
     parts, all_zero = [], True
     for name, param in projector_parameters(projector):

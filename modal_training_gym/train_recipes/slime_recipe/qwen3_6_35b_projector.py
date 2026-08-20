@@ -176,9 +176,16 @@ class Qwen3_6_35b_Projector_Recipe(Qwen3_6_35b_Recipe):
         ``main_grad`` whole. Under ``use_distributed_optimizer`` that buffer is
         a reduce-scattered shard of a bucket, and summing shards across the
         tensor-parallel group is not the replicated weight's whole-sequence
-        gradient — it would train on a silently wrong gradient rather than
-        fail. There is nothing to gain either: with the base frozen, this run's
-        optimizer state is the projector's alone, tens of megabytes.
+        gradient. There is nothing to gain either: with the base frozen, this
+        run's optimizer state is the projector's alone, tens of megabytes.
+
+        This rejects the *request*, not the state: slime sets
+        ``args.use_distributed_optimizer = True`` unconditionally inside its own
+        ``_set_default_megatron_args``, so the container trains with it on
+        whatever this field says. What keeps the sum correct there is where the
+        hook sits — it wraps ``optimizer.step``, so ``main_grad`` still views
+        the whole bucket — and the per-rank projector fingerprint the run logs
+        is what would catch it if that ever stopped holding.
         """
         if self.use_distributed_optimizer:
             raise TrainingGymConfigError(

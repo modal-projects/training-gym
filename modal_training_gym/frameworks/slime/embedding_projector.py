@@ -342,8 +342,11 @@ def projector_model_provider(
         _hide_projector_from_megatron_checkpoints(model)
         trainable = sum(p.numel() for p in projector.parameters())
         logger.info(
-            "projector-only training: froze %d base parameter tensors, "
-            "%d trainable projector parameters",
+            # A zero here is the healthy case, not a failure: slime's own
+            # only_train_params_name_list freezing runs first, so there is
+            # usually nothing left for freeze_base_model to find.
+            "projector-only training: froze %d base parameter tensors that were "
+            "not already frozen, %d trainable projector parameters",
             frozen,
             trainable,
         )
