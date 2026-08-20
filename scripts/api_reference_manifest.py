@@ -57,6 +57,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "EmbeddingProjectorDataset",
     },
     {
+        "class_name": "ProteinLocalizationDataset",
+        "module": "modal_training_gym.common.dataset",
+        "group": "core",
+        "class_type": "config_data",
+        "sidebar_label": "ProteinLocalizationDataset",
+    },
+    {
         "class_name": "WandbConfig",
         "module": "modal_training_gym.common.wandb",
         "group": "core",
@@ -288,6 +295,13 @@ API_REFERENCE_MANIFEST = [
         "group": "training",
         "class_type": "config_data",
         "sidebar_label": "ProjectorSpec",
+    },
+    {
+        "class_name": "ProjectorEval",
+        "module": "modal_training_gym.frameworks.miles.projector_eval",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "ProjectorEval",
     },
     {
         "class_name": "Qwen3_6_35b_Recipe",

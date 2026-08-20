@@ -157,7 +157,10 @@ class _ProjectorMerge:
             int(detached.isinf().sum()),
             int(detached.numel()),
         )
-        return output
+        # And what the loss hands back, which localizes a NaN: arriving here it
+        # came from the loss, arriving only at the embeddings it was produced
+        # inside the frozen base's backward.
+        return log_incoming_grad(output, "the frozen base's output (from the loss)")
 
     def _embedding_hook(self, module, inputs, output):
         if self._pending is None:
@@ -281,6 +284,17 @@ def projector_sft_rollout(args, rollout_id: int, data_buffer, evaluation: bool =
             messages, tools=sample.metadata.get("tools")
         )
         response_length = mask_generator.get_response_lengths([loss_mask])[0]
+        if not response_length:
+            # ``loss_mask[-0:]`` is the whole mask, so a conversation with no
+            # trained-on turn would hand miles a mask of the full sequence
+            # alongside ``response_length=0`` — nothing to learn from, reported
+            # as a mask/length mismatch deep in the loss instead.
+            raise ValueError(
+                f"sample {sample.index} has no tokens to train on: the loss "
+                "mask marks none of its turns as a response. Conversations for "
+                "supervised projector training have to end in an assistant "
+                "message."
+            )
         sample.tokens = token_ids
         sample.response_length = response_length
         sample.reward = 0
@@ -305,6 +319,20 @@ def projector_sft_rollout(args, rollout_id: int, data_buffer, evaluation: bool =
             raise ValueError(
                 f"sample {sample.index} places an embedding at token "
                 f"{max_position} of a {len(token_ids)}-token sequence"
+            )
+        budget = getattr(args, "seq_length", None)
+        if budget and len(token_ids) > budget:
+            # Positions are offsets into the tokens produced here, and the merge
+            # writes them into the packed micro-batch. Anything that shortens a
+            # sequence between the two shifts every later sample's offset, so a
+            # sample that does not fit the training sequence length is rejected
+            # here rather than merged onto whichever tokens survived.
+            raise ValueError(
+                f"sample {sample.index} tokenizes to {len(token_ids)} tokens, "
+                f"past the {budget}-token training sequence length. Projector "
+                "positions index the tokens this rollout emits, so a truncated "
+                "sequence would move the embeddings onto the wrong tokens; "
+                "shorten the conversation or raise seq_length."
             )
         sample.multimodal_train_inputs = {
             cfg.embeddings_key: embeddings_t,
@@ -426,7 +454,22 @@ def save_projector_checkpoint(
 
     Idempotent — the hook fires before every train step and the saver is
     installed on the first one, once per optimizer.
+
+    The saver owns both the projector's gradient all-reduce and every checkpoint
+    write, so a hook call without an optimizer is not something to skip: it
+    would train unreduced, tensor-parallel-partial gradients and leave no
+    adapter behind, silently. The pinned image passes the optimizer from its
+    train step (and the GPU runs on this branch installed the saver and wrote
+    checkpoints), so this raises if that ever stops being true.
     """
-    if optimizer is None or getattr(optimizer, "_training_gym_projector_saver", None):
+    if optimizer is None:
+        raise RuntimeError(
+            "miles called the before-train-step hook without an optimizer, so "
+            "projector-only training cannot install the wrapper that reduces "
+            "projector gradients across the tensor-parallel group and writes "
+            "the projector checkpoints. Continuing would train partial "
+            "gradients and produce no adapter."
+        )
+    if getattr(optimizer, "_training_gym_projector_saver", None):
         return
     optimizer._training_gym_projector_saver = _ProjectorSaver(args, model, optimizer)

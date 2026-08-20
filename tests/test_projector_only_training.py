@@ -19,6 +19,7 @@ from modal_training_gym import (
     GLM_5_2_5Layer_Projector_Recipe,
     GLM_5_2_Projector_Recipe,
     ProjectorSpec,
+    ProteinLocalizationDataset,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.frameworks.miles.projector_config import (
@@ -141,6 +142,28 @@ def test_recipe_emits_supervised_engine_free_flags():
     assert "--projector" not in flags
 
 
+def test_the_fields_this_adds_to_the_base_recipe_change_no_other_recipe():
+    """The projector's five new ``MilesRecipe`` fields are opt-in, not defaults.
+
+    They default to values ``cli_args`` skips, so every miles recipe that existed
+    before this change emits the command line it emitted before — which is the
+    only thing keeping a projector-shaped flag out of a Qwen or Moonlight run.
+    """
+    from modal_training_gym.common.models.qwen3_5_4b import Qwen3_5_4B
+    from modal_training_gym.train_recipes.miles_recipe import Qwen3_5_4b_Miles_Recipe
+
+    recipe = Qwen3_5_4b_Miles_Recipe()
+    flags = _flags(recipe.cli_args(dataset=_dataset(), model=Qwen3_5_4B()))
+    for flag in (
+        "--custom-model-provider-path",
+        "--loss-type",
+        "--num-epoch",
+        "--debug-train-only",
+        "--disable-compute-advantages-and-returns",
+    ):
+        assert flag not in flags
+
+
 def test_save_hook_runs_through_the_gyms_phase_reporting_wrapper():
     """Dashboard phase/substep timing must survive the projector's own hook."""
     recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
@@ -179,6 +202,29 @@ def test_an_unwired_step_hook_fails_at_model_construction():
         require_projector_step_hook(wired)
 
 
+def test_only_the_attention_backend_that_keeps_the_gradient_is_allowed():
+    """tilelang's fused sparse-MLA backward hands the embeddings NaN dq.
+
+    Verified on 8xH200: finite forward and finite grads down to the query
+    projection, then NaN out of ``sparse_mla_bwd`` — harmless for the LoRA runs
+    upstream ships, fatal for a projector whose gradient comes from there. The
+    working pairing is unrecomputable, so recompute is rejected with it.
+    """
+    for override in (
+        {"dsa_attention_backend": "tilelang", "qkv_format": "thd"},
+        {"qkv_format": "thd"},
+    ):
+        with pytest.raises(ValidationError, match='dsa_attention_backend="megatron"'):
+            GLM_5_2_Projector_Recipe(**override)
+    with pytest.raises(ValidationError, match="recompute_granularity=None"):
+        GLM_5_2_Projector_Recipe(recompute_granularity="full")
+    recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
+    assert (recipe.dsa_attention_backend, recipe.qkv_format) == ("megatron", "bshd")
+    recipe.recompute_granularity = "full"
+    with pytest.raises(TrainingGymConfigError, match="recompute_granularity=None"):
+        recipe.validate_model_parallelism(GLM_5_2_5Layer())
+
+
 def test_lora_is_rejected():
     # Pydantic wraps the validator's error; the message is what a user reads.
     with pytest.raises(ValidationError, match="lora_rank must be unset"):
@@ -204,11 +250,14 @@ def test_tensor_parallelism_without_sequence_parallelism_is_rejected():
     recipe = GLM_5_2_Projector_Recipe(sequence_parallel=False)
     with pytest.raises(TrainingGymConfigError, match="sequence_parallel=True"):
         recipe.validate_model_parallelism(GLM_5_2())
-    # TP=1 has nothing to sum over, so the combination is fine there.
+    # TP=1 has nothing to sum over, so the combination is fine there — at a
+    # batch that still covers the 64 data-parallel ranks TP=1 leaves.
     GLM_5_2_Projector_Recipe(
         sequence_parallel=False,
         tensor_model_parallel_size=1,
         expert_model_parallel_size=1,
+        rollout_batch_size=64,
+        global_batch_size=64,
     ).validate_model_parallelism(GLM_5_2())
 
 
@@ -287,6 +336,16 @@ def test_expert_parallel_size_must_divide_the_model_scripts_experts():
         recipe.validate_model_parallelism(GLM_5_2())
 
 
+def test_a_step_must_have_a_sample_for_every_data_parallel_rank():
+    """Both shipped shapes, and a rejection when a topology outgrows the batch."""
+    for recipe in (GLM_5_2_Projector_Recipe(), GLM_5_2_5Layer_Projector_Recipe()):
+        recipe.validate_model_parallelism(GLM_5_2())
+    with pytest.raises(TrainingGymConfigError, match="16 data-parallel rank"):
+        GLM_5_2_Projector_Recipe(
+            rollout_batch_size=8, global_batch_size=8
+        ).validate_model_parallelism(GLM_5_2())
+
+
 def test_no_eval_pass_is_configured():
     """The rollout raises on evaluation, so the run must not schedule one."""
     assert GLM_5_2_Projector_Recipe().skip_eval_before_train is True
@@ -297,6 +356,41 @@ def test_no_eval_pass_is_configured():
 def test_synthetic_validation_data_is_regenerated_per_run():
     """The on-volume path is class-derived, so stale rows would be reused."""
     assert EmbeddingProjectorDataset.synthetic(n_rows=2, input_dim=4).always_prepare
+
+
+def test_the_labelled_synthetic_task_puts_the_answer_only_in_the_embedding():
+    """What makes the loss curve mean something: the prompt cannot answer it.
+
+    Every row shares one prompt and the target follows from the embedding alone,
+    so a falling loss is the projector carrying information rather than the base
+    reading the question. The control deletes exactly that information and
+    nothing else.
+    """
+    rows = EmbeddingProjectorDataset.synthetic_classification(
+        n_rows=8, input_dim=16, n_classes=4
+    ).rows
+    prompts = {r["messages"][0]["content"] for r in rows}
+    targets = [r["messages"][1]["content"] for r in rows]
+    assert len(prompts) == 1
+    assert len(set(targets)) == 4
+    # One vector per class, identical across the rows sharing a class.
+    per_class = {t: tuple(r["embeddings"][0]) for t, r in zip(targets, rows)}
+    assert len(set(per_class.values())) == 4
+    assert all(any(v) for v in per_class.values())
+
+    control = EmbeddingProjectorDataset.synthetic_classification(
+        n_rows=8, input_dim=16, n_classes=4, zero_embeddings=True
+    ).rows
+    assert [r["messages"] for r in control] == [r["messages"] for r in rows]
+    assert all(not any(r["embeddings"][0]) for r in control)
+
+
+def test_the_labelled_synthetic_task_rejects_more_classes_than_it_has_words():
+    dataset = EmbeddingProjectorDataset.synthetic_classification(
+        n_rows=2, input_dim=4, n_classes=99
+    )
+    with pytest.raises(TrainingGymConfigError, match="class words"):
+        dataset.rows
 
 
 def test_disk_reservation_survives_caller_supplied_train_kwargs():
@@ -378,3 +472,138 @@ def test_a_zeroed_projector_is_caught_at_the_first_forward():
         check_projector_weights(projector)
     # Every row it would merge is exactly zero, whatever the encoder produced.
     assert float(projector(torch.ones(2, 4)).abs().max()) == 0.0
+
+
+def test_a_hook_call_without_an_optimizer_fails_rather_than_skipping():
+    """The saver owns the grad all-reduce, so skipping it trains partial grads.
+
+    The pinned image passes the optimizer, and the GPU runs installed the saver
+    and wrote checkpoints; if a future image stops doing so, the run has to stop
+    rather than quietly train tensor-parallel-partial gradients and produce no
+    adapter.
+    """
+    pytest.importorskip("torch")
+    from modal_training_gym.frameworks.miles.embedding_projector import (
+        save_projector_checkpoint,
+    )
+
+    with pytest.raises(RuntimeError, match="without an optimizer"):
+        save_projector_checkpoint(
+            object(), rollout_id=0, step_id=0, model=[], optimizer=None
+        )
+
+
+# ── Real biological data: ESM-2 over DeepLoc ──────────────────────────────────
+
+
+def test_protein_dataset_turns_deeploc_locations_into_answer_words():
+    """The target has to be words, since the model answers by generating them.
+
+    DeepLocMulti's label is ``"Endoplasmic.reticulum,M"``; DeepLocBinary's is a
+    bare ``"M"``/``"S"``. Neither is something a decoder should be asked to emit.
+    """
+    dataset = ProteinLocalizationDataset()
+    assert dataset._class_word("Endoplasmic.reticulum,M") == "endoplasmic reticulum"
+    assert dataset._class_word("Nucleus,U") == "nucleus"
+    assert dataset._class_word("M") == "membrane"
+    assert dataset._class_word("S") == "soluble"
+
+
+def test_protein_dataset_holds_its_eval_split_out_by_construction():
+    """Train and eval come from DeepLoc's own disjoint splits, not a resample."""
+    dataset = ProteinLocalizationDataset()
+    assert dataset.train_split != dataset.eval_split
+    assert dataset.always_prepare, "stale rows on the volume would be reused"
+    train_path, eval_paths = MilesRecipe._resolve_data_paths(dataset)
+    assert eval_paths and eval_paths["eval"] != train_path
+
+
+def test_protein_dataset_rejects_an_encoder_the_projector_is_not_shaped_for():
+    """Caught while materializing data, not after a cluster is up."""
+    dataset = ProteinLocalizationDataset(input_dim=1536)
+    dataset._encode = lambda sequences: [[0.0] * 640 for _ in sequences]  # pyright: ignore[reportAttributeAccessIssue]
+    with pytest.raises(TrainingGymConfigError, match="640-wide"):
+        dataset._split_rows("test", 1)
+
+
+def test_protein_rows_carry_the_embedding_in_the_column_miles_reads():
+    dataset = ProteinLocalizationDataset(rows=[])
+    row = dataset._to_row(
+        {
+            "messages": [
+                {"role": "user", "content": dataset.prompt},
+                {"role": "assistant", "content": "nucleus"},
+            ],
+            "embeddings": [[0.5] * 640],
+            "positions": [1],
+            "label": "nucleus",
+        }
+    )
+    assert row["metadata"]["projector_embeddings"] == [[0.5] * 640]
+    assert row["metadata"]["projector_positions"] == [1]
+
+
+def test_the_held_out_eval_reads_targets_and_embeddings_back(tmp_path):
+    """The eval's candidate set is the file's own answers, not a second list."""
+    from modal_training_gym.frameworks.miles.projector_eval import read_eval_rows
+
+    path = tmp_path / "eval.jsonl"
+    dataset = ProteinLocalizationDataset(rows=[])
+    with open(path, "w") as f:
+        for word in ("nucleus", "membrane"):
+            f.write(
+                json.dumps(
+                    dataset._to_row(
+                        {
+                            "messages": [
+                                {"role": "user", "content": dataset.prompt},
+                                {"role": "assistant", "content": word},
+                            ],
+                            "embeddings": [[0.25] * 640],
+                            "positions": [1],
+                            "label": word,
+                        }
+                    )
+                )
+                + "\n"
+            )
+
+    rows = read_eval_rows(str(path), "projector_embeddings", "projector_positions")
+    assert [r["target"] for r in rows] == ["nucleus", "membrane"]
+    # The answer is removed from what the model is shown, or accuracy is free.
+    assert all(m["role"] != "assistant" for r in rows for m in r["messages"])
+    assert rows[0]["embeddings"] == [[0.25] * 640] and rows[0]["positions"] == [1]
+
+
+def test_the_report_states_both_baselines_it_has_to_beat():
+    from modal_training_gym.frameworks.miles.projector_eval import (
+        ProjectorEvalReport,
+        ProjectorEvalRow,
+    )
+
+    def row(target: str, prediction: str) -> ProjectorEvalRow:
+        return ProjectorEvalRow(
+            prompt="p",
+            target=target,
+            prediction=prediction,
+            correct=target == prediction,
+            scores={},
+        )
+
+    report = ProjectorEvalReport(
+        model_name="m",
+        checkpoint="c",
+        iteration=40,
+        classes=["nucleus", "membrane"],
+        rows=[
+            row("nucleus", "nucleus"),
+            row("nucleus", "nucleus"),
+            row("membrane", "membrane"),
+            row("membrane", "nucleus"),
+        ],
+        untrained_rows=[row("nucleus", "nucleus")] + [row("membrane", "nucleus")] * 3,
+    )
+    assert report.accuracy == 0.75
+    assert report.untrained_accuracy == 0.25
+    assert report.majority_accuracy == 0.5
+    assert "trained 0.750" in report.summary()

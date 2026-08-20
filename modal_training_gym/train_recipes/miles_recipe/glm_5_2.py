@@ -167,23 +167,51 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     expert_model_parallel_size: int = 32
     expert_tensor_parallel_size: int = 1
 
-    recompute_granularity: str | None = "full"
-    recompute_method: str | None = "uniform"
-    recompute_num_layers: int | None = 1
+    # No activation recompute, which is not a free choice either: the layout the
+    # only working attention backend needs (see below) is the one the pinned
+    # image refuses to recompute — "DSA cross-layer index-share is not
+    # recompute-safe in the bshd layout ... use --qkv-format thd ... or disable
+    # activation recompute". A projector-only run backpropagates to the input
+    # embeddings, so every layer's activations are live; if the 744B shape runs
+    # out of memory on this, the way out is more nodes or a shorter sequence,
+    # not recompute.
+    recompute_granularity: str | None = None
+    recompute_method: str | None = None
+    recompute_num_layers: int | None = None
     # Upstream's GLM-5.2 script forbids dynamic batching outright: "The DSA
     # kernel backend dictates the query layout; both forbid
     # --use-dynamic-batch-size, hence --micro-batch-size 1" — tilelang's fused
     # sparse-MLA kernels index by cu_seqlens, megatron's unfused core attention
-    # wants a 4D query. With it on, the 5-layer base's forward stayed finite
-    # while SparseMLA's backward returned NaN into the embedding stream, on a
-    # run whose projected rows were multiplied by zero — i.e. independent of
-    # anything the projector wrote.
+    # wants a 4D query.
     use_dynamic_batch_size: bool = False
     micro_batch_size: int | None = 1
+    # GLM-5.2's sparse attention has two kernel backends, and the query layout
+    # is not free to choose alongside them: upstream derives one from the other
+    # (``qkv_format = "thd" if dsa_attention_backend == "tilelang" else
+    # "bshd"``). miles defaults the backend to ``megatron``, while MilesRecipe
+    # defaults the layout to ``thd``, so naming neither pairs megatron's unfused
+    # attention with a packed layout it does not implement — the forward returns
+    # finite logits and the backward hands the embedding stream NaN.
+    #
+    # ``megatron``/``bshd`` rather than ``tilelang``/``thd`` because only the
+    # former backpropagates to the embeddings. Both give a finite forward, but
+    # tilelang's ``sparse_mla_bwd`` returns a NaN dq on this shape (localized on
+    # 8xH200 to ``decoder.layers.4.self_attention.linear_q_up_proj``, with every
+    # grad above it finite, and independent of the loss mask and of recompute),
+    # which upstream's own runs never see: LoRA trains weights inside attention
+    # and never needs dq to reach the input embeddings, and a projector does.
+    dsa_attention_backend: str = "megatron"
+    qkv_format: str = "bshd"
 
     num_rollout: int = 10
-    rollout_batch_size: int = 8
-    global_batch_size: int = 8
+    # One sample per data-parallel rank per step, at this shape's DP width of
+    # 64 GPUs / TP4 = 16. Without dynamic batching Megatron's micro-batch
+    # calculator requires ``global_batch_size % (micro_batch_size * DP) == 0``,
+    # and a rollout of fewer samples than DP ranks cannot be split across them
+    # at all — see ``_require_batch_covers_data_parallel``, which checks this for
+    # any topology a caller sets rather than only for these defaults.
+    rollout_batch_size: int = 16
+    global_batch_size: int = 16
     # Only the projector is written, by the hook.
     save_interval: int = 1_000_000
 
@@ -249,21 +277,49 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
 
         Upstream's ``scripts/run_glm5_2_744b_a40b_lora.py`` states the
         constraint for both DSA backends and pins ``--micro-batch-size 1``
-        instead. A run with it on trained nothing: the sparse-MLA backward
-        returned NaN, and ``check_for_nan_in_loss_and_grad`` aborted the step.
+        instead.
         """
         if self.use_dynamic_batch_size:
             raise TrainingGymConfigError(
                 f"{type(self).__name__} needs use_dynamic_batch_size=False: "
                 "GLM-5.2's DSA attention kernels forbid it (upstream's run "
-                "script pins micro_batch_size=1 for exactly this reason), and "
-                "with it on the base's sparse-MLA backward returns NaN."
+                "script pins micro_batch_size=1 for exactly this reason)."
             )
         if self.micro_batch_size != 1:
             raise TrainingGymConfigError(
                 f"{type(self).__name__} needs micro_batch_size=1 (got "
                 f"{self.micro_batch_size}), the only batching GLM-5.2's DSA "
                 "kernels take without dynamic batching."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_working_attention_backward(self) -> "GLM_5_2_Projector_Recipe":
+        """Reject the backend/layout/recompute combinations that lose the grad.
+
+        A projector-only run is the one GLM-5.2 shape whose gradient has to
+        reach the input embeddings, so it is the one that cares which DSA
+        backend runs the backward: ``tilelang``'s fused ``sparse_mla_bwd``
+        returns NaN dq (proven on 8xH200, finite forward, finite grad down to
+        the query projection), and ``megatron``'s unfused attention is finite
+        but only ever paired with ``bshd``, which the image will not recompute.
+        """
+        if self.dsa_attention_backend != "megatron" or self.qkv_format != "bshd":
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs "
+                'dsa_attention_backend="megatron" with qkv_format="bshd" (got '
+                f'"{self.dsa_attention_backend}"/"{self.qkv_format}"): it is '
+                "the only pairing whose backward carries a finite gradient to "
+                "the input embeddings, which is the one thing a projector-only "
+                "run cannot do without."
+            )
+        if self.recompute_granularity is not None:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} needs recompute_granularity=None (got "
+                f'"{self.recompute_granularity}"): the pinned image refuses to '
+                "recompute DSA's cross-layer index share in the bshd layout "
+                "this recipe's attention backend requires. Fit the run with "
+                "nodes or sequence length instead."
             )
         return self
 
@@ -417,6 +473,46 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
             )
         return self
 
+    def _require_batch_covers_data_parallel(self) -> None:
+        """Require a step's samples to divide evenly among the data-parallel ranks.
+
+        With dynamic batching rejected, Megatron's constant micro-batch
+        calculator asserts ``global_batch_size % (micro_batch_size * DP) == 0``,
+        and a rollout that yields fewer samples than there are data-parallel
+        ranks cannot be split across them however it is batched. Neither is
+        checked before the cluster starts otherwise, so a topology change (more
+        nodes, less tensor parallelism) surfaces as an assertion inside the
+        containers after the base checkpoint has been downloaded.
+        """
+        gpus = self.actor_num_nodes * self.actor_num_gpus_per_node
+        shard = (
+            self.tensor_model_parallel_size
+            * self.pipeline_model_parallel_size
+            * self.context_parallel_size
+        )
+        if not gpus or not shard or gpus % shard:
+            # Divisibility of the GPU count by the model shards is the base
+            # class's preflight; nothing to say about batches until it holds.
+            return
+        data_parallel = gpus // shard
+        per_step = self.rollout_batch_size * self.n_samples_per_prompt
+        micro = self.micro_batch_size or 1
+        if self.global_batch_size % (micro * data_parallel) or per_step % data_parallel:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} spreads {gpus} GPU(s) over "
+                f"TP{self.tensor_model_parallel_size}/"
+                f"PP{self.pipeline_model_parallel_size}/"
+                f"CP{self.context_parallel_size}, so {data_parallel} "
+                f"data-parallel rank(s), but a step has "
+                f"global_batch_size={self.global_batch_size} over "
+                f"micro_batch_size={micro} and the rollout yields {per_step} "
+                f"sample(s) (rollout_batch_size={self.rollout_batch_size} x "
+                f"n_samples_per_prompt={self.n_samples_per_prompt}). Both have "
+                f"to be multiples of {data_parallel}: without dynamic batching "
+                "Megatron divides the global batch by micro-batch size and "
+                "data-parallel width, and each rank needs samples of its own."
+            )
+
     def _recheck_mutable_launch_invariants(self) -> None:
         """Re-run the guards that assignment after construction can defeat.
 
@@ -437,6 +533,9 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
         self._require_pretrained_base()
         self._reject_distributed_optimizer()
         self._reject_offload_train()
+        self._reject_dynamic_batch_size()
+        self._require_working_attention_backward()
+        self._require_batch_covers_data_parallel()
         if self.save_interval is not None and self.save_interval <= self.num_rollout:
             warnings.warn(
                 f"{type(self).__name__} has save_interval={self.save_interval} "
@@ -508,3 +607,6 @@ class GLM_5_2_5Layer_Projector_Recipe(GLM_5_2_Projector_Recipe):
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
     expert_model_parallel_size: int = 8
+    # One node over TP4 is 2 data-parallel ranks, not the 744B shape's 16.
+    rollout_batch_size: int = 8
+    global_batch_size: int = 8

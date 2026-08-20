@@ -674,7 +674,10 @@ class EmbeddingProjectorDataset(DatasetConfig):
     synthetic_rows: int = 0
     synthetic_input_dim: int = 0
     synthetic_seed: int = 0
-    synthetic_tokens: int = 1600
+    synthetic_tokens: int = 512
+    # Labelled synthetic mode: see ``synthetic_classification()``.
+    synthetic_classes: int = 0
+    synthetic_zero_embeddings: bool = False
 
     def __init__(self, rows: list[dict[str, Any]] | None = None, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -702,7 +705,7 @@ class EmbeddingProjectorDataset(DatasetConfig):
 
     @classmethod
     def synthetic(
-        cls, n_rows: int, input_dim: int, seed: int = 0, tokens: int = 1600
+        cls, n_rows: int, input_dim: int, seed: int = 0, tokens: int = 512
     ) -> "EmbeddingProjectorDataset":
         """Random embeddings on a fixed conversation, for wiring validation.
 
@@ -725,10 +728,15 @@ class EmbeddingProjectorDataset(DatasetConfig):
         what real prose gives (~0.006 rather than ~1.4 on Qwen3.6-35B-A3B). That
         says nothing about the projector, whose inputs are noise either way.
 
-        ``tokens`` is a rough per-sample length, long by default so a
-        validation step exercises a sequence a real projector run would see —
-        a two-sentence conversation is a few dozen tokens, well under the
-        sparse-attention regime a DSA model like GLM-5.2 trains in.
+        ``tokens`` is a *word* budget, not a token count, and the filler words
+        are worth ~2.7 GLM tokens each: measured on the pinned image,
+        ``tokens=1600`` produced 4298-token samples, past the GLM-5.2 recipe's
+        4096 ``seq_length`` and ``max_position_embeddings``. It is long enough
+        to exercise a real sequence (a two-sentence conversation is a few dozen
+        tokens, nothing like what a projector run sees) and, at the default,
+        short enough to stay inside that window with room for the chat
+        template. Raising it is a request to check the model's ``seq_length``
+        first.
         """
         return cls(
             synthetic_rows=n_rows,
@@ -738,10 +746,94 @@ class EmbeddingProjectorDataset(DatasetConfig):
             always_prepare=True,
         )
 
-    def _synthetic_rows(self) -> list[dict[str, Any]]:
+    @classmethod
+    def synthetic_classification(
+        cls,
+        n_rows: int,
+        input_dim: int,
+        n_classes: int = 4,
+        zero_embeddings: bool = False,
+        seed: int = 0,
+    ) -> "EmbeddingProjectorDataset":
+        """A task whose answer is *only* in the embedding, to measure learning.
+
+        ``synthetic()`` proves the wiring; its targets are predictable from the
+        prompt, so a falling loss there says nothing about the projector. Here
+        every row carries the same prompt and one of ``n_classes`` fixed random
+        vectors, and the assistant turn is that class's word: the only path from
+        input to target runs through the projector, so loss falling below the
+        entropy of the class prior is the projector carrying information through
+        the frozen base.
+
+        ``zero_embeddings=True`` is the control — the same run with the
+        information deleted. Its curve is what "no learning" looks like on this
+        task, and a trained curve that does not separate from it means the
+        projector is not being used, however healthy the gradients look.
+
+        Rows are generated at prepare time from the seed, like ``synthetic()``:
+        ``n_classes`` vectors of a few thousand floats do not fit in the
+        cloudpickled closure Modal accepts (64 KiB).
+        """
+        return cls(
+            synthetic_rows=n_rows,
+            synthetic_input_dim=input_dim,
+            synthetic_classes=n_classes,
+            synthetic_zero_embeddings=zero_embeddings,
+            synthetic_seed=seed,
+            always_prepare=True,
+        )
+
+    # Short, single-token-ish words so the loss concentrates on the one
+    # decision the embedding determines.
+    _CLASS_WORDS = (
+        "alpha",
+        "bravo",
+        "charlie",
+        "delta",
+        "echo",
+        "foxtrot",
+        "golf",
+        "hotel",
+    )
+
+    def _classification_rows(self) -> list[dict[str, Any]]:
+        n_classes = self.synthetic_classes
+        if n_classes > len(self._CLASS_WORDS):
+            raise TrainingGymConfigError(
+                f"synthetic_classes={n_classes} exceeds the "
+                f"{len(self._CLASS_WORDS)} class words available"
+            )
         rng = random.Random(self.synthetic_seed)
-        # ~1 token per word, split so both the prompt and the response the loss
-        # is taken over are long.
+        vectors = [
+            [rng.gauss(0.0, 1.0) for _ in range(self.synthetic_input_dim)]
+            for _ in range(n_classes)
+        ]
+        zero = [0.0] * self.synthetic_input_dim
+        rows = []
+        for i in range(self.synthetic_rows):
+            label = i % n_classes
+            rows.append(
+                {
+                    "messages": [
+                        # Identical for every row on purpose: the prompt holds
+                        # no information about the answer.
+                        {"role": "user", "content": "<emb> name it."},
+                        {"role": "assistant", "content": self._CLASS_WORDS[label]},
+                    ],
+                    "embeddings": [
+                        zero if self.synthetic_zero_embeddings else vectors[label]
+                    ],
+                    "positions": [1],
+                }
+            )
+        return rows
+
+    def _synthetic_rows(self) -> list[dict[str, Any]]:
+        if self.synthetic_classes:
+            return self._classification_rows()
+        rng = random.Random(self.synthetic_seed)
+        # Split so both the prompt and the response the loss is taken over are
+        # long. See ``synthetic()`` for what a word costs in tokens.
         filler = " ".join(
             f"token{n}" for n in range(max(self.synthetic_tokens, 8) // 2)
         )
@@ -792,3 +884,173 @@ class EmbeddingProjectorDataset(DatasetConfig):
             with open(target, "w") as f:
                 for row in rows:
                     f.write(json.dumps(row) + "\n")
+
+
+#: DeepLocBinary annotates membrane vs soluble with single letters; spelled out
+#: so the target is a word the base model has a prior over.
+_DEEPLOC_BINARY_WORDS = {"M": "membrane", "S": "soluble"}
+
+
+class ProteinLocalizationDataset(EmbeddingProjectorDataset):
+    """Projector data from a real protein encoder: ESM-2 over DeepLoc.
+
+    The synthetic modes above answer "does anything reach the projector"; this
+    one is the task a projector-only run exists for. Each row is one protein:
+    the embedding is an ESM-2 encoding of its amino-acid sequence, the prompt
+    asks where the protein localizes, and the assistant turn is the compartment
+    DeepLoc annotates it with. Nothing about the answer is in the prompt — every
+    row's prompt is identical — so held-out accuracy is a statement about the
+    projector, in the same shape as the synthetic control but on data whose
+    structure the projector did not get handed.
+
+    The train and eval files come from DeepLoc's own disjoint splits, so the
+    eval set is held out by construction rather than by sampling; the encoder
+    runs at ``prepare()`` time on the CPU container that materializes the data,
+    which is why the default encoder is one of the small ESM-2 checkpoints.
+    Embedding width is the encoder's hidden size, and it has to match
+    ``ProjectorSpec.input_dim`` — ``prepare()`` fails loudly when it doesn't,
+    rather than leaving the rollout to raise once a cluster is already up.
+
+    Sequences are mean-pooled over residues into one vector per protein, which
+    is the standard way these encoders are consumed for whole-sequence
+    prediction and what makes a protein cost exactly one token here.
+    """
+
+    hf_repo: str = "AI4Protein/DeepLocMulti"
+    hf_config: str | None = None
+    train_split: str = "train"
+    eval_split: str = "test"
+    sequence_key: str = "aa_seq"
+    location_key: str = "location"
+    encoder_model: str = "facebook/esm2_t30_150M_UR50D"
+    # Width the projector is configured for; checked against the encoder's
+    # actual output at prepare() time.
+    input_dim: int = 640
+    prompt: str = (
+        "<protein> Which subcellular compartment does this protein localize to?"
+    )
+    train_rows: int = 512
+    eval_rows: int = 128
+    # Residues per protein handed to the encoder. DeepLoc sequences run to
+    # thousands; ESM-2's attention is quadratic and localization signal is
+    # concentrated in the terminal targeting peptides, so truncation is the
+    # normal treatment.
+    max_residues: int = 512
+    encoder_batch_size: int = 8
+    seed: int = 0
+
+    def __init__(self, **kwargs: Any) -> None:
+        kwargs.setdefault("always_prepare", True)
+        super().__init__(**kwargs)
+
+    @property
+    def name(self) -> str:
+        return self.hf_repo
+
+    def _class_word(self, location: str) -> str:
+        """DeepLoc's location string as the words the model has to produce.
+
+        Multi-class labels arrive as ``"Endoplasmic.reticulum,M"`` (compartment,
+        then the membrane/soluble annotation); binary ones as bare ``"M"`` /
+        ``"S"``. Only the compartment is the target here.
+        """
+        head = str(location).split(",")[0].strip()
+        if head in _DEEPLOC_BINARY_WORDS:
+            return _DEEPLOC_BINARY_WORDS[head]
+        return head.replace(".", " ").replace("/", " or ").lower()
+
+    def _encode(self, sequences: list[str]) -> list[list[float]]:
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(self.encoder_model)
+        encoder = AutoModel.from_pretrained(self.encoder_model)
+        encoder.eval()
+
+        vectors: list[list[float]] = []
+        for start in range(0, len(sequences), self.encoder_batch_size):
+            batch = [
+                seq[: self.max_residues]
+                for seq in sequences[start : start + self.encoder_batch_size]
+            ]
+            tokens = tokenizer(
+                batch,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=self.max_residues + 2,
+            )
+            with torch.no_grad():
+                hidden = encoder(**tokens).last_hidden_state
+            mask = tokens["attention_mask"].unsqueeze(-1).to(hidden.dtype)
+            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1)
+            vectors.extend(pooled.float().tolist())
+            print(
+                f"[{type(self).__name__}] encoded "
+                f"{min(start + self.encoder_batch_size, len(sequences))}"
+                f"/{len(sequences)} sequences",
+                flush=True,
+            )
+        return vectors
+
+    def _split_rows(self, split: str, n_rows: int) -> list[dict[str, Any]]:
+        from datasets import load_dataset
+
+        ds = load_dataset(self.hf_repo, self.hf_config, split=split)
+        # Shuffled before truncation: DeepLoc's files are grouped by
+        # compartment, so the first N rows of a split are one or two classes.
+        ds = ds.shuffle(seed=self.seed)
+        if n_rows:
+            ds = ds.select(range(min(n_rows, len(ds))))
+        records = [dict(row) for row in ds]
+        embeddings = self._encode([str(r[self.sequence_key]) for r in records])
+        width = len(embeddings[0]) if embeddings else 0
+        if width != self.input_dim:
+            raise TrainingGymConfigError(
+                f"{self.encoder_model} produces {width}-wide embeddings but "
+                f"{type(self).__name__}.input_dim is {self.input_dim}. Set both "
+                "this and the recipe's ProjectorSpec.input_dim to the encoder's "
+                "hidden size; the projector's first Linear is built from it."
+            )
+        return [
+            {
+                "messages": [
+                    {"role": "user", "content": self.prompt},
+                    {
+                        "role": "assistant",
+                        "content": self._class_word(record[self.location_key]),
+                    },
+                ],
+                "embeddings": [vector],
+                # Position 1 of the row's own tokens, as with the synthetic
+                # modes: the merge overwrites that token's embedding with the
+                # projected protein, and the prompt carries no answer either
+                # way.
+                "positions": [1],
+                "label": self._class_word(record[self.location_key]),
+            }
+            for record, vector in zip(records, embeddings)
+        ]
+
+    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._write_split(path, self._split_rows(self.train_split, self.train_rows))
+        for eval_path in (eval_paths or {}).values():
+            Path(eval_path).parent.mkdir(parents=True, exist_ok=True)
+            self._write_split(
+                eval_path, self._split_rows(self.eval_split, self.eval_rows)
+            )
+
+    def _write_split(self, target: str, rows: list[dict[str, Any]]) -> None:
+        counts: dict[str, int] = {}
+        with open(target, "w") as f:
+            for row in rows:
+                counts[row["label"]] = counts.get(row["label"], 0) + 1
+                f.write(json.dumps(self._to_row(row)) + "\n")
+        majority = max(counts.values()) / len(rows) if rows else 0.0
+        print(
+            f"[{type(self).__name__}] wrote {len(rows)} rows to {target}; "
+            f"class counts {dict(sorted(counts.items()))}; "
+            f"majority-class share {majority:.3f}",
+            flush=True,
+        )
