@@ -16,6 +16,7 @@ Then: `uv run modal run <tutorial_file>.py::train`.
 """
 
 import asyncio
+import copy
 import dataclasses
 import hashlib
 import inspect
@@ -2402,5 +2403,17 @@ def build_slime_app(
 
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)
+
+    # ``image_env`` has already been baked into ``image``/``train_image`` above.
+    # Keeping it on the recipe captured by these nested ``serialized=True``
+    # functions needlessly duplicates every image environment value in Modal's
+    # cloudpickle payload.  In particular, request-bearing experiments can
+    # exceed Modal's 64 KiB serialized-function limit before a container starts.
+    # Rebind the shared closure cell to a shallow copy so the caller's resolved
+    # recipe and the exact image environment remain untouched.  Runtime code in
+    # these functions consumes ``environment``; ``image_env`` is build-only.
+    serialized_recipe = copy.copy(slime)
+    object.__setattr__(serialized_recipe, "image_env", {})
+    slime = serialized_recipe
 
     return app
