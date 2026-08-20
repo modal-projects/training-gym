@@ -174,12 +174,13 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     # kernel backend dictates the query layout; both forbid
     # --use-dynamic-batch-size, hence --micro-batch-size 1" — tilelang's fused
     # sparse-MLA kernels index by cu_seqlens, megatron's unfused core attention
-    # wants a 4D query. With it on, the 5-layer base's forward stayed finite
-    # while SparseMLA's backward returned NaN into the embedding stream, on a
-    # run whose projected rows were multiplied by zero — i.e. independent of
-    # anything the projector wrote.
+    # wants a 4D query.
     use_dynamic_batch_size: bool = False
     micro_batch_size: int | None = 1
+    # DSA kernel backend, and the query layout it dictates (upstream derives
+    # ``--qkv-format`` from it the same way).
+    dsa_attention_backend: str = "megatron"
+    qkv_format: str = "bshd"
 
     num_rollout: int = 10
     rollout_batch_size: int = 8
@@ -249,15 +250,13 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
 
         Upstream's ``scripts/run_glm5_2_744b_a40b_lora.py`` states the
         constraint for both DSA backends and pins ``--micro-batch-size 1``
-        instead. A run with it on trained nothing: the sparse-MLA backward
-        returned NaN, and ``check_for_nan_in_loss_and_grad`` aborted the step.
+        instead.
         """
         if self.use_dynamic_batch_size:
             raise TrainingGymConfigError(
                 f"{type(self).__name__} needs use_dynamic_batch_size=False: "
                 "GLM-5.2's DSA attention kernels forbid it (upstream's run "
-                "script pins micro_batch_size=1 for exactly this reason), and "
-                "with it on the base's sparse-MLA backward returns NaN."
+                "script pins micro_batch_size=1 for exactly this reason)."
             )
         if self.micro_batch_size != 1:
             raise TrainingGymConfigError(
@@ -437,6 +436,7 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
         self._require_pretrained_base()
         self._reject_distributed_optimizer()
         self._reject_offload_train()
+        self._reject_dynamic_batch_size()
         if self.save_interval is not None and self.save_interval <= self.num_rollout:
             warnings.warn(
                 f"{type(self).__name__} has save_interval={self.save_interval} "
