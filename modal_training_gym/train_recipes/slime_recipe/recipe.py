@@ -268,6 +268,15 @@ class SlimeRecipe(BaseTrainRecipe):
         Regex patterns (matched with ``re.search``) of parameter names to
         freeze, e.g. a VL model's vision tower so RL only updates the
         language backbone.
+    only_train_params_name_list : list[str] | None
+        The complement: regex patterns of the *only* parameters to train,
+        everything else frozen. Mutually exclusive with
+        ``freeze_params_name_list`` (slime raises if both are set).
+    custom_model_provider_path : str | None
+        Dotted path to a function building the Megatron model, replacing
+        slime's own provider (``--custom-model-provider-path``). Used to
+        attach modules the model script doesn't know about, e.g. the
+        embedding projector in ``Qwen3_6_35b_Projector_Recipe``.
 
     ## RL Algorithm
 
@@ -293,6 +302,18 @@ class SlimeRecipe(BaseTrainRecipe):
         Average the loss over tokens instead of over samples.
     ref_load : str
         Checkpoint path the reference model is read from (for KL terms).
+    loss_type : str
+        ``"policy_loss"`` (the RL objective), ``"sft_loss"`` for supervised
+        training on the dataset's own targets, or ``"custom_loss"``.
+    loss_mask_type : str
+        Chat-template family used to build the supervised loss mask, e.g.
+        ``"qwen3_5"``. Only read on the ``sft_loss`` path.
+    disable_compute_advantages_and_returns : bool
+        Skip the advantage/return computation, which has nothing to work on
+        outside ``policy_loss``. Set it with ``loss_type="sft_loss"``.
+    debug_train_only : bool
+        Run the training path with no sglang engines and no weight sync —
+        which is what a supervised run wants, since it generates nothing.
 
     ## Dynamic Sampling
 
@@ -535,6 +556,10 @@ class SlimeRecipe(BaseTrainRecipe):
     entropy_coef: float = 0.0
     calculate_per_token_loss: bool = False
     ref_load: str = ""
+    loss_type: str = "policy_loss"
+    loss_mask_type: str = "qwen"
+    disable_compute_advantages_and_returns: bool = False
+    debug_train_only: bool = False
 
     # ── Dynamic sampling (DAPO) ────────────────────────────────────────────
     over_sampling_batch_size: int | None = None
@@ -600,6 +625,12 @@ class SlimeRecipe(BaseTrainRecipe):
     # --freeze-params-name-list, matched with re.search). Used e.g. to freeze a
     # VL model's vision tower so RL only updates the language backbone.
     freeze_params_name_list: list[str] | None = None
+    only_train_params_name_list: list[str] | None = None
+
+    # Dotted path to a replacement Megatron model provider
+    # (--custom-model-provider-path). slime still applies its own freezing on
+    # top of whatever this returns.
+    custom_model_provider_path: str | None = None
 
     # ── Weight sync (megatron trainer → sglang rollout engines) ──────────
     # Default matches slime's own default. ``delta`` mode pin-snapshots the

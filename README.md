@@ -124,7 +124,7 @@ Models with a built-in training recipe, with the `ModelConfig` and recipe classe
 | `Qwen/Qwen3.5-4B` | `slime`, `miles` | `Qwen3_5_4B` | `Qwen3_5_4b_Recipe`, `Qwen3_5_4b_Miles_Recipe` |
 | `Qwen/Qwen3.5-9B` | `slime` | `Qwen3_5_9B` | `Qwen3_5_9b_Recipe` |
 | `Qwen/Qwen3.6-27B` | `slime` | `Qwen3_6_27B` | `Qwen3_6_27b_Recipe` |
-| `Qwen/Qwen3.6-35B-A3B` | `slime` | `Qwen3_6_35B` | `Qwen3_6_35b_Recipe` |
+| `Qwen/Qwen3.6-35B-A3B` | `slime` | `Qwen3_6_35B` | `Qwen3_6_35b_Recipe`, `Qwen3_6_35b_Projector_Recipe` |
 | `Qwen/Qwen3.8-27B` | `slime` | `Qwen3_8_27B` | `Qwen3_8_27b_Recipe` |
 | `google/gemma-4-26B-A4B-it` | `miles` | `Gemma4_26B_A4B` | `Gemma4_26B_A4B_Recipe` |
 | `moonshotai/Moonlight-16B-A3B-Instruct` | `miles` | `Moonlight_16B_A3B_Instruct` | `Moonlight_16B_A3B_Recipe` |

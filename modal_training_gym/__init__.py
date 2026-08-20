@@ -42,8 +42,12 @@ _EXPORTS = {
         "modal_training_gym.train_recipes.miles_recipe",
         "GLM_5_2_5Layer_Projector_Recipe",
     ),
+    "Qwen3_6_35b_Projector_Recipe": (
+        "modal_training_gym.train_recipes.slime_recipe",
+        "Qwen3_6_35b_Projector_Recipe",
+    ),
     "ProjectorSpec": (
-        "modal_training_gym.frameworks.miles.projector_config",
+        "modal_training_gym.common.projector_config",
         "ProjectorSpec",
     ),
     "EmbeddingProjectorDataset": (
@@ -165,6 +169,7 @@ __all__ = [
     "GLM_5_2_5Layer",
     "GLM_5_2_Projector_Recipe",
     "GLM_5_2_5Layer_Projector_Recipe",
+    "Qwen3_6_35b_Projector_Recipe",
     "ProjectorSpec",
     "EmbeddingProjectorDataset",
     "HarborDataset",
