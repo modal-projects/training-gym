@@ -141,6 +141,28 @@ def test_recipe_emits_supervised_engine_free_flags():
     assert "--projector" not in flags
 
 
+def test_the_fields_this_adds_to_the_base_recipe_change_no_other_recipe():
+    """The projector's five new ``MilesRecipe`` fields are opt-in, not defaults.
+
+    They default to values ``cli_args`` skips, so every miles recipe that existed
+    before this change emits the command line it emitted before — which is the
+    only thing keeping a projector-shaped flag out of a Qwen or Moonlight run.
+    """
+    from modal_training_gym.common.models.qwen3_5_4b import Qwen3_5_4B
+    from modal_training_gym.train_recipes.miles_recipe import Qwen3_5_4b_Miles_Recipe
+
+    recipe = Qwen3_5_4b_Miles_Recipe()
+    flags = _flags(recipe.cli_args(dataset=_dataset(), model=Qwen3_5_4B()))
+    for flag in (
+        "--custom-model-provider-path",
+        "--loss-type",
+        "--num-epoch",
+        "--debug-train-only",
+        "--disable-compute-advantages-and-returns",
+    ):
+        assert flag not in flags
+
+
 def test_save_hook_runs_through_the_gyms_phase_reporting_wrapper():
     """Dashboard phase/substep timing must survive the projector's own hook."""
     recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
