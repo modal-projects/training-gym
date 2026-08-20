@@ -49,7 +49,7 @@ class MathDataset(HuggingFaceDataset):
     apply_chat_template = True
 
 
-result = TrainConfig(
+config = TrainConfig(
     model=Qwen3_4B(),
     dataset=MathDataset(n_rows=120),
     recipe=Qwen3_4b_Recipe(
@@ -69,8 +69,9 @@ result = TrainConfig(
         sglang_mem_fraction_static=0.6,
         rm_type="deepscaler",
     ),
-).train()
-print(result.training_run_id)
+)
+run = config.launch()
+print(run.training_run_id)
 ```
 
 While that's running, you can view the run in the dashboard:

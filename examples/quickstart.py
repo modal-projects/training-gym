@@ -15,7 +15,7 @@ class MathDataset(HuggingFaceDataset):
 
 
 def main() -> None:
-    result = TrainConfig(
+    config = TrainConfig(
         model=Qwen3_4B(),
         dataset=MathDataset(n_rows=120),
         recipe=Qwen3_4b_Recipe(
@@ -35,8 +35,9 @@ def main() -> None:
             sglang_mem_fraction_static=0.6,
             rm_type="deepscaler",
         ),
-    ).train()
-    print(result.training_run_id)
+    )
+    run = config.launch()
+    print(run.training_run_id)
 
 
 if __name__ == "__main__":
