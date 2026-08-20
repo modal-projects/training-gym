@@ -25,9 +25,14 @@ when_to_use: >-
 
 ## 1. Configure and preflight
 
-If the user has not already chosen the model, dataset and reward function,
-propose an implementation for the missing pieces and ask the user to confirm
-that it matches the intended task before implementing it.
+If the user has not already chosen the model, dataset, reward function,
+topology, and final training horizon, propose the missing pieces and ask the
+user to confirm them before implementation. Present the staged plan explicitly:
+the one-step proof, the approximately 10-step smoke test, and the proposed full
+run with its model, GPU topology, important recipe settings, and maximum step
+count. Proof or smoke-test approval does not authorize the full run. Never
+infer an expensive final horizon from a vague request; launch it only after the
+user confirms that configuration and step count.
 
 Create or adapt the config only after that decision. Before spending GPU
 capacity:
@@ -88,16 +93,26 @@ Change one setting at a time and repeat the smoke test with a fresh run ID.
 
 ## 4. Promote
 
-Promote only when the proof and smoke runs are healthy and the reward remains
-informative, and trace inspection confirms that prompts and responses make
-sense for the task. Launch a fresh full run from the final config and monitor
-it until completion or an early-stop decision.
+Promote only when the proof and smoke runs are healthy, the reward remains
+informative, trace inspection confirms that prompts and responses make sense
+for the task, and the user has confirmed the final configuration and maximum
+step count. Launch a fresh full run from that exact config and monitor it until
+completion or an evidence-based early-stop decision.
 
 A full run is not a commitment to spend its entire configured horizon.
 Reassess efficacy early using both reward trajectories and sampled traces. If
-reward remains flat, declines, or is otherwise uninformative, read
+reward remains flat, declines, or is otherwise uninformative, first verify
+whether the algorithm makes that trajectory expected. Then read
 [debug-reward.md](references/debug-reward.md) and make an early-stop decision
-rather than letting a healthy but ineffective job finish by default.
+from task metrics and traces rather than letting a healthy but ineffective job
+finish by default.
+
+Keep checking every active run until it reaches a terminal state or a deliberate
+stop decision. Record the launch time, last progress time, current phase, and
+observed step duration. If startup or a step takes materially longer than the
+run's prior timings or the expected window, inspect `run get --verbose` and
+`run logs` immediately. Diagnose and fix an authorized bottleneck instead of
+continuing to wait without a new progress signal.
 
 Report the run ID, checkpoint, early-versus-late reward, task-specific success
 rate, timing, and whether all apps stopped.
