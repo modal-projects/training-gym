@@ -94,12 +94,11 @@ Change one setting at a time and repeat the smoke test with a fresh run ID.
 Promote only when the proof and smoke runs are healthy, the reward remains
 informative, trace inspection confirms that prompts and responses make sense
 for the task, and the user has confirmed the final configuration and maximum
-step count. Launch a fresh full run from that exact config and monitor it until completion or an evidence-based early-stop decision.
+step count. Launch a fresh full run from that exact config and monitor it until completion or an early-stop decision.
 
 A full run is not a commitment to spend its entire configured horizon.
 Reassess efficacy early using both reward trajectories and sampled traces. If
-reward remains flat, declines, or is otherwise uninformative, first verify
-whether the algorithm makes that trajectory expected. Then read
+reward remains flat, declines, or is otherwise uninformative, read
 [debug-reward.md](references/debug-reward.md) and make an early-stop decision
 from task metrics and traces rather than letting a healthy but ineffective job finish by default.
 
