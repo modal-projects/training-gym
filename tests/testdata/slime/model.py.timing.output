@@ -8,6 +8,7 @@ try:
         recording_lane as _tg_role,
         recording_lane_on_reporting_rank as _tg_mrec,
         time_phase as _tg_time_phase,
+        variant_phase as _tg_variant_phase,
     )
 except ImportError:
     print('WARNING: modal_training_gym not importable; substep timing off')
@@ -35,6 +36,9 @@ except ImportError:
     @_tg_cm
     def _tg_time_phase(name):
         yield
+
+    def _tg_variant_phase(base, variant):
+        return base
 
 import dataclasses
 import gc

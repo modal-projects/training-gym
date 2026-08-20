@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { clipIdleSpans, nestedHitTargetsForRow, runTimeline } from "./timing.js";
+import { categoryOf, colorFor, labelFor } from "./timing_vocabulary.js";
+
+test("phase variants inherit vocabulary and add a readable label suffix", () => {
+  assert.equal(categoryOf("compute_log_probs:ref"), "train");
+  assert.equal(colorFor("compute_log_probs:ref"), colorFor("compute_log_probs"));
+  assert.equal(labelFor("compute_log_probs:ref"), "Calculate log probs (ref)");
+  assert.equal(categoryOf("compute_log_probs"), "train");
+  assert.equal(
+    colorFor("compute_log_probs"),
+    "var(--color-c-dataviz-train-large)",
+  );
+  assert.equal(labelFor("compute_log_probs"), "Calculate log probs");
+});
 
 test("nested hit targets cover drawn bars without entering siblings", () => {
   const bars = [

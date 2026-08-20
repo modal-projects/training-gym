@@ -5,6 +5,7 @@ import {
   NEGLIGIBLE_WORK_S,
   SAMPLED,
   TOOLTIP_HIDDEN_PHASES,
+  basePhaseName,
 } from "./timing_vocabulary.js";
 import {
   collect,
@@ -25,7 +26,9 @@ const COLLAPSED_GAP_FRACTION = 0.02;
 const BREAK_LABEL_GAP_PX = 4;
 
 export function isRenderedTimingSpan(span) {
-  return !span.mergedGeneration && !HIDDEN_PHASES.has(span.name);
+  return (
+    !span.mergedGeneration && !HIDDEN_PHASES.has(basePhaseName(span.name))
+  );
 }
 
 export function breakLabelLayout(
@@ -63,7 +66,7 @@ export function mergeSyncGenerationSpans(spans) {
       .filter(
         (span) =>
           span.role === "driver" &&
-          span.name === "generate_rollouts" &&
+          basePhaseName(span.name) === "generate_rollouts" &&
           span.rolloutId != null,
       )
       .map((span) => [span.rolloutId, span]),
@@ -73,7 +76,7 @@ export function mergeSyncGenerationSpans(spans) {
       .filter(
         (span) =>
           span.role === "rollout" &&
-          span.name === "generate_samples" &&
+          basePhaseName(span.name) === "generate_samples" &&
           span.rolloutId != null,
       )
       .map((span) => span.rolloutId),
@@ -82,7 +85,7 @@ export function mergeSyncGenerationSpans(spans) {
     const sampleGeneration =
       wrapper
         ? nestedChild(wrapper, "sample_generation")
-        : span.name === "sample_generation"
+        : basePhaseName(span.name) === "sample_generation"
           ? span
           : null;
     const aggregateStats = Object.fromEntries(
@@ -122,11 +125,11 @@ export function mergeSyncGenerationSpans(spans) {
       }
     };
     if (sampleGeneration) accumulate("sample_generation", sampleGeneration);
-    if (!wrapper && span.name !== "sample_generation") {
+    if (!wrapper && basePhaseName(span.name) !== "sample_generation") {
       accumulate(span.name, span);
     }
     for (const descendant of descendants) {
-      if (!TOOLTIP_HIDDEN_PHASES.has(descendant.name)) {
+      if (!TOOLTIP_HIDDEN_PHASES.has(basePhaseName(descendant.name))) {
         const duration = descendant.duration ?? descendant.end - descendant.start;
         accumulate(descendant.name, {
           ...descendant,
@@ -158,11 +161,14 @@ export function mergeSyncGenerationSpans(spans) {
     if (span.role !== "rollout") continue;
     const driver = drivers.get(span.rolloutId);
     if (!driver) continue;
-    if (span.name === "generate_samples") {
+    if (basePhaseName(span.name) === "generate_samples") {
       mergeGeneration(span, driver, span);
       continue;
     }
-    if (!SAMPLED.has(span.name) && span.name !== "reward_post_process") {
+    if (
+      !SAMPLED.has(basePhaseName(span.name)) &&
+      basePhaseName(span.name) !== "reward_post_process"
+    ) {
       continue;
     }
     if (rolloutGenerationWrappers.has(span.rolloutId)) {
@@ -175,7 +181,7 @@ export function mergeSyncGenerationSpans(spans) {
 
 function nestedChild(span, name) {
   for (const child of span.children || []) {
-    if (child.name === name) return child;
+    if (basePhaseName(child.name) === name) return child;
     const nested = nestedChild(child, name);
     if (nested) return nested;
   }
@@ -557,7 +563,9 @@ export function runTimeline(
   const steps = stepsOf(measured);
   const rawSpans = measured;
   const sync = rawSpans.some(
-    (span) => span.role === "driver" && span.name === "generate_rollouts",
+    (span) =>
+      span.role === "driver" &&
+      basePhaseName(span.name) === "generate_rollouts",
   );
   const async =
     asyncOverride ?? isAsyncSpans(rawSpans);

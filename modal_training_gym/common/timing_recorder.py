@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -16,10 +17,25 @@ TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
 MIN_PUBLISH_INTERVAL_S = 3.0
 MAX_PHASE_INVOCATIONS = 10_000
 MAX_TIMING_PHASES = 64
+# Keep phase names bounded because they become per-record JSON object keys.
+MAX_PHASE_NAME_LENGTH = 128
 # Keep posted invocation detail bounded without changing measured aggregates.
 MAX_TOTAL_INVOCATIONS = 20_000
 
 PER_SAMPLE_PHASES = frozenset({"reward", "reward_batch", "sample_generation"})
+
+
+def variant_phase(base: str, variant: str | None) -> str:
+    """Add a normalized variant to a phase name without exceeding the limit."""
+    if not variant:
+        return base
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", variant.strip()).strip("_")
+    if not normalized:
+        return base
+    available = MAX_PHASE_NAME_LENGTH - len(base) - 2
+    if available <= 0:
+        return base[: MAX_PHASE_NAME_LENGTH - 1]
+    return f"{base}:{normalized[:available]}"
 
 
 def _timing_debug(event: str, **fields: object) -> None:
@@ -354,8 +370,10 @@ reporting.register_pre_drain_hook(_close_preloop_recorders)
 
 
 __all__ = [
+    "MAX_PHASE_NAME_LENGTH",
     "RoleRecorder",
     "time_phase",
     "recording_lane",
     "recording_lane_on_reporting_rank",
+    "variant_phase",
 ]

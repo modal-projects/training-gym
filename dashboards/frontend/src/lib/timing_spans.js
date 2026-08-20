@@ -6,6 +6,7 @@ import {
   NEGLIGIBLE_WORK_S,
   SAMPLED,
   TOOLTIP_HIDDEN_PHASES,
+  basePhaseName,
   categoryOf,
   labelFor,
   rolloutIdForTimingKey,
@@ -34,7 +35,7 @@ export function collect(timings) {
           ? phase.invocations
           : [];
         const runs =
-          !SAMPLED.has(name) && invocations.length === count
+          !SAMPLED.has(basePhaseName(name)) && invocations.length === count
             ? invocations
             : [];
         if (runs.length) {
@@ -44,7 +45,7 @@ export function collect(timings) {
             spans.push({
               ...where,
               laneKey: `${id}:${role}`,
-              kind: IDLE_PHASES.has(name) ? "idle" : "work",
+              kind: IDLE_PHASES.has(basePhaseName(name)) ? "idle" : "work",
               start,
               end,
               clockStart: start,
@@ -59,9 +60,9 @@ export function collect(timings) {
         spans.push({
           ...where,
           laneKey: `${id}:${role}`,
-          kind: IDLE_PHASES.has(name)
+          kind: IDLE_PHASES.has(basePhaseName(name))
             ? "idle"
-            : SAMPLED.has(name) || count > 1
+            : SAMPLED.has(basePhaseName(name)) || count > 1
               ? "sampled"
               : "work",
           start: laneStart + (Number(phase?.first_start_s) || 0),
@@ -206,7 +207,10 @@ export function isAsyncSpans(spans) {
   for (const span of spans) {
     if (span.role === "rollout") {
       hasRollout = true;
-    } else if (span.role === "driver" && span.name === "generate_rollouts") {
+    } else if (
+      span.role === "driver" &&
+      basePhaseName(span.name) === "generate_rollouts"
+    ) {
       sync = true;
     }
   }
@@ -232,7 +236,10 @@ export function groupTooltipChildren(children, aggregateStats = {}) {
   const rolesByName = new Map();
   const workerRoles = new Set();
   for (const child of allChildren) {
-    if (child.mergedGeneration || TOOLTIP_HIDDEN_PHASES.has(child.name)) {
+    if (
+      child.mergedGeneration ||
+      TOOLTIP_HIDDEN_PHASES.has(basePhaseName(child.name))
+    ) {
       continue;
     }
     const roles = rolesByName.get(child.name) || new Set();
@@ -245,7 +252,10 @@ export function groupTooltipChildren(children, aggregateStats = {}) {
   const allWorkerRolesPresent =
     workerRoles.has("actor") && workerRoles.has("critic");
   for (const child of allChildren) {
-    if (child.mergedGeneration || TOOLTIP_HIDDEN_PHASES.has(child.name)) {
+    if (
+      child.mergedGeneration ||
+      TOOLTIP_HIDDEN_PHASES.has(basePhaseName(child.name))
+    ) {
       continue;
     }
     const count = child.count || 1;
@@ -322,15 +332,15 @@ export function nest(spans) {
   }
   for (const span of ordered) {
     let parent = null;
-    for (const parentName of NESTS_IN[span.name] || []) {
+    for (const parentName of NESTS_IN[basePhaseName(span.name)] || []) {
       for (const other of byRolloutAndName.get(
         `${span.rolloutId}:${parentName}`,
       ) || []) {
         if (
           other !== span &&
           (other.group === span.group ||
-            (span.name === "generate_samples" &&
-              other.name === "generate_rollouts")) &&
+            (basePhaseName(span.name) === "generate_samples" &&
+              basePhaseName(other.name) === "generate_rollouts")) &&
           (other.laneKey === span.laneKey
             ? other.start <= span.start && span.end <= other.end
             : other.start <= span.start + CROSS_LANE_CONTAINMENT_TOLERANCE_S &&
@@ -352,15 +362,16 @@ export function nest(spans) {
   for (const span of ordered) {
     const occurrences = new Map();
     for (const child of [...span.children].sort((a, b) => a.start - b.start)) {
-      if (!["forward_backward", "optimizer_step"].includes(child.name)) continue;
-      const occurrence = (occurrences.get(child.name) || 0) + 1;
-      occurrences.set(child.name, occurrence);
+      const childBase = basePhaseName(child.name);
+      if (!["forward_backward", "optimizer_step"].includes(childBase)) continue;
+      const occurrence = (occurrences.get(childBase) || 0) + 1;
+      occurrences.set(childBase, occurrence);
       child.ordinal = occurrence;
     }
     const duration = Math.max(span.end - span.start, 0);
     const aggregates = new Map();
     for (const child of span.children) {
-      if (!SAMPLED.has(child.name)) {
+      if (!SAMPLED.has(basePhaseName(child.name))) {
         continue;
       }
       const childDuration = Math.max(child.end - child.start, 0);
@@ -388,7 +399,7 @@ export function nest(spans) {
       aggregates.set(child.name, current);
     }
     const children = span.children.filter(
-      (child) => !SAMPLED.has(child.name),
+      (child) => !SAMPLED.has(basePhaseName(child.name)),
     );
     for (const child of aggregates.values()) {
       children.push({

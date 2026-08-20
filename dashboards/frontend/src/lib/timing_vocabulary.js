@@ -136,7 +136,7 @@ export const PHASE_DESCRIPTIONS = {
 };
 
 export function descriptionFor(name) {
-  return PHASE_DESCRIPTIONS[name] || null;
+  return PHASE_DESCRIPTIONS[basePhaseName(name)] || null;
 }
 
 export const IDLE_PHASES = new Set([
@@ -180,17 +180,29 @@ export const GROUPS = [
 
 export const NEGLIGIBLE_WORK_S = 0.0005;
 export const CROSS_LANE_CONTAINMENT_TOLERANCE_S = 0.01;
+
+export function basePhaseName(name) {
+  if (typeof name !== "string") return name;
+  const separator = name.indexOf(":");
+  return separator === -1 ? name : name.slice(0, separator);
+}
+
 export function labelFor(name, rolloutId = null) {
+  const base = basePhaseName(name);
+  const variant = name.slice(base.length + 1);
   if (
-    (name === "wait_for_rollout" || name === "wait_for_next_rollout") &&
+    (base === "wait_for_rollout" || base === "wait_for_next_rollout") &&
     rolloutId != null
   ) {
-    const step = Number(rolloutId) + (name === "wait_for_next_rollout" ? 2 : 1);
+    const step =
+      Number(rolloutId) + (base === "wait_for_next_rollout" ? 2 : 1);
     if (Number.isInteger(step)) {
-      return `Waiting for rollout generation (step ${step})`;
+      const label = `Waiting for rollout generation (step ${step})`;
+      return variant ? `${label} (${variant.replace(/_/g, " ")})` : label;
     }
   }
-  return TIMING_LABELS[name] || name.replace(/_/g, " ");
+  const label = TIMING_LABELS[base] || base.replace(/_/g, " ");
+  return variant ? `${label} (${variant.replace(/_/g, " ")})` : label;
 }
 
 export function isLegacyTiming(timings) {
@@ -230,7 +242,7 @@ export function shouldShowOpenRolloutAction({
     showOpenRollout &&
     typeof onOpenRollout === "function" &&
     bar &&
-    ["generate_samples", "generate_rollouts"].includes(bar.name) &&
+    ["generate_samples", "generate_rollouts"].includes(basePhaseName(bar.name)) &&
     bar.kind !== "idle" &&
     rolloutId != null &&
     rolloutIds.includes(rolloutId),
@@ -238,11 +250,12 @@ export function shouldShowOpenRolloutAction({
 }
 
 export function categoryOf(name) {
-  return PHASE_CATEGORY[name] || "idle";
+  return PHASE_CATEGORY[basePhaseName(name)] || "idle";
 }
 
 export function colorFor(name) {
-  return PHASE_COLORS[name] || CATEGORIES[categoryOf(name)].color;
+  const base = basePhaseName(name);
+  return PHASE_COLORS[base] || CATEGORIES[categoryOf(base)].color;
 }
 
 export function fmtSecs(s, unit = null) {
