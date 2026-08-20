@@ -6,7 +6,7 @@ description: Install the Training Gym skills and let a coding agent configure, p
 
 # Agent-driven training
 
-Training Gym is more than an API for writing training configurations. The
+The Training Gym is more than an API for writing training configurations. The
 package ships a bundle of agent skills that teach a coding agent the whole RL
 lifecycle — configure, prove, smoke test, diagnose, promote — and a
 `training-gym` CLI that supplies the evidence each of those decisions needs:
@@ -62,7 +62,7 @@ and navigating the Training Gym codebase itself.
 
 ## Give the agent an objective
 
-With the skills installed, an ambiguous request is enough:
+The example we'll walk through here is with a relatively ambiguous prompt:
 
 > can you post-train a model to rhyme in its output
 
@@ -74,7 +74,7 @@ response rhymes *and* stays relevant to the question.
 
 ## Read the configuration it writes
 
-Training Gym gives the agent framework primitives and lifecycle guidance; what
+The Training Gym gives the agent framework primitives and lifecycle guidance; what
 comes back is ordinary Python that you can inspect, edit, and run. The rhyming
 configuration is a single file, shown here in four parts.
 
