@@ -17,7 +17,9 @@ DAPO oversamples candidates and filters groups such as all-correct or
 all-incorrect samples. Its reported reward is therefore conditioned on a
 changing retained population and need not rise monotonically. A DAPO plateau
 alone is not a stop signal; compare fixed task metrics, filter/retention counts,
-and representative traces.
+and representative traces. Use `run params` to confirm dynamic sampling,
+`run get --verbose` to inspect rollout summaries and task metrics, and
+`run trace` to inspect filtering evidence and raw samples.
 
 - Flat near chance: the model may not be learning, the signal may be sparse,
   or extraction may return zero broadly.
@@ -37,9 +39,7 @@ Set an early efficacy checkpoint proportional to the run length; for example,
 reassess a 150-step run across roughly steps 10–40. If enough comparable
 samples and fixed task metrics show that learning remains flat outside normal
 noise, declines, or is otherwise uninformative, stop the run instead of waiting
-for completion. Do not stop on a single noisy point or an algorithm-expected
-plateau, but do not keep a healthy yet ineffective job alive only because it
-has not failed.
+for completion. Do not stop on a single noisy point or an algorithm-expected plateau, but do not keep a healthy yet ineffective job alive only because it has not failed.
 
 To stop it, use `training-gym run get <run-id>` to obtain the Modal 
 app ID, then:
