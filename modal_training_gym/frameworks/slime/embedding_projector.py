@@ -117,8 +117,13 @@ def rebase_positions(
     ``cu_seqlens`` as one more segment (``slime/backends/megatron_utils/data.py``).
     So the segment count is the sample count, or one more than it; anything else
     means the row-count bookkeeping and the packing disagree and the merge would
-    silently write to the wrong tokens. Only the first ``num_samples`` boundaries
-    are read, so the padding segment is ignored either way.
+    silently write to the wrong tokens. The padding segment itself is never
+    projected into.
+
+    Segment and row counts are aggregates, so they would also match if the
+    packing ordered its samples differently from the concatenated tensors; each
+    rebased row is therefore checked against its own segment's end, which is
+    where that reordering shows up.
     """
     num_samples = int(row_counts.numel())
     num_segments = int(cu_seqlens.numel()) - 1
@@ -134,8 +139,21 @@ def rebase_positions(
             f"row counts sum to {int(counts.sum())} but {int(positions.numel())} "
             "position(s) were passed"
         )
-    starts = cu_seqlens[:num_samples].to(device=positions.device, dtype=torch.long)
-    return positions + torch.repeat_interleave(starts, counts)
+    boundaries = cu_seqlens.to(device=positions.device, dtype=torch.long)
+    starts = boundaries[:num_samples]
+    rebased = positions + torch.repeat_interleave(starts, counts)
+    # Every row must land inside the sample it came from. The checks above only
+    # see aggregates, so a packing that reordered the samples relative to the
+    # concatenated tensors would pass them and merge onto another sample's
+    # tokens; a position past its own segment's end is what that looks like.
+    ends = torch.repeat_interleave(boundaries[1 : num_samples + 1], counts)
+    if bool((rebased >= ends).any()):
+        raise ValueError(
+            "projector position(s) fall outside their own packed sample; the "
+            "microbatch's samples and its cu_seqlens segments are not in the "
+            "same order"
+        )
+    return rebased
 
 
 class _ProjectorMerge:
