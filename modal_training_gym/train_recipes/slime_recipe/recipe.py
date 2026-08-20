@@ -164,7 +164,8 @@ class SlimeRecipe(BaseTrainRecipe):
     slime_git_repository : str | None
         Public HTTPS Git repository to overlay onto the image's slime checkout.
         Must be paired with ``slime_git_revision`` and is intended for
-        reproducible fork-backed runs.
+        reproducible fork-backed runs. The selected source must remain compatible
+        with Training Gym's build-time Slime patches.
     slime_git_revision : str | None
         Full 40-character commit SHA fetched from ``slime_git_repository``.
         Branches and tags are rejected because they can move between runs.

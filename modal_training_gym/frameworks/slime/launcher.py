@@ -163,6 +163,9 @@ _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
 
+# A git overlay replaces only /root/slime, so reapply patches whose targets live
+# there. Patches for Megatron or site-packages remain intact from the base image.
+# Add new /root/slime patches here when they are added to the base image.
 _SLIME_SOURCE_PATCHES_B64 = (
     _PATCH_MEGATRON_BRIDGE_B64,
     _PATCH_ADVANTAGES_B64,
@@ -227,22 +230,24 @@ def _slime_git_overlay_command(repository: str, revision: str) -> str:
 
 def _overlay_slime_source(image: "Image", slime: SlimeRecipe) -> "Image":
     if slime.local_slime:
-        image = image.add_local_dir(
+        # Preserve the local dev overlay's existing semantics: use the checkout
+        # exactly as supplied rather than requiring it to match patch anchors.
+        return image.add_local_dir(
             slime.local_slime,
             remote_path=SLIME_ROOT,
             copy=True,
             ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
         )
-    elif slime.slime_git_repository and slime.slime_git_revision:
-        image = image.run_commands(
-            _slime_git_overlay_command(
-                slime.slime_git_repository, slime.slime_git_revision
-            )
-        )
-    else:
+    if not (slime.slime_git_repository and slime.slime_git_revision):
         return image
 
-    # The source override replaced /root/slime after the base-image patches ran.
+    image = image.run_commands(
+        _slime_git_overlay_command(slime.slime_git_repository, slime.slime_git_revision)
+    )
+
+    # The pinned source replaced /root/slime after the base-image patches ran.
+    # Fail if required patches no longer apply rather than run an incompatible
+    # fork with silently missing Training Gym behavior.
     return image.run_commands(*_patch_commands(_SLIME_SOURCE_PATCHES_B64))
 
 

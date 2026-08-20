@@ -91,16 +91,12 @@ def test_git_overlay_reapplies_slime_source_patches_after_replacement() -> None:
         assert _patch_commands((patch,))[0] in image.operations[1][1]
 
 
-def test_local_overlay_reapplies_slime_source_patches_after_replacement() -> None:
+def test_local_overlay_preserves_unpatched_dev_checkout_behavior() -> None:
     recipe = Qwen3_6_27b_Recipe(local_slime="/tmp/local-slime")
     image = RecordingImage()
 
     assert _overlay_slime_source(image, recipe) is image
 
-    assert [operation[0] for operation in image.operations] == [
-        "add_local_dir",
-        "run_commands",
-    ]
+    assert [operation[0] for operation in image.operations] == ["add_local_dir"]
     assert image.operations[0][1] == ("/tmp/local-slime",)
     assert image.operations[0][2]["remote_path"] == SLIME_ROOT
-    assert image.operations[1][1] == _patch_commands(_SLIME_SOURCE_PATCHES_B64)
