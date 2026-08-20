@@ -674,7 +674,7 @@ class EmbeddingProjectorDataset(DatasetConfig):
     synthetic_rows: int = 0
     synthetic_input_dim: int = 0
     synthetic_seed: int = 0
-    synthetic_tokens: int = 1600
+    synthetic_tokens: int = 512
 
     def __init__(self, rows: list[dict[str, Any]] | None = None, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -702,7 +702,7 @@ class EmbeddingProjectorDataset(DatasetConfig):
 
     @classmethod
     def synthetic(
-        cls, n_rows: int, input_dim: int, seed: int = 0, tokens: int = 1600
+        cls, n_rows: int, input_dim: int, seed: int = 0, tokens: int = 512
     ) -> "EmbeddingProjectorDataset":
         """Random embeddings on a fixed conversation, for wiring validation.
 
@@ -720,10 +720,15 @@ class EmbeddingProjectorDataset(DatasetConfig):
         name, so without it a later run with a different row count or embedding
         width would silently train on the file an earlier run left behind.
 
-        ``tokens`` is a rough per-sample length, long by default so a
-        validation step exercises a sequence a real projector run would see —
-        a two-sentence conversation is a few dozen tokens, well under the
-        sparse-attention regime a DSA model like GLM-5.2 trains in.
+        ``tokens`` is a *word* budget, not a token count, and the filler words
+        are worth ~2.7 GLM tokens each: measured on the pinned image,
+        ``tokens=1600`` produced 4298-token samples, past the GLM-5.2 recipe's
+        4096 ``seq_length`` and ``max_position_embeddings``. It is long enough
+        to exercise a real sequence (a two-sentence conversation is a few dozen
+        tokens, nothing like what a projector run sees) and, at the default,
+        short enough to stay inside that window with room for the chat
+        template. Raising it is a request to check the model's ``seq_length``
+        first.
         """
         return cls(
             synthetic_rows=n_rows,
@@ -735,8 +740,8 @@ class EmbeddingProjectorDataset(DatasetConfig):
 
     def _synthetic_rows(self) -> list[dict[str, Any]]:
         rng = random.Random(self.synthetic_seed)
-        # ~1 token per word, split so both the prompt and the response the loss
-        # is taken over are long.
+        # Split so both the prompt and the response the loss is taken over are
+        # long. See ``synthetic()`` for what a word costs in tokens.
         filler = " ".join(
             f"token{n}" for n in range(max(self.synthetic_tokens, 8) // 2)
         )

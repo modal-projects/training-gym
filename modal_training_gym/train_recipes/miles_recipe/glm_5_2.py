@@ -177,10 +177,12 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     # wants a 4D query.
     use_dynamic_batch_size: bool = False
     micro_batch_size: int | None = 1
-    # DSA kernel backend, and the query layout it dictates (upstream derives
-    # ``--qkv-format`` from it the same way).
-    dsa_attention_backend: str = "megatron"
-    qkv_format: str = "bshd"
+    # The DSA kernel backend and query layout are left to the miles model
+    # preset (``tilelang``/``thd``). The alternative, ``megatron``/``bshd``, is
+    # unusable with the activation recompute this recipe needs: the pinned image
+    # asserts that DSA's cross-layer index share is not recompute-safe there,
+    # because the per-microbatch top-k holder rides on ``packed_seq_params``,
+    # which only the ``thd`` layout supplies.
 
     num_rollout: int = 10
     rollout_batch_size: int = 8
