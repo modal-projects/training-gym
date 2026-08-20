@@ -102,9 +102,11 @@ class ProjectorSpec:
         if not self.positions_key.endswith("_positions"):
             raise ValueError(
                 f"positions_key={self.positions_key!r} must end in '_positions': "
-                "each sample's offset in the packed batch is added only to keys "
-                "with that suffix, and the projector's positions have to end up "
-                "as absolute offsets into the packed sequence."
+                "miles adds each sample's offset in the packed batch to keys "
+                "with that suffix and to no others, so the projector's positions "
+                "have to carry it to end up as absolute offsets. slime offsets "
+                "nothing and rebases in the merge instead, but the suffix is "
+                "required there too so one spec means the same thing on both."
             )
         return self
 
