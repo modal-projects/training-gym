@@ -128,10 +128,13 @@ def test_the_metric_run_id_is_the_whole_training_run_id() -> None:
     assert metric_run_id_for_attempt(run_id, 1) == run_id
     assert metric_run_id_for_attempt(run_id, 3) == f"{run_id}-a3"
 
+    class TestDataset(HuggingFaceDataset):
+        hf_repo = "some/dataset"
+        input_column = "prompt"
+        output_column = "answer"
+
     summary = TrainConfig(
-        dataset=HuggingFaceDataset(
-            hf_repo="some/dataset", input_column="prompt", output_column="answer"
-        ),
+        dataset=TestDataset(),
         model=Qwen3_4B(),
         recipe=SlimeRecipe(
             gpu_type="H100",

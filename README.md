@@ -50,7 +50,7 @@ class MathDataset(HuggingFaceDataset):
     input_key = "prompt"
     label_key = "label"
     output_format = "jsonl"
-    apply_chat_template = True
+    needs_chat_template = True
 
 
 config = TrainConfig(

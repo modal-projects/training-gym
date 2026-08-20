@@ -28,6 +28,12 @@ _RECIPE_KW = dict(
 )
 
 
+class _TestDataset(HuggingFaceDataset):
+    hf_repo = "some/dataset"
+    input_column = "prompt"
+    output_column = "answer"
+
+
 def _checkpoint(checkpoint_type: CheckpointType) -> Checkpoint:
     suffix = "_hf" if checkpoint_type == CheckpointType.hf else ""
     return Checkpoint(
@@ -43,11 +49,7 @@ def _checkpoint(checkpoint_type: CheckpointType) -> Checkpoint:
 def _config(recipe, checkpoint_type: CheckpointType) -> TrainConfig:
     return TrainConfig(
         model=Qwen3_5_4B(),
-        dataset=HuggingFaceDataset(
-            hf_repo="some/dataset",
-            input_column="prompt",
-            output_column="answer",
-        ),
+        dataset=_TestDataset(),
         recipe=recipe,
         checkpoint=_checkpoint(checkpoint_type),
         merge_model_recipe=False,
