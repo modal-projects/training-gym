@@ -63,7 +63,16 @@ def _merge_recipe(base: BaseTrainRecipe, overrides: BaseTrainRecipe) -> BaseTrai
         default_val = _field_default(f)
         if f.name in declared or default_val is _dc.MISSING or user_val != default_val:
             base_fields[f.name] = user_val
-    return type(base)(**base_fields)
+
+    # A recipe that subclasses the preset's own class (e.g. a projector-only
+    # variant of a model's RL recipe) is rebuilt as that subclass: it carries
+    # fields, validators and preflight checks the preset does not, and rebuilding
+    # as the preset's class would drop all three silently.
+    target = type(overrides) if isinstance(overrides, type(base)) else type(base)
+    if target is not type(base):
+        for f in _dc.fields(overrides):
+            base_fields.setdefault(f.name, getattr(overrides, f.name))
+    return target(**base_fields)
 
 
 def _field_default(field: _dc.Field) -> Any:

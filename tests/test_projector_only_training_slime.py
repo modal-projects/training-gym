@@ -19,6 +19,7 @@ from modal_training_gym import (
     Qwen3_6_35B,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.train import _merge_recipe
 from modal_training_gym.frameworks.slime.projector_config import (
     ARGS_KEY,
     PROVIDER_PATH,
@@ -209,3 +210,22 @@ def test_a_finished_run_always_leaves_a_projector_checkpoint():
 def test_projector_training_stays_opt_in():
     """Qwen3.6-35B's default recipe is still the RL one."""
     assert type(SlimeRecipe.get_base_recipe(Qwen3_6_35B())) is Qwen3_6_35b_Recipe
+
+
+def test_preset_merge_keeps_the_projector_recipe_class():
+    """The merge fills unset fields from the RL preset without demoting to it.
+
+    ``get_base_recipe`` returns the RL recipe, so rebuilding the merged recipe
+    as the preset's class would drop ``projector`` and every guard above.
+    """
+    merged = _merge_recipe(
+        Qwen3_6_35b_Recipe(),
+        Qwen3_6_35b_Projector_Recipe(
+            projector=ProjectorSpec(input_dim=4, num_layers=1)
+        ),
+    )
+    assert type(merged) is Qwen3_6_35b_Projector_Recipe
+    assert merged.projector.input_dim == 4
+    assert merged.pipeline_model_parallel_size == 1
+    assert merged.loss_type == "sft_loss"
+    assert merged.extra_config[ARGS_KEY]["input_dim"] == 4
