@@ -1,0 +1,75 @@
+name: Dashboard Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/dashboard-deploy.yml"
+      - "dashboards/**"
+      - "modal_training_gym/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: modal-deploy
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: training-gym
+      # Proxy-auth pair the dashboard needs to call authenticated endpoints.
+      MODAL_KEY: ${{ secrets.MODAL_KEY }}
+      MODAL_SECRET: ${{ secrets.MODAL_SECRET }}
+      UV_CACHE_DIR: /tmp/uv-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync
+
+      # The proxy-auth mode is a property of the deployment, not of the code, so
+      # it has to be stated explicitly — deploying in the wrong mode silently
+      # changes who can reach the dashboard.
+      - name: Check deploy configuration
+        run: |
+          case "${DASHBOARD_PROXY_AUTH}" in
+            true)
+              if [ -z "${MODAL_KEY}" ] || [ -z "${MODAL_SECRET}" ]; then
+                echo "DASHBOARD_PROXY_AUTH=true requires the MODAL_KEY and MODAL_SECRET secrets." >&2
+                exit 1
+              fi
+              ;;
+            false) ;;
+            *)
+              echo "Set the DASHBOARD_PROXY_AUTH repository variable to 'true' or 'false'." >&2
+              exit 1
+              ;;
+          esac
+        env:
+          DASHBOARD_PROXY_AUTH: ${{ vars.DASHBOARD_PROXY_AUTH }}
+
+      - name: Deploy dashboard to Modal
+        run: |
+          if [ "${DASHBOARD_PROXY_AUTH}" = "true" ]; then
+            uv run scripts/deploy_dashboard.py --proxy-auth
+          else
+            uv run scripts/deploy_dashboard.py --no-proxy-auth
+          fi
+        env:
+          DASHBOARD_PROXY_AUTH: ${{ vars.DASHBOARD_PROXY_AUTH }}
