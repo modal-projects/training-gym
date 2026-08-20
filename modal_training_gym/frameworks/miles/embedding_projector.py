@@ -55,6 +55,7 @@ from modal_training_gym.common.embedding_projector import (
 from modal_training_gym.frameworks.miles.projector_config import (
     ProjectorSpec,
     from_miles_args,
+    require_projector_step_hook,
     should_save_projector,
 )
 
@@ -175,6 +176,7 @@ def projector_model_provider(
     from megatron.training import get_args  # pyright: ignore[reportMissingImports]
 
     args = get_args()
+    require_projector_step_hook(args)
     cfg = from_miles_args(args)
     model = _build_base_model(args, pre_process, post_process, vp_stage)
     frozen = freeze_base_model(model)

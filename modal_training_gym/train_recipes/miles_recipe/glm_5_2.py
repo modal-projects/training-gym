@@ -195,6 +195,17 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     attention_backend: str | None = "flash"
     update_weight_buffer_size: int | None = 2 * 1024**3
 
+    # GLM-5.2's MoE args, as upstream's run script emits them for every shape
+    # including the single-node 5-layer test (megatron_use_deepep defaults on).
+    # Without them Megatron falls back to the allgather dispatcher, which the
+    # pinned image warns does not support the variable sequence lengths
+    # ``use_dynamic_batch_size`` produces -- and the first backward of a run
+    # without them returned NaN into the embedding stream from inside the
+    # frozen base.
+    moe_enable_deepep: bool = True
+    moe_token_dispatcher_type: str = "flex"
+    data_pad_size_multiplier: int = 1024
+
     @model_validator(mode="after")
     def _serialize_projector(self) -> "GLM_5_2_Projector_Recipe":
         """Carry the projector spec to the containers through ``extra_config``.

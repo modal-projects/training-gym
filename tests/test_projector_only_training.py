@@ -154,6 +154,31 @@ def test_save_hook_runs_through_the_gyms_phase_reporting_wrapper():
     )
 
 
+def test_an_unwired_step_hook_fails_at_model_construction():
+    """Without the hook there is no grad all-reduce and no checkpoint at all."""
+    from types import SimpleNamespace
+
+    from modal_training_gym.frameworks.miles.projector_config import (
+        require_projector_step_hook,
+    )
+
+    recipe = GLM_5_2_5Layer_Projector_Recipe(projector=ProjectorSpec(input_dim=4))
+    flags = _flags(recipe.cli_args(dataset=_dataset(), model=GLM_5_2_5Layer()))
+    wired = SimpleNamespace(
+        custom_megatron_before_train_step_hook_path=flags[
+            "--custom-megatron-before-train-step-hook-path"
+        ],
+        extra_config=dict(recipe.extra_config or {}),
+    )
+    require_projector_step_hook(wired)
+
+    wired.extra_config.pop(
+        "training_gym_custom_megatron_before_train_step_hook_path", None
+    )
+    with pytest.raises(ValueError, match="unreduced gradients and no checkpoints"):
+        require_projector_step_hook(wired)
+
+
 def test_lora_is_rejected():
     # Pydantic wraps the validator's error; the message is what a user reads.
     with pytest.raises(ValidationError, match="lora_rank must be unset"):
