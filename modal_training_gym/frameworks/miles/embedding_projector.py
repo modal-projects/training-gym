@@ -494,7 +494,10 @@ class _ProjectorMerge:
             int(detached.isinf().sum()),
             int(detached.numel()),
         )
-        return output
+        # And what the loss hands back, which localizes a NaN: arriving here it
+        # came from the loss, arriving only at the embeddings it was produced
+        # inside the frozen base's backward.
+        return log_incoming_grad(output, "the frozen base's output (from the loss)")
 
     def _embedding_hook(self, module, inputs, output):
         if self._pending is None:

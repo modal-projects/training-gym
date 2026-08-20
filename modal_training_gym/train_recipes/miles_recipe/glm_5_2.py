@@ -177,12 +177,19 @@ class GLM_5_2_Projector_Recipe(MilesRecipe):
     # wants a 4D query.
     use_dynamic_batch_size: bool = False
     micro_batch_size: int | None = 1
-    # The DSA kernel backend and query layout are left to the miles model
-    # preset (``tilelang``/``thd``). The alternative, ``megatron``/``bshd``, is
-    # unusable with the activation recompute this recipe needs: the pinned image
-    # asserts that DSA's cross-layer index share is not recompute-safe there,
-    # because the per-microbatch top-k holder rides on ``packed_seq_params``,
-    # which only the ``thd`` layout supplies.
+    # GLM-5.2's sparse attention has two kernel backends, and the query layout
+    # is not free to choose alongside them: upstream derives one from the other
+    # (``qkv_format = "thd" if dsa_attention_backend == "tilelang" else
+    # "bshd"``). miles defaults the backend to ``megatron``, while MilesRecipe
+    # defaults the layout to ``thd``, so naming neither pairs megatron's unfused
+    # attention with a packed layout it does not implement — the forward returns
+    # finite logits and the backward hands the embedding stream NaN. Named as a
+    # pair here, and ``tilelang`` rather than ``megatron``/``bshd`` because the
+    # latter is not recompute-safe: the pinned image asserts that DSA's
+    # cross-layer index share needs the top-k holder that rides on
+    # ``packed_seq_params``, which only ``thd`` supplies.
+    dsa_attention_backend: str = "tilelang"
+    qkv_format: str = "thd"
 
     num_rollout: int = 10
     # One sample per data-parallel rank per step, at this shape's DP width of
