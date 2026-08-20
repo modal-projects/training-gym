@@ -85,10 +85,11 @@ class Qwen3_6_35b_Projector_Recipe(Qwen3_6_35b_Recipe):
     above ``num_rollout`` so Megatron never writes tens of gigabytes of
     unchanged weights.
 
-    Parallelism is TP2/PP1/CP1/EP4 on one 8×H100 node. Pipeline parallelism is
-    1 because with the base frozen only the first stage holds trainable
-    parameters, so later stages would build an optimizer over an empty
-    parameter set; context parallelism is 1 because the merge rebases the
+    Parallelism is TP2/PP1/CP1/EP4 on one 8×H100 node, loading the same
+    torch_dist base conversion as the RL recipe (torch_dist reshards on load).
+    Pipeline parallelism is 1 because with the base frozen only the first stage
+    holds trainable parameters, so later stages would build an optimizer over
+    an empty parameter set; context parallelism is 1 because the merge rebases the
     data's token positions onto a tensor/sequence shard and not onto Megatron's
     context-parallel chunking. Scale with tensor or expert parallelism.
     """
@@ -122,10 +123,16 @@ class Qwen3_6_35b_Projector_Recipe(Qwen3_6_35b_Recipe):
     use_kl_loss: bool = False
     kl_loss_coef: float = 0.0
     kl_coef: float = 0.0
-    # The base is still read from here — slime falls back to ``ref_load`` when
-    # ``load`` holds no checkpoint — but at PP1 rather than the RL recipe's PP2,
-    # so it gets its own conversion directory instead of invalidating that one.
-    ref_load: str = "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp2pp1"
+    # The base is still read from ``ref_load`` — slime falls back to it when
+    # ``load`` holds no checkpoint — and it is the RL recipe's inherited
+    # tp2pp2 directory: torch_dist reshards on load, so training at PP1 loads a
+    # PP2 conversion, and the two shapes share one converted base. The
+    # conversion layout has to be pinned here because it no longer follows the
+    # training layout: slime's convert_hf_to_torch_dist.py re-derives PP from
+    # the world size whenever it is passed PP=1, which at TP2/PP1 (world 2)
+    # asks Megatron for TP2*PP2=4 ranks in a 2-rank job and asserts.
+    conversion_tensor_model_parallel_size: int = 2
+    conversion_pipeline_model_parallel_size: int = 2
 
     # No evaluation pass: the rollout function has nothing to generate with, so
     # it raises when slime calls it with ``evaluation=True``.

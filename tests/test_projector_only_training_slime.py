@@ -20,6 +20,9 @@ from modal_training_gym import (
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.train import _merge_recipe
+from modal_training_gym.frameworks.slime.modal_helpers.utils import (
+    get_checkpoint_conversion_policy,
+)
 from modal_training_gym.frameworks.slime.projector_config import (
     ARGS_KEY,
     PROVIDER_PATH,
@@ -127,12 +130,28 @@ def test_save_hook_runs_through_the_gyms_phase_reporting_wrapper():
     )
 
 
-def test_base_weights_are_read_from_their_own_conversion_directory():
-    """PP1 here vs PP2 for RL: sharing a directory would invalidate the other."""
+def test_base_weights_come_from_the_rl_recipes_conversion():
+    """Training at PP1 reshards the RL recipe's PP2 base, so it converts once.
+
+    The conversion layout must stay pinned even though training is PP1: slime's
+    converter re-derives PP from the world size when passed PP=1, which at TP2
+    asks Megatron for 4 ranks in a 2-rank job.
+    """
     rl, projector = Qwen3_6_35b_Recipe(), Qwen3_6_35b_Projector_Recipe()
     assert projector.pipeline_model_parallel_size == 1
-    assert projector.ref_load != rl.ref_load
-    assert projector.ref_load.endswith("tp2pp1")
+    assert projector.ref_load == rl.ref_load
+    assert projector.conversion_tensor_model_parallel_size == 2
+    assert projector.conversion_pipeline_model_parallel_size == 2
+    assert projector.ref_load.endswith("tp2pp2")
+
+    nodes, procs, conversion_args = get_checkpoint_conversion_policy(
+        projector, model=Qwen3_6_35B()
+    )
+    # The converter's job must have exactly TP*PP ranks, or Megatron asserts on
+    # a world size that does not match the model layout it was given.
+    assert nodes * procs == 4
+    assert "--tensor-model-parallel-size 2" in conversion_args
+    assert "--pipeline-model-parallel-size 2" in conversion_args
 
 
 def test_pipeline_parallelism_is_rejected():
