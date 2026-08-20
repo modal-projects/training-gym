@@ -54,6 +54,7 @@ from modal_training_gym.common.embedding_projector import (
     init_projector as init_projector,
     is_projector_writer,
     load_projector_checkpoint as load_projector_checkpoint,
+    log_incoming_grad as log_incoming_grad,
     log_projector_replica,
     projector_graph_tap,
     scatter_projected,
