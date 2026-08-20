@@ -163,10 +163,27 @@ _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
 
+_SLIME_BASE_PATCHES_B64 = (
+    _PATCH_MEGATRON_BRIDGE_B64,
+    _PATCH_ADVANTAGES_B64,
+    _PATCH_BRIDGE_NONE_TASK_B64,
+    _PATCH_STOP_TOKEN_DIAG_B64,
+    _PATCH_QWEN3_ASR_EXPORT_B64,
+    _PATCH_QWEN3_VL_EXPORT_B64,
+    _PATCH_QWEN3_VL_TORCH_DIST_B64,
+    _PATCH_ROLLOUT_STATUS_B64,
+    _PATCH_ADVANTAGE_DIST_B64,
+    _PATCH_LOG_ELIDE_B64,
+    _PATCH_DIST_CKPT_QUANTIZED_B64,
+    _PATCH_ZERO_STD_METRICS_B64,
+    _PATCH_SGLANG_PARALLEL_ALIASES_B64,
+    _PATCH_SUBSTEP_TIMING_B64,
+)
+
 # A git overlay replaces only /root/slime, so reapply patches whose targets live
 # there. Patches for Megatron or site-packages remain intact from the base image.
 # Add new /root/slime patches here when they are added to the base image.
-_SLIME_SOURCE_PATCHES_B64 = (
+_SLIME_ROOT_PATCHES_B64 = (
     _PATCH_MEGATRON_BRIDGE_B64,
     _PATCH_ADVANTAGES_B64,
     _PATCH_STOP_TOKEN_DIAG_B64,
@@ -174,10 +191,10 @@ _SLIME_SOURCE_PATCHES_B64 = (
     _PATCH_QWEN3_VL_EXPORT_B64,
     _PATCH_QWEN3_VL_TORCH_DIST_B64,
     _PATCH_ROLLOUT_STATUS_B64,
-    _PATCH_SUBSTEP_TIMING_B64,
     _PATCH_ADVANTAGE_DIST_B64,
     _PATCH_ZERO_STD_METRICS_B64,
     _PATCH_SGLANG_PARALLEL_ALIASES_B64,
+    _PATCH_SUBSTEP_TIMING_B64,
 )
 
 
@@ -191,20 +208,7 @@ def _build_slime_base_image() -> "Image":
         .entrypoint([])
         .run_commands(
             "rm -rf /root/.cache/huggingface",
-            f"echo {_PATCH_MEGATRON_BRIDGE_B64} | base64 -d | python3",
-            f"echo {_PATCH_ADVANTAGES_B64} | base64 -d | python3",
-            f"echo {_PATCH_BRIDGE_NONE_TASK_B64} | base64 -d | python3",
-            f"echo {_PATCH_STOP_TOKEN_DIAG_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_ASR_EXPORT_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_VL_EXPORT_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_VL_TORCH_DIST_B64} | base64 -d | python3",
-            f"echo {_PATCH_ROLLOUT_STATUS_B64} | base64 -d | python3",
-            f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
-            f"echo {_PATCH_LOG_ELIDE_B64} | base64 -d | python3",
-            f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
-            f"echo {_PATCH_ZERO_STD_METRICS_B64} | base64 -d | python3",
-            f"echo {_PATCH_SGLANG_PARALLEL_ALIASES_B64} | base64 -d | python3",
-            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
+            *_patch_commands(_SLIME_BASE_PATCHES_B64),
         )
     )
 
@@ -248,7 +252,7 @@ def _overlay_slime_source(image: "Image", slime: SlimeRecipe) -> "Image":
     # The pinned source replaced /root/slime after the base-image patches ran.
     # Fail if required patches no longer apply rather than run an incompatible
     # fork with silently missing Training Gym behavior.
-    return image.run_commands(*_patch_commands(_SLIME_SOURCE_PATCHES_B64))
+    return image.run_commands(*_patch_commands(_SLIME_ROOT_PATCHES_B64))
 
 
 def _build_conversion_config(slime_cfg: Any, model: Any = None) -> dict[str, Any]:

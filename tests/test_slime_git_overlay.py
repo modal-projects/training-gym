@@ -2,11 +2,12 @@ import pytest
 
 from modal_training_gym.frameworks.slime.launcher import (
     SLIME_ROOT,
+    _SLIME_BASE_PATCHES_B64,
+    _SLIME_ROOT_PATCHES_B64,
     _overlay_slime_source,
     _patch_commands,
     _PATCH_SGLANG_PARALLEL_ALIASES_B64,
     _PATCH_SUBSTEP_TIMING_B64,
-    _SLIME_SOURCE_PATCHES_B64,
     _slime_git_overlay_command,
 )
 from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_27b_Recipe
@@ -27,6 +28,10 @@ class RecordingImage:
     def run_commands(self, *commands: object) -> "RecordingImage":
         self.operations.append(("run_commands", commands, {}))
         return self
+
+
+def test_slime_root_patches_are_a_subset_of_base_image_patches() -> None:
+    assert set(_SLIME_ROOT_PATCHES_B64) <= set(_SLIME_BASE_PATCHES_B64)
 
 
 def test_slime_git_overlay_requires_repository_and_full_revision() -> None:
@@ -86,7 +91,7 @@ def test_git_overlay_reapplies_slime_source_patches_after_replacement() -> None:
     overlay_commands = image.operations[0][1]
     assert len(overlay_commands) == 1
     assert f"rm -rf /tmp/training-gym-slime/.git {SLIME_ROOT}" in overlay_commands[0]
-    assert image.operations[1][1] == _patch_commands(_SLIME_SOURCE_PATCHES_B64)
+    assert image.operations[1][1] == _patch_commands(_SLIME_ROOT_PATCHES_B64)
     for patch in (_PATCH_SGLANG_PARALLEL_ALIASES_B64, _PATCH_SUBSTEP_TIMING_B64):
         assert _patch_commands((patch,))[0] in image.operations[1][1]
 
