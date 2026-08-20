@@ -75,9 +75,14 @@ def test_config_resolves_by_name_case_insensitively(config):
 def test_config_resolves_by_hf_repo_id(config):
     """``check -m Qwen/Qwen3-4B`` must keep working, not just the short name."""
     matches = [c for c in ALL_CONFIGS if c.model_name == config.model_name]
+    base = [c for c in matches if not c.projector]
     if len(matches) == 1:
         assert _ValidationConfig.find(config.model_name) is config
         assert _ValidationConfig.find(config.model_name.upper()) is config
+    elif len(base) == 1:
+        # A projector entry is a variant of the base entry, not a peer, so the
+        # repo id keeps resolving to the base training run.
+        assert _ValidationConfig.find(config.model_name) is base[0]
     else:
         with pytest.raises(ValueError, match="ambiguous model"):
             _ValidationConfig.find(config.model_name)

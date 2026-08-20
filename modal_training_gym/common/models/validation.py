@@ -83,6 +83,13 @@ class _ValidationConfig:
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
+            # A projector entry shares its base model's HF repo id, so adding one
+            # would make that id ambiguous and stop resolving. It is a variant of
+            # the base entry rather than a peer, so the repo id keeps meaning the
+            # base training run and the projector is asked for by name.
+            base = [config for config in matches if not config.projector]
+            if len(base) == 1:
+                return base[0]
             choices = ", ".join(sorted(config.name for config in matches))
             raise ValueError(f"ambiguous model {name!r}; use one of: {choices}")
         available = ", ".join(config.name for config in cls.select(pr_only=False))

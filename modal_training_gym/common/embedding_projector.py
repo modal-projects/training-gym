@@ -172,7 +172,11 @@ def all_reduce_projector_grads(projector: nn.Module, sequence_parallel: bool) ->
     in ``_set_default_megatron_args``, so on that backend the recipe's field is
     advisory and what makes this correct is *when* it runs: the hook wraps
     ``optimizer.step``, where ``main_grad`` still views the whole bucket for the
-    projector's own data-parallel group. A run whose replicas diverged here
+    projector's own data-parallel group. Two things make that sum right rather
+    than lucky: data-parallel groups are formed across ranks sharing a
+    tensor-parallel rank, so every rank in the group owns the same shard region
+    of the bucket, and the optimizer reads only that region — the unreduced
+    remainder outside it is never used. A run whose replicas diverged here
     would show it immediately — the fingerprint
     :func:`log_projector_replica` writes per tensor-parallel rank is compared on
     every validated run and has stayed byte-identical.
