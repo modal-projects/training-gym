@@ -1681,16 +1681,16 @@ table.training-runs-table td.row-open-cell {
   border-color: var(--border-strong);
 }
 
-.training-open-wandb-link {
+.training-open-metric-link {
   border-color: color-mix(in srgb, var(--yellow, #fbbf24) 45%, transparent);
 }
 
-.training-open-wandb-link .open-modal-link-label,
-.training-open-wandb-link .training-open-modal-link-icon {
+.training-open-metric-link .open-modal-link-label,
+.training-open-metric-link .training-open-modal-link-icon {
   color: var(--yellow, #fbbf24);
 }
 
-.training-open-wandb-link:hover {
+.training-open-metric-link:hover {
   border-color: color-mix(in srgb, var(--yellow, #fbbf24) 60%, transparent);
 }
 
@@ -1727,11 +1727,11 @@ table.training-runs-table td.row-open-cell {
   color: var(--accent);
 }
 
-.wandb-link {
+.metric-link {
   color: var(--yellow, #fbbf24);
 }
 
-.wandb-link:hover {
+.metric-link:hover {
   color: var(--yellow, #fbbf24);
   opacity: 0.8;
 }
@@ -2340,4 +2340,3 @@ table.rollout-table th:nth-child(4) .column-label {
     text-align: center;
     font-size: 14px;
   }
-

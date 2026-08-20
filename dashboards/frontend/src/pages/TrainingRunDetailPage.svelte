@@ -25,6 +25,7 @@
     fetchRunLogs,
   } from "../lib/api.js";
   import { groupByRollout, rolloutIndex, rolloutScores } from "../lib/rolloutGrouping.js";
+  import { normalizeMetricLinks } from "../lib/metricLinks.js";
   import {
     MAX_TERMINAL_TIMING_FAILURES,
     TERMINAL_TIMING_SETTLE_WINDOW_MS,
@@ -125,19 +126,27 @@
   // the auto-refresh hands us a new `run` object with the same status (which
   // would otherwise tear down and rebuild the log stream, flashing the tail).
   let runStatus = $derived(String(run?.status || "").toLowerCase());
-  let wandbUrl = $derived.by(() => {
-    const directUrl = run?.train_result?.wandb_url || run?.config_summary?.wandb_url || "";
+  let metricUrl = $derived.by(() => {
+    const directUrl =
+      run?.train_result?.metric_url ||
+      run?.config_summary?.metric_url ||
+      run?.train_result?.wandb_url ||
+      run?.config_summary?.wandb_url ||
+      "";
     if (directUrl) return directUrl;
 
-    const project = run?.config_summary?.wandb_project || "";
+    const project =
+      run?.config_summary?.metric_project || run?.config_summary?.wandb_project || "";
     return project ? `https://wandb.ai/home?search=${encodeURIComponent(project)}` : "";
   });
-  let wandbLinks = $derived.by(() =>
-    run?.wandb_links?.length
-      ? run.wandb_links
-      : wandbUrl
-        ? [{ label: "Open in W&B", url: wandbUrl }]
-        : [],
+  let metricLinks = $derived.by(() =>
+    run?.metric_links?.length
+      ? normalizeMetricLinks(run.metric_links)
+      : run?.wandb_links?.length
+        ? normalizeMetricLinks(run.wandb_links)
+        : metricUrl
+          ? [{ label: "Metric", url: metricUrl }]
+          : [],
   );
 
   $effect(() => {
@@ -1474,9 +1483,9 @@
           <span>Collapse</span>
         </button>
       {/if}
-      {#each wandbLinks as link (link.url)}
+      {#each metricLinks as link (link.url)}
         <a
-          class="header-link wandb-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"
+          class="header-link metric-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"
           href={link.url}
           target="_blank"
           rel="noopener noreferrer"

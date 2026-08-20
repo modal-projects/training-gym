@@ -10,6 +10,7 @@
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
   import { formatTagValue, getGroupTags } from "../lib/format.js";
+  import { normalizeMetricLinks } from "../lib/metricLinks.js";
   import { toggleInSet } from "../lib/set.js";
 
   let {
@@ -140,6 +141,12 @@
       );
     }
     return parts.join(" · ");
+  }
+
+  function metricLinksForRun(run) {
+    return normalizeMetricLinks(
+      run?.metric_links?.length ? run.metric_links : run?.wandb_links,
+    );
   }
 
   $effect(() => {
@@ -369,9 +376,9 @@
                           <ExternalLink class="training-open-modal-link-icon" size={12} strokeWidth={2.1} />
                         </span>
                       {/if}
-                      {#each run.wandb_links || [] as link (link.url)}
+                      {#each metricLinksForRun(run) as link (link.url)}
                         <a
-                          class="training-open-modal-link training-open-wandb-link"
+                          class="training-open-modal-link training-open-metric-link"
                           href={link.url}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -466,4 +473,3 @@
     </div>
   </Drawer>
 {/if}
-
