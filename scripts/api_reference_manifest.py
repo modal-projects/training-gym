@@ -284,7 +284,7 @@ API_REFERENCE_MANIFEST = [
     },
     {
         "class_name": "ProjectorSpec",
-        "module": "modal_training_gym.frameworks.miles.projector_config",
+        "module": "modal_training_gym.common.projector_config",
         "group": "training",
         "class_type": "config_data",
         "sidebar_label": "ProjectorSpec",
@@ -295,6 +295,13 @@ API_REFERENCE_MANIFEST = [
         "group": "training",
         "class_type": "config_data",
         "sidebar_label": "Qwen3_6_35b_Recipe",
+    },
+    {
+        "class_name": "Qwen3_6_35b_Projector_Recipe",
+        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b_projector",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3_6_35b_Projector_Recipe",
     },
     {
         "class_name": "Qwen3_6_27b_Recipe",
