@@ -41,6 +41,9 @@ from modal_training_gym.common.ids import create_hash
 #: much slower than scoring and adds nothing to the metric, so it is sampled.
 _GENERATE_ROWS = 8
 
+# Not ``HF_CACHE_PATH``: see the mount comment in ``ProjectorEval.run``.
+_HF_CACHE_MOUNT = "/hf"
+
 
 @dataclass
 class ProjectorEvalRow:
@@ -109,7 +112,11 @@ class ProjectorEvalReport:
         )
 
         eval_config_id = create_hash(
-            "eval-config", "ProjectorEval", self.model_name, ",".join(self.classes)
+            "eval-config",
+            "ProjectorEval",
+            self.model_name,
+            "projector_class_scoring",
+            ",".join(self.classes),
         )
         EvalConfigDurable(
             eval_config_id=eval_config_id,
@@ -117,7 +124,13 @@ class ProjectorEvalReport:
             eval_fn_name="projector_class_scoring",
         ).save()
         result = EvalResult(
-            eval_id=create_hash("eval", eval_config_id, self.checkpoint),
+            eval_id=create_hash(
+                "eval",
+                eval_config_id,
+                self.model_name,
+                self.checkpoint,
+                str(self.iteration),
+            ),
             eval_config_id=eval_config_id,
             model_name=self.model_name,
             rows=[
@@ -181,9 +194,9 @@ class ProjectorEval:
         return f"{save_dir}/projector_latest.pt"
 
     def _eval_path(self) -> str:
-        from modal_training_gym.train_recipes.base import TrainRecipe
+        from modal_training_gym.train_recipes.base import BaseTrainRecipe
 
-        _train, eval_paths = TrainRecipe._resolve_data_paths(self.dataset)
+        _train, eval_paths = BaseTrainRecipe._resolve_data_paths(self.dataset)
         if not eval_paths:
             raise TrainingGymConfigError(
                 f"{type(self.dataset).__name__} writes no eval split, so there "
@@ -199,18 +212,24 @@ class ProjectorEval:
         from modal_training_gym.train_recipes.base import (
             CHECKPOINTS_PATH,
             DATA_PATH,
-            HF_CACHE_PATH,
         )
 
         prefix = self._volume_prefix()
         image = (
             modal.Image.from_registry(self.recipe.docker_image)
             .entrypoint([])
+            # The miles image ships a populated ``~/.cache/huggingface``, and
+            # Modal refuses to mount a volume onto a non-empty path, so the
+            # shared cache goes somewhere unused and HF_HOME is pointed at it.
+            .env({"HF_HOME": _HF_CACHE_MOUNT})
+            # The gym's id helper needs it and the miles image doesn't ship it,
+            # so publishing to the dashboard fails at the last line otherwise.
+            .pip_install("randomname")
             .add_local_python_source("modal_training_gym", copy=True)
         )
         app = modal.App(f"{prefix}-projector-eval", image=image)
         volumes = {
-            str(HF_CACHE_PATH): modal.Volume.from_name(
+            _HF_CACHE_MOUNT: modal.Volume.from_name(
                 "huggingface-cache", create_if_missing=True
             ),
             str(DATA_PATH): modal.Volume.from_name(

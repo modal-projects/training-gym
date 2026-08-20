@@ -638,3 +638,66 @@ def test_the_report_states_both_baselines_it_has_to_beat():
     assert report.untrained_accuracy == 0.25
     assert report.majority_accuracy == 0.5
     assert "trained 0.750" in report.summary()
+
+
+def test_publishing_the_report_reaches_the_dashboard_store(monkeypatch):
+    """The eval only counts if it lands in the dashboard, so publish is exercised.
+
+    Both of the bugs this catches were invisible until a GPU eval had already
+    finished: ``publish()`` is the last line of a multi-minute remote call, so a
+    wrong ``create_hash`` arity there costs a whole eval to discover.
+    """
+    from modal_training_gym.frameworks.miles.projector_eval import (
+        ProjectorEvalReport,
+        ProjectorEvalRow,
+    )
+
+    written: dict[str, dict] = {}
+    monkeypatch.setattr(
+        "modal_training_gym.common.eval.vol_put",
+        lambda store, key, value, **kw: written.__setitem__(key, value),
+    )
+    monkeypatch.setattr(
+        "modal_training_gym.common.eval.vol_get",
+        lambda store, key, **kw: written.get(key, {}),
+    )
+
+    report = ProjectorEvalReport(
+        model_name="zai-org/GLM-5.2",
+        checkpoint="/checkpoints/run/projector/projector_latest.pt",
+        iteration=150,
+        classes=["nucleus", "membrane"],
+        rows=[
+            ProjectorEvalRow(
+                prompt="p",
+                target="nucleus",
+                prediction="nucleus",
+                correct=True,
+                scores={"nucleus": -1.0, "membrane": -2.0},
+            )
+        ],
+    )
+    eval_id = report.publish()
+    assert written[eval_id]["rows"][0]["score"] == 1.0
+    assert written[eval_id]["model_name"] == "zai-org/GLM-5.2"
+
+
+def test_the_eval_resolves_the_held_out_split_the_run_wrote(monkeypatch):
+    """``ProjectorEval`` reads the training run's paths, not paths of its own."""
+    from modal_training_gym.frameworks.miles.projector_eval import ProjectorEval
+    from modal_training_gym.train_recipes.miles_recipe.glm_5_2 import (
+        GLM_5_2_5Layer_Projector_Recipe,
+    )
+
+    recipe = GLM_5_2_5Layer_Projector_Recipe(num_rollout=4)
+    dataset = ProteinLocalizationDataset()
+    ev = ProjectorEval(
+        model=GLM_5_2_5Layer(),
+        recipe=recipe,
+        dataset=dataset,
+        training_run_id="some-run-id",
+    )
+    assert ev._eval_path().endswith(".jsonl")
+    assert ev._checkpoint_path() == (
+        "/checkpoints/some-run-id/projector/projector_latest.pt"
+    )
