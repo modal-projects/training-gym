@@ -690,6 +690,20 @@ def projector_sft_rollout(args, rollout_id: int, data_buffer, evaluation: bool =
                 f"sample {sample.index} places an embedding at token "
                 f"{max_position} of a {len(token_ids)}-token sequence"
             )
+        budget = getattr(args, "seq_length", None)
+        if budget and len(token_ids) > budget:
+            # Positions are offsets into the tokens produced here, and the merge
+            # writes them into the packed micro-batch. Anything that shortens a
+            # sequence between the two shifts every later sample's offset, so a
+            # sample that does not fit the training sequence length is rejected
+            # here rather than merged onto whichever tokens survived.
+            raise ValueError(
+                f"sample {sample.index} tokenizes to {len(token_ids)} tokens, "
+                f"past the {budget}-token training sequence length. Projector "
+                "positions index the tokens this rollout emits, so a truncated "
+                "sequence would move the embeddings onto the wrong tokens; "
+                "shorten the conversation or raise seq_length."
+            )
         sample.multimodal_train_inputs = {
             cfg.embeddings_key: embeddings_t,
             cfg.positions_key: torch.tensor(positions, dtype=torch.long),
