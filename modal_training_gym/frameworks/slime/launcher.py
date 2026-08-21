@@ -600,8 +600,7 @@ def build_slime_app(
         recipe_app_tags=slime.app_tags,
         wandb=slime.wandb,
     )
-    if slime.slime_git_revision:
-        tags["slime_git_revision"] = slime.slime_git_revision
+
     app = App(app_name, tags=tags)
     gpu_spec = f"{slime.gpu_type}:{slime.actor_num_gpus_per_node}"
 
