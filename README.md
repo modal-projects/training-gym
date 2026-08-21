@@ -6,6 +6,8 @@ Modal Training Gym is a Python SDK for RL post-training on [Modal](https://modal
 
 The library takes care of infrastructure concerns such as Cluster topology, Ray/NCCL bring-up, volume mounts, checkpointing, and serving for eval and rollouts, so you can focus on training models.
 
+![Gym Observability Dashboard](./assets/training_runs_overview.gif)
+
 ## Quickstart
 
 Requirements:
@@ -80,8 +82,6 @@ While that's running, you can view the run in the dashboard:
 training-gym setup  # first-time deploy
 training-gym open  # opens in your browser
 ```
-
-![Gym Observability Dashboard](./assets/observability_dashboard_1.png)
 
 ## Agent set-up
 

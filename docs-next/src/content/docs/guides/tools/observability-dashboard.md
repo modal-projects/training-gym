@@ -49,7 +49,7 @@ training-gym set-password
 
 The landing page lists every training run in your workspace:
 
-![Training runs list with annotated components](/observability_dashboard_1_annotated.png)
+![Training runs list](/training_runs_list.gif)
 
 1. **Sections** — switch between *Training runs* and *Evals* (saved
    evaluation results written to the metadata volume).
