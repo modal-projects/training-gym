@@ -89,7 +89,7 @@ def _main_impl() -> None:
     )
 
     run = config.launch()
-    print(f"run id: {train_result.training_run_id}")
+    print(f"run id: {run.training_run_id}")
 
     # ## Test out the trained model
     #
@@ -103,10 +103,10 @@ def _main_impl() -> None:
     trained_deployment = Endpoint.launch(
         model, checkpoint, unauthenticated=True, recreate_if_existing=True
     )
-    deployment.wait_until_ready(timeout=45 * 60)
+    trained_deployment.wait_until_ready(timeout=45 * 60)
     print(f"checkpoint deployed to {trained_deployment.url}")
 
-    msg = deployment.chat(
+    msg = trained_deployment.chat(
         [
             {
                 "role": "user",
