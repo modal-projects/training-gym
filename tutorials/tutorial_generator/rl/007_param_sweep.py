@@ -12,7 +12,6 @@ TUTORIAL_METADATA = {
         "SlimeRecipe",
         "TrainConfig",
         "TrainingGroup",
-   
     ],
 }
 

@@ -21,7 +21,7 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown   
 def _intro():
     """ 
-    # Better long chain-of-thought reasoning
+    # Long chain-of-thought reasoning for large-scale RL
 
     Decoupled Clip and Dynamic Sampling Policy Optimization (DAPO) is a modified version
     of GRPO that substantially improves long chain-of-thought (COT) reasoning,

@@ -22,7 +22,7 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Uncompromising speech transcription
+    # Speech transcription that's better, faster, and cheaper
 
     We've shown before that when it comes to speech transcription,
     open models are [100x faster and 100x cheaper](https://modal.com/blog/fast-cheap-batch-transcription)

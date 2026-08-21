@@ -3,15 +3,15 @@
 TUTORIAL_METADATA = {
     "framework": "`slime`",
     "cluster_shape": "8 x 8xH200",
-    "summary": "GLM-4.7 355B MoE full-weight GSPO training on 64 GPUs with DAPO-Math-17k",
+    "summary": "Multi-node full-weight training",
     "difficulty": "Advanced",
     "order": 30,
     "api_classes": [
-        "GLM_4_7",
-        "GLM_4_7_Recipe",
         "Endpoint",
+        "GLM_4_7_Recipe",
+        "GLM_4_7",
+        "HuggingFaceDataset",
         "TrainConfig",
-        "TrainResult",
     ],
 }
 
@@ -22,22 +22,17 @@ from tutorial_generator import code, markdown, notebook_only, py_only, shell
 @markdown
 def _intro():
     """
-    # Multi-node GLM-4.7 full-weight training
+    # Frontier-scale training
 
-    This tutorial runs full-weight GSPO (Group-Guided Self-Preference
-    Optimization) on [GLM-4.7](https://huggingface.co/zai-org/GLM-4.7),
-    a 355B-parameter Mixture-of-Experts model from Zhipu AI, using
-    [slime](https://github.com/THUDM/slime) across **8 nodes (64 H200 GPUs)**.
-
-    GLM-4.7 routes each token through 8 of 160 experts (~32B active
-    parameters per token). Training at this scale requires:
-
-    - **TP=8, PP=4, CP=2, EP=16** to shard the model across 64 GPUs
-    - **EAGLE speculative decoding** on the sglang rollout engine
-    - **CPU-offloaded optimizer** to fit the full optimizer states
-
-    The `GLM_4_7_Recipe` preset wires all of this up — you attach a
-    dataset and call `train()`.
+    When you're decided that you need to train a frontier-scale model
+    for your workload, you're probably looking for 1) the beefiest
+    hardware you can get, and 2) guarantees that your runs won't crash.
+    This tutorial trains [GLM-4.7](https://huggingface.co/zai-org/GLM-4.7)
+    across 8 nodes with 8 H200s each for a total of 64 GPUs using full-weight
+    [Group Sequence Policy Optimization](https://arxiv.org/abs/2507.18071) (GSPO)
+    on the
+    [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k)
+    Huggingface dataset. And what do you know: it's easy as pie (possibly even easier).
     """
 
 
@@ -45,7 +40,8 @@ def _intro():
 @markdown
 def _run_instructions():
     """
-    To run the tutorial, run the following command:
+    Run with:
+
     ```
     uv run tutorials/multinode/002_glm_4_7/002_glm_4_7.py
     ```
@@ -56,8 +52,6 @@ def _run_instructions():
 @shell(
     "import importlib.util\n"
     "\n"
-    "# Skip if modal_training_gym is already importable (e.g. a local editable\n"
-    "# checkout) so your edits keep taking effect and the env stays synced.\n"
     "if importlib.util.find_spec('modal_training_gym') is None:\n"
     "    %uv pip install -q git+https://github.com/modal-projects/training-gym.git@main"
 )
@@ -78,20 +72,20 @@ def _imports():
 
 
 @markdown
-def _dataset_intro():
+def _setup_intro():
     """
-    ## Dataset
+    ## Set up
 
-    We use [DAPO-Math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k),
-    a collection of math competition problems with verifiable answers.
-    The `deepscaler` reward model built into slime checks whether the
-    model's response matches the reference answer.
+    We'll quickly set up the model, dataset, and training recipe. All that you successfully
+    train this model is encapsulated in the model and recipe classes. However, we surface
+    some important parameters to make the run correct and fast.
     """
-
 
 @code
-def _define_dataset():
-    class DAPOMath(HuggingFaceDataset):
+def _setup():
+    model = GLM_4_7()
+
+    class MathDataset(HuggingFaceDataset):
         hf_repo = "zhuzilin/dapo-math-17k"
         input_key = "prompt"
         label_key = "label"
@@ -99,101 +93,62 @@ def _define_dataset():
         apply_chat_template = True
         always_prepare = True
 
-    dataset = DAPOMath()
-
-
-@markdown
-def _model_intro():
-    """
-    ## Model and recipe
-
-    `GLM_4_7()` points at `zai-org/GLM-4.7` on HuggingFace and carries
-    the full architecture spec (92 layers, 5120 hidden, 96 attention
-    heads, 160 MoE experts).
-
-    `GLM_4_7_Recipe()` is the training preset: 8 colocated H200 nodes,
-    GSPO algorithm, EAGLE speculative rollout, CPU-offloaded Adam, and
-    DeepEP-accelerated expert dispatch. Override any field to customize.
-    """
-
-
-@code
-def _define_model():
-    model = GLM_4_7()
-
+    train_dataset = MathDataset(hf_split="train[:2000]")
     recipe = GLM_4_7_Recipe(
         rm_type="deepscaler",
     )
 
-    print(f"Model: {model.model_name}")
-    print(f"Nodes: {recipe.actor_num_nodes}, GPUs/node: {recipe.actor_num_gpus_per_node}")
-    print(f"Parallelism: TP={recipe.tensor_model_parallel_size}, "
-          f"PP={recipe.pipeline_model_parallel_size}, "
-          f"CP={recipe.context_parallel_size}, "
-          f"EP={recipe.expert_model_parallel_size}")
-    print(f"Algorithm: {recipe.advantage_estimator}")
+    print(f"training and rollout gpus colocated: {recipe.colocate}")
+    print(f"training nodes: {recipe.actor_num_nodes}, gpus/node: {recipe.actor_num_gpus_per_node}")
+    print(f"rollout gpus: {recipe.rollout_num_gpus}, rollout gpus/engine: {recipe.rollout_num_gpus_per_engine}")
+    print(f"parallelism: tp={recipe.tensor_model_parallel_size}, pp={recipe.pipeline_model_parallel_size}, "
+          f"cp={recipe.context_parallel_size}, ep={recipe.expert_model_parallel_size}")
+    print(f"optimizer cpu offload: {recipe.optimizer_cpu_offload}")
 
 
 @markdown
 def _train_intro():
     """
-    ## Train
+    ## Kick off training
 
-    `TrainConfig.train()` builds the Modal app, downloads the model
-    weights, prepares the dataset, and launches multi-node training.
-    The first run downloads ~710 GB of model weights into the shared
-    HuggingFace cache volume — subsequent runs reuse the cache.
+    Let's begin, shall we?
     """
 
 
 @code
-def _run_training():
-    training_run = TrainConfig(
+def _train():
+    config = TrainConfig(
         model=model,
-        dataset=dataset,
+        dataset=train_dataset,
         recipe=recipe,
     )
 
-    print(f"Total nodes: {recipe.total_nodes}")
-    print("--- Starting training... ---")
-    train_result = training_run.train()
-    print(f"--- Training complete: {train_result.training_run_id} ---")
+    run = config.launch()
+    print(f"run id: {train_result.training_run_id}")
 
 
 @markdown
-def _serve_intro():
+def _test_intro():
     """
-    ## Serve the trained checkpoint
+    ## Test out the trained model
 
-    After training, pass the last checkpoint to `Endpoint.launch`. GLM-4.7
-    is in the dedicated Endpoints catalog; Megatron weights are converted
-    to Hugging Face format during launch.
+    We'll spin up an [Endpoint](https://modal.com/docs/guide/endpoints)
+    and see how the trained model does.
     """
 
 
 @code
 def _serve_checkpoint():
-    checkpoint = list_checkpoints(train_result.training_run_id)[-1]
-    print(f"Checkpoint: {checkpoint.path}")
+    result = run.result()
+    checkpoint = list_checkpoints(result.training_run_id)[-1]
+    print(f"checkpoint: {checkpoint.path}")
 
-    deployment = Endpoint.launch(
-        GLM_4_7(), checkpoint, unauthenticated=True, recreate_if_existing=True
+    trained_deployment = Endpoint.launch(
+        model, checkpoint, unauthenticated=True, recreate_if_existing=True
     )
     deployment.wait_until_ready(timeout=45 * 60)
-    print(f"Deployed to {deployment.url}")
+    print(f"checkpoint deployed to {trained_deployment.url}")
 
-
-@notebook_only
-@markdown
-def _try_it():
-    """
-    Let's test the trained model with a math problem.
-    """
-
-
-@notebook_only
-@code
-def _try_generation():
     msg = deployment.chat(
         [
             {
