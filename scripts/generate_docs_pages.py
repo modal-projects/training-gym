@@ -212,16 +212,6 @@ def wrap_catalogs(markdown: str) -> str:
     return markdown
 
 
-def strip_docs_badge_line(markdown: str) -> str:
-    """Drop the README's docs-link line — the site's own nav already covers it."""
-    lines = [
-        line
-        for line in markdown.splitlines()
-        if not line.startswith("**[\U0001f4d6 Documentation]")
-    ]
-    return "\n".join(lines)
-
-
 def strip_first_heading(markdown: str) -> str:
     lines = markdown.splitlines()
     if lines and lines[0].startswith("# "):
@@ -258,7 +248,6 @@ def transform_markdown(
 ) -> str:
     page = source.read_text()
     page = strip_developer_guide(page)
-    page = strip_docs_badge_line(page)
     page = wrap_catalogs(page)
     page = convert_github_callouts(page)
     page = rewrite_images(page, source_dir=source_dir)
