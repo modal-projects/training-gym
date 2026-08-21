@@ -81,6 +81,8 @@ training-gym setup  # first-time deploy
 training-gym open  # opens in your browser
 ```
 
+![Training runs list](./assets/training_runs_list.gif)
+
 ## Agent set-up
 
 Install the Training Gym skill bundle into your project:
