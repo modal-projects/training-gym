@@ -75,14 +75,12 @@ class BaseTrainRecipe(ABC):
 
     # ── Model presets ─────────────────────────────────────────────────────────
 
-    # TOOD(joy): Remove merge_model_recipe logic everywhere.
     @classmethod
     def get_base_recipe(cls, model_config: "ModelConfig") -> "BaseTrainRecipe | None":
         """Known-model preset recipe for ``model_config``, or ``None``.
 
-        ``TrainConfig.merge_model_recipe`` merges the returned preset onto the
-        fields a user left unset. ``None`` means "no preset for this model" and
-        the user's recipe is used as written.
+        Call this explicitly. ``TrainConfig`` uses the recipe it receives
+        without applying a preset.
 
         A framework that only supports an explicit allow-list of models (e.g.
         slime) may instead raise ``TrainingGymConfigError`` for a model it has

@@ -1,4 +1,4 @@
-import dataclasses as _dc
+import copy
 import os
 import secrets as _secrets
 import sys
@@ -6,7 +6,7 @@ import threading
 import time
 import warnings
 from contextlib import nullcontext
-from typing import Any, TypeVar, cast
+from typing import Any
 
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
@@ -32,45 +32,6 @@ from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
 
-_RecipeT = TypeVar("_RecipeT", bound=BaseTrainRecipe)
-
-
-def _merge_recipe(base: BaseTrainRecipe, overrides: BaseTrainRecipe) -> BaseTrainRecipe:
-    base_fields = {f.name: getattr(base, f.name) for f in _dc.fields(base)}
-
-    # Fields that a recipe *subclass* declares in its own body are intentional
-    # config and must override the model preset even when they equal the
-    # framework base recipe's default (e.g. a long-context recipe pinning
-    # context_parallel_size=1, or disabling use_kl_loss). We collect those by
-    # walking the MRO from the concrete recipe down to — but not including — the
-    # framework's base recipe class (the immediate subclass of BaseTrainRecipe,
-    # e.g. SlimeRecipe / MilesRecipe). For a plain base recipe (no subclass
-    # layer) this set is empty, so we fall back to "value differs from default"
-    # — which keeps an untouched recipe from clobbering the preset with bare
-    # defaults (e.g. a preset's n_samples_per_prompt=8 vs default 2).
-    declared: set[str] = set()
-    for cls in type(overrides).__mro__:
-        if cls is BaseTrainRecipe or BaseTrainRecipe in getattr(cls, "__bases__", ()):
-            break
-        declared |= set(getattr(cls, "__annotations__", {}))
-
-    for f in _dc.fields(overrides):
-        if f.name not in base_fields:
-            continue
-        user_val = getattr(overrides, f.name)
-        default_val = _field_default(f)
-        if f.name in declared or default_val is _dc.MISSING or user_val != default_val:
-            base_fields[f.name] = user_val
-    return type(base)(**base_fields)
-
-
-def _field_default(field: _dc.Field) -> Any:
-    if field.default is not _dc.MISSING:
-        return field.default
-    if field.default_factory is not _dc.MISSING:
-        return field.default_factory()
-    return _dc.MISSING
-
 
 def _try_validate_model_parallelism(
     recipe: BaseTrainRecipe, model: ModelConfig
@@ -78,21 +39,6 @@ def _try_validate_model_parallelism(
     # Not every framework recipe implements this preflight.
     if validate := getattr(recipe, "validate_model_parallelism", None):
         validate(model)
-
-
-def _resolve_recipe(
-    model: ModelConfig,
-    recipe: _RecipeT,
-    *,
-    merge_model_recipe: bool,
-) -> _RecipeT:
-    base_recipe = type(recipe).get_base_recipe(model) if merge_model_recipe else None
-    if base_recipe is None:
-        _try_validate_model_parallelism(recipe, model)
-        return recipe
-    resolved = cast(_RecipeT, _merge_recipe(base_recipe, recipe))
-    _try_validate_model_parallelism(resolved, model)
-    return resolved
 
 
 def _convert_checkpoint_on_cache_miss(
@@ -364,11 +310,6 @@ class TrainConfig:
         directory becomes the recipe's ``load`` path; the attached model
         remains the Hugging Face source for tokenizer and architecture data.
         Omit to start from the base model weights. Default ``None``.
-    merge_model_recipe : bool
-        When ``True``, merges the known-model preset recipe (e.g.
-        ``Qwen3_4b_Recipe``) onto recipe fields you left unset. Set
-        ``False`` to run the recipe exactly as written, with no preset
-        defaults. Default ``True``.
     detach : bool
         Whether the training app should outlive the local client. The Modal
         app is always started detached so a dropped connection can't kill a
@@ -397,8 +338,6 @@ class TrainConfig:
     model: ModelConfig
     recipe: SlimeRecipe | MilesRecipe
     checkpoint: Checkpoint | None = None
-    # Known-model recipes are presets by default; complete recipes can opt out.
-    merge_model_recipe: bool = True
     # Whether a run outlives the local client. The app itself is always started
     # detached (the CLI's ``modal run --detach`` only detaches the entrypoint,
     # not the nested ``app.run()`` the driver opens), so this only decides
@@ -422,11 +361,8 @@ class TrainConfig:
         )
 
     def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
-        recipe = _resolve_recipe(
-            self.model,
-            self.recipe,
-            merge_model_recipe=self.merge_model_recipe,
-        )
+        recipe = copy.deepcopy(self.recipe)
+        _try_validate_model_parallelism(recipe, self.model)
         if self.checkpoint is None:
             return recipe
         if self.checkpoint.checkpoint_type != CheckpointType.megatron:
@@ -434,10 +370,12 @@ class TrainConfig:
                 "Training can only resume from a Megatron checkpoint; "
                 "Hugging Face exports are serving artifacts."
             )
-        return _dc.replace(
+        object.__setattr__(
             recipe,
-            load=os.path.dirname(self.checkpoint.path.rstrip("/")),
+            "load",
+            os.path.dirname(self.checkpoint.path.rstrip("/")),
         )
+        return recipe
 
     def _build_app(self, training_run_id: str | None = None):
         _warn_if_external_build_app()
@@ -491,7 +429,7 @@ class TrainConfig:
         """Framework-specific TrainingRun.config summary."""
         model = self.model
         dataset = self.dataset
-        recipe = self.recipe
+        recipe = self._prepare_recipe()
 
         metrics = getattr(recipe, "metrics", None)
         summary: dict[str, Any] = {
@@ -517,13 +455,12 @@ class TrainConfig:
                 serialize_recipe_params,
             )
 
-            combined = self._prepare_recipe()
             summary["recipe"] = {
                 # gpu_type is a launcher-only field (in _MILES_SKIP) so it is
                 # absent from serialize_recipe_params for miles; the dashboard
                 # cluster column reads recipe.gpu_type, so keep it here too.
-                "gpu_type": getattr(combined, "gpu_type", None),
-                **serialize_recipe_params(combined, dataset=dataset, model=model),
+                "gpu_type": getattr(recipe, "gpu_type", None),
+                **serialize_recipe_params(recipe, dataset=dataset, model=model),
             }
 
         return summary
@@ -570,14 +507,9 @@ class TrainConfig:
             config_path=str(config_path),
         )
 
-    def _resolved_recipe_for_logging(self) -> SlimeRecipe | MilesRecipe:
-        return _resolve_recipe(
-            self.model, self.recipe, merge_model_recipe=self.merge_model_recipe
-        )
-
     def context_plan_line(self) -> str | None:
         """One-line summary of the effective training context length and parallelism plan."""
-        recipe = self._resolved_recipe_for_logging()
+        recipe = self.recipe
         max_tokens_per_gpu = getattr(recipe, "max_tokens_per_gpu", None)
         if max_tokens_per_gpu is None:
             return None
@@ -685,10 +617,7 @@ class TrainConfig:
                         is_active=is_active,
                     )
 
-                # Resolved, not self.recipe: the preset decides bridge mode, which loads
-                # the HF weights directly and needs no torch_dist conversion.
-                resolved = self._resolved_recipe_for_logging()
-                megatron_to_hf_mode = getattr(resolved, "megatron_to_hf_mode", "")
+                megatron_to_hf_mode = getattr(self.recipe, "megatron_to_hf_mode", "")
                 needs_conversion = megatron_to_hf_mode != "bridge"
                 if prepare_inputs:
                     if isinstance(self.recipe, SlimeRecipe):
