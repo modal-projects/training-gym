@@ -9,6 +9,7 @@ TUTORIALS_DIR = REPO_ROOT / "tutorials"
 FIELD_PATTERN = re.compile(r"^# ([a-z_]+):\s*(.*)$")
 DEP_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 ORDER_PATTERN = re.compile(r"^\d+$")
+MAX_SAFE_INTEGER = (1 << 53) - 1
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,8 @@ def parse_tutorial(path: Path) -> TutorialEntry:
     if order_text is None or ORDER_PATTERN.fullmatch(order_text) is None:
         raise ValueError(f"{path} frontmatter requires a non-negative integer order")
     order = int(order_text)
+    if order > MAX_SAFE_INTEGER:
+        raise ValueError(f"{path} frontmatter order exceeds the safe integer range")
 
     deps = tuple(
         dependency.strip()

@@ -1,8 +1,11 @@
 # Training Gym docs site
 
-The [gym.modal.dev](https://gym.modal.dev) docs, built with
-[Starlight](https://starlight.astro.build/) (Astro) and served from a Modal
-ASGI app.
+The [gym.modal.dev](https://gym.modal.dev) docs are a
+[Starlight](https://starlight.astro.build/) site on Astro, packaged as a
+Modal ASGI app so a `modal deploy` of `docs_next_app.py` is the production
+host.
+
+That deploy is `gym.modal.dev`.
 
 ## Dev
 
@@ -25,13 +28,13 @@ npm run preview    # serves dist/ on http://localhost:4321
 uv run modal deploy docs-next/docs_next_app.py
 ```
 
-This serves the site at `gym.modal.dev`.
+That deploy is `gym.modal.dev`.
 
 ## Layout
 
 ```
 docs-next/
-├── astro.config.mjs        # Starlight config: sidebar, theme hooks
+├── astro.config.mjs        # Starlight config: sidebar, theme hooks, redirects
 ├── docs_next_app.py        # Modal ASGI app that serves dist/
 ├── src/
 │   ├── styles/custom.css   # Modal-green accent, Inter font
@@ -39,8 +42,7 @@ docs-next/
 │   │   └── tutorial-docs-loader.ts  # loads tutorials/*.py into Starlight
 │   └── content/
 │       └── docs/           # page tree (frontmatter-led)
-│           ├── index.md
-│           └── support.md
+│           └── index.md
 └── package.json
 ```
 

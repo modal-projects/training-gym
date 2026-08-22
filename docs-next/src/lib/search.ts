@@ -47,6 +47,7 @@ export function groupHits(hits: readonly SearchHit[]): SearchGroup[] {
   const buckets = new Map<DocsSection, SearchHit[]>();
   for (const hit of hits) {
     const section = sectionForUrl(hit.url);
+    if (!section) continue;
     const list = buckets.get(section);
     if (list) list.push(hit);
     else buckets.set(section, [hit]);

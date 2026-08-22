@@ -1,14 +1,12 @@
 ---
 import { Code } from 'astro-expressive-code/components';
-import MobileTableOfContents from '@astrojs/starlight/components/MobileTableOfContents.astro';
-import TableOfContents from '@astrojs/starlight/components/TableOfContents.astro';
+import TableOfContents from './TableOfContents.astro';
 
 const { toc, entry } = Astro.locals.starlightRoute;
 const runCommand =
   typeof entry.data.runCommand === 'string' ? entry.data.runCommand : '';
-const isTutorial = entry.id.replace(/^\/+/, '').startsWith('tutorials/');
-const showTutorialCta = isTutorial && Boolean(runCommand);
-const showDefaultCta = Boolean(toc) && !isTutorial;
+const showTutorialCta =
+  entry.id.replace(/^\/+/, '').startsWith('tutorials/') && Boolean(runCommand);
 const commands = showTutorialCta
   ? [
       'git clone https://github.com/modal-projects/training-gym',
@@ -20,9 +18,9 @@ const shellCode = commands.join('\n');
 ---
 
 {toc && (
-  <div class="tg-mobile-toc lg:sl-hidden">
-    <MobileTableOfContents />
-  </div>
+      <div class="tg-mobile-toc lg:sl-hidden">
+        <TableOfContents />
+      </div>
 )}
 {(toc || showTutorialCta) && (
   <div class="right-sidebar-panel sl-hidden lg:sl-block">
@@ -30,16 +28,6 @@ const shellCode = commands.join('\n');
       {toc && (
         <div class="tg-right-rail__toc">
           <TableOfContents />
-          <script is:inline>
-            (() => {
-              const root = document.currentScript?.parentElement;
-              const hash = window.location.hash || '#_top';
-              const current = [...(root?.querySelectorAll('a') ?? [])].find(
-                (link) => link.getAttribute('href') === hash,
-              );
-              current?.setAttribute('aria-current', 'true');
-            })();
-          </script>
         </div>
       )}
       {showTutorialCta && (
@@ -48,24 +36,10 @@ const shellCode = commands.join('\n');
           <Code lang="bash" code={shellCode} />
         </aside>
       )}
-      {showDefaultCta && (
-        <aside class="tg-right-rail__cta">
-          <p class="tg-right-rail__eyebrow">Training Gym</p>
-          <h2>Run RL post-training on Modal.</h2>
-          <p>Browse the runnable RL tutorials and framework launchers that ship with this repo.</p>
-          <div class="tg-right-rail__links">
-            <a class="tg-action-button tg-action-button--primary" href="/tutorials/">
-              Open tutorials
-            </a>
-            <a
-              class="tg-action-button tg-action-button--ghost"
-              href="https://github.com/modal-projects/training-gym"
-            >
-              GitHub repo
-            </a>
-          </div>
-        </aside>
-      )}
     </div>
   </div>
 )}
+
+<script>
+  import '../scripts/toc-spy';
+</script>

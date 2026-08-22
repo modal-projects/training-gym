@@ -26,6 +26,11 @@ SITE = "https://gym.modal.dev"
 REPO = "https://github.com/modal-projects/training-gym"
 
 
+def _site_url(*parts: str) -> str:
+    path = "/".join(part.strip("/") for part in parts if part)
+    return f"{SITE}/{path}" if path else f"{SITE}/"
+
+
 def _collect_guides() -> list[tuple[str, str, str, int]]:
     """Return (slug, title, description, sidebar order) for authored guides."""
     guides: list[tuple[str, str, str, int]] = []
@@ -82,17 +87,16 @@ def _render(
         "(import as `modal_training_gym`). Prefer `TrainConfig` + recipe over older",
         "framework-specific launcher APIs.",
         "",
-        f"Docs: {SITE}/",
+        f"Docs: {_site_url()}",
         f"Repo: {REPO}",
         "",
         "## Docs",
         "",
-        f"- [Overview]({SITE}/): Product overview and getting started",
-        f"- [Guides]({SITE}/guides/): Concepts and practical workflows",
-        f"- [Tutorials]({SITE}/tutorials/): Runnable Python guides",
-        f"- [API Reference]({SITE}/reference/): Public class reference",
-        f"- [CLI Reference]({SITE}/reference/cli/): `modal-training-gym` CLI",
-        f"- [Support]({SITE}/support/): Support and contribution notes",
+        f"- [Home]({_site_url()}): Docs home",
+        f"- [Guides]({_site_url('guides')}): Concepts and practical workflows",
+        f"- [Tutorials]({_site_url('tutorials')}): Runnable Python guides",
+        f"- [Reference]({_site_url('reference')}): Public class reference",
+        f"- [CLI Reference]({_site_url('reference/cli')}): `modal-training-gym` CLI",
         "",
         "## Guides",
         "",
@@ -100,7 +104,7 @@ def _render(
 
     for slug, title, description, _ in guides:
         suffix = f": {description}" if description else ""
-        lines.append(f"- [{title}]({SITE}/guides/{slug}/){suffix}")
+        lines.append(f"- [{title}]({_site_url('guides', slug)}){suffix}")
 
     lines.extend(
         [
@@ -111,15 +115,15 @@ def _render(
     )
 
     for tutorial in tutorials:
-        lines.append(f"- [{tutorial.title}]({SITE}/tutorials/{tutorial.slug}/)")
+        lines.append(f"- [{tutorial.title}]({_site_url('tutorials', tutorial.slug)})")
     lines.append("")
 
     lines.extend(
         [
-            "## API Reference",
+            "## Reference",
             "",
-            f"- [Overview]({SITE}/reference/): Index of public classes",
-            f"- [CLI Reference]({SITE}/reference/cli/): CLI commands and flags",
+            f"- [Reference]({_site_url('reference')}): Index of public classes",
+            f"- [CLI Reference]({_site_url('reference/cli')}): CLI commands and flags",
             "",
         ]
     )
@@ -140,7 +144,7 @@ def _render(
             class_name = entry["class_name"]
             label = entry.get("sidebar_label") or class_name
             path = CLASS_REFERENCE_PATHS[class_name]
-            lines.append(f"- [{label}]({SITE}{path}): `{class_name}`")
+            lines.append(f"- [{label}]({_site_url(path)}): `{class_name}`")
         lines.append("")
 
     lines.extend(

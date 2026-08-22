@@ -1,0 +1,32 @@
+---
+import { titledToc, type TocNode } from '../lib/toc';
+
+interface Props {
+  items?: readonly TocNode[];
+}
+
+const nested = Astro.props.items;
+const { toc, entry } = Astro.locals.starlightRoute;
+const root =
+  nested || !toc ? null : titledToc(toc.items, String(entry.data.title));
+const items = nested ?? root?.children ?? [];
+const title = root?.text ?? '';
+---
+
+{
+  title ? (
+    <nav class="tg-toc" aria-label="Outline">
+      <a href="#_top">{title}</a>
+      {items.length > 0 && <Astro.self items={items} />}
+    </nav>
+  ) : items.length > 0 ? (
+    <ul class="tg-toc__list">
+      {items.map((item) => (
+        <li>
+          <a href={'#' + item.slug}>{item.text}</a>
+          {item.children.length > 0 && <Astro.self items={item.children} />}
+        </li>
+      ))}
+    </ul>
+  ) : null
+}

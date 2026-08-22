@@ -270,9 +270,8 @@ tutorial only. Don't expand to all tutorials on a single change.
   `inspect.stack()[1]` inside `build_<f>_app` is not the tutorial.
   Launchers use `resolve_caller_module()` to walk past
   `modal_training_gym.*` frames. Never use raw `inspect.stack()[1]` here.
-- **Secrets required for most remote runs**: `huggingface-secret` (with
-  `HF_TOKEN`) and `wandb-secret` (with `WANDB_API_KEY`) must exist as Modal
-  Secrets in your environment.
+- **Secrets for gated models and W&B**. Hugging Face auth is only needed for
+  gated or rate-limited Hub access. Pass `WandbConfig` only when you want W&B.
 - **Do not add framework-specific quirks to `TrainConfig`** that only matter
   for one model. Put those in the model's `download` override and
   make the tool script live in `modal_training_gym/tools/`.

@@ -152,11 +152,3 @@ training-gym cleanup --older-than-days 7 --dry-run
 ```
 
 Drop `--dry-run` to actually delete. Completed runs are never touched.
-
----
-
-## Related API Reference
-
-- [`TrainConfig`](/reference/training/trainconfig/)
-- [`TrainingGroup`](/reference/training/traininggroup/)
-- [`CustomDeployment`](/reference/deployment/customdeployment/)

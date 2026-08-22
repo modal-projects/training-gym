@@ -24,7 +24,7 @@ uv run pyright modal_training_gym/    # if pyright is available
 uv run -m compileall modal_training_gym/ tutorials/
 
 # Docs (Astro/Starlight site at docs-next/)
-uv run scripts/generate_all.py --skip-build   # regen models table, API reference, docs pages
+uv run scripts/generate_all.py --skip-build   # regen models table and docs pages
 cd docs-next && npm ci && npm run dev                 # local dev server
 uv run scripts/generate_all.py                 # full regen + build
 
@@ -104,7 +104,7 @@ Tutorials are flat runnable scripts at `tutorials/*.py`. Each starts with commen
 
 - Use `uv` for all Python operations. Never install packages at the system level.
 - Tutorial sources are the flat `tutorials/*.py` files. Keep `order` values contiguous from zero.
-- Never hand-edit the Models table in README.md. It is generated from `__all__` of each `train_recipes/*_recipe/__init__.py`; add the recipe and matching `ModelConfig` export, then rerun `scripts/generate_models_table.py`.
+- Never hand-edit the models table in README.md. It is generated from `__all__` of each `train_recipes/*_recipe/__init__.py`; add the recipe and matching `ModelConfig` export, then rerun `scripts/generate_models_table.py`.
 - Ruff excludes `tutorials/**`.
 - Python 3.12 is pinned. Modal's `serialized=True` requires local ↔ remote Python version match.
 - Modal Secrets `huggingface-secret` (HF_TOKEN) and `wandb-secret` (WANDB_API_KEY) are optional: HF auth is only needed for gated/rate-limited Hub access, and `wandb-secret` only when a `WandbConfig` is passed.

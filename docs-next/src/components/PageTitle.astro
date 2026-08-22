@@ -16,6 +16,7 @@ const markdownSource = bodyMarkdown ? `${bodyMarkdown}\n` : '';
 ---
 
 <div class="tg-page-head">
+  <h1 id="_top">{entry.data.title}</h1>
   <div class="tg-page-head__actions print:hidden">
     <CopyPageDropdown markdownSource={markdownSource} pageUrl={pageUrl} />
     {showGithub && (
@@ -44,8 +45,4 @@ const markdownSource = bodyMarkdown ? `${bodyMarkdown}\n` : '';
       </a>
     )}
   </div>
-  <h1 id="_top">{entry.data.title}</h1>
-  {entry.data.description && (
-    <p class="tg-page-head__dek">{entry.data.description}</p>
-  )}
 </div>

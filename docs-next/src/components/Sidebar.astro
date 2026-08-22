@@ -3,9 +3,11 @@ import MobileMenuFooter from '@astrojs/starlight/components/MobileMenuFooter.ast
 
 const { sidebar } = Astro.locals.starlightRoute;
 const currentPath = Astro.url.pathname;
+type SidebarEntry = (typeof sidebar)[number];
+type SidebarLink = Extract<SidebarEntry, { type: 'link' }>;
 
 function getFilteredSidebar() {
-  if (currentPath === '/' || currentPath.startsWith('/support')) {
+  if (currentPath === '/') {
     return [];
   }
 
@@ -30,8 +32,8 @@ function getFilteredSidebar() {
 const filteredSidebar = getFilteredSidebar();
 const showSidebar = filteredSidebar.length > 0;
 
-function flattenLinks(entries) {
-  const links = [];
+function flattenLinks(entries: readonly SidebarEntry[]): SidebarLink[] {
+  const links: SidebarLink[] = [];
   for (const entry of entries) {
     if (entry.type === 'link') {
       links.push(entry);
@@ -42,7 +44,7 @@ function flattenLinks(entries) {
   return links;
 }
 
-function firstLinkHref(entry) {
+function firstLinkHref(entry: SidebarEntry): string | undefined {
   if (entry.type === 'link') return entry.href;
   const first = flattenLinks(entry.entries)[0];
   return first?.href;
