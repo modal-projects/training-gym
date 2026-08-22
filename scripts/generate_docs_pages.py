@@ -189,12 +189,6 @@ class Catalog:
 
 CATALOGS: tuple[Catalog, ...] = (
     Catalog(
-        begin="<!-- BEGIN TUTORIAL TABLE -->",
-        end="<!-- END TUTORIAL TABLE -->",
-        css_class="tutorial-catalog",
-        column_tracks=("1.6fr", "2.6fr", "0.9fr", "1fr", "1fr"),
-    ),
-    Catalog(
         begin="<!-- BEGIN MODELS TABLE -->",
         end="<!-- END MODELS TABLE -->",
         css_class="models-catalog",
@@ -312,13 +306,6 @@ def generate_starlight(output_dir: Path) -> None:
             "index.md",
             ROOT / "README.md",
             PurePosixPath("."),
-            "/",
-            "/tutorials/",
-        ),
-        (
-            "tutorials/index.md",
-            ROOT / "tutorials" / "README.md",
-            PurePosixPath("tutorials"),
             "/",
             "/tutorials/",
         ),

@@ -350,13 +350,8 @@ def _methods_section(cls: type) -> list[str]:
     return lines
 
 
-def _page_footer(
-    entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None
-) -> list[str]:
-    """Shared page closing: tutorial backlinks and source link."""
+def _page_footer(entry: dict) -> list[str]:
     lines: list[str] = []
-    if backlinks:
-        _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
     module_path = entry["module"]
     lines.append(
         f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)"
@@ -389,9 +384,7 @@ def _get_methods(cls: type) -> list[tuple[str, str, str]]:
     return methods
 
 
-def generate_config_data_page(
-    cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None
-) -> str:
+def generate_config_data_page(cls: type, entry: dict) -> str:
     """Generate markdown for a config/data class."""
     attrs = _get_class_attrs(cls)
     field_docs = _extract_field_docs_from_mro(cls)
@@ -439,14 +432,12 @@ def generate_config_data_page(
         lines.append("")
 
     lines.extend(_methods_section(cls))
-    lines.extend(_page_footer(entry, backlinks))
+    lines.extend(_page_footer(entry))
 
     return "\n".join(lines)
 
 
-def generate_behavior_page(
-    cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None
-) -> str:
+def generate_behavior_page(cls: type, entry: dict) -> str:
     """Generate markdown for a behavior class."""
     lines = _page_preamble(cls, entry)
 
@@ -503,7 +494,7 @@ def generate_behavior_page(
         lines.append("")
 
     lines.extend(_methods_section(cls))
-    lines.extend(_page_footer(entry, backlinks))
+    lines.extend(_page_footer(entry))
 
     return "\n".join(lines)
 
@@ -547,60 +538,6 @@ def generate_index_page(manifest: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_tutorial_backlinks() -> dict[str, list[tuple[str, str]]]:
-    """Scan tutorial sources for api_classes and build class→tutorials map."""
-    import ast as _ast
-
-    tutorial_src = ROOT / "tutorials" / "tutorial_generator"
-    backlinks: dict[str, list[tuple[str, str]]] = {}
-    buckets = ["intro", "rl", "sft", "misc"]
-
-    for bucket in buckets:
-        bucket_dir = tutorial_src / bucket
-        if not bucket_dir.is_dir():
-            continue
-        for src in sorted(bucket_dir.glob("*.py")):
-            if src.name.startswith("_") or src.name == "__init__.py":
-                continue
-            try:
-                tree = _ast.parse(src.read_text())
-            except SyntaxError:
-                continue
-            for node in _ast.walk(tree):
-                if isinstance(node, _ast.Assign):
-                    for target in node.targets:
-                        if (
-                            isinstance(target, _ast.Name)
-                            and target.id == "TUTORIAL_METADATA"
-                        ):
-                            try:
-                                metadata = _ast.literal_eval(node.value)
-                            except (ValueError, TypeError):
-                                continue
-                            summary = metadata.get("summary", src.stem)
-                            api_classes = metadata.get("api_classes", [])
-                            tutorial_path = f"/tutorials/{bucket}/{src.stem}/"
-                            for cls_name in api_classes:
-                                backlinks.setdefault(cls_name, []).append(
-                                    (summary, tutorial_path)
-                                )
-    return backlinks
-
-
-def _append_tutorial_backlinks(
-    lines: list[str], class_name: str, backlinks: dict[str, list[tuple[str, str]]]
-) -> None:
-    """Append a Related Tutorials section if any tutorials reference this class."""
-    tutorials = backlinks.get(class_name, [])
-    if not tutorials:
-        return
-    lines.append("## Related Tutorials")
-    lines.append("")
-    for summary, path in tutorials:
-        lines.append(f"- [{summary}]({path})")
-    lines.append("")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate API reference pages.")
     parser.add_argument(
@@ -616,7 +553,6 @@ def main() -> None:
             if child.is_dir():
                 shutil.rmtree(child)
 
-    backlinks = _build_tutorial_backlinks()
     errors = []
     generated = 0
 
@@ -629,7 +565,7 @@ def main() -> None:
             continue
 
         if entry["class_type"] == "config_data":
-            content = generate_config_data_page(cls, entry, backlinks=backlinks)
+            content = generate_config_data_page(cls, entry)
         elif not isinstance(cls, type):
             doc = inspect.getdoc(cls) or ""
             sig_str = ""
@@ -662,7 +598,7 @@ def main() -> None:
                 lines += [doc, ""]
             content = "\n".join(lines) + "\n"
         else:
-            content = generate_behavior_page(cls, entry, backlinks=backlinks)
+            content = generate_behavior_page(cls, entry)
 
         group_dir = output_dir / entry["group"]
         group_dir.mkdir(parents=True, exist_ok=True)

@@ -6,9 +6,8 @@ Usage:
     uv run scripts/diff_impact.py --diff-file /tmp/change.diff
     uv run scripts/diff_impact.py < /tmp/change.diff
 
-The script reads a unified diff, extracts changed paths, maps those paths to
-public classes in the repo, then finds tutorials whose `api_classes` include
-any affected class.
+The script reads a unified diff, extracts changed paths, and maps those paths
+to public classes and directly changed tutorials.
 """
 
 from __future__ import annotations
@@ -24,9 +23,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
+from scripts.tutorial_index import TutorialEntry, load_tutorial_index
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TUTORIAL_SRC_ROOT = REPO_ROOT / "tutorials" / "tutorial_generator"
-TUTORIAL_OUTPUT_ROOT = REPO_ROOT / "tutorials"
+TUTORIAL_SRC_ROOT = REPO_ROOT / "tutorials"
 MODEL_PACKAGE_ROOT = REPO_ROOT / "modal_training_gym" / "common" / "models"
 SLIME_RECIPE_PACKAGE_ROOT = (
     REPO_ROOT / "modal_training_gym" / "train_recipes" / "slime_recipe"
@@ -71,67 +71,14 @@ FRAMEWORK_VALIDATION_HARNESS_PATHS: dict[str, frozenset[Path]] = {
 
 
 @dataclass(frozen=True)
-class TutorialInfo:
-    slug: str
-    source_path: Path
-    generated_path: Path
-    summary: str
-    framework: str
-    api_classes: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class ImpactReport:
     affected_classes: tuple[str, ...]
     affected_tutorials: tuple[tuple[str, str, tuple[str, ...]], ...]
-    rerun_all_tutorials: bool = False
-
-
-def _parse_tutorial_metadata(source: str) -> dict | None:
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return None
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            if isinstance(target, ast.Name) and target.id == "TUTORIAL_METADATA":
-                try:
-                    value = ast.literal_eval(node.value)
-                except (ValueError, SyntaxError):
-                    return None
-                return value if isinstance(value, dict) else None
-    return None
 
 
 @lru_cache(maxsize=1)
-def _load_tutorial_index() -> tuple[dict[str, TutorialInfo], dict[str, set[str]]]:
-    tutorials: dict[str, TutorialInfo] = {}
-    class_to_tutorials: dict[str, set[str]] = defaultdict(set)
-
-    for source_path in sorted(TUTORIAL_SRC_ROOT.rglob("*.py")):
-        if source_path.name == "__init__.py":
-            continue
-        metadata = _parse_tutorial_metadata(source_path.read_text())
-        if metadata is None:
-            continue
-        rel = source_path.relative_to(TUTORIAL_SRC_ROOT).with_suffix("")
-        slug = "/".join(rel.parts)
-        generated_path = TUTORIAL_OUTPUT_ROOT / rel / f"{rel.name}.py"
-        info = TutorialInfo(
-            slug=slug,
-            source_path=source_path,
-            generated_path=generated_path,
-            summary=str(metadata.get("summary", rel.name)),
-            framework=str(metadata.get("framework", "")),
-            api_classes=tuple(str(name) for name in metadata.get("api_classes", [])),
-        )
-        tutorials[slug] = info
-        for class_name in info.api_classes:
-            class_to_tutorials[class_name].add(slug)
-
-    return tutorials, class_to_tutorials
+def _load_tutorial_index() -> dict[str, TutorialEntry]:
+    return {tutorial.slug: tutorial for tutorial in load_tutorial_index()}
 
 
 def _parse_public_definitions(path: Path) -> set[str]:
@@ -238,20 +185,6 @@ def affected_models(diff_text: str) -> tuple[str, ...]:
     return tuple(sorted(models))
 
 
-def _generated_tutorial_source(path: Path) -> Path | None:
-    try:
-        rel = path.relative_to(TUTORIAL_OUTPUT_ROOT)
-    except ValueError:
-        return None
-
-    if len(rel.parts) < 2:
-        return None
-    stem = rel.stem
-    bucket = rel.parts[0]
-    source = TUTORIAL_SRC_ROOT / bucket / f"{stem}.py"
-    return source if source.exists() else None
-
-
 def _paths_from_diff(diff_text: str) -> set[Path]:
     paths: set[Path] = set()
     for line in diff_text.splitlines():
@@ -280,34 +213,7 @@ def _paths_from_diff(diff_text: str) -> set[Path]:
     return paths
 
 
-def _tutorial_source_from_generated(path: Path) -> Path | None:
-    source = _generated_tutorial_source(path)
-    if source is not None:
-        return source
-    return None
-
-
 def _classes_for_path(path: Path) -> set[str]:
-    if path == REPO_ROOT / "tutorials" / "generate_tutorial.py":
-        return set()
-
-    if path == TUTORIAL_SRC_ROOT / "__init__.py":
-        return set()
-
-    if path.is_relative_to(TUTORIAL_SRC_ROOT):
-        info = _load_tutorial_index()[0].get(
-            "/".join(path.relative_to(TUTORIAL_SRC_ROOT).with_suffix("").parts)
-        )
-        return set(info.api_classes) if info else set()
-
-    generated_source = _tutorial_source_from_generated(path)
-    if generated_source is not None:
-        tutorial_slug = "/".join(
-            generated_source.relative_to(TUTORIAL_SRC_ROOT).with_suffix("").parts
-        )
-        info = _load_tutorial_index()[0].get(tutorial_slug)
-        return set(info.api_classes) if info else set()
-
     if path.is_relative_to(MODEL_PACKAGE_ROOT):
         if path.name in {"base.py", "__init__.py"}:
             return set(_package_public_definitions(str(MODEL_PACKAGE_ROOT)))
@@ -330,55 +236,28 @@ def _classes_for_path(path: Path) -> set[str]:
 
 
 def analyze_diff(diff_text: str) -> ImpactReport:
-    tutorials, class_to_tutorials = _load_tutorial_index()
+    tutorials = _load_tutorial_index()
     changed_paths = _paths_from_diff(diff_text)
 
     affected_classes: set[str] = set()
     affected_tutorial_reasons: dict[str, set[str]] = defaultdict(set)
-    rerun_all_tutorials = False
 
     for path in changed_paths:
-        if path == REPO_ROOT / "tutorials" / "generate_tutorial.py" or (
-            path == TUTORIAL_SRC_ROOT / "__init__.py"
-        ):
-            rerun_all_tutorials = True
-            continue
-
         if path.is_relative_to(TUTORIAL_SRC_ROOT):
-            slug = "/".join(path.relative_to(TUTORIAL_SRC_ROOT).with_suffix("").parts)
+            slug = path.stem
             info = tutorials.get(slug)
             if info is not None:
                 affected_tutorial_reasons[slug].add("tutorial source changed")
             continue
 
-        generated_source = _generated_tutorial_source(path)
-        if generated_source is not None:
-            slug = "/".join(
-                generated_source.relative_to(TUTORIAL_SRC_ROOT).with_suffix("").parts
-            )
-            info = tutorials.get(slug)
-            if info is not None:
-                affected_tutorial_reasons[slug].add("generated tutorial changed")
-            continue
-
         classes = _classes_for_path(path)
         affected_classes.update(classes)
-        for class_name in classes:
-            for slug in class_to_tutorials.get(class_name, set()):
-                affected_tutorial_reasons[slug].add(class_name)
-
-    if rerun_all_tutorials:
-        for slug, info in tutorials.items():
-            affected_tutorial_reasons[slug].add("tutorial generator changed")
-        affected_classes.update(
-            cls for info in tutorials.values() for cls in info.api_classes
-        )
 
     affected_tutorials = tuple(
         sorted(
             (
                 slug,
-                tutorials[slug].summary,
+                tutorials[slug].title,
                 tuple(sorted(reasons)),
             )
             for slug, reasons in affected_tutorial_reasons.items()
@@ -389,7 +268,6 @@ def analyze_diff(diff_text: str) -> ImpactReport:
     return ImpactReport(
         affected_classes=tuple(sorted(affected_classes)),
         affected_tutorials=affected_tutorials,
-        rerun_all_tutorials=rerun_all_tutorials,
     )
 
 
@@ -420,7 +298,6 @@ def _format_report(report: ImpactReport) -> str:
 def _report_to_json(report: ImpactReport) -> str:
     payload = {
         "affected_classes": list(report.affected_classes),
-        "rerun_all_tutorials": report.rerun_all_tutorials,
         "affected_tutorials": [
             {
                 "slug": slug,

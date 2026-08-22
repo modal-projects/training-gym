@@ -6,16 +6,29 @@ import remarkMath from 'remark-math';
 import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
 
 export default defineConfig({
+  redirects: {
+    '/tutorials': '/tutorials/rl_basics',
+    '/tutorials/agent/000_agent_sandbox': '/tutorials/agent_sandbox',
+    '/tutorials/multinode/002_glm_4_7': '/tutorials/multinode',
+    '/tutorials/rl/000_rl_basics': '/tutorials/rl_basics',
+    '/tutorials/rl/001_sandboxes': '/tutorials/sandboxes',
+    '/tutorials/rl/002_multiturn': '/tutorials/multiturn',
+    '/tutorials/rl/003_on_policy_distillation': '/tutorials/on_policy_distillation',
+    '/tutorials/rl/005_dapo': '/tutorials/dapo',
+    '/tutorials/rl/006_audio_asr': '/tutorials/audio_asr',
+    '/tutorials/rl/007_param_sweep': '/tutorials/param_sweep',
+    '/tutorials/rl/008_computer_use': '/tutorials/computer_use',
+    '/tutorials/rl/009_cross_tokenizer_distillation':
+      '/tutorials/cross_tokenizer_distillation',
+    '/tutorials/tools/000_observability_dashboard':
+      '/guides/tools/observability-dashboard/',
+    '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration/',
+  },
   markdown: {
     remarkPlugins: [remarkMath],
     rehypePlugins: [rehypeKatex, rehypeTableWrapper],
   },
   site: 'https://gym.modal.dev',
-  redirects: {
-    '/tutorials/tools/000_observability_dashboard':
-      '/guides/tools/observability-dashboard/',
-    '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration/',
-  },
   integrations: [
     starlight({
       title: 'Training Gym',
@@ -140,17 +153,7 @@ export default defineConfig({
         },
         {
           label: 'Tutorials',
-          items: [
-            { label: 'All Tutorials', link: '/tutorials/' },
-            {
-              label: 'Reinforcement Learning',
-              autogenerate: { directory: 'tutorials/rl' },
-            },
-            {
-              label: 'Agents',
-              autogenerate: { directory: 'tutorials/agent' },
-            },
-          ],
+          autogenerate: { directory: 'tutorials' },
         },
         {
           label: 'API Reference',

@@ -6,7 +6,6 @@ uv run scripts/generate_llms_txt.py
 from __future__ import annotations
 
 import argparse
-import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -17,44 +16,14 @@ from api_reference_manifest import (
     CLASS_REFERENCE_PATHS,
     GROUPS,
 )
-from generate_tutorial_pages import BUCKET_LABELS, BUCKETS, extract_metadata
+from tutorial_index import TutorialEntry, load_tutorial_index
 
 ROOT = Path(__file__).resolve().parents[1]
-TUTORIAL_SRC_DIR = ROOT / "tutorials" / "tutorial_generator"
 GUIDES_DIR = ROOT / "docs-next" / "src" / "content" / "docs" / "guides"
 DEFAULT_OUTPUT = ROOT / "docs-next" / "public" / "llms.txt"
 
 SITE = "https://gym.modal.dev"
 REPO = "https://github.com/modal-projects/training-gym"
-
-
-def _collect_tutorials() -> list[tuple[str, str, dict]]:
-    """Return (bucket, name, metadata) sorted by bucket, order, name."""
-    entries: list[tuple[str, str, dict]] = []
-    for bucket in BUCKETS:
-        bucket_dir = TUTORIAL_SRC_DIR / bucket
-        if not bucket_dir.is_dir():
-            continue
-        for source_path in sorted(bucket_dir.glob("*.py")):
-            if source_path.name.startswith("_") or source_path.name == "__init__.py":
-                continue
-            metadata = extract_metadata(source_path)
-            if metadata is None:
-                print(
-                    f"  SKIP {source_path.name}: no TUTORIAL_METADATA", file=sys.stderr
-                )
-                continue
-            entries.append((bucket, source_path.stem, metadata))
-
-    bucket_rank = {b: i for i, b in enumerate(BUCKETS)}
-    entries.sort(
-        key=lambda item: (
-            bucket_rank.get(item[0], len(BUCKETS)),
-            item[2].get("order", 10_000),
-            item[1],
-        )
-    )
-    return entries
 
 
 def _collect_guides() -> list[tuple[str, str, str, int]]:
@@ -99,7 +68,8 @@ def _collect_guides() -> list[tuple[str, str, str, int]]:
 
 
 def _render(
-    tutorials: list[tuple[str, str, dict]], guides: list[tuple[str, str, str, int]]
+    tutorials: tuple[TutorialEntry, ...],
+    guides: list[tuple[str, str, str, int]],
 ) -> str:
     lines: list[str] = [
         "# Modal Training Gym",
@@ -119,7 +89,7 @@ def _render(
         "",
         f"- [Overview]({SITE}/): Product overview and getting started",
         f"- [Guides]({SITE}/guides/): Concepts and practical workflows",
-        f"- [All Tutorials]({SITE}/tutorials/): Tutorial catalog",
+        f"- [Tutorials]({SITE}/tutorials/): Runnable Python guides",
         f"- [API Reference]({SITE}/reference/): Public class reference",
         f"- [CLI Reference]({SITE}/reference/cli/): `modal-training-gym` CLI",
         f"- [Support]({SITE}/support/): Support and contribution notes",
@@ -140,24 +110,9 @@ def _render(
         ]
     )
 
-    by_bucket: dict[str, list[tuple[str, dict]]] = defaultdict(list)
-    for bucket, name, metadata in tutorials:
-        by_bucket[bucket].append((name, metadata))
-
-    for bucket in BUCKETS:
-        items = by_bucket.get(bucket)
-        if not items:
-            continue
-        label = BUCKET_LABELS.get(bucket, bucket.title())
-        lines.append(f"### {label}")
-        lines.append("")
-        for name, metadata in items:
-            summary = str(metadata.get("summary") or name).strip()
-            # Keep one line; llms.txt link descriptions should stay scannable.
-            summary = " ".join(summary.split())
-            url = f"{SITE}/tutorials/{bucket}/{name}/"
-            lines.append(f"- [{name}]({url}): {summary}")
-        lines.append("")
+    for tutorial in tutorials:
+        lines.append(f"- [{tutorial.title}]({SITE}/tutorials/{tutorial.slug}/)")
+    lines.append("")
 
     lines.extend(
         [
@@ -205,7 +160,7 @@ def _render(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate docs-next/public/llms.txt from catalogs."
+        description="Generate docs-next/public/llms.txt from documentation sources."
     )
     parser.add_argument(
         "--output",
@@ -215,9 +170,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    tutorials = _collect_tutorials()
+    tutorials = load_tutorial_index()
     if not tutorials:
-        raise SystemExit("No tutorials with TUTORIAL_METADATA found")
+        raise SystemExit("No tutorials found")
     guides = _collect_guides()
     if not guides:
         raise SystemExit("No Markdown guides found")

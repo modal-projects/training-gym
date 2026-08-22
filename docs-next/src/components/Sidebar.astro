@@ -61,7 +61,7 @@ const sections = filteredSidebar.map((entry) => {
   return {
     label: entry.label,
     href: firstLinkHref(entry),
-    isCurrent: items.some((item) => item.isCurrent),
+    isCurrent: false,
     items,
   };
 });
