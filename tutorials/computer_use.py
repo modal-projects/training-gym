@@ -30,7 +30,6 @@ from modal_training_gym import (
     Qwen3_VL_8b_Recipe,
     TrainConfig,
     WandbConfig,
-    list_checkpoints,
 )
 
 # ## Dataset
@@ -330,7 +329,7 @@ print(f"run id: {run.training_run_id}")
 # Let's run the same eval on the trained checkpoint and compare accuracy.
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(

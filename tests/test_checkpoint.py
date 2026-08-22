@@ -60,7 +60,11 @@ def test_convert_reuses_when_marker_present(monkeypatch) -> None:
     _patch_volume(
         monkeypatch,
         _CheckpointVolume(
-            ["config.json", "model.safetensors", ".training_gym_convert_complete"]
+            [
+                "config.json",
+                "model.safetensors",
+                ".training_gym_convert_complete",
+            ]
         ),
     )
 

@@ -12,10 +12,8 @@ from modal import Volume
 from modal.exception import NotFoundError
 
 from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun
-from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.deploy_recipes import SglangRecipe, VllmRecipe
 
 
@@ -48,18 +46,6 @@ class Checkpoint:
         )
 
 
-def list_checkpoints(training_run_id: str) -> list[Checkpoint]:
-    result = TrainResult.from_training_run_id(training_run_id)
-    if result.framework in {
-        Framework.SLIME,
-        Framework.SLIME.value,
-        Framework.MILES,
-        Framework.MILES.value,
-    }:
-        return _list_checkpoints(result)
-    raise TrainingGymConfigError(f"Unsupported framework: {result.framework}")
-
-
 def _to_volume_path(checkpoint_dir: str, checkpoints_mount_path: str) -> str:
     checkpoint_dir_norm = os.path.normpath(checkpoint_dir)
     checkpoints_mount_path_norm = os.path.normpath(checkpoints_mount_path)
@@ -76,7 +62,7 @@ def _to_volume_path(checkpoint_dir: str, checkpoints_mount_path: str) -> str:
     return checkpoint_dir_norm.lstrip("/")
 
 
-def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
+def _list_checkpoints(train_result) -> list[Checkpoint]:
     checkpoint_dir = train_result.checkpoint_dir.rstrip("/")
     if checkpoint_dir == "":
         return []

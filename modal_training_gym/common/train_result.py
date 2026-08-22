@@ -58,6 +58,7 @@ from modal_training_gym.utils.metadata import (
 if TYPE_CHECKING:
     from modal import Volume
 
+    from modal_training_gym.common.checkpoint import Checkpoint
     from modal_training_gym.common.models import ModelConfig
 
 
@@ -184,6 +185,23 @@ class TrainResult:
         volume_name = self.checkpoints_volume_name or f"{self.app_name}-checkpoints"
         return Volume.from_name(volume_name, create_if_missing=True)
 
+    def checkpoints(self) -> list["Checkpoint"]:
+        from modal_training_gym.common.checkpoint import _list_checkpoints
+        from modal_training_gym.common.errors import TrainingGymConfigError
+
+        if self.framework in {
+            Framework.SLIME,
+            Framework.SLIME.value,
+            Framework.MILES,
+            Framework.MILES.value,
+        }:
+            return _list_checkpoints(self)
+        raise TrainingGymConfigError(f"Unsupported framework: {self.framework}")
+
+    def latest_checkpoint(self) -> "Checkpoint | None":
+        found = self.checkpoints()
+        return found[-1] if found else None
+
     @property
     def model(self) -> "ModelConfig":
         if self.model_config is None:
@@ -192,12 +210,10 @@ class TrainResult:
                 "Was it saved by an older launcher?"
             )
 
-        from modal_training_gym.common.checkpoint import list_checkpoints
-
         model = copy.copy(self.model_config)
-        checkpoints = list_checkpoints(self.training_run_id)
-        if checkpoints:
-            model.model_path = checkpoints[-1].path
+        latest = self.latest_checkpoint()
+        if latest:
+            model.model_path = latest.path
         elif self.checkpoint_dir:
             model.model_path = self.checkpoint_dir
 

@@ -36,7 +36,6 @@ from modal_training_gym import (
     Endpoint,
     Qwen3_6_35B,
     TrainConfig,
-    list_checkpoints,
 )
 from modal_training_gym.common.models.base import HFModelConfiguration, ToolCall
 
@@ -1047,7 +1046,7 @@ print(f"run id: {run.training_run_id}")
 
 result = run.result()
 print("--- Training complete ---")
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(

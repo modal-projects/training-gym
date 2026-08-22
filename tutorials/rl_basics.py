@@ -23,7 +23,6 @@ from modal_training_gym import (
     Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
-    list_checkpoints,
 )
 
 # ## Deploy the base model
@@ -223,7 +222,7 @@ print(f"run id: {run.training_run_id}")
 # We'll get the latest checkpoint and create a new Endpoint so we may evaluate it.
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
@@ -280,7 +279,7 @@ print(f"run id: {new_run.training_run_id}")
 # Once again, we'll create a new Endpoint for the new checkpoint and run evals on it.
 
 new_result = new_run.result()
-new_checkpoint = list_checkpoints(new_result.training_run_id)[-1]
+new_checkpoint = new_result.checkpoints()[-1]
 print(new_checkpoint.path)
 
 new_deployment = Endpoint.launch(

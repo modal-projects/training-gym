@@ -46,7 +46,6 @@ from modal_training_gym import (
     Qwen3_5_9B,
     SlimeRecipe,
     TrainConfig,
-    list_checkpoints,
 )
 
 # ## Deploy the base models
@@ -294,7 +293,7 @@ print(f"run id: {run.training_run_id}")
 # to our baseline evaluation from earlier.
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 print(f"checkpoint: {checkpoint.path}")
 
 trained_student_deployment = Endpoint.launch(

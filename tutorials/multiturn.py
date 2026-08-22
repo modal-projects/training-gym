@@ -27,7 +27,6 @@ from modal_training_gym import (
     Qwen3_5_4B,
     SlimeRecipe,
     TrainConfig,
-    list_checkpoints,
 )
 
 # ## Build a deterministic guessing dataset
@@ -402,7 +401,7 @@ print(f"run id: {run.training_run_id}")
 # ## Evaluate trained checkpoint
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )

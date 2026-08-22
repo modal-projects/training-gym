@@ -25,7 +25,6 @@ from modal_training_gym import (
     SlimeRecipe,
     TrainConfig,
     extract_code,
-    list_checkpoints,
 )
 
 # ## Load hello-world from Harbor Hub
@@ -191,7 +190,7 @@ print(f"run id: {run.training_run_id}")
 # ## Evaluate the trained checkpoint
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )
