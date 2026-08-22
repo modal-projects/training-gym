@@ -101,11 +101,9 @@ class TrainingGroup:
         grid: dict[str, list[Any]] | None = None,
         *,
         name: str | None = None,
-        merge_model_recipe: bool | None = None,
     ) -> None:
         self.base = base
         self.grid: dict[str, list[Any]] = dict(grid or {})
-        self.merge_model_recipe = merge_model_recipe
         self.name = name
         self.group_id = _slugify(name) if name else f"group-{secrets.token_hex(6)}"
 
@@ -199,8 +197,6 @@ class TrainingGroup:
         cfg.group_id = self.group_id
         cfg.group_overrides = dict(overrides)
         cfg.group_axes = list(self.grid)
-        if self.merge_model_recipe is not None:
-            cfg.merge_model_recipe = self.merge_model_recipe
 
         recipe_touched = False
         for path, value in overrides.items():
