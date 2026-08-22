@@ -8,6 +8,10 @@ export type SearchHit = {
 };
 export type SearchGroup = { section: DocsSection; hits: SearchHit[] };
 const MAX_HITS_PER_GROUP = 7;
+const SEARCH_SECTIONS: readonly DocsSection[] = [
+  'Home',
+  ...DOCS_NAV.map(({ section }) => section),
+];
 
 type PagefindFragment = {
   url?: unknown;
@@ -52,7 +56,7 @@ export function groupHits(hits: readonly SearchHit[]): SearchGroup[] {
     if (list) list.push(hit);
     else buckets.set(section, [hit]);
   }
-  return DOCS_NAV.flatMap(({ section }) => {
+  return SEARCH_SECTIONS.flatMap((section) => {
     const sectionHits = buckets.get(section);
     if (!sectionHits?.length) return [];
     const out: SearchHit[] = [];
