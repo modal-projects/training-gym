@@ -42,6 +42,7 @@ Repo: https://github.com/modal-projects/training-gym
 ### Agents
 
 - [000_agent_sandbox](https://gym.modal.dev/tutorials/agent/000_agent_sandbox/): Build an LLM agent harness with a self-hosted model and Modal Sandbox tool execution
+- [001_learning_agent](https://gym.modal.dev/tutorials/agent/001_learning_agent/): The Learning Agent Bench loop on the gym: acquire a corpus, author your own exam, train a searching student with GRPO, and read the margin off the dashboard
 
 ## API Reference
 

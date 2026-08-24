@@ -170,6 +170,7 @@ Difficulty is a rough signal for where to start:
 | Tutorial | Summary | Difficulty | Framework | Launch |
 |---|---|---|---|---|
 | [`000_agent_sandbox`](https://gym.modal.dev/tutorials/agent/000_agent_sandbox/) | Build an LLM agent harness with a self-hosted model and Modal Sandbox tool execution | Beginner | Modal Sandbox | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Fagent%2F000_agent_sandbox%2F000_agent_sandbox.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`001_learning_agent`](https://gym.modal.dev/tutorials/agent/001_learning_agent/) | The Learning Agent Bench loop on the gym: acquire a corpus, author your own exam, train a searching student with GRPO, and read the margin off the dashboard | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Fagent%2F001_learning_agent%2F001_learning_agent.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### Multinode
 
