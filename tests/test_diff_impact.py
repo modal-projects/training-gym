@@ -39,3 +39,17 @@ def test_generated_tutorial_diff_maps_back_to_source() -> None:
     assert "rl/003_on_policy_distillation" in {
         slug for slug, _, _ in report.affected_tutorials
     }
+
+
+def test_stitch_shared_module_diff_maps_to_stitch_recipe() -> None:
+    for module in ("train.py", "serve.py"):
+        path = f"modal_training_gym/train_recipes/stitch_recipe/{module}"
+        diff = (
+            f"diff --git a/{path} b/{path}\n"
+            "index 1234567..89abcde 100644\n"
+            f"--- a/{path}\n"
+            f"+++ b/{path}\n"
+            "@@ -1,3 +1,3 @@\n"
+        )
+
+        assert "Qwen3_30B_A3B_Stitch_Recipe" in analyze_diff(diff).affected_classes

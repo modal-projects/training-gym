@@ -59,7 +59,11 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import (
     HF_CACHE_PATH,
     MilesRecipe,
 )
-from modal_training_gym.common.patches import encode_patch
+from modal_training_gym.frameworks.miles.modal_helpers.patches import (
+    REPORTING_PATCH_COMMANDS,
+    SGLANG_ABORT_PATCH_COMMAND,
+    SUBSTEP_TIMING_PATCH_COMMAND,
+)
 from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     build_train_cmd,
     get_checkpoint_conversion_policy,
@@ -99,19 +103,6 @@ RDMA_RUNTIME_INSTALL_COMMAND = (
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
 HARBOR_PKG_VERSION = "0.8.0"
 
-_MILES_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
-_PATCH_SGLANG_ABORT_B64 = encode_patch("patch_sglang_abort", _MILES_PATCHES)
-_PATCH_ROLLOUT_STATUS_B64 = encode_patch(
-    "patch_rollout_status_reporting", _MILES_PATCHES
-)
-_PATCH_ADVANTAGE_DIST_B64 = encode_patch("patch_advantage_distribution", _MILES_PATCHES)
-_PATCH_SUBSTEP_TIMING_B64 = encode_patch("patch_substep_timing", _MILES_PATCHES)
-
-_REPORTING_PATCH_COMMANDS = (
-    f"echo {_PATCH_ROLLOUT_STATUS_B64} | base64 -d | python3",
-    f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
-)
-
 
 def _build_miles_base_image(miles: MilesRecipe) -> Image:
     image = (
@@ -119,9 +110,9 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         .entrypoint([])
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
-            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
-            *_REPORTING_PATCH_COMMANDS,
-            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
+            SGLANG_ABORT_PATCH_COMMAND,
+            *REPORTING_PATCH_COMMANDS,
+            SUBSTEP_TIMING_PATCH_COMMAND,
         )
     )
     if miles.total_nodes > 1:
@@ -224,11 +215,11 @@ def build_miles_app(
         # The local checkout just overwrote the patched miles sources;
         # re-apply the built-in patches.
         image = image.run_commands(
-            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
-            " || echo 'WARNING: sglang abort patch did not apply to the"
+            SGLANG_ABORT_PATCH_COMMAND
+            + " || echo 'WARNING: sglang abort patch did not apply to the"
             " local_miles checkout; transient router failures during rollout"
             " cleanup may crash the run'",
-            *_REPORTING_PATCH_COMMANDS,
+            *REPORTING_PATCH_COMMANDS,
         )
 
     if miles.image_run_commands:

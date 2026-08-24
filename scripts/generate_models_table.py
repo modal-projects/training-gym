@@ -31,10 +31,11 @@ BANNER = (
 FRAMEWORKS: dict[str, str] = {
     "slime": "modal_training_gym.train_recipes.slime_recipe",
     "miles": "modal_training_gym.train_recipes.miles_recipe",
+    "stitch": "modal_training_gym.train_recipes.stitch_recipe",
 }
 
 # Base recipe classes each registry exports alongside its model recipes.
-BASE_RECIPES = {"SlimeRecipe", "MilesRecipe"}
+BASE_RECIPES = {"SlimeRecipe", "MilesRecipe", "StitchRecipe"}
 
 # Model configs keyed by lowercased class name, for recipe name lookup.
 MODEL_CONFIGS = {name.lower(): getattr(models, name) for name in models.__all__}
@@ -66,7 +67,7 @@ def collect_models() -> dict[str, ModelRow]:
     for framework, module_path in FRAMEWORKS.items():
         registry = importlib.import_module(module_path)
         for recipe_name in registry.__all__:
-            if recipe_name in BASE_RECIPES:
+            if recipe_name in BASE_RECIPES or not recipe_name.endswith("_Recipe"):
                 continue
             recipe = getattr(registry, recipe_name)
             config = recipe.model_config_class or MODEL_CONFIGS.get(

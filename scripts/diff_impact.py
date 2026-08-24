@@ -34,6 +34,9 @@ SLIME_RECIPE_PACKAGE_ROOT = (
 MILES_RECIPE_PACKAGE_ROOT = (
     REPO_ROOT / "modal_training_gym" / "train_recipes" / "miles_recipe"
 )
+STITCH_RECIPE_PACKAGE_ROOT = (
+    REPO_ROOT / "modal_training_gym" / "train_recipes" / "stitch_recipe"
+)
 
 VALIDATION_BACKEND_ROOT = REPO_ROOT / "scripts" / "validation_backends"
 
@@ -65,6 +68,12 @@ FRAMEWORK_VALIDATION_HARNESS_PATHS: dict[str, frozenset[Path]] = {
         {
             REPO_ROOT / "modal_training_gym" / "frameworks" / "miles" / "launcher.py",
             VALIDATION_BACKEND_ROOT / "miles.py",
+        }
+    ),
+    "stitch": frozenset(
+        {
+            REPO_ROOT / "modal_training_gym" / "frameworks" / "stitch" / "launcher.py",
+            VALIDATION_BACKEND_ROOT / "stitch.py",
         }
     ),
 }
@@ -177,6 +186,10 @@ def _base_recipe_for(framework, model_config):
         from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
         return MilesRecipe.get_base_recipe(model_config)
+    if framework is Framework.STITCH:
+        from modal_training_gym.train_recipes.stitch_recipe import StitchRecipe
+
+        return StitchRecipe.get_base_recipe(model_config)
     raise ValueError(f"no base recipe lookup for framework {framework!r}")
 
 
@@ -321,6 +334,11 @@ def _classes_for_path(path: Path) -> set[str]:
     if path.is_relative_to(MILES_RECIPE_PACKAGE_ROOT):
         if path.name in {"recipe.py", "__init__.py"}:
             return set(_package_public_definitions(str(MILES_RECIPE_PACKAGE_ROOT)))
+        return _parse_public_definitions(path)
+
+    if path.is_relative_to(STITCH_RECIPE_PACKAGE_ROOT):
+        if path.name in {"recipe.py", "train.py", "serve.py", "pins.py", "__init__.py"}:
+            return set(_package_public_definitions(str(STITCH_RECIPE_PACKAGE_ROOT)))
         return _parse_public_definitions(path)
 
     if path.suffix == ".py" and path.exists():

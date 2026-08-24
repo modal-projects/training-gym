@@ -40,16 +40,22 @@ class MilesStatus(str, Enum):
 
 FrameworkStatus: TypeAlias = SlimeStatus | MilesStatus
 
+_STATUS_ENUMS: dict[str, type[SlimeStatus] | type[MilesStatus]] = {
+    "slime": SlimeStatus,
+    "miles": MilesStatus,
+    "stitch": MilesStatus,  # stitch currently reuses miles status phases
+}
+
 
 def resolve_framework_status(phase: str, framework: str) -> FrameworkStatus | None:
     """Parse a reported phase string into the framework's status enum.
 
     Returns ``None`` for a phase the framework doesn't know.
     """
-    if framework.strip().lower() not in ("miles", "slime"):
+    status_enum = _STATUS_ENUMS.get(framework.strip().lower())
+    if status_enum is None:
         raise ValueError(f"Invalid framework string detected: {framework}")
 
-    status_enum = MilesStatus if framework.strip().lower() == "miles" else SlimeStatus
     try:
         return status_enum(phase.strip())
     except ValueError:

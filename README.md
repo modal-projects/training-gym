@@ -122,6 +122,7 @@ Models with a built-in training recipe, with the `ModelConfig` and recipe classe
 |---|---|---|---|
 | `Qwen/Qwen3-0.6B` | `slime` | `Qwen3_0_6B` | `Qwen3_0_6b_Recipe` |
 | `Qwen/Qwen3-1.7B` | `slime` | `Qwen3_1_7B` | `Qwen3_1_7b_Recipe` |
+| `Qwen/Qwen3-30B-A3B` | `stitch` | `Qwen3_30B` | `Qwen3_30B_A3B_Stitch_Recipe` |
 | `Qwen/Qwen3-4B` | `slime` | `Qwen3_4B` | `Qwen3_4b_Recipe` |
 | `Qwen/Qwen3-8B` | `slime` | `Qwen3_8B` | `Qwen3_8b_Recipe` |
 | `Qwen/Qwen3-ASR-1.7B` | `slime` | `Qwen3_ASR_1_7B` | `Qwen3_ASR_1_7b_Recipe` |
@@ -164,6 +165,7 @@ Difficulty is a rough signal for where to start:
 | [`007_param_sweep`](https://gym.modal.dev/tutorials/rl/007_param_sweep/) | Easy grid search | Intermediate | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F007_param_sweep%2F007_param_sweep.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`008_computer_use`](https://gym.modal.dev/tutorials/rl/008_computer_use/) | GUI grounding to predict click coordinates | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F008_computer_use%2F008_computer_use.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 | [`009_cross_tokenizer_distillation`](https://gym.modal.dev/tutorials/rl/009_cross_tokenizer_distillation/) | Cross-tokenizer agentic distillation on BFCL v3 multi-turn | Advanced | `slime` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F009_cross_tokenizer_distillation%2F009_cross_tokenizer_distillation.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
+| [`010_disaggregated_rl`](https://gym.modal.dev/tutorials/rl/010_disaggregated_rl/) | Disaggregated DAPO-math RL with sparse weight deltas | Advanced | `miles` + `stitch` | <a href="https://modal.com/notebooks/new/https%3A%2F%2Fgithub.com%2Fmodal-projects%2Ftraining-gym%2Fblob%2Fmain%2Ftutorials%2Frl%2F010_disaggregated_rl%2F010_disaggregated_rl.ipynb" target="_blank" rel="nofollow noopener noreferrer"><img src="https://modal-cdn.com/open-in-modal.svg" alt="Open in Modal"></a> |
 
 ### Agents
 
