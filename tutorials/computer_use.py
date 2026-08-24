@@ -1,6 +1,6 @@
 # ---
 # order: 8
-# ---
+# deps: pillow
 #
 # # GUI Grounding with Qwen3-VL-8B
 #
