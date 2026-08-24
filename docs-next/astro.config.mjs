@@ -153,7 +153,12 @@ export default defineConfig({
         },
         {
           label: 'Tutorials',
-          autogenerate: { directory: 'tutorials' },
+          items: [
+            {
+              label: 'Featured',
+              autogenerate: { directory: 'tutorials' },
+            },
+          ],
         },
         {
           label: 'API Reference',
