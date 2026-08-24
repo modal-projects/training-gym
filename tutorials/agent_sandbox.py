@@ -157,8 +157,9 @@ FILES = {
         "    while len(seq) < n:\n"
         "        seq.append(seq[-1] + seq[-2])\n"
         "    return seq[:n]\n\n\n"
-        "count = int(sys.argv[1]) if len(sys.argv) > 1 else 10\n"
-        "print(fibonacci(count))\n"
+        'if __name__ == "__main__":\n'
+        "    count = int(sys.argv[1]) if len(sys.argv) > 1 else 10\n"
+        "    print(fibonacci(count))\n"
     ),
     "/repo/tests/test_fib.py": (
         "from fib import fibonacci\n\n\n"
