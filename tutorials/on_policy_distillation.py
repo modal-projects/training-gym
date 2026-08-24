@@ -280,7 +280,7 @@ train_run = TrainConfig(
             "opd_type": "sglang",
             "opd_kl_coef": 1.0,
             "custom_reward_post_process_path": (
-                "003_on_policy_distillation.math_opd_post_process"
+                "on_policy_distillation.math_opd_post_process"
             ),
             "rm_url": TEACHER_GENERATE_URL,
         },
