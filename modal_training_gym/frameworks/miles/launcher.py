@@ -576,7 +576,7 @@ def build_miles_app(
     _multi_node = miles.total_nodes > 1
 
     train_secrets = [
-        *metric_secrets(miles.metrics),
+        *(metric_secrets(miles.metrics) if miles.metrics is not None else []),
         *hf_secrets(),
         *proxy_auth_secrets(),
     ]
