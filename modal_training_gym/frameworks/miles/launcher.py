@@ -28,6 +28,7 @@ from modal_training_gym.common.launcher_utils import (
     timing_debug_env,
 )
 from modal_training_gym.common.metrics import (
+    apply_metric_image,
     metric_metadata,
     metric_runtime_env,
     metric_secrets,
@@ -248,6 +249,7 @@ def build_miles_app(
     if isinstance(dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
+    image = apply_metric_image(image, miles.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)

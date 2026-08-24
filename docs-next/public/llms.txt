@@ -24,6 +24,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 - [The observability dashboard](https://gym.modal.dev/guides/tools/observability-dashboard/): Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings.
 - [Weights & Biases integration](https://gym.modal.dev/guides/tools/wandb-integration/): Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links.
+- [Trackio integration](https://gym.modal.dev/guides/tools/trackio-integration/): Stream training metrics to a Trackio Space or self-hosted dashboard.
 
 ## Tutorials
 
@@ -57,6 +58,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [HuggingFaceDataset](https://gym.modal.dev/reference/core/huggingfacedataset/): `HuggingFaceDataset`
 - [HarborDataset](https://gym.modal.dev/reference/core/harbordataset/): `HarborDataset`
 - [MetricConfig](https://gym.modal.dev/reference/core/metricconfig/): `MetricConfig`
+- [TrackioConfig](https://gym.modal.dev/reference/core/trackioconfig/): `TrackioConfig`
 - [WandbConfig](https://gym.modal.dev/reference/core/wandbconfig/): `WandbConfig`
 - [ModalRayCluster](https://gym.modal.dev/reference/core/modalraycluster/): `ModalRayCluster`
 - [TrainResult](https://gym.modal.dev/reference/core/trainresult/): `TrainResult`

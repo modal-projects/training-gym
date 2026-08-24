@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from modal_training_gym.common.trackio import TrackioConfig
+    from modal_training_gym.common.wandb import WandbConfig
 
 
 class MetricConfig(ABC):
@@ -76,16 +80,32 @@ def metric_metadata(
 
 
 def metric_secrets(metric: MetricConfig) -> list[Any]:
-    if metric.provider != "wandb":
-        return []
-    from modal import Secret
+    if metric.provider == "trackio":
+        from modal_training_gym.common.trackio import trackio_secrets
 
-    return [Secret.from_name(getattr(metric, "modal_wandb_secret_name"))]
+        return trackio_secrets(cast("TrackioConfig", metric))
+    if metric.provider == "wandb":
+        from modal import Secret
+
+        return [Secret.from_name(getattr(metric, "modal_wandb_secret_name"))]
+    return []
+
+
+def apply_metric_image(image: Any, metric: MetricConfig | None) -> Any:
+    if metric is not None and metric.provider == "trackio":
+        from modal_training_gym.common.trackio import apply_trackio_image
+
+        return apply_trackio_image(image)
+    return image
 
 
 def preflight_metric(metric: MetricConfig | None) -> str:
     if metric is not None and metric.provider == "wandb":
         from modal_training_gym.common.wandb import preflight_wandb
 
-        return preflight_wandb(metric)
+        return preflight_wandb(cast("WandbConfig", metric))
+    if metric is not None and metric.provider == "trackio":
+        from modal_training_gym.common.trackio import preflight_trackio
+
+        return preflight_trackio(cast("TrackioConfig", metric))
     return ""
