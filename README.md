@@ -80,7 +80,14 @@ training-gym setup  # first-time deploy
 training-gym open  # opens in your browser
 ```
 
-![Gym Observability Dashboard](./assets/observability_dashboard_1.png)
+<div class="tg-dashboard-previews">
+  <span>
+    <img src="./assets/homepage.gif" alt="Training runs list in the Training Gym dashboard" width="100%" />
+  </span>
+  <span>
+    <img src="./assets/longrun.gif" alt="Long-running training run details in the Training Gym dashboard" width="100%" />
+  </span>
+</div>
 
 ## Agent set-up
 

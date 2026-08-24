@@ -22,6 +22,10 @@ CALLOUT_VARIANTS = {
 }
 MARKDOWN_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
 MARKDOWN_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+HTML_IMAGE_SRC = re.compile(
+    r"(<img\b[^>]*?\bsrc=)([\"'])([^\"']+)(\2)",
+    re.IGNORECASE,
+)
 
 
 def branch_exists_on_origin(branch: str) -> bool:
@@ -132,31 +136,43 @@ _RAW_ASSET_PREFIX = (
 )
 
 
+def rewrite_image_target(target: str, *, source_dir: PurePosixPath) -> str:
+    if target.startswith(_RAW_ASSET_PREFIX):
+        filename = target[len(_RAW_ASSET_PREFIX) :]
+        return f"/{filename}"
+
+    if target.startswith(("http://", "https://", "data:", "#", "/")):
+        return target
+
+    path_part, hash_part = (target.split("#", 1) + [""])[:2]
+    normalized = posixpath.normpath(PurePosixPath(source_dir, path_part).as_posix())
+
+    if normalized.startswith("assets/"):
+        filename = normalized[len("assets/") :]
+        rewritten = f"/{filename}"
+    else:
+        rewritten = f"{RAW_BASE}/{normalized}"
+
+    if hash_part:
+        rewritten = f"{rewritten}#{hash_part}"
+    return rewritten
+
+
 def rewrite_images(markdown: str, *, source_dir: PurePosixPath) -> str:
     def replace(match: re.Match[str]) -> str:
         alt_text, target = match.groups()
-
-        if target.startswith(_RAW_ASSET_PREFIX):
-            filename = target[len(_RAW_ASSET_PREFIX) :]
-            return f"![{alt_text}](/{filename})"
-
-        if target.startswith(("http://", "https://", "data:", "#", "/")):
-            return match.group(0)
-
-        path_part, hash_part = (target.split("#", 1) + [""])[:2]
-        normalized = posixpath.normpath(PurePosixPath(source_dir, path_part).as_posix())
-
-        if normalized.startswith("assets/"):
-            filename = normalized[len("assets/") :]
-            rewritten = f"/{filename}"
-        else:
-            rewritten = f"{RAW_BASE}/{normalized}"
-
-        if hash_part:
-            rewritten = f"{rewritten}#{hash_part}"
-        return f"![{alt_text}]({rewritten})"
+        return f"![{alt_text}]({rewrite_image_target(target, source_dir=source_dir)})"
 
     return MARKDOWN_IMAGE.sub(replace, markdown)
+
+
+def rewrite_html_image_sources(markdown: str, *, source_dir: PurePosixPath) -> str:
+    def replace(match: re.Match[str]) -> str:
+        prefix, quote, target, _closing_quote = match.groups()
+        rewritten = rewrite_image_target(target, source_dir=source_dir)
+        return f"{prefix}{quote}{rewritten}{quote}"
+
+    return HTML_IMAGE_SRC.sub(replace, markdown)
 
 
 @dataclass(frozen=True)
@@ -251,6 +267,7 @@ def transform_markdown(
     page = wrap_catalogs(page)
     page = convert_github_callouts(page)
     page = rewrite_images(page, source_dir=source_dir)
+    page = rewrite_html_image_sources(page, source_dir=source_dir)
     page = rewrite_links(
         page,
         source_dir=source_dir,
