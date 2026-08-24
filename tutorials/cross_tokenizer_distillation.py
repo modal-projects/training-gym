@@ -278,6 +278,35 @@ CONTEXT_SAFETY_MARGIN = 512
 EVAL_MAX_TURNS = EVAL_TAIL_STEPS * 2
 MAX_CONSECUTIVE_TOOL_ERRORS = 3
 
+_student_tokenizer_cache = {}
+
+def _get_student_tokenizer():
+    if "tok" not in _student_tokenizer_cache:
+        from transformers import AutoTokenizer
+        _student_tokenizer_cache["tok"] = AutoTokenizer.from_pretrained(
+            "Qwen/Qwen3.6-35B-A3B", trust_remote_code=True
+        )
+    return _student_tokenizer_cache["tok"]
+
+_teacher_tokenizer_cache = {}
+
+def _get_teacher_tokenizer():
+    if "tok" not in _teacher_tokenizer_cache:
+        from transformers import AutoTokenizer
+        _teacher_tokenizer_cache["tok"] = AutoTokenizer.from_pretrained(
+            "deepseek-ai/DeepSeek-V4-Flash", trust_remote_code=True
+        )
+    return _teacher_tokenizer_cache["tok"]
+
+def _teacher_response_boundary(teacher_tok, prefix_text, full_text):
+    try:
+        offsets = teacher_tok(
+            full_text, add_special_tokens=False, return_offsets_mapping=True
+        )["offset_mapping"]
+        return sum(1 for start, _end in offsets if start < len(prefix_text))
+    except (TypeError, KeyError, NotImplementedError, ValueError):
+        return len(teacher_tok(prefix_text, add_special_tokens=False)["input_ids"])
+
 def _prompt_token_count(messages, tools=None) -> int:
     try:
         tok = _get_student_tokenizer()
@@ -533,35 +562,6 @@ def align_cross_tokenizer(
 # $$
 #
 # where $\lambda$ is `--opd-kl-coef`, set to `0.3` in this tutorial.
-
-_student_tokenizer_cache = {}
-
-def _get_student_tokenizer():
-    if "tok" not in _student_tokenizer_cache:
-        from transformers import AutoTokenizer
-        _student_tokenizer_cache["tok"] = AutoTokenizer.from_pretrained(
-            "Qwen/Qwen3.6-35B-A3B", trust_remote_code=True
-        )
-    return _student_tokenizer_cache["tok"]
-
-_teacher_tokenizer_cache = {}
-
-def _get_teacher_tokenizer():
-    if "tok" not in _teacher_tokenizer_cache:
-        from transformers import AutoTokenizer
-        _teacher_tokenizer_cache["tok"] = AutoTokenizer.from_pretrained(
-            "deepseek-ai/DeepSeek-V4-Flash", trust_remote_code=True
-        )
-    return _teacher_tokenizer_cache["tok"]
-
-def _teacher_response_boundary(teacher_tok, prefix_text, full_text):
-    try:
-        offsets = teacher_tok(
-            full_text, add_special_tokens=False, return_offsets_mapping=True
-        )["offset_mapping"]
-        return sum(1 for start, _end in offsets if start < len(prefix_text))
-    except (TypeError, KeyError, NotImplementedError, ValueError):
-        return len(teacher_tok(prefix_text, add_special_tokens=False)["input_ids"])
 
 _teacher_rm_sem: asyncio.Semaphore | None = None
 
