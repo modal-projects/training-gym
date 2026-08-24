@@ -1,6 +1,4 @@
 ---
-import MobileMenuFooter from '@astrojs/starlight/components/MobileMenuFooter.astro';
-
 const { sidebar } = Astro.locals.starlightRoute;
 const currentPath = Astro.url.pathname;
 type SidebarEntry = (typeof sidebar)[number];
@@ -31,6 +29,7 @@ function getFilteredSidebar() {
 
 const filteredSidebar = getFilteredSidebar();
 const showSidebar = filteredSidebar.length > 0;
+const isReference = currentPath === '/reference' || currentPath.startsWith('/reference/');
 
 function flattenLinks(entries: readonly SidebarEntry[]): SidebarLink[] {
   const links: SidebarLink[] = [];
@@ -72,7 +71,12 @@ const sections = filteredSidebar.map((entry) => {
 {
   showSidebar ? (
     <>
-      <ul class="tg-tutorial-sidebar">
+      <ul
+        class:list={[
+          'tg-tutorial-sidebar',
+          { 'is-reference': isReference },
+        ]}
+      >
         {sections.map((section) => (
           <li>
             {section.href ? (
@@ -96,10 +100,6 @@ const sections = filteredSidebar.map((entry) => {
           </li>
         ))}
       </ul>
-
-      <div class="md:sl-hidden">
-        <MobileMenuFooter />
-      </div>
     </>
   ) : (
     <div class="tg-sidebar-empty" aria-hidden="true" />

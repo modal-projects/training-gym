@@ -17,11 +17,6 @@ const commands = showTutorialCta
 const shellCode = commands.join('\n');
 ---
 
-{toc && (
-      <div class="tg-mobile-toc lg:sl-hidden">
-        <TableOfContents />
-      </div>
-)}
 {(toc || showTutorialCta) && (
   <div class="right-sidebar-panel sl-hidden lg:sl-block">
     <div class="sl-container tg-right-rail">
