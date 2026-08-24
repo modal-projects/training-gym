@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from modal import App, Image, Retries, Secret, Volume
+from modal import App, Image, Retries, Volume
 from modal.experimental import clustered
 
 from modal_training_gym.common import (
@@ -27,6 +27,13 @@ from modal_training_gym.common.launcher_utils import (
     serialize_recipe_params,
     timing_debug_env,
 )
+from modal_training_gym.common.metrics import (
+    metric_metadata,
+    metric_runtime_env,
+    metric_secrets,
+    preflight_metric,
+)
+from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import ModalRayCluster
@@ -153,7 +160,7 @@ def _compose_ld_library_path() -> str:
 def build_ray_runtime_env(
     *,
     head_addr: str,
-    wandb_env: dict[str, str],
+    metric_env: dict[str, str],
     environment: dict,
     extra_env: dict[str, str] | None = None,
     framework_status_token: str = "",
@@ -180,7 +187,7 @@ def build_ray_runtime_env(
         "TRAINING_GYM_SUBSTEP_TIMING": substep_timing,
     }
     env_vars.update(extra_env or {})
-    env_vars.update(wandb_env)
+    env_vars.update(metric_env)
     env_vars.update(environment)
     env_vars.update(timing_debug_env())
     if framework_status_token:
@@ -244,7 +251,6 @@ def build_miles_app(
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)
-
     if caller_script is not None:
         caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]
         image = image.add_local_file(
@@ -362,7 +368,7 @@ def build_miles_app(
         framework="miles",
         model=model,
         recipe_app_tags=miles.app_tags,
-        wandb=miles.wandb,
+        metrics=miles.metrics,
     )
 
     app = App(app_name, tags=tags)
@@ -570,11 +576,7 @@ def build_miles_app(
     _multi_node = miles.total_nodes > 1
 
     train_secrets = [
-        *(
-            []
-            if miles.wandb is None
-            else [Secret.from_name(miles.wandb.modal_wandb_secret_name)]
-        ),
+        *metric_secrets(miles.metrics),
         *hf_secrets(),
         *proxy_auth_secrets(),
     ]
@@ -647,15 +649,11 @@ def build_miles_app(
 
         run_record: TrainingRun | None = None
 
-        wandb_entity = ""
-        wandb_run_id = ""
+        metric_entity = ""
+        metric_run_id = ""
 
         if cluster.is_head:
-            if miles.wandb is not None:
-                from modal_training_gym.common.wandb import preflight_wandb
-
-                wandb_entity = preflight_wandb(miles.wandb)
-            wandb_run_id = ""
+            metric_entity = preflight_metric(miles.metrics)
 
             print(f"Training run id: {training_run_id}")
             config_summary = {
@@ -664,15 +662,10 @@ def build_miles_app(
                     "gpu_type": miles.gpu_type,
                     **serialize_recipe_params(miles, dataset=dataset, model=model),
                 },
-                "wandb": (
-                    {
-                        "project": miles.wandb.project,
-                        "group": miles.wandb.group,
-                        "entity": wandb_entity,
-                        "run_id": wandb_run_id,
-                    }
-                    if miles.wandb
-                    else {}
+                "metrics": metric_metadata(
+                    miles.metrics,
+                    entity=metric_entity,
+                    run_id=metric_run_id,
                 ),
                 "dataset": {
                     "hf_repo": getattr(dataset, "hf_repo", ""),
@@ -683,7 +676,7 @@ def build_miles_app(
             }
             (
                 run_record,
-                wandb_run_id,
+                metric_run_id,
                 framework_status_token,
             ) = await init_training_run_record(
                 training_run_id=training_run_id,
@@ -692,8 +685,8 @@ def build_miles_app(
                 framework=Framework.MILES,
                 initializing_status=MilesStatus.INITIALIZING,
                 config_summary=config_summary,
-                wandb_cfg=miles.wandb,
-                wandb_entity=wandb_entity,
+                metric_cfg=miles.metrics,
+                metric_entity=metric_entity,
                 framework_status_token=framework_status_token,
             )
 
@@ -813,8 +806,8 @@ def build_miles_app(
             prepare_miles_config(miles, model, tempfile.mkdtemp())
 
             if wandb_key := os.environ.get("WANDB_API_KEY", ""):
-                if miles.wandb is not None:
-                    miles.wandb.key = wandb_key
+                if isinstance(miles.metrics, WandbConfig):
+                    miles.metrics.key = wandb_key
 
             save_root = compute_save_root(
                 miles.save,
@@ -857,16 +850,13 @@ def build_miles_app(
                     "container. Phase reporting is disabled for this run."
                 )
 
-            wandb_env = {}
-            if wandb_run_id:
-                wandb_env["WANDB_RUN_ID"] = wandb_run_id
-                wandb_env["WANDB_RESUME"] = "allow"
-            if wandb_entity:
-                wandb_env["WANDB_ENTITY"] = wandb_entity
-
             runtime_env = build_ray_runtime_env(
                 head_addr=cluster.head_addr,
-                wandb_env=wandb_env,
+                metric_env=metric_runtime_env(
+                    miles.metrics,
+                    run_id=metric_run_id,
+                    entity=metric_entity,
+                ),
                 environment=miles.environment,
                 substep_timing=miles.substep_timing,
                 extra_env={
@@ -913,9 +903,9 @@ def build_miles_app(
                 model=model,
                 checkpoints_volume_name=checkpoints_volume_name,
                 checkpoints_mount_path=checkpoints_mount_path,
-                wandb_cfg=miles.wandb,
-                wandb_entity=wandb_entity,
-                wandb_run_id=wandb_run_id,
+                metric_cfg=miles.metrics,
+                metric_entity=metric_entity,
+                metric_run_id=metric_run_id,
                 group_id=group_id,
             )
             await result.save(is_async=True)

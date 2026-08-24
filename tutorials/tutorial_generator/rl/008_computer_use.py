@@ -56,19 +56,21 @@ def _run_instructions():
     ```
     cd training-gym
     uv sync
-    uv run tutorials/rl/008_computer_use/008_computer_use.py
+    uv run --with pillow tutorials/rl/008_computer_use/008_computer_use.py
     ```
 
     To detach and watch it from the Modal dashboard instead:
 
     ```
-    uv run modal run -d tutorials/rl/008_computer_use/008_computer_use.py
+    uv run --with pillow modal run -d tutorials/rl/008_computer_use/008_computer_use.py
     ```
     """
 
 
 @notebook_only
-@shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
+@shell(
+    "%uv pip install -q pillow git+https://github.com/modal-projects/training-gym.git@main"
+)
 def _install():
     pass
 
@@ -401,10 +403,10 @@ def _train_intro():
     This tutorial runs 15 rollouts as a quick demo. For a more meaningful
     accuracy gain, increase `num_rollout`.
 
-    We pass `wandb=WandbConfig(project="…")` so reward/KL/length curves stream to
+    We pass `metrics=WandbConfig(project="…")` so reward/KL/length curves stream to
     Weights & Biases — the key comes from the `wandb-secret` Modal secret. The
     Training Gym dashboard picks up the run's project/entity/id and wires up the
-    **Open in W&B** button on the run. Drop `wandb=` to disable logging.
+    **Open in W&B** button on the run. Drop `metrics=` to disable logging.
     """
 
 
@@ -432,7 +434,7 @@ def _train():
             # Skip writing optimizer state to the checkpoint since we only serve the
             # final weights for eval (not resuming training).
             no_save_optim=True,
-            wandb=WandbConfig(project="computer-use-grounding"),
+            metrics=WandbConfig(project="computer-use-grounding"),
         ),
     )
     train_result = training_run.train()

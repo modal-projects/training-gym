@@ -50,6 +50,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "HarborDataset",
     },
     {
+        "class_name": "MetricConfig",
+        "module": "modal_training_gym.common.metrics",
+        "group": "core",
+        "class_type": "config_data",
+        "sidebar_label": "MetricConfig",
+    },
+    {
         "class_name": "WandbConfig",
         "module": "modal_training_gym.common.wandb",
         "group": "core",

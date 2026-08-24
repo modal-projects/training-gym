@@ -300,6 +300,25 @@ def test_metric_attempt_helpers_skip_invalid_links_and_dedupe_by_url():
     ]
 
 
+def test_metric_summary_uses_provider_neutral_config():
+    metric = {
+        "provider": "wandb",
+        "project": "training",
+        "entity": "modal",
+        "run_id": "run-1",
+        "url": "https://wandb.ai/modal/training/runs/run-1",
+    }
+    run = _run(config={"metrics": metric}, metadata={"metric_attempts": [metric]})
+
+    summary = build_run_summary(run)
+
+    assert summary.config_summary.metric_provider == "wandb"
+    assert summary.config_summary.metric_url == metric["url"]
+    assert [(link.label, link.url) for link in summary.metric_links] == [
+        ("Metric", metric["url"])
+    ]
+
+
 def test_missing_identity_uses_stable_fallbacks():
     summary = build_run_summary(
         {

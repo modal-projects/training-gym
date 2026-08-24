@@ -98,7 +98,7 @@ class TrainResult:
         Identifier shared by every run in a :class:`TrainingGroup` sweep, or
         empty for a standalone run. Lets eval/dashboard code group variants.
     extra:
-        Free-form metadata a launcher may attach (e.g. wandb run name,
+        Free-form metadata a launcher may attach (e.g. metric run name,
         rollout tunnel URL). Not used by the base class.
     """
 
@@ -109,9 +109,7 @@ class TrainResult:
     checkpoints_volume_name: str = ""
     checkpoints_mount_path: str = ""
     model_config: "ModelConfig | None" = None
-    wandb_project: str = ""
-    wandb_entity: str = ""
-    wandb_training_run_id: str = ""
+    metrics: dict[str, Any] = field(default_factory=dict)
     # Set when this run was launched as part of a TrainingGroup sweep; shared
     # across every variant in the group so results can be compared together.
     group_id: str = ""

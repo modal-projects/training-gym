@@ -166,6 +166,7 @@ export default defineConfig({
                 { label: 'DatasetConfig', link: '/reference/core/datasetconfig/' },
                 { label: 'HuggingFaceDataset', link: '/reference/core/huggingfacedataset/' },
                 { label: 'HarborDataset', link: '/reference/core/harbordataset/' },
+                { label: 'MetricConfig', link: '/reference/core/metricconfig/' },
                 { label: 'WandbConfig', link: '/reference/core/wandbconfig/' },
                 { label: 'ModalRayCluster', link: '/reference/core/modalraycluster/' },
                 { label: 'TrainResult', link: '/reference/core/trainresult/' },

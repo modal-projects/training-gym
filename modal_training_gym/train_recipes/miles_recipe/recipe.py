@@ -7,8 +7,8 @@ from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.train_recipes.base import (
     BaseTrainRecipe,
     RecipeType,
@@ -45,7 +45,7 @@ _MILES_SKIP = {
     "local_miles",
     "patch_files",
     "substep_timing",
-    "wandb",
+    "metrics",
     # Callables shipped by value into the containers; the launcher writes the
     # resolved import path into `extra_config` (rm/generate) or back onto the
     # field itself (the *_path flags remapped in `_fields`).
@@ -123,8 +123,8 @@ class MilesRecipe(BaseTrainRecipe):
         Env vars for the training containers (Megatron ``PYTHONPATH``, NCCL tuning).
     async_mode : bool
         Run Miles' ``train_async.py``: rollout and training overlap (off-policy).
-    wandb : WandbConfig | None
-        W&B settings; expands to Miles' ``--use-wandb``/``--wandb-*`` flags.
+    metrics : MetricConfig | None
+        Metric tracker settings; expands to Miles' W&B-compatible flags.
     image_overlay : Callable[[modal.Image], modal.Image] | None
         Customizes the Modal image, e.g. ``lambda img: img.pip_install("pkg")``.
     local_miles : str | None
@@ -494,7 +494,7 @@ class MilesRecipe(BaseTrainRecipe):
     miles_model_name: str = ""
     source_hf_checkpoint: str | None = None
     megatron_conversion_hf_checkpoint: str | None = None
-    wandb: WandbConfig | None = None
+    metrics: MetricConfig | None = None
 
     # ── Cluster and parallelism ────────────────────────────────────────────
     actor_num_nodes: int = 1
@@ -803,8 +803,8 @@ class MilesRecipe(BaseTrainRecipe):
                 fields[k] = v
         if dataset is not None:
             fields.update(self._dataset_to_fields(dataset))
-        if self.wandb is not None:
-            fields.update(self._wandb_to_fields(self.wandb))
+        if self.metrics is not None:
+            fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)
         for src, dst in _HOOK_PATH_FLAGS.items():
             if src in _HOOK_WRAPPER_PATHS:

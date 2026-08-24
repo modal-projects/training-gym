@@ -98,3 +98,27 @@ def test_slime_preflight_delegates_to_common(monkeypatch):
     )
     entity = _slime_preflight_wandb(_CFG)
     assert entity == "slime-team"
+
+
+def test_wandb_config_uses_the_provider_neutral_recipe_field():
+    from modal_training_gym import MetricConfig, Qwen3_4b_Recipe
+    from modal_training_gym.common.launcher_helpers import build_app_tags
+
+    with pytest.raises(TypeError, match="abstract"):
+        MetricConfig()
+
+    metric = WandbConfig(project="training")
+    recipe = Qwen3_4b_Recipe(metrics=metric)
+
+    assert isinstance(metric, MetricConfig)
+    assert recipe.metrics is metric
+    assert "--use-wandb" in recipe.cli_args()
+    assert "label" not in metric.metadata(run_id="run-1")
+    tags = build_app_tags(
+        framework="slime",
+        model=types.SimpleNamespace(model_name="Qwen/Qwen3-4B"),
+        recipe_app_tags={},
+        metrics=metric,
+    )
+    assert tags["_modal_metric_project"] == "training"
+    assert tags["_modal_wandb_project"] == "training"
