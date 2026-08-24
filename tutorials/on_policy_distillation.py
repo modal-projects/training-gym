@@ -269,6 +269,7 @@ train_run = TrainConfig(
         save_interval=5,
         eval_interval=None,
         custom_rm_function=math_opd_rm,
+        custom_reward_post_process_function=math_opd_post_process,
         apply_chat_template_kwargs='{"enable_thinking": true}',
         environment={
             "PYTHONPATH": "/root/Megatron-LM/:/root",
@@ -279,9 +280,6 @@ train_run = TrainConfig(
             "use_opd": True,
             "opd_type": "sglang",
             "opd_kl_coef": 1.0,
-            "custom_reward_post_process_path": (
-                "on_policy_distillation.math_opd_post_process"
-            ),
             "rm_url": TEACHER_GENERATE_URL,
         },
     ),
