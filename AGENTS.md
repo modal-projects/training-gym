@@ -46,7 +46,7 @@ uv run scripts/validate_model_configs.py list --names-only --pr-only # PR matrix
 uv run scripts/validate_model_configs.py check -m qwen3-4b
 # miles models go through the same script; the registry picks the framework
 uv run scripts/validate_model_configs.py check -m Qwen3.5-4B-Miles
-git diff | uv run scripts/diff_impact.py
+git diff | uv run python -m scripts.diff_impact
 ```
 
 ## Architecture

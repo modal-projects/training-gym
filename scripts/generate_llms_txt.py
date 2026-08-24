@@ -1,6 +1,6 @@
 """Generate docs-next/public/llms.txt from tutorial + API catalogs.
 
-uv run scripts/generate_llms_txt.py
+uv run python -m scripts.generate_llms_txt
 """
 
 from __future__ import annotations
@@ -11,12 +11,12 @@ from pathlib import Path
 
 import yaml
 
-from api_reference_manifest import (
+from scripts.api_reference_manifest import (
     API_REFERENCE_MANIFEST,
     CLASS_REFERENCE_PATHS,
     GROUPS,
 )
-from tutorial_index import TutorialEntry, load_tutorial_index
+from scripts.tutorial_index import TutorialEntry, load_tutorial_index
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDES_DIR = ROOT / "docs-next" / "src" / "content" / "docs" / "guides"

@@ -29,7 +29,7 @@ jobs:
 
       - name: Verify generated files
         run: |
-          uv run scripts/generate_llms_txt.py
+          uv run python -m scripts.generate_llms_txt
           git diff --exit-code -- docs-next/public/llms.txt
           uv run scripts/generate_models_table.py --check
 

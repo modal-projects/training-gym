@@ -2,9 +2,9 @@
 """Report which model/config classes and tutorials are affected by a diff.
 
 Usage:
-    git diff --cached | uv run scripts/diff_impact.py
-    uv run scripts/diff_impact.py --diff-file /tmp/change.diff
-    uv run scripts/diff_impact.py < /tmp/change.diff
+    git diff --cached | uv run python -m scripts.diff_impact
+    uv run python -m scripts.diff_impact --diff-file /tmp/change.diff
+    uv run python -m scripts.diff_impact < /tmp/change.diff
 
 The script reads a unified diff, extracts changed paths, and maps those paths
 to public classes and directly changed tutorials.
