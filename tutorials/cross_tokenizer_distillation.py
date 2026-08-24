@@ -1,5 +1,6 @@
 # ---
 # order: 9
+# deps: bfcl-eval, jsonschema
 # ---
 #
 # # On-policy Distillation (OPD) Across Model Families
