@@ -6,6 +6,7 @@ from .base import (
     ToolCall,
     parse_gemma4_response,
     parse_glm_response,
+    parse_inkling_response,
     parse_qwen3_6_response,
     parse_qwen3_response,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "ToolCall",
     "parse_gemma4_response",
     "parse_glm_response",
+    "parse_inkling_response",
     "parse_qwen3_6_response",
     "parse_qwen3_response",
     "Qwen3_5_0_8B",

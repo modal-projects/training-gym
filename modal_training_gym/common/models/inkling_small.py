@@ -23,7 +23,7 @@ provider.
 
 from __future__ import annotations
 
-from .base import HFModelConfiguration
+from .base import HFModelConfiguration, parse_inkling_response
 
 
 class Inkling_Small(HFModelConfiguration):
@@ -33,11 +33,11 @@ class Inkling_Small(HFModelConfiguration):
     BF16 safetensors, so the first ``download()`` into the shared
     ``huggingface-cache`` volume is the slowest step of a cold run.
 
-    No ``response_parser``: Inkling emits its own token wire format
+    ``parse_inkling_response`` splits Inkling's own token wire format
     (``<|content_thinking|>`` / ``<|content_text|>`` /
-    ``<|content_invoke_tool_json|>`` sections inside ``<|message_model|>``), so
-    ``parse_response`` returns the raw text until a parser is written against a
-    real rollout sample.
+    ``<|content_invoke_tool_json|>`` sections inside ``<|message_model|>``) into
+    thinking, content, and tool calls.
     """
 
     model_name = "thinkingmachines/Inkling-Small"
+    response_parser = staticmethod(parse_inkling_response)
