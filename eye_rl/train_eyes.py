@@ -85,10 +85,13 @@ USER_TEMPLATE = (
 )
 
 
-def build_prompts(n: int, seed: int = 7) -> list[dict[str, str]]:
-    rng = random.Random(seed)
+def shuffled_combos(seed: int = 7) -> list[tuple[str, str, str]]:
     combos = list(itertools.product(SUBJECTS, IRIS_COLORS, STYLES))
-    rng.shuffle(combos)
+    random.Random(seed).shuffle(combos)
+    return combos
+
+
+def build_prompts(n: int, combos: list[tuple[str, str, str]]) -> list[dict[str, str]]:
     rows = []
     for subject, color, style in itertools.islice(itertools.cycle(combos), n):
         rows.append(
@@ -106,12 +109,16 @@ class EyePromptDataset(DatasetConfig):
     n_eval: int = 16
 
     def load(self, split="all"):
-        rows = build_prompts(self.n_train + self.n_eval)
+        # The grammar has fewer combinations than n_train, so the eval combos are
+        # held out first — otherwise cycling would put them in the train split too.
+        combos = shuffled_combos()
+        eval_rows = build_prompts(self.n_eval, combos[: self.n_eval])
+        train_rows = build_prompts(self.n_train, combos[self.n_eval :])
         if split == "train":
-            return rows[: self.n_train]
+            return train_rows
         if split == "eval":
-            return rows[self.n_train :]
-        return rows
+            return eval_rows
+        return train_rows + eval_rows
 
     def _rows_to_records(self, rows):
         return [
