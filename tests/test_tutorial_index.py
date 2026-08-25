@@ -54,13 +54,16 @@ def test_authored_pages_use_order_and_h1() -> None:
 def test_collect_guides_uses_h1_and_order() -> None:
     guides = _collect_guides()
     assert [guide[0] for guide in guides] == [
+        "tools/agent-driven-training",
         "tools/observability-dashboard",
         "tools/wandb-integration",
     ]
-    assert guides[0][1] == "The observability dashboard"
-    assert guides[0][2] == 1
-    assert guides[1][1] == "Weights & Biases integration"
-    assert guides[1][2] == 2
+    assert guides[0][1] == "Agent-driven training"
+    assert guides[0][2] == 0
+    assert guides[1][1] == "The observability dashboard"
+    assert guides[1][2] == 1
+    assert guides[2][1] == "Weights & Biases integration"
+    assert guides[2][2] == 2
 
 
 def test_api_reference_orders_follow_manifest() -> None:
