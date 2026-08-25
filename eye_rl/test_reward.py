@@ -15,6 +15,56 @@ GOOD_SKETCH = """function setup() {
   createCanvas(512, 512, WEBGL);
   angleMode(DEGREES);
   brush.load();
+  background(255);
+  noStroke();
+  // sclera
+  fill(252, 250, 252);
+  beginShape();
+  vertex(-180, 4);
+  bezierVertex(-120, -125, 110, -135, 180, -14);
+  bezierVertex(110, 58, -110, 76, -180, 4);
+  endShape(CLOSE);
+  // banded iris
+  fill(20, 74, 52);
+  ellipse(-4, -4, 140, 176);
+  fill(46, 150, 104);
+  ellipse(-4, 10, 120, 148);
+  fill(140, 226, 178);
+  ellipse(-4, 34, 96, 92);
+  // pupil
+  fill(18, 14, 22);
+  ellipse(-4, -2, 56, 86);
+  // specular highlights
+  fill(255);
+  ellipse(-34, -42, 44, 34);
+  ellipse(28, 38, 20, 16);
+  // thick upper lash line + spikes
+  fill(20, 16, 24);
+  beginShape();
+  vertex(-190, 8);
+  bezierVertex(-128, -146, 116, -156, 192, -18);
+  bezierVertex(120, -66, 90, -94, 0, -96);
+  bezierVertex(-96, -94, -142, -18, -190, 8);
+  endShape(CLOSE);
+  triangle(150, -56, 218, -110, 184, -28);
+  triangle(96, -96, 146, -144, 140, -84);
+  triangle(-190, 8, -226, -26, -168, -16);
+  // lower lid + crease
+  brush.pick("pen");
+  brush.stroke("#2a2230");
+  brush.strokeWeight(4);
+  brush.spline([[-174,24],[-80,66],[20,74],[110,56],[176,2]], 0.5);
+  brush.strokeWeight(2);
+  brush.spline([[-150,-34],[-60,-112],[40,-122],[130,-92]], 0.5);
+  noLoop();
+}"""
+
+# The pencil-hatched eye the previous, realistic task trained: it must now score
+# clearly below the anime sketch above.
+PENCIL_SKETCH = """function setup() {
+  createCanvas(512, 512, WEBGL);
+  angleMode(DEGREES);
+  brush.load();
   background(245, 240, 230);
   // iris + pupil, hatched
   brush.pick("cpencil");
@@ -61,7 +111,10 @@ BAD_SKETCH_RUNTIME = """function setup() {
 }"""
 
 GOOD_RESPONSE = f"```javascript\n{GOOD_SKETCH}\n```"
-PROMPT = "Illustrate a human eye with a emerald green iris, rendered as a loose ink sketch. Make it detailed and expressive."
+PROMPT = (
+    "Illustrate an anime heroine's eye with an emerald green iris, in clean "
+    "cel-shaded anime style."
+)
 
 
 def main():
@@ -83,9 +136,14 @@ def main():
     assert png is not None
     open("/tmp/eye_render.png", "wb").write(png)
 
-    # judge
+    # judge: the anime sketch must beat the old pencil-hatched eye
     score, jmeta = judge_image(png, PROMPT)
-    print("judge:", score, jmeta)
+    print("judge anime:", score, jmeta)
+    pencil_png, pencil_meta = render_sketch(PENCIL_SKETCH)
+    assert pencil_png is not None, pencil_meta
+    pencil_score, pencil_jmeta = judge_image(pencil_png, PROMPT)
+    print("judge pencil:", pencil_score, pencil_jmeta)
+    assert score > pencil_score, (score, pencil_score)
 
     # full path
     reward, smeta, _ = score_response(GOOD_RESPONSE, PROMPT)

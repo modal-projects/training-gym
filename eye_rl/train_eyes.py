@@ -25,26 +25,26 @@ base_model = Qwen3_5_4B()
 # ── Prompt grammar ───────────────────────────────────────────────────────
 
 SUBJECTS = [
-    "a human eye",
-    "a cat's eye",
-    "an owl's eye",
-    "a dragon's eye",
-    "a robot's mechanical eye",
-    "an elderly person's eye",
-    "a child's wide-open eye",
-    "a reptile's eye with a slit pupil",
+    "an anime heroine's eye",
+    "a shonen protagonist's determined eye",
+    "a magical girl's sparkling eye",
+    "a cool anime rival's narrowed eye",
+    "a cheerful anime schoolgirl's wide eye",
+    "an anime idol's glossy eye",
+    "a mysterious anime villain's eye",
+    "a shy anime character's downcast eye",
 ]
-IRIS_COLORS = ["amber", "emerald green", "ice blue", "deep brown", "violet", "golden"]
+IRIS_COLORS = ["amber", "emerald green", "ice blue", "crimson", "violet", "golden"]
 STYLES = [
-    "loose ink sketch",
-    "soft watercolor wash",
-    "bold marker illustration",
-    "delicate pencil-hatched drawing",
-    "vivid expressive painting",
+    "clean cel-shaded anime style",
+    "90s retro anime style",
+    "modern glossy anime key-visual style",
+    "shoujo manga style with heavy sparkle",
+    "bold shonen anime style with thick line art",
 ]
 
 SYSTEM_PROMPT = """\
-You write p5.js sketches that use the p5.brush library to make hand-drawn-looking illustrations.
+You write p5.js sketches that draw anime-style illustrations, using p5's solid fills for flat colour and the p5.brush library for line work.
 
 Rules:
 - Reply with a single ```javascript code fence containing a complete sketch and nothing else.
@@ -52,36 +52,46 @@ Rules:
 - Start setup() with: createCanvas(512, 512, WEBGL); angleMode(DEGREES); brush.load();
 - The coordinate origin (0,0) is the CENTER of the canvas; x and y range from -256 to 256. Compose around (0,0).
 - End setup() with: noLoop();
-- Draw with the p5.brush API only, plus basic p5 (background, push/pop, translate, rotate).
+- Draw with the p5.brush API plus p5's own solid-fill drawing: background, noStroke(), fill(r,g,b), ellipse(x,y,w,h), triangle(...), and beginShape()/vertex(x,y)/bezierVertex(cx1,cy1,cx2,cy2,x,y)/endShape(CLOSE) for custom filled shapes. push/pop, translate, rotate are fine.
+- Anime eyes are flat colour areas with crisp edges, so build them from p5 fill() shapes; use p5.brush only for the thin lower-lid and crease lines. Do NOT hatch or scribble: hatching makes it look like a pencil sketch, which scores zero here.
 - Allowed brush calls: brush.pick(name), brush.stroke(color), brush.strokeWeight(w), brush.noStroke(), brush.line(x1,y1,x2,y2), brush.circle(x,y,r), brush.polygon([[x,y],...]), brush.spline([[x,y],...], curvature), brush.flowLine(x,y,length,dirAngle), brush.setHatch(brushName,color,weight), brush.hatch(dist,angle,{rand:0.1,continuous:true}), brush.noHatch(), brush.field("seabed"), brush.noField().
 - NEVER use brush.fill/brush.noFill/brush.bleed (watercolor fills erase every stroke on this renderer), and never use brush.beginShape/vertex/endShape or brush.rect.
-- To fill a shape, hatch it: brush.setHatch("cpencil", "#2f7d43", 1); brush.hatch(4, 45, {rand:0.1, continuous:true}); brush.circle(0,-6,60); brush.noHatch();
 - Brush names available to brush.pick and brush.setHatch: "pen", "rotring", "2B", "HB", "2H", "cpencil", "charcoal", "hatch_brush", "marker", "marker2". Never use "spray" — speckle textures are rejected.
-- Draw clean strokes on a mostly empty canvas: legible line work scores, ink storms score zero.
+- Draw crisp shapes on a mostly empty white canvas: ink storms and speckle score zero.
 - No loadImage, no fetch/XHR, no DOM access, no external assets, no comments longer than one line.
-- Compose the whole illustration inside the 512x512 canvas; use layered strokes and hatching for a rich hand-made feel.
+- Compose the whole illustration inside the 512x512 canvas; large bold shapes, few of them, crisply layered.
 
-An eye is built from these parts, in this order. Vary the numbers, colours and
-brushes to suit the requested subject and style, but keep the anatomy:
-1. Upper lid: one curved spline from the left corner up over the top and back
-   down to the right corner, e.g. brush.spline([[-170,0],[-96,-64],[0,-84],[98,-60],[170,0]], 0.5).
-2. Lower lid: a shallower spline between the SAME two corners, bulging downward,
-   e.g. brush.spline([[-170,0],[-92,52],[0,68],[96,50],[170,0]], 0.5). The two
-   lids must meet at the corners so they enclose an almond-shaped opening.
-3. Iris: a hatched circle of radius roughly 55-60 centred near (0,-6), inside
-   that opening, in the requested colour.
-4. Pupil: a much darker hatched circle of radius roughly 20-25 at the same centre.
-5. Lid crease: a spline arcing above the upper lid.
-6. Lashes: 8-12 short lines springing outward from the upper lid curve.
-A circle inside a box is not an eye; curved lids meeting at two corners are what
-make it read as one.
+An anime eye is built from these parts, in this order. Vary the numbers, colours,
+lash shapes and proportions to suit the requested subject and style, but keep the
+anatomy and the anime look:
+1. Sclera: a near-white almond, wide and low, filled with p5:
+   fill(252,250,252); beginShape(); vertex(-180,4);
+   bezierVertex(-120,-125, 110,-135, 180,-14); bezierVertex(110,58, -110,76, -180,4); endShape(CLOSE);
+2. Iris: a LARGE oval, taller than it is wide, filling most of the opening and
+   tucked under the upper lash line. Build it from 3 concentric ovals in the
+   requested colour, dark at the top to light at the bottom, e.g.
+   fill(74,40,120); ellipse(-4,-4,140,176); fill(126,78,196); ellipse(-4,10,120,148);
+   fill(186,150,240); ellipse(-4,34,96,92);
+3. Pupil: a tall near-black oval in the iris centre, e.g. fill(18,14,22); ellipse(-4,-2,56,86);
+4. Highlights: two pure-white ovals, a big one high on one side of the pupil and a
+   small one low on the other: fill(255); ellipse(-34,-42,44,34); ellipse(28,38,20,16);
+   This glossy specular pair is what makes the eye look alive rather than dead.
+5. Upper lash line: a THICK solid black wedge arcing over the top of the iris,
+   thickest in the middle, plus 2-3 sharp black lash spikes flaring off the outer
+   corner as filled triangles. This is the boldest shape in the drawing.
+6. Lower lid: one thin dark p5.brush spline under the iris, and a thin crease line
+   arcing above the lash line. Keep them light — anime lower lids are understated.
+Optionally add small white sparkle shapes for a shoujo style.
+No hatching, no sketchy scribbles, no grey pencil shading: flat colour, crisp
+edges, thick black lash line, glossy highlights.
 """
 
 USER_TEMPLATE = (
-    "Illustrate {subject} with a {color} iris, rendered as a {style}. "
-    "Make it detailed and expressive: an almond-shaped lid opening with upper "
-    "and lower lids meeting at two corners, an iris with a darker pupil inside "
-    "the opening, a lid crease, and lashes."
+    "Illustrate {subject} with an iris in {color}, in {style}. "
+    "Make it lively and expressive: a big glossy iris with colour banding and a "
+    "dark pupil, bright white specular highlights, a thick black upper lash line "
+    "with sharp lash spikes, and a light lower lid — flat anime colour, no "
+    "pencil hatching."
 )
 
 
@@ -342,10 +352,14 @@ def reference_pngs() -> list[bytes]:
 
 RATING_SCALE = (
     "0 = not an eye at all (random lines, blobs, boxes, lone circles)\n"
-    "1 = a circle inside a box or straight lines, only vaguely eye-suggestive\n"
-    "2 = curved lid shapes OR an iris+pupil, but not both\n"
-    "3 = clear eye: curved lids meeting at corners, plus iris and pupil\n"
-    "4 = polished eye illustration as good as A"
+    "1 = only vaguely eye-suggestive, or a sketchy pencil/hatched eye with no "
+    "flat colour\n"
+    "2 = readable eye with a big filled iris and pupil, but missing the thick "
+    "black lash line or the white highlights\n"
+    "3 = clear anime eye: big filled iris with dark pupil, white highlight, and a "
+    "bold dark lash line above it\n"
+    "4 = polished anime eye as good as A: flat crisp colour, banded glossy iris, "
+    "thick black lash line with spikes, bright highlights"
 )
 # Anatomy is worth far more than ink: a 1 must not be a comfortable place to sit.
 RATING_REWARD = {0: 0.0, 1: 0.08, 2: 0.35, 3: 0.7, 4: 1.0}
@@ -394,9 +408,10 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
                             "B_IS:, describe in under 12 words what shapes B "
                             "actually contains.\nThen a line starting with "
                             "RATING:, a single digit 0-4 for how much B looks "
-                            "like a drawing of an EYE with the same anatomy as "
-                            "A (curved upper and lower lids meeting at two "
-                            "corners, round iris, dark pupil, lashes):\n"
+                            "like an ANIME eye drawn in the same style as A "
+                            "(flat crisp colour, one big glossy iris with a "
+                            "dark pupil, white specular highlights, a thick "
+                            "black upper lash line with spikes):\n"
                             f"{RATING_SCALE}"
                         ),
                     },
