@@ -29,8 +29,13 @@ def test_trackio_config_is_provider_specific_without_provider_or_label_fields():
         "TRACKIO_SPACE_ID": "modal-labs/training-metrics",
         "TRACKIO_BUCKET_ID": "modal-labs/training-metrics",
     }
-    assert config.url() == ("https://huggingface.co/spaces/modal-labs/training-metrics")
-    assert config.metadata(run_id="run-a2")["url"] == config.url()
+    assert config.url() == (
+        "https://huggingface.co/spaces/modal-labs/training-metrics?project=rl"
+    )
+    assert config.metadata(run_id="run-a2")["url"] == (
+        "https://huggingface.co/spaces/modal-labs/training-metrics"
+        "?project=rl&runs=run-a2"
+    )
     assert "label" not in config.metadata(run_id="run-a2")
 
 
@@ -39,12 +44,17 @@ def test_trackio_dashboard_urls_do_not_expose_credentials():
         server_url="https://user:password@metrics.example.com:8443/path"
         "?write_token=secret#fragment"
     )
-    assert config.url() == "https://metrics.example.com:8443/path"
+    assert config.url(run_id="run-a2") == (
+        "https://metrics.example.com:8443/path?project=training-gym&runs=run-a2"
+    )
 
+    config.project = "rl"
     config.dashboard_url = (
         "https://metrics.example.com/view?project=rl&write_token=secret"
     )
-    assert config.url() == "https://metrics.example.com/view?project=rl"
+    assert config.url(run_id="run-a2") == (
+        "https://metrics.example.com/view?project=rl&runs=run-a2"
+    )
 
 
 class _FakeImage:

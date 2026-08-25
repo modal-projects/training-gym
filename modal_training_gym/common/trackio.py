@@ -85,29 +85,38 @@ class TrackioConfig(MetricConfig):
 
     def url(self, *, entity: str = "", run_id: str = "") -> str | None:
         if self.dashboard_url:
-            return _without_credentials(self.dashboard_url)
-        space_id = self.space_id.strip().strip("/")
-        if "/" in space_id:
-            return "https://huggingface.co/spaces/" + quote(space_id, safe="/")
-        if self.server_url:
-            return _without_credentials(self.server_url)
-        return None
+            url = self.dashboard_url
+        else:
+            space_id = self.space_id.strip().strip("/")
+            if "/" in space_id:
+                url = "https://huggingface.co/spaces/" + quote(space_id, safe="/")
+            elif self.server_url:
+                url = self.server_url
+            else:
+                return None
+        return _without_credentials(
+            url, project=self.project or "training-gym", run_id=run_id
+        )
 
 
-def _without_credentials(url: str) -> str:
+def _without_credentials(url: str, *, project: str = "", run_id: str = "") -> str:
     parsed = urlsplit(url.strip())
     if not parsed.scheme or not parsed.netloc:
         return url.strip().split("?", 1)[0].split("#", 1)[0]
     host = parsed.hostname or ""
     if parsed.port is not None:
         host = f"{host}:{parsed.port}"
-    query = urlencode(
-        [
-            (key, value)
-            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
-            if key.lower() not in {"api_key", "hf_token", "token", "write_token"}
-        ]
-    )
+    query_items = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in {"api_key", "hf_token", "token", "write_token"}
+    ]
+    query_keys = {key.lower() for key, _ in query_items}
+    if project and "project" not in query_keys:
+        query_items.append(("project", project))
+    if run_id and not query_keys.intersection({"run_ids", "runs"}):
+        query_items.append(("runs", run_id))
+    query = urlencode(query_items)
     return urlunsplit((parsed.scheme, host, parsed.path, query, ""))
 
 
