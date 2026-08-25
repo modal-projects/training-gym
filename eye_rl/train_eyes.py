@@ -545,7 +545,7 @@ def launch(num_rollout: int, n_train: int = 256, model: str = "4b") -> None:
     def overlay(image):
         # The reward compares each render against these reference eyes.
         return image.run_commands(
-            "uv pip install --system 'modal>=1.5.2' httpx pillow",
+            "uv pip install --system 'modal~=1.5.2' 'httpx~=0.28.1' 'pillow~=11.1'",
         ).add_local_dir(LOCAL_REF_DIR, "/root/eye_refs", copy=True)
 
     # Capture every sample's render: rollout_batch_size * n_samples_per_prompt.
