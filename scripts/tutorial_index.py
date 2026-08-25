@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TUTORIALS_DIR = REPO_ROOT / "tutorials"
 FIELD_PATTERN = re.compile(r"^# ([a-z_]+):\s*(.*)$")
 DEP_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+ORDER_PATTERN = re.compile(r"^\d+$")
 
 
 @dataclass(frozen=True)
@@ -47,12 +48,10 @@ def parse_tutorial(path: Path) -> TutorialEntry:
             raise ValueError(f"{path} has duplicate frontmatter field: {name}")
         fields[name] = value
 
-    try:
-        order = int(fields["order"])
-    except (KeyError, ValueError) as exc:
-        raise ValueError(f"{path} frontmatter requires an integer order") from exc
-    if order < 0:
-        raise ValueError(f"{path} frontmatter order must be non-negative")
+    order_text = fields.get("order")
+    if order_text is None or ORDER_PATTERN.fullmatch(order_text) is None:
+        raise ValueError(f"{path} frontmatter requires a non-negative integer order")
+    order = int(order_text)
 
     deps = tuple(
         dependency.strip()

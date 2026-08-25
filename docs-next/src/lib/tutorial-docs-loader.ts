@@ -207,6 +207,7 @@ export function tutorialDocsLoader(): Loader {
           runCommand: tutorial.runCommand,
         },
         tutorial.body,
+        path.relative(fileURLToPath(context.config.root), tutorial.path),
       );
     }
     for (const id of tutorialEntryIds) {

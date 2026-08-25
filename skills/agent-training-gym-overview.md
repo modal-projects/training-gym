@@ -221,15 +221,20 @@ If the tutorial's model isn't in the catalog, define a one-off subclass
 inline:
 
 ```python
-@code
-def _define_model():
-    class MyTinyModel(ModelConfig):
-        model_name = "HuggingFaceTB/SmolLM2-135M"
-        # For slime, also set architecture = ModelArchitecture(...)
+from huggingface_hub import snapshot_download
+from modal_training_gym import ModelArchitecture, ModelConfig
 
-        def download(self):
-            from huggingface_hub import snapshot_download
-            snapshot_download(repo_id=self.model_name)
+
+class MyTinyModel(ModelConfig):
+    model_name = "HuggingFaceTB/SmolLM2-135M"
+    # Slime also requires a populated model architecture.
+    architecture = ModelArchitecture(...)
+
+    def download(self):
+        snapshot_download(repo_id=self.model_name)
+
+
+model = MyTinyModel()
 ```
 
 Better: inherit from `HFModelConfiguration` and skip the `download`

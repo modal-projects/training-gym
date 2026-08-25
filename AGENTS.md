@@ -90,7 +90,7 @@ Launchers use `resolve_caller_module()` (in `common/framework.py`) to find the u
 
 ### Tutorial system
 
-Tutorials are flat runnable scripts at `tutorials/*.py`. Each starts with comment frontmatter whose only field is `order`. `docs-next/src/lib/tutorial-docs-loader.ts` discovers the corpus, validates contiguous order values, and renders Markdown comments plus Python code into docs pages.
+Tutorials are flat runnable scripts at `tutorials/*.py`. Each starts with comment frontmatter containing `order` and optional comma-separated `deps`. `docs-next/src/lib/tutorial-docs-loader.ts` discovers the corpus, validates contiguous order values, and renders Markdown comments plus Python code into docs pages.
 
 ### API reference generation
 
