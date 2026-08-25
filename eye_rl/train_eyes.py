@@ -196,7 +196,7 @@ const puppeteer = require('puppeteer-core');
   const sketch = fs.readFileSync(process.argv[2], 'utf8');
   const p5js = fs.readFileSync('/render/node_modules/p5/lib/p5.min.js', 'utf8');
   const brushjs = fs.readFileSync('/render/node_modules/p5.brush/dist/p5.brush.js', 'utf8');
-  const html = `<!DOCTYPE html><html><body>
+  const buildHtml = (sketch) => `<!DOCTYPE html><html><body>
 <script>window.__err=null;window.onerror=(m)=>{window.__err=String(m)};window.onunhandledrejection=(e)=>{window.__err=String(e.reason)};</script>
 <script>${p5js}</script>
 <script>${brushjs}</script>
@@ -244,37 +244,78 @@ const puppeteer = require('puppeteer-core');
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
            '--enable-unsafe-swiftshader', '--use-angle=swiftshader'],
   });
-  try {
+  // One render attempt: returns whatever the canvas holds plus any error, so a
+  // sketch that throws half way through still yields its partial drawing.
+  const attempt = async (src) => {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'load', timeout: 20000 });
-    await page.waitForFunction(
-      'window.__err !== null || document.querySelector("canvas") !== null',
-      { timeout: 15000 });
-    await new Promise(r => setTimeout(r, 2000));
-    const err = await page.evaluate('window.__err');
-    if (err) { console.error('SKETCH_ERROR: ' + err); process.exit(2); }
-    const canvas = await page.$('canvas');
-    if (!canvas) { console.error('SKETCH_ERROR: no canvas'); process.exit(2); }
-    // p5.brush buffers strokes and watercolor fills; flush them before capturing.
-    await page.evaluate(`
-      if (window.brush) {
-        try { brush.reDraw(); } catch (e) {}
-        try { brush.reBlend(); } catch (e) {}
+    try {
+      await page.setContent(buildHtml(src), { waitUntil: 'load', timeout: 20000 });
+      await page.waitForFunction(
+        'window.__err !== null || document.querySelector("canvas") !== null',
+        { timeout: 15000 }).catch(() => {});
+      await new Promise(r => setTimeout(r, 2000));
+      const err = await page.evaluate('window.__err');
+      const canvas = await page.$('canvas');
+      if (!canvas) return { err: err || 'no canvas', buf: null };
+      // p5.brush buffers strokes; flush them before capturing.
+      await page.evaluate(`
+        if (window.brush) {
+          try { brush.reDraw(); } catch (e) {}
+          try { brush.reBlend(); } catch (e) {}
+        }
+      `);
+      await new Promise(r => setTimeout(r, 1000));
+      // Fills settle across frames, so poll until the canvas stops changing.
+      let buf = await canvas.screenshot({ type: 'png' });
+      let prev = '';
+      for (let i = 0; i < 8; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        const shot = await canvas.screenshot({ type: 'png' });
+        const sig = Buffer.from(shot).toString('base64');
+        buf = shot;
+        if (sig === prev) break;
+        prev = sig;
       }
-    `);
-    await new Promise(r => setTimeout(r, 1000));
-    // Fills also settle across frames, so poll until the canvas stops changing.
-    let buf = await canvas.screenshot({ type: 'png' });
-    let prev = '';
-    for (let i = 0; i < 20; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      const shot = await canvas.screenshot({ type: 'png' });
-      const sig = Buffer.from(shot).toString('base64');
-      buf = shot;
-      if (sig === prev) break;
-      prev = sig;
+      return { err, buf };
+    } finally {
+      await page.close();
     }
-    process.stdout.write('PNGB64:' + Buffer.from(buf).toString('base64'));
+  };
+
+  // The name a sketch error blames, so its lines can be dropped: hallucinated
+  // globals, misused p5 calls and bad method calls all name one identifier.
+  const blamed = (err) => {
+    const s = String(err);
+    const pats = [/(\w+) is not defined/, /calling (\w+)\(\)/,
+                  /\w+\.(\w+) is not a function/, /(\w+) is not a function/];
+    // Dropping these would delete the sketch itself rather than a bad call.
+    const keep = ["setup", "createCanvas", "function", "draw", "background"];
+    for (const p of pats) {
+      const m = p.exec(s);
+      if (m) return keep.includes(m[1]) ? null : m[1];
+    }
+    return null;
+  };
+
+  try {
+    let src = sketch;
+    let res = await attempt(src);
+    // A sketch that throws draws nothing at all in WEBGL, so instead of losing
+    // it, the blamed lines are dropped and the rest of the sketch re-runs.
+    for (let i = 0; i < 3 && res.err; i++) {
+      const name = blamed(res.err);
+      if (!name) break;
+      const stripped = src.split('\n').filter(l => !l.includes(name)).join('\n');
+      if (stripped === src || !/\S/.test(stripped)) break;
+      src = stripped;
+      res = await attempt(src);
+    }
+    if (!res.buf) {
+      console.error('SKETCH_ERROR: ' + (res.err || 'no canvas'));
+      process.exit(2);
+    }
+    if (res.err) console.error('SKETCH_PARTIAL: ' + res.err);
+    process.stdout.write('PNGB64:' + Buffer.from(res.buf).toString('base64'));
     process.exit(0);
   } finally {
     await browser.close();
@@ -304,7 +345,7 @@ def render_sketch(code: str) -> tuple[bytes | None, dict]:
         app=app,
         image=_render_image(),
         workdir="/render",
-        timeout=120,
+        timeout=300,
         cpu=1.0,
         memory=2048,
     )
@@ -312,13 +353,16 @@ def render_sketch(code: str) -> tuple[bytes | None, dict]:
         sandbox.filesystem.write_text(RENDER_JS, "/render/render.js")
         sandbox.filesystem.write_text(code, "/render/sketch.js")
         proc = sandbox.exec(
-            "node", "/render/render.js", "/render/sketch.js", timeout=60
+            "node", "/render/render.js", "/render/sketch.js", timeout=180
         )
         proc.wait()
         out = proc.stdout.read()
         err = proc.stderr.read()
         if "PNGB64:" in out:
             png = base64.b64decode(out.split("PNGB64:", 1)[1].strip())
+            # A partial render still gets judged on whatever made it to canvas.
+            if "SKETCH_PARTIAL:" in (err or ""):
+                return png, {"render": "partial", "stderr": err[-200:]}
             return png, {"render": "ok"}
         return None, {"render": "fail", "stderr": (err or "")[-400:]}
     except Exception as e:
