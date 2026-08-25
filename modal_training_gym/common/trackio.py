@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import shlex
 import sys
 import types
@@ -10,13 +11,14 @@ import uuid
 from importlib import import_module
 from importlib.machinery import ModuleSpec
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from modal_training_gym.common.metrics import MetricConfig
 
 
 TRACKIO_VERSION = "0.34.0"
+_DEFAULT_MODAL_APP_NAME = "training-gym-trackio"
 _RUN_NAME_ENV = "TRAINING_GYM_TRACKIO_RUN_NAME"
 _SHIM_MARKER = "_training_gym_trackio_adapter"
 _PTH_LINE = (
@@ -71,6 +73,41 @@ class TrackioConfig(MetricConfig):
 
     provider: ClassVar[str] = "trackio"  # pyright: ignore[reportIncompatibleMethodOverride]
 
+    @classmethod
+    def deploy_to_modal(
+        cls,
+        *,
+        project: str = "",
+        group: str = "",
+        exp_name: str = "",
+        disable_random_suffix: bool = True,
+        app_name: str = _DEFAULT_MODAL_APP_NAME,
+        volume_name: str = "",
+        modal_secret_name: str = "",
+    ) -> Self:
+        """Deploy a persistent Trackio server to Modal and return its config.
+
+        The app, Volume, and write-token Secret are reused on subsequent calls
+        with the same names. The dashboard is public, while ingestion and
+        dashboard mutations require the write token stored in the Secret.
+        """
+        volume_name = volume_name or f"{app_name}-data"
+        modal_secret_name = modal_secret_name or f"_{app_name}-write-token"
+        server_url = _deploy_modal_dashboard(
+            app_name=app_name,
+            volume_name=volume_name,
+            modal_secret_name=modal_secret_name,
+        )
+        return cls(
+            project=project,
+            group=group,
+            exp_name=exp_name,
+            disable_random_suffix=disable_random_suffix,
+            server_url=server_url,
+            dashboard_url=server_url,
+            modal_secret_name=modal_secret_name,
+        )
+
     def runtime_env(self, *, run_id: str, entity: str = "") -> dict[str, str]:
         env = super().runtime_env(run_id=run_id, entity=entity)
         for key, value in (
@@ -118,6 +155,51 @@ def _without_credentials(url: str, *, project: str = "", run_id: str = "") -> st
         query_items.append(("runs", run_id))
     query = urlencode(query_items)
     return urlunsplit((parsed.scheme, host, parsed.path, query, ""))
+
+
+def _deploy_modal_dashboard(
+    *, app_name: str, volume_name: str, modal_secret_name: str
+) -> str:
+    import modal
+
+    modal.Secret.objects.create(
+        modal_secret_name,
+        {"TRACKIO_WRITE_TOKEN": secrets.token_urlsafe(32)},
+        allow_existing=True,
+    )
+    write_secret = modal.Secret.from_name(
+        modal_secret_name, required_keys=["TRACKIO_WRITE_TOKEN"]
+    )
+    data = modal.Volume.from_name(volume_name, create_if_missing=True)
+    image = modal.Image.debian_slim(python_version="3.12").uv_pip_install(
+        f"trackio=={TRACKIO_VERSION}"
+    )
+    app = modal.App(app_name)
+
+    @app.function(
+        name="dashboard",
+        image=image,
+        volumes={"/data": data},
+        secrets=[write_secret],
+        env={"TRACKIO_DIR": "/data"},
+        max_containers=1,
+        scaledown_window=300,
+        serialized=True,
+    )
+    @modal.concurrent(max_inputs=100)
+    @modal.asgi_app()
+    def dashboard():
+        from trackio.server import build_starlette_app_only
+
+        starlette_app, _ = build_starlette_app_only()
+        return starlette_app
+
+    with modal.enable_output():
+        app.deploy()
+    server_url = dashboard.get_web_url()
+    if not server_url:
+        raise RuntimeError(f"Deployed {app_name!r} but no web URL was returned.")
+    return server_url
 
 
 def trackio_secrets(config: TrackioConfig) -> list[Any]:

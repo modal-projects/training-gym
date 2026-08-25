@@ -1,6 +1,6 @@
 ---
 title: Trackio integration
-description: Stream training metrics to a Trackio Space or self-hosted dashboard.
+description: Stream training metrics to a Modal dashboard or Hugging Face Space.
 sidebar:
   order: 3
 ---
@@ -10,7 +10,27 @@ W&B-compatible experiment tracker from Hugging Face. Training Gym installs it
 in the training image and routes the framework's existing metric calls to it
 when a recipe uses `TrackioConfig`.
 
-## Hugging Face Space
+Trackio can be hosted on Modal or on [Hugging Face
+Spaces](https://huggingface.co/docs/hub/spaces). Both modes produce dashboard
+links for Training Gym runs.
+
+## Modal
+
+Deploy a persistent Trackio server and use the returned configuration:
+
+```python
+metrics = TrackioConfig.deploy_to_modal(project="my-rl-project")
+```
+
+The first call creates a Modal app, a persistent Volume for Trackio data, and
+an auto-managed Modal Secret for the write token. Later calls reuse them. The
+dashboard is publicly readable; writes require the token, and Training Gym
+does not include it in dashboard links.
+
+Pass `metrics` to the recipe as shown below. Use `app_name`, `volume_name`, or
+`modal_secret_name` when you need separate Trackio deployments.
+
+## Hugging Face Spaces
 
 Create a Modal Secret named `huggingface-secret` with an `HF_TOKEN` that can
 create or write to the Space:
@@ -43,7 +63,7 @@ training_run.train()
 Trackio creates or reuses the Space and its default Hugging Face Bucket. Set
 `bucket_id` only when you need to select a specific Bucket.
 
-## Self-hosted server
+## Other self-hosted servers
 
 For a self-hosted Trackio server, configure its base URL and put the write
 token in a Modal Secret as `TRACKIO_WRITE_TOKEN`:

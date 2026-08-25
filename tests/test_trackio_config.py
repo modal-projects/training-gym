@@ -7,7 +7,10 @@ from importlib.util import find_spec
 from typing import Any
 
 from modal_training_gym.common.metrics import apply_metric_image
-from modal_training_gym.common.trackio import TrackioConfig, install_wandb_shim
+from modal_training_gym.common.trackio import (
+    TrackioConfig,
+    install_wandb_shim,
+)
 
 
 def test_trackio_config_is_provider_specific_without_provider_or_label_fields():
@@ -54,6 +57,37 @@ def test_trackio_dashboard_urls_do_not_expose_credentials():
     )
     assert config.url(run_id="run-a2") == (
         "https://metrics.example.com/view?project=rl&runs=run-a2"
+    )
+
+
+def test_deploy_to_modal_returns_a_self_hosted_config(monkeypatch):
+    calls = {}
+
+    def fake_deploy(**kwargs):
+        calls.update(kwargs)
+        return "https://example--training-gym-trackio.modal.run"
+
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio._deploy_modal_dashboard", fake_deploy
+    )
+
+    config = TrackioConfig.deploy_to_modal(
+        project="rl",
+        group="baseline",
+        app_name="my-trackio",
+    )
+
+    assert calls == {
+        "app_name": "my-trackio",
+        "volume_name": "my-trackio-data",
+        "modal_secret_name": "_my-trackio-write-token",
+    }
+    assert config == TrackioConfig(
+        project="rl",
+        group="baseline",
+        server_url="https://example--training-gym-trackio.modal.run",
+        dashboard_url="https://example--training-gym-trackio.modal.run",
+        modal_secret_name="_my-trackio-write-token",
     )
 
 
