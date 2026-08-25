@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import types
 from dataclasses import fields
+from importlib.util import find_spec
 from typing import Any
 
 from modal_training_gym.common.metrics import apply_metric_image
@@ -40,8 +41,10 @@ def test_trackio_dashboard_urls_do_not_expose_credentials():
     )
     assert config.url() == "https://metrics.example.com:8443/path"
 
-    config.dashboard_url = "https://metrics.example.com/view?write_token=secret"
-    assert config.url() == "https://metrics.example.com/view"
+    config.dashboard_url = (
+        "https://metrics.example.com/view?project=rl&write_token=secret"
+    )
+    assert config.url() == "https://metrics.example.com/view?project=rl"
 
 
 class _FakeImage:
@@ -86,7 +89,9 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
         calls["finish"] = (args, kwargs)
 
     fake_trackio.init = fake_init
-    fake_trackio.log = lambda data: calls.setdefault("log", data)
+    fake_trackio.log = lambda data, step=None: calls.setdefault("logs", []).append(
+        (data, step)
+    )
     fake_trackio.finish = fake_finish
     fake_trackio.save = lambda path: path
     monkeypatch.setitem(sys.modules, "trackio", fake_trackio)
@@ -104,6 +109,8 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
 
     import wandb
     from wandb.sdk.lib.runid import generate_id
+
+    assert find_spec("wandb") is wandb.__spec__
 
     settings = wandb.Settings(mode="shared")
     run = wandb.init(
@@ -128,10 +135,11 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
     assert run.id == "training-run-a2"
     assert wandb.run.id == "training-run-a2"
     assert wandb.config == {"learning_rate": 1e-5}
+    assert calls["logs"] == [({}, -1)]
     assert len(generate_id()) == 8
     assert wandb.define_metric("train/*", step_metric="train/step") is None
 
     wandb.log({"loss": 0.5})
     wandb.finish()
-    assert calls["log"] == {"loss": 0.5}
+    assert calls["logs"] == [({}, -1), ({"loss": 0.5}, None)]
     assert wandb.run is None

@@ -8,9 +8,10 @@ import sys
 import types
 import uuid
 from importlib import import_module
+from importlib.machinery import ModuleSpec
 from dataclasses import dataclass
 from typing import Any, ClassVar
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from modal_training_gym.common.metrics import MetricConfig
 
@@ -100,7 +101,14 @@ def _without_credentials(url: str) -> str:
     host = parsed.hostname or ""
     if parsed.port is not None:
         host = f"{host}:{parsed.port}"
-    return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in {"api_key", "hf_token", "token", "write_token"}
+        ]
+    )
+    return urlunsplit((parsed.scheme, host, parsed.path, query, ""))
 
 
 def trackio_secrets(config: TrackioConfig) -> list[Any]:
@@ -159,6 +167,7 @@ def install_wandb_shim() -> None:
     trackio: Any = import_module("trackio")
 
     shim: Any = types.ModuleType("wandb")
+    shim.__spec__ = ModuleSpec("wandb", loader=None, is_package=True)
     shim.__path__ = []
     setattr(shim, _SHIM_MARKER, True)
     shim.run = None
@@ -179,6 +188,8 @@ def install_wandb_shim() -> None:
             resume=resume,
             embed=False,
         )
+        # Materialize the remote run before Slime's worker processes resume it.
+        trackio.log({}, step=-1)
         proxy = _RunProxy(run, requested_name or run.name)
         shim.run = proxy
         shim.config = run.config
@@ -202,12 +213,16 @@ def install_wandb_shim() -> None:
     shim.__getattr__ = lambda name: getattr(trackio, name)
 
     util: Any = types.ModuleType("wandb.util")
+    util.__spec__ = ModuleSpec("wandb.util", loader=None)
     util.generate_id = generate_id
     sdk: Any = types.ModuleType("wandb.sdk")
+    sdk.__spec__ = ModuleSpec("wandb.sdk", loader=None, is_package=True)
     sdk.__path__ = []
     lib: Any = types.ModuleType("wandb.sdk.lib")
+    lib.__spec__ = ModuleSpec("wandb.sdk.lib", loader=None, is_package=True)
     lib.__path__ = []
     runid: Any = types.ModuleType("wandb.sdk.lib.runid")
+    runid.__spec__ = ModuleSpec("wandb.sdk.lib.runid", loader=None)
     runid.generate_id = generate_id
     shim.util = util
     shim.sdk = sdk
