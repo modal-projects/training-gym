@@ -11,9 +11,3 @@ src/content/docs/reference/core/
 src/content/docs/reference/models/
 src/content/docs/reference/deployment/
 src/content/docs/reference/training/
-src/content/docs/tutorials/index.md
-src/content/docs/tutorials/rl/
-src/content/docs/tutorials/agent/
-src/content/docs/tutorials/intro/
-src/content/docs/tutorials/sft/
-src/content/docs/tutorials/misc/

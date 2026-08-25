@@ -147,7 +147,7 @@ def test_status_reporting_posts_include_proxy_auth_headers(config_path, monkeypa
     monkeypatch.delenv("MODAL_KEY", raising=False)
     monkeypatch.delenv("MODAL_SECRET", raising=False)
     requests = _capture_report(status_reporter, monkeypatch)
-    status_reporter._post(
+    status_reporter.post_item(
         {
             "_url": "https://dashboard.test/api/framework-status",
             "_timeout": 1,

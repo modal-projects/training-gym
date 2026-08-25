@@ -23,8 +23,8 @@ import tempfile
 import time
 from pathlib import Path, PurePosixPath
 from typing import Any
-from collections.abc import Callable, Mapping
-from modal import App, Dict as ModalDict, Image, Secret, Volume, Retries
+from collections.abc import Callable
+from modal import App, Image, Secret, Volume, Retries
 
 from modal_training_gym.common import hf_secrets, proxy_auth_secrets
 
@@ -63,10 +63,16 @@ from modal_training_gym.common.launcher_helpers import (
 )
 from modal_training_gym.common.launcher_utils import (
     serialize_recipe_params,
+    timing_debug_env,
+)
+from modal_training_gym.common.metrics import (
+    metric_metadata,
+    metric_runtime_env,
+    metric_secrets,
+    preflight_metric,
 )
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.status import SlimeStatus
-from modal_training_gym.common.step_timing import Substep
 
 from modal_training_gym.train_recipes.slime_recipe.recipe import (
     CHECKPOINTS_PATH,
@@ -84,6 +90,23 @@ from .modal_helpers.utils import (
 from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.framework import Framework
+
+
+def _validate_resume_checkpoint(
+    resume_from_iteration: int | None, num_rollout: int
+) -> None:
+    if resume_from_iteration is not None and resume_from_iteration + 1 > num_rollout:
+        raise RuntimeError(
+            f"Resume would start at rollout {resume_from_iteration + 1}, "
+            f"but num_rollout={num_rollout}; nothing would run."
+        )
+    if resume_from_iteration is not None and resume_from_iteration + 1 == num_rollout:
+        print(
+            "WARNING: Resume checkpoint is already at the final configured "
+            "rollout; the retry will exit without running another rollout.",
+            flush=True,
+        )
+
 
 SLIME_ROOT = "/root/slime"
 # Pin by digest to prevent mutable-tag drift.  Tag: nightly-dev-20260722a
@@ -129,6 +152,7 @@ _PATCH_QWEN3_VL_TORCH_DIST_B64 = encode_patch(
 _PATCH_ROLLOUT_STATUS_B64 = encode_patch(
     "patch_rollout_status_reporting", _SLIME_PATCHES
 )
+_PATCH_SUBSTEP_TIMING_B64 = encode_patch("patch_substep_timing", _SLIME_PATCHES)
 _PATCH_ADVANTAGE_DIST_B64 = encode_patch("patch_advantage_distribution", _SLIME_PATCHES)
 _PATCH_LOG_ELIDE_B64 = encode_patch("patch_log_elide", _SLIME_PATCHES)
 # Backport of NVIDIA/Megatron-LM #3845: dequantize quantized CUDA tensors in the
@@ -145,28 +169,86 @@ _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
 
+# Patches targeting /root/slime* — a git overlay replaces that directory, so
+# these are skipped in the base image when an overlay is configured and applied
+# after the replacement instead.
+_SLIME_ROOT_PATCHES_B64 = (
+    _PATCH_MEGATRON_BRIDGE_B64,
+    _PATCH_ADVANTAGES_B64,
+    _PATCH_STOP_TOKEN_DIAG_B64,
+    _PATCH_QWEN3_ASR_EXPORT_B64,
+    _PATCH_QWEN3_VL_EXPORT_B64,
+    _PATCH_QWEN3_VL_TORCH_DIST_B64,
+    _PATCH_ROLLOUT_STATUS_B64,
+    _PATCH_ADVANTAGE_DIST_B64,
+    _PATCH_ZERO_STD_METRICS_B64,
+    _PATCH_SGLANG_PARALLEL_ALIASES_B64,
+    _PATCH_SUBSTEP_TIMING_B64,
+)
 
-def _build_slime_base_image() -> "Image":
+# Patches targeting Megatron-LM or site-packages — survive a git overlay.
+_SLIME_EXTERNAL_PATCHES_B64 = (
+    _PATCH_BRIDGE_NONE_TASK_B64,
+    _PATCH_LOG_ELIDE_B64,
+    _PATCH_DIST_CKPT_QUANTIZED_B64,
+)
+
+
+def _patch_commands(patches: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(f"echo {patch} | base64 -d | python3" for patch in patches)
+
+
+def _build_slime_base_image(*, apply_root_patches: bool = True) -> "Image":
+    patches = _SLIME_EXTERNAL_PATCHES_B64
+    if apply_root_patches:
+        patches = patches + _SLIME_ROOT_PATCHES_B64
     return (
         Image.from_registry(SLIME_IMAGE)
         .entrypoint([])
-        .run_commands(
-            "rm -rf /root/.cache/huggingface",
-            f"echo {_PATCH_MEGATRON_BRIDGE_B64} | base64 -d | python3",
-            f"echo {_PATCH_ADVANTAGES_B64} | base64 -d | python3",
-            f"echo {_PATCH_BRIDGE_NONE_TASK_B64} | base64 -d | python3",
-            f"echo {_PATCH_STOP_TOKEN_DIAG_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_ASR_EXPORT_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_VL_EXPORT_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_VL_TORCH_DIST_B64} | base64 -d | python3",
-            f"echo {_PATCH_ROLLOUT_STATUS_B64} | base64 -d | python3",
-            f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
-            f"echo {_PATCH_LOG_ELIDE_B64} | base64 -d | python3",
-            f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
-            f"echo {_PATCH_ZERO_STD_METRICS_B64} | base64 -d | python3",
-            f"echo {_PATCH_SGLANG_PARALLEL_ALIASES_B64} | base64 -d | python3",
-        )
+        .run_commands("rm -rf /root/.cache/huggingface", *_patch_commands(patches))
     )
+
+
+def _slime_git_overlay_command(repository: str, revision: str) -> str:
+    """Build the reproducible image command for a fork source overlay."""
+    repo = shlex.quote(repository)
+    sha = shlex.quote(revision)
+    checkout = "/tmp/training-gym-slime"
+    return (
+        "set -eux; "
+        "command -v git >/dev/null; "
+        f"rm -rf {checkout}; "
+        f"git init {checkout}; "
+        f"git -C {checkout} remote add origin {repo}; "
+        f"git -C {checkout} fetch --depth=1 origin {sha}; "
+        f"git -C {checkout} checkout --detach FETCH_HEAD; "
+        f'test "$(git -C {checkout} rev-parse HEAD)" = {sha}; '
+        f"rm -rf {checkout}/.git {SLIME_ROOT}; "
+        f"mv {checkout} {SLIME_ROOT}"
+    )
+
+
+def _overlay_slime_source(image: "Image", slime: SlimeRecipe) -> "Image":
+    if slime.local_slime:
+        # Preserve the local dev overlay's existing semantics: use the checkout
+        # exactly as supplied rather than requiring it to match patch anchors.
+        return image.add_local_dir(
+            slime.local_slime,
+            remote_path=SLIME_ROOT,
+            copy=True,
+            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
+        )
+    if not (slime.slime_git_repository and slime.slime_git_revision):
+        return image
+
+    image = image.run_commands(
+        _slime_git_overlay_command(slime.slime_git_repository, slime.slime_git_revision)
+    )
+
+    # The pinned source replaced /root/slime after the base-image patches ran.
+    # Fail if required patches no longer apply rather than run an incompatible
+    # fork with silently missing Training Gym behavior.
+    return image.run_commands(*_patch_commands(_SLIME_ROOT_PATCHES_B64))
 
 
 def _build_conversion_config(slime_cfg: Any, model: Any = None) -> dict[str, Any]:
@@ -276,122 +358,10 @@ _serialize_slime_params = serialize_recipe_params
 
 
 def _preflight_wandb(wandb_cfg: WandbConfig) -> str:
-    """Thin wrapper around :func:`~modal_training_gym.common.wandb.preflight_wandb`."""
+    """Backward-compatible wrapper for the W&B preflight helper."""
     from modal_training_gym.common.wandb import preflight_wandb
 
     return preflight_wandb(wandb_cfg)
-
-
-def aggregate_step_times(
-    step_times_dict: Mapping[str, Any],
-    run_id: str,
-    num_steps: int,
-    SUBSTEP_ORDER: list[str],
-    OPTIONAL_SUBSTEPS: set[str],
-) -> tuple[
-    dict[str, dict[str, int | None]],
-    dict[str, dict[str, dict[str, float | None]]],
-]:
-    """Organize step and substep timings from the Modal dict at the end of a run.
-
-    Records each step's start/end/duration; missing timestamps become None.
-    Each substep's duration is the gap from its start to the next recorded
-    substep's start (or the step's end for the last one). Duration is None
-    if a mandatory substep in between is missing. Step duration is computed
-    independently, since substeps include work outside the step (evals,
-    checkpointing).
-    """
-    step_times: dict[str, dict[str, int | None]] = {}
-    substep_times: dict[str, dict[str, dict[str, float | None]]] = {}
-
-    for current_step_num in range(1, num_steps + 1):
-        start_key = f"{run_id}:{current_step_num}:start"
-        finish_key = f"{run_id}:{current_step_num}:finish"
-
-        raw_start_time = step_times_dict.get(start_key)
-        raw_end_time = step_times_dict.get(finish_key)
-        precise_start_time = (
-            float(raw_start_time) if raw_start_time is not None else None
-        )
-        precise_end_time = float(raw_end_time) if raw_end_time is not None else None
-        start_time = int(precise_start_time) if precise_start_time is not None else None
-        end_time = int(precise_end_time) if precise_end_time is not None else None
-
-        duration = None
-        if start_time is not None and end_time is not None:
-            duration = end_time - start_time
-
-        step_times[f"{current_step_num}"] = {
-            "start": start_time,
-            "end": end_time,
-            "duration_s": duration,
-        }
-
-        raw_step_window_start = step_times_dict.get(
-            f"{run_id}:{current_step_num}:substep_start"
-        )
-        step_window_start = (
-            float(raw_step_window_start) if raw_step_window_start is not None else None
-        )
-        full_step_start_time = (
-            step_window_start if step_window_start is not None else precise_start_time
-        )
-        full_step_end_time = step_times_dict.get(
-            f"{run_id}:{current_step_num}:substep_finish"
-        )
-        if full_step_end_time is not None:
-            full_step_end_time = float(full_step_end_time)
-            if step_window_start is not None and full_step_end_time < step_window_start:
-                full_step_end_time = precise_end_time
-        else:
-            full_step_end_time = precise_end_time
-
-        substep_times[f"{current_step_num}"] = {}
-        eval_before = Substep.EVAL_BEFORE.value
-        present: set[str] = set()
-        recorded: list[tuple[float, int, str]] = []
-        for order_idx, substep in enumerate(SUBSTEP_ORDER):
-            substep_start = step_times_dict.get(
-                f"{run_id}:{current_step_num}:substep:{substep}"
-            )
-            if substep_start is None:
-                continue
-            substep_start = float(substep_start)
-            if (
-                step_window_start is not None
-                and substep_start < step_window_start
-                and substep != eval_before
-            ):
-                continue
-            if full_step_start_time is not None and substep != eval_before:
-                substep_start = max(substep_start, full_step_start_time)
-            if full_step_end_time is not None:
-                substep_start = min(substep_start, full_step_end_time)
-            present.add(substep)
-            recorded.append((substep_start, order_idx, substep))
-        recorded.sort()
-
-        for idx, (substep_start, order_idx, substep) in enumerate(recorded):
-            if idx + 1 < len(recorded):
-                next_start, next_idx = recorded[idx + 1][0], recorded[idx + 1][1]
-            else:
-                next_start, next_idx = full_step_end_time, len(SUBSTEP_ORDER)
-
-            gap = SUBSTEP_ORDER[order_idx + 1 : next_idx]
-            dropped_mandatory = any(
-                s not in OPTIONAL_SUBSTEPS and s not in present for s in gap
-            )
-            if next_start is None or dropped_mandatory:
-                substep_duration = None
-            else:
-                substep_duration = round(max(next_start - substep_start, 0.0), 3)
-
-            substep_times[f"{current_step_num}"][substep] = {
-                "start": round(substep_start, 3),
-                "duration_s": substep_duration,
-            }
-
-    return step_times, substep_times
 
 
 def build_slime_app(
@@ -453,7 +423,10 @@ def build_slime_app(
     _caller_module, caller_script = resolve_caller_context()
 
     # ── Image ────────────────────────────────────────────────────────────────
-    image = _build_slime_base_image()
+    # When a git overlay will replace /root/slime, skip root patches here so they
+    # run once after the replacement instead of being applied and then discarded.
+    _needs_git_overlay = bool(slime.slime_git_repository and slime.slime_git_revision)
+    image = _build_slime_base_image(apply_root_patches=not _needs_git_overlay)
 
     # Hybrid models have layers with different parameter sets (e.g. GDN
     # layers carry linear_attn.dt_bias that standard attention layers lack).
@@ -480,13 +453,7 @@ def build_slime_app(
     if isinstance(dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
-    if slime.local_slime:
-        image = image.add_local_dir(
-            slime.local_slime,
-            remote_path=SLIME_ROOT,
-            copy=True,
-            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
-        )
+    image = _overlay_slime_source(image, slime)
 
     if slime.image_run_commands:
         image = image.run_commands(*slime.image_run_commands)
@@ -496,7 +463,6 @@ def build_slime_app(
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)
-
     if caller_script is not None:
         caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]
         caller_remote_path = f"/root/{caller_module_name}.py"
@@ -669,8 +635,9 @@ def build_slime_app(
         framework="slime",
         model=model,
         recipe_app_tags=slime.app_tags,
-        wandb=slime.wandb,
+        metrics=slime.metrics,
     )
+
     app = App(app_name, tags=tags)
     gpu_spec = f"{slime.gpu_type}:{slime.actor_num_gpus_per_node}"
 
@@ -842,17 +809,14 @@ def build_slime_app(
         if model and getattr(model, "architecture", None):
             mmt = getattr(model.architecture, "megatron_model_type", "")
 
-        if num_nodes > 1:
-            spec = importlib.util.find_spec(
-                "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        spec = importlib.util.find_spec(
+            "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        )
+        convert_script = spec.origin if spec is not None else None
+        if not convert_script:
+            raise RuntimeError(
+                "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
             )
-            convert_script = spec.origin if spec is not None else None
-            if not convert_script:
-                raise RuntimeError(
-                    "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
-                )
-        else:
-            convert_script = f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"
         if mmt or slime.slime_model_script:
             model_script = (
                 f"{SLIME_ROOT}/{slime.slime_model_script}"
@@ -875,6 +839,8 @@ def build_slime_app(
 
         env = {**os.environ, **slime.environment}
         env.pop("NCCL_NVLS_ENABLE", None)
+        if any(arg.startswith("--pipeline-model-parallel-size ") for arg in extra_args):
+            env["SKIP_PP_AUTOINFLATE"] = "1"
         if num_nodes > 1:
             env["SKIP_RELEASE_RENAME"] = "1"
         print(
@@ -908,8 +874,8 @@ def build_slime_app(
     _use_clustered = _multi_node or (_full_node and _supports_rdma(slime.gpu_type))
 
     train_secrets: list[Secret] = []
-    if slime.wandb is not None:
-        train_secrets.append(Secret.from_name(slime.wandb.modal_wandb_secret_name))
+    if slime.metrics is not None:
+        train_secrets.extend(metric_secrets(slime.metrics))
     # Proxy-auth tokens for any custom_rm / generate hook that calls a
     # CustomDeployment.launch() endpoint (teacher /generate, etc.).
     train_secrets.extend(proxy_auth_secrets())
@@ -928,65 +894,6 @@ def build_slime_app(
     if train_function_kwargs:
         unsupported = ", ".join(sorted(train_function_kwargs))
         raise TypeError(f"Unsupported slime.train_function_kwargs keys: {unsupported}")
-
-    SUBSTEP_ORDER = [substep.value for substep in Substep]
-    OPTIONAL_SUBSTEPS = {
-        Substep.EVAL_BEFORE.value,
-        Substep.OFFLOAD_ROLLOUT.value,
-        Substep.CHECKPOINT_SAVE.value,
-        Substep.OFFLOAD_TRAIN.value,
-        Substep.EVAL_AFTER.value,
-    }
-
-    STEP_TIME_DICT_BATCH_SIZE = 128
-
-    STEP_TIME_KEY_SUFFIXES = (
-        "start",
-        "finish",
-        "substep_start",
-        "substep_finish",
-        *(f"substep:{s}" for s in SUBSTEP_ORDER),
-    )
-
-    async def write_step_times(
-        run_id: str, num_steps: int
-    ) -> tuple[
-        dict[str, dict[str, float | None]],
-        dict[str, dict[str, dict[str, float | None]]],
-    ]:
-        step_times_dict = ModalDict.from_name(
-            "training-gym-step-times", create_if_missing=True
-        )
-        keys = [
-            f"{run_id}:{step}:{suffix}"
-            for step in range(1, num_steps + 1)
-            for suffix in STEP_TIME_KEY_SUFFIXES
-        ]
-        event_times_by_key: dict[str, Any] = {}
-        for offset in range(0, len(keys), STEP_TIME_DICT_BATCH_SIZE):
-            batch = keys[offset : offset + STEP_TIME_DICT_BATCH_SIZE]
-            values = await asyncio.gather(*(step_times_dict.get.aio(k) for k in batch))
-            event_times_by_key.update(zip(batch, values))
-        return aggregate_step_times(
-            event_times_by_key,
-            run_id,
-            num_steps,
-            SUBSTEP_ORDER,
-            OPTIONAL_SUBSTEPS,
-        )
-
-    async def clear_step_times(run_id: str, num_steps: int) -> None:
-        step_times_dict = ModalDict.from_name(
-            "training-gym-step-times", create_if_missing=True
-        )
-        keys = [
-            f"{run_id}:{step}:{suffix}"
-            for step in range(1, num_steps + 1)
-            for suffix in STEP_TIME_KEY_SUFFIXES
-        ]
-        for offset in range(0, len(keys), STEP_TIME_DICT_BATCH_SIZE):
-            batch = keys[offset : offset + STEP_TIME_DICT_BATCH_SIZE]
-            await asyncio.gather(*(step_times_dict.pop.aio(k, None) for k in batch))
 
     @app.function(
         image=train_image,
@@ -1047,27 +954,19 @@ def build_slime_app(
             await cluster.wait_forever()
             return
 
-        # Fail fast on W&B access before any GPU work, not as a recurring CommError
-        # mid-training.
-        wandb_entity = ""
-        if slime.wandb is not None:
-            wandb_entity = _preflight_wandb(slime.wandb)
+        # Fail fast on tracker access before the framework starts training.
+        metric_entity = preflight_metric(slime.metrics)
 
-        wandb_run_id = ""
+        metric_run_id = ""
 
         print(f"Training run id: {training_run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
             "recipe": _serialize_slime_params(slime, dataset=dataset, model=model),
-            "wandb": (
-                {
-                    "project": slime.wandb.project,
-                    "group": slime.wandb.group,
-                    "entity": wandb_entity,
-                    "run_id": wandb_run_id,
-                }
-                if slime.wandb
-                else {}
+            "metrics": metric_metadata(
+                slime.metrics,
+                entity=metric_entity,
+                run_id=metric_run_id,
             ),
             "dataset": {
                 "hf_repo": getattr(dataset, "hf_repo", ""),
@@ -1078,7 +977,7 @@ def build_slime_app(
         }
         (
             run_record,
-            wandb_run_id,
+            metric_run_id,
             framework_status_token,
         ) = await init_training_run_record(
             training_run_id=training_run_id,
@@ -1087,8 +986,8 @@ def build_slime_app(
             framework=Framework.SLIME,
             initializing_status=SlimeStatus.INITIALIZING,
             config_summary=config_summary,
-            wandb_cfg=slime.wandb,
-            wandb_entity=wandb_entity,
+            metric_cfg=slime.metrics,
+            metric_entity=metric_entity,
             framework_status_token=framework_status_token,
         )
 
@@ -1149,8 +1048,8 @@ def build_slime_app(
             prepare_slime_config(slime, model, tempfile.mkdtemp())
 
             if wandb_key := os.environ.get("WANDB_API_KEY", ""):
-                if slime.wandb is not None:
-                    slime.wandb.key = wandb_key
+                if isinstance(slime.metrics, WandbConfig):
+                    slime.metrics.key = wandb_key
 
             save_root = compute_save_root(
                 slime.save,
@@ -1183,6 +1082,8 @@ def build_slime_app(
             await run_record.save(is_async=True)
 
             if resume_checkpoint is not None:
+                resume_from_iteration = resume_checkpoint.get("resume_from_iteration")
+                _validate_resume_checkpoint(resume_from_iteration, slime.num_rollout)
                 print(
                     f"WARNING: detected existing checkpoint in "
                     f"{resume_checkpoint['resume_checkpoint_path']}; "
@@ -1225,13 +1126,6 @@ def build_slime_app(
                     "container. Phase reporting is disabled for this run."
                 )
 
-            wandb_env = {}
-            if wandb_run_id:
-                wandb_env["WANDB_RUN_ID"] = wandb_run_id
-                wandb_env["WANDB_RESUME"] = "allow"
-            if wandb_entity:
-                wandb_env["WANDB_ENTITY"] = wandb_entity
-
             runtime_env = {
                 "env_vars": {
                     "no_proxy": f"127.0.0.1,{cluster.head_addr}",
@@ -1247,8 +1141,14 @@ def build_slime_app(
                         getattr(slime, "trace_sample_limit", 16)
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
-                    **wandb_env,
+                    "TRAINING_GYM_SUBSTEP_TIMING": slime.substep_timing,
+                    **metric_runtime_env(
+                        slime.metrics,
+                        run_id=metric_run_id,
+                        entity=metric_entity,
+                    ),
                     **slime.environment,
+                    **timing_debug_env(),
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
             }
@@ -1265,11 +1165,16 @@ def build_slime_app(
                 print(f"Ray dashboard: {tunnel.url}")
                 result = await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
                 if not result.is_success:
-                    run_record.error_message = result.message
-                    raise RuntimeError(
+                    message = (
                         result.message
                         or f"Ray job finished with status: {result.status}"
                     )
+                    error = RuntimeError(
+                        f"{message} (training_run_id={training_run_id})"
+                    )
+                    error.training_run_id = training_run_id  # pyright: ignore[reportAttributeAccessIssue]  # exception metadata is consumed by downstream callers
+                    run_record.error_message = str(error)
+                    raise error
                 print(f"Ray job completed: {result.status}")
 
             result = build_train_result(
@@ -1280,9 +1185,9 @@ def build_slime_app(
                 model=model,
                 checkpoints_volume_name=checkpoints_volume_name,
                 checkpoints_mount_path=checkpoints_mount_path,
-                wandb_cfg=slime.wandb,
-                wandb_entity=wandb_entity,
-                wandb_run_id=wandb_run_id,
+                metric_cfg=slime.metrics,
+                metric_entity=metric_entity,
+                metric_run_id=metric_run_id,
                 group_id=group_id,
             )
             await result.save(is_async=True)
@@ -1304,27 +1209,10 @@ def build_slime_app(
                 run_record, training_run_id
             )
 
-            step_times_read = False
-            if not slime.async_mode:
-                try:
-                    (
-                        latest_run_record.step_times,
-                        latest_run_record.substep_times,
-                    ) = await write_step_times(training_run_id, slime.num_rollout)
-                    step_times_read = True
-                except Exception as exc:
-                    print(f"Failed to read step times: {exc}")
-
             try:
                 await latest_run_record.save(is_async=True)
             except Exception as exc:
                 print(f"Failed to save run record: {exc}")
-            else:
-                if step_times_read or slime.async_mode:
-                    try:
-                        await clear_step_times(training_run_id, slime.num_rollout)
-                    except Exception as exc:
-                        print(f"Failed to clear step times: {exc}")
 
     for tag, fn in app.registered_functions.items():
         setattr(app, tag, fn)

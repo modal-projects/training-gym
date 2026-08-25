@@ -7,6 +7,7 @@ from enum import Enum
 import os
 import time
 
+import modal
 from modal import Volume
 from modal.exception import NotFoundError
 
@@ -19,6 +20,7 @@ from modal_training_gym.deploy_recipes import SglangRecipe, VllmRecipe
 
 
 _CHECKPOINTS_MOUNT_FALLBACK = "/checkpoints"
+_CONVERT_COMPLETE_MARKER = ".training_gym_convert_complete"
 
 
 class CheckpointType(Enum):
@@ -76,7 +78,7 @@ def _to_volume_path(checkpoint_dir: str, checkpoints_mount_path: str) -> str:
 
 def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
     checkpoint_dir = train_result.checkpoint_dir.rstrip("/")
-    if not checkpoint_dir:
+    if checkpoint_dir == "":
         return []
 
     def _entry_name(entry: object) -> str:
@@ -121,21 +123,19 @@ def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
         key=lambda entry: _entry_name(entry),
     ):
         name = _entry_name(entry)
-        if not name.startswith(prefix):
-            continue
-
-        checkpoints.append(
-            Checkpoint(
-                checkpoint_type=_checkpoint_type(name),
-                name=name,
-                path=os.path.join(checkpoint_dir, name),
-                timestamp=float(getattr(entry, "mtime", 0.0)),
-                training_run_id=train_result.training_run_id,
-                app_name=train_result.app_name,
-                checkpoints_volume_name=checkpoints_volume_name,
-                checkpoints_mount_path=checkpoints_mount_path,
+        if name.startswith(prefix):
+            checkpoints.append(
+                Checkpoint(
+                    checkpoint_type=_checkpoint_type(name),
+                    name=name,
+                    path=os.path.join(checkpoint_dir, name),
+                    timestamp=float(getattr(entry, "mtime", 0.0)),
+                    training_run_id=train_result.training_run_id,
+                    app_name=train_result.app_name,
+                    checkpoints_volume_name=checkpoints_volume_name,
+                    checkpoints_mount_path=checkpoints_mount_path,
+                )
             )
-        )
     return checkpoints
 
 
@@ -148,7 +148,7 @@ def _conversion_gpu_spec(
             training_run = TrainingRun.from_id(run_id)
         except KeyError:
             training_run = None
-        if training_run is not None:
+        if training_run:
             recipe_config = training_run.config.get("recipe", {})
             gpu_type = recipe_config.get("gpu_type")
             n_gpu = recipe_config.get("actor_num_gpus_per_node")
@@ -173,20 +173,38 @@ def convert_megatron_checkpoint_to_hf(
     if checkpoint.checkpoint_type == CheckpointType.hf:
         return checkpoint
 
-    import modal
-    from modal import App, Volume
-
     checkpoints_volume_name = checkpoint.checkpoints_volume_name
-    if not checkpoints_volume_name:
+    if checkpoints_volume_name in (None, ""):
         raise TrainingGymConfigError(
             "Cannot convert checkpoint without checkpoints volume metadata."
         )
     checkpoints_mount_path = (
         checkpoint.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
     )
+    output_path = f"{checkpoint.path}_hf"
+    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=True)
+    rel = _to_volume_path(output_path, checkpoints_mount_path)
+    marker_rel = (
+        f"{rel}/{_CONVERT_COMPLETE_MARKER}" if rel else _CONVERT_COMPLETE_MARKER
+    )
+    try:
+        b"".join(volume.read_file(marker_rel))
+    except (FileNotFoundError, NotFoundError):
+        pass
+    else:
+        return Checkpoint(
+            checkpoint_type=CheckpointType.hf,
+            name=os.path.basename(output_path.rstrip("/")),
+            path=output_path,
+            timestamp=checkpoint.timestamp,
+            training_run_id=checkpoint.training_run_id,
+            app_name=checkpoint.app_name,
+            checkpoints_volume_name=checkpoints_volume_name,
+            checkpoints_mount_path=checkpoints_mount_path,
+        )
 
     model_ref = model.model_name or model.model_path
-    if not model_ref:
+    if model_ref in (None, ""):
         raise TrainingGymConfigError(
             "Cannot convert a megatron checkpoint without model_name or model_path."
         )
@@ -202,7 +220,7 @@ def convert_megatron_checkpoint_to_hf(
     image = _build_slime_base_image().add_local_python_source(
         "modal_training_gym", copy=True
     )
-    conversion_app = App("training-gym-checkpoint-convert")
+    conversion_app = modal.App("training-gym-checkpoint-convert")
     gpu_spec = _conversion_gpu_spec(checkpoint, recipe)
 
     @conversion_app.function(
@@ -239,10 +257,10 @@ def convert_megatron_checkpoint_to_hf(
         spec = importlib.util.find_spec(
             "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf"
         )
-        convert_script = spec.origin if spec is not None else None
-        if not convert_script:
+        convert_script = spec.origin if spec else None
+        if convert_script in (None, ""):
             raise RuntimeError(
-                "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf not found"
+                "modal_training_gym.frameworks.slime.modal_helpers.convert_torch_dist_to_hf is missing"
             )
         cmd = (
             f"python {convert_script} "
@@ -253,10 +271,11 @@ def convert_megatron_checkpoint_to_hf(
         )
         print(f"Converting checkpoint for serving: {cmd}")
         subprocess.run(["bash", "-c", cmd], check=True)
+        with open(os.path.join(output_dir, _CONVERT_COMPLETE_MARKER), "w"):
+            pass
         checkpoints_volume.commit()
         return output_dir
 
-    output_path = f"{checkpoint.path}_hf"
     with modal.enable_output():
         with conversion_app.run():
             output_path = convert_megatron_to_hf.remote(

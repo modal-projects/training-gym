@@ -50,6 +50,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "HarborDataset",
     },
     {
+        "class_name": "MetricConfig",
+        "module": "modal_training_gym.common.metrics",
+        "group": "core",
+        "class_type": "config_data",
+        "sidebar_label": "MetricConfig",
+    },
+    {
         "class_name": "WandbConfig",
         "module": "modal_training_gym.common.wandb",
         "group": "core",
@@ -190,6 +197,13 @@ API_REFERENCE_MANIFEST = [
         "class_type": "config_data",
         "sidebar_label": "Qwen3.6-27B",
     },
+    {
+        "class_name": "Qwen3_8_27B",
+        "module": "modal_training_gym.common.models.qwen3_8_27b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3.8-27B",
+    },
     # --- Training ---
     {
         "class_name": "TrainConfig",
@@ -275,6 +289,14 @@ API_REFERENCE_MANIFEST = [
         "class_type": "config_data",
         "sidebar_label": "Qwen3_6_27b_Recipe",
     },
+    {
+        "class_name": "Qwen3_8_27b_Recipe",
+        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_8_27b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Qwen3_8_27b_Recipe",
+    },
+    # --- Deployment ---
     {
         "class_name": "Qwen3_5_0_8b_Recipe",
         "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_0_8b",

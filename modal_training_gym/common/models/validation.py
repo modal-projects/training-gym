@@ -21,7 +21,9 @@ from .qwen3_5_0_8b import Qwen3_5_0_8B
 from .qwen3_5_2b import Qwen3_5_2B
 from .qwen3_5_4b import Qwen3_5_4B
 from .qwen3_5_9b import Qwen3_5_9B
+from .qwen3_6_27b import Qwen3_6_27B
 from .qwen3_6_35b import Qwen3_6_35B
+from .qwen3_8_27b import Qwen3_8_27B
 from .qwen3_8b import Qwen3_8B
 from .qwen3_asr_1_7b import Qwen3_ASR_1_7B
 from .qwen3_vl_8b import Qwen3_VL_8B
@@ -95,7 +97,9 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
     _ValidationConfig("Qwen3.5-4B", Qwen3_5_4B, Framework.SLIME),
     _ValidationConfig("Qwen3.5-4B-Miles", Qwen3_5_4B, Framework.MILES),
     _ValidationConfig("Qwen3.5-9B", Qwen3_5_9B, Framework.SLIME),
+    _ValidationConfig("Qwen3.6-27B", Qwen3_6_27B, Framework.SLIME, run_on_pr=False),
     _ValidationConfig("Qwen3.6-35B-A3B", Qwen3_6_35B, Framework.SLIME),
+    _ValidationConfig("Qwen3.8-27B", Qwen3_8_27B, Framework.SLIME, run_on_pr=False),
     _ValidationConfig(
         "Moonlight-16B-A3B-Instruct",
         Moonlight_16B_A3B_Instruct,

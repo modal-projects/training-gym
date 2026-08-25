@@ -8,13 +8,15 @@ it uses the local ``dashboards/frontend`` directory instead.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import secrets as _secrets
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict
+from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict, cast
 
 import modal
+from modal.exception import Error
 
 if TYPE_CHECKING:
     from google.protobuf.timestamp_pb2 import Timestamp
@@ -38,7 +40,11 @@ from modal_training_gym.common.config import (
     dashboard_requires_proxy_auth,
 )
 from modal_training_gym.common.dashboard import DASHBOARD_APP_NAME
-from modal_training_gym.common.run import FrameworkStatusUpdate, TrainingRun
+from modal_training_gym.common.run import (
+    FrameworkStatusUpdate,
+    TrainingRun,
+    TrainingRunStatus,
+)
 from modal_training_gym.common.run_list import (
     filter_run_summaries,
     run_list_field_metadata,
@@ -49,11 +55,23 @@ from modal_training_gym.common.run_summary import (
     build_run_summary,
     build_run_summaries,
 )
+from modal_training_gym.common.step_timing import (
+    RoleTimingRecord,
+    legacy_run_to_records,
+    rollout_lanes,
+    validate_timing_record,
+)
 from modal_training_gym.common.time import parse_time as _parse_log_time
 from modal_training_gym.common.training_rollout import (
     TrainingRolloutResult,
     TrainingRolloutSummary,
     _apply_parsed,
+)
+from modal_training_gym.utils.metadata import (
+    bounded_gather_with_retries,
+    vol_get as _metadata_vol_get,
+    vol_list_metadata_with_failures,
+    vol_put_many as _metadata_vol_put_many,
 )
 
 SummaryLoader = Callable[[], Awaitable[list[JsonDict]]]
@@ -68,10 +86,18 @@ class LogEntry(TypedDict):
     ts_ns: int | None
 
 
+class TimingFileCache(TypedDict):
+    mtime: int
+    size: int
+    checked_at: float
+    record: JsonDict | None
+
+
 REPO_URL = "https://github.com/modal-projects/training-gym.git"
 REPO_BRANCH = "main"
 
 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
+TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
 
 _repo_frontend = Path(__file__).resolve().parents[1] / "dashboards" / "frontend"
 _has_local_frontend = _repo_frontend.is_dir()
@@ -109,7 +135,8 @@ def _build_image() -> modal.Image:
             {
                 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY: "true"
                 if dashboard_requires_proxy_auth()
-                else "false"
+                else "false",
+                TIMING_DEBUG_ENV: os.environ.get(TIMING_DEBUG_ENV, ""),
             }
         )
     )
@@ -131,7 +158,7 @@ MODAL_CREDS_SECRET_NAME = "_training-gym-modal-creds"
 # Set a real value via ``training-gym set-password``.
 DASHBOARD_PASSWORD_SECRET_NAME = "_training-gym-dashboard-password"
 
-# Routes that must bypass Basic Auth. Write endpoints authenticate with their
+# Routes that must bypass Basic Auth. These endpoints authenticate with their
 # own per-run bearer token; the proxy-auth status route must report only the
 # Modal-layer setting, independent of dashboard password protection.
 PASSWORD_EXEMPT_PATHS = frozenset(
@@ -140,6 +167,7 @@ PASSWORD_EXEMPT_PATHS = frozenset(
         "/api/framework-status",
         "/api/training-rollouts",
         "/api/advantage-distributions",
+        "/api/timing-events",
     }
 )
 
@@ -150,6 +178,15 @@ _MISSING_TOKEN_DUMMY = "training-gym-missing-token-dummy-never-issued"
 def _is_local() -> bool:
     """True when we're not running inside a Modal container."""
     return not os.environ.get("MODAL_IS_REMOTE")
+
+
+def _timing_debug(event: str, **fields: object) -> None:
+    if os.environ.get(TIMING_DEBUG_ENV) != "1":
+        return
+    payload = {"event": event, **fields}
+    print(
+        f"[timing-debug] {json.dumps(payload, sort_keys=True, default=str)}", flush=True
+    )
 
 
 def _resolve_log_window(
@@ -380,6 +417,7 @@ def fastapi_app():
         FastAPI,
         Header,
         HTTPException,
+        Path as FastAPIPath,
     )  # Request imported at module scope
     from fastapi.concurrency import run_in_threadpool
     from fastapi.responses import (
@@ -439,6 +477,59 @@ def fastapi_app():
     cache_entries: dict[str, tuple[float, list[JsonDict], float]] = {
         key: (0.0, [], 0.0) for key in cache_keys
     }
+
+    TIMING_CACHE_MAX_RUNS = 64
+    TIMING_CACHE_TTL_S = 15.0
+    TIMING_FAILURE_RETRY_WINDOW_S = 1.0
+
+    class TimingEntry:
+        def __init__(self) -> None:
+            self.lanes: JsonDict = {}
+            self.file_records: dict[str, TimingFileCache] = {}
+            self.persisted_records: dict[str, JsonDict] = {}
+            self.pending_records: dict[str, JsonDict] = {}
+            self.legacy_records: list[JsonDict] = []
+            self.legacy_derived = False
+            self.touched_at = time.monotonic()
+            self.read_at: float | None = None
+            self.stale = False
+            self.lock = asyncio.Lock()
+
+        @property
+        def fresh(self) -> bool:
+            if self.read_at is None:
+                return False
+            ttl = TIMING_FAILURE_RETRY_WINDOW_S if self.stale else TIMING_CACHE_TTL_S
+            return time.monotonic() - self.read_at < ttl
+
+    timing_cache: dict[str, TimingEntry] = {}
+    timing_cache_lock = asyncio.Lock()
+
+    def _rebuild_timing_lanes(entry: TimingEntry) -> None:
+        records = dict(entry.persisted_records)
+        for storage_key, record in entry.pending_records.items():
+            stored = records.get(storage_key)
+            if (
+                stored is None
+                or record.get("final", False)
+                or not stored.get("final", False)
+            ):
+                records[storage_key] = record
+        grouped: dict[int | None, list[JsonDict]] = {}
+        for record in [*entry.legacy_records, *records.values()]:
+            rollout_id = cast(int | None, record["rollout_id"])
+            grouped.setdefault(rollout_id, []).append(record)
+        entry.lanes = {
+            ("pre-loop" if rollout_id is None else str(rollout_id)): rollout_lanes(
+                rollout_records
+            )
+            for rollout_id, rollout_records in sorted(
+                grouped.items(), key=lambda item: (item[0] is None, item[0] or 0)
+            )
+        }
+        if entry.legacy_derived:
+            entry.lanes["metadata"] = {"legacy_derived": True}
+
     cache_locks = {key: asyncio.Lock() for key in cache_keys}
     # Hold strong refs to background refresh tasks so they aren't GC'd mid-flight.
     refresh_tasks: set[asyncio.Task[list[JsonDict]]] = set()
@@ -479,6 +570,67 @@ def fastapi_app():
             await get_modal_client()
         except Exception:
             pass
+
+    async def _flush_unpersisted_timing(
+        training_run_id: str, entry: TimingEntry
+    ) -> bool:
+        async with entry.lock:
+            records = {
+                storage_key: record
+                for storage_key, record in entry.pending_records.items()
+                if record.get("final", False)
+                or not entry.persisted_records.get(storage_key, {}).get("final", False)
+            }
+            if not records:
+                return False
+            await _metadata_vol_put_many(
+                RoleTimingRecord.store(training_run_id),
+                records,
+                is_async=True,
+            )
+            entry.persisted_records.update(records)
+            for storage_key in records:
+                entry.pending_records.pop(storage_key, None)
+                entry.file_records.pop(
+                    f"{RoleTimingRecord.store(training_run_id)}/{storage_key}.json",
+                    None,
+                )
+            _rebuild_timing_lanes(entry)
+            _timing_debug(
+                "timing_flush",
+                training_run_id=training_run_id,
+                written=sorted(records),
+            )
+            return True
+
+    async def _timing_entry_for(training_run_id: str) -> TimingEntry:
+        evicted: tuple[str, TimingEntry] | None = None
+        async with timing_cache_lock:
+            entry = timing_cache.get(training_run_id)
+            if entry is not None:
+                entry.touched_at = time.monotonic()
+                return entry
+            if len(timing_cache) >= TIMING_CACHE_MAX_RUNS:
+                evictable = [
+                    (other.touched_at, run_id)
+                    for run_id, other in timing_cache.items()
+                    if not other.lock.locked()
+                ]
+                if evictable:
+                    evicted_run_id = min(evictable)[1]
+                    evicted = (evicted_run_id, timing_cache.pop(evicted_run_id))
+            entry = timing_cache.setdefault(training_run_id, TimingEntry())
+        if evicted is not None:
+            evicted_run_id, evicted_entry = evicted
+            try:
+                await _flush_unpersisted_timing(evicted_run_id, evicted_entry)
+            except Exception as exc:
+                _timing_debug(
+                    "timing_flush_failed",
+                    training_run_id=evicted_run_id,
+                    detail=str(exc),
+                )
+        return entry
 
     async def refresh_cache(key: str, loader: SummaryLoader) -> list[JsonDict]:
         async with cache_locks[key]:
@@ -640,7 +792,8 @@ def fastapi_app():
         return token.strip()
 
     async def _require_framework_status_token(
-        training_run_id: str, authorization: str | None
+        training_run_id: str,
+        authorization: str | None,
     ) -> None:
         """403 unless ``authorization`` carries the run's status token.
 
@@ -662,8 +815,6 @@ def fastapi_app():
             expected_token = ""
         supplied = _bearer_token(authorization)
         if not expected_token:
-            # Spend the same comparison an existing token would, then refuse
-            # regardless of its outcome.
             _secrets.compare_digest(supplied, _MISSING_TOKEN_DUMMY)
             raise HTTPException(status_code=403, detail="Invalid status token")
         if not _secrets.compare_digest(supplied, expected_token):
@@ -746,6 +897,23 @@ def fastapi_app():
             )
         await run.save(is_async=True)
         invalidate_cache("runs")
+        if run.status in {
+            TrainingRunStatus.STOPPED,
+            TrainingRunStatus.CANCELLED,
+            TrainingRunStatus.COMPLETED,
+            TrainingRunStatus.FAILED,
+        }:
+            try:
+                await _flush_unpersisted_timing(
+                    update.training_run_id,
+                    await _timing_entry_for(update.training_run_id),
+                )
+            except Exception as exc:
+                _timing_debug(
+                    "timing_flush_failed",
+                    training_run_id=update.training_run_id,
+                    detail=str(exc),
+                )
         return JSONResponse({"status": "ok", "framework_status": status.value})
 
     # ── Training rollouts ────────────────────────────────────────────────
@@ -834,6 +1002,198 @@ def fastapi_app():
                 ),
             )
         return JSONResponse(merged)
+
+    @web.post("/api/timing-events")
+    async def timing_event(
+        record: RoleTimingRecord,
+        authorization: str | None = Header(default=None),
+    ):
+        await _require_framework_status_token(record.training_run_id, authorization)
+
+        entry = await _timing_entry_for(record.training_run_id)
+        async with entry.lock:
+            record_payload = record.model_dump(mode="json")
+            _timing_debug(
+                "timing_arrival",
+                training_run_id=record.training_run_id,
+                storage_key=record.storage_key,
+                lane_start_unix_s=record.lane_start_unix_s,
+                final=record.final,
+                phases=sorted(record.phases),
+                total_count=sum(phase.count for phase in record.phases.values()),
+            )
+            if record.final:
+                entry.pending_records[record.storage_key] = record_payload
+                _rebuild_timing_lanes(entry)
+                try:
+                    await _metadata_vol_put_many(
+                        RoleTimingRecord.store(record.training_run_id),
+                        {record.storage_key: record_payload},
+                        is_async=True,
+                    )
+                except Exception:
+                    _timing_debug(
+                        "timing_flush_failed",
+                        training_run_id=record.training_run_id,
+                        written=[],
+                        detail="final timing POST write failed",
+                    )
+                    raise
+                else:
+                    entry.persisted_records[record.storage_key] = record_payload
+                    entry.pending_records.pop(record.storage_key, None)
+            else:
+                stored = entry.persisted_records.get(record.storage_key)
+                if stored is None or not stored.get("final", False):
+                    entry.pending_records[record.storage_key] = record_payload
+            _rebuild_timing_lanes(entry)
+            entry.file_records.pop(
+                f"{RoleTimingRecord.store(record.training_run_id)}/"
+                f"{record.storage_key}.json",
+                None,
+            )
+        return JSONResponse({"status": "ok"})
+
+    async def _read_run_timings(
+        training_run_id: str,
+        entry: TimingEntry,
+    ) -> tuple[JsonDict, bool]:
+        listed, had_read_failures = await vol_list_metadata_with_failures(
+            RoleTimingRecord.store(training_run_id),
+            is_async=True,
+        )
+        if had_read_failures:
+            return {}, True
+        current = {item["path"]: (item["mtime"], item["size"]) for item in listed}
+        unchanged = {
+            path: cached
+            for path, cached in entry.file_records.items()
+            if current.get(path) == (cached["mtime"], cached["size"])
+        }
+        changed = [item for item in listed if item["path"] not in unchanged]
+        read_results = await bounded_gather_with_retries(
+            [
+                lambda item=item: _metadata_vol_get(
+                    RoleTimingRecord.store(training_run_id),
+                    item["path"].rsplit("/", 1)[-1][:-5],
+                    is_async=True,
+                )
+                for item in changed
+            ]
+        )
+        updated: dict[str, TimingFileCache] = {}
+        for item, result in zip(changed, read_results, strict=True):
+            if isinstance(result, (KeyError, FileNotFoundError)):
+                cached = entry.file_records.get(item["path"])
+                if cached is not None:
+                    updated[item["path"]] = cached
+                continue
+            if isinstance(result, (json.JSONDecodeError, UnicodeDecodeError)):
+                updated[item["path"]] = {
+                    "mtime": current[item["path"]][0],
+                    "size": current[item["path"]][1],
+                    "checked_at": time.time(),
+                    "record": None,
+                }
+                continue
+            if isinstance(result, BaseException):
+                return {}, True
+            validated = validate_timing_record(result)
+            updated[item["path"]] = {
+                "mtime": current[item["path"]][0],
+                "size": current[item["path"]][1],
+                "checked_at": time.time(),
+                "record": validated,
+            }
+        entry.file_records = {**unchanged, **updated}
+        stored_records = {
+            path.rsplit("/", 1)[-1][:-5]: cached["record"]
+            for path, cached in entry.file_records.items()
+            if cached["record"] is not None
+        }
+        for storage_key, record in entry.persisted_records.items():
+            current_record = stored_records.get(storage_key)
+            if current_record is None or (
+                record.get("final", False) and not current_record.get("final", False)
+            ):
+                stored_records[storage_key] = record
+        entry.persisted_records = stored_records
+        for storage_key in list(entry.pending_records):
+            pending = entry.pending_records[storage_key]
+            if entry.persisted_records.get(storage_key, {}).get(
+                "final", False
+            ) and not pending.get("final", False):
+                entry.pending_records.pop(storage_key, None)
+        entry.legacy_derived = False
+        entry.legacy_records = []
+        if (
+            not listed
+            and not had_read_failures
+            and not entry.persisted_records
+            and not entry.pending_records
+        ):
+            try:
+                run = await _get_run_or_404(training_run_id)
+            except Error:
+                return {}, True
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+            else:
+                legacy_records = legacy_run_to_records(run.substep_times)
+                entry.legacy_derived = bool(legacy_records)
+                entry.legacy_records = legacy_records
+        _rebuild_timing_lanes(entry)
+        return entry.lanes, had_read_failures
+
+    @web.get("/api/runs/{training_run_id}/timings")
+    async def get_run_timings(
+        training_run_id: str = FastAPIPath(),
+    ):
+        run = await _get_run_or_404(training_run_id)
+        entry = await _timing_entry_for(training_run_id)
+
+        def response() -> JsonDict:
+            if not entry.stale:
+                return entry.lanes
+            metadata_value = entry.lanes.get("metadata")
+            metadata = metadata_value if isinstance(metadata_value, dict) else {}
+            return {
+                **entry.lanes,
+                "metadata": {**metadata, "timing_stale": True},
+            }
+
+        if not entry.fresh:
+            async with entry.lock:
+                if not entry.fresh:
+                    _, had_read_failures = await _read_run_timings(
+                        training_run_id, entry
+                    )
+                    if had_read_failures:
+                        entry.read_at = time.monotonic()
+                        entry.stale = True
+                    else:
+                        entry.read_at = time.monotonic()
+                        entry.stale = False
+        if (
+            run.status
+            in {
+                TrainingRunStatus.STOPPED,
+                TrainingRunStatus.CANCELLED,
+                TrainingRunStatus.COMPLETED,
+                TrainingRunStatus.FAILED,
+            }
+            and entry.pending_records
+        ):
+            try:
+                await _flush_unpersisted_timing(training_run_id, entry)
+            except Exception as exc:
+                _timing_debug(
+                    "timing_flush_failed",
+                    training_run_id=training_run_id,
+                    detail=str(exc),
+                )
+        return JSONResponse(response())
 
     # ── Live Modal log stream (SSE, pure pass-through) ───────────────────
 

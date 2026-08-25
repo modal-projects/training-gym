@@ -150,6 +150,15 @@ export async function fetchRunAdvantages(trainingRunId, { signal } = {}) {
     .sort((a, b) => a.rollout_id - b.rollout_id);
 }
 
+export async function fetchRunTimings(trainingRunId, { signal } = {}) {
+  const res = await fetch(
+    `${SERVER}/runs/${encodeURIComponent(trainingRunId)}/timings`,
+    { signal },
+  );
+  if (!res.ok) throw new Error(await getErrorFromResponse(res));
+  return await res.json();
+}
+
 // One step's full per-group advantage distribution (for drill-in).
 export async function fetchRunAdvantageStep(trainingRunId, rolloutId) {
   const res = await fetch(

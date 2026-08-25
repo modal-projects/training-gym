@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import time
+from queue import Queue
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from modal_training_gym import _dashboard
+from modal_training_gym.common import reporting
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.run import TrainingRun
+from modal_training_gym.common.step_timing import RoleTimingRecord
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
 from modal_training_gym.utils import metadata
@@ -295,3 +299,182 @@ def test_run_logs_rejects_invalid_time_bound(bound, fake_volume, monkeypatch, tm
     assert response.json()["detail"].startswith(
         f"{bound} must be epoch seconds, ISO 8601, or a relative time"
     )
+
+
+def _timing_payload(run_id: str = "timing-run", *, final: bool = False) -> dict:
+    return {
+        "training_run_id": run_id,
+        "rollout_id": 0,
+        "role": "driver",
+        "lane_start_unix_s": 100.0,
+        "final": final,
+        "phases": {
+            "train_models": {
+                "count": 1,
+                "busy_duration_s": 0.1,
+                "longest_invocation_s": 0.1,
+                "first_start_s": 0.0,
+                "last_end_s": 0.1,
+            }
+        },
+    }
+
+
+def _save_timing_run(run_id: str = "timing-run") -> None:
+    TrainingRun(
+        training_run_id=run_id,
+        modal_app_id="ap-timing",
+        framework=Framework.SLIME,
+        config={},
+    ).save()
+    metadata.vol_put(
+        MetadataStore.FRAMEWORK_STATUS_TOKENS,
+        run_id,
+        {"token": "secret"},
+    )
+
+
+def test_final_record_is_written_once_and_not_shadowed_by_progress(
+    fake_volume, monkeypatch, tmp_path
+):
+    _save_timing_run()
+    writes = []
+
+    async def capture(*args, **kwargs):
+        writes.append((args, kwargs))
+
+    monkeypatch.setattr(_dashboard, "_metadata_vol_put_many", capture)
+    with _client(monkeypatch, tmp_path) as client:
+        assert (
+            client.post(
+                "/api/timing-events",
+                json=_timing_payload(final=True),
+                headers={"Authorization": "Bearer secret"},
+            ).status_code
+            == 200
+        )
+        progress = _timing_payload()
+        progress["phases"]["train_models"]["count"] = 99
+        assert (
+            client.post(
+                "/api/timing-events",
+                json=progress,
+                headers={"Authorization": "Bearer secret"},
+            ).status_code
+            == 200
+        )
+        timings = client.get("/api/runs/timing-run/timings").json()
+
+    assert len(writes) == 1
+    assert timings["0"]["roles"]["driver"]["phases"]["train_models"]["count"] == 1
+
+    queue = Queue()
+    delivered = []
+    final_payload = {
+        "_url": "https://dashboard.test/api/timing-events",
+        "training_run_id": "timing-run",
+        "storage_key": "00000000__driver",
+        "final": True,
+    }
+    queue.put(None)
+    queue.put(None)
+    queue.put(final_payload)
+    monkeypatch.setattr(reporting, "_REPORT_QUEUE", queue)
+    monkeypatch.setattr(reporting, "_post", lambda item: delivered.append(item) or True)
+    monkeypatch.setattr(reporting, "_REPORT_DRAIN_DEADLINE", time.monotonic() + 1.0)
+    reporting._worker()
+    assert delivered == [final_payload]
+    assert queue.unfinished_tasks == 0
+
+
+def test_timing_reads_isolate_malformed_records(fake_volume, monkeypatch, tmp_path):
+    _save_timing_run()
+    RoleTimingRecord.model_validate(_timing_payload()).save()
+    metadata.vol_put(
+        RoleTimingRecord.store("timing-run"),
+        "00000001__driver",
+        {"not": "a timing record"},
+    )
+
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.get("/api/runs/timing-run/timings")
+
+    assert response.status_code == 200
+    assert set(response.json()) == {"0"}
+
+
+def test_persisted_non_final_timing_survives_stale_listing(
+    fake_volume, monkeypatch, tmp_path
+):
+    _save_timing_run()
+    listed = []
+
+    async def list_records(*_args, **_kwargs):
+        return (listed[-1] if listed else [], False)
+
+    monkeypatch.setattr(_dashboard, "vol_list_metadata_with_failures", list_records)
+    run = TrainingRun.from_id("timing-run")
+    run.status = run.status.COMPLETED
+    run.save()
+    writes = []
+
+    async def capture(*args, **kwargs):
+        writes.append((args, kwargs))
+
+    monkeypatch.setattr(_dashboard, "_metadata_vol_put_many", capture)
+    with _client(monkeypatch, tmp_path) as client:
+        progress = _timing_payload()
+        assert (
+            client.post(
+                "/api/timing-events",
+                json=progress,
+                headers={"Authorization": "Bearer secret"},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/api/framework-status",
+                json={"training_run_id": "timing-run", "phase": "training"},
+                headers={"Authorization": "Bearer secret"},
+            ).status_code
+            == 200
+        )
+        first = client.get("/api/runs/timing-run/timings")
+        assert first.status_code == 200
+        assert (
+            first.json()["0"]["roles"]["driver"]["phases"]["train_models"][
+                "first_start_s"
+            ]
+            == 0.0
+        )
+
+    listed.append(
+        [
+            {
+                "path": "substep-timing/timing-run/00000000__driver.json",
+                "mtime": 1,
+                "size": 2,
+            }
+        ]
+    )
+    replacement = {
+        **progress,
+        "lane_start_unix_s": 200.0,
+        "final": True,
+    }
+
+    original_read = _dashboard._metadata_vol_get
+
+    async def read_record(store, key, *args, **kwargs):
+        if key == "00000000__driver":
+            return replacement
+        return await original_read(store, key, *args, **kwargs)
+
+    monkeypatch.setattr(_dashboard, "_metadata_vol_get", read_record)
+    with _client(monkeypatch, tmp_path / "second") as client:
+        second = client.get("/api/runs/timing-run/timings")
+
+    assert writes
+    assert second.status_code == 200
+    assert second.json()["0"]["roles"]["driver"]["lane_start_unix_s"] == 200.0

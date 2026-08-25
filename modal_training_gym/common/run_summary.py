@@ -7,7 +7,7 @@ import math
 from typing import Any, cast
 from urllib.parse import quote
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_serializer
 from pydantic.fields import FieldInfo
 
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
@@ -15,7 +15,7 @@ from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 
 JsonDict = dict[str, object]
 StepTimes = dict[str, dict[str, int | None]]
-SubstepTimes = dict[str, dict[str, dict[str, float | None]]]
+SubstepTimes = dict[str, dict[str, dict[str, float | int | bool | None]]]
 
 
 class FrameworkProgress(BaseModel):
@@ -96,11 +96,46 @@ class LatestRollout(BaseModel):
     created_at: int = 0
 
 
-class WandbLink(BaseModel):
+class MetricLink(BaseModel):
     label: str
     url: str
     run_id: str = ""
     attempt: int | None = None
+
+
+WandbLink = MetricLink
+
+
+def _wandb_label(label: object) -> str:
+    text = _text(label).strip()
+    if not text:
+        return "W&B"
+    return text.replace("Metric", "W&B", 1)
+
+
+def _legacy_wandb_link_dump(links: object) -> list[JsonDict]:
+    legacy_links: list[JsonDict] = []
+    if not isinstance(links, list):
+        return legacy_links
+    for raw_link in links:
+        link = _mapping(raw_link)
+        if not link.get("url"):
+            continue
+        legacy_link = dict(link)
+        legacy_link["label"] = _wandb_label(link.get("label"))
+        legacy_links.append(legacy_link)
+    return legacy_links
+
+
+def _add_legacy_wandb_fields(data: JsonDict, *, include_group: bool) -> JsonDict:
+    data["wandb_project"] = data.get("metric_project", "")
+    if include_group:
+        data["wandb_group"] = data.get("metric_group", "")
+    data["wandb_entity"] = data.get("metric_entity", "")
+    data["wandb_training_run_id"] = data.get("metric_run_id", "")
+    data["wandb_url"] = data.get("metric_url")
+    data["wandb_links"] = _legacy_wandb_link_dump(data.get("metric_links"))
+    return data
 
 
 class ConfigSummary(BaseModel):
@@ -112,12 +147,17 @@ class ConfigSummary(BaseModel):
     actor_num_gpus_per_node: int = 0
     lr: float = 0.0
     global_batch_size: int = 0
-    wandb_project: str = ""
-    wandb_group: str = ""
-    wandb_entity: str = ""
-    wandb_training_run_id: str = ""
-    wandb_url: str | None = None
-    wandb_links: list[WandbLink] = Field(default_factory=list)
+    metric_provider: str = ""
+    metric_project: str = ""
+    metric_group: str = ""
+    metric_entity: str = ""
+    metric_run_id: str = ""
+    metric_url: str | None = None
+    metric_links: list[MetricLink] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Any) -> JsonDict:
+        return _add_legacy_wandb_fields(handler(self), include_group=True)
 
 
 class TrainResultSummary(BaseModel):
@@ -126,11 +166,16 @@ class TrainResultSummary(BaseModel):
     checkpoint_dir: str = ""
     model_name: str = ""
     model_path: str = ""
-    wandb_project: str = ""
-    wandb_entity: str = ""
-    wandb_training_run_id: str = ""
-    wandb_url: str | None = None
-    wandb_links: list[WandbLink] = Field(default_factory=list)
+    metric_provider: str = ""
+    metric_project: str = ""
+    metric_entity: str = ""
+    metric_run_id: str = ""
+    metric_url: str | None = None
+    metric_links: list[MetricLink] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Any) -> JsonDict:
+        return _add_legacy_wandb_fields(handler(self), include_group=False)
 
 
 class ResumeState(BaseModel):
@@ -141,6 +186,7 @@ class ResumeState(BaseModel):
     resume_from_iteration: int | None = None
     last_attempt_status: str = ""
     last_attempt_started_at: int = 0
+    attempt_starts: list[int] = Field(default_factory=list)
 
 
 class GroupTag(BaseModel):
@@ -199,7 +245,7 @@ class RunSummary(BaseModel):
     has_train_result: bool = False
     config_summary: JsonDict | ConfigSummary = Field(default_factory=dict)
     train_result: TrainResultSummary | None = None
-    wandb_links: list[WandbLink] = Field(default_factory=list)
+    metric_links: list[MetricLink] = Field(default_factory=list)
     resume_state: ResumeState | None = None
 
     config: JsonDict = Field(default_factory=dict)
@@ -207,6 +253,12 @@ class RunSummary(BaseModel):
     error_message: str = ""
     step_times: StepTimes | None = None
     substep_times: SubstepTimes | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Any) -> JsonDict:
+        data = handler(self)
+        data["wandb_links"] = _legacy_wandb_link_dump(data.get("metric_links"))
+        return data
 
 
 def _unwrap(value: object) -> object:
@@ -296,20 +348,32 @@ def _wandb_url(entity: object, project: object, run_id: object) -> str | None:
     return f"{base}/runs/{quote(clean_run_id, safe='')}" if clean_run_id else base
 
 
-def _wandb_summary(
-    *, entity: object, project: object, group: object = "", run_id: object = ""
+def _metric_summary(
+    *,
+    entity: object,
+    project: object,
+    group: object = "",
+    run_id: object = "",
+    metric: object = None,
 ) -> dict[str, Any]:
-    url = _wandb_url(entity, project, run_id)
-    link = (
-        [WandbLink(label="W&B", url=url, run_id=_text(run_id).strip())] if url else []
+    metric_data = _mapping(metric)
+    provider = _text(metric_data.get("provider")).strip()
+    url = _text(metric_data.get("url")).strip()
+    if not url and provider in ("", "wandb"):
+        url = _wandb_url(entity, project, run_id) or ""
+    metric_link = (
+        [MetricLink(label="Metric", url=url, run_id=_text(run_id).strip())]
+        if url
+        else []
     )
     return {
-        "wandb_project": _text(project),
-        "wandb_group": _text(group),
-        "wandb_entity": _text(entity),
-        "wandb_training_run_id": _text(run_id),
-        "wandb_url": url,
-        "wandb_links": link,
+        "metric_provider": provider,
+        "metric_project": _text(project),
+        "metric_group": _text(group),
+        "metric_entity": _text(entity),
+        "metric_run_id": _text(run_id),
+        "metric_url": url or None,
+        "metric_links": metric_link,
     }
 
 
@@ -318,14 +382,17 @@ def _config_summary(config: object, training_run_id: str) -> ConfigSummary | Jso
         return {}
     model = _mapping(config.get("model"))
     recipe = _mapping(config.get("recipe")) or _mapping(config.get("preset"))
-    wandb = _mapping(config.get("wandb"))
+    legacy_wandb = _mapping(config.get("wandb"))
+    metric_config = _mapping(config.get("metrics")) or legacy_wandb
     dataset = _mapping(config.get("dataset"))
     dataset_name = (
         _text(dataset.get("hf_repo"))
         or _text(dataset.get("prompt_data"))
         or _text(dataset.get("name"))
     )
-    wandb_run_id = _text(wandb.get("run_id")) or training_run_id[:8]
+    metric_run_id = _text(metric_config.get("run_id")) or (
+        training_run_id[:8] if legacy_wandb else ""
+    )
     return ConfigSummary(
         model_name=_text(model.get("model_name")),
         dataset_name=dataset_name,
@@ -335,27 +402,37 @@ def _config_summary(config: object, training_run_id: str) -> ConfigSummary | Jso
         actor_num_gpus_per_node=_integer(recipe.get("actor_num_gpus_per_node")),
         lr=_number(config.get("lr")),
         global_batch_size=_integer(config.get("global_batch_size")),
-        **_wandb_summary(
-            entity=wandb.get("entity"),
-            project=wandb.get("project"),
-            group=wandb.get("group"),
-            run_id=wandb_run_id if wandb.get("project") and wandb.get("entity") else "",
+        **_metric_summary(
+            entity=metric_config.get("entity"),
+            project=metric_config.get("project"),
+            group=metric_config.get("group"),
+            run_id=(
+                metric_run_id
+                if metric_config.get("project")
+                and metric_config.get("entity")
+                or metric_config.get("url")
+                else ""
+            ),
+            metric=metric_config,
         ),
     )
 
 
 def _train_result_summary(result: JsonDict) -> TrainResultSummary:
     model = _mapping(result.get("model_config"))
+    metric = _mapping(result.get("metrics"))
     return TrainResultSummary(
         training_run_id=_text(result.get("training_run_id")),
         app_name=_text(result.get("app_name")),
         checkpoint_dir=_text(result.get("checkpoint_dir")),
         model_name=_text(model.get("model_name")),
         model_path=_text(model.get("model_path")),
-        **_wandb_summary(
-            entity=result.get("wandb_entity"),
-            project=result.get("wandb_project"),
-            run_id=result.get("wandb_training_run_id"),
+        **_metric_summary(
+            entity=metric.get("entity") or result.get("wandb_entity"),
+            project=metric.get("project") or result.get("wandb_project"),
+            group=metric.get("group"),
+            run_id=metric.get("run_id") or result.get("wandb_training_run_id"),
+            metric=metric,
         ),
     )
 
@@ -397,6 +474,18 @@ def _resume_state(metadata: JsonDict) -> ResumeState | None:
     attempt_count = _integer(metadata.get("attempt_count"))
     checkpoint_path = _text(metadata.get("resume_checkpoint_path"))
     resumed = metadata.get("resumed_from_checkpoint") is True or bool(checkpoint_path)
+    raw_attempt_starts = metadata.get("attempt_starts")
+    attempt_starts = (
+        sorted(
+            {
+                parsed
+                for item in raw_attempt_starts
+                if (parsed := _optional_int(item)) is not None
+            }
+        )[-50:]
+        if isinstance(raw_attempt_starts, list)
+        else []
+    )
     if attempt_count <= 1 and not resumed:
         return None
     return ResumeState(
@@ -407,6 +496,7 @@ def _resume_state(metadata: JsonDict) -> ResumeState | None:
         resume_from_iteration=_optional_int(metadata.get("resume_from_iteration")),
         last_attempt_status=_text(metadata.get("last_attempt_status")),
         last_attempt_started_at=_timestamp(metadata.get("last_attempt_started_at")),
+        attempt_starts=attempt_starts,
     )
 
 
@@ -453,22 +543,30 @@ def _group_tags(metadata: JsonDict, group_id: str) -> GroupTags | None:
     )
 
 
-def _wandb_attempt_links(metadata: JsonDict) -> list[WandbLink]:
-    attempts = metadata.get("wandb_attempts")
+def _metric_attempt_links(metadata: JsonDict) -> list[MetricLink]:
+    attempts = metadata.get("metric_attempts") or metadata.get("wandb_attempts")
     if not isinstance(attempts, list):
         return []
-    links: list[WandbLink] = []
+    links: list[MetricLink] = []
     for raw_attempt in attempts:
         attempt = _mapping(raw_attempt)
         attempt_number = _integer(attempt.get("attempt"))
         run_id = _text(attempt.get("run_id"))
-        url = _wandb_url(
-            attempt.get("entity"), attempt.get("project"), attempt.get("run_id")
-        )
+        provider = _text(attempt.get("provider")).strip()
+        url = _text(attempt.get("url")).strip()
+        if not url and provider in ("", "wandb"):
+            url = (
+                _wandb_url(
+                    attempt.get("entity"), attempt.get("project"), attempt.get("run_id")
+                )
+                or ""
+            )
         if url:
             links.append(
-                WandbLink(
-                    label=f"W&B a{attempt_number}" if attempt_number > 1 else "W&B",
+                MetricLink(
+                    label=f"Metric a{attempt_number}"
+                    if attempt_number > 1
+                    else "Metric",
                     url=url,
                     run_id=run_id,
                     attempt=attempt_number or None,
@@ -477,9 +575,9 @@ def _wandb_attempt_links(metadata: JsonDict) -> list[WandbLink]:
     return links
 
 
-def _dedupe_links(*groups: list[WandbLink]) -> list[WandbLink]:
+def _dedupe_links(*groups: list[MetricLink]) -> list[MetricLink]:
     seen: set[str] = set()
-    links: list[WandbLink] = []
+    links: list[MetricLink] = []
     for group in groups:
         for link in group:
             if link.url and link.url not in seen:
@@ -529,11 +627,11 @@ def build_run_summary(
         duration = max(0, ended_at - started_at)
     modal_app_url = _modal_app_url(modal_app_id)
     config_links = (
-        config_summary.wandb_links if isinstance(config_summary, ConfigSummary) else []
+        config_summary.metric_links if isinstance(config_summary, ConfigSummary) else []
     )
     links = _dedupe_links(
-        _wandb_attempt_links(metadata),
-        result_summary.wandb_links if result_summary else [],
+        _metric_attempt_links(metadata),
+        result_summary.metric_links if result_summary else [],
         config_links,
     )
     config_model = (
@@ -577,7 +675,7 @@ def build_run_summary(
         has_train_result=result_summary is not None,
         config_summary=config_summary,
         train_result=result_summary,
-        wandb_links=links,
+        metric_links=links,
         resume_state=_resume_state(metadata),
         config=config,
         metadata=metadata or None,

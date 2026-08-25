@@ -3,7 +3,7 @@
   import { ArrowLeft, ChevronLeft, ChevronRight, Download, ExternalLink, Minimize2, X } from "lucide-svelte";
   import Tabs from "../components/Tabs.svelte";
   import RunSummary from "../components/RunSummary.svelte";
-  import StepTimings from "../components/StepTimings.svelte";
+  import RunTimeline from "../components/RunTimeline.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
   import InferenceStats from "../components/InferenceStats.svelte";
@@ -19,11 +19,26 @@
     fetchRun,
     fetchRunRollouts,
     fetchRollout,
+    fetchRunTimings,
     fetchRunAdvantages,
     fetchRunAdvantageStep,
     fetchRunLogs,
   } from "../lib/api.js";
   import { groupByRollout, rolloutIndex, rolloutScores } from "../lib/rolloutGrouping.js";
+  import { normalizeMetricLinks } from "../lib/metricLinks.js";
+  import {
+    MAX_TERMINAL_TIMING_FAILURES,
+    TERMINAL_TIMING_SETTLE_WINDOW_MS,
+    terminalTimingReadSettled,
+    timingReadFingerprint,
+    updateTimingFailureState,
+  } from "../lib/timing_retry.js";
+  import {
+    rolloutIdForTimingKey,
+    shouldShowTimingSection,
+    timingIsAsync,
+    timingRunStart,
+  } from "../lib/timing.js";
 
   // Number of historical log lines requested per page.
   const HIST_PAGE = 500;
@@ -111,19 +126,27 @@
   // the auto-refresh hands us a new `run` object with the same status (which
   // would otherwise tear down and rebuild the log stream, flashing the tail).
   let runStatus = $derived(String(run?.status || "").toLowerCase());
-  let wandbUrl = $derived.by(() => {
-    const directUrl = run?.train_result?.wandb_url || run?.config_summary?.wandb_url || "";
+  let metricUrl = $derived.by(() => {
+    const directUrl =
+      run?.train_result?.metric_url ||
+      run?.config_summary?.metric_url ||
+      run?.train_result?.wandb_url ||
+      run?.config_summary?.wandb_url ||
+      "";
     if (directUrl) return directUrl;
 
-    const project = run?.config_summary?.wandb_project || "";
+    const project =
+      run?.config_summary?.metric_project || run?.config_summary?.wandb_project || "";
     return project ? `https://wandb.ai/home?search=${encodeURIComponent(project)}` : "";
   });
-  let wandbLinks = $derived.by(() =>
-    run?.wandb_links?.length
-      ? run.wandb_links
-      : wandbUrl
-        ? [{ label: "Open in W&B", url: wandbUrl }]
-        : [],
+  let metricLinks = $derived.by(() =>
+    run?.metric_links?.length
+      ? normalizeMetricLinks(run.metric_links)
+      : run?.wandb_links?.length
+        ? normalizeMetricLinks(run.wandb_links)
+        : metricUrl
+          ? [{ label: "Metric", url: metricUrl }]
+          : [],
   );
 
   $effect(() => {
@@ -193,21 +216,6 @@
     return value.toFixed(3);
   }
 
-  // Map a rollout to its step timing. Step keys are 1-indexed; rollout ids are
-  // 0-indexed, so step N corresponds to rollout N-1 (fall back to a direct match).
-  function stepTimingForRollout(rolloutId) {
-    const st = run?.step_times || null;
-    const sub = run?.substep_times || null;
-    if (!st && !sub) return null;
-    const candidates = [String(Number(rolloutId) + 1), String(rolloutId)];
-    const key = candidates.find((k) => (st && st[k]) || (sub && sub[k]));
-    if (!key) return null;
-    return {
-      stepTimes: st && st[key] ? { [key]: st[key] } : null,
-      substepTimes: sub && sub[key] ? { [key]: sub[key] } : null,
-    };
-  }
-
   function resumeBadge(run) {
     const state = run?.resume_state;
     if (!state) return "";
@@ -222,6 +230,36 @@
     }
     return parts.join(" · ");
   }
+
+  // Only the latest attempt's checkpoint is recorded, so earlier boundaries are
+  // labelled with their attempt number alone.
+  let attemptMarkers = $derived.by(() => {
+    const state = run?.resume_state;
+    if (!state || !(state.attempt_count > 1)) return [];
+    const latest = Number(state.last_attempt_started_at);
+    const starts = (Array.isArray(state.attempt_starts) ? state.attempt_starts : [])
+      .map(Number)
+      .filter(Number.isFinite);
+    if (Number.isFinite(latest) && !starts.includes(latest)) starts.push(latest);
+    starts.sort((a, b) => a - b);
+    const first = starts.length > state.attempt_count ? 0 : state.attempt_count - starts.length;
+    return starts
+      .map((at, index) => ({ at, attempt: first + index + 1 }))
+      .filter((marker) => marker.attempt > 1)
+      .map(({ at, attempt }) => {
+        const rawStep =
+          at === latest && state.resumed_from_checkpoint
+            ? state.resume_from_iteration
+            : null;
+        const step = rawStep != null ? Number(rawStep) : null;
+        const completedStep =
+          step != null && Number.isFinite(step) ? step + 1 : null;
+        return {
+          at,
+          label: `attempt ${attempt}${completedStep != null ? ` · resumed after step ${completedStep}` : ""}`,
+        };
+      });
+  });
 
   // ── Rollouts (auto-refresh while run is running) ─────────────────────
   let rolloutSummaries = $state([]);
@@ -251,17 +289,12 @@
     const rollouts = groupByRollout(samples);
     if (!rollouts.length) return null;
     const scores = rolloutScores(samples, rollouts);
-    // Loop instead of Math.min(...arr): a single step's rollout-score array can
-    // exceed the engine's max argument count and make the spread throw a
-    // RangeError (same failure class buildDist avoids).
     let lo = Infinity;
     let hi = -Infinity;
     for (const v of scores) {
       if (v < lo) lo = v;
       if (v > hi) hi = v;
     }
-    // When every rollout scored the same, a single bucket reads clearer than a
-    // lone bar pinned to one edge.
     const count = lo === hi ? 1 : BUCKET_COUNT;
     const span = hi - lo || 1;
     const buckets = Array.from({ length: count }, () => []);
@@ -446,9 +479,6 @@
   async function loadRollouts(signal) {
     if (!runId) return;
     try {
-      // Untracked: the fetch effect calls this synchronously, so a tracked read
-      // here makes the effect depend on the state it is about to write, and
-      // every fetch (which always yields a fresh array) retriggers it forever.
       const wasEmpty = untrack(() => rolloutSummaries.length === 0);
       const rows = await fetchRunRollouts(runId, { signal });
       if (signal?.aborted) return;
@@ -470,6 +500,104 @@
     }
   }
 
+  let timingInFlight = null;
+  let timingError = $state("");
+  let timingFailures = $state(0);
+  let terminalTimingFailures = $state(0);
+  let timingStaleFailures = $state(0);
+  let timingLoaded = $state(false);
+  let terminalTimingStartedAt = $state(null);
+  let terminalTimingFingerprint = $state(null);
+  let terminalTimingIdenticalReads = $state(0);
+  const MAX_TERMINAL_TIMING_STALE_READS = 3;
+
+  async function loadTimings(parentSignal) {
+    if (
+      !runId ||
+      (timingInFlight?.runId === runId && !timingInFlight.signal.aborted)
+    )
+      return;
+    const controller = new AbortController();
+    const abortRequest = () => controller.abort();
+    parentSignal.addEventListener("abort", abortRequest, { once: true });
+    const timeout = window.setTimeout(() => controller.abort(), 10000);
+    timingInFlight = { runId, signal: controller.signal };
+    const status = String(untrack(() => run?.status) || "").toLowerCase();
+    const terminal = status && status !== "running";
+    try {
+      const timings = await fetchRunTimings(runId, {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      const serialized = timingReadFingerprint(timings);
+      if (serialized !== runTimingsSerialized) {
+        runTimingsSerialized = serialized;
+        runTimings = timings;
+      }
+      const timingStale = Boolean(timings?.metadata?.timing_stale);
+      if (!terminal) {
+        terminalTimingStartedAt = null;
+        terminalTimingFingerprint = null;
+        terminalTimingIdenticalReads = 0;
+        timingLoaded = false;
+      } else if (terminalTimingStartedAt == null) {
+        terminalTimingStartedAt = Date.now();
+      }
+      if (terminal && !timingStale) {
+        const settled = terminalTimingReadSettled({
+          previousFingerprint: terminalTimingFingerprint,
+          fingerprint: serialized,
+          identicalReads: terminalTimingIdenticalReads,
+          startedAt: terminalTimingStartedAt,
+        });
+        terminalTimingFingerprint = serialized;
+        terminalTimingIdenticalReads = settled.identicalReads;
+        timingLoaded = settled.settled;
+      } else if (
+        terminal &&
+        terminalTimingStartedAt != null &&
+        Date.now() - terminalTimingStartedAt >= TERMINAL_TIMING_SETTLE_WINDOW_MS
+      ) {
+        timingLoaded = true;
+      }
+      const nextFailures = updateTimingFailureState(
+        {
+          runningFailures: timingFailures,
+          terminalFailures: terminalTimingFailures,
+          staleFailures: timingStaleFailures,
+        },
+        { terminal, success: true, stale: timingStale },
+      );
+      timingFailures = nextFailures.runningFailures;
+      terminalTimingFailures = nextFailures.terminalFailures;
+      timingStaleFailures = nextFailures.staleFailures;
+      if (!timingStale) timingError = "";
+    } catch {
+      if (parentSignal.aborted) return;
+      const nextFailures = updateTimingFailureState(
+        {
+          runningFailures: timingFailures,
+          terminalFailures: terminalTimingFailures,
+          staleFailures: timingStaleFailures,
+        },
+        { terminal },
+      );
+      timingFailures = nextFailures.runningFailures;
+      terminalTimingFailures = nextFailures.terminalFailures;
+      if (terminal) {
+        if (terminalTimingFailures >= MAX_TERMINAL_TIMING_FAILURES) {
+          timingError = "Timing unavailable right now.";
+        }
+      } else if (timingFailures >= 2) {
+        timingError = "Timing unavailable right now.";
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      parentSignal.removeEventListener("abort", abortRequest);
+      if (timingInFlight?.signal === controller.signal) timingInFlight = null;
+    }
+  }
+
   async function loadAdvantages(signal) {
     if (!runId) return;
     try {
@@ -488,6 +616,16 @@
     runId;
     rolloutSummaries = [];
     rolloutsError = "";
+    runTimings = {};
+    runTimingsSerialized = "{}";
+    timingFailures = 0;
+    terminalTimingFailures = 0;
+    timingStaleFailures = 0;
+    timingLoaded = false;
+    terminalTimingStartedAt = null;
+    terminalTimingFingerprint = null;
+    terminalTimingIdenticalReads = 0;
+    timingError = "";
     expandedRolloutId = null;
     expandedRollout = null;
     advantageSteps = [];
@@ -524,12 +662,23 @@
     const controller = new AbortController();
     rolloutsLoading = true;
     void loadRollouts(controller.signal);
+    void loadTimings(controller.signal);
 
     // Poll while the run is active so new rollouts stream in.
     const interval = window.setInterval(() => {
       const status = String(run?.status || "").toLowerCase();
-      if (status && status !== "running") return;
-      void loadRollouts(controller.signal);
+      if (
+        status &&
+        status !== "running" &&
+        (timingLoaded ||
+          terminalTimingFailures >= MAX_TERMINAL_TIMING_FAILURES ||
+          timingStaleFailures >= MAX_TERMINAL_TIMING_STALE_READS)
+      )
+        return;
+      if (!status || status === "running") {
+        void loadRollouts(controller.signal);
+      }
+      void loadTimings(controller.signal);
     }, 5000);
 
     return () => {
@@ -537,6 +686,15 @@
       window.clearInterval(interval);
     };
   });
+
+  let runTimings = $state({});
+  let runTimingsSerialized = $state("{}");
+  let showTimingSection = $derived(shouldShowTimingSection(runTimings));
+  let timelineAsync = $derived(timingIsAsync(runTimings));
+  let timelineRunOrigin = $derived(timingRunStart(runTimings));
+  let stepTimingIds = $derived(
+    Object.keys(runTimings).filter((id) => rolloutIdForTimingKey(id) !== null),
+  );
 
   async function toggleRolloutDetail(rolloutId) {
     if (!runId) return;
@@ -554,7 +712,6 @@
       const detail = await fetchRollout(runId, rolloutId);
       if (expandedRolloutId === rolloutId) {
         expandedRollout = detail;
-        // Preselect the first populated bucket so a rollout is shown right away.
         const d = sampleDist;
         const first = d ? d.buckets.findIndex((b) => b.length > 0) : -1;
         if (first >= 0) openBucket(first);
@@ -1326,9 +1483,9 @@
           <span>Collapse</span>
         </button>
       {/if}
-      {#each wandbLinks as link (link.url)}
+      {#each metricLinks as link (link.url)}
         <a
-          class="header-link wandb-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"
+          class="header-link metric-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"
           href={link.url}
           target="_blank"
           rel="noopener noreferrer"
@@ -1389,17 +1546,32 @@
               <pre class="[border:1px_solid_color-mix(in_srgb,var(--red,#f87171)_45%,transparent)] rounded-[8px] bg-[color-mix(in_srgb,var(--red,#f87171)_12%,transparent)] text-(--red,#f87171) [font-family:var(--font-mono)] text-[12px] leading-[17px] m-0 max-h-[320px] overflow-auto p-[12px_14px] whitespace-pre-wrap [word-break:break-word]">{run.error_message}</pre>
             </div>
           {/if}
-          {#if run.step_times || run.substep_times}
+          {#if timingError || showTimingSection}
             <div class="rollout-chart">
-              <div class="rollout-chart-title">Step &amp; substep timeline</div>
-              <div class="chart-scroll">
-                <StepTimings
-                  stepTimes={run.step_times}
-                  substepTimes={run.substep_times}
-                  layout="timeline"
-                  downloadName={`step_substep_times_${runId}.json`}
-                />
+              {#if timingError}
+                <div class="text-(--text-muted) text-[12px] mb-[8px]">
+                  {timingError}
+                </div>
+              {/if}
+              {#if showTimingSection}
+              <div class="rollout-chart-title">
+                Substep Timing{#if stepTimingIds.length}{" "}({stepTimingIds.length}
+                  {stepTimingIds.length === 1 ? "step" : "steps"}){/if}
               </div>
+              <RunTimeline
+                timings={runTimings}
+                asyncOverride={timelineAsync}
+                runOrigin={timelineRunOrigin}
+                timelineKey={runId}
+                downloadName={`substep_timing_${runId}.json`}
+                rolloutIds={rolloutSummaries.map((r) => r.rollout_id)}
+                {attemptMarkers}
+                onOpenRollout={(id) => {
+                  selectTab("rollouts");
+                  if (expandedRolloutId !== id) void toggleRolloutDetail(id);
+                }}
+              />
+              {/if}
             </div>
           {/if}
           {#if rolloutsLoading && !rolloutSummaries.length}
@@ -1575,17 +1747,22 @@
                     {:else if !expandedRollout || !sampleDist}
                       <div class="detail-empty">No rollouts recorded.</div>
                     {:else}
-                      {@const stepTiming = stepTimingForRollout(r.rollout_id)}
-                      {#if stepTiming}
+                      {#if runTimings[r.rollout_id]}
                         <div class="rollout-chart">
-                          <div class="rollout-chart-title">Step timing</div>
-                          <div class="chart-scroll">
-                            <StepTimings
-                              stepTimes={stepTiming.stepTimes}
-                              substepTimes={stepTiming.substepTimes}
-                              layout="rows"
-                            />
-                          </div>
+                          <div class="rollout-chart-title">Substep timing</div>
+                          <RunTimeline
+                            timings={{ [r.rollout_id]: runTimings[r.rollout_id] }}
+                            asyncOverride={timelineAsync}
+                            runOrigin={timelineRunOrigin}
+                            showOpenRollout={false}
+                            timelineKey={`${runId}:${r.rollout_id}`}
+                            downloadName={`substep_timing_${runId}_rollout_${r.rollout_id}.json`}
+                            rolloutIds={[r.rollout_id]}
+                            onOpenRollout={(id) => {
+                              selectTab("rollouts");
+                              if (expandedRolloutId !== id) void toggleRolloutDetail(id);
+                            }}
+                          />
                         </div>
                       {/if}
                       {#if expandedRollout.metrics && Object.keys(expandedRollout.metrics).length}
@@ -2006,4 +2183,3 @@
     {/if}
   {/if}
 </section>
-

@@ -17,7 +17,7 @@ config = TrainConfig(
         actor_num_nodes=1,
         actor_num_gpus_per_node=8,
         gpu_type="H100",
-        wandb=WandbConfig(project="my-project"),
+        metrics=WandbConfig(project="my-project"),
     ),
 )
 
@@ -41,7 +41,7 @@ either isn't cached yet, it runs those steps before training.
 launcher instructions, cluster topology, RL hyperparameters, and checkpointing.
 
 Every field on `SlimeRecipe` (except internal fields like `environment`, `async_mode`,
-`wandb`, `image_overlay`, etc.) is forwarded to slime as a CLI argument:
+`metrics`, `image_overlay`, etc.) is forwarded to slime as a CLI argument:
 `field_name` → `--field-name`.
 
 See `modal_training_gym/train_recipes/slime_recipe/recipe.py` for the full field list.
@@ -100,7 +100,11 @@ recipe = SlimeRecipe(
 
 ## Dev overlay
 
-To test local slime changes without rebuilding the image, set `local_slime`:
+To test a local slime checkout without rebuilding the base image, set
+`local_slime`. The overlay is used as-is; build-time patches are not reapplied,
+so include any required changes in the checkout. This also means the
+substep-timing patch is not applied automatically, and local runs will not
+produce substep timing unless the checkout includes the equivalent changes:
 
 ```python
 recipe = SlimeRecipe(

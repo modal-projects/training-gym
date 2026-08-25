@@ -174,12 +174,13 @@ class Endpoint:
         before creating. The default is ``False`` so existing callers keep a
         live endpoint.
 
+        Megatron training checkpoints are converted to Hugging Face format
+        before create. The conversion can take hours on large models, so we
+        skip if HF checkpoints are present.
+
         Returns once the endpoint has a URL, which may occur before it can serve
         traffic; call ``wait_until_ready()`` to wait for the model to become ready.
         Raises ``TimeoutError`` if no URL is published within ``wait_timeout_sec``.
-
-        Megatron training checkpoints are converted to Hugging Face format
-        before create.
         """
         if checkpoint:
             model_config = (

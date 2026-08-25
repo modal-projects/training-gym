@@ -1,6 +1,8 @@
 from collections.abc import Callable
 from dataclasses import field
-from typing import Any, ClassVar
+import re
+from typing import Any, ClassVar, Literal
+from urllib.parse import urlparse
 
 from modal_training_gym.train_recipes.base import (
     BaseTrainRecipe,
@@ -21,7 +23,7 @@ from modal_training_gym.common.models import (
     ModelConfig,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.wandb import WandbConfig
+from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.train_recipes.gpu_allocation import (
     validate_num_experts_divisible_by_expert_parallel_size,
     resolve_gpu_allocation,
@@ -36,13 +38,15 @@ _SLIME_SKIP = {
     "recipe_type",
     "environment",
     "async_mode",
-    "wandb",
+    "metrics",
     "name",
     "app_tags",
     "capture_trace",
     "trace_sample_limit",
     "image_overlay",
     "local_slime",
+    "slime_git_repository",
+    "slime_git_revision",
     "memory",
     "cloud",
     "region",
@@ -63,6 +67,7 @@ _SLIME_SKIP = {
     "image_run_commands",
     "image_env",
     "train_function_kwargs",
+    "substep_timing",
     "conversion_pipeline_model_parallel_size",
     "conversion_tensor_model_parallel_size",
     "conversion_expert_model_parallel_size",
@@ -77,7 +82,6 @@ _HOOK_PATH_CONFIG_KEYS = {
     "custom_megatron_before_log_prob_hook": "training_gym_custom_megatron_before_log_prob_hook_path",
     "custom_megatron_before_train_step_hook": "training_gym_custom_megatron_before_train_step_hook_path",
 }
-
 _HOOK_WRAPPER_PATHS = {
     "custom_rollout_log_function": "modal_training_gym.frameworks.slime.phase_reporting.log_rollout_data",
     "custom_eval_rollout_log_function": "modal_training_gym.frameworks.slime.phase_reporting.log_eval_rollout_data",
@@ -148,15 +152,22 @@ class SlimeRecipe(BaseTrainRecipe):
     async_mode : bool
         Run slime's ``train_async.py`` so rollout generation and training
         overlap (one-step off-policy) instead of alternating.
-    wandb : WandbConfig | None
-        W&B settings; expands to slime's ``--use-wandb``/``--wandb-project``/
-        ``--wandb-group`` flags.
+    metrics : MetricConfig | None
+        Metric tracker settings; expands to slime's W&B-compatible flags.
     image_overlay : Callable | None
         Callable that customizes the Modal image (e.g.
         ``lambda img: img.pip_install("pkg")``).
     local_slime : str | None
         Path to a local slime checkout mounted over the image's copy — dev
         overlay for testing slime changes without an image rebuild.
+    slime_git_repository : str | None
+        Public HTTPS Git repository to overlay onto the image's slime checkout.
+        Must be paired with ``slime_git_revision`` and is intended for
+        reproducible fork-backed runs. The selected source must remain compatible
+        with Training Gym's build-time Slime patches.
+    slime_git_revision : str | None
+        Full 40-character commit SHA fetched from ``slime_git_repository``.
+        Branches and tags are rejected because they can move between runs.
     memory : int | tuple[int, int] | None
         Modal Function memory request/limit in MiB.
     cloud : str | None
@@ -491,9 +502,11 @@ class SlimeRecipe(BaseTrainRecipe):
         }
     )
     async_mode: bool = False
-    wandb: WandbConfig | None = None
+    metrics: MetricConfig | None = None
     image_overlay: Callable[[modal.Image], modal.Image] | None = None
     local_slime: str | None = None
+    slime_git_repository: str | None = None
+    slime_git_revision: str | None = None
     memory: int | tuple[int, int] | None = None
     cloud: str | None = None
     region: str | None = None
@@ -504,6 +517,8 @@ class SlimeRecipe(BaseTrainRecipe):
     image_run_commands: list[str] = field(default_factory=list)
     image_env: dict[str, str] = field(default_factory=dict)
     train_function_kwargs: dict[str, Any] = field(default_factory=dict)
+
+    substep_timing: Literal["auto", "off"] = "auto"
 
     # ── Per-sample execution tracing (dashboard timeline) ───────────────────
     # When True, the rollout recorder attaches slime's per-sample trace (the
@@ -656,6 +671,35 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── Validators ───────────────────────────────────────────────────────────
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = frozenset(_SLIME_SKIP)
+
+    @model_validator(mode="after")
+    def _validate_slime_source_overlay(self) -> "SlimeRecipe":
+        repository = self.slime_git_repository
+        revision = self.slime_git_revision
+        if bool(repository) != bool(revision):
+            raise TrainingGymConfigError(
+                "slime_git_repository and slime_git_revision must be set together"
+            )
+        if self.local_slime and repository:
+            raise TrainingGymConfigError(
+                "local_slime and slime_git_repository are mutually exclusive"
+            )
+        if repository:
+            parsed = urlparse(repository)
+            if parsed.scheme != "https" or not parsed.netloc:
+                raise TrainingGymConfigError(
+                    "slime_git_repository must be a public HTTPS URL"
+                )
+            if parsed.username or parsed.password:
+                raise TrainingGymConfigError(
+                    "slime_git_repository must not contain credentials"
+                )
+            if not re.fullmatch(r"[0-9a-fA-F]{40}", revision or ""):
+                raise TrainingGymConfigError(
+                    "slime_git_revision must be a full 40-character commit SHA"
+                )
+            object.__setattr__(self, "slime_git_revision", revision.lower())
+        return self
 
     @model_validator(mode="after")
     def _resolve_callable_paths(self) -> "SlimeRecipe":
@@ -820,8 +864,8 @@ class SlimeRecipe(BaseTrainRecipe):
             self.validate_model_parallelism(model)
             if not self.slime_model_script:
                 fields.update(self._model_to_fields(model))
-        if self.wandb is not None:
-            fields.update(self._wandb_to_fields(self.wandb))
+        if self.metrics is not None:
+            fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)
         for src, dst in {
             "rollout_function": "rollout_function_path",
@@ -875,6 +919,9 @@ class SlimeRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b import (
             Qwen3_6_27b_Recipe,
         )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_8_27b import (
+            Qwen3_8_27b_Recipe,
+        )
         from modal_training_gym.train_recipes.slime_recipe.qwen3_asr_1_7b import (
             Qwen3_ASR_1_7b_Recipe,
         )
@@ -908,6 +955,8 @@ class SlimeRecipe(BaseTrainRecipe):
             return Qwen3_6_35b_Recipe()
         if model_config.model_name == "Qwen/Qwen3.6-27B":
             return Qwen3_6_27b_Recipe()
+        if model_config.model_name == "Qwen/Qwen3.8-27B":
+            return Qwen3_8_27b_Recipe()
         raise TrainingGymConfigError(
             f"no base slime recipe for model {model_config.model_name!r}"
         )

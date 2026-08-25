@@ -1,15 +1,14 @@
 ---
-title: Weights & Biases integration
-description: Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links.
-sidebar:
-  order: 2
+order: 2
 ---
+
+# Weights & Biases integration
 
 Every training recipe can stream its training curves — reward, KL,
 response lengths, learning rate, and the rest of the framework's metrics
 — to [Weights & Biases](https://wandb.ai). W&B logging is opt-in per run:
 pass a `WandbConfig` to the recipe to enable it, drop it to disable it.
-The [observability dashboard](/guides/tools/observability-dashboard/)
+The [observability dashboard](/guides/tools/observability-dashboard)
 records where each run logged and wires up an **Open in W&B** button on
 the run page, so the two views stay one click apart.
 
@@ -30,7 +29,7 @@ secret, set `WandbConfig(modal_wandb_secret_name="my-secret")`.
 
 ## Enable logging on a recipe
 
-Pass `wandb=WandbConfig(project="…")` to any training recipe:
+Pass `metrics=WandbConfig(project="…")` to any training recipe:
 
 ```python
 from modal_training_gym import Qwen3_5_4b_Recipe, TrainConfig, WandbConfig
@@ -41,7 +40,7 @@ training_run = TrainConfig(
     dataset=my_dataset,  # any DatasetConfig
     recipe=Qwen3_5_4b_Recipe(
         num_rollout=40,
-        wandb=WandbConfig(
+        metrics=WandbConfig(
             project="my-rl-project",
             group="lr-sweep",  # optional: organize related runs
         ),
@@ -60,7 +59,7 @@ The `WandbConfig` fields you'll actually use:
 | `disable_random_suffix` | On by default — keeps run names stable instead of letting W&B append a random suffix. |
 | `modal_wandb_secret_name` | Modal Secret to read `WANDB_API_KEY` from. Defaults to `"wandb-secret"`. |
 
-See the [`WandbConfig` reference](/reference/core/wandbconfig/) for the
+See the [`WandbConfig` reference](/reference/core/wandbconfig) for the
 full list.
 
 ## Fail fast: the W&B preflight
@@ -74,22 +73,22 @@ deleting) a probe run.
 
 If the key is missing, expired, or can't write to the project, the run
 fails immediately with an actionable error telling you which secret to
-fix — or to drop `wandb=` if you didn't want logging at all.
+fix — or to drop `metrics=` if you didn't want logging at all.
 
 ## How runs map to W&B runs
 
-Each training run gets an id like `tender-ranch-2275c004a3bf`; its W&B
-run id is the first 8 characters of that id, so runs are easy to
-correlate across the dashboard, W&B, and your terminal:
+Each training run gets an id like `tender-ranch-2275c004a3bf`, and that id
+is its W&B run id, so runs are easy to correlate across the dashboard,
+W&B, and your terminal:
 
-- First attempt → W&B run id `<first 8 chars of the run id>`.
+- First attempt → W&B run id `tender-ranch-2275c004a3bf`.
 - If a run is **preempted and retried**, attempt *N* logs to
-  `<first-8>-aN` with resume enabled, so each attempt's curves stay
-  separate but linked.
+  `tender-ranch-2275c004a3bf-aN` with resume enabled, so each attempt's
+  curves stay separate but linked.
 
 The dashboard records the entity, project, group, and run id for every
 attempt — the **W&B** button on a run's detail page (see the
-[dashboard guide](/guides/tools/observability-dashboard/)) jumps
+[dashboard guide](/guides/tools/observability-dashboard)) jumps
 straight to the matching W&B run.
 
 ## Sweeps
@@ -97,19 +96,10 @@ straight to the matching W&B run.
 When launching variants with `TrainingGroup`, give them a shared
 `group=` so W&B overlays their reward curves in its Group view. The
 sweep grid can also override W&B fields per variant via dotted paths
-(e.g. `"recipe.wandb.group"`), just like any other recipe field.
+(e.g. `"recipe.metrics.group"`), just like any other recipe field.
 
 ## Disabling logging
 
-W&B is entirely opt-in: omit `wandb=` from the recipe and nothing is
+W&B is entirely opt-in: omit `metrics=` from the recipe and nothing is
 logged, no secret is required, and no preflight runs. Training metrics
 are still captured by the observability dashboard either way.
-
----
-
-## Related API Reference
-
-- [`WandbConfig`](/reference/core/wandbconfig/)
-- [`TrainConfig`](/reference/training/trainconfig/)
-- [`SlimeRecipe`](/reference/training/slimerecipe/)
-- [`TrainingGroup`](/reference/training/traininggroup/)

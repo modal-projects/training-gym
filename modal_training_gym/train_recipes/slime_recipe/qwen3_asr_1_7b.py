@@ -52,7 +52,7 @@ class Qwen3_ASR_1_7b_Recipe(SlimeRecipe):
 
     Carries the ASR-specific defaults so a user only sets the reward (and W&B):
 
-      recipe = Qwen3_ASR_1_7b_Recipe(custom_rm_function=word_error_rate_reward, wandb=...)
+      recipe = Qwen3_ASR_1_7b_Recipe(custom_rm_function=word_error_rate_reward, metrics=...)
 
     What's baked in and why:
 

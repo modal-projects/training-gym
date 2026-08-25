@@ -63,10 +63,24 @@ def cache_control_value(path: str, content_type: str) -> str | None:
 def serve():
     from fastapi import FastAPI, Request, Response
     from fastapi.middleware.gzip import GZipMiddleware
+    from fastapi.responses import RedirectResponse
     from fastapi.staticfiles import StaticFiles
 
     web = FastAPI()
     web.add_middleware(GZipMiddleware, minimum_size=500)
+    dist = Path(REMOTE_DIST)
+
+    @web.middleware("http")
+    async def directory_index_without_slash(request: Request, call_next):
+        path = request.url.path
+        if path != "/" and path.endswith("/"):
+            target = path.rstrip("/") or "/"
+            query = request.url.query
+            location = f"{target}?{query}" if query else target
+            return RedirectResponse(url=location, status_code=301)
+        if path != "/" and (dist / path.lstrip("/") / "index.html").is_file():
+            request.scope["path"] = f"{path}/"
+        return await call_next(request)
 
     @web.middleware("http")
     async def cache_control(request: Request, call_next):

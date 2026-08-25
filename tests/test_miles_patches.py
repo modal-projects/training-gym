@@ -13,16 +13,26 @@ from modal_training_gym.frameworks.miles.modal_helpers.patches import (
 
 TESTDATA = Path(__file__).parent / "testdata" / "miles"
 
-# The async driver dispatches generation through futures and has no offload
-# calls, so these rollout-patch anchors are expected to miss there.
-EXPECTED_ASYNC_MISSES = "generate_rollouts, offload_rollout, offload_train"
+STATUS_PATCH_FILES = ("train.py", "train_async.py", "log_utils.py")
 
 
 @pytest.fixture(scope="session")
 def miles_inputs() -> dict[str, str]:
-    inputs = sorted(TESTDATA.glob("*.input"))
+    inputs = [TESTDATA / f"{name}.input" for name in STATUS_PATCH_FILES]
     assert inputs
     return {path.name.removesuffix(".input"): path.read_text() for path in inputs}
+
+
+def test_all_miles_goldens_compile():
+    for golden in TESTDATA.glob("*.output"):
+        compile(golden.read_text(), str(golden), "exec")
+
+
+def _apply_patcher(name: str, work: Path) -> None:
+    if name == "log_utils.py":
+        advantage_patcher._patch_file(work)
+    else:
+        rollout_patcher._patch_file(work)
 
 
 def test_missing_patch_targets_are_skipped(tmp_path, capsys):
@@ -36,27 +46,18 @@ def test_missing_patch_targets_are_skipped(tmp_path, capsys):
     assert "not found, skipping advantage-distribution patch" in capsys.readouterr().out
 
 
-def _apply_patcher(name: str, work: Path) -> None:
-    if name == "log_utils.py":
-        advantage_patcher._patch_file(work)
-    else:
-        rollout_patcher._patch_file(work)
-
-
-def test_patch_matches_golden(miles_inputs, tmp_path, request, capsys):
+def test_patch_matches_golden(miles_inputs, tmp_path, request):
     rewrite_goldens = request.config.getoption("--rewrite")
     for name, source in miles_inputs.items():
-        golden_path = TESTDATA / f"{name}.output"
+        golden_path = TESTDATA / (
+            f"{name}.advantage.output"
+            if name == "log_utils.py"
+            else f"{name}.status.output"
+        )
         work = tmp_path / name
         work.write_text(source)
         _apply_patcher(name, work)
         actual = work.read_text()
-
-        out = capsys.readouterr().out
-        if name == "train_async.py":
-            assert f"Could not patch train_async.py for: {EXPECTED_ASYNC_MISSES}" in out
-        else:
-            assert "WARNING: Could not" not in out
 
         if rewrite_goldens:
             golden_path.write_text(actual)

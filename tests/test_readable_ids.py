@@ -103,3 +103,38 @@ def test_train_config_can_skip_model_recipe_merge() -> None:
     )._build_config_summary("brisk-river-deadbeef")
     assert unmerged["recipe"]["n_samples_per_prompt"] == 2
     assert unmerged["recipe"]["lr"] == 1e-6
+
+
+def test_the_metric_run_id_is_the_whole_training_run_id() -> None:
+    """The same id is exported as WANDB_RUN_ID and recorded for the dashboard's
+    deep link, so the producer and the record have to agree on it, and it has to
+    stay distinguishing: WANDB_RESUME=allow turns a repeat into a resume of the
+    earlier run rather than a new one."""
+    from modal_training_gym.common.run import metric_run_id_for_attempt
+    from modal_training_gym.common.wandb import WandbConfig
+
+    run_id = "electric-batter-6362579afd91"
+    assert metric_run_id_for_attempt(run_id, 1) == run_id
+    assert metric_run_id_for_attempt(run_id, 3) == f"{run_id}-a3"
+
+    summary = TrainConfig(
+        dataset=HuggingFaceDataset(
+            hf_repo="some/dataset", input_column="prompt", output_column="answer"
+        ),
+        model=Qwen3_4B(),
+        recipe=SlimeRecipe(
+            gpu_type="H100",
+            colocate=True,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,
+            rollout_num_gpus_per_engine=1,
+            num_rollout=1,
+            rollout_batch_size=16,
+            rollout_max_response_len=4096,
+            rollout_temperature=1.0,
+            save_interval=10,
+            metrics=WandbConfig(project="p", entity="e"),
+        ),
+    )._build_config_summary(run_id)
+
+    assert summary["metrics"]["run_id"] == run_id
