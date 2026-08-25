@@ -214,6 +214,14 @@ def get_checkpoint_conversion_policy(
             "Megatron otherwise defaults ETP to TP and the expert world size no "
             "longer matches tp*pp"
         )
+    if ep and etp and not (tp > 1 or pp > 1):
+        raise ValueError(
+            "checkpoint conversion expert parallelism needs a pinned conversion "
+            "layout: set conversion_tensor_model_parallel_size or "
+            "conversion_pipeline_model_parallel_size, otherwise the converter "
+            "inflates PP to the rank count and the expert world size no longer "
+            "divides it"
+        )
     if single_rank_mtp and tp == 1 and pp == 1 and getattr(cfg, "mtp_num_layers", 0):
         world_size = 1
     else:
