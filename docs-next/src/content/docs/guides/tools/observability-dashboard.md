@@ -1,9 +1,8 @@
 ---
-title: The observability dashboard
-description: Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings.
-sidebar:
-  order: 1
+order: 1
 ---
+
+# The observability dashboard
 
 Every training run and eval launched through
 `modal-training-gym` writes metadata to a shared Modal Volume. The

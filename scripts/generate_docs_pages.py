@@ -5,7 +5,6 @@ import os
 import posixpath
 import re
 import subprocess
-import textwrap
 from pathlib import Path, PurePosixPath
 
 REPO_URL = "https://github.com/modal-projects/training-gym"
@@ -171,15 +170,6 @@ def rewrite_html_image_sources(markdown: str, *, source_dir: PurePosixPath) -> s
     return HTML_IMAGE_SRC.sub(replace, markdown)
 
 
-def strip_first_heading(markdown: str) -> str:
-    lines = markdown.splitlines()
-    if lines and lines[0].startswith("# "):
-        lines = lines[1:]
-        while lines and not lines[0].strip():
-            lines = lines[1:]
-    return "\n".join(lines).strip() + "\n"
-
-
 def strip_developer_guide(markdown: str) -> str:
     """Drop the trailing `# Developer Guide` section (and its preceding `---`).
 
@@ -209,26 +199,10 @@ def transform_markdown(
     page = convert_github_callouts(page)
     page = rewrite_images(page, source_dir=source_dir)
     page = rewrite_html_image_sources(page, source_dir=source_dir)
-    page = rewrite_links(
+    return rewrite_links(
         page,
         source_dir=source_dir,
         home_link=home_link,
-    )
-    return strip_first_heading(page)
-
-
-def starlight_frontmatter() -> str:
-    return textwrap.dedent(
-        """\
-        ---
-        title: Training Gym SDK
-        description: Open-source Python SDK for GRPO and RL post-training of LLMs on Modal.
-        next: false
-        tableOfContents:
-          minHeadingLevel: 2
-          maxHeadingLevel: 2
-        ---
-        """
     )
 
 
@@ -250,7 +224,7 @@ def generate_starlight(output_dir: Path) -> None:
         )
         output_path = output_dir / destination
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(starlight_frontmatter() + "\n" + content)
+        output_path.write_text("---\norder: 0\n---\n\n" + content)
 
 
 def parse_args() -> argparse.Namespace:

@@ -1,7 +1,8 @@
 ---
-title: CLI Reference
-description: Command-line interface for the Training Gym SDK.
+order: 1
 ---
+
+# CLI Reference
 
 The `training-gym` CLI is installed automatically with the package.
 

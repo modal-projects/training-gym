@@ -8,6 +8,7 @@ export const collections = {
     loader: tutorialDocsLoader(),
     schema: docsSchema({
       extend: z.object({
+        order: z.number(),
         runCommand: z.string().optional(),
       }),
     }),

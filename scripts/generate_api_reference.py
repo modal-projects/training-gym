@@ -103,30 +103,25 @@ def _rst_to_md(text: str) -> str:
     return re.sub(r"``(.*?)``", r"`\1`", text)
 
 
-def _seo_description(cls: type, class_name: str) -> str:
-    """Extract first sentence of docstring for SEO meta description."""
-    doc = inspect.getdoc(cls) or ""
-    if not doc:
-        return f"API reference for {class_name}"
-    first_para = doc.split("\n\n")[0].replace("\n", " ").strip()
-    first_para = re.sub(r"``(.*?)``", r"\1", first_para)
-    period = first_para.find(". ")
-    if period != -1:
-        first_para = first_para[: period + 1]
-    elif not first_para.endswith("."):
-        first_para += "."
-    if len(first_para) > 160:
-        first_para = first_para[:157] + "..."
-    return first_para
+def _orders_within_group() -> dict[str, int]:
+    next_order: dict[str, int] = {}
+    orders: dict[str, int] = {}
+    for entry in API_REFERENCE_MANIFEST:
+        group = entry["group"]
+        orders[entry["class_name"]] = next_order.get(group, 0)
+        next_order[group] = next_order.get(group, 0) + 1
+    return orders
 
 
-def _yaml_quote(value: str) -> str:
-    """Render a string as a safe single-quoted YAML scalar.
-
-    Doubles embedded single quotes so apostrophes (e.g. "run's") don't
-    prematurely terminate the quoted scalar and break frontmatter parsing.
-    """
-    return "'" + value.replace("'", "''") + "'"
+def _page_heading(order: int, title: str) -> list[str]:
+    return [
+        "---",
+        f"order: {order}",
+        "---",
+        "",
+        f"# {title}",
+        "",
+    ]
 
 
 def _format_type(type_hint: Any) -> str:
@@ -274,7 +269,7 @@ def _render_field_table(
     return lines
 
 
-def _page_preamble(cls: type, entry: dict) -> list[str]:
+def _page_preamble(cls: type, entry: dict, order: int) -> list[str]:
     """Shared page opening: frontmatter, import block, summary, inheritance."""
     docstring = inspect.getdoc(cls) or ""
     # Render all intro prose before the first section header.  Section
@@ -305,11 +300,7 @@ def _page_preamble(cls: type, entry: dict) -> list[str]:
     module_path = entry["module"]
 
     lines = [
-        "---",
-        f"title: {_yaml_quote(entry['sidebar_label'])}",
-        f"description: {_yaml_quote(_seo_description(cls, entry['class_name']))}",
-        "---",
-        "",
+        *_page_heading(order, entry["sidebar_label"]),
         "```python",
         f"from {module_path} import {entry['class_name']}",
         "```",
@@ -384,13 +375,13 @@ def _get_methods(cls: type) -> list[tuple[str, str, str]]:
     return methods
 
 
-def generate_config_data_page(cls: type, entry: dict) -> str:
+def generate_config_data_page(cls: type, entry: dict, order: int) -> str:
     """Generate markdown for a config/data class."""
     attrs = _get_class_attrs(cls)
     field_docs = _extract_field_docs_from_mro(cls)
     groups = _parse_docstring_groups_from_mro(cls)
 
-    lines = _page_preamble(cls, entry)
+    lines = _page_preamble(cls, entry, order)
 
     if not attrs:
         return "\n".join(lines)
@@ -437,9 +428,9 @@ def generate_config_data_page(cls: type, entry: dict) -> str:
     return "\n".join(lines)
 
 
-def generate_behavior_page(cls: type, entry: dict) -> str:
+def generate_behavior_page(cls: type, entry: dict, order: int) -> str:
     """Generate markdown for a behavior class."""
-    lines = _page_preamble(cls, entry)
+    lines = _page_preamble(cls, entry, order)
 
     init = getattr(cls, "__init__", None)
     if init:
@@ -502,10 +493,7 @@ def generate_behavior_page(cls: type, entry: dict) -> str:
 def generate_index_page(manifest: list[dict]) -> str:
     """Generate the API reference index page."""
     lines = [
-        "---",
-        "title: Reference",
-        "pagefind: false",
-        "---",
+        *_page_heading(0, "Reference"),
     ]
 
     for group_key, group_info in sorted(GROUPS.items(), key=lambda x: x[1]["order"]):
@@ -555,6 +543,7 @@ def main() -> None:
 
     errors = []
     generated = 0
+    orders = _orders_within_group()
 
     for entry in API_REFERENCE_MANIFEST:
         try:
@@ -564,8 +553,9 @@ def main() -> None:
             errors.append(f"ERROR: {entry['class_name']} ({entry['module']}): {e}")
             continue
 
+        order = orders[entry["class_name"]]
         if entry["class_type"] == "config_data":
-            content = generate_config_data_page(cls, entry)
+            content = generate_config_data_page(cls, entry, order)
         elif not isinstance(cls, type):
             doc = inspect.getdoc(cls) or ""
             sig_str = ""
@@ -573,32 +563,15 @@ def main() -> None:
                 sig_str = f"`{entry['class_name']}{inspect.signature(cls)}`"
             except (ValueError, TypeError):
                 pass
-            first_sentence = ""
-            if doc:
-                para = doc.split("\n\n")[0].replace("\n", " ").strip()
-                para = re.sub(r"``(.*?)``", r"\1", para)
-                dot = para.find(". ")
-                if dot != -1:
-                    first_sentence = para[: dot + 1]
-                else:
-                    first_sentence = para if para.endswith(".") else para + "."
-            desc = first_sentence or f"API reference for {entry['class_name']}"
-            lines = [
-                "---",
-                f"title: {_yaml_quote(entry.get('sidebar_label', entry['class_name']))}",
-                f"description: {_yaml_quote(desc)}",
-                "---",
-                "",
-                f"# `{entry['class_name']}`",
-                "",
-            ]
+            title = entry.get("sidebar_label", entry["class_name"])
+            lines = _page_heading(order, title)
             if sig_str:
                 lines += [sig_str, ""]
             if doc:
                 lines += [doc, ""]
             content = "\n".join(lines) + "\n"
         else:
-            content = generate_behavior_page(cls, entry)
+            content = generate_behavior_page(cls, entry, order)
 
         group_dir = output_dir / entry["group"]
         group_dir.mkdir(parents=True, exist_ok=True)

@@ -7,11 +7,22 @@ import starlight from '@astrojs/starlight';
 import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
-import { parseTutorialMetadata } from './src/lib/tutorial-metadata.js';
+import { parseTutorialMetadata } from './src/lib/tutorial-docs-loader.ts';
 
 const configDirectory = path.dirname(fileURLToPath(import.meta.url));
 
-function firstTutorialPath() {
+function remarkStripPageTitle() {
+  return (/** @type {{ children: Array<{ type: string, depth?: number }> }} */ tree) => {
+    const index = tree.children.findIndex(
+      (node) => node.type === 'heading' && node.depth === 1,
+    );
+    if (index !== -1) {
+      tree.children.splice(index, 1);
+    }
+  };
+}
+
+function loadTutorialPages() {
   const tutorialsDirectory = path.resolve(configDirectory, '../tutorials');
   const tutorials = readdirSync(tutorialsDirectory)
     .filter((fileName) => fileName.endsWith('.py'))
@@ -25,7 +36,7 @@ function firstTutorialPath() {
   if (!tutorials[0]) {
     throw new Error('No tutorial pages found');
   }
-  return `/tutorials/${tutorials[0].slug}`;
+  return tutorials;
 }
 
 function firstGuidePath() {
@@ -37,9 +48,9 @@ function firstGuidePath() {
       const source = readFileSync(guidePath, 'utf8');
       const frontmatterEnd = source.indexOf('\n---', 4);
       const frontmatter = frontmatterEnd === -1 ? '' : source.slice(4, frontmatterEnd);
-      const orderMatch = frontmatter.match(/^\s+order:\s*(\d+)\s*$/m);
+      const orderMatch = frontmatter.match(/^order:\s*(\d+)\s*$/m);
       if (!orderMatch) {
-        throw new Error(`${guidePath} is missing sidebar order`);
+        throw new Error(`${guidePath} is missing order`);
       }
       const slug = fileName
         .replaceAll(path.sep, '/')
@@ -53,7 +64,8 @@ function firstGuidePath() {
   return `/guides/${guides[0].slug}`;
 }
 
-const firstTutorial = firstTutorialPath();
+const tutorialPages = loadTutorialPages();
+const firstTutorial = `/tutorials/${tutorialPages[0].slug}`;
 const firstGuide = firstGuidePath();
 
 export default defineConfig({
@@ -81,7 +93,7 @@ export default defineConfig({
     '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration',
   },
   markdown: {
-    remarkPlugins: [remarkMath],
+    remarkPlugins: [remarkMath, remarkStripPageTitle],
     rehypePlugins: [rehypeKatex, rehypeTableWrapper],
   },
   site: 'https://gym.modal.dev',
@@ -211,7 +223,7 @@ export default defineConfig({
           items: [
             {
               label: 'Featured',
-              autogenerate: { directory: 'tutorials' },
+              items: tutorialPages.map(({ slug }) => ({ slug: `tutorials/${slug}` })),
             },
           ],
         },

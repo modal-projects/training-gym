@@ -21,8 +21,8 @@ Repo: https://github.com/modal-projects/training-gym
 
 ## Guides
 
-- [The observability dashboard](https://gym.modal.dev/guides/tools/observability-dashboard): Deploy and use the observability dashboard — track runs, inspect rollouts, and profile step timings.
-- [Weights & Biases integration](https://gym.modal.dev/guides/tools/wandb-integration): Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links.
+- [The observability dashboard](https://gym.modal.dev/guides/tools/observability-dashboard)
+- [Weights & Biases integration](https://gym.modal.dev/guides/tools/wandb-integration)
 
 ## Tutorials
 

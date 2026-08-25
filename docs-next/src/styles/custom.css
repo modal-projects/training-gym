@@ -462,6 +462,16 @@ nav.tg-toc .tg-toc__list .tg-toc__list a {
   scrollbar-width: none;
 }
 
+.sl-markdown-content .expressive-code pre[data-language='txt'] {
+  overflow-x: visible;
+}
+
+.sl-markdown-content .expressive-code pre[data-language='txt'] .ec-line .code {
+  min-width: min(20ch, var(--ecMaxLine, 20ch));
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
+
 .expressive-code pre::-webkit-scrollbar {
   display: none;
 }
@@ -1254,18 +1264,6 @@ dialog {
     line-height: 1.25rem;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  #starlight__sidebar .tg-tutorial-sidebar:not(.is-reference)
-    > li:has(.tg-tutorial-sidebar__item):not(:has(.active)) {
-    display: none;
-  }
-
-  #starlight__sidebar .tg-tutorial-sidebar:not(.is-reference) > li:has(.active) > :is(
-      .tg-tutorial-sidebar__header,
-      .tg-tutorial-sidebar__item
-    ) {
-    border-inline-start-color: var(--sl-color-accent);
   }
 
   #starlight__sidebar .tg-tutorial-sidebar > li > .tg-tutorial-sidebar__item.active {

@@ -5,86 +5,11 @@ import { docsLoader } from '@astrojs/starlight/loaders';
 import type { Loader, LoaderContext } from 'astro/loaders';
 
 const TUTORIAL_ENTRY_PREFIX = 'tutorials/';
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const tutorialsDirectory = path.join(repoRoot, 'tutorials');
-const pyprojectPath = path.join(repoRoot, 'pyproject.toml');
 const frontmatterFieldPattern = /^# ([a-z_]+):\s*(.*)$/;
 const dependencyPattern = /^[A-Za-z0-9_.-]+$/;
 
-export interface Tutorial {
-  path: string;
-  slug: string;
-  order: number;
-  title: string;
-  body: string;
-  runCommand: string;
-}
-
-function markdownFromComments(lines: string[]): string {
-  return lines
-    .map((line) => (line === '#' ? '' : line.slice(2)))
-    .join('\n')
-    .trim();
-}
-
-function renderBody(source: string, tutorialPath: string): { title: string; body: string } {
-  const lines = source.split('\n');
-  const blocks: Array<{ kind: 'markdown' | 'code'; content: string }> = [];
-  let index = 0;
-
-  while (index < lines.length) {
-    const isMarkdown = lines[index] === '#' || lines[index].startsWith('# ');
-    const start = index;
-    while (
-      index < lines.length &&
-      (lines[index] === '#' || lines[index].startsWith('# ')) === isMarkdown
-    ) {
-      index += 1;
-    }
-    const blockLines = lines.slice(start, index);
-    const content = isMarkdown
-      ? markdownFromComments(blockLines)
-      : blockLines.join('\n').trim();
-    if (content) {
-      blocks.push({ kind: isMarkdown ? 'markdown' : 'code', content });
-    }
-  }
-
-  const titleLine = blocks
-    .filter((block) => block.kind === 'markdown')
-    .flatMap((block) => block.content.split('\n'))
-    .find((line) => line.startsWith('# '));
-  if (!titleLine) {
-    throw new Error(`${tutorialPath} is missing an H1 heading`);
-  }
-  const title = titleLine.slice(2).trim();
-  let removedTitle = false;
-  const body = blocks
-    .map((block) => {
-      if (block.kind === 'code') {
-        return `\`\`\`python\n${block.content}\n\`\`\``;
-      }
-      if (!removedTitle && block.content.split('\n').includes(titleLine)) {
-        removedTitle = true;
-        return block.content
-          .split('\n')
-          .filter((line) => line !== titleLine)
-          .join('\n')
-          .trim();
-      }
-      return block.content;
-    })
-    .filter(Boolean)
-    .join('\n\n');
-
-  return { title, body };
-}
-
-function parseFrontmatter(
-  source: string,
-  tutorialPath: string,
-): { order: number; deps: string[]; content: string } {
-  const lines = source.split('\n');
+export function parseTutorialMetadata(source: string, tutorialPath: string) {
+  const lines = source.split(/\r?\n/);
   if (lines[0] !== '# ---') {
     throw new Error(`${tutorialPath} must start with tutorial frontmatter`);
   }
@@ -113,6 +38,11 @@ function parseFrontmatter(
   if (!orderText || !/^\d+$/.test(orderText)) {
     throw new Error(`${tutorialPath} frontmatter requires a non-negative integer order`);
   }
+  const order = Number(orderText);
+  if (!Number.isSafeInteger(order)) {
+    throw new Error(`${tutorialPath} frontmatter order exceeds the safe integer range`);
+  }
+
   const deps = (fields.get('deps') ?? '')
     .split(',')
     .map((dependency) => dependency.trim())
@@ -125,10 +55,123 @@ function parseFrontmatter(
     throw new Error(`${tutorialPath} has invalid frontmatter deps: ${invalidDeps.join(', ')}`);
   }
 
+  const contentLines = lines.slice(frontmatterEnd + 1);
+  const titleLine = contentLines.find((line) => line.startsWith('# # '));
+  if (!titleLine) {
+    throw new Error(`${tutorialPath} is missing an H1 heading`);
+  }
+
   return {
-    order: Number(orderText),
+    order,
+    title: titleLine.slice(4).trim(),
     deps,
-    content: lines.slice(frontmatterEnd + 1).join('\n'),
+    content: contentLines.join('\n'),
+  };
+}
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const tutorialsDirectory = path.join(repoRoot, 'tutorials');
+const pyprojectPath = path.join(repoRoot, 'pyproject.toml');
+
+export interface Tutorial {
+  path: string;
+  slug: string;
+  order: number;
+  title: string;
+  body: string;
+  runCommand: string;
+  deps: string[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function firstHeading(source: string): string | undefined {
+  let body = source;
+  if (body.startsWith('---')) {
+    const frontmatterEnd = body.indexOf('\n---', 3);
+    if (frontmatterEnd !== -1) {
+      const afterFence = body.indexOf('\n', frontmatterEnd + 4);
+      body = afterFence === -1 ? '' : body.slice(afterFence + 1);
+    }
+  }
+  for (const line of body.split('\n')) {
+    if (line.startsWith('# ')) {
+      return line.slice(2).trim();
+    }
+  }
+  return undefined;
+}
+
+function markdownFromComments(lines: string[]): string {
+  return lines
+    .map((line) => (line === '#' ? '' : line.slice(2)))
+    .join('\n')
+    .trim();
+}
+
+function renderBody(source: string): string {
+  const lines = source.split('\n');
+  const blocks: Array<{ kind: 'markdown' | 'code'; content: string }> = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const isMarkdown = lines[index] === '#' || lines[index].startsWith('# ');
+    const start = index;
+    while (
+      index < lines.length &&
+      (lines[index] === '#' || lines[index].startsWith('# ')) === isMarkdown
+    ) {
+      index += 1;
+    }
+    const blockLines = lines.slice(start, index);
+    const content = isMarkdown
+      ? markdownFromComments(blockLines)
+      : blockLines.join('\n').trim();
+    if (content) {
+      blocks.push({ kind: isMarkdown ? 'markdown' : 'code', content });
+    }
+  }
+
+  return blocks
+    .map((block) => {
+      if (block.kind === 'code') {
+        return `\`\`\`python\n${block.content}\n\`\`\``;
+      }
+      return block.content;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function resolveContentFile(filePath: string, root: URL): string {
+  return path.isAbsolute(filePath) ? filePath : path.join(fileURLToPath(root), filePath);
+}
+
+async function derivedMarkdownData(
+  id: string,
+  data: Record<string, unknown>,
+  filePath: string | undefined,
+  root: URL,
+): Promise<Record<string, unknown>> {
+  if (typeof data.order !== 'number' || !Number.isInteger(data.order)) {
+    throw new Error(`${id} frontmatter requires an integer order`);
+  }
+  if (!filePath) {
+    throw new Error(`${id} is missing a file path`);
+  }
+  const title = firstHeading(await readFile(resolveContentFile(filePath, root), 'utf8'));
+  if (!title) {
+    throw new Error(`${id} is missing an H1 heading`);
+  }
+  return {
+    ...data,
+    title,
+    sidebar: {
+      ...(isRecord(data.sidebar) ? data.sidebar : {}),
+      order: data.order,
+    },
   };
 }
 
@@ -142,16 +185,16 @@ function formatRunCommand(slug: string, extras: string[]): string {
 async function readTutorial(fileName: string): Promise<Tutorial> {
   const tutorialPath = path.join(tutorialsDirectory, fileName);
   const source = await readFile(tutorialPath, 'utf8');
-  const { order, deps, content } = parseFrontmatter(source, tutorialPath);
+  const { order, title, deps, content } = parseTutorialMetadata(source, tutorialPath);
   const slug = path.basename(fileName, '.py');
-  const { title, body } = renderBody(content, tutorialPath);
   return {
     path: tutorialPath,
     slug,
     order,
     title,
-    body,
+    body: renderBody(content),
     runCommand: formatRunCommand(slug, deps),
+    deps,
   };
 }
 
@@ -182,7 +225,7 @@ async function storeEntry(
     data: parsedData,
     body,
     filePath,
-    digest: context.generateDigest(body),
+    digest: context.generateDigest(JSON.stringify({ body, data })),
     rendered: await context.renderMarkdown(body),
   });
 }
@@ -202,8 +245,8 @@ export function tutorialDocsLoader(): Loader {
         id,
         {
           title: tutorial.title,
+          order: tutorial.order,
           sidebar: { order: tutorial.order },
-          next: tutorial.order === tutorials.length - 1 ? false : undefined,
           runCommand: tutorial.runCommand,
         },
         tutorial.body,
@@ -221,6 +264,18 @@ export function tutorialDocsLoader(): Loader {
   return {
     name: 'training-gym-tutorial-docs-loader',
     async load(context) {
+      const parseData = context.parseData.bind(context);
+      context.parseData = async (args) => {
+        if (!args.id.startsWith(TUTORIAL_ENTRY_PREFIX)) {
+          args.data = (await derivedMarkdownData(
+            args.id,
+            args.data,
+            args.filePath,
+            context.config.root,
+          )) as typeof args.data;
+        }
+        return parseData(args);
+      };
       await starlightDocsLoader.load(context);
       await syncTutorialEntries(context);
 

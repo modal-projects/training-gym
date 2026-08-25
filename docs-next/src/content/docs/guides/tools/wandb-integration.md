@@ -1,9 +1,8 @@
 ---
-title: Weights & Biases integration
-description: Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links.
-sidebar:
-  order: 2
+order: 2
 ---
+
+# Weights & Biases integration
 
 Every training recipe can stream its training curves — reward, KL,
 response lengths, learning rate, and the rest of the framework's metrics
