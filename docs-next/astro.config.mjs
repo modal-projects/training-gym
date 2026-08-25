@@ -212,7 +212,6 @@ export default defineConfig({
         {
           label: 'Guides',
           items: [
-            { label: 'Agent-driven training', link: '/guides/agent-driven-training' },
             {
               label: 'Tools',
               autogenerate: { directory: 'guides/tools' },

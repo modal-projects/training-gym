@@ -45,7 +45,7 @@ image = (
 app = modal.App("training-gym-docs", image=image)
 
 _DIRECTORY_REDIRECTS = {
-    "/guides": "/guides/tools/observability-dashboard",
+    "/guides": "/guides/tools/agent-driven-training",
     "/tutorials": "/tutorials/rl_basics",
 }
 
