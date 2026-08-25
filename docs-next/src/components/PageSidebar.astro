@@ -2,12 +2,11 @@
 import { Code } from 'astro-expressive-code/components';
 import MobileTableOfContents from '@astrojs/starlight/components/MobileTableOfContents.astro';
 import TableOfContents from '@astrojs/starlight/components/TableOfContents.astro';
-import { isTutorialPage } from '../lib/tutorial-page';
 
 const { toc, entry } = Astro.locals.starlightRoute;
 const runCommand =
   typeof entry.data.runCommand === 'string' ? entry.data.runCommand : '';
-const isTutorial = isTutorialPage(entry.id);
+const isTutorial = entry.id.replace(/^\/+/, '').startsWith('tutorials/');
 const showTutorialCta = isTutorial && Boolean(runCommand);
 const showDefaultCta = Boolean(toc) && !isTutorial;
 const commands = showTutorialCta

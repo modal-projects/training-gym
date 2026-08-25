@@ -1,11 +1,15 @@
 ---
 import CopyPageDropdown from './CopyPageDropdown.astro';
-import { isTutorialPage, tutorialGithubUrl } from '../lib/tutorial-page';
 
 const { entry } = Astro.locals.starlightRoute;
 const pageUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
-const showGithub = isTutorialPage(entry.id);
-const githubHref = showGithub ? tutorialGithubUrl(entry.id) : '';
+const tutorialSlug = entry.id.replace(/^\/+/, '').startsWith('tutorials/')
+  ? entry.id.replace(/^\/+/, '').slice('tutorials/'.length)
+  : '';
+const showGithub = Boolean(tutorialSlug);
+const githubHref = showGithub
+  ? `https://github.com/modal-projects/training-gym/blob/main/tutorials/${tutorialSlug}.py`
+  : '';
 
 const bodyMarkdown = typeof entry.body === 'string' ? entry.body.trim() : '';
 const markdownSource = bodyMarkdown ? `${bodyMarkdown}\n` : '';

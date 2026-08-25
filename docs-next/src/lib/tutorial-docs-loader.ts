@@ -3,8 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import type { Loader, LoaderContext } from 'astro/loaders';
-import { TUTORIAL_ENTRY_PREFIX } from './tutorial-page';
 
+const TUTORIAL_ENTRY_PREFIX = 'tutorials/';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const tutorialsDirectory = path.join(repoRoot, 'tutorials');
 const pyprojectPath = path.join(repoRoot, 'pyproject.toml');
