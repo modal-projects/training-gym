@@ -1,0 +1,608 @@
+"""Eye-illustration RL task: dataset, renderer sandbox, judge, reward.
+
+The model writes a p5.js + p5.brush sketch that draws an eye. The sketch is
+rendered to a PNG in a Modal Sandbox (node + headless chromium), the PNG is
+judged by a VLM endpoint, and the rendered image is attached to
+``sample.metadata["image"]`` so it shows up in the Training Gym dashboard.
+"""
+
+from __future__ import annotations
+
+import base64
+import itertools
+import json
+import os
+import random
+import re
+
+import modal
+
+from modal_training_gym import Qwen3_5_4B
+from modal_training_gym.common.dataset import DatasetConfig
+
+base_model = Qwen3_5_4B()
+
+# ── Prompt grammar ───────────────────────────────────────────────────────
+
+SUBJECTS = [
+    "a human eye",
+    "a cat's eye",
+    "an owl's eye",
+    "a dragon's eye",
+    "a robot's mechanical eye",
+    "an elderly person's eye",
+    "a child's wide-open eye",
+    "a reptile's eye with a slit pupil",
+]
+IRIS_COLORS = ["amber", "emerald green", "ice blue", "deep brown", "violet", "golden"]
+STYLES = [
+    "loose ink sketch",
+    "soft watercolor wash",
+    "bold marker illustration",
+    "delicate pencil-hatched drawing",
+    "vivid expressive painting",
+]
+
+SYSTEM_PROMPT = """\
+You write p5.js sketches that use the p5.brush library to make hand-drawn-looking illustrations.
+
+Rules:
+- Reply with a single ```javascript code fence containing a complete sketch and nothing else.
+- Define exactly one function: `function setup() { ... }`. Do not define draw().
+- Start setup() with: createCanvas(512, 512, WEBGL); angleMode(DEGREES); brush.load();
+- The coordinate origin (0,0) is the CENTER of the canvas; x and y range from -256 to 256. Compose around (0,0).
+- End setup() with: noLoop();
+- Draw with the p5.brush API only, plus basic p5 (background, push/pop, translate, rotate).
+- Allowed brush calls: brush.pick(name), brush.stroke(color), brush.strokeWeight(w), brush.noStroke(), brush.line(x1,y1,x2,y2), brush.circle(x,y,r), brush.polygon([[x,y],...]), brush.spline([[x,y],...], curvature), brush.flowLine(x,y,length,dirAngle), brush.setHatch(brushName,color,weight), brush.hatch(dist,angle,{rand:0.1,continuous:true}), brush.noHatch(), brush.field("seabed"), brush.noField().
+- NEVER use brush.fill/brush.noFill/brush.bleed (watercolor fills erase every stroke on this renderer), and never use brush.beginShape/vertex/endShape or brush.rect.
+- To fill a shape, hatch it: brush.setHatch("cpencil", "#2f7d43", 1); brush.hatch(4, 45, {rand:0.1, continuous:true}); brush.circle(0,-6,60); brush.noHatch();
+- Brush names available to brush.pick and brush.setHatch: "pen", "rotring", "2B", "HB", "2H", "cpencil", "charcoal", "hatch_brush", "marker", "marker2". Never use "spray" — speckle textures are rejected.
+- Draw clean strokes on a mostly empty canvas: legible line work scores, ink storms score zero.
+- No loadImage, no fetch/XHR, no DOM access, no external assets, no comments longer than one line.
+- Compose the whole illustration inside the 512x512 canvas; use layered strokes and hatching for a rich hand-made feel.
+
+An eye is built from these parts, in this order. Vary the numbers, colours and
+brushes to suit the requested subject and style, but keep the anatomy:
+1. Upper lid: one curved spline from the left corner up over the top and back
+   down to the right corner, e.g. brush.spline([[-170,0],[-96,-64],[0,-84],[98,-60],[170,0]], 0.5).
+2. Lower lid: a shallower spline between the SAME two corners, bulging downward,
+   e.g. brush.spline([[-170,0],[-92,52],[0,68],[96,50],[170,0]], 0.5). The two
+   lids must meet at the corners so they enclose an almond-shaped opening.
+3. Iris: a hatched circle of radius roughly 55-60 centred near (0,-6), inside
+   that opening, in the requested colour.
+4. Pupil: a much darker hatched circle of radius roughly 20-25 at the same centre.
+5. Lid crease: a spline arcing above the upper lid.
+6. Lashes: 8-12 short lines springing outward from the upper lid curve.
+A circle inside a box is not an eye; curved lids meeting at two corners are what
+make it read as one.
+"""
+
+USER_TEMPLATE = (
+    "Illustrate {subject} with a {color} iris, rendered as a {style}. "
+    "Make it detailed and expressive: an almond-shaped lid opening with upper "
+    "and lower lids meeting at two corners, an iris with a darker pupil inside "
+    "the opening, a lid crease, and lashes."
+)
+
+
+def build_prompts(n: int, seed: int = 7) -> list[dict[str, str]]:
+    rng = random.Random(seed)
+    combos = list(itertools.product(SUBJECTS, IRIS_COLORS, STYLES))
+    rng.shuffle(combos)
+    rows = []
+    for subject, color, style in itertools.islice(itertools.cycle(combos), n):
+        rows.append(
+            {"prompt": USER_TEMPLATE.format(subject=subject, color=color, style=style)}
+        )
+    return rows
+
+
+class EyePromptDataset(DatasetConfig):
+    """Prompt-only dataset generated from the eye grammar."""
+
+    input_key = "messages"
+    label_key = "label"
+    n_train: int = 256
+    n_eval: int = 16
+
+    def load(self, split="all"):
+        rows = build_prompts(self.n_train + self.n_eval)
+        if split == "train":
+            return rows[: self.n_train]
+        if split == "eval":
+            return rows[self.n_train :]
+        return rows
+
+    def _rows_to_records(self, rows):
+        return [
+            {
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": r["prompt"]},
+                ],
+                "label": r["prompt"],
+            }
+            for r in rows
+        ]
+
+    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
+        def write(p, rows):
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            records = self._rows_to_records(rows)
+            if p.endswith(".parquet"):
+                from datasets import Dataset
+
+                Dataset.from_list(records).to_parquet(p)
+            else:
+                with open(p, "w") as f:
+                    for rec in records:
+                        f.write(json.dumps(rec) + "\n")
+
+        write(path, self.load("train"))
+        for p in (eval_paths or {}).values():
+            write(p, self.load("eval"))
+
+
+# ── Code extraction / static gates ───────────────────────────────────────
+
+_JS_FENCE = re.compile(r"```(?:javascript|js)\s*\n(.*?)```", re.DOTALL)
+_BANNED = re.compile(
+    r"\b(loadImage|fetch|XMLHttpRequest|WebSocket|document\.|window\.|eval|import|require)\b"
+)
+
+
+def extract_sketch(response: str) -> str | None:
+    parsed = base_model.parse_response(response)
+    content = parsed.content or ""
+    m = _JS_FENCE.search(content)
+    if not m:
+        return None
+    code = m.group(1).strip()
+    if not code or "function setup" not in code:
+        return None
+    if _BANNED.search(code):
+        return None
+    if len(code) > 8000:
+        return None
+    return code
+
+
+# ── Renderer: Modal Sandbox with node + chromium ─────────────────────────
+
+RENDER_APP_NAME = "training-gym-eye-render"
+
+RENDER_JS = r"""
+const fs = require('fs');
+const puppeteer = require('puppeteer-core');
+
+(async () => {
+  const sketch = fs.readFileSync(process.argv[2], 'utf8');
+  const p5js = fs.readFileSync('/render/node_modules/p5/lib/p5.min.js', 'utf8');
+  const brushjs = fs.readFileSync('/render/node_modules/p5.brush/dist/p5.brush.js', 'utf8');
+  const html = `<!DOCTYPE html><html><body>
+<script>window.__err=null;window.onerror=(m)=>{window.__err=String(m)};window.onunhandledrejection=(e)=>{window.__err=String(e.reason)};</script>
+<script>${p5js}</script>
+<script>${brushjs}</script>
+<script>
+// Forgiving brush facade: unknown brush names fall back to real ones and
+// hallucinated brush.* methods become no-ops, so one bad call does not throw
+// away the whole drawing.
+(function(){
+  const real = window.brush;
+  // "spray" is deliberately absent: speckle storms fool the judge, so any
+  // request for it falls back to a line brush.
+  const names = ["pen","rotring","2B","HB","2H","cpencil","charcoal",
+                 "hatch_brush","marker","marker2"];
+  const pick = real.pick, setHatch = real.setHatch;
+  const noop = () => {};
+  const patched = {
+    pick: (n) => pick(names.includes(n) ? n : "HB"),
+    setHatch: (n, c, w) => setHatch(names.includes(n) ? n : "hatch_brush", c, w),
+    // Watercolor fills composite a full-canvas rect that erases every stroke
+    // in headless WEBGL, so they are dropped instead of ruining the drawing.
+    fill: noop, noFill: noop, bleed: noop, rect: noop,
+  };
+  const facade = new Proxy(real, {
+    get(target, key) {
+      if (key in patched) return patched[key];
+      const value = target[key];
+      if (value === undefined) return () => {};
+      return value;
+    },
+  });
+  window.brush = facade;
+  // Brush-only names are also exposed bare, since sketches often drop the
+  // "brush." prefix. p5's own globals (line, circle, fill, stroke) are untouched.
+  for (const name of ["pick", "spline", "flowLine", "polygon", "hatch",
+                      "noHatch", "setHatch", "bleed", "field", "noField"]) {
+    if (window[name] === undefined) window[name] = (...a) => facade[name](...a);
+  }
+})();
+</script>
+<script>try{${sketch}}catch(e){window.__err=String(e)}</script>
+</body></html>`;
+  const browser = await puppeteer.launch({
+    executablePath: '/usr/bin/chromium',
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
+           '--enable-unsafe-swiftshader', '--use-angle=swiftshader'],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'load', timeout: 20000 });
+    await page.waitForFunction(
+      'window.__err !== null || document.querySelector("canvas") !== null',
+      { timeout: 15000 });
+    await new Promise(r => setTimeout(r, 2000));
+    const err = await page.evaluate('window.__err');
+    if (err) { console.error('SKETCH_ERROR: ' + err); process.exit(2); }
+    const canvas = await page.$('canvas');
+    if (!canvas) { console.error('SKETCH_ERROR: no canvas'); process.exit(2); }
+    // p5.brush buffers strokes and watercolor fills; flush them before capturing.
+    await page.evaluate(`
+      if (window.brush) {
+        try { brush.reDraw(); } catch (e) {}
+        try { brush.reBlend(); } catch (e) {}
+      }
+    `);
+    await new Promise(r => setTimeout(r, 1000));
+    // Fills also settle across frames, so poll until the canvas stops changing.
+    let buf = await canvas.screenshot({ type: 'png' });
+    let prev = '';
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      const shot = await canvas.screenshot({ type: 'png' });
+      const sig = Buffer.from(shot).toString('base64');
+      buf = shot;
+      if (sig === prev) break;
+      prev = sig;
+    }
+    process.stdout.write('PNGB64:' + Buffer.from(buf).toString('base64'));
+    process.exit(0);
+  } finally {
+    await browser.close();
+  }
+})().catch(e => { console.error('RENDER_ERROR: ' + e); process.exit(3); });
+"""
+
+
+def _render_image() -> modal.Image:
+    return (
+        modal.Image.debian_slim(python_version="3.12")
+        .apt_install("chromium", "nodejs", "npm", "fonts-liberation")
+        .run_commands(
+            "mkdir -p /render",
+            "cd /render && npm install --no-audit --no-fund"
+            " p5@1.11.3 p5.brush@1.1.2 puppeteer-core@23.11.1",
+        )
+    )
+
+
+def render_sketch(code: str) -> tuple[bytes | None, dict]:
+    """Render sketch code to PNG bytes in a Modal Sandbox."""
+    app = modal.App.lookup(RENDER_APP_NAME, create_if_missing=True)
+    sandbox = modal.Sandbox._experimental_create(
+        "sleep",
+        "infinity",
+        app=app,
+        image=_render_image(),
+        workdir="/render",
+        timeout=120,
+        cpu=1.0,
+        memory=2048,
+    )
+    try:
+        sandbox.filesystem.write_text(RENDER_JS, "/render/render.js")
+        sandbox.filesystem.write_text(code, "/render/sketch.js")
+        proc = sandbox.exec(
+            "node", "/render/render.js", "/render/sketch.js", timeout=60
+        )
+        proc.wait()
+        out = proc.stdout.read()
+        err = proc.stderr.read()
+        if "PNGB64:" in out:
+            png = base64.b64decode(out.split("PNGB64:", 1)[1].strip())
+            return png, {"render": "ok"}
+        return None, {"render": "fail", "stderr": (err or "")[-400:]}
+    except Exception as e:
+        return None, {"render": "fail", "stderr": f"{type(e).__name__}: {e}"[-400:]}
+    finally:
+        sandbox.terminate()
+        sandbox.detach()
+
+
+# ── VLM judge ────────────────────────────────────────────────────────────
+
+JUDGE_URL = "https://modal-labs--ep-eye-judge-server.us-west.modal.direct"
+JUDGE_MODEL = "google/gemma-4-E4B-it"
+
+# Reference eyes the candidate is compared against, shipped into the training
+# image by launch(). Absolute yes/no questions do not work here: the judge calls
+# a circle inside a box an eye, so it is asked to grade against a real drawing.
+LOCAL_REF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "refs")
+REF_DIRS = ("/root/eye_refs", LOCAL_REF_DIR)
+
+
+def reference_pngs() -> list[bytes]:
+    import glob
+
+    for d in REF_DIRS:
+        paths = sorted(glob.glob(os.path.join(d, "ref_*.png")))
+        if paths:
+            return [open(p, "rb").read() for p in paths]
+    return []
+
+
+RATING_SCALE = (
+    "0 = not an eye at all (random lines, blobs, boxes, lone circles)\n"
+    "1 = a circle inside a box or straight lines, only vaguely eye-suggestive\n"
+    "2 = curved lid shapes OR an iris+pupil, but not both\n"
+    "3 = clear eye: curved lids meeting at corners, plus iris and pupil\n"
+    "4 = polished eye illustration as good as A"
+)
+# Anatomy is worth far more than ink: a 1 must not be a comfortable place to sit.
+RATING_REWARD = {0: 0.0, 1: 0.08, 2: 0.35, 3: 0.7, 4: 1.0}
+
+
+def side_by_side(ref: bytes, cand: bytes) -> bytes:
+    """Reference on the left, candidate on the right, labelled A and B."""
+    import io
+
+    from PIL import Image, ImageDraw
+
+    a = Image.open(io.BytesIO(ref)).convert("RGB").resize((384, 384))
+    b = Image.open(io.BytesIO(cand)).convert("RGB").resize((384, 384))
+    sheet = Image.new("RGB", (784, 410), "white")
+    sheet.paste(a, (0, 26))
+    sheet.paste(b, (400, 26))
+    draw = ImageDraw.Draw(sheet)
+    draw.text((150, 8), "A (reference eye)", fill="black")
+    draw.text((550, 8), "B (candidate)", fill="black")
+    draw.line([(392, 0), (392, 410)], fill="black")
+    buf = io.BytesIO()
+    sheet.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
+    """Grade the candidate against a reference eye on a 0-4 anatomy scale."""
+    import httpx
+
+    b64 = base64.b64encode(side_by_side(ref, png)).decode()
+    body = {
+        "model": JUDGE_MODEL,
+        "max_tokens": 192,
+        # Non-zero so the votes averaged in judge_image actually decorrelate.
+        "temperature": 0.7,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "Image A is a reference illustration of an eye. "
+                            "Image B is a candidate drawing, made for the "
+                            f'brief: "{prompt}"\n\nFirst line, starting with '
+                            "B_IS:, describe in under 12 words what shapes B "
+                            "actually contains.\nThen a line starting with "
+                            "RATING:, a single digit 0-4 for how much B looks "
+                            "like a drawing of an EYE with the same anatomy as "
+                            "A (curved upper and lower lids meeting at two "
+                            "corners, round iris, dark pupil, lashes):\n"
+                            f"{RATING_SCALE}"
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{b64}"},
+                    },
+                ],
+            }
+        ],
+    }
+    headers = {
+        "Modal-Key": os.environ.get("MODAL_KEY", ""),
+        "Modal-Secret": os.environ.get("MODAL_SECRET", ""),
+    }
+    import time
+
+    last_err = ""
+    for attempt in range(10):
+        if attempt:
+            time.sleep(30)
+        try:
+            resp = httpx.post(
+                f"{JUDGE_URL}/v1/chat/completions",
+                json=body,
+                headers=headers,
+                timeout=120,
+            )
+            resp.raise_for_status()
+            text = resp.json()["choices"][0]["message"]["content"] or ""
+            m = re.search(r"RATING:\s*([0-4])", text.upper())
+            if m:
+                rating = int(m.group(1))
+                desc = text.split("RATING:")[0].replace("B_IS:", "").strip()
+                return RATING_REWARD[rating], {
+                    "judge": str(rating),
+                    "judge_desc": desc[:120],
+                }
+            last_err = f"unparseable: {text[:80]}"
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"[:200]
+    return 0.0, {"judge_error": last_err}
+
+
+JUDGE_VOTES = 3
+
+
+def judge_image(png: bytes, prompt: str) -> tuple[float, dict]:
+    """Average votes against several references — one Gemma vote is too noisy."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    refs = reference_pngs()
+    if not refs:
+        return 0.0, {"judge_error": "no reference eyes found"}
+    chosen = [refs[i % len(refs)] for i in range(JUDGE_VOTES)]
+    with ThreadPoolExecutor(max_workers=JUDGE_VOTES) as pool:
+        votes = list(pool.map(lambda r: judge_once(png, prompt, r), chosen))
+    scores = [s for s, _ in votes]
+    return sum(scores) / len(scores), {
+        "judge": " ".join(m.get("judge", "?") for _, m in votes),
+        "judge_desc": votes[0][1].get("judge_desc", ""),
+    }
+
+
+# ── Reward ───────────────────────────────────────────────────────────────
+
+
+def ink_fraction(png: bytes) -> float:
+    """Fraction of pixels that differ from the dominant background color."""
+    import io
+
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(png)).convert("L").resize((64, 64))
+    hist = img.histogram()
+    bg = max(range(256), key=lambda i: hist[i])
+    px = list(img.getdata())
+    return sum(1 for v in px if abs(v - bg) > 16) / len(px)
+
+
+def coverage_fraction(png: bytes) -> float:
+    """Fraction of an 8x8 grid of the canvas that is substantially inked.
+
+    Line work leaves most cells empty; speckle storms and ink floods cover the
+    whole canvas, which is what fools the judge into scoring them as drawings.
+    """
+    import io
+
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(png)).convert("L").resize((64, 64))
+    hist = img.histogram()
+    bg = max(range(256), key=lambda i: hist[i])
+    ink = [abs(v - bg) > 16 for v in img.getdata()]
+    cells = 0
+    for by in range(8):
+        for bx in range(8):
+            cell = sum(
+                ink[(by * 8 + y) * 64 + bx * 8 + x] for y in range(8) for x in range(8)
+            )
+            cells += cell / 64.0 > 0.15
+    return cells / 64.0
+
+
+def score_response(response: str, prompt: str) -> tuple[float, dict, bytes | None]:
+    code = extract_sketch(response)
+    if code is None:
+        return 0.0, {"gate": "no valid sketch"}, None
+    png, meta = render_sketch(code)
+    if png is None:
+        return 0.0, meta, None
+    ink = ink_fraction(png)
+    meta["ink"] = round(ink, 3)
+    if ink < 0.02:
+        return 0.02, meta, png
+    coverage = coverage_fraction(png)
+    meta["coverage"] = round(coverage, 3)
+    # A legible drawing is line work on a mostly empty canvas; speckle storms and
+    # ink-flooded canvases fool the judge, so gate them out before judging.
+    if coverage > 0.40 or ink > 0.35:
+        return 0.02, meta, png
+    judge_score, judge_meta = judge_image(png, prompt)
+    meta.update(judge_meta)
+    return 0.05 + 0.95 * judge_score, meta, png
+
+
+async def eye_rm(args, sample, **kwargs) -> float:
+    import asyncio
+
+    prompt = getattr(sample, "label", None) or ""
+    reward, meta, png = await asyncio.to_thread(score_response, sample.response, prompt)
+    md = {**(getattr(sample, "metadata", None) or {}), **meta}
+    if png is not None:
+        md["image"] = png
+    sample.metadata = md
+    return reward
+
+
+# ── Training entrypoint ──────────────────────────────────────────────────
+
+
+def launch(num_rollout: int, n_train: int = 256, model: str = "4b") -> None:
+    from modal_training_gym import (
+        Qwen3_8_27B,
+        Qwen3_8_27b_Recipe,
+        SlimeRecipe,
+        TrainConfig,
+    )
+    from modal_training_gym.common.sample_extraction import IMAGE_SAMPLE_LIMIT_ENV
+
+    dataset = EyePromptDataset(n_train=n_train, always_prepare=True)
+
+    def overlay(image):
+        # The reward compares each render against these reference eyes.
+        return image.run_commands(
+            "uv pip install --system 'modal>=1.5.2' httpx pillow",
+        ).add_local_dir(LOCAL_REF_DIR, "/root/eye_refs", copy=True)
+
+    # Capture every sample's render: rollout_batch_size * n_samples_per_prompt.
+    all_images = str(8 * 8)
+
+    def overlay_all_images(image):
+        return overlay(image).env({IMAGE_SAMPLE_LIMIT_ENV: all_images})
+
+    if model == "27b":
+        config = TrainConfig(
+            model=Qwen3_8_27B(),
+            dataset=dataset,
+            recipe=Qwen3_8_27b_Recipe(
+                custom_rm_function=eye_rm,
+                num_rollout=num_rollout,
+                rollout_batch_size=8,
+                n_samples_per_prompt=8,
+                rollout_max_response_len=3072,
+                rollout_temperature=1.0,
+                save_interval=10,
+                apply_chat_template_kwargs='{"enable_thinking": false}',
+                image_overlay=overlay_all_images,
+            ),
+        )
+        result = config.train()
+        print(f"Training run id: {result.training_run_id}")
+        return
+    config = TrainConfig(
+        model=Qwen3_5_4B(),
+        dataset=dataset,
+        recipe=SlimeRecipe(
+            custom_rm_function=eye_rm,
+            gpu_type="H100",
+            colocate=True,
+            tensor_model_parallel_size=1,
+            sequence_parallel=False,
+            rollout_num_gpus_per_engine=1,
+            num_rollout=num_rollout,
+            rollout_batch_size=8,
+            n_samples_per_prompt=8,
+            rollout_max_response_len=6144,
+            rollout_temperature=1.0,
+            global_batch_size=8,
+            max_tokens_per_gpu=16384,
+            save_interval=10,
+            apply_chat_template_kwargs='{"enable_thinking": false}',
+            image_overlay=overlay_all_images,
+        ),
+    )
+    result = config.train()
+    print(f"Training run id: {result.training_run_id}")
+
+
+if __name__ == "__main__":
+    import sys
+
+    launch(
+        num_rollout=int(sys.argv[1]) if len(sys.argv) > 1 else 1,
+        model=sys.argv[2] if len(sys.argv) > 2 else "4b",
+    )
