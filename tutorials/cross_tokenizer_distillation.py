@@ -83,7 +83,7 @@ teacher_deployment.wait_until_ready(timeout=TEACHER_READY_TIMEOUT)
 TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 TEACHER_RM_CONCURRENCY = 24
 
-base_model = Qwen3_6_35B()
+model = Qwen3_6_35B()
 
 # ## Loading BFCL V3 and Defining Train/Eval Split
 #
@@ -270,7 +270,7 @@ def trajectory_reward(
 # held-out BFCL split. Using our K curriculum, we initialize the agent context and the task's
 # class instances to the Kth ground-truth call, where K is set to N calls - 1. The teacher returns
 # OpenAI-style structured `tool_calls` (SGLang `--tool-call-parser deepseekv4`); the student uses
-# Qwen's `<tool_call>` wire format via `base_model.parse_response`.
+# Qwen's `<tool_call>` wire format via `model.parse_response`.
 
 SERVED_CONTEXT_LEN = 16384
 RESPONSE_TOKEN_CAP = 8192
@@ -356,7 +356,7 @@ def _actions_from_message(msg: dict) -> tuple[str, list[ToolCall]]:
             if name:
                 actions.append(ToolCall(name=name, arguments=raw_args))
         return content, actions
-    parsed = base_model.parse_response(content)
+    parsed = model.parse_response(content)
     return parsed.content, parsed.tool_calls
 
 def bfcl_eval_fn(deployment, example: dict) -> dict:
@@ -444,7 +444,7 @@ def _print_eval_summary(name: str, mean: float, rows: list[dict]) -> None:
         print(f"{'First-call tool match':<25} {_frac(rows, 'tool_match'):>10.1%}")
 
 base_deployment = Endpoint.launch(
-    base_model, unauthenticated=True, recreate_if_existing=True
+    model, unauthenticated=True, recreate_if_existing=True
 )
 print(f"Student URL: {base_deployment.url}")
 
@@ -736,7 +736,7 @@ async def tool_step_generate(args, sample, sampling_params):
         trajectory_text += model_text
         response_segments.append((model_text, 1))
 
-        actions = base_model.parse_response(model_text).tool_calls
+        actions = model.parse_response(model_text).tool_calls
         action = actions[0] if actions else None
 
         if action is None:
@@ -969,8 +969,8 @@ def cross_tokenizer_post_process(args, samples, **kwargs):
 #
 # Training uses **2×8 H100** actor nodes.
 
-training_run = TrainConfig(
-    model=base_model,
+config = TrainConfig(
+    model=model,
     dataset=dataset,
     recipe=Qwen3_6_35b_Recipe(
         custom_rm_function=cross_tokenizer_reward,
@@ -1038,19 +1038,20 @@ print("  Teacher: DeepSeek V4 Flash")
 print("  Student: Qwen3.6-35B-A3B")
 print("  Dataset: BFCL multi_turn_base, prefix-conditioned (task, K) rows")
 print("  Reward: schema + live exec + structural match + terminal state/response verdict")
-train_result = training_run.train()
-print(f"Training run id: {train_result.training_run_id}")
-print("--- Training complete ---")
+run = config.launch()
+print(f"run id: {run.training_run_id}")
 
 # ## Evaluate the trained student
 #
 # Deploy the last checkpoint and re-run the held-out BFCL ids with the same evaluator from our earlier baseline.
 
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+result = run.result()
+print("--- Training complete ---")
+checkpoint = list_checkpoints(result.training_run_id)[-1]
 print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
-    Qwen3_6_35B(), checkpoint, unauthenticated=True, recreate_if_existing=True
+    model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )
 print(f"Trained student URL: {trained_deployment.url}")
 

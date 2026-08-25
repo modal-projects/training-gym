@@ -325,8 +325,9 @@ def run_eval(
 
 # ## Serve and evaluate the base model
 
+model = Qwen3_5_4B()
 base_deployment = Endpoint.launch(
-    Qwen3_5_4B(),
+    model,
     unauthenticated=True,
     recreate_if_existing=True,
 )
@@ -366,8 +367,8 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 #   tokenizer's chat template; disables Qwen3's `<think>` block so responses stay
 #   short and parseable.
 
-training_run = TrainConfig(
-    model=Qwen3_5_4B(),
+config = TrainConfig(
+    model=model,
     dataset=train_dataset,
     recipe=SlimeRecipe(
         custom_generate_function=number_guess_generate,
@@ -395,14 +396,15 @@ training_run = TrainConfig(
     ),
 )
 print("Starting training...")
-train_result = training_run.train()
-print(f"Training run id: {train_result.training_run_id}")
+run = config.launch()
+print(f"run id: {run.training_run_id}")
 
 # ## Evaluate trained checkpoint
 
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+result = run.result()
+checkpoint = list_checkpoints(result.training_run_id)[-1]
 trained_deployment = Endpoint.launch(
-    Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
+    model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )
 print(f"Trained model URL: {trained_deployment.url}")
 

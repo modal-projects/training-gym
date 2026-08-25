@@ -31,10 +31,10 @@ from modal_training_gym import (
 # [Endpoint](https://modal.com/docs/guide/endpoints)
 # to get a baseline for performance.
 
-base_model = Qwen3_5_4B()
+model = Qwen3_5_4B()
 
 base_deployment = Endpoint.launch(
-    base_model, unauthenticated=True, recreate_if_existing=True
+    model, unauthenticated=True, recreate_if_existing=True
 )
 base_deployment.wait_until_ready(timeout=15 * 60)
 print(f"base model deployed to {base_deployment.url}")
@@ -133,7 +133,7 @@ print(f"percent correct: {base_mean:.1%}")
 # respectively. These values, however, do maintain the paper's 4:1 ratio.
 
 async def dapo_overlong_rm(args, sample, **kwargs) -> float:
-    response = base_model.parse_response(sample.response)
+    response = model.parse_response(sample.response)
     base = score_answer(response.content, sample.label)
 
     L_max = args.rollout_max_response_len
@@ -162,8 +162,8 @@ async def dapo_overlong_rm(args, sample, **kwargs) -> float:
 #
 # Again, for demonstration purposes, we set `n_samples_per_prompt=8`.
 
-training_run = TrainConfig(
-    model=base_model,
+config = TrainConfig(
+    model=model,
     dataset=train_dataset,
     recipe=SlimeRecipe(
         gpu_type="H100",
@@ -222,18 +222,19 @@ training_run = TrainConfig(
     ),
 )
 
-train_result = training_run.train()
-print(f"run id: {train_result.training_run_id}")
+run = config.launch()
+print(f"run id: {run.training_run_id}")
 
 # ## Evaluate the trained model
 #
 # Let's run the same eval on the trained checkpoint.
 
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+result = run.result()
+checkpoint = list_checkpoints(result.training_run_id)[-1]
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
-    Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
+    model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )
 trained_deployment.wait_until_ready(timeout=15 * 60)
 print(f"checkpoint deployed to {trained_deployment.url}")

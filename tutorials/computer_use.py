@@ -255,9 +255,9 @@ def run_eval(
     mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
     return mean, rows
 
-base_model = Qwen3_VL_8B()
+model = Qwen3_VL_8B()
 base_deployment = CustomDeployment.launch(
-    base_model,
+    model,
     unauthenticated=True,
 )
 print(f"Base model URL: {base_deployment.url}")
@@ -297,8 +297,8 @@ print(
 # Training Gym dashboard picks up the run's project/entity/id and wires up the
 # **Open in W&B** button on the run. Drop `metrics=` to disable logging.
 
-training_run = TrainConfig(
-    model=base_model,
+config = TrainConfig(
+    model=model,
     dataset=train_dataset,
     recipe=Qwen3_VL_8b_Recipe(
         # TP=4 shards the 8B weights across 4 GPUs, freeing enough VRAM per
@@ -322,18 +322,19 @@ training_run = TrainConfig(
         metrics=WandbConfig(project="computer-use-grounding"),
     ),
 )
-train_result = training_run.train()
-print(f"Training run id: {train_result.training_run_id}")
+run = config.launch()
+print(f"run id: {run.training_run_id}")
 
 # ## Evaluate the trained model
 #
 # Let's run the same eval on the trained checkpoint and compare accuracy.
 
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+result = run.result()
+checkpoint = list_checkpoints(result.training_run_id)[-1]
 print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(
-    Qwen3_VL_8B(),
+    model,
     checkpoint=checkpoint,
     app_name="qwen3-vl-8b-grounding-serve",
     served_model_name="qwen3-vl-8b-grounding",

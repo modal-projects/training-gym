@@ -56,20 +56,21 @@ print(f"optimizer cpu offload: {recipe.optimizer_cpu_offload}")
 
 # ## Kick off training
 
-training_run = TrainConfig(
+config = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=recipe,
 )
 
-train_result = training_run.train()
-print(f"run id: {train_result.training_run_id}")
+run = config.launch()
+print(f"run id: {run.training_run_id}")
 
 # ## Test out the trained model
 #
 # Spin up an [Endpoint](https://modal.com/docs/guide/endpoints) and try a prompt.
 
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+result = run.result()
+checkpoint = list_checkpoints(result.training_run_id)[-1]
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(

@@ -41,10 +41,10 @@ from modal_training_gym import (
 # [cold-start](https://modal.com/docs/guide/cold-start#what-is-a-cold-start).
 # Once you see the URL has been printed, you're ready to move on!
 
-base_model = Qwen3_5_4B()
+model = Qwen3_5_4B()
 
 base_deployment = Endpoint.launch(
-    base_model, unauthenticated=True, recreate_if_existing=True
+    model, unauthenticated=True, recreate_if_existing=True
 )
 base_deployment.wait_until_ready(timeout=15 * 60)
 print(f"base model deployed to {base_deployment.url}")
@@ -169,7 +169,7 @@ print(f"average score: {base_mean:.1f}")
 # model's response and pass it to our existing score_haiku. Simple enough.
 
 async def haiku_rm(args, sample, **kwargs) -> float:
-    response = base_model.parse_response(sample.response)
+    response = model.parse_response(sample.response)
     return score_haiku(response.content)
 
 # ## Train the model
@@ -188,8 +188,8 @@ async def haiku_rm(args, sample, **kwargs) -> float:
 # Once we run the code below, training kicks off and we'll immediately get a run ID, which we may
 # use to watch the run's progress in the dashboard.
 
-train_run = TrainConfig(
-    model=base_model,
+config = TrainConfig(
+    model=model,
     dataset=train_dataset,
     recipe=SlimeRecipe(
         gpu_type="H100",
@@ -215,18 +215,19 @@ train_run = TrainConfig(
     ),
 )
 
-train_result = train_run.train()
-print(f"run id: {train_result.training_run_id}")
+run = config.launch()
+print(f"run id: {run.training_run_id}")
 
 # ## Serve and evaluate the trained checkpoint
 #
 # We'll get the latest checkpoint and create a new Endpoint so we may evaluate it.
 
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+result = run.result()
+checkpoint = list_checkpoints(result.training_run_id)[-1]
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
-    Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
+    model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )
 trained_deployment.wait_until_ready(timeout=15 * 60)
 print(f"checkpoint deployed to {trained_deployment.url}")
@@ -242,8 +243,8 @@ print(f"average score: {trained_mean:.1f}")
 # A likely cause is that it only trained for 10 iterations.
 # Let's continue training, starting from the last checkpoint.
 
-new_train_run = TrainConfig(
-    model=Qwen3_5_4B(),
+new_config = TrainConfig(
+    model=model,
     dataset=train_dataset,
     checkpoint=checkpoint,
     recipe=SlimeRecipe(
@@ -271,18 +272,19 @@ new_train_run = TrainConfig(
     ),
 )
 
-new_train_result = new_train_run.train()
-print(f"run id: {new_train_result.training_run_id}")
+new_run = new_config.launch()
+print(f"run id: {new_run.training_run_id}")
 
 # ## Evals Evals Evals
 #
 # Once again, we'll create a new Endpoint for the new checkpoint and run evals on it.
 
-new_checkpoint = list_checkpoints(new_train_result.training_run_id)[-1]
+new_result = new_run.result()
+new_checkpoint = list_checkpoints(new_result.training_run_id)[-1]
 print(new_checkpoint.path)
 
 new_deployment = Endpoint.launch(
-    Qwen3_5_4B(), new_checkpoint, unauthenticated=True, recreate_if_existing=True
+    model, new_checkpoint, unauthenticated=True, recreate_if_existing=True
 )
 new_deployment.wait_until_ready(timeout=15 * 60)
 print(f"new checkpoint deployed to {new_deployment.url}")

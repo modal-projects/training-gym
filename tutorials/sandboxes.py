@@ -110,10 +110,10 @@ def score_hello_file(code):
         sandbox.detach()
     return score, metadata
 
-base_model = Qwen3_5_4B()
+model = Qwen3_5_4B()
 
 base_deployment = Endpoint.launch(
-    base_model, unauthenticated=True, recreate_if_existing=True
+    model, unauthenticated=True, recreate_if_existing=True
 )
 print(f"Base model URL: {base_deployment.url}")
 
@@ -131,7 +131,7 @@ def run_eval(deployment, *, max_concurrency: int = 2) -> float:
             ],
         )
         response = msg.get("content") or msg.get("reasoning_content") or ""
-        code = extract_code(response, model=base_model)
+        code = extract_code(response, model=model)
         score, _metadata = score_hello_file(code)
         return score
 
@@ -151,13 +151,13 @@ print(f"Base mean reward: {base_mean:.4f}")
 async def sandbox_rm(args, sample, **kwargs) -> float:
     import asyncio
 
-    code = extract_code(sample.response, model=base_model)
+    code = extract_code(sample.response, model=model)
     reward, meta = await asyncio.to_thread(score_hello_file, code)
     sample.metadata = {**(getattr(sample, "metadata", None) or {}), "sandbox": meta}
     return reward
 
-training_run = TrainConfig(
-    model=Qwen3_5_4B(),
+config = TrainConfig(
+    model=model,
     dataset=dataset,
     recipe=SlimeRecipe(
         custom_rm_function=sandbox_rm,
@@ -185,14 +185,15 @@ training_run = TrainConfig(
     ),
 )
 print("Starting training...")
-train_result = training_run.train()
-print(f"Training run id: {train_result.training_run_id}")
+run = config.launch()
+print(f"run id: {run.training_run_id}")
 
 # ## Evaluate the trained checkpoint
 
-checkpoint = list_checkpoints(train_result.training_run_id)[-1]
+result = run.result()
+checkpoint = list_checkpoints(result.training_run_id)[-1]
 trained_deployment = Endpoint.launch(
-    Qwen3_5_4B(), checkpoint, unauthenticated=True, recreate_if_existing=True
+    model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )
 print(f"Trained model URL: {trained_deployment.url}")
 
