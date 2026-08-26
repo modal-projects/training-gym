@@ -110,6 +110,7 @@ training-gym open  # opens in your browser
 | Gemma | <ul><li>[gemma-4-26B-A4B-it](https://huggingface.co/google/gemma-4-26B-A4B-it)</li></ul> |
 | Inkling | <ul><li>[Inkling-Small](https://huggingface.co/thinkingmachines/Inkling-Small)</li></ul> |
 | Moonlight | <ul><li>[Moonlight-16B-A3B-Instruct](https://huggingface.co/moonshotai/Moonlight-16B-A3B-Instruct)</li></ul> |
+| NVIDIA | <ul><li>[NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16)</li></ul> |
 | Qwen3 | <ul><li>[Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B)</li><li>[Qwen3-1.7B](https://huggingface.co/Qwen/Qwen3-1.7B)</li><li>[Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B)</li><li>[Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B)</li><li>[Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)</li><li>[Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct)</li></ul> |
 | Qwen3.5 | <ul><li>[Qwen3.5-0.8B](https://huggingface.co/Qwen/Qwen3.5-0.8B)</li><li>[Qwen3.5-2B](https://huggingface.co/Qwen/Qwen3.5-2B)</li><li>[Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)</li><li>[Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B)</li></ul> |
 | Qwen3.6 | <ul><li>[Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B)</li><li>[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)</li></ul> |

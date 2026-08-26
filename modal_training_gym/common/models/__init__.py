@@ -14,6 +14,7 @@ from .gemma4_26b_a4b import Gemma4_26B_A4B
 from .glm_4_7 import GLM_4_7
 from .inkling_small import Inkling_Small
 from .moonlight_16b_a3b_instruct import Moonlight_16B_A3B_Instruct
+from .nemotron3_ultra_550b_a55b import Nemotron3_Ultra_550B_A55B
 from .qwen3_0_6b import Qwen3_0_6B
 from .qwen3_1_7b import Qwen3_1_7B
 from .qwen3_4b import Qwen3_4B
@@ -43,6 +44,7 @@ __all__ = [
     "Qwen3_8B",
     "Qwen3_30B",
     "Moonlight_16B_A3B_Instruct",
+    "Nemotron3_Ultra_550B_A55B",
     "ToolCall",
     "parse_gemma4_response",
     "parse_glm_response",

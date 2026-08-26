@@ -184,6 +184,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "Inkling-Small",
     },
     {
+        "class_name": "Nemotron3_Ultra_550B_A55B",
+        "module": "modal_training_gym.common.models.nemotron3_ultra_550b_a55b",
+        "group": "models",
+        "class_type": "config_data",
+        "sidebar_label": "Nemotron-3-Ultra-550B-A55B",
+    },
+    {
         "class_name": "Qwen3_6_35B",
         "module": "modal_training_gym.common.models.qwen3_6_35b",
         "group": "models",
@@ -274,6 +281,13 @@ API_REFERENCE_MANIFEST = [
         "group": "training",
         "class_type": "config_data",
         "sidebar_label": "Inkling_Small_LoRA_Recipe",
+    },
+    {
+        "class_name": "Nemotron3_Ultra_550B_A55B_Recipe",
+        "module": "modal_training_gym.train_recipes.miles_recipe.nemotron3_ultra_550b_a55b",
+        "group": "training",
+        "class_type": "config_data",
+        "sidebar_label": "Nemotron3_Ultra_550B_A55B_Recipe",
     },
     {
         "class_name": "Qwen3_6_35b_Recipe",

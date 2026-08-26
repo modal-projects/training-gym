@@ -110,6 +110,9 @@ HARBOR_PKG_VERSION = "0.8.0"
 
 _MILES_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
 _PATCH_SGLANG_ABORT_B64 = encode_patch("patch_sglang_abort", _MILES_PATCHES)
+_PATCH_SGLANG_LOAD_BARRIER_B64 = encode_patch(
+    "patch_sglang_load_barrier", _MILES_PATCHES
+)
 _PATCH_ROLLOUT_STATUS_B64 = encode_patch(
     "patch_rollout_status_reporting", _MILES_PATCHES
 )
@@ -130,6 +133,9 @@ _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_PATCH_DIST_CKPT_FORK_RETRY_B64 = encode_patch(
+    "patch_dist_ckpt_fork_retry", _MEGATRON_PATCHES
+)
 _MEGATRON_TORCH_STRATEGY_PY = (
     "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
 )
@@ -350,7 +356,16 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
+            # SGLang's post-load barrier allows 8 min; a TB-scale checkpoint on a
+            # Modal Volume reads at ~1 GiB/s cold, so every node that did not
+            # download it blows through that and the engine dies (Nemotron-3-Ultra
+            # 16-node run). Raise it.
+            f"echo {_PATCH_SGLANG_LOAD_BARRIER_B64} | base64 -d | python3",
             f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
+            # Megatron's torch_dist writer forks 2 helper processes per rank; that
+            # fork intermittently returns EAGAIN on Modal and takes the whole run
+            # with it (2 of 3 saves on the Nemotron-3-Ultra slice). Retry instead.
+            f"echo {_PATCH_DIST_CKPT_FORK_RETRY_B64} | base64 -d | python3",
             (
                 f"if test -f {_MEGATRON_TORCH_STRATEGY_PY}; then "
                 f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3; "
