@@ -81,7 +81,12 @@ lash length to suit the brief, but keep the anatomy and the soft painted look:
    opening (loop low-alpha shapes, not one solid black wedge), then 25-40
    INDIVIDUAL lash strands as brush.spline curves with brush.pick("2B") and a
    thin brush.strokeWeight, fanning outward and curling up, longest at the outer
-   corner and thinning to hair-fine tips.
+   corner and thinning to hair-fine tips. Every strand STARTS on the upper lid
+   line and curves away from it, so the lashes read as a dense fan along the lid
+   rather than hairs floating over the eye; walk the lid with a for-loop over the
+   lid curve rather than placing them by hand, e.g.
+   for (let i=0;i<32;i++){ let t=i/31; let x=lerp(-150,150,t);
+   let y=-40-60*sin(180*t); brush.spline([[x,y],[x+18*t,y-26],[x+34*t,y-52]], 0.7); }
 7. Lower lid: a soft warm-pink crease line under the eye, a light catchlight on
    the lid rim, 10-20 short fine lower lashes, and a pinkish tear duct.
 8. Brow: an arc of 40+ short fine brush strokes above the eye, dark at the inner
@@ -385,14 +390,16 @@ def render_sketch(code: str) -> tuple[bytes | None, dict]:
 
 # ── VLM judge ────────────────────────────────────────────────────────────
 
-# A 4B critic is not a reliable eye-anatomy grader: on a 50-step run it rated
-# skin-coloured blobs with a lash spray 3/4, so reward climbed while the images
-# lost their sclera, limbal ring and highlight. The 26B-A4B MoE judge costs the
-# same active parameters per image and grades the style far better.
-JUDGE_URL = (
-    "https://modal-labs-joy-dev--ep-eye-judge-26b-open-server.us-west.modal.direct"
-)
-JUDGE_MODEL = "google/gemma-4-26B-A4B-it"
+# Judge size is the binding constraint on this task. A 4B critic rated
+# skin-coloured blobs 3/4, so reward climbed while the images lost their sclera
+# and highlight; a 26B-A4B MoE critic stopped that but, with only ~4B active
+# parameters, capped honest eyes at 2/4 without discriminating lash quality.
+# This is a 27B dense multimodal critic: every parameter looks at every image.
+JUDGE_URL = "https://modal-labs-joy-dev--ep-eye-judge-27b-server.us-west.modal.direct"
+JUDGE_MODEL = "Qwen/Qwen3.8-27B"
+# Qwen3.8 answers from its reasoning channel by default, which leaves the content
+# field empty and every vote unparseable, so thinking is turned off explicitly.
+JUDGE_TEMPLATE_KWARGS = {"enable_thinking": False}
 
 # Reference eyes the candidate is compared against, shipped into the training
 # image by launch(). Absolute yes/no questions do not work here: the judge calls
@@ -448,6 +455,17 @@ CHECKS = (
 CHECK_BLOCK = "\n".join(
     f"{name}: YES or NO - {question}?" for name, question, _ in CHECKS
 )
+
+# Lashes are the part the policy skips: it settles on a bare sclera+iris template
+# because the 0-4 style scale barely moves when lashes are missing. They get
+# their own graded question and their own slice of the reward.
+LASH_QUESTION = (
+    "LASHFAN: 0, 1 or 2 for the lashes in B - 0 = none, or only stray hairs "
+    "floating away from the lid; 1 = a few short hairs on the lid line; "
+    "2 = a dense fan of many fine separate lash hairs following the upper lid "
+    "and curling up, like A"
+)
+LASH_WEIGHT = 0.2
 # Anatomy is worth far more than ink: a 1 must not be a comfortable place to sit.
 RATING_REWARD = {0: 0.0, 1: 0.08, 2: 0.35, 3: 0.7, 4: 1.0}
 
@@ -480,6 +498,7 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
     body = {
         "model": JUDGE_MODEL,
         "max_tokens": 320,
+        "chat_template_kwargs": JUDGE_TEMPLATE_KWARGS,
         # Non-zero so the votes averaged in judge_image actually decorrelate.
         "temperature": 0.7,
         "messages": [
@@ -495,6 +514,7 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
                             "B_IS:, describe in under 12 words what shapes B "
                             "actually contains.\nThen answer these about B, one "
                             f"per line, exactly as named:\n{CHECK_BLOCK}\n"
+                            f"{LASH_QUESTION}\n"
                             "Then a line starting with "
                             "RATING:, a single digit 0-4 for how much B looks "
                             "like a SOFT SEMI-REALISTIC PAINTED eye in the "
@@ -533,7 +553,7 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
             resp.raise_for_status()
             text = resp.json()["choices"][0]["message"]["content"] or ""
             upper = text.upper()
-            m = re.search(r"RATING:\s*([0-4])", upper)
+            m = re.search(r"RATING:\s*\**\s*([0-4])", upper)
             if m:
                 rating = int(m.group(1))
                 missing = ""
@@ -542,10 +562,14 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
                     if answer and answer.group(1) == "NO":
                         rating = min(rating, cap)
                         missing += name[0]
+                fan = re.search(r"LASHFAN:\s*\**\s*([0-2])", upper)
+                lash = int(fan.group(1)) / 2 if fan else 0.0
                 desc = text.split("B_IS:")[-1].splitlines()[0].strip()
-                return RATING_REWARD[rating], {
+                style = RATING_REWARD[rating]
+                return (1 - LASH_WEIGHT) * style + LASH_WEIGHT * lash, {
                     "judge": str(rating),
                     "judge_missing": missing,
+                    "judge_lash": f"{lash:.1f}",
                     "judge_desc": desc[:120],
                 }
             last_err = f"unparseable: {text[:80]}"
@@ -571,6 +595,7 @@ def judge_image(png: bytes, prompt: str) -> tuple[float, dict]:
     return sum(scores) / len(scores), {
         "judge": " ".join(m.get("judge", "?") for _, m in votes),
         "judge_missing": " ".join(m.get("judge_missing", "") or "-" for _, m in votes),
+        "judge_lash": " ".join(m.get("judge_lash", "?") for _, m in votes),
         "judge_desc": votes[0][1].get("judge_desc", ""),
     }
 
@@ -670,7 +695,13 @@ async def eye_rm(args, sample, **kwargs) -> float:
 # ── Training entrypoint ──────────────────────────────────────────────────
 
 
-def launch(num_rollout: int, n_train: int = 256, model: str = "4b") -> None:
+def launch(
+    num_rollout: int,
+    n_train: int = 256,
+    model: str = "4b",
+    load: str = "",
+) -> None:
+    """Train the eye task. ``load`` continues from a training checkpoint dir."""
     from modal_training_gym import (
         Qwen3_8_27B,
         Qwen3_8_27b_Recipe,
@@ -732,6 +763,10 @@ def launch(num_rollout: int, n_train: int = 256, model: str = "4b") -> None:
             save_interval=10,
             apply_chat_template_kwargs='{"enable_thinking": false}',
             image_overlay=overlay_all_images,
+            load=load,
+            # The saved scheduler stops at the previous horizon, so continuing
+            # past it needs the new schedule to win over the checkpoint's.
+            extra_config={"override_opt_param_scheduler": True} if load else {},
         ),
     )
     result = config.train()
@@ -744,4 +779,5 @@ if __name__ == "__main__":
     launch(
         num_rollout=int(sys.argv[1]) if len(sys.argv) > 1 else 1,
         model=sys.argv[2] if len(sys.argv) > 2 else "4b",
+        load=sys.argv[3] if len(sys.argv) > 3 else "",
     )
