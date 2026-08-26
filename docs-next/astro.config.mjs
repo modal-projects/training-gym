@@ -213,6 +213,10 @@ export default defineConfig({
           label: 'Guides',
           items: [
             {
+              label: 'Start here',
+              autogenerate: { directory: 'guides/start' },
+            },
+            {
               label: 'Tools',
               autogenerate: { directory: 'guides/tools' },
             },
