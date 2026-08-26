@@ -118,11 +118,6 @@ def score_haiku(response: str) -> float:
 # example of creating your own dataset, or the
 # [DatasetConfig](https://gym.modal.dev/reference/core/datasetconfig) documentation
 # for a deeper dive.
-#
-# The tutorials set `output_format = "jsonl"` so the prepared file stays
-# readable with `head` on the data volume. Parquet is the default and the better
-# choice at real dataset sizes: it's compact, typed, and streams row group by
-# row group.
 
 class HaikuDataset(HuggingFaceDataset):
     hf_repo = "statworx/haiku"
