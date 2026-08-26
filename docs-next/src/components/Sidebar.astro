@@ -1,37 +1,27 @@
 ---
-import MobileMenuFooter from '@astrojs/starlight/components/MobileMenuFooter.astro';
-
 const { sidebar } = Astro.locals.starlightRoute;
 const currentPath = Astro.url.pathname;
+type SidebarEntry = (typeof sidebar)[number];
+type SidebarLink = Extract<SidebarEntry, { type: 'link' }>;
+type SidebarGroup = Extract<SidebarEntry, { type: 'group' }>;
 
-function getFilteredSidebar() {
-  if (currentPath === '/' || currentPath.startsWith('/support')) {
-    return [];
-  }
-
-  for (const entry of sidebar) {
-    if (entry.type === 'group') {
-      const hasMatchingChild = JSON.stringify(entry).includes(currentPath) ||
-        entry.entries.some((e) =>
-          e.type === 'link'
-            ? currentPath.startsWith(e.href.replace(/\/$/, ''))
-            : JSON.stringify(e).includes(currentPath)
-        );
-
-      if (hasMatchingChild) {
-        return entry.entries;
-      }
-    }
-  }
-
-  return sidebar;
-}
-
-const filteredSidebar = getFilteredSidebar();
+const currentSection =
+  currentPath === '/guides' || currentPath.startsWith('/guides/')
+    ? 'Guides'
+    : currentPath === '/tutorials' || currentPath.startsWith('/tutorials/')
+      ? 'Tutorials'
+      : currentPath === '/reference' || currentPath.startsWith('/reference/')
+        ? 'Reference'
+        : undefined;
+const activeGroup = sidebar.find(
+  (entry): entry is SidebarGroup => entry.type === 'group' && entry.label === currentSection,
+);
+const filteredSidebar: readonly SidebarEntry[] = activeGroup?.entries ?? [];
 const showSidebar = filteredSidebar.length > 0;
+const isReference = currentPath === '/reference' || currentPath.startsWith('/reference/');
 
-function flattenLinks(entries) {
-  const links = [];
+function flattenLinks(entries: readonly SidebarEntry[]): SidebarLink[] {
+  const links: SidebarLink[] = [];
   for (const entry of entries) {
     if (entry.type === 'link') {
       links.push(entry);
@@ -42,7 +32,7 @@ function flattenLinks(entries) {
   return links;
 }
 
-function firstLinkHref(entry) {
+function firstLinkHref(entry: SidebarEntry): string | undefined {
   if (entry.type === 'link') return entry.href;
   const first = flattenLinks(entry.entries)[0];
   return first?.href;
@@ -61,7 +51,7 @@ const sections = filteredSidebar.map((entry) => {
   return {
     label: entry.label,
     href: firstLinkHref(entry),
-    isCurrent: items.some((item) => item.isCurrent),
+    isCurrent: false,
     items,
   };
 });
@@ -70,7 +60,12 @@ const sections = filteredSidebar.map((entry) => {
 {
   showSidebar ? (
     <>
-      <ul class="tg-tutorial-sidebar">
+      <ul
+        class:list={[
+          'tg-tutorial-sidebar',
+          { 'is-reference': isReference },
+        ]}
+      >
         {sections.map((section) => (
           <li>
             {section.href ? (
@@ -94,10 +89,6 @@ const sections = filteredSidebar.map((entry) => {
           </li>
         ))}
       </ul>
-
-      <div class="md:sl-hidden">
-        <MobileMenuFooter />
-      </div>
     </>
   ) : (
     <div class="tg-sidebar-empty" aria-hidden="true" />

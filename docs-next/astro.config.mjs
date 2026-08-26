@@ -1,21 +1,102 @@
 // @ts-check
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
+import { parseTutorialMetadata } from './src/lib/tutorial-docs-loader.ts';
+
+const configDirectory = path.dirname(fileURLToPath(import.meta.url));
+
+function remarkStripPageTitle() {
+  return (/** @type {{ children: Array<{ type: string, depth?: number }> }} */ tree) => {
+    const index = tree.children.findIndex(
+      (node) => node.type === 'heading' && node.depth === 1,
+    );
+    if (index !== -1) {
+      tree.children.splice(index, 1);
+    }
+  };
+}
+
+function loadTutorialPages() {
+  const tutorialsDirectory = path.resolve(configDirectory, '../tutorials');
+  const tutorials = readdirSync(tutorialsDirectory)
+    .filter((fileName) => fileName.endsWith('.py'))
+    .map((fileName) => {
+      const tutorialPath = path.join(tutorialsDirectory, fileName);
+      const source = readFileSync(tutorialPath, 'utf8');
+      const { order } = parseTutorialMetadata(source, tutorialPath);
+      return { order, slug: path.basename(fileName, '.py') };
+    })
+    .sort((left, right) => left.order - right.order || left.slug.localeCompare(right.slug));
+  if (!tutorials[0]) {
+    throw new Error('No tutorial pages found');
+  }
+  return tutorials;
+}
+
+function firstGuidePath() {
+  const guidesDirectory = path.resolve(configDirectory, 'src/content/docs/guides');
+  const guides = readdirSync(guidesDirectory, { recursive: true, encoding: 'utf8' })
+    .filter((fileName) => fileName.endsWith('.md'))
+    .map((fileName) => {
+      const guidePath = path.join(guidesDirectory, fileName);
+      const source = readFileSync(guidePath, 'utf8');
+      const frontmatterEnd = source.indexOf('\n---', 4);
+      const frontmatter = frontmatterEnd === -1 ? '' : source.slice(4, frontmatterEnd);
+      const orderMatch = frontmatter.match(/^order:\s*(\d+)\s*$/m);
+      if (!orderMatch) {
+        throw new Error(`${guidePath} is missing order`);
+      }
+      const slug = fileName
+        .replaceAll(path.sep, '/')
+        .replace(/(?:\/index)?\.md$/, '');
+      return { order: Number(orderMatch[1]), slug };
+    })
+    .sort((left, right) => left.order - right.order || left.slug.localeCompare(right.slug));
+  if (!guides[0]) {
+    throw new Error('No guide pages found');
+  }
+  return `/guides/${guides[0].slug}`;
+}
+
+const tutorialPages = loadTutorialPages();
+const firstTutorial = `/tutorials/${tutorialPages[0].slug}`;
+const firstGuide = firstGuidePath();
 
 export default defineConfig({
+  trailingSlash: 'never',
+  redirects: {
+    '/guides': firstGuide,
+    '/support': '/',
+    '/tutorials': firstTutorial,
+    '/tutorials/agent': firstTutorial,
+    '/tutorials/agent/000_agent_sandbox': '/tutorials/agent_sandbox',
+    '/tutorials/multinode/002_glm_4_7': '/tutorials/multinode',
+    '/tutorials/rl': firstTutorial,
+    '/tutorials/rl/000_rl_basics': '/tutorials/rl_basics',
+    '/tutorials/rl/001_sandboxes': '/tutorials/sandboxes',
+    '/tutorials/rl/002_multiturn': '/tutorials/multiturn',
+    '/tutorials/rl/003_on_policy_distillation': '/tutorials/on_policy_distillation',
+    '/tutorials/rl/005_dapo': '/tutorials/dapo',
+    '/tutorials/rl/006_audio_asr': '/tutorials/audio_asr',
+    '/tutorials/rl/007_param_sweep': '/tutorials/param_sweep',
+    '/tutorials/rl/008_computer_use': '/tutorials/computer_use',
+    '/tutorials/rl/009_cross_tokenizer_distillation':
+      '/tutorials/cross_tokenizer_distillation',
+    '/tutorials/tools/000_observability_dashboard':
+      '/guides/tools/observability-dashboard',
+    '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration',
+  },
   markdown: {
-    remarkPlugins: [remarkMath],
+    remarkPlugins: [remarkMath, remarkStripPageTitle],
     rehypePlugins: [rehypeKatex, rehypeTableWrapper],
   },
   site: 'https://gym.modal.dev',
-  redirects: {
-    '/tutorials/tools/000_observability_dashboard':
-      '/guides/tools/observability-dashboard/',
-    '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration/',
-  },
   integrations: [
     starlight({
       title: 'Training Gym',
@@ -125,13 +206,12 @@ export default defineConfig({
         Sidebar: './src/components/Sidebar.astro',
         PageSidebar: './src/components/PageSidebar.astro',
         PageTitle: './src/components/PageTitle.astro',
+        TableOfContents: './src/components/TableOfContents.astro',
       },
       sidebar: [
-        { label: 'Overview', link: '/' },
         {
           label: 'Guides',
           items: [
-            { label: 'Overview', link: '/guides/' },
             {
               label: 'Tools',
               autogenerate: { directory: 'guides/tools' },
@@ -141,93 +221,88 @@ export default defineConfig({
         {
           label: 'Tutorials',
           items: [
-            { label: 'All Tutorials', link: '/tutorials/' },
             {
-              label: 'Reinforcement Learning',
-              autogenerate: { directory: 'tutorials/rl' },
-            },
-            {
-              label: 'Agents',
-              autogenerate: { directory: 'tutorials/agent' },
+              label: 'Featured',
+              items: tutorialPages.map(({ slug }) => ({ slug: `tutorials/${slug}` })),
             },
           ],
         },
         {
-          label: 'API Reference',
+          label: 'Reference',
           items: [
-            { label: 'Overview', link: '/reference/' },
-            { label: 'CLI Reference', link: '/reference/cli/' },
+            { label: 'Overview', link: '/reference' },
+            { label: 'CLI Reference', link: '/reference/cli' },
             {
               label: 'Core',
               items: [
-                { label: 'ModelConfig', link: '/reference/core/modelconfig/' },
-                { label: 'HFModelConfiguration', link: '/reference/core/hfmodelconfiguration/' },
-                { label: 'ModelArchitecture', link: '/reference/core/modelarchitecture/' },
-                { label: 'DatasetConfig', link: '/reference/core/datasetconfig/' },
-                { label: 'HuggingFaceDataset', link: '/reference/core/huggingfacedataset/' },
-                { label: 'HarborDataset', link: '/reference/core/harbordataset/' },
-                { label: 'MetricConfig', link: '/reference/core/metricconfig/' },
-                { label: 'TrackioConfig', link: '/reference/core/trackioconfig/' },
-                { label: 'WandbConfig', link: '/reference/core/wandbconfig/' },
-                { label: 'ModalRayCluster', link: '/reference/core/modalraycluster/' },
-                { label: 'TrainResult', link: '/reference/core/trainresult/' },
+                { label: 'ModelConfig', link: '/reference/core/modelconfig' },
+                { label: 'HFModelConfiguration', link: '/reference/core/hfmodelconfiguration' },
+                { label: 'ModelArchitecture', link: '/reference/core/modelarchitecture' },
+                { label: 'DatasetConfig', link: '/reference/core/datasetconfig' },
+                { label: 'HuggingFaceDataset', link: '/reference/core/huggingfacedataset' },
+                { label: 'HarborDataset', link: '/reference/core/harbordataset' },
+                { label: 'MetricConfig', link: '/reference/core/metricconfig' },
+                { label: 'TrackioConfig', link: '/reference/core/trackioconfig' },
+                { label: 'WandbConfig', link: '/reference/core/wandbconfig' },
+                { label: 'ModalRayCluster', link: '/reference/core/modalraycluster' },
+                { label: 'TrainResult', link: '/reference/core/trainresult' },
               ],
             },
             {
               label: 'Models',
               items: [
-                { label: 'ToolCall', link: '/reference/models/toolcall/' },
-                { label: 'ParsedResponse', link: '/reference/models/parsedresponse/' },
-                { label: 'parse_qwen3_response', link: '/reference/models/parse_qwen3_response/' },
-                { label: 'Qwen3-0.6B', link: '/reference/models/qwen3_0_6b/' },
-                { label: 'Qwen3-1.7B', link: '/reference/models/qwen3_1_7b/' },
-                { label: 'Qwen3-4B', link: '/reference/models/qwen3_4b/' },
-                { label: 'Qwen3-8B', link: '/reference/models/qwen3_8b/' },
-                { label: 'Qwen3-30B-A3B', link: '/reference/models/qwen3_30b/' },
-                { label: 'Qwen3.5-4B', link: '/reference/models/qwen3_5_4b/' },
+                { label: 'ToolCall', link: '/reference/models/toolcall' },
+                { label: 'ParsedResponse', link: '/reference/models/parsedresponse' },
+                { label: 'parse_qwen3_response', link: '/reference/models/parse_qwen3_response' },
+                { label: 'Qwen3-0.6B', link: '/reference/models/qwen3_0_6b' },
+                { label: 'Qwen3-1.7B', link: '/reference/models/qwen3_1_7b' },
+                { label: 'Qwen3-4B', link: '/reference/models/qwen3_4b' },
+                { label: 'Qwen3-8B', link: '/reference/models/qwen3_8b' },
+                { label: 'Qwen3-30B-A3B', link: '/reference/models/qwen3_30b' },
+                { label: 'Qwen3.5-4B', link: '/reference/models/qwen3_5_4b' },
                 {
                   label: 'Moonlight-16B-A3B-Instruct',
-                  link: '/reference/models/moonlight_16b_a3b_instruct/',
+                  link: '/reference/models/moonlight_16b_a3b_instruct',
                 },
-                { label: 'Qwen3.6-35B-A3B', link: '/reference/models/qwen3_6_35b/' },
-                { label: 'Qwen3.6-27B', link: '/reference/models/qwen3_6_27b/' },
-                { label: 'Qwen3.8-27B', link: '/reference/models/qwen3_8_27b/' },
+                { label: 'Qwen3.6-35B-A3B', link: '/reference/models/qwen3_6_35b' },
+                { label: 'Qwen3.6-27B', link: '/reference/models/qwen3_6_27b' },
+                { label: 'Qwen3.8-27B', link: '/reference/models/qwen3_8_27b' },
               ],
             },
             {
               label: 'Training',
               items: [
-                { label: 'TrainConfig', link: '/reference/training/trainconfig/' },
-                { label: 'SlimeRecipe', link: '/reference/training/slimerecipe/' },
-                { label: 'MilesRecipe', link: '/reference/training/milesrecipe/' },
+                { label: 'TrainConfig', link: '/reference/training/trainconfig' },
+                { label: 'SlimeRecipe', link: '/reference/training/slimerecipe' },
+                { label: 'MilesRecipe', link: '/reference/training/milesrecipe' },
                 {
                   label: 'Qwen3_5_4b_Miles_Recipe',
-                  link: '/reference/training/qwen3_5_4b_miles_recipe/',
+                  link: '/reference/training/qwen3_5_4b_miles_recipe',
                 },
                 {
                   label: 'Moonlight_16B_A3B_Recipe',
-                  link: '/reference/training/moonlight_16b_a3b_recipe/',
+                  link: '/reference/training/moonlight_16b_a3b_recipe',
                 },
-                { label: 'Qwen3_6_35b_Recipe', link: '/reference/training/qwen3_6_35b_recipe/' },
-                { label: 'Qwen3_6_27b_Recipe', link: '/reference/training/qwen3_6_27b_recipe/' },
-                { label: 'Qwen3_8_27b_Recipe', link: '/reference/training/qwen3_8_27b_recipe/' },
+                { label: 'Qwen3_6_35b_Recipe', link: '/reference/training/qwen3_6_35b_recipe' },
+                { label: 'Qwen3_6_27b_Recipe', link: '/reference/training/qwen3_6_27b_recipe' },
+                { label: 'Qwen3_8_27b_Recipe', link: '/reference/training/qwen3_8_27b_recipe' },
               ],
             },
             {
               label: 'Deployment',
               items: [
-                { label: 'Endpoint', link: '/reference/deployment/endpoint/' },
-                { label: 'CustomDeployment', link: '/reference/deployment/customdeployment/' },
-                { label: 'SglangRecipe', link: '/reference/deployment/sglangrecipe/' },
-                { label: 'VllmRecipe', link: '/reference/deployment/vllmrecipe/' },
+                { label: 'Endpoint', link: '/reference/deployment/endpoint' },
+                { label: 'CustomDeployment', link: '/reference/deployment/customdeployment' },
+                { label: 'SglangRecipe', link: '/reference/deployment/sglangrecipe' },
+                { label: 'VllmRecipe', link: '/reference/deployment/vllmrecipe' },
               ],
             },
           ],
         },
-        { label: 'CLI Reference', link: '/reference/cli/' },
-        { label: 'Support', link: '/support/' },
+        { label: 'CLI Reference', link: '/reference/cli' },
       ],
-      lastUpdated: true,
+      lastUpdated: false,
+      pagination: false,
       disable404Route: true,
     }),
   ],

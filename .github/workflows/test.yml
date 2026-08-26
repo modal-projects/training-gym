@@ -29,12 +29,12 @@ jobs:
 
       - name: Verify generated files
         run: |
-          uv run tutorials/generate_tutorial.py
-          git diff --exit-code -- README.md tutorials/
-          test -z "$(git ls-files --others --exclude-standard -- README.md tutorials/)"
-          uv run scripts/generate_llms_txt.py
+          uv run python -m scripts.generate_llms_txt
           git diff --exit-code -- docs-next/public/llms.txt
           uv run scripts/generate_models_table.py --check
+
+      - name: Compile tutorials
+        run: uv run -m compileall tutorials/
 
       - name: Run tests
         run: uv run pytest tests/ -v

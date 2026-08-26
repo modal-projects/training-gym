@@ -6,11 +6,13 @@ from .base import (
     ToolCall,
     parse_gemma4_response,
     parse_glm_response,
+    parse_inkling_response,
     parse_qwen3_6_response,
     parse_qwen3_response,
 )
 from .gemma4_26b_a4b import Gemma4_26B_A4B
 from .glm_4_7 import GLM_4_7
+from .inkling_small import Inkling_Small
 from .moonlight_16b_a3b_instruct import Moonlight_16B_A3B_Instruct
 from .qwen3_0_6b import Qwen3_0_6B
 from .qwen3_1_7b import Qwen3_1_7B
@@ -34,6 +36,7 @@ __all__ = [
     "ParsedResponse",
     "Gemma4_26B_A4B",
     "GLM_4_7",
+    "Inkling_Small",
     "Qwen3_0_6B",
     "Qwen3_1_7B",
     "Qwen3_4B",
@@ -43,6 +46,7 @@ __all__ = [
     "ToolCall",
     "parse_gemma4_response",
     "parse_glm_response",
+    "parse_inkling_response",
     "parse_qwen3_6_response",
     "parse_qwen3_response",
     "Qwen3_5_0_8B",

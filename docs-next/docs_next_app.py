@@ -44,6 +44,11 @@ image = (
 
 app = modal.App("training-gym-docs", image=image)
 
+_DIRECTORY_REDIRECTS = {
+    "/guides": "/guides/tools/agent-driven-training",
+    "/tutorials": "/tutorials/rl_basics",
+}
+
 
 def cache_control_value(path: str, content_type: str) -> str | None:
     if path.startswith("/_astro/"):
@@ -63,10 +68,24 @@ def cache_control_value(path: str, content_type: str) -> str | None:
 def serve():
     from fastapi import FastAPI, Request, Response
     from fastapi.middleware.gzip import GZipMiddleware
+    from fastapi.responses import RedirectResponse
     from fastapi.staticfiles import StaticFiles
 
     web = FastAPI()
     web.add_middleware(GZipMiddleware, minimum_size=500)
+    dist = Path(REMOTE_DIST)
+
+    @web.middleware("http")
+    async def directory_index_without_slash(request: Request, call_next):
+        path = request.url.path
+        if path != "/" and path.endswith("/"):
+            target = path.rstrip("/") or "/"
+            query = request.url.query
+            location = f"{target}?{query}" if query else target
+            return RedirectResponse(url=location, status_code=301)
+        if path != "/" and (dist / path.lstrip("/") / "index.html").is_file():
+            request.scope["path"] = f"{path}/"
+        return await call_next(request)
 
     @web.middleware("http")
     async def cache_control(request: Request, call_next):
@@ -77,6 +96,17 @@ def serve():
         if value and response.status_code in (200, 206):
             response.headers["Cache-Control"] = value
         return response
+
+    @web.middleware("http")
+    async def directory_http_redirects(request: Request, call_next):
+        if request.method not in ("GET", "HEAD"):
+            return await call_next(request)
+        target = _DIRECTORY_REDIRECTS.get(request.url.path.rstrip("/") or "/")
+        if target is None:
+            return await call_next(request)
+        query = request.url.query
+        location = f"{target}?{query}" if query else target
+        return RedirectResponse(url=location, status_code=301)
 
     web.mount("/", StaticFiles(directory=REMOTE_DIST, html=True), name="static")
 

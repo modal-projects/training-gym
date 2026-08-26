@@ -1,9 +1,8 @@
 ---
-title: Trackio integration
-description: Stream training metrics to a Modal dashboard or Hugging Face Space.
-sidebar:
-  order: 3
+order: 3
 ---
+
+# Trackio integration
 
 [Trackio](https://huggingface.co/docs/trackio/index) is a lightweight,
 W&B-compatible experiment tracker from Hugging Face. Training Gym installs it

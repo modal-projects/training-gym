@@ -31,6 +31,11 @@ _CONVERSION_EXTRA_ARGS = [
     ("make_vocab_size_divisible_by", "make-vocab-size-divisible-by"),
 ]
 
+_PIPELINE_SPLIT_ARGS = {
+    "decoder_first_pipeline_num_layers",
+    "decoder_last_pipeline_num_layers",
+}
+
 # Architecture fields emitted as CLI flags for every framework.
 _ARCH_VALUE_FIELDS = [
     ("num_layers", "num-layers"),
@@ -181,6 +186,10 @@ def get_checkpoint_conversion_policy(
     ``extended_arch_args`` emits the full MoE/attention arch flag set; when
     ``arch_args_model_script_attr`` is set, arch flags are skipped if that
     attribute is populated (the model script already sources them).
+
+    TP/PP come from the ``conversion_*`` overrides when set, else from the training
+    layout. EP/ETP are emitted only when their ``conversion_*`` fields are set
+    explicitly, and the pipeline-split args are dropped at conversion PP1.
     """
     gpus_per_node = getattr(cfg, "actor_num_gpus_per_node", 8)
     actor_nodes = getattr(cfg, "actor_num_nodes", 1)
@@ -192,11 +201,37 @@ def get_checkpoint_conversion_policy(
     pp = getattr(cfg, "conversion_pipeline_model_parallel_size", None) or getattr(
         cfg, "pipeline_model_parallel_size", 1
     )
-
+    # Expert parallelism is opt-in: torch_dist reshards, so most models convert fine
+    # at the implicit EP1. Models whose full expert set does not fit a rank at EP1
+    # (Inkling-Small: 256 experts) set it explicitly to mirror upstream's layout.
+    ep = getattr(cfg, "conversion_expert_model_parallel_size", None)
+    etp = getattr(cfg, "conversion_expert_tensor_parallel_size", None)
+    if (ep or etp) and not (ep and etp):
+        raise ValueError(
+            "checkpoint conversion expert parallelism needs both "
+            "conversion_expert_model_parallel_size and "
+            f"conversion_expert_tensor_parallel_size (got ep={ep}, etp={etp}); "
+            "Megatron otherwise defaults ETP to TP and the expert world size no "
+            "longer matches tp*pp"
+        )
+    if ep and etp and not (tp > 1 or pp > 1):
+        raise ValueError(
+            "checkpoint conversion expert parallelism needs a pinned conversion "
+            "layout: set conversion_tensor_model_parallel_size or "
+            "conversion_pipeline_model_parallel_size, otherwise the converter "
+            "inflates PP to the rank count and the expert world size no longer "
+            "divides it"
+        )
     if single_rank_mtp and tp == 1 and pp == 1 and getattr(cfg, "mtp_num_layers", 0):
         world_size = 1
     else:
         world_size = tp * pp if (tp > 1 or pp > 1) else gpus_per_node
+
+    if ep and etp and world_size % (etp * ep * pp) != 0:
+        raise ValueError(
+            f"checkpoint conversion expert world size etp*ep*pp={etp}*{ep}*{pp}"
+            f"={etp * ep * pp} does not divide the conversion world size {world_size}"
+        )
     max_world_size = actor_nodes * gpus_per_node
     if world_size > max_world_size:
         raise ValueError(
@@ -212,12 +247,25 @@ def get_checkpoint_conversion_policy(
             continue
 
         extra_args: list[str] = []
-        if tp > 1 or pp > 1:
+        pins_layout = tp > 1 or pp > 1
+        if pins_layout:
             extra_args += [
                 f"--tensor-model-parallel-size {tp}",
                 f"--pipeline-model-parallel-size {pp}",
             ]
+        if ep:
+            extra_args.append(f"--expert-model-parallel-size {ep}")
+        if etp:
+            extra_args.append(f"--expert-tensor-parallel-size {etp}")
         for attr, flag in _CONVERSION_EXTRA_ARGS:
+            # A recipe carries one ``decoder_{first,last}_pipeline_num_layers`` pair
+            # shared by conversion and training. It describes a split across >1
+            # pipeline stages, so it is meaningless (and rejected by Megatron) when
+            # the conversion layout is PP1. Only drop it when that PP1 is pinned on the
+            # command line: with no layout flags the converter picks its own PP, and
+            # dropping the split would then describe a layout nobody asked for.
+            if pp == 1 and pins_layout and attr in _PIPELINE_SPLIT_ARGS:
+                continue
             if x := getattr(cfg, attr, None):
                 extra_args.append(f"--{flag} {x}")
 

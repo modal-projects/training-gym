@@ -61,7 +61,7 @@ jobs:
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
             models=$(git diff "$BASE_SHA...HEAD" \
-              | uv run scripts/diff_impact.py --models)
+              | uv run python -m scripts.diff_impact --models)
           elif [ -n "$MODELS_INPUT" ]; then
             models=$(printf '%s' "$MODELS_INPUT" \
               | uv run python -c "import json,sys; print(json.dumps([m.strip() for m in sys.stdin.read().split(',') if m.strip()]))")
