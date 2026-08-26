@@ -682,7 +682,10 @@ class HarborEval(EvalConfig):
         )
         code = self._extract_code(response)
         label = self._resolve_label(example)
-        if "harbor_task_path" in label or "harbor_task_data_rel" in label:
+        test_cases = self._resolve_test_cases(example)
+        has_staged_task = "harbor_task_data_rel" in label
+        has_source_task = "harbor_task_path" in label
+        if has_staged_task or (has_source_task and not test_cases):
             from modal_training_gym.common.harbor import (
                 resolve_harbor_task_path,
                 score_harbor_response,
@@ -709,7 +712,6 @@ class HarborEval(EvalConfig):
                 )
             )
         else:
-            test_cases = self._resolve_test_cases(example)
             score, metadata = score_in_sandbox(
                 code,
                 test_cases=test_cases,

@@ -245,6 +245,7 @@ def test_harbor_eval_uses_trial_scorer(
                 "harbor_task_data_rel": "HarborDataset/harbor_tasks/source/task-a",
                 "harbor_candidate_path": "/tmp/candidate.py",
                 "harbor_candidate_command": "python {candidate_path}",
+                "test_cases": [{"input": "", "expected": "legacy"}],
             },
         },
     )
@@ -254,6 +255,47 @@ def test_harbor_eval_uses_trial_scorer(
     assert captured["response"] == "print('candidate')"
     assert captured["task_path"] == tmp_path
     assert captured["candidate_path"] == "/tmp/candidate.py"
+
+
+def test_harbor_eval_preserves_inline_test_case_scoring(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from modal_training_gym.common import eval as eval_module
+
+    captured: dict[str, object] = {}
+
+    def fake_score(response, **kwargs):
+        captured["response"] = response
+        captured.update(kwargs)
+        return 1.0, {"test_cases": 1}
+
+    monkeypatch.setattr(eval_module, "score_in_sandbox", fake_score)
+
+    class Deployment:
+        def generate(self, prompt, **kwargs):
+            return "print('candidate')"
+
+    evaluation = HarborEval(
+        dataset=HarborDataset(path=str(tmp_path)),
+        extract_code_fn=lambda response: response,
+    )
+    test_cases = [{"input": "", "expected": "candidate"}]
+    result = evaluation._harbor_eval_fn(
+        Deployment(),
+        {
+            "prompt": "Write the candidate.",
+            "label": {
+                "harbor_task_path": str(tmp_path / "task-a"),
+                "test_cases": test_cases,
+            },
+        },
+    )
+
+    assert result.score == 1.0
+    assert result.metadata == {"test_cases": 1}
+    assert captured["response"] == "print('candidate')"
+    assert captured["test_cases"] == test_cases
 
 
 @pytest.mark.parametrize(
@@ -302,3 +344,29 @@ def test_explicit_reward_function_takes_precedence(
     )
 
     assert config._prepare_recipe().custom_rm_function is custom_reward
+
+
+@pytest.mark.parametrize(
+    ("recipe_type", "recipe_kwargs"),
+    [(MilesRecipe, {}), (SlimeRecipe, _SLIME_RECIPE_KWARGS)],
+)
+def test_explicit_reward_type_takes_precedence(
+    tmp_path: Path,
+    recipe_type,
+    recipe_kwargs,
+) -> None:
+    dataset = HarborDataset(path=str(tmp_path))
+    config = TrainConfig(
+        model=Qwen3_5_4B(),
+        dataset=dataset,
+        recipe=recipe_type(
+            rm_type="deepscaler",
+            **recipe_kwargs,
+        ),
+        merge_model_recipe=False,
+    )
+
+    prepared = config._prepare_recipe()
+
+    assert prepared.custom_rm_function is None
+    assert prepared.rm_type == "deepscaler"

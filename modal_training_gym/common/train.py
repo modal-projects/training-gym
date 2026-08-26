@@ -433,7 +433,9 @@ class TrainConfig:
         if (
             reward_function is not None
             and isinstance(recipe, (MilesRecipe, SlimeRecipe))
+            and isinstance(self.recipe, (MilesRecipe, SlimeRecipe))
             and recipe.custom_rm_function is None
+            and self.recipe.rm_type is None
         ):
             recipe = _dc.replace(recipe, custom_rm_function=reward_function)
         if self.checkpoint is None:
