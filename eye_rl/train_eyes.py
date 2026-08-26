@@ -231,6 +231,14 @@ const puppeteer = require('puppeteer-core');
     },
   });
   window.brush = facade;
+  // Gradients are built with lerpColor, which sketches often call on hex
+  // strings; coercing them keeps a whole iris from being lost to one call.
+  const realLerp = window.lerpColor;
+  window.lerpColor = (a, b, t) => {
+    const c = (v) => (typeof v === "string" || typeof v === "number")
+      ? window.color(v) : v;
+    return realLerp(c(a), c(b), t);
+  };
   // Brush-only names are also exposed bare, since sketches often drop the
   // "brush." prefix. p5's own globals (line, circle, fill, stroke) are untouched.
   for (const name of ["pick", "spline", "flowLine", "polygon", "hatch",
