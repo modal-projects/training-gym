@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
 import os
 import time
+from dataclasses import dataclass
+from enum import Enum
 
 import modal
 from modal import Volume
@@ -14,8 +14,8 @@ from modal.exception import NotFoundError
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun
+from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.deploy_recipes import SglangRecipe, VllmRecipe
-
 
 _CHECKPOINTS_MOUNT_FALLBACK = "/checkpoints"
 _CONVERT_COMPLETE_MARKER = ".training_gym_convert_complete"
@@ -62,7 +62,7 @@ def _to_volume_path(checkpoint_dir: str, checkpoints_mount_path: str) -> str:
     return checkpoint_dir_norm.lstrip("/")
 
 
-def _list_checkpoints(train_result) -> list[Checkpoint]:
+def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
     checkpoint_dir = train_result.checkpoint_dir.rstrip("/")
     if checkpoint_dir == "":
         return []

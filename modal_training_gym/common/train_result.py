@@ -21,7 +21,7 @@ Typical flow:
     result = TrainResult.load(training_run_id)
 
     print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
-    print(result.latest_checkpoint_path())  # .../iter_0000050
+    print(result.checkpoints()[-1].path)    # .../iter_0000050
 
     from modal_training_gym import CustomDeployment
     from modal_training_gym.deploy_recipes import SglangRecipe
