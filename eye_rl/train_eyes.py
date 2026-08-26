@@ -761,6 +761,8 @@ def launch(
                 save_interval=10,
                 apply_chat_template_kwargs='{"enable_thinking": false}',
                 image_overlay=overlay_all_images,
+                load=load,
+                extra_config={"override_opt_param_scheduler": True} if load else {},
             ),
         )
         result = config.train()
