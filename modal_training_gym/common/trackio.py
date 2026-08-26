@@ -267,10 +267,22 @@ def install_wandb_shim() -> None:
 
     def init(*args: Any, **kwargs: Any) -> _RunProxy:
         project = kwargs.pop("project", args[0] if args else "") or "training-gym"
-        requested_name = kwargs.pop("id", "") or os.environ.get(_RUN_NAME_ENV, "")
-        requested_name = requested_name or kwargs.pop("name", "")
+        framework_id = kwargs.pop("id", "")
+        framework_name = kwargs.pop("name", "")
+        requested_name = (
+            os.environ.get(_RUN_NAME_ENV, "") or framework_id or framework_name
+        )
         resume = kwargs.pop("resume", "allow" if requested_name else "never")
         kwargs.pop("settings", None)
+        routing = {
+            key: value
+            for key, value in (
+                ("space_id", os.environ.get("TRACKIO_SPACE_ID", "")),
+                ("server_url", os.environ.get("TRACKIO_SERVER_URL", "")),
+                ("bucket_id", os.environ.get("TRACKIO_BUCKET_ID", "")),
+            )
+            if value
+        }
         run = trackio.init(
             project=project,
             name=requested_name or None,
@@ -278,6 +290,7 @@ def install_wandb_shim() -> None:
             config=kwargs.pop("config", None),
             resume=resume,
             embed=False,
+            **routing,
         )
         # Materialize the remote run before Slime's worker processes resume it.
         trackio.log({}, step=-1)
@@ -286,19 +299,30 @@ def install_wandb_shim() -> None:
         shim.config = run.config
         return proxy
 
-    def finish(*args: Any, **kwargs: Any) -> Any:
+    def log(
+        data: dict[str, Any],
+        step: int | None = None,
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> Any:
+        return trackio.log(data, step=step)
+
+    def finish(*_args: Any, **_kwargs: Any) -> Any:
         try:
-            return trackio.finish(*args, **kwargs)
+            return trackio.finish()
         finally:
             shim.run = None
+
+    def save(glob_str: str, *_args: Any, **_kwargs: Any) -> Any:
+        return trackio.save(glob_str)
 
     def generate_id() -> str:
         return uuid.uuid4().hex[:8]
 
     shim.init = init
-    shim.log = trackio.log
+    shim.log = log
     shim.finish = finish
-    shim.save = trackio.save
+    shim.save = save
     shim.login = lambda **kwargs: True
     shim.define_metric = lambda *args, **kwargs: None
     shim.__getattr__ = lambda name: getattr(trackio, name)

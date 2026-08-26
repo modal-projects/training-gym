@@ -148,6 +148,9 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
     ):
         monkeypatch.delitem(sys.modules, module_name, raising=False)
     monkeypatch.setenv("TRAINING_GYM_TRACKIO_RUN_NAME", "training-run-a2")
+    monkeypatch.setenv("TRACKIO_SPACE_ID", "modal-labs/training-metrics")
+    monkeypatch.setenv("TRACKIO_SERVER_URL", "https://metrics.example.com")
+    monkeypatch.setenv("TRACKIO_BUCKET_ID", "modal-labs/training-metrics")
 
     install_wandb_shim()
 
@@ -160,6 +163,7 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
     run = wandb.init(
         project="rl",
         entity="ignored",
+        id="framework-id",
         group="baseline",
         name="framework-name",
         config={"learning_rate": 1e-5},
@@ -175,6 +179,9 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
         "config": {"learning_rate": 1e-5},
         "resume": "allow",
         "embed": False,
+        "space_id": "modal-labs/training-metrics",
+        "server_url": "https://metrics.example.com",
+        "bucket_id": "modal-labs/training-metrics",
     }
     assert run.id == "training-run-a2"
     assert wandb.run.id == "training-run-a2"
@@ -183,7 +190,11 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
     assert len(generate_id()) == 8
     assert wandb.define_metric("train/*", step_metric="train/step") is None
 
-    wandb.log({"loss": 0.5})
-    wandb.finish()
+    wandb.log({"loss": 0.5}, commit=False, sync=True)
+    assert wandb.save("metrics.json", base_path="/tmp", policy="now") == (
+        "metrics.json"
+    )
+    wandb.finish(exit_code=0, quiet=True)
     assert calls["logs"] == [({}, -1), ({"loss": 0.5}, None)]
+    assert calls["finish"] == ((), {})
     assert wandb.run is None
