@@ -41,6 +41,7 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("fastapi[standard]==0.118.0")
     .add_local_dir(DIST_DIR, remote_path=REMOTE_DIST, copy=True)
+    .add_local_python_source("astro_redirects", copy=True)
 )
 
 app = modal.App("training-gym-docs", image=image)
