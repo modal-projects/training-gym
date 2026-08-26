@@ -9,6 +9,7 @@ import pytest
 from modal_training_gym.common.dataset import HarborDataset
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.harbor import resolve_harbor_task_path
+from modal_training_gym.train_recipes.base import BaseTrainRecipe
 
 
 def _write_task(task_dir: Path, *, marker: bytes) -> None:
@@ -119,8 +120,21 @@ def test_load_includes_default_staged_task_path(tmp_path: Path) -> None:
     [row] = dataset.load()
 
     assert row["label"]["harbor_task_data_rel"] == (
-        "HarborDataset/harbor_tasks/source/task-a"
+        f"{dataset.data_path_name}/harbor_tasks/source/task-a"
     )
+
+
+def test_distinct_harbor_datasets_use_distinct_data_paths(tmp_path: Path) -> None:
+    first = HarborDataset(path=str(tmp_path / "first"))
+    second = HarborDataset(path=str(tmp_path / "second"))
+    matching_first = HarborDataset(path=str(tmp_path / "first"))
+
+    first_path, _ = BaseTrainRecipe._resolve_data_paths(first)
+    second_path, _ = BaseTrainRecipe._resolve_data_paths(second)
+    matching_path, _ = BaseTrainRecipe._resolve_data_paths(matching_first)
+
+    assert first_path != second_path
+    assert first_path == matching_path
 
 
 def test_prepare_reports_missing_task_source(tmp_path: Path) -> None:

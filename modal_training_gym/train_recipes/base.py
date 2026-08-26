@@ -111,7 +111,9 @@ class BaseTrainRecipe(ABC):
     ) -> str:
         """Derive one on-volume path for a dataset and destination split."""
         hf_repo = getattr(ds, "hf_repo", "")
-        name = hf_repo.replace("/", "_") if hf_repo else type(ds).__name__
+        name = getattr(ds, "data_path_name", "") or (
+            hf_repo.replace("/", "_") if hf_repo else type(ds).__name__
+        )
         fmt = ds.output_format
         ext = "jsonl" if fmt == "jsonl" else "parquet"
         cache_key = getattr(ds, "cache_key", "")

@@ -17,6 +17,7 @@ from typing import Any, Literal
 import hashlib
 import json
 import random
+import re
 import shutil
 import tomllib
 import uuid
@@ -433,6 +434,40 @@ class HarborDataset(DatasetConfig):
             }
         )
 
+    @property
+    def data_path_name(self) -> str:
+        source = self.dataset_name or self.path or self.task_root or "harbor"
+        source_name = Path(source.split("@", 1)[0]).name or "harbor"
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", source_name).strip("-") or "harbor"
+        identity = {
+            "dataset_name": self.dataset_name,
+            "path": str(Path(self.path).expanduser().resolve()) if self.path else "",
+            "task_root": (
+                str(Path(self.task_root).expanduser().resolve())
+                if self.task_root
+                else ""
+            ),
+            "task_glob": self.task_glob,
+            "task_names": self.task_names,
+            "instruction_path": self.instruction_path,
+            "label_metadata_path": self.label_metadata_path,
+            "test_data_dir": self.test_data_dir,
+            "candidate_path": self.candidate_path,
+            "candidate_command": self.candidate_command,
+            "prompt_template": self.prompt_template,
+            "system_prompt": self.system_prompt,
+            "train_size": self.train_size,
+            "eval_size": self.eval_size,
+            "train_repeats": self.train_repeats,
+            "eval_repeats": self.eval_repeats,
+            "shuffle_tasks": self.shuffle_tasks,
+            "shuffle_seed": self.shuffle_seed,
+        }
+        digest = hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()[:12]
+        return f"{type(self).__name__}-{slug[:32]}-{digest}"
+
     def _harbor_dataset_ref(self) -> str:
         if "@" in self.dataset_name:
             return self.dataset_name
@@ -594,7 +629,7 @@ class HarborDataset(DatasetConfig):
         rel_with_root = (Path(task_root.name) / rel).as_posix()
         if task_data_rel is None:
             task_data_rel = (
-                Path(type(self).__name__) / self.task_files_dir / rel_with_root
+                Path(self.data_path_name) / self.task_files_dir / rel_with_root
             )
         label: dict[str, Any] = {
             "harbor_task_name": task_dir.name,
