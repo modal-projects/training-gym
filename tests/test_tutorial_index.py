@@ -10,8 +10,7 @@ from scripts.tutorial_index import parse_tutorial
 ROOT = Path(__file__).resolve().parents[1]
 AUTHORED_PAGES = (
     ROOT / "docs-next/src/content/docs/guides/tools/observability-dashboard.md",
-    ROOT / "docs-next/src/content/docs/guides/tools/trackio-integration.md",
-    ROOT / "docs-next/src/content/docs/guides/tools/wandb-integration.md",
+    ROOT / "docs-next/src/content/docs/guides/tools/metrics-integration.md",
     ROOT / "docs-next/src/content/docs/reference/cli.md",
 )
 
@@ -57,17 +56,14 @@ def test_collect_guides_uses_h1_and_order() -> None:
     assert [guide[0] for guide in guides] == [
         "tools/agent-driven-training",
         "tools/observability-dashboard",
-        "tools/wandb-integration",
-        "tools/trackio-integration",
+        "tools/metrics-integration",
     ]
     assert guides[0][1] == "Agent-driven training"
     assert guides[0][2] == 0
     assert guides[1][1] == "The observability dashboard"
     assert guides[1][2] == 1
-    assert guides[2][1] == "Weights & Biases integration"
+    assert guides[2][1] == "Metrics integration"
     assert guides[2][2] == 2
-    assert guides[3][1] == "Trackio integration"
-    assert guides[3][2] == 3
 
 
 def test_api_reference_orders_follow_manifest() -> None:

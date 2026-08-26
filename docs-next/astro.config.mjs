@@ -90,7 +90,9 @@ export default defineConfig({
       '/tutorials/cross_tokenizer_distillation',
     '/tutorials/tools/000_observability_dashboard':
       '/guides/tools/observability-dashboard',
-    '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration',
+    '/tutorials/tools/001_wandb_integration': '/guides/tools/metrics-integration',
+    '/guides/tools/wandb-integration': '/guides/tools/metrics-integration',
+    '/guides/tools/trackio-integration': '/guides/tools/metrics-integration',
   },
   markdown: {
     remarkPlugins: [remarkMath, remarkStripPageTitle],

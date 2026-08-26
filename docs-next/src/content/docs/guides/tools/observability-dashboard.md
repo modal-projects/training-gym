@@ -139,7 +139,7 @@ rollout step — the fastest way to debug a flat reward curve:
    (`←` / `→` to navigate): the full prompt, the system message, the
    model's thinking, every conversation turn, and the reward that sample
    received.
-5. **W&B link** — jump to the same run in Weights & Biases.
+5. **Metrics link** — jump to the same run in W&B or Trackio.
 
 ## Housekeeping
 
