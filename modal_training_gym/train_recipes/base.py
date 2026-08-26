@@ -110,8 +110,7 @@ class BaseTrainRecipe(ABC):
         """Derive on-volume file paths from a dataset's properties."""
         hf_repo = getattr(ds, "hf_repo", "")
         name = hf_repo.replace("/", "_") if hf_repo else type(ds).__name__
-        fmt = getattr(ds, "output_format", "parquet")
-        ext = "jsonl" if fmt == "jsonl" else "parquet"
+        ext = "jsonl" if ds.output_format == "jsonl" else "parquet"
         split = getattr(ds, "hf_split", "train")
         prompt_data = f"{DATA_PATH}/{name}/{split}.{ext}"
         if getattr(ds, "writes_eval_paths", True):

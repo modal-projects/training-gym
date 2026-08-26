@@ -35,12 +35,23 @@ class DatasetConfig:
 
     Describes *what* the data is. Where it gets written on disk is decided
     by the recipe/launcher layer, not by the dataset itself.
+
+    output_format : str
+        On-disk format ``prepare()`` writes, ``"parquet"`` (default) or
+        ``"jsonl"``; it also picks the extension of the path the launcher
+        hands to ``prepare()``. Parquet is the default because it is compact,
+        carries a typed schema (so a ragged or mistyped column fails at write
+        time rather than inside a remote rollout actor), streams row-group by
+        row-group, and stores binary media without base64 inflation. Choose
+        ``"jsonl"`` for small or hand-inspected datasets — it stays greppable
+        on the data volume and tolerates rows whose schemas don't line up.
     """
 
     _type: DatasetType = DatasetType.DEFAULT
     dataset_id: str = ""
     input_key: str = ""
     label_key: str = ""
+    output_format: str = "parquet"
     apply_chat_template: bool = True
     always_prepare: bool = False
     # When True (default), ``prepare()`` is expected to materialize every path in
@@ -58,6 +69,11 @@ class DatasetConfig:
 
     def _validate(self) -> None:
         """Required-field check; subclasses call this at the end of their own ``__init__``."""
+        if self.output_format not in ("parquet", "jsonl"):
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} has output_format="
+                f"{self.output_format!r}; expected 'parquet' or 'jsonl'."
+            )
         if not self.label_key:
             raise TrainingGymConfigError(
                 f"{type(self).__name__} requires `label_key` to be set. "
@@ -156,7 +172,6 @@ class HuggingFaceDataset(DatasetConfig):
     hf_repo: str = ""
     hf_split: str = "train"
     hf_config: str | None = None
-    output_format: str = "parquet"
     input_column: str = ""
     output_column: str = ""
     system_prompt: str = ""
@@ -248,7 +263,6 @@ class HarborDataset(DatasetConfig):
     instruction_path: str = "instruction.md"
     label_metadata_path: str | None = None
     test_data_dir: str | None = None
-    output_format: str = "parquet"
     prompt_template: str = "{instruction}"
     system_prompt: str = ""
     train_size: int | None = None
