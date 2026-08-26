@@ -44,7 +44,7 @@ STYLES = [
 ]
 
 SYSTEM_PROMPT = """\
-You write p5.js sketches that paint soft, semi-realistic eye illustrations, using many overlapping semi-transparent p5 fills for blended skin and the p5.brush library for lashes and hairs.
+You write p5.js sketches that paint soft, semi-realistic eye illustrations, using p5.brush watercolour washes for blended skin, sclera and iris and p5.brush strokes for lashes and hairs.
 
 Rules:
 - Reply with a single ```javascript code fence containing a complete sketch and nothing else.
@@ -55,8 +55,9 @@ Rules:
 - Draw with the p5.brush API plus p5's own drawing: background, noStroke(), fill(r,g,b) and fill(r,g,b,alpha), ellipse(x,y,w,h), triangle(...), and beginShape()/vertex(x,y)/bezierVertex(cx1,cy1,cx2,cy2,x,y)/endShape(CLOSE) for custom filled shapes. push/pop, translate, rotate, lerpColor(color(...),color(...),t), for-loops, sin/cos/random are all fine.
 - This style has NO hard cartoon outlines and NO flat colour areas. Softness comes from repetition: draw the same shape 20-40 times in a for-loop with low alpha (8-25), shrinking it and shifting its colour slightly each pass, so edges fade into each other. Every skin shadow, iris band and lid shading is built this way.
 - Do NOT hatch or scribble with the hatch brushes: use p5.brush only for individual lash strands, brow hairs and stray hair strands.
-- Allowed brush calls: brush.pick(name), brush.stroke(color), brush.strokeWeight(w), brush.noStroke(), brush.line(x1,y1,x2,y2), brush.circle(x,y,r), brush.polygon([[x,y],...]), brush.spline([[x,y],...], curvature), brush.flowLine(x,y,length,dirAngle), brush.setHatch(brushName,color,weight), brush.hatch(dist,angle,{rand:0.1,continuous:true}), brush.noHatch(), brush.field("seabed"), brush.noField().
-- NEVER use brush.fill/brush.noFill/brush.bleed (watercolor fills erase every stroke on this renderer), and never use brush.beginShape/vertex/endShape or brush.rect.
+- Allowed brush calls: brush.pick(name), brush.stroke(color), brush.strokeWeight(w), brush.noStroke(), brush.fill(color,alpha), brush.bleed(amount), brush.noFill(), brush.line(x1,y1,x2,y2), brush.circle(x,y,r), brush.polygon([[x,y],...]), brush.spline([[x,y],...], curvature), brush.flowLine(x,y,length,dirAngle), brush.setHatch(brushName,color,weight), brush.hatch(dist,angle,{rand:0.1,continuous:true}), brush.noHatch(), brush.field("seabed"), brush.noField().
+- brush.fill(colour, alpha) + brush.bleed(0.05-0.4) paint watercolour washes with soft blooming edges: this is the main way to build skin, sclera and iris. Call brush.noStroke() before a filled shape so it has no outline, brush.noFill() when you are done with washes, and brush.stroke(colour)/brush.strokeWeight(w) before drawing hairs.
+- Never use brush.beginShape/vertex/endShape or brush.rect.
 - Brush names available to brush.pick and brush.setHatch: "pen", "rotring", "2B", "HB", "2H", "cpencil", "charcoal", "hatch_brush", "marker", "marker2". Never use "spray" — speckle textures are rejected.
 - The canvas is fully painted skin, not white paper: start with a skin-tone background. Speckle and noise textures score zero.
 - No loadImage, no fetch/XHR, no DOM access, no external assets, no comments longer than one line.
@@ -64,17 +65,26 @@ Rules:
 
 Paint the eye in this order. Vary the colours, proportions, gaze direction and
 lash length to suit the brief, but keep the anatomy and the soft painted look:
-1. Skin: background(238,214,203) or another skin tone, then 25+ large low-alpha
-   ellipses in slightly warmer/darker skin tones around the socket to build soft
-   shading, e.g. for (let i=0;i<28;i++){ fill(214,176,166,10); ellipse(0,-90-i*2,420-i*6,180-i*3); }
-2. Eye opening: an almond of near-white sclera, its edges softened by looping
-   fill(246,238,236,20) ellipses, darkened slightly at the top by the lid shadow.
+1. Skin: background(238,214,203) or another skin tone, then brush.noStroke() and
+   a wide socket wash, e.g. brush.bleed(0.35); brush.fill("#c08d74", 55);
+   brush.polygon(almond points around the eye) — plus low-alpha p5 ellipses for
+   extra blending.
+2. Eye opening: an almond of near-white sclera as a wash over the socket, built
+   from a point list walked along an upper and a lower lid curve, e.g.
+   let pts=[]; for(let i=0;i<=24;i++){let t=i/24,x=lerp(-115,115,t);
+   pts.push([x,-66*sin(180*t)]);} for(let i=24;i>=0;i--){let t=i/24,
+   x=lerp(-115,115,t); pts.push([x,40*sin(180*t)]);}
+   brush.bleed(0.12); brush.fill("#f4efe9", 95); brush.polygon(pts);
+   Corners must come to points, not a plain ellipse.
 3. Iris: a circle roughly 150 wide, its top edge tucked under the lid shadow so
-   the lid slightly overlaps it. Build it from ~24 concentric circles looping from
-   a DARK limbal ring at the outside to a lighter centre in the requested colour
-   using lerpColor, then a few thin brush.line fibres radiating from the pupil.
-4. Pupil: a soft near-black circle about a third of the iris width, edges blurred
-   by 8-10 low-alpha circles around it.
+   the lid slightly overlaps it. Paint it as 2-3 nested washes from a DARK limbal
+   ring at the outside to a lighter centre in the requested colour, e.g.
+   brush.bleed(0.1); brush.fill("#6f93ab",100); brush.circle(0,0,42);
+   brush.bleed(0.07); brush.fill("#2c4b66",92); brush.circle(0,0,30);
+   then a few thin brush.line fibres radiating from the pupil.
+4. Pupil: a soft near-black wash about a third of the iris width
+   (brush.bleed(0.04); brush.fill("#120d10",100); brush.circle(...)), then
+   brush.noFill() before drawing any hairs.
 5. Specular: ONE small white highlight near the top of the iris, plus a faint
    larger glow — never two big cartoon ovals.
 6. Upper lash line and lashes: a soft dark band hugging the top of the eye
@@ -223,15 +233,24 @@ const puppeteer = require('puppeteer-core');
   const patched = {
     pick: (n) => pick(names.includes(n) ? n : "HB"),
     setHatch: (n, c, w) => setHatch(names.includes(n) ? n : "hatch_brush", c, w),
-    // Watercolor fills composite a full-canvas rect that erases every stroke
-    // in headless WEBGL, so they are dropped instead of ruining the drawing.
-    fill: noop, noFill: noop, bleed: noop, rect: noop,
+    // brush.rect misreads p5's CORNER mode here and floods the canvas.
+    rect: noop,
+  };
+  // Flushing a watercolour mask leaves p5's modelview matrix holding the
+  // full-canvas quad transform, so every shape after a fill colour change lands
+  // half a canvas off. Restoring the matrix around each brush call keeps the
+  // sketch's own transforms and undoes the leak.
+  const guard = (fn) => function () {
+    const r = window._renderer;
+    const m = r && r.uMVMatrix ? Array.from(r.uMVMatrix.mat4) : null;
+    try { return fn.apply(real, arguments); }
+    finally { if (m) r.uMVMatrix.mat4.set(m); }
   };
   const facade = new Proxy(real, {
     get(target, key) {
-      if (key in patched) return patched[key];
-      const value = target[key];
+      const value = key in patched ? patched[key] : target[key];
       if (value === undefined) return () => {};
+      if (typeof value === "function") return guard(value);
       return value;
     },
   });
