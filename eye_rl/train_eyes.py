@@ -57,6 +57,8 @@ Rules:
 - Do NOT hatch or scribble with the hatch brushes: use p5.brush only for individual lash strands, brow hairs and stray hair strands.
 - Allowed brush calls: brush.pick(name), brush.stroke(color), brush.strokeWeight(w), brush.noStroke(), brush.fill(color,alpha), brush.bleed(amount), brush.noFill(), brush.line(x1,y1,x2,y2), brush.circle(x,y,r), brush.polygon([[x,y],...]), brush.spline([[x,y],...], curvature), brush.flowLine(x,y,length,dirAngle), brush.setHatch(brushName,color,weight), brush.hatch(dist,angle,{rand:0.1,continuous:true}), brush.noHatch(), brush.field("seabed"), brush.noField().
 - brush.fill(colour, alpha) + brush.bleed(0.05-0.4) paint watercolour washes with soft blooming edges: this is the main way to build skin, sclera and iris. Call brush.noStroke() before a filled shape so it has no outline, brush.noFill() when you are done with washes, and brush.stroke(colour)/brush.strokeWeight(w) before drawing hairs.
+- The third argument of brush.circle(x,y,r) is a RADIUS, not a diameter, so an iris is brush.circle(0,0,78) and a pupil brush.circle(0,0,28).
+- Draw BIG: the eye opening spans about 380 of the 512 canvas and the socket shading spans about 460. A drawing whose features sit in the middle 150 pixels scores zero.
 - Never use brush.beginShape/vertex/endShape or brush.rect.
 - Brush names available to brush.pick and brush.setHatch: "pen", "rotring", "2B", "HB", "2H", "cpencil", "charcoal", "hatch_brush", "marker", "marker2". Never use "spray" — speckle textures are rejected.
 - The canvas is fully painted skin, not white paper: start with a skin-tone background. Speckle and noise textures score zero.
@@ -65,25 +67,25 @@ Rules:
 
 Paint the eye in this order. Vary the colours, proportions, gaze direction and
 lash length to suit the brief, but keep the anatomy and the soft painted look:
-1. Skin: background(238,214,203) or another skin tone, then brush.noStroke() and
-   a wide socket wash, e.g. brush.bleed(0.35); brush.fill("#c08d74", 55);
-   brush.polygon(almond points around the eye) — plus low-alpha p5 ellipses for
-   extra blending.
-2. Eye opening: an almond of near-white sclera as a wash over the socket, built
-   from a point list walked along an upper and a lower lid curve, e.g.
-   let pts=[]; for(let i=0;i<=24;i++){let t=i/24,x=lerp(-115,115,t);
-   pts.push([x,-66*sin(180*t)]);} for(let i=24;i>=0;i--){let t=i/24,
-   x=lerp(-115,115,t); pts.push([x,40*sin(180*t)]);}
-   brush.bleed(0.12); brush.fill("#f4efe9", 95); brush.polygon(pts);
-   Corners must come to points, not a plain ellipse.
-3. Iris: a circle roughly 150 wide, its top edge tucked under the lid shadow so
-   the lid slightly overlaps it. Paint it as 2-3 nested washes from a DARK limbal
-   ring at the outside to a lighter centre in the requested colour, e.g.
-   brush.bleed(0.1); brush.fill("#6f93ab",100); brush.circle(0,0,42);
-   brush.bleed(0.07); brush.fill("#2c4b66",92); brush.circle(0,0,30);
+0. An almond helper, used for both the socket and the eye opening:
+   function lid(w,up,lo,cy){ let p=[];
+   for(let i=0;i<=26;i++){let t=i/26,x=lerp(-w/2,w/2,t); p.push([x,cy-up*sin(180*t)]);}
+   for(let i=26;i>=0;i--){let t=i/26,x=lerp(-w/2,w/2,t); p.push([x,cy+lo*sin(180*t)]);}
+   return p; }
+1. Skin: background(238,214,203) or another skin tone, then a wide socket wash,
+   e.g. brush.noStroke(); brush.bleed(0.4); brush.fill("#c08d74",50);
+   brush.polygon(lid(460,150,120,-10));
+2. Eye opening: an almond of near-white sclera washed over the socket, its
+   corners coming to points rather than a plain ellipse, e.g.
+   brush.bleed(0.13); brush.fill("#f5f0ea",95); brush.polygon(lid(380,105,70,0));
+3. Iris: radius about 78, its top edge tucked under the lid shadow so the lid
+   slightly overlaps it. Paint it as nested washes from a DARK limbal ring at the
+   outside to a lighter centre in the requested colour, e.g.
+   brush.bleed(0.1); brush.fill("#6f93ab",100); brush.circle(-10,0,78);
+   brush.bleed(0.08); brush.fill("#2c4b66",92); brush.circle(-10,0,54);
    then a few thin brush.line fibres radiating from the pupil.
-4. Pupil: a soft near-black wash about a third of the iris width
-   (brush.bleed(0.04); brush.fill("#120d10",100); brush.circle(...)), then
+4. Pupil: a soft near-black wash of radius about 28
+   (brush.bleed(0.04); brush.fill("#120d10",100); brush.circle(-10,4,28)), then
    brush.noFill() before drawing any hairs.
 5. Specular: ONE small white highlight near the top of the iris, plus a faint
    larger glow — never two big cartoon ovals.
@@ -95,8 +97,10 @@ lash length to suit the brief, but keep the anatomy and the soft painted look:
    line and curves away from it, so the lashes read as a dense fan along the lid
    rather than hairs floating over the eye; walk the lid with a for-loop over the
    lid curve rather than placing them by hand, e.g.
-   for (let i=0;i<32;i++){ let t=i/31; let x=lerp(-150,150,t);
-   let y=-40-60*sin(180*t); brush.spline([[x,y],[x+18*t,y-26],[x+34*t,y-52]], 0.7); }
+   brush.stroke("#3b241f"); brush.strokeWeight(1.4); brush.pick("2B");
+   for (let i=0;i<36;i++){ let t=i/35, x=lerp(-185,185,t), y=-8-102*sin(180*t),
+   len=28+52*t, cur=10+30*t;
+   brush.spline([[x,y],[x+cur*0.4,y-len*0.5],[x+cur,y-len]], 0.7); }
 7. Lower lid: a soft warm-pink crease line under the eye, a light catchlight on
    the lid rim, 10-20 short fine lower lashes, and a pinkish tear duct.
 8. Brow: an arc of 40+ short fine brush strokes above the eye, dark at the inner
