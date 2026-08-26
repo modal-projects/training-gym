@@ -592,15 +592,18 @@ class HarborDataset(DatasetConfig):
     ) -> dict[str, Any]:
         rel = task_dir.relative_to(task_root)
         rel_with_root = (Path(task_root.name) / rel).as_posix()
+        if task_data_rel is None:
+            task_data_rel = (
+                Path(type(self).__name__) / self.task_files_dir / rel_with_root
+            )
         label: dict[str, Any] = {
             "harbor_task_name": task_dir.name,
             "harbor_task_path": task_dir.as_posix(),
             "harbor_task_rel": rel_with_root,
             "harbor_candidate_path": self.candidate_path,
             "harbor_candidate_command": self.candidate_command,
+            "harbor_task_data_rel": task_data_rel.as_posix(),
         }
-        if task_data_rel is not None:
-            label["harbor_task_data_rel"] = task_data_rel.as_posix()
         label.update(self._read_label_metadata(task_dir))
         if self.test_data_dir:
             label["test_cases"] = self._read_test_data(task_dir)

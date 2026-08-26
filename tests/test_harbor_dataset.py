@@ -111,6 +111,18 @@ def test_prepare_only_stages_selected_tasks(
     assert (staged_root / "task-b").is_dir()
 
 
+def test_load_includes_default_staged_task_path(tmp_path: Path) -> None:
+    task_root = tmp_path / "source"
+    _write_task(task_root / "task-a", marker=b"a")
+    dataset = HarborDataset(path=str(task_root))
+
+    [row] = dataset.load()
+
+    assert row["label"]["harbor_task_data_rel"] == (
+        "HarborDataset/harbor_tasks/source/task-a"
+    )
+
+
 def test_prepare_reports_missing_task_source(tmp_path: Path) -> None:
     dataset = HarborDataset(path=str(tmp_path / "missing"))
 
