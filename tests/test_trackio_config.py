@@ -125,8 +125,29 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
 
     fake_trackio = types.ModuleType("trackio")
 
-    def fake_init(**kwargs: Any) -> _FakeRun:
-        calls["init"] = kwargs
+    # This is the Trackio 0.34.0 keyword surface used by the adapter.
+    def fake_init(
+        project: str,
+        name: str | None = None,
+        group: str | None = None,
+        space_id: str | None = None,
+        server_url: str | None = None,
+        bucket_id: str | None = None,
+        config: dict[str, Any] | None = None,
+        resume: str = "never",
+        embed: bool = True,
+    ) -> _FakeRun:
+        calls["init"] = {
+            "project": project,
+            "name": name,
+            "group": group,
+            "space_id": space_id,
+            "server_url": server_url,
+            "bucket_id": bucket_id,
+            "config": config,
+            "resume": resume,
+            "embed": embed,
+        }
         return _FakeRun()
 
     def fake_finish(*args: Any, **kwargs: Any) -> None:
