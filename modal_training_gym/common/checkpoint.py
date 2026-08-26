@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
 import os
 import time
+from dataclasses import dataclass
+from enum import Enum
 
 import modal
 from modal import Volume
 from modal.exception import NotFoundError
 
 from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.deploy_recipes import SglangRecipe, VllmRecipe
-
 
 _CHECKPOINTS_MOUNT_FALLBACK = "/checkpoints"
 _CONVERT_COMPLETE_MARKER = ".training_gym_convert_complete"
@@ -46,18 +44,6 @@ class Checkpoint:
         return _to_volume_path(
             self.path, self.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
         )
-
-
-def list_checkpoints(training_run_id: str) -> list[Checkpoint]:
-    result = TrainResult.from_training_run_id(training_run_id)
-    if result.framework in {
-        Framework.SLIME,
-        Framework.SLIME.value,
-        Framework.MILES,
-        Framework.MILES.value,
-    }:
-        return _list_checkpoints(result)
-    raise TrainingGymConfigError(f"Unsupported framework: {result.framework}")
 
 
 def _to_volume_path(checkpoint_dir: str, checkpoints_mount_path: str) -> str:

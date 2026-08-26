@@ -1,22 +1,22 @@
 export const DOCS_NAV = [
-  { section: 'Overview', prefix: '/' },
-  { section: 'Guides', prefix: '/guides/' },
-  { section: 'Tutorials', prefix: '/tutorials/' },
-  { section: 'API Reference', prefix: '/reference/' },
-  { section: 'Support', prefix: '/support/' },
+  { section: 'Guides', prefix: '/guides' },
+  { section: 'Tutorials', prefix: '/tutorials' },
+  { section: 'Reference', prefix: '/reference' },
 ] as const;
 
-export type DocsSection = (typeof DOCS_NAV)[number]['section'];
+export type DocsSection = 'Home' | (typeof DOCS_NAV)[number]['section'];
 
 const PREFIXES_LONGEST_FIRST = [...DOCS_NAV].sort(
   (a, b) => b.prefix.length - a.prefix.length,
 );
 
-export function sectionForUrl(url: string): DocsSection {
+export function sectionForUrl(url: string): DocsSection | undefined {
   const pathname = url.split(/[?#]/)[0] ?? url;
-  const path = pathname.endsWith('/') ? pathname : `${pathname}/`;
+  const path =
+    pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+  if (path === '/') return 'Home';
   for (const { section, prefix } of PREFIXES_LONGEST_FIRST) {
-    if (path === prefix || path.startsWith(prefix)) return section;
+    if (path === prefix || path.startsWith(`${prefix}/`)) return section;
   }
-  return 'Overview';
+  return undefined;
 }

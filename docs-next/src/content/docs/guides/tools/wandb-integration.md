@@ -1,15 +1,14 @@
 ---
-title: Weights & Biases integration
-description: Stream training curves to Weights & Biases — setup, run naming, sweeps, and dashboard deep-links.
-sidebar:
-  order: 2
+order: 2
 ---
+
+# Weights & Biases integration
 
 Every training recipe can stream its training curves — reward, KL,
 response lengths, learning rate, and the rest of the framework's metrics
 — to [Weights & Biases](https://wandb.ai). W&B logging is opt-in per run:
 pass a `WandbConfig` to the recipe to enable it, drop it to disable it.
-The [observability dashboard](/guides/tools/observability-dashboard/)
+The [observability dashboard](/guides/tools/observability-dashboard)
 records where each run logged and wires up an **Open in W&B** button on
 the run page, so the two views stay one click apart.
 
@@ -60,7 +59,7 @@ The `WandbConfig` fields you'll actually use:
 | `disable_random_suffix` | On by default — keeps run names stable instead of letting W&B append a random suffix. |
 | `modal_wandb_secret_name` | Modal Secret to read `WANDB_API_KEY` from. Defaults to `"wandb-secret"`. |
 
-See the [`WandbConfig` reference](/reference/core/wandbconfig/) for the
+See the [`WandbConfig` reference](/reference/core/wandbconfig) for the
 full list.
 
 ## Fail fast: the W&B preflight
@@ -89,7 +88,7 @@ W&B, and your terminal:
 
 The dashboard records the entity, project, group, and run id for every
 attempt — the **W&B** button on a run's detail page (see the
-[dashboard guide](/guides/tools/observability-dashboard/)) jumps
+[dashboard guide](/guides/tools/observability-dashboard)) jumps
 straight to the matching W&B run.
 
 ## Sweeps
@@ -104,12 +103,3 @@ sweep grid can also override W&B fields per variant via dotted paths
 W&B is entirely opt-in: omit `metrics=` from the recipe and nothing is
 logged, no secret is required, and no preflight runs. Training metrics
 are still captured by the observability dashboard either way.
-
----
-
-## Related API Reference
-
-- [`WandbConfig`](/reference/core/wandbconfig/)
-- [`TrainConfig`](/reference/training/trainconfig/)
-- [`SlimeRecipe`](/reference/training/slimerecipe/)
-- [`TrainingGroup`](/reference/training/traininggroup/)

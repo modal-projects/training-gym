@@ -58,6 +58,13 @@ _MILES_SKIP = {
     "custom_megatron_before_log_prob_hook",
     "custom_megatron_before_train_step_hook",
     "train_function_kwargs",
+    # Conversion-only parallelism and scratch: launcher-side, never forwarded to
+    # the miles CLI.
+    "conversion_tensor_model_parallel_size",
+    "conversion_pipeline_model_parallel_size",
+    "conversion_expert_model_parallel_size",
+    "conversion_expert_tensor_parallel_size",
+    "convert_ephemeral_disk_mb",
     "capture_trace",
     "trace_sample_limit",
 }
@@ -511,8 +518,24 @@ class MilesRecipe(BaseTrainRecipe):
     load: str = ""
     ref_load: str = ""
     megatron_to_hf_mode: str = "bridge"
+    # Selects miles' megatron→HF weight mapping (e.g. "inkling"); when empty miles
+    # infers it from the HF config's class name.
+    model_name: str = ""
     save_interval: int = 10
     no_save_optim: bool = False
+
+    # ── Checkpoint conversion ───────────────────────────────────────────
+    # Conversion-only parallelism overrides. Launcher instructions, not CLI flags
+    # (see _MILES_SKIP): torch_dist reshards on load, so the conversion layout is
+    # independent of the training layout.
+    conversion_tensor_model_parallel_size: int | None = None
+    conversion_pipeline_model_parallel_size: int | None = None
+    conversion_expert_model_parallel_size: int | None = None
+    conversion_expert_tensor_parallel_size: int | None = None
+    # Ephemeral disk (MiB) for the conversion container. Local staging needs room for
+    # the whole torch_dist checkpoint plus the Volume's write buffer for the shard in
+    # flight; the default container disk is not enough for a 276B model.
+    convert_ephemeral_disk_mb: int | None = None
 
     # ── Fault tolerance and health checks ───────────────────────────────────
     # Miles' own argparse default; slime defaults this on instead.
@@ -821,6 +844,10 @@ class MilesRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
             Gemma4_26B_A4B_Recipe,
         )
+        from modal_training_gym.train_recipes.miles_recipe.inkling import (
+            Inkling_Small_LoRA_Recipe,
+            Inkling_Small_Recipe,
+        )
         from modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b import (
             Moonlight_16B_A3B_Recipe,
         )
@@ -834,6 +861,10 @@ class MilesRecipe(BaseTrainRecipe):
             return Moonlight_16B_A3B_Recipe()
         if model_config.model_name == "google/gemma-4-26B-A4B-it":
             return Gemma4_26B_A4B_Recipe()
+        if model_config.model_name == "thinkingmachines/Inkling-Small":
+            if issubclass(cls, Inkling_Small_LoRA_Recipe):
+                return Inkling_Small_LoRA_Recipe()
+            return Inkling_Small_Recipe()
         return None
 
     def download_model(self) -> None:

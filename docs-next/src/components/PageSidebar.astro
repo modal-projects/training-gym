@@ -1,41 +1,106 @@
 ---
-import MobileTableOfContents from '@astrojs/starlight/components/MobileTableOfContents.astro';
-import TableOfContents from '@astrojs/starlight/components/TableOfContents.astro';
+import { Code } from 'astro-expressive-code/components';
+import TableOfContents from './TableOfContents.astro';
 
-const currentPath = Astro.url.pathname;
-const primaryHref = currentPath.startsWith('/tutorials/') ? '/' : '/tutorials/';
-const primaryLabel = currentPath.startsWith('/tutorials/') ? 'Read overview' : 'Open tutorials';
+const { toc, entry } = Astro.locals.starlightRoute;
+const runCommand =
+  typeof entry.data.runCommand === 'string' ? entry.data.runCommand : '';
+const showTutorialCta =
+  entry.id.replace(/^\/+/, '').startsWith('tutorials/') && Boolean(runCommand);
+const commands = showTutorialCta
+  ? [
+      'git clone https://github.com/modal-projects/training-gym',
+      'cd training-gym',
+      runCommand,
+    ]
+  : [];
+const shellCode = commands.join('\n');
 ---
 
-{
-  Astro.locals.starlightRoute.toc && (
-    <>
-      <div class="tg-mobile-toc lg:sl-hidden">
-        <MobileTableOfContents />
-      </div>
-      <div class="right-sidebar-panel sl-hidden lg:sl-block">
-        <div class="sl-container tg-right-rail">
-          <div class="tg-right-rail__toc">
-            <TableOfContents />
-          </div>
-          <aside class="tg-right-rail__cta">
-            <p class="tg-right-rail__eyebrow">Training Gym</p>
-            <h2>Run RL post-training on Modal.</h2>
-            <p>Browse the runnable RL notebooks and framework launchers that ship with this repo.</p>
-            <div class="tg-right-rail__links">
-              <a class="tg-action-button tg-action-button--primary" href={primaryHref}>
-                {primaryLabel}
-              </a>
-              <a
-                class="tg-action-button tg-action-button--ghost"
-                href="https://github.com/modal-projects/training-gym"
-              >
-                GitHub repo
-              </a>
-            </div>
-          </aside>
+{(toc || showTutorialCta) && (
+  <div class="right-sidebar-panel sl-hidden lg:sl-block">
+    <div class="sl-container tg-right-rail">
+      {toc && (
+        <div class="tg-right-rail__toc">
+          <TableOfContents />
         </div>
-      </div>
-    </>
-  )
-}
+      )}
+      {showTutorialCta && (
+        <aside class="tg-right-rail__cta tg-right-rail__cta--tutorial">
+          <h2>Try this now!</h2>
+          <Code lang="bash" code={shellCode} />
+        </aside>
+      )}
+    </div>
+  </div>
+)}
+
+<script>
+  const TOC_LINK = '.tg-toc a';
+
+  interface Section {
+    id: string;
+    heading: HTMLElement;
+  }
+
+  function linkTarget(link: HTMLAnchorElement): string {
+    return decodeURIComponent(link.hash.replace(/^#/, ''));
+  }
+
+  function markCurrent(ids: ReadonlySet<string>): void {
+    for (const node of document.querySelectorAll(TOC_LINK)) {
+      const link = node as HTMLAnchorElement;
+      if (ids.has(linkTarget(link))) {
+        link.setAttribute('aria-current', 'true');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    }
+  }
+
+  function start(): void {
+    const links = [...document.querySelectorAll<HTMLAnchorElement>(TOC_LINK)];
+    if (links.length === 0) return;
+
+    const sections = [...new Set(links.map(linkTarget))].flatMap((id): Section[] => {
+      const heading = document.getElementById(id);
+      return heading ? [{ id, heading }] : [];
+    });
+    const article = document.querySelector<HTMLElement>('.sl-markdown-content');
+    if (sections.length === 0 || !article) return;
+
+    const update = () => {
+      const viewportTop =
+        (document.querySelector('header')?.getBoundingClientRect().height ?? 0) + 16;
+      const viewportBottom = window.innerHeight - 16;
+      const articleBottom = article.getBoundingClientRect().bottom;
+      const visible = new Set<string>();
+
+      sections.forEach(({ id, heading }, index) => {
+        const top = heading.getBoundingClientRect().top;
+        const bottom =
+          sections[index + 1]?.heading.getBoundingClientRect().top ?? articleBottom;
+        if (top < viewportBottom && bottom > viewportTop) visible.add(id);
+      });
+
+      markCurrent(visible);
+    };
+
+    let frame = 0;
+    const scheduleUpdate = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+
+    update();
+    window.addEventListener('scroll', scheduleUpdate, { passive: true });
+    window.addEventListener('resize', scheduleUpdate);
+  }
+
+  const onIdle =
+    window.requestIdleCallback ?? ((cb: IdleRequestCallback) => window.setTimeout(cb, 1));
+  onIdle(() => start());
+</script>

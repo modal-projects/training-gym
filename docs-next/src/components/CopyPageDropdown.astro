@@ -14,7 +14,7 @@ const claudeUrl = `https://claude.ai/new?q=${q}`;
 {markdownSource && (
   <div class="tg-copy-page" data-tg-copy-page>
     <button
-      class="tg-action-button tg-copy-button"
+      class="btn btn-outlined bg-c-gray-5 tg-copy-button"
       type="button"
       aria-expanded="false"
       aria-controls="tg-copy-page-panel"
@@ -22,13 +22,13 @@ const claudeUrl = `https://claude.ai/new?q=${q}`;
       title="Copy page"
     >
       <span class="tg-copy-button__icon" data-tg-copy-icon aria-hidden="true">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+        <svg class="text-c-gray-80 mr-2.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
       </span>
       <span class="tg-copy-button__icon tg-copy-button__icon--check" data-tg-copy-check hidden aria-hidden="true">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+        <svg class="text-c-gray-80 mr-2.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
       </span>
-      <span data-tg-copy-status>Copy page</span>
-      <svg class="tg-copy-button__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+      <span class="text-c-gray-80 text-sm" data-tg-copy-status>Copy page</span>
+      <svg class="text-c-gray-80 ml-1.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
     </button>
     <div class="tg-copy-page__menu" id="tg-copy-page-panel" hidden data-tg-copy-menu>
       <button class="tg-copy-page__item" type="button" data-tg-copy-markdown>
@@ -195,11 +195,6 @@ const claudeUrl = `https://claude.ai/new?q=${q}`;
     color: var(--tg-caution-text);
   }
 
-  .tg-copy-button__chevron {
-    margin-left: 0.15rem;
-    opacity: 0.85;
-  }
-
   .tg-copy-button__icon:not([hidden]) {
     display: inline-flex;
     align-items: center;
@@ -266,5 +261,14 @@ const claudeUrl = `https://claude.ai/new?q=${q}`;
     color: var(--sl-color-gray-3);
     font-size: 0.75rem;
     line-height: 1.35;
+  }
+
+  @media (max-width: 49.999rem) {
+    .tg-copy-page__menu {
+      right: auto;
+      left: 0;
+      width: min(16.5rem, calc(100vw - 2rem));
+      min-width: 0;
+    }
   }
 </style>
