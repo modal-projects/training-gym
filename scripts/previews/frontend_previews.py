@@ -12,10 +12,8 @@ import modal
 NGINX_CONF_DIR = Path("/root/nginx")
 _DOCS_NEXT = Path(__file__).resolve().parent.parent.parent / "docs-next"
 _ASTRO_REDIRECTS = _DOCS_NEXT / "astro_redirects.py"
-for _redirects_dir in (Path("/root"), _DOCS_NEXT):
-    if (_redirects_dir / "astro_redirects.py").is_file():
-        sys.path.insert(0, str(_redirects_dir))
-        break
+sys.path.insert(0, str(_DOCS_NEXT))
+sys.path.insert(1, "/root")
 from astro_redirects import refresh_map_from_tarball  # noqa: E402
 
 image = (
