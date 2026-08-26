@@ -9,9 +9,95 @@ from train_eyes import (  # noqa: E402
     judge_image,
     render_sketch,
     score_response,
+    speckle_fraction,
 )
 
 GOOD_SKETCH = """function setup() {
+  createCanvas(512, 512, WEBGL);
+  angleMode(DEGREES);
+  brush.load();
+  background(238, 214, 203);
+  noStroke();
+  // soft socket shading
+  for (let i = 0; i < 28; i++) {
+    fill(212, 172, 162, 10);
+    ellipse(0, -70 - i * 2, 440 - i * 8, 210 - i * 4);
+    fill(226, 190, 180, 8);
+    ellipse(-10, 110 - i, 380 - i * 8, 150 - i * 3);
+  }
+  // eye opening, soft edged
+  for (let i = 0; i < 22; i++) {
+    fill(246, 238, 236, 22);
+    beginShape();
+    vertex(-176 + i, 4);
+    bezierVertex(-118 + i, -116 + i * 1.4, 108 - i, -126 + i * 1.4, 176 - i, -12);
+    bezierVertex(106 - i, 52 - i, -108 + i, 68 - i, -176 + i, 4);
+    endShape(CLOSE);
+  }
+  // iris: dark limbal ring blending to a lighter centre
+  for (let i = 0; i < 24; i++) {
+    let t = i / 23;
+    fill(lerpColor(color(26, 48, 30), color(126, 168, 108), t));
+    ellipse(-4, -2, 124 - i * 3.8, 124 - i * 3.8);
+  }
+  // pupil with blurred edge
+  for (let i = 0; i < 10; i++) {
+    fill(16, 16, 18, 60);
+    ellipse(-4, -2, 44 + i * 2.4, 44 + i * 2.4);
+  }
+  // lid shadow over the top of the iris
+  for (let i = 0; i < 18; i++) {
+    fill(120, 78, 66, 12);
+    ellipse(-4, -104 + i * 2, 300 - i * 6, 120 - i * 4);
+  }
+  // one small specular plus a faint glow
+  fill(255, 255, 252, 40);
+  ellipse(-22, -34, 46, 34);
+  fill(255);
+  ellipse(-24, -38, 14, 11);
+  // lashes: individual strands
+  brush.pick("2B");
+  brush.stroke("#241a18");
+  for (let i = 0; i < 32; i++) {
+    let t = i / 31;
+    let x = -170 + t * 350;
+    let y = -26 - 44 * sin(t * 180);
+    let dx = (t - 0.5) * 60;
+    brush.strokeWeight(1.6 - t * 0.6);
+    brush.spline([[x, y], [x + dx * 0.5, y - 20], [x + dx, y - 36]], 0.6);
+  }
+  // lower lashes
+  for (let i = 0; i < 14; i++) {
+    let t = i / 13;
+    let x = -130 + t * 250;
+    let y = 46 + 26 * sin(t * 180);
+    let dx = (t - 0.5) * 30;
+    brush.strokeWeight(1);
+    brush.spline([[x, y], [x + dx * 0.5, y + 10], [x + dx, y + 20]], 0.6);
+  }
+  // brow
+  brush.pick("cpencil");
+  brush.stroke("#4a3227");
+  for (let i = 0; i < 44; i++) {
+    let t = i / 43;
+    let x = -196 + t * 380;
+    let y = -164 - 40 * sin(t * 180);
+    brush.strokeWeight(1.4 - t * 0.6);
+    brush.line(x, y, x + 18, y + 6 - 24 * cos(t * 180));
+  }
+  // lower crease and tear duct
+  brush.pick("pen");
+  brush.stroke("#b98a7e");
+  brush.strokeWeight(2);
+  brush.spline([[-158, 44], [-70, 88], [30, 94], [120, 72], [174, 16]], 0.5);
+  fill(206, 140, 132, 90);
+  ellipse(-166, 6, 30, 22);
+  noLoop();
+}"""
+
+# The flat cel-shaded eye the previous task trained: it must now score clearly
+# below the painted sketch above.
+ANIME_SKETCH = """function setup() {
   createCanvas(512, 512, WEBGL);
   angleMode(DEGREES);
   brush.load();
@@ -59,8 +145,6 @@ GOOD_SKETCH = """function setup() {
   noLoop();
 }"""
 
-# The pencil-hatched eye the previous, realistic task trained: it must now score
-# clearly below the anime sketch above.
 PENCIL_SKETCH = """function setup() {
   createCanvas(512, 512, WEBGL);
   angleMode(DEGREES);
@@ -112,8 +196,8 @@ BAD_SKETCH_RUNTIME = """function setup() {
 
 GOOD_RESPONSE = f"```javascript\n{GOOD_SKETCH}\n```"
 PROMPT = (
-    "Illustrate an anime heroine's eye with an emerald green iris, in clean "
-    "cel-shaded anime style."
+    "Paint a young woman's eye in soft daylight with an iris in mossy green, "
+    "in soft digital painting, semi-realistic."
 )
 
 
@@ -125,10 +209,13 @@ def main():
     assert extract_sketch(GOOD_RESPONSE) is not None
     print("gates: OK")
 
-    # render failure path
-    png, meta = render_sketch(BAD_SKETCH_RUNTIME)
-    print("bad sketch render:", meta)
-    assert png is None
+    # a sketch that draws nothing: recovery may salvage the canvas, but the
+    # blank-ink gate has to keep its reward at the floor
+    bad_reward, bad_meta, _ = score_response(
+        f"```javascript\n{BAD_SKETCH_RUNTIME}\n```", PROMPT
+    )
+    print("bad sketch reward:", bad_reward, bad_meta)
+    assert bad_reward <= 0.02
 
     # render success path
     png, meta = render_sketch(GOOD_SKETCH)
@@ -136,14 +223,16 @@ def main():
     assert png is not None
     open("/tmp/eye_render.png", "wb").write(png)
 
-    # judge: the anime sketch must beat the old pencil-hatched eye
+    # judge: the painted eye must beat both earlier styles
     score, jmeta = judge_image(png, PROMPT)
-    print("judge anime:", score, jmeta)
-    pencil_png, pencil_meta = render_sketch(PENCIL_SKETCH)
-    assert pencil_png is not None, pencil_meta
-    pencil_score, pencil_jmeta = judge_image(pencil_png, PROMPT)
-    print("judge pencil:", pencil_score, pencil_jmeta)
-    assert score > pencil_score, (score, pencil_score)
+    print("judge painted:", score, jmeta)
+    print("painted speckle:", round(speckle_fraction(png), 3))
+    for name, sketch in (("anime", ANIME_SKETCH), ("pencil", PENCIL_SKETCH)):
+        other_png, other_meta = render_sketch(sketch)
+        assert other_png is not None, other_meta
+        other_score, other_jmeta = judge_image(other_png, PROMPT)
+        print(f"judge {name}:", other_score, other_jmeta)
+        assert score > other_score, (name, score, other_score)
 
     # full path
     reward, smeta, _ = score_response(GOOD_RESPONSE, PROMPT)

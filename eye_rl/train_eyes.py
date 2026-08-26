@@ -25,26 +25,26 @@ base_model = Qwen3_5_4B()
 # ── Prompt grammar ───────────────────────────────────────────────────────
 
 SUBJECTS = [
-    "an anime heroine's eye",
-    "a shonen protagonist's determined eye",
-    "a magical girl's sparkling eye",
-    "a cool anime rival's narrowed eye",
-    "a cheerful anime schoolgirl's wide eye",
-    "an anime idol's glossy eye",
-    "a mysterious anime villain's eye",
-    "a shy anime character's downcast eye",
+    "a young woman's eye in soft daylight",
+    "a calm half-lidded eye looking to the side",
+    "a wide open eye seen close up",
+    "a gently downcast eye with long lashes",
+    "an eye looking straight at the viewer",
+    "a tired eye with a soft lower lid",
+    "a delicate eye with a thin double eyelid crease",
+    "an eye caught mid-glance",
 ]
-IRIS_COLORS = ["amber", "emerald green", "ice blue", "crimson", "violet", "golden"]
+IRIS_COLORS = ["warm brown", "mossy green", "grey blue", "hazel", "deep amber", "slate"]
 STYLES = [
-    "clean cel-shaded anime style",
-    "90s retro anime style",
-    "modern glossy anime key-visual style",
-    "shoujo manga style with heavy sparkle",
-    "bold shonen anime style with thick line art",
+    "soft digital painting, semi-realistic",
+    "airbrushed portrait study with blended edges",
+    "webtoon-style semi-realistic rendering",
+    "warm painterly close-up with soft focus",
+    "muted painterly realism with fine lash detail",
 ]
 
 SYSTEM_PROMPT = """\
-You write p5.js sketches that draw anime-style illustrations, using p5's solid fills for flat colour and the p5.brush library for line work.
+You write p5.js sketches that paint soft, semi-realistic eye illustrations, using many overlapping semi-transparent p5 fills for blended skin and the p5.brush library for lashes and hairs.
 
 Rules:
 - Reply with a single ```javascript code fence containing a complete sketch and nothing else.
@@ -52,46 +52,49 @@ Rules:
 - Start setup() with: createCanvas(512, 512, WEBGL); angleMode(DEGREES); brush.load();
 - The coordinate origin (0,0) is the CENTER of the canvas; x and y range from -256 to 256. Compose around (0,0).
 - End setup() with: noLoop();
-- Draw with the p5.brush API plus p5's own solid-fill drawing: background, noStroke(), fill(r,g,b), ellipse(x,y,w,h), triangle(...), and beginShape()/vertex(x,y)/bezierVertex(cx1,cy1,cx2,cy2,x,y)/endShape(CLOSE) for custom filled shapes. push/pop, translate, rotate are fine.
-- Anime eyes are flat colour areas with crisp edges, so build them from p5 fill() shapes; use p5.brush only for the thin lower-lid and crease lines. Do NOT hatch or scribble: hatching makes it look like a pencil sketch, which scores zero here.
+- Draw with the p5.brush API plus p5's own drawing: background, noStroke(), fill(r,g,b) and fill(r,g,b,alpha), ellipse(x,y,w,h), triangle(...), and beginShape()/vertex(x,y)/bezierVertex(cx1,cy1,cx2,cy2,x,y)/endShape(CLOSE) for custom filled shapes. push/pop, translate, rotate, lerpColor(color(...),color(...),t), for-loops, sin/cos/random are all fine.
+- This style has NO hard cartoon outlines and NO flat colour areas. Softness comes from repetition: draw the same shape 20-40 times in a for-loop with low alpha (8-25), shrinking it and shifting its colour slightly each pass, so edges fade into each other. Every skin shadow, iris band and lid shading is built this way.
+- Do NOT hatch or scribble with the hatch brushes: use p5.brush only for individual lash strands, brow hairs and stray hair strands.
 - Allowed brush calls: brush.pick(name), brush.stroke(color), brush.strokeWeight(w), brush.noStroke(), brush.line(x1,y1,x2,y2), brush.circle(x,y,r), brush.polygon([[x,y],...]), brush.spline([[x,y],...], curvature), brush.flowLine(x,y,length,dirAngle), brush.setHatch(brushName,color,weight), brush.hatch(dist,angle,{rand:0.1,continuous:true}), brush.noHatch(), brush.field("seabed"), brush.noField().
 - NEVER use brush.fill/brush.noFill/brush.bleed (watercolor fills erase every stroke on this renderer), and never use brush.beginShape/vertex/endShape or brush.rect.
 - Brush names available to brush.pick and brush.setHatch: "pen", "rotring", "2B", "HB", "2H", "cpencil", "charcoal", "hatch_brush", "marker", "marker2". Never use "spray" — speckle textures are rejected.
-- Draw crisp shapes on a mostly empty white canvas: ink storms and speckle score zero.
+- The canvas is fully painted skin, not white paper: start with a skin-tone background. Speckle and noise textures score zero.
 - No loadImage, no fetch/XHR, no DOM access, no external assets, no comments longer than one line.
-- Compose the whole illustration inside the 512x512 canvas; large bold shapes, few of them, crisply layered.
+- Compose one eye, filling most of the 512x512 canvas, as if photographed close up.
 
-An anime eye is built from these parts, in this order. Vary the numbers, colours,
-lash shapes and proportions to suit the requested subject and style, but keep the
-anatomy and the anime look:
-1. Sclera: a near-white almond, wide and low, filled with p5:
-   fill(252,250,252); beginShape(); vertex(-180,4);
-   bezierVertex(-120,-125, 110,-135, 180,-14); bezierVertex(110,58, -110,76, -180,4); endShape(CLOSE);
-2. Iris: a LARGE oval, taller than it is wide, filling most of the opening and
-   tucked under the upper lash line. Build it from 3 concentric ovals in the
-   requested colour, dark at the top to light at the bottom, e.g.
-   fill(74,40,120); ellipse(-4,-4,140,176); fill(126,78,196); ellipse(-4,10,120,148);
-   fill(186,150,240); ellipse(-4,34,96,92);
-3. Pupil: a tall near-black oval in the iris centre, e.g. fill(18,14,22); ellipse(-4,-2,56,86);
-4. Highlights: two pure-white ovals, a big one high on one side of the pupil and a
-   small one low on the other: fill(255); ellipse(-34,-42,44,34); ellipse(28,38,20,16);
-   This glossy specular pair is what makes the eye look alive rather than dead.
-5. Upper lash line: a THICK solid black wedge arcing over the top of the iris,
-   thickest in the middle, plus 2-3 sharp black lash spikes flaring off the outer
-   corner as filled triangles. This is the boldest shape in the drawing.
-6. Lower lid: one thin dark p5.brush spline under the iris, and a thin crease line
-   arcing above the lash line. Keep them light — anime lower lids are understated.
-Optionally add small white sparkle shapes for a shoujo style.
-No hatching, no sketchy scribbles, no grey pencil shading: flat colour, crisp
-edges, thick black lash line, glossy highlights.
+Paint the eye in this order. Vary the colours, proportions, gaze direction and
+lash length to suit the brief, but keep the anatomy and the soft painted look:
+1. Skin: background(238,214,203) or another skin tone, then 25+ large low-alpha
+   ellipses in slightly warmer/darker skin tones around the socket to build soft
+   shading, e.g. for (let i=0;i<28;i++){ fill(214,176,166,10); ellipse(0,-90-i*2,420-i*6,180-i*3); }
+2. Eye opening: an almond of near-white sclera, its edges softened by looping
+   fill(246,238,236,20) ellipses, darkened slightly at the top by the lid shadow.
+3. Iris: a circle roughly 150 wide, its top edge tucked under the lid shadow so
+   the lid slightly overlaps it. Build it from ~24 concentric circles looping from
+   a DARK limbal ring at the outside to a lighter centre in the requested colour
+   using lerpColor, then a few thin brush.line fibres radiating from the pupil.
+4. Pupil: a soft near-black circle about a third of the iris width, edges blurred
+   by 8-10 low-alpha circles around it.
+5. Specular: ONE small white highlight near the top of the iris, plus a faint
+   larger glow — never two big cartoon ovals.
+6. Upper lash line and lashes: a soft dark band hugging the top of the eye
+   opening (loop low-alpha shapes, not one solid black wedge), then 25-40
+   INDIVIDUAL lash strands as brush.spline curves with brush.pick("2B") and a
+   thin brush.strokeWeight, fanning outward and curling up, longest at the outer
+   corner and thinning to hair-fine tips.
+7. Lower lid: a soft warm-pink crease line under the eye, a light catchlight on
+   the lid rim, 10-20 short fine lower lashes, and a pinkish tear duct.
+8. Brow: an arc of 40+ short fine brush strokes above the eye, dark at the inner
+   end, fading and sweeping outward. Add 2-3 stray hair strands across the skin.
+No hard outlines, no flat cel-shaded blocks, no black wedges, no white paper
+background: soft blended skin, gradient iris, fine individual lash hairs.
 """
 
 USER_TEMPLATE = (
-    "Illustrate {subject} with an iris in {color}, in {style}. "
-    "Make it lively and expressive: a big glossy iris with colour banding and a "
-    "dark pupil, bright white specular highlights, a thick black upper lash line "
-    "with sharp lash spikes, and a light lower lid — flat anime colour, no "
-    "pencil hatching."
+    "Paint {subject} with an iris in {color}, in {style}. "
+    "Soft blended skin around the whole socket, a gradient iris with a dark "
+    "limbal ring and one small specular highlight, fine individual lash strands "
+    "and a soft brow — no hard outlines, no flat cel-shaded blocks."
 )
 
 
@@ -396,14 +399,14 @@ def reference_pngs() -> list[bytes]:
 
 RATING_SCALE = (
     "0 = not an eye at all (random lines, blobs, boxes, lone circles)\n"
-    "1 = only vaguely eye-suggestive, or a sketchy pencil/hatched eye with no "
-    "flat colour\n"
-    "2 = readable eye with a big filled iris and pupil, but missing the thick "
-    "black lash line or the white highlights\n"
-    "3 = clear anime eye: big filled iris with dark pupil, white highlight, and a "
-    "bold dark lash line above it\n"
-    "4 = polished anime eye as good as A: flat crisp colour, banded glossy iris, "
-    "thick black lash line with spikes, bright highlights"
+    "1 = only vaguely eye-suggestive, or a flat cartoon/anime eye with hard "
+    "outlines drawn on bare white paper\n"
+    "2 = readable eye with an iris and pupil in an eye opening, but hard edged, "
+    "or with no skin around it, or with no lashes\n"
+    "3 = softly painted eye: skin-toned lids and socket around it, a gradient "
+    "iris with a pupil and a small highlight, and lashes\n"
+    "4 = as painterly as A: smoothly blended skin, gradient iris with a dark "
+    "limbal ring and one small specular, fine individual lash hairs and a brow"
 )
 # Anatomy is worth far more than ink: a 1 must not be a comfortable place to sit.
 RATING_REWARD = {0: 0.0, 1: 0.08, 2: 0.35, 3: 0.7, 4: 1.0}
@@ -452,10 +455,11 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
                             "B_IS:, describe in under 12 words what shapes B "
                             "actually contains.\nThen a line starting with "
                             "RATING:, a single digit 0-4 for how much B looks "
-                            "like an ANIME eye drawn in the same style as A "
-                            "(flat crisp colour, one big glossy iris with a "
-                            "dark pupil, white specular highlights, a thick "
-                            "black upper lash line with spikes):\n"
+                            "like a SOFT SEMI-REALISTIC PAINTED eye in the "
+                            "same style as A (blended skin-tone lids and "
+                            "socket, no hard cartoon outlines, gradient iris "
+                            "with a dark limbal ring and one small specular, "
+                            "fine individual lash hairs, a soft brow):\n"
                             f"{RATING_SCALE}"
                         ),
                     },
@@ -560,6 +564,23 @@ def coverage_fraction(png: bytes) -> float:
     return cells / 64.0
 
 
+def speckle_fraction(png: bytes) -> float:
+    """Fraction of pixels that differ sharply from their local neighbourhood.
+
+    A painted eye covers the whole canvas but varies smoothly, so coverage alone
+    cannot separate it from the speckle and noise storms that fool the judge.
+    High-frequency detail can, since noise disagrees with its own neighbours.
+    """
+    import io
+
+    from PIL import Image, ImageFilter
+
+    img = Image.open(io.BytesIO(png)).convert("L").resize((128, 128))
+    blurred = img.filter(ImageFilter.BoxBlur(2))
+    px, bpx = list(img.getdata()), list(blurred.getdata())
+    return sum(1 for v, b in zip(px, bpx) if abs(v - b) > 40) / len(px)
+
+
 def score_response(response: str, prompt: str) -> tuple[float, dict, bytes | None]:
     code = extract_sketch(response)
     if code is None:
@@ -571,11 +592,12 @@ def score_response(response: str, prompt: str) -> tuple[float, dict, bytes | Non
     meta["ink"] = round(ink, 3)
     if ink < 0.02:
         return 0.02, meta, png
-    coverage = coverage_fraction(png)
-    meta["coverage"] = round(coverage, 3)
-    # A legible drawing is line work on a mostly empty canvas; speckle storms and
-    # ink-flooded canvases fool the judge, so gate them out before judging.
-    if coverage > 0.40 or ink > 0.35:
+    meta["coverage"] = round(coverage_fraction(png), 3)
+    speckle = speckle_fraction(png)
+    meta["speckle"] = round(speckle, 3)
+    # This style paints the whole canvas, so only noise is gated: speckle storms
+    # otherwise read to the judge as texture and score like real rendering.
+    if speckle > 0.12:
         return 0.02, meta, png
     judge_score, judge_meta = judge_image(png, prompt)
     meta.update(judge_meta)
