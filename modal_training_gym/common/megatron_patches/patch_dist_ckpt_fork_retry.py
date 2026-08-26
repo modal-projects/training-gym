@@ -5,7 +5,7 @@ forks ``thread_count`` helper processes **per rank** to write the ``.distcp``
 shards — 2 per rank by default, so 16 on an 8-rank node. On Modal that fork
 intermittently fails::
 
-    File ".../strategies/filesystem_async.py", line 315, in write_preloaded_data_multiproc
+    File ".../filesystem_async.py", line 315, in write_preloaded_data_multiproc
         p.start()
     File ".../multiprocessing/popen_fork.py", line 66, in _launch
         self.pid = os.fork()
@@ -42,6 +42,15 @@ Retrying ``Process.start()`` is safe: CPython assigns ``self._popen`` only after
 that, so a ``start()`` that raised leaves the object reusable. ``start()`` also
 calls ``_cleanup()``, which reaps exited children and may itself free whatever
 the fork was short of.
+
+**It logs.** A silent retry would leave "is this patch still doing anything?"
+unanswerable — clean saves would look identical whether the patch fired or the
+underlying condition simply went away. It warns on every retry, notes the
+attempt a fork finally succeeded on, and logs an error before re-raising when the
+attempts are exhausted, which is the signal that the transient-resource
+assumption is wrong and this needs escalating rather than a bigger retry count.
+It binds its own ``_mtg_log`` rather than reusing the enclosing function's
+``logger``, so the injected code cannot break if upstream moves that binding.
 
 Applied to every miles image (see ``frameworks/miles/launcher.py``), not just one
 recipe: any miles model saving a torch_dist checkpoint forks the same writer.
@@ -90,18 +99,33 @@ replacement = (
     f"{inner}# 'try again', and a failed start() leaves the Process reusable, so\n"
     f"{inner}# retry with backoff instead of losing the whole training run.\n"
     f"{inner}import errno as _mtg_errno\n"
+    f"{inner}import logging as _mtg_logging\n"
     f"{inner}import time as _mtg_time\n"
+    "\n"
+    f"{inner}_mtg_log = _mtg_logging.getLogger(__name__)\n"
     "\n"
     f"{inner}_mtg_attempts = 6\n"
     f"{inner}for _mtg_try in range(_mtg_attempts):\n"
     f"{body}try:\n"
     f"{body}    p.start()\n"
+    f"{body}    if _mtg_try:\n"
+    f"{body}        _mtg_log.warning(\n"
+    f'{body}            "{marker}: fork succeeded on attempt %d/%d",\n'
+    f"{body}            _mtg_try + 1,\n"
+    f"{body}            _mtg_attempts,\n"
+    f"{body}        )\n"
     f"{body}    break\n"
     f"{body}except OSError as _mtg_exc:\n"
     f"{body}    if _mtg_exc.errno != _mtg_errno.EAGAIN:\n"
     f"{body}        raise\n"
     f"{body}    if _mtg_try == _mtg_attempts - 1:\n"
+    f"{body}        _mtg_log.error(\n"
+    f'{body}            "{marker}: fork still EAGAIN after %d attempts; "\n'
+    f'{body}            "the transient-resource assumption does not hold here",\n'
+    f"{body}            _mtg_attempts,\n"
+    f"{body}        )\n"
     f"{body}        raise\n"
+    f'{body}    _mtg_log.warning("{marker}: fork EAGAIN, retry %d", _mtg_try + 1)\n'
     f"{body}    _mtg_time.sleep(0.5 * (2**_mtg_try))\n"
 )
 

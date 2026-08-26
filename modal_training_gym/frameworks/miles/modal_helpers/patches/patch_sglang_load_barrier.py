@@ -29,18 +29,25 @@ next 20 minutes emitting ``Broken pipe`` / ``should dump`` NCCL warnings — whi
 is all that is visible unless you go looking for the original ValueError. There
 was no OOM and no dead rank: the nodes were simply still reading.
 
-This raises the constant to 3600 s. It only extends how long a *healthy* rank
-waits for a slow peer; a genuinely dead rank still fails, just later. Nothing
-about loading, sharding or serving changes, so an engine that came up inside 8
-minutes behaves identically.
+This does **not** hardcode a bigger number. Raising the timeout has a real cost —
+a genuinely dead rank stops being detected in 8 minutes and instead hangs the
+engine for however long the new budget allows — and most miles models never need
+it: a single-node engine's ranks all share the downloader's page cache, and the
+barrier group is per-TP-group, so they never wait on a cold reader at all.
+Baking 3600 s into the shared image would hand every small model a 60-minute hang
+on a real failure in exchange for nothing.
 
-The constant is module-level with no environment variable and no CLI flag, so a
-recipe cannot reach it — hence a patch.
+So the patch makes the constant **configurable, defaulting to upstream's 480 s**:
 
-Only single-node engines avoid this entirely (the barrier group is per-TP-group,
-and a one-node engine's ranks all share the downloader's page cache). Any miles
-model large enough to need a multi-node rollout engine is exposed, which is why
-this is applied to every miles image rather than one recipe.
+    UNBALANCED_MODEL_LOADING_TIMEOUT_S = int(
+        os.environ.get("MILES_LOAD_BARRIER_TIMEOUT_S", "480")
+    )
+
+A recipe that needs longer sets ``MILES_LOAD_BARRIER_TIMEOUT_S`` in its
+``environment`` (Nemotron-3-Ultra sets 3600). Every other model keeps upstream's
+fast failure detection unchanged, and the knob is reachable from a recipe without
+another patch. The env var is read at import time, which is after the launcher has
+put the recipe's ``environment`` into the container.
 
 Executed at image-build time via ``python3 <this file>``.
 """
@@ -53,7 +60,9 @@ path = Path(
     "model_runner_components/load_model_utils.py"
 )
 
-NEW_TIMEOUT_S = 3600
+# Upstream's value, kept as the default so unaffected models are untouched.
+DEFAULT_TIMEOUT_S = 480
+ENV_VAR = "MILES_LOAD_BARRIER_TIMEOUT_S"
 
 if not path.exists():
     print(f"{path} not found; skipping SGLang load-barrier patch")
@@ -80,14 +89,20 @@ if not m:
 
 old_value = m.group(1)
 replacement = (
-    f"UNBALANCED_MODEL_LOADING_TIMEOUT_S = {NEW_TIMEOUT_S}  # {marker}: was {old_value}."
-    "\n# A TB-scale checkpoint on a Modal Volume reads at ~1 GiB/s cold, so nodes that"
-    "\n# did not download it need far longer than 8 min. Only the downloader's own node"
-    "\n# has it in page cache. See patch_sglang_load_barrier.py."
+    f"import os as _mtg_os  # {marker}\n"
+    f"# {marker}: was a hardcoded {old_value}. A TB-scale checkpoint on a\n"
+    "# Modal Volume reads at ~1 GiB/s cold, so an engine's non-downloading\n"
+    "# nodes can need ~30 min; only the node that downloaded it has the file\n"
+    "# in page cache. Raising this for everyone would cost small models their\n"
+    "# fast dead-rank detection, so it is a per-recipe opt-in via\n"
+    f"# ${ENV_VAR}. See patch_sglang_load_barrier.py.\n"
+    "UNBALANCED_MODEL_LOADING_TIMEOUT_S = int(\n"
+    f'    _mtg_os.environ.get("{ENV_VAR}", "{DEFAULT_TIMEOUT_S}")\n'
+    ")"
 )
 src = pattern.sub(lambda _: replacement, src, count=1)
 path.write_text(src)
 print(
     f"Patched load_model_utils.py: UNBALANCED_MODEL_LOADING_TIMEOUT_S "
-    f"{old_value} -> {NEW_TIMEOUT_S}"
+    f"{old_value} -> ${ENV_VAR} (default {DEFAULT_TIMEOUT_S})"
 )

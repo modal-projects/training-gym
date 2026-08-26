@@ -1,10 +1,11 @@
 """Miles recipe for NVIDIA Nemotron-3-Ultra-550B-A55B.
 
 Mirrors the upstream-validated profile from
-``scripts/run_nemotron_3_ultra_550b_a55b.py`` + ``docs/models/nemotron/nemotron-3-ultra.md``
-at ``--num-nodes 16``: 16 nodes x 8 H200 colocated, TP8 / SP / PP4 / EP32 / ETP1
-(DP4), four 32-GPU SGLang engines running EP32 + DP-attention, GRPO on
-DAPO-Math-17k with a CPU-offloaded Adam.
+``scripts/run_nemotron_3_ultra_550b_a55b.py`` and
+``docs/models/nemotron/nemotron-3-ultra.md`` at ``--num-nodes 16``:
+16 nodes x 8 H200 colocated, TP8 / SP / PP4 / EP32 / ETP1 (DP4), four 32-GPU
+SGLang engines running EP32 + DP-attention, GRPO on DAPO-Math-17k with a
+CPU-offloaded Adam.
 
 Full-parameter only — upstream ships no LoRA model script for this model, so
 there is no validated adapter profile to mirror.
@@ -76,6 +77,14 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
             # the blanket sgl-kernel version guard, which otherwise refuses to
             # start the engines.
             "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK": "1",
+            # An engine spans 4 nodes; the three that did not download the
+            # checkpoint read ~1 TB off the Modal Volume at ~1 GiB/s, so weight
+            # load takes ~30 min (measured: 28 min on `poky-coyote-b2814b94964f`).
+            # SGLang's post-load barrier allows 480 s by default and killed the
+            # first 16-node attempt. `patch_sglang_load_barrier` makes that
+            # configurable, defaulting to upstream's 480 — models with single-node
+            # engines keep fast dead-rank detection; this one opts in.
+            "MILES_LOAD_BARRIER_TIMEOUT_S": "3600",
         }
     )
 
