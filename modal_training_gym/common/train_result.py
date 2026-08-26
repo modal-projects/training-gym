@@ -198,10 +198,6 @@ class TrainResult:
             return _list_checkpoints(self)
         raise TrainingGymConfigError(f"Unsupported framework: {self.framework}")
 
-    def latest_checkpoint(self) -> "Checkpoint | None":
-        found = self.checkpoints()
-        return found[-1] if found else None
-
     @property
     def model(self) -> "ModelConfig":
         if self.model_config is None:
@@ -211,9 +207,9 @@ class TrainResult:
             )
 
         model = copy.copy(self.model_config)
-        latest = self.latest_checkpoint()
-        if latest:
-            model.model_path = latest.path
+        checkpoints = self.checkpoints()
+        if checkpoints:
+            model.model_path = checkpoints[-1].path
         elif self.checkpoint_dir:
             model.model_path = self.checkpoint_dir
 
