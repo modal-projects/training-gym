@@ -385,8 +385,14 @@ def render_sketch(code: str) -> tuple[bytes | None, dict]:
 
 # ── VLM judge ────────────────────────────────────────────────────────────
 
-JUDGE_URL = "https://modal-labs--ep-eye-judge-server.us-west.modal.direct"
-JUDGE_MODEL = "google/gemma-4-E4B-it"
+# A 4B critic is not a reliable eye-anatomy grader: on a 50-step run it rated
+# skin-coloured blobs with a lash spray 3/4, so reward climbed while the images
+# lost their sclera, limbal ring and highlight. The 26B-A4B MoE judge costs the
+# same active parameters per image and grades the style far better.
+JUDGE_URL = (
+    "https://modal-labs-joy-dev--ep-eye-judge-26b-open-server.us-west.modal.direct"
+)
+JUDGE_MODEL = "google/gemma-4-26B-A4B-it"
 
 # Reference eyes the candidate is compared against, shipped into the training
 # image by launch(). Absolute yes/no questions do not work here: the judge calls
@@ -407,14 +413,40 @@ def reference_pngs() -> list[bytes]:
 
 RATING_SCALE = (
     "0 = not an eye at all (random lines, blobs, boxes, lone circles)\n"
-    "1 = only vaguely eye-suggestive, or a flat cartoon/anime eye with hard "
-    "outlines drawn on bare white paper\n"
-    "2 = readable eye with an iris and pupil in an eye opening, but hard edged, "
-    "or with no skin around it, or with no lashes\n"
+    "1 = only vaguely eye-suggestive: a dark smudge on skin, or a flat cartoon "
+    "eye with hard outlines on bare white paper\n"
+    "2 = readable eye with an iris and pupil sitting in a pale eye opening, but "
+    "hard edged, or missing skin around it, or missing lashes\n"
     "3 = softly painted eye: skin-toned lids and socket around it, a gradient "
-    "iris with a pupil and a small highlight, and lashes\n"
+    "iris with a pupil and a small highlight, and lashes along the lid\n"
     "4 = as painterly as A: smoothly blended skin, gradient iris with a dark "
     "limbal ring and one small specular, fine individual lash hairs and a brow"
+)
+
+# Each check answered NO caps the rating, so an image missing the parts that make
+# an eye read as an eye cannot be scored highly however painterly it looks.
+CHECKS = (
+    (
+        "SCLERA",
+        "is a pale almond-shaped eye white visible on BOTH sides of the iris, "
+        "rather than only a dark smudge on skin",
+        1,
+    ),
+    (
+        "IRIS",
+        "is the iris a graded disc with a darker rim and a distinctly darker "
+        "pupil inside it",
+        2,
+    ),
+    (
+        "LASHES",
+        "do the lashes run along the upper lid line as fine hairs, rather than "
+        "spraying outward from the middle of the eye",
+        2,
+    ),
+)
+CHECK_BLOCK = "\n".join(
+    f"{name}: YES or NO - {question}?" for name, question, _ in CHECKS
 )
 # Anatomy is worth far more than ink: a 1 must not be a comfortable place to sit.
 RATING_REWARD = {0: 0.0, 1: 0.08, 2: 0.35, 3: 0.7, 4: 1.0}
@@ -447,7 +479,7 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
     b64 = base64.b64encode(side_by_side(ref, png)).decode()
     body = {
         "model": JUDGE_MODEL,
-        "max_tokens": 192,
+        "max_tokens": 320,
         # Non-zero so the votes averaged in judge_image actually decorrelate.
         "temperature": 0.7,
         "messages": [
@@ -461,7 +493,9 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
                             "Image B is a candidate drawing, made for the "
                             f'brief: "{prompt}"\n\nFirst line, starting with '
                             "B_IS:, describe in under 12 words what shapes B "
-                            "actually contains.\nThen a line starting with "
+                            "actually contains.\nThen answer these about B, one "
+                            f"per line, exactly as named:\n{CHECK_BLOCK}\n"
+                            "Then a line starting with "
                             "RATING:, a single digit 0-4 for how much B looks "
                             "like a SOFT SEMI-REALISTIC PAINTED eye in the "
                             "same style as A (blended skin-tone lids and "
@@ -498,12 +532,20 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
             )
             resp.raise_for_status()
             text = resp.json()["choices"][0]["message"]["content"] or ""
-            m = re.search(r"RATING:\s*([0-4])", text.upper())
+            upper = text.upper()
+            m = re.search(r"RATING:\s*([0-4])", upper)
             if m:
                 rating = int(m.group(1))
-                desc = text.split("RATING:")[0].replace("B_IS:", "").strip()
+                missing = ""
+                for name, _, cap in CHECKS:
+                    answer = re.search(rf"{name}:\s*\**\s*(YES|NO)", upper)
+                    if answer and answer.group(1) == "NO":
+                        rating = min(rating, cap)
+                        missing += name[0]
+                desc = text.split("B_IS:")[-1].splitlines()[0].strip()
                 return RATING_REWARD[rating], {
                     "judge": str(rating),
+                    "judge_missing": missing,
                     "judge_desc": desc[:120],
                 }
             last_err = f"unparseable: {text[:80]}"
@@ -528,6 +570,7 @@ def judge_image(png: bytes, prompt: str) -> tuple[float, dict]:
     scores = [s for s, _ in votes]
     return sum(scores) / len(scores), {
         "judge": " ".join(m.get("judge", "?") for _, m in votes),
+        "judge_missing": " ".join(m.get("judge_missing", "") or "-" for _, m in votes),
         "judge_desc": votes[0][1].get("judge_desc", ""),
     }
 
