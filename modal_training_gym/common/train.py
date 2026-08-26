@@ -429,6 +429,13 @@ class TrainConfig:
             self.recipe,
             merge_model_recipe=self.merge_model_recipe,
         )
+        reward_function = getattr(self.dataset, "reward_function", None)
+        if (
+            reward_function is not None
+            and isinstance(recipe, (MilesRecipe, SlimeRecipe))
+            and recipe.custom_rm_function is None
+        ):
+            recipe = _dc.replace(recipe, custom_rm_function=reward_function)
         if self.checkpoint is None:
             return recipe
         if self.checkpoint.checkpoint_type != CheckpointType.megatron:

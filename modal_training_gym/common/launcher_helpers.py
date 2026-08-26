@@ -17,6 +17,7 @@ import secrets as _secrets
 import tempfile
 import textwrap
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 import cloudpickle
@@ -223,7 +224,11 @@ def write_dataset_if_needed(
 
     write = write_fn or dataset.write
     refresh = dataset.needs_refresh
-    if os.path.exists(path) and not refresh:
+    task_files_dir = getattr(dataset, "task_files_dir", None)
+    staged_missing = bool(
+        task_files_dir and not (Path(path).parent / task_files_dir).is_dir()
+    )
+    if os.path.exists(path) and not refresh and not staged_missing:
         dataset.validate_write(path)
         return False
 

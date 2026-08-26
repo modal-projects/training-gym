@@ -97,6 +97,9 @@ class DatasetConfig(ABC):
                 "Declare it as a class attribute on the dataset subclass."
             )
 
+    def is_prepared(self, path: str) -> bool:
+        return Path(path).exists()
+
     def _expected_columns(self) -> set[str]:
         cols: set[str] = set()
         if self.input_key:
@@ -297,6 +300,9 @@ class HarborDataset(DatasetConfig):
     instruction_path: str = "instruction.md"
     label_metadata_path: str | None = None
     test_data_dir: str | None = None
+    task_files_dir: str = "harbor_tasks"
+    candidate_path: str = "/tmp/training-gym-candidate.py"
+    candidate_command: str = "python {candidate_path}"
     prompt_template: str = "{instruction}"
     system_prompt: str = ""
     train_size: int | None = None
@@ -320,6 +326,9 @@ class HarborDataset(DatasetConfig):
         instruction_path: str | None = None,
         label_metadata_path: str | None = None,
         test_data_dir: str | None = None,
+        task_files_dir: str | None = None,
+        candidate_path: str | None = None,
+        candidate_command: str | None = None,
         prompt_template: str | None = None,
         system_prompt: str | None = None,
         train_size: int | None = None,
@@ -349,6 +358,12 @@ class HarborDataset(DatasetConfig):
             self.label_metadata_path = label_metadata_path
         if test_data_dir is not None:
             self.test_data_dir = test_data_dir
+        if task_files_dir is not None:
+            self.task_files_dir = task_files_dir
+        if candidate_path is not None:
+            self.candidate_path = candidate_path
+        if candidate_command is not None:
+            self.candidate_command = candidate_command
         if prompt_template is not None:
             self.prompt_template = prompt_template
         if system_prompt is not None:
@@ -391,6 +406,8 @@ class HarborDataset(DatasetConfig):
     def cache_key(self) -> str:
         return _materialization_fingerprint(
             {
+                "candidate_command": self.candidate_command,
+                "candidate_path": self.candidate_path,
                 "dataset_class": f"{type(self).__module__}.{type(self).__qualname__}",
                 "dataset_name": self.dataset_name,
                 "eval_repeats": self.eval_repeats,
@@ -406,6 +423,7 @@ class HarborDataset(DatasetConfig):
                 "shuffle_tasks": self.shuffle_tasks,
                 "split": self.split,
                 "system_prompt": self.system_prompt,
+                "task_files_dir": self.task_files_dir,
                 "task_glob": self.task_glob,
                 "task_names": self.task_names,
                 "task_root": self.task_root,
@@ -565,14 +583,24 @@ class HarborDataset(DatasetConfig):
                 )
         return test_cases
 
-    def _build_label(self, task_root: Path, task_dir: Path) -> dict[str, Any]:
+    def _build_label(
+        self,
+        task_root: Path,
+        task_dir: Path,
+        *,
+        task_data_rel: Path | None = None,
+    ) -> dict[str, Any]:
         rel = task_dir.relative_to(task_root)
         rel_with_root = (Path(task_root.name) / rel).as_posix()
         label: dict[str, Any] = {
             "harbor_task_name": task_dir.name,
             "harbor_task_path": task_dir.as_posix(),
             "harbor_task_rel": rel_with_root,
+            "harbor_candidate_path": self.candidate_path,
+            "harbor_candidate_command": self.candidate_command,
         }
+        if task_data_rel is not None:
+            label["harbor_task_data_rel"] = task_data_rel.as_posix()
         label.update(self._read_label_metadata(task_dir))
         if self.test_data_dir:
             label["test_cases"] = self._read_test_data(task_dir)
@@ -589,14 +617,24 @@ class HarborDataset(DatasetConfig):
         }
         return self.prompt_template.format(**context).strip()
 
-    def _build_row(self, task_root: Path, task_dir: Path) -> dict[str, Any]:
+    def _build_row(
+        self,
+        task_root: Path,
+        task_dir: Path,
+        *,
+        task_data_rel: Path | None = None,
+    ) -> dict[str, Any]:
         instruction_file = task_dir / self.instruction_path
         if not instruction_file.exists():
             raise FileNotFoundError(
                 f"instruction file does not exist for Harbor task {task_dir.name}: {instruction_file}"
             )
         instruction = instruction_file.read_text(encoding="utf-8").strip()
-        label = self._build_label(task_root, task_dir)
+        label = self._build_label(
+            task_root,
+            task_dir,
+            task_data_rel=task_data_rel,
+        )
         user_prompt = self._format_prompt(
             instruction=instruction, task_dir=task_dir, label=label
         )
@@ -608,6 +646,36 @@ class HarborDataset(DatasetConfig):
             self.input_key: messages,
             self.label_key: json.dumps(label, separators=(",", ":")),
         }
+
+    def _stage_task_dirs(
+        self,
+        *,
+        task_root: Path,
+        task_dirs: list[Path],
+        output_path: str,
+    ) -> tuple[Path, list[Path]]:
+        staged_root = Path(output_path).resolve().parent / self.task_files_dir
+        if staged_root.exists():
+            shutil.rmtree(staged_root)
+
+        staged_dirs: list[Path] = []
+        for task_dir in task_dirs:
+            try:
+                relative_task_dir = task_dir.relative_to(task_root)
+            except ValueError as exc:
+                raise TrainingGymConfigError(
+                    f"Harbor task {task_dir} is outside task root {task_root}"
+                ) from exc
+            target_dir = staged_root / task_root.name / relative_task_dir
+            target_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(
+                task_dir,
+                target_dir,
+                copy_function=shutil.copy2,
+                symlinks=True,
+            )
+            staged_dirs.append(target_dir)
+        return staged_root, staged_dirs
 
     @staticmethod
     def _repeat_rows(rows: list[dict[str, Any]], repeats: int) -> list[dict[str, Any]]:
@@ -650,6 +718,36 @@ class HarborDataset(DatasetConfig):
         ]
         _, eval_rows = self._split_rows(base_rows)
         self._write_rows(self._repeat_rows(eval_rows, int(self.eval_repeats)), path)
+
+    def write(self, path: str) -> None:
+        task_root = self._resolve_task_root()
+        task_dirs = self._iter_task_dirs()
+        staged_root, staged_dirs = self._stage_task_dirs(
+            task_root=task_root,
+            task_dirs=task_dirs,
+            output_path=path,
+        )
+        output_parent = Path(path).resolve().parent.parent
+        rows = [
+            self._build_row(
+                staged_root,
+                task_dir,
+                task_data_rel=task_dir.relative_to(output_parent),
+            )
+            for task_dir in staged_dirs
+        ]
+        if self.split != "all":
+            train_rows, eval_rows = self._split_rows(rows)
+            if self.split == "train":
+                rows = self._repeat_rows(train_rows, int(self.train_repeats))
+            else:
+                rows = self._repeat_rows(eval_rows, int(self.eval_repeats))
+        if self.output_format == "parquet":
+            HFDataset.from_list(list(rows)).to_parquet(path)
+        else:
+            with open(path, "w") as f:
+                for row in rows:
+                    f.write(json.dumps(row) + "\n")
 
     def to_pandas(self):
         import pandas as pd

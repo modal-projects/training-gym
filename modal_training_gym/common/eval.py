@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -612,11 +613,13 @@ class HarborEval(EvalConfig):
     """Evaluate a deployed model on a Harbor dataset using sandbox execution.
 
     Automates the common pattern of generating code from a Harbor task,
-    extracting it from the LLM response, running it in a Modal sandbox,
-    and comparing stdout against expected test-case outputs.
+    extracting it from the LLM response, and running the task's Harbor
+    environment and verifier in a Modal sandbox.
 
     When neither ``eval_fn`` nor ``eval_response_fn`` is provided, a
-    default sandbox-backed scorer is used automatically.  Pass
+    default Harbor-backed scorer is used automatically for staged Harbor
+    tasks. Rows containing only inline ``test_cases`` retain the generic
+    stdin/stdout scorer. Pass
     ``extract_code_fn`` to override how code is pulled from the model
     response, or supply your own ``eval_fn`` to take full control.
     """
@@ -631,17 +634,20 @@ class HarborEval(EvalConfig):
     sandbox_python_version: str = "3.11"
     extract_code_fn: Callable[[str], str] | None = None
 
-    def _resolve_test_cases(self, example: DatasetRow) -> list[dict[str, str]]:
+    @staticmethod
+    def _resolve_label(example: DatasetRow) -> dict[str, Any]:
         label = example.get("label", {})
         if isinstance(label, str):
             try:
                 label = json.loads(label)
             except (json.JSONDecodeError, ValueError):
-                label = {}
-        if isinstance(label, dict):
-            cases = label.get("test_cases")
-            if isinstance(cases, list) and cases:
-                return cases
+                return {}
+        return label if isinstance(label, dict) else {}
+
+    def _resolve_test_cases(self, example: DatasetRow) -> list[dict[str, str]]:
+        cases = self._resolve_label(example).get("test_cases")
+        if isinstance(cases, list) and cases:
+            return cases
         if self.test_cases is not None:
             return self.test_cases
         return []
@@ -675,17 +681,45 @@ class HarborEval(EvalConfig):
             **self.generate_kwargs,
         )
         code = self._extract_code(response)
-        test_cases = self._resolve_test_cases(example)
-        score, metadata = score_in_sandbox(
-            code,
-            test_cases=test_cases,
-            timeout_sec=self.sandbox_timeout,
-            sandbox_cpu=self.sandbox_cpu,
-            sandbox_memory=self.sandbox_memory,
-            cpu_policy=self.sandbox_cpu_policy,
-            memory_policy=self.sandbox_memory_policy,
-            python_version=self.sandbox_python_version,
-        )
+        label = self._resolve_label(example)
+        if "harbor_task_path" in label or "harbor_task_data_rel" in label:
+            from modal_training_gym.common.harbor import (
+                resolve_harbor_task_path,
+                score_harbor_response,
+            )
+
+            task_path = resolve_harbor_task_path(label)
+            score, metadata = asyncio.run(
+                score_harbor_response(
+                    code,
+                    task_path=task_path,
+                    candidate_path=label.get(
+                        "harbor_candidate_path",
+                        "/tmp/training-gym-candidate.py",
+                    ),
+                    candidate_command=label.get(
+                        "harbor_candidate_command",
+                        "python {candidate_path}",
+                    ),
+                    timeout_sec=self.sandbox_timeout,
+                    sandbox_cpu=self.sandbox_cpu,
+                    sandbox_memory=self.sandbox_memory,
+                    cpu_policy=self.sandbox_cpu_policy,
+                    memory_policy=self.sandbox_memory_policy,
+                )
+            )
+        else:
+            test_cases = self._resolve_test_cases(example)
+            score, metadata = score_in_sandbox(
+                code,
+                test_cases=test_cases,
+                timeout_sec=self.sandbox_timeout,
+                sandbox_cpu=self.sandbox_cpu,
+                sandbox_memory=self.sandbox_memory,
+                cpu_policy=self.sandbox_cpu_policy,
+                memory_policy=self.sandbox_memory_policy,
+                python_version=self.sandbox_python_version,
+            )
 
         parsed = self.model.parse_response(response) if self.model is not None else None
 
