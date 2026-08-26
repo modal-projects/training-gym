@@ -437,7 +437,11 @@ class TrainConfig:
             and recipe.custom_rm_function is None
             and self.recipe.rm_type is None
         ):
-            recipe = _dc.replace(recipe, custom_rm_function=reward_function)
+            recipe = _dc.replace(
+                recipe,
+                custom_rm_function=reward_function,
+                rm_type=None,
+            )
         if self.checkpoint is None:
             return recipe
         if self.checkpoint.checkpoint_type != CheckpointType.megatron:

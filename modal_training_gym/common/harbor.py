@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from modal_training_gym.common.errors import TrainingGymConfigError
@@ -13,7 +14,6 @@ _CODE_FENCE_RE = re.compile(
     r"```(?:python|py)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE
 )
 _DEFAULT_DATA_ROOT = Path("/data")
-_DEFAULT_TRIALS_ROOT = Path("/tmp/training-gym-harbor-trials")
 _AGENT_IMPORT_PATH = "modal_training_gym.common.harbor_agent:TrainingGymResponseAgent"
 
 
@@ -114,58 +114,59 @@ async def score_harbor_response(
     if not resolved_task_path.is_dir():
         raise FileNotFoundError(f"Harbor task directory does not exist: {task_path}")
 
-    trial_config = TrialConfig(
-        trials_dir=_DEFAULT_TRIALS_ROOT,
-        task=TaskConfig(path=resolved_task_path),
-        agent=AgentConfig(
-            import_path=_AGENT_IMPORT_PATH,
-            override_timeout_sec=float(timeout_sec),
-            kwargs={
-                "response": response,
-                "candidate_path": candidate_path,
-                "candidate_command": candidate_command,
-            },
-        ),
-        verifier=VerifierConfig(override_timeout_sec=float(timeout_sec)),
-        environment=EnvironmentConfig(
-            type=EnvironmentType.MODAL,
-            cpu_enforcement_policy=_resource_mode(cpu_policy),
-            memory_enforcement_policy=_resource_mode(memory_policy),
-            override_cpus=max(1, int(sandbox_cpu)),
-            override_memory_mb=int(sandbox_memory),
-            suppress_override_warnings=True,
-            kwargs={
-                "sandbox_timeout_secs": max(300, timeout_sec * 3),
-                "sandbox_idle_timeout_secs": max(120, timeout_sec * 2),
-            },
-        ),
-    )
-    trial = await Trial.create(trial_config)
-    result = await trial.run()
+    with TemporaryDirectory(prefix="training-gym-harbor-trial-") as trials_dir:
+        trial_config = TrialConfig(
+            trials_dir=Path(trials_dir),
+            task=TaskConfig(path=resolved_task_path),
+            agent=AgentConfig(
+                import_path=_AGENT_IMPORT_PATH,
+                override_timeout_sec=float(timeout_sec),
+                kwargs={
+                    "response": response,
+                    "candidate_path": candidate_path,
+                    "candidate_command": candidate_command,
+                },
+            ),
+            verifier=VerifierConfig(override_timeout_sec=float(timeout_sec)),
+            environment=EnvironmentConfig(
+                type=EnvironmentType.MODAL,
+                cpu_enforcement_policy=_resource_mode(cpu_policy),
+                memory_enforcement_policy=_resource_mode(memory_policy),
+                override_cpus=max(1, int(sandbox_cpu)),
+                override_memory_mb=int(sandbox_memory),
+                suppress_override_warnings=True,
+                kwargs={
+                    "sandbox_timeout_secs": max(300, timeout_sec * 3),
+                    "sandbox_idle_timeout_secs": max(120, timeout_sec * 2),
+                },
+            ),
+        )
+        trial = await Trial.create(trial_config)
+        result = await trial.run()
 
-    rewards = (
-        result.verifier_result.rewards
-        if result.verifier_result is not None
-        and result.verifier_result.rewards is not None
-        else {}
-    )
-    reward_value = rewards.get("reward")
-    if reward_value is None and rewards:
-        reward_value = next(iter(rewards.values()))
+        rewards = (
+            result.verifier_result.rewards
+            if result.verifier_result is not None
+            and result.verifier_result.rewards is not None
+            else {}
+        )
+        reward_value = rewards.get("reward")
+        if reward_value is None and rewards:
+            reward_value = next(iter(rewards.values()))
 
-    metadata: dict[str, Any] = {
-        "harbor_task_name": result.task_name,
-        "harbor_trial_name": result.trial_name,
-        "harbor_rewards": rewards,
-    }
-    if result.agent_result is not None and result.agent_result.metadata is not None:
-        metadata["harbor_agent"] = result.agent_result.metadata
-    if result.exception_info is not None:
-        metadata["harbor_error"] = {
-            "type": result.exception_info.exception_type,
-            "message": result.exception_info.exception_message,
+        metadata: dict[str, Any] = {
+            "harbor_task_name": result.task_name,
+            "harbor_trial_name": result.trial_name,
+            "harbor_rewards": rewards,
         }
-    return float(reward_value or 0.0), metadata
+        if result.agent_result is not None and result.agent_result.metadata is not None:
+            metadata["harbor_agent"] = result.agent_result.metadata
+        if result.exception_info is not None:
+            metadata["harbor_error"] = {
+                "type": result.exception_info.exception_type,
+                "message": result.exception_info.exception_message,
+            }
+        return float(reward_value or 0.0), metadata
 
 
 async def harbor_reward(args, sample, **kwargs):

@@ -118,7 +118,8 @@ def test_score_harbor_response_builds_modal_trial(
     assert score == 1.0
     assert metadata["harbor_rewards"] == {"reward": 1.0}
     config = captured["config"]
-    assert config.trials_dir == Path("/tmp/training-gym-harbor-trials")
+    assert config.trials_dir.name.startswith("training-gym-harbor-trial-")
+    assert not config.trials_dir.exists()
     assert config.environment.type.value == "modal"
     assert config.environment.override_cpus == 2
     assert config.environment.override_memory_mb == 2048
@@ -318,6 +319,20 @@ def test_harbor_dataset_supplies_default_reward_function(
     prepared = config._prepare_recipe()
 
     assert prepared.custom_rm_function is dataset.reward_function
+
+
+def test_harbor_reward_replaces_model_preset_reward_type(tmp_path: Path) -> None:
+    dataset = HarborDataset(path=str(tmp_path))
+    config = TrainConfig(
+        model=Qwen3_5_4B(),
+        dataset=dataset,
+        recipe=MilesRecipe(),
+    )
+
+    prepared = config._prepare_recipe()
+
+    assert prepared.custom_rm_function is dataset.reward_function
+    assert prepared.rm_type is None
 
 
 @pytest.mark.parametrize(
