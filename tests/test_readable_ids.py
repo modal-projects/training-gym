@@ -11,7 +11,7 @@ from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 
 
 def test_create_hash_has_word_word_hash_shape() -> None:
-    value = ids.create_hash("model", "ckpt", "recipe", "app", "", "path")
+    value = ids.create_hash("model", "ckpt", "recipe", "app", "path")
 
     assert value.count("-") >= 2
 
@@ -20,8 +20,8 @@ def test_create_hash_suffix_is_stable_for_same_parts(monkeypatch) -> None:
     import randomname
 
     monkeypatch.setattr(randomname, "get_name", lambda *, sep: "brisk-river")
-    first = ids.create_hash("model", "ckpt", "recipe", "app", "", "path")
-    second = ids.create_hash("model", "ckpt", "recipe", "app", "", "path")
+    first = ids.create_hash("model", "ckpt", "recipe", "app", "path")
+    second = ids.create_hash("model", "ckpt", "recipe", "app", "path")
 
     assert first.rsplit("-", 1)[-1] == second.rsplit("-", 1)[-1]
 
@@ -30,8 +30,8 @@ def test_create_hash_suffix_differs_for_different_parts(monkeypatch) -> None:
     import randomname
 
     monkeypatch.setattr(randomname, "get_name", lambda *, sep: "brisk-river")
-    first = ids.create_hash("model-a", "ckpt", "recipe", "app", "", "path")
-    second = ids.create_hash("model-b", "ckpt", "recipe", "app", "", "path")
+    first = ids.create_hash("model-a", "ckpt", "recipe", "app", "path")
+    second = ids.create_hash("model-b", "ckpt", "recipe", "app", "path")
 
     assert first.rsplit("-", 1)[-1] != second.rsplit("-", 1)[-1]
 
@@ -62,10 +62,8 @@ def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
     )
 
     dataset = DummyDataset()
-    eval_dataset = DummyDataset()
     config = TrainConfig(
         dataset=dataset,
-        eval_dataset=eval_dataset,
         model=ModelConfig(model_name="Qwen/Qwen3-4B"),
         recipe=DummyRecipe(),
     )
@@ -74,7 +72,7 @@ def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
     second = config._generate_training_run_id()
     assert first != second
     assert calls == 2
-    assert hash_parts[0][3:5] == (dataset.id, eval_dataset.id)
+    assert hash_parts[0][3] == dataset.id
 
 
 def test_train_config_can_skip_model_recipe_merge() -> None:

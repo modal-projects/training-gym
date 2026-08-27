@@ -371,7 +371,6 @@ def build_slime_app(
     slime: SlimeRecipe,
     model: ModelConfig,
     dataset: DatasetConfig,
-    eval_dataset: DatasetConfig | None = None,
     checkpoint: Checkpoint | None = None,
     name: str | None = None,
     group_id: str | None = None,
@@ -382,8 +381,6 @@ def build_slime_app(
 
     SlimeRecipe._validate_custom_model_architecture(model)
     SlimeRecipe._validate_dataset(dataset)
-    if eval_dataset is not None:
-        SlimeRecipe._validate_dataset(eval_dataset)
 
     # Models that can't do THD packing (model.requires_bshd, e.g. Qwen3-ASR) must
     # train on padded (bshd) batches; fail fast with the fix if the recipe didn't.
@@ -681,7 +678,6 @@ def build_slime_app(
     def prepare_dataset():
         run_prepare_dataset(
             dataset,
-            eval_dataset,
             data_volume,
             SlimeRecipe._resolve_data_path,
         )
@@ -974,7 +970,6 @@ def build_slime_app(
             "recipe": _serialize_slime_params(
                 slime,
                 dataset=dataset,
-                eval_dataset=eval_dataset,
                 model=model,
             ),
             "metrics": metric_metadata(
@@ -1045,14 +1040,6 @@ def build_slime_app(
                     dataset,
                     SlimeRecipe._resolve_data_path(dataset, "train"),
                 )
-                if eval_dataset is not None:
-                    wrote_data = (
-                        write_dataset_if_needed(
-                            eval_dataset,
-                            SlimeRecipe._resolve_data_path(eval_dataset, "eval"),
-                        )
-                        or wrote_data
-                    )
                 if wrote_data:
                     await data_volume.commit.aio()
 
@@ -1124,7 +1111,6 @@ def build_slime_app(
                     SLIME_ROOT,
                     model=model,
                     dataset=dataset,
-                    eval_dataset=eval_dataset,
                 )
             finally:
                 object.__setattr__(slime, "save", original_save)

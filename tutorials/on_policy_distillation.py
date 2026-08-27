@@ -249,7 +249,6 @@ def math_opd_post_process(args, samples, **kwargs):
 config = TrainConfig(
     model=student_model,
     dataset=train_dataset,
-    eval_dataset=eval_dataset,
     recipe=SlimeRecipe(
         gpu_type="H100",
         actor_num_nodes=1,

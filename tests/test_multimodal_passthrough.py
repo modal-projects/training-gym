@@ -7,7 +7,6 @@ import json
 import pytest
 
 from modal_training_gym import HuggingFaceDataset, MultimodalDataset, SlimeRecipe
-from modal_training_gym.common.launcher_helpers import run_prepare_dataset
 
 _RECIPE_KW = dict(
     gpu_type="H100",
@@ -56,55 +55,25 @@ def test_write_writes_media_column(tmp_path):
     assert row["prompt"] == "p" and row["label"] == "l"
 
 
-def test_eval_dataset_uses_separate_materialization_path():
-    train = MultimodalDataset(rows=[])
-    evaluation = MultimodalDataset(rows=[])
+def test_dataset_does_not_add_eval_prompt_data():
+    ds = MultimodalDataset(rows=[])
+    args = SlimeRecipe(**_RECIPE_KW).cli_args(dataset=ds)
 
-    args = SlimeRecipe(**_RECIPE_KW).cli_args(
-        dataset=train,
-        eval_dataset=evaluation,
-    )
-    flags = _flags(args)
-
-    assert flags["--prompt-data"] == "/data/MultimodalDataset/train.jsonl"
-    eval_index = args.index("--eval-prompt-data")
-    assert args[eval_index + 1 : eval_index + 3] == [
-        "eval",
-        "/data/MultimodalDataset/eval.jsonl",
-    ]
+    assert "--eval-prompt-data" not in args
 
 
-def test_train_and_eval_datasets_are_written_separately(tmp_path):
-    train = MultimodalDataset(
-        rows=[{"prompt": "train", "media": [], "label": "train-label"}]
-    )
-    evaluation = MultimodalDataset(
-        rows=[{"prompt": "eval", "media": [], "label": "eval-label"}]
-    )
+def test_huggingface_write_uses_rows_override(tmp_path):
+    class TestDataset(HuggingFaceDataset):
+        hf_repo = "unused"
+        output_format = "jsonl"
 
-    class FakeVolume:
-        reloads = 0
-        commits = 0
+        def rows(self):
+            return [{"input": "custom", "label": "answer"}]
 
-        def reload(self):
-            self.reloads += 1
+    output_path = tmp_path / "dataset.jsonl"
+    TestDataset().write(str(output_path))
 
-        def commit(self):
-            self.commits += 1
-
-    volume = FakeVolume()
-
-    def resolve_path(_dataset, split):
-        return str(tmp_path / f"{split}.jsonl")
-
-    run_prepare_dataset(train, evaluation, volume, resolve_path)
-
-    train_row = json.loads((tmp_path / "train.jsonl").read_text().splitlines()[0])
-    eval_row = json.loads((tmp_path / "eval.jsonl").read_text().splitlines()[0])
-    assert train_row["prompt"] == "train"
-    assert eval_row["prompt"] == "eval"
-    assert volume.reloads == 1
-    assert volume.commits == 1
+    assert json.loads(output_path.read_text())["input"] == "custom"
 
 
 def test_text_dataset_unaffected():

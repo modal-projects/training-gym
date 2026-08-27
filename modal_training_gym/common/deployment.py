@@ -231,7 +231,6 @@ class CustomDeployment(BaseModel):
             checkpoint.path if checkpoint is not None else "",
             f"{type(recipe).__name__}:{recipe.recipe_type.value}",
             app_name,
-            "",
             model_path,
         )
         checkpoints_volume = (

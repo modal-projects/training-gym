@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -433,7 +434,6 @@ def build_miles_app(
     miles: MilesRecipe,
     model: ModelConfig,
     dataset: DatasetConfig,
-    eval_dataset: DatasetConfig | None = None,
     checkpoint: Checkpoint | None = None,
     name: str | None = None,
     group_id: str | None = None,
@@ -646,7 +646,6 @@ def build_miles_app(
     def prepare_dataset():
         run_prepare_dataset(
             dataset,
-            eval_dataset,
             data_volume,
             MilesRecipe._resolve_data_path,
         )
@@ -978,7 +977,6 @@ def build_miles_app(
                     **serialize_recipe_params(
                         miles,
                         dataset=dataset,
-                        eval_dataset=eval_dataset,
                         model=model,
                     ),
                 },
@@ -1059,14 +1057,6 @@ def build_miles_app(
                 dataset,
                 MilesRecipe._resolve_data_path(dataset, "train"),
             )
-            if eval_dataset is not None:
-                wrote_data = (
-                    write_dataset_if_needed(
-                        eval_dataset,
-                        MilesRecipe._resolve_data_path(eval_dataset, "eval"),
-                    )
-                    or wrote_data
-                )
             if wrote_data:
                 await data_volume.commit.aio()
 
@@ -1169,7 +1159,6 @@ def build_miles_app(
                     MILES_ROOT,
                     model=model,
                     dataset=dataset,
-                    eval_dataset=eval_dataset,
                 )
             finally:
                 miles.save = original_save

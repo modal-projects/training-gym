@@ -67,6 +67,7 @@ class ScreenSpotDataset(MultimodalDataset):
     hf_split = "test"
     n_rows = 800
     row_offset = 0
+    needs_refresh = True
 
     def __init__(self, *, n_rows=None, row_offset=None):
         if n_rows is not None:
@@ -74,10 +75,6 @@ class ScreenSpotDataset(MultimodalDataset):
         if row_offset is not None:
             self.row_offset = row_offset
         super().__init__(rows=[])
-
-    @property
-    def needs_refresh(self):
-        return True
 
     def rows(self) -> list[dict]:
         import base64
@@ -293,7 +290,6 @@ print(
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    eval_dataset=eval_dataset,
     recipe=Qwen3_VL_8b_Recipe(
         # TP=4 shards the 8B weights across 4 GPUs, freeing enough VRAM per
         # GPU for the large 0.75 KV pool below. (TP=2 OOMs at mem=0.75.)

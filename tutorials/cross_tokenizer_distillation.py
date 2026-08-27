@@ -971,7 +971,6 @@ def cross_tokenizer_post_process(args, samples, **kwargs):
 config = TrainConfig(
     model=model,
     dataset=dataset,
-    eval_dataset=eval_dataset,
     recipe=Qwen3_6_35b_Recipe(
         custom_rm_function=cross_tokenizer_reward,
         custom_generate_function=tool_step_generate,

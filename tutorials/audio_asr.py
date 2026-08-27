@@ -73,19 +73,13 @@ class LibriSpeechASRDataset(MultimodalDataset):
     hf_repo = "hf-internal-testing/librispeech_asr_dummy"
     hf_config = "clean"
     hf_split = "validation"
+    needs_refresh = True
+    needs_chat_template = False
 
     def __init__(self, *, hf_split=None):
         if hf_split is not None:
             self.hf_split = hf_split
         super().__init__(rows=[])
-
-    @property
-    def needs_refresh(self):
-        return True
-
-    @property
-    def needs_chat_template(self):
-        return False
 
     def rows(self):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
@@ -168,7 +162,6 @@ async def wer_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    eval_dataset=eval_dataset,
     recipe=Qwen3_ASR_1_7b_Recipe(
         gpu_type="H100",
         actor_num_nodes=1,

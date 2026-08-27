@@ -733,9 +733,8 @@ class SlimeRecipe(BaseTrainRecipe):
     def _dataset_to_fields(
         cls,
         ds: "DatasetConfig",
-        eval_ds: "DatasetConfig | None" = None,
     ) -> dict[str, Any]:
-        fields = super()._dataset_to_fields(ds, eval_ds)
+        fields = super()._dataset_to_fields(ds)
         if getattr(ds, "multimodal_keys", None):
             fields["multimodal_keys"] = ds.multimodal_keys
         return fields
@@ -853,7 +852,6 @@ class SlimeRecipe(BaseTrainRecipe):
     def _fields(
         self,
         dataset: "DatasetConfig | None" = None,
-        eval_dataset: "DatasetConfig | None" = None,
         model: "ModelConfig | None" = None,
     ) -> dict[str, Any]:
         fields = self._field_values()
@@ -864,7 +862,7 @@ class SlimeRecipe(BaseTrainRecipe):
         ):
             fields["sglang_cuda_graph_backend_prefill"] = "disabled"
         if dataset is not None:
-            fields.update(self._dataset_to_fields(dataset, eval_dataset))
+            fields.update(self._dataset_to_fields(dataset))
         if model is not None:
             self.validate_model_parallelism(model)
             if not self.slime_model_script:

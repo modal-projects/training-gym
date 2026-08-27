@@ -157,7 +157,6 @@ async def sandbox_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=dataset,
-    eval_dataset=eval_dataset,
     recipe=SlimeRecipe(
         custom_rm_function=sandbox_rm,
 

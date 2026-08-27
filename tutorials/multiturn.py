@@ -50,21 +50,13 @@ TRAIN_TARGETS = list(range(1, _MAX_VALUE + 1, 2))
 TEST_TARGETS = list(range(2, _MAX_VALUE + 1, 2))
 
 class NumberGuessDataset(DatasetConfig):
+    input_key = "messages"
+    label_key = "label"
+    needs_refresh = True
+
     def __init__(self, split="train"):
         self.split = split
         super().__init__()
-
-    @property
-    def input_key(self):
-        return "messages"
-
-    @property
-    def label_key(self):
-        return "label"
-
-    @property
-    def needs_refresh(self):
-        return True
 
     def rows(self):
         targets = TEST_TARGETS if self.split == "eval" else TRAIN_TARGETS
@@ -365,7 +357,6 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    eval_dataset=eval_dataset,
     recipe=SlimeRecipe(
         custom_generate_function=number_guess_generate,
         custom_rm_function=number_guess_rm,

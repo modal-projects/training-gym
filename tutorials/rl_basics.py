@@ -189,7 +189,6 @@ async def haiku_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    eval_dataset=eval_dataset,
     recipe=SlimeRecipe(
         gpu_type="H100",
         actor_num_nodes=1,
@@ -245,7 +244,6 @@ print(f"average score: {trained_mean:.1f}")
 new_config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    eval_dataset=eval_dataset,
     checkpoint=checkpoint,
     recipe=SlimeRecipe(
         custom_rm_function=haiku_rm,

@@ -164,7 +164,6 @@ async def dapo_overlong_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    eval_dataset=eval_dataset,
     recipe=SlimeRecipe(
         gpu_type="H100",
         actor_num_nodes=1,

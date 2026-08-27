@@ -361,10 +361,6 @@ class TrainConfig:
         Framework recipe (``SlimeRecipe`` or ``MilesRecipe``). Selects the
         training framework and carries Modal infra settings (GPU type, node
         count, image) plus framework CLI flags.
-    eval_dataset : DatasetConfig | None
-        The evaluation dataset, passed into slime/miles. ``train()``
-        materializes it into the framework's ``/data`` volume before
-        training if it isn't already present.
     checkpoint : Checkpoint | None
         Megatron checkpoint to resume training from. The checkpoint's parent
         directory becomes the recipe's ``load`` path; the attached model
@@ -402,7 +398,6 @@ class TrainConfig:
     dataset: DatasetConfig
     model: ModelConfig
     recipe: BaseTrainRecipe
-    eval_dataset: DatasetConfig | None = None
     checkpoint: Checkpoint | None = None
     # Known-model recipes are presets by default; complete recipes can opt out.
     merge_model_recipe: bool = True
@@ -425,7 +420,6 @@ class TrainConfig:
             self.checkpoint.path if self.checkpoint is not None else "",
             f"{type(self.recipe).__name__}:{self.recipe.recipe_type.value}",
             self.dataset.id,
-            self.eval_dataset.id if self.eval_dataset is not None else "",
             self.model.model_path or "",
         )
 
@@ -464,7 +458,6 @@ class TrainConfig:
                 miles=cast(MilesRecipe, self._prepare_recipe()),
                 model=self.model,
                 dataset=self.dataset,
-                eval_dataset=self.eval_dataset,
                 checkpoint=self.checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
@@ -479,7 +472,6 @@ class TrainConfig:
                 slime=cast(SlimeRecipe, self._prepare_recipe()),
                 model=self.model,
                 dataset=self.dataset,
-                eval_dataset=self.eval_dataset,
                 checkpoint=self.checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
@@ -546,7 +538,6 @@ class TrainConfig:
                 **serialize_recipe_params(
                     combined,
                     dataset=dataset,
-                    eval_dataset=self.eval_dataset,
                     model=model,
                 ),
             }

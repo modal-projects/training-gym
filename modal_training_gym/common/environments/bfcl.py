@@ -17,11 +17,11 @@ shape as :mod:`.base`.
 from __future__ import annotations
 
 import ast
+import hashlib
 import inspect
 import json
 import os
 import time
-import uuid
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -594,6 +594,10 @@ class BfclMultiTurnDataset(DatasetConfig):
     with ``split="eval"``; the remaining ids are used for ``split="train"``.
     """
 
+    input_key = "messages"
+    label_key = "label"
+    output_format: Literal["jsonl"] = "jsonl"
+
     def __init__(
         self,
         split: Literal["all", "train", "eval"] = "train",
@@ -603,21 +607,21 @@ class BfclMultiTurnDataset(DatasetConfig):
         # Keep this while framework path resolution still uses ``hf_split``.
         self.hf_split = split
         self.config = config if config is not None else BfclMultiTurnConfig()
-        if not self.id:
-            self.id = f"bfcl-{self.config.category}-{split}-{uuid.uuid4()}"
+        self.id = f"bfcl-{self.config.category}-{split}-{self.cache_key}"
         super().__init__()
 
     @property
-    def input_key(self) -> str:
-        return "messages"
-
-    @property
-    def label_key(self) -> str:
-        return "label"
-
-    @property
-    def output_format(self) -> Literal["jsonl"]:
-        return "jsonl"
+    def cache_key(self) -> str:
+        payload = json.dumps(
+            {
+                "category": self.config.category,
+                "eval_tail": self.config.eval_tail,
+                "obs_limit": self.config.obs_limit,
+                "split": self.split,
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()[:8]
 
     def _entries(self) -> list[dict]:
         return _load_jsonl(

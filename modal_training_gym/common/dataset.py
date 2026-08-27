@@ -21,6 +21,8 @@ import tomllib
 import uuid
 from pathlib import Path
 
+from datasets import Dataset as HFDataset
+
 from modal_training_gym.common.errors import TrainingGymConfigError
 
 DatasetRow = dict[str, Any]
@@ -45,31 +47,19 @@ class DatasetConfig(ABC):
 
     type: DatasetType = DatasetType.DEFAULT
     id: str = ""
-
-    @property
-    def input_key(self) -> str:
-        return "input"
+    input_key: str = "input"
+    needs_chat_template: bool = True
+    needs_refresh: bool = False
+    output_format: Literal["jsonl", "parquet"] = "jsonl"
 
     @property
     @abstractmethod
     def label_key(self) -> str:
         raise NotImplementedError("Datasets must set a label_key.")
 
-    @property
-    def needs_chat_template(self) -> bool:
-        return True
-
-    @property
-    def needs_refresh(self) -> bool:
-        return False
-
     @abstractmethod
     def rows(self) -> Iterable[DatasetRow]:
         pass
-
-    @property
-    def output_format(self) -> Literal["jsonl", "parquet"]:
-        return "jsonl"
 
     @property
     def name(self) -> str:
@@ -168,6 +158,8 @@ class HuggingFaceDataset(DatasetConfig):
     system_prompt: str = ""
     prompt_template: str = "{input}"
     n_rows: int = 0
+    output_format: Literal["jsonl", "parquet"] = "parquet"
+    label_key: str = "label"
 
     def __init__(
         self, *, hf_split: str | None = None, n_rows: int | None = None
@@ -194,14 +186,6 @@ class HuggingFaceDataset(DatasetConfig):
             return "messages"
         return self.input_column or super().input_key
 
-    @property
-    def output_format(self) -> Literal["jsonl", "parquet"]:
-        return "parquet"
-
-    @property
-    def label_key(self) -> str:
-        return "label"
-
     def _load_hf_dataset(self):
         from datasets import load_dataset
 
@@ -225,7 +209,10 @@ class HuggingFaceDataset(DatasetConfig):
             messages.append({"role": "system", "content": self.system_prompt})
         user_content = self.prompt_template.format(input=row[self.input_column])
         messages.append({"role": "user", "content": user_content})
-        return {"messages": messages, self.label_key: str(row[self.output_column])}
+        return {
+            self.input_key: messages,
+            self.label_key: str(row[self.output_column]),
+        }
 
     def rows(self) -> Iterable[DatasetRow]:
         for row in self._load_hf_dataset():
@@ -236,11 +223,13 @@ class HuggingFaceDataset(DatasetConfig):
         return ds.to_pandas()
 
     def write(self, path: str) -> None:
-        ds = self._load_hf_dataset()
+        rows = list(self.rows())
         if self.output_format == "parquet":
-            ds.to_parquet(path)
+            HFDataset.from_list(rows).to_parquet(path)
         else:
-            ds.to_json(path, orient="records", lines=True)
+            with open(path, "w") as f:
+                for row in rows:
+                    f.write(json.dumps(row) + "\n")
 
 
 class HarborDataset(DatasetConfig):
@@ -271,6 +260,9 @@ class HarborDataset(DatasetConfig):
     eval_repeats: int = 1
     shuffle_tasks: bool = False
     shuffle_seed: int = 0
+    input_key: str = "messages"
+    label_key: str = "label"
+    output_format: Literal["parquet"] = "parquet"
 
     def __init__(
         self,
@@ -344,20 +336,8 @@ class HarborDataset(DatasetConfig):
         return "harbor"
 
     @property
-    def input_key(self) -> str:
-        return "messages"
-
-    @property
-    def label_key(self) -> str:
-        return "label"
-
-    @property
     def name(self) -> str:
         return self.dataset_name
-
-    @property
-    def output_format(self) -> Literal["parquet"]:
-        return "parquet"
 
     @property
     def needs_refresh(self) -> bool:
@@ -553,8 +533,8 @@ class HarborDataset(DatasetConfig):
             messages.append({"role": "system", "content": self.system_prompt})
         messages.append({"role": "user", "content": user_prompt})
         return {
-            "messages": messages,
-            "label": json.dumps(label, separators=(",", ":")),
+            self.input_key: messages,
+            self.label_key: json.dumps(label, separators=(",", ":")),
         }
 
     @staticmethod
@@ -626,6 +606,9 @@ class MultimodalDataset(DatasetConfig):
     # data-URI
     # MIME matches `modality`. Pairs with the dashboard fallback in EvalsPage.svelte.
     media_column: str = ""
+    input_key: str = "prompt"
+    label_key: str = "label"
+    output_format: Literal["jsonl"] = "jsonl"
 
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         if self.modality not in ("image", "audio", "video"):
@@ -642,18 +625,6 @@ class MultimodalDataset(DatasetConfig):
         if not self.id:
             self.id = f"mm-{self.modality}-{uuid.uuid4()}"
         super().__init__()
-
-    @property
-    def input_key(self) -> str:
-        return "prompt"
-
-    @property
-    def label_key(self) -> str:
-        return "label"
-
-    @property
-    def output_format(self) -> Literal["jsonl"]:
-        return "jsonl"
 
     @property
     def multimodal_keys(self) -> dict[str, str]:

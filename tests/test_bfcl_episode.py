@@ -135,9 +135,17 @@ def test_bfcl_prompt_defers_to_model_tool_format() -> None:
 def test_bfcl_dataset_paths_are_split_specific() -> None:
     train = bfcl.BfclMultiTurnDataset(split="train")
     evaluation = bfcl.BfclMultiTurnDataset(split="eval")
+    identical_train = bfcl.BfclMultiTurnDataset(split="train")
+    changed_train = bfcl.BfclMultiTurnDataset(
+        split="train",
+        config=bfcl.BfclMultiTurnConfig(eval_tail=31),
+    )
 
     train_path = BaseTrainRecipe._resolve_data_path(train, "train")
     eval_path = BaseTrainRecipe._resolve_data_path(evaluation, "eval")
+    identical_train_path = BaseTrainRecipe._resolve_data_path(identical_train, "train")
+    changed_train_path = BaseTrainRecipe._resolve_data_path(changed_train, "train")
 
-    assert train_path == "/data/BfclMultiTurnDataset/train.jsonl"
-    assert eval_path == "/data/BfclMultiTurnDataset/eval.jsonl"
+    assert train_path != eval_path
+    assert train_path == identical_train_path
+    assert train_path != changed_train_path

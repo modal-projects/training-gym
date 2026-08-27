@@ -113,23 +113,18 @@ class BaseTrainRecipe(ABC):
         name = hf_repo.replace("/", "_") if hf_repo else type(ds).__name__
         fmt = ds.output_format
         ext = "jsonl" if fmt == "jsonl" else "parquet"
-        return f"{DATA_PATH}/{name}/{split}.{ext}"
+        cache_key = getattr(ds, "cache_key", "")
+        suffix = f"-{cache_key}" if cache_key else ""
+        return f"{DATA_PATH}/{name}/{split}{suffix}.{ext}"
 
     @classmethod
     def _dataset_to_fields(
         cls,
         ds: "DatasetConfig",
-        eval_ds: "DatasetConfig | None" = None,
     ) -> dict[str, Any]:
         prompt_data = cls._resolve_data_path(ds, "train")
-        eval_prompt_data = (
-            ["eval", cls._resolve_data_path(eval_ds, "eval")]
-            if eval_ds is not None
-            else None
-        )
         return {
             "prompt_data": prompt_data,
-            "eval_prompt_data": eval_prompt_data,
             "input_key": ds.input_key,
             "label_key": ds.label_key,
             "apply_chat_template": ds.needs_chat_template,
@@ -182,7 +177,6 @@ class BaseTrainRecipe(ABC):
     def _fields(
         self,
         dataset: "DatasetConfig | None" = None,
-        eval_dataset: "DatasetConfig | None" = None,
         model: "ModelConfig | None" = None,
     ) -> dict[str, Any]:
         """Recipe fields to emit as CLI flags, merged with dataset/model/wandb.
@@ -197,13 +191,10 @@ class BaseTrainRecipe(ABC):
     def cli_args(
         self,
         dataset: "DatasetConfig | None" = None,
-        eval_dataset: "DatasetConfig | None" = None,
         model: "ModelConfig | None" = None,
     ) -> list[str]:
         out: list[str] = []
-        for key, val in self._fields(
-            dataset=dataset, eval_dataset=eval_dataset, model=model
-        ).items():
+        for key, val in self._fields(dataset=dataset, model=model).items():
             if val is None or val is False or val == "":
                 continue
             flag = f"--{key.replace('_', '-')}"

@@ -28,8 +28,8 @@ tokenizer/budget for pruning, and (optionally) the system prompt.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
-import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
@@ -707,22 +707,30 @@ class ToolathlonTrajectoryDataset(DatasetConfig):
             self.eval_tasks = eval_tasks
         if obs_limit is not None:
             self.obs_limit = obs_limit
-        if not self.id:
-            source = self.source_file.removesuffix(".jsonl")
-            self.id = f"toolathlon-{source}-{split}-{uuid.uuid4()}"
+        source = self.source_file.removesuffix(".jsonl")
+        self.id = f"toolathlon-{source}-{split}-{self.cache_key}"
         super().__init__()
 
-    @property
-    def input_key(self) -> str:
-        return "messages"
+    input_key = "messages"
+    label_key = "label"
+    output_format: Literal["jsonl"] = "jsonl"
 
     @property
-    def label_key(self) -> str:
-        return "label"
-
-    @property
-    def output_format(self) -> Literal["jsonl"]:
-        return "jsonl"
+    def cache_key(self) -> str:
+        payload = json.dumps(
+            {
+                "eval_tasks": self.eval_tasks,
+                "hf_repo": self.hf_repo,
+                "obs_limit": self.obs_limit,
+                "orig_workspace": self.config.orig_workspace,
+                "source_file": self.source_file,
+                "split": self.split,
+                "train_tasks": self.train_tasks,
+                "workspace_path": self.config.workspace_path,
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()[:8]
 
     def _tasks_for_split(self) -> set[str]:
         if self.split == "eval":

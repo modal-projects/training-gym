@@ -15,7 +15,6 @@ Usage:
 """
 
 import argparse
-import copy
 import json
 import sys
 import time
@@ -349,7 +348,6 @@ def run_base_training(
     wandb_project: str | None = None,
     wandb_group: str | None = None,
     wandb_secret_name: str = "wandb-secret",
-    eval_interval: int | None = None,
     save_interval: int | None = None,
     non_colocated: bool = False,
 ) -> ValidationResult:
@@ -360,8 +358,6 @@ def run_base_training(
         config.framework, model_config, step_count
     )
     train_recipe.num_rollout = step_count
-    if eval_interval is not None:
-        train_recipe.eval_interval = eval_interval
     if save_interval is not None:
         train_recipe.save_interval = save_interval
     if non_colocated:
@@ -387,7 +383,6 @@ def run_base_training(
     train_config = TrainConfig(
         model=model_config,
         dataset=dataset,
-        eval_dataset=copy.deepcopy(dataset),
         recipe=train_recipe,
     )
 
@@ -753,12 +748,6 @@ def __main__():
         help="Number of training steps (rollouts) to run. Defaults to 1.",
     )
     check_parser.add_argument(
-        "--eval-interval",
-        type=int,
-        default=None,
-        help="Override the recipe eval_interval (eval every N rollouts).",
-    )
-    check_parser.add_argument(
         "--save-interval",
         type=int,
         default=None,
@@ -868,7 +857,6 @@ def __main__():
         None if args.no_wandb else args.wandb_project,
         args.wandb_group,
         args.wandb_secret_name,
-        eval_interval=args.eval_interval,
         save_interval=args.save_interval,
         non_colocated=args.non_colocated,
     )

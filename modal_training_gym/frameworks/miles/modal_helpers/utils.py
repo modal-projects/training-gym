@@ -42,15 +42,12 @@ def model_args_command(miles_cfg, miles_root: str) -> str:
     return shlex.join(["python3", utility, miles_cfg.miles_model_name])
 
 
-def build_train_cmd(
-    miles_cfg, miles_root: str, model=None, dataset=None, eval_dataset=None
-) -> str:
+def build_train_cmd(miles_cfg, miles_root: str, model=None, dataset=None) -> str:
     return _build_train_cmd(
         miles_cfg,
         miles_root,
         model=model,
         dataset=dataset,
-        eval_dataset=eval_dataset,
         model_script_attr="miles_model_script",
         model_args_command=model_args_command(miles_cfg, miles_root),
     )

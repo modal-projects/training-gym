@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from datasets import load_dataset
 
 from modal_training_gym.common.dataset import (
     DatasetConfig,
@@ -21,23 +21,17 @@ class Gsm8kDataset(HuggingFaceDataset):
     hf_config = "main"
     input_column = "question"
     output_column = "answer"
+    output_format = "jsonl"
+    needs_refresh = True
 
-    @property
-    def output_format(self) -> Literal["jsonl"]:
-        return "jsonl"
-
-    @property
-    def needs_refresh(self) -> bool:
-        return True
-
-    def _load_hf_dataset(self):
-        from datasets import load_dataset
-
+    def rows(self):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         if self.n_rows:
             ds = ds.select(range(min(self.n_rows, len(ds))))
-        ds = ds.map(lambda r: {"answer": r["answer"].split("####")[-1].strip()})
-        return ds.map(self._to_chat, remove_columns=ds.column_names)
+        for row in ds:
+            row = dict(row)
+            row["answer"] = row["answer"].split("####")[-1].strip()
+            yield self._to_chat(row)
 
 
 class LibriSpeechASRDataset(MultimodalDataset):
@@ -52,6 +46,8 @@ class LibriSpeechASRDataset(MultimodalDataset):
     hf_config = "clean"
     hf_split = "validation"
     n_rows = 8
+    needs_refresh = True
+    needs_chat_template = False
 
     _INSTRUCTION = (
         "<audio>\nTranscribe the speech to text. Respond with only the transcript."
@@ -61,14 +57,6 @@ class LibriSpeechASRDataset(MultimodalDataset):
         if n_rows is not None:
             self.n_rows = n_rows
         super().__init__(rows=[])
-
-    @property
-    def needs_refresh(self):
-        return True
-
-    @property
-    def needs_chat_template(self):
-        return False
 
     def _build_rows(self) -> list[dict]:
         import base64 as b64
