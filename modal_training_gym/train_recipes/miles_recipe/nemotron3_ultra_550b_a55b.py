@@ -71,7 +71,6 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
         default_factory=lambda: {
             "PYTHONPATH": "/root/Megatron-LM/",
             "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-            "NCCL_NVLS_ENABLE": "1",
             # The nemotron DP-attention path uses existing kernels; upstream skips
             # the blanket sgl-kernel version guard, which otherwise refuses to
             # start the engines.
