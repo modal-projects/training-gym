@@ -6,7 +6,7 @@ Always read the common gotchas.
 
 ### Phase 1: Discovery
 
-First try looking for the existing model running on miles. Upstream ships inside the pinned image at `/root/miles`: `scripts/models/<model>.sh` (the `MODEL_ARGS` a recipe sources), `scripts/run_<model>.py` (the validated cluster shape, parallelism and hyperparameters), `docs/models/<vendor>/<model>.md`, `miles_plugins/models/<model>/`, and `miles/backends/megatron_utils/megatron_to_hf/<model>.py` (the weight mapping selected by `model_name`). Probe the image to read them — `scripts/fetch_miles_patch_snapshots.py` is the working pattern. If you cannot find an existing model, find the model with the most similar architecture. Reference huggingface for model architecture.
+First try looking for the existing model running on miles. Upstream ships inside the pinned image at `/root/miles`: `scripts/models/<model>.py` (the `MODEL_ARGS` a recipe sources — newer images ship these as `.py` modules exposing `model_args()`, older ones as `.sh`; check which your pinned image has, the two are reached by different recipe fields — see below), `scripts/run_<model>.py` (the validated cluster shape, parallelism and hyperparameters), `docs/models/<vendor>/<model>.md`, `miles_plugins/models/<model>/`, and `miles/backends/megatron_utils/megatron_to_hf/<model>.py` (the weight mapping selected by `model_name`). Probe the image to read them — `scripts/fetch_miles_patch_snapshots.py` is the working pattern. If you cannot find an existing model, find the model with the most similar architecture. Reference huggingface for model architecture.
 
 **Check image/version compatibility FIRST — it is the most common blocker.** The gym pins the miles image per recipe (`docker_image` on `MilesRecipe`, overridden on the recipe subclass), so a bump changes only the recipe you edit. A model added to miles *after* that image was built will not run on it. Verify:
 - **When support landed upstream** — the model plugin, the `megatron_to_hf` mapping, **and** the sglang inside the image all have to be new enough. A model with custom kernels needs an sglang that can serve them, not just the plugin.
@@ -67,9 +67,14 @@ Miles registers every sglang `ServerArgs` option under a `--sglang-` prefix, so 
 - Things in `_MILES_SKIP` (e.g. `miles_model_script`, `megatron_conversion_hf_checkpoint`, `environment`) are launcher instructions, not CLI flags — they won't appear in `cli_args` output. That is expected, not a bug.
 - `${MODEL_ARGS[@]}` are emitted **before** the recipe's flags (`build_train_cmd`), so a recipe field overrides the same flag baked into the model script. That is how `custom_model_provider_path` swaps a provider without forking the script.
 
-## `miles_model_script` vs. `ModelArchitecture`
+## `miles_model_script` / `miles_model_name` vs. `ModelArchitecture`
 
-When a model's args aren't representable in `ModelArchitecture` (custom kernels, exotic MoE routing, a custom model provider), set `miles_model_script = "scripts/models/<model>.sh"`. The launcher then `source`s that script and passes `${MODEL_ARGS[@]}`, and the upstream args are used verbatim. The model class then leaves `architecture = None`. Arch args are not re-derived for the conversion step, so the script is the single source of truth. Also set `model_name` when the megatron→HF weight mapping is selected by name rather than by config.
+When a model's args aren't representable in `ModelArchitecture` (custom kernels, exotic MoE routing, a custom model provider), point the recipe at upstream's model script instead. **Which field depends on how the image ships it:**
+
+- `.sh` script -> `miles_model_script = "scripts/models/<model>.sh"`. The launcher `source`s it and passes `${MODEL_ARGS[@]}`.
+- `.py` module exposing `model_args()` -> `miles_model_name = "<model>"` (no path, no extension). The launcher runs `miles/utils/external_utils/model_args_utils.py <name>` and splices the printed line in as `${MODEL_ARGS[@]}`.
+
+Newer images have converted `scripts/models/*` to `.py`, so `miles_model_script` with a `.sh` path silently refers to a file that no longer exists on a bumped image. Verify against the image you pin. Either way the upstream args are used verbatim. The model class then leaves `architecture = None`. Arch args are not re-derived for the conversion step, so the script is the single source of truth. Also set `model_name` when the megatron→HF weight mapping is selected by name rather than by config.
 
 ## Checkpoint conversion (torch_dist) constraints
 
@@ -82,6 +87,86 @@ When a model's args aren't representable in `ModelArchitecture` (custom kernels,
 ## Shipped callables and hooks
 
 Miles takes custom functions as import paths; the gym ships the callable by value and writes the resolved path, via `_HOOK_PATH_FLAGS`, `_HOOK_PATH_CONFIG_KEYS` and `_HOOK_WRAPPER_PATHS` in recipe.py. The wrappers live in `frameworks/miles/phase_reporting.py` and run phase reporting and dashboard capture before delegating to yours — so **setting a raw `--*-path` yourself replaces the wrapper and the run trains fine while reporting no substep times**, failing the Phase-2 dashboard gate. Pass the callable on the recipe field instead. Prefer `custom_reward_post_process_function` over a dotted path: a `__main__` function has no importable module name and miles' `import_module` fails inside the Ray actor. `capture_trace` + `trace_sample_limit` attach a per-sample generate/reward/tool-call timeline, useful when diagnosing gibberish.
+
+## Large multi-node models
+
+Everything here was learned the expensive way on Nemotron-3-Ultra-550B (16 x 8 H200);
+see `.gym/new_models/Nemotron3_Ultra_550B_A55B/failure_analysis_*.md` for the evidence.
+
+**Start by diffing your recipe's resolved settings against the closest existing
+large recipe, not against upstream's launcher.** `Inkling_Small_Recipe` is the
+reference for multi-node miles on Modal. Four of its settings are deviations from
+both `MilesRecipe`'s defaults and upstream's scripts, each encoding a failure that
+only appears at scale. A new large recipe that does not carry them will hit the
+same four failures in sequence, one 128-GPU run at a time:
+
+| Setting | Default that breaks | What breaks |
+|---|---|---|
+| `offload_train_target="disk"` (+ `offload_train_disk_dir`) | miles defaults to `"cpu"` | The paused actor is backed up into host RAM *on top of* `--optimizer-cpu-offload`. Megatron actors segfault inside `offload_train`, Ray reports `ActorUnavailableError`, the gym retries silently. |
+| `NCCL_NVLS_ENABLE="0"` | `MilesRecipe` defaults to `"1"` | NVLS is intra-node NVLink SHARP. A tensor-parallel group spanning nodes cannot use it, and `ncclCommInitRank` fails with `NCCL error: invalid usage` while building `_TP`, killing engine init. |
+| `use_distributed_optimizer=True` | off in Megatron and in upstream's scripts | Without it every DP replica holds a full copy of the optimizer state. See the arithmetic below. |
+| `RAY_memory_monitor_refresh_ms="0"` | Ray's monitor is on | Ray kills actors under host-memory pressure, which is the normal regime for a CPU-offloaded optimizer. |
+
+`/tmp` is on the container's overlay filesystem on Modal, **not** a tmpfs, so
+`/tmp/train_offload` is genuinely disk. Upstream's help text warns that a tmpfs
+path silently defeats disk offload, so this is worth re-checking if the image
+changes.
+
+### Do the host-RAM arithmetic before launching
+
+```
+params_per_rank = total_params / (TP * PP)
+optimizer_state = params_per_rank * 12 bytes     # fp32 master + 2 Adam moments
+per_node        = optimizer_state * gpus_per_node
+```
+
+For 550 B at TP8/PP4 that is 17.2 B params/rank -> **1.50 TiB per 8-rank node**,
+against a 2 TiB Modal H200 host — before the checkpoint staging
+(`total_params * 2 / num_nodes`), the weights, and activations. It OOMs. With
+`use_distributed_optimizer=True` the state shards across DP and the same number
+is 0.38 TiB. The distributed optimizer is mathematically equivalent: it changes
+where state lives, not the update.
+
+### Multi-node rollout engines are their own shape
+
+`rollout_num_gpus_per_engine > actor_num_gpus_per_node` means the engine spans
+nodes (`nnodes>1` in sglang's `server_args`), which a single-node engine never
+exercises. Two failures live only here:
+
+- **SGLang's post-load barrier.** `UNBALANCED_MODEL_LOADING_TIMEOUT_S` is a
+  hardcoded 480 s in `load_model_utils.py` with no flag and no env var. Only the
+  node that *downloaded* the checkpoint reads it back from page cache (measured:
+  40 s); every other node pulls it cold off the Modal Volume at ~1 GiB/s, so a
+  1 TB checkpoint needs ~30 min. The first rank to finish then raises
+  `ValueError: TP rank N could finish the model loading, but there are other ranks
+  that didn't finish loading`, the engine tears down its TCPStore, and the ranks
+  still loading emit 20 minutes of `Broken pipe` NCCL warnings — which is all you
+  see unless you go looking for the original `ValueError`.
+  `frameworks/miles/modal_helpers/patches/patch_sglang_load_barrier.py` makes the
+  constant read `$MILES_LOAD_BARRIER_TIMEOUT_S`, defaulting to upstream's 480 so
+  single-node models keep fast dead-rank detection; a recipe that needs longer
+  sets it in `environment`.
+- **Raise `rollout_health_check_first_wait` to match.** If the barrier allows
+  3600 s but the health checker still allows 1800, you have only moved the
+  failure.
+
+### What a slice can and cannot prove
+
+A pruned few-layer slice is the right first step — it is ~1/15 the cost and
+catches real plumbing bugs — but be explicit about its blind spots. It **cannot**
+exercise: multi-node rollout engines (its engine is `nnodes=1`), host-RAM limits,
+the cold-Volume read path, or output quality and reward (see SKILL.md). Two of
+the four failures above were invisible to a slice that had just run five clean
+steps. Budget for the full-scale run finding new things; do not treat a green
+slice as de-risking the launch.
+
+### Timing at scale is not extrapolable
+
+Rollout generation on the full model came in ~20x slower than a slice-based
+estimate (3.0 h vs a predicted 3-6 min for 256 x 8192 tokens), and decode
+degrades superlinearly with sequence length — the same model at 2048 tokens ran
+~4x faster *per token* than at 8192. Predict step time from a run at the real
+shape, or say the number is unvalidated.
 
 ## LoRA
 

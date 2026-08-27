@@ -56,8 +56,7 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
 
     gpu_type: str = "H200"
     # Upstream's optimizer offload keeps fp32 main params and both Adam moments in
-    # host RAM. See model_setup.md for the per-node estimate and for why
-    # use_distributed_optimizer stays off (upstream leaves it off).
+    # host RAM. See model_setup.md for the per-node estimate.
     memory: tuple[int, int] = (1024, 2 * 1024 * 1024)
 
     # nemotron_h is a hybrid Mamba2 + attention + latent-MoE stack: the block
@@ -199,6 +198,20 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     optimizer_cpu_offload: bool = True
     overlap_cpu_optimizer_d2h_h2d: bool = True
     use_precision_aware_optimizer: bool = True
+    # On, deviating from upstream's script, because the host cannot hold the
+    # un-sharded state. Model-parallel world is TP8 x PP4 = 32, so each rank owns
+    # ~17.2 B params; at 12 B/param of fp32 master plus two Adam moments that is
+    # ~1.50 TiB per 8-rank node, against a 2 TiB host -- before the ~69 GB/node of
+    # checkpoint staging, the weights, and activations. `careful-nutmeg-2f54f87c1fbf`
+    # ran all 3 training steps and then died in the 1.1 TB checkpoint save with
+    # Ray reporting "killed by the OOM killer due to high memory usage ... or
+    # SIGSEGV". Sharding the state across DP=4 brings it to ~0.38 TiB per node.
+    #
+    # Mathematically equivalent to the un-sharded optimizer -- it changes where
+    # state lives, not the update -- and Inkling-Small already pairs it with CPU
+    # offload. model_setup.md pre-registered this as the first lever if a run OOMed
+    # the host; one did.
+    use_distributed_optimizer: bool = True
 
     # Spill the paused actor to node-local disk, not host RAM. miles defaults
     # --offload-train-target to "cpu", which puts the offloaded trainer in host
