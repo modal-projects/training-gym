@@ -555,11 +555,13 @@ STYLE_TEXT = {
     "woodcut": "a woodcut print eye with carved lines",
     "graphic": "a flat graphic poster eye",
 }
-# Chance level for picking one family out of seven, and the confidence at which
-# a render counts as fully on-brief (the median rated image of a family sits
-# near 0.18, so 0.35 is reachable without being free).
-STYLE_FLOOR = 1.0 / len(STYLE_TEXT)
-STYLE_CEIL = 0.35
+# Softmax over the seven descriptions was all-or-nothing: on the collapsed
+# batch every sample scored exactly 0, so the term carried no gradient. The
+# cosine margin between the asked-for family and the best-fitting other one
+# varies within a batch (sd 0.013 on those same renders), and these bounds put
+# the collapsed template near 0.25 and the hand-rated stylised pool near 0.75.
+STYLE_LO = -0.08
+STYLE_HI = 0.02
 
 
 def style_score(png: bytes, family: str) -> float:
@@ -568,7 +570,7 @@ def style_score(png: bytes, family: str) -> float:
     Taste alone collapses the batch: one pale watercolour eye scores acceptably
     for every prompt, so the policy stopped varying with the brief. CLIP's
     text tower ranks the render against all seven family descriptions, and this
-    term is the probability mass on the family that was actually asked for.
+    term is how far the asked-for one leads the closest competing family.
     """
     import io
 
@@ -601,9 +603,12 @@ def style_score(png: bytes, family: str) -> float:
         if hasattr(f, "pooler_output"):
             f = f.pooler_output
         f = f / f.norm(dim=-1, keepdim=True)
-        logits = 100.0 * (f @ _PROBE["style_text"].T)
-        prob = float(torch.softmax(logits, dim=-1)[0, names.index(family)])
-    return max(0.0, min(1.0, (prob - STYLE_FLOOR) / (STYLE_CEIL - STYLE_FLOOR)))
+        sims = (f @ _PROBE["style_text"].T)[0]
+        i = names.index(family)
+        own = float(sims[i])
+        rest = float(torch.cat([sims[:i], sims[i + 1 :]]).max())
+    margin = own - rest
+    return max(0.0, min(1.0, (margin - STYLE_LO) / (STYLE_HI - STYLE_LO)))
 
 
 # Each check answered NO caps the whole reward, so an image the probe likes for
@@ -638,10 +643,14 @@ LASH_QUESTION = (
     "away from the lid; 1 = a few short hairs on the lid line; 2 = a dense fan "
     "of many fine separate lash hairs following the upper lid and curling up"
 )
-TASTE_WEIGHT = 0.40
-STYLE_WEIGHT = 0.20
-ANATOMY_WEIGHT = 0.20
-LASH_WEIGHT = 0.20
+# The judge's anatomy and lash answers saturated (0.97 and 0.99 mean over a
+# late rollout), so weight on them is a constant offset rather than a gradient;
+# they still matter through the caps below, which zero a render that stopped
+# being an eye. The learnable signal goes to taste and style instead.
+TASTE_WEIGHT = 0.45
+STYLE_WEIGHT = 0.35
+ANATOMY_WEIGHT = 0.10
+LASH_WEIGHT = 0.10
 JUDGE_VOTES = 2
 
 
