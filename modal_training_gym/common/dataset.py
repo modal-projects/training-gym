@@ -252,6 +252,17 @@ class HarborDataset(DatasetConfig):
 
     Each task folder contains an instruction file and optional label metadata.
     Tasks are discovered by globbing the task_root directory.
+
+    Subclass and set the task source — ``dataset_name`` for a Harbor Hub
+    dataset, or ``path`` / ``task_root`` for a local task directory::
+
+        class HelloWorld(HarborDataset):
+            dataset_name = "harbor/hello-world"
+            label_metadata_path = "task.toml"
+
+        dataset = HelloWorld(train_repeats=20)
+
+    Any class attribute can still be overridden per instance as a kwarg.
     """
 
     _type: DatasetType = DatasetType.HARBOR
@@ -290,6 +301,17 @@ class HarborDataset(DatasetConfig):
                 slug = "harbor"
             self.dataset_id = f"{slug}-{uuid.uuid4()}"
         self._validate()
+
+    def _validate(self) -> None:
+        super()._validate()
+        if not (self.dataset_name or self.path or self.task_root):
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} requires a task source: set "
+                "`dataset_name` for a Harbor Hub dataset, or `path` / "
+                "`task_root` for a local task directory. Declare it as a class "
+                'attribute (`dataset_name = "harbor/hello-world"`) on your '
+                "subclass, or pass it as a kwarg."
+            )
 
     @property
     def name(self) -> str:

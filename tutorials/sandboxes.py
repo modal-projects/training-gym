@@ -29,7 +29,7 @@ from modal_training_gym import (
 
 # ## Load hello-world from Harbor Hub
 #
-# `HarborDataset` accepts a `dataset_name` to pull tasks from
+# Subclass `HarborDataset` and set `dataset_name` to pull tasks from
 # [Harbor Hub](https://hub.harborframework.com). Each task has:
 # - `instruction.md` — the problem statement (prompt)
 # - `task.toml` — metadata (difficulty, category)
@@ -45,18 +45,20 @@ from modal_training_gym import (
 
 EXPECTED_HELLO = "Hello, world!"
 
-dataset = HarborDataset(
-    dataset_name="harbor/hello-world",
-    label_metadata_path="task.toml",
-    train_repeats=20,
-    always_prepare=True,  # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
-    system_prompt=(
+class HelloWorldDataset(HarborDataset):
+    dataset_name = "harbor/hello-world"
+    label_metadata_path = "task.toml"
+    train_repeats = 20
+    always_prepare = True  # For the purpose of this tutorial, we want to prepare the dataset every time we run it, in case there is stale data from a previous run.
+    system_prompt = (
         "You are an expert Python programmer. "
         "Solve the given problem by writing a complete Python program. "
         "Your program may create or modify files as needed. "
         "Put your solution in a ```python code fence."
-    ),
-)
+    )
+
+
+dataset = HelloWorldDataset()
 
 # ## Evaluate with a file-based sandbox check
 #
