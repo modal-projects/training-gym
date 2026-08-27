@@ -543,6 +543,69 @@ def taste_score(png: bytes) -> float:
     return 1.0 / (1.0 + math.exp(-3.47 * (t - 0.5)))
 
 
+# CLIP reads short style phrases far better than the long grammar briefs: on the
+# rated pool these recover the family for 41% of images against 14% chance,
+# where the brief text managed 29%.
+STYLE_TEXT = {
+    "glitch": "a glitch art eye with colour-shifted scanlines",
+    "anime": "a glossy anime eye",
+    "nouveau": "an art nouveau eye with ornamental curves",
+    "collage": "a torn paper collage eye",
+    "psych": "a psychedelic eye with radiating colour waves",
+    "woodcut": "a woodcut print eye with carved lines",
+    "graphic": "a flat graphic poster eye",
+}
+# Chance level for picking one family out of seven, and the confidence at which
+# a render counts as fully on-brief (the median rated image of a family sits
+# near 0.18, so 0.35 is reachable without being free).
+STYLE_FLOOR = 1.0 / len(STYLE_TEXT)
+STYLE_CEIL = 0.35
+
+
+def style_score(png: bytes, family: str) -> float:
+    """How well the render reads as its prompted style family, not another one.
+
+    Taste alone collapses the batch: one pale watercolour eye scores acceptably
+    for every prompt, so the policy stopped varying with the brief. CLIP's
+    text tower ranks the render against all seven family descriptions, and this
+    term is the probability mass on the family that was actually asked for.
+    """
+    import io
+
+    from PIL import Image
+
+    p = _probe()
+    names = list(STYLE_TEXT)
+    if family not in STYLE_TEXT:
+        return 0.0
+    torch = p["torch"]
+    with _LOCKS.setdefault("style", threading.Lock()):
+        if "style_text" not in _PROBE:
+            with torch.no_grad():
+                t = p["model"].get_text_features(
+                    **p["proc"](
+                        text=[STYLE_TEXT[n] for n in names],
+                        return_tensors="pt",
+                        padding=True,
+                        truncation=True,
+                    )
+                )
+            if hasattr(t, "pooler_output"):
+                t = t.pooler_output
+            _PROBE["style_text"] = t / t.norm(dim=-1, keepdim=True)
+    img = Image.open(io.BytesIO(png)).convert("RGB")
+    with torch.no_grad():
+        f = p["model"].get_image_features(
+            **p["proc"](images=[img], return_tensors="pt")
+        )
+        if hasattr(f, "pooler_output"):
+            f = f.pooler_output
+        f = f / f.norm(dim=-1, keepdim=True)
+        logits = 100.0 * (f @ _PROBE["style_text"].T)
+        prob = float(torch.softmax(logits, dim=-1)[0, names.index(family)])
+    return max(0.0, min(1.0, (prob - STYLE_FLOOR) / (STYLE_CEIL - STYLE_FLOOR)))
+
+
 # Each check answered NO caps the whole reward, so an image the probe likes for
 # its colour and texture cannot score highly if it stopped being an eye.
 CHECKS = (
@@ -575,8 +638,9 @@ LASH_QUESTION = (
     "away from the lid; 1 = a few short hairs on the lid line; 2 = a dense fan "
     "of many fine separate lash hairs following the upper lid and curling up"
 )
-TASTE_WEIGHT = 0.55
-ANATOMY_WEIGHT = 0.25
+TASTE_WEIGHT = 0.40
+STYLE_WEIGHT = 0.20
+ANATOMY_WEIGHT = 0.20
 LASH_WEIGHT = 0.20
 JUDGE_VOTES = 2
 
@@ -664,11 +728,17 @@ def judge_image(png: bytes, prompt: str, family: str) -> tuple[float, dict]:
     from concurrent.futures import ThreadPoolExecutor
 
     taste = taste_score(png)
+    style = style_score(png, family)
     with ThreadPoolExecutor(max_workers=JUDGE_VOTES) as pool:
         votes = list(pool.map(lambda _: judge_vote(png, prompt), range(JUDGE_VOTES)))
     anatomy = sum(s for s, _ in votes) / len(votes)
     lash = sum(m.get("lash", 0.0) for _, m in votes) / len(votes)
-    score = TASTE_WEIGHT * taste + ANATOMY_WEIGHT * anatomy + LASH_WEIGHT * lash
+    score = (
+        TASTE_WEIGHT * taste
+        + STYLE_WEIGHT * style
+        + ANATOMY_WEIGHT * anatomy
+        + LASH_WEIGHT * lash
+    )
     # A missing sclera, iris or lash line caps the whole reward: the probe can be
     # charmed by a striking image that is not an eye, and this is the backstop.
     for name, _, cap in CHECKS:
@@ -677,6 +747,7 @@ def judge_image(png: bytes, prompt: str, family: str) -> tuple[float, dict]:
     return score, {
         "judge_family": family,
         "taste": round(taste, 3),
+        "style": round(style, 3),
         "judge_anatomy": round(anatomy, 3),
         "judge_lash": round(lash, 2),
         "judge_missing": " ".join(m.get("missing", "") or "-" for _, m in votes),
