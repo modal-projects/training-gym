@@ -17,6 +17,10 @@ Repo: https://github.com/modal-projects/training-gym
 
 ## Guides
 
+### Start
+
+- [Model](https://gym.modal.dev/guides/model)
+
 ### Tools
 
 - [Agent-driven training](https://gym.modal.dev/guides/agent)
