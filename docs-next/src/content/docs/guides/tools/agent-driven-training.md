@@ -46,6 +46,8 @@ We leave it ambiguous to demonstrate that when empowered with the right tools an
 Since it is just writing Python code, we can easily inspect what it wrote. First, it loaded the dataset:
 
 ```python
+from datasets import load_dataset
+
 from modal_training_gym import HuggingFaceDataset
 
 SYSTEM_PROMPT = (
@@ -63,21 +65,20 @@ class RhymeInstructionDataset(HuggingFaceDataset):
     input_column = "instruction"
     output_column = "output"
     output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
+    needs_chat_template = True
+    needs_refresh = True
     system_prompt = SYSTEM_PROMPT
     prompt_template = "{input}"
 
-    def load(self, split: str = "all"):
-        from datasets import load_dataset
-
+    def rows(self):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         ds = ds.filter(
             lambda r: not r["input"].strip() and 60 <= len(r["output"]) <= 600
         )
         if self.n_rows:
             ds = ds.select(range(min(self.n_rows, len(ds))))
-        return ds
+        for row in ds:
+            yield self._to_chat(row)
 ```
 
 Next, it defined the reward function. Here, we care about the model's ability to both rhyme and answer the user's question. As our [intro tutorial](https://gym.modal.dev/tutorials/rl_basics) shows, NLTK’s [CMU Pronouncing Dictionary](https://github.com/prosegrinder/python-cmudict) is a useful library for measure the former.

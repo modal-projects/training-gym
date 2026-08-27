@@ -40,6 +40,14 @@ class DatasetConfig(ABC):
     A dataset describes *what* the data is and a way to iterate over its rows.
     The recipe/launcher layer then uses the dataset to materialize the data on disk.
 
+    output_format : str
+        On-disk format ``write()`` uses, ``"parquet"`` (default) or
+        ``"jsonl"``. The format also selects the extension of the path that
+        the launcher passes to ``write()``. Parquet is compact, carries a
+        typed schema, and stores binary media without base64 inflation. Choose
+        ``"jsonl"`` for small datasets that
+        need to stay greppable or tolerate rows with different schemas.
+
     You can implement your own dataset by subclassing DatasetConfig and overriding the
     necessary methods, but you can also use one of our built-in datasets to pull from
     common sources like HuggingFace or Harbor.
@@ -50,7 +58,7 @@ class DatasetConfig(ABC):
     input_key: str = "input"
     needs_chat_template: bool = True
     needs_refresh: bool = False
-    output_format: Literal["jsonl", "parquet"] = "jsonl"
+    output_format: Literal["parquet", "jsonl"] = "parquet"
 
     @property
     @abstractmethod
@@ -68,6 +76,19 @@ class DatasetConfig(ABC):
     def __init__(self):
         if not self.id:
             self.id = str(uuid.uuid4())
+        self._validate()
+
+    def _validate(self) -> None:
+        if self.output_format not in ("parquet", "jsonl"):
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} has output_format="
+                f"{self.output_format!r}; expected 'parquet' or 'jsonl'."
+            )
+        if not self.label_key:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} requires `label_key` to be set. "
+                "Declare it as a class attribute on the dataset subclass."
+            )
 
     def _expected_columns(self) -> set[str]:
         cols: set[str] = set()
@@ -78,10 +99,12 @@ class DatasetConfig(ABC):
         return cols
 
     def write(self, path: str) -> None:
-        rows = self.rows()
-        with open(path, "w") as f:
-            for row in rows:
-                f.write(json.dumps(row) + "\n")
+        if self.output_format == "parquet":
+            HFDataset.from_list(list(self.rows())).to_parquet(path)
+        else:
+            with open(path, "w") as f:
+                for row in self.rows():
+                    f.write(json.dumps(row) + "\n")
 
     def validate_write(self, path: str) -> None:
         """Sniff what ``write()`` wrote and confirm the columns the framework will index.
@@ -158,7 +181,6 @@ class HuggingFaceDataset(DatasetConfig):
     system_prompt: str = ""
     prompt_template: str = "{input}"
     n_rows: int = 0
-    output_format: Literal["jsonl", "parquet"] = "parquet"
     label_key: str = "label"
 
     def __init__(
@@ -222,15 +244,6 @@ class HuggingFaceDataset(DatasetConfig):
         ds = self._load_hf_dataset()
         return ds.to_pandas()
 
-    def write(self, path: str) -> None:
-        rows = list(self.rows())
-        if self.output_format == "parquet":
-            HFDataset.from_list(rows).to_parquet(path)
-        else:
-            with open(path, "w") as f:
-                for row in rows:
-                    f.write(json.dumps(row) + "\n")
-
 
 class HarborDataset(DatasetConfig):
     """Dataset backed by a Harbor task directory structure.
@@ -262,7 +275,6 @@ class HarborDataset(DatasetConfig):
     shuffle_seed: int = 0
     input_key: str = "messages"
     label_key: str = "label"
-    output_format: Literal["parquet"] = "parquet"
 
     def __init__(
         self,
@@ -575,11 +587,6 @@ class HarborDataset(DatasetConfig):
         import pandas as pd
 
         return pd.DataFrame(self.rows())
-
-    def write(self, path: str) -> None:
-        from datasets import Dataset
-
-        Dataset.from_list(list(self.rows())).to_parquet(path)
 
 
 class MultimodalDataset(DatasetConfig):

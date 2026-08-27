@@ -86,10 +86,10 @@ actionable `ValueError` if a user attaches a model with
 
 ### `DatasetConfig`
 
-In `modal_training_gym/common/dataset.py`. Plain class; subclass and override
-`prepare()` to materialize the data on a shared volume. Declarative class
-attrs (`prompt_data`, `input_key`, `rm_type`, etc.) are interpreted by each
-framework's config converter.
+In `modal_training_gym/common/dataset.py`. Subclass it and implement `rows()`.
+The launcher calls `write()` to materialize those rows on a shared volume.
+Class attributes such as `input_key`, `label_key`, `output_format`,
+`needs_chat_template`, and `needs_refresh` configure that process.
 
 ### `TrainConfig` + recipe
 
