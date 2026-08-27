@@ -23,7 +23,7 @@ from modal_training_gym.common.models import (
     ModelConfig,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.wandb import WandbConfig
+from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.train_recipes.gpu_allocation import (
     validate_num_experts_divisible_by_expert_parallel_size,
     resolve_gpu_allocation,
@@ -38,7 +38,7 @@ _SLIME_SKIP = {
     "recipe_type",
     "environment",
     "async_mode",
-    "wandb",
+    "metrics",
     "name",
     "app_tags",
     "capture_trace",
@@ -152,9 +152,8 @@ class SlimeRecipe(BaseTrainRecipe):
     async_mode : bool
         Run slime's ``train_async.py`` so rollout generation and training
         overlap (one-step off-policy) instead of alternating.
-    wandb : WandbConfig | None
-        W&B settings; expands to slime's ``--use-wandb``/``--wandb-project``/
-        ``--wandb-group`` flags.
+    metrics : MetricConfig | None
+        Metric tracker settings; expands to slime's W&B-compatible flags.
     image_overlay : Callable | None
         Callable that customizes the Modal image (e.g.
         ``lambda img: img.pip_install("pkg")``).
@@ -503,7 +502,7 @@ class SlimeRecipe(BaseTrainRecipe):
         }
     )
     async_mode: bool = False
-    wandb: WandbConfig | None = None
+    metrics: MetricConfig | None = None
     image_overlay: Callable[[modal.Image], modal.Image] | None = None
     local_slime: str | None = None
     slime_git_repository: str | None = None
@@ -865,8 +864,8 @@ class SlimeRecipe(BaseTrainRecipe):
             self.validate_model_parallelism(model)
             if not self.slime_model_script:
                 fields.update(self._model_to_fields(model))
-        if self.wandb is not None:
-            fields.update(self._wandb_to_fields(self.wandb))
+        if self.metrics is not None:
+            fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)
         for src, dst in {
             "rollout_function": "rollout_function_path",

@@ -147,6 +147,7 @@ class ConfigSummary(BaseModel):
     actor_num_gpus_per_node: int = 0
     lr: float = 0.0
     global_batch_size: int = 0
+    metric_provider: str = ""
     metric_project: str = ""
     metric_group: str = ""
     metric_entity: str = ""
@@ -165,6 +166,7 @@ class TrainResultSummary(BaseModel):
     checkpoint_dir: str = ""
     model_name: str = ""
     model_path: str = ""
+    metric_provider: str = ""
     metric_project: str = ""
     metric_entity: str = ""
     metric_run_id: str = ""
@@ -347,20 +349,30 @@ def _wandb_url(entity: object, project: object, run_id: object) -> str | None:
 
 
 def _metric_summary(
-    *, entity: object, project: object, group: object = "", run_id: object = ""
+    *,
+    entity: object,
+    project: object,
+    group: object = "",
+    run_id: object = "",
+    metric: object = None,
 ) -> dict[str, Any]:
-    url = _wandb_url(entity, project, run_id)
+    metric_data = _mapping(metric)
+    provider = _text(metric_data.get("provider")).strip()
+    url = _text(metric_data.get("url")).strip()
+    if not url and provider in ("", "wandb"):
+        url = _wandb_url(entity, project, run_id) or ""
     metric_link = (
         [MetricLink(label="Metric", url=url, run_id=_text(run_id).strip())]
         if url
         else []
     )
     return {
+        "metric_provider": provider,
         "metric_project": _text(project),
         "metric_group": _text(group),
         "metric_entity": _text(entity),
         "metric_run_id": _text(run_id),
-        "metric_url": url,
+        "metric_url": url or None,
         "metric_links": metric_link,
     }
 
@@ -370,14 +382,17 @@ def _config_summary(config: object, training_run_id: str) -> ConfigSummary | Jso
         return {}
     model = _mapping(config.get("model"))
     recipe = _mapping(config.get("recipe")) or _mapping(config.get("preset"))
-    metric_config = _mapping(config.get("wandb"))
+    legacy_wandb = _mapping(config.get("wandb"))
+    metric_config = _mapping(config.get("metrics")) or legacy_wandb
     dataset = _mapping(config.get("dataset"))
     dataset_name = (
         _text(dataset.get("hf_repo"))
         or _text(dataset.get("prompt_data"))
         or _text(dataset.get("name"))
     )
-    metric_run_id = _text(metric_config.get("run_id")) or training_run_id[:8]
+    metric_run_id = _text(metric_config.get("run_id")) or (
+        training_run_id[:8] if legacy_wandb else ""
+    )
     return ConfigSummary(
         model_name=_text(model.get("model_name")),
         dataset_name=dataset_name,
@@ -393,15 +408,19 @@ def _config_summary(config: object, training_run_id: str) -> ConfigSummary | Jso
             group=metric_config.get("group"),
             run_id=(
                 metric_run_id
-                if metric_config.get("project") and metric_config.get("entity")
+                if metric_config.get("project")
+                and metric_config.get("entity")
+                or metric_config.get("url")
                 else ""
             ),
+            metric=metric_config,
         ),
     )
 
 
 def _train_result_summary(result: JsonDict) -> TrainResultSummary:
     model = _mapping(result.get("model_config"))
+    metric = _mapping(result.get("metrics"))
     return TrainResultSummary(
         training_run_id=_text(result.get("training_run_id")),
         app_name=_text(result.get("app_name")),
@@ -409,9 +428,11 @@ def _train_result_summary(result: JsonDict) -> TrainResultSummary:
         model_name=_text(model.get("model_name")),
         model_path=_text(model.get("model_path")),
         **_metric_summary(
-            entity=result.get("wandb_entity"),
-            project=result.get("wandb_project"),
-            run_id=result.get("wandb_training_run_id"),
+            entity=metric.get("entity") or result.get("wandb_entity"),
+            project=metric.get("project") or result.get("wandb_project"),
+            group=metric.get("group"),
+            run_id=metric.get("run_id") or result.get("wandb_training_run_id"),
+            metric=metric,
         ),
     )
 
@@ -523,7 +544,7 @@ def _group_tags(metadata: JsonDict, group_id: str) -> GroupTags | None:
 
 
 def _metric_attempt_links(metadata: JsonDict) -> list[MetricLink]:
-    attempts = metadata.get("wandb_attempts")
+    attempts = metadata.get("metric_attempts") or metadata.get("wandb_attempts")
     if not isinstance(attempts, list):
         return []
     links: list[MetricLink] = []
@@ -531,15 +552,21 @@ def _metric_attempt_links(metadata: JsonDict) -> list[MetricLink]:
         attempt = _mapping(raw_attempt)
         attempt_number = _integer(attempt.get("attempt"))
         run_id = _text(attempt.get("run_id"))
-        url = _wandb_url(
-            attempt.get("entity"), attempt.get("project"), attempt.get("run_id")
-        )
+        provider = _text(attempt.get("provider")).strip()
+        url = _text(attempt.get("url")).strip()
+        if not url and provider in ("", "wandb"):
+            url = (
+                _wandb_url(
+                    attempt.get("entity"), attempt.get("project"), attempt.get("run_id")
+                )
+                or ""
+            )
         if url:
             links.append(
                 MetricLink(
-                    label=(
-                        f"Metric a{attempt_number}" if attempt_number > 1 else "Metric"
-                    ),
+                    label=f"Metric a{attempt_number}"
+                    if attempt_number > 1
+                    else "Metric",
                     url=url,
                     run_id=run_id,
                     attempt=attempt_number or None,

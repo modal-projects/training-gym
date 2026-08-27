@@ -14,8 +14,8 @@ from modal_training_gym.train_recipes.gpu_allocation import (
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
+    from modal_training_gym.common.metrics import MetricConfig
     from modal_training_gym.common.models import ModelConfig
-    from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths (shared by every framework) ───────────────────────────
 
@@ -110,8 +110,7 @@ class BaseTrainRecipe(ABC):
         """Derive on-volume file paths from a dataset's properties."""
         hf_repo = getattr(ds, "hf_repo", "")
         name = hf_repo.replace("/", "_") if hf_repo else type(ds).__name__
-        fmt = getattr(ds, "output_format", "parquet")
-        ext = "jsonl" if fmt == "jsonl" else "parquet"
+        ext = "jsonl" if ds.output_format == "jsonl" else "parquet"
         split = getattr(ds, "hf_split", "train")
         prompt_data = f"{DATA_PATH}/{name}/{split}.{ext}"
         if getattr(ds, "writes_eval_paths", True):
@@ -135,14 +134,10 @@ class BaseTrainRecipe(ABC):
         }
 
     @staticmethod
-    def _wandb_to_fields(w: "WandbConfig") -> dict[str, Any]:
-        return {
-            "use_wandb": True,
-            "wandb_project": w.project,
-            "wandb_group": w.group,
-            "wandb_key": w.key,
-            "disable_wandb_random_suffix": w.disable_random_suffix,
-        }
+    def _metrics_to_fields(metric: "MetricConfig") -> dict[str, Any]:
+        from modal_training_gym.common.metrics import metric_cli_fields
+
+        return metric_cli_fields(metric)
 
     # ── CLI serialization ─────────────────────────────────────────────────────
 

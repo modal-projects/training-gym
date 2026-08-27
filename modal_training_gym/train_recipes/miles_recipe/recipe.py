@@ -7,8 +7,8 @@ from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.train_recipes.base import (
     BaseTrainRecipe,
     RecipeType,
@@ -45,7 +45,7 @@ _MILES_SKIP = {
     "local_miles",
     "patch_files",
     "substep_timing",
-    "wandb",
+    "metrics",
     # Callables shipped by value into the containers; the launcher writes the
     # resolved import path into `extra_config` (rm/generate) or back onto the
     # field itself (the *_path flags remapped in `_fields`).
@@ -58,6 +58,13 @@ _MILES_SKIP = {
     "custom_megatron_before_log_prob_hook",
     "custom_megatron_before_train_step_hook",
     "train_function_kwargs",
+    # Conversion-only parallelism and scratch: launcher-side, never forwarded to
+    # the miles CLI.
+    "conversion_tensor_model_parallel_size",
+    "conversion_pipeline_model_parallel_size",
+    "conversion_expert_model_parallel_size",
+    "conversion_expert_tensor_parallel_size",
+    "convert_ephemeral_disk_mb",
     "capture_trace",
     "trace_sample_limit",
 }
@@ -123,8 +130,8 @@ class MilesRecipe(BaseTrainRecipe):
         Env vars for the training containers (Megatron ``PYTHONPATH``, NCCL tuning).
     async_mode : bool
         Run Miles' ``train_async.py``: rollout and training overlap (off-policy).
-    wandb : WandbConfig | None
-        W&B settings; expands to Miles' ``--use-wandb``/``--wandb-*`` flags.
+    metrics : MetricConfig | None
+        Metric tracker settings; expands to Miles' W&B-compatible flags.
     image_overlay : Callable[[modal.Image], modal.Image] | None
         Customizes the Modal image, e.g. ``lambda img: img.pip_install("pkg")``.
     local_miles : str | None
@@ -494,7 +501,7 @@ class MilesRecipe(BaseTrainRecipe):
     miles_model_name: str = ""
     source_hf_checkpoint: str | None = None
     megatron_conversion_hf_checkpoint: str | None = None
-    wandb: WandbConfig | None = None
+    metrics: MetricConfig | None = None
 
     # ── Cluster and parallelism ────────────────────────────────────────────
     actor_num_nodes: int = 1
@@ -511,8 +518,24 @@ class MilesRecipe(BaseTrainRecipe):
     load: str = ""
     ref_load: str = ""
     megatron_to_hf_mode: str = "bridge"
+    # Selects miles' megatron→HF weight mapping (e.g. "inkling"); when empty miles
+    # infers it from the HF config's class name.
+    model_name: str = ""
     save_interval: int = 10
     no_save_optim: bool = False
+
+    # ── Checkpoint conversion ───────────────────────────────────────────
+    # Conversion-only parallelism overrides. Launcher instructions, not CLI flags
+    # (see _MILES_SKIP): torch_dist reshards on load, so the conversion layout is
+    # independent of the training layout.
+    conversion_tensor_model_parallel_size: int | None = None
+    conversion_pipeline_model_parallel_size: int | None = None
+    conversion_expert_model_parallel_size: int | None = None
+    conversion_expert_tensor_parallel_size: int | None = None
+    # Ephemeral disk (MiB) for the conversion container. Local staging needs room for
+    # the whole torch_dist checkpoint plus the Volume's write buffer for the shard in
+    # flight; the default container disk is not enough for a 276B model.
+    convert_ephemeral_disk_mb: int | None = None
 
     # ── Fault tolerance and health checks ───────────────────────────────────
     # Miles' own argparse default; slime defaults this on instead.
@@ -803,8 +826,8 @@ class MilesRecipe(BaseTrainRecipe):
                 fields[k] = v
         if dataset is not None:
             fields.update(self._dataset_to_fields(dataset))
-        if self.wandb is not None:
-            fields.update(self._wandb_to_fields(self.wandb))
+        if self.metrics is not None:
+            fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)
         for src, dst in _HOOK_PATH_FLAGS.items():
             if src in _HOOK_WRAPPER_PATHS:
@@ -821,6 +844,10 @@ class MilesRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
             Gemma4_26B_A4B_Recipe,
         )
+        from modal_training_gym.train_recipes.miles_recipe.inkling import (
+            Inkling_Small_LoRA_Recipe,
+            Inkling_Small_Recipe,
+        )
         from modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b import (
             Moonlight_16B_A3B_Recipe,
         )
@@ -834,6 +861,10 @@ class MilesRecipe(BaseTrainRecipe):
             return Moonlight_16B_A3B_Recipe()
         if model_config.model_name == "google/gemma-4-26B-A4B-it":
             return Gemma4_26B_A4B_Recipe()
+        if model_config.model_name == "thinkingmachines/Inkling-Small":
+            if issubclass(cls, Inkling_Small_LoRA_Recipe):
+                return Inkling_Small_LoRA_Recipe()
+            return Inkling_Small_Recipe()
         return None
 
     def download_model(self) -> None:

@@ -6,11 +6,11 @@ from modal_training_gym.common.checkpoint import (
     Checkpoint,
     CheckpointType,
     convert_megatron_checkpoint_to_hf,
-    list_checkpoints,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common import train_result as train_result_mod
 from modal_training_gym.common.train_result import TrainResult
 
 
@@ -47,22 +47,19 @@ def _patch_volume(monkeypatch, volume: _CheckpointVolume) -> None:
     )
 
 
-def test_list_checkpoints_explains_that_run_must_be_terminal(monkeypatch) -> None:
-    def missing_result(training_run_id: str) -> TrainResult:
+def test_train_result_explains_that_run_must_be_terminal(monkeypatch) -> None:
+    def missing_result(*args, **kwargs):
         raise KeyError(training_run_id)
 
-    monkeypatch.setattr(
-        checkpoint_mod.TrainResult,
-        "from_training_run_id",
-        staticmethod(missing_result),
-    )
+    training_run_id = "still-running"
+    monkeypatch.setattr(train_result_mod, "vol_get", missing_result)
 
     with pytest.raises(
         TrainingGymConfigError,
-        match=r"Rollout progress is not terminal run completion.*"
+        match=r"rollout counter does not mean.*terminal state.*"
         r"TrainingRun\.from_id\('still-running'\)\.result\(\)",
     ):
-        list_checkpoints("still-running")
+        TrainResult.from_training_run_id(training_run_id)
 
 
 def test_checkpoint_discovery_does_not_create_source_volume(monkeypatch) -> None:
@@ -73,22 +70,16 @@ def test_checkpoint_discovery_does_not_create_source_volume(monkeypatch) -> None
         return _CheckpointVolume([])
 
     monkeypatch.setattr(checkpoint_mod.Volume, "from_name", from_name)
-    monkeypatch.setattr(
-        checkpoint_mod.TrainResult,
-        "from_training_run_id",
-        staticmethod(
-            lambda training_run_id: TrainResult(
-                app_name="app",
-                framework=Framework.SLIME,
-                training_run_id=training_run_id,
-                checkpoint_dir="/checkpoints/run",
-                checkpoints_volume_name="recipe-checkpoints",
-                checkpoints_mount_path="/checkpoints",
-            )
-        ),
+    result = TrainResult(
+        app_name="app",
+        framework=Framework.SLIME,
+        training_run_id="complete-run",
+        checkpoint_dir="/checkpoints/run",
+        checkpoints_volume_name="recipe-checkpoints",
+        checkpoints_mount_path="/checkpoints",
     )
 
-    assert list_checkpoints("complete-run") == []
+    assert result.checkpoints() == []
     assert calls == [("recipe-checkpoints", False)]
 
 

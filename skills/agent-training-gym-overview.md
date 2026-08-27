@@ -28,19 +28,14 @@ modal_training_gym/         ← installable package
 └── tools/                  ← shared scripts mounted on every image at
                               /opt/training-gym/tools (see "Tools" below)
 
-tutorials/
-├── tutorial_generator/     ← decorator-annotated source files — THIS is
-│                             what you edit; each file is one tutorial
-└── generate_tutorial.py    ← AST-walks each source, emits
-                              tutorials/<name>/<name>.py + .ipynb
+tutorials/                  ← flat runnable Python tutorial sources
 
 tests/                      ← plain-script tests (uv run tests/<x>.py)
 skills/                     ← agent-facing docs (you are here)
 ```
 
-**Never edit `tutorials/<name>/<name>.py` or `.ipynb` directly — they are
-generated.** Edit `tutorials/tutorial_generator/<name>.py` and run
-`uv run tutorials/generate_tutorial.py`.
+Edit `tutorials/*.py` directly. Each file is both the runnable tutorial and the
+source for its docs page.
 
 ## Core abstractions
 
@@ -90,7 +85,7 @@ Every framework exposes **two** dataclasses:
 - `<F>FrameworkConfig` — Modal infra (gpu, image, n_nodes, gpus_per_node) +
   framework-specific CLI flags. Uses pydantic with `extra="forbid"`, so any
   unknown kwarg fails loudly.
-- `<F>Config` — wraps `dataset`, `model`, `wandb`, `framework_config`.
+- `<F>Config` — wraps `dataset`, `model`, `metrics`, `framework_config`.
   Exposes `build_app()` which delegates to the launcher's
   `build_<f>_app(...)` factory. Typically has `_WRAPPER_FIELDS` (in some
   frameworks) to exclude the wrapper slots from CLI-arg rendering.
@@ -101,7 +96,7 @@ User code builds an app like:
 cfg = MyFrameworkConfig(
     dataset=MyDataset(...),
     model=Qwen3_4B(),
-    wandb=WandbConfig(project="..."),
+    metrics=WandbConfig(project="..."),
     framework_config=MyFrameworkFrameworkConfig(gpu="H100", n_nodes=1, ...),
 )
 app = cfg.build_app()
@@ -184,101 +179,34 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
 ## Adding a new tutorial
 
-1. **Pick the framework** — almost always one of the catalog above.
+1. **Pick the framework**. Use one of the catalog entries above in most cases.
 
-2. **Create the source** at
-   `tutorials/tutorial_generator/<name>.py`. Structure (follow
-   existing slime tutorials as templates):
+2. **Create `tutorials/<name>.py`** with the next contiguous `order` value:
 
    ```python
-   from tutorial_generator import code, markdown, notebook_only, py_only, shell
+   # ---
+   # order: 0
+   # ---
+   #
+   # # <Title>
+   #
+   # One-paragraph description of what this trains.
 
+   from modal_training_gym import TrainConfig
 
-   @markdown
-   def _intro():
-       """# <Title>
-
-       One-paragraph description of what this trains.
-       """
-
-
-   @notebook_only
-   @shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
-   def _install():
-       pass
-
-
-   @code
-   def _imports():
-       import modal
-
-       from modal_training_gym.common.dataset import DatasetConfig
-       from modal_training_gym.common.models import <BuiltinModelOrModelConfiguration>
-       from modal_training_gym.common.wandb import WandbConfig
-       from modal_training_gym.frameworks.<framework> import (
-           <F>Config, <F>FrameworkConfig,
-       )
-
-
-   @code
-   def _define_dataset():
-       class MyDataset(DatasetConfig):
-           ...
-           def prepare(self): ...
-
-
-   @code
-   def _define_config():
-       fw_cfg = <F>FrameworkConfig(gpu="H100", n_nodes=1, gpus_per_node=1, ...)
-       my_training_run = <F>Config(
-           dataset=MyDataset(...),
-           model=<BuiltinModel>(),
-           wandb=WandbConfig(project="..."),
-           framework_config=fw_cfg,
-       )
-
-
-   @code
-   def _build_app():
-       app = my_training_run.build_app()
-
-
-   @py_only
-   @markdown
-   def _run_cli():
-       """```bash
-       uv run modal run tutorials/<name>/<name>.py::app.download
-       uv run modal run tutorials/<name>/<name>.py::app.prepare_dataset
-       uv run modal run --detach tutorials/<name>/<name>.py::app.train
-       ```"""
-
-
-   @notebook_only
-   @code
-   def _invoke_train():
-       with modal.enable_output():
-           with app.run():
-               app.train.remote()
+   train_result = TrainConfig(...).train()
    ```
 
-3. **Decorators cheat sheet**:
-   - `@markdown` — function docstring becomes a markdown cell.
-   - `@code` — function body (dedented) becomes a code cell.
-   - `@shell("...")` — string arg is the code cell verbatim (supports
-     `%uv pip install`, etc).
-   - `@py_only` / `@notebook_only` — restrict a cell to one output format.
-     Stack on top of `@markdown` / `@code` / `@shell`.
+   Markdown comment blocks become prose on the docs page. Python blocks become
+   code cells.
 
-4. **Regenerate** and verify determinism:
+3. **Validate the source**:
+
    ```bash
-   uv run tutorials/generate_tutorial.py
-   # Run it again — should produce byte-identical output (no git diff).
-   uv run tutorials/generate_tutorial.py
-   git diff tutorials/
+   uv run -m compileall tutorials/
    ```
-   Pre-commit hook also runs this — committed `.py`/`.ipynb` never drift.
 
-5. **Keep training cheap by default**. Tutorials should smoke in a single
+4. **Keep training cheap by default**. Tutorials should smoke in a single
    step by default so Tier 2 validation is cheap:
    - `num_train_epochs=1`, `train_iters=1` (or framework equivalent).
    - Small `global_batch_size` / tiny dataset slice
@@ -293,15 +221,20 @@ If the tutorial's model isn't in the catalog, define a one-off subclass
 inline:
 
 ```python
-@code
-def _define_model():
-    class MyTinyModel(ModelConfig):
-        model_name = "HuggingFaceTB/SmolLM2-135M"
-        # For slime, also set architecture = ModelArchitecture(...)
+from huggingface_hub import snapshot_download
+from modal_training_gym import ModelArchitecture, ModelConfig
 
-        def download(self):
-            from huggingface_hub import snapshot_download
-            snapshot_download(repo_id=self.model_name)
+
+class MyTinyModel(ModelConfig):
+    model_name = "HuggingFaceTB/SmolLM2-135M"
+    # Slime also requires a populated model architecture.
+    architecture = ModelArchitecture(...)
+
+    def download(self):
+        snapshot_download(repo_id=self.model_name)
+
+
+model = MyTinyModel()
 ```
 
 Better: inherit from `HFModelConfiguration` and skip the `download`
@@ -314,8 +247,8 @@ Always follow the tiered policy in
 [agent-example-validation.md](agent-example-validation.md):
 
 - **Tier 0 (local compile)** — `uv run -m compileall modal_training_gym/`.
-- **Tier 1 (cheap drift checks)** — regenerate tutorials (byte-determinism
-  check) + local instantiation smoke across the affected frameworks. No GPU.
+- **Tier 1 (cheap drift checks):** Local instantiation smoke across the
+  affected frameworks. No GPU.
 - **Tier 2 (scheduled smoke)** — one remote `modal run --detach` that
   reaches ≥1 training step, then kill the detached app.
 - **Tier 3 (full example validation)** — canonical multi-node runs.
@@ -344,10 +277,8 @@ test. Run with `uv run tests/test_model_configuration.py`.
   `inspect.stack()[1]` inside `build_<f>_app` is the config wrapper, not
   the tutorial. Launchers use `resolve_caller_module()` to walk past
   `modal_training_gym.*` frames. Never use raw `inspect.stack()[1]` here.
-- **Secrets required for most remote runs**: `huggingface-secret` (with
-  `HF_TOKEN`) and `wandb-secret` (with `WANDB_API_KEY`) must exist as Modal
-  Secrets in your environment.
-- **Do not edit generated tutorials**. The pre-commit hook rewrites them.
+- **Secrets for gated models and W&B**. Hugging Face auth is only needed for
+  gated or rate-limited Hub access. Pass `WandbConfig` only when you want W&B.
 - **Do not add framework-specific quirks to `<F>Config`** that only matter
   for one model. Put those in the model's `download` override and
   make the tool script live in `modal_training_gym/tools/`.
@@ -358,6 +289,6 @@ test. Run with `uv run tests/test_model_configuration.py`.
 - Adding/modifying a framework → `modal_training_gym/frameworks/<name>/`.
 - Cross-framework scripts → `modal_training_gym/tools/`.
 - Cross-framework helpers → `modal_training_gym/common/framework.py`.
-- Tutorial sources → `tutorials/tutorial_generator/<name>.py`.
-- Tutorial regeneration → `uv run tutorials/generate_tutorial.py`.
+- Tutorial sources live in `tutorials/*.py`; their docs loader is
+  `docs-next/src/lib/tutorial-docs-loader.ts`.
 - Tests → `tests/test_*.py`, run via `uv run tests/<file>.py`.

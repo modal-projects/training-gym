@@ -376,7 +376,7 @@ def run_base_training(
     ]
     model_short_name = model_config.model_name.rsplit("/", 1)[-1]
     if wandb_project is not None:
-        train_recipe.wandb = WandbConfig(
+        train_recipe.metrics = WandbConfig(
             project=wandb_project
             or f"model-validation-{model_short_name}-{dataset_name}",
             group=wandb_group or f"model-validator-{model_short_name}-{dataset_name}",

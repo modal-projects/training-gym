@@ -21,7 +21,7 @@ Typical flow:
     result = TrainResult.load(training_run_id)
 
     print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
-    print(result.latest_checkpoint_path())  # .../iter_0000050
+    print(result.checkpoints()[-1].path)    # .../iter_0000050
 
     from modal_training_gym import CustomDeployment
     from modal_training_gym.deploy_recipes import SglangRecipe
@@ -58,6 +58,7 @@ from modal_training_gym.utils.metadata import (
 if TYPE_CHECKING:
     from modal import Volume
 
+    from modal_training_gym.common.checkpoint import Checkpoint
     from modal_training_gym.common.models import ModelConfig
 
 
@@ -98,7 +99,7 @@ class TrainResult:
         Identifier shared by every run in a :class:`TrainingGroup` sweep, or
         empty for a standalone run. Lets eval/dashboard code group variants.
     extra:
-        Free-form metadata a launcher may attach (e.g. wandb run name,
+        Free-form metadata a launcher may attach (e.g. metric run name,
         rollout tunnel URL). Not used by the base class.
     """
 
@@ -109,9 +110,7 @@ class TrainResult:
     checkpoints_volume_name: str = ""
     checkpoints_mount_path: str = ""
     model_config: "ModelConfig | None" = None
-    wandb_project: str = ""
-    wandb_entity: str = ""
-    wandb_training_run_id: str = ""
+    metrics: dict[str, Any] = field(default_factory=dict)
     # Set when this run was launched as part of a TrainingGroup sweep; shared
     # across every variant in the group so results can be compared together.
     group_id: str = ""
@@ -167,14 +166,21 @@ class TrainResult:
 
         Raises
         ------
-        KeyError
-            The given ``training_run_id`` isn't in the store.
+        TrainingGymConfigError
+            The run has not produced a terminal result or the id is unknown.
         """
-        return cls(
-            **cls._parse_model_config(
-                vol_get(MetadataStore.TRAIN_RESULTS, training_run_id)
-            )
-        )
+        from modal_training_gym.common.errors import TrainingGymConfigError
+
+        try:
+            payload = vol_get(MetadataStore.TRAIN_RESULTS, training_run_id)
+        except KeyError:
+            raise TrainingGymConfigError(
+                f"No completed TrainResult exists for training run "
+                f"{training_run_id!r}. A completed rollout counter does not mean "
+                "the training run has reached a terminal state. Wait with "
+                f"TrainingRun.from_id({training_run_id!r}).result()."
+            ) from None
+        return cls(**cls._parse_model_config(payload))
 
     @classmethod
     def load(cls, training_run_id: str) -> "TrainResult":
@@ -188,6 +194,19 @@ class TrainResult:
         volume_name = self.checkpoints_volume_name or f"{self.app_name}-checkpoints"
         return Volume.from_name(volume_name, create_if_missing=False)
 
+    def checkpoints(self) -> list["Checkpoint"]:
+        from modal_training_gym.common.checkpoint import _list_checkpoints
+        from modal_training_gym.common.errors import TrainingGymConfigError
+
+        if self.framework in {
+            Framework.SLIME,
+            Framework.SLIME.value,
+            Framework.MILES,
+            Framework.MILES.value,
+        }:
+            return _list_checkpoints(self)
+        raise TrainingGymConfigError(f"Unsupported framework: {self.framework}")
+
     @property
     def model(self) -> "ModelConfig":
         if self.model_config is None:
@@ -196,10 +215,8 @@ class TrainResult:
                 "Was it saved by an older launcher?"
             )
 
-        from modal_training_gym.common.checkpoint import list_checkpoints
-
         model = copy.copy(self.model_config)
-        checkpoints = list_checkpoints(self.training_run_id)
+        checkpoints = self.checkpoints()
         if checkpoints:
             model.model_path = checkpoints[-1].path
         elif self.checkpoint_dir:

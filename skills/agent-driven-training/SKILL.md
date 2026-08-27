@@ -113,7 +113,7 @@ Report the run ID, checkpoint, early-versus-late reward, task-specific success
 rate, timing, and whether all apps stopped.
 
 Checkpoint lookup requires a terminal run. For a detached run, call
-`TrainingRun.from_id(run_id).result()` before `list_checkpoints(run_id)`.
+`result = TrainingRun.from_id(run_id).result()`, then `result.checkpoints()`.
 
 Continue from a checkpoint only when the run is healthy and preserving its
 optimizer and scheduler state avoids discarding useful progress, such as after

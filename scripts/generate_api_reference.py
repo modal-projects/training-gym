@@ -103,30 +103,25 @@ def _rst_to_md(text: str) -> str:
     return re.sub(r"``(.*?)``", r"`\1`", text)
 
 
-def _seo_description(cls: type, class_name: str) -> str:
-    """Extract first sentence of docstring for SEO meta description."""
-    doc = inspect.getdoc(cls) or ""
-    if not doc:
-        return f"API reference for {class_name}"
-    first_para = doc.split("\n\n")[0].replace("\n", " ").strip()
-    first_para = re.sub(r"``(.*?)``", r"\1", first_para)
-    period = first_para.find(". ")
-    if period != -1:
-        first_para = first_para[: period + 1]
-    elif not first_para.endswith("."):
-        first_para += "."
-    if len(first_para) > 160:
-        first_para = first_para[:157] + "..."
-    return first_para
+def _orders_within_group() -> dict[str, int]:
+    next_order: dict[str, int] = {}
+    orders: dict[str, int] = {}
+    for entry in API_REFERENCE_MANIFEST:
+        group = entry["group"]
+        orders[entry["class_name"]] = next_order.get(group, 0)
+        next_order[group] = next_order.get(group, 0) + 1
+    return orders
 
 
-def _yaml_quote(value: str) -> str:
-    """Render a string as a safe single-quoted YAML scalar.
-
-    Doubles embedded single quotes so apostrophes (e.g. "run's") don't
-    prematurely terminate the quoted scalar and break frontmatter parsing.
-    """
-    return "'" + value.replace("'", "''") + "'"
+def _page_heading(order: int, title: str) -> list[str]:
+    return [
+        "---",
+        f"order: {order}",
+        "---",
+        "",
+        f"# {title}",
+        "",
+    ]
 
 
 def _format_type(type_hint: Any) -> str:
@@ -274,7 +269,7 @@ def _render_field_table(
     return lines
 
 
-def _page_preamble(cls: type, entry: dict) -> list[str]:
+def _page_preamble(cls: type, entry: dict, order: int) -> list[str]:
     """Shared page opening: frontmatter, import block, summary, inheritance."""
     docstring = inspect.getdoc(cls) or ""
     # Render all intro prose before the first section header.  Section
@@ -305,11 +300,7 @@ def _page_preamble(cls: type, entry: dict) -> list[str]:
     module_path = entry["module"]
 
     lines = [
-        "---",
-        f"title: {_yaml_quote(entry['sidebar_label'])}",
-        f"description: {_yaml_quote(_seo_description(cls, entry['class_name']))}",
-        "---",
-        "",
+        *_page_heading(order, entry["sidebar_label"]),
         "```python",
         f"from {module_path} import {entry['class_name']}",
         "```",
@@ -350,13 +341,8 @@ def _methods_section(cls: type) -> list[str]:
     return lines
 
 
-def _page_footer(
-    entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None
-) -> list[str]:
-    """Shared page closing: tutorial backlinks and source link."""
+def _page_footer(entry: dict) -> list[str]:
     lines: list[str] = []
-    if backlinks:
-        _append_tutorial_backlinks(lines, entry["class_name"], backlinks)
     module_path = entry["module"]
     lines.append(
         f"**Source:** [`{module_path.replace('.', '/')}.py`]({REPO_URL}/blob/main/{module_path.replace('.', '/')}.py)"
@@ -389,15 +375,13 @@ def _get_methods(cls: type) -> list[tuple[str, str, str]]:
     return methods
 
 
-def generate_config_data_page(
-    cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None
-) -> str:
+def generate_config_data_page(cls: type, entry: dict, order: int) -> str:
     """Generate markdown for a config/data class."""
     attrs = _get_class_attrs(cls)
     field_docs = _extract_field_docs_from_mro(cls)
     groups = _parse_docstring_groups_from_mro(cls)
 
-    lines = _page_preamble(cls, entry)
+    lines = _page_preamble(cls, entry, order)
 
     if not attrs:
         return "\n".join(lines)
@@ -439,16 +423,14 @@ def generate_config_data_page(
         lines.append("")
 
     lines.extend(_methods_section(cls))
-    lines.extend(_page_footer(entry, backlinks))
+    lines.extend(_page_footer(entry))
 
     return "\n".join(lines)
 
 
-def generate_behavior_page(
-    cls: type, entry: dict, backlinks: dict[str, list[tuple[str, str]]] | None = None
-) -> str:
+def generate_behavior_page(cls: type, entry: dict, order: int) -> str:
     """Generate markdown for a behavior class."""
-    lines = _page_preamble(cls, entry)
+    lines = _page_preamble(cls, entry, order)
 
     init = getattr(cls, "__init__", None)
     if init:
@@ -503,7 +485,7 @@ def generate_behavior_page(
         lines.append("")
 
     lines.extend(_methods_section(cls))
-    lines.extend(_page_footer(entry, backlinks))
+    lines.extend(_page_footer(entry))
 
     return "\n".join(lines)
 
@@ -511,10 +493,7 @@ def generate_behavior_page(
 def generate_index_page(manifest: list[dict]) -> str:
     """Generate the API reference index page."""
     lines = [
-        "---",
-        "title: API Reference",
-        "pagefind: false",
-        "---",
+        *_page_heading(0, "Reference"),
     ]
 
     for group_key, group_info in sorted(GROUPS.items(), key=lambda x: x[1]["order"]):
@@ -537,7 +516,7 @@ def generate_index_page(manifest: list[dict]) -> str:
                 first_line = ""
 
             slug = entry["class_name"].lower()
-            link = f"/reference/{group_key}/{slug}/"
+            link = f"/reference/{group_key}/{slug}"
             lines.append(
                 f"| [`{entry['sidebar_label']}`]({link}) | {_rst_to_md(first_line)} |"
             )
@@ -545,60 +524,6 @@ def generate_index_page(manifest: list[dict]) -> str:
         lines.append("")
 
     return "\n".join(lines)
-
-
-def _build_tutorial_backlinks() -> dict[str, list[tuple[str, str]]]:
-    """Scan tutorial sources for api_classes and build class→tutorials map."""
-    import ast as _ast
-
-    tutorial_src = ROOT / "tutorials" / "tutorial_generator"
-    backlinks: dict[str, list[tuple[str, str]]] = {}
-    buckets = ["intro", "rl", "sft", "misc"]
-
-    for bucket in buckets:
-        bucket_dir = tutorial_src / bucket
-        if not bucket_dir.is_dir():
-            continue
-        for src in sorted(bucket_dir.glob("*.py")):
-            if src.name.startswith("_") or src.name == "__init__.py":
-                continue
-            try:
-                tree = _ast.parse(src.read_text())
-            except SyntaxError:
-                continue
-            for node in _ast.walk(tree):
-                if isinstance(node, _ast.Assign):
-                    for target in node.targets:
-                        if (
-                            isinstance(target, _ast.Name)
-                            and target.id == "TUTORIAL_METADATA"
-                        ):
-                            try:
-                                metadata = _ast.literal_eval(node.value)
-                            except (ValueError, TypeError):
-                                continue
-                            summary = metadata.get("summary", src.stem)
-                            api_classes = metadata.get("api_classes", [])
-                            tutorial_path = f"/tutorials/{bucket}/{src.stem}/"
-                            for cls_name in api_classes:
-                                backlinks.setdefault(cls_name, []).append(
-                                    (summary, tutorial_path)
-                                )
-    return backlinks
-
-
-def _append_tutorial_backlinks(
-    lines: list[str], class_name: str, backlinks: dict[str, list[tuple[str, str]]]
-) -> None:
-    """Append a Related Tutorials section if any tutorials reference this class."""
-    tutorials = backlinks.get(class_name, [])
-    if not tutorials:
-        return
-    lines.append("## Related Tutorials")
-    lines.append("")
-    for summary, path in tutorials:
-        lines.append(f"- [{summary}]({path})")
-    lines.append("")
 
 
 def main() -> None:
@@ -616,9 +541,9 @@ def main() -> None:
             if child.is_dir():
                 shutil.rmtree(child)
 
-    backlinks = _build_tutorial_backlinks()
     errors = []
     generated = 0
+    orders = _orders_within_group()
 
     for entry in API_REFERENCE_MANIFEST:
         try:
@@ -628,8 +553,9 @@ def main() -> None:
             errors.append(f"ERROR: {entry['class_name']} ({entry['module']}): {e}")
             continue
 
+        order = orders[entry["class_name"]]
         if entry["class_type"] == "config_data":
-            content = generate_config_data_page(cls, entry, backlinks=backlinks)
+            content = generate_config_data_page(cls, entry, order)
         elif not isinstance(cls, type):
             doc = inspect.getdoc(cls) or ""
             sig_str = ""
@@ -637,32 +563,15 @@ def main() -> None:
                 sig_str = f"`{entry['class_name']}{inspect.signature(cls)}`"
             except (ValueError, TypeError):
                 pass
-            first_sentence = ""
-            if doc:
-                para = doc.split("\n\n")[0].replace("\n", " ").strip()
-                para = re.sub(r"``(.*?)``", r"\1", para)
-                dot = para.find(". ")
-                if dot != -1:
-                    first_sentence = para[: dot + 1]
-                else:
-                    first_sentence = para if para.endswith(".") else para + "."
-            desc = first_sentence or f"API reference for {entry['class_name']}"
-            lines = [
-                "---",
-                f"title: {_yaml_quote(entry.get('sidebar_label', entry['class_name']))}",
-                f"description: {_yaml_quote(desc)}",
-                "---",
-                "",
-                f"# `{entry['class_name']}`",
-                "",
-            ]
+            title = entry.get("sidebar_label", entry["class_name"])
+            lines = _page_heading(order, title)
             if sig_str:
                 lines += [sig_str, ""]
             if doc:
                 lines += [doc, ""]
             content = "\n".join(lines) + "\n"
         else:
-            content = generate_behavior_page(cls, entry, backlinks=backlinks)
+            content = generate_behavior_page(cls, entry, order)
 
         group_dir = output_dir / entry["group"]
         group_dir.mkdir(parents=True, exist_ok=True)

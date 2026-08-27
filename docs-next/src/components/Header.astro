@@ -5,6 +5,15 @@ import Search from './Search.astro';
 
 const currentPath = Astro.url.pathname;
 const navItems = DOCS_NAV.map(({ section, prefix }) => ({ href: prefix, label: section }));
+const repoHref = 'https://github.com/modal-projects/training-gym';
+const mobileNavItems = [
+  { href: repoHref, label: 'Repo', isRepo: true },
+  ...navItems.map((item) => ({
+    ...item,
+    label: item.label,
+    isRepo: false,
+  })),
+];
 
 const shouldRenderSearch =
   config.pagefind || config.components.Search !== '@astrojs/starlight/components/Search.astro';
@@ -36,21 +45,58 @@ const isActive = (href: string) =>
         <Search class="tg-header__search" />
       </div>
     )}
-    <a class="tg-header__repo" href="https://github.com/modal-projects/training-gym">
-      GitHub
+    <a
+      class="btn btn-outlined bg-c-gray-5 tg-header__repo"
+      href={repoHref}
+    >
+      <svg
+        class="text-c-gray-80 mr-2.5"
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path>
+        <path d="M9 18c-4.51 2-5-2-7-2"></path>
+      </svg>
+      <span class="text-c-gray-80 text-sm">Repo</span>
     </a>
     <details class="tg-header__menu">
       <summary aria-label="Open navigation">
-        <span></span>
-        <span></span>
-        <span></span>
+        <span class="tg-header__hamburger-box">
+          <span class="tg-header__hamburger-inner"></span>
+        </span>
       </summary>
       <nav class="tg-header__menu-panel" aria-label="Primary">
-        {navItems.map((item) => (
+        {mobileNavItems.map((item) => (
           <a
             href={item.href}
-            class:list={['tg-header__menu-link', { 'is-active': isActive(item.href) }]}
+            class:list={[
+              'tg-header__menu-link',
+              { 'is-active': isActive(item.href), 'is-repo': item.isRepo },
+            ]}
           >
+            {item.isRepo && (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path>
+                <path d="M9 18c-4.51 2-5-2-7-2"></path>
+              </svg>
+            )}
             {item.label}
           </a>
         ))}
@@ -58,3 +104,46 @@ const isActive = (href: string) =>
     </details>
   </div>
 </div>
+
+<script>
+  const menu = document.querySelector<HTMLDetailsElement>('.tg-header__menu');
+  const summary = menu?.querySelector<HTMLElement>('summary');
+  const mobile = window.matchMedia('(max-width: 52.499rem)');
+  const closeDuration = 300;
+  let closeTimer: number | undefined;
+
+  const syncMenuState = () => {
+    document.body.toggleAttribute('data-mobile-menu-expanded', Boolean(menu?.open && mobile.matches));
+    summary?.setAttribute('aria-label', menu?.open ? 'Close navigation' : 'Open navigation');
+  };
+
+  const closeMenu = (restoreFocus = false) => {
+    if (!menu?.open || menu.classList.contains('is-closing')) return;
+    if (!mobile.matches) {
+      menu.open = false;
+      if (restoreFocus) summary?.focus();
+      return;
+    }
+    menu.classList.add('is-closing');
+    window.clearTimeout(closeTimer);
+    closeTimer = window.setTimeout(() => {
+      menu.open = false;
+      menu.classList.remove('is-closing');
+      if (restoreFocus) summary?.focus();
+    }, closeDuration);
+  };
+
+  summary?.addEventListener('click', (event) => {
+    if (!menu?.open) return;
+    event.preventDefault();
+    closeMenu();
+  });
+  menu?.addEventListener('toggle', syncMenuState);
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && menu?.open) {
+      event.preventDefault();
+      closeMenu(true);
+    }
+  }, { capture: true });
+  mobile.addEventListener('change', syncMenuState);
+</script>

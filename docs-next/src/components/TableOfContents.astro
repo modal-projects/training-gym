@@ -1,0 +1,82 @@
+---
+type TocItem = {
+  slug: string;
+  text: string;
+  depth: number;
+  children: readonly TocItem[];
+};
+
+type TocNode = {
+  slug: string;
+  text: string;
+  children: readonly TocNode[];
+};
+
+const PAGE_TITLE_SLUG = '_top';
+
+function toNode(item: TocItem): TocNode {
+  return {
+    slug: item.slug,
+    text: item.text,
+    children: item.children.map(toNode),
+  };
+}
+
+function titledToc(items: readonly TocItem[], title: string): TocNode {
+  const children: TocNode[] = [];
+  for (const item of items) {
+    if (item.slug === PAGE_TITLE_SLUG) {
+      children.push(...item.children.map(toNode));
+      continue;
+    }
+    children.push(toNode(item));
+  }
+  return { slug: PAGE_TITLE_SLUG, text: title, children };
+}
+
+interface Props {
+  items?: readonly TocNode[];
+}
+
+const nested = Astro.props.items;
+const { toc, entry } = Astro.locals.starlightRoute;
+const root =
+  nested || !toc ? null : titledToc(toc.items, String(entry.data.title));
+const items = nested ?? root?.children ?? [];
+const title = root?.text ?? '';
+---
+
+{
+  title ? (
+    <nav class="tg-toc" aria-label="Outline">
+      <a href="#_top">{title}</a>
+      {items.length > 0 && <Astro.self items={items} />}
+      <script is:inline>
+        const toc = document.currentScript?.closest('.tg-toc');
+        toc?.addEventListener('click', (event) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (!(event.target instanceof Element)) return;
+          const link = event.target.closest('a');
+          if (!(link instanceof HTMLAnchorElement)) return;
+          const target = document.getElementById(decodeURIComponent(link.hash.slice(1)));
+          if (!target) return;
+          event.preventDefault();
+          const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'auto'
+            : 'smooth';
+          target.scrollIntoView({ behavior });
+          history.pushState(null, '', link.hash);
+        });
+      </script>
+    </nav>
+  ) : items.length > 0 ? (
+    <ul class="tg-toc__list">
+      {items.map((item) => (
+        <li>
+          <a href={'#' + item.slug}>{item.text}</a>
+          {item.children.length > 0 && <Astro.self items={item.children} />}
+        </li>
+      ))}
+    </ul>
+  ) : null
+}

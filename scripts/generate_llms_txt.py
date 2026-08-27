@@ -1,26 +1,24 @@
 """Generate docs-next/public/llms.txt from tutorial + API catalogs.
 
-uv run scripts/generate_llms_txt.py
+uv run python -m scripts.generate_llms_txt
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 from collections import defaultdict
 from pathlib import Path
 
 import yaml
 
-from api_reference_manifest import (
+from scripts.api_reference_manifest import (
     API_REFERENCE_MANIFEST,
     CLASS_REFERENCE_PATHS,
     GROUPS,
 )
-from generate_tutorial_pages import BUCKET_LABELS, BUCKETS, extract_metadata
+from scripts.tutorial_index import TutorialEntry, load_tutorial_index
 
 ROOT = Path(__file__).resolve().parents[1]
-TUTORIAL_SRC_DIR = ROOT / "tutorials" / "tutorial_generator"
 GUIDES_DIR = ROOT / "docs-next" / "src" / "content" / "docs" / "guides"
 DEFAULT_OUTPUT = ROOT / "docs-next" / "public" / "llms.txt"
 
@@ -28,38 +26,21 @@ SITE = "https://gym.modal.dev"
 REPO = "https://github.com/modal-projects/training-gym"
 
 
-def _collect_tutorials() -> list[tuple[str, str, dict]]:
-    """Return (bucket, name, metadata) sorted by bucket, order, name."""
-    entries: list[tuple[str, str, dict]] = []
-    for bucket in BUCKETS:
-        bucket_dir = TUTORIAL_SRC_DIR / bucket
-        if not bucket_dir.is_dir():
-            continue
-        for source_path in sorted(bucket_dir.glob("*.py")):
-            if source_path.name.startswith("_") or source_path.name == "__init__.py":
-                continue
-            metadata = extract_metadata(source_path)
-            if metadata is None:
-                print(
-                    f"  SKIP {source_path.name}: no TUTORIAL_METADATA", file=sys.stderr
-                )
-                continue
-            entries.append((bucket, source_path.stem, metadata))
-
-    bucket_rank = {b: i for i, b in enumerate(BUCKETS)}
-    entries.sort(
-        key=lambda item: (
-            bucket_rank.get(item[0], len(BUCKETS)),
-            item[2].get("order", 10_000),
-            item[1],
-        )
-    )
-    return entries
+def _site_url(*parts: str) -> str:
+    path = "/".join(part.strip("/") for part in parts if part)
+    return f"{SITE}/{path}" if path else f"{SITE}/"
 
 
-def _collect_guides() -> list[tuple[str, str, str, int]]:
-    """Return (slug, title, description, sidebar order) for authored guides."""
-    guides: list[tuple[str, str, str, int]] = []
+def _first_heading(body: str) -> str | None:
+    for line in body.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return None
+
+
+def _collect_guides() -> list[tuple[str, str, int]]:
+    """Return (slug, title, order) for authored guides."""
+    guides: list[tuple[str, str, int]] = []
     for path in sorted(GUIDES_DIR.rglob("*.md")):
         text = path.read_text()
         if not text.startswith("---\n"):
@@ -68,6 +49,7 @@ def _collect_guides() -> list[tuple[str, str, str, int]]:
         if len(parts) != 3:
             raise ValueError(f"Guide has invalid frontmatter: {path}")
         frontmatter = parts[1]
+        body = parts[2]
 
         try:
             metadata = yaml.safe_load(frontmatter)
@@ -76,30 +58,24 @@ def _collect_guides() -> list[tuple[str, str, str, int]]:
         if not isinstance(metadata, dict):
             raise ValueError(f"Guide frontmatter must be a mapping: {path}")
 
-        title = metadata.get("title")
-        if not isinstance(title, str) or not title:
-            raise ValueError(f"Guide frontmatter is missing title: {path}")
-        description = metadata.get("description", "")
-        if not isinstance(description, str):
-            raise ValueError(f"Guide description must be a string: {path}")
-
-        sidebar = metadata.get("sidebar", {})
-        if not isinstance(sidebar, dict):
-            raise ValueError(f"Guide sidebar must be a mapping: {path}")
-        sidebar_order = sidebar.get("order", 10_000)
-        if type(sidebar_order) is not int:
-            raise ValueError(f"Guide sidebar order must be an integer: {path}")
+        order = metadata.get("order")
+        if type(order) is not int:
+            raise ValueError(f"Guide frontmatter requires an integer order: {path}")
+        title = _first_heading(body)
+        if not title:
+            raise ValueError(f"Guide is missing an H1 heading: {path}")
 
         slug = path.relative_to(GUIDES_DIR).with_suffix("").as_posix()
         if slug != "index":
-            guides.append((slug, title, description, sidebar_order))
+            guides.append((slug, title, order))
 
-    guides.sort(key=lambda guide: (guide[3], guide[1].lower()))
+    guides.sort(key=lambda guide: (guide[2], guide[1].lower()))
     return guides
 
 
 def _render(
-    tutorials: list[tuple[str, str, dict]], guides: list[tuple[str, str, str, int]]
+    tutorials: tuple[TutorialEntry, ...],
+    guides: list[tuple[str, str, int]],
 ) -> str:
     lines: list[str] = [
         "# Modal Training Gym",
@@ -112,25 +88,23 @@ def _render(
         "(import as `modal_training_gym`). Prefer `TrainConfig` + recipe over older",
         "framework-specific launcher APIs.",
         "",
-        f"Docs: {SITE}/",
+        f"Docs: {_site_url()}",
         f"Repo: {REPO}",
         "",
         "## Docs",
         "",
-        f"- [Overview]({SITE}/): Product overview and getting started",
-        f"- [Guides]({SITE}/guides/): Concepts and practical workflows",
-        f"- [All Tutorials]({SITE}/tutorials/): Tutorial catalog",
-        f"- [API Reference]({SITE}/reference/): Public class reference",
-        f"- [CLI Reference]({SITE}/reference/cli/): `modal-training-gym` CLI",
-        f"- [Support]({SITE}/support/): Support and contribution notes",
+        f"- [Home]({_site_url()}): Docs home",
+        f"- [Guides]({_site_url('guides')}): Concepts and practical workflows",
+        f"- [Tutorials]({_site_url('tutorials')}): Runnable Python guides",
+        f"- [Reference]({_site_url('reference')}): Public class reference",
+        f"- [CLI Reference]({_site_url('reference/cli')}): `modal-training-gym` CLI",
         "",
         "## Guides",
         "",
     ]
 
-    for slug, title, description, _ in guides:
-        suffix = f": {description}" if description else ""
-        lines.append(f"- [{title}]({SITE}/guides/{slug}/){suffix}")
+    for slug, title, _order in guides:
+        lines.append(f"- [{title}]({_site_url('guides', slug)})")
 
     lines.extend(
         [
@@ -140,31 +114,16 @@ def _render(
         ]
     )
 
-    by_bucket: dict[str, list[tuple[str, dict]]] = defaultdict(list)
-    for bucket, name, metadata in tutorials:
-        by_bucket[bucket].append((name, metadata))
-
-    for bucket in BUCKETS:
-        items = by_bucket.get(bucket)
-        if not items:
-            continue
-        label = BUCKET_LABELS.get(bucket, bucket.title())
-        lines.append(f"### {label}")
-        lines.append("")
-        for name, metadata in items:
-            summary = str(metadata.get("summary") or name).strip()
-            # Keep one line; llms.txt link descriptions should stay scannable.
-            summary = " ".join(summary.split())
-            url = f"{SITE}/tutorials/{bucket}/{name}/"
-            lines.append(f"- [{name}]({url}): {summary}")
-        lines.append("")
+    for tutorial in tutorials:
+        lines.append(f"- [{tutorial.title}]({_site_url('tutorials', tutorial.slug)})")
+    lines.append("")
 
     lines.extend(
         [
-            "## API Reference",
+            "## Reference",
             "",
-            f"- [Overview]({SITE}/reference/): Index of public classes",
-            f"- [CLI Reference]({SITE}/reference/cli/): CLI commands and flags",
+            f"- [Reference]({_site_url('reference')}): Index of public classes",
+            f"- [CLI Reference]({_site_url('reference/cli')}): CLI commands and flags",
             "",
         ]
     )
@@ -185,7 +144,7 @@ def _render(
             class_name = entry["class_name"]
             label = entry.get("sidebar_label") or class_name
             path = CLASS_REFERENCE_PATHS[class_name]
-            lines.append(f"- [{label}]({SITE}{path}): `{class_name}`")
+            lines.append(f"- [{label}]({_site_url(path)}): `{class_name}`")
         lines.append("")
 
     lines.extend(
@@ -205,7 +164,7 @@ def _render(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate docs-next/public/llms.txt from catalogs."
+        description="Generate docs-next/public/llms.txt from documentation sources."
     )
     parser.add_argument(
         "--output",
@@ -215,9 +174,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    tutorials = _collect_tutorials()
+    tutorials = load_tutorial_index()
     if not tutorials:
-        raise SystemExit("No tutorials with TUTORIAL_METADATA found")
+        raise SystemExit("No tutorials found")
     guides = _collect_guides()
     if not guides:
         raise SystemExit("No Markdown guides found")

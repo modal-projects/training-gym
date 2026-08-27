@@ -615,33 +615,37 @@ def record_resume_checkpoint(
     run.metadata = metadata
 
 
-def wandb_run_id_for_attempt(training_run_id: str, attempt_count: int) -> str:
+def metric_run_id_for_attempt(training_run_id: str, attempt_count: int) -> str:
     return (
         training_run_id if attempt_count <= 1 else f"{training_run_id}-a{attempt_count}"
     )
 
 
-def record_wandb_attempt(
+def record_metric_attempt(
     run: TrainingRun,
     *,
+    provider: str,
     entity: str,
     project: str,
     group: str,
     run_id: str,
+    url: str = "",
     attempt_count: int,
 ) -> None:
-    if not project or not run_id:
+    if not run_id:
         return
 
     metadata = dict(run.metadata or {})
-    raw_attempts = metadata.get("wandb_attempts")
+    raw_attempts = metadata.get("metric_attempts") or metadata.get("wandb_attempts")
     attempts = raw_attempts if isinstance(raw_attempts, list) else []
     attempt = {
         "attempt": attempt_count,
+        "provider": provider,
         "entity": entity,
         "project": project,
         "group": group,
         "run_id": run_id,
+        "url": url,
     }
     attempts = [
         existing
@@ -655,9 +659,10 @@ def record_wandb_attempt(
         )
     ]
     attempts.append(attempt)
-    metadata["wandb_attempts"] = sorted(
+    metadata["metric_attempts"] = sorted(
         attempts,
         key=lambda item: int(item.get("attempt") or 0) if isinstance(item, dict) else 0,
     )
-    metadata["wandb_latest_run_id"] = run_id
+    metadata["metric_latest_run_id"] = run_id
+    metadata["metric_provider"] = provider
     run.metadata = metadata

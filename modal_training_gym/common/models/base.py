@@ -535,3 +535,37 @@ def parse_gemma4_response(text: str) -> ParsedResponse:
         tool_calls=tool_calls,
         thinking=thinking,
     )
+
+
+# ── Inkling family (Inkling-Small) ─────────────────────────────────────
+
+_INKLING_SECTION_RE = re.compile(
+    r"<\|content_(thinking|text|invoke_tool_json)\|>(.*?)(?=<\|[a-z0-9_]+\|>|$)",
+    re.DOTALL,
+)
+
+
+def parse_inkling_response(text: str) -> ParsedResponse:
+    """Parse Inkling-family output into structured content.
+
+    Handles the ``<|content_thinking|>`` and ``<|content_text|>`` sections of a
+    ``<|message_model|>`` turn, closed by ``<|end_message|>`` and
+    ``<|content_model_end_sampling|>``, plus ``<|content_invoke_tool_json|>``
+    tool bodies. A response truncated mid-section still yields that section.
+    """
+    thinking: list[str] = []
+    content: list[str] = []
+    tool_calls: list[ToolCall] = []
+    for kind, body in _INKLING_SECTION_RE.findall(text):
+        if kind == "thinking":
+            thinking.append(body.strip())
+        elif kind == "text":
+            content.append(body.strip())
+        elif call := _parse_json_tool_block(body.strip()):
+            tool_calls.append(call)
+
+    return ParsedResponse(
+        content="\n".join(part for part in content if part),
+        tool_calls=tool_calls,
+        thinking="\n".join(part for part in thinking if part) or None,
+    )
