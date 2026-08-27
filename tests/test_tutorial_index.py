@@ -4,6 +4,7 @@ import sys
 import pytest
 import yaml
 
+from scripts.api_reference_manifest import CLASS_REFERENCE_PATHS
 from scripts.generate_docs_pages import generate_starlight
 from scripts.generate_llms_txt import (
     GUIDES_DIR,
@@ -12,6 +13,7 @@ from scripts.generate_llms_txt import (
     _guide_section,
     _readme_heading_and_intro,
     _render,
+    flatten_doc_id,
 )
 from scripts.tutorial_index import parse_tutorial
 
@@ -124,9 +126,37 @@ def test_render_groups_guides_by_section() -> None:
     assert start < tools
     assert text.index("[Model]", start) < text.index("[Dataset]", start) < tools
     assert intro in text
+    assert "https://gym.modal.dev/guides/model)" in text
+    assert "https://gym.modal.dev/guides/dataset)" in text
+    assert "https://gym.modal.dev/guides/wandb-integration)" in text
+    assert "/guides/start/" not in text
+    assert "/guides/tools/" not in text
     for line in text.splitlines():
         if line.startswith("- ["):
             assert "): " not in line
+
+
+def test_flatten_doc_id_keeps_section_drops_grouping_folders() -> None:
+    assert flatten_doc_id("guides/tools/dashboard.md") == "guides/dashboard"
+    assert flatten_doc_id("guides/start/model.md") == "guides/model"
+    assert flatten_doc_id("guides/tools/agent.md") == "guides/agent"
+    assert flatten_doc_id("reference/core/trainconfig.md") == "reference/trainconfig"
+    assert flatten_doc_id("reference/cli.md") == "reference/cli"
+    assert flatten_doc_id("tutorials/rl_basics.md") == "tutorials/rl_basics"
+    assert flatten_doc_id("reference/index.md") == "reference"
+    assert flatten_doc_id("index.md") == "index"
+
+
+def test_agent_guide_stem_is_agent() -> None:
+    assert (GUIDES_DIR / "tools" / "agent.md").is_file()
+    assert not (GUIDES_DIR / "tools" / "agent-driven-training.md").exists()
+
+
+def test_class_reference_paths_are_section_plus_stem() -> None:
+    for path in CLASS_REFERENCE_PATHS.values():
+        parts = path.strip("/").split("/")
+        assert parts[0] == "reference"
+        assert len(parts) == 2
 
 
 def test_api_reference_orders_follow_manifest() -> None:
