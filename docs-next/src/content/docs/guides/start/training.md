@@ -40,7 +40,7 @@ result = run.result()
 Then, get the latest checkpoint:
 
 ```python
-checkpoint = result.latest_checkpoint()
+checkpoint = result.checkpoints()[-1]
 ```
 
 Now, we could do offline evals:
