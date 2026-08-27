@@ -46,8 +46,16 @@ So the patch makes the constant **configurable, defaulting to upstream's 480 s**
 A recipe that needs longer sets ``MILES_LOAD_BARRIER_TIMEOUT_S`` in its
 ``environment`` (Nemotron-3-Ultra sets 3600). Every other model keeps upstream's
 fast failure detection unchanged, and the knob is reachable from a recipe without
-another patch. The env var is read at import time, which is after the launcher has
-put the recipe's ``environment`` into the container.
+another patch.
+
+**The value is read at the barrier call, not at import.** An earlier version of
+this patch resolved it once at module import and was silently ineffective: on
+`simple-coral-6ccbf13224c9` the scheduler processes provably had
+``MILES_LOAD_BARRIER_TIMEOUT_S=3600`` in ``/proc/<pid>/environ``, yet the barrier
+still fired at exactly 480 s after the first rank finished. Whatever imports that
+module early, re-reading at the call site removes the ordering question
+altogether. The module-level constant is still rewritten so the default is
+visible where a reader expects it.
 
 Executed at image-build time via ``python3 <this file>``.
 """
@@ -101,6 +109,28 @@ replacement = (
     ")"
 )
 src = pattern.sub(lambda _: replacement, src, count=1)
+
+# Re-read at the call site: the module-level value alone proved unreliable.
+call_pattern = re.compile(
+    r"timeout=datetime\.timedelta\(seconds=UNBALANCED_MODEL_LOADING_TIMEOUT_S\),"
+)
+if not call_pattern.search(src):
+    print(
+        "WARNING: could not patch the monitored_barrier call site — "
+        "`timeout=datetime.timedelta(seconds=UNBALANCED_MODEL_LOADING_TIMEOUT_S),` "
+        "not found; the module-level default still applies"
+    )
+else:
+    src = call_pattern.sub(
+        "timeout=datetime.timedelta(\n"
+        "                    seconds=int(\n"
+        f'                        _mtg_os.environ.get("{ENV_VAR}", UNBALANCED_MODEL_LOADING_TIMEOUT_S)\n'
+        "                    )\n"
+        "                ),",
+        src,
+        count=1,
+    )
+
 path.write_text(src)
 print(
     f"Patched load_model_utils.py: UNBALANCED_MODEL_LOADING_TIMEOUT_S "

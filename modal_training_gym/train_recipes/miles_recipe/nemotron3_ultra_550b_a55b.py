@@ -87,6 +87,14 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
             # bring-up otherwise surfaces only as "invalid usage" with no detail.
             # WARN is quiet unless something is wrong.
             "NCCL_DEBUG": "WARN",
+            # NCCL's RAS reliability thread segfaults while ranks are winding down
+            # after the final checkpoint save, taking a run that had already
+            # finished all its work and written its checkpoint
+            # (`cool-rout-441980b0b4ef`). The captured stack is entirely inside it:
+            # rasMsgHandlePeersUpdate -> rasMsgHandle -> rasSockEventLoop ->
+            # rasThreadMain. RAS only reports health, so disabling it costs
+            # nothing here. Inkling-Small sets it for the same reason.
+            "NCCL_RAS_ENABLE": "0",
             # Ray's memory monitor kills actors under host-memory pressure, which
             # is the regime this model runs in (CPU-offloaded optimizer for 550 B).
             # Inkling-Small disables it for the same reason.
