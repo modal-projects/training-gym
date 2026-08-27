@@ -49,7 +49,16 @@ class Checkpoint:
 
 
 def list_checkpoints(training_run_id: str) -> list[Checkpoint]:
-    result = TrainResult.from_training_run_id(training_run_id)
+    try:
+        result = TrainResult.from_training_run_id(training_run_id)
+    except KeyError:
+        raise TrainingGymConfigError(
+            f"No completed TrainResult exists for training run "
+            f"{training_run_id!r}. Rollout progress is not terminal run "
+            "completion; wait with "
+            f"TrainingRun.from_id({training_run_id!r}).result() before "
+            "listing checkpoints."
+        ) from None
     if result.framework in {
         Framework.SLIME,
         Framework.SLIME.value,
@@ -93,7 +102,7 @@ def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
     checkpoints_mount_path = (
         train_result.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
     )
-    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=True)
+    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=False)
     prefix = "iter_"
     rel = _to_volume_path(checkpoint_dir, checkpoints_mount_path)
 
@@ -182,7 +191,7 @@ def convert_megatron_checkpoint_to_hf(
         checkpoint.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
     )
     output_path = f"{checkpoint.path}_hf"
-    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=True)
+    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=False)
     rel = _to_volume_path(output_path, checkpoints_mount_path)
     marker_rel = (
         f"{rel}/{_CONVERT_COMPLETE_MARKER}" if rel else _CONVERT_COMPLETE_MARKER
@@ -212,7 +221,7 @@ def convert_megatron_checkpoint_to_hf(
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
     checkpoints_volume = Volume.from_name(
         checkpoints_volume_name,
-        create_if_missing=True,
+        create_if_missing=False,
     )
     from modal_training_gym.common import hf_secrets
     from modal_training_gym.frameworks.slime.launcher import _build_slime_base_image

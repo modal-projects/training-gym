@@ -183,8 +183,10 @@ class TrainResult:
     # ── Volume lookup ────────────────────────────────────────────────────
 
     def volume(self) -> "Volume":
+        from modal import Volume
+
         volume_name = self.checkpoints_volume_name or f"{self.app_name}-checkpoints"
-        return Volume.from_name(volume_name, create_if_missing=True)
+        return Volume.from_name(volume_name, create_if_missing=False)
 
     @property
     def model(self) -> "ModelConfig":
