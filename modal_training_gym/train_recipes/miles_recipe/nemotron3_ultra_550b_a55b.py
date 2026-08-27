@@ -77,6 +77,22 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
             # the blanket sgl-kernel version guard, which otherwise refuses to
             # start the engines.
             "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK": "1",
+            # 0, overriding MilesRecipe's default of 1. NVLS is intra-node NVLink
+            # SHARP; a rollout engine here spans 4 nodes, so its tensor-parallel
+            # group cannot use it, and enabling it made ncclCommInitRank fail with
+            # "NCCL error: invalid usage" while building _TP, killing engine init
+            # (`weary-sole-4b773f2e4618`). Inkling-Small -- the only other
+            # multi-node miles recipe here -- reached the same conclusion: "NCCL
+            # NVLS_ENABLE is the one that had to deviate" on Modal.
+            "NCCL_NVLS_ENABLE": "0",
+            # The NCCL error message itself asks for this, and a failed engine
+            # bring-up otherwise surfaces only as "invalid usage" with no detail.
+            # WARN is quiet unless something is wrong.
+            "NCCL_DEBUG": "WARN",
+            # Ray's memory monitor kills actors under host-memory pressure, which
+            # is the regime this model runs in (CPU-offloaded optimizer for 550 B).
+            # Inkling-Small disables it for the same reason.
+            "RAY_memory_monitor_refresh_ms": "0",
             # An engine spans 4 nodes; the three that did not download the
             # checkpoint read ~1 TB off the Modal Volume at ~1 GiB/s, so weight
             # load takes ~30 min (measured: 28 min on `poky-coyote-b2814b94964f`).
@@ -183,6 +199,20 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     optimizer_cpu_offload: bool = True
     overlap_cpu_optimizer_d2h_h2d: bool = True
     use_precision_aware_optimizer: bool = True
+
+    # Spill the paused actor to node-local disk, not host RAM. miles defaults
+    # --offload-train-target to "cpu", which puts the offloaded trainer in host
+    # memory *on top of* the CPU-offloaded optimizer above. Inkling-Small
+    # documents that as already exceeding the node at 276 B; this model is twice
+    # that, and leaving the default killed a 16-node run
+    # (`poky-coyote-b2814b94964f`): four Megatron actors hit
+    # "!!!!!!! Segfault encountered !!!!!!!" inside `offload_train`, Ray reported
+    # them unavailable, and the gym silently retried the whole run.
+    #
+    # /tmp is on the container's overlay filesystem on Modal, not a tmpfs, so it
+    # is genuinely disk — upstream warns that a tmpfs path defeats this.
+    offload_train_target: str = "disk"
+    offload_train_disk_dir: str = "/tmp/train_offload"
 
     # ── Batching + precision ─────────────────────────────────────────────────
     use_dynamic_batch_size: bool = True
