@@ -28,7 +28,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 - [Agent-driven training](https://gym.modal.dev/guides/agent)
 - [The observability dashboard](https://gym.modal.dev/guides/observability-dashboard)
-- [Weights & Biases integration](https://gym.modal.dev/guides/wandb-integration)
+- [Metric logging](https://gym.modal.dev/guides/metric)
 
 ## Tutorials
 
