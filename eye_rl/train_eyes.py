@@ -14,6 +14,7 @@ import json
 import os
 import random
 import re
+import threading
 
 import modal
 
@@ -35,16 +36,44 @@ SUBJECTS = [
     "an eye caught mid-glance",
 ]
 IRIS_COLORS = ["warm brown", "mossy green", "grey blue", "hazel", "deep amber", "slate"]
-STYLES = [
-    "soft digital painting, semi-realistic",
-    "airbrushed portrait study with blended edges",
-    "webtoon-style semi-realistic rendering",
-    "warm painterly close-up with soft focus",
-    "muted painterly realism with fine lash detail",
-]
+
+# The style axis is the user's hand-rated taste, not a guess: each family is a
+# cluster of the images they marked "love", and the reward compares a render
+# against the loved images of the same family, so prompt and reference agree.
+STYLE_FAMILIES = {
+    "glitch": (
+        "glitched CRT style: horizontal colour-shifted scanline bands and offset "
+        "channels laid over a painted eye"
+    ),
+    "anime": (
+        "glossy anime illustration: a large banded iris, bright speculars and a "
+        "bold dark lash line"
+    ),
+    "nouveau": (
+        "art-nouveau painting: flowing ornamental curves and pale washed grounds "
+        "around the eye"
+    ),
+    "collage": (
+        "painted paper collage: torn translucent colour planes and printed dot "
+        "texture layered over the eye"
+    ),
+    "psych": (
+        "psychedelic painting: concentric radiating colour waves rippling out "
+        "from the iris"
+    ),
+    "woodcut": (
+        "woodcut-inspired painting: carved dark planes, a strong vertical grain "
+        "and a lit iris"
+    ),
+    "graphic": (
+        "graphic painted study: strong flat colour shapes with visible pigment "
+        "grain and ink marks"
+    ),
+}
+STYLES = list(STYLE_FAMILIES)
 
 SYSTEM_PROMPT = """\
-You write p5.js sketches that paint soft, semi-realistic eye illustrations, using p5.brush watercolour washes for blended skin, sclera and iris and p5.brush strokes for lashes and hairs.
+You write p5.js sketches that paint stylised eye illustrations, using p5.brush watercolour washes for painted grounds, skin, sclera and iris and p5.brush strokes for lashes and hairs.
 
 Rules:
 - Reply with a single ```javascript code fence containing a complete sketch and nothing else.
@@ -53,7 +82,8 @@ Rules:
 - The coordinate origin (0,0) is the CENTER of the canvas; x and y range from -256 to 256. Compose around (0,0).
 - End setup() with: noLoop();
 - Draw with the p5.brush API plus p5's own drawing: background, noStroke(), fill(r,g,b) and fill(r,g,b,alpha), ellipse(x,y,w,h), triangle(...), and beginShape()/vertex(x,y)/bezierVertex(cx1,cy1,cx2,cy2,x,y)/endShape(CLOSE) for custom filled shapes. push/pop, translate, rotate, lerpColor(color(...),color(...),t), for-loops, sin/cos/random are all fine.
-- This style has NO hard cartoon outlines and NO flat colour areas. Softness comes from repetition: draw the same shape 20-40 times in a for-loop with low alpha (8-25), shrinking it and shifting its colour slightly each pass, so edges fade into each other. Every skin shadow, iris band and lid shading is built this way.
+- The medium is always PAINT, whatever the requested style: build every area by repetition, drawing the same shape 20-40 times in a for-loop with low alpha (8-25), shifting its colour and position slightly each pass so edges break up and pigment varies. Hard geometric shapes are allowed when the style asks for them, but they must be painted this way rather than filled flat.
+- Give the whole canvas a painted ground first, in colours that suit the requested style, then paint the eye over it.
 - Do NOT hatch or scribble with the hatch brushes: use p5.brush only for individual lash strands, brow hairs and stray hair strands.
 - Allowed brush calls: brush.pick(name), brush.stroke(color), brush.strokeWeight(w), brush.noStroke(), brush.fill(color,alpha), brush.bleed(amount), brush.noFill(), brush.line(x1,y1,x2,y2), brush.circle(x,y,r), brush.polygon([[x,y],...]), brush.spline([[x,y],...], curvature), brush.flowLine(x,y,length,dirAngle), brush.setHatch(brushName,color,weight), brush.hatch(dist,angle,{rand:0.1,continuous:true}), brush.noHatch(), brush.field("seabed"), brush.noField().
 - brush.fill(colour, alpha) + brush.bleed(0.05-0.4) paint watercolour washes with soft blooming edges: this is the main way to build skin, sclera and iris. Call brush.noStroke() before a filled shape so it has no outline, brush.noFill() when you are done with washes, and brush.stroke(colour)/brush.strokeWeight(w) before drawing hairs.
@@ -61,7 +91,7 @@ Rules:
 - Draw BIG: the eye opening spans about 380 of the 512 canvas and the socket shading spans about 460. A drawing whose features sit in the middle 150 pixels scores zero.
 - Never use brush.beginShape/vertex/endShape or brush.rect.
 - Brush names available to brush.pick and brush.setHatch: "pen", "rotring", "2B", "HB", "2H", "cpencil", "charcoal", "hatch_brush", "marker", "marker2". Never use "spray" — speckle textures are rejected.
-- The canvas is fully painted skin, not white paper: start with a skin-tone background. Speckle and noise textures score zero.
+- The canvas is fully painted, never white paper: start with a background colour that suits the style. Speckle and noise textures score zero.
 - No loadImage, no fetch/XHR, no DOM access, no external assets, no comments longer than one line.
 - Compose one eye, filling most of the 512x512 canvas, as if photographed close up.
 
@@ -105,15 +135,19 @@ lash length to suit the brief, but keep the anatomy and the soft painted look:
    the lid rim, 10-20 short fine lower lashes, and a pinkish tear duct.
 8. Brow: an arc of 40+ short fine brush strokes above the eye, dark at the inner
    end, fading and sweeping outward. Add 2-3 stray hair strands across the skin.
-No hard outlines, no flat cel-shaded blocks, no black wedges, no white paper
-background: soft blended skin, gradient iris, fine individual lash hairs.
+9. Style: on top of that anatomy, commit hard to the style the brief asks for —
+   scanline bands, ornamental curves, torn collage planes, radiating waves,
+   carved planes — painted in the same layered low-alpha way, and never so
+   opaque that the iris, pupil, highlight and lashes stop being readable.
+No black wedges, no white paper background, no speckle noise: a painted ground,
+a readable eye, and fine individual lash hairs along the lid.
 """
 
 USER_TEMPLATE = (
-    "Paint {subject} with an iris in {color}, in {style}. "
-    "Soft blended skin around the whole socket, a gradient iris with a dark "
-    "limbal ring and one small specular highlight, fine individual lash strands "
-    "and a soft brow — no hard outlines, no flat cel-shaded blocks."
+    "Paint {subject} with an iris in {color}. Style: {style}. "
+    "Paint the whole canvas, keep the eye anatomy readable — sclera, gradient "
+    "iris with a pupil and a small specular highlight, a dense fan of fine lash "
+    "hairs along the upper lid — and push the style hard."
 )
 
 
@@ -125,9 +159,14 @@ def shuffled_combos(seed: int = 7) -> list[tuple[str, str, str]]:
 
 def build_prompts(n: int, combos: list[tuple[str, str, str]]) -> list[dict[str, str]]:
     rows = []
-    for subject, color, style in itertools.islice(itertools.cycle(combos), n):
+    for subject, color, family in itertools.islice(itertools.cycle(combos), n):
         rows.append(
-            {"prompt": USER_TEMPLATE.format(subject=subject, color=color, style=style)}
+            {
+                "prompt": USER_TEMPLATE.format(
+                    subject=subject, color=color, style=STYLE_FAMILIES[family]
+                ),
+                "family": family,
+            }
         )
     return rows
 
@@ -159,7 +198,9 @@ class EyePromptDataset(DatasetConfig):
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": r["prompt"]},
                 ],
-                "label": r["prompt"],
+                # The reward needs the style family as well as the brief, so it
+                # can compare the render against the loved images of that family.
+                "label": f"{r['family']}::{r['prompt']}",
             }
             for r in rows
         ]
@@ -424,100 +465,129 @@ JUDGE_MODEL = "Qwen/Qwen3.8-27B"
 # field empty and every vote unparseable, so thinking is turned off explicitly.
 JUDGE_TEMPLATE_KWARGS = {"enable_thinking": False}
 
-# Reference eyes the candidate is compared against, shipped into the training
-# image by launch(). Absolute yes/no questions do not work here: the judge calls
-# a circle inside a box an eye, so it is asked to grade against a real drawing.
-LOCAL_REF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "refs")
-REF_DIRS = ("/root/eye_refs", LOCAL_REF_DIR)
-
-
-def reference_pngs() -> list[bytes]:
-    import glob
-
-    for d in REF_DIRS:
-        paths = sorted(glob.glob(os.path.join(d, "ref_*.png")))
-        if paths:
-            return [open(p, "rb").read() for p in paths]
-    return []
-
-
-RATING_SCALE = (
-    "0 = not an eye at all (random lines, blobs, boxes, lone circles)\n"
-    "1 = only vaguely eye-suggestive: a dark smudge on skin, or a flat cartoon "
-    "eye with hard outlines on bare white paper\n"
-    "2 = readable eye with an iris and pupil sitting in a pale eye opening, but "
-    "hard edged, or missing skin around it, or missing lashes\n"
-    "3 = softly painted eye: skin-toned lids and socket around it, a gradient "
-    "iris with a pupil and a small highlight, and lashes along the lid\n"
-    "4 = as painterly as A: smoothly blended skin, gradient iris with a dark "
-    "limbal ring and one small specular, fine individual lash hairs and a brow"
+# The user hand-rated 220 eye illustrations into love / okay / nope. Asking the
+# VLM which of two images is better does NOT recover that taste: on held-out
+# rated images its verdicts ranked rejected images above loved ones about as
+# often as not (AUC ~0.5). So taste is learned from the ratings directly, by a
+# ridge probe over CLIP embeddings of all 220 images (held-out love/nope
+# AUC 0.78, 0.71 when whole style families are held out), and the VLM is left to
+# do only what a probe cannot: check that the drawing is still an eye.
+LOCAL_PROBE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "taste_probe.npz"
 )
+# On a rollout worker the module arrives by cloudpickle without its directory, so
+# the probe weights and CLIP snapshot are baked into the image at these paths.
+REMOTE_PROBE_PATH = "/root/eye_taste/taste_probe.npz"
+REMOTE_CLIP_DIR = "/root/eye_taste/clip"
+_PROBE: dict[str, object] = {}
+# Renders are scored concurrently, and importing transformers from several
+# threads at once yields a half-initialised module, so loading is serialised.
+# The lock is created on first use rather than at import: this module is
+# cloudpickled to the rollout workers, and a live lock among its globals makes
+# it unpicklable, which silently strips the reward's helpers.
+_LOCKS: dict[str, threading.Lock] = {}
 
-# Each check answered NO caps the rating, so an image missing the parts that make
-# an eye read as an eye cannot be scored highly however painterly it looks.
+
+def _probe():
+    """CLIP encoder plus the fitted probe weights, loaded once per worker."""
+    with _LOCKS.setdefault("probe", threading.Lock()):
+        if "model" not in _PROBE:
+            _load_probe()
+    return _PROBE
+
+
+def _load_probe() -> None:
+    import numpy as np
+    import torch
+    from transformers import CLIPModel, CLIPProcessor
+
+    path = REMOTE_PROBE_PATH if os.path.exists(REMOTE_PROBE_PATH) else LOCAL_PROBE_PATH
+    data = np.load(path, allow_pickle=False)
+    name = REMOTE_CLIP_DIR if os.path.isdir(REMOTE_CLIP_DIR) else str(data["model"])
+    _PROBE.update(
+        model=CLIPModel.from_pretrained(name).eval(),
+        proc=CLIPProcessor.from_pretrained(name),
+        w=data["w"],
+        lo=float(data["lo"]),
+        hi=float(data["hi"]),
+        torch=torch,
+    )
+
+
+def taste_score(png: bytes) -> float:
+    """The user's rated preference for this image, mapped to roughly [0, 1].
+
+    The anchors are the probe's mean score on the images they rejected and on the
+    ones they loved, mapped to 0.15 and 0.85 by a logistic curve. Hard clipping
+    was worse: half the renders from earlier runs landed below the rejected mean,
+    so a clipped term gave the whole bottom of the batch identical reward and no
+    gradient to climb.
+    """
+    import io
+    import math
+
+    from PIL import Image
+
+    p = _probe()
+    img = Image.open(io.BytesIO(png)).convert("RGB")
+    with p["torch"].no_grad():
+        f = p["model"].get_image_features(
+            **p["proc"](images=[img], return_tensors="pt")
+        )
+        # Newer transformers wrap the projected embedding in an output object.
+        if hasattr(f, "pooler_output"):
+            f = f.pooler_output
+        v = (f / f.norm(dim=-1, keepdim=True)).numpy()[0]
+    raw = float(v @ p["w"][:-1] + p["w"][-1])
+    t = (raw - p["lo"]) / (p["hi"] - p["lo"])
+    return 1.0 / (1.0 + math.exp(-3.47 * (t - 0.5)))
+
+
+# Each check answered NO caps the whole reward, so an image the probe likes for
+# its colour and texture cannot score highly if it stopped being an eye.
 CHECKS = (
     (
         "SCLERA",
         "is a pale almond-shaped eye white visible on BOTH sides of the iris, "
-        "rather than only a dark smudge on skin",
-        1,
+        "rather than only a dark smudge",
+        0.30,
     ),
     (
         "IRIS",
-        "is the iris a graded disc with a darker rim and a distinctly darker "
-        "pupil inside it",
-        2,
+        "is the iris a graded disc with a distinctly darker pupil inside it",
+        0.45,
     ),
     (
         "LASHES",
         "do the lashes run along the upper lid line as fine hairs, rather than "
         "spraying outward from the middle of the eye",
-        2,
+        0.65,
     ),
 )
 CHECK_BLOCK = "\n".join(
     f"{name}: YES or NO - {question}?" for name, question, _ in CHECKS
 )
 
-# Lashes are the part the policy skips: it settles on a bare sclera+iris template
-# because the 0-4 style scale barely moves when lashes are missing. They get
-# their own graded question and their own slice of the reward.
+# Lashes are the part the policy skips, because no other term moves much when
+# they are missing, so they get their own graded question and slice of reward.
 LASH_QUESTION = (
-    "LASHFAN: 0, 1 or 2 for the lashes in B - 0 = none, or only stray hairs "
-    "floating away from the lid; 1 = a few short hairs on the lid line; "
-    "2 = a dense fan of many fine separate lash hairs following the upper lid "
-    "and curling up, like A"
+    "LASHFAN: 0, 1 or 2 for the lashes - 0 = none, or only stray hairs floating "
+    "away from the lid; 1 = a few short hairs on the lid line; 2 = a dense fan "
+    "of many fine separate lash hairs following the upper lid and curling up"
 )
-LASH_WEIGHT = 0.2
-# Anatomy is worth far more than ink: a 1 must not be a comfortable place to sit.
-RATING_REWARD = {0: 0.0, 1: 0.08, 2: 0.35, 3: 0.7, 4: 1.0}
+TASTE_WEIGHT = 0.55
+ANATOMY_WEIGHT = 0.25
+LASH_WEIGHT = 0.20
+JUDGE_VOTES = 2
 
 
-def side_by_side(ref: bytes, cand: bytes) -> bytes:
-    """Reference on the left, candidate on the right, labelled A and B."""
-    import io
+def judge_vote(png: bytes, prompt: str) -> tuple[float, dict]:
+    """One VLM vote on eye anatomy: which parts are present, how the lashes read."""
+    import time
 
-    from PIL import Image, ImageDraw
-
-    a = Image.open(io.BytesIO(ref)).convert("RGB").resize((384, 384))
-    b = Image.open(io.BytesIO(cand)).convert("RGB").resize((384, 384))
-    sheet = Image.new("RGB", (784, 410), "white")
-    sheet.paste(a, (0, 26))
-    sheet.paste(b, (400, 26))
-    draw = ImageDraw.Draw(sheet)
-    draw.text((150, 8), "A (reference eye)", fill="black")
-    draw.text((550, 8), "B (candidate)", fill="black")
-    draw.line([(392, 0), (392, 410)], fill="black")
-    buf = io.BytesIO()
-    sheet.save(buf, "PNG")
-    return buf.getvalue()
-
-
-def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
-    """Grade the candidate against a reference eye on a 0-4 anatomy scale."""
     import httpx
 
-    b64 = base64.b64encode(side_by_side(ref, png)).decode()
+    b64 = base64.b64encode(png).decode()
     body = {
         "model": JUDGE_MODEL,
         "max_tokens": 320,
@@ -531,21 +601,12 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
                     {
                         "type": "text",
                         "text": (
-                            "Image A is a reference illustration of an eye. "
-                            "Image B is a candidate drawing, made for the "
-                            f'brief: "{prompt}"\n\nFirst line, starting with '
-                            "B_IS:, describe in under 12 words what shapes B "
-                            "actually contains.\nThen answer these about B, one "
-                            f"per line, exactly as named:\n{CHECK_BLOCK}\n"
-                            f"{LASH_QUESTION}\n"
-                            "Then a line starting with "
-                            "RATING:, a single digit 0-4 for how much B looks "
-                            "like a SOFT SEMI-REALISTIC PAINTED eye in the "
-                            "same style as A (blended skin-tone lids and "
-                            "socket, no hard cartoon outlines, gradient iris "
-                            "with a dark limbal ring and one small specular, "
-                            "fine individual lash hairs, a soft brow):\n"
-                            f"{RATING_SCALE}"
+                            "This illustration was drawn for the brief:\n"
+                            f'"{prompt}"\n\n'
+                            "First line, starting with IMAGE_IS:, describe in "
+                            "under 12 words what shapes the image actually "
+                            "contains. Then answer these, one per line, exactly "
+                            f"as named:\n{CHECK_BLOCK}\n{LASH_QUESTION}"
                         ),
                     },
                     {
@@ -560,8 +621,6 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
         "Modal-Key": os.environ.get("MODAL_KEY", ""),
         "Modal-Secret": os.environ.get("MODAL_SECRET", ""),
     }
-    import time
-
     last_err = ""
     for attempt in range(10):
         if attempt:
@@ -576,50 +635,52 @@ def judge_once(png: bytes, prompt: str, ref: bytes) -> tuple[float, dict]:
             resp.raise_for_status()
             text = resp.json()["choices"][0]["message"]["content"] or ""
             upper = text.upper()
-            m = re.search(r"RATING:\s*\**\s*([0-4])", upper)
-            if m:
-                rating = int(m.group(1))
-                missing = ""
-                for name, _, cap in CHECKS:
-                    answer = re.search(rf"{name}:\s*\**\s*(YES|NO)", upper)
-                    if answer and answer.group(1) == "NO":
-                        rating = min(rating, cap)
-                        missing += name[0]
+            answers = {
+                name: re.search(rf"{name}:\s*\**\s*(YES|NO)", upper)
+                for name, _, _ in CHECKS
+            }
+            if any(answers.values()):
+                missing = "".join(
+                    name[0]
+                    for name, _, _ in CHECKS
+                    if answers[name] is None or answers[name].group(1) == "NO"
+                )
+                present = 1.0 - len(missing) / len(CHECKS)
                 fan = re.search(r"LASHFAN:\s*\**\s*([0-2])", upper)
-                lash = int(fan.group(1)) / 2 if fan else 0.0
-                desc = text.split("B_IS:")[-1].splitlines()[0].strip()
-                style = RATING_REWARD[rating]
-                return (1 - LASH_WEIGHT) * style + LASH_WEIGHT * lash, {
-                    "judge": str(rating),
-                    "judge_missing": missing,
-                    "judge_lash": f"{lash:.1f}",
-                    "judge_desc": desc[:120],
+                desc = text.split("IMAGE_IS:")[-1].splitlines()[0].strip()
+                return present, {
+                    "missing": missing,
+                    "lash": int(fan.group(1)) / 2 if fan else 0.0,
+                    "desc": desc[:120],
                 }
             last_err = f"unparseable: {text[:80]}"
         except Exception as e:
             last_err = f"{type(e).__name__}: {e}"[:200]
-    return 0.0, {"judge_error": last_err}
+    return 0.0, {"judge_error": last_err, "lash": 0.0, "missing": ""}
 
 
-JUDGE_VOTES = 3
-
-
-def judge_image(png: bytes, prompt: str) -> tuple[float, dict]:
-    """Average votes against several references — one Gemma vote is too noisy."""
+def judge_image(png: bytes, prompt: str, family: str) -> tuple[float, dict]:
+    """Score a render on the user's taste, gated by VLM eye-anatomy checks."""
     from concurrent.futures import ThreadPoolExecutor
 
-    refs = reference_pngs()
-    if not refs:
-        return 0.0, {"judge_error": "no reference eyes found"}
-    chosen = [refs[i % len(refs)] for i in range(JUDGE_VOTES)]
+    taste = taste_score(png)
     with ThreadPoolExecutor(max_workers=JUDGE_VOTES) as pool:
-        votes = list(pool.map(lambda r: judge_once(png, prompt, r), chosen))
-    scores = [s for s, _ in votes]
-    return sum(scores) / len(scores), {
-        "judge": " ".join(m.get("judge", "?") for _, m in votes),
-        "judge_missing": " ".join(m.get("judge_missing", "") or "-" for _, m in votes),
-        "judge_lash": " ".join(m.get("judge_lash", "?") for _, m in votes),
-        "judge_desc": votes[0][1].get("judge_desc", ""),
+        votes = list(pool.map(lambda _: judge_vote(png, prompt), range(JUDGE_VOTES)))
+    anatomy = sum(s for s, _ in votes) / len(votes)
+    lash = sum(m.get("lash", 0.0) for _, m in votes) / len(votes)
+    score = TASTE_WEIGHT * taste + ANATOMY_WEIGHT * anatomy + LASH_WEIGHT * lash
+    # A missing sclera, iris or lash line caps the whole reward: the probe can be
+    # charmed by a striking image that is not an eye, and this is the backstop.
+    for name, _, cap in CHECKS:
+        if sum(1 for _, m in votes if name[0] in m.get("missing", "")) > len(votes) / 2:
+            score = min(score, cap)
+    return score, {
+        "judge_family": family,
+        "taste": round(taste, 3),
+        "judge_anatomy": round(anatomy, 3),
+        "judge_lash": round(lash, 2),
+        "judge_missing": " ".join(m.get("missing", "") or "-" for _, m in votes),
+        "judge_desc": votes[0][1].get("desc", ""),
     }
 
 
@@ -680,7 +741,10 @@ def speckle_fraction(png: bytes) -> float:
     return sum(1 for v, b in zip(px, bpx) if abs(v - b) > 40) / len(px)
 
 
-def score_response(response: str, prompt: str) -> tuple[float, dict, bytes | None]:
+def score_response(response: str, label: str) -> tuple[float, dict, bytes | None]:
+    family, _, prompt = label.partition("::")
+    if not prompt:
+        family, prompt = next(iter(STYLE_FAMILIES)), label
     code = extract_sketch(response)
     if code is None:
         return 0.0, {"gate": "no valid sketch"}, None
@@ -698,7 +762,7 @@ def score_response(response: str, prompt: str) -> tuple[float, dict, bytes | Non
     # otherwise read to the judge as texture and score like real rendering.
     if speckle > 0.12:
         return 0.02, meta, png
-    judge_score, judge_meta = judge_image(png, prompt)
+    judge_score, judge_meta = judge_image(png, prompt, family)
     meta.update(judge_meta)
     return 0.05 + 0.95 * judge_score, meta, png
 
@@ -706,8 +770,8 @@ def score_response(response: str, prompt: str) -> tuple[float, dict, bytes | Non
 async def eye_rm(args, sample, **kwargs) -> float:
     import asyncio
 
-    prompt = getattr(sample, "label", None) or ""
-    reward, meta, png = await asyncio.to_thread(score_response, sample.response, prompt)
+    label = getattr(sample, "label", None) or ""
+    reward, meta, png = await asyncio.to_thread(score_response, sample.response, label)
     md = {**(getattr(sample, "metadata", None) or {}), **meta}
     if png is not None:
         md["image"] = png
@@ -736,10 +800,17 @@ def launch(
     dataset = EyePromptDataset(n_train=n_train, always_prepare=True)
 
     def overlay(image):
-        # The reward compares each render against these reference eyes.
+        # The reward scores each render with a CLIP probe fitted on the user's
+        # ratings, so the worker needs CLIP weights and the probe file locally.
         return image.run_commands(
             "uv pip install --system 'modal~=1.5.2' 'httpx~=0.28.1' 'pillow~=11.1'",
-        ).add_local_dir(LOCAL_REF_DIR, "/root/eye_refs", copy=True)
+            # The HF cache path is a volume mount at runtime, so the build
+            # has to download through a scratch cache and leave it empty.
+            f'HF_HOME=/tmp/hf python -c "from huggingface_hub import '
+            f"snapshot_download as d; d('openai/clip-vit-base-patch32', "
+            f"local_dir='{REMOTE_CLIP_DIR}')\"",
+            "rm -rf /tmp/hf /root/.cache/huggingface",
+        ).add_local_file(LOCAL_PROBE_PATH, REMOTE_PROBE_PATH, copy=True)
 
     # Capture every sample's render: rollout_batch_size * n_samples_per_prompt.
     all_images = str(8 * 8)

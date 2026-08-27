@@ -10,6 +10,7 @@ from train_eyes import (  # noqa: E402
     render_sketch,
     score_response,
     speckle_fraction,
+    taste_score,
 )
 
 GOOD_SKETCH = """function setup() {
@@ -199,6 +200,9 @@ PROMPT = (
     "Paint a young woman's eye in soft daylight with an iris in mossy green, "
     "in soft digital painting, semi-realistic."
 )
+FAMILY = "nouveau"
+# The reward reads the style family off the front of the dataset label.
+LABEL = f"{FAMILY}::{PROMPT}"
 
 
 def main():
@@ -212,7 +216,7 @@ def main():
     # a sketch that draws nothing: recovery may salvage the canvas, but the
     # blank-ink gate has to keep its reward at the floor
     bad_reward, bad_meta, _ = score_response(
-        f"```javascript\n{BAD_SKETCH_RUNTIME}\n```", PROMPT
+        f"```javascript\n{BAD_SKETCH_RUNTIME}\n```", LABEL
     )
     print("bad sketch reward:", bad_reward, bad_meta)
     assert bad_reward <= 0.02
@@ -223,21 +227,32 @@ def main():
     assert png is not None
     open("/tmp/eye_render.png", "wb").write(png)
 
-    # judge: the painted eye must beat both earlier styles
-    score, jmeta = judge_image(png, PROMPT)
+    # taste probe: monotone in [0, 1], and never saturated flat, so every render
+    # in a batch gets a distinguishable score
+    painted_taste = taste_score(png)
+    print("taste painted:", round(painted_taste, 3))
+    assert 0.0 < painted_taste < 1.0
+
+    # judge: taste probe plus anatomy checks
+    score, jmeta = judge_image(png, PROMPT, FAMILY)
     print("judge painted:", score, jmeta)
     print("painted speckle:", round(speckle_fraction(png), 3))
+    # The bar is the user's ratings, not a fixed style: they loved flat anime
+    # eyes and rejected sparse pencil line work, so anime is allowed to outscore
+    # the painterly sketch, while pencil hatching has to come last.
+    scores = {"painted": score}
     for name, sketch in (("anime", ANIME_SKETCH), ("pencil", PENCIL_SKETCH)):
         other_png, other_meta = render_sketch(sketch)
         assert other_png is not None, other_meta
-        other_score, other_jmeta = judge_image(other_png, PROMPT)
-        print(f"judge {name}:", other_score, other_jmeta)
-        assert score > other_score, (name, score, other_score)
+        scores[name], other_jmeta = judge_image(other_png, PROMPT, FAMILY)
+        print(f"judge {name}:", scores[name], other_jmeta)
+    assert scores["painted"] > scores["pencil"], scores
+    assert scores["anime"] > scores["pencil"], scores
 
     # full path
-    reward, smeta, _ = score_response(GOOD_RESPONSE, PROMPT)
+    reward, smeta, _ = score_response(GOOD_RESPONSE, LABEL)
     print("full reward:", reward, smeta)
-    reward0, smeta0, _ = score_response("I cannot draw that.", PROMPT)
+    reward0, smeta0, _ = score_response("I cannot draw that.", LABEL)
     assert reward0 == 0.0
     print("malformed reward:", reward0, smeta0)
 
