@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from enum import Enum
 from typing import Any, Literal
+import hashlib
 import json
 import random
 import shutil
@@ -26,6 +27,11 @@ from datasets import Dataset as HFDataset
 from modal_training_gym.common.errors import TrainingGymConfigError
 
 DatasetRow = dict[str, Any]
+
+
+def _materialization_fingerprint(fields: dict[str, Any]) -> str:
+    payload = json.dumps(fields, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 class DatasetType(Enum):
@@ -199,6 +205,25 @@ class HuggingFaceDataset(DatasetConfig):
         return self.hf_repo
 
     @property
+    def cache_key(self) -> str:
+        return _materialization_fingerprint(
+            {
+                "dataset_class": f"{type(self).__module__}.{type(self).__qualname__}",
+                "hf_config": self.hf_config,
+                "hf_repo": self.hf_repo,
+                "hf_split": self.hf_split,
+                "input_column": self.input_column,
+                "input_key": self.input_key,
+                "label_key": self.label_key,
+                "n_rows": self.n_rows,
+                "output_column": self.output_column,
+                "output_format": self.output_format,
+                "prompt_template": self.prompt_template,
+                "system_prompt": self.system_prompt,
+            }
+        )
+
+    @property
     def _emits_chat(self) -> bool:
         return bool(self.input_column and self.output_column)
 
@@ -354,6 +379,34 @@ class HarborDataset(DatasetConfig):
     @property
     def needs_refresh(self) -> bool:
         return self._needs_refresh
+
+    @property
+    def cache_key(self) -> str:
+        return _materialization_fingerprint(
+            {
+                "dataset_class": f"{type(self).__module__}.{type(self).__qualname__}",
+                "dataset_name": self.dataset_name,
+                "eval_repeats": self.eval_repeats,
+                "eval_size": self.eval_size,
+                "input_key": self.input_key,
+                "instruction_path": self.instruction_path,
+                "label_key": self.label_key,
+                "label_metadata_path": self.label_metadata_path,
+                "output_format": self.output_format,
+                "path": self.path,
+                "prompt_template": self.prompt_template,
+                "shuffle_seed": self.shuffle_seed,
+                "shuffle_tasks": self.shuffle_tasks,
+                "split": self.split,
+                "system_prompt": self.system_prompt,
+                "task_glob": self.task_glob,
+                "task_names": self.task_names,
+                "task_root": self.task_root,
+                "test_data_dir": self.test_data_dir,
+                "train_repeats": self.train_repeats,
+                "train_size": self.train_size,
+            }
+        )
 
     def _harbor_dataset_ref(self) -> str:
         if "@" in self.dataset_name:
