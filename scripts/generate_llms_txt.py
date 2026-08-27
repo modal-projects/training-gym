@@ -28,6 +28,19 @@ SITE = "https://gym.modal.dev"
 REPO = "https://github.com/modal-projects/training-gym"
 
 
+def flatten_doc_id(entry: str) -> str:
+    path = entry.replace("\\", "/")
+    suffix_at = path.rfind(".")
+    if suffix_at > path.rfind("/"):
+        path = path[:suffix_at]
+    if path.endswith("/index"):
+        path = path[: -len("/index")]
+    parts = [part for part in path.split("/") if part]
+    if len(parts) <= 2:
+        return path
+    return f"{parts[0]}/{parts[-1]}"
+
+
 def _site_url(*parts: str) -> str:
     path = "/".join(part.strip("/") for part in parts if part)
     return f"{SITE}/{path}" if path else f"{SITE}/"
@@ -144,7 +157,7 @@ def _render(
             lines.append(f"### {section.replace('-', ' ').title()}")
             lines.append("")
         for slug, title, _order in section_guides:
-            lines.append(_item(title, _site_url("guides", slug)))
+            lines.append(_item(title, _site_url(flatten_doc_id(f"guides/{slug}"))))
         lines.append("")
 
     lines.extend(

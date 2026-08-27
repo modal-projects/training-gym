@@ -55,7 +55,7 @@ from modal_training_gym import (
 # to serve the student. However, for the teacher model, we need per-token logprobs, 
 # which are not currently supported by Endpoints when speculative decoding is
 # enabled. So we instead use a
-# [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment)
+# [CustomDeployment](https://gym.modal.dev/reference/customdeployment)
 # to serve the teacher.
 
 student_model = Qwen3_5_4B()

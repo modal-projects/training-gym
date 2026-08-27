@@ -11,6 +11,20 @@ _ASTRO_REDIRECT = re.compile(
     re.IGNORECASE,
 )
 
+DIRECTORY_HOME_REDIRECTS = frozenset(
+    {
+        "/guides",
+        "/reference",
+        "/tutorials",
+        "/tutorials/agent",
+        "/tutorials/rl",
+    }
+)
+
+
+def redirect_status(request_path: str) -> int:
+    return 302 if request_path in DIRECTORY_HOME_REDIRECTS else 301
+
 
 def _request_path(parent: Path) -> str:
     return "/" if parent == Path(".") else f"/{parent.as_posix()}"

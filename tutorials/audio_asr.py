@@ -37,7 +37,7 @@ from modal_training_gym import (
 #
 # Since audio models are not yet supported on
 # [Endpoints](https://modal.com/docs/guide/endpoints), we use a
-# [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment)
+# [CustomDeployment](https://gym.modal.dev/reference/customdeployment)
 # to deploy the base and trained models.
 
 model = Qwen3_ASR_1_7B()

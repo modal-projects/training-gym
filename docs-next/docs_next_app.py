@@ -19,7 +19,7 @@ from pathlib import Path
 
 import modal
 
-from astro_redirects import refresh_map
+from astro_redirects import redirect_status, refresh_map
 
 DOCS_DIR = Path(__file__).resolve().parent
 DIST_DIR = DOCS_DIR / "dist"
@@ -99,12 +99,13 @@ def serve():
     async def astro_refresh_redirects(request: Request, call_next):
         if request.method not in ("GET", "HEAD"):
             return await call_next(request)
-        target = redirects.get(request.url.path.rstrip("/") or "/")
+        path = request.url.path.rstrip("/") or "/"
+        target = redirects.get(path)
         if target is None:
             return await call_next(request)
         query = request.url.query
         location = f"{target}?{query}" if query else target
-        return RedirectResponse(url=location, status_code=302)
+        return RedirectResponse(url=location, status_code=redirect_status(path))
 
     web.mount("/", StaticFiles(directory=REMOTE_DIST, html=True), name="static")
 

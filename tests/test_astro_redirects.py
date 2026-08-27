@@ -1,5 +1,3 @@
-"""Astro meta-refresh map from dist/tarball, and nginx 302 locations."""
-
 from __future__ import annotations
 
 import importlib.util
@@ -48,3 +46,33 @@ def test_refresh_map_and_nginx_slash_locations(tmp_path: Path) -> None:
     snippet = previews._docs_nginx_refresh_inc(expected)
     assert f"location = /guides {{ return 302 {TARGET}$is_args$args; }}" in snippet
     assert f"location = /guides/ {{ return 302 {TARGET}$is_args$args; }}" in snippet
+
+    page_move = {"/guides/tools/dashboard": "/guides/dashboard"}
+    move_snippet = previews._docs_nginx_refresh_inc(page_move)
+    assert (
+        "location = /guides/tools/dashboard { return 301 /guides/dashboard$is_args$args; }"
+        in move_snippet
+    )
+    for section_home in (
+        "/guides",
+        "/reference",
+        "/tutorials",
+        "/tutorials/agent",
+        "/tutorials/rl",
+    ):
+        assert astro.redirect_status(section_home) == 302
+
+    for moved_page in (
+        "/guides/tools/dashboard",
+        "/guides/tools/agent-driven-training",
+        "/guides/agent-driven-training",
+        "/reference/core/modelconfig",
+        "/tutorials/rl/000_rl_basics",
+    ):
+        assert astro.redirect_status(moved_page) == 301
+
+
+def test_old_agent_guide_slugs_redirect_to_agent() -> None:
+    config = (ROOT / "docs-next" / "astro.config.mjs").read_text()
+    assert "'/guides/tools/agent-driven-training': '/guides/agent'" in config
+    assert "'/guides/agent-driven-training': '/guides/agent'" in config
