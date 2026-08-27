@@ -14,7 +14,6 @@ class Qwen3_5_4b_Miles_Recipe(MilesRecipe):
 
     model_config_class: ClassVar[type[ModelConfig]] = Qwen3_5_4B
 
-    gpu_type: str = "H100"
     miles_model_name: str = "qwen3.5-4B"
     environment: dict[str, str] = field(
         default_factory=lambda: {
@@ -29,7 +28,6 @@ class Qwen3_5_4b_Miles_Recipe(MilesRecipe):
 
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
-    colocate: bool = True
 
     num_rollout: int = 3000
     rollout_batch_size: int = 32
@@ -73,7 +71,6 @@ class Qwen3_5_4b_Miles_Recipe(MilesRecipe):
     adam_beta1: float = 0.9
     adam_beta2: float = 0.98
 
-    rollout_num_gpus_per_engine: int = 1
     sglang_mem_fraction_static: float = 0.7
 
     attention_dropout: float = 0.0

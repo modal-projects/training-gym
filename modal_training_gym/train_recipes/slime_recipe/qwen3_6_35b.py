@@ -10,14 +10,12 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 class Qwen3_6_35b_Recipe(SlimeRecipe):
     """Qwen3.6-35B-A3B (MoE) on 1×8×H100 with TP2/PP2/CP1/EP4."""
 
-    gpu_type: str = "H100"
     slime_model_script: str = "scripts/models/qwen3.5-35B-A3B.sh"
     hf_checkpoint: str = "Qwen/Qwen3.6-35B-A3B"
     train_function_kwargs: dict[str, int] = field(
         default_factory=lambda: {"ephemeral_disk": 1_048_576}
     )
 
-    colocate: bool = True
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
 

@@ -472,21 +472,19 @@ class SlimeRecipe(BaseTrainRecipe):
         Parser for reasoning/thinking output.
     """
 
-    # ── Required: cluster and parallelism ──────────────────────────────────
-    gpu_type: str  # Modal GPU type for every node, e.g. "H100" or "B200"
-    colocate: bool  # trainer + rollout engines share GPUs (vs. disaggregated)
-    tensor_model_parallel_size: int  # Megatron TP size for the actor
+    # ── Required ────────────────────────────────────────────────────────────
     sequence_parallel: bool  # Megatron sequence parallelism (requires TP > 1)
-    rollout_num_gpus_per_engine: int  # GPUs per sglang engine (its TP size)
-
-    # ── Required: rollout ──────────────────────────────────────────────────
-    num_rollout: int  # total rollout (= training) steps for the run
-    rollout_batch_size: int  # prompts sampled per rollout step
     rollout_max_response_len: int  # max generated tokens per sample
     rollout_temperature: float  # sampling temperature for generation
-
-    # ── Required: checkpointing ────────────────────────────────────────────
     save_interval: int  # save a checkpoint every N rollout steps
+
+    # ── Baseline topology and rollout ───────────────────────────────────────
+    gpu_type: str = "H100"
+    colocate: bool = True
+    tensor_model_parallel_size: int = 1
+    rollout_num_gpus_per_engine: int = 1
+    num_rollout: int = 1
+    rollout_batch_size: int = 8
 
     # ── App identity ─────────────────────────────────────────────────────────
     recipe_type: RecipeType = RecipeType.SLIME

@@ -91,7 +91,6 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     modality: Literal["text", "vision"] = "text"
 
     gpu_type: str = "H200"
-    colocate: bool = True
     image_run_commands: list[str] = field(default_factory=_image_patches)
 
     hf_checkpoint: str = "google/gemma-4-26B-A4B-it"

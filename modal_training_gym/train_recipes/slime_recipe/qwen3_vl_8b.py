@@ -12,17 +12,13 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 class Qwen3_VL_8b_Recipe(SlimeRecipe):
     """Qwen3-VL-8B vision-language GRPO on 1×8×H100, colocated."""
 
-    gpu_type: str = "H100"
-    colocate: bool = True
     tensor_model_parallel_size: int = 2
     sequence_parallel: bool = True
-    rollout_num_gpus_per_engine: int = 1
 
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
 
     num_rollout: int = 15
-    rollout_batch_size: int = 8
     n_samples_per_prompt: int = 4
     rollout_max_response_len: int = 256
     rollout_temperature: float = 1.0

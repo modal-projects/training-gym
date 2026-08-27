@@ -79,11 +79,7 @@ class Qwen3_ASR_1_7b_Recipe(SlimeRecipe):
     larger ``num_rollout``); everything else holds.
     """
 
-    gpu_type: str = "H100"
-    colocate: bool = True
-    tensor_model_parallel_size: int = 1
     sequence_parallel: bool = False
-    rollout_num_gpus_per_engine: int = 1
 
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 2

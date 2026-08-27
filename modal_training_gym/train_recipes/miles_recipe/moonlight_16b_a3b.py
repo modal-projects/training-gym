@@ -14,7 +14,6 @@ class Moonlight_16B_A3B_Recipe(MilesRecipe):
 
     model_config_class: ClassVar[type[ModelConfig]] = Moonlight_16B_A3B_Instruct
 
-    gpu_type: str = "H100"
     environment: dict[str, str] = field(
         default_factory=lambda: {
             "PYTHONPATH": "/root/Megatron-LM/",
@@ -28,7 +27,6 @@ class Moonlight_16B_A3B_Recipe(MilesRecipe):
 
     actor_num_nodes: int = 1
     actor_num_gpus_per_node: int = 8
-    colocate: bool = True
     use_miles_router: bool = True
 
     num_rollout: int = 3000

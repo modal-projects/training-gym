@@ -108,7 +108,6 @@ class _InklingSmallRecipe(MilesRecipe):
     # ── Cluster + parallelism ────────────────────────────────────────────────
     actor_num_nodes: int = 4
     actor_num_gpus_per_node: int = 8
-    colocate: bool = True
     tensor_model_parallel_size: int = 4
     sequence_parallel: bool = True
     pipeline_model_parallel_size: int = 8

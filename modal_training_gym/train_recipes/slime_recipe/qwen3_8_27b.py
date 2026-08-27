@@ -10,7 +10,6 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 class Qwen3_8_27b_Recipe(SlimeRecipe):
     """Qwen3.8-27B on 4×8×H100 using Slime's Qwen3.5-27B recipe."""
 
-    gpu_type: str = "H100"
     memory: int | tuple[int, int] | None = (128, 2_097_152)
     slime_model_script: str = "scripts/models/qwen3.5-27B.sh"
     hf_checkpoint: str = "Qwen/Qwen3.8-27B"
@@ -19,7 +18,6 @@ class Qwen3_8_27b_Recipe(SlimeRecipe):
         default_factory=lambda: {"ephemeral_disk": 1_048_576}
     )
 
-    colocate: bool = True
     actor_num_nodes: int = 4
     actor_num_gpus_per_node: int = 8
 
@@ -36,7 +34,6 @@ class Qwen3_8_27b_Recipe(SlimeRecipe):
 
     # ── Rollout ───────────────────────────────────────────────────────────
     num_rollout: int = 3000
-    rollout_batch_size: int = 8
     n_samples_per_prompt: int = 8
     global_batch_size: int = 64
     rollout_num_gpus_per_engine: int = 2

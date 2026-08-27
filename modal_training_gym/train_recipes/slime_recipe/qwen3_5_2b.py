@@ -8,13 +8,8 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 class Qwen3_5_2b_Recipe(SlimeRecipe):
     """Qwen3.5-2B on 1×8×H100, colocated GRPO."""
 
-    gpu_type: str = "H100"
-    colocate: bool = True
-    tensor_model_parallel_size: int = 1
     sequence_parallel: bool = False
-    rollout_num_gpus_per_engine: int = 1
 
-    num_rollout: int = 1
     rollout_batch_size: int = 24
     rollout_max_response_len: int = 4096
     rollout_temperature: float = 1.0

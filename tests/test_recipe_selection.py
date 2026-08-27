@@ -3,18 +3,13 @@ from typing import Any
 from modal_training_gym.common.dataset import HuggingFaceDataset
 from modal_training_gym.common.models import Qwen3_4B
 from modal_training_gym.common.train import TrainConfig
+from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4b_Recipe
 
 
 _SLIME_RECIPE_KW = {
-    "gpu_type": "H100",
-    "colocate": True,
-    "tensor_model_parallel_size": 1,
     "sequence_parallel": False,
-    "rollout_num_gpus_per_engine": 1,
-    "num_rollout": 1,
-    "rollout_batch_size": 16,
     "rollout_max_response_len": 4096,
     "rollout_temperature": 1.0,
     "save_interval": 10,
@@ -36,7 +31,21 @@ def _config(recipe: SlimeRecipe) -> TrainConfig:
 def test_generic_recipe_uses_framework_defaults_for_known_model() -> None:
     config = _config(SlimeRecipe(**_SLIME_RECIPE_KW))
 
-    assert config._prepare_recipe().n_samples_per_prompt == 2
+    recipe = config._prepare_recipe()
+    assert recipe.gpu_type == "H100"
+    assert recipe.tensor_model_parallel_size == 1
+    assert recipe.rollout_num_gpus_per_engine == 1
+    assert recipe.colocate is True
+    assert recipe.num_rollout == 1
+    assert recipe.n_samples_per_prompt == 2
+    assert recipe.rollout_batch_size == 8
+
+
+def test_miles_recipe_uses_shared_sampling_defaults() -> None:
+    recipe = MilesRecipe()
+
+    assert recipe.n_samples_per_prompt == 2
+    assert recipe.rollout_batch_size == 8
 
 
 def test_model_recipe_uses_its_class_defaults() -> None:
