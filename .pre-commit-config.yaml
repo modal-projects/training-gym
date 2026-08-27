@@ -19,4 +19,4 @@ repos:
         entry: uv run python -m scripts.generate_llms_txt
         language: system
         pass_filenames: false
-        files: ^(scripts/generate_llms_txt\.py|scripts/tutorial_index\.py|scripts/api_reference_manifest\.py|docs-next/public/llms\.txt|docs-next/src/content/docs/guides/.*\.md|tutorials/.*\.py)$
+        files: ^(scripts/generate_llms_txt\.py|scripts/tutorial_index\.py|scripts/api_reference_manifest\.py|README\.md|docs-next/public/llms\.txt|docs-next/src/content/docs/guides/.*\.md|tutorials/.*\.py)$
