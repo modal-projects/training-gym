@@ -51,6 +51,23 @@ const title = root?.text ?? '';
     <nav class="tg-toc" aria-label="Outline">
       <a href="#_top">{title}</a>
       {items.length > 0 && <Astro.self items={items} />}
+      <script is:inline>
+        const toc = document.currentScript?.closest('.tg-toc');
+        toc?.addEventListener('click', (event) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (!(event.target instanceof Element)) return;
+          const link = event.target.closest('a');
+          if (!(link instanceof HTMLAnchorElement)) return;
+          const target = document.getElementById(decodeURIComponent(link.hash.slice(1)));
+          if (!target) return;
+          event.preventDefault();
+          const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'auto'
+            : 'smooth';
+          target.scrollIntoView({ behavior });
+          history.pushState(null, '', link.hash);
+        });
+      </script>
     </nav>
   ) : items.length > 0 ? (
     <ul class="tg-toc__list">
