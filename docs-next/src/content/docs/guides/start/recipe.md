@@ -105,7 +105,7 @@ An example of a simple reward function is shown below. Take note of the `async` 
 ```python
 async def my_custom_rm(args, sample, **kwargs) -> float:
     response = model.parse_response(sample.response)
-    sample.metadata["em_dashes_used"] = response.count("—")
+    sample.metadata["em_dashes_used"] = response.content.count("—")
     return 1 if response.content == sample.label else 0
 
 
