@@ -78,7 +78,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
 
 print("running trained model evaluation...")
 correct = run_eval(deployment)
-print(f"percent correct: {print:.1%}")
+print(f"percent correct: {correct:.1%}")
 ```
 
 Or train the model further with the existing checkpoint as a starting point:
