@@ -1,4 +1,4 @@
-import copy
+import dataclasses as _dc
 import os
 import secrets as _secrets
 import sys
@@ -361,20 +361,19 @@ class TrainConfig:
         )
 
     def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
-        recipe = copy.deepcopy(self.recipe)
-        _try_validate_model_parallelism(recipe, self.model)
         if self.checkpoint is None:
-            return recipe
-        if self.checkpoint.checkpoint_type != CheckpointType.megatron:
-            raise TrainingGymConfigError(
-                "Training can only resume from a Megatron checkpoint; "
-                "Hugging Face exports are serving artifacts."
+            recipe = _dc.replace(self.recipe)
+        else:
+            if self.checkpoint.checkpoint_type != CheckpointType.megatron:
+                raise TrainingGymConfigError(
+                    "Training can only resume from a Megatron checkpoint; "
+                    "Hugging Face exports are serving artifacts."
+                )
+            recipe = _dc.replace(
+                self.recipe,
+                load=os.path.dirname(self.checkpoint.path.rstrip("/")),
             )
-        object.__setattr__(
-            recipe,
-            "load",
-            os.path.dirname(self.checkpoint.path.rstrip("/")),
-        )
+        _try_validate_model_parallelism(recipe, self.model)
         return recipe
 
     def _build_app(self, training_run_id: str | None = None):
