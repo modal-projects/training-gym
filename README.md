@@ -83,7 +83,7 @@ result = TrainConfig(
 print(result.training_run_id)
 ```
 
-And you can view in-progress training runs in the dashboard:
+And you can view in-progress training runs in the [dashboard](https://gym.modal.dev/guides/observability-dashboard):
 
 ```bash
 training-gym setup  # first-time deploy
