@@ -27,7 +27,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 - [Choosing a base model](https://gym.modal.dev/guides/model)
 - [Getting your data](https://gym.modal.dev/guides/dataset)
-- [Recipe](https://gym.modal.dev/guides/recipe)
+- [Cooking with a recipe](https://gym.modal.dev/guides/recipe)
 
 ### Tools
 

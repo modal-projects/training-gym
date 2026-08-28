@@ -2,7 +2,7 @@
 order: 2
 ---
 
-# Recipe
+# Cooking with a recipe
 
 Lastly, before we start training, we need a recipe.
 
