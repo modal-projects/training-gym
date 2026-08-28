@@ -90,6 +90,12 @@ PALETTES = [
 # calls the task actually needs beat it. Everything below is constraint, not
 # documentation — the canvas setup, the coordinate frame, the allowed calls, and
 # the failure modes that score zero.
+#
+# One rule is there because of a trace, not a guess. Ten smoke steps in, most
+# sketches compiled but rendered *grey*: the model had settled on p5's
+# single-argument grayscale form, `brush.fill(30, 100)`, which is legal p5 and
+# ignores the palette in the brief entirely. Reward alone would have unlearned
+# it eventually; one line demanding quoted hex strings does it for free.
 
 SYSTEM_PROMPT = """\
 You write p5.js sketches that paint a single watercolour flower using p5.brush.
@@ -102,6 +108,7 @@ Rules:
 - (0,0) is the CENTRE of the canvas; x and y run from -256 to 256. Compose around (0,0).
 - The only brush calls that exist are: brush.fill(colour, alpha), brush.noFill(), brush.stroke(colour), brush.noStroke(), brush.strokeWeight(w), brush.bleed(amount), brush.pick(name), brush.polygon([[x,y],...]), brush.circle(x,y,radius), brush.line(x1,y1,x2,y2). Any other brush.* call is a hallucination and will be dropped.
 - brush.pick names: "pen", "2B", "HB", "cpencil", "charcoal", "marker". Never "spray".
+- Every colour is a quoted hex string, e.g. brush.fill("#e2725b", 100). A bare number like brush.fill(30, 100) is GREYSCALE and scores zero. Pick 4-6 hex colours from the requested palette before you paint and use only those.
 - The third argument of brush.circle is a RADIUS, not a diameter.
 - p5's own background(), color(), lerpColor(), random(), sin(), cos() and for-loops are all available. p5 transforms (translate/rotate) do NOT reach the brush layer: compute every vertex in absolute canvas coordinates.
 - Watercolour is built by repetition: paint each shape 4-8 times in a loop with brush.bleed(0.1-0.3) and brush.fill(colour, 80-120), jittering position, angle and colour slightly each pass. Alpha under 40 is invisible however many passes you stack.
