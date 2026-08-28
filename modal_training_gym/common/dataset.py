@@ -64,6 +64,7 @@ class DatasetConfig(ABC):
     input_key: str = "input"
     needs_chat_template: bool = True
     needs_refresh: bool = False
+    writes_eval_paths: bool = True
     output_format: Literal["parquet", "jsonl"] = "parquet"
 
     @property
@@ -104,13 +105,19 @@ class DatasetConfig(ABC):
             cols.add(self.label_key)
         return cols
 
-    def write(self, path: str) -> None:
+    def _write_rows(self, rows: Iterable[DatasetRow], path: str) -> None:
         if self.output_format == "parquet":
-            HFDataset.from_list(list(self.rows())).to_parquet(path)
+            HFDataset.from_list(list(rows)).to_parquet(path)
         else:
             with open(path, "w") as f:
-                for row in self.rows():
+                for row in rows:
                     f.write(json.dumps(row) + "\n")
+
+    def write(self, path: str) -> None:
+        self._write_rows(self.rows(), path)
+
+    def write_eval(self, path: str) -> None:
+        self.write(path)
 
     def validate_write(self, path: str) -> None:
         """Sniff what ``write()`` wrote and confirm the columns the framework will index.
@@ -636,6 +643,14 @@ class HarborDataset(DatasetConfig):
             return self._repeat_rows(train_rows, int(self.train_repeats))
         return self._repeat_rows(eval_rows, int(self.eval_repeats))
 
+    def write_eval(self, path: str) -> None:
+        task_root = self._resolve_task_root()
+        base_rows = [
+            self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()
+        ]
+        _, eval_rows = self._split_rows(base_rows)
+        self._write_rows(self._repeat_rows(eval_rows, int(self.eval_repeats)), path)
+
     def to_pandas(self):
         import pandas as pd
 
@@ -657,6 +672,7 @@ class MultimodalDataset(DatasetConfig):
     constructor, or subclass and override ``source_rows()`` to generate them.
     """
 
+    writes_eval_paths = False
     modality: Literal["image", "audio", "video"] = "audio"
     # TODO(ben/joy): gate-check media at this boundary so the evals dashboard can
     # reliably visualize it. Two parts: (1) normalize each emitted media item to a

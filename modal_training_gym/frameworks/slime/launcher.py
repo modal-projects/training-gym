@@ -60,7 +60,7 @@ from modal_training_gym.common.launcher_helpers import (
     run_download_phase,
     run_prepare_dataset,
     ship_callable,
-    write_dataset_if_needed,
+    materialize_dataset,
 )
 from modal_training_gym.common.launcher_utils import (
     serialize_recipe_params,
@@ -1036,9 +1036,9 @@ def build_slime_app(
 
             if dataset:
                 await _set_framework_status_async(SlimeStatus.PREPARE_DATASET)
-                wrote_data = write_dataset_if_needed(
+                wrote_data = materialize_dataset(
                     dataset,
-                    SlimeRecipe._resolve_data_path(dataset, "train"),
+                    SlimeRecipe._resolve_data_path,
                 )
                 if wrote_data:
                     await data_volume.commit.aio()

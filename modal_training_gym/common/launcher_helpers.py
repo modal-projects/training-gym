@@ -17,10 +17,13 @@ import secrets as _secrets
 import tempfile
 import textwrap
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import cloudpickle
 from modal import Image, Volume
+
+if TYPE_CHECKING:
+    from modal_training_gym.common.dataset import DatasetConfig
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS, modal_tag_value
 from modal_training_gym.common.framework import (
@@ -209,10 +212,16 @@ def run_download_phase(
         flush_status_reporter(timeout_seconds=2.0)
 
 
-def write_dataset_if_needed(dataset: Any, path: str) -> bool:
+def write_dataset_if_needed(
+    dataset: Any,
+    path: str,
+    *,
+    write_fn: Callable[[str], None] | None = None,
+) -> bool:
     """Write and validate one dataset unless a reusable materialization exists."""
     import shutil
 
+    write = write_fn or dataset.write
     refresh = dataset.needs_refresh
     if os.path.exists(path) and not refresh:
         dataset.validate_write(path)
@@ -226,9 +235,26 @@ def write_dataset_if_needed(dataset: Any, path: str) -> bool:
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     print(f"Writing dataset ({path})...")
-    dataset.write(path)
+    write(path)
     dataset.validate_write(path)
     return True
+
+
+def materialize_dataset(
+    dataset: "DatasetConfig",
+    resolve_data_path: Callable[["DatasetConfig", str], str],
+) -> bool:
+    wrote = write_dataset_if_needed(dataset, resolve_data_path(dataset, "train"))
+    if dataset.writes_eval_paths:
+        wrote = (
+            write_dataset_if_needed(
+                dataset,
+                resolve_data_path(dataset, "eval"),
+                write_fn=dataset.write_eval,
+            )
+            or wrote
+        )
+    return wrote
 
 
 def run_prepare_dataset(
@@ -237,7 +263,7 @@ def run_prepare_dataset(
     resolve_data_path: Callable[[Any, str], str],
 ) -> None:
     data_volume.reload()
-    write_dataset_if_needed(dataset, resolve_data_path(dataset, "train"))
+    materialize_dataset(dataset, resolve_data_path)
     data_volume.commit()
 
 

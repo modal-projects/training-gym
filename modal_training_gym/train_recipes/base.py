@@ -12,6 +12,7 @@ from modal_training_gym.train_recipes.gpu_allocation import (
     resolve_gpu_allocation,
 )
 
+
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
     from modal_training_gym.common.metrics import MetricConfig
@@ -122,13 +123,18 @@ class BaseTrainRecipe(ABC):
         cls,
         ds: "DatasetConfig",
     ) -> dict[str, Any]:
-        prompt_data = cls._resolve_data_path(ds, "train")
-        return {
-            "prompt_data": prompt_data,
+        fields: dict[str, Any] = {
+            "prompt_data": cls._resolve_data_path(ds, "train"),
             "input_key": ds.input_key,
             "label_key": ds.label_key,
             "apply_chat_template": ds.needs_chat_template,
         }
+        if ds.writes_eval_paths:
+            fields["eval_prompt_data"] = [
+                "eval",
+                cls._resolve_data_path(ds, "eval"),
+            ]
+        return fields
 
     @staticmethod
     def _metrics_to_fields(metric: "MetricConfig") -> dict[str, Any]:

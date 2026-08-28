@@ -596,6 +596,7 @@ class BfclMultiTurnDataset(DatasetConfig):
 
     input_key = "messages"
     label_key = "label"
+    writes_eval_paths = False
     output_format: Literal["jsonl"] = "jsonl"
 
     def __init__(

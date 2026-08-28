@@ -60,7 +60,7 @@ from modal_training_gym.common.launcher_helpers import (
     run_download_phase,
     run_prepare_dataset,
     ship_callable,
-    write_dataset_if_needed,
+    materialize_dataset,
 )
 from modal_training_gym.common.status import MilesStatus
 from modal_training_gym.train_recipes.miles_recipe.recipe import (
@@ -1053,9 +1053,9 @@ def build_miles_app(
             await checkpoints_volume.commit.aio()
 
             await _set_framework_status(MilesStatus.PREPARE_DATASET)
-            wrote_data = write_dataset_if_needed(
+            wrote_data = materialize_dataset(
                 dataset,
-                MilesRecipe._resolve_data_path(dataset, "train"),
+                MilesRecipe._resolve_data_path,
             )
             if wrote_data:
                 await data_volume.commit.aio()
