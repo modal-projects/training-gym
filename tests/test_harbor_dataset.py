@@ -4,6 +4,7 @@ import json
 import stat
 from pathlib import Path
 
+import pyarrow.parquet as pq
 import pytest
 
 from modal_training_gym.common.dataset import HarborDataset
@@ -34,30 +35,19 @@ def _write_task(task_dir: Path, *, marker: bytes) -> None:
     )
 
 
-def test_prepare_stages_complete_task_trees_with_portable_labels(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_write_stages_complete_task_trees_with_portable_labels(tmp_path: Path) -> None:
     task_root = tmp_path / "source"
     _write_task(task_root / "task-a", marker=b"\x00task-a\xff")
     _write_task(task_root / "task-b", marker=b"\x00task-b\xff")
     output_path = tmp_path / "prepared" / "train.parquet"
-    written_rows: dict[str, list[dict[str, object]]] = {}
+    output_path.parent.mkdir(parents=True)
 
     dataset = HarborDataset(path=str(task_root))
-    output_path.parent.mkdir(parents=True)
-    output_path.touch()
-    assert not dataset.is_prepared(str(output_path))
-    monkeypatch.setattr(
-        dataset,
-        "_write_split",
-        lambda rows, path: written_rows.setdefault(path, rows),
-    )
+    dataset.write(str(output_path))
 
-    dataset.prepare(str(output_path))
-
-    assert dataset.is_prepared(str(output_path))
-    rows = written_rows[str(output_path)]
+    assert output_path.exists()
+    assert (output_path.parent / dataset.task_files_dir).is_dir()
+    rows = pq.read_table(output_path).to_pylist()
     assert len(rows) == 2
     labels = {
         json.loads(row["label"])["harbor_task_name"]: json.loads(row["label"])
@@ -94,32 +84,27 @@ def test_prepare_stages_complete_task_trees_with_portable_labels(
     assert (staged_a / "solution" / "solve.sh").is_file()
 
 
-def test_prepare_only_stages_selected_tasks(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_write_only_stages_selected_tasks(tmp_path: Path) -> None:
     task_root = tmp_path / "source"
     _write_task(task_root / "task-a", marker=b"a")
     _write_task(task_root / "task-b", marker=b"b")
     output_path = tmp_path / "prepared" / "train.parquet"
     dataset = HarborDataset(path=str(task_root), task_names=["task-b"])
-    monkeypatch.setattr(dataset, "_write_split", lambda rows, path: None)
-
-    dataset.prepare(str(output_path))
+    dataset.write(str(output_path))
 
     staged_root = output_path.parent / "harbor_tasks" / "source"
     assert not (staged_root / "task-a").exists()
     assert (staged_root / "task-b").is_dir()
 
 
-def test_load_includes_default_staged_task_path(tmp_path: Path) -> None:
+def test_rows_include_default_staged_task_path(tmp_path: Path) -> None:
     task_root = tmp_path / "source"
     _write_task(task_root / "task-a", marker=b"a")
     dataset = HarborDataset(path=str(task_root))
 
-    [row] = dataset.load()
+    [row] = list(dataset.rows())
 
-    assert row["label"]["harbor_task_data_rel"] == (
+    assert json.loads(row["label"])["harbor_task_data_rel"] == (
         f"{dataset.data_path_name}/harbor_tasks/source/task-a"
     )
 
@@ -129,19 +114,33 @@ def test_distinct_harbor_datasets_use_distinct_data_paths(tmp_path: Path) -> Non
     second = HarborDataset(path=str(tmp_path / "second"))
     matching_first = HarborDataset(path=str(tmp_path / "first"))
 
-    first_path, _ = BaseTrainRecipe._resolve_data_paths(first)
-    second_path, _ = BaseTrainRecipe._resolve_data_paths(second)
-    matching_path, _ = BaseTrainRecipe._resolve_data_paths(matching_first)
+    first_path = BaseTrainRecipe._resolve_data_path(first)
+    second_path = BaseTrainRecipe._resolve_data_path(second)
+    matching_path = BaseTrainRecipe._resolve_data_path(matching_first)
 
     assert first_path != second_path
     assert first_path == matching_path
 
 
-def test_prepare_reports_missing_task_source(tmp_path: Path) -> None:
+def test_write_identity_fields_change_data_path(tmp_path: Path) -> None:
+    path = str(tmp_path / "tasks")
+    base = HarborDataset(path=path)
+    prompt = HarborDataset(path=path, prompt_template="{instruction}\nmore")
+    repeats = HarborDataset(path=path, train_repeats=2)
+    command = HarborDataset(path=path, candidate_command="python3 {candidate_path}")
+    matching = HarborDataset(path=path, prompt_template="{instruction}")
+
+    assert base.data_path_name != prompt.data_path_name
+    assert base.data_path_name != repeats.data_path_name
+    assert base.data_path_name != command.data_path_name
+    assert base.data_path_name == matching.data_path_name
+
+
+def test_write_reports_missing_task_source(tmp_path: Path) -> None:
     dataset = HarborDataset(path=str(tmp_path / "missing"))
 
     with pytest.raises(FileNotFoundError, match="task root does not exist"):
-        dataset.prepare(str(tmp_path / "prepared" / "train.parquet"))
+        dataset.write(str(tmp_path / "prepared" / "train.parquet"))
 
 
 def test_resolve_harbor_task_path_rejects_escape(tmp_path: Path) -> None:

@@ -27,6 +27,7 @@ _EXPORTS = {
     "Sample": ("modal_training_gym.common.sample", "Sample"),
     "extract_code": ("modal_training_gym.common.eval", "extract_code"),
     "HarborEval": ("modal_training_gym.common.eval", "HarborEval"),
+    "harbor_reward": ("modal_training_gym.common.harbor", "harbor_reward"),
     "Gemma4_26B_A4B": ("modal_training_gym.common.models", "Gemma4_26B_A4B"),
     "Gemma4_26B_A4B_Recipe": (
         "modal_training_gym.train_recipes.miles_recipe",
@@ -163,6 +164,7 @@ __all__ = [
     "Sample",
     "extract_code",
     "HarborEval",
+    "harbor_reward",
     "HFModelConfiguration",
     "HuggingFaceDataset",
     "MultimodalDataset",

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from modal_training_gym.common.dataset import DatasetRow
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.harbor import extract_harbor_candidate
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_put
 
@@ -617,21 +618,17 @@ class HarborEval(EvalConfig):
     environment and verifier in a Modal sandbox.
 
     When neither ``eval_fn`` nor ``eval_response_fn`` is provided, a
-    default Harbor-backed scorer is used automatically for staged Harbor
-    tasks. Rows containing only inline ``test_cases`` retain the generic
-    stdin/stdout scorer. Pass
+    default sandbox-backed scorer is used automatically. Pass
     ``extract_code_fn`` to override how code is pulled from the model
     response, or supply your own ``eval_fn`` to take full control.
     """
 
     model: "ModelConfig | None" = None
-    test_cases: list[dict[str, str]] | None = None
     sandbox_timeout: int = 60
     sandbox_cpu: float = 1.0
     sandbox_memory: int = 1024
     sandbox_cpu_policy: str = "limit"
     sandbox_memory_policy: str = "limit"
-    sandbox_python_version: str = "3.11"
     extract_code_fn: Callable[[str], str] | None = None
 
     @staticmethod
@@ -644,18 +641,10 @@ class HarborEval(EvalConfig):
                 return {}
         return label if isinstance(label, dict) else {}
 
-    def _resolve_test_cases(self, example: DatasetRow) -> list[dict[str, str]]:
-        cases = self._resolve_label(example).get("test_cases")
-        if isinstance(cases, list) and cases:
-            return cases
-        if self.test_cases is not None:
-            return self.test_cases
-        return []
-
     def _extract_code(self, text: str) -> str:
         if self.extract_code_fn is not None:
             return self.extract_code_fn(text)
-        return extract_code(text, model=self.model)
+        return extract_harbor_candidate(text)
 
     def _build_messages(self, example: DatasetRow, prompt: str) -> list[dict[str, str]]:
         messages = example.get("messages")
@@ -673,6 +662,8 @@ class HarborEval(EvalConfig):
         deployment: "CustomDeployment",
         example: DatasetRow,
     ) -> EvalRowResult:
+        from modal_training_gym.common.harbor import score_from_label
+
         prompt = self.build_prompt(example)
         messages = self._build_messages(example, prompt)
         response = deployment.generate(
@@ -680,48 +671,17 @@ class HarborEval(EvalConfig):
             messages=messages,
             **self.generate_kwargs,
         )
-        code = self._extract_code(response)
-        label = self._resolve_label(example)
-        test_cases = self._resolve_test_cases(example)
-        has_staged_task = "harbor_task_data_rel" in label
-        has_source_task = "harbor_task_path" in label
-        if has_staged_task or (has_source_task and not test_cases):
-            from modal_training_gym.common.harbor import (
-                resolve_harbor_task_path,
-                score_harbor_response,
-            )
-
-            task_path = resolve_harbor_task_path(label)
-            score, metadata = asyncio.run(
-                score_harbor_response(
-                    code,
-                    task_path=task_path,
-                    candidate_path=label.get(
-                        "harbor_candidate_path",
-                        "/tmp/training-gym-candidate.py",
-                    ),
-                    candidate_command=label.get(
-                        "harbor_candidate_command",
-                        "python {candidate_path}",
-                    ),
-                    timeout_sec=self.sandbox_timeout,
-                    sandbox_cpu=self.sandbox_cpu,
-                    sandbox_memory=self.sandbox_memory,
-                    cpu_policy=self.sandbox_cpu_policy,
-                    memory_policy=self.sandbox_memory_policy,
-                )
-            )
-        else:
-            score, metadata = score_in_sandbox(
-                code,
-                test_cases=test_cases,
+        score, metadata = asyncio.run(
+            score_from_label(
+                self._extract_code(response),
+                self._resolve_label(example),
                 timeout_sec=self.sandbox_timeout,
                 sandbox_cpu=self.sandbox_cpu,
                 sandbox_memory=self.sandbox_memory,
                 cpu_policy=self.sandbox_cpu_policy,
                 memory_policy=self.sandbox_memory_policy,
-                python_version=self.sandbox_python_version,
             )
+        )
 
         parsed = self.model.parse_response(response) if self.model is not None else None
 

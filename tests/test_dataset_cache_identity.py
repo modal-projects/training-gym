@@ -108,10 +108,12 @@ def test_harbor_materialization_path_tracks_row_selection(baseline, changed) -> 
         ("shuffle_seed", 42),
         ("shuffle_tasks", True),
         ("system_prompt", "Solve the task."),
+        ("task_files_dir", "staged-tasks"),
         ("task_glob", "task-*"),
         ("task_names", ["task-a"]),
         ("task_root", "/alternate-tasks"),
-        ("test_data_dir", "tests"),
+        ("candidate_path", "/tmp/alternate-candidate.py"),
+        ("candidate_command", "python3 {candidate_path}"),
         ("train_repeats", 2),
     ],
 )

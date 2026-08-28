@@ -1,37 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import sys
 from enum import Enum
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-import pytest
-
 from modal_training_gym.common.dataset import HarborDataset
 from modal_training_gym.common.eval import HarborEval
 from modal_training_gym.common.harbor import (
+    TrainingGymResponseAgent,
     extract_harbor_candidate,
+    harbor_reward,
     score_harbor_response,
 )
-from modal_training_gym.common.models import Qwen3_5_4B
-from modal_training_gym.common.train import TrainConfig
-from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
-from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-
-_SLIME_RECIPE_KWARGS = {
-    "gpu_type": "H100",
-    "colocate": True,
-    "tensor_model_parallel_size": 1,
-    "sequence_parallel": False,
-    "rollout_num_gpus_per_engine": 1,
-    "num_rollout": 1,
-    "rollout_batch_size": 16,
-    "rollout_max_response_len": 4096,
-    "rollout_temperature": 1.0,
-    "save_interval": 10,
-}
 
 
 class _Config:
@@ -40,7 +22,7 @@ class _Config:
 
 
 def _install_fake_harbor(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch,
     *,
     reward: float = 1.0,
     exception_info=None,
@@ -95,10 +77,7 @@ def _install_fake_harbor(
     return captured
 
 
-def test_score_harbor_response_builds_modal_trial(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_score_harbor_response_builds_modal_trial(tmp_path: Path, monkeypatch) -> None:
     captured = _install_fake_harbor(monkeypatch)
 
     score, metadata = asyncio.run(
@@ -130,11 +109,13 @@ def test_score_harbor_response_builds_modal_trial(
     assert config.agent.kwargs["response"] == "print('candidate')"
     assert config.agent.kwargs["candidate_path"] == "/tmp/candidate file.py"
     assert config.verifier.override_timeout_sec == 42
+    assert config.agent.import_path == (
+        "modal_training_gym.common.harbor:TrainingGymResponseAgent"
+    )
 
 
 def test_score_harbor_response_surfaces_trial_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch
 ) -> None:
     exception_info = SimpleNamespace(
         exception_type="RuntimeError",
@@ -158,26 +139,7 @@ def test_score_harbor_response_surfaces_trial_failure(
     }
 
 
-def test_training_gym_agent_uploads_before_execution(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class BaseAgent:
-        def __init__(self, logs_dir, model_name=None, **kwargs):
-            self.logs_dir = logs_dir
-
-    harbor_agents = ModuleType("harbor.agents")
-    harbor_agents_base = ModuleType("harbor.agents.base")
-    harbor_agents_base.BaseAgent = BaseAgent
-    monkeypatch.setitem(sys.modules, "harbor.agents", harbor_agents)
-    monkeypatch.setitem(sys.modules, "harbor.agents.base", harbor_agents_base)
-    monkeypatch.delitem(
-        sys.modules,
-        "modal_training_gym.common.harbor_agent",
-        raising=False,
-    )
-    module = importlib.import_module("modal_training_gym.common.harbor_agent")
-
+def test_training_gym_agent_uploads_before_execution(tmp_path: Path) -> None:
     calls: list[tuple[object, ...]] = []
 
     class Environment:
@@ -189,7 +151,7 @@ def test_training_gym_agent_uploads_before_execution(
             return SimpleNamespace(return_code=0, stdout="ok", stderr="")
 
     context = SimpleNamespace(metadata=None)
-    agent = module.TrainingGymResponseAgent(
+    agent = TrainingGymResponseAgent(
         tmp_path,
         response="print(1)",
         candidate_path="/tmp/candidate file.py",
@@ -205,20 +167,8 @@ def test_training_gym_agent_uploads_before_execution(
     assert context.metadata["candidate_return_code"] == 0
 
 
-def test_extract_harbor_candidate_strips_chat_markup() -> None:
-    response = (
-        "<|im_start|>assistant\n<think>reasoning</think>\n"
-        "```python\nprint('candidate')\n```\n<|im_end|>"
-    )
-
-    assert extract_harbor_candidate(response) == "print('candidate')"
-
-
-def test_harbor_eval_uses_trial_scorer(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from modal_training_gym.common import harbor
+def test_harbor_eval_uses_trial_scorer(tmp_path: Path, monkeypatch) -> None:
+    import modal_training_gym.common.harbor as harbor
 
     captured: dict[str, object] = {}
 
@@ -246,7 +196,6 @@ def test_harbor_eval_uses_trial_scorer(
                 "harbor_task_data_rel": "HarborDataset/harbor_tasks/source/task-a",
                 "harbor_candidate_path": "/tmp/candidate.py",
                 "harbor_candidate_command": "python {candidate_path}",
-                "test_cases": [{"input": "", "expected": "legacy"}],
             },
         },
     )
@@ -256,132 +205,70 @@ def test_harbor_eval_uses_trial_scorer(
     assert captured["response"] == "print('candidate')"
     assert captured["task_path"] == tmp_path
     assert captured["candidate_path"] == "/tmp/candidate.py"
+    assert captured["timeout_sec"] == 60
 
 
-def test_harbor_eval_preserves_inline_test_case_scoring(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from modal_training_gym.common import eval as eval_module
+def test_extract_harbor_candidate_accepts_flexible_fences() -> None:
+    assert extract_harbor_candidate("```py\nprint(1)\n```") == "print(1)"
+    assert extract_harbor_candidate("```\nprint(2)\n```") == "print(2)"
+    assert (
+        extract_harbor_candidate("<think>scratch</think>\n```python\nprint(3)\n```")
+        == "print(3)"
+    )
+
+
+def test_harbor_eval_default_extracts_py_fence(tmp_path: Path, monkeypatch) -> None:
+    import modal_training_gym.common.harbor as harbor
 
     captured: dict[str, object] = {}
 
-    def fake_score(response, **kwargs):
+    async def fake_score(response, **kwargs):
         captured["response"] = response
-        captured.update(kwargs)
-        return 1.0, {"test_cases": 1}
+        return 1.0, {}
 
-    monkeypatch.setattr(eval_module, "score_in_sandbox", fake_score)
+    monkeypatch.setattr(harbor, "resolve_harbor_task_path", lambda label: tmp_path)
+    monkeypatch.setattr(harbor, "score_harbor_response", fake_score)
 
     class Deployment:
         def generate(self, prompt, **kwargs):
-            return "print('candidate')"
+            return "```py\nprint('candidate')\n```"
 
-    evaluation = HarborEval(
-        dataset=HarborDataset(path=str(tmp_path)),
-        extract_code_fn=lambda response: response,
-    )
-    test_cases = [{"input": "", "expected": "candidate"}]
-    result = evaluation._harbor_eval_fn(
+    result = HarborEval(dataset=HarborDataset(path=str(tmp_path)))._harbor_eval_fn(
         Deployment(),
         {
             "prompt": "Write the candidate.",
             "label": {
-                "harbor_task_path": str(tmp_path / "task-a"),
-                "test_cases": test_cases,
+                "harbor_task_data_rel": "HarborDataset/harbor_tasks/source/task-a"
             },
         },
     )
 
     assert result.score == 1.0
-    assert result.metadata == {"test_cases": 1}
     assert captured["response"] == "print('candidate')"
-    assert captured["test_cases"] == test_cases
 
 
-@pytest.mark.parametrize(
-    ("recipe_type", "recipe_kwargs"),
-    [(MilesRecipe, {}), (SlimeRecipe, _SLIME_RECIPE_KWARGS)],
-)
-def test_harbor_dataset_supplies_default_reward_function(
-    tmp_path: Path,
-    recipe_type,
-    recipe_kwargs,
-) -> None:
-    dataset = HarborDataset(path=str(tmp_path))
-    config = TrainConfig(
-        model=Qwen3_5_4B(),
-        dataset=dataset,
-        recipe=recipe_type(**recipe_kwargs),
-        merge_model_recipe=False,
-    )
+def test_harbor_reward_uses_shared_extract(monkeypatch) -> None:
+    import modal_training_gym.common.harbor as harbor
 
-    prepared = config._prepare_recipe()
+    captured: dict[str, object] = {}
 
-    assert prepared.custom_rm_function is dataset.reward_function
+    async def fake_score(response, label, **kwargs):
+        captured["response"] = response
+        return 1.0, {"harbor_task_name": "task-a"}
+
+    monkeypatch.setattr(harbor, "score_from_label", fake_score)
+    sample = SimpleNamespace(response="```py\nprint(1)\n```", label="{}", metadata=None)
+
+    assert asyncio.run(harbor_reward(None, sample)) == 1.0
+    assert captured["response"] == "print(1)"
+    assert sample.metadata == {"harbor": {"harbor_task_name": "task-a"}}
 
 
-def test_harbor_reward_replaces_model_preset_reward_type(tmp_path: Path) -> None:
-    dataset = HarborDataset(path=str(tmp_path))
-    config = TrainConfig(
-        model=Qwen3_5_4B(),
-        dataset=dataset,
-        recipe=MilesRecipe(),
-    )
+def test_live_harbor_import_is_real_package() -> None:
+    import harbor
+    import harbor.models.environment_type
+    import harbor.models.trial.config
+    import harbor.trial.trial
 
-    prepared = config._prepare_recipe()
-
-    assert prepared.custom_rm_function is dataset.reward_function
-    assert prepared.rm_type is None
-
-
-@pytest.mark.parametrize(
-    ("recipe_type", "recipe_kwargs"),
-    [(MilesRecipe, {}), (SlimeRecipe, _SLIME_RECIPE_KWARGS)],
-)
-def test_explicit_reward_function_takes_precedence(
-    tmp_path: Path,
-    recipe_type,
-    recipe_kwargs,
-) -> None:
-    def custom_reward(*args, **kwargs):
-        return 0.5
-
-    dataset = HarborDataset(path=str(tmp_path))
-    config = TrainConfig(
-        model=Qwen3_5_4B(),
-        dataset=dataset,
-        recipe=recipe_type(
-            custom_rm_function=custom_reward,
-            **recipe_kwargs,
-        ),
-        merge_model_recipe=False,
-    )
-
-    assert config._prepare_recipe().custom_rm_function is custom_reward
-
-
-@pytest.mark.parametrize(
-    ("recipe_type", "recipe_kwargs"),
-    [(MilesRecipe, {}), (SlimeRecipe, _SLIME_RECIPE_KWARGS)],
-)
-def test_explicit_reward_type_takes_precedence(
-    tmp_path: Path,
-    recipe_type,
-    recipe_kwargs,
-) -> None:
-    dataset = HarborDataset(path=str(tmp_path))
-    config = TrainConfig(
-        model=Qwen3_5_4B(),
-        dataset=dataset,
-        recipe=recipe_type(
-            rm_type="deepscaler",
-            **recipe_kwargs,
-        ),
-        merge_model_recipe=False,
-    )
-
-    prepared = config._prepare_recipe()
-
-    assert prepared.custom_rm_function is None
-    assert prepared.rm_type == "deepscaler"
+    assert harbor.models.trial.config.TrialConfig.__module__.startswith("harbor.")
+    assert harbor.trial.trial.Trial.__module__.startswith("harbor.")

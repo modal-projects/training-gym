@@ -107,7 +107,7 @@ RDMA_RUNTIME_INSTALL_COMMAND = (
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
-HARBOR_PKG_VERSION = "0.8.0"
+HARBOR_PKG_VERSION = "0.22.0"
 
 _MILES_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
 _PATCH_SGLANG_ABORT_B64 = encode_patch("patch_sglang_abort", _MILES_PATCHES)
@@ -477,7 +477,7 @@ def build_miles_app(
         miles.image_overlay = None
 
     if isinstance(dataset, HarborDataset):
-        image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
+        image = image.uv_pip_install(f"harbor[modal]=={HARBOR_PKG_VERSION}")
 
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")

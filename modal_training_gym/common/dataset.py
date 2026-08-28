@@ -98,9 +98,6 @@ class DatasetConfig(ABC):
                 "Declare it as a class attribute on the dataset subclass."
             )
 
-    def is_prepared(self, path: str) -> bool:
-        return Path(path).exists()
-
     def _expected_columns(self) -> set[str]:
         cols: set[str] = set()
         if self.input_key:
@@ -300,7 +297,6 @@ class HarborDataset(DatasetConfig):
     task_names: list[str] | None = None
     instruction_path: str = "instruction.md"
     label_metadata_path: str | None = None
-    test_data_dir: str | None = None
     task_files_dir: str = "harbor_tasks"
     candidate_path: str = "/tmp/training-gym-candidate.py"
     candidate_command: str = "python {candidate_path}"
@@ -326,7 +322,6 @@ class HarborDataset(DatasetConfig):
         task_names: list[str] | None = None,
         instruction_path: str | None = None,
         label_metadata_path: str | None = None,
-        test_data_dir: str | None = None,
         task_files_dir: str | None = None,
         candidate_path: str | None = None,
         candidate_command: str | None = None,
@@ -357,8 +352,6 @@ class HarborDataset(DatasetConfig):
             self.instruction_path = instruction_path
         if label_metadata_path is not None:
             self.label_metadata_path = label_metadata_path
-        if test_data_dir is not None:
-            self.test_data_dir = test_data_dir
         if task_files_dir is not None:
             self.task_files_dir = task_files_dir
         if candidate_path is not None:
@@ -428,7 +421,6 @@ class HarborDataset(DatasetConfig):
                 "task_glob": self.task_glob,
                 "task_names": self.task_names,
                 "task_root": self.task_root,
-                "test_data_dir": self.test_data_dir,
                 "train_repeats": self.train_repeats,
                 "train_size": self.train_size,
             }
@@ -449,11 +441,6 @@ class HarborDataset(DatasetConfig):
             ),
             "task_glob": self.task_glob,
             "task_names": self.task_names,
-            "instruction_path": self.instruction_path,
-            "label_metadata_path": self.label_metadata_path,
-            "test_data_dir": self.test_data_dir,
-            "candidate_path": self.candidate_path,
-            "candidate_command": self.candidate_command,
             "prompt_template": self.prompt_template,
             "system_prompt": self.system_prompt,
             "train_size": self.train_size,
@@ -462,6 +449,10 @@ class HarborDataset(DatasetConfig):
             "eval_repeats": self.eval_repeats,
             "shuffle_tasks": self.shuffle_tasks,
             "shuffle_seed": self.shuffle_seed,
+            "candidate_path": self.candidate_path,
+            "candidate_command": self.candidate_command,
+            "instruction_path": self.instruction_path,
+            "label_metadata_path": self.label_metadata_path,
         }
         digest = hashlib.sha256(
             json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
@@ -601,23 +592,6 @@ class HarborDataset(DatasetConfig):
             )
         return data
 
-    def _read_test_data(self, task_dir: Path) -> list[dict[str, str]]:
-        assert self.test_data_dir is not None
-        tests_dir = task_dir / self.test_data_dir
-        test_cases: list[dict[str, str]] = []
-        if not tests_dir.is_dir():
-            return test_cases
-        for in_file in sorted(tests_dir.glob("*.in")):
-            out_file = in_file.with_suffix(".out")
-            if out_file.exists():
-                test_cases.append(
-                    {
-                        "input": in_file.read_text(encoding="utf-8"),
-                        "expected_output": out_file.read_text(encoding="utf-8"),
-                    }
-                )
-        return test_cases
-
     def _build_label(
         self,
         task_root: Path,
@@ -640,8 +614,6 @@ class HarborDataset(DatasetConfig):
             "harbor_task_data_rel": task_data_rel.as_posix(),
         }
         label.update(self._read_label_metadata(task_dir))
-        if self.test_data_dir:
-            label["test_cases"] = self._read_test_data(task_dir)
         return label
 
     def _format_prompt(
