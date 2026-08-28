@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import hashlib
 import os
+import re
 import shlex
 import subprocess
 import shutil
@@ -303,17 +304,62 @@ def _is_resumable_checkpoint(path: str) -> bool:
     one save shape: a LoRA run stores ``adapter/`` with per-rank ``.pt`` files and no
     ``.metadata``/``common.pt``/``.distcp`` at all, so the conversion predicate would
     report every adapter checkpoint as absent and silently restart from ``ref_load``.
-    Only the crashed-torch_dist signature is rejected — ``.distcp`` shards present but
-    the ``.metadata`` that is written last missing.
+
+    For torch_dist saves, two interrupted-write signatures are rejected:
+
+    - ``.distcp`` shards present but the ``.metadata`` written last missing — a
+      crashed writer.
+    - ``.metadata`` present but shards it references missing — on Modal each
+      node commits its Volume writes independently, so a node killed after the
+      coordinator committed ``.metadata`` leaves a checkpoint that looks
+      finished while missing that node's shards. Resuming into one fails every
+      retry with FileNotFoundError.
     """
     try:
-        names = os.listdir(path)
+        names = set(os.listdir(path))
     except OSError:
         return False
     if not names:
         return False
-    if any(name.endswith(".distcp") for name in names):
-        return ".metadata" in names
+    if not any(name.endswith(".distcp") for name in names):
+        return True
+    if ".metadata" not in names:
+        return False
+    return _metadata_shards_present(path, names)
+
+
+def _metadata_shards_present(path: str, names: set[str]) -> bool:
+    """Whether every ``.distcp`` shard referenced by ``.metadata`` exists.
+
+    torch DCP's ``.metadata`` is a pickle whose storage entries carry each
+    shard's relative path as a literal string, so the referenced set can be
+    scanned out of the raw bytes without unpickling (which needs torch classes
+    unavailable outside the training image).
+    """
+    try:
+        with open(os.path.join(path, ".metadata"), "rb") as f:
+            blob = f.read()
+    except OSError:
+        return False
+    referenced = {m.decode() for m in re.findall(rb"__\d+_\d+\.distcp", blob)}
+    if not referenced:
+        # Unrecognized metadata shape; keep the pre-existing behavior rather
+        # than rejecting a save we cannot inspect.
+        return True
+    missing = sorted(referenced - names)
+    empty = sorted(
+        name
+        for name in referenced & names
+        if not os.path.getsize(os.path.join(path, name))
+    )
+    if missing or empty:
+        print(
+            f"WARNING: checkpoint {path} has .metadata but is missing "
+            f"{len(missing)} shard(s) and has {len(empty)} empty shard(s) it "
+            f"references (e.g. {(missing + empty)[:3]}); treating it as an "
+            "interrupted save."
+        )
+        return False
     return True
 
 
@@ -1176,11 +1222,11 @@ def build_miles_app(
             elif unresumable := _unresumable_save_dirs(save_root):
                 print(
                     f"WARNING: {save_root} holds saves that cannot be resumed "
-                    f"({', '.join(unresumable)}) — they carry torch_dist shards "
-                    "without the .metadata written last, so they are interrupted "
-                    "writes. Training restarts from ref_load and their progress is "
-                    "discarded; Megatron follows latest_checkpointed_iteration.txt, "
-                    "so resuming into one of these would load a partial save."
+                    f"({', '.join(unresumable)}) — they are interrupted writes "
+                    "(missing the .metadata written last, or missing shards that "
+                    ".metadata references). Training restarts from ref_load and "
+                    "their progress is discarded; resuming into one of these "
+                    "would fail on the partial save."
                 )
             try:
                 cmd = build_train_cmd(miles, MILES_ROOT, model=model, dataset=dataset)
