@@ -52,10 +52,17 @@ function firstGuidePath() {
       if (!orderMatch) {
         throw new Error(`${guidePath} is missing order`);
       }
-      const slug = flattenDocId(`guides/${fileName.replaceAll(path.sep, '/')}`);
-      return { order: Number(orderMatch[1]), slug };
+      const relative = fileName.replaceAll(path.sep, '/');
+      const slug = flattenDocId(`guides/${relative}`);
+      const section = relative.split('/')[0] ?? '';
+      return { order: Number(orderMatch[1]), section, slug };
     })
-    .sort((left, right) => left.order - right.order || left.slug.localeCompare(right.slug));
+    .sort(
+      (left, right) =>
+        left.section.localeCompare(right.section) ||
+        left.order - right.order ||
+        left.slug.localeCompare(right.slug)
+    );
   if (!guides[0]) {
     throw new Error('No guide pages found');
   }
