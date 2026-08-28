@@ -137,9 +137,6 @@ _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PAT
 _PATCH_DIST_CKPT_FORK_RETRY_B64 = encode_patch(
     "patch_dist_ckpt_fork_retry", _MEGATRON_PATCHES
 )
-_PATCH_DIST_CKPT_BLOCKING_D2H_B64 = encode_patch(
-    "patch_dist_ckpt_blocking_d2h", _MEGATRON_PATCHES
-)
 _PATCH_DIST_CKPT_READ_RETRY_B64 = encode_patch(
     "patch_dist_ckpt_read_retry", _MEGATRON_PATCHES
 )
@@ -418,13 +415,8 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             # fork intermittently returns EAGAIN on Modal and takes the whole run
             # with it (2 of 3 saves on the Nemotron-3-Ultra slice). Retry instead.
             f"echo {_PATCH_DIST_CKPT_FORK_RETRY_B64} | base64 -d | python3",
-            # The same writer stages every shard into *pinned* host memory and then
-            # forks; upstream disables that on ROCm because the fork segfaults. A
-            # TB-scale save pins ~320 GiB/node here, so widen the guard.
-            f"echo {_PATCH_DIST_CKPT_BLOCKING_D2H_B64} | base64 -d | python3",
             # Reads of a torch_dist checkpoint on a Modal Volume intermittently
-            # fail with EINVAL on a subset of ranks while the files are intact
-            # (verified by re-reading the full 1 TiB from separate containers).
+            # fail with EINVAL on a subset of ranks while the files are intact.
             # Retry with reopen instead of losing a multi-node retry cycle.
             f"echo {_PATCH_DIST_CKPT_READ_RETRY_B64} | base64 -d | python3",
             (

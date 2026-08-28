@@ -20,9 +20,6 @@ driven by this model's scale rather than by anything nemotron-specific:
 - ``megatron_patches/patch_dist_ckpt_fork_retry`` — Megatron's torch_dist writer
   forks 2 helper processes per rank and that fork intermittently returns EAGAIN
   on Modal, killing the run at its checkpoint save.
-- ``megatron_patches/patch_dist_ckpt_blocking_d2h`` — the same writer stages
-  every shard into pinned host memory before forking; a TB-scale save pins
-  ~320 GiB per node.
 - ``megatron_patches/patch_dist_ckpt_read_retry`` — torch_dist reads off a
   Modal Volume intermittently fail with EINVAL on a subset of ranks while the
   files are intact; retry with reopen instead of losing the run.
@@ -85,43 +82,27 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
             "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK": "1",
             # 0, overriding MilesRecipe's default of 1. NVLS is intra-node NVLink
             # SHARP; a rollout engine here spans 4 nodes, so its tensor-parallel
-            # group cannot use it, and enabling it made ncclCommInitRank fail with
-            # "NCCL error: invalid usage" while building _TP, killing engine init
-            # (`weary-sole-4b773f2e4618`). Inkling-Small -- the only other
-            # multi-node miles recipe here -- reached the same conclusion: "NCCL
-            # NVLS_ENABLE is the one that had to deviate" on Modal.
+            # group cannot use it and ncclCommInitRank fails with "invalid usage"
+            # while building _TP. Inkling-Small deviates for the same reason.
             "NCCL_NVLS_ENABLE": "0",
-            # The NCCL error message itself asks for this, and a failed engine
-            # bring-up otherwise surfaces only as "invalid usage" with no detail.
-            # WARN is quiet unless something is wrong.
+            # A failed engine bring-up otherwise surfaces only as "invalid usage"
+            # with no detail. WARN is quiet unless something is wrong.
             "NCCL_DEBUG": "WARN",
-            # NCCL's RAS reliability thread segfaults while ranks are winding down
-            # after the final checkpoint save, taking a run that had already
-            # finished all its work and written its checkpoint
-            # (`cool-rout-441980b0b4ef`). The captured stack is entirely inside it:
-            # rasMsgHandlePeersUpdate -> rasMsgHandle -> rasSockEventLoop ->
-            # rasThreadMain. RAS only reports health, so disabling it costs
-            # nothing here. Inkling-Small sets it for the same reason.
+            # NCCL's RAS reliability thread segfaults while ranks wind down after
+            # the final checkpoint save, failing a run whose work is already
+            # done. RAS only reports health, so disabling it costs nothing.
+            # Inkling-Small sets it for the same reason.
             "NCCL_RAS_ENABLE": "0",
             # Ray's memory monitor kills actors under host-memory pressure, which
             # is the regime this model runs in (CPU-offloaded optimizer for 550 B).
             # Inkling-Small disables it for the same reason.
             "RAY_memory_monitor_refresh_ms": "0",
-            # The 1 TiB checkpoint write stalls whole nodes for minutes (engine
-            # HTTP servers stop answering for ~4 min around a save). Ray's
-            # default node health window (~40 s) declares a node dead well
-            # inside such a stall, killing the run at its checkpoint. Widen it
-            # to ~8 min; the trade-off is slower detection of a genuinely dead
-            # node.
-            "RAY_health_check_timeout_ms": "60000",
-            "RAY_health_check_failure_threshold": "8",
             # An engine spans 4 nodes; the three that did not download the
             # checkpoint read ~1 TB off the Modal Volume at ~1 GiB/s, so weight
-            # load takes ~30 min (measured: 28 min on `poky-coyote-b2814b94964f`).
-            # SGLang's post-load barrier allows 480 s by default and killed the
-            # first 16-node attempt. `patch_sglang_load_barrier` makes that
-            # configurable, defaulting to upstream's 480 — models with single-node
-            # engines keep fast dead-rank detection; this one opts in.
+            # load alone takes ~30 min. SGLang's post-load barrier allows 480 s by
+            # default; `patch_sglang_load_barrier` makes it configurable so models
+            # with single-node engines keep fast dead-rank detection while this
+            # one opts in.
             "MILES_LOAD_BARRIER_TIMEOUT_S": "3600",
         }
     )
@@ -229,31 +210,20 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     overlap_cpu_optimizer_d2h_h2d: bool = True
     use_precision_aware_optimizer: bool = True
     # On, deviating from upstream's script, because the host cannot hold the
-    # un-sharded state. Model-parallel world is TP8 x PP4 = 32, so each rank owns
-    # ~17.2 B params; at 12 B/param of fp32 master plus two Adam moments that is
-    # ~1.50 TiB per 8-rank node, against a 2 TiB host -- before the ~69 GB/node of
-    # checkpoint staging, the weights, and activations. `careful-nutmeg-2f54f87c1fbf`
-    # ran all 3 training steps and then died in the 1.1 TB checkpoint save with
-    # Ray reporting "killed by the OOM killer due to high memory usage ... or
-    # SIGSEGV". Sharding the state across DP=4 brings it to ~0.38 TiB per node.
-    #
-    # Mathematically equivalent to the un-sharded optimizer -- it changes where
-    # state lives, not the update -- and Inkling-Small already pairs it with CPU
-    # offload. model_setup.md pre-registered this as the first lever if a run OOMed
-    # the host; one did.
+    # un-sharded state: TP8 x PP4 = 32 model-parallel ranks put ~17.2 B params on
+    # each, and at 12 B/param of fp32 master plus two Adam moments that is
+    # ~1.50 TiB per 8-rank node — the host OOMs at the checkpoint save. Sharding
+    # across DP=4 brings it to ~0.38 TiB per node; mathematically equivalent, it
+    # changes where state lives, not the update. Inkling-Small already pairs it
+    # with CPU offload.
     use_distributed_optimizer: bool = True
 
-    # Spill the paused actor to node-local disk, not host RAM. miles defaults
-    # --offload-train-target to "cpu", which puts the offloaded trainer in host
-    # memory *on top of* the CPU-offloaded optimizer above. Inkling-Small
-    # documents that as already exceeding the node at 276 B; this model is twice
-    # that, and leaving the default killed a 16-node run
-    # (`poky-coyote-b2814b94964f`): four Megatron actors hit
-    # "!!!!!!! Segfault encountered !!!!!!!" inside `offload_train`, Ray reported
-    # them unavailable, and the gym silently retried the whole run.
-    #
-    # /tmp is on the container's overlay filesystem on Modal, not a tmpfs, so it
-    # is genuinely disk — upstream warns that a tmpfs path defeats this.
+    # Spill the paused actor to node-local disk, not host RAM: miles' default
+    # --offload-train-target of "cpu" puts the offloaded trainer in host memory
+    # on top of the CPU-offloaded optimizer above, which segfaults the actors.
+    # Inkling-Small documents the same at half this size. /tmp is on the
+    # container's overlay filesystem on Modal, not a tmpfs, so it is genuinely
+    # disk — upstream warns that a tmpfs path defeats this.
     offload_train_target: str = "disk"
     offload_train_disk_dir: str = "/tmp/train_offload"
 

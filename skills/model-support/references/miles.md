@@ -204,7 +204,6 @@ The working patterns live in `.gym/new_models/Nemotron3_Ultra_550B_A55B/`:
 `probe_miles_image.py` (inspect upstream support inside the pinned image),
 `validate_cli_args.py` (parse the emitted args with miles' own argparse — this
 is how `save_interval=None` handling was verified before a launch),
-`configs/probe_blocking_d2h_patch.py` (prove a patch applies and compiles), and
 `configs/verify_built_image.py` (grep markers out of the exact image
 `_build_miles_base_image` produces — a cached layer is otherwise
 indistinguishable from a skipped patch). Checkpoint completeness is a
