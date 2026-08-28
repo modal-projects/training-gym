@@ -12,7 +12,7 @@ Here, we’ll focus on the former, and in the [next guide](https://gym.modal.dev
 
 The [HuggingFaceDataset](https://gym.modal.dev/reference/huggingfacedataset) class handles all the subtle ways in which datasets differ.
 
-For example, [statworx/haiku](https://huggingface.co/datasets/statworx/haiku) contains a `keywords` column with only a single word as input, and a `text` column that contains a ground-truth label. Since the input isn’t in the OpenAI chat completions API format, we need to set `needs_chat_template` to True. By default, the Gym will format each prompt in the dataset as a single user message.
+For example, [statworx/haiku](https://huggingface.co/datasets/statworx/haiku) contains a `keywords` column with only a single word as input, and a `text` column that contains a ground-truth label. Since the input isn’t in the OpenAI chat completions API format, we need to set `apply_chat_template` to True. By default, the Gym will format each prompt in the dataset as a single user message.
 
 ```python
 from modal_training_gym import HuggingFaceDataset
@@ -22,7 +22,7 @@ class HaikuDataset(HuggingFaceDataset):
     hf_repo = "statworx/haiku"
     input_column = "keywords"
     output_column = "text"
-    needs_chat_template = True
+    apply_chat_template = True
 ```
 
 You can customize this by adding a system prompt, or by providing a prompt template to add additional text to the user message:
@@ -30,7 +30,7 @@ You can customize this by adding a system prompt, or by providing a prompt templ
 ```python
 class HaikuDataset(HuggingFaceDataset):
     # ...
-    needs_chat_template = True
+    apply_chat_template = True
     system_prompt = "You are an expert poet."
     prompt_template = "Write a haiku about {input}."
 ```
@@ -44,7 +44,7 @@ class MathDataset(HuggingFaceDataset):
     hf_repo = "zhuzilin/dapo-math-17k"
     input_key = "prompt"
     label_key = "label"
-    needs_chat_template = False
+    apply_chat_template = False
 ```
 
 As any seasoned ML veteran will tell you, we need separate datasets for training and validation/evaluation to properly train a model. This is made easy with [HF's slicing syntax](https://huggingface.co/docs/datasets/v4.8.4/loading#slice-splits):
@@ -93,8 +93,8 @@ During training, each task will be converted into a single user prompt. Like `Hu
 ```python
 class HelloWorld(HarborDataset):
     # ...
-    system_prompt="You are an expert Python programmer.",
-    prompt_template="Perform task {task_name} stored at {task_path}: {instruction}",
+    system_prompt="You are an expert Python programmer."
+    prompt_template="Perform task {task_name} stored at {task_path}: {instruction}"
 ```
 
 ## Creating a custom dataset
@@ -102,8 +102,10 @@ class HelloWorld(HarborDataset):
 To use your own data, likely stored in an [external source](https://modal.com/docs/guide/cloud-bucket-mounts) or a [Modal Volume](https://modal.com/docs/guide/volumes), you simply subclass [DatasetConfig](https://gym.modal.dev/reference/datasetconfig):
 
 ```python
+import os
+
+from datasets import Dataset
 from modal_training_gym import DatasetConfig
-from collections.abc import Iterable
 
 prompts = [(prompt, label), ...]  # external source
 
@@ -111,16 +113,22 @@ prompts = [(prompt, label), ...]  # external source
 class MyCustomDataset(DatasetConfig):
     input_key = "messages"
     label_key = "label"
-    needs_chat_template = False
+    apply_chat_template = True
 
-    def rows(self) -> Iterable[DatasetRow]:
-        for prompt, label in prompts:
-            yield {
-                self.input_key: [
-                    {"role": "user", "content": prompt},
-                ],
+    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        rows = [
+            {
+                self.input_key: [{"role": "user", "content": prompt}],
                 self.label_key: label,
             }
+            for prompt, label in prompts
+        ]
+        Dataset.from_list(rows).to_parquet(path)
+        if eval_paths:
+            for eval_path in eval_paths.values():
+                os.makedirs(os.path.dirname(eval_path), exist_ok=True)
+                Dataset.from_list(rows).to_parquet(eval_path)
 
 
 dataset = MyCustomDataset()
