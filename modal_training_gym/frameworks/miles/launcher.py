@@ -140,6 +140,9 @@ _PATCH_DIST_CKPT_FORK_RETRY_B64 = encode_patch(
 _PATCH_DIST_CKPT_READ_RETRY_B64 = encode_patch(
     "patch_dist_ckpt_read_retry", _MEGATRON_PATCHES
 )
+_PATCH_DIST_CKPT_WRITE_THROTTLE_B64 = encode_patch(
+    "patch_dist_ckpt_write_throttle", _MEGATRON_PATCHES
+)
 _MEGATRON_TORCH_STRATEGY_PY = (
     "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
 )
@@ -419,6 +422,11 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             # fail with EINVAL on a subset of ranks while the files are intact.
             # Retry with reopen instead of losing a multi-node retry cycle.
             f"echo {_PATCH_DIST_CKPT_READ_RETRY_B64} | base64 -d | python3",
+            # An unpaced TB-scale shard write bursts into the Volume mount far
+            # faster than it uploads, and the burst resets cluster TCP
+            # connections. Pace it via MILES_CKPT_WRITE_BWLIMIT_MBPS (no-op
+            # unless a recipe sets the env var).
+            f"echo {_PATCH_DIST_CKPT_WRITE_THROTTLE_B64} | base64 -d | python3",
             (
                 f"if test -f {_MEGATRON_TORCH_STRATEGY_PY}; then "
                 f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3; "

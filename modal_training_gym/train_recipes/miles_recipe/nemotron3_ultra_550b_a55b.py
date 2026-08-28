@@ -104,6 +104,14 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
             # with single-node engines keep fast dead-rank detection while this
             # one opts in.
             "MILES_LOAD_BARRIER_TIMEOUT_S": "3600",
+            # Pace checkpoint shard writes (patch_dist_ckpt_write_throttle,
+            # MB/s per writer process; 16 writers/node => ~0.5 GiB/s/node).
+            # Unpaced, the 64 GiB/node burst outruns the Volume mount's upload
+            # and the congestion resets TCP connections between cluster
+            # containers, failing the run at its save. Reads at ~1 GiB/s/node
+            # are proven safe; this keeps writes inside that envelope for a
+            # ~2 min save instead of ~1 min.
+            "MILES_CKPT_WRITE_BWLIMIT_MBPS": "32",
         }
     )
 
