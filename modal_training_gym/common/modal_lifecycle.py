@@ -108,13 +108,17 @@ def request_stop_app(app_id: str) -> None:
 
     if not isinstance(app_id, str) or _APP_ID_PATTERN.fullmatch(app_id) is None:
         raise ValueError("an exact Modal app ID is required")
-    import modal
+    from modal._utils.async_utils import synchronizer
+    from modal.client import _Client
     from modal_proto import api_pb2
 
-    with modal.Client.from_env() as client:
-        client.stub.AppStop(
+    async def _request_stop() -> None:
+        client = await _Client.from_env()
+        await client.stub.AppStop(
             api_pb2.AppStopRequest(
                 app_id=app_id,
                 source=api_pb2.APP_STOP_SOURCE_PYTHON_CLIENT,
             )
         )
+
+    synchronizer.create_blocking(_request_stop)()

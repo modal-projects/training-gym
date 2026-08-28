@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from modal._utils.async_utils import synchronizer
+from modal.client import _Client
 from modal_proto import api_pb2
 
 from modal_training_gym.common import modal_lifecycle
@@ -146,6 +148,35 @@ def test_best_effort_stop_wraps_strict_stop(monkeypatch, capsys) -> None:
     monkeypatch.setattr(modal_lifecycle, "request_stop_app", fail)
     modal_lifecycle.stop_app("ap-exact")
     assert "could not auto-stop app ap-exact" in capsys.readouterr().out
+
+
+def test_strict_stop_reuses_already_open_environment_client(monkeypatch) -> None:
+    requests = []
+
+    class Stub:
+        async def AppStop(self, request):
+            requests.append(request)
+
+    class Client:
+        stub = Stub()
+
+        async def _open(self):
+            raise AssertionError("an environment client must not be reopened")
+
+    async def from_env(_cls):
+        return Client()
+
+    monkeypatch.setattr(_Client, "from_env", classmethod(from_env))
+    monkeypatch.setattr(
+        synchronizer,
+        "create_blocking",
+        lambda function: lambda: asyncio.run(function()),
+    )
+    modal_lifecycle.request_stop_app("ap-Exact123")
+
+    assert len(requests) == 1
+    assert requests[0].app_id == "ap-Exact123"
+    assert requests[0].source == api_pb2.APP_STOP_SOURCE_PYTHON_CLIENT
 
 
 @pytest.mark.parametrize(
