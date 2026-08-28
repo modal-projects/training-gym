@@ -30,9 +30,13 @@ def flowers():
     return module
 
 
-def _png(color, size=(512, 512), noise=False):
+def _png(color, size=(512, 512), noise=False, block=None):
     Image = pytest.importorskip("PIL.Image")
     img = Image.new("RGB", size, color)
+    if block:
+        draw = pytest.importorskip("PIL.ImageDraw").Draw(img)
+        w, h = size[0] // block[0], size[1] // block[1]
+        draw.rectangle((w, h, size[0] - w, size[1] - h), fill=(8, 8, 8))
     if noise:
         import random
 
@@ -141,6 +145,16 @@ def test_speckle_storm_is_gated(flowers, monkeypatch):
     _stub_scoring(flowers, monkeypatch, _png((255, 255, 255), noise=True))
     reward, meta, _ = flowers.score_response(SKETCH, "iris::paint an iris")
     assert meta["speckle"] > 0.12
+    assert reward < 0.11
+
+
+def test_black_mass_is_gated(flowers, monkeypatch):
+    _stub_scoring(flowers, monkeypatch, _png((255, 255, 255), block=(10, 10)))
+    monkeypatch.setattr(
+        flowers, "probe_score", lambda png: pytest.fail("ink slick was judged")
+    )
+    reward, meta, _ = flowers.score_response(SKETCH, "iris::paint an iris")
+    assert meta["dark"] > 0.3
     assert reward < 0.11
 
 

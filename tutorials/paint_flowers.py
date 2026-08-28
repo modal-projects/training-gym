@@ -110,9 +110,12 @@ Rules:
 - brush.pick names: "pen", "2B", "HB", "cpencil", "charcoal", "marker". Never "spray".
 - Every colour is a quoted hex string, e.g. brush.fill("#e2725b", 100). A bare number like brush.fill(30, 100) is GREYSCALE and scores zero. Pick 4-6 hex colours from the requested palette before you paint and use only those.
 - The third argument of brush.circle is a RADIUS, not a diameter.
+- brush.strokeWeight is 1-4, always. A weight above 6 paints a black mass over the flower and scores zero. Outlines are thin; volume comes from fills, not from fat strokes.
+- The paper is painted with p5's background("#hex") as the very first call after brush.load(). brush.fill() does not paint a background.
 - p5's own background(), color(), lerpColor(), random(), sin(), cos() and for-loops are all available. p5 transforms (translate/rotate) do NOT reach the brush layer: compute every vertex in absolute canvas coordinates.
 - Watercolour is built by repetition: paint each shape 4-8 times in a loop with brush.bleed(0.1-0.3) and brush.fill(colour, 80-120), jittering position, angle and colour slightly each pass. Alpha under 40 is invisible however many passes you stack.
-- Paint, in order: a coloured paper background, a stem and pointed leaves, the petals (each a brush.polygon computed from an outline function), dry petal outlines with brush.pick("cpencil"), then the flower centre and stamens.
+- Paint, in order: a coloured paper background, a stem and pointed leaves, the petals, dry petal outlines with brush.pick("cpencil"), then the flower centre and stamens.
+- Petals are SEPARATE shapes: 5-8 of them, each its own convex brush.polygon of 4-8 vertices, placed around (0,0) at evenly spaced angles computed with cos()/sin(). One big many-armed star polygon is not a flower.
 - Draw BIG: the bloom spans about 300 of the 512 pixels. A flower in the middle 120 pixels scores zero.
 - Scores zero: a blank page, a single blob, scribbled lines, a grey flower, a flower painted off the canvas edge, speckle noise, fewer than three petals.
 - No loadImage, no fetch, no DOM access, no external assets, no comments over one line.
@@ -723,6 +726,15 @@ def speckle_fraction(png: bytes) -> float:
     return sum(1 for v, b in zip(px, bpx) if abs(v - b) > 40) / len(px)
 
 
+def dark_fraction(png: bytes) -> float:
+    """Fraction of pixels that are nearly black."""
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(png)).convert("L").resize((128, 128))
+    px = list(img.getdata())
+    return sum(1 for v in px if v < 48) / len(px)
+
+
 # ## The reward
 #
 # The four terms, assembled. The weights are the blog's collapsed rubric, and the
@@ -762,11 +774,18 @@ def score_response(response: str, label: str) -> tuple[float, dict, bytes | None
     ink = ink_fraction(png)
     speckle = speckle_fraction(png)
     coverage = coverage_fraction(png)
+    dark = dark_fraction(png)
     meta.update(
-        ink=round(ink, 3), speckle=round(speckle, 3), coverage=round(coverage, 3)
+        ink=round(ink, 3),
+        speckle=round(speckle, 3),
+        coverage=round(coverage, 3),
+        dark=round(dark, 3),
     )
-    # An empty canvas, a noise storm, or a flood fill: no picture to judge.
-    if ink < 0.02 or speckle > 0.12 or coverage > 0.97:
+    # An empty canvas, a noise storm, a flood fill, or an ink slick: nothing to
+    # judge. The darkness gate is the one the policy found on its own — a fat
+    # brush.strokeWeight paints a black mass that still renders and still has
+    # ink, so without it the cheap terms pay out for a silhouette.
+    if ink < 0.02 or speckle > 0.12 or coverage > 0.97 or dark > 0.3:
         return round(reward, 4), meta, png
 
     probe = probe_score(png)
