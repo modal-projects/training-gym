@@ -14,12 +14,18 @@ there is no validated adapter profile to mirror.
 shim, sglang's ``nemotron_h`` runner) is already inside ``MilesRecipe``'s default
 image, and this recipe carries no `patch_files` of its own.
 
-It did, however, surface two image-wide fixes that now apply to every miles
-image, both driven by this model's scale rather than by anything nemotron-specific:
+It did, however, surface image-wide fixes that now apply to every miles image,
+driven by this model's scale rather than by anything nemotron-specific:
 
 - ``megatron_patches/patch_dist_ckpt_fork_retry`` — Megatron's torch_dist writer
   forks 2 helper processes per rank and that fork intermittently returns EAGAIN
   on Modal, killing the run at its checkpoint save.
+- ``megatron_patches/patch_dist_ckpt_blocking_d2h`` — the same writer stages
+  every shard into pinned host memory before forking; a TB-scale save pins
+  ~320 GiB per node.
+- ``megatron_patches/patch_dist_ckpt_read_retry`` — torch_dist reads off a
+  Modal Volume intermittently fail with EINVAL on a subset of ranks while the
+  files are intact; retry with reopen instead of losing the run.
 - ``miles/modal_helpers/patches/patch_sglang_load_barrier`` — SGLang allows 8 min
   between the first and last rank finishing weight load. Only the node that
   downloaded the checkpoint reads it from page cache; the rest pull ~1 TB off a
@@ -56,8 +62,10 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
 
     gpu_type: str = "H200"
     # Upstream's optimizer offload keeps fp32 main params and both Adam moments in
-    # host RAM. See model_setup.md for the per-node estimate.
-    memory: tuple[int, int] = (1024, 2 * 1024 * 1024)
+    # host RAM: measured (cgroup accounting, 16 nodes) ~1360 GiB steady state plus
+    # ~320 GiB during a checkpoint save. 2600 GiB keeps the save peak well under
+    # the cap on a 2.84 TiB host.
+    memory: tuple[int, int] = (1024, 2600 * 1024)
 
     # nemotron_h is a hybrid Mamba2 + attention + latent-MoE stack: the block
     # pattern, the Mamba dimensions and moe_latent_size=2048 are not representable
@@ -99,6 +107,14 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
             # is the regime this model runs in (CPU-offloaded optimizer for 550 B).
             # Inkling-Small disables it for the same reason.
             "RAY_memory_monitor_refresh_ms": "0",
+            # The 1 TiB checkpoint write stalls whole nodes for minutes (engine
+            # HTTP servers stop answering for ~4 min around a save). Ray's
+            # default node health window (~40 s) declares a node dead well
+            # inside such a stall, killing the run at its checkpoint. Widen it
+            # to ~8 min; the trade-off is slower detection of a genuinely dead
+            # node.
+            "RAY_health_check_timeout_ms": "60000",
+            "RAY_health_check_failure_threshold": "8",
             # An engine spans 4 nodes; the three that did not download the
             # checkpoint read ~1 TB off the Modal Volume at ~1 GiB/s, so weight
             # load takes ~30 min (measured: 28 min on `poky-coyote-b2814b94964f`).
@@ -129,6 +145,13 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     # this is set, so resuming a params-only checkpoint dies with
     # KeyError: 'optimizer'. Trade-off: a resumed run restarts the Adam moments.
     no_load_optim: bool = True
+    # Not a MilesRecipe field: declaring it emits --ckpt-fully-parallel-load.
+    # Megatron's default load has every DP replica read its full TP/PP slice, so
+    # a resume pulls DP x 1.1 TB through the Volume mount at once; fully-parallel
+    # load reads each shard once cluster-wide and broadcasts. Safe with
+    # params-only checkpoints — Megatron's dp_zero_gather_scatter conflict only
+    # arises when optimizer state is loaded, which no_load_optim disables.
+    ckpt_fully_parallel_load: bool = True
     # Room for the Volume's write buffer during the 1.12 TB download.
     train_function_kwargs: dict[str, Any] = field(
         default_factory=lambda: {"ephemeral_disk": _EPHEMERAL_DISK_MIB}
