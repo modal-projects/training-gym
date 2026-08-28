@@ -2,7 +2,7 @@
 order: 0
 ---
 
-# Model
+# Choosing a base model
 
 The first step to training is choosing a base model. The Training Gym supports the [top](https://gym.modal.dev/#supported-models) open-source LLMs and VLMs. 
 

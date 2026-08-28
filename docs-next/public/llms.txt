@@ -25,7 +25,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 ### Start
 
-- [Model](https://gym.modal.dev/guides/model)
+- [Choosing a base model](https://gym.modal.dev/guides/model)
 
 ### Tools
 
