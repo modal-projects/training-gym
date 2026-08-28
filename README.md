@@ -78,7 +78,7 @@ run = config.launch()
 print(run.training_run_id)
 ```
 
-And you can view in-progress training runs in the [dashboard](https://gym.modal.dev/guides/observability-dashboard):
+And you can view in-progress training runs in the [dashboard](https://gym.modal.dev/guides/dashboard):
 
 ```bash
 training-gym setup  # first-time deploy
