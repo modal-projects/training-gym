@@ -881,6 +881,34 @@ def launch(num_rollout: int, judge_url: str, n_train: int = 224, load: str = "")
     print(f"Training run id: {result.training_run_id}")
 
 
+# ## What 100 steps buys
+#
+# Run `lazy-cache-56eb24da74da`, Qwen3.5-4B, 100 rollouts of 8 prompts x 8
+# samples on one H100, about 2.5 hours:
+#
+# | | step 1 | step 40 | step 100 |
+# | --- | --- | --- | --- |
+# | mean reward | 0.070 | 0.288 | 0.498 |
+# | renders that produce an image | 21/64 | 64/64 | 62/64 |
+# | win rate against the reference pool | 0.03 | 0.44 | 0.66 |
+#
+# The order in which things are learned is the interesting part, and it is the
+# order the reward is stacked in. Syntax first: the cheap gates are the only
+# terms a cold policy can reach, so the first ten steps are spent learning that
+# a sketch has to parse and run. Colour second, once the probe starts paying.
+# Composition last, and only because the pairwise judge does not care about
+# anything else.
+#
+# Two honest caveats. The final samples converge hard on one composition — five
+# or six round, overlapping petal washes on a stem, seen face-on — which is the
+# blog's clip-art collapse arriving by a different route: a pairwise judge with
+# twenty references teaches the policy the *average* of that pool, and variance
+# is not rewarded. And leaves mostly disappear by step 100; they cost tokens and
+# the judge rarely punishes their absence. Both are reference-pool problems
+# rather than reward-weight problems, and the fix is a wider, deliberately
+# varied pool rather than another term.
+
+
 if __name__ == "__main__":
     import sys
 
