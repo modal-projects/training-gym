@@ -114,7 +114,7 @@ export default defineConfig({
       '/tutorials/cross_tokenizer_distillation',
     '/tutorials/tools/000_observability_dashboard':
       '/guides/observability-dashboard',
-    '/tutorials/tools/001_wandb_integration': '/guides/wandb-integration',
+    '/tutorials/tools/001_wandb_integration': '/guides/metric',
   },
   markdown: {
     remarkPlugins: [remarkMath, remarkStripPageTitle],

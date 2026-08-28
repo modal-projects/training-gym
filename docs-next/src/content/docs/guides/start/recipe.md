@@ -38,7 +38,7 @@ We provide optimized recipes for all supported models in the Training Gym, but n
 
 This guide will focus on the most important ones, but feel free to check out the full list for each model on their reference page (e.g., [Qwen3.8 27B](https://gym.modal.dev/reference/qwen3_8_27b_recipe)).
 
-See [this guide](https://gym.modal.dev/guides/wandb-integration/) for more details on logging integrations.
+See [this guide](https://gym.modal.dev/guides/metric) for more details on logging integrations.
 
 ## Hardware and parallelism
 
