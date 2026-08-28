@@ -2,7 +2,7 @@
 order: 3
 ---
 
-# Training
+# Training in the Gym
 
 Once you have your model, dataset, and training recipe, you're ready to start training:
 
