@@ -1,31 +1,18 @@
 import json
 from pathlib import Path
 
-from modal_training_gym import HuggingFaceDataset, SlimeRecipe
+from modal_training_gym import HuggingFaceDataset, Qwen3_5_4B, TrainConfig
 from modal_training_gym.common.dataset import HarborDataset
 from modal_training_gym.common.environments.bfcl import BfclMultiTurnDataset
 from modal_training_gym.train_recipes.base import BaseTrainRecipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4b_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_5_4b import Qwen3_5_4b_Recipe
 
 
 def _flags(args: list[str]) -> dict[str, str]:
     return {
         args[i]: args[i + 1] for i in range(len(args) - 1) if args[i].startswith("--")
     }
-
-
-_RECIPE_KW = dict(
-    gpu_type="H100",
-    colocate=True,
-    tensor_model_parallel_size=1,
-    sequence_parallel=False,
-    rollout_num_gpus_per_engine=1,
-    num_rollout=1,
-    rollout_batch_size=4,
-    rollout_max_response_len=256,
-    rollout_temperature=1.0,
-    save_interval=1,
-)
 
 
 class TinyGsm8kDataset(HuggingFaceDataset):
@@ -43,7 +30,7 @@ class TinyGsm8kDataset(HuggingFaceDataset):
 
 def test_hf_dataset_emits_eval_prompt_data():
     ds = TinyGsm8kDataset()
-    args = SlimeRecipe(**_RECIPE_KW).cli_args(dataset=ds)
+    args = Qwen3_4b_Recipe().cli_args(dataset=ds)
     flags = _flags(args)
 
     assert "--eval-prompt-data" in args
@@ -60,9 +47,28 @@ def test_hf_dataset_emits_eval_prompt_data():
     assert train_path != eval_path
 
 
+def test_model_recipe_can_disable_eval_after_merge():
+    class NoEvalTiny(TinyGsm8kDataset):
+        writes_eval_paths = False
+
+    ds = NoEvalTiny()
+    config = TrainConfig(
+        dataset=ds,
+        model=Qwen3_5_4B(),
+        recipe=Qwen3_5_4b_Recipe(eval_interval=None),
+    )
+    recipe = config._prepare_recipe()
+    args = recipe.cli_args(dataset=ds)
+
+    assert recipe.eval_interval is None
+    assert "--eval-interval" not in args
+    assert "--eval-prompt-data" not in args
+
+
 def test_bfcl_dataset_omits_eval_prompt_data():
     ds = BfclMultiTurnDataset()
-    args = Qwen3_4b_Recipe().cli_args(dataset=ds)
+    args = Qwen3_4b_Recipe(eval_interval=None).cli_args(dataset=ds)
+    assert "--eval-interval" not in args
     assert "--eval-prompt-data" not in args
 
 

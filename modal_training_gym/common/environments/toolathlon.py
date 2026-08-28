@@ -681,7 +681,6 @@ class ToolathlonTrajectoryDataset(DatasetConfig):
     train_tasks: tuple[str, ...] = ()
     eval_tasks: tuple[str, ...] = ()
     obs_limit: int = 1500  # truncate each observation to N chars in context
-    writes_eval_paths = False
 
     def __init__(
         self,

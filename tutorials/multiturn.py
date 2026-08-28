@@ -25,7 +25,7 @@ from modal_training_gym import (
     DatasetConfig,
     Endpoint,
     Qwen3_5_4B,
-    SlimeRecipe,
+    Qwen3_5_4b_Recipe,
     TrainConfig,
 )
 
@@ -357,7 +357,7 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=SlimeRecipe(
+    recipe=Qwen3_5_4b_Recipe(
         custom_generate_function=number_guess_generate,
         custom_rm_function=number_guess_rm,
         extra_config={
@@ -379,6 +379,7 @@ config = TrainConfig(
 
         global_batch_size=8,
         save_interval=10,
+        eval_interval=None,
         apply_chat_template_kwargs='{"enable_thinking": false}',
     ),
 )

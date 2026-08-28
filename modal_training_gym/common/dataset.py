@@ -64,7 +64,7 @@ class DatasetConfig(ABC):
     input_key: str = "input"
     needs_chat_template: bool = True
     needs_refresh: bool = False
-    writes_eval_paths: bool = True
+    writes_eval_paths: bool = False
     output_format: Literal["parquet", "jsonl"] = "parquet"
 
     @property
@@ -186,6 +186,7 @@ class HuggingFaceDataset(DatasetConfig):
     """
 
     type: DatasetType = DatasetType.HUGGING_FACE
+    writes_eval_paths: bool = True
     hf_repo: str = ""
     hf_split: str = "train"
     hf_config: str | None = None
@@ -289,6 +290,7 @@ class HarborDataset(DatasetConfig):
     """
 
     type: DatasetType = DatasetType.HARBOR
+    writes_eval_paths: bool = True
     dataset_name: str = ""
     path: str | None = None
     task_root: str = ""
@@ -672,7 +674,6 @@ class MultimodalDataset(DatasetConfig):
     constructor, or subclass and override ``source_rows()`` to generate them.
     """
 
-    writes_eval_paths = False
     modality: Literal["image", "audio", "video"] = "audio"
     # TODO(ben/joy): gate-check media at this boundary so the evals dashboard can
     # reliably visualize it. Two parts: (1) normalize each emitted media item to a
