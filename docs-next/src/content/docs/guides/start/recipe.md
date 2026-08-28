@@ -117,7 +117,7 @@ recipe = Qwen3_5_4b_Recipe(
 
 The simplest reward functions (like the above) return binary scores for correct or incorrect responses. Likely, though, you'll want to provide the model with more granular information for better training performance; for example, giving an exact distance between its response and the expected answer. And to enable use cases like code generation and gameplay, you'll want to incorporate external components such as a [Modal Sandbox](https://modal.com/docs/guide/sandboxes).
 
-For logging purposes, you can attach metadata to each sample for more observability in the [dashboard](https://gym.modal.dev/guides/observability-dashboard/).
+For logging purposes, you can attach metadata to each sample for more observability in the [dashboard](https://gym.modal.dev/guides/dashboard/).
 
 When you're task requires something beyond a single-turn interaction, all it takes is implementing a [custom generate](https://miles.radixark.com/docs/user-guide/generate-endpoint) function.
 

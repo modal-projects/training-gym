@@ -113,7 +113,9 @@ export default defineConfig({
     '/tutorials/rl/009_cross_tokenizer_distillation':
       '/tutorials/cross_tokenizer_distillation',
     '/tutorials/tools/000_observability_dashboard':
-      '/guides/observability-dashboard',
+      '/guides/dashboard',
+    '/guides/observability-dashboard': '/guides/dashboard',
+    '/guides/tools/observability-dashboard': '/guides/dashboard',
     '/guides/wandb-integration': '/guides/metric',
     '/guides/tools/wandb-integration': '/guides/metric',
     '/tutorials/tools/001_wandb_integration': '/guides/metric',

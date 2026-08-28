@@ -4,7 +4,7 @@ order: 2
 
 # Logging metrics
 
-The [observability dashboard](https://gym.modal.dev/guides/observability-dashboard) captures the most important plots and metadata you'd care about during training. However, when you need access to everything logged by the [underlying framework](https://miles.radixark.com/docs), you can use our [Weights & Biases](https://wandb.ai) integration.
+The [observability dashboard](https://gym.modal.dev/guides/dashboard) captures the most important plots and metadata you'd care about during training. However, when you need access to everything logged by the [underlying framework](https://miles.radixark.com/docs), you can use our [Weights & Biases](https://wandb.ai) integration.
 
 First, you'll need to create a [Modal Secret](https://modal.com/docs/guide/secrets) with your API key:
 
