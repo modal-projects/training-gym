@@ -160,6 +160,64 @@ the four failures above were invisible to a slice that had just run five clean
 steps. Budget for the full-scale run finding new things; do not treat a green
 slice as de-risking the launch.
 
+### Iterating cheaply at multi-node scale
+
+Read SKILL.md's "Iterate cheaply" section first; these are the miles-specific
+mechanics, learned on Nemotron-3-Ultra where every observation behind a
+transition cost ~25–40 min of bring-up.
+
+**Warm save/offload lab.** miles ships `--save-trigger-sentinel`: if the file
+exists at a rollout boundary, a checkpoint is saved and the file removed. So one
+cluster held alive on cheap rollouts yields as many save→offload observations as
+you want for a single bring-up:
+
+```python
+recipe = <Model>_Recipe(
+    num_rollout=50,                    # cheap steps keep the cluster alive
+    rollout_max_response_len=256,      # short decode, not fewer samples
+    save_interval=999,                 # no periodic saves (None is rejected:
+                                       # Megatron asserts it whenever --save is set)
+    extra_config={"save_trigger_sentinel": "/tmp/save_now"},
+)
+```
+
+```bash
+uv run modal container list | grep <app-id>            # find the head container
+uv run modal container exec --no-pty <ta-...> -- touch /tmp/save_now
+```
+
+Note the final rollout still saves regardless — `should_run_periodic_action`
+returns True at `rollout_id == num_rollout - 1` — so keep `num_rollout` well
+above where you'll stop, and stop the app from the CLI when done.
+
+**Respect the minimum viable rollout shape.** Shrink cost via
+`rollout_max_response_len` and step count, never below the shape where every
+DP-attention group has work. On Nemotron-3-Ultra (4 engines × dp4 = 16 DP
+groups), 4 prompts × 2 samples left most groups idle and sglang's scheduler
+died with `AssertionError: extend-idle conversion expects an empty rank` on
+every attempt — the lab never reached a single save. 16 prompts × 4 samples
+@ 2048 is the floor that runs clean there; derive the equivalent for your
+engine × dp layout before shrinking.
+
+**Answer image/flag/artifact questions with a CPU probe, not a training run.**
+The working patterns live in `.gym/new_models/Nemotron3_Ultra_550B_A55B/`:
+`probe_miles_image.py` (inspect upstream support inside the pinned image),
+`validate_cli_args.py` (parse the emitted args with miles' own argparse — this
+is how `save_interval=None` handling was verified before a launch),
+`configs/probe_blocking_d2h_patch.py` (prove a patch applies and compiles), and
+`configs/verify_built_image.py` (grep markers out of the exact image
+`_build_miles_base_image` produces — a cached layer is otherwise
+indistinguishable from a skipped patch). Checkpoint completeness is a
+`modal volume ls` (256 `.distcp` + `.metadata` for a 128-rank save), not a
+resave.
+
+**Reuse warm state across runs.** The HF cache volume keeps the model download
+(~12 min saved), and recently-written volumes read back faster; back-to-back
+16-node runs came up in ~22 min vs ~38 cold. Launch the next experiment while
+the analysis of the previous one is still in progress only if they answer
+independent questions — otherwise you pay bring-up to reproduce a conclusion
+the pending run would have handed you.
+
 ### Timing at scale is not extrapolable
 
 Rollout generation on the full model came in ~20x slower than a slice-based

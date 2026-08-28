@@ -30,6 +30,16 @@ If reward doesn't climb, isolate which layer is at fault: data (`DatasetConfig` 
 
 **One step is not a time series.** Cold-start step cost can be ~10x steady state (kernel autotune, compilation), and it is measured on *step 0* of every run. Comparing step 0 of two different runs and concluding "steady" is invalid — you need ≥3 steps in one run.
 
+### Iterate cheaply: spend GPUs on questions only GPUs can answer
+
+The cost profile of a large-model validation run is dominated by fixed startup (cluster + image + weight load — 25–40 min at 16 nodes), so the unit of waste is *the run*, not the step. Before every launch, ask what question the run answers and whether something cheaper answers it:
+
+- **Escalate through the ladder**: local compile/arg checks → a CPU-only Modal probe against the pinned image (parse the args with the framework's own parser, print patched source, list a volume) → a few-layer slice → a short full-scale run → the smoke test. A question about flags, patches, or checkpoint completeness should never cost a 128-GPU bring-up; `modal volume ls` on the checkpoints volume (count shards, check `.metadata`) replaces rerunning a save to see if the last one worked.
+- **Make each GPU run a discriminating experiment**: change one variable, pre-register what pass and fail look like, and prefer isolation shapes that split the hypothesis space — e.g. the same N steps *with the save removed* proved the failure lived in the save→offload adjacency and nowhere else, worth more than another run reproducing a known failure.
+- **Test one transition, not the whole lifecycle**: a 1-step run with `save_interval=1` exercises load → rollout → train → save → offload → exit for the cost of one step; run that before any multi-step smoke.
+- **Shrink the run along the cheap axes**: fewer steps and shorter `rollout_max_response_len` (decode cost is superlinear in length) — **not** fewer samples, which changes the execution shape (see the framework reference for minimum viable rollout shapes; too-small batches idle DP groups and crash engines rather than saving money).
+- **Keep the cluster warm while iterating on one transition**: when debugging something that happens at a rollout boundary (a save, an offload), hold one cluster alive on cheap rollouts and trigger the transition on demand instead of paying weight load per observation — mechanics in [references/miles.md](references/miles.md).
+
 ### Operating a long run
 
 Multi-hour, multi-node runs fail in ways that are invisible if you only watch elapsed time.
