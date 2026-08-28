@@ -15,18 +15,11 @@ class Qwen3_VL_8b_Recipe(SlimeRecipe):
     tensor_model_parallel_size: int = 2
     sequence_parallel: bool = True
 
-    actor_num_nodes: int = 1
-    actor_num_gpus_per_node: int = 8
-
     num_rollout: int = 15
     n_samples_per_prompt: int = 4
     rollout_max_response_len: int = 256
     rollout_temperature: float = 1.0
     sglang_mem_fraction_static: float = 0.55
-
-    global_batch_size: int = 16
-    lr: float = 1e-6
-    lr_decay_style: str = "constant"
 
     # VL image patches expand to many tokens; padded (bshd) batches avoid the
     # THD packing path, which needs dynamic batching off + explicit micro batch.
@@ -36,7 +29,6 @@ class Qwen3_VL_8b_Recipe(SlimeRecipe):
     )
 
     save_interval: int = 10
-    eval_interval: int | None = None
 
     # AutoBridge loads the VL checkpoint (incl. ViT) at the configured TP; skips
     # slime's torch_dist pre-conversion, which mis-assigns the VL pipeline stage.

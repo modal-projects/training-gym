@@ -19,7 +19,6 @@ class Qwen3_8_27b_Recipe(SlimeRecipe):
     )
 
     actor_num_nodes: int = 4
-    actor_num_gpus_per_node: int = 8
 
     # ── Parallelism ───────────────────────────────────────────────────────
     tensor_model_parallel_size: int = 4
@@ -39,7 +38,6 @@ class Qwen3_8_27b_Recipe(SlimeRecipe):
     rollout_num_gpus_per_engine: int = 2
     rollout_max_response_len: int = 32768
     rollout_temperature: float = 1.0
-    sglang_mem_fraction_static: float = 0.75
     sglang_speculative_algorithm: str | None = "EAGLE"
     sglang_speculative_num_steps: int | None = 3
     sglang_speculative_eagle_topk: int | None = 1
@@ -47,12 +45,10 @@ class Qwen3_8_27b_Recipe(SlimeRecipe):
     sglang_mamba_scheduler_strategy: str | None = "extra_buffer"
 
     # ── Training / optimizer ──────────────────────────────────────────────
-    lr: float = 1e-6
     max_tokens_per_gpu: int = 8192
     calculate_per_token_loss: bool = True
     balance_data: bool = True
     rm_type: str | None = "deepscaler"
-    use_kl_loss: bool = False
     optimizer_cpu_offload: bool = True
     overlap_cpu_optimizer_d2h_h2d: bool = True
     use_precision_aware_optimizer: bool = True
@@ -60,6 +56,4 @@ class Qwen3_8_27b_Recipe(SlimeRecipe):
     eps_clip_high: float | None = None
 
     # ── Checkpointing / eval ──────────────────────────────────────────────
-    megatron_to_hf_mode: str = ""
     save_interval: int = 20
-    eval_interval: int | None = None

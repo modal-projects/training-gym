@@ -16,9 +16,6 @@ class Qwen3_6_35b_Recipe(SlimeRecipe):
         default_factory=lambda: {"ephemeral_disk": 1_048_576}
     )
 
-    actor_num_nodes: int = 1
-    actor_num_gpus_per_node: int = 8
-
     # ── Parallelism ───────────────────────────────────────────────────────
     tensor_model_parallel_size: int = 2
     sequence_parallel: bool = True
@@ -34,7 +31,6 @@ class Qwen3_6_35b_Recipe(SlimeRecipe):
     rollout_max_response_len: int = 16384
     rollout_temperature: float = 1.0
     global_batch_size: int = 128
-    sglang_mem_fraction_static: float = 0.75
     sglang_enable_dp_attention: bool = True
     sglang_dp_size: int | None = 4
     sglang_ep_size: int | None = 4
@@ -51,7 +47,6 @@ class Qwen3_6_35b_Recipe(SlimeRecipe):
 
     # ── Training ──────────────────────────────────────────────────────────
     n_samples_per_prompt: int = 8
-    lr: float = 1e-6
     max_tokens_per_gpu: int = 8192
     balance_data: bool = True
     moe_token_dispatcher_type: str = "flex"
@@ -67,8 +62,6 @@ class Qwen3_6_35b_Recipe(SlimeRecipe):
     attention_backend: str = "flash"
 
     # ── Checkpointing / eval ──────────────────────────────────────────────
-    megatron_to_hf_mode: str = ""
     ref_load: str = "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp2pp2"
     save_interval: int = 20
     no_save_optim: bool = True
-    eval_interval: int | None = None
