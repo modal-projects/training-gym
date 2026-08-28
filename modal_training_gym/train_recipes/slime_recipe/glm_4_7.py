@@ -41,7 +41,6 @@ class GLM_4_7_Recipe(SlimeRecipe):
     actor_num_nodes: int = 8
     n_samples_per_prompt: int = 8
     global_batch_size: int = 128
-    lr: float = 1e-6
     max_tokens_per_gpu: int = 8192
 
     # MoE parallelism
@@ -56,9 +55,6 @@ class GLM_4_7_Recipe(SlimeRecipe):
     eps_clip: float = 1e-4
     eps_clip_high: float = 2e-4
     use_tis: bool = True
-    kl_loss_coef: float = 0.0
-    kl_loss_type: str = "low_var_kl"
-    entropy_coef: float = 0.0
 
     # Optimizer
     optimizer_cpu_offload: bool = True
