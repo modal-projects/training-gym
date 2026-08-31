@@ -419,7 +419,7 @@ class TrainConfig:
             self.model.model_name,
             self.checkpoint.path if self.checkpoint is not None else "",
             f"{type(self.recipe).__name__}:{self.recipe.recipe_type.value}",
-            self.dataset.dataset_id,
+            str(hash(self.dataset)),
             self.model.model_path or "",
         )
 

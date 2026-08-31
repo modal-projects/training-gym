@@ -1,15 +1,14 @@
-"""Dataset config + ``prepare()`` hook, shared across training frameworks.
+"""Classes for defining nad using datasets for training.
 
-Pure data — each framework config writes its own converter from a
-``DatasetConfig`` instance to its specific CLI flags (e.g. SlimeRecipe emits
-``--prompt-data``, ``--input-key``, …).
-
-Subclass and override ``prepare()`` to materialize the data into a shared
-volume.
+Datasets inherit from a base ``DatasetConfig`` class and provide a ``rows()``
+method that returns an iterable collection of rows. Subclasses are provided for
+common sources like Hugging Face and Harbor.
 """
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from enum import Enum
 from typing import Any, Literal
 import json
@@ -30,83 +29,47 @@ class DatasetType(Enum):
     HARBOR = "harbor"
 
 
-class DatasetConfig:
+class DatasetConfig(ABC):
     """Dataset configuration shared across training frameworks.
 
-    Describes *what* the data is. Where it gets written on disk is decided
-    by the recipe/launcher layer, not by the dataset itself.
-
-    output_format : str
-        On-disk format ``prepare()`` writes, ``"parquet"`` (default) or
-        ``"jsonl"``; it also picks the extension of the path the launcher
-        hands to ``prepare()``. Parquet is the default because it is compact,
-        carries a typed schema (so a ragged or mistyped column fails at write
-        time rather than inside a remote rollout actor), streams row-group by
-        row-group, and stores binary media without base64 inflation. Choose
-        ``"jsonl"`` for small or hand-inspected datasets — it stays greppable
-        on the data volume and tolerates rows whose schemas don't line up.
+    Describes *what* the data is and provides a ``rows()`` method to resolve it.
     """
 
     _type: DatasetType = DatasetType.DEFAULT
-    dataset_id: str = ""
-    input_key: str = ""
-    label_key: str = ""
-    output_format: str = "parquet"
-    apply_chat_template: bool = True
-    always_prepare: bool = False
-    # When True (default), ``prepare()`` is expected to materialize every path in
-    # ``eval_paths`` and the launcher validates them strictly. Datasets that use
-    # a separate DatasetConfig instance for offline eval (Toolathlon, BFCL) set
-    # this False so resolvers don't invent a companion ``eval.*`` file.
-    writes_eval_paths: bool = True
 
-    def __init__(self, **kwargs: Any) -> None:
-        if not self.dataset_id:
-            self.dataset_id = str(uuid.uuid4())
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        self._validate()
+    def cache_key(self) -> str | None:
+        return None
+    
+    @abstractmethod
+    def input_key(self) -> str:
+        raise NotImplementedError(f"{type(self).__name__} has no input_key()")
 
-    def _validate(self) -> None:
-        """Required-field check; subclasses call this at the end of their own ``__init__``."""
-        if self.output_format not in ("parquet", "jsonl"):
-            raise TrainingGymConfigError(
-                f"{type(self).__name__} has output_format="
-                f"{self.output_format!r}; expected 'parquet' or 'jsonl'."
-            )
-        if not self.label_key:
-            raise TrainingGymConfigError(
-                f"{type(self).__name__} requires `label_key` to be set. "
-                "It names the column on the materialized dataset that holds "
-                "per-sample ground-truth / reward-function input. "
-                'Declare it as a class attribute (`label_key = "label"`) on '
-                "your subclass, or pass `label_key=...` as a kwarg. Frameworks "
-                "like slime index `data[label_key]` at load time, so an unset "
-                "value reliably crashes deep in a remote Ray actor."
-            )
+    @abstractmethod
+    def label_key(self) -> str:
+        raise NotImplementedError(f"{type(self).__name__} has no label_key()")
+    
+    def output_format(self) -> str:
+        return "jsonl"
 
-    @property
-    def name(self) -> str:
-        return self.dataset_id
-
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
-        """Materialize training data to ``path`` (and eval splits to ``eval_paths``)."""
-        raise NotImplementedError(f"{type(self).__name__} has no prepare()")
-
-    def load(self, split: Literal["all", "train", "eval"] = "all") -> Any:
-        """Load raw examples, optionally filtered by split."""
-        raise NotImplementedError(f"{type(self).__name__} has no load()")
+    @abstractmethod
+    def rows(self) -> Iterable[DatasetRow]:
+        raise NotImplementedError(f"{type(self).__name__} has no rows()") 
+    
+    def write(self, path: str) -> None:
+        with open(path, "w") as f:
+            for row in self.rows():
+                f.write(json.dumps(row) + "\n")
 
     def _expected_columns(self) -> set[str]:
         cols: set[str] = set()
-        if self.input_key:
-            cols.add(self.input_key)
-        if self.label_key:
-            cols.add(self.label_key)
+        if self.input_key():
+            cols.add(self.input_key())
+        if self.label_key():
+            cols.add(self.label_key())
         return cols
 
-    def validate_prepared(self, path: str) -> None:
-        """Sniff what ``prepare()`` wrote and confirm the columns the framework will index.
+    def validate_written(self, path: str) -> None:
+        """Sniff what ``write()`` wrote and confirm the columns the framework will index.
 
         Catches the common ``KeyError: 'label'`` (and friends) that otherwise
         only fire deep inside a Ray actor on a remote container, after image
@@ -116,8 +79,7 @@ class DatasetConfig:
 
         if not os.path.exists(path):
             raise FileNotFoundError(
-                f"{type(self).__name__}.prepare() did not produce {path!r}. "
-                "Ensure your prepare(path, ...) override writes to the `path` arg."
+                f"{type(self).__name__}.write() did not produce {path!r}. "
             )
 
         expected = self._expected_columns()
@@ -139,7 +101,7 @@ class DatasetConfig:
                 return
         except Exception as e:  # don't shadow the user's real bug with a sniff bug
             print(
-                f"[{type(self).__name__}.validate_prepared] could not sniff "
+                f"[{type(self).__name__}.validate_written] could not sniff "
                 f"{path!r} ({e!r}); skipping schema check."
             )
             return
@@ -147,52 +109,72 @@ class DatasetConfig:
         missing = expected - cols
         if missing:
             raise TrainingGymConfigError(
-                f"{type(self).__name__}.prepare() wrote {path!r} but it is "
+                f"{type(self).__name__}.write() wrote {path!r} but it is "
                 f"missing required column(s) {sorted(missing)} "
                 f"(input_key={self.input_key!r}, label_key={self.label_key!r}). "
                 f"Columns present: {sorted(cols)}. "
-                "Either rename the column(s) your prepare() writes, or set "
+                "Either rename the column(s) your write() writes, or implement "
                 "input_key/label_key on your DatasetConfig subclass to match."
             )
 
 
 class HuggingFaceDataset(DatasetConfig):
-    """Dataset backed by a HuggingFace ``datasets`` repo.
-
-    Subclass and set ``hf_repo`` plus column mappings. When
-    ``input_column`` and ``output_column`` are set, ``prepare()`` wraps
-    each row into a prompt-only chat message list plus a separate label
-    field: ``{"messages": [{"role": "user", ...}], <label_key>: ...}``.
-    A leading ``{"role": "system", ...}`` message is included when
-    ``system_prompt`` is set. No assistant turn is emitted — the target
-    from ``output_column`` is stored under ``label_key``.
-    """
+    """Dataset backed by a HuggingFace ``datasets`` repo."""
 
     _type: DatasetType = DatasetType.HUGGING_FACE
-    hf_repo: str = ""
-    hf_split: str = "train"
-    hf_config: str | None = None
-    input_column: str = ""
-    output_column: str = ""
-    system_prompt: str = ""
-    prompt_template: str = "{input}"
-    n_rows: int = 0
-    label_key: str = "label"
 
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        if not self.input_key and self.input_column and self.output_column:
-            self.input_key = "messages"
-        if "dataset_id" not in kwargs:
-            self.dataset_id = f"{self.hf_repo}-{self.hf_split}-{uuid.uuid4()}"
-        self._validate()
+    hf_repo: str
+    hf_split: str
+    hf_config: str | None
+    input_column: str
+    output_column: str
+    apply_chat_template: bool
+    system_prompt: str
+    prompt_template: str
+    always_download: bool
 
-    @property
-    def name(self) -> str:
-        return self.hf_repo
+    def __init__(
+        self,
+        hf_repo: str,
+        *,
+        hf_split: str = "train",
+        hf_config: str | None = None,
+        input_column: str,
+        output_column: str,
+        apply_chat_template: bool = True,
+        system_prompt: str,
+        prompt_template: str = "{input}",
+        always_download: bool = False,
+    ):
+        self.hf_repo = hf_repo
+        self.hf_split = hf_split
+        self.hf_config = hf_config
+        self.input_column = input_column
+        self.output_column = output_column
+        self.apply_chat_template = apply_chat_template
+        self.system_prompt = system_prompt
+        self.prompt_template = prompt_template
+        self.always_download = always_download
 
-    def load(self, split: Literal["all", "train", "eval"] = "all") -> Any:
+    def cache_key(self) -> str | None:
+        if self.always_download:
+            return None
+        else:
+            return f"{self.hf_repo}-{self.hf_split}-{self.hf_config}"
+    
+    def input_key(self) -> str:
+        if self.apply_chat_template:
+            return "messages"
+        else:
+            return self.input_column
+
+    def label_key(self) -> str:
+        if self.apply_chat_template:
+            return "label"
+        else:
+            return self.output_column
+    
+    def _load_hf_dataset(self):
         from datasets import load_dataset
 
         ds = load_dataset(
@@ -200,51 +182,37 @@ class HuggingFaceDataset(DatasetConfig):
             self.hf_config,
             split=self.hf_split,
         )
-        if self.n_rows:
-            ds = ds.select(range(min(self.n_rows, len(ds))))
+
+        if self.apply_chat_template:
+            ds = ds.map(self._to_chat)
+
         return ds
 
-    def _format_for_training(self, ds):
-        if not (self.input_column and self.output_column):
-            return ds
-
-        in_col, out_col = self.input_column, self.output_column
-        sys_prompt = self.system_prompt
-        template = self.prompt_template
-        label_key = self.label_key
-
-        def _to_chat(row: dict) -> dict:
-            user_content = template.format(input=row[in_col])
-            msgs = []
-            if sys_prompt:
-                msgs.append({"role": "system", "content": sys_prompt})
-            msgs.append({"role": "user", "content": user_content})
-            return {"messages": msgs, label_key: str(row[out_col])}
-
-        return ds.map(_to_chat, remove_columns=ds.column_names)
+    def _to_chat(self, row):
+        messages: list[dict[str, str]] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        user_content = self.prompt_template.format(input=row[self.input_column])
+        messages.append({"role": "user", "content": user_content})
+        return {
+            self.input_key(): messages,
+            self.label_key(): str(row[self.output_column]),
+        }
 
     def to_pandas(self, *, formatted: bool = False):
-        ds = self.load()
-        if formatted:
-            ds = self._format_for_training(ds)
-        return ds.to_pandas()
-
-    def _write_split(self, ds, path: str) -> None:
-        import os
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        if self.output_format == "jsonl":
-            ds.to_json(path, orient="records", lines=True)
-        else:
+        ds = self._load_hf_dataset()
+        return ds.to_pandas(formatted=formatted)
+    
+    def rows(self) -> Iterable[DatasetRow]:
+        for row in self._load_hf_dataset():
+            yield dict(row)
+    
+    def write(self, path: str) -> None:
+        ds = self._load_hf_dataset()
+        if self.output_format() == "parquet":
             ds.to_parquet(path)
-
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
-        ds = self._format_for_training(self.load())
-        self._write_split(ds, path)
-
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_split(ds, eval_path)
+        else:
+            ds.to_json(path, orient="records", lines=True)
 
 
 class HarborDataset(DatasetConfig):
