@@ -120,6 +120,12 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     # miles' load_checkpoint dispatches on what --ref-load points at, and an HF
     # directory routes to _load_checkpoint_hf. There is no offline torch_dist
     # conversion step, so none of the conversion_* fields apply.
+    #
+    # The bridge logs "Unrecognized mapping type for mtp.*" on every rank: the
+    # checkpoint ships an MTP (speculative-draft) head whose layer norms have no
+    # bridge mapping. Benign while MTP is neither trained (mtp_num_layers unset)
+    # nor served (no sglang_speculative_algorithm); enabling speculative decoding
+    # with this head requires fixing that mapping first.
     megatron_to_hf_mode: str = "bridge"
     ref_load: str = "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
     # hf_checkpoint is intentionally unset — it comes from the attached
