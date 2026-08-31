@@ -152,6 +152,15 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
         default_factory=lambda: {"ephemeral_disk": _EPHEMERAL_DISK_MIB}
     )
 
+    # ── Weight sync ──────────────────────────────────────────────────────────
+    # The colocated sync pays a convert -> serialize -> IPC round trip per
+    # chunk, so 1.1 TB through miles' 512 MB default is ~9,000 round trips:
+    # measured 598-688 s per sync. 2 GiB — upstream's tuning for the comparable
+    # GLM5-744B and Kimi-K2.5 — measured 330 s. The remaining floor is the
+    # bridge HF export; a direct megatron_to_hf mapping for nemotron_h is the
+    # path to Inkling-class (~40 s) syncs.
+    update_weight_buffer_size: int | None = 2 * 1024**3
+
     # ── Cluster + parallelism ────────────────────────────────────────────────
     actor_num_nodes: int = 16
     actor_num_gpus_per_node: int = 8
