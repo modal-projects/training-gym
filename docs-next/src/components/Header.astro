@@ -230,14 +230,20 @@ const isActive = (href: string) =>
   const hoverablePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
   for (const dropdown of document.querySelectorAll<HTMLDetailsElement>('.tg-header__nav-dropdown')) {
     const dropdownSummary = dropdown.querySelector<HTMLElement>('summary');
+    let dropdownCloseTimer: number | undefined;
 
     dropdown.addEventListener('pointerenter', () => {
-      if (hoverablePointer.matches) dropdown.open = true;
+      if (!hoverablePointer.matches) return;
+      window.clearTimeout(dropdownCloseTimer);
+      dropdown.open = true;
     });
     dropdown.addEventListener('pointerleave', () => {
-      if (hoverablePointer.matches && !dropdown.matches(':focus-within')) {
-        dropdown.open = false;
-      }
+      if (!hoverablePointer.matches || dropdown.matches(':focus-within')) return;
+      dropdownCloseTimer = window.setTimeout(() => {
+        if (!dropdown.matches(':focus-within')) {
+          dropdown.open = false;
+        }
+      }, 120);
     });
     dropdown.addEventListener('focusin', (event) => {
       if (event.target !== dropdownSummary || dropdownSummary?.matches(':focus-visible')) {
