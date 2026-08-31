@@ -86,8 +86,12 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
             # while building _TP. Inkling-Small deviates for the same reason.
             "NCCL_NVLS_ENABLE": "0",
             # A failed engine bring-up otherwise surfaces only as "invalid usage"
-            # with no detail. WARN is quiet unless something is wrong.
-            "NCCL_DEBUG": "WARN",
+            # with no detail. INIT,NET keeps INFO scoped to bring-up and the
+            # network path — chatty only during init — to capture why the NCCL
+            # net plugin fails to initialize on individual hosts (the recurring
+            # per-node "Failed to initialize any NET plugin" fleet issue).
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "INIT,NET",
             # NCCL's RAS reliability thread segfaults while ranks wind down after
             # the final checkpoint save, failing a run whose work is already
             # done. RAS only reports health, so disabling it costs nothing.
@@ -190,7 +194,7 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     balance_data: bool = True
     rollout_shuffle: bool = True
     num_rollout: int = 30
-    # Small rollout batch/sample sizes can idle DP ranks; 
+    # Small rollout batch/sample sizes can idle DP ranks;
     # see sglang#34535: https://github.com/sgl-project/sglang/pull/34535
     rollout_batch_size: int = 32
     n_samples_per_prompt: int = 8
