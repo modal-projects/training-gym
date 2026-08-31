@@ -40,6 +40,15 @@ Set up the [dashboard](https://gym.modal.dev/guides/dashboard):
 training-gym setup
 ```
 
+<div class="tg-dashboard-previews">
+  <span>
+    <img src="./assets/homepage.gif" alt="Training runs list in the Training Gym dashboard" width="100%" />
+  </span>
+  <span>
+    <img src="./assets/longrun.gif" alt="Long-running training run details in the Training Gym dashboard" width="100%" />
+  </span>
+</div>
+
 And empower your agents with the Gym's skill bundle:
 
 ```bash
@@ -89,15 +98,6 @@ config = TrainConfig(
 run = config.launch()
 print(run.training_run_id)
 ```
-
-<div class="tg-dashboard-previews">
-  <span>
-    <img src="./assets/homepage.gif" alt="Training runs list in the Training Gym dashboard" width="100%" />
-  </span>
-  <span>
-    <img src="./assets/longrun.gif" alt="Long-running training run details in the Training Gym dashboard" width="100%" />
-  </span>
-</div>
 
 ## Supported models
 
