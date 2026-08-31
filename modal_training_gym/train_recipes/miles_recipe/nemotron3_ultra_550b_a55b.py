@@ -190,6 +190,8 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     balance_data: bool = True
     rollout_shuffle: bool = True
     num_rollout: int = 30
+    # Small rollout batch/sample sizes can idle DP ranks; 
+    # see sglang#34535: https://github.com/sgl-project/sglang/pull/34535
     rollout_batch_size: int = 32
     n_samples_per_prompt: int = 8
     global_batch_size: int = 128
