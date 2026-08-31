@@ -34,6 +34,18 @@ Authenticate with Modal:
 modal setup
 ```
 
+Set up the [dashboard](https://gym.modal.dev/guides/dashboard):
+
+```bash
+training-gym setup
+```
+
+And empower your agents with the Gym's skill bundle:
+
+```bash
+training-gym skills install
+```
+
 Then, it's as easy as:
 
 ```python
@@ -76,19 +88,6 @@ config = TrainConfig(
 )
 run = config.launch()
 print(run.training_run_id)
-```
-
-While you're at it, empower your agents with the Gym's skill bundle:
-
-```bash
-training-gym skills install
-```
-
-And watch your training runs in the [dashboard](https://gym.modal.dev/guides/dashboard):
-
-```bash
-training-gym setup  # first-time deploy
-training-gym open  # opens in your browser
 ```
 
 <div class="tg-dashboard-previews">
