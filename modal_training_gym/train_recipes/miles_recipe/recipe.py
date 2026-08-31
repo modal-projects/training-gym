@@ -35,6 +35,7 @@ _MILES_SKIP = {
     "docker_image",
     "gpu_type",
     "memory",
+    "cpu",
     "cloud",
     "region",
     "name",
@@ -138,6 +139,8 @@ class MilesRecipe(BaseTrainRecipe):
         Local Miles checkout mounted over the image's copy; no rebuild needed.
     memory : int | tuple[int, int] | None
         Modal Function memory request/limit in MiB.
+    cpu : float | tuple[float, float] | None
+        Modal Function CPU request/limit in cores per container.
     cloud : str | None
         Modal cloud provider to pin the cluster to.
     region : str | None
@@ -478,6 +481,7 @@ class MilesRecipe(BaseTrainRecipe):
     docker_image: str = "radixark/miles:dev-202608120325"
     gpu_type: str = "H100"
     memory: int | tuple[int, int] | None = None
+    cpu: float | tuple[float, float] | None = None
     cloud: str | None = None
     region: str | None = None
     name: str = ""
