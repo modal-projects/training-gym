@@ -78,7 +78,13 @@ run = config.launch()
 print(run.training_run_id)
 ```
 
-And you can view in-progress training runs in the [dashboard](https://gym.modal.dev/guides/dashboard):
+While you're at it, empower your agents with the Gym's skill bundle:
+
+```bash
+training-gym skills install
+```
+
+And watch your training runs in the [dashboard](https://gym.modal.dev/guides/dashboard):
 
 ```bash
 training-gym setup  # first-time deploy
