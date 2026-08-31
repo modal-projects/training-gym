@@ -1,8 +1,12 @@
 ---
 import '@astrojs/starlight/style/markdown.css';
+
+const slug = Astro.locals.starlightRoute.entry.id.replace(/^\/+/, '');
+const isCli = slug === 'reference/cli' || slug.startsWith('reference/cli/');
+const isCliIndex = slug === 'reference/cli';
 ---
 
-<div class="sl-markdown-content"><slot /></div>
+<div class:list={['sl-markdown-content', { 'tg-cli': isCli, 'tg-cli-index': isCliIndex }]}><slot /></div>
 
 <script is:inline>
   (() => {

@@ -77,19 +77,23 @@ class BaseTrainRecipe(ABC):
 
     @classmethod
     def get_base_recipe(cls, model_config: "ModelConfig") -> "BaseTrainRecipe | None":
-        """Known-model preset recipe for ``model_config``, or ``None``.
+        """Return the model preset for ``model_config``.
 
         Call this explicitly. ``TrainConfig`` uses the recipe it receives
         without applying a preset.
 
-        A framework that only supports an explicit allow-list of models (e.g.
-        slime) may instead raise ``TrainingGymConfigError`` for a model it has
-        no preset for, rather than returning ``None``.
+        Returns:
+            The model preset, or ``None`` when no preset is registered.
+
+        Raises:
+            TrainingGymConfigError:
+                The recipe accepts only registered models and ``model_config`` is not
+                registered.
         """
         return None
 
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
-        """Preflight the parallelism plan. Overridden per framework."""
+        """Validate the model's parallelism settings."""
         return None
 
     # ── Container → framework flag converters ────────────────────────────────

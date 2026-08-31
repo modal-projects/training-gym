@@ -3,20 +3,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import type { Loader, LoaderContext } from 'astro/loaders';
+import { flattenDocId } from './docs-sections';
 
 const TUTORIAL_ENTRY_PREFIX = 'tutorials/';
 const frontmatterFieldPattern = /^# ([a-z_]+):\s*(.*)$/;
 const dependencyPattern = /^[A-Za-z0-9_.-]+$/;
-
-export function flattenDocId(entry: string): string {
-  const withoutExt = entry.replace(/\.[^./]+$/, '');
-  const withoutIndex = withoutExt.replace(/\/index$/, '');
-  const parts = withoutIndex.split('/').filter(Boolean);
-  if (parts.length <= 2) {
-    return withoutIndex;
-  }
-  return `${parts[0]}/${parts[parts.length - 1]}`;
-}
 
 function generateDocsId({
   entry,

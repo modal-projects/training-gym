@@ -59,7 +59,7 @@ def _run_filter_options(function: Callable[..., Any]) -> Callable[..., Any]:
             name,
             default=None,
             metavar=option_name.upper(),
-            help=f"Only runs with this {str(metadata['label']).lower()}.",
+            help=f"Filter by {str(metadata['label']).lower()}.",
         )(function)
     return function
 
@@ -898,12 +898,12 @@ def list_runs(
 
 @click.group("run", cls=_TrainingGymGroup)
 def run_group() -> None:
-    """Inspect and manage training runs."""
+    """Inspect and manage runs."""
 
 
 @run_group.command(
     "get",
-    help="Show status and top-level metadata for a single run.",
+    help="Show a run's status and top-level metadata.",
     epilog=(
         "Examples:\n"
         "  training-gym run get brave-falcon-3fa8\n"
@@ -919,13 +919,13 @@ def run_group() -> None:
 )
 @json_option
 def get_command(*, run_id: str, verbose: bool, json_output: bool) -> None:
-    """Show status and top-level metadata for a single run."""
+    """Show a run's status and top-level metadata."""
     get_run(run_id=run_id, verbose=verbose, json_output=json_output)
 
 
 @run_group.command(
     "params",
-    help=("Show the framework training recipe for a single run."),
+    help="Show a run's framework training recipe.",
     epilog=(
         "Examples:\n"
         "  training-gym run params brave-falcon-3fa8\n"
@@ -935,17 +935,13 @@ def get_command(*, run_id: str, verbose: bool, json_output: bool) -> None:
 @click.argument("run_id")
 @json_option
 def params_command(*, run_id: str, json_output: bool) -> None:
-    """Show the framework training recipe for a single run."""
+    """Show a run's framework training recipe."""
     show_run_params(run_id=run_id, json_output=json_output)
 
 
 @run_group.command(
     "logs",
-    help=(
-        "Show logs for a training run.\n\n"
-        f"By default, shows the latest {DEFAULT_LOG_TAIL} logs. "
-        "Use --follow to stream new logs."
-    ),
+    help="Show logs for a training run.",
     epilog=(
         "Examples:\n"
         "  training-gym run logs brave-falcon-3fa8 --follow\n"
@@ -964,24 +960,22 @@ def params_command(*, run_id: str, json_output: bool) -> None:
     "--since",
     default=None,
     metavar="START",
-    help="Show logs since a timestamp or relative time (e.g. 30m, 2h).",
+    help="Show logs since a timestamp or relative time, such as 30m or 2h.",
 )
 @click.option(
     "--until",
     default=None,
     metavar="END",
-    help="Show logs up to a timestamp or relative time (e.g. 30m, 2h).",
+    help="Show logs up to a timestamp or relative time, such as 30m or 2h.",
 )
 @click.option(
     "-n",
     "--tail",
     type=click.IntRange(min=1, max=MAX_LOG_TAIL),
     default=None,
+    show_default=str(DEFAULT_LOG_TAIL),
     metavar="N",
-    help=(
-        f"Show at most the newest N logs within the requested window "
-        f"(default: {DEFAULT_LOG_TAIL}; max: {MAX_LOG_TAIL})."
-    ),
+    help="Show at most N recent logs in the requested window.",
 )
 @click.option(
     "--search",
@@ -1014,10 +1008,7 @@ def logs_command(
 
 @run_group.command(
     "trace",
-    help=(
-        "Download agent traces for a run to a local directory and print the "
-        "path along with metadata about the number of samples and size of files."
-    ),
+    help="Download agent traces for a run.",
     epilog=(
         "Examples:\n"
         "  training-gym run trace brave-falcon-3fa8 --out ./traces --step 4-100:2\n"
@@ -1037,10 +1028,7 @@ def logs_command(
     "--step",
     default=None,
     metavar="STEP",
-    help=(
-        "Select steps by list or range, such as 1,4,9 or 4-100:2. "
-        "The range end is excluded. Defaults to all steps."
-    ),
+    help="Select steps by list or end-exclusive range, or omit to select all steps.",
 )
 @click.option(
     "--dry-run",
@@ -1073,9 +1061,8 @@ def trace_command(
 @run_group.command(
     "list",
     help=(
-        "List training runs with their top-level metadata.\n\n"
-        "Supports filtering on status, model, dataset, recipe, group, "
-        "or by recency, all with a limit. Sorted by most recently updated."
+        "List training runs and top-level metadata.\n\n"
+        "Results are sorted by most recently updated."
     ),
     epilog=(
         "Examples:\n"
@@ -1089,7 +1076,7 @@ def trace_command(
     "--since",
     default=None,
     metavar="TIME",
-    help="Only runs created or updated since this timestamp or relative time.",
+    help="Include runs created or updated since this timestamp or relative time.",
 )
 @click.option(
     "--limit",
@@ -1107,7 +1094,7 @@ def list_command(
     json_output: bool,
     **filters: str | None,
 ) -> None:
-    """List training runs with their top-level metadata."""
+    """List training runs and top-level metadata."""
     list_runs(
         since=since,
         limit=limit,

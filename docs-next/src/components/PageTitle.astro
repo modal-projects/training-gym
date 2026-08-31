@@ -1,7 +1,9 @@
 ---
 import CopyPageDropdown from './CopyPageDropdown.astro';
+import { isIdentifierTitlePath } from '../lib/docs-sections';
 
 const { entry } = Astro.locals.starlightRoute;
+const isIdentifierTitle = isIdentifierTitlePath(Astro.url.pathname);
 const pageUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
 const titleParts = entry.data.title.split(
   /(?<=_)|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/,
@@ -18,7 +20,7 @@ const bodyMarkdown = typeof entry.body === 'string' ? entry.body.trim() : '';
 const markdownSource = bodyMarkdown ? `${bodyMarkdown}\n` : '';
 ---
 
-<div class="tg-page-head">
+<div class:list={['tg-page-head', { 'is-identifier': isIdentifierTitle }]}>
   <h1 id="_top">
     {titleParts.map((part, index) => (
       <>{part}{index < titleParts.length - 1 && <wbr />}</>

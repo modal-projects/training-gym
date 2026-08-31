@@ -7,19 +7,17 @@ from typing import Any
 
 
 class MetricConfig(ABC):
-    """Base class for metric tracker configurations.
+    """Defines metric tracker metadata, environment variables, and links.
 
-    ## Fields
-
-    project : str
-        Metric project name. Default ``""``.
-    group : str
-        Group tag for related runs. Default ``""``.
-    exp_name : str
-        Run display name. Default ``""``.
-    disable_random_suffix : bool
-        Whether the tracker should preserve the configured run name. Default
-        ``True``.
+    Attributes:
+        project:
+            Metric project name.
+        group:
+            Group tag for related runs.
+        exp_name:
+            Run display name.
+        disable_random_suffix:
+            Preserve the configured run name.
     """
 
     project: str = ""

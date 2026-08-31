@@ -31,20 +31,18 @@ class DatasetType(Enum):
 
 
 class DatasetConfig:
-    """Dataset configuration shared across training frameworks.
+    """Dataset fields and materialization behavior shared across training frameworks.
 
-    Describes *what* the data is. Where it gets written on disk is decided
-    by the recipe/launcher layer, not by the dataset itself.
-
-    output_format : str
-        On-disk format ``prepare()`` writes, ``"parquet"`` (default) or
-        ``"jsonl"``; it also picks the extension of the path the launcher
-        hands to ``prepare()``. Parquet is the default because it is compact,
-        carries a typed schema (so a ragged or mistyped column fails at write
-        time rather than inside a remote rollout actor), streams row-group by
-        row-group, and stores binary media without base64 inflation. Choose
-        ``"jsonl"`` for small or hand-inspected datasets — it stays greppable
-        on the data volume and tolerates rows whose schemas don't line up.
+    Attributes:
+        dataset_id: Dataset ID.
+        input_key: Prompt column name.
+        label_key: Ground-truth column name.
+        output_format: On-disk format written by `prepare()`, either `parquet` or
+            `jsonl`.
+        apply_chat_template: Apply the model's chat template.
+        always_prepare: Rerun `prepare()` when the output path exists.
+        writes_eval_paths: Whether `prepare()` must materialize every `eval_paths`
+            entry.
     """
 
     _type: DatasetType = DatasetType.DEFAULT
@@ -90,11 +88,15 @@ class DatasetConfig:
         return self.dataset_id
 
     def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
-        """Materialize training data to ``path`` (and eval splits to ``eval_paths``)."""
+        """Materialize training data at ``path`` and evaluation data at ``eval_paths``."""
         raise NotImplementedError(f"{type(self).__name__} has no prepare()")
 
     def load(self, split: Literal["all", "train", "eval"] = "all") -> Any:
-        """Load raw examples, optionally filtered by split."""
+        """Load raw examples, optionally filtered by split.
+
+        Returns:
+            Raw examples for ``split``.
+        """
         raise NotImplementedError(f"{type(self).__name__} has no load()")
 
     def _expected_columns(self) -> set[str]:
@@ -106,12 +108,7 @@ class DatasetConfig:
         return cols
 
     def validate_prepared(self, path: str) -> None:
-        """Sniff what ``prepare()`` wrote and confirm the columns the framework will index.
-
-        Catches the common ``KeyError: 'label'`` (and friends) that otherwise
-        only fire deep inside a Ray actor on a remote container, after image
-        build and cluster bringup.
-        """
+        """Validate the prepared file format and required columns."""
         import os
 
         if not os.path.exists(path):
@@ -157,15 +154,18 @@ class DatasetConfig:
 
 
 class HuggingFaceDataset(DatasetConfig):
-    """Dataset backed by a HuggingFace ``datasets`` repo.
+    """A dataset loaded from a Hugging Face ``datasets`` repository.
 
-    Subclass and set ``hf_repo`` plus column mappings. When
-    ``input_column`` and ``output_column`` are set, ``prepare()`` wraps
-    each row into a prompt-only chat message list plus a separate label
-    field: ``{"messages": [{"role": "user", ...}], <label_key>: ...}``.
-    A leading ``{"role": "system", ...}`` message is included when
-    ``system_prompt`` is set. No assistant turn is emitted — the target
-    from ``output_column`` is stored under ``label_key``.
+    Attributes:
+        hf_repo: Hugging Face dataset repository ID.
+        hf_split: Source dataset split.
+        hf_config: Source dataset configuration name.
+        input_column: Source prompt column.
+        output_column: Source answer column.
+        system_prompt: System message added to formatted examples.
+        prompt_template: Template applied to each source prompt.
+        n_rows: Maximum number of source rows to load; zero loads all rows.
+        label_key: Ground-truth column name.
     """
 
     _type: DatasetType = DatasetType.HUGGING_FACE
@@ -248,10 +248,25 @@ class HuggingFaceDataset(DatasetConfig):
 
 
 class HarborDataset(DatasetConfig):
-    """Dataset backed by a Harbor task directory structure.
+    """A dataset loaded from Harbor tasks.
 
-    Each task folder contains an instruction file and optional label metadata.
-    Tasks are discovered by globbing the task_root directory.
+    Attributes:
+        dataset_name: Harbor dataset ID.
+        path: Local Harbor dataset path.
+        task_root: Local directory containing Harbor tasks.
+        task_glob: Glob used to select task directories.
+        task_names: Explicit task directory names to select.
+        instruction_path: Relative path to each task instruction.
+        label_metadata_path: Relative JSON or TOML metadata path.
+        test_data_dir: Relative directory containing test data.
+        prompt_template: Template applied to each task instruction.
+        system_prompt: System message added to each prompt.
+        train_size: Number of tasks in the training split.
+        eval_size: Number of tasks in the evaluation split.
+        train_repeats: Repetitions of each training row.
+        eval_repeats: Repetitions of each evaluation row.
+        shuffle_tasks: Shuffle tasks before splitting.
+        shuffle_seed: Seed used to shuffle tasks.
     """
 
     _type: DatasetType = DatasetType.HARBOR

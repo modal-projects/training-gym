@@ -98,376 +98,333 @@ _HOOK_WRAPPER_PATHS = {
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class MilesRecipe(BaseTrainRecipe):
-    """Recipe for configuring Miles RL training on Modal.
+    """Miles training and Modal resource settings.
 
-    Fields named in ``_MILES_SKIP`` are launcher instructions — image build,
-    cluster topology, W&B, checkpoint conversion, callable shipping — and are
-    never emitted as CLI flags; shipped callables reach Miles as resolved
-    import paths instead. Every other field becomes
-    ``--<field-name-with-dashes> <value>`` via ``BaseTrainRecipe.cli_args``:
-    ``None``/``False``/``""`` omit the flag, ``True`` emits it bare, lists
-    become space-separated values, ``YAML_CONFIG_FIELDS`` dicts are written to
-    YAML on the container and passed as paths, and ``JSON_CONFIG_FIELDS`` dicts
-    are passed as inline JSON. ``sglang_*`` fields configure the rollout
-    engines — Miles registers every sglang ``ServerArgs`` option under a
-    ``--sglang-`` prefix.
+    Args:
 
-    ## App Identity
+        recipe_type:
+            Internal discriminator fixed to Miles.
+        name:
+            Modal app title. The launcher derives it from the class when empty.
+        app_tags:
+            Extra tags merged into the Modal app metadata for the dashboard.
 
-    name : str
-        Modal app title; empty lets the launcher derive one from the class.
-    app_tags : dict
-        Extra tags merged into the Modal app metadata for the dashboard.
+        docker_image:
+            Registry reference for the Miles image every container runs.
+        environment:
+            Training-container environment variables such as Megatron
+            ``PYTHONPATH`` and NCCL settings.
+        async_mode:
+            Run Miles' ``train_async.py`` so rollout generation and training overlap.
+        metrics:
+            Metric tracker settings; expands to Miles' W&B-compatible flags.
+        image_overlay:
+            Function that modifies the Modal image.
+        local_miles:
+            Local Miles checkout mounted over the image copy without rebuilding it.
+        memory:
+            Modal Function memory request/limit in MiB.
+        cpu:
+            Modal Function CPU request/limit in cores per container.
+        cloud:
+            Modal cloud provider to pin the cluster to.
+        region:
+            Modal region to pin the cluster to.
+        miles_model_script:
+            Script in the Miles repository sourced for ``MODEL_ARGS`` instead of
+            model-architecture flags.
+        miles_model_name:
+            Name accepted by Miles' ``model_args_utils.py``.
+        source_hf_checkpoint:
+            Source checkpoint when it differs from the model's own.
+        megatron_conversion_hf_checkpoint:
+            HF weights used for the HF→Megatron conversion instead of the model's own.
+        patch_files:
+            Local patch scripts applied to Miles/Megatron sources at image build.
+        image_run_commands:
+            Extra shell commands run while building the image.
+        image_env:
+            Extra env vars baked into the image.
+        train_function_kwargs:
+            Additional Modal Function keyword arguments for the training function.
+        capture_trace:
+            Attach sampled per-request execution traces to recorded rollouts.
+        trace_sample_limit:
+            Maximum traced samples per rollout when ``capture_trace`` is enabled.
 
-    ## Modal Launcher
+        gpu_type:
+            Modal GPU type for every node.
+        colocate:
+            Trainer and rollout engines share GPUs; ``False`` gives each its own.
+        actor_num_nodes:
+            Megatron actor nodes.
+        actor_num_gpus_per_node:
+            GPUs per actor node.
+        rollout_num_gpus:
+            Rollout-engine GPUs when disaggregated; ``None`` lets the resolver size it.
+        rollout_num_gpus_per_engine:
+            GPUs and tensor-parallel size per SGLang engine.
+        train_backend:
+            Training backend.
+        tensor_model_parallel_size:
+            Megatron tensor-parallel size for the actor.
+        pipeline_model_parallel_size:
+            Megatron pipeline-parallel size for the actor.
+        context_parallel_size:
+            Megatron context-parallel size; multiplies the effective context length.
+        expert_model_parallel_size:
+            Expert-parallel size for MoE; must divide the model's ``num_experts``.
+        expert_tensor_parallel_size:
+            Tensor-parallel size within each expert.
+        decoder_last_pipeline_num_layers:
+            Layers placed on the last pipeline stage, to rebalance an uneven split.
+        sequence_parallel:
+            Megatron sequence parallelism. Requires tensor parallelism greater than one.
+        use_critic:
+            Train a separate critic model for PPO. GRPO does not use one.
+        critic_num_nodes:
+            Nodes for the critic when ``use_critic`` is set.
+        critic_num_gpus_per_node:
+            GPUs per critic node.
 
-    docker_image : str
-        Registry reference for the Miles image every container runs.
-    environment : dict
-        Env vars for the training containers (Megatron ``PYTHONPATH``, NCCL tuning).
-    async_mode : bool
-        Run Miles' ``train_async.py``: rollout and training overlap (off-policy).
-    metrics : MetricConfig | None
-        Metric tracker settings; expands to Miles' W&B-compatible flags.
-    image_overlay : Callable[[modal.Image], modal.Image] | None
-        Customizes the Modal image, e.g. ``lambda img: img.pip_install("pkg")``.
-    local_miles : str | None
-        Local Miles checkout mounted over the image's copy; no rebuild needed.
-    memory : int | tuple[int, int] | None
-        Modal Function memory request/limit in MiB.
-    cpu : float | tuple[float, float] | None
-        Modal Function CPU request/limit in cores per container.
-    cloud : str | None
-        Modal cloud provider to pin the cluster to.
-    region : str | None
-        Modal region to pin the cluster to.
-    miles_model_script : str
-        Script in the Miles repo sourced for ``MODEL_ARGS`` instead of arch flags.
-    miles_model_name : str
-        Name accepted by Miles' ``model_args_utils.py``.
-    source_hf_checkpoint : str | None
-        Source checkpoint when it differs from the model's own.
-    megatron_conversion_hf_checkpoint : str | None
-        HF weights used for the HF→Megatron conversion instead of the model's own.
-    patch_files : list[str]
-        Local patch scripts applied to Miles/Megatron sources at image build.
-    image_run_commands : list[str]
-        Extra shell commands run while building the image.
-    image_env : dict[str, str]
-        Extra env vars baked into the image.
-    train_function_kwargs : dict[str, Any]
-        Extra Modal Function kwargs for the train function; supports
-        ``ephemeral_disk`` (MiB), ``secrets`` and ``experimental_options``.
-    capture_trace : bool
-        Attach miles' per-sample execution trace (generate/reward/tool-call
-        timeline) to recorded rollouts for the dashboard.
-    trace_sample_limit : int
-        With ``capture_trace``, number of samples per rollout that get a
-        trace attached (sampling keeps the added data volume small).
+        num_rollout:
+            Training and rollout steps for the run.
+        rollout_batch_size:
+            Prompts per rollout step, each expanded into a group of responses.
+        rollout_max_response_len:
+            Max generated tokens per sample.
+        rollout_temperature:
+            Sampling temperature for rollout generation.
+        rollout_shuffle:
+            Shuffle the prompt dataset between epochs.
+        rollout_top_p:
+            Nucleus-sampling top-p for rollout generation.
+        rollout_stop_token_ids:
+            Extra token ids that terminate generation.
+        use_miles_router:
+            Route rollout requests through Miles' router instead of directly to
+            engines.
+        rollout_top_k:
+            Top-k for rollout generation; ``None`` leaves Miles' own default.
+        use_rollout_routing_replay:
+            Reuse the rollout's MoE expert routing in training.
 
-    ## Cluster and Parallelism
+        hf_checkpoint:
+            Checkpoint trained from; normally set from the attached ``ModelConfig``.
+        save:
+            Checkpoint output directory on the mounted ``/checkpoints`` volume.
+        save_interval:
+            Save a checkpoint every N rollout steps.
+        load:
+            Directory to resume from; empty starts from the converted HF weights.
+        no_save_optim:
+            Omit optimizer state from checkpoints. The resulting checkpoints cannot
+            resume the optimizer exactly.
+        megatron_to_hf_mode:
+            Export mode for saved Megatron checkpoints; empty disables the export.
 
-    gpu_type : str
-        Modal GPU type for every node, e.g. ``"H100"`` or ``"H200"``.
-    colocate : bool
-        Trainer and rollout engines share GPUs; ``False`` gives each its own.
-    actor_num_nodes : int
-        Nodes for the Megatron actor (trainer).
-    actor_num_gpus_per_node : int
-        GPUs per actor node.
-    rollout_num_gpus : int | None
-        Rollout-engine GPUs when disaggregated; ``None`` lets the resolver size it.
-    rollout_num_gpus_per_engine : int
-        GPUs per sglang engine — its tensor-parallel size.
-    train_backend : str
-        Training backend, e.g. ``"megatron"``.
-    tensor_model_parallel_size : int
-        Megatron tensor-parallel size for the actor.
-    pipeline_model_parallel_size : int
-        Megatron pipeline-parallel size for the actor.
-    context_parallel_size : int | None
-        Megatron context-parallel size; multiplies the effective context length.
-    expert_model_parallel_size : int | None
-        Expert-parallel size for MoE; must divide the model's ``num_experts``.
-    expert_tensor_parallel_size : int | None
-        Tensor-parallel size within each expert.
-    decoder_last_pipeline_num_layers : int | None
-        Layers placed on the last pipeline stage, to rebalance an uneven split.
-    sequence_parallel : bool
-        Megatron sequence parallelism (requires TP > 1).
-    use_critic : bool
-        Train a separate critic model (PPO-style; GRPO runs without one).
-    critic_num_nodes : int | None
-        Nodes for the critic when ``use_critic`` is set.
-    critic_num_gpus_per_node : int | None
-        GPUs per critic node.
+        use_fault_tolerance:
+            Enable Miles' fault tolerance to recover from worker failures.
+        rollout_health_check_interval:
+            Seconds between rollout engine ``/health_generate`` checks.
+        rollout_health_check_timeout:
+            Seconds to wait for ``/health_generate`` before killing the engine.
+        rollout_health_check_first_wait:
+            Initial health-check delay in seconds before checking
+            ``/health_generate``. DeepGEMM compilation may require a longer delay.
 
-    ## Rollout and Sampling
+        update_weight_buffer_size:
+            Byte size of the buffer broadcasting updated weights to the engines.
 
-    num_rollout : int
-        Total rollout steps (= training steps) for the run.
-    rollout_batch_size : int
-        Prompts per rollout step, each expanded into a group of responses.
-    rollout_max_response_len : int
-        Max generated tokens per sample.
-    rollout_temperature : float
-        Sampling temperature for rollout generation.
-    rollout_shuffle : bool
-        Shuffle the prompt dataset between epochs.
-    rollout_top_p : float
-        Nucleus-sampling top-p for rollout generation.
-    rollout_stop_token_ids : list[int] | None
-        Extra token ids that terminate generation.
-    use_miles_router : bool
-        Route rollout requests through Miles' router, not engines directly.
-    rollout_top_k : int | None
-        Top-k for rollout generation; ``None`` leaves Miles' own default.
-    use_rollout_routing_replay : bool
-        Reuse the rollout's MoE expert routing in training.
+        advantage_estimator:
+            Advantage estimator.
+        n_samples_per_prompt:
+            Responses sampled per prompt as one GRPO group.
+        eps_clip:
+            PPO clip lower bound.
+        eps_clip_high:
+            Upper PPO clip bound for asymmetric DAPO clipping.
+        use_kl_loss:
+            Add a per-token KL loss term against the reference model.
+        kl_loss_type:
+            KL formulation.
+        kl_loss_coef:
+            Coefficient of the KL loss term.
+        kl_coef:
+            KL penalty coefficient applied in the reward.
+        entropy_coef:
+            Entropy bonus coefficient.
+        calculate_per_token_loss:
+            Average the loss over tokens instead of over samples.
+        ref_load:
+            Checkpoint read by the reference model for KL terms.
+        use_tis:
+            Correct rollout and trainer mismatch with truncated importance sampling.
 
-    ## Checkpointing
+        over_sampling_batch_size:
+            Extra DAPO prompts sampled to replace filtered groups.
+        dynamic_sampling_filter_path:
+            Import path of the predicate deciding which sample groups to keep.
+        balance_data:
+            Rebalance kept samples across data-parallel ranks.
 
-    hf_checkpoint : str
-        Checkpoint trained from; normally set from the attached ``ModelConfig``.
-    save : str
-        Checkpoint output directory (the mounted ``/checkpoints`` volume).
-    save_interval : int
-        Save a checkpoint every N rollout steps.
-    load : str
-        Directory to resume from; empty starts from the converted HF weights.
-    no_save_optim : bool
-        Omit optim state from checkpoints (smaller, but no exact resume).
-    megatron_to_hf_mode : str
-        Export mode for saved Megatron checkpoints; empty disables the export.
+        global_batch_size:
+            Training samples per optim step.
+        lr:
+            Learning rate.
+        lr_decay_style:
+            Learning-rate schedule.
+        weight_decay:
+            Weight decay.
+        adam_beta1:
+            Adam beta1.
+        adam_beta2:
+            Adam beta2.
+        optimizer:
+            Optimizer name.
+        use_distributed_optimizer:
+            Shard optimizer state across data-parallel ranks with Megatron's
+            distributed optimizer.
+        optimizer_cpu_offload:
+            Keep optimizer state on CPU to reduce GPU memory use at the cost of
+            slower steps.
+        overlap_cpu_optimizer_d2h_h2d:
+            Overlap the offloaded optimizer's device↔host copies with compute.
+        use_precision_aware_optimizer:
+            Use Megatron's precision-aware optimizer with lower-precision state.
 
-    ## Fault Tolerance and Health Checks
+        lora_rank:
+            LoRA rank; ``None`` trains full weights.
+        lora_alpha:
+            LoRA scaling factor.
+        lora_dropout:
+            Dropout applied to LoRA layers.
+        target_modules:
+            Comma-separated module names LoRA adapters attach to.
+        experts_shared_outer_loras:
+            Share one outer LoRA across MoE experts instead of one per expert.
+        lora_base_cpu_backup:
+            Keep frozen base weights on CPU to free GPU memory.
+        no_gradient_accumulation_fusion:
+            Disable fused gradient accumulation for incompatible LoRA paths.
+        sglang_lora_backend:
+            SGLang LoRA kernel backend.
+        sglang_lora_use_virtual_experts:
+            Serve MoE LoRA adapters as virtual experts in sglang.
 
-    use_fault_tolerance : bool
-        Enable Miles' fault tolerance to recover from worker failures.
-    rollout_health_check_interval : int
-        Seconds between rollout engine ``/health_generate`` checks.
-    rollout_health_check_timeout : int
-        Seconds to wait for ``/health_generate`` before killing the engine.
-    rollout_health_check_first_wait : int
-        Grace period before checks start; raise a lot for deepgemm compilation.
+        attention_dropout:
+            Attention dropout probability.
+        hidden_dropout:
+            Hidden-layer dropout probability.
+        attention_softmax_in_fp32:
+            Compute attention softmax in fp32.
+        accumulate_allreduce_grads_in_fp32:
+            Accumulate and all-reduce gradients in fp32.
+        attention_backend:
+            Megatron attention kernel backend.
+        no_check_for_nan_in_loss_and_grad:
+            Skip the NaN check on loss and gradients to avoid a synchronization per
+            step.
+        recompute_granularity:
+            Activation recomputation granularity: ``"full"`` or ``"selective"``.
+        recompute_method:
+            Recomputation method: ``"uniform"`` or ``"block"``.
+        recompute_num_layers:
+            Layers per recomputation chunk.
+        qkv_format:
+            QKV layout for the Megatron backend: ``"thd"`` or ``"bshd"``.
 
-    ## Weight Sync
+        use_dynamic_batch_size:
+            Pack samples up to ``max_tokens_per_gpu`` instead of a fixed micro batch.
+        micro_batch_size:
+            Fixed micro-batch size when dynamic batching is off; ``None`` leaves
+            Miles' own default.
+        max_tokens_per_gpu:
+            Token budget per GPU per micro-batch when dynamic batching is on.
 
-    update_weight_buffer_size : int | None
-        Byte size of the buffer broadcasting updated weights to the engines.
+        eval_interval:
+            Run eval every N rollout steps; ``None`` disables eval.
+        n_samples_per_eval_prompt:
+            Responses sampled per eval prompt.
+        eval_max_response_len:
+            Max generated tokens per eval sample.
+        eval_top_p:
+            Nucleus-sampling top-p for eval generation.
+        eval_config:
+            Evaluation defaults and datasets written to ``--eval-config`` as YAML.
+        skip_eval_before_train:
+            Skip the eval pass before the first train step.
 
-    ## RL Algorithm
+        rm_type:
+            Built-in reward function name. Leave unset for a custom reward.
 
-    advantage_estimator : str
-        Advantage estimator, e.g. ``"grpo"``.
-    n_samples_per_prompt : int
-        Responses sampled per prompt (the GRPO group size).
-    eps_clip : float
-        PPO clip lower bound.
-    eps_clip_high : float
-        PPO clip upper bound (asymmetric DAPO-style clipping).
-    use_kl_loss : bool
-        Add a per-token KL loss term against the reference model.
-    kl_loss_type : str
-        KL formulation, e.g. ``"low_var_kl"``.
-    kl_loss_coef : float
-        Coefficient of the KL loss term.
-    kl_coef : float
-        KL penalty coefficient applied in the reward.
-    entropy_coef : float
-        Entropy bonus coefficient.
-    calculate_per_token_loss : bool
-        Average the loss over tokens instead of over samples.
-    ref_load : str
-        Checkpoint the reference model is read from (for KL terms).
-    use_tis : bool
-        Truncated importance sampling, correcting rollout/trainer mismatch.
+        custom_rm_function:
+            Reward callable shipped by value as Miles' ``custom_rm_path``.
+        custom_generate_function:
+            Custom Miles generation step shipped by value.
+        custom_reward_post_process_function:
+            Function applied to rewards after generation and shipped by value.
+        rollout_function:
+            Custom rollout loop passed through ``--rollout-function-path``.
+        custom_rollout_log_function:
+            Function called with each rollout's data after dashboard and phase
+            reporting.
+        custom_eval_rollout_log_function:
+            Function called with each evaluation rollout's data.
+        custom_megatron_before_log_prob_hook:
+            Hook run in the Megatron trainer before log-prob computation.
+        custom_megatron_before_train_step_hook:
+            Hook run in the Megatron trainer before each train step.
 
-    ## Dynamic Sampling
+        extra_config:
+            Custom configuration written to YAML at ``--custom-config-path``. Keys
+            become Miles arguments and override same-named fields.
+        sglang_config:
+            SGLang engine settings written to ``--sglang-config`` as YAML.
+        apply_chat_template_kwargs:
+            Keyword arguments for tokenizer ``apply_chat_template``, passed as JSON.
+        train_env_vars:
+            Env vars for the training processes, passed as inline JSON.
+        multimodal_keys:
+            Multimodal dataset columns passed as JSON.
 
-    over_sampling_batch_size : int | None
-        Extra prompts sampled so filter-rejected groups can be replaced (DAPO).
-    dynamic_sampling_filter_path : str | None
-        Import path of the predicate deciding which sample groups to keep.
-    balance_data : bool
-        Rebalance kept samples across data-parallel ranks.
-
-    ## Training and Optimizer
-
-    global_batch_size : int
-        Training samples per optim step.
-    lr : float
-        Learning rate.
-    lr_decay_style : str
-        Schedule, e.g. ``"constant"`` or ``"cosine"``.
-    weight_decay : float
-        Weight decay.
-    adam_beta1 : float
-        Adam beta1.
-    adam_beta2 : float
-        Adam beta2.
-    optimizer : str
-        Optimizer name, e.g. ``"adam"``.
-    use_distributed_optimizer : bool
-        Shard optim state across data-parallel ranks (Megatron distributed opt).
-    optimizer_cpu_offload : bool
-        Keep optimizer state on CPU, trading step time for GPU memory.
-    overlap_cpu_optimizer_d2h_h2d : bool
-        Overlap the offloaded optimizer's device↔host copies with compute.
-    use_precision_aware_optimizer : bool
-        Megatron's precision-aware optimizer (lower-precision optim state).
-
-    ## LoRA
-
-    lora_rank : int | None
-        LoRA rank; ``None`` trains full weights.
-    lora_alpha : int | None
-        LoRA scaling factor.
-    lora_dropout : float | None
-        Dropout applied to LoRA layers.
-    target_modules : str | None
-        Comma-separated module names LoRA adapters attach to.
-    experts_shared_outer_loras : bool
-        Share one outer LoRA across MoE experts instead of one per expert.
-    lora_base_cpu_backup : bool
-        Keep a CPU copy of the frozen base weights, freeing GPU memory.
-    no_gradient_accumulation_fusion : bool
-        Disable fused gradient accumulation (required by some LoRA paths).
-    sglang_lora_backend : str | None
-        sglang LoRA kernel backend, e.g. ``"triton"``.
-    sglang_lora_use_virtual_experts : bool
-        Serve MoE LoRA adapters as virtual experts in sglang.
-
-    ## Memory and Precision
-
-    attention_dropout : float
-        Attention dropout probability.
-    hidden_dropout : float
-        Hidden-layer dropout probability.
-    attention_softmax_in_fp32 : bool
-        Compute attention softmax in fp32.
-    accumulate_allreduce_grads_in_fp32 : bool
-        Accumulate and all-reduce gradients in fp32.
-    attention_backend : str | None
-        Megatron attention kernel backend, e.g. ``"flash"``.
-    no_check_for_nan_in_loss_and_grad : bool
-        Skip the NaN check on loss and gradients (saves a sync per step).
-    recompute_granularity : str | None
-        Activation recomputation granularity (``"full"`` or ``"selective"``).
-    recompute_method : str | None
-        Recomputation method (``"uniform"`` or ``"block"``).
-    recompute_num_layers : int | None
-        Layers per recomputation chunk.
-    qkv_format : str
-        QKV layout for the Megatron backend (``"thd"`` or ``"bshd"``).
-
-    ## Dynamic Batching
-
-    use_dynamic_batch_size : bool
-        Pack samples up to ``max_tokens_per_gpu`` instead of a fixed micro batch.
-    micro_batch_size : int | None
-        Fixed micro-batch size when dynamic batching is off; ``None`` leaves
-        Miles' own default.
-    max_tokens_per_gpu : int
-        Token budget per GPU per micro-batch when dynamic batching is on.
-
-    ## Eval
-
-    eval_interval : int | None
-        Run eval every N rollout steps; ``None`` disables eval.
-    n_samples_per_eval_prompt : int
-        Responses sampled per eval prompt.
-    eval_max_response_len : int
-        Max generated tokens per eval sample.
-    eval_top_p : float
-        Nucleus-sampling top-p for eval generation.
-    eval_config : dict | str | None
-        Dict written to YAML for ``--eval-config``: eval defaults + dataset list.
-    skip_eval_before_train : bool
-        Skip the eval pass before the first train step.
-
-    ## Reward Model
-
-    rm_type : str | None
-        Miles built-in reward function (e.g. ``"deepscaler"``), else ``None``.
-
-    ## Custom Functions and Hooks
-
-    custom_rm_function : Callable | None
-        Reward callable shipped by value as Miles' ``custom_rm_path``.
-    custom_generate_function : Callable | None
-        Replaces Miles' generate step; shipped by value, registered by path.
-    custom_reward_post_process_function : Callable | None
-        Applied to rewards after generation. Prefer this over a raw dotted path: a
-        ``__main__`` function has no importable module name, so Miles' own
-        ``importlib.import_module`` fails inside the Ray actor.
-    rollout_function : Callable | str | None
-        Replaces Miles' entire rollout loop (``--rollout-function-path``).
-    custom_rollout_log_function : Callable | str | None
-        Called with each rollout's data for logging; the gym wraps it so
-        phase reporting and dashboard capture still run.
-    custom_eval_rollout_log_function : Callable | str | None
-        Same as above, for eval rollouts.
-    custom_megatron_before_log_prob_hook : Callable | str | None
-        Hook run in the Megatron trainer before log-prob computation.
-    custom_megatron_before_train_step_hook : Callable | str | None
-        Hook run in the Megatron trainer before each train step.
-
-    ## Config Overrides
-
-    extra_config : dict | None
-        Primary escape hatch: dict written to YAML at ``--custom-config-path``; its keys
-        become Miles args and override same-named fields.
-    sglang_config : dict | str | None
-        YAML at ``--sglang-config`` for structured engine config, not flat flags.
-    apply_chat_template_kwargs : str | dict
-        Kwargs for the tokenizer's ``apply_chat_template``, as inline JSON.
-    train_env_vars : dict | str | None
-        Env vars for the training processes, passed as inline JSON.
-    multimodal_keys : dict | str | None
-        Dataset columns holding multimodal inputs (inline JSON); auto-filled.
-
-    ## SGLang Rollout Engine
-
-    sglang_mem_fraction_static : float
-        Fraction of GPU memory sglang reserves for weights + KV cache.
-    sglang_enable_dp_attention : bool
-        Enable data-parallel attention across engine ranks.
-    sglang_dp_size : int | None
-        Data-parallel size for the engines.
-    sglang_ep_size : int | None
-        Expert-parallel size for MoE models.
-    sglang_enable_dp_lm_head : bool
-        Data-parallel LM head (pairs with DP attention).
-    sglang_disable_custom_all_reduce : bool
-        Fall back to NCCL all-reduce instead of sglang's custom kernel.
-    sglang_cuda_graph_bs : list[int] | None
-        Batch sizes to capture CUDA graphs for.
-    sglang_attention_backend : str | None
-        sglang attention kernel backend, e.g. ``"triton"``. ``None`` leaves
-        sglang's own selection (FlashAttention) in place.
-    sglang_disable_cuda_graph : bool
-        Run the engines in eager mode instead of capturing CUDA graphs.
-    sglang_disable_overlap_schedule : bool
-        Disable sglang's overlapped scheduler.
-    sglang_disable_radix_cache : bool
-        Disable prefix (radix) caching across requests.
-    no_offload_train : bool
-        Keep the training weights and optimizer resident instead of offloading
-        them between rollout and train phases (colocated runs).
-    no_offload_rollout : bool
-        Keep the rollout engines resident instead of offloading them.
-    sglang_moe_runner_backend : str | None
-        MoE GEMM runner for the engines, e.g. ``"triton"``. ``None`` leaves
-        sglang's ``auto`` selection in place.
-    sglang_max_running_requests : int | None
-        Cap on concurrent in-flight requests per engine.
-    sglang_server_concurrency : int | None
-        Cap on concurrent requests Miles sends to each engine.
-    sglang_tool_call_parser : str | None
-        Parser for tool-call output, e.g. ``"qwen25"``.
-    sglang_reasoning_parser : str | None
-        Parser for reasoning/thinking output.
+        sglang_mem_fraction_static:
+            Fraction of GPU memory sglang reserves for weights + KV cache.
+        sglang_enable_dp_attention:
+            Enable data-parallel attention across engine ranks.
+        sglang_dp_size:
+            Data-parallel size for the engines.
+        sglang_ep_size:
+            Expert-parallel size for MoE models.
+        sglang_enable_dp_lm_head:
+            Data-parallel LM head paired with DP attention.
+        sglang_disable_custom_all_reduce:
+            Fall back to NCCL all-reduce instead of sglang's custom kernel.
+        sglang_cuda_graph_bs:
+            Batch sizes to capture CUDA graphs for.
+        sglang_attention_backend:
+            SGLang attention kernel backend. The server selects one when unset.
+        sglang_disable_cuda_graph:
+            Run the engines in eager mode instead of capturing CUDA graphs.
+        sglang_disable_overlap_schedule:
+            Disable sglang's overlapped scheduler.
+        sglang_disable_radix_cache:
+            Disable prefix (radix) caching across requests.
+        no_offload_train:
+            Keep training weights and optimizer resident between rollout and training
+            phases for colocated runs.
+        no_offload_rollout:
+            Keep the rollout engines resident instead of offloading them.
+        sglang_moe_runner_backend:
+            SGLang MoE GEMM runner. The server selects one when unset.
+        sglang_max_running_requests:
+            Cap on concurrent in-flight requests per engine.
+        sglang_server_concurrency:
+            Cap on concurrent requests Miles sends to each engine.
+        sglang_tool_call_parser:
+            Tool-call output parser.
+        sglang_reasoning_parser:
+            Parser for reasoning/thinking output.
     """
 
     # ── Launcher instructions (not Miles CLI flags) ─────────────────────────

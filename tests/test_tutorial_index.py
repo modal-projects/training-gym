@@ -18,12 +18,9 @@ from scripts.generate_llms_txt import (
 from scripts.tutorial_index import parse_tutorial
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS_DIR = ROOT / "docs-next/src/content/docs"
 GUIDE_PAGES = tuple(
     path for path in sorted(GUIDES_DIR.rglob("*.md")) if path.stem != "index"
 )
-CLI_PAGES = tuple(sorted(DOCS_DIR.glob("reference/cli.md")))
-AUTHORED_PAGES = GUIDE_PAGES + CLI_PAGES
 
 
 @pytest.mark.parametrize("order", ["+0", "-0", "1_0"])
@@ -54,8 +51,7 @@ def test_homepage_frontmatter_is_order_only(tmp_path: Path) -> None:
 
 def test_authored_pages_use_order_and_h1() -> None:
     assert GUIDE_PAGES, f"no guide pages under {GUIDES_DIR}"
-    assert CLI_PAGES, f"missing {DOCS_DIR / 'reference/cli.md'}"
-    for path in AUTHORED_PAGES:
+    for path in GUIDE_PAGES:
         text = path.read_text()
         lines = _frontmatter_lines(text)
         assert len(lines) == 1, path
@@ -92,13 +88,13 @@ def test_collect_guides_orders_by_section_then_order() -> None:
     assert [slug for slug, _, _ in guides] == [slug for _, _, _, slug in expected]
 
 
-def test_readme_heading_and_intro_skips_h1_and_badges() -> None:
+def test_readme_heading_and_intro_skips_badges_and_rewrites_anchors() -> None:
     markdown = (
         "# Training Gym\n"
         "\n"
         "[![ci](https://img.shields.io/badge/ci-ok)](https://example.com)\n"
         "\n"
-        "First paragraph.\n"
+        "First paragraph with a [Quickstart](#quickstart).\n"
         "\n"
         "Second paragraph.\n"
         "\n"
@@ -106,7 +102,9 @@ def test_readme_heading_and_intro_skips_h1_and_badges() -> None:
     )
     assert _readme_heading_and_intro(markdown) == (
         "Training Gym",
-        "First paragraph.\n\nSecond paragraph.",
+        "First paragraph with a "
+        "[Quickstart](https://gym.modal.dev/#quickstart).\n\n"
+        "Second paragraph.",
     )
 
 
@@ -141,9 +139,15 @@ def test_flatten_doc_id_keeps_section_drops_grouping_folders() -> None:
     assert flatten_doc_id("guides/start/model.md") == "guides/model"
     assert flatten_doc_id("guides/tools/agent.md") == "guides/agent"
     assert flatten_doc_id("reference/core/trainconfig.md") == "reference/trainconfig"
+    assert (
+        flatten_doc_id("reference/recipes/qwen3_4b_recipe.md")
+        == "reference/qwen3_4b_recipe"
+    )
     assert flatten_doc_id("reference/cli.md") == "reference/cli"
+    assert flatten_doc_id("reference/cli/index.md") == "reference/cli"
     assert flatten_doc_id("tutorials/rl_basics.md") == "tutorials/rl_basics"
     assert flatten_doc_id("reference/index.md") == "reference"
+    assert flatten_doc_id("reference/sdk.md") == "reference/sdk"
     assert flatten_doc_id("index.md") == "index"
 
 
@@ -165,20 +169,20 @@ def test_api_reference_orders_follow_manifest() -> None:
         sys.path.insert(0, str(scripts_dir))
     from generate_api_reference import _orders_within_group, _page_heading
 
-    assert _page_heading(0, "Reference") == [
+    assert _page_heading(0, "SDK") == [
         "---",
         "order: 0",
         "---",
         "",
-        "# Reference",
+        "# SDK",
         "",
     ]
     orders = _orders_within_group()
     assert orders["ModelConfig"] == 0
     assert orders["HFModelConfiguration"] == 1
-    assert orders["ToolCall"] == 0
+    assert orders["DatasetConfig"] == 0
     assert orders["TrainConfig"] == 0
-    assert orders["Endpoint"] == 0
+    assert orders["CustomDeployment"] == 0
 
 
 def test_mobile_sidebar_does_not_accent_every_row() -> None:
