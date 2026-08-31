@@ -165,6 +165,7 @@ config = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=Qwen3_5_4b_Recipe(
+        eval_interval=None,
         tensor_model_parallel_size=2,
         sequence_parallel=True,
         rollout_num_gpus=8,

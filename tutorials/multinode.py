@@ -43,6 +43,7 @@ class MathDataset(HuggingFaceDataset):
 
 train_dataset = MathDataset(hf_split="train[:2000]")
 recipe = GLM_4_7_Recipe(
+    eval_interval=None,
     rm_type="deepscaler",
 )
 

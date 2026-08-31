@@ -250,6 +250,7 @@ config = TrainConfig(
     model=student_model,
     dataset=train_dataset,
     recipe=Qwen3_5_4b_Recipe(
+        eval_interval=None,
         rollout_num_gpus=8,
         num_rollout=10,
         n_samples_per_prompt=4,
