@@ -20,7 +20,7 @@ from modal_training_gym import (
     Endpoint,
     HuggingFaceDataset,
     Qwen3_5_4B,
-    SlimeRecipe,
+    Qwen3_5_4b_Recipe,
     TrainConfig,
 )
 
@@ -155,7 +155,7 @@ async def dapo_overlong_rm(args, sample, **kwargs) -> float:
 # modifications. Those include:
 #
 # - Clip-Higher: `eps_clip=0.2`, `eps_clip_high=0.28`
-# - No KL penalty: `use_kl_loss=False`, `kl_coef=0.0`
+# - No KL penalty: `use_kl_loss=False`
 # - Token-level policy-gradient loss: `calculate_per_token_loss=True`
 # - Dynamic sampling: `over_sampling_batch_size=48` and `dynamic_sampling_filter_path`
 #
@@ -164,44 +164,18 @@ async def dapo_overlong_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=SlimeRecipe(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
+    recipe=Qwen3_5_4b_Recipe(
         tensor_model_parallel_size=2,
         sequence_parallel=True,
         rollout_num_gpus=8,
-        rollout_num_gpus_per_engine=1,
-        colocate=True,
         num_rollout=15,
-        rollout_batch_size=16,
         n_samples_per_prompt=8,
         global_batch_size=32,
         rollout_max_response_len=8192,
-        rollout_temperature=1.0,
-        rollout_shuffle=True,
-        lr=1e-6,
-        lr_decay_style="constant",
-        weight_decay=0.1,
-        adam_beta1=0.9,
-        adam_beta2=0.98,
-        optimizer="adam",
-        advantage_estimator="grpo",
         use_kl_loss=False,
-        kl_loss_type="low_var_kl",
-        kl_loss_coef=0.0,
-        entropy_coef=0.0,
         eps_clip=0.2,
         eps_clip_high=0.28,
-        use_dynamic_batch_size=True,
-        max_tokens_per_gpu=9216,
-        attention_dropout=0.0,
-        hidden_dropout=0.0,
-        accumulate_allreduce_grads_in_fp32=True,
-        attention_softmax_in_fp32=True,
-        sglang_mem_fraction_static=0.75,
         save_interval=5,
-        eval_interval=None,
         custom_rm_function=dapo_overlong_rm,
         apply_chat_template_kwargs='{"enable_thinking": true}',
         environment={
@@ -214,10 +188,8 @@ config = TrainConfig(
             "slime.rollout.filter_hub.dynamic_sampling_filters."
             "check_reward_nonzero_std"
         ),
-        kl_coef=0.0,
         balance_data=True,
         calculate_per_token_loss=True,
-        rollout_top_p=1.0,
     ),
 )
 

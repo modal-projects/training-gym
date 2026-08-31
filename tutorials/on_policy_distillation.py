@@ -43,8 +43,8 @@ from modal_training_gym import (
     Endpoint,
     HuggingFaceDataset,
     Qwen3_5_4B,
+    Qwen3_5_4b_Recipe,
     Qwen3_5_9B,
-    SlimeRecipe,
     TrainConfig,
 )
 
@@ -249,24 +249,12 @@ def math_opd_post_process(args, samples, **kwargs):
 config = TrainConfig(
     model=student_model,
     dataset=train_dataset,
-    recipe=SlimeRecipe(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
+    recipe=Qwen3_5_4b_Recipe(
         rollout_num_gpus=8,
-        rollout_num_gpus_per_engine=1,
-        colocate=True,
         num_rollout=10,
-        rollout_batch_size=16,
         n_samples_per_prompt=4,
-        global_batch_size=16,
         rollout_max_response_len=2048,
-        rollout_temperature=1.0,
-        lr=1e-6,
         save_interval=5,
-        eval_interval=None,
         custom_rm_function=math_opd_rm,
         custom_reward_post_process_function=math_opd_post_process,
         apply_chat_template_kwargs='{"enable_thinking": true}',

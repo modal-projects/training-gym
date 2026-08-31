@@ -25,7 +25,7 @@ from modal_training_gym import (
     DatasetConfig,
     Endpoint,
     Qwen3_5_4B,
-    SlimeRecipe,
+    Qwen3_5_4b_Recipe,
     TrainConfig,
 )
 
@@ -339,7 +339,7 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 
 # ## Train with custom multi-turn rollout
 #
-# A quick tour of the `SlimeRecipe` knobs we set below.
+# A quick tour of the knobs we set below.
 #
 # **Cluster and parallelism**
 # - `gpu_type="H100"` — GPU SKU used for both the rollout (sglang) and training
@@ -369,7 +369,7 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=SlimeRecipe(
+    recipe=Qwen3_5_4b_Recipe(
         custom_generate_function=number_guess_generate,
         custom_rm_function=number_guess_rm,
         extra_config={
