@@ -19,6 +19,7 @@ from modal_training_gym.common.metrics import MetricConfig
 
 TRACKIO_VERSION = "0.34.0"
 _DEFAULT_MODAL_APP_NAME = "training-gym-trackio"
+_DASHBOARD_PASSWORD_SECRET_NAME = "_training-gym-trackio-password"
 _RUN_NAME_ENV = "TRAINING_GYM_TRACKIO_RUN_NAME"
 _SHIM_MARKER = "_training_gym_trackio_adapter"
 _PTH_LINE = (
@@ -170,6 +171,16 @@ def _deploy_modal_dashboard(
     write_secret = modal.Secret.from_name(
         modal_secret_name, required_keys=["TRACKIO_WRITE_TOKEN"]
     )
+    password_secret = modal.Secret.from_name(
+        _DASHBOARD_PASSWORD_SECRET_NAME, required_keys=["DASHBOARD_PASSWORD"]
+    )
+    function_secrets = [write_secret]
+    try:
+        password_secret.hydrate()
+    except Exception:
+        pass
+    else:
+        function_secrets.append(password_secret)
     data = modal.Volume.from_name(volume_name, create_if_missing=True)
     image = modal.Image.debian_slim(python_version="3.12").uv_pip_install(
         f"trackio=={TRACKIO_VERSION}"
@@ -180,7 +191,7 @@ def _deploy_modal_dashboard(
         name="dashboard",
         image=image,
         volumes={"/data": data},
-        secrets=[write_secret],
+        secrets=function_secrets,
         env={"TRACKIO_DIR": "/data"},
         max_containers=1,
         scaledown_window=300,
@@ -189,9 +200,37 @@ def _deploy_modal_dashboard(
     @modal.concurrent(max_inputs=100)
     @modal.asgi_app()
     def dashboard():
+        import base64
+        import binascii
+
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.responses import Response
         from trackio.server import build_starlette_app_only
 
         starlette_app, _ = build_starlette_app_only()
+        password = os.environ.get("DASHBOARD_PASSWORD", "")
+        write_token = os.environ.get("TRACKIO_WRITE_TOKEN", "")
+
+        async def require_password(request, call_next):
+            scheme, _, encoded = request.headers.get("Authorization", "").partition(" ")
+            try:
+                decoded = base64.b64decode(encoded).decode("utf-8")
+            except (binascii.Error, ValueError, UnicodeDecodeError):
+                decoded = ""
+            supplied = decoded.partition(":")[2] if scheme.lower() == "basic" else ""
+            supplied_write_token = request.headers.get("X-Trackio-Write-Token", "")
+            if password and not (
+                secrets.compare_digest(supplied, password)
+                or write_token
+                and secrets.compare_digest(supplied_write_token, write_token)
+            ):
+                return Response(
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Basic realm="training-gym"'},
+                )
+            return await call_next(request)
+
+        starlette_app.add_middleware(BaseHTTPMiddleware, dispatch=require_password)
         return starlette_app
 
     with modal.enable_output():
