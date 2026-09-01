@@ -119,7 +119,7 @@ The simplest reward functions (like the above) return binary scores for correct 
 
 For logging purposes, you can attach metadata to each sample for more observability in the [dashboard](https://gym.modal.dev/guides/dashboard/).
 
-When you're task requires something beyond a single-turn interaction, all it takes is implementing a [custom generate](https://miles.radixark.com/docs/user-guide/generate-endpoint) function.
+When your task requires something beyond a single-turn interaction, all it takes is implementing a [custom generate](https://miles.radixark.com/docs/user-guide/generate-endpoint) function.
 
 For an in-depth example, see the [multi-turn RL tutorial](https://gym.modal.dev/tutorials/multiturn/#multi-turn-environment-and-reward).
 
@@ -182,7 +182,7 @@ recipe = Qwen3_5_4b_Recipe(
 
 Typically, your generation function will:
 
-1. Determine the URL of the internal SGLang server and sets up a tokenizer for later use.
+1. Determine the URL of the internal SGLang server and set up a tokenizer for later use.
 2. Make one or multiple calls against the SGLang endpoint to generate responses from the model.
 3. Tokenize the prompt and response with a corresponding loss mask.
 4. Set response fields on the sample.
