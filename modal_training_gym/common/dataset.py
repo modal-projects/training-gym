@@ -215,10 +215,6 @@ class HuggingFaceDataset(DatasetConfig):
             self.label_key(): str(row[self.output_column]),
         }
 
-    def to_pandas(self, *, formatted: bool = False):
-        ds = self._load_hf_dataset()
-        return ds.to_pandas(formatted=formatted)
-
     def rows(self) -> Iterable[DatasetRow]:
         for row in self._load_hf_dataset():
             yield dict(row)
@@ -539,13 +535,6 @@ class HarborDataset(DatasetConfig):
             if split == "eval":
                 return out[self.train_size : self.train_size + (self.eval_size or 0)]
         return out
-
-    def to_pandas(self, *, formatted: bool = False):
-        import pandas as pd
-
-        if not formatted:
-            return pd.DataFrame(self.load())
-        return pd.DataFrame(self.rows())
 
     def rows(self) -> Iterable[DatasetRow]:
         task_root = self._resolve_task_root()
