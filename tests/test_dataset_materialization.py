@@ -163,3 +163,15 @@ def test_harbor_instances_select_discrete_splits(tmp_path):
     train_prompts = {row["messages"][0]["content"] for row in train_rows}
     assert eval_rows[0]["messages"][0]["content"] not in train_prompts
     assert train.cache_key() != evaluation.cache_key()
+
+
+def test_harbor_always_download_disables_materialization_reuse():
+    dataset = HarborDataset(
+        dataset_name="harbor/example",
+        always_download=True,
+    )
+
+    assert dataset.cache_key() is None
+    assert BaseTrainRecipe._resolve_data_paths(
+        dataset
+    ) != BaseTrainRecipe._resolve_data_paths(dataset)

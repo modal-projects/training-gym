@@ -260,6 +260,7 @@ class HarborDataset(DatasetConfig):
         eval_repeats: int = 1,
         shuffle_tasks: bool = False,
         shuffle_seed: int = 0,
+        always_download: bool = False,
     ) -> None:
         if split not in ("all", "train", "eval"):
             raise TrainingGymConfigError(
@@ -282,8 +283,11 @@ class HarborDataset(DatasetConfig):
         self.eval_repeats = eval_repeats
         self.shuffle_tasks = shuffle_tasks
         self.shuffle_seed = shuffle_seed
+        self.always_download = always_download
 
-    def cache_key(self) -> str:
+    def cache_key(self) -> str | None:
+        if self.always_download:
+            return None
         return _materialization_fingerprint(
             {
                 "dataset_name": self.dataset_name,
