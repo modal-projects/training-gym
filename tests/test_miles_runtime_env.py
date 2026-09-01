@@ -52,7 +52,8 @@ def test_ld_library_path_comes_from_the_container(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:/wheel/nvidia/lib"
+        "/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
+        ":/usr/local/cuda/lib64:/wheel/nvidia/lib"
     )
     assert env_vars["MASTER_ADDR"] == "10.0.0.1"
     assert env_vars["no_proxy"] == "127.0.0.1,10.0.0.1"
@@ -82,7 +83,9 @@ def test_unset_container_path_yields_only_the_system_lib_dir(monkeypatch):
         head_addr="10.0.0.1", metric_env={}, environment={}
     )["env_vars"]
 
-    assert env_vars["LD_LIBRARY_PATH"] == "/usr/lib/x86_64-linux-gnu"
+    assert env_vars["LD_LIBRARY_PATH"] == (
+        "/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
+    )
 
 
 def test_system_lib_dir_is_not_duplicated(monkeypatch):
@@ -93,7 +96,7 @@ def test_system_lib_dir_is_not_duplicated(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/usr/lib/x86_64-linux-gnu:/wheel/nvidia/lib"
+        "/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu:/wheel/nvidia/lib"
     )
 
 
