@@ -5,6 +5,7 @@ from modal_training_gym import (
     TrainConfig,
 )
 
+
 def main() -> None:
     config = TrainConfig(
         model=Qwen3_4B(),
