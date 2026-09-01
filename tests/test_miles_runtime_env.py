@@ -54,7 +54,8 @@ def test_ld_library_path_comes_from_the_container(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
+        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib"
+        ":/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
         ":/usr/local/cuda/lib64:/wheel/nvidia/lib"
     )
     assert env_vars["MASTER_ADDR"] == "10.0.0.1"
@@ -77,7 +78,7 @@ def test_recipe_environment_still_wins(monkeypatch):
     assert env_vars["PYTHONPATH"] == "/root/Megatron-LM/"
 
 
-def test_unset_container_path_yields_only_the_system_lib_dir(monkeypatch):
+def test_unset_container_path_yields_only_the_required_lib_dirs(monkeypatch):
     """No empty entry, which the loader would read as the working directory."""
     monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
 
@@ -86,7 +87,8 @@ def test_unset_container_path_yields_only_the_system_lib_dir(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
+        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib"
+        ":/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
     )
 
 
@@ -98,7 +100,8 @@ def test_system_lib_dir_is_not_duplicated(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu:/wheel/nvidia/lib"
+        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib"
+        ":/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu:/wheel/nvidia/lib"
     )
 
 
@@ -115,11 +118,9 @@ def test_metric_env_is_preserved(monkeypatch):
     assert env_vars["WANDB_RESUME"] == "allow"
 
 
-def test_efa_dirs_precede_the_system_lib_dir(monkeypatch):
+def test_efa_dirs_precede_the_system_lib_dir_when_absent_on_head(monkeypatch):
     monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
-    monkeypatch.setattr(
-        launcher.os.path, "isdir", lambda d: d in launcher._EFA_LIB_DIRS
-    )
+    monkeypatch.setattr(launcher.os.path, "isdir", lambda _d: False)
 
     env_vars = build_ray_runtime_env(
         head_addr="10.0.0.1", metric_env={}, environment={}

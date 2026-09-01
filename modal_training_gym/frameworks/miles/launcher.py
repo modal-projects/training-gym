@@ -451,7 +451,7 @@ def _compose_ld_library_path() -> str:
     #   broken (see _enable_rdma_prefix_if_broken). This path is composed once
     #   on the head and shipped to every node's workers, so the decision has
     #   to live in the per-node filesystem, not here.
-    parts = [d for d in _EFA_LIB_DIRS if os.path.isdir(d)]
+    parts = list(_EFA_LIB_DIRS)
     parts.append(_GYM_RDMA_ENABLED_DIR)
     parts.append(SYSTEM_LIB_DIR)
     for part in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
