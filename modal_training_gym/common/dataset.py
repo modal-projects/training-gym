@@ -1,4 +1,4 @@
-"""Classes for defining nad using datasets for training.
+"""Classes for defining and using datasets for training.
 
 Datasets inherit from a base ``DatasetConfig`` class and provide a ``rows()``
 method that returns an iterable collection of rows. Subclasses are provided for
@@ -11,16 +11,21 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from enum import Enum
 from typing import Any, Literal
+import hashlib
 import json
 import random
 import shutil
 import tomllib
-import uuid
 from pathlib import Path
 
 from modal_training_gym.common.errors import TrainingGymConfigError
 
 DatasetRow = dict[str, Any]
+
+
+def _materialization_fingerprint(fields: dict[str, Any]) -> str:
+    payload = json.dumps(fields, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 class DatasetType(Enum):
@@ -39,7 +44,7 @@ class DatasetConfig(ABC):
 
     def cache_key(self) -> str | None:
         return None
-    
+
     @abstractmethod
     def input_key(self) -> str:
         raise NotImplementedError(f"{type(self).__name__} has no input_key()")
@@ -47,14 +52,14 @@ class DatasetConfig(ABC):
     @abstractmethod
     def label_key(self) -> str:
         raise NotImplementedError(f"{type(self).__name__} has no label_key()")
-    
+
     def output_format(self) -> str:
         return "jsonl"
 
     @abstractmethod
     def rows(self) -> Iterable[DatasetRow]:
-        raise NotImplementedError(f"{type(self).__name__} has no rows()") 
-    
+        raise NotImplementedError(f"{type(self).__name__} has no rows()")
+
     def write(self, path: str) -> None:
         with open(path, "w") as f:
             for row in self.rows():
@@ -111,10 +116,10 @@ class DatasetConfig(ABC):
             raise TrainingGymConfigError(
                 f"{type(self).__name__}.write() wrote {path!r} but it is "
                 f"missing required column(s) {sorted(missing)} "
-                f"(input_key={self.input_key!r}, label_key={self.label_key!r}). "
+                f"(input_key={self.input_key()!r}, label_key={self.label_key()!r}). "
                 f"Columns present: {sorted(cols)}. "
                 "Either rename the column(s) your write() writes, or implement "
-                "input_key/label_key on your DatasetConfig subclass to match."
+                "input_key()/label_key() on your DatasetConfig subclass to match."
             )
 
 
@@ -142,7 +147,7 @@ class HuggingFaceDataset(DatasetConfig):
         input_column: str,
         output_column: str,
         apply_chat_template: bool = True,
-        system_prompt: str,
+        system_prompt: str = "",
         prompt_template: str = "{input}",
         always_download: bool = False,
     ):
@@ -159,9 +164,20 @@ class HuggingFaceDataset(DatasetConfig):
     def cache_key(self) -> str | None:
         if self.always_download:
             return None
-        else:
-            return f"{self.hf_repo}-{self.hf_split}-{self.hf_config}"
-    
+        return _materialization_fingerprint(
+            {
+                "hf_repo": self.hf_repo,
+                "hf_split": self.hf_split,
+                "hf_config": self.hf_config,
+                "input_column": self.input_column,
+                "output_column": self.output_column,
+                "apply_chat_template": self.apply_chat_template,
+                "system_prompt": self.system_prompt,
+                "prompt_template": self.prompt_template,
+                "output_format": self.output_format(),
+            }
+        )
+
     def input_key(self) -> str:
         if self.apply_chat_template:
             return "messages"
@@ -173,7 +189,7 @@ class HuggingFaceDataset(DatasetConfig):
             return "label"
         else:
             return self.output_column
-    
+
     def _load_hf_dataset(self):
         from datasets import load_dataset
 
@@ -202,11 +218,11 @@ class HuggingFaceDataset(DatasetConfig):
     def to_pandas(self, *, formatted: bool = False):
         ds = self._load_hf_dataset()
         return ds.to_pandas(formatted=formatted)
-    
+
     def rows(self) -> Iterable[DatasetRow]:
         for row in self._load_hf_dataset():
             yield dict(row)
-    
+
     def write(self, path: str) -> None:
         ds = self._load_hf_dataset()
         if self.output_format() == "parquet":
@@ -223,45 +239,78 @@ class HarborDataset(DatasetConfig):
     """
 
     _type: DatasetType = DatasetType.HARBOR
-    dataset_name: str = ""
-    path: str | None = None
-    task_root: str = ""
-    task_glob: str = "*"
-    task_names: list[str] | None = None
-    instruction_path: str = "instruction.md"
-    label_metadata_path: str | None = None
-    test_data_dir: str | None = None
-    prompt_template: str = "{instruction}"
-    system_prompt: str = ""
-    train_size: int | None = None
-    eval_size: int | None = None
-    train_repeats: int = 1
-    eval_repeats: int = 1
-    shuffle_tasks: bool = False
-    shuffle_seed: int = 0
 
-    def __init__(self, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        if not self.input_key:
-            self.input_key = "messages"
-        if not self.label_key:
-            self.label_key = "label"
-        if "dataset_id" not in kwargs:
-            if self.dataset_name:
-                slug = self.dataset_name.replace("/", "-")
-            elif self.path:
-                slug = self.path.replace("/", "_")
-            elif self.task_root:
-                slug = self.task_root.replace("/", "_")
-            else:
-                slug = "harbor"
-            self.dataset_id = f"{slug}-{uuid.uuid4()}"
-        self._validate()
+    def __init__(
+        self,
+        *,
+        split: Literal["all", "train", "eval"] = "train",
+        dataset_name: str = "",
+        path: str | None = None,
+        task_root: str = "",
+        task_glob: str = "*",
+        task_names: list[str] | None = None,
+        instruction_path: str = "instruction.md",
+        label_metadata_path: str | None = None,
+        test_data_dir: str | None = None,
+        prompt_template: str = "{instruction}",
+        system_prompt: str = "",
+        train_size: int | None = None,
+        eval_size: int | None = None,
+        train_repeats: int = 1,
+        eval_repeats: int = 1,
+        shuffle_tasks: bool = False,
+        shuffle_seed: int = 0,
+    ) -> None:
+        if split not in ("all", "train", "eval"):
+            raise TrainingGymConfigError(
+                f"split must be one of all/train/eval, got {split!r}"
+            )
+        self.split = split
+        self.dataset_name = dataset_name
+        self.path = path
+        self.task_root = task_root
+        self.task_glob = task_glob
+        self.task_names = task_names
+        self.instruction_path = instruction_path
+        self.label_metadata_path = label_metadata_path
+        self.test_data_dir = test_data_dir
+        self.prompt_template = prompt_template
+        self.system_prompt = system_prompt
+        self.train_size = train_size
+        self.eval_size = eval_size
+        self.train_repeats = train_repeats
+        self.eval_repeats = eval_repeats
+        self.shuffle_tasks = shuffle_tasks
+        self.shuffle_seed = shuffle_seed
 
-    @property
-    def name(self) -> str:
-        return self.dataset_name
+    def cache_key(self) -> str:
+        return _materialization_fingerprint(
+            {
+                "dataset_name": self.dataset_name,
+                "path": self.path,
+                "task_root": self.task_root,
+                "task_glob": self.task_glob,
+                "task_names": self.task_names,
+                "instruction_path": self.instruction_path,
+                "label_metadata_path": self.label_metadata_path,
+                "test_data_dir": self.test_data_dir,
+                "prompt_template": self.prompt_template,
+                "system_prompt": self.system_prompt,
+                "train_size": self.train_size,
+                "eval_size": self.eval_size,
+                "train_repeats": self.train_repeats,
+                "eval_repeats": self.eval_repeats,
+                "shuffle_tasks": self.shuffle_tasks,
+                "shuffle_seed": self.shuffle_seed,
+                "split": self.split,
+            }
+        )
+
+    def input_key(self) -> str:
+        return "messages"
+
+    def label_key(self) -> str:
+        return "label"
 
     def _harbor_dataset_ref(self) -> str:
         if "@" in self.dataset_name:
@@ -303,18 +352,6 @@ class HarborDataset(DatasetConfig):
                 str(cache_dir),
             ]
         subprocess.run(cmd, check=True)
-
-    def _write_split(self, rows: list[dict[str, Any]], path: str) -> None:
-        import os
-
-        from datasets import Dataset
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        ds = Dataset.from_list(rows)
-        if self.output_format == "jsonl":
-            ds.to_json(path, orient="records", lines=True)
-            return
-        ds.to_parquet(path)
 
     def _pull_harbor_dataset(self) -> Path:
         cache_dir = self._harbor_cache_dir()
@@ -465,8 +502,8 @@ class HarborDataset(DatasetConfig):
             messages.append({"role": "system", "content": self.system_prompt})
         messages.append({"role": "user", "content": user_prompt})
         return {
-            "messages": messages,
-            "label": json.dumps(label, separators=(",", ":")),
+            self.input_key(): messages,
+            self.label_key(): json.dumps(label, separators=(",", ":")),
         }
 
     @staticmethod
@@ -504,43 +541,35 @@ class HarborDataset(DatasetConfig):
 
         if not formatted:
             return pd.DataFrame(self.load())
+        return pd.DataFrame(self.rows())
 
-        task_root = self._resolve_task_root()
-        rows = [
-            self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()
-        ]
-        return pd.DataFrame(rows)
-
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
+    def rows(self) -> Iterable[DatasetRow]:
         task_root = self._resolve_task_root()
         base_rows = [
             self._build_row(task_root, task_dir) for task_dir in self._iter_task_dirs()
         ]
-
+        if self.split == "all":
+            return base_rows
         if self.train_size is None:
-            train_base = base_rows
-            eval_base = base_rows
+            selected = base_rows
         else:
             train_size = max(1, min(int(self.train_size), len(base_rows)))
-            train_base = base_rows[:train_size]
-            eval_base = (
-                base_rows[train_size : train_size + (self.eval_size or 0)] or base_rows
-            )
-
-        train_rows = self._repeat_rows(train_base, int(self.train_repeats))
-        eval_rows = self._repeat_rows(eval_base, int(self.eval_repeats))
-
-        self._write_split(train_rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_split(eval_rows, eval_path)
+            if self.split == "train":
+                selected = base_rows[:train_size]
+            else:
+                selected = (
+                    base_rows[train_size : train_size + (self.eval_size or 0)]
+                    or base_rows
+                )
+        repeats = self.train_repeats if self.split == "train" else self.eval_repeats
+        return self._repeat_rows(selected, int(repeats))
 
 
 class MultimodalDataset(DatasetConfig):
     """Modality-agnostic dataset for image / audio / video RL.
 
     Each row pairs a text ``prompt`` with one or more ``media`` items and a
-    ``label``. ``prepare()`` writes the media verbatim into a column named by
+    ``label``. ``rows()`` writes the media verbatim into a column named by
     ``media_column`` (default ``"<modality>s"``), and the column is surfaced to
     the trainer/rollout via ``multimodal_keys`` (``{modality: media_column}``,
     e.g. slime's ``--multimodal-keys``). Media items may be URLs, local paths,
@@ -548,12 +577,9 @@ class MultimodalDataset(DatasetConfig):
     inspects them.
 
     Pass ``rows=[{"prompt": str, "media": list, "label": Any}, ...]`` or
-    subclass and override the ``rows`` property.
+    subclass and override ``source_rows()``.
     """
 
-    input_key: str = "prompt"
-    label_key: str = "label"
-    modality: Literal["image", "audio", "video"] = "audio"
     # TODO(ben/joy): gate-check media at this boundary so the evals dashboard can
     # reliably visualize it. Two parts: (1) normalize each emitted media item to a
     # canonical, browser-renderable container per modality (audio->wav, image->png/
@@ -561,55 +587,50 @@ class MultimodalDataset(DatasetConfig):
     # dataset already re-encodes to wav, make it the convention here; (2) validate the
     # data-URI
     # MIME matches `modality`. Pairs with the dashboard fallback in EvalsPage.svelte.
-    media_column: str = ""
-    output_format: str = "jsonl"
-
-    def __init__(self, rows: list[dict[str, Any]] | None = None, **kwargs: Any) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        if self.modality not in ("image", "audio", "video"):
+    def __init__(
+        self,
+        rows: Iterable[dict[str, Any]] | None = None,
+        *,
+        modality: Literal["image", "audio", "video"] = "audio",
+        media_column: str | None = None,
+        apply_chat_template: bool = False,
+    ) -> None:
+        self.modality = modality
+        self.apply_chat_template = apply_chat_template
+        if modality not in ("image", "audio", "video"):
             raise TrainingGymConfigError(
-                f"modality must be one of image/audio/video, got {self.modality!r}"
+                f"modality must be one of image/audio/video, got {modality!r}"
             )
-        if not self.media_column:
-            self.media_column = f"{self.modality}s"
-        if self.input_key == self.media_column or self.label_key == self.media_column:
+        self.media_column = media_column or f"{modality}s"
+        if (
+            self.input_key() == self.media_column
+            or self.label_key() == self.media_column
+        ):
             raise TrainingGymConfigError(
                 "media_column must differ from input_key and label_key"
             )
-        # The whole feature in one line: name the media column for the framework.
-        self.multimodal_keys = {self.modality: self.media_column}
-        self._rows = list(rows or [])
-        if not self.dataset_id:
-            self.dataset_id = f"mm-{self.modality}-{uuid.uuid4()}"
-        self._validate()
+        self.multimodal_keys = {modality: self.media_column}
+        self._source_rows = list(rows or [])
 
-    @property
-    def rows(self) -> list[DatasetRow]:
-        return self._rows
+    def input_key(self) -> str:
+        return "prompt"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def source_rows(self) -> Iterable[dict[str, Any]]:
+        return self._source_rows
 
     def _to_row(self, r: dict[str, Any]) -> DatasetRow:
         media = r["media"]
         return {
-            self.input_key: r["prompt"],
+            self.input_key(): r["prompt"],
             self.media_column: list(media)
             if isinstance(media, (list, tuple))
             else [media],
-            self.label_key: r["label"],
+            self.label_key(): r["label"],
         }
 
-    def load(self) -> list[DatasetRow]:
-        return [self._to_row(r) for r in self.rows]
-
-    def _write_jsonl(self, rows: list[dict[str, Any]], path: str) -> None:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            for row in rows:
-                f.write(json.dumps(row) + "\n")
-
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
-        rows = self.load()
-        self._write_jsonl(rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_jsonl(rows, eval_path)
+    def rows(self) -> Iterable[DatasetRow]:
+        for row in self.source_rows():
+            yield self._to_row(row)

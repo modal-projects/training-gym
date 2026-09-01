@@ -32,16 +32,14 @@ from modal_training_gym.train_recipes.slime_recipe import GLM_4_7_Recipe
 model = GLM_4_7()
 
 
-class MathDataset(HuggingFaceDataset):
-    hf_repo = "zhuzilin/dapo-math-17k"
-    input_key = "prompt"
-    label_key = "label"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
-
-
-train_dataset = MathDataset(hf_split="train[:2000]")
+train_dataset = HuggingFaceDataset(
+    "zhuzilin/dapo-math-17k",
+    hf_split="train[:2000]",
+    input_column="prompt",
+    output_column="label",
+    apply_chat_template=True,
+    always_download=True,
+)
 recipe = GLM_4_7_Recipe(
     rm_type="deepscaler",
 )

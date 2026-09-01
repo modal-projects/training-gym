@@ -40,12 +40,12 @@ def test_multimodal_keys_emitted(modality):
     assert flags["--label-key"] == "label"
 
 
-def test_prepare_writes_media_column(tmp_path):
+def test_write_writes_media_column(tmp_path):
     rows = [{"prompt": "p", "media": ["a.wav", "b.wav"], "label": "l"}]
     ds = MultimodalDataset(rows=rows, modality="audio")
     out = str(tmp_path / "train.jsonl")
-    ds.prepare(out)
-    ds.validate_prepared(out)  # must not raise
+    ds.write(out)
+    ds.validate_written(out)  # must not raise
     row = json.loads(open(out).readline())
     assert row["audios"] == ["a.wav", "b.wav"]
     assert row["prompt"] == "p" and row["label"] == "l"
@@ -53,7 +53,9 @@ def test_prepare_writes_media_column(tmp_path):
 
 def test_text_dataset_unaffected():
     ds = HuggingFaceDataset(
-        hf_repo="statworx/haiku", input_column="keywords", output_column="text"
+        hf_repo="statworx/haiku",
+        input_column="keywords",
+        output_column="text",
     )
     assert getattr(ds, "multimodal_keys", None) is None
     assert "--multimodal-keys" not in SlimeRecipe(**_RECIPE_KW).cli_args(dataset=ds)

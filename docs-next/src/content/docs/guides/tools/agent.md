@@ -55,29 +55,14 @@ SYSTEM_PROMPT = (
     "(AABB). Do not write any prose, preamble, or explanation outside the verse."
 )
 
-
-class RhymeInstructionDataset(HuggingFaceDataset):
-    """Self-contained Alpaca instructions; the label is the reference answer."""
-
-    hf_repo = "tatsu-lab/alpaca"
-    input_column = "instruction"
-    output_column = "output"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
-    system_prompt = SYSTEM_PROMPT
-    prompt_template = "{input}"
-
-    def load(self, split: str = "all"):
-        from datasets import load_dataset
-
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        ds = ds.filter(
-            lambda r: not r["input"].strip() and 60 <= len(r["output"]) <= 600
-        )
-        if self.n_rows:
-            ds = ds.select(range(min(self.n_rows, len(ds))))
-        return ds
+def rhyme_dataset(n_rows: int) -> HuggingFaceDataset:
+    return HuggingFaceDataset(
+        hf_repo="tatsu-lab/alpaca",
+        hf_split=f"train[:{n_rows}]",
+        input_column="instruction",
+        output_column="output",
+        system_prompt=SYSTEM_PROMPT,
+    )
 ```
 
 Next, it defined the reward function. Here, we care about the model's ability to both rhyme and answer the user's question. As our [intro tutorial](https://gym.modal.dev/tutorials/rl_basics) shows, NLTK’s [CMU Pronouncing Dictionary](https://github.com/prosegrinder/python-cmudict) is a useful library for measure the former.
@@ -289,7 +274,7 @@ def _image_overlay(image):
 def build_config(*, num_rollout: int, n_rows: int, save_interval: int) -> TrainConfig:
     return TrainConfig(
         model=Qwen3_4B(),
-        dataset=RhymeInstructionDataset(n_rows=n_rows),
+        dataset=rhyme_dataset(n_rows),
         recipe=Qwen3_4b_Recipe(
             custom_rm_function=rhyme_rm,
             num_rollout=num_rollout,

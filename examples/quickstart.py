@@ -5,19 +5,16 @@ from modal_training_gym import (
     TrainConfig,
 )
 
-
-class MathDataset(HuggingFaceDataset):
-    hf_repo = "zhuzilin/dapo-math-17k"
-    input_key = "prompt"
-    label_key = "label"
-    output_format = "jsonl"
-    apply_chat_template = True
-
-
 def main() -> None:
     config = TrainConfig(
         model=Qwen3_4B(),
-        dataset=MathDataset(n_rows=120),
+        dataset=HuggingFaceDataset(
+            "zhuzilin/dapo-math-17k",
+            hf_split="train[:120]",
+            input_column="prompt",
+            output_column="label",
+            apply_chat_template=True,
+        ),
         recipe=Qwen3_4b_Recipe(
             gpu_type="H100",
             actor_num_nodes=1,

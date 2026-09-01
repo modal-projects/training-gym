@@ -62,20 +62,15 @@ GROUNDING_PROMPT = (
 class ScreenSpotDataset(MultimodalDataset):
     """GUI grounding dataset from ScreenSpot."""
 
-    modality = "image"
     hf_repo = "rootsautomation/ScreenSpot"
     hf_split = "test"
-    n_rows = 800
-    row_offset = 0
-    always_prepare = True
-    # Collapse to one chat-templated string; the VL processor crashes on raw
-    # message lists.
-    apply_chat_template = True
 
-    def __init__(self, **kwargs):
-        super().__init__(rows=[], **kwargs)
+    def __init__(self, *, n_rows: int, row_offset: int = 0):
+        self.n_rows = n_rows
+        self.row_offset = row_offset
+        super().__init__(modality="image", apply_chat_template=True)
 
-    def _build_rows(self) -> list[dict]:
+    def source_rows(self):
         import base64
         import io
 
@@ -85,7 +80,6 @@ class ScreenSpotDataset(MultimodalDataset):
         start = min(self.row_offset, len(ds))
         stop = min(start + self.n_rows, len(ds))
         # Demo-scale: inline base64 rows in memory; stream large corpora.
-        rows = []
         for row in ds.select(range(start, stop)):
             left, top, right, bottom = row["bbox"]
             instruction = row["instruction"]
@@ -95,28 +89,11 @@ class ScreenSpotDataset(MultimodalDataset):
             img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
             data_uri = f"data:image/png;base64,{img_b64}"
 
-            rows.append(
-                {
-                    self.input_key: GROUNDING_PROMPT.format(
-                        instruction=instruction
-                    ),
-                    self.media_column: [data_uri],
-                    self.label_key: (
-                        f"{left:.4f},{top:.4f},{right:.4f},{bottom:.4f}"
-                    ),
-                }
-            )
-        return rows
-
-    def load(self, split: str = "all") -> list[dict]:
-        return self._build_rows()
-
-    def prepare(self, path, eval_paths=None):
-        rows = self._build_rows()
-        self._write_jsonl(rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_jsonl(rows, eval_path)
+            yield {
+                "prompt": GROUNDING_PROMPT.format(instruction=instruction),
+                "media": data_uri,
+                "label": f"{left:.4f},{top:.4f},{right:.4f},{bottom:.4f}",
+            }
 
 train_dataset = ScreenSpotDataset(n_rows=800)
 
@@ -250,7 +227,7 @@ def run_eval(
         return grounding_eval_fn(deployment, example)
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        rows = list(executor.map(_score_one, eval_dataset.load()))
+        rows = list(executor.map(_score_one, eval_dataset.rows()))
     mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
     return mean, rows
 

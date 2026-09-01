@@ -114,17 +114,23 @@ def score_answer(response: str, label: str) -> int:
 # describes, using a small number of samples with a larger number of rollouts can be
 # sufficient for OPD. Following suit, we'll only use 100 training samples and 20 for evaluation.
 
-class MathDataset(HuggingFaceDataset):
-    hf_repo = "zhuzilin/dapo-math-17k"
-    input_key = "prompt"
-    label_key = "label"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
+train_dataset = HuggingFaceDataset(
+    "zhuzilin/dapo-math-17k",
+    hf_split="train[:100]",
+    input_column="prompt",
+    output_column="label",
+    apply_chat_template=True,
+    always_download=True,
+)
 
-train_dataset = MathDataset(hf_split="train[:100]")
-
-eval_dataset = MathDataset(hf_split="train[100:120]")
+eval_dataset = HuggingFaceDataset(
+    "zhuzilin/dapo-math-17k",
+    hf_split="train[100:120]",
+    input_column="prompt",
+    output_column="label",
+    apply_chat_template=True,
+    always_download=True,
+)
 
 # ## Evaluate the base models
 #
@@ -151,16 +157,15 @@ def run_eval(
     deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
-        prompt = example["prompt"][0]["content"]
         msg = deployment.chat(
-            [{"role": "user", "content": prompt}],
+            example[eval_dataset.input_key()],
             chat_template_kwargs={"enable_thinking": True},
         )
         response = msg.get("content") or msg.get("reasoning_content") or ""
-        return score_answer(response, example["label"])
+        return score_answer(response, example[eval_dataset.label_key()])
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        scores = list(executor.map(_score_one, eval_dataset.load()))
+        scores = list(executor.map(_score_one, eval_dataset.rows()))
     percent_correct = (
         len([s for s in scores if s == 1]) / len(scores) if scores else float("nan")
     )

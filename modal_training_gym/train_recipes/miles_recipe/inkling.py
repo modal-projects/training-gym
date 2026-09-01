@@ -174,8 +174,21 @@ class _InklingSmallRecipe(MilesRecipe):
     # script.
     custom_model_provider_path: str | None = None
 
-    def _fields(self, dataset=None, model=None) -> dict[str, Any]:
-        fields = super()._fields(dataset=dataset, model=model)
+    def _fields(
+        self,
+        dataset=None,
+        eval_dataset=None,
+        dataset_path=None,
+        eval_dataset_path=None,
+        model=None,
+    ) -> dict[str, Any]:
+        fields = super()._fields(
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+            model=model,
+        )
         # inkling-small.sh pins the *text* provider. Both providers are the same
         # function; the multimodal one just passes mm_towers=True, which calls
         # wire_mm_towers() to build the vision/audio towers and load them straight

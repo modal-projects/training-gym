@@ -353,6 +353,9 @@ class TrainConfig:
         The training dataset. ``train()`` materializes it into the
         framework's ``/data`` volume before training if it isn't already
         present.
+    eval_dataset : DatasetConfig | None
+        Optional dataset used by the framework's internal evaluation loop.
+        It is materialized independently from the training dataset.
     model : ModelConfig
         The model to train. Carries model identity (``model_name``) and
         weight-download logic; weights are downloaded into the shared
@@ -398,6 +401,7 @@ class TrainConfig:
     dataset: DatasetConfig
     model: ModelConfig
     recipe: BaseTrainRecipe
+    eval_dataset: DatasetConfig | None = None
     checkpoint: Checkpoint | None = None
     # Known-model recipes are presets by default; complete recipes can opt out.
     merge_model_recipe: bool = True
@@ -419,7 +423,7 @@ class TrainConfig:
             self.model.model_name,
             self.checkpoint.path if self.checkpoint is not None else "",
             f"{type(self.recipe).__name__}:{self.recipe.recipe_type.value}",
-            str(hash(self.dataset)),
+            "",
             self.model.model_path or "",
         )
 
@@ -458,6 +462,7 @@ class TrainConfig:
                 miles=cast(MilesRecipe, self._prepare_recipe()),
                 model=self.model,
                 dataset=self.dataset,
+                eval_dataset=self.eval_dataset,
                 checkpoint=self.checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
@@ -472,6 +477,7 @@ class TrainConfig:
                 slime=cast(SlimeRecipe, self._prepare_recipe()),
                 model=self.model,
                 dataset=self.dataset,
+                eval_dataset=self.eval_dataset,
                 checkpoint=self.checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
@@ -520,6 +526,14 @@ class TrainConfig:
                 "hf_repo": getattr(dataset, "hf_repo", ""),
                 "name": type(dataset).__name__,
             },
+            "eval_dataset": (
+                {
+                    "hf_repo": getattr(self.eval_dataset, "hf_repo", ""),
+                    "name": type(self.eval_dataset).__name__,
+                }
+                if self.eval_dataset is not None
+                else None
+            ),
             "lr": getattr(recipe, "lr", None),
             "global_batch_size": getattr(recipe, "global_batch_size", None),
         }
@@ -535,7 +549,12 @@ class TrainConfig:
                 # absent from serialize_recipe_params for miles; the dashboard
                 # cluster column reads recipe.gpu_type, so keep it here too.
                 "gpu_type": getattr(combined, "gpu_type", None),
-                **serialize_recipe_params(combined, dataset=dataset, model=model),
+                **serialize_recipe_params(
+                    combined,
+                    dataset=dataset,
+                    eval_dataset=self.eval_dataset,
+                    model=model,
+                ),
             }
 
         return summary

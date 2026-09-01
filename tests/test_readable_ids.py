@@ -38,18 +38,27 @@ def test_create_hash_suffix_differs_for_different_parts(monkeypatch) -> None:
 
 def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
     class DummyDataset(DatasetConfig):
-        label_key = "label"
+        def cache_key(self) -> str | None:
+            raise AssertionError("run ID generation must not resolve dataset paths")
+
+        def input_key(self) -> str:
+            return "prompt"
+
+        def label_key(self) -> str:
+            return "label"
+
+        def rows(self):
+            yield {"prompt": "p", "label": "l"}
 
     @dataclass
     class DummyRecipe(BaseTrainRecipe):
         recipe_type: RecipeType = field(default=RecipeType.SLIME)
 
-    calls = 0
+    calls: list[tuple[str, ...]] = []
 
     def fake_create_hash(*parts: str) -> str:
-        nonlocal calls
-        calls += 1
-        return f"brisk-river-{calls:08x}"
+        calls.append(parts)
+        return f"brisk-river-{len(calls):08x}"
 
     monkeypatch.setattr(
         "modal_training_gym.common.train.create_hash",
@@ -65,7 +74,8 @@ def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
     first = config._generate_training_run_id()
     second = config._generate_training_run_id()
     assert first != second
-    assert calls == 2
+    assert len(calls) == 2
+    assert all(parts[3] == "" for parts in calls)
 
 
 def test_train_config_can_skip_model_recipe_merge() -> None:
@@ -119,7 +129,9 @@ def test_the_metric_run_id_is_the_whole_training_run_id() -> None:
 
     summary = TrainConfig(
         dataset=HuggingFaceDataset(
-            hf_repo="some/dataset", input_column="prompt", output_column="answer"
+            hf_repo="some/dataset",
+            input_column="prompt",
+            output_column="answer",
         ),
         model=Qwen3_4B(),
         recipe=SlimeRecipe(

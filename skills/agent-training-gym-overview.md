@@ -18,7 +18,7 @@ launchers from their own scripts or notebooks.
 ```
 modal_training_gym/         ← installable package
 ├── common/                 ← cross-framework pure data + helpers
-│   ├── dataset.py          ← DatasetConfig base (user subclasses)
+│   ├── dataset.py          ← dataset abstraction + built-in sources
 │   ├── models/             ← ModelConfig hierarchy (see below)
 │   ├── wandb.py            ← WandbConfig
 │   ├── framework.py        ← resolve_caller_module, TOOLS_*
@@ -73,10 +73,31 @@ actionable `ValueError` if a user attaches a model with
 
 ### `DatasetConfig`
 
-In `modal_training_gym/common/dataset.py`. Plain class; subclass and override
-`prepare()` to materialize the data on a shared volume. Declarative class
-attrs (`prompt_data`, `input_key`, `rm_type`, etc.) are interpreted by each
-framework's config converter.
+In `modal_training_gym/common/dataset.py`. Instantiate built-in sources such
+as `HuggingFaceDataset` directly:
+
+```python
+dataset = HuggingFaceDataset(
+    hf_repo="org/repo",
+    hf_split="train[:100]",
+    input_column="question",
+    output_column="answer",
+)
+```
+
+For custom data, subclass `DatasetConfig` and implement the methods
+`input_key()`, `label_key()`, and `rows()`. `rows()` is also the interface for
+explicit local or offline loops. The default `write(path)` serializes those
+rows to JSONL; launchers create the destination directory and call `write()` to
+materialize framework input on the shared data volume.
+
+`cache_key()` controls materialization reuse. Return the same stable key when
+equivalent configurations can share written data; return `None` to make every
+training run use a fresh path and attempt materialization independently.
+
+`TrainConfig` accepts an optional, separate `eval_dataset` for the framework's
+internal evaluation loop. It is independent from explicit offline evaluation
+over `eval_dataset.rows()`.
 
 ### Framework config two-class split
 

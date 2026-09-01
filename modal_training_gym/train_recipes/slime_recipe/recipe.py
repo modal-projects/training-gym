@@ -730,8 +730,20 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── Container → slime flag converters ────────────────────────────────────
 
     @classmethod
-    def _dataset_to_fields(cls, ds: "DatasetConfig") -> dict[str, Any]:
-        fields = super()._dataset_to_fields(ds)
+    def _dataset_to_fields(
+        cls,
+        ds: "DatasetConfig",
+        eval_ds: "DatasetConfig | None" = None,
+        *,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
+    ) -> dict[str, Any]:
+        fields = super()._dataset_to_fields(
+            ds,
+            eval_ds,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+        )
         if getattr(ds, "multimodal_keys", None):
             fields["multimodal_keys"] = ds.multimodal_keys
         return fields
@@ -748,25 +760,35 @@ class SlimeRecipe(BaseTrainRecipe):
             )
         return m.architecture
 
-    @staticmethod
-    def _validate_dataset(ds: "DatasetConfig") -> None:
+    @classmethod
+    def _validate_datasets(
+        cls,
+        ds: "DatasetConfig",
+        eval_ds: "DatasetConfig | None" = None,
+    ) -> None:
         """Local preflight for the most common dataset misconfigurations.
 
         Slime indexes ``data[input_key]`` and ``data[label_key]`` inside a Ray
         actor's ``__init__``; if those are unset or collide, the failure only
         surfaces after image build + Ray bringup. Catch it here instead.
         """
-        if not ds.input_key:
-            raise TrainingGymConfigError(
-                f"{type(ds).__name__}.input_key is unset. Slime requires a "
-                "column name (e.g. 'messages' for chat data, 'text' for raw "
-                "prompts). Set `input_key = ...` on your DatasetConfig subclass."
-            )
-        if ds.label_key and ds.label_key == ds.input_key:
-            raise TrainingGymConfigError(
-                f"{type(ds).__name__}: input_key and label_key are both "
-                f"{ds.input_key!r}; they must name distinct columns."
-            )
+        super()._validate_datasets(ds, eval_ds)
+        for dataset in (ds, eval_ds):
+            if dataset is None:
+                continue
+            input_key = dataset.input_key()
+            label_key = dataset.label_key()
+            if not input_key:
+                raise TrainingGymConfigError(
+                    f"{type(dataset).__name__}.input_key() is unset. Slime requires a "
+                    "column name (e.g. 'messages' for chat data, 'text' for raw "
+                    "prompts). Implement `input_key()` on your DatasetConfig subclass."
+                )
+            if label_key and label_key == input_key:
+                raise TrainingGymConfigError(
+                    f"{type(dataset).__name__}: input_key() and label_key() are both "
+                    f"{input_key!r}; they must name distinct columns."
+                )
 
     @staticmethod
     def _model_to_fields(m: "ModelConfig") -> dict[str, Any]:
@@ -849,6 +871,9 @@ class SlimeRecipe(BaseTrainRecipe):
     def _fields(
         self,
         dataset: "DatasetConfig | None" = None,
+        eval_dataset: "DatasetConfig | None" = None,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
         model: "ModelConfig | None" = None,
     ) -> dict[str, Any]:
         fields = self._field_values()
@@ -859,7 +884,14 @@ class SlimeRecipe(BaseTrainRecipe):
         ):
             fields["sglang_cuda_graph_backend_prefill"] = "disabled"
         if dataset is not None:
-            fields.update(self._dataset_to_fields(dataset))
+            fields.update(
+                self._dataset_to_fields(
+                    dataset,
+                    eval_dataset,
+                    dataset_path=dataset_path,
+                    eval_dataset_path=eval_dataset_path,
+                )
+            )
         if model is not None:
             self.validate_model_parallelism(model)
             if not self.slime_model_script:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from modal_training_gym.common.dataset import (
     DatasetConfig,
-    HuggingFaceDataset,
     MultimodalDataset,
 )
 from modal_training_gym.common.models import ModelConfig
@@ -14,22 +13,26 @@ from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 VALIDATION_EPHEMERAL_DISK_MIB = 2_097_152
 
 
-class Gsm8kDataset(HuggingFaceDataset):
-    hf_repo = "openai/gsm8k"
-    hf_config = "main"
-    input_column = "question"
-    output_column = "answer"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
+class Gsm8kDataset(DatasetConfig):
+    def __init__(self, *, n_rows: int = 10) -> None:
+        self.n_rows = n_rows
 
-    def load(self, split: str = "all"):
+    def input_key(self) -> str:
+        return "messages"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def rows(self):
         from datasets import load_dataset
 
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        if self.n_rows:
-            ds = ds.select(range(min(self.n_rows, len(ds))))
-        return ds.map(lambda r: {"answer": r["answer"].split("####")[-1].strip()})
+        dataset = load_dataset("openai/gsm8k", "main", split="train")
+        dataset = dataset.select(range(min(self.n_rows, len(dataset))))
+        for row in dataset:
+            yield {
+                "messages": [{"role": "user", "content": row["question"]}],
+                "label": row["answer"].split("####")[-1].strip(),
+            }
 
 
 class LibriSpeechASRDataset(MultimodalDataset):
@@ -39,22 +42,19 @@ class LibriSpeechASRDataset(MultimodalDataset):
     of LibriSpeech clips. gsm8k is text-only.
     """
 
-    modality = "audio"
     hf_repo = "hf-internal-testing/librispeech_asr_dummy"
     hf_config = "clean"
     hf_split = "validation"
-    n_rows = 8
-    always_prepare = True
-    apply_chat_template = False
 
     _INSTRUCTION = (
         "<audio>\nTranscribe the speech to text. Respond with only the transcript."
     )
 
-    def __init__(self, **kwargs):
-        super().__init__(rows=[], **kwargs)
+    def __init__(self, *, n_rows: int = 8):
+        self.n_rows = n_rows
+        super().__init__(modality="audio")
 
-    def _build_rows(self) -> list[dict]:
+    def source_rows(self):
         import base64 as b64
         import io
 
@@ -64,7 +64,6 @@ class LibriSpeechASRDataset(MultimodalDataset):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         ds = ds.select(range(min(self.n_rows, len(ds))))
         ds = ds.cast_column("audio", Audio(decode=False))
-        rows = []
         for ex in ds:
             audio = ex["audio"]
             data = (
@@ -78,24 +77,11 @@ class LibriSpeechASRDataset(MultimodalDataset):
             data_uri = "data:audio/wav;base64," + b64.b64encode(buf.getvalue()).decode(
                 "ascii"
             )
-            rows.append(
-                {
-                    self.input_key: self._INSTRUCTION,
-                    self.media_column: [data_uri],
-                    self.label_key: ex["text"].lower().strip(),
-                }
-            )
-        return rows
-
-    def load(self, split: str = "all") -> list[dict]:
-        return self._build_rows()
-
-    def prepare(self, path, eval_paths=None):
-        rows = self._build_rows()
-        self._write_jsonl(rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_jsonl(rows, eval_path)
+            yield {
+                "prompt": self._INSTRUCTION,
+                "media": data_uri,
+                "label": ex["text"].lower().strip(),
+            }
 
 
 def build_slime_validation(

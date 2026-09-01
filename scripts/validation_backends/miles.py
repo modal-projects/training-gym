@@ -8,19 +8,6 @@ from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
 
-class DapoMath17kDataset(HuggingFaceDataset):
-    """DAPO-Math-17k prompts for Miles math-RL validation."""
-
-    hf_repo = "zhuzilin/dapo-math-17k"
-    input_column = ""
-    output_column = ""
-    input_key = "prompt"
-    label_key = "label"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
-
-
 def build_miles_validation(
     model_config: ModelConfig, step_count: int
 ) -> tuple[MilesRecipe, DatasetConfig]:
@@ -45,4 +32,12 @@ def build_miles_validation(
     prompts_per_step = max(
         recipe.rollout_batch_size, recipe.over_sampling_batch_size or 0
     )
-    return recipe, DapoMath17kDataset(n_rows=prompts_per_step * step_count)
+    n_rows = prompts_per_step * step_count
+    return recipe, HuggingFaceDataset(
+        "zhuzilin/dapo-math-17k",
+        hf_split=f"train[:{n_rows}]",
+        input_column="prompt",
+        output_column="label",
+        apply_chat_template=True,
+        always_download=True,
+    )

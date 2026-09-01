@@ -69,17 +69,16 @@ def score_transcript(response: str, label: str) -> float:
 # resolve them in a custom `generate` function.
 
 class LibriSpeechASRDataset(MultimodalDataset):
-    modality = "audio"
     hf_repo = "hf-internal-testing/librispeech_asr_dummy"
     hf_config = "clean"
-    hf_split = "validation"
-    always_prepare = True
-    apply_chat_template = False  # ensures the data URI is valid throughout the rollout
 
-    def load(self) -> list[dict]:
+    def __init__(self, *, hf_split: str):
+        self.hf_split = hf_split
+        super().__init__(modality="audio")
+
+    def source_rows(self):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         ds = ds.cast_column("audio", Audio(decode=False))  # decode with soundfile instead of torchcodec
-        rows = []
         for ex in ds:
             audio = ex["audio"]
             data = (
@@ -93,14 +92,11 @@ class LibriSpeechASRDataset(MultimodalDataset):
             data_uri = "data:audio/wav;base64," + base64.b64encode(
                 buf.getvalue()
             ).decode("ascii")
-            rows.append(
-                {
-                    self.input_key: "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
-                    self.media_column: [data_uri],
-                    self.label_key: ex["text"].lower().strip(),
-                }
-            )
-        return rows
+            yield {
+                "prompt": "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
+                "media": data_uri,
+                "label": ex["text"].lower().strip(),
+            }
 
 train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
 
@@ -136,7 +132,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         return score_transcript(hypothesis, reference)
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        wers = list(executor.map(_score_one, eval_dataset.load()))
+        wers = list(executor.map(_score_one, eval_dataset.rows()))
     return sum(wers) / len(wers) if wers else float("nan")
 
 print("running base model evaluation...")
