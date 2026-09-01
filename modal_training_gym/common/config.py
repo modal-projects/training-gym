@@ -25,6 +25,26 @@ MODAL_CONFIG_PATH = Path(
 _dashboard_requires_proxy_auth = False
 DASHBOARD_PROXY_AUTH_PATH = "/api/proxy-auth"
 
+# Holds DASHBOARD_PASSWORD. An empty value means the dashboard is open (no
+# auth) — that's the default so existing deployments keep working untouched.
+# Set a real value via ``training-gym set-password``.
+DASHBOARD_PASSWORD_SECRET_NAME = "_training-gym-dashboard-password"
+
+
+def password_secret_exists() -> bool:
+    """True if the operator has configured a dashboard password Secret.
+
+    Checked at deploy time (local) to decide whether to mount the Secret on
+    the ASGI function — if it was never created, the dashboard stays open.
+    """
+    import modal
+
+    try:
+        modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME).hydrate()
+        return True
+    except Exception:
+        return False
+
 
 def set_dashboard_requires_proxy_auth(value: bool) -> None:
     """Set the mode used when `_dashboard` next registers its web function."""

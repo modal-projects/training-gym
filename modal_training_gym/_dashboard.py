@@ -36,8 +36,10 @@ from starlette.requests import Request
 # must resolve from this module's globals.
 from modal_training_gym.common.advantage_distribution import AdvantageDistribution
 from modal_training_gym.common.config import (
+    DASHBOARD_PASSWORD_SECRET_NAME,
     DASHBOARD_PROXY_AUTH_PATH,
     dashboard_requires_proxy_auth,
+    password_secret_exists,
 )
 from modal_training_gym.common.dashboard import DASHBOARD_APP_NAME
 from modal_training_gym.common.run import (
@@ -152,11 +154,6 @@ STATIC_DIR = "/app/frontend/dist"
 # Underscore-prefixed so it shows up as an auto-managed secret in the Modal
 # Secrets UI and is auto-created on first deploy from ~/.modal.toml.
 MODAL_CREDS_SECRET_NAME = "_training-gym-modal-creds"
-
-# Holds DASHBOARD_PASSWORD. An empty value means the dashboard is open (no
-# auth) — that's the default so existing deployments keep working untouched.
-# Set a real value via ``training-gym set-password``.
-DASHBOARD_PASSWORD_SECRET_NAME = "_training-gym-dashboard-password"
 
 # Routes that must bypass Basic Auth. These endpoints authenticate with their
 # own per-run bearer token; the proxy-auth status route must report only the
@@ -316,19 +313,6 @@ def ensure_creds_secret(interactive: bool = False) -> bool:
         return False
 
 
-def _password_secret_exists() -> bool:
-    """True if the operator has configured a dashboard password Secret.
-
-    Checked at deploy time (local) to decide whether to mount the Secret on
-    the ASGI function — if it was never created, the dashboard stays open.
-    """
-    try:
-        modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME).hydrate()
-        return True
-    except Exception:
-        return False
-
-
 def _function_secrets() -> list[modal.Secret]:
     """Secrets mounted on the ASGI function.
 
@@ -336,7 +320,7 @@ def _function_secrets() -> list[modal.Secret]:
     it, ``DASHBOARD_PASSWORD`` is never injected and the dashboard is open.
     """
     secrets = [modal.Secret.from_name(MODAL_CREDS_SECRET_NAME)]
-    if _password_secret_exists():
+    if password_secret_exists():
         secrets.append(modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME))
     return secrets
 

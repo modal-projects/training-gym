@@ -19,7 +19,6 @@ from modal_training_gym.common.metrics import MetricConfig
 
 TRACKIO_VERSION = "0.34.0"
 _DEFAULT_MODAL_APP_NAME = "training-gym-trackio"
-_DASHBOARD_PASSWORD_SECRET_NAME = "_training-gym-trackio-password"
 _RUN_NAME_ENV = "TRAINING_GYM_TRACKIO_RUN_NAME"
 _SHIM_MARKER = "_training_gym_trackio_adapter"
 _PTH_LINE = (
@@ -89,8 +88,10 @@ class TrackioConfig(MetricConfig):
         """Deploy a persistent Trackio server to Modal and return its config.
 
         The app, Volume, and write-token Secret are reused on subsequent calls
-        with the same names. The dashboard is public, while ingestion and
-        dashboard mutations require the write token stored in the Secret.
+        with the same names. Ingestion and dashboard mutations require the write
+        token stored in the Secret. Reads are open unless a dashboard password
+        was set with ``training-gym set-password``, which gates this dashboard
+        behind the same HTTP Basic Auth as the observability dashboard.
         """
         volume_name = volume_name or f"{app_name}-data"
         modal_secret_name = modal_secret_name or f"_{app_name}-write-token"
@@ -163,6 +164,11 @@ def _deploy_modal_dashboard(
 ) -> str:
     import modal
 
+    from modal_training_gym.common.config import (
+        DASHBOARD_PASSWORD_SECRET_NAME,
+        password_secret_exists,
+    )
+
     modal.Secret.objects.create(
         modal_secret_name,
         {"TRACKIO_WRITE_TOKEN": secrets.token_urlsafe(32)},
@@ -171,16 +177,9 @@ def _deploy_modal_dashboard(
     write_secret = modal.Secret.from_name(
         modal_secret_name, required_keys=["TRACKIO_WRITE_TOKEN"]
     )
-    password_secret = modal.Secret.from_name(
-        _DASHBOARD_PASSWORD_SECRET_NAME, required_keys=["DASHBOARD_PASSWORD"]
-    )
     function_secrets = [write_secret]
-    try:
-        password_secret.hydrate()
-    except Exception:
-        pass
-    else:
-        function_secrets.append(password_secret)
+    if password_secret_exists():
+        function_secrets.append(modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME))
     data = modal.Volume.from_name(volume_name, create_if_missing=True)
     image = modal.Image.debian_slim(python_version="3.12").uv_pip_install(
         f"trackio=={TRACKIO_VERSION}"
@@ -208,21 +207,27 @@ def _deploy_modal_dashboard(
         from trackio.server import build_starlette_app_only
 
         starlette_app, _ = build_starlette_app_only()
-        password = os.environ.get("DASHBOARD_PASSWORD", "")
+        dashboard_password = os.environ.get("DASHBOARD_PASSWORD", "")
         write_token = os.environ.get("TRACKIO_WRITE_TOKEN", "")
 
-        async def require_password(request, call_next):
-            scheme, _, encoded = request.headers.get("Authorization", "").partition(" ")
+        def _password_ok(authorization: str | None) -> bool:
+            scheme, _, encoded = (authorization or "").partition(" ")
+            if scheme.lower() != "basic" or not encoded:
+                return False
             try:
                 decoded = base64.b64decode(encoded).decode("utf-8")
             except (binascii.Error, ValueError, UnicodeDecodeError):
-                decoded = ""
-            supplied = decoded.partition(":")[2] if scheme.lower() == "basic" else ""
-            supplied_write_token = request.headers.get("X-Trackio-Write-Token", "")
-            if password and not (
-                secrets.compare_digest(supplied, password)
-                or write_token
-                and secrets.compare_digest(supplied_write_token, write_token)
+                return False
+            _user, _, supplied = decoded.partition(":")
+            return secrets.compare_digest(supplied, dashboard_password)
+
+        def _write_token_ok(supplied: str) -> bool:
+            return bool(write_token) and secrets.compare_digest(supplied, write_token)
+
+        async def require_password(request, call_next):
+            if dashboard_password and not (
+                _password_ok(request.headers.get("Authorization"))
+                or _write_token_ok(request.headers.get("X-Trackio-Write-Token", ""))
             ):
                 return Response(
                     status_code=401,

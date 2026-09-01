@@ -92,9 +92,15 @@ metrics = TrackioConfig.deploy_to_modal(project="my-rl-project")
 ```
 
 The first call creates a Modal app, a persistent Volume for Trackio data, and
-an auto-managed Modal Secret for the write token. Later calls reuse them. The
-dashboard is publicly readable; writes require the token, and Training Gym
-does not include it in dashboard links.
+an auto-managed Modal Secret for the write token. Later calls reuse them. Writes
+require the token, and Training Gym does not include it in dashboard links.
+
+Reads are open unless a dashboard password is set with
+[`training-gym set-password`](/guides/tools/observability-dashboard), which puts
+the Trackio dashboard behind the same HTTP Basic Auth as the observability
+dashboard. Training containers keep ingesting with the write token. The
+password is read at container startup, so run `deploy_to_modal()` again after
+changing it.
 
 Pass `metrics` to the recipe. Use `app_name`, `volume_name`, or
 `modal_secret_name` when separate Trackio deployments are required.
