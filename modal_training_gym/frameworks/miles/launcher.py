@@ -926,6 +926,7 @@ def build_miles_app(
         image=image,
         gpu=gpu_spec,
         memory=miles.memory,
+        cpu=miles.cpu,
         ephemeral_disk=train_ephemeral_disk,
         cloud=miles.cloud,
         region=miles.region,
