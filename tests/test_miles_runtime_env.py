@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 from modal_training_gym.frameworks.miles import launcher
 from modal_training_gym.frameworks.miles.launcher import build_ray_runtime_env
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
@@ -111,3 +113,55 @@ def test_metric_env_is_preserved(monkeypatch):
 
     assert env_vars["WANDB_RUN_ID"] == "abc"
     assert env_vars["WANDB_RESUME"] == "allow"
+
+
+def test_efa_dirs_precede_the_system_lib_dir(monkeypatch):
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+    monkeypatch.setattr(
+        launcher.os.path, "isdir", lambda d: d in launcher._EFA_LIB_DIRS
+    )
+
+    env_vars = build_ray_runtime_env(
+        head_addr="10.0.0.1", metric_env={}, environment={}
+    )["env_vars"]
+
+    assert env_vars["LD_LIBRARY_PATH"] == (
+        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib"
+        ":/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
+    )
+
+
+def _probe(monkeypatch, returncode: int, stderr: str) -> list[tuple[str, str]]:
+    created: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        launcher.os.path, "isdir", lambda d: d == launcher._GYM_RDMA_DIR
+    )
+    monkeypatch.setattr(launcher.os.path, "lexists", lambda d: False)
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, returncode, "", stderr),
+    )
+    monkeypatch.setattr(
+        launcher.os, "symlink", lambda src, dst: created.append((src, dst))
+    )
+    launcher._enable_rdma_prefix_if_broken()
+    return created
+
+
+def test_broken_verbs_pair_materializes_the_prefix_alias(monkeypatch):
+    created = _probe(
+        monkeypatch, 1, "ImportError: version `IBVERBS_PRIVATE_34' not found"
+    )
+
+    assert created == [(launcher._GYM_RDMA_DIR, launcher._GYM_RDMA_ENABLED_DIR)]
+
+
+def test_healthy_verbs_pair_leaves_the_alias_absent(monkeypatch):
+    assert _probe(monkeypatch, 0, "") == []
+
+
+def test_unrelated_probe_failure_leaves_the_alias_absent(monkeypatch):
+    assert (
+        _probe(monkeypatch, 1, "ModuleNotFoundError: No module named 'mooncake'") == []
+    )
