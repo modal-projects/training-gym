@@ -17,7 +17,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from modal_training_gym.common.metrics import MetricConfig
 
 
-TRACKIO_PACKAGE_VERSION = "0.34.0"
+_DEFAULT_TRACKIO_VERSION = "0.34.0"
 _DEFAULT_MODAL_APP_NAME = "training-gym-trackio"
 _RUN_NAME_ENV = "TRAINING_GYM_TRACKIO_RUN_NAME"
 _SHIM_MARKER = "_training_gym_trackio_adapter"
@@ -59,7 +59,7 @@ class TrackioConfig(MetricConfig):
     modal_secret_name : str
         Modal Secret containing ``HF_TOKEN`` or ``TRACKIO_WRITE_TOKEN``.
         The standard optional ``"huggingface-secret"`` is used by default.
-    package_version : str
+    TRACKIO_PACKAGE_VERSION : str
         Trackio release installed in the training image, and in the server
         deployed by ``deploy_to_modal``. Defaults to the version this release
         of Training Gym is tested against; bump it to pick up a newer Trackio.
@@ -74,7 +74,7 @@ class TrackioConfig(MetricConfig):
     dashboard_url: str = ""
     bucket_id: str = ""
     modal_secret_name: str = "huggingface-secret"
-    package_version: str = TRACKIO_PACKAGE_VERSION
+    TRACKIO_PACKAGE_VERSION: str = _DEFAULT_TRACKIO_VERSION
 
     provider: ClassVar[str] = "trackio"  # pyright: ignore[reportIncompatibleMethodOverride]
 
@@ -89,7 +89,7 @@ class TrackioConfig(MetricConfig):
         app_name: str = _DEFAULT_MODAL_APP_NAME,
         volume_name: str = "",
         modal_secret_name: str = "",
-        package_version: str = TRACKIO_PACKAGE_VERSION,
+        TRACKIO_PACKAGE_VERSION: str = _DEFAULT_TRACKIO_VERSION,
     ) -> Self:
         """Deploy a persistent Trackio server to Modal and return its config.
 
@@ -105,7 +105,7 @@ class TrackioConfig(MetricConfig):
             app_name=app_name,
             volume_name=volume_name,
             modal_secret_name=modal_secret_name,
-            package_version=package_version,
+            TRACKIO_PACKAGE_VERSION=TRACKIO_PACKAGE_VERSION,
         )
         return cls(
             project=project,
@@ -115,7 +115,7 @@ class TrackioConfig(MetricConfig):
             server_url=server_url,
             dashboard_url=server_url,
             modal_secret_name=modal_secret_name,
-            package_version=package_version,
+            TRACKIO_PACKAGE_VERSION=TRACKIO_PACKAGE_VERSION,
         )
 
     def runtime_env(self, *, run_id: str, entity: str = "") -> dict[str, str]:
@@ -174,7 +174,7 @@ def _deploy_modal_dashboard(
     app_name: str,
     volume_name: str,
     modal_secret_name: str,
-    package_version: str = TRACKIO_PACKAGE_VERSION,
+    TRACKIO_PACKAGE_VERSION: str = _DEFAULT_TRACKIO_VERSION,
 ) -> str:
     import modal
 
@@ -199,7 +199,7 @@ def _deploy_modal_dashboard(
         function_secrets.append(password_secret)
     data = modal.Volume.from_name(volume_name, create_if_missing=True)
     image = modal.Image.debian_slim(python_version="3.12").uv_pip_install(
-        f"trackio=={package_version}"
+        f"trackio=={TRACKIO_PACKAGE_VERSION}"
     )
     app = modal.App(app_name)
 
@@ -277,9 +277,9 @@ def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
         "pathlib.Path(site.getsitepackages()[0], "
         f"'_training_gym_trackio.pth').write_text({_PTH_LINE!r})"
     )
-    return image.uv_pip_install(f"trackio=={config.package_version}").run_commands(
-        f"python3 -c {shlex.quote(install_code)}"
-    )
+    return image.uv_pip_install(
+        f"trackio=={config.TRACKIO_PACKAGE_VERSION}"
+    ).run_commands(f"python3 -c {shlex.quote(install_code)}")
 
 
 def preflight_trackio(_config: TrackioConfig) -> str:

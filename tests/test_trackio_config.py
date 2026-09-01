@@ -86,7 +86,7 @@ def test_deploy_to_modal_returns_a_self_hosted_config(monkeypatch):
         "app_name": "my-trackio",
         "volume_name": "my-trackio-data",
         "modal_secret_name": "_my-trackio-write-token",
-        "package_version": "0.34.0",
+        "TRACKIO_PACKAGE_VERSION": "0.34.0",
     }
     assert config == TrackioConfig(
         project="rl",
@@ -125,7 +125,7 @@ def test_trackio_image_installs_trackio_and_the_conditional_wandb_adapter():
 def test_trackio_package_version_is_configurable():
     """A pinned default, but bumpable without waiting on a Training Gym release."""
     image = _FakeImage()
-    apply_metric_image(image, TrackioConfig(package_version="0.35.0"))
+    apply_metric_image(image, TrackioConfig(TRACKIO_PACKAGE_VERSION="0.35.0"))
 
     assert image.packages == ["trackio==0.35.0"]
 
