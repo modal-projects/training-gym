@@ -881,7 +881,8 @@ nav.tg-toc .tg-toc__list .tg-toc__list a {
   background: var(--tg-panel);
 }
 
-.tg-dashboard-previews img {
+.tg-dashboard-previews img,
+.tg-dashboard-previews video {
   display: block;
   width: 100%;
   height: 100%;

@@ -20,8 +20,9 @@ CALLOUT_VARIANTS = {
 }
 MARKDOWN_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)]+)\)")
 MARKDOWN_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-HTML_IMAGE_SRC = re.compile(
-    r"(<img\b[^>]*?\bsrc=)([\"'])([^\"']+)(\2)",
+HTML_MEDIA_TAG = re.compile(r"<(?:img|video|source)\b[^>]*>", re.IGNORECASE)
+HTML_MEDIA_URL_ATTR = re.compile(
+    r"\b(src|poster)=([\"'])([^\"']+)(\2)",
     re.IGNORECASE,
 )
 
@@ -161,13 +162,16 @@ def rewrite_images(markdown: str, *, source_dir: PurePosixPath) -> str:
     return MARKDOWN_IMAGE.sub(replace, markdown)
 
 
-def rewrite_html_image_sources(markdown: str, *, source_dir: PurePosixPath) -> str:
-    def replace(match: re.Match[str]) -> str:
-        prefix, quote, target, _closing_quote = match.groups()
+def rewrite_html_media_sources(markdown: str, *, source_dir: PurePosixPath) -> str:
+    def replace_attribute(match: re.Match[str]) -> str:
+        attribute, quote, target, _closing_quote = match.groups()
         rewritten = rewrite_image_target(target, source_dir=source_dir)
-        return f"{prefix}{quote}{rewritten}{quote}"
+        return f"{attribute}={quote}{rewritten}{quote}"
 
-    return HTML_IMAGE_SRC.sub(replace, markdown)
+    def replace_tag(match: re.Match[str]) -> str:
+        return HTML_MEDIA_URL_ATTR.sub(replace_attribute, match.group(0))
+
+    return HTML_MEDIA_TAG.sub(replace_tag, markdown)
 
 
 def strip_developer_guide(markdown: str) -> str:
@@ -198,7 +202,7 @@ def transform_markdown(
     page = strip_developer_guide(page)
     page = convert_github_callouts(page)
     page = rewrite_images(page, source_dir=source_dir)
-    page = rewrite_html_image_sources(page, source_dir=source_dir)
+    page = rewrite_html_media_sources(page, source_dir=source_dir)
     return rewrite_links(
         page,
         source_dir=source_dir,

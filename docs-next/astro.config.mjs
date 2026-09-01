@@ -6,6 +6,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
+import { rehypeLazyMedia } from './rehype-lazy-media.mjs';
 import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
 import { flattenDocId, parseTutorialMetadata } from './src/lib/tutorial-docs-loader.ts';
 
@@ -122,7 +123,7 @@ export default defineConfig({
   },
   markdown: {
     remarkPlugins: [remarkMath, remarkStripPageTitle],
-    rehypePlugins: [rehypeKatex, rehypeTableWrapper],
+    rehypePlugins: [rehypeKatex, rehypeTableWrapper, rehypeLazyMedia],
   },
   site: 'https://gym.modal.dev',
   integrations: [

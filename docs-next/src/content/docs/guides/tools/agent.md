@@ -350,7 +350,7 @@ training-gym run trace <run-id> --out ./traces --yes --json
 
 ## Results
 
-<video controls playsinline width="100%">
+<video controls playsinline preload="none" poster="/agent-driven-training-rhyme-poster.jpg" width="100%">
   <source src="/agent-driven-training-rhyme.mp4" type="video/mp4">
   <source src="https://gym.modal.dev/agent-driven-training-rhyme.mp4" type="video/mp4">
   <a href="https://gym.modal.dev/agent-driven-training-rhyme.mp4">Watch the agent-driven training demo.</a>

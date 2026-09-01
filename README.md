@@ -42,10 +42,10 @@ training-gym setup
 
 <div class="tg-dashboard-previews">
   <span>
-    <img src="./assets/homepage.gif" alt="Training runs list in the Training Gym dashboard" width="100%" />
+    <video src="https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/homepage.mp4" poster="https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/homepage-poster.jpg" aria-label="Training runs list in the Training Gym dashboard" width="100%" preload="none" playsinline muted loop controls></video>
   </span>
   <span>
-    <img src="./assets/longrun.gif" alt="Long-running training run details in the Training Gym dashboard" width="100%" />
+    <video src="https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/longrun.mp4" poster="https://raw.githubusercontent.com/modal-projects/training-gym/main/assets/longrun-poster.jpg" aria-label="Long-running training run details in the Training Gym dashboard" width="100%" preload="none" playsinline muted loop controls></video>
   </span>
 </div>
 
