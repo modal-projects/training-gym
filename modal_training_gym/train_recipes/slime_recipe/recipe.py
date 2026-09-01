@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 
 from modal_training_gym.train_recipes.base import (
     BaseTrainRecipe,
-    RecipeType,
     # Re-exported for backwards compatibility (e.g. frameworks/slime/launcher.py
     # imports the volume paths from this module).
     CHECKPOINTS_PATH as CHECKPOINTS_PATH,
@@ -35,7 +34,6 @@ import modal
 # ── Types ─────────────────────────────────────────────────────────────────────
 
 _SLIME_SKIP = {
-    "recipe_type",
     "environment",
     "async_mode",
     "metrics",
@@ -136,8 +134,6 @@ class SlimeRecipe(BaseTrainRecipe):
 
     ## App Identity
 
-    recipe_type : RecipeType
-        Discriminator marking this recipe as slime; never override.
     name : str
         Modal app title; when empty the launcher derives one from the recipe
         class.
@@ -492,7 +488,6 @@ class SlimeRecipe(BaseTrainRecipe):
     save_interval: int  # save a checkpoint every N rollout steps
 
     # ── App identity ─────────────────────────────────────────────────────────
-    recipe_type: RecipeType = RecipeType.SLIME
     name: str = ""
     app_tags: dict = field(default_factory=dict)
 

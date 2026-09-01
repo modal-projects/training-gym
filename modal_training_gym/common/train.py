@@ -6,15 +6,17 @@ import threading
 import time
 import warnings
 from contextlib import nullcontext
-from typing import Any
-from typing import TypeVar
-from typing import cast
+from typing import Any, TypeVar, cast
+
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
+from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun, metric_run_id_for_attempt
 from modal_training_gym.common.status import (
@@ -23,16 +25,12 @@ from modal_training_gym.common.status import (
     SlimeStatus,
 )
 from modal_training_gym.common.train_result import TrainResult
-from modal_training_gym.common.modal_urls import modal_app_dashboard_url
-from modal_training_gym.utils.metadata import MetadataStore, vol_put
 from modal_training_gym.frameworks.miles import build_miles_app
 from modal_training_gym.frameworks.slime import build_slime_app
-from modal_training_gym.train_recipes.base import BaseTrainRecipe, RecipeType
+from modal_training_gym.train_recipes.base import BaseTrainRecipe
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-from pydantic import ConfigDict
-from pydantic.dataclasses import dataclass
-
+from modal_training_gym.utils.metadata import MetadataStore, vol_put
 
 _RecipeT = TypeVar("_RecipeT", bound=BaseTrainRecipe)
 
@@ -357,7 +355,7 @@ class TrainConfig:
         The model to train. Carries model identity (``model_name``) and
         weight-download logic; weights are downloaded into the shared
         HuggingFace cache volume on first use and reused across runs.
-    recipe : BaseTrainRecipe
+    recipe : SlimeRecipe | MilesRecipe
         Framework recipe (``SlimeRecipe`` or ``MilesRecipe``). Selects the
         training framework and carries Modal infra settings (GPU type, node
         count, image) plus framework CLI flags.
@@ -397,7 +395,7 @@ class TrainConfig:
     # ── Composed configs (required) ─────────────────────────────────────────
     dataset: DatasetConfig
     model: ModelConfig
-    recipe: BaseTrainRecipe
+    recipe: SlimeRecipe | MilesRecipe
     checkpoint: Checkpoint | None = None
     # Known-model recipes are presets by default; complete recipes can opt out.
     merge_model_recipe: bool = True
@@ -418,12 +416,12 @@ class TrainConfig:
         return create_hash(
             self.model.model_name,
             self.checkpoint.path if self.checkpoint is not None else "",
-            f"{type(self.recipe).__name__}:{self.recipe.recipe_type.value}",
+            f"{type(self.recipe).__name__}:{self.framework.value}",
             self.dataset.dataset_id,
             self.model.model_path or "",
         )
 
-    def _prepare_recipe(self) -> BaseTrainRecipe:
+    def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
         recipe = _resolve_recipe(
             self.model,
             self.recipe,
@@ -436,47 +434,39 @@ class TrainConfig:
                 "Training can only resume from a Megatron checkpoint; "
                 "Hugging Face exports are serving artifacts."
             )
-        if isinstance(recipe, (MilesRecipe, SlimeRecipe)):
-            recipe = _dc.replace(
-                recipe,
-                load=os.path.dirname(self.checkpoint.path.rstrip("/")),
-            )
-        return recipe
+        return _dc.replace(
+            recipe,
+            load=os.path.dirname(self.checkpoint.path.rstrip("/")),
+        )
 
     def _build_app(self, training_run_id: str | None = None):
         _warn_if_external_build_app()
         if training_run_id is None:
             training_run_id = self._generate_training_run_id()
-        recipe_type = self.recipe.recipe_type
-        if recipe_type == RecipeType.MILES:
-            if not isinstance(self.recipe, MilesRecipe):
-                raise TrainingGymConfigError(
-                    f"Recipe type {recipe_type} requires MilesRecipe, got {type(self.recipe).__name__}"
-                )
+        recipe = self._prepare_recipe()
+        if isinstance(recipe, MilesRecipe):
             return build_miles_app(
                 training_run_id=training_run_id,
-                miles=cast(MilesRecipe, self._prepare_recipe()),
+                miles=recipe,
                 model=self.model,
                 dataset=self.dataset,
                 checkpoint=self.checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
             )
-        if recipe_type == RecipeType.SLIME:
-            if not isinstance(self.recipe, SlimeRecipe):
-                raise TrainingGymConfigError(
-                    f"Recipe type {recipe_type} requires SlimeRecipe, got {type(self.recipe).__name__}"
-                )
+        if isinstance(recipe, SlimeRecipe):
             return build_slime_app(
                 training_run_id=training_run_id,
-                slime=cast(SlimeRecipe, self._prepare_recipe()),
+                slime=recipe,
                 model=self.model,
                 dataset=self.dataset,
                 checkpoint=self.checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
             )
-        raise TrainingGymConfigError(f"Unknown recipe type: {recipe_type}")
+        raise TrainingGymConfigError(
+            f"Unknown training recipe: {type(recipe).__name__}"
+        )
 
     # ── Run-record helpers ─────────────────────────────────────────────────
 
@@ -487,17 +477,15 @@ class TrainConfig:
         if isinstance(self.recipe, MilesRecipe):
             return Framework.MILES
         raise TrainingGymConfigError(
-            f"Unknown recipe type: {type(self.recipe).__name__}"
+            f"Unknown training recipe: {type(self.recipe).__name__}"
         )
 
     def _initializing_status(self) -> FrameworkStatus:
-        if isinstance(self.recipe, SlimeRecipe):
+        if self.framework is Framework.SLIME:
             return SlimeStatus.INITIALIZING
-        if isinstance(self.recipe, MilesRecipe):
+        if self.framework is Framework.MILES:
             return MilesStatus.INITIALIZING
-        raise TrainingGymConfigError(
-            f"Unknown recipe type: {type(self.recipe).__name__}"
-        )
+        raise TrainingGymConfigError(f"Unknown training framework: {self.framework}")
 
     def _build_config_summary(self, training_run_id: str) -> dict[str, Any]:
         """Framework-specific TrainingRun.config summary."""
@@ -582,7 +570,7 @@ class TrainConfig:
             config_path=str(config_path),
         )
 
-    def _resolved_recipe_for_logging(self) -> BaseTrainRecipe:
+    def _resolved_recipe_for_logging(self) -> SlimeRecipe | MilesRecipe:
         return _resolve_recipe(
             self.model, self.recipe, merge_model_recipe=self.merge_model_recipe
         )
@@ -625,12 +613,12 @@ class TrainConfig:
         """Start training in a detached Modal app and return immediately."""
         import modal
 
+        from modal_training_gym.cli.setup import ensure_dashboard_deployed
         from modal_training_gym.common.config import (
             CONFIG_PATH,
             get_framework_status_url,
         )
         from modal_training_gym.common.status_reporter import enqueue_framework_status
-        from modal_training_gym.cli.setup import ensure_dashboard_deployed
 
         training_run_id = self._generate_training_run_id()
         ensure_dashboard_deployed()

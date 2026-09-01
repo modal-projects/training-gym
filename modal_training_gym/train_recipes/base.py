@@ -3,7 +3,6 @@ import json
 import os
 from abc import ABC
 from collections.abc import Callable
-from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -27,13 +26,7 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimodal_keys")
 
 
-class RecipeType(Enum):
-    SLIME = "slime"
-    MILES = "miles"
-
-
 class BaseTrainRecipe(ABC):
-    recipe_type: RecipeType
     model_config_class: ClassVar["type[ModelConfig] | None"] = None
 
     # Fields consumed by the Modal launcher (image build, cluster topology,
