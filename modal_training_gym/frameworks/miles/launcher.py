@@ -4,6 +4,7 @@ import hashlib
 import os
 import shlex
 import subprocess
+import sys
 import shutil
 import tempfile
 import threading
@@ -30,7 +31,6 @@ from modal_training_gym.common.launcher_utils import (
     timing_debug_env,
 )
 from modal_training_gym.common.metrics import (
-    apply_metric_image,
     metric_metadata,
     metric_runtime_env,
     metric_secrets,
@@ -97,6 +97,12 @@ def _validate_resume_checkpoint(
 
 MILES_ROOT = "/root/miles"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
+
+# Modal injects the AWS EFA/OFI stack (libfabric 1.30 + NCCL's ofi net plugin)
+# on GPU hosts and prepends these dirs to the container's LD_LIBRARY_PATH.
+_EFA_LIB_DIRS = ("/opt/amazon/efa/lib", "/opt/amazon/ofi-nccl/lib")
+
+
 # libibverbs and the libmlx5 provider come from incompatible rdma package versions for miles multi-node training
 # reinstalling fixes this issue, mooncake transferengine imports successfully
 RDMA_RUNTIME_INSTALL_COMMAND = (
@@ -104,6 +110,62 @@ RDMA_RUNTIME_INSTALL_COMMAND = (
     "--reinstall libibverbs1 ibverbs-providers && "
     "rm -rf /var/lib/apt/lists/*"
 )
+
+# On EFA hosts the Modal runtime bind-mounts the *host's* libibverbs.so.1 and
+# libefa.so.1 over the system paths. libibverbs and its provider libraries are
+# coupled through private symbol versions (IBVERBS_PRIVATE_*), so a host
+# libibverbs older than the image's libmlx5 breaks every verbs consumer —
+# mooncake's TransferEngine import died with "version 'IBVERBS_PRIVATE_34' not
+# found" on exactly the attempts that drew EFA hosts. A bind mount cannot be
+# replaced by apt or shadowed at its own path, so the image's matched verbs
+# set is copied to a private prefix at build time and Ray workers resolve it
+# from there; everything outside the set (libfabric included) links only the
+# public IBVERBS_1.x ABI and is unaffected.
+#
+# The prefix is engaged only when the system pair is actually broken: with the
+# prefix on the path, absolute-path loads (the provider loader) still map the
+# system copies, so a healthy Mellanox node ends up with two live instances of
+# libibverbs/libmlx5 and NCCL's IB data path degrades badly (a weight sync
+# measured 20-50x slower). Where the system pair is intact — every host that
+# mounts nothing — the prefix must stay out of the path.
+_GYM_RDMA_DIR = "/opt/gym-rdma/lib"
+GYM_RDMA_COPY_COMMAND = (
+    f"mkdir -p {_GYM_RDMA_DIR} && "
+    f"cp -a {SYSTEM_LIB_DIR}/libibverbs.so.1* {SYSTEM_LIB_DIR}/libmlx5.so.1* "
+    f"{_GYM_RDMA_DIR}/ && "
+    f"if ls {SYSTEM_LIB_DIR}/libefa.so.1* >/dev/null 2>&1; then "
+    f"cp -a {SYSTEM_LIB_DIR}/libefa.so.1* {_GYM_RDMA_DIR}/; fi && "
+    f"if test -d {SYSTEM_LIB_DIR}/libibverbs; then "
+    f"cp -a {SYSTEM_LIB_DIR}/libibverbs {_GYM_RDMA_DIR}/; fi"
+)
+
+
+_system_verbs_broken_cache: bool | None = None
+
+
+def _system_verbs_broken() -> bool:
+    """Whether this node's system verbs pair fails mooncake's import.
+
+    Probed once per container under the system search order (no prefix). True
+    means the host bind-mounted a foreign libibverbs over the image's — the
+    only case where the private prefix should enter the search path.
+    """
+    global _system_verbs_broken_cache
+    if _system_verbs_broken_cache is not None:
+        return _system_verbs_broken_cache
+    probe = [sys.executable, "-c", "from mooncake.engine import TransferEngine"]
+    check = subprocess.run(probe, capture_output=True, text=True)
+    broken = check.returncode != 0 and "IBVERBS_PRIVATE" in check.stderr
+    if broken:
+        print(
+            "WARNING: this node's system verbs pair is mismatched "
+            f"({check.stderr.strip().splitlines()[-1]}); resolving the image's "
+            f"matched set from {_GYM_RDMA_DIR} for Ray workers."
+        )
+    _system_verbs_broken_cache = broken
+    return broken
+
+
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
@@ -363,7 +425,9 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         )
     )
     if miles.total_nodes > 1:
-        image = image.run_commands(RDMA_RUNTIME_INSTALL_COMMAND)
+        # The copy must follow the reinstall so the private prefix snapshots
+        # the freshly matched verbs set.
+        image = image.run_commands(RDMA_RUNTIME_INSTALL_COMMAND, GYM_RDMA_COPY_COMMAND)
     if miles.image_env:
         image = image.env(miles.image_env)
     return image
@@ -381,7 +445,23 @@ def _response_parser_path(model: Any) -> str:
 
 
 def _compose_ld_library_path() -> str:
-    parts = [SYSTEM_LIB_DIR]
+    # Ordering carries two constraints:
+    # - The injected EFA dirs must precede SYSTEM_LIB_DIR: NCCL's ofi plugin
+    #   requires the injected libfabric 1.30 (`FABRIC_1.8`), and with the
+    #   system dir first the loader finds the image's libfabric 1.20 instead,
+    #   so the plugin never loads in a Ray worker — fatal at engine bring-up
+    #   on hosts whose env pins NCCL_NET_PLUGIN=ofi.
+    # - The private rdma prefix precedes SYSTEM_LIB_DIR only on nodes whose
+    #   system verbs pair is broken (an EFA host's bind-mounted libibverbs
+    #   breaking the private-ABI coupling with the image's providers — see
+    #   GYM_RDMA_COPY_COMMAND). On healthy nodes it must stay out: it would
+    #   dual-load libibverbs/libmlx5 (path lookups hit the prefix, the
+    #   provider loader's absolute paths hit the system copies) and degrade
+    #   NCCL's IB data path badly.
+    parts = [d for d in _EFA_LIB_DIRS if os.path.isdir(d)]
+    if os.path.isdir(_GYM_RDMA_DIR) and _system_verbs_broken():
+        parts.append(_GYM_RDMA_DIR)
+    parts.append(SYSTEM_LIB_DIR)
     for part in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
         if part and part not in parts:
             parts.append(part)
@@ -479,7 +559,6 @@ def build_miles_app(
     if isinstance(dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
-    image = apply_metric_image(image, miles.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)
@@ -913,7 +992,6 @@ def build_miles_app(
         image=image,
         gpu=gpu_spec,
         memory=miles.memory,
-        cpu=miles.cpu,
         ephemeral_disk=train_ephemeral_disk,
         cloud=miles.cloud,
         region=miles.region,
@@ -939,6 +1017,10 @@ def build_miles_app(
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
         if framework_status_token:
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
+
+        # Decide (and log) this node's verbs resolution before anything reads
+        # the composed library path.
+        _system_verbs_broken()
 
         await asyncio.gather(
             hf_cache_volume.reload.aio(),
