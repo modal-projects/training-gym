@@ -41,6 +41,7 @@ train_dataset = HuggingFaceDataset(
     always_download=True,
 )
 recipe = GLM_4_7_Recipe(
+    eval_interval=None,
     rm_type="deepscaler",
 )
 

@@ -547,8 +547,8 @@ class MilesRecipe(BaseTrainRecipe):
 
     # ── Rollout and sampling ────────────────────────────────────────────────
     num_rollout: int = 1
-    rollout_batch_size: int = 16
-    n_samples_per_prompt: int = 8
+    rollout_batch_size: int = 8
+    n_samples_per_prompt: int = 2
     rollout_max_response_len: int = 4096
     rollout_temperature: float = 1.0
     rollout_shuffle: bool = True

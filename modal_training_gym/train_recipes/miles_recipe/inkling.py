@@ -107,8 +107,6 @@ class _InklingSmallRecipe(MilesRecipe):
 
     # ── Cluster + parallelism ────────────────────────────────────────────────
     actor_num_nodes: int = 4
-    actor_num_gpus_per_node: int = 8
-    colocate: bool = True
     tensor_model_parallel_size: int = 4
     sequence_parallel: bool = True
     pipeline_model_parallel_size: int = 8
@@ -132,17 +130,12 @@ class _InklingSmallRecipe(MilesRecipe):
     rollout_batch_size: int = 64
     n_samples_per_prompt: int = 8
     rollout_max_response_len: int = 2048
-    rollout_temperature: float = 1.0
     global_batch_size: int = 128
     # One engine spans 2 nodes.
     rollout_num_gpus_per_engine: int = 16
     skip_eval_before_train: bool = True
 
     # ── GRPO ─────────────────────────────────────────────────────────────────
-    advantage_estimator: str = "grpo"
-    entropy_coef: float = 0.0
-    eps_clip: float = 0.2
-    eps_clip_high: float = 0.28
     eps_clip_c: float = 3.0
     use_tis: bool = True
     # R3: replays the rollout's routed expert IDs (including across media-expanded
@@ -150,13 +143,7 @@ class _InklingSmallRecipe(MilesRecipe):
     use_rollout_routing_replay: bool = True
 
     # ── Optimizer ────────────────────────────────────────────────────────────
-    optimizer: str = "adam"
-    lr_decay_style: str = "constant"
-    weight_decay: float = 0.1
-    adam_beta1: float = 0.9
-    adam_beta2: float = 0.98
     use_distributed_optimizer: bool = True
-    accumulate_allreduce_grads_in_fp32: bool = True
     no_check_for_nan_in_loss_and_grad: bool = True
 
     # ── SGLang ───────────────────────────────────────────────────────────────
@@ -290,7 +277,6 @@ class Inkling_Small_LoRA_Recipe(_InklingSmallRecipe):
     sglang_max_loras_per_batch: int = 1
     sglang_max_lora_rank: int = 32
 
-    use_dynamic_batch_size: bool = True
     max_tokens_per_gpu: int = 4096
 
     sglang_ep_size: int = 16

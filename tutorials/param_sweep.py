@@ -11,7 +11,7 @@
 from modal_training_gym import (
     HuggingFaceDataset,
     Qwen3_5_4B,
-    SlimeRecipe,
+    Qwen3_5_4b_Recipe,
     TrainConfig,
     TrainingGroup,
 )
@@ -36,29 +36,12 @@ train_dataset = HuggingFaceDataset(
 base = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=SlimeRecipe(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        colocate=True,
+    recipe=Qwen3_5_4b_Recipe(
+        eval_interval=None,
         rollout_num_gpus=8,
-        rollout_num_gpus_per_engine=1,
         num_rollout=15,
-        rollout_batch_size=16,
-        n_samples_per_prompt=8,
         rollout_max_response_len=8192,
-        rollout_temperature=1.0,
         global_batch_size=32,
-        lr=1e-6,
-        advantage_estimator="grpo",
-        use_kl_loss=False,
-        kl_coef=0.0,
-        use_dynamic_batch_size=True,
-        max_tokens_per_gpu=9216,
-        sglang_mem_fraction_static=0.75,
-        save_interval=10,
         rm_type="dapo",
     ),
 )
@@ -71,7 +54,7 @@ base = TrainConfig(
 group = TrainingGroup(
     base=base,
     grid={
-        "recipe.lr": [1e-6, 5e-6],
+        "recipe.lr": [5e-7, 5e-6],
         "recipe.rollout_temperature": [0.8, 1.0],
     },
 )

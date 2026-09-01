@@ -22,7 +22,7 @@ from modal_training_gym import (
     Endpoint,
     HarborDataset,
     Qwen3_5_4B,
-    SlimeRecipe,
+    Qwen3_5_4b_Recipe,
     TrainConfig,
     extract_code,
 )
@@ -156,26 +156,15 @@ config = TrainConfig(
     model=model,
     dataset=train_dataset,
     eval_dataset=eval_dataset,
-    recipe=SlimeRecipe(
-        custom_rm_function=sandbox_rm,
-
-        gpu_type="H100",
-        colocate=True,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus_per_engine=1,
-
+    recipe=Qwen3_5_4b_Recipe(
+        eval_interval=None,
         num_rollout=10,
         rollout_batch_size=8,
-        n_samples_per_prompt=8,
         rollout_max_response_len=2048,
         rollout_temperature=0.9,
-
         global_batch_size=8,
-        eval_max_response_len=2048,
-        n_samples_per_eval_prompt=8,
         max_tokens_per_gpu=4096,
-        save_interval=10,
+        custom_rm_function=sandbox_rm,
         image_overlay=lambda image: image.run_commands(
             "uv pip install --system 'modal>=1.5.2'",
         ),
