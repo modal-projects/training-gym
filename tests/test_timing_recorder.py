@@ -8,7 +8,11 @@ from types import ModuleType
 from modal_training_gym.common import reporting
 from modal_training_gym.common import timing_recorder
 from modal_training_gym.common.step_timing import RoleTimingRecord
-from modal_training_gym.common.timing_recorder import RoleRecorder
+from modal_training_gym.common.timing_recorder import (
+    MAX_PHASE_NAME_LENGTH,
+    RoleRecorder,
+    variant_phase,
+)
 
 
 def _configure(monkeypatch):
@@ -17,6 +21,17 @@ def _configure(monkeypatch):
     monkeypatch.setenv("TRAINING_GYM_FRAMEWORK_STATUS_URL", "https://dashboard.test")
     monkeypatch.setenv("TRAINING_GYM_TRAINING_RUN_ID", "run-1")
     monkeypatch.setattr(timing_recorder, "_TIMING_MODE_CACHE", None)
+
+
+def test_variant_phase_normalizes_and_bounds_prefixes():
+    assert variant_phase("compute_log_probs", "") == "compute_log_probs"
+    assert variant_phase("compute_log_probs", None) == "compute_log_probs"
+    assert variant_phase("compute_log_probs", "  ref__ ") == "compute_log_probs:ref"
+    assert (
+        variant_phase("compute_log_probs", "teacher model!")
+        == "compute_log_probs:teacher_model"
+    )
+    assert len(variant_phase("compute_log_probs", "x" * 1000)) < MAX_PHASE_NAME_LENGTH
 
 
 def test_dist_down_rank_environment_elects_one_publisher(monkeypatch):

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from modal_training_gym.common.status import SlimeStatus
 from modal_training_gym.common.timing_recorder import (
     MAX_PHASE_INVOCATIONS,
+    MAX_PHASE_NAME_LENGTH,
     MAX_TIMING_PHASES,
     trim_invocation_lists,
 )
@@ -19,8 +20,6 @@ from modal_training_gym.utils.metadata import (
 )
 
 MAX_ROLLOUT_ID = 1_000_000
-# Keep phase names bounded because they become per-record JSON object keys.
-MAX_PHASE_NAME_LENGTH = 128
 
 
 class Role(str, Enum):

@@ -234,8 +234,15 @@ def test_miles_package_patch_matches_golden(
     assert patched == golden_path.read_text(), (
         f"golden mismatch for {golden}; rerun with --rewrite to accept"
     )
-    for phase, _ in target.blocks:
-        assert f"with _tg_time_phase('{phase}'):" in patched
+    for block_spec in target.blocks:
+        phase = block_spec[0]
+        if phase == "compute_log_probs":
+            assert (
+                "with _tg_time_phase(_tg_variant_phase("
+                "'compute_log_probs', store_prefix)):"
+            ) in patched
+        else:
+            assert f"with _tg_time_phase('{phase}'):" in patched
     if target.scope is not None:
         assert "_tg_role('rollout', rollout_id)" in patched or "_tg_mrec(" in patched
     compile(patched, path, "exec")
@@ -261,8 +268,15 @@ def test_slime_package_patch_matches_golden(
     assert patched == golden_path.read_text(), (
         f"golden mismatch for {golden}; rerun with --rewrite to accept"
     )
-    for phase, _ in target.blocks:
-        assert f"with _tg_time_phase('{phase}'):" in patched
+    for block_spec in target.blocks:
+        phase = block_spec[0]
+        if phase == "compute_log_probs":
+            assert (
+                "with _tg_time_phase(_tg_variant_phase("
+                "'compute_log_probs', store_prefix)):"
+            ) in patched
+        else:
+            assert f"with _tg_time_phase('{phase}'):" in patched
     if target.scope is not None:
         assert "_tg_role('rollout', rollout_id)" in patched or "_tg_mrec(" in patched
     compile(patched, path, "exec")
@@ -395,6 +409,27 @@ def test_per_sample_generation_target_wraps_only_generation_branch(
     assert patched.index("with _tg_time_phase('sample_generation'):") < patched.index(
         "with _tg_time_phase('reward'):"
     )
+    compile(patched, str(work), "exec")
+
+
+@pytest.mark.parametrize("framework", ["miles", "slime"])
+def test_log_prob_phase_uses_store_prefix_variant(patchers, tmp_path, framework):
+    patcher = patchers[framework]
+    target = next(
+        target
+        for target in patcher.PACKAGE_TARGETS
+        if target.path.endswith("backends/megatron_utils/actor.py")
+    )
+    work = tmp_path / target.path
+    work.parent.mkdir(parents=True)
+    work.write_text((TESTDATA / f"{framework}/actor.py.input").read_text())
+    patcher.patch_package_file(tmp_path, target)
+    patched = work.read_text()
+    assert (
+        "with _tg_time_phase(_tg_variant_phase('compute_log_probs', store_prefix)):"
+        in patched
+    )
+    assert "# PATCHED_TRAINING_GYM_TIMING_COMPUTE_LOG_PROBS" in patched
     compile(patched, str(work), "exec")
 
 

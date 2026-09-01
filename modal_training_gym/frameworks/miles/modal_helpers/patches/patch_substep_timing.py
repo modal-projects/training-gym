@@ -19,6 +19,7 @@ from pathlib import Path
 
 PREAMBLE_MARKER = "PATCHED_TRAINING_GYM_TIMING_PREAMBLE"
 RECORDER_MARKER = "PATCHED_TRAINING_GYM_TIMING_RECORDER"
+BlockSpec = tuple[str, str] | tuple[str, str, str]
 
 
 def phase_marker(phase: str) -> str:
@@ -36,6 +37,7 @@ PREAMBLE = (
     "        recording_lane as _tg_role,\n"
     "        recording_lane_on_reporting_rank as _tg_mrec,\n"
     "        time_phase as _tg_time_phase,\n"
+    "        variant_phase as _tg_variant_phase,\n"
     "    )\n"
     "except ImportError:\n"
     "    print('WARNING: modal_training_gym not importable; substep timing off')\n"
@@ -63,6 +65,9 @@ PREAMBLE = (
     "    @_tg_cm\n"
     "    def _tg_time_phase(name):\n"
     "        yield\n"
+    "\n"
+    "    def _tg_variant_phase(base, variant):\n"
+    "        return base\n"
     "\n"
 )
 
@@ -112,8 +117,13 @@ def indent_block(block: str) -> str:
     return "\n".join(f"    {ln}" if ln.strip() else ln for ln in block.splitlines())
 
 
-def wrap_block(block: str, phase: str, opener: str = "_tg_rec.phase") -> str:
-    """Wrap a block in ``with <opener>('<phase>'):``.
+def wrap_block(
+    block: str,
+    phase: str,
+    opener: str = "_tg_rec.phase",
+    phase_expr: str | None = None,
+) -> str:
+    """Wrap a block in ``with <opener>(<phase>):``.
 
     For a bare ``if``, only the body is wrapped, so a skipped branch records
     nothing instead of a ~0s bar for work that never ran. An ``if/else`` is
@@ -134,7 +144,8 @@ def wrap_block(block: str, phase: str, opener: str = "_tg_rec.phase") -> str:
     return (
         head
         + f"{indent}# {phase_marker(phase)}\n"
-        + f"{indent}with {opener}('{phase}'):\n{indent_block(body)}\n"
+        + f"{indent}with {opener}({phase_expr or repr(phase)}):\n"
+        + f"{indent_block(body)}\n"
     )
 
 
@@ -204,7 +215,7 @@ class PackageTarget:
 
     path: str
     scope: tuple[str, str, str] | None
-    blocks: tuple[tuple[str, str], ...]
+    blocks: tuple[BlockSpec, ...]
 
 
 # status patcher runs first, so the anchors are the upstream lines.
@@ -403,6 +414,7 @@ PACKAGE_TARGETS: tuple[PackageTarget, ...] = (
                 "                rollout_id=rollout_id,\n"
                 "                store_prefix=store_prefix,\n"
                 "            )\n",
+                "_tg_variant_phase('compute_log_probs', store_prefix)",
             ),
             (
                 "trainer_finalize",
@@ -534,13 +546,24 @@ def _patch_package_file(root: Path, target: PackageTarget) -> None:
         print(f"{target.path} already patched for substep timing")
         return
 
-    for phase, block in target.blocks:
-        src = replace_once(src, block, wrap_block(block, phase, "_tg_time_phase"), path)
+    for block_spec in target.blocks:
+        phase, block = block_spec[:2]
+        phase_expr = block_spec[2] if len(block_spec) == 3 else None
+        src = replace_once(
+            src,
+            block,
+            wrap_block(block, phase, "_tg_time_phase", phase_expr),
+            path,
+        )
     if target.scope is not None:
         src = wrap_scope(src, target.scope, path)  # last: it reindents the body
     src = _inject_preamble(src)
 
-    missing = [phase for phase, _ in target.blocks if phase_marker(phase) not in src]
+    missing = [
+        phase
+        for phase, _ in (block_spec[:2] for block_spec in target.blocks)
+        if phase_marker(phase) not in src
+    ]
     if missing:
         raise RuntimeError(f"{path}: phases not instrumented: {missing}")
     if target.scope is not None and RECORDER_MARKER not in src:
