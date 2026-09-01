@@ -25,6 +25,11 @@ MODAL_CONFIG_PATH = Path(
 _dashboard_requires_proxy_auth = False
 DASHBOARD_PROXY_AUTH_PATH = "/api/proxy-auth"
 
+# Holds DASHBOARD_PASSWORD. An empty value means the dashboard is open (no
+# auth) — that's the default so existing deployments keep working untouched.
+# Set a real value via ``training-gym set-password``.
+DASHBOARD_PASSWORD_SECRET_NAME = "_training-gym-dashboard-password"
+
 
 def set_dashboard_requires_proxy_auth(value: bool) -> None:
     """Set the mode used when `_dashboard` next registers its web function."""

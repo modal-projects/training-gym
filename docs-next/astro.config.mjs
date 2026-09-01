@@ -119,6 +119,10 @@ export default defineConfig({
     '/guides/wandb-integration': '/guides/metric',
     '/guides/tools/wandb-integration': '/guides/metric',
     '/tutorials/tools/001_wandb_integration': '/guides/metric',
+    '/guides/trackio-integration': '/guides/metric',
+    '/guides/tools/trackio-integration': '/guides/metric',
+    '/guides/metrics-integration': '/guides/metric',
+    '/guides/tools/metrics-integration': '/guides/metric',
   },
   markdown: {
     remarkPlugins: [remarkMath, remarkStripPageTitle],

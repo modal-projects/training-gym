@@ -17,6 +17,7 @@ _EXPORTS = {
     "Endpoint": ("modal_training_gym.common.endpoint", "Endpoint"),
     "HarborDataset": ("modal_training_gym.common.dataset", "HarborDataset"),
     "MetricConfig": ("modal_training_gym.common.metrics", "MetricConfig"),
+    "TrackioConfig": ("modal_training_gym.common.trackio", "TrackioConfig"),
     "EvalConfig": ("modal_training_gym.common.eval", "EvalConfig"),
     "EvalConfigDurable": ("modal_training_gym.common.eval", "EvalConfigDurable"),
     "EvalResult": ("modal_training_gym.common.eval", "EvalResult"),
@@ -211,6 +212,7 @@ __all__ = [
     "TrainingGroup",
     "TrainingRun",
     "TrainResult",
+    "TrackioConfig",
     "WandbConfig",
 ]
 

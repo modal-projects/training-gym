@@ -6,7 +6,6 @@ import re
 import uuid
 from abc import ABC
 from collections.abc import Callable
-from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -40,13 +39,7 @@ def _safe_data_key(cache_key: str) -> str:
 JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimodal_keys")
 
 
-class RecipeType(Enum):
-    SLIME = "slime"
-    MILES = "miles"
-
-
 class BaseTrainRecipe(ABC):
-    recipe_type: RecipeType
     model_config_class: ClassVar["type[ModelConfig] | None"] = None
 
     # Fields consumed by the Modal launcher (image build, cluster topology,
@@ -95,14 +88,12 @@ class BaseTrainRecipe(ABC):
 
     # ── Model presets ─────────────────────────────────────────────────────────
 
-    # TOOD(joy): Remove merge_model_recipe logic everywhere.
     @classmethod
     def get_base_recipe(cls, model_config: "ModelConfig") -> "BaseTrainRecipe | None":
         """Known-model preset recipe for ``model_config``, or ``None``.
 
-        ``TrainConfig.merge_model_recipe`` merges the returned preset onto the
-        fields a user left unset. ``None`` means "no preset for this model" and
-        the user's recipe is used as written.
+        Call this explicitly. ``TrainConfig`` uses the recipe it receives
+        without applying a preset.
 
         A framework that only supports an explicit allow-list of models (e.g.
         slime) may instead raise ``TrainingGymConfigError`` for a model it has

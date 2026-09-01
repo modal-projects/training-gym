@@ -66,7 +66,7 @@ def rhyme_dataset(n_rows: int) -> HuggingFaceDataset:
     )
 ```
 
-Next, it defined the reward function. Here, we care about the model's ability to both rhyme and answer the user's question. As our [intro tutorial](https://gym.modal.dev/tutorials/rl_basics) shows, NLTK’s [CMU Pronouncing Dictionary](https://github.com/prosegrinder/python-cmudict) is a useful library for measure the former.
+Next, it defined the reward function. Here, we care about the model's ability to both rhyme and answer the user's question. As our [intro tutorial](https://gym.modal.dev/tutorials/rl_basics) shows, NLTK’s [CMU Pronouncing Dictionary](https://github.com/prosegrinder/python-cmudict) is a useful library for measuring the former.
 
 <details>
 <summary>What's going on here</summary>

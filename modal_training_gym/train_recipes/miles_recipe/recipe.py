@@ -11,7 +11,6 @@ from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.base import (
     BaseTrainRecipe,
-    RecipeType,
     # Re-exported for backwards compatibility (e.g. frameworks/miles/launcher.py
     # imports the volume paths from this module).
     CHECKPOINTS_PATH as CHECKPOINTS_PATH,
@@ -25,7 +24,6 @@ from modal_training_gym.train_recipes.gpu_allocation import (
 )
 
 _MILES_SKIP = {
-    "recipe_type",
     "environment",
     "async_mode",
     "miles_model_script",
@@ -116,8 +114,6 @@ class MilesRecipe(BaseTrainRecipe):
 
     ## App Identity
 
-    recipe_type : RecipeType
-        Discriminator marking this recipe as Miles; never override.
     name : str
         Modal app title; empty lets the launcher derive one from the class.
     app_tags : dict
@@ -473,9 +469,6 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_reasoning_parser : str | None
         Parser for reasoning/thinking output.
     """
-
-    # ── App identity ─────────────────────────────────────────────────────────
-    recipe_type: RecipeType = RecipeType.MILES
 
     # ── Launcher instructions (not Miles CLI flags) ─────────────────────────
     docker_image: str = "radixark/miles:dev-202608120325"

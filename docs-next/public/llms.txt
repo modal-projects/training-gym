@@ -64,6 +64,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [HuggingFaceDataset](https://gym.modal.dev/reference/huggingfacedataset)
 - [HarborDataset](https://gym.modal.dev/reference/harbordataset)
 - [MetricConfig](https://gym.modal.dev/reference/metricconfig)
+- [TrackioConfig](https://gym.modal.dev/reference/trackioconfig)
 - [WandbConfig](https://gym.modal.dev/reference/wandbconfig)
 - [ModalRayCluster](https://gym.modal.dev/reference/modalraycluster)
 - [TrainResult](https://gym.modal.dev/reference/trainresult)

@@ -57,6 +57,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "MetricConfig",
     },
     {
+        "class_name": "TrackioConfig",
+        "module": "modal_training_gym.common.trackio",
+        "group": "core",
+        "class_type": "config_data",
+        "sidebar_label": "TrackioConfig",
+    },
+    {
         "class_name": "WandbConfig",
         "module": "modal_training_gym.common.wandb",
         "group": "core",
