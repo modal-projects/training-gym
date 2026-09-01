@@ -17,22 +17,23 @@ For example, [statworx/haiku](https://huggingface.co/datasets/statworx/haiku) co
 ```python
 from modal_training_gym import HuggingFaceDataset
 
-
-class HaikuDataset(HuggingFaceDataset):
-    hf_repo = "statworx/haiku"
-    input_column = "keywords"
-    output_column = "text"
-    apply_chat_template = True
+haiku_dataset = HuggingFaceDataset(
+    "statworx/haiku",
+    input_column="keywords",
+    output_column="text",
+    apply_chat_template=True,
+)
 ```
 
 You can customize this by adding a system prompt, or by providing a prompt template to add additional text to the user message:
 
 ```python
-class HaikuDataset(HuggingFaceDataset):
+haiku_dataset = HuggingFaceDataset(
     # ...
-    apply_chat_template = True
-    system_prompt = "You are an expert poet."
-    prompt_template = "Write a haiku about {input}."
+    apply_chat_template=True,
+    system_prompt="You are an expert poet.",
+    prompt_template="Write a haiku about {input}.",
+)
 ```
 
 Note that only `input` is allowed.
@@ -40,18 +41,19 @@ Note that only `input` is allowed.
 Other datasets like [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k) are already formatted using a chat template:
 
 ```python
-class MathDataset(HuggingFaceDataset):
-    hf_repo = "zhuzilin/dapo-math-17k"
-    input_key = "prompt"
-    label_key = "label"
-    apply_chat_template = False
+math_dataset = HuggingFaceDataset(
+    "zhuzilin/dapo-math-17k",
+    input_column="prompt",
+    output_column="label",
+    apply_chat_template=False,
+)
 ```
 
 As any seasoned ML veteran will tell you, we need separate datasets for training and validation/evaluation to properly train a model. This is made easy with [HF's slicing syntax](https://huggingface.co/docs/datasets/v4.8.4/loading#slice-splits):
 
 ```python
-train_dataset = MyHFDataset(..., hf_split="train[:1000]")
-eval_dataset = MyHFDataset(..., hf_split="train[1000:]")
+train_dataset = HuggingFaceDataset(..., hf_split="train[:1000]")
+eval_dataset = HuggingFaceDataset(..., hf_split="train[1000:]")
 ```
 
 If a dataset is gated, you can create a [Modal Secret](https://modal.com/docs/guide/secrets) named `huggingface-secret` that the Gym will auto-detect:
@@ -67,34 +69,33 @@ A [Harbor dataset](https://gym.modal.dev/reference/harbordataset) provides a ser
 ```python
 from modal_training_gym import HarborDataset
 
-
-class HelloWorld(HarborDataset):
-    dataset_name="harbor/hello-world"
+hello_world = HarborDataset(dataset_name="harbor/hello-world")
 ```
 
 If you have the files installed locally, you can instead use the filepath:
 
 ```python
-class HelloWorld(HarborDataset):
-    path="/path/to/task_root"
+hello_world = HarborDataset(path="/path/to/task_root")
 ```
 
 Some tasks provide additional metadata:
 
 ```python
-class HelloWorld(HarborDataset):
+hello_world = HarborDataset(
     # ...
-    label_metadata_path="task.toml"
-    test_data_dir="tests"
+    label_metadata_path="task.toml",
+    test_data_dir="tests",
+)
 ```
 
 During training, each task will be converted into a single user prompt. Like `HuggingFaceDataset`, you can optionally provide a system prompt or override the template for the user message. However, if the metadata contains variables, you can also use them in `prompt_template`!
 
 ```python
-class HelloWorld(HarborDataset):
+hello_world = HarborDataset(
     # ...
-    system_prompt="You are an expert Python programmer."
-    prompt_template="Perform task {task_name} stored at {task_path}: {instruction}"
+    system_prompt="You are an expert Python programmer.",
+    prompt_template="Perform task {task_name} stored at {task_path}: {instruction}",
+)
 ```
 
 ## Creating a custom dataset
@@ -102,33 +103,24 @@ class HelloWorld(HarborDataset):
 To use your own data, likely stored in an [external source](https://modal.com/docs/guide/cloud-bucket-mounts) or a [Modal Volume](https://modal.com/docs/guide/volumes), you simply subclass [DatasetConfig](https://gym.modal.dev/reference/datasetconfig):
 
 ```python
-import os
-
-from datasets import Dataset
 from modal_training_gym import DatasetConfig
 
 prompts = [(prompt, label), ...]  # external source
 
 
 class MyCustomDataset(DatasetConfig):
-    input_key = "messages"
-    label_key = "label"
-    apply_chat_template = True
+    def input_key(self) -> str:
+        return "messages"
 
-    def prepare(self, path: str, eval_paths: dict[str, str] | None = None) -> None:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        rows = [
-            {
-                self.input_key: [{"role": "user", "content": prompt}],
-                self.label_key: label,
+    def label_key(self) -> str:
+        return "label"
+
+    def rows(self):
+        for prompt, label in prompts:
+            yield {
+                self.input_key(): [{"role": "user", "content": prompt}],
+                self.label_key(): label,
             }
-            for prompt, label in prompts
-        ]
-        Dataset.from_list(rows).to_parquet(path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                os.makedirs(os.path.dirname(eval_path), exist_ok=True)
-                Dataset.from_list(rows).to_parquet(eval_path)
 
 
 dataset = MyCustomDataset()
