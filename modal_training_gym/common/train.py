@@ -18,7 +18,11 @@ from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.run import TrainingRun, metric_run_id_for_attempt
+from modal_training_gym.common.run import (
+    TrainingRun,
+    TrainingRunStatus,
+    metric_run_id_for_attempt,
+)
 from modal_training_gym.common.status import (
     FrameworkStatus,
     MilesStatus,
@@ -39,6 +43,33 @@ def _try_validate_model_parallelism(
     # Not every framework recipe implements this preflight.
     if validate := getattr(recipe, "validate_model_parallelism", None):
         validate(model)
+
+
+def _terminalize_unlaunched_run(run_record: TrainingRun, exc: BaseException) -> None:
+    """Terminalize a recorded run whose Modal app never came up.
+
+    Without this the record sits in ``running`` with no app id until the
+    dashboard reconciler's pre-app timeout expires.
+    """
+    finished_at = int(time.time())
+    if isinstance(exc, KeyboardInterrupt):
+        run_record.status = TrainingRunStatus.STOPPED
+        reason = "launch_interrupted"
+    else:
+        run_record.status = TrainingRunStatus.FAILED
+        run_record.error_message = f"{type(exc).__name__}: {exc}"
+        reason = "launch_failed_before_modal_app"
+    run_record.ended_at = finished_at
+    run_record.completed_at = finished_at
+    run_record.duration_seconds = max(0, finished_at - run_record.started_at)
+    run_record.metadata = {**(run_record.metadata or {}), "terminal_reason": reason}
+    try:
+        run_record.save()
+    except Exception as save_exc:  # noqa: BLE001 — best-effort bookkeeping
+        print(
+            f"WARNING: could not mark {run_record.training_run_id} as "
+            f"{run_record.status.value}: {save_exc!r}"
+        )
 
 
 def _convert_checkpoint_on_cache_miss(
@@ -529,14 +560,11 @@ class TrainConfig:
         Returns:
             The launched training run.
         """
-        import modal
-
         from modal_training_gym.cli.setup import ensure_dashboard_deployed
         from modal_training_gym.common.config import (
             CONFIG_PATH,
             get_framework_status_url,
         )
-        from modal_training_gym.common.status_reporter import enqueue_framework_status
 
         training_run_id = self._generate_training_run_id()
         ensure_dashboard_deployed()
@@ -573,6 +601,49 @@ class TrainConfig:
         except RuntimeError:
             framework_status_token = ""
         print(f"TrainingRun recorded: {training_run_id}")
+
+        try:
+            function_call = self._start_detached_app(
+                run_record,
+                training_run_id=training_run_id,
+                framework_status_url=framework_status_url,
+                framework_status_token=framework_status_token,
+                status_display=status_display,
+                show_output=show_output,
+                prepare_inputs=prepare_inputs,
+            )
+        except BaseException as exc:
+            if not run_record.modal_app_id:
+                _terminalize_unlaunched_run(run_record, exc)
+            raise
+
+        run_record.function_call_id = function_call.object_id
+        run_record._function_call = function_call
+        run_record._status_display = status_display if show_output else None
+        try:
+            run_record.save()
+        except RuntimeError:
+            pass
+        print(
+            f"Launched training {run_record.training_run_id}: "
+            f"app={run_record.modal_app_id}, function_call={run_record.function_call_id}"
+        )
+        return run_record
+
+    def _start_detached_app(
+        self,
+        run_record: TrainingRun,
+        *,
+        training_run_id: str,
+        framework_status_url: str,
+        framework_status_token: str,
+        status_display: Any,
+        show_output: bool,
+        prepare_inputs: bool,
+    ) -> Any:
+        import modal
+
+        from modal_training_gym.common.status_reporter import enqueue_framework_status
 
         app = self._build_app(training_run_id)
         output_context = modal.enable_output() if show_output else nullcontext()
@@ -636,22 +707,9 @@ class TrainConfig:
                             framework_status_token=framework_status_token,
                         )
 
-                function_call = app.train.spawn(
+                return app.train.spawn(
                     modal_app_id=modal_app_id,
                     modal_app_url=modal_app_url,
                     framework_status_url=framework_status_url,
                     framework_status_token=framework_status_token,
                 )
-
-        run_record.function_call_id = function_call.object_id
-        run_record._function_call = function_call
-        run_record._status_display = status_display if show_output else None
-        try:
-            run_record.save()
-        except RuntimeError:
-            pass
-        print(
-            f"Launched training {run_record.training_run_id}: "
-            f"app={run_record.modal_app_id}, function_call={run_record.function_call_id}"
-        )
-        return run_record
