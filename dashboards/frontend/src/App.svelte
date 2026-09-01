@@ -94,13 +94,25 @@
     // their status/stage and rollouts stay live. Current data stays on screen
     // (no skeleton) and only the refresh button spins while fetching. A run
     // detail page refreshes its own run, so skip the full list there.
+    // A backgrounded tab refreshes nothing and catches up on the way back:
+    // polling a hidden tab only burns memory and battery, and mobile browsers
+    // discard tabs that keep working while off-screen.
     const refresh = window.setInterval(() => {
+      if (document.hidden) return;
       if (activePage === "training" && activeTrainingRunId) return;
       void load();
     }, 5000);
 
+    const onVisibilityChange = () => {
+      if (document.hidden) return;
+      if (activePage === "training" && activeTrainingRunId) return;
+      void load();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     return () => {
       window.removeEventListener("popstate", syncPageWithPath);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       window.clearInterval(refresh);
     };
   });
@@ -251,6 +263,10 @@
   }
 
   async function load() {
+    // One refresh at a time. The runs payload can take longer to arrive than
+    // the 5s interval, and overlapping fetches stack whole copies of it in
+    // memory for a response that gets thrown away as stale anyway.
+    if (refreshing) return;
     refreshing = true;
     try {
       const tasks = [loadRuns()];

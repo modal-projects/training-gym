@@ -429,6 +429,7 @@ def fastapi_app():
         Path as FastAPIPath,
     )  # Request imported at module scope
     from fastapi.concurrency import run_in_threadpool
+    from fastapi.middleware.gzip import GZipMiddleware
     from fastapi.responses import (
         FileResponse,
         JSONResponse,
@@ -447,6 +448,22 @@ def fastapi_app():
     )
 
     web = FastAPI()
+
+    class _GZipUnlessStreaming(GZipMiddleware):
+        """Compress responses, leaving server-sent-event streams untouched.
+
+        Buffering an SSE stream through gzip withholds each event until the
+        compressor flushes, which stalls the live log tail.
+        """
+
+        async def __call__(self, scope, receive, send):
+            path = scope.get("path", "") if scope["type"] == "http" else ""
+            if path.endswith("/logs/stream"):
+                await self.app(scope, receive, send)
+                return
+            await super().__call__(scope, receive, send)
+
+    web.add_middleware(_GZipUnlessStreaming, minimum_size=1024)
 
     # ── Optional password protection ──────────────────────────────────────
     # When DASHBOARD_PASSWORD is set we gate the whole app behind HTTP Basic
@@ -840,7 +857,16 @@ def fastapi_app():
 
     # ── Training runs ────────────────────────────────────────────────────
 
-    @web.get("/api/runs", response_model=list[RunSummary])
+    # The run list renders none of the full config or the per-step timing maps —
+    # the per-run detail endpoint serves those — yet they are most of the list
+    # payload (``config`` alone is ~60% of it), so the list drops them rather
+    # than shipping them on every poll. ``metadata`` stays: the list's group and
+    # tag columns fall back to it for runs that predate ``group_tags``.
+    run_list_excluded_fields = {"config", "step_times", "substep_times"}
+
+    # ``response_model`` is left off: FastAPI ignores ``response_model_exclude``
+    # for sequence response models, so the exclusion is applied here instead.
+    @web.get("/api/runs")
     async def runs(
         request: Request,
         since: int | None = None,
@@ -866,7 +892,12 @@ def fastapi_app():
             since=since,
             limit=limit,
         )
-        return filtered
+        return JSONResponse(
+            [
+                summary.model_dump(mode="json", exclude=run_list_excluded_fields)
+                for summary in filtered
+            ]
+        )
 
     @web.get("/api/runs/{training_run_id}", response_model=RunSummary)
     async def get_run(training_run_id: str):

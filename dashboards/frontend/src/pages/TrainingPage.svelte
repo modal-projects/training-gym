@@ -9,6 +9,7 @@
   import RunSummary from "../components/RunSummary.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
+  import { fetchRun } from "../lib/api.js";
   import { formatTagValue, getGroupTags } from "../lib/format.js";
   import { normalizeMetricLinks } from "../lib/metricLinks.js";
   import { toggleInSet } from "../lib/set.js";
@@ -57,9 +58,29 @@
   // full rollouts/logs detail lives on its own page. Clicking a run (or the
   // drawer's Expand button) navigates to that page; the page's Collapse button
   // brings the summary back as this drawer.
-  let selectedRun = $derived.by(
-    () => allRuns.find((run) => run.run_id === drawerRunId) || null,
-  );
+  // The list payload carries only the fields the table renders, so the drawer
+  // fetches the run's full record (config and all) when it opens.
+  let drawerDetail = $state(null);
+
+  $effect(() => {
+    const runId = drawerRunId;
+    drawerDetail = null;
+    if (!runId) return;
+    const controller = new AbortController();
+    fetchRun(runId, { signal: controller.signal })
+      .then((detail) => {
+        if (detail) drawerDetail = detail;
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  });
+
+  let selectedRun = $derived.by(() => {
+    const listRun = allRuns.find((run) => run.run_id === drawerRunId) || null;
+    if (!listRun) return null;
+    if (drawerDetail?.run_id !== drawerRunId) return listRun;
+    return { ...listRun, ...drawerDetail };
+  });
 
   const drawerWidth = "min(420px, calc(100vw - 24px))";
   const columns = [
@@ -171,6 +192,60 @@
     void groupBy;
     collapsedGroupKeys = new Set();
   });
+
+  // A run row is ~50 DOM nodes, so rendering every run costs seconds of layout
+  // on a phone and re-renders the whole table on each refresh. Rows come in as
+  // they are scrolled towards instead; filters still run over every run.
+  const renderChunk = 60;
+  let renderLimit = $state(renderChunk);
+
+  $effect(() => {
+    void search;
+    void activeRecipes;
+    void activeStatuses;
+    void activeGroups;
+    void groupBy;
+    renderLimit = renderChunk;
+  });
+
+  let visibleRuns = $derived(filteredRuns.slice(0, renderLimit));
+
+  let visibleGroups = $derived.by(() => {
+    let budget = renderLimit;
+    return runGroups.map((group) => {
+      if (collapsedGroupKeys.has(group.key)) return group;
+      const runs = group.runs.slice(0, Math.max(budget, 0));
+      budget -= runs.length;
+      return { ...group, runs };
+    });
+  });
+
+  let hiddenRunCount = $derived(Math.max(filteredRuns.length - renderLimit, 0));
+
+  function growOnScroll(event) {
+    if (hiddenRunCount <= 0) return;
+    const el = event.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600) {
+      renderLimit += renderChunk;
+    }
+  }
+
+  let sentinel = $state(null);
+
+  $effect(() => {
+    const node = sentinel;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          renderLimit += renderChunk;
+        }
+      },
+      { rootMargin: "600px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  });
 </script>
 
 <section class="summary-sticky grid grid-cols-5 gap-[14px] p-[0_24px] mb-[24px] max-[900px]:grid-cols-2">
@@ -242,7 +317,11 @@
       <div class="page-empty">No runs match the current filters.</div>
     {:else}
       {#snippet runsTable(runs, frozenOffset)}
-        <div class="table-wrap freeze-header" style={frozenOffset ? `--frozen-table-offset: ${frozenOffset};` : ""}>
+        <div
+          class="table-wrap freeze-header"
+          style={frozenOffset ? `--frozen-table-offset: ${frozenOffset};` : ""}
+          onscroll={growOnScroll}
+        >
           <ResizableTable class="training-runs-table" {columns} stickyFirstColumn>
             <tbody>
               {#each runs as run, runIndex (`${run.run_id || "run"}-${run.created_at || 0}-${runIndex}`)}
@@ -398,10 +477,10 @@
       {/snippet}
 
       {#if groupBy === "none"}
-        {@render runsTable(filteredRuns)}
+        {@render runsTable(visibleRuns)}
       {:else}
         <div class="flex flex-col gap-[24px] p-0">
-          {#each runGroups as group (group.key)}
+          {#each visibleGroups as group (group.key)}
             <GroupSection
               title={group.key}
               subtitle={`${group.runs.length} run${group.runs.length === 1 ? "" : "s"}`}
@@ -418,6 +497,12 @@
               {@render runsTable(group.runs, "360px")}
             </GroupSection>
           {/each}
+        </div>
+      {/if}
+
+      {#if hiddenRunCount > 0}
+        <div bind:this={sentinel} class="page-empty">
+          Showing {renderLimit} of {filteredRuns.length} runs
         </div>
       {/if}
     {/if}
