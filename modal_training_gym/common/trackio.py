@@ -143,6 +143,8 @@ def _without_credentials(url: str, *, project: str = "", run_id: str = "") -> st
     if not parsed.scheme or not parsed.netloc:
         return url.strip().split("?", 1)[0].split("#", 1)[0]
     host = parsed.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
     if parsed.port is not None:
         host = f"{host}:{parsed.port}"
     query_items = [

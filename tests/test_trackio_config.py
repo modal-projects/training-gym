@@ -51,6 +51,11 @@ def test_trackio_dashboard_urls_do_not_expose_credentials():
         "https://metrics.example.com:8443/path?project=training-gym&runs=run-a2"
     )
 
+    config = TrackioConfig(server_url="https://user:pw@[2001:db8::1]:8443/path")
+    assert config.url(run_id="run-a2") == (
+        "https://[2001:db8::1]:8443/path?project=training-gym&runs=run-a2"
+    )
+
     config.project = "rl"
     config.dashboard_url = (
         "https://metrics.example.com/view?project=rl&write_token=secret"
