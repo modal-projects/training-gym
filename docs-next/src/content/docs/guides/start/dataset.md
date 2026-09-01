@@ -52,8 +52,12 @@ math_dataset = HuggingFaceDataset(
 As any seasoned ML veteran will tell you, we need separate datasets for training and validation/evaluation to properly train a model. This is made easy with [HF's slicing syntax](https://huggingface.co/docs/datasets/v4.8.4/loading#slice-splits):
 
 ```python
-train_dataset = HuggingFaceDataset(..., hf_split="train[:1000]")
-eval_dataset = HuggingFaceDataset(..., hf_split="train[1000:]")
+train_dataset = HuggingFaceDataset(
+    ..., hf_split="train[:1000]", apply_chat_template=True
+)
+eval_dataset = HuggingFaceDataset(
+    ..., hf_split="train[1000:]", apply_chat_template=True
+)
 ```
 
 If a dataset is gated, you can create a [Modal Secret](https://modal.com/docs/guide/secrets) named `huggingface-secret` that the Gym will auto-detect:

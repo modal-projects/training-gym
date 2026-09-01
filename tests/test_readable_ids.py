@@ -95,6 +95,7 @@ def test_train_config_can_skip_model_recipe_merge() -> None:
         hf_repo="some/dataset",
         input_column="prompt",
         output_column="answer",
+        apply_chat_template=True,
     )
 
     merged = TrainConfig(
@@ -132,6 +133,7 @@ def test_the_metric_run_id_is_the_whole_training_run_id() -> None:
             hf_repo="some/dataset",
             input_column="prompt",
             output_column="answer",
+            apply_chat_template=True,
         ),
         model=Qwen3_4B(),
         recipe=SlimeRecipe(

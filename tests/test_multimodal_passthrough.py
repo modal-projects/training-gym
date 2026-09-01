@@ -56,9 +56,17 @@ def test_text_dataset_unaffected():
         hf_repo="statworx/haiku",
         input_column="keywords",
         output_column="text",
+        apply_chat_template=True,
     )
     assert getattr(ds, "multimodal_keys", None) is None
     assert "--multimodal-keys" not in SlimeRecipe(**_RECIPE_KW).cli_args(dataset=ds)
+
+
+def test_hugging_face_dataset_requires_chat_template_choice():
+    import inspect
+
+    parameter = inspect.signature(HuggingFaceDataset).parameters["apply_chat_template"]
+    assert parameter.default is inspect.Parameter.empty
 
 
 def test_media_column_must_be_distinct():

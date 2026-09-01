@@ -95,6 +95,7 @@ dataset = HuggingFaceDataset(
     hf_split="train[:100]",
     input_column="question",
     output_column="answer",
+    apply_chat_template=True,
 )
 ```
 

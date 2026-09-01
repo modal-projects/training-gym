@@ -72,6 +72,7 @@ config = TrainConfig(
         hf_split="train[:120]",
         input_column="prompt",
         output_column="label",
+        apply_chat_template=True,
     ),
     recipe=Qwen3_4b_Recipe(
         gpu_type="H100",

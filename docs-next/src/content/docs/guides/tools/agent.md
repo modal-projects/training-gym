@@ -61,6 +61,7 @@ def rhyme_dataset(n_rows: int) -> HuggingFaceDataset:
         hf_split=f"train[:{n_rows}]",
         input_column="instruction",
         output_column="output",
+        apply_chat_template=True,
         system_prompt=SYSTEM_PROMPT,
     )
 ```

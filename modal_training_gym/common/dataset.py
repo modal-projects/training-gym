@@ -146,7 +146,7 @@ class HuggingFaceDataset(DatasetConfig):
         hf_config: str | None = None,
         input_column: str,
         output_column: str,
-        apply_chat_template: bool = True,
+        apply_chat_template: bool,
         system_prompt: str = "",
         prompt_template: str = "{input}",
         always_download: bool = False,
