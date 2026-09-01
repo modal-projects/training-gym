@@ -1935,7 +1935,9 @@
                             evalReport={activeSample.sample.metadata?.eval_report}
                           />
                           {#if activeSample.sample.reward_events?.length}
-                            <div class="rollout-sample-label">transition rewards</div>
+                            <div class="rollout-sample-label">
+                              {activeSample.sample.reward_granularity === "checkpoint" ? "reward windows" : "transition rewards"}
+                            </div>
                             <RewardTimeline
                               events={activeSample.sample.reward_events}
                               granularity={activeSample.sample.reward_granularity || "transition"}
