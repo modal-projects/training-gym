@@ -106,6 +106,7 @@ export default defineConfig({
     '/reference/core/harbordataset': '/reference/harbordataset',
     '/reference/core/trainresult': '/reference/trainresult',
     '/reference/core/metricconfig': '/reference/metricconfig',
+    '/reference/core/trackioconfig': '/reference/trackioconfig',
     '/reference/core/wandbconfig': '/reference/wandbconfig',
     '/reference/core/modalraycluster': '/reference/modalraycluster',
     '/reference/training/qwen3_5_4b_miles_recipe': '/reference/qwen3_5_4b_miles_recipe',

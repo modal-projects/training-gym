@@ -87,6 +87,7 @@ def test_old_reference_slugs_redirect_to_flattened_pages() -> None:
     )
     assert "'/reference': '/reference/sdk'" in config
     assert "'/reference/core/modelconfig': '/reference/modelconfig'" in config
+    assert "'/reference/core/trackioconfig': '/reference/trackioconfig'" in config
     assert (
         "'/reference/training/qwen3_5_4b_miles_recipe': "
         "'/reference/qwen3_5_4b_miles_recipe'" in config
