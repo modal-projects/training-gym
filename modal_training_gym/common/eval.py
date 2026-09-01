@@ -238,7 +238,7 @@ EvalFn = Callable[["CustomDeployment", DatasetRow], EvalRowResult]
 class EvalConfig:
     """Evaluate a deployed model on a dataset config.
 
-    The dataset must expose ``load()`` and return iterable dict examples.
+    The dataset must expose ``rows()`` and return iterable dict examples.
     """
 
     dataset: "DatasetConfig"
