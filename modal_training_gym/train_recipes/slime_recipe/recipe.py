@@ -193,7 +193,8 @@ class SlimeRecipe(BaseTrainRecipe):
         Extra env vars baked into the image.
     train_function_kwargs : dict
         Extra Modal Function options for the train function; supported keys:
-        ``secrets``, ``experimental_options``, ``ephemeral_disk``.
+        ``secrets``, ``experimental_options``, ``ephemeral_disk``,
+        ``stage_checkpoint_locally`` and ``checkpoint_stage_dir``.
     capture_trace : bool
         Attach slime's per-sample execution trace (generate/reward/tool-call
         timeline) to recorded rollouts for the dashboard.

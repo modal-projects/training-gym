@@ -8,6 +8,7 @@
   import TimeAgo from "../components/TimeAgo.svelte";
   import InferenceStats from "../components/InferenceStats.svelte";
   import SampleTimeline from "../components/SampleTimeline.svelte";
+  import RewardTimeline from "../components/RewardTimeline.svelte";
   import ConversationView from "../components/ConversationView.svelte";
   import AdvantageViolins from "../components/AdvantageViolins.svelte";
   import AdvantageSpreadChart from "../components/AdvantageSpreadChart.svelte";
@@ -425,6 +426,8 @@
       raw_response: s.raw_response || null,
       raw_prompt: s.raw_prompt || null,
       trace: s.trace || null,
+      reward_granularity: s.reward_granularity || null,
+      reward_events: s.reward_events || null,
       metadata,
     };
   }
@@ -712,6 +715,11 @@
       const detail = await fetchRollout(runId, rolloutId);
       if (expandedRolloutId === rolloutId) {
         expandedRollout = detail;
+        // `sampleDist` is a derived value of `expandedRollout`. Wait for the
+        // state update to flush before reading it; otherwise the first bucket
+        // is not opened and the sample/reward timeline appears to be missing
+        // until the user clicks a histogram bar manually.
+        await tick();
         const d = sampleDist;
         const first = d ? d.buckets.findIndex((b) => b.length > 0) : -1;
         if (first >= 0) openBucket(first);
@@ -1926,6 +1934,13 @@
                             thinking={activeSample.sample.thinking || ""}
                             evalReport={activeSample.sample.metadata?.eval_report}
                           />
+                          {#if activeSample.sample.reward_events?.length}
+                            <div class="rollout-sample-label">transition rewards</div>
+                            <RewardTimeline
+                              events={activeSample.sample.reward_events}
+                              granularity={activeSample.sample.reward_granularity || "transition"}
+                            />
+                          {/if}
                           {#if activeSample.sample.metadata?.reference}
                             <div class="rollout-sample-label">reference</div>
                             <pre class="rollout-sample-text">{activeSample.sample.metadata.reference}</pre>

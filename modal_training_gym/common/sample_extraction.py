@@ -51,13 +51,28 @@ TRAJECTORY_SAMPLE_LIMIT_ENV = "TRAINING_GYM_TRAJECTORY_SAMPLE_LIMIT"
 _TRAJECTORY_SAMPLE_LIMIT_DEFAULT = 16
 _TRAJECTORY_MSG_CHARS_MAX = 8000
 _TRAJECTORY_MAX_MESSAGES = 128
+# Reward events are handled as a first-class bounded payload rather than as a
+# generic metadata tag. This keeps long environment traces (for example one
+# event per turn in a game) from being dropped by the per-tag 2 KiB limit.
+REWARD_EVENTS_KEY = "reward_events"
+REWARD_GRANULARITY_KEY = "reward_granularity"
+_REWARD_EVENTS_MAX = 512
+_REWARD_EVENTS_MAX_BYTES = 128 * 1024
+_REWARD_EVENT_LABEL_MAX = 160
 
 
 # Keys handled separately below (compacted/size-limited their own way) —
 # never copy them through the generic passthrough too, or they'd end up
 # duplicated under the same name with two different shapes.
 _RESERVED_METADATA_KEYS = frozenset(
-    {"trajectory_messages", "eval_report", "image", "image_ref"}
+    {
+        "trajectory_messages",
+        "eval_report",
+        "image",
+        "image_ref",
+        REWARD_EVENTS_KEY,
+        REWARD_GRANULARITY_KEY,
+    }
 )
 # Per-tag cap on the generic metadata passthrough so a stray large value a
 # reward function stashes on the sample can't bloat the rollout payload.
@@ -129,6 +144,130 @@ def _sample_score(sample: Sample, reward: float | None = None) -> float:
         return float(value)
 
     return 0.0
+
+
+def _reward_event_raw(sample: Any) -> Any:
+    """Find first-class or legacy transition rewards on a framework sample."""
+    raw = _duck_get(sample, REWARD_EVENTS_KEY)
+    if raw is not None:
+        return raw
+    metadata = _duck_get(sample, "metadata")
+    if not isinstance(metadata, dict):
+        return None
+    raw = metadata.get(REWARD_EVENTS_KEY)
+    if raw is not None:
+        return raw
+    # Balatro's initial integration stored this under a framework-specific
+    # nested metadata object. Keep old payloads readable while new producers
+    # use the generic first-class field.
+    balatro = metadata.get("balatro")
+    if isinstance(balatro, dict):
+        return balatro.get("partial_reward_trace")
+    return None
+
+
+def _reward_granularity(sample: Any) -> str | None:
+    value = _duck_get(sample, REWARD_GRANULARITY_KEY)
+    if isinstance(value, str) and value.strip():
+        return value
+    metadata = _duck_get(sample, "metadata")
+    if isinstance(metadata, dict):
+        value = metadata.get(REWARD_GRANULARITY_KEY)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _numeric_mapping(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): float(item)
+        for key, item in value.items()
+        if isinstance(item, (int, float)) and not isinstance(item, bool)
+    }
+
+
+def _normalize_reward_events(sample: Any) -> list[dict[str, Any]] | None:
+    """Normalize bounded transition events into the dashboard contract.
+
+    Older producers use ``total`` for the per-transition delta and put
+    component values beside it. New producers may use ``reward`` and an
+    explicit ``components`` mapping. Invalid or oversized entries are
+    discarded individually so one bad event cannot hide the whole trace.
+    """
+    raw_events = _reward_event_raw(sample)
+    if not isinstance(raw_events, list) or not raw_events:
+        return None
+
+    events: list[dict[str, Any]] = []
+    cumulative = 0.0
+    component_keys = {
+        "turn",
+        "step",
+        "reward",
+        "total",
+        "cumulative_reward",
+        "token_start",
+        "token_end",
+        "label",
+        "state",
+        "components",
+    }
+    for raw in raw_events[:_REWARD_EVENTS_MAX]:
+        if not isinstance(raw, dict):
+            continue
+        reward = raw.get("reward", raw.get("total"))
+        if not isinstance(reward, (int, float)) or isinstance(reward, bool):
+            continue
+        reward = float(reward)
+        cumulative_value = raw.get("cumulative_reward")
+        if isinstance(cumulative_value, (int, float)) and not isinstance(
+            cumulative_value, bool
+        ):
+            cumulative = float(cumulative_value)
+        else:
+            cumulative += reward
+
+        event: dict[str, Any] = {"reward": reward, "cumulative_reward": cumulative}
+        turn = raw.get("turn", raw.get("step"))
+        if isinstance(turn, int) and not isinstance(turn, bool):
+            event["turn"] = turn
+        for name in ("token_start", "token_end"):
+            value = raw.get(name)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                event[name] = value
+        label = raw.get("label", raw.get("state"))
+        if label is not None:
+            event["label"] = str(label)[:_REWARD_EVENT_LABEL_MAX]
+
+        components = _numeric_mapping(raw.get("components"))
+        if not components:
+            components = _numeric_mapping(
+                {key: value for key, value in raw.items() if key not in component_keys}
+            )
+        if components:
+            event["components"] = components
+
+        # Bound the serialized event as well as the event count. This is a
+        # defensive guard for user-defined component names.
+        try:
+            if len(json.dumps(event, ensure_ascii=False).encode()) > 4096:
+                event.pop("components", None)
+        except (TypeError, ValueError):
+            continue
+        events.append(event)
+        try:
+            if (
+                len(json.dumps(events, ensure_ascii=False).encode())
+                > _REWARD_EVENTS_MAX_BYTES
+            ):
+                events.pop()
+                break
+        except (TypeError, ValueError):
+            events.pop()
+            break
+    return events or None
 
 
 _RESPONSE_PARSER: Any = None
@@ -712,6 +851,10 @@ def _sample_to_dict(
         "response": response_text,
         "metadata": metadata,
     }
+    reward_events = _normalize_reward_events(sample)
+    if reward_events:
+        out[REWARD_EVENTS_KEY] = reward_events
+        out[REWARD_GRANULARITY_KEY] = _reward_granularity(sample) or "transition"
     rollout_index = optional_int(get("rollout_id"))
     if rollout_index is None:
         rollout_index = sample_index
