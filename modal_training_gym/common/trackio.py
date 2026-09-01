@@ -17,7 +17,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from modal_training_gym.common.metrics import MetricConfig
 
 
-TRACKIO_VERSION = "0.34.0"
+TRACKIO_PACKAGE_VERSION = "0.34.0"
 _DEFAULT_MODAL_APP_NAME = "training-gym-trackio"
 _RUN_NAME_ENV = "TRAINING_GYM_TRACKIO_RUN_NAME"
 _SHIM_MARKER = "_training_gym_trackio_adapter"
@@ -59,6 +59,10 @@ class TrackioConfig(MetricConfig):
     modal_secret_name : str
         Modal Secret containing ``HF_TOKEN`` or ``TRACKIO_WRITE_TOKEN``.
         The standard optional ``"huggingface-secret"`` is used by default.
+    package_version : str
+        Trackio release installed in the training image, and in the server
+        deployed by ``deploy_to_modal``. Defaults to the version this release
+        of Training Gym is tested against; bump it to pick up a newer Trackio.
     """
 
     project: str = ""
@@ -70,6 +74,7 @@ class TrackioConfig(MetricConfig):
     dashboard_url: str = ""
     bucket_id: str = ""
     modal_secret_name: str = "huggingface-secret"
+    package_version: str = TRACKIO_PACKAGE_VERSION
 
     provider: ClassVar[str] = "trackio"  # pyright: ignore[reportIncompatibleMethodOverride]
 
@@ -84,6 +89,7 @@ class TrackioConfig(MetricConfig):
         app_name: str = _DEFAULT_MODAL_APP_NAME,
         volume_name: str = "",
         modal_secret_name: str = "",
+        package_version: str = TRACKIO_PACKAGE_VERSION,
     ) -> Self:
         """Deploy a persistent Trackio server to Modal and return its config.
 
@@ -99,6 +105,7 @@ class TrackioConfig(MetricConfig):
             app_name=app_name,
             volume_name=volume_name,
             modal_secret_name=modal_secret_name,
+            package_version=package_version,
         )
         return cls(
             project=project,
@@ -108,6 +115,7 @@ class TrackioConfig(MetricConfig):
             server_url=server_url,
             dashboard_url=server_url,
             modal_secret_name=modal_secret_name,
+            package_version=package_version,
         )
 
     def runtime_env(self, *, run_id: str, entity: str = "") -> dict[str, str]:
@@ -162,14 +170,15 @@ def _without_credentials(url: str, *, project: str = "", run_id: str = "") -> st
 
 
 def _deploy_modal_dashboard(
-    *, app_name: str, volume_name: str, modal_secret_name: str
+    *,
+    app_name: str,
+    volume_name: str,
+    modal_secret_name: str,
+    package_version: str = TRACKIO_PACKAGE_VERSION,
 ) -> str:
     import modal
 
-    from modal_training_gym.common.config import (
-        DASHBOARD_PASSWORD_SECRET_NAME,
-        password_secret_exists,
-    )
+    from modal_training_gym.common.config import DASHBOARD_PASSWORD_SECRET_NAME
 
     modal.Secret.objects.create(
         modal_secret_name,
@@ -180,11 +189,17 @@ def _deploy_modal_dashboard(
         modal_secret_name, required_keys=["TRACKIO_WRITE_TOKEN"]
     )
     function_secrets = [write_secret]
-    if password_secret_exists():
-        function_secrets.append(modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME))
+    # Mounted only when the operator has set a password; absent it, reads are open.
+    password_secret = modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME)
+    try:
+        password_secret.hydrate()
+    except Exception:
+        pass
+    else:
+        function_secrets.append(password_secret)
     data = modal.Volume.from_name(volume_name, create_if_missing=True)
     image = modal.Image.debian_slim(python_version="3.12").uv_pip_install(
-        f"trackio=={TRACKIO_VERSION}"
+        f"trackio=={package_version}"
     )
     app = modal.App(app_name)
 
@@ -256,13 +271,13 @@ def trackio_secrets(config: TrackioConfig) -> list[Any]:
     return [Secret.from_name(config.modal_secret_name)]
 
 
-def apply_trackio_image(image: Any) -> Any:
+def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
     install_code = (
         "import pathlib, site; "
         "pathlib.Path(site.getsitepackages()[0], "
         f"'_training_gym_trackio.pth').write_text({_PTH_LINE!r})"
     )
-    return image.uv_pip_install(f"trackio=={TRACKIO_VERSION}").run_commands(
+    return image.uv_pip_install(f"trackio=={config.package_version}").run_commands(
         f"python3 -c {shlex.quote(install_code)}"
     )
 

@@ -39,7 +39,6 @@ from modal_training_gym.common.config import (
     DASHBOARD_PASSWORD_SECRET_NAME,
     DASHBOARD_PROXY_AUTH_PATH,
     dashboard_requires_proxy_auth,
-    password_secret_exists,
 )
 from modal_training_gym.common.dashboard import DASHBOARD_APP_NAME
 from modal_training_gym.common.run import (
@@ -320,9 +319,12 @@ def _function_secrets() -> list[modal.Secret]:
     it, ``DASHBOARD_PASSWORD`` is never injected and the dashboard is open.
     """
     secrets = [modal.Secret.from_name(MODAL_CREDS_SECRET_NAME)]
-    if password_secret_exists():
-        secrets.append(modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME))
-    return secrets
+    password = modal.Secret.from_name(DASHBOARD_PASSWORD_SECRET_NAME)
+    try:
+        password.hydrate()
+    except Exception:
+        return secrets
+    return [*secrets, password]
 
 
 def set_dashboard_password(password: str) -> None:
