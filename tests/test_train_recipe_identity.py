@@ -6,10 +6,10 @@ from modal_training_gym.common.models import ModelConfig, Qwen3_4B, Qwen3_5_4B
 from modal_training_gym.common.train import TrainConfig
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
-    Qwen3_5_4b_Miles_Recipe,
+    Qwen3_5_4B_Miles_Recipe,
 )
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4b_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
 
 
 def _config(recipe: SlimeRecipe | MilesRecipe, model: ModelConfig) -> TrainConfig:
@@ -28,12 +28,12 @@ def _config(recipe: SlimeRecipe | MilesRecipe, model: ModelConfig) -> TrainConfi
     ("recipe", "model", "framework"),
     [
         (
-            Qwen3_4b_Recipe(),
+            Qwen3_4B_Recipe(),
             Qwen3_4B(),
             Framework.SLIME,
         ),
         (
-            Qwen3_5_4b_Miles_Recipe(),
+            Qwen3_5_4B_Miles_Recipe(),
             Qwen3_5_4B(),
             Framework.MILES,
         ),

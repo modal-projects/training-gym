@@ -15,12 +15,12 @@ modal secret create wandb-secret WANDB_API_KEY=<your-api-key>
 Then, just pass it in your [training recipe](https://gym.modal.dev/guides/recipe):
 
 ```python
-from modal_training_gym import Qwen3_5_4B, Qwen3_5_4b_Recipe, TrainConfig, WandbConfig
+from modal_training_gym import Qwen3_5_4B, Qwen3_5_4B_Recipe, TrainConfig, WandbConfig
 
 config = TrainConfig(
     model=Qwen3_5_4B(),
     dataset=my_dataset,
-    recipe=Qwen3_5_4b_Recipe(
+    recipe=Qwen3_5_4B_Recipe(
         # ...
         metrics=WandbConfig(
             project="my-rl-project",

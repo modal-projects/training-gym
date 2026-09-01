@@ -5,7 +5,7 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
-class Qwen3_0_6b_Recipe(SlimeRecipe):
+class Qwen3_0_6B_Recipe(SlimeRecipe):
     """Qwen3-0.6B GRPO recipe for 1 node with 8 H100 GPUs."""
 
     sequence_parallel: bool = False

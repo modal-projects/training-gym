@@ -16,7 +16,7 @@ _SGLANG_DEFAULTS = SglangRecipe()
 
 
 @dataclass
-class Qwen3_4b_SglangRecipe(SglangRecipe):
+class Qwen3_4B_SglangRecipe(SglangRecipe):
     """Qwen3-4B SGLang recipe for 1×H100."""
 
     def __post_init__(self) -> None:

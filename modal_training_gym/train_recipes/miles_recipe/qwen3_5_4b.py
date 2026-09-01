@@ -9,7 +9,7 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
-class Qwen3_5_4b_Miles_Recipe(MilesRecipe):
+class Qwen3_5_4B_Miles_Recipe(MilesRecipe):
     """Qwen3.5-4B GRPO recipe for 1 node with 8 H100 GPUs."""
 
     model_config_class: ClassVar[type[ModelConfig]] = Qwen3_5_4B

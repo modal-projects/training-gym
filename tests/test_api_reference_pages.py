@@ -127,7 +127,7 @@ def test_kwargs_model_preset_documents_public_overrides() -> None:
     assert "<strong>response_parser</strong> <code>Callable" in page
     assert "<strong>model_path</strong>" not in page
 
-    recipe_page = _render("Qwen3_5_4b_Miles_Recipe")
+    recipe_page = _render("Qwen3_5_4B_Miles_Recipe")
     assert "## `model_config_class`" not in recipe_page
 
 
@@ -601,9 +601,9 @@ def test_params_follow_modal_default_and_docs_heuristic() -> None:
         ):
             assert card.count("<p>") == 2, entry["class_name"]
 
-    qwen_vl = _render("Qwen3_VL_8b_Recipe")
+    qwen_vl = _render("Qwen3_VL_8B_Recipe")
     assert "Default: ['vision_model']" in qwen_vl
-    for class_name in ("Qwen3_ASR_1_7b_Recipe", "Gemma4_26B_A4B_Recipe"):
+    for class_name in ("Qwen3_ASR_1_7B_Recipe", "Gemma4_26B_A4B_Recipe"):
         page = _render(class_name)
         assert "<strong>image_run_commands</strong>" in page
         image_commands = page.split("<strong>image_run_commands</strong>", 1)[1].split(

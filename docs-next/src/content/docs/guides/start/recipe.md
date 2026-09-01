@@ -14,9 +14,9 @@ While the model and dataset dictate what will be trained, the recipe dictates ho
 - Etc.
 
 ```python
-from modal_training_gym import Qwen3_5_4b_Recipe
+from modal_training_gym import Qwen3_5_4B_Recipe
 
-recipe = Qwen3_5_4b_Recipe(
+recipe = Qwen3_5_4B_Recipe(
     gpu_type="H100",
     actor_num_nodes=1,
     actor_num_gpus_per_node=8,
@@ -43,7 +43,7 @@ See [this guide](https://gym.modal.dev/guides/metric) for more details on loggin
 ## Hardware and parallelism
 
 ```python
-recipe = Qwen3_5_4b_Recipe(
+recipe = Qwen3_5_4B_Recipe(
     # ...
     gpu_type="H100",
     actor_num_nodes=1,
@@ -66,7 +66,7 @@ Actor parameters pertain to your training cluster, and rollout parameters your r
 You can also tune how model computations are parallelized and sharded across multiple GPUs. These parameters can be difficult to determine and may differ for each model, so we provide defaults in each model’s recipe. However, if you’re experiencing out-of-memory errors or want complete control over how your GPUs are utilized, you can manually set these yourself:
 
 ```python
-Qwen3_5_4b_Recipe(
+Qwen3_5_4B_Recipe(
     # ...
     tensor_model_parallel_size=2,
     sequence_parallel=True,
@@ -84,7 +84,7 @@ The three most important parameters to specify are:
 - `n_samples_per_prompt`: the number of rollouts sampled for each prompt.
 
 ```python
-Qwen3_5_4b_Recipe(
+Qwen3_5_4B_Recipe(
     # ...
     num_rollout=10,
     rollout_batch_size=8,
@@ -109,7 +109,7 @@ async def my_custom_rm(args, sample, **kwargs) -> float:
     return 1 if response.content == sample.label else 0
 
 
-recipe = Qwen3_5_4b_Recipe(
+recipe = Qwen3_5_4B_Recipe(
     # ...
     custom_rm_function=my_custom_rm,
 )
@@ -175,7 +175,7 @@ async def my_custom_generate(args, sample, sampling_params):
     return sample
 
 
-recipe = Qwen3_5_4b_Recipe(
+recipe = Qwen3_5_4B_Recipe(
     custom_generate_function=my_custom_generate,
 )
 ```
@@ -190,7 +190,7 @@ Typically, your generation function will:
 Since the containers use [Modal Images](https://modal.com/docs/guide/images) under the hood, you can easily use external packages by extending the base image:
 
 ```python
-recipe = Qwen3_5_4b_Recipe(
+recipe = Qwen3_5_4B_Recipe(
     # ...
     image_overlay=lambda image: image.pip_install("syllables"),
 )

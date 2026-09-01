@@ -52,7 +52,7 @@ from modal_training_gym.common.environments import (
 from modal_training_gym.deploy_recipes.sglang_recipe import (
     DeepSeek_V4_Flash_SglangRecipe,
 )
-from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_35b_Recipe
+from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_35B_Recipe
 
 # ## Deploy DeepSeek-V4 Flash Teacher Model
 # Modal training gym provides a production SGLang recipe for the 284B-A13B FP4 checkpoint on
@@ -971,7 +971,7 @@ def cross_tokenizer_post_process(args, samples, **kwargs):
 config = TrainConfig(
     model=model,
     dataset=dataset,
-    recipe=Qwen3_6_35b_Recipe(
+    recipe=Qwen3_6_35B_Recipe(
         custom_rm_function=cross_tokenizer_reward,
         custom_generate_function=tool_step_generate,
         custom_reward_post_process_function=cross_tokenizer_post_process,

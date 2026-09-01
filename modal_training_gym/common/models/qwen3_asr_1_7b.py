@@ -10,7 +10,7 @@ The class holds only the model's specs. Alongside it live the Qwen3-ASR-specific
 input-prep functions (prompt rendering + processor tokenization) the
 transcription rollout needs — model knowledge, kept out of the generic slime glue,
 mirroring ``parse_qwen3_response`` in :mod:`.base`. Framework wiring (the slime
-image-build shims and audio deps) lives on ``Qwen3_ASR_1_7b_Recipe`` instead,
+image-build shims and audio deps) lives on ``Qwen3_ASR_1_7B_Recipe`` instead,
 since it's meaningless for other backends.
 """
 

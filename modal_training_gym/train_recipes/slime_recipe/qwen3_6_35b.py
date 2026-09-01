@@ -7,7 +7,7 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
-class Qwen3_6_35b_Recipe(SlimeRecipe):
+class Qwen3_6_35B_Recipe(SlimeRecipe):
     """Qwen3.6-35B-A3B MoE recipe for 1 node with 8 H100 GPUs."""
 
     slime_model_script: str = "scripts/models/qwen3.5-35B-A3B.sh"

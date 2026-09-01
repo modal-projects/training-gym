@@ -47,7 +47,7 @@ def _asr_image_run_commands() -> list[str]:
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
-class Qwen3_ASR_1_7b_Recipe(SlimeRecipe):
+class Qwen3_ASR_1_7B_Recipe(SlimeRecipe):
     """Qwen3-ASR-1.7B audio GRPO recipe for 1 node with 2 H100 GPUs.
 
     Args:

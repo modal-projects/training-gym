@@ -11,7 +11,7 @@ _VLLM_DEFAULTS = VllmRecipe()
 
 
 @dataclass
-class Qwen3_4b_VllmRecipe(VllmRecipe):
+class Qwen3_4B_VllmRecipe(VllmRecipe):
     """Qwen3-4B vLLM recipe for 1×H100."""
 
     def __post_init__(self) -> None:

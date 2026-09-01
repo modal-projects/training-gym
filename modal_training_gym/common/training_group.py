@@ -6,7 +6,7 @@ Example::
         base=TrainConfig(
             model=Qwen3_6_35B(),
             dataset=ds,
-            recipe=Qwen3_6_35b_Recipe(num_rollout=10),
+            recipe=Qwen3_6_35B_Recipe(num_rollout=10),
         ),
         grid={
             "recipe.lr": [1e-6, 5e-6, 1e-5],

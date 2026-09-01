@@ -21,7 +21,7 @@ from modal_training_gym import (
     Endpoint,
     HuggingFaceDataset,
     Qwen3_5_4B,
-    Qwen3_5_4b_Recipe,
+    Qwen3_5_4B_Recipe,
     TrainConfig,
 )
 
@@ -190,7 +190,7 @@ async def haiku_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=Qwen3_5_4b_Recipe(
+    recipe=Qwen3_5_4B_Recipe(
         eval_interval=None,
         rollout_num_gpus=8,
         num_rollout=10,
@@ -237,7 +237,7 @@ new_config = TrainConfig(
     model=model,
     dataset=train_dataset,
     checkpoint=checkpoint,
-    recipe=Qwen3_5_4b_Recipe(
+    recipe=Qwen3_5_4B_Recipe(
         eval_interval=None,
         custom_rm_function=haiku_rm,
         rollout_num_gpus=8,

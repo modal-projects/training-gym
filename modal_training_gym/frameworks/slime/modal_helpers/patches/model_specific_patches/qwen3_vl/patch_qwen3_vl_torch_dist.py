@@ -9,7 +9,7 @@ runs.
 
 Fix: skip the frozen vision tower (``vision_model.*``) during conversion and let the
 tool's origin-HF fill copy the ViT verbatim from the base HF checkpoint. This is exact
-because the ViT is frozen during RL (see ``Qwen3_VL_8b_Recipe.freeze_params_name_list``),
+because the ViT is frozen during RL (see ``Qwen3_VL_8B_Recipe.freeze_params_name_list``),
 so its weights equal the base weights. The fill only adds tensors whose HF names were
 not already produced by the (trained) language-stack conversion, so trained weights
 always win.

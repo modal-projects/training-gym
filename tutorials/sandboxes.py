@@ -22,7 +22,7 @@ from modal_training_gym import (
     Endpoint,
     HarborDataset,
     Qwen3_5_4B,
-    Qwen3_5_4b_Recipe,
+    Qwen3_5_4B_Recipe,
     TrainConfig,
     extract_code,
 )
@@ -158,7 +158,7 @@ async def sandbox_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=dataset,
-    recipe=Qwen3_5_4b_Recipe(
+    recipe=Qwen3_5_4B_Recipe(
         eval_interval=None,
         num_rollout=10,
         rollout_batch_size=8,
