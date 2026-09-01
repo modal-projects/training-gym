@@ -48,6 +48,7 @@ _SLIME_SKIP = {
     "slime_git_repository",
     "slime_git_revision",
     "memory",
+    "cpu",
     "cloud",
     "region",
     "checkpoint",
@@ -170,6 +171,8 @@ class SlimeRecipe(BaseTrainRecipe):
         Branches and tags are rejected because they can move between runs.
     memory : int | tuple[int, int] | None
         Modal Function memory request/limit in MiB.
+    cpu : float | tuple[float, float] | None
+        Modal Function CPU request/limit in cores per container.
     cloud : str | None
         Modal cloud provider to pin the cluster to.
     region : str | None
@@ -508,6 +511,7 @@ class SlimeRecipe(BaseTrainRecipe):
     slime_git_repository: str | None = None
     slime_git_revision: str | None = None
     memory: int | tuple[int, int] | None = None
+    cpu: float | tuple[float, float] | None = None
     cloud: str | None = None
     region: str | None = None
     slime_model_script: str = ""

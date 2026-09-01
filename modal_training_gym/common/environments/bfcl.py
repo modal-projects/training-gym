@@ -593,7 +593,7 @@ class BfclMultiTurnDataset(DatasetConfig):
 
     input_key: str = "messages"
     label_key: str = "label"
-    # JSON-lines output (slime default is parquet).
+    # JSON-lines output (the gym default is parquet).
     output_format: str = "jsonl"
     writes_eval_paths: bool = False
 

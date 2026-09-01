@@ -4,6 +4,12 @@ Modal Training Gym is an open-source Python SDK for RL post-training on [Modal](
 
 The library takes care of infrastructure concerns such as cluster topology, Ray/NCCL bring-up, volume mounts, checkpointing, and serving for eval and rollouts, so you (or your agent!) can focus on training models.
 
+To get started, you can go through the [Quickstart](#quickstart) section below, or paste the prompt below into your favorite agent:
+
+```txt
+Install the `training-gym` library. Then, install the skill bundle into the local project with `training-gym skills install`. Finally, tell the user that they can ask you to do something like: "Given a budget of 1 B300, train Qwen3.8 27B to correctly solve problems taken from agentica-org/DeepCoder-Preview-Dataset with xhigh reasoning and a length penalty to limit the number of reasoning tokens."
+```
+
 ## Quickstart
 
 Requirements:
@@ -22,25 +28,34 @@ Or pin it in `pyproject.toml`:
 training-gym = { git = "https://github.com/modal-projects/training-gym.git", branch = "main" }
 ```
 
-Then, install the skill bundle into your project:
-
-```bash
-training-gym skills install
-```
-
 Authenticate with Modal:
 
 ```bash
 modal setup
 ```
 
-Either ask your favorite agent something like:
+Set up the [dashboard](https://gym.modal.dev/guides/dashboard):
 
-```txt
-Given a budget of 1 B300, train Qwen3.8 27B to correctly solve problems taken from agentica-org/DeepCoder-Preview-Dataset with xhigh reasoning and a length penalty to limit the number of reasoning tokens.
+```bash
+training-gym setup
 ```
 
-Or use the library directly:
+<div class="tg-dashboard-previews">
+  <span>
+    <img src="./assets/homepage.gif" alt="Training runs list in the Training Gym dashboard" width="100%" />
+  </span>
+  <span>
+    <img src="./assets/longrun.gif" alt="Long-running training run details in the Training Gym dashboard" width="100%" />
+  </span>
+</div>
+
+And empower your agents with the Gym's skill bundle:
+
+```bash
+training-gym skills install
+```
+
+Then, it's as easy as:
 
 ```python
 from modal_training_gym import (
@@ -59,7 +74,7 @@ class MathDataset(HuggingFaceDataset):
     apply_chat_template = True
 
 
-result = TrainConfig(
+config = TrainConfig(
     model=Qwen3_4B(),
     dataset=MathDataset(n_rows=120),
     recipe=Qwen3_4b_Recipe(
@@ -79,25 +94,10 @@ result = TrainConfig(
         sglang_mem_fraction_static=0.6,
         rm_type="deepscaler",
     ),
-).train()
-print(result.training_run_id)
+)
+run = config.launch()
+print(run.training_run_id)
 ```
-
-And you can view in-progress training runs in the dashboard:
-
-```bash
-training-gym setup  # first-time deploy
-training-gym open  # opens in your browser
-```
-
-<div class="tg-dashboard-previews">
-  <span>
-    <img src="./assets/homepage.gif" alt="Training runs list in the Training Gym dashboard" width="100%" />
-  </span>
-  <span>
-    <img src="./assets/longrun.gif" alt="Long-running training run details in the Training Gym dashboard" width="100%" />
-  </span>
-</div>
 
 ## Supported models
 

@@ -19,7 +19,7 @@
   --sl-nav-height: 53px;
   --breakpoint-xl: 75rem;
   --sl-content-width: calc(var(--breakpoint-xl) - var(--sl-sidebar-width));
-  --sl-sidebar-width: 22rem;
+  --sl-sidebar-width: clamp(16rem, 22vw, 22rem);
   --sl-text-h1: 2.25rem;
   --sl-text-h2: 1.5rem;
   --sl-text-h3: 1.25rem;
@@ -114,6 +114,11 @@ body::before {
   width: 100%;
 }
 
+html:has(.tg-sidebar-empty) .content-panel .sl-container {
+  width: min(100%, calc(var(--sl-content-width) + 5rem));
+  margin-inline: auto;
+}
+
 .site-title {
   color: var(--sl-color-accent);
   display: inline-flex;
@@ -170,7 +175,7 @@ body::before {
   display: block;
   border-inline-start: 1px solid var(--tg-border);
   padding: 0.5rem 0.5rem;
-  line-height: 1.25;
+  line-height: 1.25rem;
   text-decoration: none;
 }
 
@@ -182,7 +187,7 @@ body::before {
 
 #starlight__sidebar .tg-tutorial-sidebar__item {
   color: var(--sl-color-gray-3);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   padding-inline-start: 2rem;
 }
 
@@ -248,12 +253,9 @@ body::before {
   border-radius: 0;
   color: var(--sl-color-gray-3);
   padding: 0.5rem 0.5rem 0.5rem 2rem;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
   text-decoration: none;
-  transition:
-    border-color 0.18s ease,
-    background-color 0.18s ease,
-    color 0.18s ease;
 }
 
 #starlight__sidebar a.large {
@@ -317,18 +319,11 @@ body::before {
   }
 
   html[data-has-toc]:has(.tg-sidebar-empty) .content-panel .sl-container {
-    width: min(100%, calc(var(--sl-content-width) + 5rem));
     max-width: none;
-    margin-inline: auto;
   }
 
   html:has(.tg-sidebar-empty):not([data-has-toc]) .main-pane {
     width: 100%;
-  }
-
-  html:has(.tg-sidebar-empty):not([data-has-toc]) .content-panel .sl-container {
-    width: min(100%, calc(var(--sl-content-width) + 5rem));
-    margin-inline: auto;
   }
 
   html[data-has-sidebar][data-has-toc]:not(:has(.tg-sidebar-empty)) .main-pane {
@@ -419,10 +414,6 @@ nav.tg-toc .tg-toc__list .tg-toc__list a {
   line-height: 1.45;
   padding: 0.5rem 0.5rem 0.5rem 0.95rem;
   text-decoration: none;
-  transition:
-    border-color 0.18s ease,
-    background-color 0.18s ease,
-    color 0.18s ease;
 }
 
 .right-sidebar-panel nav a:hover {
@@ -832,10 +823,11 @@ nav.tg-toc .tg-toc__list .tg-toc__list a {
 
 .tg-page-head__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex: 0 0 auto;
   gap: 0.7rem;
   justify-content: flex-end;
+  margin-inline-start: auto;
   padding-top: 0.2rem;
 }
 
@@ -848,12 +840,18 @@ nav.tg-toc .tg-toc__list .tg-toc__list a {
 .tg-page-head h1,
 .sl-markdown-content h1 {
   margin: 0;
-  flex: 1 1 auto;
-  min-width: 0;
   color: var(--sl-color-white);
   font-size: var(--sl-text-h1);
   font-weight: 500;
   line-height: 1.1;
+}
+
+.tg-page-head h1 {
+  flex: 1 1 auto;
+  min-width: min-content;
+  hyphens: none;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .sl-markdown-content {
@@ -1196,6 +1194,14 @@ dialog {
 }
 
 @media (max-width: 52.499rem) {
+  :root {
+    --sl-sidebar-width: 0rem;
+  }
+
+  html[data-has-sidebar] {
+    --sl-content-inline-start: 0rem;
+  }
+
   html[data-has-toc] {
     --sl-mobile-toc-height: 0rem;
   }
@@ -1221,7 +1227,7 @@ dialog {
   .page nav.sidebar::after {
     content: '';
     display: block;
-    width: 22.5rem;
+    width: min(22.5rem, calc(100% - 1rem));
     height: 1px;
     margin: 2rem 0 0 1rem;
     background: radial-gradient(rgba(255, 255, 255, 0.3) 20%, transparent 65%);
@@ -1354,22 +1360,6 @@ dialog {
     padding-top: 1.5rem;
   }
 
-  .tg-page-head__actions {
-    justify-content: flex-start;
-    order: -1;
-    padding-top: 0;
-  }
-
-  .tg-page-head__actions > a {
-    order: -1;
-  }
-
-  .tg-page-head {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 1.5rem;
-  }
-
   .page:has(.tg-sidebar-empty) .sl-markdown-content {
     color: var(--sl-color-gray-3);
   }
@@ -1456,6 +1446,28 @@ dialog {
 
   .title-wrapper img {
     height: 17px;
+  }
+}
+
+@media (max-width: 24.375rem) {
+  .tg-page-head__actions > a .text-sm {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .tg-page-head__actions svg {
+    margin-inline: 0;
+  }
+
+  .tg-page-head__actions [data-tg-copy-trigger] > svg:last-child {
+    display: none;
   }
 }
 

@@ -8,6 +8,29 @@ const TUTORIAL_ENTRY_PREFIX = 'tutorials/';
 const frontmatterFieldPattern = /^# ([a-z_]+):\s*(.*)$/;
 const dependencyPattern = /^[A-Za-z0-9_.-]+$/;
 
+export function flattenDocId(entry: string): string {
+  const withoutExt = entry.replace(/\.[^./]+$/, '');
+  const withoutIndex = withoutExt.replace(/\/index$/, '');
+  const parts = withoutIndex.split('/').filter(Boolean);
+  if (parts.length <= 2) {
+    return withoutIndex;
+  }
+  return `${parts[0]}/${parts[parts.length - 1]}`;
+}
+
+function generateDocsId({
+  entry,
+  data,
+}: {
+  entry: string;
+  data: Record<string, unknown>;
+}): string {
+  if (typeof data.slug === 'string' && data.slug.length > 0) {
+    return data.slug;
+  }
+  return flattenDocId(entry);
+}
+
 export function parseTutorialMetadata(source: string, tutorialPath: string) {
   const lines = source.split(/\r?\n/);
   if (lines[0] !== '# ---') {
@@ -231,7 +254,7 @@ async function storeEntry(
 }
 
 export function tutorialDocsLoader(): Loader {
-  const starlightDocsLoader = docsLoader();
+  const starlightDocsLoader = docsLoader({ generateId: generateDocsId });
   let tutorialEntryIds = new Set<string>();
 
   async function syncTutorialEntries(context: LoaderContext): Promise<void> {
