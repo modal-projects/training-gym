@@ -10,7 +10,9 @@ from pathlib import Path
 
 import modal
 
-from modal_training_gym.frameworks.slime.launcher import SLIME_IMAGE
+from modal_training_gym.frameworks.slime.launcher import (
+    SLIME_REGISTRY_IMAGE as SLIME_IMAGE,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTDATA_DIR = REPO_ROOT / "tests" / "testdata" / "slime"

@@ -345,7 +345,10 @@ def _is_complete_torch_dist_checkpoint(path: str) -> bool:
 
 def _build_miles_base_image(miles: MilesRecipe) -> Image:
     image = (
-        Image.from_registry(miles.docker_image)
+        # docker_image is resolved as a Modal named Image (published by
+        # scripts/publish_framework_images.py); resolving a name never pulls
+        # from the registry or triggers a rebuild.
+        Image.from_name(miles.docker_image)
         .entrypoint([])
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",

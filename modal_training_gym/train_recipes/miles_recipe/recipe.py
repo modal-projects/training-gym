@@ -122,7 +122,9 @@ class MilesRecipe(BaseTrainRecipe):
     ## Modal Launcher
 
     docker_image : str
-        Registry reference for the Miles image every container runs.
+        Modal named Image reference for the Miles image every container runs,
+        published from the upstream registry image by
+        ``scripts/publish_framework_images.py``.
     environment : dict
         Env vars for the training containers (Megatron ``PYTHONPATH``, NCCL tuning).
     async_mode : bool
