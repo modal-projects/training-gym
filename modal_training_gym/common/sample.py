@@ -58,8 +58,8 @@ class Sample(BaseModel):
     response: str = ""
     parsed_response: ParsedResponse | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    # Optional transition-level observability. This is deliberately distinct
-    # from ``score``: current trainers still consume one scalar per sample.
+    # Optional transition-level rewards. ``score`` remains the episode-level
+    # scalar; token-aware trainers may consume these events individually.
     reward_granularity: str | None = None
     reward_events: list[RewardEvent] | None = None
     # captured only when trace recording is enabled and only for a sampled

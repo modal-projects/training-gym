@@ -6,6 +6,7 @@ import pytest
 
 from modal_training_gym.common.sample import RewardEvent, Sample
 from modal_training_gym.common.sample_extraction import _sample_to_dict
+from modal_training_gym.common.token_rewards import build_token_reward_vectors
 
 
 def _event(turn: int) -> dict[str, object]:
@@ -101,3 +102,60 @@ def test_reward_events_are_bounded_individually():
     recorded = _sample_to_dict(raw)
 
     assert len(recorded["reward_events"]) == 512
+
+
+def test_transition_events_become_token_rewards_and_preserve_scalar_total():
+    sample = SimpleNamespace(
+        response_length=8,
+        loss_mask=[1] * 8,
+        reward=9.0,
+        metadata={
+            "reward_events": [
+                {"reward": 2.0, "token_start": 0, "token_end": 2},
+                {"reward": 3.0, "token_start": 4, "token_end": 6},
+            ]
+        },
+    )
+
+    vectors = build_token_reward_vectors([sample], [9.0])
+
+    assert vectors == [[0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0]]
+    assert sum(vectors[0]) == pytest.approx(9.0)
+
+
+def test_samples_without_events_keep_scalar_fallback():
+    sample = SimpleNamespace(
+        response_length=3,
+        loss_mask=[1, 1, 1],
+        reward=2.0,
+        metadata={},
+    )
+
+    assert build_token_reward_vectors([sample], [2.0]) is None
+
+
+def test_token_advantages_are_return_to_go_with_scalar_mixed_batch():
+    torch = pytest.importorskip("torch")
+    from modal_training_gym.frameworks.slime.token_reward_advantages import (
+        compute_token_reward_advantages,
+    )
+
+    data = {
+        "kl": [torch.zeros(4), torch.zeros(3)],
+        "rewards": [3.0, 5.0],
+        "token_rewards": [[1.0, 0.0, 2.0, 0.0], None],
+        "response_lengths": [4, 3],
+        "total_lengths": [4, 3],
+        "loss_masks": [torch.ones(4), torch.ones(3)],
+    }
+
+    compute_token_reward_advantages(
+        SimpleNamespace(
+            advantage_estimator="grpo",
+            training_gym_token_reward_gamma=1.0,
+        ),
+        data,
+    )
+
+    assert data["advantages"][0].tolist() == [3.0, 2.0, 2.0, 0.0]
+    assert data["advantages"][1].tolist() == [5.0, 5.0, 5.0]

@@ -280,6 +280,7 @@ _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATC
 _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
+_PATCH_TOKEN_REWARDS_B64 = encode_patch("patch_token_rewards", _SLIME_PATCHES)
 
 # Patches targeting /root/slime* — a git overlay replaces that directory, so
 # these are skipped in the base image when an overlay is configured and applied
@@ -296,6 +297,7 @@ _SLIME_ROOT_PATCHES_B64 = (
     _PATCH_ZERO_STD_METRICS_B64,
     _PATCH_SGLANG_PARALLEL_ALIASES_B64,
     _PATCH_SUBSTEP_TIMING_B64,
+    _PATCH_TOKEN_REWARDS_B64,
 )
 
 # Patches targeting Megatron-LM or site-packages — survive a git overlay.
@@ -661,6 +663,15 @@ def build_slime_app(
         object.__setattr__(slime, "custom_generate_function", None)
     if slime.custom_reward_post_process_function is not None:
         object.__setattr__(slime, "custom_reward_post_process_function", None)
+
+    if slime.token_reward_mode == "transition":
+        cfg = dict(slime.extra_config or {})
+        cfg.setdefault(
+            "custom_advantage_function_path",
+            "modal_training_gym.frameworks.slime.token_reward_advantages.compute_token_reward_advantages",
+        )
+        cfg["training_gym_token_reward_gamma"] = slime.token_reward_gamma
+        object.__setattr__(slime, "extra_config", cfg)
 
     # ── SGLang request params auto-wiring ─────────────────────────────────
     if slime.sglang_request_params:

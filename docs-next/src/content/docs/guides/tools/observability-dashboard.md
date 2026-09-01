@@ -139,7 +139,11 @@ rollout step — the fastest way to debug a flat reward curve:
 4. **Sample viewer** — click a histogram bar to page through its samples
    (`←` / `→` to navigate): the full prompt, the system message, the
    model's thinking, every conversation turn, and the reward that sample
-   received.
+   received. When transition rewards are present, the viewer also shows their
+   delta, cumulative value, components, and action-token span. A Slime recipe
+   can opt into training on these events with
+   `token_reward_mode="transition"`; recipes that leave the setting at its
+   default `"scalar"` continue to use one episode reward per sample.
 5. **W&B link** — jump to the same run in Weights & Biases.
 
 ## Housekeeping
