@@ -123,13 +123,16 @@ RDMA_RUNTIME_INSTALL_COMMAND = (
 # from there; everything outside the set (libfabric included) links only the
 # public IBVERBS_1.x ABI and is unaffected.
 #
-# The prefix is engaged only when the system pair is actually broken: with the
-# prefix on the path, absolute-path loads (the provider loader) still map the
-# system copies, so a healthy Mellanox node ends up with two live instances of
-# libibverbs/libmlx5 and NCCL's IB data path degrades badly (a weight sync
-# measured 20-50x slower). Where the system pair is intact — every host that
-# mounts nothing — the prefix must stay out of the path.
+# The prefix is engaged per node, and only where the system pair is actually
+# broken: with the prefix on the path, absolute-path loads (the provider
+# loader) still map the system copies, so a healthy node ends up with two live
+# instances of libibverbs/libmlx5 and NCCL's IB data path degrades badly (a
+# weight sync measured 20-50x slower). Ray distributes one env_vars mapping to
+# every worker, so the path carries a fixed alias that each node materializes
+# (as a symlink to the copy) only after its own probe fails — on healthy nodes
+# the alias does not exist and the loader skips it.
 _GYM_RDMA_DIR = "/opt/gym-rdma/lib"
+_GYM_RDMA_ENABLED_DIR = "/opt/gym-rdma/enabled"
 GYM_RDMA_COPY_COMMAND = (
     f"mkdir -p {_GYM_RDMA_DIR} && "
     f"cp -a {SYSTEM_LIB_DIR}/libibverbs.so.1* {SYSTEM_LIB_DIR}/libmlx5.so.1* "
@@ -141,30 +144,24 @@ GYM_RDMA_COPY_COMMAND = (
 )
 
 
-_system_verbs_broken_cache: bool | None = None
-
-
-def _system_verbs_broken() -> bool:
-    """Whether this node's system verbs pair fails mooncake's import.
-
-    Probed once per container under the system search order (no prefix). True
-    means the host bind-mounted a foreign libibverbs over the image's — the
-    only case where the private prefix should enter the search path.
-    """
-    global _system_verbs_broken_cache
-    if _system_verbs_broken_cache is not None:
-        return _system_verbs_broken_cache
+def _enable_rdma_prefix_if_broken() -> None:
+    """Point this node's prefix alias at the matched verbs copy when the
+    system pair fails mooncake's import (the EFA bind-mount case)."""
+    if not os.path.isdir(_GYM_RDMA_DIR) or os.path.lexists(_GYM_RDMA_ENABLED_DIR):
+        return
     probe = [sys.executable, "-c", "from mooncake.engine import TransferEngine"]
     check = subprocess.run(probe, capture_output=True, text=True)
-    broken = check.returncode != 0 and "IBVERBS_PRIVATE" in check.stderr
-    if broken:
-        print(
-            "WARNING: this node's system verbs pair is mismatched "
-            f"({check.stderr.strip().splitlines()[-1]}); resolving the image's "
-            f"matched set from {_GYM_RDMA_DIR} for Ray workers."
-        )
-    _system_verbs_broken_cache = broken
-    return broken
+    if check.returncode == 0 or "IBVERBS_PRIVATE" not in check.stderr:
+        return
+    print(
+        "WARNING: this node's system verbs pair is mismatched "
+        f"({check.stderr.strip().splitlines()[-1]}); resolving the image's "
+        f"matched set from {_GYM_RDMA_DIR} for Ray workers."
+    )
+    try:
+        os.symlink(_GYM_RDMA_DIR, _GYM_RDMA_ENABLED_DIR)
+    except FileExistsError:
+        pass
 
 
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
@@ -384,11 +381,9 @@ def _is_resumable_checkpoint(path: str) -> bool:
         return False
     if not names:
         return False
-    if not any(name.endswith(".distcp") for name in names):
-        return True
-    if ".metadata" not in names:
-        return False
-    return _metadata_shards_present(path, names)
+    if ".metadata" in names:
+        return _metadata_shards_present(path, names)
+    return not any(name.endswith(".distcp") for name in names)
 
 
 def _metadata_shards_present(path: str, names: set[str]) -> bool:
@@ -527,16 +522,13 @@ def _compose_ld_library_path() -> str:
     #   system dir first the loader finds the image's libfabric 1.20 instead,
     #   so the plugin never loads in a Ray worker — fatal at engine bring-up
     #   on hosts whose env pins NCCL_NET_PLUGIN=ofi.
-    # - The private rdma prefix precedes SYSTEM_LIB_DIR only on nodes whose
-    #   system verbs pair is broken (an EFA host's bind-mounted libibverbs
-    #   breaking the private-ABI coupling with the image's providers — see
-    #   GYM_RDMA_COPY_COMMAND). On healthy nodes it must stay out: it would
-    #   dual-load libibverbs/libmlx5 (path lookups hit the prefix, the
-    #   provider loader's absolute paths hit the system copies) and degrade
-    #   NCCL's IB data path badly.
+    # - The private rdma prefix alias precedes SYSTEM_LIB_DIR; it resolves
+    #   only on nodes that materialized it because their system verbs pair is
+    #   broken (see _enable_rdma_prefix_if_broken). This path is composed once
+    #   on the head and shipped to every node's workers, so the decision has
+    #   to live in the per-node filesystem, not here.
     parts = [d for d in _EFA_LIB_DIRS if os.path.isdir(d)]
-    if os.path.isdir(_GYM_RDMA_DIR) and _system_verbs_broken():
-        parts.append(_GYM_RDMA_DIR)
+    parts.append(_GYM_RDMA_ENABLED_DIR)
     parts.append(SYSTEM_LIB_DIR)
     for part in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
         if part and part not in parts:
@@ -557,8 +549,9 @@ def build_ray_runtime_env(
 
     Ray workers do not pick up the container's linker path on their own, and
     without it the Megatron actor can resolve a libibverbs that does not match
-    the image's libmlx5 and die importing mooncake. The system lib dir is put
-    in front for that reason; the rest is read from the container, so whatever
+    the image's libmlx5 and die importing mooncake. The leading dirs are
+    ordered by ``_compose_ld_library_path``; the rest is read from the
+    container, so whatever
     the image exports — including any wheel-shipped nvidia lib dirs — is
     carried through. Composing it here rather than in an ``image_env`` entry
     keeps it independent of whether the base image exports ``LD_LIBRARY_PATH``
@@ -1094,9 +1087,7 @@ def build_miles_app(
         if framework_status_token:
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
 
-        # Decide (and log) this node's verbs resolution before anything reads
-        # the composed library path.
-        _system_verbs_broken()
+        _enable_rdma_prefix_if_broken()
 
         await asyncio.gather(
             hf_cache_volume.reload.aio(),
