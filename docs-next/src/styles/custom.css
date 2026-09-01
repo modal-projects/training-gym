@@ -657,33 +657,28 @@ nav.tg-toc .tg-toc__list .tg-toc__list a {
   position: relative;
 }
 
-summary.tg-header__nav-link {
+button.tg-header__nav-link {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  list-style: none;
   background: none;
   border: 0;
   cursor: pointer;
   font-family: inherit;
 }
 
-summary.tg-header__nav-link::-webkit-details-marker {
-  display: none;
-}
-
-summary.tg-header__nav-link svg {
+button.tg-header__nav-link svg {
   display: block;
   opacity: 0.8;
 }
 
-summary.tg-header__nav-link:focus-visible {
+button.tg-header__nav-link:focus-visible {
   outline: 2px solid var(--sl-color-accent);
   outline-offset: 0.25rem;
 }
 
 .tg-header__nav-menu {
-  display: none;
+  display: flex;
   position: absolute;
   top: 100%;
   left: 0;
@@ -698,10 +693,8 @@ summary.tg-header__nav-link:focus-visible {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-.tg-header__nav-dropdown:hover .tg-header__nav-menu,
-.tg-header__nav-dropdown[open] .tg-header__nav-menu,
-.tg-header__nav-dropdown:focus-within .tg-header__nav-menu {
-  display: flex;
+.tg-header__nav-menu[hidden] {
+  display: none;
 }
 
 .tg-header__nav-menu-item {

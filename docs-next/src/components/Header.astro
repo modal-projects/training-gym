@@ -23,9 +23,12 @@ const isActive = (href: string) =>
     <nav class="tg-header__nav" aria-label="Primary">
       {DOCS_NAV.map((item) =>
         item.section === 'Reference' ? (
-          <details class="tg-header__nav-dropdown">
-            <summary
+          <div class="tg-header__nav-dropdown">
+            <button
+              type="button"
               class:list={['tg-header__nav-link', { 'is-active': Boolean(activeReference) }]}
+              aria-expanded="false"
+              aria-controls="tg-header-reference-menu"
             >
               {item.section}
               <svg
@@ -41,8 +44,8 @@ const isActive = (href: string) =>
               >
                 <path d="m6 9 6 6 6-6"></path>
               </svg>
-            </summary>
-            <div class="tg-header__nav-menu">
+            </button>
+            <div id="tg-header-reference-menu" class="tg-header__nav-menu" hidden>
               {REFERENCE_SURFACES.map((surface) => (
                 <a
                   href={surface.href}
@@ -53,7 +56,7 @@ const isActive = (href: string) =>
                 </a>
               ))}
             </div>
-          </details>
+          </div>
         ) : (
           <a
             href={item.prefix}
@@ -228,40 +231,55 @@ const isActive = (href: string) =>
   }
 
   const hoverablePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
-  for (const dropdown of document.querySelectorAll<HTMLDetailsElement>('.tg-header__nav-dropdown')) {
-    const dropdownSummary = dropdown.querySelector<HTMLElement>('summary');
+  for (const dropdown of document.querySelectorAll<HTMLElement>('.tg-header__nav-dropdown')) {
+    const dropdownTrigger = dropdown.querySelector<HTMLButtonElement>(':scope > button');
+    const dropdownMenu = dropdown.querySelector<HTMLElement>(':scope > .tg-header__nav-menu');
     let dropdownCloseTimer: number | undefined;
+
+    const setDropdownOpen = (open: boolean) => {
+      if (!dropdownTrigger || !dropdownMenu) return;
+      dropdownTrigger.setAttribute('aria-expanded', String(open));
+      dropdownMenu.hidden = !open;
+    };
 
     dropdown.addEventListener('pointerenter', () => {
       if (!hoverablePointer.matches) return;
       window.clearTimeout(dropdownCloseTimer);
-      dropdown.open = true;
+      setDropdownOpen(true);
     });
     dropdown.addEventListener('pointerleave', () => {
       if (!hoverablePointer.matches || dropdown.matches(':focus-within')) return;
       dropdownCloseTimer = window.setTimeout(() => {
         if (!dropdown.matches(':focus-within')) {
-          dropdown.open = false;
+          setDropdownOpen(false);
         }
       }, 120);
     });
-    dropdown.addEventListener('focusin', (event) => {
-      if (event.target !== dropdownSummary || dropdownSummary?.matches(':focus-visible')) {
-        dropdown.open = true;
-      }
+    dropdown.addEventListener('focusin', () => {
+      window.clearTimeout(dropdownCloseTimer);
+      setDropdownOpen(true);
     });
     dropdown.addEventListener('focusout', () => {
       requestAnimationFrame(() => {
         if (!dropdown.matches(':focus-within') && !dropdown.matches(':hover')) {
-          dropdown.open = false;
+          setDropdownOpen(false);
         }
       });
     });
+    dropdownTrigger?.addEventListener('click', (event) => {
+      event.preventDefault();
+      setDropdownOpen(true);
+    });
     dropdown.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && dropdown.open) {
+      if (event.key === 'Escape' && dropdownTrigger?.getAttribute('aria-expanded') === 'true') {
         event.preventDefault();
-        dropdown.open = false;
-        dropdownSummary?.focus();
+        dropdownTrigger.focus();
+        setDropdownOpen(false);
+      }
+    });
+    document.addEventListener('pointerdown', (event) => {
+      if (!dropdown.contains(event.target as Node)) {
+        setDropdownOpen(false);
       }
     });
   }
