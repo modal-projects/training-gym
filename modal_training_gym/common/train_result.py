@@ -166,14 +166,21 @@ class TrainResult:
 
         Raises
         ------
-        KeyError
-            The given ``training_run_id`` isn't in the store.
+        TrainingGymConfigError
+            The run has not produced a terminal result or the id is unknown.
         """
-        return cls(
-            **cls._parse_model_config(
-                vol_get(MetadataStore.TRAIN_RESULTS, training_run_id)
-            )
-        )
+        from modal_training_gym.common.errors import TrainingGymConfigError
+
+        try:
+            payload = vol_get(MetadataStore.TRAIN_RESULTS, training_run_id)
+        except KeyError:
+            raise TrainingGymConfigError(
+                f"No completed TrainResult exists for training run "
+                f"{training_run_id!r}. A completed rollout counter does not mean "
+                "the training run has reached a terminal state. Wait with "
+                f"TrainingRun.from_id({training_run_id!r}).result()."
+            ) from None
+        return cls(**cls._parse_model_config(payload))
 
     @classmethod
     def load(cls, training_run_id: str) -> "TrainResult":
@@ -182,8 +189,10 @@ class TrainResult:
     # ── Volume lookup ────────────────────────────────────────────────────
 
     def volume(self) -> "Volume":
+        from modal import Volume
+
         volume_name = self.checkpoints_volume_name or f"{self.app_name}-checkpoints"
-        return Volume.from_name(volume_name, create_if_missing=True)
+        return Volume.from_name(volume_name, create_if_missing=False)
 
     def checkpoints(self) -> list["Checkpoint"]:
         from modal_training_gym.common.checkpoint import _list_checkpoints

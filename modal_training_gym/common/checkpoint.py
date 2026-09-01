@@ -79,7 +79,7 @@ def _list_checkpoints(train_result: "TrainResult") -> list[Checkpoint]:
     checkpoints_mount_path = (
         train_result.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
     )
-    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=True)
+    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=False)
     prefix = "iter_"
     rel = _to_volume_path(checkpoint_dir, checkpoints_mount_path)
 
@@ -168,7 +168,7 @@ def convert_megatron_checkpoint_to_hf(
         checkpoint.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
     )
     output_path = f"{checkpoint.path}_hf"
-    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=True)
+    volume = Volume.from_name(checkpoints_volume_name, create_if_missing=False)
     rel = _to_volume_path(output_path, checkpoints_mount_path)
     marker_rel = (
         f"{rel}/{_CONVERT_COMPLETE_MARKER}" if rel else _CONVERT_COMPLETE_MARKER
@@ -198,7 +198,7 @@ def convert_megatron_checkpoint_to_hf(
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
     checkpoints_volume = Volume.from_name(
         checkpoints_volume_name,
-        create_if_missing=True,
+        create_if_missing=False,
     )
     from modal_training_gym.common import hf_secrets
     from modal_training_gym.frameworks.slime.launcher import _build_slime_base_image
