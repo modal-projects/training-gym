@@ -459,7 +459,7 @@ def build_slime_app(
             copy=True,
         )
 
-    if isinstance(dataset, HarborDataset):
+    if isinstance(dataset, HarborDataset) or isinstance(eval_dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
     image = _overlay_slime_source(image, slime)

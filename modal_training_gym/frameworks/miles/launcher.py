@@ -485,7 +485,7 @@ def build_miles_app(
         image = miles.image_overlay(image)
         miles.image_overlay = None
 
-    if isinstance(dataset, HarborDataset):
+    if isinstance(dataset, HarborDataset) or isinstance(eval_dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
     image = apply_metric_image(image, miles.metrics)

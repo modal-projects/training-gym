@@ -14,7 +14,7 @@ def main() -> None:
             hf_split="train[:120]",
             input_column="prompt",
             output_column="label",
-            apply_chat_template=True,
+            apply_chat_template=False,
         ),
         recipe=Qwen3_4b_Recipe(
             gpu_type="H100",
