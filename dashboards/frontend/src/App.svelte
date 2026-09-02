@@ -344,14 +344,21 @@
 
   let reloadQueued = false;
 
-  async function load() {
+  // `queue`: this load asks for data the current one won't return (a new query
+  // or facet selection), so it waits its turn instead of being dropped. Polls
+  // pass it up — a request slower than the 5s interval would otherwise queue a
+  // successor on every tick and refresh without pause.
+  async function load({ queue = false } = {}) {
     // One refresh at a time. The runs payload can take longer to arrive than
     // the 5s interval, and overlapping fetches stack whole copies of it in
-    // memory for a response that gets thrown away as stale anyway. A request
-    // that arrives mid-flight is queued rather than dropped, so a search or
-    // facet change still lands even while a poll is running.
+    // memory for a response that gets thrown away as stale anyway.
     if (refreshing) {
+      if (!queue) return;
       reloadQueued = true;
+      // The in-flight request carries the previous query, so retire it: its
+      // rows would otherwise land as the current ones until the queued load
+      // answers.
+      runsRequestId++;
       return;
     }
     refreshing = true;
@@ -428,7 +435,7 @@
     lastRunQueryKey = key;
     const timer = window.setTimeout(() => {
       loadedRunCount = RUNS_PAGE_SIZE;
-      void load();
+      void load({ queue: true });
     }, 250);
     return () => window.clearTimeout(timer);
   });
@@ -818,7 +825,7 @@
         title={pageMeta[activePage].title}
         {statusText}
         {refreshing}
-        onRefresh={load}
+        onRefresh={() => load()}
       />
 
     {#if activePage === "training" && activeTrainingRunId}
