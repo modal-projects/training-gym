@@ -10,6 +10,7 @@ from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 class _FakeImage:
     def __init__(self):
         self.commands: list[str] = []
+        self.operations: list[str] = []
 
     @classmethod
     def from_registry(cls, _docker_image: str) -> "_FakeImage":
@@ -19,7 +20,12 @@ class _FakeImage:
         return self
 
     def run_commands(self, *commands: str) -> "_FakeImage":
+        self.operations.append("run_commands")
         self.commands.extend(commands)
+        return self
+
+    def add_local_dir(self, *_args, **_kwargs) -> "_FakeImage":
+        self.operations.append("add_local_dir")
         return self
 
     def env(self, _environment: dict[str, str]) -> "_FakeImage":
@@ -50,6 +56,17 @@ def test_image_applies_efa_host_patches(monkeypatch):
 
     commands = "\n".join(launcher._build_miles_base_image(MilesRecipe()).commands)
 
+    assert launcher._PATCH_MOONCAKE_TOLERANCE_B64 in commands
+    assert launcher._PATCH_ROUTER_STARTUP_TIMEOUT_B64 in commands
+
+
+def test_local_miles_overlay_reapplies_efa_host_patches():
+    image = _FakeImage()
+
+    launcher._overlay_local_miles(image, "/tmp/local-miles")
+
+    assert image.operations == ["add_local_dir", "run_commands"]
+    commands = "\n".join(image.commands)
     assert launcher._PATCH_MOONCAKE_TOLERANCE_B64 in commands
     assert launcher._PATCH_ROUTER_STARTUP_TIMEOUT_B64 in commands
 

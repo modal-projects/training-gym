@@ -391,6 +391,31 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
     return image
 
 
+def _overlay_local_miles(image: Image, local_miles: str) -> Image:
+    image = image.add_local_dir(
+        local_miles,
+        remote_path=MILES_ROOT,
+        copy=True,
+        ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
+    )
+    # The local checkout just overwrote the patched miles sources; re-apply
+    # the built-in patches. Keep custom checkouts usable when their layout has
+    # intentionally diverged, matching the existing local-overlay behavior.
+    return image.run_commands(
+        f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
+        " || echo 'WARNING: sglang abort patch did not apply to the"
+        " local_miles checkout; transient router failures during rollout"
+        " cleanup may crash the run'",
+        f"echo {_PATCH_MOONCAKE_TOLERANCE_B64} | base64 -d | python3"
+        " || echo 'WARNING: mooncake import tolerance patch did not apply to"
+        " the local_miles checkout; EFA-host actor imports may fail'",
+        f"echo {_PATCH_ROUTER_STARTUP_TIMEOUT_B64} | base64 -d | python3"
+        " || echo 'WARNING: router startup timeout patch did not apply to the"
+        " local_miles checkout; busy routers retain the upstream timeout'",
+        *_REPORTING_PATCH_COMMANDS,
+    )
+
+
 def _response_parser_path(model: Any) -> str:
     """Import path of the model's response parser so the rollout recorder can
     resolve and apply it remotely. Empty when the model sets no parser."""
@@ -482,21 +507,7 @@ def build_miles_app(
         )
 
     if miles.local_miles:
-        image = image.add_local_dir(
-            miles.local_miles,
-            remote_path=MILES_ROOT,
-            copy=True,
-            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
-        )
-        # The local checkout just overwrote the patched miles sources;
-        # re-apply the built-in patches.
-        image = image.run_commands(
-            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
-            " || echo 'WARNING: sglang abort patch did not apply to the"
-            " local_miles checkout; transient router failures during rollout"
-            " cleanup may crash the run'",
-            *_REPORTING_PATCH_COMMANDS,
-        )
+        image = _overlay_local_miles(image, miles.local_miles)
 
     if miles.image_run_commands:
         image = image.run_commands(*miles.image_run_commands)
