@@ -61,29 +61,12 @@ _VISION_MODE: dict[str, Any] = {
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Gemma4_26B_A4B_Recipe(MilesRecipe):
-    """Gemma-4-26B-A4B MoE GRPO on 1×8×H200 with TP4/PP1/EP8, colocated.
+    """Gemma-4-26B-A4B GRPO recipe on 1 node with 8 H200 GPUs.
 
-    One checkpoint, two modes, chosen by ``modality``. The fields below are the
-    text defaults; ``modality="vision"`` replaces those named in ``_VISION_MODE``
-    with smaller-rollout values. Either way an argument you pass wins, because
-    the vision values are applied as defaults before your arguments, not over
-    them::
-
-        TrainConfig(
-            model=Gemma4_26B_A4B(),
-            dataset=MultimodalDataset(modality="image", n_rows=120),
-            recipe=Gemma4_26B_A4B_Recipe(modality="vision"),
-        ).train()
-
-    A vision run needs ``apply_chat_template=True`` so the prompt reaches the
-    processor as a string, a leading ``<image>`` in each prompt so the processor
-    inserts a placeholder for it — without one the image never reaches the model
-    and it answers "I cannot see the image" at a constant reward — plus its own
-    reward: the text path's ``gemma_math`` scores maths, not images, so
-    ``modality="vision"`` clears ``rm_type`` and requires you to supply one.
-
-    Based on upstream ``scripts/run_gemma_4_26b_a4b.py``, with the deviations
-    noted inline.
+    Args:
+        modality:
+            Training mode. Vision mode requires ``apply_chat_template=True``, a
+            leading ``<image>`` prompt marker, and a custom reward function.
     """
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = MilesRecipe._SKIP_FIELDS | {"modality"}

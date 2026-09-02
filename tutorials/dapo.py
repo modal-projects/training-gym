@@ -20,7 +20,7 @@ from modal_training_gym import (
     Endpoint,
     HuggingFaceDataset,
     Qwen3_5_4B,
-    Qwen3_5_4b_Recipe,
+    Qwen3_5_4B_Recipe,
     TrainConfig,
 )
 
@@ -164,7 +164,7 @@ async def dapo_overlong_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=Qwen3_5_4b_Recipe(
+    recipe=Qwen3_5_4B_Recipe(
         eval_interval=None,
         tensor_model_parallel_size=2,
         sequence_parallel=True,

@@ -8,7 +8,7 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class GLM_4_7_Recipe(SlimeRecipe):
-    """GLM-4.7 (355B-A32B MoE) on 8x8xH200, non-colocated GSPO."""
+    """GLM-4.7 MoE GSPO recipe for 8 trainer nodes and 8 rollout nodes, each with 8 H200 GPUs."""
 
     gpu_type: str = "H200"
     memory: int | tuple[int, int] | None = (128, 2_097_152)

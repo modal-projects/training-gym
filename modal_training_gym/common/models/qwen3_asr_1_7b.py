@@ -10,7 +10,7 @@ The class holds only the model's specs. Alongside it live the Qwen3-ASR-specific
 input-prep functions (prompt rendering + processor tokenization) the
 transcription rollout needs — model knowledge, kept out of the generic slime glue,
 mirroring ``parse_qwen3_response`` in :mod:`.base`. Framework wiring (the slime
-image-build shims and audio deps) lives on ``Qwen3_ASR_1_7b_Recipe`` instead,
+image-build shims and audio deps) lives on ``Qwen3_ASR_1_7B_Recipe`` instead,
 since it's meaningless for other backends.
 """
 
@@ -29,6 +29,16 @@ if TYPE_CHECKING:
 
 
 class Qwen3_ASR_1_7B(HFModelConfiguration):
+    """Alibaba Qwen3-ASR-1.7B speech recognition model.
+
+    Attributes:
+        model_name: Hugging Face repository ID.
+        architecture: Megatron architecture parameters for the text backbone.
+        response_parser: Parser for generated text.
+        requires_bshd: Requires padded BSHD batches during training.
+        audio_placeholder: Token sequence that marks audio input.
+    """
+
     model_name = "Qwen/Qwen3-ASR-1.7B"
 
     # Qwen3 dense backbone, same ``<|im_start|>``/``<|im_end|>`` delimiters as the
@@ -39,14 +49,14 @@ class Qwen3_ASR_1_7B(HFModelConfiguration):
     # The native megatron-bridge Qwen3-ASR forward doesn't implement THD sequence
     # packing, so training must use padded (bshd) batches; the slime launcher
     # enforces this when the recipe leaves slime's default thd packing on.
-    requires_bshd = True
+    requires_bshd: bool = True
 
     # The processor expands this single <|audio_pad|> to N tokens (N = the audio
     # encoder's output length for the clip), aligning audio embeddings with token
     # positions. It must appear in the prompt text; the raw audio data-URI must not,
     # or it tokenizes into ~100k-1M text tokens (scales with clip duration) and OOMs
     # the actor.
-    audio_placeholder = "<|audio_start|><|audio_pad|><|audio_end|>"
+    audio_placeholder: str = "<|audio_start|><|audio_pad|><|audio_end|>"
 
     # thinker_config.text_config (Qwen3 dense backbone), verbatim from config.json.
     architecture = ModelArchitecture(
@@ -68,11 +78,7 @@ class Qwen3_ASR_1_7B(HFModelConfiguration):
     )
 
     def download(self) -> None:
-        """Download, then add a fast ``tokenizer.json`` to the snapshot.
-
-        Qwen3-ASR ships only a slow tokenizer; SGLang's Rust ``sgl-router`` needs
-        ``tokenizer.json`` or it errors every rollout.
-        """
+        """Download the model and add the ``tokenizer.json`` required by SGLang."""
         super().download()
         self._materialize_router_tokenizer()
 

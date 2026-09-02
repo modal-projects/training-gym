@@ -10,7 +10,7 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Moonlight_16B_A3B_Recipe(MilesRecipe):
-    """Moonlight-16B-A3B on 1x8xH100, following Miles' DAPO recipe."""
+    """Moonlight-16B-A3B DAPO recipe for 1 node with 8 H100 GPUs."""
 
     model_config_class: ClassVar[type[ModelConfig]] = Moonlight_16B_A3B_Instruct
 

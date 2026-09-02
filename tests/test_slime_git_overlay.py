@@ -10,7 +10,7 @@ from modal_training_gym.frameworks.slime.launcher import (
     _PATCH_SUBSTEP_TIMING_B64,
     _slime_git_overlay_command,
 )
-from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_27b_Recipe
+from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_27B_Recipe
 
 
 REPOSITORY = "https://github.com/modal-projects/slime.git"
@@ -36,10 +36,10 @@ def test_root_and_external_patches_are_disjoint() -> None:
 
 def test_slime_git_overlay_requires_repository_and_full_revision() -> None:
     with pytest.raises(ValueError, match="must be set together"):
-        Qwen3_6_27b_Recipe(slime_git_repository=REPOSITORY)
+        Qwen3_6_27B_Recipe(slime_git_repository=REPOSITORY)
 
     with pytest.raises(ValueError, match="full 40-character"):
-        Qwen3_6_27b_Recipe(
+        Qwen3_6_27B_Recipe(
             slime_git_repository=REPOSITORY,
             slime_git_revision="ba324beb",
         )
@@ -47,21 +47,21 @@ def test_slime_git_overlay_requires_repository_and_full_revision() -> None:
 
 def test_slime_git_overlay_rejects_local_or_credentialed_sources() -> None:
     with pytest.raises(ValueError, match="mutually exclusive"):
-        Qwen3_6_27b_Recipe(
+        Qwen3_6_27B_Recipe(
             local_slime="/tmp/slime",
             slime_git_repository=REPOSITORY,
             slime_git_revision=REVISION,
         )
 
     with pytest.raises(ValueError, match="must not contain credentials"):
-        Qwen3_6_27b_Recipe(
+        Qwen3_6_27B_Recipe(
             slime_git_repository="https://token@example.com/slime.git",
             slime_git_revision=REVISION,
         )
 
 
 def test_slime_git_overlay_command_is_revision_pinned() -> None:
-    recipe = Qwen3_6_27b_Recipe(
+    recipe = Qwen3_6_27B_Recipe(
         slime_git_repository=REPOSITORY,
         slime_git_revision=REVISION.upper(),
     )
@@ -76,7 +76,7 @@ def test_slime_git_overlay_command_is_revision_pinned() -> None:
 
 
 def test_git_overlay_reapplies_slime_source_patches_after_replacement() -> None:
-    recipe = Qwen3_6_27b_Recipe(
+    recipe = Qwen3_6_27B_Recipe(
         slime_git_repository=REPOSITORY,
         slime_git_revision=REVISION,
     )
@@ -97,7 +97,7 @@ def test_git_overlay_reapplies_slime_source_patches_after_replacement() -> None:
 
 
 def test_local_overlay_preserves_unpatched_dev_checkout_behavior() -> None:
-    recipe = Qwen3_6_27b_Recipe(local_slime="/tmp/local-slime")
+    recipe = Qwen3_6_27B_Recipe(local_slime="/tmp/local-slime")
     image = RecordingImage()
 
     assert _overlay_slime_source(image, recipe) is image

@@ -4,11 +4,12 @@ from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_6_respons
 
 
 class Qwen3_6_35B(HFModelConfiguration):
-    """Qwen3.6-35B-A3B (35B total, ~3B active) MoE model from Alibaba.
+    """Alibaba Qwen3.6-35B-A3B model.
 
-    Mixture-of-Experts with 256 experts, 8 active per token.
-    Pre-configured with base ``ModelArchitecture`` for Megatron-based
-    frameworks (slime). Downloads from ``Qwen/Qwen3.6-35B-A3B`` on HuggingFace.
+    Attributes:
+        model_name: Hugging Face repository ID.
+        architecture: Megatron architecture parameters for this model.
+        response_parser: Parser for generated text.
     """
 
     response_parser = staticmethod(parse_qwen3_6_response)

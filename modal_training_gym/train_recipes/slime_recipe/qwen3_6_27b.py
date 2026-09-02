@@ -7,8 +7,8 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
-class Qwen3_6_27b_Recipe(SlimeRecipe):
-    """Qwen3.6-27B on 4×8×H100 using Slime's Qwen3.5-27B recipe."""
+class Qwen3_6_27B_Recipe(SlimeRecipe):
+    """Qwen3.6-27B GRPO recipe for 4 nodes with 8 H100 GPUs each."""
 
     memory: int | tuple[int, int] | None = (128, 2_097_152)
     slime_model_script: str = "scripts/models/qwen3.5-27B.sh"

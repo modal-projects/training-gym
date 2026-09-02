@@ -101,14 +101,14 @@ def test_slime_preflight_delegates_to_common(monkeypatch):
 
 
 def test_wandb_config_uses_the_provider_neutral_recipe_field():
-    from modal_training_gym import MetricConfig, Qwen3_4b_Recipe
+    from modal_training_gym import MetricConfig, Qwen3_4B_Recipe
     from modal_training_gym.common.launcher_helpers import build_app_tags
 
     with pytest.raises(TypeError, match="abstract"):
         MetricConfig()
 
     metric = WandbConfig(project="training")
-    recipe = Qwen3_4b_Recipe(metrics=metric)
+    recipe = Qwen3_4B_Recipe(metrics=metric)
 
     assert isinstance(metric, MetricConfig)
     assert recipe.metrics is metric

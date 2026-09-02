@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -76,3 +77,27 @@ def test_old_agent_guide_slugs_redirect_to_agent() -> None:
     config = (ROOT / "docs-next" / "astro.config.mjs").read_text()
     assert "'/guides/tools/agent-driven-training': '/guides/agent'" in config
     assert "'/guides/agent-driven-training': '/guides/agent'" in config
+
+
+def test_old_reference_slugs_redirect_to_flattened_pages() -> None:
+    config = re.sub(
+        r"\s+",
+        " ",
+        (ROOT / "docs-next" / "astro.config.mjs").read_text(),
+    )
+    assert "'/reference': '/reference/sdk'" in config
+    assert "'/reference/core/modelconfig': '/reference/modelconfig'" in config
+    assert "'/reference/core/trackioconfig': '/reference/trackioconfig'" in config
+    assert (
+        "'/reference/training/qwen3_5_4b_miles_recipe': "
+        "'/reference/qwen3_5_4b_miles_recipe'" in config
+    )
+    assert "'/reference/models/parsedresponse': '/reference/parsedresponse'" in config
+    assert (
+        "'/reference/models/parse_qwen3_response': "
+        "'/reference/modelconfig#parse_response'" in config
+    )
+    assert (
+        "'/reference/parse_qwen3_response': '/reference/modelconfig#parse_response'"
+        in config
+    )

@@ -1,0 +1,122 @@
+{
+  "sdk": [
+    {
+      "label": "CustomDeployment",
+      "link": "/reference/customdeployment"
+    },
+    {
+      "label": "DatasetConfig",
+      "link": "/reference/datasetconfig"
+    },
+    {
+      "label": "Endpoint",
+      "link": "/reference/endpoint"
+    },
+    {
+      "label": "HarborDataset",
+      "link": "/reference/harbordataset"
+    },
+    {
+      "label": "HFModelConfiguration",
+      "link": "/reference/hfmodelconfiguration"
+    },
+    {
+      "label": "HuggingFaceDataset",
+      "link": "/reference/huggingfacedataset"
+    },
+    {
+      "label": "MetricConfig",
+      "link": "/reference/metricconfig"
+    },
+    {
+      "label": "MilesRecipe",
+      "link": "/reference/milesrecipe"
+    },
+    {
+      "label": "ModalRayCluster",
+      "link": "/reference/modalraycluster"
+    },
+    {
+      "label": "ModelArchitecture",
+      "link": "/reference/modelarchitecture"
+    },
+    {
+      "label": "ModelConfig",
+      "link": "/reference/modelconfig"
+    },
+    {
+      "label": "ParsedResponse",
+      "link": "/reference/parsedresponse"
+    },
+    {
+      "label": "SglangRecipe",
+      "link": "/reference/sglangrecipe"
+    },
+    {
+      "label": "SlimeRecipe",
+      "link": "/reference/slimerecipe"
+    },
+    {
+      "label": "ToolCall",
+      "link": "/reference/toolcall"
+    },
+    {
+      "label": "TrackioConfig",
+      "link": "/reference/trackioconfig"
+    },
+    {
+      "label": "TrainConfig",
+      "link": "/reference/trainconfig"
+    },
+    {
+      "label": "TrainingGroup",
+      "link": "/reference/traininggroup"
+    },
+    {
+      "label": "TrainingRun",
+      "link": "/reference/trainingrun"
+    },
+    {
+      "label": "TrainResult",
+      "link": "/reference/trainresult"
+    },
+    {
+      "label": "VllmRecipe",
+      "link": "/reference/vllmrecipe"
+    },
+    {
+      "label": "WandbConfig",
+      "link": "/reference/wandbconfig"
+    }
+  ],
+  "cli": [
+    {
+      "label": "training-gym run",
+      "link": "/reference/cli/run"
+    },
+    {
+      "label": "training-gym skills",
+      "link": "/reference/cli/skills"
+    },
+    {
+      "label": "training-gym setup",
+      "link": "/reference/cli/setup"
+    },
+    {
+      "label": "training-gym set-password",
+      "link": "/reference/cli/set-password"
+    },
+    {
+      "label": "training-gym set-proxy-auth",
+      "link": "/reference/cli/set-proxy-auth"
+    },
+    {
+      "label": "training-gym open",
+      "link": "/reference/cli/open"
+    },
+    {
+      "label": "training-gym cleanup",
+      "link": "/reference/cli/cleanup"
+    }
+  ]
+}
