@@ -25,9 +25,8 @@ from modal_training_gym import (
     DatasetConfig,
     Endpoint,
     Qwen3_5_4B,
-    SlimeRecipe,
+    Qwen3_5_4B_Recipe,
     TrainConfig,
-    list_checkpoints,
 )
 
 # ## Build a deterministic guessing dataset
@@ -340,7 +339,7 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 
 # ## Train with custom multi-turn rollout
 #
-# A quick tour of the `SlimeRecipe` knobs we set below.
+# A quick tour of the knobs we set below.
 #
 # **Cluster and parallelism**
 # - `gpu_type="H100"` — GPU SKU used for both the rollout (sglang) and training
@@ -370,7 +369,8 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=SlimeRecipe(
+    recipe=Qwen3_5_4B_Recipe(
+        eval_interval=None,
         custom_generate_function=number_guess_generate,
         custom_rm_function=number_guess_rm,
         extra_config={
@@ -402,7 +402,7 @@ print(f"run id: {run.training_run_id}")
 # ## Evaluate trained checkpoint
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )

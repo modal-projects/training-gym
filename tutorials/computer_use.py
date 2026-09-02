@@ -27,10 +27,9 @@ from modal_training_gym import (
     CustomDeployment,
     MultimodalDataset,
     Qwen3_VL_8B,
-    Qwen3_VL_8b_Recipe,
+    Qwen3_VL_8B_Recipe,
     TrainConfig,
     WandbConfig,
-    list_checkpoints,
 )
 
 # ## Dataset
@@ -272,7 +271,7 @@ print(
 
 # ## Training
 #
-# We use `Qwen3_VL_8b_Recipe` which carries VL-specific defaults:
+# We use `Qwen3_VL_8B_Recipe` which carries VL-specific defaults:
 # - **Frozen vision tower** (`freeze_params_name_list=["vision_model"]`) — RL
 #   only updates the language backbone. This is the standard recipe for VLM RL:
 #   a single sparse reward is too noisy to safely fine-tune a pretrained visual
@@ -300,7 +299,7 @@ print(
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=Qwen3_VL_8b_Recipe(
+    recipe=Qwen3_VL_8B_Recipe(
         # TP=4 shards the 8B weights across 4 GPUs, freeing enough VRAM per
         # GPU for the large 0.75 KV pool below. (TP=2 OOMs at mem=0.75.)
         tensor_model_parallel_size=4,
@@ -330,7 +329,7 @@ print(f"run id: {run.training_run_id}")
 # Let's run the same eval on the trained checkpoint and compare accuracy.
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(

@@ -13,7 +13,7 @@ from modal_training_gym.train_recipes.miles_recipe.nemotron3_ultra_550b_a55b imp
     Nemotron3_Ultra_550B_A55B_Recipe,
 )
 from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
-    Qwen3_5_4b_Miles_Recipe,
+    Qwen3_5_4B_Miles_Recipe,
 )
 
 __all__ = [
@@ -23,5 +23,5 @@ __all__ = [
     "Inkling_Small_LoRA_Recipe",
     "Moonlight_16B_A3B_Recipe",
     "Nemotron3_Ultra_550B_A55B_Recipe",
-    "Qwen3_5_4b_Miles_Recipe",
+    "Qwen3_5_4B_Miles_Recipe",
 ]

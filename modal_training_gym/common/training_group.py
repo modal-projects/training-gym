@@ -6,7 +6,7 @@ Example::
         base=TrainConfig(
             model=Qwen3_6_35B(),
             dataset=ds,
-            recipe=Qwen3_6_35b_Recipe(num_rollout=10),
+            recipe=Qwen3_6_35B_Recipe(num_rollout=10),
         ),
         grid={
             "recipe.lr": [1e-6, 5e-6, 1e-5],
@@ -93,7 +93,7 @@ def _revalidate_recipe(recipe: Any) -> Any:
 
 
 class TrainingGroup:
-    """A base ``TrainConfig`` plus a grid of field overrides to expand."""
+    """A parameter sweep over a base ``TrainConfig``."""
 
     def __init__(
         self,
@@ -101,11 +101,9 @@ class TrainingGroup:
         grid: dict[str, list[Any]] | None = None,
         *,
         name: str | None = None,
-        merge_model_recipe: bool | None = None,
     ) -> None:
         self.base = base
         self.grid: dict[str, list[Any]] = dict(grid or {})
-        self.merge_model_recipe = merge_model_recipe
         self.name = name
         self.group_id = _slugify(name) if name else f"group-{secrets.token_hex(6)}"
 
@@ -163,7 +161,11 @@ class TrainingGroup:
     # ── Variant expansion ─────────────────────────────────────────────────────
 
     def iter_variants(self) -> list[tuple[dict[str, Any], TrainConfig]]:
-        """Return ``(overrides, config)`` for each point in the grid."""
+        """Expand the sweep grid.
+
+        Returns:
+            Pairs of overrides and validated training configs.
+        """
         if self._variants is not None:
             return list(self._variants)
 
@@ -183,7 +185,11 @@ class TrainingGroup:
         return list(self._variants)
 
     def get_train_configs(self) -> list[TrainConfig]:
-        """Expand the grid into validated, ready-to-run ``TrainConfig``s."""
+        """Build validated configs for each sweep point.
+
+        Returns:
+            Validated training configs.
+        """
         return [cfg for _, cfg in self.iter_variants()]
 
     def _print_variant_plan(
@@ -199,8 +205,6 @@ class TrainingGroup:
         cfg.group_id = self.group_id
         cfg.group_overrides = dict(overrides)
         cfg.group_axes = list(self.grid)
-        if self.merge_model_recipe is not None:
-            cfg.merge_model_recipe = self.merge_model_recipe
 
         recipe_touched = False
         for path, value in overrides.items():
@@ -229,14 +233,16 @@ class TrainingGroup:
         max_parallel: int = 1,
         continue_on_error: bool = True,
     ) -> list[TrainResult]:
-        """Run every variant and return the successful ``TrainResult``s.
+        """Train every variant.
 
-        All configs are expanded and validated up front, so invalid fields fail
-        before any run launches. With ``max_parallel > 1`` variants run in a
-        thread pool — each ``TrainConfig.train()`` is detached and independent,
-        so they progress concurrently on Modal. Failures are collected in
-        ``self.failures`` (and re-raised immediately if ``continue_on_error`` is
-        False) so one bad run doesn't sink the rest of the sweep.
+        Args:
+            max_parallel:
+                Maximum number of variants to run at once.
+            continue_on_error:
+                Continue after a variant fails.
+
+        Returns:
+            Successful training results.
         """
         variants = self.iter_variants()
         results: list[TrainResult] = []
@@ -299,7 +305,17 @@ class TrainingGroup:
         continue_on_error: bool = True,
         prepare_inputs: bool = False,
     ) -> list[TrainingRun]:
-        """Start every variant as a detached Modal call and return immediately."""
+        """Launch every variant as a detached Modal call.
+
+        Args:
+            continue_on_error:
+                Continue after a variant fails to launch.
+            prepare_inputs:
+                Materialize model and dataset inputs before launching.
+
+        Returns:
+            Launched training runs.
+        """
         variants = self.iter_variants()
         launches: list[TrainingRun] = []
         failures: list[tuple[dict[str, Any], BaseException]] = []

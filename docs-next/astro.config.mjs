@@ -7,7 +7,9 @@ import starlight from '@astrojs/starlight';
 import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
+import { flattenDocId } from './src/lib/docs-sections.ts';
 import { parseTutorialMetadata } from './src/lib/tutorial-docs-loader.ts';
+import referenceSidebar from './src/generated/reference-sidebar.json';
 
 const configDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -52,16 +54,37 @@ function firstGuidePath() {
       if (!orderMatch) {
         throw new Error(`${guidePath} is missing order`);
       }
-      const slug = fileName
-        .replaceAll(path.sep, '/')
-        .replace(/(?:\/index)?\.md$/, '');
-      return { order: Number(orderMatch[1]), slug };
+      const relative = fileName.replaceAll(path.sep, '/');
+      const slug = flattenDocId(`guides/${relative}`);
+      const section = relative.split('/')[0] ?? '';
+      return { order: Number(orderMatch[1]), section, slug };
     })
-    .sort((left, right) => left.order - right.order || left.slug.localeCompare(right.slug));
+    .sort(
+      (left, right) =>
+        left.section.localeCompare(right.section) ||
+        left.order - right.order ||
+        left.slug.localeCompare(right.slug)
+    );
   if (!guides[0]) {
     throw new Error('No guide pages found');
   }
-  return `/guides/${guides[0].slug}`;
+  return `/${guides[0].slug}`;
+}
+
+function nestedDocRedirects() {
+  const docsRoot = path.resolve(configDirectory, 'src/content/docs');
+  /** @type {Record<string, string>} */
+  const redirects = {};
+  for (const fileName of readdirSync(docsRoot, { recursive: true, encoding: 'utf8' })) {
+    if (typeof fileName !== 'string') continue;
+    if (!fileName.endsWith('.md') && !fileName.endsWith('.mdx')) continue;
+    const entry = fileName.replaceAll(path.sep, '/');
+    const flat = flattenDocId(entry);
+    const nested = entry.replace(/\.[^./]+$/, '').replace(/\/index$/, '');
+    if (nested === flat || nested === 'index') continue;
+    redirects[`/${nested}`] = `/${flat}`;
+  }
+  return redirects;
 }
 
 const tutorialPages = loadTutorialPages();
@@ -71,6 +94,38 @@ const firstGuide = firstGuidePath();
 export default defineConfig({
   trailingSlash: 'never',
   redirects: {
+    ...nestedDocRedirects(),
+    '/guides/tools/agent-driven-training': '/guides/agent',
+    '/guides/agent-driven-training': '/guides/agent',
+    '/reference': '/reference/sdk',
+    '/reference/core/modelconfig': '/reference/modelconfig',
+    '/reference/core/hfmodelconfiguration': '/reference/hfmodelconfiguration',
+    '/reference/core/modelarchitecture': '/reference/modelarchitecture',
+    '/reference/core/datasetconfig': '/reference/datasetconfig',
+    '/reference/core/huggingfacedataset': '/reference/huggingfacedataset',
+    '/reference/core/harbordataset': '/reference/harbordataset',
+    '/reference/core/trainresult': '/reference/trainresult',
+    '/reference/core/metricconfig': '/reference/metricconfig',
+    '/reference/core/trackioconfig': '/reference/trackioconfig',
+    '/reference/core/wandbconfig': '/reference/wandbconfig',
+    '/reference/core/modalraycluster': '/reference/modalraycluster',
+    '/reference/training/qwen3_5_4b_miles_recipe': '/reference/qwen3_5_4b_miles_recipe',
+    '/reference/training/moonlight_16b_a3b_recipe': '/reference/moonlight_16b_a3b_recipe',
+    '/reference/training/gemma4_26b_a4b_recipe': '/reference/gemma4_26b_a4b_recipe',
+    '/reference/training/inkling_small_recipe': '/reference/inkling_small_recipe',
+    '/reference/training/inkling_small_lora_recipe': '/reference/inkling_small_lora_recipe',
+    '/reference/training/qwen3_6_35b_recipe': '/reference/qwen3_6_35b_recipe',
+    '/reference/training/qwen3_6_27b_recipe': '/reference/qwen3_6_27b_recipe',
+    '/reference/training/qwen3_8_27b_recipe': '/reference/qwen3_8_27b_recipe',
+    '/reference/training/qwen3_5_0_8b_recipe': '/reference/qwen3_5_0_8b_recipe',
+    '/reference/training/qwen3_5_2b_recipe': '/reference/qwen3_5_2b_recipe',
+    '/reference/training/qwen3_5_4b_recipe': '/reference/qwen3_5_4b_recipe',
+    '/reference/training/qwen3_5_9b_recipe': '/reference/qwen3_5_9b_recipe',
+    '/reference/models/parsedresponse': '/reference/parsedresponse',
+    '/reference/models/parse_qwen3_response':
+      '/reference/modelconfig#parse_response',
+    '/reference/parse_qwen3_response':
+      '/reference/modelconfig#parse_response',
     '/guides': firstGuide,
     '/support': '/',
     '/tutorials': firstTutorial,
@@ -89,8 +144,16 @@ export default defineConfig({
     '/tutorials/rl/009_cross_tokenizer_distillation':
       '/tutorials/cross_tokenizer_distillation',
     '/tutorials/tools/000_observability_dashboard':
-      '/guides/tools/observability-dashboard',
-    '/tutorials/tools/001_wandb_integration': '/guides/tools/wandb-integration',
+      '/guides/dashboard',
+    '/guides/observability-dashboard': '/guides/dashboard',
+    '/guides/tools/observability-dashboard': '/guides/dashboard',
+    '/guides/wandb-integration': '/guides/metric',
+    '/guides/tools/wandb-integration': '/guides/metric',
+    '/tutorials/tools/001_wandb_integration': '/guides/metric',
+    '/guides/trackio-integration': '/guides/metric',
+    '/guides/tools/trackio-integration': '/guides/metric',
+    '/guides/metrics-integration': '/guides/metric',
+    '/guides/tools/metrics-integration': '/guides/metric',
   },
   markdown: {
     remarkPlugins: [remarkMath, remarkStripPageTitle],
@@ -202,6 +265,7 @@ export default defineConfig({
       customCss: ['./src/styles/custom.css'],
       components: {
         Header: './src/components/Header.astro',
+        MarkdownContent: './src/components/MarkdownContent.astro',
         Search: './src/components/Search.astro',
         Sidebar: './src/components/Sidebar.astro',
         PageSidebar: './src/components/PageSidebar.astro',
@@ -212,6 +276,10 @@ export default defineConfig({
         {
           label: 'Guides',
           items: [
+            {
+              label: 'Start here',
+              autogenerate: { directory: 'guides/start' },
+            },
             {
               label: 'Tools',
               autogenerate: { directory: 'guides/tools' },
@@ -228,77 +296,13 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Reference',
-          items: [
-            { label: 'Overview', link: '/reference' },
-            { label: 'CLI Reference', link: '/reference/cli' },
-            {
-              label: 'Core',
-              items: [
-                { label: 'ModelConfig', link: '/reference/core/modelconfig' },
-                { label: 'HFModelConfiguration', link: '/reference/core/hfmodelconfiguration' },
-                { label: 'ModelArchitecture', link: '/reference/core/modelarchitecture' },
-                { label: 'DatasetConfig', link: '/reference/core/datasetconfig' },
-                { label: 'HuggingFaceDataset', link: '/reference/core/huggingfacedataset' },
-                { label: 'HarborDataset', link: '/reference/core/harbordataset' },
-                { label: 'MetricConfig', link: '/reference/core/metricconfig' },
-                { label: 'WandbConfig', link: '/reference/core/wandbconfig' },
-                { label: 'ModalRayCluster', link: '/reference/core/modalraycluster' },
-                { label: 'TrainResult', link: '/reference/core/trainresult' },
-              ],
-            },
-            {
-              label: 'Models',
-              items: [
-                { label: 'ToolCall', link: '/reference/models/toolcall' },
-                { label: 'ParsedResponse', link: '/reference/models/parsedresponse' },
-                { label: 'parse_qwen3_response', link: '/reference/models/parse_qwen3_response' },
-                { label: 'Qwen3-0.6B', link: '/reference/models/qwen3_0_6b' },
-                { label: 'Qwen3-1.7B', link: '/reference/models/qwen3_1_7b' },
-                { label: 'Qwen3-4B', link: '/reference/models/qwen3_4b' },
-                { label: 'Qwen3-8B', link: '/reference/models/qwen3_8b' },
-                { label: 'Qwen3-30B-A3B', link: '/reference/models/qwen3_30b' },
-                { label: 'Qwen3.5-4B', link: '/reference/models/qwen3_5_4b' },
-                {
-                  label: 'Moonlight-16B-A3B-Instruct',
-                  link: '/reference/models/moonlight_16b_a3b_instruct',
-                },
-                { label: 'Qwen3.6-35B-A3B', link: '/reference/models/qwen3_6_35b' },
-                { label: 'Qwen3.6-27B', link: '/reference/models/qwen3_6_27b' },
-                { label: 'Qwen3.8-27B', link: '/reference/models/qwen3_8_27b' },
-              ],
-            },
-            {
-              label: 'Training',
-              items: [
-                { label: 'TrainConfig', link: '/reference/training/trainconfig' },
-                { label: 'SlimeRecipe', link: '/reference/training/slimerecipe' },
-                { label: 'MilesRecipe', link: '/reference/training/milesrecipe' },
-                {
-                  label: 'Qwen3_5_4b_Miles_Recipe',
-                  link: '/reference/training/qwen3_5_4b_miles_recipe',
-                },
-                {
-                  label: 'Moonlight_16B_A3B_Recipe',
-                  link: '/reference/training/moonlight_16b_a3b_recipe',
-                },
-                { label: 'Qwen3_6_35b_Recipe', link: '/reference/training/qwen3_6_35b_recipe' },
-                { label: 'Qwen3_6_27b_Recipe', link: '/reference/training/qwen3_6_27b_recipe' },
-                { label: 'Qwen3_8_27b_Recipe', link: '/reference/training/qwen3_8_27b_recipe' },
-              ],
-            },
-            {
-              label: 'Deployment',
-              items: [
-                { label: 'Endpoint', link: '/reference/deployment/endpoint' },
-                { label: 'CustomDeployment', link: '/reference/deployment/customdeployment' },
-                { label: 'SglangRecipe', link: '/reference/deployment/sglangrecipe' },
-                { label: 'VllmRecipe', link: '/reference/deployment/vllmrecipe' },
-              ],
-            },
-          ],
+          label: 'SDK',
+          items: referenceSidebar.sdk,
         },
-        { label: 'CLI Reference', link: '/reference/cli' },
+        {
+          label: 'CLI',
+          items: referenceSidebar.cli,
+        },
       ],
       lastUpdated: false,
       pagination: false,

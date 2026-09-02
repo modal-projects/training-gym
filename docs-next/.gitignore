@@ -4,10 +4,13 @@ dist/
 .DS_Store
 *.log
 
-# Generated doc pages (rebuilt in CI by scripts/generate_all.py)
 src/content/docs/index.md
 src/content/docs/reference/index.md
+src/content/docs/reference/sdk.md
 src/content/docs/reference/core/
 src/content/docs/reference/models/
+src/content/docs/reference/datasets/
+src/content/docs/reference/recipes/
 src/content/docs/reference/deployment/
 src/content/docs/reference/training/
+src/content/docs/reference/cli/

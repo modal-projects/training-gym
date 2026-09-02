@@ -21,9 +21,8 @@ from modal_training_gym import (
     Endpoint,
     HuggingFaceDataset,
     Qwen3_5_4B,
-    SlimeRecipe,
+    Qwen3_5_4B_Recipe,
     TrainConfig,
-    list_checkpoints,
 )
 
 # ## Deploy the base model
@@ -35,7 +34,7 @@ from modal_training_gym import (
 # production-ready LLM inference endpoint on Modal's managed infrastructure. It supports both
 # open model weights in addition to custom fine tunes, sourced from either a Hugging Face repo or a
 # [Modal Volume](https://modal.com/docs/guide/volumes). To use it, we provide a
-# [class](https://gym.modal.dev/reference/deployment/endpoint) to instantiate one programatically.
+# [class](https://gym.modal.dev/reference/endpoint) to instantiate one programatically.
 #
 # It will take a moment to download the model weights onto a Modal Volume and boot containers past the
 # [cold-start](https://modal.com/docs/guide/cold-start#what-is-a-cold-start).
@@ -117,7 +116,7 @@ def score_haiku(response: str) -> float:
 # See the
 # [multi-turn example](https://gym.modal.dev/tutorials/multiturn) for a basic
 # example of creating your own dataset, or the
-# [DatasetConfig](https://gym.modal.dev/reference/core/datasetconfig) documentation
+# [DatasetConfig](https://gym.modal.dev/reference/datasetconfig) documentation
 # for a deeper dive.
 
 class HaikuDataset(HuggingFaceDataset):
@@ -191,20 +190,11 @@ async def haiku_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=SlimeRecipe(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
+    recipe=Qwen3_5_4B_Recipe(
+        eval_interval=None,
         rollout_num_gpus=8,
-        rollout_num_gpus_per_engine=1,
-        colocate=True,
         num_rollout=10,
-        rollout_batch_size=16,
-        n_samples_per_prompt=2,
-        rollout_max_response_len=4096,
-        rollout_temperature=1.0,
+        n_samples_per_prompt=8,
         save_interval=5,
         apply_chat_template_kwargs='{"enable_thinking": false}',
         custom_rm_function=haiku_rm,
@@ -223,7 +213,7 @@ print(f"run id: {run.training_run_id}")
 # We'll get the latest checkpoint and create a new Endpoint so we may evaluate it.
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
@@ -247,23 +237,12 @@ new_config = TrainConfig(
     model=model,
     dataset=train_dataset,
     checkpoint=checkpoint,
-    recipe=SlimeRecipe(
-        custom_rm_function=haiku_rm,
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus=8,
-        rollout_num_gpus_per_engine=1,
-        colocate=True,
-        num_rollout=20,
-        rollout_batch_size=16,
-        n_samples_per_prompt=2,
-        rollout_max_response_len=4096,
-        rollout_temperature=1.0,
-        save_interval=10,
+    recipe=Qwen3_5_4B_Recipe(
         eval_interval=None,
+        custom_rm_function=haiku_rm,
+        rollout_num_gpus=8,
+        num_rollout=20,
+        n_samples_per_prompt=8,
         apply_chat_template_kwargs='{"enable_thinking": false}',
         image_overlay=lambda image: image.run_commands(
             "uv pip install --system aiohttp 'nltk>=3.8.0'",
@@ -280,7 +259,7 @@ print(f"run id: {new_run.training_run_id}")
 # Once again, we'll create a new Endpoint for the new checkpoint and run evals on it.
 
 new_result = new_run.result()
-new_checkpoint = list_checkpoints(new_result.training_run_id)[-1]
+new_checkpoint = new_result.checkpoints()[-1]
 print(new_checkpoint.path)
 
 new_deployment = Endpoint.launch(

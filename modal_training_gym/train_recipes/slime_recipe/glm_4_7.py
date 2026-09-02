@@ -8,7 +8,7 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class GLM_4_7_Recipe(SlimeRecipe):
-    """GLM-4.7 (355B-A32B MoE) on 8x8xH200, non-colocated GSPO."""
+    """GLM-4.7 MoE GSPO recipe for 8 trainer nodes and 8 rollout nodes, each with 8 H200 GPUs."""
 
     gpu_type: str = "H200"
     memory: int | tuple[int, int] | None = (128, 2_097_152)
@@ -41,7 +41,6 @@ class GLM_4_7_Recipe(SlimeRecipe):
     actor_num_nodes: int = 8
     n_samples_per_prompt: int = 8
     global_batch_size: int = 128
-    lr: float = 1e-6
     max_tokens_per_gpu: int = 8192
 
     # MoE parallelism
@@ -56,9 +55,6 @@ class GLM_4_7_Recipe(SlimeRecipe):
     eps_clip: float = 1e-4
     eps_clip_high: float = 2e-4
     use_tis: bool = True
-    kl_loss_coef: float = 0.0
-    kl_loss_type: str = "low_var_kl"
-    entropy_coef: float = 0.0
 
     # Optimizer
     optimizer_cpu_offload: bool = True

@@ -50,7 +50,6 @@ def _config(recipe, checkpoint_type: CheckpointType) -> TrainConfig:
         ),
         recipe=recipe,
         checkpoint=_checkpoint(checkpoint_type),
-        merge_model_recipe=False,
     )
 
 

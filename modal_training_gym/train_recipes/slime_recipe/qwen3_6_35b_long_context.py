@@ -7,7 +7,7 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
-class Qwen3_6_35b_Recipe_Long_Context(SlimeRecipe):
+class Qwen3_6_35B_Recipe_Long_Context(SlimeRecipe):
     """Qwen3.6-35B-A3B (MoE) on 2x8xH200 with TP2/PP2/CP1/EP2."""
 
     gpu_type: str = "H200"
@@ -18,8 +18,6 @@ class Qwen3_6_35b_Recipe_Long_Context(SlimeRecipe):
     )
 
     colocate: bool = False
-    actor_num_nodes: int = 1
-    actor_num_gpus_per_node: int = 8
     rollout_num_gpus: int = 8
 
     # ── Parallelism ───────────────────────────────────────────────────────
@@ -37,7 +35,6 @@ class Qwen3_6_35b_Recipe_Long_Context(SlimeRecipe):
     rollout_max_response_len: int = 8192
     rollout_temperature: float = 1.0
     global_batch_size: int = 128
-    sglang_mem_fraction_static: float = 0.75
     sglang_ep_size: int | None = 4
     sglang_disable_custom_all_reduce: bool = True
     sglang_cuda_graph_bs: list[int] | None = field(
@@ -59,7 +56,6 @@ class Qwen3_6_35b_Recipe_Long_Context(SlimeRecipe):
 
     # ── Training ──────────────────────────────────────────────────────────
     n_samples_per_prompt: int = 8
-    lr: float = 1e-6
     max_tokens_per_gpu: int = 16384
     calculate_per_token_loss: bool = True
     moe_token_dispatcher_type: str = "flex"
@@ -74,10 +70,8 @@ class Qwen3_6_35b_Recipe_Long_Context(SlimeRecipe):
     attention_backend: str = "flash"
 
     # ── Checkpointing / eval ──────────────────────────────────────────────
-    megatron_to_hf_mode: str = ""
     ref_load: str = "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp2pp2"
     save_interval: int = 1
-    eval_interval: int | None = None
 
     # ── Chat template ─────────────────────────────────────────────────────
     apply_chat_template_kwargs: dict | str = field(

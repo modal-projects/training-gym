@@ -3,10 +3,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import type { Loader, LoaderContext } from 'astro/loaders';
+import { flattenDocId } from './docs-sections';
 
 const TUTORIAL_ENTRY_PREFIX = 'tutorials/';
 const frontmatterFieldPattern = /^# ([a-z_]+):\s*(.*)$/;
 const dependencyPattern = /^[A-Za-z0-9_.-]+$/;
+
+function generateDocsId({
+  entry,
+  data,
+}: {
+  entry: string;
+  data: Record<string, unknown>;
+}): string {
+  if (typeof data.slug === 'string' && data.slug.length > 0) {
+    return data.slug;
+  }
+  return flattenDocId(entry);
+}
 
 export function parseTutorialMetadata(source: string, tutorialPath: string) {
   const lines = source.split(/\r?\n/);
@@ -231,7 +245,7 @@ async function storeEntry(
 }
 
 export function tutorialDocsLoader(): Loader {
-  const starlightDocsLoader = docsLoader();
+  const starlightDocsLoader = docsLoader({ generateId: generateDocsId });
   let tutorialEntryIds = new Set<string>();
 
   async function syncTutorialEntries(context: LoaderContext): Promise<void> {

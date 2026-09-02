@@ -27,16 +27,11 @@ from .base import HFModelConfiguration, parse_inkling_response
 
 
 class Inkling_Small(HFModelConfiguration):
-    """Inkling-Small (276 B total / 12 B active) from Thinking Machines Lab.
+    """Thinking Machines Lab Inkling-Small MoE model with 276B total and 12B active parameters.
 
-    Public, ungated, Apache-2.0 — no ``huggingface-secret`` needed. ~550 GB of
-    BF16 safetensors, so the first ``download()`` into the shared
-    ``huggingface-cache`` volume is the slowest step of a cold run.
-
-    ``parse_inkling_response`` splits Inkling's own token wire format
-    (``<|content_thinking|>`` / ``<|content_text|>`` /
-    ``<|content_invoke_tool_json|>`` sections inside ``<|message_model|>``) into
-    thinking, content, and tool calls.
+    Attributes:
+        model_name: Hugging Face repository ID.
+        response_parser: Parser for generated text.
     """
 
     model_name = "thinkingmachines/Inkling-Small"

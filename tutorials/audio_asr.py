@@ -29,16 +29,15 @@ from modal_training_gym import (
     CustomDeployment,
     MultimodalDataset,
     Qwen3_ASR_1_7B,
-    Qwen3_ASR_1_7b_Recipe,
+    Qwen3_ASR_1_7B_Recipe,
     TrainConfig,
-    list_checkpoints,
 )
 
 # ## Deploy the base model
 #
 # Since audio models are not yet supported on
 # [Endpoints](https://modal.com/docs/guide/endpoints), we use a
-# [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment)
+# [CustomDeployment](https://gym.modal.dev/reference/customdeployment)
 # to deploy the base and trained models.
 
 model = Qwen3_ASR_1_7B()
@@ -157,12 +156,12 @@ async def wer_rm(args, sample, **kwargs) -> float:
 # There are many ASR-specific changes to the default framework recipes such as
 # the transcription rollout, padded (bshd) batches, and the many-samples/high-temperature
 # settings that surface reward variance. To not pass the burden of specifying onto you,
-# we created `Qwen3_ASR_1_7b_Recipe` so that you can focus on training.
+# we created `Qwen3_ASR_1_7B_Recipe` so that you can focus on training.
 
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=Qwen3_ASR_1_7b_Recipe(
+    recipe=Qwen3_ASR_1_7B_Recipe(
         gpu_type="H100",
         actor_num_nodes=1,
         actor_num_gpus_per_node=2,
@@ -181,7 +180,7 @@ print(f"run id: {run.training_run_id}")
 # Let's run the same eval on the trained checkpoint.
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(

@@ -1,24 +1,25 @@
 ---
+import {
+  referenceSidebarSections,
+  referenceSurfaceForPath,
+  sectionForUrl,
+  type SidebarTreeEntry,
+} from '../lib/docs-sections';
+
 const { sidebar } = Astro.locals.starlightRoute;
 const currentPath = Astro.url.pathname;
 type SidebarEntry = (typeof sidebar)[number];
 type SidebarLink = Extract<SidebarEntry, { type: 'link' }>;
 type SidebarGroup = Extract<SidebarEntry, { type: 'group' }>;
 
-const currentSection =
-  currentPath === '/guides' || currentPath.startsWith('/guides/')
-    ? 'Guides'
-    : currentPath === '/tutorials' || currentPath.startsWith('/tutorials/')
-      ? 'Tutorials'
-      : currentPath === '/reference' || currentPath.startsWith('/reference/')
-        ? 'Reference'
-        : undefined;
+const surface = referenceSurfaceForPath(currentPath);
+const currentSection = surface?.label ?? sectionForUrl(currentPath);
 const activeGroup = sidebar.find(
   (entry): entry is SidebarGroup => entry.type === 'group' && entry.label === currentSection,
 );
 const filteredSidebar: readonly SidebarEntry[] = activeGroup?.entries ?? [];
-const showSidebar = filteredSidebar.length > 0;
-const isReference = currentPath === '/reference' || currentPath.startsWith('/reference/');
+const showSidebar = filteredSidebar.length > 0 || Boolean(surface);
+const isReference = Boolean(surface);
 
 function flattenLinks(entries: readonly SidebarEntry[]): SidebarLink[] {
   const links: SidebarLink[] = [];
@@ -32,29 +33,40 @@ function flattenLinks(entries: readonly SidebarEntry[]): SidebarLink[] {
   return links;
 }
 
-function firstLinkHref(entry: SidebarEntry): string | undefined {
-  if (entry.type === 'link') return entry.href;
-  const first = flattenLinks(entry.entries)[0];
-  return first?.href;
-}
-
-const sections = filteredSidebar.map((entry) => {
-  if (entry.type === 'link') {
-    return {
-      label: entry.label,
-      href: entry.href,
-      isCurrent: entry.isCurrent,
-      items: [],
-    };
-  }
-  const items = flattenLinks(entry.entries);
-  return {
-    label: entry.label,
-    href: firstLinkHref(entry),
-    isCurrent: false,
-    items,
-  };
-});
+const leafOnly =
+  filteredSidebar.length > 0 && filteredSidebar.every((entry) => entry.type === 'link');
+const childSections = leafOnly && activeGroup
+  ? [
+      {
+        label: activeGroup.label,
+        href: undefined as string | undefined,
+        isCurrent: false,
+        items: flattenLinks(activeGroup.entries),
+      },
+    ]
+  : filteredSidebar.map((entry) => {
+      if (entry.type === 'link') {
+        return {
+          label: entry.label,
+          href: entry.href,
+          isCurrent: entry.isCurrent,
+          items: [] as SidebarLink[],
+        };
+      }
+      return {
+        label: entry.label,
+        href: undefined as string | undefined,
+        isCurrent: false,
+        items: flattenLinks(entry.entries),
+      };
+    });
+const sections = surface
+  ? referenceSidebarSections(
+      surface,
+      (activeGroup?.entries ?? []) as SidebarTreeEntry[],
+      currentPath,
+    )
+  : childSections;
 ---
 
 {

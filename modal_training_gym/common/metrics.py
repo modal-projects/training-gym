@@ -7,19 +7,17 @@ from typing import Any
 
 
 class MetricConfig(ABC):
-    """Base class for metric tracker configurations.
+    """Defines metric tracker metadata, environment variables, and links.
 
-    ## Fields
-
-    project : str
-        Metric project name. Default ``""``.
-    group : str
-        Group tag for related runs. Default ``""``.
-    exp_name : str
-        Run display name. Default ``""``.
-    disable_random_suffix : bool
-        Whether the tracker should preserve the configured run name. Default
-        ``True``.
+    Attributes:
+        project:
+            Metric project name.
+        group:
+            Group tag for related runs.
+        exp_name:
+            Run display name.
+        disable_random_suffix:
+            Preserve the configured run name.
     """
 
     project: str = ""
@@ -76,11 +74,23 @@ def metric_metadata(
 
 
 def metric_secrets(metric: MetricConfig) -> list[Any]:
-    if metric.provider != "wandb":
-        return []
-    from modal import Secret
+    if metric.provider == "trackio":
+        from modal_training_gym.common.trackio import trackio_secrets
 
-    return [Secret.from_name(getattr(metric, "modal_wandb_secret_name"))]
+        return trackio_secrets(metric)
+    if metric.provider == "wandb":
+        from modal import Secret
+
+        return [Secret.from_name(getattr(metric, "modal_wandb_secret_name"))]
+    return []
+
+
+def apply_metric_image(image: Any, metric: MetricConfig | None) -> Any:
+    if metric is not None and metric.provider == "trackio":
+        from modal_training_gym.common.trackio import apply_trackio_image
+
+        return apply_trackio_image(image, metric)
+    return image
 
 
 def preflight_metric(metric: MetricConfig | None) -> str:
@@ -88,4 +98,8 @@ def preflight_metric(metric: MetricConfig | None) -> str:
         from modal_training_gym.common.wandb import preflight_wandb
 
         return preflight_wandb(metric)
+    if metric is not None and metric.provider == "trackio":
+        from modal_training_gym.common.trackio import preflight_trackio
+
+        return preflight_trackio(metric)
     return ""

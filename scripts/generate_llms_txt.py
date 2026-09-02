@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from itertools import groupby
 from pathlib import Path
 
 import yaml
@@ -19,11 +20,25 @@ from scripts.api_reference_manifest import (
 from scripts.tutorial_index import TutorialEntry, load_tutorial_index
 
 ROOT = Path(__file__).resolve().parents[1]
+README = ROOT / "README.md"
 GUIDES_DIR = ROOT / "docs-next" / "src" / "content" / "docs" / "guides"
 DEFAULT_OUTPUT = ROOT / "docs-next" / "public" / "llms.txt"
 
 SITE = "https://gym.modal.dev"
 REPO = "https://github.com/modal-projects/training-gym"
+
+
+def flatten_doc_id(entry: str) -> str:
+    path = entry.replace("\\", "/")
+    suffix_at = path.rfind(".")
+    if suffix_at > path.rfind("/"):
+        path = path[:suffix_at]
+    if path.endswith("/index"):
+        path = path[: -len("/index")]
+    parts = [part for part in path.split("/") if part]
+    if len(parts) <= 2:
+        return path
+    return f"{parts[0]}/{parts[-1]}"
 
 
 def _site_url(*parts: str) -> str:
@@ -36,6 +51,41 @@ def _first_heading(body: str) -> str | None:
         if line.startswith("# "):
             return line[2:].strip()
     return None
+
+
+def _guide_section(slug: str) -> str:
+    return slug.split("/", 1)[0] if "/" in slug else ""
+
+
+def _is_badge_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("[![") or stripped.startswith("![")
+
+
+def _item(label: str, url: str) -> str:
+    return f"- [{label}]({url})"
+
+
+def _readme_heading_and_intro(markdown: str) -> tuple[str, str]:
+    lines = markdown.splitlines()
+    index = 0
+    while index < len(lines) and not lines[index].startswith("# "):
+        index += 1
+    if index == len(lines):
+        raise ValueError("README is missing an H1 heading")
+    heading = lines[index][2:].strip()
+    if not heading:
+        raise ValueError("README H1 is empty")
+    index += 1
+    body: list[str] = []
+    while index < len(lines) and not lines[index].startswith("## "):
+        if not _is_badge_line(lines[index]):
+            body.append(lines[index])
+        index += 1
+    intro = "\n".join(body).strip()
+    if not intro:
+        raise ValueError("README is missing intro text after the H1")
+    return heading, intro.replace("](#", f"]({_site_url()}#")
 
 
 def _collect_guides() -> list[tuple[str, str, int]]:
@@ -69,7 +119,9 @@ def _collect_guides() -> list[tuple[str, str, int]]:
         if slug != "index":
             guides.append((slug, title, order))
 
-    guides.sort(key=lambda guide: (guide[2], guide[1].lower()))
+    guides.sort(
+        key=lambda guide: (_guide_section(guide[0]), guide[2], guide[1].lower())
+    )
     return guides
 
 
@@ -77,53 +129,54 @@ def _render(
     tutorials: tuple[TutorialEntry, ...],
     guides: list[tuple[str, str, int]],
 ) -> str:
+    heading, intro = _readme_heading_and_intro(README.read_text())
     lines: list[str] = [
-        "# Modal Training Gym",
+        f"# {heading}",
         "",
-        "> Python SDK for RL post-training on Modal. Compose a model, dataset, and",
-        "> recipe (`SlimeRecipe` / Miles) via `TrainConfig`, then call `.train()` /",
-        "> `.launch()` — cluster topology, Ray/NCCL, volumes, and checkpointing are handled.",
-        "",
-        "Requires Python 3.12. Install the package as `modal-training-gym`",
-        "(import as `modal_training_gym`). Prefer `TrainConfig` + recipe over older",
-        "framework-specific launcher APIs.",
+        intro,
         "",
         f"Docs: {_site_url()}",
         f"Repo: {REPO}",
         "",
         "## Docs",
         "",
-        f"- [Home]({_site_url()}): Docs home",
-        f"- [Guides]({_site_url('guides')}): Concepts and practical workflows",
-        f"- [Tutorials]({_site_url('tutorials')}): Runnable Python guides",
-        f"- [Reference]({_site_url('reference')}): Public class reference",
-        f"- [CLI Reference]({_site_url('reference/cli')}): `modal-training-gym` CLI",
+        _item("Home", _site_url()),
+        _item("Guides", _site_url("guides")),
+        _item("Tutorials", _site_url("tutorials")),
+        _item("SDK Reference", _site_url("reference/sdk")),
+        _item("CLI Reference", _site_url("reference/cli")),
         "",
         "## Guides",
         "",
     ]
 
-    for slug, title, _order in guides:
-        lines.append(f"- [{title}]({_site_url('guides', slug)})")
+    for section, section_guides in groupby(
+        guides, key=lambda guide: _guide_section(guide[0])
+    ):
+        if section:
+            lines.append(f"### {section.replace('-', ' ').title()}")
+            lines.append("")
+        for slug, title, _order in section_guides:
+            lines.append(_item(title, _site_url(flatten_doc_id(f"guides/{slug}"))))
+        lines.append("")
 
     lines.extend(
         [
-            "",
             "## Tutorials",
             "",
         ]
     )
 
     for tutorial in tutorials:
-        lines.append(f"- [{tutorial.title}]({_site_url('tutorials', tutorial.slug)})")
+        lines.append(_item(tutorial.title, _site_url("tutorials", tutorial.slug)))
     lines.append("")
 
     lines.extend(
         [
             "## Reference",
             "",
-            f"- [Reference]({_site_url('reference')}): Index of public classes",
-            f"- [CLI Reference]({_site_url('reference/cli')}): CLI commands and flags",
+            _item("SDK Reference", _site_url("reference/sdk")),
+            _item("CLI Reference", _site_url("reference/cli")),
             "",
         ]
     )
@@ -144,16 +197,16 @@ def _render(
             class_name = entry["class_name"]
             label = entry.get("sidebar_label") or class_name
             path = CLASS_REFERENCE_PATHS[class_name]
-            lines.append(f"- [{label}]({_site_url(path)}): `{class_name}`")
+            lines.append(_item(label, _site_url(path)))
         lines.append("")
 
     lines.extend(
         [
             "## Optional",
             "",
-            f"- [AGENTS.md]({REPO}/blob/main/AGENTS.md): Agent working rules for this repo",
-            f"- [skills/]({REPO}/tree/main/skills): Packaged agent skills (model-support, etc.)",
-            f"- [examples/quickstart.py]({REPO}/blob/main/examples/quickstart.py): Minimal TrainConfig example",
+            _item("AGENTS.md", f"{REPO}/blob/main/AGENTS.md"),
+            _item("skills/", f"{REPO}/tree/main/skills"),
+            _item("examples/quickstart.py", f"{REPO}/blob/main/examples/quickstart.py"),
             "",
             "<!-- Generated by scripts/generate_llms_txt.py; do not edit by hand. -->",
             "",

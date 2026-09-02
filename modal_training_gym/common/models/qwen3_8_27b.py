@@ -4,11 +4,12 @@ from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_6_respons
 
 
 class Qwen3_8_27B(HFModelConfiguration):
-    """Qwen3.8-27B dense hybrid Gated DeltaNet/attention model.
+    """Alibaba Qwen3.8-27B model.
 
-    The Slime recipe validates text-only causal-language-model training. The
-    checkpoint's vision encoder is not represented by ``ModelArchitecture``;
-    multimodal training remains outside this preset's validated scope.
+    Attributes:
+        model_name: Hugging Face repository ID.
+        architecture: Megatron architecture parameters for this model.
+        response_parser: Parser for generated text.
     """
 
     response_parser = staticmethod(parse_qwen3_6_response)

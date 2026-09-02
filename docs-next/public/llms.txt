@@ -1,29 +1,40 @@
-# Modal Training Gym
+# Training Gym
 
-> Python SDK for RL post-training on Modal. Compose a model, dataset, and
-> recipe (`SlimeRecipe` / Miles) via `TrainConfig`, then call `.train()` /
-> `.launch()` — cluster topology, Ray/NCCL, volumes, and checkpointing are handled.
+Modal Training Gym is an open-source Python SDK for RL post-training on [Modal](https://modal.com).
 
-Requires Python 3.12. Install the package as `modal-training-gym`
-(import as `modal_training_gym`). Prefer `TrainConfig` + recipe over older
-framework-specific launcher APIs.
+The library takes care of infrastructure concerns such as cluster topology, Ray/NCCL bring-up, volume mounts, checkpointing, and serving for eval and rollouts, so you (or your agent!) can focus on training models.
+
+To get started, you can go through the [Quickstart](https://gym.modal.dev/#quickstart) section below, or paste the prompt below into your favorite agent:
+
+```txt
+Install the `training-gym` library. Then, install the skill bundle into the local project with `training-gym skills install`. Finally, tell the user that they can ask you to do something like: "Given a budget of 1 B300, train Qwen3.8 27B to correctly solve problems taken from agentica-org/DeepCoder-Preview-Dataset with xhigh reasoning and a length penalty to limit the number of reasoning tokens."
+```
 
 Docs: https://gym.modal.dev/
 Repo: https://github.com/modal-projects/training-gym
 
 ## Docs
 
-- [Home](https://gym.modal.dev/): Docs home
-- [Guides](https://gym.modal.dev/guides): Concepts and practical workflows
-- [Tutorials](https://gym.modal.dev/tutorials): Runnable Python guides
-- [Reference](https://gym.modal.dev/reference): Public class reference
-- [CLI Reference](https://gym.modal.dev/reference/cli): `modal-training-gym` CLI
+- [Home](https://gym.modal.dev/)
+- [Guides](https://gym.modal.dev/guides)
+- [Tutorials](https://gym.modal.dev/tutorials)
+- [SDK Reference](https://gym.modal.dev/reference/sdk)
+- [CLI Reference](https://gym.modal.dev/reference/cli)
 
 ## Guides
 
-- [Agent-driven training](https://gym.modal.dev/guides/tools/agent-driven-training)
-- [The observability dashboard](https://gym.modal.dev/guides/tools/observability-dashboard)
-- [Weights & Biases integration](https://gym.modal.dev/guides/tools/wandb-integration)
+### Start
+
+- [Choosing a base model](https://gym.modal.dev/guides/model)
+- [Getting your data](https://gym.modal.dev/guides/dataset)
+- [Cooking with a recipe](https://gym.modal.dev/guides/recipe)
+- [Training in the Gym](https://gym.modal.dev/guides/training)
+
+### Tools
+
+- [Agent-driven training](https://gym.modal.dev/guides/agent)
+- [Observability dashboard](https://gym.modal.dev/guides/dashboard)
+- [Logging metrics](https://gym.modal.dev/guides/metric)
 
 ## Tutorials
 
@@ -41,76 +52,103 @@ Repo: https://github.com/modal-projects/training-gym
 
 ## Reference
 
-- [Reference](https://gym.modal.dev/reference): Index of public classes
-- [CLI Reference](https://gym.modal.dev/reference/cli): CLI commands and flags
-
-### Core
-
-- [ModelConfig](https://gym.modal.dev/reference/core/modelconfig): `ModelConfig`
-- [HFModelConfiguration](https://gym.modal.dev/reference/core/hfmodelconfiguration): `HFModelConfiguration`
-- [ModelArchitecture](https://gym.modal.dev/reference/core/modelarchitecture): `ModelArchitecture`
-- [DatasetConfig](https://gym.modal.dev/reference/core/datasetconfig): `DatasetConfig`
-- [HuggingFaceDataset](https://gym.modal.dev/reference/core/huggingfacedataset): `HuggingFaceDataset`
-- [HarborDataset](https://gym.modal.dev/reference/core/harbordataset): `HarborDataset`
-- [MetricConfig](https://gym.modal.dev/reference/core/metricconfig): `MetricConfig`
-- [WandbConfig](https://gym.modal.dev/reference/core/wandbconfig): `WandbConfig`
-- [ModalRayCluster](https://gym.modal.dev/reference/core/modalraycluster): `ModalRayCluster`
-- [TrainResult](https://gym.modal.dev/reference/core/trainresult): `TrainResult`
+- [SDK Reference](https://gym.modal.dev/reference/sdk)
+- [CLI Reference](https://gym.modal.dev/reference/cli)
 
 ### Models
 
-- [ToolCall](https://gym.modal.dev/reference/models/toolcall): `ToolCall`
-- [ParsedResponse](https://gym.modal.dev/reference/models/parsedresponse): `ParsedResponse`
-- [parse_qwen3_response](https://gym.modal.dev/reference/models/parse_qwen3_response): `parse_qwen3_response`
-- [Qwen3-0.6B](https://gym.modal.dev/reference/models/qwen3_0_6b): `Qwen3_0_6B`
-- [Qwen3-1.7B](https://gym.modal.dev/reference/models/qwen3_1_7b): `Qwen3_1_7B`
-- [Qwen3-4B](https://gym.modal.dev/reference/models/qwen3_4b): `Qwen3_4B`
-- [Qwen3-8B](https://gym.modal.dev/reference/models/qwen3_8b): `Qwen3_8B`
-- [Qwen3.5-0.8B](https://gym.modal.dev/reference/models/qwen3_5_0_8b): `Qwen3_5_0_8B`
-- [Qwen3.5-2B](https://gym.modal.dev/reference/models/qwen3_5_2b): `Qwen3_5_2B`
-- [Qwen3.5-4B](https://gym.modal.dev/reference/models/qwen3_5_4b): `Qwen3_5_4B`
-- [Qwen3.5-9B](https://gym.modal.dev/reference/models/qwen3_5_9b): `Qwen3_5_9B`
-- [Qwen3-30B-A3B](https://gym.modal.dev/reference/models/qwen3_30b): `Qwen3_30B`
-- [Moonlight-16B-A3B-Instruct](https://gym.modal.dev/reference/models/moonlight_16b_a3b_instruct): `Moonlight_16B_A3B_Instruct`
-- [Gemma-4-26B-A4B-it](https://gym.modal.dev/reference/models/gemma4_26b_a4b): `Gemma4_26B_A4B`
-- [Inkling-Small](https://gym.modal.dev/reference/models/inkling_small): `Inkling_Small`
-- [Nemotron-3-Ultra-550B-A55B](https://gym.modal.dev/reference/models/nemotron3_ultra_550b_a55b): `Nemotron3_Ultra_550B_A55B`
-- [Qwen3.6-35B-A3B](https://gym.modal.dev/reference/models/qwen3_6_35b): `Qwen3_6_35B`
-- [Qwen3.6-27B](https://gym.modal.dev/reference/models/qwen3_6_27b): `Qwen3_6_27B`
-- [Qwen3.8-27B](https://gym.modal.dev/reference/models/qwen3_8_27b): `Qwen3_8_27B`
+- [ModelConfig](https://gym.modal.dev/reference/modelconfig)
+- [HFModelConfiguration](https://gym.modal.dev/reference/hfmodelconfiguration)
+- [ModelArchitecture](https://gym.modal.dev/reference/modelarchitecture)
+- [ToolCall](https://gym.modal.dev/reference/toolcall)
+- [Qwen3-0.6B](https://gym.modal.dev/reference/qwen3_0_6b)
+- [Qwen3-1.7B](https://gym.modal.dev/reference/qwen3_1_7b)
+- [Qwen3-4B](https://gym.modal.dev/reference/qwen3_4b)
+- [Qwen3-8B](https://gym.modal.dev/reference/qwen3_8b)
+- [Qwen3.5-0.8B](https://gym.modal.dev/reference/qwen3_5_0_8b)
+- [Qwen3.5-2B](https://gym.modal.dev/reference/qwen3_5_2b)
+- [Qwen3.5-4B](https://gym.modal.dev/reference/qwen3_5_4b)
+- [Qwen3.5-9B](https://gym.modal.dev/reference/qwen3_5_9b)
+- [Qwen3-30B-A3B](https://gym.modal.dev/reference/qwen3_30b)
+- [Moonlight-16B-A3B-Instruct](https://gym.modal.dev/reference/moonlight_16b_a3b_instruct)
+- [Gemma-4-26B-A4B-it](https://gym.modal.dev/reference/gemma4_26b_a4b)
+- [Inkling-Small](https://gym.modal.dev/reference/inkling_small)
+- [Nemotron-3-Ultra-550B-A55B](https://gym.modal.dev/reference/nemotron3_ultra_550b_a55b)
+- [GLM-4.7](https://gym.modal.dev/reference/glm_4_7)
+- [Qwen3.6-35B-A3B](https://gym.modal.dev/reference/qwen3_6_35b)
+- [Qwen3.6-27B](https://gym.modal.dev/reference/qwen3_6_27b)
+- [Qwen3.8-27B](https://gym.modal.dev/reference/qwen3_8_27b)
+- [Qwen3-ASR-1.7B](https://gym.modal.dev/reference/qwen3_asr_1_7b)
+- [Qwen3-VL-8B](https://gym.modal.dev/reference/qwen3_vl_8b)
+
+### Datasets
+
+- [DatasetConfig](https://gym.modal.dev/reference/datasetconfig)
+- [HuggingFaceDataset](https://gym.modal.dev/reference/huggingfacedataset)
+- [HarborDataset](https://gym.modal.dev/reference/harbordataset)
+
+### Recipes
+
+- [Qwen3_5_4B_Miles_Recipe](https://gym.modal.dev/reference/qwen3_5_4b_miles_recipe)
+- [Moonlight_16B_A3B_Recipe](https://gym.modal.dev/reference/moonlight_16b_a3b_recipe)
+- [Gemma4_26B_A4B_Recipe](https://gym.modal.dev/reference/gemma4_26b_a4b_recipe)
+- [Inkling_Small_Recipe](https://gym.modal.dev/reference/inkling_small_recipe)
+- [Inkling_Small_LoRA_Recipe](https://gym.modal.dev/reference/inkling_small_lora_recipe)
+- [Nemotron3_Ultra_550B_A55B_Recipe](https://gym.modal.dev/reference/nemotron3_ultra_550b_a55b_recipe)
+- [Qwen3_6_35B_Recipe](https://gym.modal.dev/reference/qwen3_6_35b_recipe)
+- [Qwen3_6_27B_Recipe](https://gym.modal.dev/reference/qwen3_6_27b_recipe)
+- [Qwen3_8_27B_Recipe](https://gym.modal.dev/reference/qwen3_8_27b_recipe)
+- [Qwen3.5-0.8B_Recipe](https://gym.modal.dev/reference/qwen3_5_0_8b_recipe)
+- [Qwen3.5-2B_Recipe](https://gym.modal.dev/reference/qwen3_5_2b_recipe)
+- [Qwen3.5-4B_Recipe](https://gym.modal.dev/reference/qwen3_5_4b_recipe)
+- [Qwen3.5-9B_Recipe](https://gym.modal.dev/reference/qwen3_5_9b_recipe)
+- [Qwen3_0_6B_Recipe](https://gym.modal.dev/reference/qwen3_0_6b_recipe)
+- [Qwen3_1_7B_Recipe](https://gym.modal.dev/reference/qwen3_1_7b_recipe)
+- [Qwen3_4B_Recipe](https://gym.modal.dev/reference/qwen3_4b_recipe)
+- [Qwen3_8B_Recipe](https://gym.modal.dev/reference/qwen3_8b_recipe)
+- [GLM_4_7_Recipe](https://gym.modal.dev/reference/glm_4_7_recipe)
+- [Qwen3_ASR_1_7B_Recipe](https://gym.modal.dev/reference/qwen3_asr_1_7b_recipe)
+- [Qwen3_VL_8B_Recipe](https://gym.modal.dev/reference/qwen3_vl_8b_recipe)
 
 ### Training
 
-- [TrainConfig](https://gym.modal.dev/reference/training/trainconfig): `TrainConfig`
-- [TrainingRun](https://gym.modal.dev/reference/training/trainingrun): `TrainingRun`
-- [TrainingGroup](https://gym.modal.dev/reference/training/traininggroup): `TrainingGroup`
-- [SlimeRecipe](https://gym.modal.dev/reference/training/slimerecipe): `SlimeRecipe`
-- [MilesRecipe](https://gym.modal.dev/reference/training/milesrecipe): `MilesRecipe`
-- [Qwen3_5_4b_Miles_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_miles_recipe): `Qwen3_5_4b_Miles_Recipe`
-- [Moonlight_16B_A3B_Recipe](https://gym.modal.dev/reference/training/moonlight_16b_a3b_recipe): `Moonlight_16B_A3B_Recipe`
-- [Gemma4_26B_A4B_Recipe](https://gym.modal.dev/reference/training/gemma4_26b_a4b_recipe): `Gemma4_26B_A4B_Recipe`
-- [Inkling_Small_Recipe](https://gym.modal.dev/reference/training/inkling_small_recipe): `Inkling_Small_Recipe`
-- [Inkling_Small_LoRA_Recipe](https://gym.modal.dev/reference/training/inkling_small_lora_recipe): `Inkling_Small_LoRA_Recipe`
-- [Nemotron3_Ultra_550B_A55B_Recipe](https://gym.modal.dev/reference/training/nemotron3_ultra_550b_a55b_recipe): `Nemotron3_Ultra_550B_A55B_Recipe`
-- [Qwen3_6_35b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_35b_recipe): `Qwen3_6_35b_Recipe`
-- [Qwen3_6_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_6_27b_recipe): `Qwen3_6_27b_Recipe`
-- [Qwen3_8_27b_Recipe](https://gym.modal.dev/reference/training/qwen3_8_27b_recipe): `Qwen3_8_27b_Recipe`
-- [Qwen3.5-0.8b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_0_8b_recipe): `Qwen3_5_0_8b_Recipe`
-- [Qwen3.5-2b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_2b_recipe): `Qwen3_5_2b_Recipe`
-- [Qwen3.5-4b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_4b_recipe): `Qwen3_5_4b_Recipe`
-- [Qwen3.5-9b_Recipe](https://gym.modal.dev/reference/training/qwen3_5_9b_recipe): `Qwen3_5_9b_Recipe`
+- [TrainConfig](https://gym.modal.dev/reference/trainconfig)
+- [TrainingRun](https://gym.modal.dev/reference/trainingrun)
+- [TrainingGroup](https://gym.modal.dev/reference/traininggroup)
+- [TrainResult](https://gym.modal.dev/reference/trainresult)
+- [MetricConfig](https://gym.modal.dev/reference/metricconfig)
+- [TrackioConfig](https://gym.modal.dev/reference/trackioconfig)
+- [WandbConfig](https://gym.modal.dev/reference/wandbconfig)
+- [ModalRayCluster](https://gym.modal.dev/reference/modalraycluster)
+- [SlimeRecipe](https://gym.modal.dev/reference/slimerecipe)
+- [MilesRecipe](https://gym.modal.dev/reference/milesrecipe)
 
 ### Deployment
 
-- [Endpoint](https://gym.modal.dev/reference/deployment/endpoint): `Endpoint`
-- [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment): `CustomDeployment`
-- [SglangRecipe](https://gym.modal.dev/reference/deployment/sglangrecipe): `SglangRecipe`
-- [VllmRecipe](https://gym.modal.dev/reference/deployment/vllmrecipe): `VllmRecipe`
+- [CustomDeployment](https://gym.modal.dev/reference/customdeployment)
+- [Endpoint](https://gym.modal.dev/reference/endpoint)
+- [ParsedResponse](https://gym.modal.dev/reference/parsedresponse)
+- [SglangRecipe](https://gym.modal.dev/reference/sglangrecipe)
+- [VllmRecipe](https://gym.modal.dev/reference/vllmrecipe)
+- [DeepSeek_V4_Flash_SglangRecipe](https://gym.modal.dev/reference/deepseek_v4_flash_sglangrecipe)
+- [GLM_4_7_SglangRecipe](https://gym.modal.dev/reference/glm_4_7_sglangrecipe)
+- [Qwen3_0_6B_SglangRecipe](https://gym.modal.dev/reference/qwen3_0_6b_sglangrecipe)
+- [Qwen3_0_6B_VllmRecipe](https://gym.modal.dev/reference/qwen3_0_6b_vllmrecipe)
+- [Qwen3_1_7B_SglangRecipe](https://gym.modal.dev/reference/qwen3_1_7b_sglangrecipe)
+- [Qwen3_1_7B_VllmRecipe](https://gym.modal.dev/reference/qwen3_1_7b_vllmrecipe)
+- [Qwen3_4B_SglangRecipe](https://gym.modal.dev/reference/qwen3_4b_sglangrecipe)
+- [Qwen3_4B_VllmRecipe](https://gym.modal.dev/reference/qwen3_4b_vllmrecipe)
+- [Qwen3_8B_SglangRecipe](https://gym.modal.dev/reference/qwen3_8b_sglangrecipe)
+- [Qwen3_8B_VllmRecipe](https://gym.modal.dev/reference/qwen3_8b_vllmrecipe)
+- [Qwen3_30B_SglangRecipe](https://gym.modal.dev/reference/qwen3_30b_sglangrecipe)
+- [Qwen3_30B_VllmRecipe](https://gym.modal.dev/reference/qwen3_30b_vllmrecipe)
+- [Qwen3_6_35B_SglangRecipe](https://gym.modal.dev/reference/qwen3_6_35b_sglangrecipe)
+- [Qwen3_6_35B_VllmRecipe](https://gym.modal.dev/reference/qwen3_6_35b_vllmrecipe)
 
 ## Optional
 
-- [AGENTS.md](https://github.com/modal-projects/training-gym/blob/main/AGENTS.md): Agent working rules for this repo
-- [skills/](https://github.com/modal-projects/training-gym/tree/main/skills): Packaged agent skills (model-support, etc.)
-- [examples/quickstart.py](https://github.com/modal-projects/training-gym/blob/main/examples/quickstart.py): Minimal TrainConfig example
+- [AGENTS.md](https://github.com/modal-projects/training-gym/blob/main/AGENTS.md)
+- [skills/](https://github.com/modal-projects/training-gym/tree/main/skills)
+- [examples/quickstart.py](https://github.com/modal-projects/training-gym/blob/main/examples/quickstart.py)
 
 <!-- Generated by scripts/generate_llms_txt.py; do not edit by hand. -->

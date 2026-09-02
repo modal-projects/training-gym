@@ -1,8 +1,13 @@
 ---
 import CopyPageDropdown from './CopyPageDropdown.astro';
+import { isIdentifierTitlePath } from '../lib/docs-sections';
 
 const { entry } = Astro.locals.starlightRoute;
+const isIdentifierTitle = isIdentifierTitlePath(Astro.url.pathname);
 const pageUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
+const titleParts = entry.data.title.split(
+  /(?<=_)|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/,
+);
 const tutorialSlug = entry.id.replace(/^\/+/, '').startsWith('tutorials/')
   ? entry.id.replace(/^\/+/, '').slice('tutorials/'.length)
   : '';
@@ -15,8 +20,12 @@ const bodyMarkdown = typeof entry.body === 'string' ? entry.body.trim() : '';
 const markdownSource = bodyMarkdown ? `${bodyMarkdown}\n` : '';
 ---
 
-<div class="tg-page-head">
-  <h1 id="_top">{entry.data.title}</h1>
+<div class:list={['tg-page-head', { 'is-identifier': isIdentifierTitle }]}>
+  <h1 id="_top">
+    {titleParts.map((part, index) => (
+      <>{part}{index < titleParts.length - 1 && <wbr />}</>
+    ))}
+  </h1>
   <div class="tg-page-head__actions print:hidden">
     <CopyPageDropdown markdownSource={markdownSource} pageUrl={pageUrl} />
     {showGithub && (

@@ -21,7 +21,7 @@ Typical flow:
     result = TrainResult.load(training_run_id)
 
     print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
-    print(result.latest_checkpoint_path())  # .../iter_0000050
+    print(result.checkpoints()[-1].path)    # .../iter_0000050
 
     from modal_training_gym import CustomDeployment
     from modal_training_gym.deploy_recipes import SglangRecipe
@@ -58,6 +58,7 @@ from modal_training_gym.utils.metadata import (
 if TYPE_CHECKING:
     from modal import Volume
 
+    from modal_training_gym.common.checkpoint import Checkpoint
     from modal_training_gym.common.models import ModelConfig
 
 
@@ -66,40 +67,23 @@ TRAIN_RESULTS_STORE_NAME = MetadataStore.TRAIN_RESULTS.value
 
 @dataclass
 class TrainResult:
-    """One completed training run's checkpoint handle.
+    """Result metadata and checkpoints for a completed training run.
 
-    Constructed and persisted by each framework's ``train`` function at
-    the end of a run, and loaded by eval scripts via :meth:`load`. All
-    fields are pure data — no method connects to Modal until explicitly
-    invoked.
-
-    Fields
-    ------
-    app_name:
-        Modal app name — also the prefix for the per-app checkpoints
-        volume (``{app_name}-checkpoints``) and the shared results
-        :class:`modal.Dict` (``{app_name}-train-results``).
-    framework:
-        Training framework identifier.
-    training_run_id:
-        Unique identifier for *this* specific training call. Keys the
-        record in the shared :class:`modal.Dict`; embedded in
-        ``checkpoint_dir`` for frameworks that scope checkpoints by run.
-    checkpoint_dir:
-        Absolute in-container path to this run's checkpoint directory.
-        For slime (which
-        writes a single flat ``iter_*`` tree at ``slime.save``) this is
-        that save root.
-    model_config:
-        The ``ModelConfig`` used for training. The :attr:`model` property
-        returns a copy with ``model_path`` pointing at the latest
-        checkpoint, ready to serve.
-    group_id:
-        Identifier shared by every run in a :class:`TrainingGroup` sweep, or
-        empty for a standalone run. Lets eval/dashboard code group variants.
-    extra:
-        Free-form metadata a launcher may attach (e.g. metric run name,
-        rollout tunnel URL). Not used by the base class.
+    Args:
+        app_name:
+            Modal app name and default checkpoint volume prefix.
+        framework:
+            Training framework.
+        training_run_id:
+            Run ID and key in the shared results store.
+        checkpoint_dir:
+            Checkpoint directory inside the training container.
+        model_config:
+            Model used for training.
+        group_id:
+            ``TrainingGroup`` sweep ID.
+        extra:
+            Framework-specific run metadata.
     """
 
     app_name: str
@@ -161,12 +145,13 @@ class TrainResult:
 
     @classmethod
     def from_training_run_id(cls, training_run_id: str) -> "TrainResult":
-        """Load a completed run's result.
+        """Load a ``TrainResult`` by ``training_run_id``.
 
-        Raises
-        ------
-        KeyError
-            The given ``training_run_id`` isn't in the store.
+        Returns:
+            The persisted ``TrainResult``.
+
+        Raises:
+            KeyError: The given `training_run_id` isn't in the store.
         """
         return cls(
             **cls._parse_model_config(
@@ -176,26 +161,52 @@ class TrainResult:
 
     @classmethod
     def load(cls, training_run_id: str) -> "TrainResult":
+        """Alias for ``from_training_run_id``."""
         return cls.from_training_run_id(training_run_id)
 
-    # ── Volume lookup ────────────────────────────────────────────────────
-
     def volume(self) -> "Volume":
+        """Open or create the checkpoints volume.
+
+        Returns:
+            The Modal checkpoints ``Volume``.
+        """
         volume_name = self.checkpoints_volume_name or f"{self.app_name}-checkpoints"
         return Volume.from_name(volume_name, create_if_missing=True)
 
+    def checkpoints(self) -> list["Checkpoint"]:
+        """List this run's checkpoints.
+
+        Returns:
+            This run's ``Checkpoint`` objects.
+        """
+        from modal_training_gym.common.checkpoint import _list_checkpoints
+        from modal_training_gym.common.errors import TrainingGymConfigError
+
+        if self.framework in {
+            Framework.SLIME,
+            Framework.SLIME.value,
+            Framework.MILES,
+            Framework.MILES.value,
+        }:
+            return _list_checkpoints(self)
+        raise TrainingGymConfigError(f"Unsupported framework: {self.framework}")
+
     @property
     def model(self) -> "ModelConfig":
+        """Build a ``ModelConfig`` for this training result.
+
+        Returns:
+            A copy whose ``model_path`` targets the latest checkpoint, or
+            ``checkpoint_dir`` when no checkpoints are recorded.
+        """
         if self.model_config is None:
             raise ValueError(
                 "No model_config on this TrainResult. "
                 "Was it saved by an older launcher?"
             )
 
-        from modal_training_gym.common.checkpoint import list_checkpoints
-
         model = copy.copy(self.model_config)
-        checkpoints = list_checkpoints(self.training_run_id)
+        checkpoints = self.checkpoints()
         if checkpoints:
             model.model_path = checkpoints[-1].path
         elif self.checkpoint_dir:

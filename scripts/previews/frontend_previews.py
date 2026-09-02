@@ -1,23 +1,36 @@
+import sys
+import tempfile
 import traceback
-from pathlib import Path
-import modal
 from collections import defaultdict
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
-from typing import Literal, TypeAlias, Optional
+from pathlib import Path
+from typing import Literal, Optional, TypeAlias
+
+import modal
 
 NGINX_CONF_DIR = Path("/root/nginx")
+_DOCS_NEXT = Path(__file__).resolve().parent.parent.parent / "docs-next"
+_ASTRO_REDIRECTS = _DOCS_NEXT / "astro_redirects.py"
+sys.path.insert(0, str(_DOCS_NEXT))
+sys.path.insert(1, "/root")
+from astro_redirects import redirect_status, refresh_map_from_tarball  # noqa: E402
 
 image = (
     modal.Image.debian_slim()
     .pip_install("PyGithub~=2.6.1")
     .add_local_dir(Path(__file__).resolve().parent / "nginx", NGINX_CONF_DIR)
+    .add_local_file(_ASTRO_REDIRECTS, "/root/astro_redirects.py", copy=True)
 )
 
 with image.imports():
     from github import Github
 
-redirector_image = modal.Image.debian_slim().pip_install("fastapi[standard]==0.139.0")
+redirector_image = (
+    modal.Image.debian_slim()
+    .pip_install("fastapi[standard]==0.139.0")
+    .add_local_file(_ASTRO_REDIRECTS, "/root/astro_redirects.py", copy=True)
+)
 
 app = modal.App(
     name="training-gym-previews",
@@ -38,6 +51,18 @@ def get_mounted_artifact_path(name):
 
 
 PreviewType: TypeAlias = Literal["dashboard", "docs"]
+
+
+def _docs_nginx_refresh_inc(redirects: dict[str, str]) -> str:
+    blocks: list[str] = []
+    for path, target in sorted(redirects.items()):
+        safe_target = target.replace("$", "$$")
+        locations = ("/",) if path == "/" else (path, f"{path}/")
+        for location in locations:
+            blocks.append(
+                f"location = {location} {{ return {redirect_status(path)} {safe_target}$is_args$args; }}"
+            )
+    return "\n".join(blocks) + ("\n" if blocks else "")
 
 
 @dataclass
@@ -69,6 +94,9 @@ class PreviewDeployment:
 
         if self.type == "docs":
             image = image.add_local_file(NGINX_CONF_DIR / "docs.conf", remote_conf)
+            inc = Path(tempfile.mkdtemp()) / "astro-refresh.inc"
+            inc.write_text(_docs_nginx_refresh_inc(refresh_map_from_tarball(path)))
+            image = image.add_local_file(inc, "/etc/nginx/astro-refresh.inc", copy=True)
 
         sb_app = modal.App.lookup(SANDBOX_APP_NAME, create_if_missing=True)
         self.expiration = datetime.now() + SANDBOX_TIMEOUT

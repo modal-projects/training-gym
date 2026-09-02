@@ -53,7 +53,7 @@ _EPHEMERAL_DISK_MIB = 2 * 1024 * 1024
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
-    """Full-parameter GRPO on Nemotron-3-Ultra-550B-A55B (16 nodes x 8 H200)."""
+    """Nemotron-3-Ultra-550B-A55B full-parameter GRPO recipe for 16 nodes with 8 H200 GPUs each."""
 
     model_config_class: ClassVar[type[ModelConfig]] = Nemotron3_Ultra_550B_A55B
 
@@ -125,12 +125,11 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     # directory routes to _load_checkpoint_hf. There is no offline torch_dist
     # conversion step, so none of the conversion_* fields apply.
     #
-    # The bridge logs "Unrecognized mapping type for mtp.*" on every rank: the
-    # checkpoint ships an MTP (speculative-draft) head whose layer norms have no
-    # bridge mapping. Benign while MTP is neither trained (mtp_num_layers unset)
-    # nor served (no sglang_speculative_algorithm); enabling speculative decoding
-    # with this head requires fixing that mapping first.
-    megatron_to_hf_mode: str = "bridge"
+    # Under the default bridge mode this model logs "Unrecognized mapping type
+    # for mtp.*" on every rank: the checkpoint ships an MTP (speculative-draft)
+    # head whose layer norms have no bridge mapping. Benign while MTP is neither
+    # trained (mtp_num_layers unset) nor served (no sglang_speculative_algorithm);
+    # enabling speculative decoding with this head requires fixing that mapping.
     ref_load: str = "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
     # hf_checkpoint is intentionally unset — it comes from the attached
     # ModelConfig, so pointing the recipe at another checkpoint is a model swap.
@@ -167,8 +166,6 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
 
     # ── Cluster + parallelism ────────────────────────────────────────────────
     actor_num_nodes: int = 16
-    actor_num_gpus_per_node: int = 8
-    colocate: bool = True
     # Mamba n_groups=8 requires n_groups % tp == 0, so attention/Mamba tensor
     # parallelism cannot exceed 8. Scale comes from PP and EP instead.
     tensor_model_parallel_size: int = 8
@@ -192,7 +189,6 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     # ── Rollout + reward ─────────────────────────────────────────────────────
     rm_type: str | None = "deepscaler"
     balance_data: bool = True
-    rollout_shuffle: bool = True
     num_rollout: int = 30
     # Small rollout batch/sample sizes can idle DP ranks;
     # see sglang#34535: https://github.com/sgl-project/sglang/pull/34535
@@ -200,7 +196,6 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     n_samples_per_prompt: int = 8
     global_batch_size: int = 128
     rollout_max_response_len: int = 8192
-    rollout_temperature: float = 1.0
     # The 550 B (~1.1 TB BF16) does not fit one 8-GPU engine.
     rollout_num_gpus_per_engine: int = 32
     skip_eval_before_train: bool = True
@@ -214,27 +209,12 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     # post-load barrier to 3600 s for the same reason — leaving this at 1800 would
     # just move the failure from the barrier to the health checker.
     rollout_health_check_first_wait: int = 3600
-    # Left off deliberately, unlike every other large-MoE recipe here: upstream
-    # does not enable routing replay for the 108-layer Ultra because the routing
-    # capturer needs a fix for per-layer top-22 under DP-attention.
-    # Train/rollout logprob diff is ~0.01 without it.
-    use_rollout_routing_replay: bool = False
-
-    # ── GRPO ─────────────────────────────────────────────────────────────────
-    advantage_estimator: str = "grpo"
-    entropy_coef: float = 0.0
-    eps_clip: float = 0.2
-    eps_clip_high: float = 0.28
-    kl_loss_coef: float = 0.0
-    kl_loss_type: str = "low_var_kl"
+    # Routing replay stays at the framework default of off, unlike every other
+    # large-MoE recipe here: upstream does not enable it for the 108-layer Ultra
+    # because the routing capturer needs a fix for per-layer top-22 under
+    # DP-attention. Train/rollout logprob diff is ~0.01 without it.
 
     # ── Optimizer ────────────────────────────────────────────────────────────
-    optimizer: str = "adam"
-    lr: float = 1e-6
-    lr_decay_style: str = "constant"
-    weight_decay: float = 0.1
-    adam_beta1: float = 0.9
-    adam_beta2: float = 0.98
     optimizer_cpu_offload: bool = True
     overlap_cpu_optimizer_d2h_h2d: bool = True
     use_precision_aware_optimizer: bool = True
@@ -257,12 +237,7 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     offload_train_disk_dir: str = "/tmp/train_offload"
 
     # ── Batching + precision ─────────────────────────────────────────────────
-    use_dynamic_batch_size: bool = True
     max_tokens_per_gpu: int = 1024
-    attention_dropout: float = 0.0
-    hidden_dropout: float = 0.0
-    accumulate_allreduce_grads_in_fp32: bool = True
-    attention_softmax_in_fp32: bool = True
     attention_backend: str = "auto"
 
     # ── SGLang ───────────────────────────────────────────────────────────────

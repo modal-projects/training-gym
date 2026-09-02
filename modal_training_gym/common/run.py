@@ -75,28 +75,7 @@ class TrainingRunStatus(Enum):
 
 
 class TrainingRun(BaseModel):
-    """Handle to one launched training run — the record *and* the way to wait on it.
-
-    ``TrainConfig.launch()`` returns a ``TrainingRun`` as soon as training is
-    spawned, and persists it to the metadata volume (which is what the
-    dashboard reads). Because the Modal app is started detached and the
-    ``train`` function-call id is persisted on the record, a run outlives the
-    process that launched it and can be picked back up by id from anywhere:
-
-    ```python
-    run = TrainConfig(...).launch()
-    print(run.training_run_id, run.modal_app_url)
-
-    # ...later, from any other process:
-    run = TrainingRun.from_id("<training_run_id>")
-    train_result = run.result()   # block for the TrainResult
-    run.function_call.cancel(terminate_containers=True)   # or stop it early
-    ```
-
-    Never hand-roll ``_build_app()`` + ``app.train.spawn()`` to get this: that
-    nested ``app.run()`` is ephemeral, so leaving the block (or Ctrl-C) stops
-    the app and kills the run.
-    """
+    """A launched training run that can be inspected, awaited, or loaded by ID."""
 
     training_run_id: str
     modal_app_id: str = ""
@@ -140,14 +119,7 @@ class TrainingRun(BaseModel):
     @computed_field
     @property
     def group_id(self) -> str | None:
-        """Group id, derived from ``metadata`` (its single source of truth).
-
-        Exposed as a top-level attribute/serialized field so the dashboard and
-        other callers can read ``run.group_id`` directly, but not stored
-        separately — ``TrainConfig`` writes it into ``metadata`` (and
-        ``metadata['group_tags']``), and this reads it back so the two can never
-        drift out of sync.
-        """
+        """The sweep ID stored in ``metadata``."""
         meta = self.metadata or {}
         gid = meta.get("group_id")
         if gid:
@@ -173,7 +145,17 @@ class TrainingRun(BaseModel):
         timeout: float | None = None,
         stop_app_on_success: bool = True,
     ) -> TrainResult:
-        """Block until the spawned training call finishes and return its TrainResult."""
+        """Wait for this training run to finish.
+
+        Args:
+            timeout:
+                Maximum number of seconds to wait.
+            stop_app_on_success:
+                Stop the Modal app after successful training.
+
+        Returns:
+            The completed training result.
+        """
         from modal_training_gym.common.modal_lifecycle import stop_app
         from modal_training_gym.common.status_reporter import (
             flush as flush_status_reporter,
@@ -228,12 +210,10 @@ class TrainingRun(BaseModel):
     def apply_framework_status(
         self, update: FrameworkStatusUpdate
     ) -> FrameworkStatus | None:
-        """Apply one framework-status report to this run (without saving).
+        """Apply a framework status update without saving the run.
 
-        Sets ``framework_status``, merges the report into the
-        ``framework_progress`` metadata blob, and records step start/finish
-        times. Returns the resolved status, or ``None`` (run untouched) when
-        ``update.phase`` isn't a valid status for this run's framework.
+        Returns:
+            The resolved status, or ``None`` for an invalid phase.
         """
         status = resolve_framework_status(update.phase, str(self.framework.value))
         if status is None:
@@ -285,7 +265,7 @@ class TrainingRun(BaseModel):
         return status
 
     def record_latest_rollout(self, rollout: TrainingRolloutResult) -> None:
-        """Stamp a just-saved rollout's summary onto this run's metadata."""
+        """Store the saved rollout summary in this run's metadata."""
         metadata = dict(self.metadata or {})
         metadata["latest_rollout"] = {
             "rollout_id": rollout.rollout_id,
@@ -426,7 +406,7 @@ class TrainingRun(BaseModel):
 
     @classmethod
     def from_stored_data(cls, data: object) -> TrainingRun:
-        """Use for volume records instead of model_validate to snapshot metadata keys."""
+        """Build a run from persisted data and snapshot its metadata keys."""
         run = cls.model_validate(data)
         metadata = data.get("metadata") if isinstance(data, dict) else None
         if isinstance(metadata, dict):

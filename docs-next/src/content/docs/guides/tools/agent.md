@@ -80,7 +80,7 @@ class RhymeInstructionDataset(HuggingFaceDataset):
         return ds
 ```
 
-Next, it defined the reward function. Here, we care about the model's ability to both rhyme and answer the user's question. As our [intro tutorial](https://gym.modal.dev/tutorials/rl_basics) shows, NLTK’s [CMU Pronouncing Dictionary](https://github.com/prosegrinder/python-cmudict) is a useful library for measure the former.
+Next, it defined the reward function. Here, we care about the model's ability to both rhyme and answer the user's question. As our [intro tutorial](https://gym.modal.dev/tutorials/rl_basics) shows, NLTK’s [CMU Pronouncing Dictionary](https://github.com/prosegrinder/python-cmudict) is a useful library for measuring the former.
 
 <details>
 <summary>What's going on here</summary>
@@ -270,7 +270,7 @@ Then, it wrote the training code:
 
 ```python
 from modal_training_gym import Qwen3_4B, TrainConfig
-from modal_training_gym.train_recipes.slime_recipe import Qwen3_4b_Recipe
+from modal_training_gym.train_recipes.slime_recipe import Qwen3_4B_Recipe
 
 
 def _image_overlay(image):
@@ -290,7 +290,7 @@ def build_config(*, num_rollout: int, n_rows: int, save_interval: int) -> TrainC
     return TrainConfig(
         model=Qwen3_4B(),
         dataset=RhymeInstructionDataset(n_rows=n_rows),
-        recipe=Qwen3_4b_Recipe(
+        recipe=Qwen3_4B_Recipe(
             custom_rm_function=rhyme_rm,
             num_rollout=num_rollout,
             rollout_batch_size=16,

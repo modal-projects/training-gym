@@ -21,7 +21,6 @@ from modal_training_gym import (
     GLM_4_7,
     HuggingFaceDataset,
     TrainConfig,
-    list_checkpoints,
 )
 from modal_training_gym.train_recipes.slime_recipe import GLM_4_7_Recipe
 
@@ -44,6 +43,7 @@ class MathDataset(HuggingFaceDataset):
 
 train_dataset = MathDataset(hf_split="train[:2000]")
 recipe = GLM_4_7_Recipe(
+    eval_interval=None,
     rm_type="deepscaler",
 )
 
@@ -70,7 +70,7 @@ print(f"run id: {run.training_run_id}")
 # Spin up an [Endpoint](https://modal.com/docs/guide/endpoints) and try a prompt.
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(

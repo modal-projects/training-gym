@@ -43,10 +43,9 @@ from modal_training_gym import (
     Endpoint,
     HuggingFaceDataset,
     Qwen3_5_4B,
+    Qwen3_5_4B_Recipe,
     Qwen3_5_9B,
-    SlimeRecipe,
     TrainConfig,
-    list_checkpoints,
 )
 
 # ## Deploy the base models
@@ -56,7 +55,7 @@ from modal_training_gym import (
 # to serve the student. However, for the teacher model, we need per-token logprobs, 
 # which are not currently supported by Endpoints when speculative decoding is
 # enabled. So we instead use a
-# [CustomDeployment](https://gym.modal.dev/reference/deployment/customdeployment)
+# [CustomDeployment](https://gym.modal.dev/reference/customdeployment)
 # to serve the teacher.
 
 student_model = Qwen3_5_4B()
@@ -250,24 +249,13 @@ def math_opd_post_process(args, samples, **kwargs):
 config = TrainConfig(
     model=student_model,
     dataset=train_dataset,
-    recipe=SlimeRecipe(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus=8,
-        rollout_num_gpus_per_engine=1,
-        colocate=True,
-        num_rollout=10,
-        rollout_batch_size=16,
-        n_samples_per_prompt=4,
-        global_batch_size=16,
-        rollout_max_response_len=2048,
-        rollout_temperature=1.0,
-        lr=1e-6,
-        save_interval=5,
+    recipe=Qwen3_5_4B_Recipe(
         eval_interval=None,
+        rollout_num_gpus=8,
+        num_rollout=10,
+        n_samples_per_prompt=4,
+        rollout_max_response_len=2048,
+        save_interval=5,
         custom_rm_function=math_opd_rm,
         custom_reward_post_process_function=math_opd_post_process,
         apply_chat_template_kwargs='{"enable_thinking": true}',
@@ -294,7 +282,7 @@ print(f"run id: {run.training_run_id}")
 # to our baseline evaluation from earlier.
 
 result = run.result()
-checkpoint = list_checkpoints(result.training_run_id)[-1]
+checkpoint = result.checkpoints()[-1]
 print(f"checkpoint: {checkpoint.path}")
 
 trained_student_deployment = Endpoint.launch(

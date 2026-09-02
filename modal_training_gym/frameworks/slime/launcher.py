@@ -66,6 +66,7 @@ from modal_training_gym.common.launcher_utils import (
     timing_debug_env,
 )
 from modal_training_gym.common.metrics import (
+    apply_metric_image,
     metric_metadata,
     metric_runtime_env,
     metric_secrets,
@@ -390,7 +391,7 @@ def build_slime_app(
                 f"{model.model_name} requires padded (bshd) batches: its "
                 "megatron-bridge forward doesn't implement THD sequence packing. "
                 'Set extra_config={"qkv_format": "bshd", "micro_batch_size": N} and '
-                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7b_Recipe, which sets "
+                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7B_Recipe, which sets "
                 f"these. Got qkv_format={cfg.get('qkv_format')!r}, "
                 f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
             )
@@ -460,6 +461,7 @@ def build_slime_app(
     if slime.image_env:
         image = image.env(slime.image_env)
 
+    image = apply_metric_image(image, slime.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)
@@ -763,6 +765,7 @@ def build_slime_app(
         image=image,
         gpu=gpu_spec,
         memory=slime.memory,
+        cpu=slime.cpu,
         cloud=slime.cloud,
         region=slime.region,
         volumes=all_volumes,
@@ -876,6 +879,11 @@ def build_slime_app(
     train_secrets: list[Secret] = []
     if slime.metrics is not None:
         train_secrets.extend(metric_secrets(slime.metrics))
+        if (
+            slime.metrics.provider == "trackio"
+            and getattr(slime.metrics, "modal_secret_name", "") == "huggingface-secret"
+        ):
+            train_secrets.extend(hf_secrets())
     # Proxy-auth tokens for any custom_rm / generate hook that calls a
     # CustomDeployment.launch() endpoint (teacher /generate, etc.).
     train_secrets.extend(proxy_auth_secrets())
@@ -899,6 +907,7 @@ def build_slime_app(
         image=train_image,
         gpu=gpu_spec,
         memory=slime.memory,
+        cpu=slime.cpu,
         cloud=slime.cloud,
         region=slime.region,
         volumes=all_volumes,
