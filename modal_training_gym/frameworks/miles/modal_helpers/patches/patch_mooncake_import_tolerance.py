@@ -40,9 +40,12 @@ NEW_USE = (
     "    transfer_engine = TransferEngine()"
 )
 
+
 def _patch_file(target: pathlib.Path) -> None:
     if not target.exists():
-        raise SystemExit(f"{target} not found; miles layout changed — re-check the patch.")
+        raise SystemExit(
+            f"{target} not found; miles layout changed — re-check the patch."
+        )
 
     src = target.read_text()
     if MARKER in src:
