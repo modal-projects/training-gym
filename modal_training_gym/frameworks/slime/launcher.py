@@ -616,7 +616,9 @@ def build_slime_app(
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
+    data_volume = Volume.from_name(
+        slime.data_volume_name or f"{volume_prefix}-data", create_if_missing=True
+    )
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
         resolve_checkpoint_volumes(
             checkpoint,
