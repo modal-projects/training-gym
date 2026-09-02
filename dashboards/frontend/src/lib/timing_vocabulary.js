@@ -74,7 +74,7 @@ export const TIMING_LABELS = {
   evaluate_rollouts: "Eval (before training)",
   evaluate_rollouts_end: "Eval (after training)",
   generate_rollouts: "Rollout generation",
-  offload_rollout: "Offload generation engines",
+  offload_rollout: "Offload rollout engines",
   compute_log_probs: "Calculate log probs",
   train_models: "Train",
   checkpoint_save: "Save checkpoint",
@@ -92,52 +92,9 @@ export const TIMING_LABELS = {
   optimizer_step: "Optimizer step",
   // Labels stay role-neutral: the tooltip prefixes the role that recorded the
   // phase, and the actor and the critic record the same phase names.
-  trainer_finalize: "Cleanup & offload",
+  trainer_finalize: "Trainer cleanup",
   train_step_finalize: "Train-step cleanup & metrics",
 };
-
-// What each phase actually wraps, described from the recording role's point of
-// view; kept in step with the patch sites in
-// modal_training_gym/frameworks/*/modal_helpers/patches/patch_substep_timing.py.
-export const PHASE_DESCRIPTIONS = {
-  evaluate_rollouts: "Evaluation pass before the first training step.",
-  evaluate_rollouts_end: "Evaluation pass after this step's training.",
-  generate_rollouts:
-    "The driver's call for this step's samples, start to finish — the engines' own generation is the nested bar.",
-  generate_samples: "Generating and scoring this step's batch on the engines.",
-  sample_generation:
-    "Generating one sample; summed over samples that ran at the same time.",
-  reward: "Scoring one sample's reward.",
-  reward_batch: "Scoring a whole batch of rewards in one call.",
-  reward_post_process: "Turning raw reward scores into training rewards.",
-  offload_rollout: "Freeing the engines' GPU memory before training starts.",
-  compute_log_probs:
-    "A forward-only log-prob pass; runs once per model that needs one (reference, old policy, teacher, actor).",
-  train_models:
-    "The driver's training call for this step, blocking until every worker returns.",
-  forward_backward: "Forward and backward pass over the microbatches.",
-  optimizer_step:
-    "Parameter update and LR-scheduler step; skipped steps record nothing.",
-  train_step_finalize:
-    "After each training step: releasing gradients, reducing the loss and logging.",
-  trainer_finalize:
-    "After the step's training: debug dump, replay clear, CPU weight backup, optional reference update, and the GPU offload.",
-  checkpoint_save: "Writing this step's checkpoint.",
-  offload_train:
-    "Freeing the trainer's GPU memory before the engines take new weights.",
-  weight_sync:
-    "Loading the updated weights into the generation engines, including bringing them back onto the GPU.",
-  initial_weight_sync:
-    "The first weight load into the engines, before the training loop starts.",
-  wait_for_rollout:
-    "Async driver idle: this step's samples were prefetched during the previous step and aren't ready yet.",
-  wait_for_next_rollout:
-    "Async driver idle: generation of the next step's samples has to finish before weights can change.",
-};
-
-export function descriptionFor(name) {
-  return PHASE_DESCRIPTIONS[name] || null;
-}
 
 export const IDLE_PHASES = new Set([
   "wait_for_rollout",
