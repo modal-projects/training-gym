@@ -469,6 +469,33 @@ def prepare_launch_config(
             object.__setattr__(cfg, field, path)
 
 
+def drop_materialized_config_key(cfg: Any, key: str) -> None:
+    """Remove ``key`` from the recipe's already-materialized escape-hatch YAML.
+
+    Runs after ``prepare_launch_config`` has replaced the escape-hatch dict
+    with a file path, so the YAML is rewritten and the recorded keys updated
+    so ``_emit_fields`` stops suppressing the same-named flag.
+    """
+    import yaml
+
+    escape_hatch = getattr(cfg, "_ESCAPE_HATCH_FIELD", None)
+    if not escape_hatch:
+        return
+    keys = tuple(getattr(cfg, "_materialized_config_keys", ()) or ())
+    if key not in keys:
+        return
+    path = getattr(cfg, escape_hatch, None)
+    if isinstance(path, str) and os.path.isfile(path):
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        data.pop(key, None)
+        with open(path, "w") as f:
+            yaml.dump(data, f)
+    object.__setattr__(
+        cfg, "_materialized_config_keys", tuple(k for k in keys if k != key)
+    )
+
+
 def build_train_cmd(
     cfg: Any,
     root: str,

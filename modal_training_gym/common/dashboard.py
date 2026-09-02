@@ -13,6 +13,10 @@ from pathlib import Path
 DASHBOARD_APP_NAME = "training-gym-dashboard"
 DASHBOARD_WEB_FUNCTION = "fastapi_app"
 
+# Set on a per-PR dashboard deploy (scripts/previews/dashboard_api.py) so it
+# serves the API without the scheduled jobs that rewrite shared metadata.
+DASHBOARD_PREVIEW_ENV_KEY = "TRAINING_GYM_DASHBOARD_PREVIEW"
+
 _DASHBOARD_SOURCES = (
     (Path(__file__).resolve().parents[1], (".py",)),
     (Path(__file__).resolve().parents[2] / "dashboards" / "frontend", None),

@@ -174,6 +174,7 @@ def test_auto_deploy_redeploys_when_fingerprint_is_stale(
     assert cli_setup_module.ensure_dashboard_deployed() == "https://dashboard.test"
     assert calls == [{"interactive": False, "require_proxy_auth": False}]
 
+
 def _capture_report(reporter, monkeypatch):
     requests = []
 

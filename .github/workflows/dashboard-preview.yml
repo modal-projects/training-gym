@@ -2,9 +2,11 @@ name: Dashboard preview
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
     paths:
       - ".github/workflows/dashboard-preview.yml"
       - "dashboards/**"
+      - "modal_training_gym/_dashboard.py"
       - "scripts/previews/**"
 
 permissions:
@@ -16,6 +18,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +51,9 @@ jobs:
           path: dashboard.tar.gz
 
   preview:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: |
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     needs:
       - build
     runs-on: ubuntu-latest
@@ -72,8 +77,17 @@ jobs:
         with:
           name: dashboard-dist
 
+      # The preview's frontend is static nginx, so its /api has to be proxied
+      # somewhere. Give the PR its own backend: the deployed one doesn't have
+      # the PR's API changes.
+      - name: Deploy dashboard API preview
+        id: api
+        run: |
+          uv run python scripts/previews/dashboard_api.py deploy ${{ github.event.pull_request.number }} | tee api.log
+          echo "url=$(tail -n 1 api.log)" >> "$GITHUB_OUTPUT"
+
       - name: Deploy dashboard preview
-        run: uv run --no-project --with modal python scripts/previews/deploy.py ${{ github.event.pull_request.number }} dashboard dashboard.tar.gz
+        run: uv run --no-project --with modal python scripts/previews/deploy.py ${{ github.event.pull_request.number }} dashboard dashboard.tar.gz --api-url '${{ steps.api.outputs.url }}'
 
       - name: Comment preview URL on PR
         uses: actions/github-script@v7
@@ -101,3 +115,24 @@ jobs:
               issue_number: prNumber,
               body: `${marker}\nDashboard preview: ${baseUrl}/${prNumber}/dashboard`,
             });
+
+  cleanup:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.PREVIEW_MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.PREVIEW_MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: training-gym
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      # The nginx sandbox is reaped by the previews app's hourly refresh; the
+      # PR's own dashboard app is ours to stop.
+      - name: Stop dashboard API preview
+        run: uv run python scripts/previews/dashboard_api.py stop ${{ github.event.pull_request.number }}
