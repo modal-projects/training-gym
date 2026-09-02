@@ -8,7 +8,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "previews"))
 
-from dashboard_api import app_name  # noqa: E402
+from dashboard_api import app_name, is_already_gone  # noqa: E402
 from frontend_previews import (  # noqa: E402
     DEPLOYED_DASHBOARD_HOST,
     render_dashboard_conf,
@@ -38,6 +38,25 @@ def test_conf_without_a_pr_backend_keeps_using_the_deployed_dashboard():
 def test_conf_rejects_an_api_url_it_cannot_read_a_host_from():
     with pytest.raises(ValueError):
         render_dashboard_conf(TEMPLATE, "not-a-url")
+
+
+@pytest.mark.parametrize(
+    "api_url",
+    [
+        "https://evil.example.com",
+        "https://ok.modal.run;return 200 'x'",
+        "https://ok.modal.run.evil.example.com",
+    ],
+)
+def test_conf_only_proxies_at_modal_hosts(api_url):
+    # The host lands inside nginx directives verbatim.
+    with pytest.raises(ValueError):
+        render_dashboard_conf(TEMPLATE, api_url)
+
+
+def test_cleanup_tolerates_a_missing_app_but_not_a_failing_one():
+    assert is_already_gone("Error: App training-gym-dashboard-pr-489 not found")
+    assert not is_already_gone("Error: connection to Modal failed")
 
 
 def test_backend_app_name_is_per_pr():

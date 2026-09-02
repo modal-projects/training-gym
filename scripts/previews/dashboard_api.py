@@ -54,6 +54,12 @@ def deploy(pr_number: int) -> str:
     return modal.Function.from_name(name, WEB_FUNCTION).get_web_url()
 
 
+def is_already_gone(output: str) -> bool:
+    """Whether ``modal app stop`` failed because there's nothing left to stop."""
+    lowered = output.lower()
+    return "not found" in lowered or "no such app" in lowered
+
+
 def stop(pr_number: int) -> None:
     """Stop the PR's dashboard app, tolerating one that's already gone."""
     name = app_name(pr_number)
@@ -68,7 +74,12 @@ def stop(pr_number: int) -> None:
         return
     print(result.stdout, end="")
     print(result.stderr, end="", file=sys.stderr)
-    print(f"Warning: could not stop {name}; it may already be stopped.")
+    if is_already_gone(result.stdout + result.stderr):
+        print(f"{name} is already stopped.")
+        return
+    # Anything else leaves a backend running against real metadata, so the
+    # cleanup job should go red and be retried.
+    raise SystemExit(result.returncode)
 
 
 def main() -> None:

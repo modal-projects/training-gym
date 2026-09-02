@@ -1,3 +1,4 @@
+import re
 import sys
 import tempfile
 import traceback
@@ -72,11 +73,18 @@ def _docs_nginx_refresh_inc(redirects: dict[str, str]) -> str:
     return "\n".join(blocks) + ("\n" if blocks else "")
 
 
+MODAL_HOST_RE = re.compile(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.modal\.run")
+
+
 def render_dashboard_conf(template: str, api_url: Optional[str]) -> str:
     """Point the dashboard conf's ``/api`` proxy at the API this preview uses."""
     host = urlparse(api_url).netloc if api_url else DEPLOYED_DASHBOARD_HOST
     if not host:
         raise ValueError(f"no host in api_url={api_url!r}")
+    # The host is substituted straight into nginx directives, and the preview
+    # only ever proxies at a Modal web endpoint.
+    if not MODAL_HOST_RE.fullmatch(host):
+        raise ValueError(f"not a modal.run host: {host!r}")
     return template.replace("__API_HOST__", host)
 
 
