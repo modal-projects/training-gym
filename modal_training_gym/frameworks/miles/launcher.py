@@ -26,6 +26,7 @@ from modal_training_gym.common.framework import (
     mount_tools_dir,
 )
 from modal_training_gym.common.launcher_utils import (
+    drop_materialized_config_key,
     serialize_recipe_params,
     timing_debug_env,
 )
@@ -1150,6 +1151,7 @@ def build_miles_app(
                 # Continue from the iteration stored in the run's own checkpoint,
                 # even for runs launched with an explicit start_rollout_id.
                 miles.start_rollout_id = None
+                drop_materialized_config_key(miles, "start_rollout_id")
             elif unresumable := _unresumable_save_dirs(save_root):
                 print(
                     f"WARNING: {save_root} holds saves that cannot be resumed "

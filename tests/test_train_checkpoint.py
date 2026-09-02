@@ -173,3 +173,31 @@ def test_miles_conversion_uses_wrapper_with_expected_environment() -> None:
         '            env["CONVERT_KEEP_PP1"] = "1"'
     ) in source
     assert 'if num_nodes > 1:\n            env["SKIP_RELEASE_RENAME"] = "1"' in source
+
+
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        pytest.param(SlimeRecipe(**_RECIPE_KW), id="slime"),
+        pytest.param(MilesRecipe(), id="miles"),
+    ],
+)
+def test_auto_resume_drops_extra_config_start_rollout_id(recipe, tmp_path) -> None:
+    import yaml
+
+    from modal_training_gym.common.launcher_utils import (
+        drop_materialized_config_key,
+        prepare_launch_config,
+    )
+
+    recipe.extra_config = {"start_rollout_id": 0, "qkv_format": "bshd"}
+    prepare_launch_config(
+        recipe, None, str(tmp_path), yaml_config_fields=("extra_config",)
+    )
+    assert "start_rollout_id" in recipe._escape_hatch_keys()
+
+    drop_materialized_config_key(recipe, "start_rollout_id")
+
+    assert recipe._escape_hatch_keys() == ("qkv_format",)
+    with open(recipe.extra_config) as f:
+        assert yaml.safe_load(f) == {"qkv_format": "bshd"}
