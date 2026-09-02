@@ -54,10 +54,19 @@ def deploy(pr_number: int) -> str:
     return modal.Function.from_name(name, WEB_FUNCTION).get_web_url()
 
 
-def is_already_gone(output: str) -> bool:
-    """Whether ``modal app stop`` failed because there's nothing left to stop."""
+def is_already_gone(output: str, name: str) -> bool:
+    """Whether ``modal app stop`` failed because there's nothing left to stop.
+
+    The app has to be the missing thing: a failure about some other absent
+    resource leaves the backend running.
+    """
     lowered = output.lower()
-    return "not found" in lowered or "no such app" in lowered
+    if name.lower() not in lowered:
+        return False
+    return any(
+        phrase in lowered
+        for phrase in ("app not found", "no such app", "lookup failed for app")
+    )
 
 
 def stop(pr_number: int) -> None:
@@ -74,7 +83,7 @@ def stop(pr_number: int) -> None:
         return
     print(result.stdout, end="")
     print(result.stderr, end="", file=sys.stderr)
-    if is_already_gone(result.stdout + result.stderr):
+    if is_already_gone(result.stdout + result.stderr, name):
         print(f"{name} is already stopped.")
         return
     # Anything else leaves a backend running against real metadata, so the

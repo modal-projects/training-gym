@@ -55,8 +55,12 @@ def test_conf_only_proxies_at_modal_hosts(api_url):
 
 
 def test_cleanup_tolerates_a_missing_app_but_not_a_failing_one():
-    assert is_already_gone("Error: App training-gym-dashboard-pr-489 not found")
-    assert not is_already_gone("Error: connection to Modal failed")
+    name = app_name(489)
+
+    assert is_already_gone(f"Error: App not found: {name}", name)
+    assert is_already_gone(f"Error: Lookup failed for App '{name}'", name)
+    assert not is_already_gone("Error: connection to Modal failed", name)
+    assert not is_already_gone("Error: Secret 'wandb' not found", name)
 
 
 def test_backend_app_name_is_per_pr():
