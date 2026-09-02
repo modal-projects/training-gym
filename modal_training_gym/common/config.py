@@ -24,6 +24,7 @@ MODAL_CONFIG_PATH = Path(
 
 _dashboard_requires_proxy_auth = False
 DASHBOARD_PROXY_AUTH_PATH = "/api/proxy-auth"
+DASHBOARD_VERSION_PATH = "/api/version"
 
 # Holds DASHBOARD_PASSWORD. An empty value means the dashboard is open (no
 # auth) — that's the default so existing deployments keep working untouched.
@@ -64,6 +65,20 @@ def save_dashboard_url(url: str, *, proxy_auth: bool | None = None) -> None:
         dashboard["proxy_auth"] = proxy_auth
     config["dashboard"] = dashboard
     CONFIG_PATH.write_text(_render(config))
+
+
+def get_dashboard_version(url: str) -> str | None:
+    """Return the source fingerprint the live dashboard was built from, or ``None``."""
+    request = Request(
+        url.rstrip("/") + DASHBOARD_VERSION_PATH,
+        headers=modal_proxy_auth_headers(),
+    )
+    try:
+        with urlopen(request, timeout=5) as response:
+            value = loads(response.read())
+    except (HTTPError, URLError, OSError, JSONDecodeError, UnicodeDecodeError):
+        return None
+    return value if isinstance(value, str) else None
 
 
 def get_dashboard_url() -> str | None:

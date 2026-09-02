@@ -131,6 +131,49 @@ def test_auto_deploy_reuses_proxy_auth_mode(monkeypatch, last_proxy_auth, expect
     assert calls == [{"interactive": False, "require_proxy_auth": expected}]
 
 
+def _deployed_dashboard(monkeypatch, *, live_version, local_fingerprint):
+    monkeypatch.setattr(
+        cli_setup_module, "deployed_dashboard_url", lambda: "https://dashboard.test"
+    )
+    monkeypatch.setattr(
+        cli_setup_module, "current_dashboard_fingerprint", lambda: local_fingerprint
+    )
+    # ensure_dashboard_deployed imports these from config at call time.
+    monkeypatch.setattr(config, "get_dashboard_version", lambda _url: live_version)
+    monkeypatch.setattr(config, "get_dashboard_proxy_auth", lambda: False)
+
+
+def _record_setup(monkeypatch):
+    calls = []
+
+    def setup(**kwargs):
+        calls.append(kwargs)
+        return "https://dashboard.test"
+
+    monkeypatch.setattr(cli_setup_module, "setup", setup)
+    return calls
+
+
+def test_auto_deploy_skips_when_fingerprint_matches(config_path, monkeypatch):
+    _deployed_dashboard(monkeypatch, live_version="fp-1", local_fingerprint="fp-1")
+    calls = _record_setup(monkeypatch)
+
+    assert cli_setup_module.ensure_dashboard_deployed() == "https://dashboard.test"
+    assert calls == []
+
+
+@pytest.mark.parametrize("live_version", ["fp-1", None])
+def test_auto_deploy_redeploys_when_fingerprint_is_stale(
+    config_path, monkeypatch, live_version
+):
+    _deployed_dashboard(
+        monkeypatch, live_version=live_version, local_fingerprint="fp-2"
+    )
+    calls = _record_setup(monkeypatch)
+
+    assert cli_setup_module.ensure_dashboard_deployed() == "https://dashboard.test"
+    assert calls == [{"interactive": False, "require_proxy_auth": False}]
+
 def _capture_report(reporter, monkeypatch):
     requests = []
 

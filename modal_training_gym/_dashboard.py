@@ -38,9 +38,13 @@ from modal_training_gym.common.advantage_distribution import AdvantageDistributi
 from modal_training_gym.common.config import (
     DASHBOARD_PASSWORD_SECRET_NAME,
     DASHBOARD_PROXY_AUTH_PATH,
+    DASHBOARD_VERSION_PATH,
     dashboard_requires_proxy_auth,
 )
-from modal_training_gym.common.dashboard import DASHBOARD_APP_NAME
+from modal_training_gym.common.dashboard import (
+    DASHBOARD_APP_NAME,
+    current_dashboard_fingerprint,
+)
 from modal_training_gym.common.run import (
     FrameworkStatusUpdate,
     TrainingRun,
@@ -98,6 +102,7 @@ REPO_URL = "https://github.com/modal-projects/training-gym.git"
 REPO_BRANCH = "main"
 
 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
+DASHBOARD_VERSION_ENV_KEY = "DASHBOARD_VERSION"
 TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
 
 _repo_frontend = Path(__file__).resolve().parents[1] / "dashboards" / "frontend"
@@ -137,6 +142,7 @@ def _build_image() -> modal.Image:
                 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY: "true"
                 if dashboard_requires_proxy_auth()
                 else "false",
+                DASHBOARD_VERSION_ENV_KEY: current_dashboard_fingerprint(),
                 TIMING_DEBUG_ENV: os.environ.get(TIMING_DEBUG_ENV, ""),
             }
         )
@@ -160,6 +166,7 @@ MODAL_CREDS_SECRET_NAME = "_training-gym-modal-creds"
 PASSWORD_EXEMPT_PATHS = frozenset(
     {
         DASHBOARD_PROXY_AUTH_PATH,
+        DASHBOARD_VERSION_PATH,
         "/api/framework-status",
         "/api/training-rollouts",
         "/api/advantage-distributions",
@@ -454,6 +461,10 @@ def fastapi_app():
     @web.get(DASHBOARD_PROXY_AUTH_PATH)
     async def proxy_auth_status() -> bool:
         return os.environ.get(DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY, "false") == "true"
+
+    @web.get(DASHBOARD_VERSION_PATH)
+    async def version() -> str:
+        return os.environ.get(DASHBOARD_VERSION_ENV_KEY, "")
 
     cache_ttl_seconds = 30.0
     cache_keys = ("runs", "train_results", "evals")

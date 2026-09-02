@@ -20,11 +20,13 @@ What this does:
 """
 
 from __future__ import annotations
+
 import os
 import webbrowser
 
 from modal_training_gym.common.dashboard import (
     DASHBOARD_APP_NAME,
+    current_dashboard_fingerprint,
     deployed_dashboard_url,
 )
 
@@ -246,8 +248,10 @@ def open_dashboard() -> str | None:
 def ensure_dashboard_deployed() -> str | None:
     """Deploy the dashboard if it isn't already; return its web URL (or ``None``).
 
-    Idempotent: if the app is already deployed we only reconcile the cached URL
-    in ``~/.training-gym.toml`` and return; we never redeploy.
+    Idempotent: the live dashboard reports the source fingerprint it was built
+    from. If it matches the local sources we only reconcile the cached URL in
+    ``~/.training-gym.toml`` and return; a mismatch (or an unreachable version
+    endpoint) triggers a redeploy.
 
     Best-effort and guaranteed not to raise: this is called from the hot path
     of ``train()`` and ``evaluate()``, where dashboard provisioning is a
@@ -260,6 +264,7 @@ def ensure_dashboard_deployed() -> str | None:
         from modal_training_gym.common.config import (
             get_dashboard_proxy_auth,
             get_dashboard_url,
+            get_dashboard_version,
             save_dashboard_url,
         )
 
@@ -268,12 +273,17 @@ def ensure_dashboard_deployed() -> str | None:
             # Already deployed — keep the local toml in sync with the live URL.
             if get_dashboard_url() != web_url:
                 save_dashboard_url(web_url)
-            return web_url
-
-        print(
-            f"Training-gym dashboard ({DASHBOARD_APP_NAME!r}) is not deployed — "
-            "deploying it now (this happens once)."
-        )
+            if get_dashboard_version(web_url) == current_dashboard_fingerprint():
+                return web_url
+            print(
+                f"Training-gym dashboard ({DASHBOARD_APP_NAME!r}) does not match "
+                "the local sources: redeploying it."
+            )
+        else:
+            print(
+                f"Training-gym dashboard ({DASHBOARD_APP_NAME!r}) is not deployed: "
+                "deploying it now."
+            )
         return setup(
             interactive=False,
             require_proxy_auth=get_dashboard_proxy_auth() is True,
