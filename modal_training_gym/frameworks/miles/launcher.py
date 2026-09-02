@@ -5,7 +5,6 @@ import os
 import re
 import shlex
 import subprocess
-import sys
 import shutil
 import tempfile
 import threading
@@ -111,57 +110,6 @@ RDMA_RUNTIME_INSTALL_COMMAND = (
     "--reinstall libibverbs1 ibverbs-providers && "
     "rm -rf /var/lib/apt/lists/*"
 )
-
-# On EFA hosts the Modal runtime bind-mounts the *host's* libibverbs.so.1 and
-# libefa.so.1 over the system paths. libibverbs and its provider libraries are
-# coupled through private symbol versions (IBVERBS_PRIVATE_*), so a host
-# libibverbs older than the image's libmlx5 breaks every verbs consumer —
-# mooncake's TransferEngine import died with "version 'IBVERBS_PRIVATE_34' not
-# found" on exactly the attempts that drew EFA hosts. A bind mount cannot be
-# replaced by apt or shadowed at its own path, so the image's matched verbs
-# set is copied to a private prefix at build time and Ray workers resolve it
-# from there; everything outside the set (libfabric included) links only the
-# public IBVERBS_1.x ABI and is unaffected.
-#
-# The prefix is engaged per node, and only where the system pair is actually
-# broken: with the prefix on the path, absolute-path loads (the provider
-# loader) still map the system copies, so a healthy node ends up with two live
-# instances of libibverbs/libmlx5 and NCCL's IB data path degrades badly (a
-# weight sync measured 20-50x slower). Ray distributes one env_vars mapping to
-# every worker, so the path carries a fixed alias that each node materializes
-# (as a symlink to the copy) only after its own probe fails — on healthy nodes
-# the alias does not exist and the loader skips it.
-_GYM_RDMA_DIR = "/opt/gym-rdma/lib"
-_GYM_RDMA_ENABLED_DIR = "/opt/gym-rdma/enabled"
-GYM_RDMA_COPY_COMMAND = (
-    f"mkdir -p {_GYM_RDMA_DIR} && "
-    f"cp -a {SYSTEM_LIB_DIR}/libibverbs.so.1* {SYSTEM_LIB_DIR}/libmlx5.so.1* "
-    f"{_GYM_RDMA_DIR}/ && "
-    f"if ls {SYSTEM_LIB_DIR}/libefa.so.1* >/dev/null 2>&1; then "
-    f"cp -a {SYSTEM_LIB_DIR}/libefa.so.1* {_GYM_RDMA_DIR}/; fi && "
-    f"if test -d {SYSTEM_LIB_DIR}/libibverbs; then "
-    f"cp -a {SYSTEM_LIB_DIR}/libibverbs {_GYM_RDMA_DIR}/; fi"
-)
-
-
-def _enable_rdma_prefix_if_broken() -> None:
-    """Point this node's prefix alias at the matched verbs copy when the
-    system pair fails mooncake's import (the EFA bind-mount case)."""
-    if not os.path.isdir(_GYM_RDMA_DIR) or os.path.lexists(_GYM_RDMA_ENABLED_DIR):
-        return
-    probe = [sys.executable, "-c", "from mooncake.engine import TransferEngine"]
-    check = subprocess.run(probe, capture_output=True, text=True)
-    if check.returncode == 0 or "IBVERBS_PRIVATE" not in check.stderr:
-        return
-    print(
-        "WARNING: this node's system verbs pair is mismatched "
-        f"({check.stderr.strip().splitlines()[-1]}); resolving the image's "
-        f"matched set from {_GYM_RDMA_DIR} for Ray workers."
-    )
-    try:
-        os.symlink(_GYM_RDMA_DIR, _GYM_RDMA_ENABLED_DIR)
-    except FileExistsError:
-        pass
 
 
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
@@ -496,9 +444,7 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         )
     )
     if miles.total_nodes > 1:
-        # The copy must follow the reinstall so the private prefix snapshots
-        # the freshly matched verbs set.
-        image = image.run_commands(RDMA_RUNTIME_INSTALL_COMMAND, GYM_RDMA_COPY_COMMAND)
+        image = image.run_commands(RDMA_RUNTIME_INSTALL_COMMAND)
     if miles.image_env:
         image = image.env(miles.image_env)
     return image
@@ -516,19 +462,12 @@ def _response_parser_path(model: Any) -> str:
 
 
 def _compose_ld_library_path() -> str:
-    # Ordering carries two constraints:
-    # - The injected EFA dirs must precede SYSTEM_LIB_DIR: NCCL's ofi plugin
-    #   requires the injected libfabric 1.30 (`FABRIC_1.8`), and with the
-    #   system dir first the loader finds the image's libfabric 1.20 instead,
-    #   so the plugin never loads in a Ray worker — fatal at engine bring-up
-    #   on hosts whose env pins NCCL_NET_PLUGIN=ofi.
-    # - The private rdma prefix alias precedes SYSTEM_LIB_DIR; it resolves
-    #   only on nodes that materialized it because their system verbs pair is
-    #   broken (see _enable_rdma_prefix_if_broken). This path is composed once
-    #   on the head and shipped to every node's workers, so the decision has
-    #   to live in the per-node filesystem, not here.
-    parts = [d for d in _EFA_LIB_DIRS if os.path.isdir(d)]
-    parts.append(_GYM_RDMA_ENABLED_DIR)
+    # The injected EFA dirs must precede SYSTEM_LIB_DIR: NCCL's ofi plugin
+    # requires the injected libfabric 1.30 (`FABRIC_1.8`), and with the system
+    # dir first the loader finds the image's libfabric 1.20 instead, so the
+    # plugin never loads in a Ray worker — fatal at engine bring-up on hosts
+    # whose env pins NCCL_NET_PLUGIN=ofi.
+    parts = list(_EFA_LIB_DIRS)
     parts.append(SYSTEM_LIB_DIR)
     for part in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
         if part and part not in parts:
@@ -1086,8 +1025,6 @@ def build_miles_app(
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
         if framework_status_token:
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
-
-        _enable_rdma_prefix_if_broken()
 
         await asyncio.gather(
             hf_cache_volume.reload.aio(),

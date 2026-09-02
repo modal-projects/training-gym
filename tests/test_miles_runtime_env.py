@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-
 from modal_training_gym.frameworks.miles import launcher
 from modal_training_gym.frameworks.miles.launcher import build_ray_runtime_env
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
@@ -12,6 +10,7 @@ from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 class _FakeImage:
     def __init__(self):
         self.commands: list[str] = []
+        self.operations: list[str] = []
 
     @classmethod
     def from_registry(cls, _docker_image: str) -> "_FakeImage":
@@ -21,7 +20,12 @@ class _FakeImage:
         return self
 
     def run_commands(self, *commands: str) -> "_FakeImage":
+        self.operations.append("run_commands")
         self.commands.extend(commands)
+        return self
+
+    def add_local_dir(self, *_args, **_kwargs) -> "_FakeImage":
+        self.operations.append("add_local_dir")
         return self
 
     def env(self, _environment: dict[str, str]) -> "_FakeImage":
@@ -45,6 +49,28 @@ def test_single_node_image_keeps_base_rdma_runtime(monkeypatch):
     assert launcher.RDMA_RUNTIME_INSTALL_COMMAND not in image.commands
 
 
+def test_image_applies_efa_host_patches(monkeypatch):
+    """The mooncake-import-tolerance and router-timeout patches, both needed
+    for a miles run to complete on an EFA host, are baked into the image."""
+    monkeypatch.setattr(launcher, "Image", _FakeImage)
+
+    commands = "\n".join(launcher._build_miles_base_image(MilesRecipe()).commands)
+
+    assert launcher._PATCH_MOONCAKE_TOLERANCE_B64 in commands
+    assert launcher._PATCH_ROUTER_STARTUP_TIMEOUT_B64 in commands
+
+
+def test_local_miles_overlay_reapplies_efa_host_patches():
+    image = _FakeImage()
+
+    launcher._overlay_local_miles(image, "/tmp/local-miles")
+
+    assert image.operations == ["add_local_dir", "run_commands"]
+    commands = "\n".join(image.commands)
+    assert launcher._PATCH_MOONCAKE_TOLERANCE_B64 in commands
+    assert launcher._PATCH_ROUTER_STARTUP_TIMEOUT_B64 in commands
+
+
 def test_ld_library_path_comes_from_the_container(monkeypatch):
     """Workers get the container's linker path, behind the system lib dir."""
     monkeypatch.setenv("LD_LIBRARY_PATH", "/usr/local/cuda/lib64:/wheel/nvidia/lib")
@@ -54,8 +80,8 @@ def test_ld_library_path_comes_from_the_container(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
-        ":/usr/local/cuda/lib64:/wheel/nvidia/lib"
+        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib"
+        ":/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:/wheel/nvidia/lib"
     )
     assert env_vars["MASTER_ADDR"] == "10.0.0.1"
     assert env_vars["no_proxy"] == "127.0.0.1,10.0.0.1"
@@ -77,7 +103,7 @@ def test_recipe_environment_still_wins(monkeypatch):
     assert env_vars["PYTHONPATH"] == "/root/Megatron-LM/"
 
 
-def test_unset_container_path_yields_only_the_system_lib_dir(monkeypatch):
+def test_unset_container_path_yields_only_the_required_lib_dirs(monkeypatch):
     """No empty entry, which the loader would read as the working directory."""
     monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
 
@@ -86,7 +112,7 @@ def test_unset_container_path_yields_only_the_system_lib_dir(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
+        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib:/usr/lib/x86_64-linux-gnu"
     )
 
 
@@ -98,7 +124,8 @@ def test_system_lib_dir_is_not_duplicated(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu:/wheel/nvidia/lib"
+        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib"
+        ":/usr/lib/x86_64-linux-gnu:/wheel/nvidia/lib"
     )
 
 
@@ -115,53 +142,17 @@ def test_metric_env_is_preserved(monkeypatch):
     assert env_vars["WANDB_RESUME"] == "allow"
 
 
-def test_efa_dirs_precede_the_system_lib_dir(monkeypatch):
+def test_efa_dirs_lead_the_path(monkeypatch):
+    """The injected EFA dirs come first so NCCL's ofi plugin resolves the
+    injected libfabric, not the image's older one."""
     monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
-    monkeypatch.setattr(
-        launcher.os.path, "isdir", lambda d: d in launcher._EFA_LIB_DIRS
-    )
 
     env_vars = build_ray_runtime_env(
         head_addr="10.0.0.1", metric_env={}, environment={}
     )["env_vars"]
 
-    assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib"
-        ":/opt/gym-rdma/enabled:/usr/lib/x86_64-linux-gnu"
-    )
-
-
-def _probe(monkeypatch, returncode: int, stderr: str) -> list[tuple[str, str]]:
-    created: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        launcher.os.path, "isdir", lambda d: d == launcher._GYM_RDMA_DIR
-    )
-    monkeypatch.setattr(launcher.os.path, "lexists", lambda d: False)
-    monkeypatch.setattr(
-        launcher.subprocess,
-        "run",
-        lambda *a, **k: subprocess.CompletedProcess(a, returncode, "", stderr),
-    )
-    monkeypatch.setattr(
-        launcher.os, "symlink", lambda src, dst: created.append((src, dst))
-    )
-    launcher._enable_rdma_prefix_if_broken()
-    return created
-
-
-def test_broken_verbs_pair_materializes_the_prefix_alias(monkeypatch):
-    created = _probe(
-        monkeypatch, 1, "ImportError: version `IBVERBS_PRIVATE_34' not found"
-    )
-
-    assert created == [(launcher._GYM_RDMA_DIR, launcher._GYM_RDMA_ENABLED_DIR)]
-
-
-def test_healthy_verbs_pair_leaves_the_alias_absent(monkeypatch):
-    assert _probe(monkeypatch, 0, "") == []
-
-
-def test_unrelated_probe_failure_leaves_the_alias_absent(monkeypatch):
-    assert (
-        _probe(monkeypatch, 1, "ModuleNotFoundError: No module named 'mooncake'") == []
-    )
+    path = env_vars["LD_LIBRARY_PATH"].split(":")
+    assert path[: len(launcher._EFA_LIB_DIRS)] == list(launcher._EFA_LIB_DIRS)
+    assert launcher.SYSTEM_LIB_DIR in path
+    # The private-prefix machinery is gone: nothing shadows the host verbs libs.
+    assert not any("gym-rdma" in p for p in path)
