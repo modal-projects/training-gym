@@ -45,9 +45,19 @@ async def main():
         batch.put_file(str(args.artifact), f"/{artifact_name}")
 
     print(f"Deploying {args.type} preview for #{args.pr_number}")
-    await deploy_preview.remote.aio(
-        args.pr_number, args.type, artifact_name, api_url=args.api_url
-    )
+    # The deployed previews app is main's code (see previews-app.yml), so on a
+    # branch that introduces `api_url` it doesn't take one yet: fall back to a
+    # preview proxied at the deployed dashboard rather than failing the job.
+    kwargs = {"api_url": args.api_url} if args.api_url else {}
+    try:
+        await deploy_preview.remote.aio(
+            args.pr_number, args.type, artifact_name, **kwargs
+        )
+    except TypeError as exc:
+        if not kwargs or "api_url" not in str(exc):
+            raise
+        print(f"Previews app does not accept api_url yet ({exc}); deploying without it")
+        await deploy_preview.remote.aio(args.pr_number, args.type, artifact_name)
 
 
 if __name__ == "__main__":
