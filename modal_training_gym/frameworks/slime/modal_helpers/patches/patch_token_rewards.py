@@ -6,7 +6,9 @@ from pathlib import Path
 
 
 ROLLOUT = Path("/root/slime/slime/ray/rollout.py")
+DATA = Path("/root/slime/slime/backends/megatron_utils/data.py")
 MARKER = "# training-gym: token rewards"
+DATA_MARKER = "# training-gym: token rewards are training-only"
 
 
 def _replace_once(source: str, old: str, new: str, label: str) -> str:
@@ -48,5 +50,36 @@ def patch_rollout() -> None:
     print("[patch_token_rewards] patched rollout.py")
 
 
+def patch_data_logger() -> None:
+    """Keep vector rewards out of Slime's scalar rollout metric reducer.
+
+    ``token_rewards`` is intentionally a list of per-response-token vectors.
+    It is consumed by the advantage function on the training path, but
+    ``log_rollout_data`` summarizes every list-valued field with ``sum(val)``.
+    Letting that field reach the logger produces ``int + list`` and aborts the
+    actor on the first training step.
+    """
+    if not DATA.is_file():
+        print(f"[patch_token_rewards] WARNING: {DATA} not found; skipped")
+        return
+    source = DATA.read_text()
+    if DATA_MARKER in source:
+        print("[patch_token_rewards] data.py already patched")
+        return
+    source = _replace_once(
+        source,
+        "        for key, val in rollout_data.items():\n            if key in [\n",
+        "        for key, val in rollout_data.items():\n"
+        f"            {DATA_MARKER}\n"
+        '            if key == "token_rewards":\n'
+        "                continue\n"
+        "            if key in [\n",
+        "rollout metric reducer loop",
+    )
+    DATA.write_text(source)
+    print("[patch_token_rewards] patched data.py logger")
+
+
 if __name__ == "__main__":
     patch_rollout()
+    patch_data_logger()
