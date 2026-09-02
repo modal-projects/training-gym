@@ -12,11 +12,37 @@ async function getErrorFromResponse(res) {
   return detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`;
 }
 
-export async function fetchRuns({ signal } = {}) {
-  const response = await fetch(`${SERVER}/runs`, { signal });
+// The run list is paged and filtered server-side: `facets` maps a facet name
+// ("status", "recipe", "group") to the selected buckets, and a facet left out
+// means every bucket. Totals and per-bucket counts come from `fetchRunCounts`,
+// which sees every run rather than the page the client holds.
+function runQueryParams({ limit, offset, query, facets }) {
+  const params = new URLSearchParams();
+  if (limit != null) params.set("limit", String(limit));
+  if (offset) params.set("offset", String(offset));
+  if (query) params.set("q", query);
+  for (const [facet, values] of Object.entries(facets || {})) {
+    for (const value of values) params.append(facet, value);
+  }
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
+
+export async function fetchRuns({ signal, limit, offset, query, facets } = {}) {
+  const search = runQueryParams({ limit, offset, query, facets });
+  const response = await fetch(`${SERVER}/runs${search}`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const runs = await response.json();
   return Array.isArray(runs) ? runs : [];
+}
+
+// Per-bucket counts cover every run; `matching` counts the given query, so the
+// page knows how many rows are still reachable by paging.
+export async function fetchRunCounts({ signal, query, facets } = {}) {
+  const search = runQueryParams({ query, facets });
+  const res = await fetch(`${SERVER}/runs/counts${search}`, { signal });
+  if (!res.ok) throw new Error(await getErrorFromResponse(res));
+  return await res.json();
 }
 
 export async function fetchRun(trainingRunId, { signal } = {}) {

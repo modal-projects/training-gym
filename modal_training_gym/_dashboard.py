@@ -50,6 +50,8 @@ from modal_training_gym.common.run import (
     TrainingRunStatus,
 )
 from modal_training_gym.common.run_list import (
+    FACET_NAMES,
+    count_run_facets,
     filter_run_summaries,
     run_list_field_metadata,
 )
@@ -429,7 +431,6 @@ def fastapi_app():
         Path as FastAPIPath,
     )  # Request imported at module scope
     from fastapi.concurrency import run_in_threadpool
-    from fastapi.middleware.gzip import GZipMiddleware
     from fastapi.responses import (
         FileResponse,
         JSONResponse,
@@ -448,22 +449,6 @@ def fastapi_app():
     )
 
     web = FastAPI()
-
-    class _GZipUnlessStreaming(GZipMiddleware):
-        """Compress responses, leaving server-sent-event streams untouched.
-
-        Buffering an SSE stream through gzip withholds each event until the
-        compressor flushes, which stalls the live log tail.
-        """
-
-        async def __call__(self, scope, receive, send):
-            path = scope.get("path", "") if scope["type"] == "http" else ""
-            if path.endswith("/logs/stream"):
-                await self.app(scope, receive, send)
-                return
-            await super().__call__(scope, receive, send)
-
-    web.add_middleware(_GZipUnlessStreaming, minimum_size=1024)
 
     # ── Optional password protection ──────────────────────────────────────
     # When DASHBOARD_PASSWORD is set we gate the whole app behind HTTP Basic
@@ -864,6 +849,24 @@ def fastapi_app():
     # tag columns fall back to it for runs that predate ``group_tags``.
     run_list_excluded_fields = {"config", "step_times", "substep_times"}
 
+    # Repeated params (``?status=failed&status=stopped``) mirror the run list's
+    # multi-select chips; an absent facet means "every bucket".
+    def _requested_facets(request: Request) -> dict[str, set[str]]:
+        return {
+            name: set(values)
+            for name in FACET_NAMES
+            if (values := request.query_params.getlist(name))
+        }
+
+    async def load_run_summaries() -> list[RunSummary]:
+        try:
+            data = await get_cached_list("runs", load_runs)
+        except Exception:
+            data = []
+        return [
+            RunSummary.model_validate(item) for item in data if isinstance(item, dict)
+        ]
+
     # ``response_model`` is left off: FastAPI ignores ``response_model_exclude``
     # for sequence response models, so the exclusion is applied here instead.
     @web.get("/api/runs")
@@ -871,26 +874,32 @@ def fastapi_app():
         request: Request,
         since: int | None = None,
         limit: int | None = None,
+        offset: int = 0,
+        q: str = "",
     ):
         if limit is not None and limit < 1:
             raise HTTPException(status_code=400, detail="Limit must be positive")
-        try:
-            data = await get_cached_list("runs", load_runs)
-        except Exception:
-            data = []
-        summaries = [
-            RunSummary.model_validate(item) for item in data if isinstance(item, dict)
-        ]
+        if offset < 0:
+            raise HTTPException(status_code=400, detail="Offset must not be negative")
+        summaries = await load_run_summaries()
         filters = {
             name: request.query_params.get(name, "")
             for name, metadata in run_list_field_metadata().items()
             if metadata.get("filterable")
         }
+        facets = _requested_facets(request)
         filtered = filter_run_summaries(
             summaries,
             filters=filters,
+            facets=facets,
+            query=q,
             since=since,
             limit=limit,
+            offset=offset,
+            # The list shows runs newest-first, and paging is only stable if the
+            # server orders by the same key: sorting by update time reshuffles
+            # the pages under the client whenever a run reports progress.
+            sort_by="created",
         )
         return JSONResponse(
             [
@@ -898,6 +907,24 @@ def fastapi_app():
                 for summary in filtered
             ]
         )
+
+    # Declared before ``/api/runs/{training_run_id}`` so "counts" isn't read as a
+    # run id. The page's totals and filter-chip counts come from here, since a
+    # paged list can't count runs the client hasn't loaded. Chip counts cover
+    # every run (they're what the chips would select); ``matching`` counts the
+    # current query, which is how many rows paging can still reach.
+    @web.get("/api/runs/counts")
+    async def run_counts(request: Request, q: str = ""):
+        summaries = await load_run_summaries()
+        counts = count_run_facets(summaries)
+        counts["matching"] = len(
+            filter_run_summaries(
+                summaries,
+                facets=_requested_facets(request),
+                query=q,
+            )
+        )
+        return counts
 
     @web.get("/api/runs/{training_run_id}", response_model=RunSummary)
     async def get_run(training_run_id: str):

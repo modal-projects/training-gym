@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from modal_training_gym.common.run_list import (
+    count_run_facets,
     filter_run_summaries,
     run_list_field_metadata,
 )
@@ -171,3 +172,63 @@ def test_since_uses_created_or_updated_time_inclusively_before_limiting():
         since=300,
         limit=1,
     ) == [recently_updated]
+
+
+def test_facets_select_buckets_and_default_to_every_bucket():
+    slime = _summary(run_id="slime", training_run_id="slime", recipe="slime")
+    miles = _summary(
+        run_id="miles",
+        training_run_id="miles",
+        recipe="miles",
+        display_status="failed",
+        group_id="",
+    )
+
+    assert filter_run_summaries([slime, miles], facets={"recipe": {"miles"}}) == [miles]
+    assert filter_run_summaries(
+        [slime, miles],
+        facets={"status": {"pending", "failed"}, "group": {"nightly", "(no group)"}},
+    ) == [slime, miles]
+    assert filter_run_summaries([slime, miles], facets={"group": {"(no group)"}}) == [
+        miles
+    ]
+
+
+def test_query_matches_identifiers_and_paging_slices_the_sorted_result():
+    first = _summary(run_id="first", training_run_id="first", created_at=300)
+    second = _summary(
+        run_id="second",
+        training_run_id="second",
+        model="org/other",
+        created_at=200,
+    )
+    third = _summary(run_id="third", training_run_id="third", created_at=100)
+
+    assert filter_run_summaries([first, second, third], query=" ORG/OTHER ") == [second]
+    assert filter_run_summaries(
+        [first, second, third],
+        sort_by="created",
+        offset=1,
+        limit=1,
+    ) == [second]
+
+
+def test_facet_counts_cover_every_run():
+    runs = [
+        _summary(run_id="a", training_run_id="a"),
+        _summary(run_id="b", training_run_id="b", display_status="failed"),
+        _summary(
+            run_id="c",
+            training_run_id="c",
+            recipe="",
+            framework="miles",
+            group_id="",
+        ),
+    ]
+
+    assert count_run_facets(runs) == {
+        "total": 3,
+        "status": {"pending": 2, "failed": 1},
+        "recipe": {"slime": 2, "miles": 1},
+        "group": {"nightly": 2, "(no group)": 1},
+    }

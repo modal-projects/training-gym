@@ -15,7 +15,10 @@
   import { toggleInSet } from "../lib/set.js";
 
   let {
-    allRuns,
+    totalRuns,
+    matchingRunCount,
+    hasMoreRuns,
+    onLoadMore = () => {},
     completedTotal,
     runningTotal,
     stoppedTotal,
@@ -76,7 +79,7 @@
   });
 
   let selectedRun = $derived.by(() => {
-    const listRun = allRuns.find((run) => run.run_id === drawerRunId) || null;
+    const listRun = filteredRuns.find((run) => run.run_id === drawerRunId) || null;
     if (!listRun) return null;
     if (drawerDetail?.run_id !== drawerRunId) return listRun;
     return { ...listRun, ...drawerDetail };
@@ -174,7 +177,7 @@
     if (
       !loading &&
       drawerRunId &&
-      !allRuns.some((run) => run.run_id === drawerRunId)
+      !filteredRuns.some((run) => run.run_id === drawerRunId)
     ) {
       onCloseDrawer();
     }
@@ -193,53 +196,40 @@
     collapsedGroupKeys = new Set();
   });
 
-  // A run row is ~50 DOM nodes, so rendering every run costs seconds of layout
-  // on a phone and re-renders the whole table on each refresh. Rows come in as
-  // they are scrolled towards instead; filters still run over every run.
-  const renderChunk = 60;
-  let renderLimit = $state(renderChunk);
-
-  $effect(() => {
-    void search;
-    void activeRecipes;
-    void activeStatuses;
-    void activeGroups;
-    void groupBy;
-    renderLimit = renderChunk;
-  });
-
-  let visibleRuns = $derived(filteredRuns.slice(0, renderLimit));
-
-  let visibleGroups = $derived.by(() => {
-    let budget = renderLimit;
-    return runGroups.map((group) => {
-      if (collapsedGroupKeys.has(group.key)) return group;
-      const runs = group.runs.slice(0, Math.max(budget, 0));
-      budget -= runs.length;
-      return { ...group, runs };
-    });
-  });
-
-  let hiddenRunCount = $derived(Math.max(filteredRuns.length - renderLimit, 0));
+  // A run row is ~50 DOM nodes, so a full history is seconds of layout on a
+  // phone and a re-render of every row on each refresh. The server hands out
+  // one page at a time and scrolling near the end asks for the next one.
+  let hiddenRunCount = $derived(
+    Math.max(matchingRunCount - filteredRuns.length, 0),
+  );
 
   function growOnScroll(event) {
-    if (hiddenRunCount <= 0) return;
+    if (!hasMoreRuns) return;
     const el = event.currentTarget;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600) {
-      renderLimit += renderChunk;
+      onLoadMore();
     }
   }
 
   let sentinel = $state(null);
+  let list = $state(null);
+
+  // A new query restarts paging at the first page. Staying scrolled to the
+  // bottom of the old, longer list would immediately ask for page after page
+  // again, so send the reader back to the top of the new results.
+  $effect(() => {
+    void search;
+    const root = list;
+    if (!root) return;
+    for (const wrap of root.querySelectorAll(".table-wrap")) wrap.scrollTop = 0;
+  });
 
   $effect(() => {
     const node = sentinel;
     if (!node) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          renderLimit += renderChunk;
-        }
+        if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
       },
       { rootMargin: "600px" },
     );
@@ -251,7 +241,7 @@
 <section class="summary-sticky grid grid-cols-5 gap-[14px] p-[0_24px] mb-[24px] max-[900px]:grid-cols-2">
   <article class="summary-card">
     <span class="summary-label">Total runs</span>
-    <strong>{allRuns.length}</strong>
+    <strong>{totalRuns}</strong>
   </article>
   <article class="summary-card">
     <span class="summary-label">Completed runs</span>
@@ -300,7 +290,7 @@
     />
   </div>
 
-  <div class="p-0">
+  <div class="p-0" bind:this={list}>
     {#if loading}
       <div class="table-wrap freeze-header">
         <MinimalTableSkeleton
@@ -311,7 +301,7 @@
       </div>
     {:else if error}
       <div class="page-empty">Failed to load: {error}</div>
-    {:else if !allRuns.length}
+    {:else if !totalRuns}
       <div class="page-empty">No training runs found yet.</div>
     {:else if !filteredRuns.length}
       <div class="page-empty">No runs match the current filters.</div>
@@ -477,10 +467,10 @@
       {/snippet}
 
       {#if groupBy === "none"}
-        {@render runsTable(visibleRuns)}
+        {@render runsTable(filteredRuns)}
       {:else}
         <div class="flex flex-col gap-[24px] p-0">
-          {#each visibleGroups as group (group.key)}
+          {#each runGroups as group (group.key)}
             <GroupSection
               title={group.key}
               subtitle={`${group.runs.length} run${group.runs.length === 1 ? "" : "s"}`}
@@ -502,7 +492,7 @@
 
       {#if hiddenRunCount > 0}
         <div bind:this={sentinel} class="page-empty">
-          Showing {renderLimit} of {filteredRuns.length} runs
+          Showing {filteredRuns.length} of {matchingRunCount} runs
         </div>
       {/if}
     {/if}
