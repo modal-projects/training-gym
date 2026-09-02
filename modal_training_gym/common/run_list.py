@@ -68,8 +68,10 @@ def _search_values(summary: RunSummary) -> Iterable[str]:
     yield summary.group_id
     if summary.group_tags is not None:
         yield summary.group_tags.group_id
+        yield from summary.group_tags.axes
         for tag in summary.group_tags.tags:
             yield tag.key
+            yield tag.label
             yield str(tag.value)
         for key, value in summary.group_tags.overrides.items():
             yield key

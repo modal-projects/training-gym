@@ -882,10 +882,13 @@ def fastapi_app():
         if offset < 0:
             raise HTTPException(status_code=400, detail="Offset must not be negative")
         summaries = await load_run_summaries()
+        # Facet params are multi-select unions, so they're read only by
+        # ``_requested_facets``: taking them here too would intersect the union
+        # with whichever repeated value ``get`` happens to return.
         filters = {
             name: request.query_params.get(name, "")
             for name, metadata in run_list_field_metadata().items()
-            if metadata.get("filterable")
+            if metadata.get("filterable") and name not in FACET_NAMES
         }
         facets = _requested_facets(request)
         filtered = filter_run_summaries(

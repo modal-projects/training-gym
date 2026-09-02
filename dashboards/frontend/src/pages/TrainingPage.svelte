@@ -64,15 +64,21 @@
   // The list payload carries only the fields the table renders, so the drawer
   // fetches the run's full record (config and all) when it opens.
   let drawerDetail = $state(null);
+  // Set only when the server says the run is gone. The list holds one page, so
+  // a run being absent from it means nothing — the drawer renders from the
+  // detail fetch for runs deep-linked or scrolled past.
+  let drawerRunMissing = $state(false);
 
   $effect(() => {
     const runId = drawerRunId;
     drawerDetail = null;
+    drawerRunMissing = false;
     if (!runId) return;
     const controller = new AbortController();
     fetchRun(runId, { signal: controller.signal })
       .then((detail) => {
         if (detail) drawerDetail = detail;
+        else drawerRunMissing = true;
       })
       .catch(() => {});
     return () => controller.abort();
@@ -80,9 +86,10 @@
 
   let selectedRun = $derived.by(() => {
     const listRun = filteredRuns.find((run) => run.run_id === drawerRunId) || null;
-    if (!listRun) return null;
-    if (drawerDetail?.run_id !== drawerRunId) return listRun;
-    return { ...listRun, ...drawerDetail };
+    const detail = drawerDetail?.run_id === drawerRunId ? drawerDetail : null;
+    if (!listRun) return detail;
+    if (!detail) return listRun;
+    return { ...listRun, ...detail };
   });
 
   const drawerWidth = "min(420px, calc(100vw - 24px))";
@@ -174,11 +181,7 @@
   }
 
   $effect(() => {
-    if (
-      !loading &&
-      drawerRunId &&
-      !filteredRuns.some((run) => run.run_id === drawerRunId)
-    ) {
+    if (!loading && drawerRunId && drawerRunMissing) {
       onCloseDrawer();
     }
   });

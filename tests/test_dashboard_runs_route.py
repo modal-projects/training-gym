@@ -224,6 +224,25 @@ def test_runs_route_pages_and_omits_detail_only_fields(
     assert detail.json()["config"]
 
 
+def test_runs_route_unions_repeated_facet_values(fake_volume, monkeypatch, tmp_path):
+    _save_records()
+    TrainingRun(
+        training_run_id="run-route-2",
+        framework=Framework.MILES,
+        config={"model": {"model_name": "other/model"}},
+        created_at=50,
+        started_at=50,
+        updated_at=200,
+    ).save()
+
+    with _client(monkeypatch, tmp_path) as client:
+        both = client.get("/api/runs?recipe=slime&recipe=miles")
+
+    # ``recipe`` is a filter-chip facet as well as a filterable column, so a
+    # multi-select must not narrow to whichever repeated value is read first.
+    assert [run["run_id"] for run in both.json()] == ["run-route-1", "run-route-2"]
+
+
 def test_runs_counts_route_counts_every_run_and_the_current_query(
     fake_volume, monkeypatch, tmp_path
 ):

@@ -342,18 +342,28 @@
     if (!isStale()) loadingEvals = false;
   }
 
+  let reloadQueued = false;
+
   async function load() {
     // One refresh at a time. The runs payload can take longer to arrive than
     // the 5s interval, and overlapping fetches stack whole copies of it in
-    // memory for a response that gets thrown away as stale anyway.
-    if (refreshing) return;
+    // memory for a response that gets thrown away as stale anyway. A request
+    // that arrives mid-flight is queued rather than dropped, so a search or
+    // facet change still lands even while a poll is running.
+    if (refreshing) {
+      reloadQueued = true;
+      return;
+    }
     refreshing = true;
     try {
-      const tasks = [loadRuns()];
-      if (activePage === "evals") {
-        tasks.push(loadEvals());
-      }
-      await Promise.all(tasks);
+      do {
+        reloadQueued = false;
+        const tasks = [loadRuns()];
+        if (activePage === "evals") {
+          tasks.push(loadEvals());
+        }
+        await Promise.all(tasks);
+      } while (reloadQueued);
     } finally {
       refreshing = false;
     }
@@ -418,7 +428,7 @@
     lastRunQueryKey = key;
     const timer = window.setTimeout(() => {
       loadedRunCount = RUNS_PAGE_SIZE;
-      void loadRuns();
+      void load();
     }, 250);
     return () => window.clearTimeout(timer);
   });

@@ -194,6 +194,22 @@ def test_facets_select_buckets_and_default_to_every_bucket():
     ]
 
 
+def test_query_matches_the_group_metadata_the_tags_column_renders():
+    tagged = _summary(
+        run_id="tagged",
+        training_run_id="tagged",
+        group_tags={
+            "group_id": "sweep-1",
+            "axes": ["learning_rate"],
+            "tags": [{"key": "lr", "label": "Learning rate", "value": 3e-4}],
+        },
+    )
+    plain = _summary(run_id="plain", training_run_id="plain")
+
+    for query in ("learning_rate", "Learning rate", "0.0003", "sweep-1"):
+        assert filter_run_summaries([tagged, plain], query=query) == [tagged]
+
+
 def test_query_matches_identifiers_and_paging_slices_the_sorted_result():
     first = _summary(run_id="first", training_run_id="first", created_at=300)
     second = _summary(
