@@ -181,7 +181,7 @@
   }
 
   $effect(() => {
-    if (!loading && drawerRunId && drawerRunMissing) {
+    if (drawerRunId && drawerRunMissing) {
       onCloseDrawer();
     }
   });
