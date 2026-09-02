@@ -5,7 +5,7 @@ from modal_training_gym.common.dataset import DatasetConfig, HuggingFaceDataset
 from modal_training_gym.common.models import ModelConfig, Qwen3_4B
 from modal_training_gym.common.train import TrainConfig
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4b_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
 
 
 def test_create_hash_has_word_word_hash_shape() -> None:
@@ -62,7 +62,7 @@ def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
     config = TrainConfig(
         dataset=DummyDataset(),
         model=ModelConfig(model_name="Qwen/Qwen3-4B"),
-        recipe=Qwen3_4b_Recipe(),
+        recipe=Qwen3_4B_Recipe(),
     )
 
     first = config._generate_training_run_id()
@@ -70,7 +70,7 @@ def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
 
     assert first != second
     assert len(calls) == 2
-    assert [parts[2] for parts in calls] == ["Qwen3_4b_Recipe:slime"] * 2
+    assert [parts[2] for parts in calls] == ["Qwen3_4B_Recipe:slime"] * 2
     assert all(parts[3] == "" for parts in calls)
 
 

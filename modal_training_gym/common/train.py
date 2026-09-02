@@ -289,51 +289,30 @@ class _TrainStatusDisplay:
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class TrainConfig:
-    """Compose dataset, model, and recipe into one training entrypoint.
+    """A dataset, model, and recipe for one training run.
 
-    ## Fields
-
-    dataset : DatasetConfig
-        The training dataset. ``train()`` materializes it into the
-        framework's ``/data`` volume before training if it isn't already
-        present.
-    eval_dataset : DatasetConfig | None
-        Optional dataset used by the framework's internal evaluation loop.
-        It is materialized independently from the training dataset.
-    model : ModelConfig
-        The model to train. Carries model identity (``model_name``) and
-        weight-download logic; weights are downloaded into the shared
-        HuggingFace cache volume on first use and reused across runs.
-    recipe : SlimeRecipe | MilesRecipe
-        Framework recipe (``SlimeRecipe`` or ``MilesRecipe``). Selects the
-        training framework and carries Modal infra settings (GPU type, node
-        count, image) plus framework CLI flags.
-    checkpoint : Checkpoint | None
-        Megatron checkpoint to resume training from. The checkpoint's parent
-        directory becomes the recipe's ``load`` path; the attached model
-        remains the Hugging Face source for tokenizer and architecture data.
-        Omit to start from the base model weights. Default ``None``.
-    detach : bool
-        Whether the training app should outlive the local client. The Modal
-        app is always started detached so a dropped connection can't kill a
-        multi-hour run; ``detach`` controls what ``train()`` does when its
-        wait for the result is interrupted (Ctrl-C, a crashed driver):
-        ``True`` leaves the run going on Modal, ``False`` stops the app on
-        the way out. ``launch()`` always leaves the run going, since it
-        returns before training finishes. Default ``True``.
-    group_id : str | None
-        Shared sweep id. Set by ``TrainingGroup`` so every run in a sweep
-        carries the same id, letting the dashboard group variants together.
-        Not usually set by hand. Default ``None``.
-    group_overrides : dict[str, Any] | None
-        Per-variant parameter overrides applied by ``TrainingGroup``, keyed
-        by dotted field path (e.g. ``{"recipe.lr": 1e-5}``). Recorded in
-        run metadata so the dashboard can label each variant. Default
-        ``None``.
-    group_axes : list[str] | None
-        Names of the swept parameter paths in a ``TrainingGroup`` grid.
-        Recorded in run metadata for dashboard grouping; falls back to the
-        keys of ``group_overrides`` when unset. Default ``None``.
+    Args:
+        dataset:
+            Training dataset materialized in the framework's ``/data`` volume.
+        eval_dataset : DatasetConfig | None
+            Optional dataset used by the framework's internal evaluation loop.
+            It is materialized independently from the training dataset.
+        model:
+            Model identity and weight download behavior.
+        recipe:
+            Training framework, Modal resources, and framework arguments.
+        checkpoint:
+            Megatron checkpoint to resume from. ``model`` remains the source for
+            tokenizer and architecture metadata.
+        detach:
+            Keep training on Modal if the local ``train()`` wait is interrupted.
+            ``False`` stops the app.
+        group_id:
+            Sweep ID assigned by ``TrainingGroup``.
+        group_overrides:
+            Variant overrides keyed by dotted field path.
+        group_axes:
+            Swept field paths that group dashboard variants.
     """
 
     # ── Composed configs (required) ─────────────────────────────────────────
@@ -526,7 +505,7 @@ class TrainConfig:
         )
 
     def context_plan_line(self) -> str | None:
-        """One-line summary of the effective training context length and parallelism plan."""
+        """Summarize effective context length and parallelism on one line."""
         recipe = self.recipe
         max_tokens_per_gpu = getattr(recipe, "max_tokens_per_gpu", None)
         if max_tokens_per_gpu is None:
@@ -543,7 +522,11 @@ class TrainConfig:
         )
 
     def train(self, *, show_output: bool = True) -> TrainResult:
-        """Build the app, run training, and return the TrainResult."""
+        """Run one training configuration.
+
+        Returns:
+            The completed training result.
+        """
         from modal_training_gym.common.modal_lifecycle import stop_app
 
         launch = self.launch(show_output=show_output, prepare_inputs=True)
@@ -560,7 +543,11 @@ class TrainConfig:
         show_output: bool = True,
         prepare_inputs: bool = False,
     ) -> TrainingRun:
-        """Start training in a detached Modal app and return immediately."""
+        """Start one training run in a detached Modal app.
+
+        Returns:
+            The launched training run.
+        """
         import modal
 
         from modal_training_gym.cli.setup import ensure_dashboard_deployed

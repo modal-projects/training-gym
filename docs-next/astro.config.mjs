@@ -7,7 +7,9 @@ import starlight from '@astrojs/starlight';
 import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
-import { flattenDocId, parseTutorialMetadata } from './src/lib/tutorial-docs-loader.ts';
+import { flattenDocId } from './src/lib/docs-sections.ts';
+import { parseTutorialMetadata } from './src/lib/tutorial-docs-loader.ts';
+import referenceSidebar from './src/generated/reference-sidebar.json';
 
 const configDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -95,6 +97,35 @@ export default defineConfig({
     ...nestedDocRedirects(),
     '/guides/tools/agent-driven-training': '/guides/agent',
     '/guides/agent-driven-training': '/guides/agent',
+    '/reference': '/reference/sdk',
+    '/reference/core/modelconfig': '/reference/modelconfig',
+    '/reference/core/hfmodelconfiguration': '/reference/hfmodelconfiguration',
+    '/reference/core/modelarchitecture': '/reference/modelarchitecture',
+    '/reference/core/datasetconfig': '/reference/datasetconfig',
+    '/reference/core/huggingfacedataset': '/reference/huggingfacedataset',
+    '/reference/core/harbordataset': '/reference/harbordataset',
+    '/reference/core/trainresult': '/reference/trainresult',
+    '/reference/core/metricconfig': '/reference/metricconfig',
+    '/reference/core/trackioconfig': '/reference/trackioconfig',
+    '/reference/core/wandbconfig': '/reference/wandbconfig',
+    '/reference/core/modalraycluster': '/reference/modalraycluster',
+    '/reference/training/qwen3_5_4b_miles_recipe': '/reference/qwen3_5_4b_miles_recipe',
+    '/reference/training/moonlight_16b_a3b_recipe': '/reference/moonlight_16b_a3b_recipe',
+    '/reference/training/gemma4_26b_a4b_recipe': '/reference/gemma4_26b_a4b_recipe',
+    '/reference/training/inkling_small_recipe': '/reference/inkling_small_recipe',
+    '/reference/training/inkling_small_lora_recipe': '/reference/inkling_small_lora_recipe',
+    '/reference/training/qwen3_6_35b_recipe': '/reference/qwen3_6_35b_recipe',
+    '/reference/training/qwen3_6_27b_recipe': '/reference/qwen3_6_27b_recipe',
+    '/reference/training/qwen3_8_27b_recipe': '/reference/qwen3_8_27b_recipe',
+    '/reference/training/qwen3_5_0_8b_recipe': '/reference/qwen3_5_0_8b_recipe',
+    '/reference/training/qwen3_5_2b_recipe': '/reference/qwen3_5_2b_recipe',
+    '/reference/training/qwen3_5_4b_recipe': '/reference/qwen3_5_4b_recipe',
+    '/reference/training/qwen3_5_9b_recipe': '/reference/qwen3_5_9b_recipe',
+    '/reference/models/parsedresponse': '/reference/parsedresponse',
+    '/reference/models/parse_qwen3_response':
+      '/reference/modelconfig#parse_response',
+    '/reference/parse_qwen3_response':
+      '/reference/modelconfig#parse_response',
     '/guides': firstGuide,
     '/support': '/',
     '/tutorials': firstTutorial,
@@ -265,17 +296,13 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Reference',
-          items: [
-            { label: 'Overview', link: '/reference' },
-            { label: 'CLI Reference', link: '/reference/cli' },
-            { label: 'Core', autogenerate: { directory: 'reference/core' } },
-            { label: 'Models', autogenerate: { directory: 'reference/models' } },
-            { label: 'Training', autogenerate: { directory: 'reference/training' } },
-            { label: 'Deployment', autogenerate: { directory: 'reference/deployment' } },
-          ],
+          label: 'SDK',
+          items: referenceSidebar.sdk,
         },
-        { label: 'CLI Reference', link: '/reference/cli' },
+        {
+          label: 'CLI',
+          items: referenceSidebar.cli,
+        },
       ],
       lastUpdated: false,
       pagination: false,

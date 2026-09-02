@@ -85,7 +85,7 @@ def _readme_heading_and_intro(markdown: str) -> tuple[str, str]:
     intro = "\n".join(body).strip()
     if not intro:
         raise ValueError("README is missing intro text after the H1")
-    return heading, intro
+    return heading, intro.replace("](#", f"]({_site_url()}#")
 
 
 def _collect_guides() -> list[tuple[str, str, int]]:
@@ -143,7 +143,7 @@ def _render(
         _item("Home", _site_url()),
         _item("Guides", _site_url("guides")),
         _item("Tutorials", _site_url("tutorials")),
-        _item("Reference", _site_url("reference")),
+        _item("SDK Reference", _site_url("reference/sdk")),
         _item("CLI Reference", _site_url("reference/cli")),
         "",
         "## Guides",
@@ -175,7 +175,7 @@ def _render(
         [
             "## Reference",
             "",
-            _item("Reference", _site_url("reference")),
+            _item("SDK Reference", _site_url("reference/sdk")),
             _item("CLI Reference", _site_url("reference/cli")),
             "",
         ]

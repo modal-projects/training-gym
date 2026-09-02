@@ -17,7 +17,7 @@ _SGLANG_DEFAULTS = SglangRecipe()
 
 @dataclass
 class GLM_4_7_SglangRecipe(SglangRecipe):
-    """GLM-4.7 (355B-A32B MoE) on 8xH200 — sensible SGLang defaults."""
+    """GLM-4.7 355B-A32B MoE SGLang recipe for 8×H200."""
 
     def __post_init__(self) -> None:
         for key, val in _GLM_4_7_DEFAULTS.items():

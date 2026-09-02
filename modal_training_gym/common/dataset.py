@@ -35,10 +35,7 @@ class DatasetType(Enum):
 
 
 class DatasetConfig(ABC):
-    """Dataset configuration shared across training frameworks.
-
-    Describes *what* the data is and provides a ``rows()`` method to resolve it.
-    """
+    """Dataset fields and materialization behavior shared across training frameworks."""
 
     _type: DatasetType = DatasetType.DEFAULT
 
@@ -47,20 +44,29 @@ class DatasetConfig(ABC):
 
     @abstractmethod
     def input_key(self) -> str:
+        """Prompt column name."""
         raise NotImplementedError(f"{type(self).__name__} has no input_key()")
 
     @abstractmethod
     def label_key(self) -> str:
+        """Ground-truth column name."""
         raise NotImplementedError(f"{type(self).__name__} has no label_key()")
 
     def output_format(self) -> str:
+        """The on-disk format written by `write()`, either `parquet` or `jsonl`."""
         return "jsonl"
 
     @abstractmethod
     def rows(self) -> Iterable[DatasetRow]:
+        """Load raw examples.
+
+        Returns:
+            An iterable collection of raw examples.
+        """
         raise NotImplementedError(f"{type(self).__name__} has no rows()")
 
     def write(self, path: str) -> None:
+        """Materialize training data at ``path``."""
         with open(path, "w") as f:
             for row in self.rows():
                 f.write(json.dumps(row) + "\n")
@@ -74,12 +80,7 @@ class DatasetConfig(ABC):
         return cols
 
     def validate_written(self, path: str) -> None:
-        """Sniff what ``write()`` wrote and confirm the columns the framework will index.
-
-        Catches the common ``KeyError: 'label'`` (and friends) that otherwise
-        only fire deep inside a Ray actor on a remote container, after image
-        build and cluster bringup.
-        """
+        """Validate the materialized file format and required columns."""
         import os
 
         if not os.path.exists(path):
@@ -124,7 +125,19 @@ class DatasetConfig(ABC):
 
 
 class HuggingFaceDataset(DatasetConfig):
-    """Dataset backed by a HuggingFace ``datasets`` repo."""
+    """A dataset loaded from a Hugging Face ``datasets`` repository.
+
+    Attributes:
+        hf_repo: Hugging Face dataset repository ID.
+        hf_split: Source dataset split.
+        hf_config: Source dataset configuration name.
+        input_column: Source prompt column.
+        output_column: Source answer column.
+        apply_chat_template: Apply the model's chat template.
+        system_prompt: System message added to formatted examples.
+        prompt_template: Template applied to each source prompt.
+        always_download: When training, always download the dataset from Hugging Face instead of caching it.
+    """
 
     _type: DatasetType = DatasetType.HUGGING_FACE
 
@@ -228,10 +241,25 @@ class HuggingFaceDataset(DatasetConfig):
 
 
 class HarborDataset(DatasetConfig):
-    """Dataset backed by a Harbor task directory structure.
+    """A dataset loaded from Harbor tasks.
 
-    Each task folder contains an instruction file and optional label metadata.
-    Tasks are discovered by globbing the task_root directory.
+    Attributes:
+        dataset_name: Harbor dataset ID.
+        path: Local Harbor dataset path.
+        task_root: Local directory containing Harbor tasks.
+        task_glob: Glob used to select task directories.
+        task_names: Explicit task directory names to select.
+        instruction_path: Relative path to each task instruction.
+        label_metadata_path: Relative JSON or TOML metadata path.
+        test_data_dir: Relative directory containing test data.
+        prompt_template: Template applied to each task instruction.
+        system_prompt: System message added to each prompt.
+        train_size: Number of tasks in the training split.
+        eval_size: Number of tasks in the evaluation split.
+        train_repeats: Repetitions of each training row.
+        eval_repeats: Repetitions of each evaluation row.
+        shuffle_tasks: Shuffle tasks before splitting.
+        shuffle_seed: Seed used to shuffle tasks.
     """
 
     _type: DatasetType = DatasetType.HARBOR

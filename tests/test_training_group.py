@@ -7,7 +7,7 @@ from modal_training_gym.common.dataset import HuggingFaceDataset
 from modal_training_gym.common.models import Qwen3_6_35B
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.training_group import TrainingGroupError
-from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import Qwen3_6_35b_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import Qwen3_6_35B_Recipe
 
 
 def _base() -> TrainConfig:
@@ -19,7 +19,7 @@ def _base() -> TrainConfig:
             output_column="answer",
             apply_chat_template=True,
         ),
-        recipe=Qwen3_6_35b_Recipe(num_rollout=10),
+        recipe=Qwen3_6_35B_Recipe(num_rollout=10),
     )
 
 
@@ -52,7 +52,7 @@ def test_variants_are_independent_and_base_untouched():
 
     assert configs[0].recipe.lr == 2e-6
     assert configs[1].recipe.lr == 9e-6
-    assert base.recipe.lr == Qwen3_6_35b_Recipe().lr
+    assert base.recipe.lr == Qwen3_6_35B_Recipe().lr
     assert configs[0].recipe is not configs[1].recipe
     assert all(c.recipe.num_rollout == 10 for c in configs)
 

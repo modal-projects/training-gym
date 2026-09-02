@@ -14,7 +14,7 @@ from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
     Gemma4_26B_A4B_Recipe,
 )
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4b_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
 
 
 _SLIME_RECIPE_KW = {
@@ -119,7 +119,7 @@ def test_miles_recipe_uses_shared_sampling_defaults() -> None:
 
 
 def test_model_recipe_uses_its_class_defaults() -> None:
-    config = _config(Qwen3_4b_Recipe())
+    config = _config(Qwen3_4B_Recipe())
 
     assert config._prepare_recipe().n_samples_per_prompt == 8
 

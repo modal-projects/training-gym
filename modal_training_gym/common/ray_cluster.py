@@ -146,41 +146,21 @@ class ModalRayJobResult:
 
 
 class ModalRayCluster:
-    """Base class for bootstrapping a Ray cluster inside Modal clustered functions.
+    """Starts and coordinates a Ray cluster inside a Modal clustered function.
 
-    Manages cluster discovery, Ray head/worker startup,
-    ``JobSubmissionClient`` creation, dashboard forwarding, and a
-    worker keep-alive loop. Framework launchers (slime, etc.)
-    compose or subclass this.
-
-    Attributes (populated after ``discover_cluster()``)
-    ---------------------------------------------------
-    n_nodes : int
-        Total cluster node count.
-    rank : int
-        This container's rank (0 = head).
-    head_addr : str
-        IPv4 address of the head node.
-    node_ip : str
-        IPv4 address of this container.
-    is_head : bool
-        Property — ``True`` when ``rank == 0``.
-
-    Methods
-    -------
-    discover_cluster(n_nodes)
-        Populate rank, addresses, and node count from Modal cluster info.
-    start_ray(init_retries=30, worker_wait_retries=60)
-        Start Ray head or worker using discovered cluster state.
-    start(n_nodes, init_retries=30, worker_wait_retries=60)
-        Convenience: ``discover_cluster`` + ``start_ray``.
-    forward_dashboard()
-        Return a ``modal.forward`` context manager for the Ray dashboard.
-    submit_and_tail(entrypoint, runtime_env=None)
-        Async: submit a Ray job, stream logs, return final status.
-    wait_forever(poll_seconds=10)
-        Async: keep a worker container alive until termination.
+    Attributes:
+        n_nodes: Total cluster node count.
+        rank: This container's rank, where zero is the head.
+        head_addr: IPv4 address of the head node.
+        node_ip: IPv4 address of this container.
+        is_head: Whether this container is the head.
     """
+
+    n_nodes: int
+    rank: int
+    head_addr: str
+    node_ip: str
+    is_head: bool
 
     def __init__(self) -> None:
         # Populated by discover_cluster(); see _discovered for readiness check.
@@ -193,11 +173,11 @@ class ModalRayCluster:
         self._started: bool = False
 
     def head_extra_start_args(self) -> list[str]:
-        """Override to append flags to `ray start --head` (e.g. resource hints)."""
+        """Additional arguments for ``ray start --head``."""
         return []
 
     def worker_extra_start_args(self) -> list[str]:
-        """Override to append flags to `ray start` on worker ranks."""
+        """Additional arguments for ``ray start`` on worker ranks."""
         return []
 
     @property
@@ -210,17 +190,22 @@ class ModalRayCluster:
 
     @property
     def client(self):
-        """Ray `JobSubmissionClient`. Only valid on the head node."""
+        """Ray ``JobSubmissionClient`` for the head node, or ``None`` before startup.
+
+        Raises:
+            RuntimeError:
+                Cluster discovery has not run or this container is not the head node.
+        """
         if not self.is_head:
             raise RuntimeError("JobSubmissionClient is only available on the head node")
         return self._client
 
     def discover_cluster(self, n_nodes: int) -> None:
-        """Populate `rank`, `head_addr`, `node_ip`, and `n_nodes` from Modal.
+        """Discover this container's Ray cluster state.
 
-        Does not start Ray. Call this first if you need to read cluster state
-        (e.g. to set framework-specific env vars) before `start_ray()` inherits
-        the environment into the Ray daemon. Idempotent.
+        Args:
+            n_nodes:
+                Number of containers in the cluster.
         """
         if self._discovered:
             return
@@ -253,10 +238,17 @@ class ModalRayCluster:
         init_retries: int = 30,
         worker_wait_retries: int = 60,
     ) -> None:
-        """Start the Ray head or worker using previously-discovered cluster state.
+        """Start the Ray head or worker.
 
-        Requires `discover_cluster()` to have been called. On the head also
-        creates a `JobSubmissionClient`. Idempotent.
+        Args:
+            init_retries:
+                Maximum Ray head initialization attempts.
+            worker_wait_retries:
+                Maximum attempts to wait for workers.
+
+        Raises:
+            RuntimeError:
+                ``discover_cluster()`` has not been called.
         """
         if self._started:
             return
@@ -289,7 +281,7 @@ class ModalRayCluster:
         init_retries: int = 30,
         worker_wait_retries: int = 60,
     ) -> None:
-        """Convenience: `discover_cluster(n_nodes)` followed by `start_ray(...)`."""
+        """Discover the cluster and start Ray."""
         self.discover_cluster(n_nodes)
         self.start_ray(
             init_retries=init_retries,
@@ -297,9 +289,14 @@ class ModalRayCluster:
         )
 
     def forward_dashboard(self):
-        """Return a `modal.forward` context manager for the Ray dashboard.
+        """Open a forwarding context for the Ray dashboard.
 
-        Usable with either `with` or `async with`. Only valid on the head node.
+        Returns:
+            A context manager compatible with ``with`` and ``async with``.
+
+        Raises:
+            RuntimeError:
+                This container is not the head node.
         """
         import modal
 
@@ -314,7 +311,11 @@ class ModalRayCluster:
         runtime_env: dict | None = None,
         max_retries: int = 35,
     ) -> ModalRayJobResult:
-        """Submit a Ray job, stream its logs to stdout, and return the final status."""
+        """Submit a Ray job and stream its logs.
+
+        Returns:
+            The final Ray job status.
+        """
         if not self.is_head:
             raise RuntimeError("submit_and_tail is only valid on the head node")
         assert self._client is not None

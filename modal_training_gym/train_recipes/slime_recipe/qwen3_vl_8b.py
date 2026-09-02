@@ -9,8 +9,8 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
-class Qwen3_VL_8b_Recipe(SlimeRecipe):
-    """Qwen3-VL-8B vision-language GRPO on 1×8×H100, colocated."""
+class Qwen3_VL_8B_Recipe(SlimeRecipe):
+    """Qwen3-VL-8B GRPO recipe for 1 node with 8 H100 GPUs."""
 
     tensor_model_parallel_size: int = 2
     sequence_parallel: bool = True

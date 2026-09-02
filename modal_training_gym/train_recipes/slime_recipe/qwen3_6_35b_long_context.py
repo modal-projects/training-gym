@@ -7,7 +7,7 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
-class Qwen3_6_35b_Recipe_Long_Context(SlimeRecipe):
+class Qwen3_6_35B_Recipe_Long_Context(SlimeRecipe):
     """Qwen3.6-35B-A3B (MoE) on 2x8xH200 with TP2/PP2/CP1/EP2."""
 
     gpu_type: str = "H200"

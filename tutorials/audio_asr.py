@@ -29,7 +29,7 @@ from modal_training_gym import (
     CustomDeployment,
     MultimodalDataset,
     Qwen3_ASR_1_7B,
-    Qwen3_ASR_1_7b_Recipe,
+    Qwen3_ASR_1_7B_Recipe,
     TrainConfig,
 )
 
@@ -152,12 +152,12 @@ async def wer_rm(args, sample, **kwargs) -> float:
 # There are many ASR-specific changes to the default framework recipes such as
 # the transcription rollout, padded (bshd) batches, and the many-samples/high-temperature
 # settings that surface reward variance. To not pass the burden of specifying onto you,
-# we created `Qwen3_ASR_1_7b_Recipe` so that you can focus on training.
+# we created `Qwen3_ASR_1_7B_Recipe` so that you can focus on training.
 
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    recipe=Qwen3_ASR_1_7b_Recipe(
+    recipe=Qwen3_ASR_1_7B_Recipe(
         gpu_type="H100",
         actor_num_nodes=1,
         actor_num_gpus_per_node=2,

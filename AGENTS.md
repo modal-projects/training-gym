@@ -74,7 +74,7 @@ Every framework mounts three Modal Volumes:
 
 ### Model presets
 
-Known-model presets live under `train_recipes/`, such as `Qwen3_4b_Recipe`. `TrainConfig` trains with the recipe it receives; choose a model-specific class when tuned defaults are intended.
+Known-model presets live under `train_recipes/`, such as `Qwen3_4B_Recipe`. `TrainConfig` trains with the recipe it receives; choose a model-specific class when tuned defaults are intended.
 
 ### Model validation
 

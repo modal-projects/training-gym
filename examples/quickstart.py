@@ -1,7 +1,7 @@
 from modal_training_gym import (
     HuggingFaceDataset,
     Qwen3_4B,
-    Qwen3_4b_Recipe,
+    Qwen3_4B_Recipe,
     TrainConfig,
 )
 
@@ -16,7 +16,7 @@ def main() -> None:
             output_column="label",
             apply_chat_template=False,
         ),
-        recipe=Qwen3_4b_Recipe(
+        recipe=Qwen3_4B_Recipe(
             gpu_type="H100",
             actor_num_nodes=1,
             actor_num_gpus_per_node=8,

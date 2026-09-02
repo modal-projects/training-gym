@@ -399,7 +399,7 @@ def build_slime_app(
                 f"{model.model_name} requires padded (bshd) batches: its "
                 "megatron-bridge forward doesn't implement THD sequence packing. "
                 'Set extra_config={"qkv_format": "bshd", "micro_batch_size": N} and '
-                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7b_Recipe, which sets "
+                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7B_Recipe, which sets "
                 f"these. Got qkv_format={cfg.get('qkv_format')!r}, "
                 f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
             )

@@ -122,7 +122,7 @@ public `build_app()`.
 cfg = TrainConfig(
     dataset=MyDataset(...),
     model=Qwen3_4B(),
-    recipe=Qwen3_4b_Recipe(gpu_type="H100", ...),
+    recipe=Qwen3_4B_Recipe(gpu_type="H100", ...),
 )
 result = cfg.train()
 ```

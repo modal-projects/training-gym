@@ -22,7 +22,7 @@ from modal_training_gym import (
     Endpoint,
     HarborDataset,
     Qwen3_5_4B,
-    Qwen3_5_4b_Recipe,
+    Qwen3_5_4B_Recipe,
     TrainConfig,
     extract_code,
 )
@@ -156,7 +156,7 @@ config = TrainConfig(
     model=model,
     dataset=train_dataset,
     eval_dataset=eval_dataset,
-    recipe=Qwen3_5_4b_Recipe(
+    recipe=Qwen3_5_4B_Recipe(
         eval_interval=None,
         num_rollout=10,
         rollout_batch_size=8,

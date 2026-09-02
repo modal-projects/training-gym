@@ -194,7 +194,7 @@ class _InklingSmallRecipe(MilesRecipe):
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Inkling_Small_Recipe(_InklingSmallRecipe):
-    """Full-parameter GRPO on Inkling-Small (4 nodes x 8 H200)."""
+    """Inkling-Small full-parameter GRPO recipe for 4 nodes with 8 H200 GPUs each."""
 
     lr: float = 5e-5
 
@@ -255,11 +255,7 @@ class Inkling_Small_Recipe(_InklingSmallRecipe):
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Inkling_Small_LoRA_Recipe(_InklingSmallRecipe):
-    """Rank-32 all-linear LoRA GRPO on Inkling-Small (4 nodes x 8 H200).
-
-    The base model stays frozen in both runtimes and only the adapter is synced to
-    the colocated engine after each step, so no optimizer offload is needed.
-    """
+    """Inkling-Small rank-32 LoRA GRPO recipe for 4 nodes with 8 H200 GPUs each."""
 
     # Upstream's launcher default is 5e-6, which upstream itself documents as reading
     # like "not learning": the zero-initialised B factors need hundreds of rollouts to
