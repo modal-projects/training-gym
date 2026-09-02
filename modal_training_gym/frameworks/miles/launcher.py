@@ -1130,6 +1130,7 @@ def build_miles_app(
 
             original_save = miles.save
             original_load = miles.load
+            original_start_rollout_id = miles.start_rollout_id
             miles.save = save_root
             resume_checkpoint = torch_dist_resume_checkpoint(
                 save_root, is_complete=_is_resumable_checkpoint
@@ -1146,6 +1147,9 @@ def build_miles_app(
                     "resuming training from last saved iteration."
                 )
                 miles.load = save_root
+                # Continue from the iteration stored in the run's own checkpoint,
+                # even for runs launched with an explicit start_rollout_id.
+                miles.start_rollout_id = None
             elif unresumable := _unresumable_save_dirs(save_root):
                 print(
                     f"WARNING: {save_root} holds saves that cannot be resumed "
@@ -1160,6 +1164,7 @@ def build_miles_app(
             finally:
                 miles.save = original_save
                 miles.load = original_load
+                miles.start_rollout_id = original_start_rollout_id
 
             phase_report_url = (
                 os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL")
