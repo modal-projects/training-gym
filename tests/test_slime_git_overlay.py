@@ -105,3 +105,32 @@ def test_local_overlay_preserves_unpatched_dev_checkout_behavior() -> None:
     assert [operation[0] for operation in image.operations] == ["add_local_dir"]
     assert image.operations[0][1] == ("/tmp/local-slime",)
     assert image.operations[0][2]["remote_path"] == SLIME_ROOT
+
+
+def _launcher_source() -> str:
+    from pathlib import Path
+
+    import modal_training_gym.frameworks.slime.launcher as launcher_module
+
+    return Path(launcher_module.__file__).read_text()
+
+
+def test_pinned_revision_is_recorded_as_an_app_tag() -> None:
+    """Provenance is the point of pinning; a run must say which commit it used."""
+    source = _launcher_source()
+
+    assert 'tags["slime_git_revision"] = slime.slime_git_revision' in source
+
+
+def test_recipe_environment_cannot_override_the_run_identity() -> None:
+    """`**slime.environment` is splatted into runtime_env, so ordering is load-bearing.
+
+    A recipe's env dict must not be able to reassign the run id, which keys the
+    metric run, the run record, and the framework status callbacks.
+    """
+    source = _launcher_source()
+    runtime_env = source[source.index("runtime_env = {") :]
+
+    assert runtime_env.index("**slime.environment") < runtime_env.index(
+        '"TRAINING_GYM_TRAINING_RUN_ID": training_run_id'
+    )

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.metrics import MetricConfig
 
 
@@ -282,13 +283,32 @@ def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
     ).run_commands(f"python3 -c {shlex.quote(install_code)}")
 
 
-def preflight_trackio(_config: TrackioConfig) -> str:
+def require_trackio_destination(config: TrackioConfig) -> None:
+    """Fail loudly when Trackio has nowhere to log.
+
+    A TrackioConfig with no Space, server, or dashboard URL falls back to a
+    Trackio local to the training container, whose database dies with the
+    container — the run succeeds and the metrics are simply gone. Refuse that
+    instead, the way a missing W&B key would be refused.
+    """
+    if config.space_id or config.server_url or config.dashboard_url:
+        return
+    raise TrainingGymConfigError(
+        "TrackioConfig has no destination, so metrics would be written to a "
+        "Trackio local to the training container and lost when it exits. Use "
+        "TrackioConfig.deploy_to_modal(project=...) for a server on Modal, or "
+        "set space_id= for a Hugging Face Space or server_url= for your own."
+    )
+
+
+def preflight_trackio(config: TrackioConfig) -> str:
     try:
         import trackio  # noqa: F401
     except ImportError as exc:
         raise RuntimeError(
             "Trackio logging is enabled, but Trackio is missing from the training image."
         ) from exc
+    require_trackio_destination(config)
     return ""
 
 

@@ -461,6 +461,10 @@ def build_slime_app(
     if slime.image_env:
         image = image.env(slime.image_env)
 
+    if slime.metrics is not None and slime.metrics.provider == "trackio":
+        from modal_training_gym.common.trackio import require_trackio_destination
+
+        require_trackio_destination(slime.metrics)
     image = apply_metric_image(image, slime.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
@@ -641,6 +645,10 @@ def build_slime_app(
         recipe_app_tags=slime.app_tags,
         metrics=slime.metrics,
     )
+    # Record which fork commit produced the run; that provenance is the point
+    # of pinning a source overlay in the first place.
+    if slime.slime_git_revision:
+        tags["slime_git_revision"] = slime.slime_git_revision
 
     app = App(app_name, tags=tags)
     gpu_spec = f"{slime.gpu_type}:{slime.actor_num_gpus_per_node}"
@@ -1141,7 +1149,6 @@ def build_slime_app(
                 "env_vars": {
                     "no_proxy": f"127.0.0.1,{cluster.head_addr}",
                     "MASTER_ADDR": cluster.head_addr,
-                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(slime.num_rollout),
                     "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
@@ -1160,6 +1167,10 @@ def build_slime_app(
                     ),
                     **slime.environment,
                     **timing_debug_env(),
+                    # After **slime.environment: a recipe's env dict must not be
+                    # able to reassign the run's identity, which keys metrics,
+                    # the run record, and the framework status callbacks.
+                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
             }

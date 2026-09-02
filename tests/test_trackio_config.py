@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import sys
 import threading
 import types
@@ -8,9 +10,11 @@ from importlib.util import find_spec
 from typing import Any
 
 from modal_training_gym.common.metrics import apply_metric_image
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.trackio import (
     TrackioConfig,
     install_wandb_shim,
+    require_trackio_destination,
 )
 
 
@@ -335,3 +339,16 @@ def test_trackio_adapter_preserves_native_train_and_eval_metric_names(monkeypatc
         ({"rollout/average_last_reward": 0.625}, 0),
         ({"eval/train-2-smoke": 0.5, "eval/eval-2-smoke": 0.25}, 1),
     ]
+
+
+def test_trackio_without_a_destination_is_refused():
+    """A destination-less config logs to a container-local DB that dies with it."""
+    with pytest.raises(TrainingGymConfigError, match="no destination"):
+        require_trackio_destination(TrackioConfig(project="rl"))
+
+    for reachable in (
+        TrackioConfig(project="rl", server_url="https://trackio.example"),
+        TrackioConfig(project="rl", space_id="modal-labs/metrics"),
+        TrackioConfig(project="rl", dashboard_url="https://trackio.example"),
+    ):
+        require_trackio_destination(reachable)
