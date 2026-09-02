@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import types
 from dataclasses import fields
 from importlib.util import find_spec
@@ -137,6 +138,11 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
         name = "fallback-name"
         config = {"learning_rate": 1e-5}
 
+        def log(self, metrics, step=None):
+            # The adapter logs through the run object, not the module, so that
+            # threads started after init() reach the same run.
+            calls.setdefault("logs", []).append((metrics, step))
+
     fake_trackio = types.ModuleType("trackio")
 
     # This is the Trackio 0.34.0 keyword surface used by the adapter.
@@ -233,3 +239,99 @@ def test_trackio_wandb_adapter_covers_the_framework_surface(monkeypatch):
     assert calls["logs"] == [({}, -1), ({"loss": 0.5}, None)]
     assert calls["finish"] == ((), {})
     assert wandb.run is None
+
+
+def _install_shim_with_contextvar_trackio(monkeypatch):
+    """Fake trackio whose active run lives in a ContextVar, as the real one does."""
+    import contextvars
+
+    current_run = contextvars.ContextVar("current_run", default=None)
+    logged: list[tuple[dict[str, Any], int | None]] = []
+
+    class _FakeRun:
+        name = "fallback-name"
+        config: dict[str, Any] = {}
+
+        def log(self, metrics, step=None):
+            logged.append((metrics, step))
+
+    def fake_init(**kwargs):
+        run = _FakeRun()
+        current_run.set(run)
+        return run
+
+    def fake_log(data, step=None):
+        run = current_run.get()
+        if run is None:
+            raise RuntimeError("Call trackio.init() before trackio.log().")
+        run.log(data, step=step)
+
+    fake_trackio = types.ModuleType("trackio")
+    fake_trackio.init = fake_init
+    fake_trackio.log = fake_log
+    fake_trackio.finish = lambda *a, **k: None
+    monkeypatch.setitem(sys.modules, "trackio", fake_trackio)
+    for module_name in (
+        "wandb",
+        "wandb.util",
+        "wandb.sdk",
+        "wandb.sdk.lib",
+        "wandb.sdk.lib.runid",
+    ):
+        monkeypatch.delitem(sys.modules, module_name, raising=False)
+    monkeypatch.setenv("TRAINING_GYM_TRACKIO_RUN_NAME", "training-run-a2")
+    install_wandb_shim()
+    return logged
+
+
+def test_trackio_adapter_logs_from_a_thread_started_after_init(monkeypatch):
+    """`wandb.run is not None` must imply `wandb.log()` works, in any thread.
+
+    Slime's SGLang engine-metrics loop is a daemon thread that guards on
+    `wandb.run` and then logs. trackio keeps its run in a ContextVar, which a
+    thread started after init() cannot see, so routing through the module-level
+    trackio.log() raised "Call trackio.init() before trackio.log()" there.
+    """
+    logged = _install_shim_with_contextvar_trackio(monkeypatch)
+
+    import wandb
+
+    wandb.init(project="agentic-harbor")
+    error: list[BaseException] = []
+
+    def worker():
+        try:
+            assert wandb.run is not None
+            wandb.log({"sgl_engine/uptime_sec": 1.0}, step=3)
+        except BaseException as exc:  # noqa: BLE001
+            error.append(exc)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    assert error == []
+    assert ({"sgl_engine/uptime_sec": 1.0}, 3) in logged
+
+
+def test_trackio_adapter_preserves_native_train_and_eval_metric_names(monkeypatch):
+    """Slime names its per-eval-dataset series ``eval/<subset>``.
+
+    The adapter is the only thing between ``wandb.log`` and Trackio, so a
+    rewritten or collapsed key here silently merges every eval subset into one
+    chart. Keys and steps must arrive verbatim.
+    """
+    logged = _install_shim_with_contextvar_trackio(monkeypatch)
+
+    import wandb
+
+    wandb.init(project="agentic-harbor")
+    logged.clear()
+
+    wandb.log({"rollout/average_last_reward": 0.625}, step=0)
+    wandb.log({"eval/train-2-smoke": 0.5, "eval/eval-2-smoke": 0.25}, step=1)
+
+    assert logged == [
+        ({"rollout/average_last_reward": 0.625}, 0),
+        ({"eval/train-2-smoke": 0.5, "eval/eval-2-smoke": 0.25}, 1),
+    ]

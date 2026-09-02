@@ -366,7 +366,15 @@ def install_wandb_shim() -> None:
         *_args: Any,
         **_kwargs: Any,
     ) -> Any:
-        return trackio.log(data, step=step)
+        # trackio.log() resolves the run from a ContextVar, which a thread
+        # started after init() cannot see. W&B's run is process-global and
+        # callers depend on that: slime's SGLang engine-metrics thread guards
+        # on `wandb.run is not None` and then logs. Go through the run object
+        # we already hold so any thread reaches the same run.
+        run = shim.run
+        if run is None:
+            return trackio.log(data, step=step)
+        return run.log(metrics=data, step=step)
 
     def finish(*_args: Any, **_kwargs: Any) -> Any:
         try:
