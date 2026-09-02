@@ -18,6 +18,16 @@ Megatron runs 2 writers per rank, so a node's rate is
 leaves the stream untouched, so models that do not opt in are unaffected.
 Checkpoint bytes are unchanged; only the write pacing is.
 
+**Choosing a value.** Size it against the mount's *upload* rate, not its read
+rate. A mounted Volume buffers writes to container-local disk and uploads in
+the background, so any write rate above what the mount drains banks a backlog
+that keeps uploading after the save returns — and that tail is unpaced, which
+is what resets cluster TCP. A measured single container sustains roughly
+**260-275 MiB/s end to end** (8 GiB written, then a blocking ``commit()``;
+the drain alone runs 440-590 MiB/s). Divide the per-node budget by the writer
+count: at 8 ranks/node, 16 keeps a node near 256 MiB/s. Higher values shorten
+the save but leave a backlog whose drain time scales with the overshoot.
+
 Executed at image-build time via ``python3 <this file>``.
 """
 

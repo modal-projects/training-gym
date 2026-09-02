@@ -109,13 +109,19 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
             # one opts in.
             "MILES_LOAD_BARRIER_TIMEOUT_S": "3600",
             # Pace checkpoint shard writes (patch_dist_ckpt_write_throttle,
-            # MB/s per writer process; 16 writers/node => ~0.5 GiB/s/node).
-            # Unpaced, the 64 GiB/node burst outruns the Volume mount's upload
-            # and the congestion resets TCP connections between cluster
-            # containers, failing the run at its save. Reads at ~1 GiB/s/node
-            # are proven safe; this keeps writes inside that envelope for a
-            # ~2 min save instead of ~1 min.
-            "MILES_CKPT_WRITE_BWLIMIT_MBPS": "32",
+            # MB/s per writer process; 16 writers/node => ~256 MiB/s/node).
+            # Sized against the Volume mount's *upload* rate, not its read rate:
+            # a mounted Volume buffers writes locally and uploads in the
+            # background, and a measured single container sustains only
+            # ~262-274 MiB/s end to end. Writing faster than that banks a
+            # backlog that drains as an unpaced burst after the save reports
+            # done, and that burst resets TCP between cluster containers.
+            # At the earlier 32 (512 MiB/s/node) a 64 GiB/node save left a
+            # ~30 GiB backlog draining for ~1 min past the save, which is
+            # exactly when achromatic-tint lost three nodes' engines. Staying
+            # under the upload rate keeps the backlog near zero; the save costs
+            # ~4 min instead of ~2.5.
+            "MILES_CKPT_WRITE_BWLIMIT_MBPS": "16",
         }
     )
 

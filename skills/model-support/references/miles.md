@@ -225,6 +225,24 @@ degrades superlinearly with sequence length — the same model at 2048 tokens ra
 ~4x faster *per token* than at 8192. Predict step time from a run at the real
 shape, or say the number is unvalidated.
 
+### Pace TB-scale checkpoint writes to the Volume's upload rate
+
+A mounted Modal Volume buffers writes to container-local disk and uploads in
+the background. Write faster than it drains and the backlog keeps uploading
+*after* the save returns; that tail is unpaced and resets TCP between cluster
+containers, so the run dies during whatever comes next (engine onload, the
+following step) with `Connection reset by peer` / `ActorUnavailableError` on
+several nodes at once — never an OOM or a crashed process.
+
+Measured: a single container sustains **~260-275 MiB/s end to end**, while the
+drain alone runs 440-590 MiB/s. Set `MILES_CKPT_WRITE_BWLIMIT_MBPS`
+(`patch_dist_ckpt_write_throttle`, per writer process, 16 writers/node at 8
+ranks) so the per-node rate stays under the sustained figure — 16 puts a node
+near 256 MiB/s. Sizing it against the *read* envelope instead (~1 GiB/s/node)
+looks safe and is not: at 32 a 64 GiB/node save banked ~30 GiB that drained for
+~1 min past the save, which is exactly when `achromatic-tint` lost three nodes'
+engines. Budget the slower save (~4 min rather than ~2.5 at 550 B).
+
 ## LoRA
 
 Ship a full-parameter and a `*_LoRA_Recipe` variant on a shared private base, matching whichever upstream gates in CI. They differ on more than the adapter: full-param pins `use_dynamic_batch_size=False` + `micro_batch_size=1` (dynamic packing exposes a PP-p2p × EP-all-to-all NCCL race on varlen shapes) and offloads the optimizer, while LoRA packs dynamically, keeps both runtimes resident (`no_offload_train` / `no_offload_rollout`) and syncs only the adapter — ~3 s vs ~50 s per rollout.
