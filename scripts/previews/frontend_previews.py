@@ -1,6 +1,8 @@
+import re
 import sys
 import tempfile
 import traceback
+from urllib.parse import urlparse
 from collections import defaultdict
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
@@ -52,6 +54,12 @@ def get_mounted_artifact_path(name):
 
 PreviewType: TypeAlias = Literal["dashboard", "docs"]
 
+# Where a dashboard preview sends `/api` when the PR didn't bring its own
+# backend (see scripts/previews/dashboard_api.py).
+DEPLOYED_DASHBOARD_HOST = (
+    "modal-labs-training-gym--training-gym-dashboard-fastapi-app.modal.run"
+)
+
 
 def _docs_nginx_refresh_inc(redirects: dict[str, str]) -> str:
     blocks: list[str] = []
@@ -65,6 +73,28 @@ def _docs_nginx_refresh_inc(redirects: dict[str, str]) -> str:
     return "\n".join(blocks) + ("\n" if blocks else "")
 
 
+MODAL_HOST_RE = re.compile(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.modal\.run")
+
+
+def render_dashboard_conf(template: str, api_url: Optional[str]) -> str:
+    """Point the dashboard conf's ``/api`` proxy at the API this preview uses."""
+    host = urlparse(api_url).netloc if api_url else DEPLOYED_DASHBOARD_HOST
+    if not host:
+        raise ValueError(f"no host in api_url={api_url!r}")
+    # The host is substituted straight into nginx directives, and the preview
+    # only ever proxies at a Modal web endpoint.
+    if not MODAL_HOST_RE.fullmatch(host):
+        raise ValueError(f"not a modal.run host: {host!r}")
+    return template.replace("__API_HOST__", host)
+
+
+def _dashboard_nginx_conf(api_url: Optional[str]) -> Path:
+    template = (NGINX_CONF_DIR / "dashboard.conf").read_text()
+    conf = Path(tempfile.mkdtemp()) / "dashboard.conf"
+    conf.write_text(render_dashboard_conf(template, api_url))
+    return conf
+
+
 @dataclass
 class PreviewDeployment:
     type: PreviewType
@@ -72,6 +102,9 @@ class PreviewDeployment:
     sandbox_id: Optional[str] = None
     url: Optional[str] = None
     expiration: datetime | None = None
+    # Set when the PR deployed its own dashboard backend; `None` keeps the
+    # preview reading the deployed dashboard, as every preview used to.
+    api_url: Optional[str] = None
 
     def deploy(self):
         print(f"Deploying {self.type} preview from {self.artifact}")
@@ -90,7 +123,11 @@ class PreviewDeployment:
         remote_conf = "/etc/nginx/conf.d/preview.conf"
 
         if self.type == "dashboard":
-            image = image.add_local_file(NGINX_CONF_DIR / "dashboard.conf", remote_conf)
+            conf = _dashboard_nginx_conf(self.api_url)
+            image = image.add_local_file(conf, remote_conf)
+            print(
+                f"Dashboard preview proxies /api to {self.api_url or 'the deployed dashboard'}"
+            )
 
         if self.type == "docs":
             image = image.add_local_file(NGINX_CONF_DIR / "docs.conf", remote_conf)
@@ -141,7 +178,12 @@ class PreviewDeployment:
 
 
 @app.function(volumes={MOUNT_POINT: vol})
-def deploy_preview(pr_number: int, type: PreviewType, artifact: str):
+def deploy_preview(
+    pr_number: int,
+    type: PreviewType,
+    artifact: str,
+    api_url: Optional[str] = None,
+):
     print(f"Deploying {type} preview for #{pr_number}")
     key = (pr_number, type)
 
@@ -154,7 +196,7 @@ def deploy_preview(pr_number: int, type: PreviewType, artifact: str):
             deployment.terminate()
             deployment.cleanup_artifact()
 
-        deployment = PreviewDeployment(type=type, artifact=artifact)
+        deployment = PreviewDeployment(type=type, artifact=artifact, api_url=api_url)
         deployment.deploy()
     finally:
         deployments[key] = asdict(deployment)
