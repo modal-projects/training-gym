@@ -645,10 +645,6 @@ def build_slime_app(
         recipe_app_tags=slime.app_tags,
         metrics=slime.metrics,
     )
-    # Record which fork commit produced the run; that provenance is the point
-    # of pinning a source overlay in the first place.
-    if slime.slime_git_revision:
-        tags["slime_git_revision"] = slime.slime_git_revision
 
     app = App(app_name, tags=tags)
     gpu_spec = f"{slime.gpu_type}:{slime.actor_num_gpus_per_node}"
@@ -981,7 +977,21 @@ def build_slime_app(
         print(f"Training run id: {training_run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
-            "recipe": _serialize_slime_params(slime, dataset=dataset, model=model),
+            # _fields() omits _SLIME_SKIP, so the source overlay and data volume
+            # would otherwise leave no trace of what a run actually used. App
+            # tags are capped at 8 and already spoken for, so record them here.
+            "recipe": {
+                **_serialize_slime_params(slime, dataset=dataset, model=model),
+                **{
+                    key: value
+                    for key, value in (
+                        ("slime_git_repository", slime.slime_git_repository),
+                        ("slime_git_revision", slime.slime_git_revision),
+                        ("data_volume_name", slime.data_volume_name),
+                    )
+                    if value
+                },
+            },
             "metrics": metric_metadata(
                 slime.metrics,
                 entity=metric_entity,

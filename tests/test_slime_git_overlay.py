@@ -115,11 +115,19 @@ def _launcher_source() -> str:
     return Path(launcher_module.__file__).read_text()
 
 
-def test_pinned_revision_is_recorded_as_an_app_tag() -> None:
-    """Provenance is the point of pinning; a run must say which commit it used."""
-    source = _launcher_source()
+def test_pinned_revision_is_recorded_on_the_run() -> None:
+    """Provenance is the point of pinning; a run must say which commit it used.
 
-    assert 'tags["slime_git_revision"] = slime.slime_git_revision' in source
+    ``_fields()`` omits ``_SLIME_SKIP``, so the overlay fields reach the run
+    record only if the launcher adds them explicitly. Modal caps apps at 8
+    tags, which the agentic recipe already exhausts, so this cannot be a tag.
+    """
+    source = _launcher_source()
+    recipe_entry = source[source.index('"recipe": {') :]
+    end = recipe_entry.index('"metrics"')
+
+    for field in ("slime_git_repository", "slime_git_revision", "data_volume_name"):
+        assert field in recipe_entry[:end], field
 
 
 def test_recipe_environment_cannot_override_the_run_identity() -> None:
