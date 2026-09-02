@@ -138,6 +138,7 @@
   // Mirrors the server's facet buckets (`run_facet_values`), which is what the
   // filter chips and counts are keyed by.
   const NO_GROUP = "(no group)";
+  const UNTAGGED_RECIPE = "(untagged)";
 
   function getGroup(run) {
     return safeText(run.group_id) || NO_GROUP;
@@ -241,6 +242,26 @@
     }
   }
 
+  // The counts endpoint is the only source of whole-history totals, so losing
+  // it (a preview build talking to an older backend, a slow volume read) must
+  // not take the rows down with it: count the loaded window instead. Exact
+  // once everything is paged in, an undercount before that.
+  function countsFromPage(page) {
+    const buckets = { status: {}, recipe: {}, group: {} };
+    for (const run of page) {
+      const values = {
+        status: getStatus(run),
+        recipe:
+          safeText(run.recipe) || safeText(run.framework) || UNTAGGED_RECIPE,
+        group: getGroup(run),
+      };
+      for (const [name, value] of Object.entries(values)) {
+        buckets[name][value] = (buckets[name][value] || 0) + 1;
+      }
+    }
+    return { total: page.length, matching: page.length, ...buckets };
+  }
+
   async function loadRuns() {
     const requestId = ++runsRequestId;
     const isStale = () => requestId !== runsRequestId;
@@ -259,7 +280,7 @@
     const limit = Math.max(loadedRunCount, RUNS_PAGE_SIZE);
 
     try {
-      const [page, counts] = await Promise.all([
+      const [pageResult, countsResult] = await Promise.allSettled([
         matchesNothing
           ? Promise.resolve([])
           : fetchWithTimeout(
@@ -274,6 +295,12 @@
         ),
       ]);
       if (isStale()) return;
+      if (pageResult.status === "rejected") throw pageResult.reason;
+      const page = pageResult.value;
+      const counts =
+        countsResult.status === "fulfilled"
+          ? countsResult.value
+          : countsFromPage(page);
       runs = page;
       runCounts = counts;
       adoptFacetValues(counts);

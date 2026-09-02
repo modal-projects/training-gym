@@ -1573,6 +1573,14 @@ def fastapi_app():
 
     # ── SPA fallback ─────────────────────────────────────────────────────
 
+    # Declared before the fallback so an unknown API path is a JSON 404 rather
+    # than the SPA's HTML served with a 200: a frontend newer than the deployed
+    # backend would otherwise parse index.html as JSON and report the parser's
+    # error ("The string did not match the expected pattern", on WebKit).
+    @web.get("/api/{full_path:path}", include_in_schema=False)
+    async def api_not_found(full_path: str):
+        raise HTTPException(status_code=404, detail=f"No such API path: {full_path}")
+
     @web.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         return FileResponse(f"{STATIC_DIR}/index.html")
