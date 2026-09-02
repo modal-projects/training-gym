@@ -1,27 +1,27 @@
 """Weekly synthetic monitoring for training-gym model validation.
 
-Test it with:
+Test it out with:
 
 ```shell
-    uv run modal run -m synthetic_monitoring.model_validation --model qwen3-4b --dryrun
+    uv run modal run -e training-gym -m synthetic_monitoring.model_validation --model qwen3-4b
 ```
 """
 
 from __future__ import annotations
 
 import os
+import time
 import traceback
+from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import modal
 
 from modal_training_gym.common.models.validation import _ValidationConfig
+from modal_training_gym.common.run import TrainingRun
 from scripts.validate_model_configs import ValidationResult, run_base_training
-from synthetic_monitoring.chart import (
-    RunPoint,
-    append_history,
-    render_timing_history_chart,
-)
+from synthetic_monitoring.chart import RunPoint, render_timing_history_chart
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PROBE_TIMEOUT_S = 60 * 60
@@ -32,6 +32,7 @@ LAUNCH_TIMEOUT_S = (
 )
 MODAL_ENV = "training-gym"
 SLACK_CHANNEL_ID = "C0B9ZEA3ASD"
+HISTORY_DICT_NAME = "gym-synmon-timing-baselines"
 
 probe_image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -49,7 +50,145 @@ modal_creds_secret = modal.Secret.from_name(
 app = modal.App("gym-synmon-launcher")
 
 
-def _slack_client():
+def _history_dict():
+    return modal.Dict.from_name(
+        HISTORY_DICT_NAME, create_if_missing=True, environment_name=MODAL_ENV
+    )
+
+
+def _raw_cell(text: str) -> dict:
+    return {"type": "raw_text", "text": text}
+
+
+def slack_report_blocks(
+    rows: list[dict], *, when: datetime | None = None
+) -> list[dict]:
+    day = (when or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    table_rows = [
+        [
+            _raw_cell("Model"),
+            _raw_cell("Total runtime"),
+            _raw_cell("Delta vs previous successful run"),
+        ]
+    ]
+    for row in rows:
+        if row["status"] == "success":
+            total = int(round(row["total_duration_s"]))
+            hours, rem = divmod(total, 3600)
+            minutes, seconds = divmod(rem, 60)
+            if hours:
+                runtime_text = f"{hours}h {minutes:02d}m {seconds:02d}s"
+            elif minutes:
+                runtime_text = f"{minutes}m {seconds:02d}s"
+            else:
+                runtime_text = f"{seconds}s"
+            runtime, delta = _raw_cell(runtime_text), _raw_cell(row["delta"])
+        elif row.get("modal_app_url"):
+            runtime, delta = (
+                _raw_cell("FAILED"),
+                {
+                    "type": "rich_text",
+                    "elements": [
+                        {
+                            "type": "rich_text_section",
+                            "elements": [
+                                {
+                                    "type": "link",
+                                    "text": "logs",
+                                    "url": row["modal_app_url"],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+        else:
+            runtime, delta = (
+                _raw_cell("FAILED"),
+                _raw_cell((row.get("error") or "failed")[:200]),
+            )
+        table_rows.append([_raw_cell(row["model"]), runtime, delta])
+    return [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"Weekly model validation - {day}"},
+        },
+        {
+            "type": "table",
+            "column_settings": [
+                {"is_wrapped": True},
+                {"align": "left"},
+                {"is_wrapped": True},
+            ],
+            "rows": table_rows,
+        },
+    ]
+
+
+def _lookup_app_url(training_run_id: str) -> str | None:
+    if not training_run_id:
+        return None
+    try:
+        url = TrainingRun.from_id(training_run_id).modal_app_url
+    except Exception:
+        return None
+    return url or None
+
+
+def _record(model: str, point: RunPoint) -> list[RunPoint]:
+    try:
+        history = _history_dict()
+        points = [RunPoint(**item) for item in history.get(model, [])]
+        if point.training_run_id and any(
+            p.training_run_id == point.training_run_id for p in points
+        ):
+            return points
+        points.append(point)
+        points.sort(key=lambda p: (p.ts, p.training_run_id))
+        history[model] = [asdict(p) for p in points]
+        return points
+    except Exception as exc:
+        print(f"error: append_history failed for {model}: {exc}")
+        return [point]
+
+
+def _row(
+    model: str, point: RunPoint, history: list[RunPoint], error: str | None = None
+) -> dict:
+    prior = next(
+        (
+            p
+            for p in reversed(history)
+            if p.status == "success"
+            and (p.training_run_id, p.ts) != (point.training_run_id, point.ts)
+        ),
+        None,
+    )
+    ok = point.status == "success"
+    if ok:
+        prior_s = prior.total_duration_s if prior else None
+        if prior_s is None:
+            delta = "n/a"
+        else:
+            delta_s = point.total_duration_s - prior_s
+            delta = (
+                f"{delta_s:+.0f}s"
+                if prior_s <= 0
+                else f"{delta_s:+.0f}s ({delta_s / prior_s * 100:+.1f}%)"
+            )
+    else:
+        delta = "n/a"
+    return {
+        "model": model,
+        "status": point.status,
+        "total_duration_s": point.total_duration_s if ok else None,
+        "delta": delta,
+        "modal_app_url": point.modal_app_url,
+        "error": error,
+    }
+
+
+def _post_report(rows: list[dict]) -> None:
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
 
@@ -59,75 +198,95 @@ def _slack_client():
     except SlackApiError as exc:
         if exc.response["error"] != "already_in_channel":
             raise
-    return client
+    header = f"Weekly model validation - {datetime.now(timezone.utc):%Y-%m-%d}"
+    thread_ts = client.chat_postMessage(
+        channel=SLACK_CHANNEL_ID,
+        text=header,
+        blocks=slack_report_blocks(rows),
+        mrkdwn=True,
+        unfurl_links=False,
+        unfurl_media=False,
+    )["ts"]
+    for row in rows:
+        try:
+            if row["status"] == "success":
+                png = render_timing_history_chart(
+                    [
+                        RunPoint(**item)
+                        for item in _history_dict().get(row["model"], [])
+                    ],
+                    model_name=row["model"],
+                )
+                if png:
+                    client.files_upload_v2(
+                        channel=SLACK_CHANNEL_ID,
+                        thread_ts=thread_ts,
+                        content=png,
+                        filename=f"timing_history_{row['model'].replace('/', '_')}.png",
+                        title=row["model"],
+                    )
+                continue
+            text = f"`{row['model']}` failed"
+            if row.get("error"):
+                text += f"\n```{row['error'][:1500]}```"
+            if row.get("modal_app_url"):
+                text += f"\n<{row['modal_app_url']}|Modal logs>"
+            client.chat_postMessage(
+                channel=SLACK_CHANNEL_ID,
+                thread_ts=thread_ts,
+                text=text,
+                mrkdwn=True,
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+        except Exception as exc:
+            print(f"error: reply failed for {row['model']}: {exc}")
 
 
 @app.function(
     image=probe_image,
     timeout=PROBE_TIMEOUT_S + CLEANUP_GRACE_S,
-    secrets=[slack_secret, modal_creds_secret],
+    secrets=[modal_creds_secret],
 )
-def monitor(
-    model: str = "",
-    dryrun: bool = False,
-    num_steps: int = 1,
-) -> dict:
+def monitor(model: str = "", num_steps: int = 1) -> dict:
     selected = _ValidationConfig.find(model).name
-    print(f"synmon: model={selected!r} dryrun={dryrun} num_steps={num_steps}")
-    if dryrun:
-        print(f"dryrun: would probe {selected!r} num_steps={num_steps}")
-        return {"model": selected, "dryrun": True}
-
+    print(f"synmon: model={selected!r} num_steps={num_steps}")
     result: ValidationResult | None = None
     try:
         result = run_base_training(selected, step_count=num_steps)
-        if not result.succeeded:
-            raise RuntimeError(
+        url = _lookup_app_url(result.training_run_id)
+        point = RunPoint.from_validation_result(result, modal_app_url=url)
+        error = (
+            None
+            if result.succeeded
+            else (
                 f"model validation failed for {selected}: "
                 f"{result.training_run_status.value}"
             )
+        )
+        return _row(selected, point, _record(selected, point), error)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
-        lines = [f"`{selected}` failed", f"```{error[:1500]}```"]
-        if result:
-            lines.insert(1, f"Run: `{result.training_run_id}`")
-        _slack_client().chat_postMessage(
-            channel=SLACK_CHANNEL_ID,
-            text="\n".join(lines),
-            mrkdwn=True,
-            unfurl_links=False,
-            unfurl_media=False,
+        print(f"error: probe failed for {selected}: {error}")
+        url = _lookup_app_url(result.training_run_id) if result else None
+        point = RunPoint(
+            ts=time.time(),
+            timings={},
+            training_run_id=getattr(result, "training_run_id", "") or "",
+            total_duration_s=float(getattr(result, "total_duration_s", 0) or 0),
+            status="failed",
+            modal_app_url=url,
         )
-        raise
-
-    history = append_history(
-        selected, RunPoint.from_validation_result(result), environment_name=MODAL_ENV
-    )
-    _slack_client().files_upload_v2(
-        channel=SLACK_CHANNEL_ID,
-        content=render_timing_history_chart(history, model_name=selected),
-        filename=f"timing_history_{selected.replace('/', '_')}.png",
-        title=f"{selected} (n={len(history)} runs)",
-    )
-
-    return {
-        "model": selected,
-        "training_run_id": result.training_run_id,
-        "total_duration_s": result.total_duration_s,
-    }
+        return _row(selected, point, _record(selected, point), error)
 
 
 @app.function(
     image=probe_image,
     timeout=LAUNCH_TIMEOUT_S,
     schedule=modal.Cron("17 0 * * 0"),
-    secrets=[slack_secret],
+    secrets=[slack_secret, modal_creds_secret],
 )
-def launch_weekly(
-    model: str = "",
-    dryrun: bool = False,
-    num_steps: int = 1,
-) -> list[dict]:
+def launch_weekly(model: str = "", num_steps: int = 1) -> list[dict]:
     names = (
         [_ValidationConfig.find(model).name]
         if model
@@ -136,41 +295,37 @@ def launch_weekly(
     if not names:
         raise RuntimeError("no validatable models registered")
 
-    results: list[dict] = []
-    failures: list[str] = []
-    for name, row in zip(
+    rows: list[dict] = []
+    for name, payload in zip(
         names,
-        monitor.map(
-            names,
-            kwargs={"dryrun": dryrun, "num_steps": num_steps},
-            return_exceptions=True,
-        ),
+        monitor.map(names, kwargs={"num_steps": num_steps}, return_exceptions=True),
     ):
-        if isinstance(row, Exception):
-            tb = "".join(traceback.format_exception(type(row), row, row.__traceback__))
+        if isinstance(payload, Exception):
+            tb = "".join(
+                traceback.format_exception(
+                    type(payload), payload, payload.__traceback__
+                )
+            )
             print(f"error: probe failed for {name}:\n{tb}")
-            failures.append(f"`{name}` {type(row).__name__}: {row}")
+            rows.append(
+                {
+                    "model": name,
+                    "status": "failed",
+                    "total_duration_s": None,
+                    "delta": "n/a",
+                    "modal_app_url": None,
+                    "error": f"{type(payload).__name__}: {payload}",
+                }
+            )
             continue
-        results.append(row)
+        rows.append(payload)
 
-    if failures:
-        summary = "\n".join(failures)
-        _slack_client().chat_postMessage(
-            channel=SLACK_CHANNEL_ID,
-            text=f"weekly model validation had failures\n{summary}"[:3500],
-            mrkdwn=True,
-            unfurl_links=False,
-            unfurl_media=False,
-        )
-        raise RuntimeError(f"synmon fan-out finished with failures:\n{summary}")
-    return results
+    _post_report(rows)
+    if any(row["status"] != "success" for row in rows):
+        raise RuntimeError("synmon fan-out finished with failures")
+    return rows
 
 
 @app.local_entrypoint()
-def main(
-    model: str = "",
-    dryrun: bool = True,
-    num_steps: int = 1,
-) -> None:
-    result = monitor.remote(model=model, dryrun=dryrun, num_steps=num_steps)
-    print(result)
+def main(model: str = "", num_steps: int = 1) -> None:
+    print(launch_weekly.remote(model=model, num_steps=num_steps))

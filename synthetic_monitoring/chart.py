@@ -1,45 +1,38 @@
 import io
+import math
 import re
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-import modal
+from modal_training_gym.common.step_timing import Substep
 
 if TYPE_CHECKING:
     from scripts.validate_model_configs import ValidationResult
 
-_STEP_SUFFIX = re.compile(r" \(step \d+\)$")
-_LANE_ORDER = {None: 0, "actor": 1, "rollout": 2}
+LOOKBACK_S = 90 * 24 * 3600
 
-HISTORY_DICT_NAME = "gym-synmon-timing-baselines"
+_STEP_SUFFIX = re.compile(r" \(step \d+\)$")
+_LANE_ORDER = {None: 0, "actor": 1, "rollout": 2, "critic": 3}
+_SUBSTEP_ORDER = {member.value: i for i, member in enumerate(Substep)}
 
 _GRAY_00 = "#181818"
-_GRAY_08 = "#222222"
-_GRAY_15 = "#272727"
+_GRAY_10 = "#232323"
 _GRAY_20 = "#2f2f2f"
 _GRAY_30 = "#464646"
-_GRAY_40 = "#747474"
 _GRAY_50 = "#a3a3a3"
 _GRAY_70 = "#d1d1d1"
-_GREEN_50 = "#6ac345"
-_GREEN_70 = "#63cd93"
-_GREEN_80 = "#7fee64"
-_RED_75 = "#f87171"
-_YELLOW_60 = "#d1c05f"
-_BLUE_60 = "#79a4c4"
-_PHASE_COLORS = (
-    _BLUE_60,
-    _GREEN_50,
-    _YELLOW_60,
-    _RED_75,
-    _GREEN_70,
-    _GRAY_50,
-    _GRAY_40,
-    "#c4a27a",
-    _GRAY_70,
-)
+_DATAVIZ_GREEN_2 = "#6ac345"
+_DATAVIZ_ORANGE_2 = "#ffa556"
+_DATAVIZ_BLUE_2 = "#85aef8"
+_DATAVIZ_PURPLE_2 = "#c29bfc"
+_LANE_COLORS = {
+    None: _DATAVIZ_GREEN_2,
+    "actor": _DATAVIZ_BLUE_2,
+    "rollout": _DATAVIZ_ORANGE_2,
+    "critic": _DATAVIZ_PURPLE_2,
+}
 
 
 @dataclass(frozen=True)
@@ -48,10 +41,16 @@ class RunPoint:
     timings: dict[str, float]
     training_run_id: str
     total_duration_s: float
+    status: str = "success"
+    modal_app_url: str | None = None
 
     @classmethod
     def from_validation_result(
-        cls, result: "ValidationResult", *, ts: float | None = None
+        cls,
+        result: "ValidationResult",
+        *,
+        ts: float | None = None,
+        modal_app_url: str | None = None,
     ) -> "RunPoint":
         timings: dict[str, float] = {}
         step_times = result.step_times or {}
@@ -61,34 +60,20 @@ class RunPoint:
                 substep_times[step_key].items(), key=lambda item: item[1]["start"]
             )
             for name, entry in ordered_substeps:
-                # duration_s sums busy time across overlapping invocations, so
-                # a concurrent phase can exceed its wall time; say so in the key.
-                key = name.replace(")", ", busy)") if entry["concurrent"] else name
-                timings[f"{key} (step {step_key})"] = entry["duration_s"]
+                timings[f"{name} (step {step_key})"] = (
+                    entry["wall_duration_s"]
+                    if entry["concurrent"]
+                    else entry["duration_s"]
+                )
             timings[f"Step {step_key}"] = step_times[step_key]["duration_s"]
         return cls(
             ts=time.time() if ts is None else ts,
             timings=timings,
             training_run_id=result.training_run_id,
             total_duration_s=result.total_duration_s,
+            status="success" if result.succeeded else "failed",
+            modal_app_url=modal_app_url,
         )
-
-
-def append_history(
-    model_name: str, point: RunPoint, *, environment_name: str
-) -> list[RunPoint]:
-    history = modal.Dict.from_name(
-        HISTORY_DICT_NAME, create_if_missing=True, environment_name=environment_name
-    )
-    points = [RunPoint(**item) for item in history.get(model_name, [])]
-    if point.training_run_id and any(
-        p.training_run_id == point.training_run_id for p in points
-    ):
-        return points
-    points.append(point)
-    points.sort(key=lambda p: (p.ts, p.training_run_id))
-    history[model_name] = [asdict(p) for p in points]
-    return points
 
 
 def _panel_title(label: str) -> str:
@@ -96,9 +81,16 @@ def _panel_title(label: str) -> str:
     return name[:1].upper() + name[1:]
 
 
-def _lane(title: str) -> int:
-    match = re.search(r"\((actor|rollout)\b", title)
-    return _LANE_ORDER[match.group(1) if match else None]
+def _lane(title: str) -> str | None:
+    match = re.search(r"\((actor|rollout|critic)\)", title)
+    return match.group(1) if match else None
+
+
+def _panel_sort_key(raw: str) -> tuple[int, int, str]:
+    index = _SUBSTEP_ORDER.get(raw.split(" (", 1)[0])
+    if index is None:
+        return (len(_SUBSTEP_ORDER), 0, raw)
+    return (index, _LANE_ORDER[_lane(raw)], "")
 
 
 def _substep_series(history: list[RunPoint]) -> dict[str, list[float | None]]:
@@ -108,11 +100,12 @@ def _substep_series(history: list[RunPoint]) -> dict[str, list[float | None]]:
         for label in point.timings:
             if label.startswith("Step "):
                 continue
-            pretty = _panel_title(label)
-            if pretty not in seen:
-                seen.add(pretty)
-                names.append(pretty)
-    names.sort(key=_lane)
+            raw = _STEP_SUFFIX.sub("", label)
+            if raw not in seen:
+                seen.add(raw)
+                names.append(raw)
+    names.sort(key=_panel_sort_key)
+    names = [_panel_title(raw) for raw in names]
     series: dict[str, list[float | None]] = {name: [] for name in names}
     for point in history:
         for name in names:
@@ -129,7 +122,7 @@ def _substep_series(history: list[RunPoint]) -> dict[str, list[float | None]]:
 
 
 def _style_history_axes(ax) -> None:
-    ax.set_facecolor(_GRAY_08)
+    ax.set_facecolor(_GRAY_10)
     ax.set_axisbelow(True)
     ax.yaxis.grid(True, color=_GRAY_20, linewidth=0.8)
     ax.xaxis.grid(False)
@@ -142,7 +135,6 @@ def _style_history_axes(ax) -> None:
         spine.set_linewidth(0.9)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    ax.set_xlabel("time (UTC)")
 
 
 def render_timing_history_chart(
@@ -151,67 +143,58 @@ def render_timing_history_chart(
     model_name: str,
 ) -> bytes:
     from matplotlib import pyplot
-    from matplotlib.gridspec import GridSpec
 
-    series = _substep_series(history)
-    tick_labels = [
-        datetime.fromtimestamp(p.ts, tz=timezone.utc).strftime("%m-%d %H:%M")
-        for p in history
-    ]
-    xs = list(range(len(history)))
-
+    cutoff = time.time() - LOOKBACK_S
+    points = [p for p in history if p.status == "success" and p.ts >= cutoff]
+    series = _substep_series(points)
     names = list(series)
-    ncols = 3
-    nrows_sub = (len(names) + ncols - 1) // ncols
-    nrows = nrows_sub + 1
+    if not names:
+        return b""
 
-    fig_height_in = 2.6 * nrows + 1.1
-    fig = pyplot.figure(figsize=(13.5, fig_height_in))
-    fig.patch.set_facecolor(_GRAY_00)
-    gs = GridSpec(
-        nrows,
-        ncols,
-        figure=fig,
-        height_ratios=[1.0] * nrows_sub + [1.2],
-        hspace=0.62,
-        wspace=0.32,
-        # Fixed headroom in inches so the suptitle clears the first axes title
-        # whether there are zero substep rows or several.
-        top=1 - 0.9 / fig_height_in,
-        bottom=0.10,
-        left=0.06,
-        right=0.98,
+    tick_labels = [
+        datetime.fromtimestamp(p.ts, tz=timezone.utc).strftime("%m-%d\n%H:%M")
+        for p in points
+    ]
+    xs = list(range(len(points)))
+    n_cols = max(1, math.ceil(math.sqrt(len(names))))
+    n_rows = math.ceil(len(names) / n_cols)
+    fig, axes = pyplot.subplots(
+        n_rows,
+        n_cols,
+        figsize=(2 + 4 * n_cols, 2 + 4.2 * n_rows),
+        squeeze=False,
+        sharey=False,
+        layout="constrained",
     )
+    fig.patch.set_facecolor(_GRAY_00)
     fig.suptitle(
-        f"{model_name} (n={len(history)} runs)",
+        f"{model_name} (n={len(points)} runs)",
         color=_GRAY_70,
         fontsize=13,
         fontweight="medium",
     )
 
     for i, name in enumerate(names):
-        ax = fig.add_subplot(gs[i // ncols, i % ncols])
-        color = _PHASE_COLORS[i % len(_PHASE_COLORS)]
+        ax = axes[i // n_cols][i % n_cols]
         for x, y in zip(xs, series[name], strict=True):
             if y is None:
                 continue
-            ax.bar(x, y, color=color, width=0.72, zorder=2)
-        ax.set_title(name, fontsize=10)
+            ax.bar(x, y, color=_LANE_COLORS[_lane(name)], width=0.72, zorder=2)
+        ax.set_title(name, fontsize=10, pad=10)
         ax.set_ylabel("seconds")
         ax.set_xticks(xs)
-        ax.set_xticklabels(tick_labels, rotation=20, ha="right", fontsize=7)
+        ax.set_xticklabels(tick_labels, fontsize=7, rotation=0)
+        ax.ticklabel_format(axis="y", style="plain", useOffset=False)
         _style_history_axes(ax)
+        if i // n_cols == n_rows - 1:
+            ax.set_xlabel("time (UTC)")
 
-    ax = fig.add_subplot(gs[nrows_sub, :])
-    for x, point in zip(xs, history, strict=True):
-        ax.bar(x, point.total_duration_s, color=_GREEN_80, width=0.55, zorder=2)
-    ax.set_title("Total")
-    ax.set_ylabel("seconds")
-    ax.set_xticks(xs)
-    ax.set_xticklabels(tick_labels, rotation=20, ha="right", fontsize=8)
-    _style_history_axes(ax)
+    for j in range(len(names), n_rows * n_cols):
+        axes[j // n_cols][j % n_cols].set_visible(False)
+
+    fig.get_layout_engine().set(h_pad=0.18, hspace=0.18)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=140, bbox_inches="tight", facecolor=_GRAY_00)
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=_GRAY_00)
     pyplot.close(fig)
     return buf.getvalue()
