@@ -1,8 +1,8 @@
 """Self-contained training-gym dashboard app.
 
-When deployed from a pip install (no local repo checkout), the image build
-clones the frontend source from GitHub. When running from a repo checkout,
-it uses the local ``dashboards/frontend`` directory instead.
+The image builds the frontend from the same sources the fingerprint hashes:
+``dashboards/frontend`` in a repo checkout, or the copy the wheel ships at
+``modal_training_gym/_frontend``.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import json
 import os
 import secrets as _secrets
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict, cast
 
 import modal
@@ -45,6 +44,7 @@ from modal_training_gym.common.dashboard import (
     DASHBOARD_APP_NAME,
     DASHBOARD_PREVIEW_ENV_KEY,
     current_dashboard_fingerprint,
+    dashboard_frontend_dir,
 )
 from modal_training_gym.common.run import (
     FrameworkStatusUpdate,
@@ -99,9 +99,6 @@ class TimingFileCache(TypedDict):
     record: JsonDict | None
 
 
-REPO_URL = "https://github.com/modal-projects/training-gym.git"
-REPO_BRANCH = "main"
-
 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
 DASHBOARD_VERSION_ENV_KEY = "DASHBOARD_VERSION"
 TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
@@ -121,12 +118,9 @@ def _is_preview() -> bool:
 # per open PR is a standing bill for a review aid.
 IS_PREVIEW = _is_preview()
 
-_repo_frontend = Path(__file__).resolve().parents[1] / "dashboards" / "frontend"
-_has_local_frontend = _repo_frontend.is_dir()
-
 
 def _build_image() -> modal.Image:
-    base = (
+    return (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("curl")
         .run_commands(
@@ -134,24 +128,13 @@ def _build_image() -> modal.Image:
             "apt-get install -y nodejs",
         )
         .pip_install("fastapi[standard]==0.118.0", "modal")
-    )
-
-    if _has_local_frontend:
-        base = base.add_local_dir(
-            str(_repo_frontend),
+        .add_local_dir(
+            str(dashboard_frontend_dir()),
             remote_path="/app/frontend",
             copy=True,
             ignore=["node_modules", "dist"],
         )
-    else:
-        base = base.apt_install("git").run_commands(
-            f"git clone --depth 1 -b {REPO_BRANCH} {REPO_URL} /tmp/training-gym",
-            "mkdir -p /app && cp -r /tmp/training-gym/dashboards/frontend /app/frontend",
-            "rm -rf /tmp/training-gym",
-        )
-
-    return (
-        base.run_commands("cd /app/frontend && npm install && npm run build")
+        .run_commands("cd /app/frontend && npm install && npm run build")
         .add_local_python_source("modal_training_gym", copy=True)
         .env(
             {

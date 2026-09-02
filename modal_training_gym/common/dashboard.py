@@ -17,16 +17,23 @@ DASHBOARD_WEB_FUNCTION = "fastapi_app"
 # serves the API without the scheduled jobs that rewrite shared metadata.
 DASHBOARD_PREVIEW_ENV_KEY = "TRAINING_GYM_DASHBOARD_PREVIEW"
 
-_DASHBOARD_SOURCES = (
-    (Path(__file__).resolve().parents[1], (".py",)),
-    (Path(__file__).resolve().parents[2] / "dashboards" / "frontend", None),
-)
+_PACKAGE_DIR = Path(__file__).resolve().parents[1]
 _PRUNED_DIRS = frozenset({"__pycache__", "node_modules", "dist"})
+
+
+def dashboard_frontend_dir() -> Path:
+    """The frontend sources a dashboard image is built from.
+
+    A repo checkout has them at ``dashboards/frontend``; a wheel ships a copy
+    at ``modal_training_gym/_frontend`` (see ``pyproject.toml``).
+    """
+    checkout = _PACKAGE_DIR.parent / "dashboards" / "frontend"
+    return checkout if checkout.is_dir() else _PACKAGE_DIR / "_frontend"
 
 
 def current_dashboard_fingerprint() -> str:
     hasher = hashlib.sha256()
-    for root, suffixes in _DASHBOARD_SOURCES:
+    for root, suffixes in ((_PACKAGE_DIR, (".py",)), (dashboard_frontend_dir(), None)):
         if not root.is_dir():
             continue
         for dirpath, dirnames, filenames in os.walk(root):
