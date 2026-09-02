@@ -65,7 +65,12 @@ def is_already_gone(output: str, name: str) -> bool:
         return False
     return any(
         phrase in lowered
-        for phrase in ("app not found", "no such app", "lookup failed for app")
+        for phrase in (
+            "app not found",
+            "no app with name",
+            "no such app",
+            "lookup failed for app",
+        )
     )
 
 

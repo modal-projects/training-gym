@@ -57,6 +57,10 @@ def test_conf_only_proxies_at_modal_hosts(api_url):
 def test_cleanup_tolerates_a_missing_app_but_not_a_failing_one():
     name = app_name(489)
 
+    # modal 1.5.2's wording, from modal/cli/app.py.
+    assert is_already_gone(
+        f"No App with name '{name}' found in the 'main' environment.", name
+    )
     assert is_already_gone(f"Error: App not found: {name}", name)
     assert is_already_gone(f"Error: Lookup failed for App '{name}'", name)
     assert not is_already_gone("Error: connection to Modal failed", name)
