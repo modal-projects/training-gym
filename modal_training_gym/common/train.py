@@ -351,6 +351,11 @@ class TrainConfig:
             recipe = _dc.replace(
                 self.recipe,
                 load=os.path.dirname(self.checkpoint.path.rstrip("/")),
+                start_rollout_id=(
+                    0
+                    if self.recipe.start_rollout_id is None
+                    else self.recipe.start_rollout_id
+                ),
             )
         _try_validate_model_parallelism(recipe, self.model)
         return recipe
