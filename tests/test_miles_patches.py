@@ -10,6 +10,7 @@ import pytest
 from modal_training_gym.frameworks.miles.modal_helpers.patches import (
     patch_advantage_distribution as advantage_patcher,
     patch_mooncake_import_tolerance as mooncake_patcher,
+    patch_skip_final_weight_sync as final_sync_patcher,
     patch_rollout_status_reporting as rollout_patcher,
 )
 
@@ -107,3 +108,63 @@ def test_mooncake_import_is_moved_inside_p2p_setup(tmp_path):
     # Image builds can layer the same patch more than once.
     mooncake_patcher._patch_file(work)
     assert work.read_text() == patched
+
+
+def test_final_weight_sync_is_skipped_only_on_the_last_rollout(tmp_path):
+    """The guard must break before the post-save sync on the final rollout,
+    leave every earlier rollout's sync intact, and keep eval's weights fresh."""
+    work = tmp_path / "train.py"
+    work.write_text((TESTDATA / "train.py.input").read_text())
+
+    final_sync_patcher._patch_file(work)
+    patched = work.read_text()
+    assert final_sync_patcher.MARKER in patched
+
+    tree = ast.parse(patched)  # the patched loop must still be valid Python
+
+    # Find the guard: an `if` whose body is a bare `break`, sitting in the
+    # rollout loop ahead of the sync.
+    guards = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and any(isinstance(b, ast.Break) for b in node.body)
+        and "num_rollout" in ast.unparse(node.test)
+        and "should_run_periodic_action" in ast.unparse(node.test)
+    ]
+    assert len(guards) == 1, "expected exactly one final-rollout break guard"
+    assert "rollout_id + 1 >= args.num_rollout" in ast.unparse(guards[0].test)
+
+    # It has to precede the sync, or it would not prevent anything.
+    assert patched.index(final_sync_patcher.MARKER) < patched.index(
+        "await offload_train()"
+    )
+
+    # The real (non-final) syncs and the eval call must survive untouched.
+    original = (TESTDATA / "train.py.input").read_text()
+    for line in (
+        "await offload_train()",
+        "await rollout_manager.onload_weights.remote()",
+        "await actor_model.update_weights(rollout_id=rollout_id)",
+        "await rollout_manager.onload_kv.remote()",
+        "await rollout_manager.eval.remote(rollout_id)",
+    ):
+        assert patched.count(line) == original.count(line), line
+
+
+def test_final_weight_sync_patch_is_idempotent_and_fails_on_drift(tmp_path):
+    work = tmp_path / "train.py"
+    work.write_text((TESTDATA / "train.py.input").read_text())
+    final_sync_patcher._patch_file(work)
+    once = work.read_text()
+    final_sync_patcher._patch_file(work)
+    assert work.read_text() == once
+
+    drifted = tmp_path / "drifted.py"
+    drifted.write_text(
+        (TESTDATA / "train.py.input")
+        .read_text()
+        .replace("await offload_train()", "await offload_train_v2()")
+    )
+    with pytest.raises(SystemExit):
+        final_sync_patcher._patch_file(drifted)

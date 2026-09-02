@@ -43,7 +43,6 @@ REMOTE_ONLY = frozenset(
         "modal_training_gym.common.megatron_patches.patch_dist_ckpt_fork_retry",
         "modal_training_gym.common.megatron_patches.patch_dist_ckpt_quantized",
         "modal_training_gym.common.megatron_patches.patch_dist_ckpt_read_retry",
-        "modal_training_gym.common.megatron_patches.patch_dist_ckpt_write_throttle",
         "modal_training_gym.common.megatron_patches.patch_gdn_packed_seq",
         "modal_training_gym.common.megatron_patches.patch_torch_load",
         "modal_training_gym.common.megatron_patches.patch_validation",

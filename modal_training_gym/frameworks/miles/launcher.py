@@ -128,6 +128,9 @@ _PATCH_MOONCAKE_TOLERANCE_B64 = encode_patch(
 _PATCH_ROUTER_STARTUP_TIMEOUT_B64 = encode_patch(
     "patch_router_startup_timeout", _MILES_PATCHES
 )
+_PATCH_SKIP_FINAL_WEIGHT_SYNC_B64 = encode_patch(
+    "patch_skip_final_weight_sync", _MILES_PATCHES
+)
 _PATCH_ROLLOUT_STATUS_B64 = encode_patch(
     "patch_rollout_status_reporting", _MILES_PATCHES
 )
@@ -153,9 +156,6 @@ _PATCH_DIST_CKPT_FORK_RETRY_B64 = encode_patch(
 )
 _PATCH_DIST_CKPT_READ_RETRY_B64 = encode_patch(
     "patch_dist_ckpt_read_retry", _MEGATRON_PATCHES
-)
-_PATCH_DIST_CKPT_WRITE_THROTTLE_B64 = encode_patch(
-    "patch_dist_ckpt_write_throttle", _MEGATRON_PATCHES
 )
 _MEGATRON_TORCH_STRATEGY_PY = (
     "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
@@ -434,6 +434,11 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             # under bring-up load. Raise the bound (it returns as soon as the
             # port accepts, and still fails fast if the child dies).
             f"echo {_PATCH_ROUTER_STARTUP_TIMEOUT_B64} | base64 -d | python3",
+            # miles syncs weights into the rollout engines after *every* save,
+            # including the final rollout's, where nothing generates again. At
+            # TB scale that redundant post-save sync is where 16-node runs lose
+            # a node, after all requested work is already done.
+            f"echo {_PATCH_SKIP_FINAL_WEIGHT_SYNC_B64} | base64 -d | python3",
             f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
             # Megatron's torch_dist writer forks 2 helper processes per rank; that
             # fork intermittently returns EAGAIN on Modal and takes the whole run
@@ -443,11 +448,6 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             # fail with EINVAL on a subset of ranks while the files are intact.
             # Retry with reopen instead of losing a multi-node retry cycle.
             f"echo {_PATCH_DIST_CKPT_READ_RETRY_B64} | base64 -d | python3",
-            # An unpaced TB-scale shard write bursts into the Volume mount far
-            # faster than it uploads, and the burst resets cluster TCP
-            # connections. Pace it via MILES_CKPT_WRITE_BWLIMIT_MBPS (no-op
-            # unless a recipe sets the env var).
-            f"echo {_PATCH_DIST_CKPT_WRITE_THROTTLE_B64} | base64 -d | python3",
             (
                 f"if test -f {_MEGATRON_TORCH_STRATEGY_PY}; then "
                 f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3; "
@@ -486,6 +486,9 @@ def _overlay_local_miles(image: Image, local_miles: str) -> Image:
         f"echo {_PATCH_ROUTER_STARTUP_TIMEOUT_B64} | base64 -d | python3"
         " || echo 'WARNING: router startup timeout patch did not apply to the"
         " local_miles checkout; busy routers retain the upstream timeout'",
+        f"echo {_PATCH_SKIP_FINAL_WEIGHT_SYNC_B64} | base64 -d | python3"
+        " || echo 'WARNING: final-weight-sync patch did not apply to the"
+        " local_miles checkout; the redundant post-save sync remains'",
         *_REPORTING_PATCH_COMMANDS,
     )
 
