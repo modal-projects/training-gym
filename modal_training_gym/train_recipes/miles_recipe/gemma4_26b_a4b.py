@@ -61,29 +61,12 @@ _VISION_MODE: dict[str, Any] = {
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Gemma4_26B_A4B_Recipe(MilesRecipe):
-    """Gemma-4-26B-A4B MoE GRPO on 1×8×H200 with TP4/PP1/EP8, colocated.
+    """Gemma-4-26B-A4B GRPO recipe on 1 node with 8 H200 GPUs.
 
-    One checkpoint, two modes, chosen by ``modality``. The fields below are the
-    text defaults; ``modality="vision"`` replaces those named in ``_VISION_MODE``
-    with smaller-rollout values. Either way an argument you pass wins, because
-    the vision values are applied as defaults before your arguments, not over
-    them::
-
-        TrainConfig(
-            model=Gemma4_26B_A4B(),
-            dataset=MultimodalDataset(modality="image", n_rows=120),
-            recipe=Gemma4_26B_A4B_Recipe(modality="vision"),
-        ).train()
-
-    A vision run needs ``apply_chat_template=True`` so the prompt reaches the
-    processor as a string, a leading ``<image>`` in each prompt so the processor
-    inserts a placeholder for it — without one the image never reaches the model
-    and it answers "I cannot see the image" at a constant reward — plus its own
-    reward: the text path's ``gemma_math`` scores maths, not images, so
-    ``modality="vision"`` clears ``rm_type`` and requires you to supply one.
-
-    Based on upstream ``scripts/run_gemma_4_26b_a4b.py``, with the deviations
-    noted inline.
+    Args:
+        modality:
+            Training mode. Vision mode requires ``apply_chat_template=True``, a
+            leading ``<image>`` prompt marker, and a custom reward function.
     """
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = MilesRecipe._SKIP_FIELDS | {"modality"}
@@ -91,35 +74,22 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     modality: Literal["text", "vision"] = "text"
 
     gpu_type: str = "H200"
-    colocate: bool = True
     image_run_commands: list[str] = field(default_factory=_image_patches)
 
     hf_checkpoint: str = "google/gemma-4-26B-A4B-it"
     ref_load: str = "google/gemma-4-26B-A4B-it"
-    megatron_to_hf_mode: str = "bridge"
     miles_model_script: str = "scripts/models/gemma-4-26b-a4b-it.sh"
     # Model overflows container disk, so reserve 1 TiB.
     train_function_kwargs: dict[str, Any] = field(
         default_factory=lambda: {"ephemeral_disk": _EPHEMERAL_DISK_MIB}
     )
 
-    actor_num_nodes: int = 1
-    actor_num_gpus_per_node: int = 8
-
-    train_backend: str = "megatron"
     tensor_model_parallel_size: int = 4
     sequence_parallel: bool = True
-    pipeline_model_parallel_size: int = 1
     context_parallel_size: int = 1
     expert_model_parallel_size: int = 8
     expert_tensor_parallel_size: int = 1
 
-    # Off, unlike upstream: Gemma-4's decoder layer returns a tuple, which
-    # Megatron's checkpointed forward rejects ("save_for_backward can only save
-    # variables").
-    recompute_granularity: str | None = None
-    recompute_method: str | None = None
-    recompute_num_layers: int | None = None
     # bshd rules out dynamic batching and miles asserts on the pair (upstream passes
     # both and trips it), so use an explicit micro batch; max_tokens_per_gpu is inert.
     use_dynamic_batch_size: bool = False
@@ -127,16 +97,13 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     max_tokens_per_gpu: int = 1024
 
     rm_type: str | None = "gemma_math"
-    rollout_shuffle: bool = True
     balance_data: bool = True
     num_rollout: int = 3
     rollout_batch_size: int = 32
     n_samples_per_prompt: int = 8
     rollout_max_response_len: int = 256
-    rollout_temperature: float = 1.0
     # None so text mode omits the flag and miles keeps its default; vision mode sets it.
     rollout_top_p: float | None = None
-    rollout_top_k: int | None = None
     # generation_config.json's eos_token_id: <eos>, <turn|>, <|tool_response>.
     rollout_stop_token_ids: list[int] | None = field(
         default_factory=lambda: [1, 106, 50]
@@ -156,37 +123,14 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     sglang_disable_cuda_graph: bool = True
     sglang_disable_overlap_schedule: bool = True
     sglang_disable_radix_cache: bool = True
-    sglang_max_running_requests: int | None = None
     # Resident, as upstream has it: offloading instead hits an illegal memory
     # access in SGLang's memory-saver path during the training step.
     no_offload_train: bool = True
     no_offload_rollout: bool = True
-    # Off, unlike upstream: sglang's routed-experts capturer reads
-    # num_experts_per_tok, which Gemma-4 calls top_k_experts, so every scheduler
-    # dies with AttributeError.
-    use_rollout_routing_replay: bool = False
-
-    advantage_estimator: str = "grpo"
     use_kl_loss: bool = True
-    kl_loss_coef: float = 0.0
-    kl_loss_type: str = "low_var_kl"
-    entropy_coef: float = 0.0
-    eps_clip: float = 0.2
-    eps_clip_high: float = 0.28
-
-    optimizer: str = "adam"
-    lr: float = 1e-6
-    lr_decay_style: str = "constant"
-    weight_decay: float = 0.1
-    adam_beta1: float = 0.9
-    adam_beta2: float = 0.98
 
     attention_backend: str = "unfused"
     qkv_format: str = "bshd"
-    attention_dropout: float = 0.0
-    hidden_dropout: float = 0.0
-    accumulate_allreduce_grads_in_fp32: bool = True
-    attention_softmax_in_fp32: bool = True
     no_gradient_accumulation_fusion: bool = True
     no_check_for_nan_in_loss_and_grad: bool = True
 

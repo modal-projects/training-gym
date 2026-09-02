@@ -19,10 +19,11 @@ from pathlib import Path
 
 import modal
 
+from astro_redirects import redirect_status, refresh_map
+
 DOCS_DIR = Path(__file__).resolve().parent
 DIST_DIR = DOCS_DIR / "dist"
 REMOTE_DIST = "/assets/dist"
-
 
 if not modal.is_local():
     pass
@@ -40,6 +41,7 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("fastapi[standard]==0.118.0")
     .add_local_dir(DIST_DIR, remote_path=REMOTE_DIST, copy=True)
+    .add_local_python_source("astro_redirects", copy=True)
 )
 
 app = modal.App("training-gym-docs", image=image)
@@ -63,10 +65,25 @@ def cache_control_value(path: str, content_type: str) -> str | None:
 def serve():
     from fastapi import FastAPI, Request, Response
     from fastapi.middleware.gzip import GZipMiddleware
+    from fastapi.responses import RedirectResponse
     from fastapi.staticfiles import StaticFiles
 
     web = FastAPI()
     web.add_middleware(GZipMiddleware, minimum_size=500)
+    dist = Path(REMOTE_DIST)
+    redirects = refresh_map(dist)
+
+    @web.middleware("http")
+    async def directory_index_without_slash(request: Request, call_next):
+        path = request.url.path
+        if path != "/" and path.endswith("/"):
+            target = path.rstrip("/") or "/"
+            query = request.url.query
+            location = f"{target}?{query}" if query else target
+            return RedirectResponse(url=location, status_code=301)
+        if path != "/" and (dist / path.lstrip("/") / "index.html").is_file():
+            request.scope["path"] = f"{path}/"
+        return await call_next(request)
 
     @web.middleware("http")
     async def cache_control(request: Request, call_next):
@@ -77,6 +94,18 @@ def serve():
         if value and response.status_code in (200, 206):
             response.headers["Cache-Control"] = value
         return response
+
+    @web.middleware("http")
+    async def astro_refresh_redirects(request: Request, call_next):
+        if request.method not in ("GET", "HEAD"):
+            return await call_next(request)
+        path = request.url.path.rstrip("/") or "/"
+        target = redirects.get(path)
+        if target is None:
+            return await call_next(request)
+        query = request.url.query
+        location = f"{target}?{query}" if query else target
+        return RedirectResponse(url=location, status_code=redirect_status(path))
 
     web.mount("/", StaticFiles(directory=REMOTE_DIST, html=True), name="static")
 

@@ -12,11 +12,9 @@ on:
       - "scripts/generate_docs_pages.py"
       - "scripts/generate_models_table.py"
       - "scripts/generate_api_reference.py"
-      - "scripts/generate_tutorial_pages.py"
       - "scripts/api_reference_manifest.py"
       - "scripts/generate_llms_txt.py"
-      - "tutorials/tutorial_generator/**"
-      - "tutorials/README.md"
+      - "tutorials/*.py"
       - "uv.lock"
   push:
     paths:
@@ -29,11 +27,9 @@ on:
       - "scripts/generate_docs_pages.py"
       - "scripts/generate_models_table.py"
       - "scripts/generate_api_reference.py"
-      - "scripts/generate_tutorial_pages.py"
       - "scripts/api_reference_manifest.py"
       - "scripts/generate_llms_txt.py"
-      - "tutorials/tutorial_generator/**"
-      - "tutorials/README.md"
+      - "tutorials/*.py"
       - "uv.lock"
   workflow_dispatch:
 
@@ -61,6 +57,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Test docs-sections
+        run: node --experimental-strip-types --test docs-next/src/lib/docs-sections.test.mts
 
       - name: Sync Python dependencies
         run: uv sync --group docs

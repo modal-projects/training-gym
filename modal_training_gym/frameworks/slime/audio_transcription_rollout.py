@@ -12,7 +12,7 @@ to a local SGLang engine, and writes the transcript + training fields back onto 
 Sample. Generic audio decode lives in :mod:`modal_training_gym.common.audio`; the
 Qwen3-ASR tokenization in :mod:`modal_training_gym.common.models.qwen3_asr_1_7b`.
 
-Wire it in via ``SlimeRecipe.custom_generate_function`` (``Qwen3_ASR_1_7b_Recipe``
+Wire it in via ``SlimeRecipe.custom_generate_function`` (``Qwen3_ASR_1_7B_Recipe``
 already does). slime calls it ``n_samples_per_prompt`` times per prompt, sampling
 at ``sampling_params["temperature"]`` to give GRPO its N samples to score.
 

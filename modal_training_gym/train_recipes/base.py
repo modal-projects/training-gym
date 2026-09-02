@@ -3,7 +3,6 @@ import json
 import os
 from abc import ABC
 from collections.abc import Callable
-from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -27,13 +26,7 @@ CHECKPOINTS_PATH = Path("/checkpoints")
 JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimodal_keys")
 
 
-class RecipeType(Enum):
-    SLIME = "slime"
-    MILES = "miles"
-
-
 class BaseTrainRecipe(ABC):
-    recipe_type: RecipeType
     model_config_class: ClassVar["type[ModelConfig] | None"] = None
 
     # Fields consumed by the Modal launcher (image build, cluster topology,
@@ -82,23 +75,25 @@ class BaseTrainRecipe(ABC):
 
     # ── Model presets ─────────────────────────────────────────────────────────
 
-    # TOOD(joy): Remove merge_model_recipe logic everywhere.
     @classmethod
     def get_base_recipe(cls, model_config: "ModelConfig") -> "BaseTrainRecipe | None":
-        """Known-model preset recipe for ``model_config``, or ``None``.
+        """Return the model preset for ``model_config``.
 
-        ``TrainConfig.merge_model_recipe`` merges the returned preset onto the
-        fields a user left unset. ``None`` means "no preset for this model" and
-        the user's recipe is used as written.
+        Call this explicitly. ``TrainConfig`` uses the recipe it receives
+        without applying a preset.
 
-        A framework that only supports an explicit allow-list of models (e.g.
-        slime) may instead raise ``TrainingGymConfigError`` for a model it has
-        no preset for, rather than returning ``None``.
+        Returns:
+            The model preset, or ``None`` when no preset is registered.
+
+        Raises:
+            TrainingGymConfigError:
+                The recipe accepts only registered models and ``model_config`` is not
+                registered.
         """
         return None
 
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
-        """Preflight the parallelism plan. Overridden per framework."""
+        """Validate the model's parallelism settings."""
         return None
 
     # ── Container → framework flag converters ────────────────────────────────
@@ -110,8 +105,7 @@ class BaseTrainRecipe(ABC):
         """Derive on-volume file paths from a dataset's properties."""
         hf_repo = getattr(ds, "hf_repo", "")
         name = hf_repo.replace("/", "_") if hf_repo else type(ds).__name__
-        fmt = getattr(ds, "output_format", "parquet")
-        ext = "jsonl" if fmt == "jsonl" else "parquet"
+        ext = "jsonl" if ds.output_format == "jsonl" else "parquet"
         split = getattr(ds, "hf_split", "train")
         prompt_data = f"{DATA_PATH}/{name}/{split}.{ext}"
         if getattr(ds, "writes_eval_paths", True):

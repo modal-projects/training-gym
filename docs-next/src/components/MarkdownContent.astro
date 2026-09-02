@@ -1,0 +1,67 @@
+---
+import '@astrojs/starlight/style/markdown.css';
+
+const slug = Astro.locals.starlightRoute.entry.id.replace(/^\/+/, '');
+const isCli = slug === 'reference/cli' || slug.startsWith('reference/cli/');
+const isCliIndex = slug === 'reference/cli';
+---
+
+<div class:list={['sl-markdown-content', { 'tg-cli': isCli, 'tg-cli-index': isCliIndex }]}><slot /></div>
+
+<script is:inline>
+  (() => {
+    const TOC_LINK = '.tg-toc a';
+
+    function linkTarget(link) {
+      return decodeURIComponent(link.hash.replace(/^#/, ''));
+    }
+
+    function markCurrent(ids) {
+      for (const link of document.querySelectorAll(TOC_LINK)) {
+        if (ids.has(linkTarget(link))) {
+          if (link.getAttribute('aria-current') !== 'true') {
+            link.setAttribute('aria-current', 'true');
+          }
+        } else if (link.hasAttribute('aria-current')) {
+          link.removeAttribute('aria-current');
+        }
+      }
+    }
+
+    const links = [...document.querySelectorAll(TOC_LINK)];
+    const headings = [...new Set(links.map(linkTarget))].flatMap((id) => {
+      const heading = document.getElementById(id);
+      return heading ? [{ id, heading }] : [];
+    });
+    if (headings.length === 0) return;
+
+    const active = new Set();
+    const syncCurrent = () => {
+      active.clear();
+      for (const { id, heading } of headings) {
+        const rect = heading.getBoundingClientRect();
+        if (rect.top < window.innerHeight && rect.bottom > 0) active.add(id);
+      }
+      const hashLink = links.find((link) => link.hash === location.hash);
+      if (hashLink) active.add(linkTarget(hashLink));
+      markCurrent(active);
+    };
+
+    syncCurrent();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            active.add(entry.target.id);
+          } else {
+            active.delete(entry.target.id);
+          }
+        }
+        markCurrent(active);
+      },
+      { threshold: 0.8 },
+    );
+    headings.forEach(({ heading }) => observer.observe(heading));
+    window.addEventListener('hashchange', syncCurrent);
+  })();
+</script>

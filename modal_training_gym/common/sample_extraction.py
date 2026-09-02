@@ -586,10 +586,12 @@ def _image_to_data_uri(value: Any) -> str | None:
 
 
 def _image_candidates(sample: Any) -> list[Any]:
-    """Unencoded input-image references on a slime Sample, best first.
+    """Unencoded image references on a slime Sample, best first.
 
-    For image-modality runs slime's ``process_vision_info`` lifts the screenshot
-    into ``sample.multimodal_inputs['images']`` (even when ``apply_chat_template``
+    An image a reward/rollout function stashes on ``sample.metadata["image"]``
+    (e.g. a rendering of the model's output) comes first. For image-modality
+    runs slime's ``process_vision_info`` lifts the screenshot into
+    ``sample.multimodal_inputs['images']`` (even when ``apply_chat_template``
     collapses the prompt to a string). Falls back to image items in a
     conversation-list prompt. Returns ``[]`` for non-image samples.
     """
@@ -601,6 +603,10 @@ def _image_candidates(sample: Any) -> list[Any]:
             return getattr(sample, key, default)
 
     candidates: list[Any] = []
+    meta = get("metadata", None)
+    if isinstance(meta, dict) and meta.get("image") is not None:
+        candidates.append(meta["image"])
+
     mm = get("multimodal_inputs", None)
     if isinstance(mm, dict):
         imgs = mm.get("images") or mm.get("image")
@@ -658,7 +664,11 @@ def _raw_image_key(value: Any) -> Any:
 
 
 class RolloutImageStore:
-    """Deduplicates input images across one rollout's samples.
+    """Deduplicates images across one rollout's samples.
+
+    Covers both input images (multimodal prompts) and output images a reward
+    function attaches as ``sample.metadata["image"]``; every candidate is
+    thumbnailed and size-capped before it rides on the payload.
 
     The bytes ride on the first sample that uses them as ``metadata["image"]``; the
     rest of the prompt group carries only ``metadata["image_ref"]`` naming it. Both

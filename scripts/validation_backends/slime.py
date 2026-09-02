@@ -35,8 +35,8 @@ class Gsm8kDataset(HuggingFaceDataset):
 class LibriSpeechASRDataset(MultimodalDataset):
     """LibriSpeech ASR rows (prompt + audio data-URI + transcript label).
 
-    Mirrors the 006_audio_asr tutorial dataset: audio models can't train on
-    gsm8k, so they validate against a handful of LibriSpeech clips instead.
+    Mirrors the audio_asr tutorial dataset. Audio models validate on a handful
+    of LibriSpeech clips. gsm8k is text-only.
     """
 
     modality = "audio"

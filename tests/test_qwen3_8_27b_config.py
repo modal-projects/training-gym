@@ -1,6 +1,6 @@
 from modal_training_gym import (
     Qwen3_8_27B,
-    Qwen3_8_27b_Recipe,
+    Qwen3_8_27B_Recipe,
 )
 from modal_training_gym.frameworks.slime.modal_helpers.utils import (
     get_checkpoint_conversion_policy,
@@ -10,7 +10,7 @@ from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 
 def test_qwen3_8_27b_adapts_current_slime_qwen3_5_recipe() -> None:
     model = Qwen3_8_27B()
-    recipe = Qwen3_8_27b_Recipe()
+    recipe = Qwen3_8_27B_Recipe()
 
     assert recipe.slime_model_script == "scripts/models/qwen3.5-27B.sh"
     assert recipe.hf_checkpoint == model.model_name == "Qwen/Qwen3.8-27B"
@@ -54,5 +54,5 @@ def test_qwen3_8_27b_adapts_current_slime_qwen3_5_recipe() -> None:
 def test_qwen3_8_27b_is_the_registered_base_recipe() -> None:
     recipe = SlimeRecipe.get_base_recipe(Qwen3_8_27B())
 
-    assert isinstance(recipe, Qwen3_8_27b_Recipe)
+    assert isinstance(recipe, Qwen3_8_27B_Recipe)
     assert recipe.gpu_allocation.total_gpus == 32

@@ -1,16 +1,18 @@
 import asyncio
+import contextlib
 import hashlib
 import os
 import shlex
 import subprocess
 import shutil
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from modal import App, Image, Retries, Volume
+from modal import App, Dict as ModalDict, Image, Retries, Volume
 from modal.experimental import clustered
 
 from modal_training_gym.common import (
@@ -28,6 +30,7 @@ from modal_training_gym.common.launcher_utils import (
     timing_debug_env,
 )
 from modal_training_gym.common.metrics import (
+    apply_metric_image,
     metric_metadata,
     metric_runtime_env,
     metric_secrets,
@@ -66,7 +69,7 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import (
     HF_CACHE_PATH,
     MilesRecipe,
 )
-from modal_training_gym.common.patches import encode_patch
+from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
 from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     build_train_cmd,
     get_checkpoint_conversion_policy,
@@ -119,6 +122,227 @@ _REPORTING_PATCH_COMMANDS = (
     f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
 )
 
+# Megatron-level torch_dist save fixes, shared with the slime image. Both no-op when
+# their target source doesn't match, so they are safe for every miles image; the
+# checkpoint-save one is skipped in the shell below when its target is absent
+# entirely, since guarding inside the script would change the bytes the slime image
+# already builds from.
+_PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
+    "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
+)
+_PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_MEGATRON_TORCH_STRATEGY_PY = (
+    "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
+)
+
+
+_CONVERT_LOCK_DICT_NAME = "training-gym-convert-lock"
+_CONVERT_LOCK_TTL_S = 900.0
+_CONVERT_LOCK_REFRESH_S = 300.0
+_CONVERT_TOKEN_TTL_S = 4 * _CONVERT_LOCK_TTL_S
+
+
+def _convert_lock_dict() -> Any:
+    return ModalDict.from_name(_CONVERT_LOCK_DICT_NAME, create_if_missing=True)
+
+
+def _convert_lock_key(volume_name: str, save_path: str) -> str:
+    return f"lock:{volume_name}:{save_path}"
+
+
+def _sweep_convert_tokens(locks: Any, key: str) -> None:
+    """Drop takeover tokens old enough that no live contender can act on one.
+
+    A token has to outlive the takeover it settles, or a contender still holding the
+    stale read it was written for could win a fresh one and pop the new owner's claim.
+    Past that it is only litter, and nothing else reclaims it, so tokens are swept on
+    release and on the next takeover for the same path.
+    """
+    prefix = f"{key}:takeover:"
+    cutoff = time.time() - _CONVERT_TOKEN_TTL_S
+    try:
+        names = [str(name) for name in locks.keys() if str(name).startswith(prefix)]
+        for name in names:
+            token = locks.get(name)
+            written_at = token.get("at") if isinstance(token, dict) else None
+            if not isinstance(written_at, (int, float)) or written_at < cutoff:
+                locks.pop(name, None)
+    except Exception as exc:
+        print(f"WARNING: could not sweep stale conversion tokens: {exc}")
+
+
+def _acquire_convert_lock(run_id: str, volume_name: str, save_path: str) -> str:
+    """Claim the right to convert into ``save_path``; return the current holder.
+
+    Two launches of the same recipe share one ``ref_load``, so without this the
+    loser's cleanup deletes the winner's still-metadata-less conversion output.
+
+    ``Dict.put(..., skip_if_exists=True)`` is the atomic compare-and-set that decides
+    the winner; a read-then-write claim would let two runs both observe an unheld lock
+    and both proceed. The claim expires after ``_CONVERT_LOCK_TTL_S``, sized against the
+    heartbeat interval so a holder that cannot run its release path frees the path in a
+    TTL rather than a conversion's worth of time.
+
+    Taking a stale claim over cannot be a delete followed by a put: two runs that both
+    read the same stale holder would delete each other's fresh claim and both come away
+    believing they own the path. Instead each contender first claims a token naming the
+    stale holder it saw, which only one can win, and only that winner replaces the
+    claim. Those tokens are swept by age, not on use — see ``_sweep_convert_tokens``.
+    """
+    locks = _convert_lock_dict()
+    key = _convert_lock_key(volume_name, save_path)
+    claim = {"run_id": run_id, "claimed_at": time.time()}
+    if locks.put(key, claim, skip_if_exists=True):
+        return run_id
+
+    owner, claimed_at = "", None
+    holder = locks.get(key)
+    if isinstance(holder, dict):
+        owner = str(holder.get("run_id") or "")
+        claimed_at = holder.get("claimed_at")
+        if owner == run_id:
+            return run_id
+        if (
+            owner
+            and isinstance(claimed_at, (int, float))
+            and time.time() - claimed_at < _CONVERT_LOCK_TTL_S
+        ):
+            return owner
+
+    takeover_key = f"{key}:takeover:{owner}:{claimed_at}"
+    token = {"run_id": run_id, "at": time.time()}
+    if not locks.put(takeover_key, token, skip_if_exists=True):
+        winner = locks.get(takeover_key)
+        if isinstance(winner, dict) and winner.get("run_id"):
+            return str(winner["run_id"])
+        return owner or run_id
+
+    _sweep_convert_tokens(locks, key)
+    try:
+        locks.pop(key)
+    except KeyError:
+        pass
+    if locks.put(key, claim, skip_if_exists=True):
+        return run_id
+    holder = locks.get(key)
+    if isinstance(holder, dict) and holder.get("run_id"):
+        return str(holder["run_id"])
+    return run_id
+
+
+def _refresh_convert_lock(run_id: str, volume_name: str, save_path: str) -> None:
+    """Extend an existing claim of this run's; never create one.
+
+    A refresh that wrote unconditionally would resurrect the claim when a tick
+    straddles the release, leaving it held with nobody to give it back.
+    """
+    locks = _convert_lock_dict()
+    key = _convert_lock_key(volume_name, save_path)
+    holder = locks.get(key)
+    if not isinstance(holder, dict) or str(holder.get("run_id") or "") != run_id:
+        return
+    locks[key] = {"run_id": run_id, "claimed_at": time.time()}
+
+
+@contextlib.contextmanager
+def _convert_lock_heartbeat(run_id: str, volume_name: str, save_path: str):
+    """Keep this run's claim fresh for as long as the body runs.
+
+    Refreshing on elapsed time rather than on work done: a torch_dist conversion
+    writes only about one file per rank, so any progress-based cadence never fires,
+    and the claim would lapse mid-conversion and let a later launch delete the output
+    being written.
+    """
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(_CONVERT_LOCK_REFRESH_S):
+            try:
+                _refresh_convert_lock(run_id, volume_name, save_path)
+            except Exception as exc:
+                print(f"WARNING: could not refresh conversion claim: {exc}")
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=5.0)
+
+
+def _release_convert_lock(run_id: str, volume_name: str, save_path: str) -> None:
+    """Drop the conversion claim, but only if this run still holds it."""
+    locks = _convert_lock_dict()
+    key = _convert_lock_key(volume_name, save_path)
+    holder = locks.get(key)
+    if isinstance(holder, dict) and str(holder.get("run_id") or "") != run_id:
+        return
+    try:
+        locks.pop(key)
+    except KeyError:
+        pass
+    _sweep_convert_tokens(locks, key)
+
+
+def _is_resumable_checkpoint(path: str) -> bool:
+    """Whether ``path`` holds a training save that can be resumed from.
+
+    Looser than ``_is_complete_torch_dist_checkpoint`` because miles writes more than
+    one save shape: a LoRA run stores ``adapter/`` with per-rank ``.pt`` files and no
+    ``.metadata``/``common.pt``/``.distcp`` at all, so the conversion predicate would
+    report every adapter checkpoint as absent and silently restart from ``ref_load``.
+    Only the crashed-torch_dist signature is rejected — ``.distcp`` shards present but
+    the ``.metadata`` that is written last missing.
+    """
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return False
+    if not names:
+        return False
+    if any(name.endswith(".distcp") for name in names):
+        return ".metadata" in names
+    return True
+
+
+def _unresumable_save_dirs(save_root: str) -> list[str]:
+    """Save directories that exist but cannot be resumed from."""
+    try:
+        names = os.listdir(save_root)
+    except OSError:
+        return []
+    return sorted(
+        name
+        for name in names
+        if (name == "release" or name.startswith("iter_"))
+        and os.path.isdir(os.path.join(save_root, name))
+        and not _is_resumable_checkpoint(os.path.join(save_root, name))
+    )
+
+
+def _is_complete_torch_dist_checkpoint(path: str) -> bool:
+    """Whether ``path`` holds a *finished* torch_dist checkpoint.
+
+    ``.metadata`` is written last, by ``save_state_dict_async_finalize``, so its
+    presence is what separates a completed save from a crashed one. Without this
+    check ``torch_dist_resume_checkpoint``'s ``iter_*`` scan accepts any directory
+    (its default ``is_complete`` is ``os.path.isdir``), so a conversion that died
+    mid-write is reported as a cache hit and silently skips re-conversion — which
+    then feeds partial weights to training. A crashed conversion does leave
+    ``common.pt`` and the ``.distcp`` shards behind, so those alone are not enough
+    to tell the two apart.
+    """
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return False
+    return (
+        ".metadata" in names
+        and "common.pt" in names
+        and any(name.endswith(".distcp") for name in names)
+    )
+
 
 def _build_miles_base_image(miles: MilesRecipe) -> Image:
     image = (
@@ -127,6 +351,13 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
+            f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
+            (
+                f"if test -f {_MEGATRON_TORCH_STRATEGY_PY}; then "
+                f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3; "
+                f"else echo 'WARNING: {_MEGATRON_TORCH_STRATEGY_PY} not found, "
+                "skipping checkpoint-save patch'; fi"
+            ),
             *_REPORTING_PATCH_COMMANDS,
             f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
         )
@@ -248,6 +479,7 @@ def build_miles_app(
     if isinstance(dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
+    image = apply_metric_image(image, miles.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)
@@ -458,7 +690,9 @@ def build_miles_app(
         checkpoints_volume.reload()
 
         save_path = str(miles.ref_load)
-        if has_torch_dist_checkpoint(save_path):
+        if has_torch_dist_checkpoint(
+            save_path, is_complete=_is_complete_torch_dist_checkpoint
+        ):
             print(
                 f"Found existing torch_dist checkpoint at {save_path}; "
                 "skipping conversion."
@@ -467,13 +701,60 @@ def build_miles_app(
                 flush_status_reporter(timeout_seconds=2.0)
             return None
 
-        conversion_hf_checkpoint = (
-            getattr(miles, "megatron_conversion_hf_checkpoint", None)
-            or getattr(miles, "hf_checkpoint", "")
-            or model.model_path
-            or model.model_name
+        holder = _acquire_convert_lock(
+            training_run_id, checkpoints_volume_name, save_path
         )
-        return resolve_checkpoint_ref(conversion_hf_checkpoint)
+        if holder != training_run_id:
+            raise RuntimeError(
+                f"Run {holder} is already converting into {save_path}. Two runs of "
+                "this recipe share one ref_load, so continuing would delete that "
+                "run's in-flight conversion and interleave shards. Wait for it to "
+                "finish and relaunch to pick up the cached checkpoint, or point this "
+                "run at a different ref_load."
+            )
+
+        try:
+            # Clear partial torch_dist writes from an earlier crash here — the
+            # single-container step that decides to convert — so the conversion cannot mix
+            # fresh shards with stale ones from a different parallelism. Only the
+            # ``iter_*``/``release`` directories the converter itself writes, plus the
+            # iteration tracker the resume scan prefers over them, are removed, and only
+            # those failing the completeness check: ``ref_load`` is user-settable
+            # and may hold a hand-placed checkpoint in a layout this predicate rejects.
+            if os.path.isdir(save_path):
+                stale = [
+                    name
+                    for name in sorted(os.listdir(save_path))
+                    if (name == "release" or name.startswith("iter_"))
+                    and os.path.isdir(os.path.join(save_path, name))
+                    and not _is_complete_torch_dist_checkpoint(
+                        os.path.join(save_path, name)
+                    )
+                ]
+                tracker = "latest_checkpointed_iteration.txt"
+                tracker_path = os.path.join(save_path, tracker)
+                has_tracker = stale and os.path.isfile(tracker_path)
+                if stale:
+                    print(
+                        f"Removing incomplete torch_dist checkpoint state at {save_path}: "
+                        + ", ".join([*stale, *([tracker] if has_tracker else [])])
+                    )
+                    for name in stale:
+                        shutil.rmtree(os.path.join(save_path, name), ignore_errors=True)
+                    if has_tracker:
+                        os.remove(tracker_path)
+                    checkpoints_volume.commit()
+
+            conversion_hf_checkpoint = (
+                getattr(miles, "megatron_conversion_hf_checkpoint", None)
+                or getattr(miles, "hf_checkpoint", "")
+                or model.model_path
+                or model.model_name
+            )
+            return resolve_checkpoint_ref(conversion_hf_checkpoint)
+        except BaseException:
+            _release_convert_lock(training_run_id, checkpoints_volume_name, save_path)
+            raise
 
     @app.function(
         image=image,
@@ -481,6 +762,7 @@ def build_miles_app(
         volumes=all_volumes,
         timeout=4 * 60 * 60,
         secrets=proxy_auth_secrets() or None,
+        ephemeral_disk=miles.convert_ephemeral_disk_mb,
         experimental_options={"efa_enabled": True} if convert_multi_node else {},
         serialized=True,
         name="convert_checkpoint",
@@ -564,11 +846,40 @@ def build_miles_app(
             f"node_rank={node_rank}"
         )
         print(f"Running: bash -c {cmd!r}")
-        subprocess.run(["bash", "-c", cmd], check=True, env=env)
-        checkpoints_volume.commit()
-
         if node_rank == 0:
-            print(f"Saved Megatron torch_dist checkpoint to {save_path}")
+            _refresh_convert_lock(training_run_id, checkpoints_volume_name, save_path)
+        heartbeat = (
+            _convert_lock_heartbeat(training_run_id, checkpoints_volume_name, save_path)
+            if node_rank == 0
+            else contextlib.nullcontext()
+        )
+        try:
+            with heartbeat:
+                subprocess.run(["bash", "-c", cmd], check=True, env=env)
+
+                checkpoints_volume.commit()
+
+                if node_rank == 0:
+                    print(f"Saved Megatron torch_dist checkpoint to {save_path}")
+                    # Fail loudly here rather than leaving a partial checkpoint for a later
+                    # run to mistake for a cache hit.
+                    if not has_torch_dist_checkpoint(
+                        save_path, is_complete=_is_complete_torch_dist_checkpoint
+                    ):
+                        raise RuntimeError(
+                            f"Conversion finished but {save_path} holds no complete "
+                            "torch_dist checkpoint (missing .metadata)."
+                        )
+            if node_rank == 0:
+                _release_convert_lock(
+                    training_run_id, checkpoints_volume_name, save_path
+                )
+        except BaseException:
+            if node_rank == 0:
+                _release_convert_lock(
+                    training_run_id, checkpoints_volume_name, save_path
+                )
+            raise
 
         if training_run_id:
             flush_status_reporter(timeout_seconds=2.0)
@@ -602,6 +913,7 @@ def build_miles_app(
         image=image,
         gpu=gpu_spec,
         memory=miles.memory,
+        cpu=miles.cpu,
         ephemeral_disk=train_ephemeral_disk,
         cloud=miles.cloud,
         region=miles.region,
@@ -819,7 +1131,9 @@ def build_miles_app(
             original_save = miles.save
             original_load = miles.load
             miles.save = save_root
-            resume_checkpoint = torch_dist_resume_checkpoint(save_root)
+            resume_checkpoint = torch_dist_resume_checkpoint(
+                save_root, is_complete=_is_resumable_checkpoint
+            )
             record_resume_checkpoint(run_record, resume_checkpoint)
             await run_record.save(is_async=True)
 
@@ -832,6 +1146,15 @@ def build_miles_app(
                     "resuming training from last saved iteration."
                 )
                 miles.load = save_root
+            elif unresumable := _unresumable_save_dirs(save_root):
+                print(
+                    f"WARNING: {save_root} holds saves that cannot be resumed "
+                    f"({', '.join(unresumable)}) — they carry torch_dist shards "
+                    "without the .metadata written last, so they are interrupted "
+                    "writes. Training restarts from ref_load and their progress is "
+                    "discarded; Megatron follows latest_checkpointed_iteration.txt, "
+                    "so resuming into one of these would load a partial save."
+                )
             try:
                 cmd = build_train_cmd(miles, MILES_ROOT, model=model, dataset=dataset)
             finally:

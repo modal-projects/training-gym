@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from ..framework import Framework
 from .base import ModelConfig
 from .gemma4_26b_a4b import Gemma4_26B_A4B
+from .inkling_small import Inkling_Small
 from .moonlight_16b_a3b_instruct import Moonlight_16B_A3B_Instruct
 from .qwen3_0_6b import Qwen3_0_6B
 from .qwen3_1_7b import Qwen3_1_7B
@@ -107,4 +108,5 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
     _ValidationConfig(
         "Gemma-4-26B-A4B-it", Gemma4_26B_A4B, Framework.MILES, run_on_pr=False
     ),
+    _ValidationConfig("Inkling-Small", Inkling_Small, Framework.MILES, run_on_pr=False),
 }

@@ -68,6 +68,7 @@ from modal_training_gym.common.launcher_utils import (
     timing_debug_env,
 )
 from modal_training_gym.common.metrics import (
+    apply_metric_image,
     metric_metadata,
     metric_runtime_env,
     metric_secrets,
@@ -89,7 +90,7 @@ from .modal_helpers.utils import (
     prepare_slime_config,
     resolve_checkpoint_ref,
 )
-from modal_training_gym.common.patches import encode_patch
+from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.framework import Framework
 
@@ -226,14 +227,14 @@ SLIME_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02
 HARBOR_PKG_VERSION = "0.8.0"
 
 _SLIME_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
-_PATCH_VALIDATION_B64 = encode_patch("patch_validation", _SLIME_PATCHES)
+_PATCH_VALIDATION_B64 = encode_patch("patch_validation", _MEGATRON_PATCHES)
 _PATCH_MEGATRON_BRIDGE_B64 = encode_patch("patch_megatron_bridge", _SLIME_PATCHES)
-_PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", _SLIME_PATCHES)
+_PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", _MEGATRON_PATCHES)
 _PATCH_GLOBAL_PLAN_B64 = encode_patch("patch_global_plan", _SLIME_PATCHES)
-_PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _SLIME_PATCHES)
+_PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
 _PATCH_ADVANTAGES_B64 = encode_patch("patch_advantages", _SLIME_PATCHES)
 _PATCH_BRIDGE_NONE_TASK_B64 = encode_patch("patch_bridge_none_task", _SLIME_PATCHES)
-_PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", _SLIME_PATCHES)
+_PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", _MEGATRON_PATCHES)
 _PATCH_BRIDGE_PER_TOKEN_LOSS_B64 = encode_patch(
     "patch_bridge_provider_per_token_loss", _SLIME_PATCHES
 )
@@ -270,7 +271,7 @@ _PATCH_LOG_ELIDE_B64 = encode_patch("patch_log_elide", _SLIME_PATCHES)
 # with inline_container.cc "unexpected pos" (e.g. the GLM-5.2 convert). No-op for
 # non-quantized tensors, so safe for every image.
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
-    "patch_dist_ckpt_quantized", _SLIME_PATCHES
+    "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
 _PATCH_CHECKPOINT_READER_RETRY_B64 = encode_patch(
     "patch_checkpoint_reader_retry", _SLIME_PATCHES
@@ -411,6 +412,38 @@ def _is_complete_torch_dist_checkpoint(path: str) -> bool:
     return "common.pt" in names and any(name.endswith(".distcp") for name in names)
 
 
+_PIPELINE_SPLIT_FLAGS = (
+    "--decoder-first-pipeline-num-layers",
+    "--decoder-last-pipeline-num-layers",
+)
+
+
+def _conversion_config_matches(stored: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether a recorded conversion still describes the current layout.
+
+    The record stores the emitted ``extra_args``, so a checkpoint converted before
+    the pipeline-split flags stopped being emitted at conversion PP1 would otherwise
+    read as stale and be re-converted for nothing. Dropping those flags is tolerated;
+    changing their values is not, since at PP>1 they define the split.
+    """
+    if stored == current:
+        return True
+    stored_rest, current_rest = dict(stored), dict(current)
+    stored_args = stored_rest.pop("extra_args", None)
+    current_args = current_rest.pop("extra_args", None)
+    if stored_rest != current_rest:
+        return False
+    if not isinstance(stored_args, list) or not isinstance(current_args, list):
+        return False
+    if [a for a in stored_args if not a.startswith(_PIPELINE_SPLIT_FLAGS)] != [
+        a for a in current_args if not a.startswith(_PIPELINE_SPLIT_FLAGS)
+    ]:
+        return False
+    return {a for a in current_args if a.startswith(_PIPELINE_SPLIT_FLAGS)} <= {
+        a for a in stored_args if a.startswith(_PIPELINE_SPLIT_FLAGS)
+    }
+
+
 def _checkpoint_conversion_cache_status(
     save_path: str, current_config: dict[str, Any]
 ) -> tuple[str, dict[str, Any] | None]:
@@ -432,7 +465,7 @@ def _checkpoint_conversion_cache_status(
             stored_config = json.load(f)
     except (OSError, json.JSONDecodeError):
         return "stale", None
-    if stored_config != current_config:
+    if not _conversion_config_matches(stored_config, current_config):
         return "stale", stored_config
     return "hit", stored_config
 
@@ -473,7 +506,7 @@ def build_slime_app(
                 f"{model.model_name} requires padded (bshd) batches: its "
                 "megatron-bridge forward doesn't implement THD sequence packing. "
                 'Set extra_config={"qkv_format": "bshd", "micro_batch_size": N} and '
-                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7b_Recipe, which sets "
+                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7B_Recipe, which sets "
                 f"these. Got qkv_format={cfg.get('qkv_format')!r}, "
                 f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
             )
@@ -543,6 +576,7 @@ def build_slime_app(
     if slime.image_env:
         image = image.env(slime.image_env)
 
+    image = apply_metric_image(image, slime.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)
@@ -855,6 +889,7 @@ def build_slime_app(
         image=image,
         gpu=gpu_spec,
         memory=slime.memory,
+        cpu=slime.cpu,
         cloud=slime.cloud,
         region=slime.region,
         volumes=all_volumes,
@@ -968,6 +1003,11 @@ def build_slime_app(
     train_secrets: list[Secret] = []
     if slime.metrics is not None:
         train_secrets.extend(metric_secrets(slime.metrics))
+        if (
+            slime.metrics.provider == "trackio"
+            and getattr(slime.metrics, "modal_secret_name", "") == "huggingface-secret"
+        ):
+            train_secrets.extend(hf_secrets())
     # Proxy-auth tokens for any custom_rm / generate hook that calls a
     # CustomDeployment.launch() endpoint (teacher /generate, etc.).
     train_secrets.extend(proxy_auth_secrets())
@@ -999,6 +1039,7 @@ def build_slime_app(
         image=train_image,
         gpu=gpu_spec,
         memory=slime.memory,
+        cpu=slime.cpu,
         cloud=slime.cloud,
         region=slime.region,
         volumes=all_volumes,

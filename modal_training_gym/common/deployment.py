@@ -145,11 +145,18 @@ class _CrashloopDetector:
 
 
 class CustomDeployment(BaseModel):
-    """A recipe-driven deployed model endpoint.
+    """A model deployed with an SGLang or vLLM recipe.
 
-    Use `launch` to build and deploy an SGLang or vLLM serving app.
-    The returned handle carries the live URL, Modal app id, and convenience
-    methods for generation and evaluation.
+    Attributes:
+        deployment_id: Stable deployment ID.
+        model: Served model configuration.
+        recipe: Serving recipe.
+        app_name: Modal app name.
+        served_model_name: Model name exposed to clients.
+        unauthenticated: Whether the endpoint accepts unauthenticated requests.
+        modal_app_id: Modal app ID.
+        modal_app_url: Dashboard URL.
+        url: Endpoint URL.
     """
 
     deployment_id: str
@@ -195,6 +202,25 @@ class CustomDeployment(BaseModel):
         served_model_name: str | None = None,
         unauthenticated: bool = True,
     ) -> "CustomDeployment":
+        """Deploy ``model`` with an SGLang or vLLM serving recipe.
+
+        Args:
+            model:
+                Model configuration or Hugging Face model name.
+            checkpoint:
+                Training checkpoint to convert and serve.
+            recipe:
+                SGLang or vLLM serving recipe.
+            app_name:
+                Modal app name derived from ``model`` when omitted.
+            served_model_name:
+                Model name exposed to clients.
+            unauthenticated:
+                Whether the endpoint accepts requests without proxy credentials.
+
+        Returns:
+            The deployed ``CustomDeployment`` handle.
+        """
         model = ModelConfig(model_name=model) if isinstance(model, str) else model
 
         if recipe is None:
@@ -326,12 +352,20 @@ class CustomDeployment(BaseModel):
         max_attempts: int = 4,
         **extra,
     ) -> dict:
-        """Return one OpenAI-compatible chat-completion message while
-        preserving structured fields like tool_calls and reasoning_content.
+        """Send one OpenAI-compatible chat-completion request.
 
-        Extra keyword arguments are Chat Completions body fields. Call
-        ``wait_until_ready`` before chatting if the deployment may still be
-        starting.
+        Args:
+            messages:
+                OpenAI-compatible chat messages.
+            timeout:
+                Timeout in seconds for each request.
+            max_attempts:
+                Maximum request attempts for transient failures.
+            extra:
+                Additional Chat Completions request fields.
+
+        Returns:
+            The assistant ``message`` dict.
         """
         import time
 
@@ -383,6 +417,11 @@ class CustomDeployment(BaseModel):
         prompt: str | list[dict],
         **kwargs,
     ) -> str:
+        """Send a chat-completion request.
+
+        Returns:
+            The assistant text, or ``reasoning_content`` when ``content`` is ``None``.
+        """
         messages = kwargs.pop("messages", None)
         if messages is None:
             messages = [{"role": "user", "content": prompt}]
@@ -427,6 +466,12 @@ class CustomDeployment(BaseModel):
         return t
 
     def wait_until_ready(self, timeout: int = 600) -> None:
+        """Wait until the deployment can serve traffic.
+
+        Args:
+            timeout:
+                Maximum number of seconds to wait.
+        """
         import time
 
         import requests

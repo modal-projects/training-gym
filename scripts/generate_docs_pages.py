@@ -5,8 +5,6 @@ import os
 import posixpath
 import re
 import subprocess
-import textwrap
-from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 REPO_URL = "https://github.com/modal-projects/training-gym"
@@ -101,7 +99,6 @@ def rewrite_links(
     *,
     source_dir: PurePosixPath,
     home_link: str,
-    tutorials_link: str,
 ) -> str:
     def replace(match: re.Match[str]) -> str:
         label, target = match.groups()
@@ -113,8 +110,6 @@ def rewrite_links(
 
         if normalized in {".", "README.md"}:
             rewritten = home_link
-        elif normalized == "tutorials/README.md":
-            rewritten = tutorials_link
         elif (
             normalized.startswith("tutorials/") and not PurePosixPath(normalized).suffix
         ):
@@ -175,68 +170,6 @@ def rewrite_html_image_sources(markdown: str, *, source_dir: PurePosixPath) -> s
     return HTML_IMAGE_SRC.sub(replace, markdown)
 
 
-@dataclass(frozen=True)
-class Catalog:
-    begin: str
-    end: str
-    css_class: str
-    column_tracks: tuple[str, ...]
-
-    @property
-    def grid_template(self) -> str:
-        return " ".join(f"minmax(0, {track})" for track in self.column_tracks)
-
-
-CATALOGS: tuple[Catalog, ...] = (
-    Catalog(
-        begin="<!-- BEGIN TUTORIAL TABLE -->",
-        end="<!-- END TUTORIAL TABLE -->",
-        css_class="tutorial-catalog",
-        column_tracks=("1.6fr", "2.6fr", "0.9fr", "1fr", "1fr"),
-    ),
-    Catalog(
-        begin="<!-- BEGIN MODELS TABLE -->",
-        end="<!-- END MODELS TABLE -->",
-        css_class="models-catalog",
-        column_tracks=("1.7fr", "0.7fr", "1.1fr", "1.6fr"),
-    ),
-)
-
-
-def wrap_catalogs(markdown: str) -> str:
-    for catalog in CATALOGS:
-        has_begin = catalog.begin in markdown
-        has_end = catalog.end in markdown
-        if not has_begin and not has_end:
-            continue
-        if has_begin != has_end:
-            raise ValueError(f"catalog {catalog.css_class} has a one-sided marker pair")
-        markdown = markdown.replace(
-            catalog.begin,
-            (
-                f'<div class="catalog {catalog.css_class}" '
-                f'style="--catalog-columns: {catalog.grid_template}">\n\n'
-                f"{catalog.begin}"
-            ),
-            1,
-        )
-        markdown = markdown.replace(
-            catalog.end,
-            f"{catalog.end}\n\n</div>",
-            1,
-        )
-    return markdown
-
-
-def strip_first_heading(markdown: str) -> str:
-    lines = markdown.splitlines()
-    if lines and lines[0].startswith("# "):
-        lines = lines[1:]
-        while lines and not lines[0].strip():
-            lines = lines[1:]
-    return "\n".join(lines).strip() + "\n"
-
-
 def strip_developer_guide(markdown: str) -> str:
     """Drop the trailing `# Developer Guide` section (and its preceding `---`).
 
@@ -260,49 +193,16 @@ def transform_markdown(
     *,
     source_dir: PurePosixPath,
     home_link: str,
-    tutorials_link: str,
 ) -> str:
     page = source.read_text()
     page = strip_developer_guide(page)
-    page = wrap_catalogs(page)
     page = convert_github_callouts(page)
     page = rewrite_images(page, source_dir=source_dir)
     page = rewrite_html_image_sources(page, source_dir=source_dir)
-    page = rewrite_links(
+    return rewrite_links(
         page,
         source_dir=source_dir,
         home_link=home_link,
-        tutorials_link=tutorials_link,
-    )
-    return strip_first_heading(page)
-
-
-def starlight_frontmatter(destination: str) -> str:
-    if destination == "index.md":
-        return textwrap.dedent(
-            """\
-            ---
-            title: Training Gym SDK
-            description: Open-source Python SDK for GRPO and RL post-training of LLMs on Modal.
-            next: false
-            pagefind: false
-            tableOfContents:
-              minHeadingLevel: 2
-              maxHeadingLevel: 2
-            ---
-            """
-        )
-
-    return textwrap.dedent(
-        """\
-        ---
-        title: Tutorials
-        description: Examples for using the Training Gym SDK.
-        prev: false
-        next: false
-        pagefind: false
-        ---
-        """
     )
 
 
@@ -313,27 +213,18 @@ def generate_starlight(output_dir: Path) -> None:
             ROOT / "README.md",
             PurePosixPath("."),
             "/",
-            "/tutorials/",
-        ),
-        (
-            "tutorials/index.md",
-            ROOT / "tutorials" / "README.md",
-            PurePosixPath("tutorials"),
-            "/",
-            "/tutorials/",
         ),
     )
 
-    for destination, source, source_dir, home_link, tutorials_link in pages:
+    for destination, source, source_dir, home_link in pages:
         content = transform_markdown(
             source,
             source_dir=source_dir,
             home_link=home_link,
-            tutorials_link=tutorials_link,
         )
         output_path = output_dir / destination
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(starlight_frontmatter(destination) + "\n" + content)
+        output_path.write_text("---\norder: 0\n---\n\n" + content)
 
 
 def parse_args() -> argparse.Namespace:

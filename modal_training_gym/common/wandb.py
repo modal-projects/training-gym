@@ -16,27 +16,24 @@ from modal_training_gym.common.metrics import MetricConfig
 
 @dataclass
 class WandbConfig(MetricConfig):
-    """Weights & Biases logging configuration shared across all frameworks.
+    """Weights & Biases run metadata and credentials.
 
-    ## Fields
-
-    project : str
-        W&B project name. Default ``""``.
-    entity : str
-        W&B entity/team slug. Optional; when omitted, preflight resolves the
-        default entity for the configured API key.
-    group : str
-        W&B group tag for organizing related runs. Default ``""``.
-    exp_name : str
-        W&B run display name. Default ``""``.
-    key : str
-        W&B API key. Usually injected via ``WANDB_API_KEY`` at launch
-        time rather than hardcoded. Default ``""``.
-    disable_random_suffix : bool
-        When ``True``, suppresses the random suffix that W&B appends to
-        run names. Default ``True``.
-    modal_wandb_secret_name : str
-        Name of the Modal secret containing the W&B API key. Default ``"wandb-secret"``.
+    Args:
+        project:
+            W&B project name.
+        entity:
+            W&B entity or team slug. The API key's default entity applies when
+            empty.
+        group:
+            W&B group tag for related runs.
+        exp_name:
+            W&B run display name.
+        key:
+            W&B API key. ``WANDB_API_KEY`` takes precedence.
+        disable_random_suffix:
+            Preserve the configured run name.
+        modal_wandb_secret_name:
+            Modal secret containing the W&B API key.
     """
 
     project: str = ""

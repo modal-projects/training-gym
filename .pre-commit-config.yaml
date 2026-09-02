@@ -8,20 +8,15 @@ repos:
 
   - repo: local
     hooks:
-      - id: regenerate-tutorials
-        name: Regenerate tutorials (tutorials/generate_tutorial.py)
-        entry: uv run tutorials/generate_tutorial.py
-        language: system
-        pass_filenames: false
-        # Run only when the generator or a tutorial source file changes.
-        # Regenerated outputs land in tutorials/<name>/; if they differ from
-        # what's committed, pre-commit fails the commit so you can `git add`
-        # the updated files and retry.
-        files: ^tutorials/(generate_tutorial\.py|tutorial_generator/.*\.py)$
-
       - id: regenerate-models-table
         name: Regenerate Models table (scripts/generate_models_table.py)
         entry: uv run scripts/generate_models_table.py
         language: system
         pass_filenames: false
         files: ^(scripts/generate_models_table\.py|modal_training_gym/(train_recipes/.*_recipe/__init__\.py|common/models/.*\.py))$
+      - id: regenerate-llms-txt
+        name: Regenerate llms.txt (scripts/generate_llms_txt.py)
+        entry: uv run python -m scripts.generate_llms_txt
+        language: system
+        pass_filenames: false
+        files: ^(scripts/generate_llms_txt\.py|scripts/tutorial_index\.py|scripts/api_reference_manifest\.py|README\.md|docs-next/public/llms\.txt|docs-next/src/content/docs/guides/.*\.md|tutorials/.*\.py)$

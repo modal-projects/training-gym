@@ -1,37 +1,28 @@
 ---
-import MobileMenuFooter from '@astrojs/starlight/components/MobileMenuFooter.astro';
+import {
+  referenceSidebarSections,
+  referenceSurfaceForPath,
+  sectionForUrl,
+  type SidebarTreeEntry,
+} from '../lib/docs-sections';
 
 const { sidebar } = Astro.locals.starlightRoute;
 const currentPath = Astro.url.pathname;
+type SidebarEntry = (typeof sidebar)[number];
+type SidebarLink = Extract<SidebarEntry, { type: 'link' }>;
+type SidebarGroup = Extract<SidebarEntry, { type: 'group' }>;
 
-function getFilteredSidebar() {
-  if (currentPath === '/' || currentPath.startsWith('/support')) {
-    return [];
-  }
+const surface = referenceSurfaceForPath(currentPath);
+const currentSection = surface?.label ?? sectionForUrl(currentPath);
+const activeGroup = sidebar.find(
+  (entry): entry is SidebarGroup => entry.type === 'group' && entry.label === currentSection,
+);
+const filteredSidebar: readonly SidebarEntry[] = activeGroup?.entries ?? [];
+const showSidebar = filteredSidebar.length > 0 || Boolean(surface);
+const isReference = Boolean(surface);
 
-  for (const entry of sidebar) {
-    if (entry.type === 'group') {
-      const hasMatchingChild = JSON.stringify(entry).includes(currentPath) ||
-        entry.entries.some((e) =>
-          e.type === 'link'
-            ? currentPath.startsWith(e.href.replace(/\/$/, ''))
-            : JSON.stringify(e).includes(currentPath)
-        );
-
-      if (hasMatchingChild) {
-        return entry.entries;
-      }
-    }
-  }
-
-  return sidebar;
-}
-
-const filteredSidebar = getFilteredSidebar();
-const showSidebar = filteredSidebar.length > 0;
-
-function flattenLinks(entries) {
-  const links = [];
+function flattenLinks(entries: readonly SidebarEntry[]): SidebarLink[] {
+  const links: SidebarLink[] = [];
   for (const entry of entries) {
     if (entry.type === 'link') {
       links.push(entry);
@@ -42,35 +33,51 @@ function flattenLinks(entries) {
   return links;
 }
 
-function firstLinkHref(entry) {
-  if (entry.type === 'link') return entry.href;
-  const first = flattenLinks(entry.entries)[0];
-  return first?.href;
-}
-
-const sections = filteredSidebar.map((entry) => {
-  if (entry.type === 'link') {
-    return {
-      label: entry.label,
-      href: entry.href,
-      isCurrent: entry.isCurrent,
-      items: [],
-    };
-  }
-  const items = flattenLinks(entry.entries);
-  return {
-    label: entry.label,
-    href: firstLinkHref(entry),
-    isCurrent: items.some((item) => item.isCurrent),
-    items,
-  };
-});
+const leafOnly =
+  filteredSidebar.length > 0 && filteredSidebar.every((entry) => entry.type === 'link');
+const childSections = leafOnly && activeGroup
+  ? [
+      {
+        label: activeGroup.label,
+        href: undefined as string | undefined,
+        isCurrent: false,
+        items: flattenLinks(activeGroup.entries),
+      },
+    ]
+  : filteredSidebar.map((entry) => {
+      if (entry.type === 'link') {
+        return {
+          label: entry.label,
+          href: entry.href,
+          isCurrent: entry.isCurrent,
+          items: [] as SidebarLink[],
+        };
+      }
+      return {
+        label: entry.label,
+        href: undefined as string | undefined,
+        isCurrent: false,
+        items: flattenLinks(entry.entries),
+      };
+    });
+const sections = surface
+  ? referenceSidebarSections(
+      surface,
+      (activeGroup?.entries ?? []) as SidebarTreeEntry[],
+      currentPath,
+    )
+  : childSections;
 ---
 
 {
   showSidebar ? (
     <>
-      <ul class="tg-tutorial-sidebar">
+      <ul
+        class:list={[
+          'tg-tutorial-sidebar',
+          { 'is-reference': isReference },
+        ]}
+      >
         {sections.map((section) => (
           <li>
             {section.href ? (
@@ -94,10 +101,6 @@ const sections = filteredSidebar.map((entry) => {
           </li>
         ))}
       </ul>
-
-      <div class="md:sl-hidden">
-        <MobileMenuFooter />
-      </div>
     </>
   ) : (
     <div class="tg-sidebar-empty" aria-hidden="true" />
