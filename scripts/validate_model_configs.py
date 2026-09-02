@@ -35,6 +35,7 @@ from modal_training_gym.common.models.validation import (
     Framework,
     _ValidationConfig,
 )
+from modal_training_gym.common.modal_lifecycle import stop_app
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.step_timing import measured_run_times
 from modal_training_gym.common.wandb import WandbConfig
@@ -351,6 +352,7 @@ def run_base_training(
     eval_interval: int | None = None,
     save_interval: int | None = None,
     non_colocated: bool = False,
+    timeout: float | None = None,
 ) -> ValidationResult:
     config = _ValidationConfig.find(model_name)
     model_config = config.model_config()
@@ -389,7 +391,12 @@ def run_base_training(
         recipe=train_recipe,
     )
 
-    train_result = train_config.train()
+    launch = train_config.launch(prepare_inputs=True)
+    try:
+        train_result = launch.result(timeout=timeout)
+    except BaseException:
+        stop_app(launch.modal_app_id)
+        raise
     training_run = TrainingRun.from_id(train_result.training_run_id)
     previous = None
     step_times, substep_times = {}, {}

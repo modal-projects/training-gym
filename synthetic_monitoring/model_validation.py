@@ -253,7 +253,9 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
     print(f"synmon: model={selected!r} num_steps={num_steps}")
     result: ValidationResult | None = None
     try:
-        result = run_base_training(selected, step_count=num_steps)
+        result = run_base_training(
+            selected, step_count=num_steps, timeout=PROBE_TIMEOUT_S
+        )
         url = _lookup_app_url(result.training_run_id)
         point = RunPoint.from_validation_result(result, modal_app_url=url)
         error = (
