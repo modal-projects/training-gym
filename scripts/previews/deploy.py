@@ -24,6 +24,12 @@ async def main():
         "type", choices=["dashboard", "docs"], help="which frontend to deploy"
     )
     parser.add_argument("artifact", type=Path, help="path to the artifact .tar.gz")
+    parser.add_argument(
+        "--api-url",
+        default=None,
+        help="dashboard backend this preview's /api should proxy to; "
+        "defaults to the deployed dashboard",
+    )
     args = parser.parse_args()
 
     if not args.artifact.is_file():
@@ -39,7 +45,9 @@ async def main():
         batch.put_file(str(args.artifact), f"/{artifact_name}")
 
     print(f"Deploying {args.type} preview for #{args.pr_number}")
-    await deploy_preview.remote.aio(args.pr_number, args.type, artifact_name)
+    await deploy_preview.remote.aio(
+        args.pr_number, args.type, artifact_name, api_url=args.api_url
+    )
 
 
 if __name__ == "__main__":

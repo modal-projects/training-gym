@@ -40,7 +40,10 @@ from modal_training_gym.common.config import (
     DASHBOARD_PROXY_AUTH_PATH,
     dashboard_requires_proxy_auth,
 )
-from modal_training_gym.common.dashboard import DASHBOARD_APP_NAME
+from modal_training_gym.common.dashboard import (
+    DASHBOARD_APP_NAME,
+    DASHBOARD_PREVIEW_ENV_KEY,
+)
 from modal_training_gym.common.run import (
     FrameworkStatusUpdate,
     TrainingRun,
@@ -100,6 +103,21 @@ REPO_BRANCH = "main"
 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
 TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
 
+
+def _is_preview() -> bool:
+    return os.environ.get(DASHBOARD_PREVIEW_ENV_KEY, "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+# A preview deploy is one dashboard per open PR (see scripts/previews) reading
+# the same metadata volume as the real one, so it serves the API and nothing
+# else: the scheduled jobs rewrite that shared metadata, and a warm container
+# per open PR is a standing bill for a review aid.
+IS_PREVIEW = _is_preview()
+
 _repo_frontend = Path(__file__).resolve().parents[1] / "dashboards" / "frontend"
 _has_local_frontend = _repo_frontend.is_dir()
 
@@ -138,6 +156,7 @@ def _build_image() -> modal.Image:
                 if dashboard_requires_proxy_auth()
                 else "false",
                 TIMING_DEBUG_ENV: os.environ.get(TIMING_DEBUG_ENV, ""),
+                DASHBOARD_PREVIEW_ENV_KEY: "true" if IS_PREVIEW else "",
             }
         )
     )
@@ -363,7 +382,11 @@ def _run_compact_sync() -> None:
         compact_summary_store(summary_store)
 
 
-@app.function(schedule=modal.Cron("*/30 * * * *"), retries=3, timeout=1800)
+@app.function(
+    schedule=None if IS_PREVIEW else modal.Cron("*/30 * * * *"),
+    retries=3,
+    timeout=1800,
+)
 def compact_summaries() -> None:
     """Scheduled compaction of summary stores (every 30 min)."""
     _run_compact_sync()
@@ -371,7 +394,7 @@ def compact_summaries() -> None:
 
 
 @app.function(
-    schedule=modal.Cron("*/30 * * * *"),
+    schedule=None if IS_PREVIEW else modal.Cron("*/30 * * * *"),
     secrets=_function_secrets(),
     retries=3,
     timeout=1800,
@@ -390,7 +413,7 @@ def reconcile() -> None:
 
 
 @app.function(
-    min_containers=1,
+    min_containers=0 if IS_PREVIEW else 1,
     secrets=_function_secrets(),
 )
 @modal.concurrent(max_inputs=50, target_inputs=20)
