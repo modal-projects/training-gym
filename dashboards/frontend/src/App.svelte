@@ -430,9 +430,10 @@
   function loadMoreRuns() {
     if (!hasMoreRuns) return;
     const nextCount = runs.length + RUNS_PAGE_SIZE;
-    // Scrolling fires this on every event, so the page already asked for is
-    // not asked for again: one queued page per set of rows on screen.
-    if (loadedRunCount >= nextCount) return;
+    // Scrolling fires this on every event, so while the fetch for this page is
+    // in flight or queued it isn't asked for again. Once nothing is in flight a
+    // page that failed can be retried.
+    if (loadedRunCount >= nextCount && (refreshing || reloadQueued)) return;
     loadedRunCount = nextCount;
     // Queued, so asking for the next page during a refresh grows the window
     // once that refresh lands instead of being dropped.
