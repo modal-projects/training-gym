@@ -45,6 +45,10 @@
       "link": "/reference/modelconfig"
     },
     {
+      "label": "OnlineRollout",
+      "link": "/reference/onlinerollout"
+    },
+    {
       "label": "ParsedResponse",
       "link": "/reference/parsedresponse"
     },

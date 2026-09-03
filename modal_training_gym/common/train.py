@@ -12,7 +12,7 @@ from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
-from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.dataset import DatasetConfig, OnlineRollout
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
@@ -331,6 +331,16 @@ class TrainConfig:
     group_id: str | None = None
     group_overrides: dict[str, Any] | None = None
     group_axes: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.dataset, OnlineRollout):
+            return
+        path = (self.recipe.extra_config or {}).get("custom_generate_function_path")
+        if self.recipe.custom_generate_function is None and not isinstance(path, str):
+            raise TrainingGymConfigError(
+                "OnlineRollout requires recipe.custom_generate_function or "
+                "recipe.extra_config['custom_generate_function_path']"
+            )
 
     def _generate_training_run_id(self) -> str:
         """Mint a new run id. ``launch()`` calls this once per invocation, so
