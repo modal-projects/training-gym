@@ -78,7 +78,7 @@ You'll see:
 
 1. Same timeline but for each step.
 2. Reward distribution across all rollouts. A healthy run is represented as a bimodal distribution for the majority of the run, while an unhealthy one will gravitate towards one end or the other before training has completed. Pictured above is one indicative of the end of a run, as most rollouts have already saturated the reward.
-3. Per-rollout trace that shows the full prompt, the system message, the model's thinking, every conversation turn, and the reward.
+3. Per-rollout trace that shows the full prompt, the system message, the model's thinking, every conversation turn, and the reward. When transition rewards are present, the viewer also shows their delta, cumulative value, components, and action-token span. Set a Slime recipe's `token_reward_mode="transition"` to train on these events; the default `"scalar"` continues to use one episode reward per sample.
 
 ## Housekeeping
 

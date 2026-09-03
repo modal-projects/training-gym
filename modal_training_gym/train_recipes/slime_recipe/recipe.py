@@ -71,6 +71,8 @@ _SLIME_SKIP = {
     "conversion_tensor_model_parallel_size",
     "conversion_expert_model_parallel_size",
     "conversion_expert_tensor_parallel_size",
+    "token_reward_mode",
+    "token_reward_gamma",
 }
 
 YAML_CONFIG_FIELDS = ("eval_config", "extra_config", "sglang_config")
@@ -455,6 +457,12 @@ class SlimeRecipe(BaseTrainRecipe):
     calculate_per_token_loss: bool = False
     ref_load: str = ""
 
+    # ── Training Gym transition rewards ────────────────────────────────────
+    # Launcher-only: when enabled, rollout reward events are converted into
+    # response-token rewards and consumed by the custom advantage function.
+    token_reward_mode: Literal["scalar", "transition"] = "scalar"
+    token_reward_gamma: float = 1.0
+
     # ── Dynamic sampling (DAPO) ────────────────────────────────────────────
     over_sampling_batch_size: int | None = None
     dynamic_sampling_filter_path: str | None = None
@@ -631,6 +639,12 @@ class SlimeRecipe(BaseTrainRecipe):
     def _validate_gpu_allocation(self) -> "SlimeRecipe":
         resolve_gpu_allocation(self)
         validate_megatron_actor_parallelism(self)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_token_rewards(self) -> "SlimeRecipe":
+        if self.token_reward_gamma < 0 or self.token_reward_gamma > 1:
+            raise TrainingGymConfigError("token_reward_gamma must be between 0 and 1")
         return self
 
     # ── Container → slime flag converters ────────────────────────────────────

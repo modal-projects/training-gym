@@ -16,8 +16,10 @@ Then: `uv run modal run <tutorial_file>.py::train`.
 """
 
 import asyncio
+import json
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -110,6 +112,113 @@ def _validate_resume_checkpoint(
         )
 
 
+_LOCAL_CHECKPOINT_STAGE_MARKER = ".training_gym_local_stage.json"
+
+
+def _stream_copy_file(source: str, destination: str) -> None:
+    """Copy a checkpoint shard with buffered reads, avoiding remote seek APIs."""
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    with (
+        open(source, "rb", buffering=16 * 1024 * 1024) as src,
+        open(destination, "wb", buffering=16 * 1024 * 1024) as dst,
+    ):
+        shutil.copyfileobj(src, dst, length=16 * 1024 * 1024)
+    try:
+        shutil.copystat(source, destination, follow_symlinks=False)
+    except OSError:
+        # Checkpoint correctness does not depend on source mode/timestamps.
+        pass
+
+
+def _stream_copy_tree(source: str, destination: str) -> None:
+    """Recursively copy a torch distributed checkpoint using sequential reads."""
+    for root, dirs, files in os.walk(source):
+        relative = os.path.relpath(root, source)
+        target_root = (
+            destination if relative == "." else os.path.join(destination, relative)
+        )
+        os.makedirs(target_root, exist_ok=True)
+        for directory in dirs:
+            os.makedirs(os.path.join(target_root, directory), exist_ok=True)
+        for filename in files:
+            _stream_copy_file(
+                os.path.join(root, filename), os.path.join(target_root, filename)
+            )
+
+
+def _stage_checkpoint_locally(source: str, stage_root: str) -> str:
+    """Stage the latest torch_dist checkpoint on this node's local disk.
+
+    Modal Volumes are excellent for durable storage, but distributed checkpoint
+    restore performs random reads across many large shards.  Keeping only the
+    selected iteration on local ephemeral storage avoids those remote random
+    reads while preserving optimizer/RNG state for a true resume.
+    """
+    raw_source = str(source or "")
+    if not raw_source:
+        return raw_source
+    source = os.path.abspath(raw_source)
+    if not os.path.isdir(source):
+        return source
+
+    resume = torch_dist_resume_checkpoint(
+        source, is_complete=_is_complete_torch_dist_checkpoint
+    )
+    if resume is None:
+        # HF directories and incomplete paths should continue through the
+        # normal loader rather than being treated as torch_dist checkpoints.
+        return source
+
+    checkpoint_name = str(resume["resume_checkpoint_name"])
+    source_checkpoint = str(resume["resume_checkpoint_path"])
+    stage_root = os.path.abspath(stage_root)
+    staged_root = os.path.join(stage_root, os.path.basename(source.rstrip("/")))
+    marker_path = os.path.join(staged_root, _LOCAL_CHECKPOINT_STAGE_MARKER)
+    marker = {
+        "source": source,
+        "checkpoint_name": checkpoint_name,
+    }
+    try:
+        with open(marker_path) as f:
+            if json.load(f) == marker:
+                print(f"Using locally staged checkpoint {staged_root}")
+                return staged_root
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    os.makedirs(stage_root, exist_ok=True)
+    partial_root = f"{staged_root}.partial-{os.getpid()}"
+    shutil.rmtree(partial_root, ignore_errors=True)
+    os.makedirs(partial_root, exist_ok=True)
+    print(
+        f"Staging checkpoint {source_checkpoint} to local disk at "
+        f"{os.path.join(partial_root, checkpoint_name)} ..."
+    )
+    _stream_copy_tree(source_checkpoint, os.path.join(partial_root, checkpoint_name))
+    # Megatron uses this marker to select the iteration under --load.  Preserve
+    # the source marker when present, and synthesize it when discovery found a
+    # checkpoint by scanning the directory instead.
+    source_tracker = os.path.join(source, "latest_checkpointed_iteration.txt")
+    destination_tracker = os.path.join(
+        partial_root, "latest_checkpointed_iteration.txt"
+    )
+    if os.path.isfile(source_tracker):
+        _stream_copy_file(source_tracker, destination_tracker)
+    else:
+        with open(destination_tracker, "w") as f:
+            f.write(
+                "release"
+                if checkpoint_name == "release"
+                else checkpoint_name.removeprefix("iter_").lstrip("0") or "0"
+            )
+    with open(os.path.join(partial_root, _LOCAL_CHECKPOINT_STAGE_MARKER), "w") as f:
+        json.dump(marker, f, sort_keys=True)
+    shutil.rmtree(staged_root, ignore_errors=True)
+    os.replace(partial_root, staged_root)
+    print(f"Local checkpoint staging complete: {staged_root}")
+    return staged_root
+
+
 SLIME_ROOT = "/root/slime"
 # Pin by digest to prevent mutable-tag drift.  Tag: nightly-dev-20260722a
 SLIME_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02b31a0109dc850f8ca342"
@@ -165,11 +274,15 @@ _PATCH_LOG_ELIDE_B64 = encode_patch("patch_log_elide", _SLIME_PATCHES)
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
+_PATCH_CHECKPOINT_READER_RETRY_B64 = encode_patch(
+    "patch_checkpoint_reader_retry", _SLIME_PATCHES
+)
 # OPD / multi-turn: zero-std metrics must skip non-numeric rewards (dict/None).
 _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATCHES)
 _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
+_PATCH_TOKEN_REWARDS_B64 = encode_patch("patch_token_rewards", _SLIME_PATCHES)
 
 # Patches targeting /root/slime* — a git overlay replaces that directory, so
 # these are skipped in the base image when an overlay is configured and applied
@@ -186,6 +299,7 @@ _SLIME_ROOT_PATCHES_B64 = (
     _PATCH_ZERO_STD_METRICS_B64,
     _PATCH_SGLANG_PARALLEL_ALIASES_B64,
     _PATCH_SUBSTEP_TIMING_B64,
+    _PATCH_TOKEN_REWARDS_B64,
 )
 
 # Patches targeting Megatron-LM or site-packages — survive a git overlay.
@@ -193,6 +307,7 @@ _SLIME_EXTERNAL_PATCHES_B64 = (
     _PATCH_BRIDGE_NONE_TASK_B64,
     _PATCH_LOG_ELIDE_B64,
     _PATCH_DIST_CKPT_QUANTIZED_B64,
+    _PATCH_CHECKPOINT_READER_RETRY_B64,
 )
 
 
@@ -584,6 +699,15 @@ def build_slime_app(
     if slime.custom_reward_post_process_function is not None:
         object.__setattr__(slime, "custom_reward_post_process_function", None)
 
+    if slime.token_reward_mode == "transition":
+        cfg = dict(slime.extra_config or {})
+        cfg.setdefault(
+            "custom_advantage_function_path",
+            "modal_training_gym.frameworks.slime.token_reward_advantages.compute_token_reward_advantages",
+        )
+        cfg["training_gym_token_reward_gamma"] = slime.token_reward_gamma
+        object.__setattr__(slime, "extra_config", cfg)
+
     # ── SGLang request params auto-wiring ─────────────────────────────────
     if slime.sglang_request_params:
         cfg = dict(slime.extra_config or {})
@@ -900,6 +1024,14 @@ def build_slime_app(
     if user_experimental_options is not None:
         train_experimental_options.update(user_experimental_options)
     train_ephemeral_disk = train_function_kwargs.pop("ephemeral_disk", None)
+    stage_checkpoint_locally = bool(
+        train_function_kwargs.pop("stage_checkpoint_locally", False)
+    )
+    checkpoint_stage_dir = str(
+        train_function_kwargs.pop(
+            "checkpoint_stage_dir", "/tmp/training-gym-checkpoints"
+        )
+    )
     if train_function_kwargs:
         unsupported = ", ".join(sorted(train_function_kwargs))
         raise TypeError(f"Unsupported slime.train_function_kwargs keys: {unsupported}")
@@ -953,6 +1085,16 @@ def build_slime_app(
 
         cluster = ModalRayCluster()
         cluster.discover_cluster(slime.total_nodes)
+
+        # Do this in every clustered container before Ray starts.  Trainer
+        # placement is decided by Ray, so restricting the copy to a presumed
+        # subset of Modal ranks could leave a trainer rank on the Volume-backed
+        # path and recreate the distributed-read failure.
+        staged_load_path = ""
+        if stage_checkpoint_locally and getattr(slime, "load", ""):
+            staged_load_path = _stage_checkpoint_locally(
+                str(slime.load), checkpoint_stage_dir
+            )
 
         os.environ["SLIME_HOST_IP"] = cluster.node_ip
         os.environ["SGLANG_HOST_IP"] = cluster.node_ip
@@ -1074,6 +1216,9 @@ def build_slime_app(
             original_ref_load = slime.ref_load
             original_no_load_optim = slime.no_load_optim
             object.__setattr__(slime, "save", save_root)
+            if staged_load_path and os.path.isdir(staged_load_path):
+                print(f"Using staged local checkpoint for restore: {staged_load_path}")
+                object.__setattr__(slime, "load", staged_load_path)
 
             # Resolve the local HF snapshot dir (used for bridge-mode load below).
             _hf_ref: str | None = None
