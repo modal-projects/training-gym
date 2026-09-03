@@ -129,13 +129,13 @@ class BaseTrainRecipe(ABC):
     ) -> None:
         if eval_ds is None:
             return
-        for key_method in ("input_key", "label_key"):
-            train_key = getattr(ds, key_method)()
-            eval_key = getattr(eval_ds, key_method)()
-            if train_key != eval_key:
+        for dataset_method in ("input_key", "label_key", "apply_chat_template"):
+            train_value = getattr(ds, dataset_method)()
+            eval_value = getattr(eval_ds, dataset_method)()
+            if train_value != eval_value:
                 raise TrainingGymConfigError(
                     f"Training and evaluation datasets must use the same "
-                    f"{key_method}(): got {train_key!r} and {eval_key!r}."
+                    f"{dataset_method}(): got {train_value!r} and {eval_value!r}."
                 )
 
     @classmethod

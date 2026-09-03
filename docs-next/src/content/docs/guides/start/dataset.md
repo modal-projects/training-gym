@@ -53,10 +53,10 @@ As any seasoned ML veteran will tell you, we need separate datasets for training
 
 ```python
 train_dataset = HuggingFaceDataset(
-    ..., hf_split="train[:1000]", apply_chat_template=True
+    ..., hf_split="train[:1000]",
 )
 eval_dataset = HuggingFaceDataset(
-    ..., hf_split="train[1000:]", apply_chat_template=True
+    ..., hf_split="train[1000:]",
 )
 ```
 

@@ -117,7 +117,7 @@ def test_run_prepare_dataset_writes_train_and_eval(tmp_path):
     assert volume.commit_count == 1
 
 
-def test_eval_dataset_keys_must_match_training_dataset():
+def test_eval_dataset_fields_must_match_training_dataset():
     class OtherInputDataset(RowsDataset):
         def input_key(self) -> str:
             return "messages"
@@ -126,6 +126,10 @@ def test_eval_dataset_keys_must_match_training_dataset():
         def label_key(self) -> str:
             return "answer"
 
+    class OtherChatTemplateDataset(RowsDataset):
+        def apply_chat_template(self) -> bool:
+            return False
+
     with pytest.raises(TrainingGymConfigError, match="same input_key"):
         BaseTrainRecipe._validate_datasets(
             RowsDataset("train"), OtherInputDataset("eval")
@@ -133,6 +137,10 @@ def test_eval_dataset_keys_must_match_training_dataset():
     with pytest.raises(TrainingGymConfigError, match="same label_key"):
         BaseTrainRecipe._validate_datasets(
             RowsDataset("train"), OtherLabelDataset("eval")
+        )
+    with pytest.raises(TrainingGymConfigError, match="same apply_chat_template"):
+        BaseTrainRecipe._validate_datasets(
+            RowsDataset("train"), OtherChatTemplateDataset("eval")
         )
 
 
