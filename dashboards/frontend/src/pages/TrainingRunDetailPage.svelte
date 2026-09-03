@@ -643,7 +643,7 @@
   // steps stream in on a running run.
   $effect(() => {
     const id = runId;
-    if (!id || activeTab !== "summary") return;
+    if (!id || runMissing || activeTab !== "summary") return;
 
     const controller = new AbortController();
     void loadAdvantages(controller.signal);
@@ -664,7 +664,7 @@
   $effect(() => {
     const id = runId;
     const tab = activeTab;
-    if (!id || (tab !== "summary" && tab !== "rollouts")) return;
+    if (!id || runMissing || (tab !== "summary" && tab !== "rollouts")) return;
 
     const controller = new AbortController();
     rolloutsLoading = true;
