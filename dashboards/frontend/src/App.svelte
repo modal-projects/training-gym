@@ -7,13 +7,29 @@
   import TrainingPage from "./pages/TrainingPage.svelte";
   import TrainingRunDetailPage from "./pages/TrainingRunDetailPage.svelte";
   import EvalsPage from "./pages/EvalsPage.svelte";
-  import { fetchRuns, fetchEvals, fetchEvalDetail } from "./lib/api.js";
+  import {
+    fetchRuns,
+    fetchRunCounts,
+    fetchEvals,
+    fetchEvalDetail,
+  } from "./lib/api.js";
   import logoSvg from "./lib/logo.svg";
   import { fmtDuration } from "./lib/format.js";
 
   const DOCS_URL = "https://gym.modal.dev";
 
-  let allRuns = $state([]);
+  // The server filters, sorts and pages the run list, so `runs` only holds the
+  // rows the page asked for and every total comes from `runCounts`.
+  const RUNS_PAGE_SIZE = 100;
+  let runs = $state([]);
+  let loadedRunCount = $state(RUNS_PAGE_SIZE);
+  let runCounts = $state({
+    total: 0,
+    matching: 0,
+    status: {},
+    recipe: {},
+    group: {},
+  });
   let allEvals = $state([]);
   let loading = $state(true);
   let loadingEvals = $state(false);
@@ -94,22 +110,49 @@
     // their status/stage and rollouts stay live. Current data stays on screen
     // (no skeleton) and only the refresh button spins while fetching. A run
     // detail page refreshes its own run, so skip the full list there.
-    const refresh = window.setInterval(() => {
-      if (activePage === "training" && activeTrainingRunId) return;
-      void load();
-    }, 5000);
+    // A hidden tab polls nothing — mobile browsers discard tabs that keep
+    // working off-screen — and catches up once on the way back.
+    let refresh = null;
+
+    const shouldRefresh = () =>
+      !(activePage === "training" && activeTrainingRunId);
+
+    const startPolling = () => {
+      if (refresh !== null) return;
+      refresh = window.setInterval(() => {
+        if (shouldRefresh()) void load();
+      }, 5000);
+    };
+
+    const stopPolling = () => {
+      if (refresh === null) return;
+      window.clearInterval(refresh);
+      refresh = null;
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+        return;
+      }
+      startPolling();
+      if (shouldRefresh()) void load();
+    };
+
+    if (!document.hidden) startPolling();
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       window.removeEventListener("popstate", syncPageWithPath);
-      window.clearInterval(refresh);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      stopPolling();
     };
   });
 
-  function getRecipe(run) {
-    return run.recipe || run.framework || "(untagged)";
-  }
-
+  // Mirrors the server's facet buckets (`run_facet_values`), which is what the
+  // filter chips and counts are keyed by.
   const NO_GROUP = "(no group)";
+  const UNTAGGED_RECIPE = "(untagged)";
 
   function getGroup(run) {
     return safeText(run.group_id) || NO_GROUP;
@@ -141,10 +184,6 @@
     return value != null ? String(value) : "";
   }
 
-  function includesText(value, query) {
-    return safeText(value).toLowerCase().includes(query);
-  }
-
   function getErrorMessage(value) {
     if (value instanceof Error) return value.message;
     if (typeof value === "string") return value;
@@ -167,6 +206,76 @@
       });
   }
 
+  // A chip group with every value selected is the same query as no filter at
+  // all, and leaving it out of the request keeps the URL (and the response
+  // cache key) stable while the user is only toggling within one group.
+  function requestFacets() {
+    const universes = { status: statuses, recipe: recipes, group: groups };
+    const selections = {
+      status: activeStatuses,
+      recipe: activeRecipes,
+      group: activeGroups,
+    };
+    const facets = {};
+    for (const [name, selected] of Object.entries(selections)) {
+      const universe = universes[name];
+      if (!universe.length) continue;
+      if (universe.every((value) => selected.has(value))) continue;
+      facets[name] = [...selected];
+    }
+    return facets;
+  }
+
+  // Nothing selected in a chip group matches nothing, and an empty repeated
+  // query param reads as "unfiltered" on the server — so answer it here.
+  let matchesNothing = $derived.by(() =>
+    Object.values(requestFacets()).some((values) => !values.length),
+  );
+
+  function adoptFacetValues(counts) {
+    // Auto-enable newly-seen recipes/statuses/groups without resetting the
+    // user's current filter selection on every refresh.
+    const seen = {
+      recipe: [seenRecipes, activeRecipes],
+      status: [seenStatuses, activeStatuses],
+      group: [seenGroups, activeGroups],
+    };
+    for (const [facet, [seenValues, active]] of Object.entries(seen)) {
+      const next = new Set(active);
+      let changed = false;
+      for (const value of Object.keys(counts[facet] || {})) {
+        if (seenValues.has(value)) continue;
+        seenValues.add(value);
+        next.add(value);
+        changed = true;
+      }
+      if (!changed) continue;
+      if (facet === "recipe") activeRecipes = next;
+      else if (facet === "status") activeStatuses = next;
+      else activeGroups = next;
+    }
+  }
+
+  // The counts endpoint is the only source of whole-history totals, so losing
+  // it (a preview build talking to an older backend, a slow volume read) must
+  // not take the rows down with it: count the loaded window instead. Exact
+  // once everything is paged in, an undercount before that.
+  function countsFromPage(page) {
+    const buckets = { status: {}, recipe: {}, group: {} };
+    for (const run of page) {
+      const values = {
+        status: getStatus(run),
+        recipe:
+          safeText(run.recipe) || safeText(run.framework) || UNTAGGED_RECIPE,
+        group: getGroup(run),
+      };
+      for (const [name, value] of Object.entries(values)) {
+        buckets[name][value] = (buckets[name][value] || 0) + 1;
+      }
+    }
+    return { total: page.length, matching: page.length, ...buckets };
+  }
+
   async function loadRuns() {
     const requestId = ++runsRequestId;
     const isStale = () => requestId !== runsRequestId;
@@ -177,47 +286,44 @@
     if (!hasLoadedRuns) loading = true;
     error = null;
 
+    const query = search.trim();
+    const facets = requestFacets();
+    // Refetch the whole loaded window rather than only the newest page: it is
+    // the rows that are actually on screen, so the payload stays proportional
+    // to what the user has scrolled through, and everything visible stays live.
+    const limit = Math.max(loadedRunCount, RUNS_PAGE_SIZE);
+
     try {
-      const runs = await fetchWithTimeout(fetchRuns, 30000, "runs");
+      const [pageResult, countsResult] = await Promise.allSettled([
+        matchesNothing
+          ? Promise.resolve([])
+          : fetchWithTimeout(
+              (options) => fetchRuns({ ...options, limit, query, facets }),
+              30000,
+              "runs",
+            ),
+        fetchWithTimeout(
+          (options) => fetchRunCounts({ ...options, query, facets }),
+          15000,
+          "run counts",
+        ),
+      ]);
       if (isStale()) return;
-      allRuns = runs;
-      // Auto-enable newly-seen recipes/statuses without resetting the user's
-      // current filter selection on every refresh.
-      const nextRecipes = new Set(activeRecipes);
-      const nextStatuses = new Set(activeStatuses);
-      const nextGroups = new Set(activeGroups);
-      let recipesChanged = false;
-      let statusesChanged = false;
-      let groupsChanged = false;
-      for (const run of allRuns) {
-        const recipe = getRecipe(run);
-        if (!seenRecipes.has(recipe)) {
-          seenRecipes.add(recipe);
-          nextRecipes.add(recipe);
-          recipesChanged = true;
-        }
-        const status = getStatus(run);
-        if (!seenStatuses.has(status)) {
-          seenStatuses.add(status);
-          nextStatuses.add(status);
-          statusesChanged = true;
-        }
-        const group = getGroup(run);
-        if (!seenGroups.has(group)) {
-          seenGroups.add(group);
-          nextGroups.add(group);
-          groupsChanged = true;
-        }
-      }
-      if (recipesChanged) activeRecipes = nextRecipes;
-      if (statusesChanged) activeStatuses = nextStatuses;
-      if (groupsChanged) activeGroups = nextGroups;
+      if (pageResult.status === "rejected") throw pageResult.reason;
+      const page = pageResult.value;
+      const counts =
+        countsResult.status === "fulfilled"
+          ? countsResult.value
+          : countsFromPage(page);
+      runs = page;
+      runCounts = counts;
+      adoptFacetValues(counts);
     } catch (e) {
       if (isStale()) return;
       // Keep the data we already have on a transient refresh failure — only
       // surface the error (and clear) when there's nothing to show yet.
       // Otherwise the page flickers to "Loading…"/empty on every flaky poll.
-      if (!allRuns.length) {
+      if (!runs.length) {
         error = getErrorMessage(e);
         activeRecipes = new Set();
         activeStatuses = new Set();
@@ -250,14 +356,35 @@
     if (!isStale()) loadingEvals = false;
   }
 
-  async function load() {
+  let reloadQueued = false;
+
+  // `queue`: this load asks for data the current one won't return (a new query
+  // or facet selection), so it waits its turn instead of being dropped. Polls
+  // pass it up — a request slower than the 5s interval would otherwise queue a
+  // successor on every tick and refresh without pause.
+  async function load({ queue = false } = {}) {
+    // One refresh at a time. The runs payload can take longer to arrive than
+    // the 5s interval, and overlapping fetches stack whole copies of it in
+    // memory for a response that gets thrown away as stale anyway.
+    if (refreshing) {
+      if (!queue) return;
+      reloadQueued = true;
+      // The in-flight request carries the previous query, so retire it: its
+      // rows would otherwise land as the current ones until the queued load
+      // answers.
+      runsRequestId++;
+      return;
+    }
     refreshing = true;
     try {
-      const tasks = [loadRuns()];
-      if (activePage === "evals") {
-        tasks.push(loadEvals());
-      }
-      await Promise.all(tasks);
+      do {
+        reloadQueued = false;
+        const tasks = [loadRuns()];
+        if (activePage === "evals") {
+          tasks.push(loadEvals());
+        }
+        await Promise.all(tasks);
+      } while (reloadQueued);
     } finally {
       refreshing = false;
     }
@@ -279,71 +406,60 @@
     }
   });
 
-  let recipes = $derived([...new Set(allRuns.map(getRecipe))].sort());
-  let statuses = $derived([...new Set(allRuns.map(getStatus))].sort());
+  let recipeCounts = $derived(runCounts.recipe || {});
+  let statusCounts = $derived(runCounts.status || {});
+  let groupCounts = $derived(runCounts.group || {});
+
+  let recipes = $derived(Object.keys(recipeCounts).sort());
+  let statuses = $derived(Object.keys(statusCounts).sort());
   // Real group ids first (alphabetical), with "(no group)" pinned last so the
   // sweep groups are what you see at the top of the filter.
   let groups = $derived(
-    [...new Set(allRuns.map(getGroup))].sort((a, b) => {
+    Object.keys(groupCounts).sort((a, b) => {
       if (a === NO_GROUP) return 1;
       if (b === NO_GROUP) return -1;
       return a.localeCompare(b);
     }),
   );
 
-  let recipeCounts = $derived(
-    allRuns.reduce((acc, run) => {
-      const recipe = getRecipe(run);
-      acc[recipe] = (acc[recipe] || 0) + 1;
-      return acc;
-    }, {}),
-  );
+  // Runs arrive already filtered and sorted newest-first by the server.
+  let filteredRuns = $derived(runs);
+  let matchingRunCount = $derived(matchesNothing ? 0 : runCounts.matching || 0);
+  let hasMoreRuns = $derived(runs.length < matchingRunCount);
 
-  let statusCounts = $derived(
-    allRuns.reduce((acc, run) => {
-      const status = getStatus(run);
-      acc[status] = (acc[status] || 0) + 1;
-      return acc;
-    }, {}),
-  );
+  function loadMoreRuns() {
+    if (!hasMoreRuns) return;
+    const nextCount = runs.length + RUNS_PAGE_SIZE;
+    // Scrolling fires this on every event, so while the fetch for this page is
+    // in flight or queued it isn't asked for again. Once nothing is in flight a
+    // page that failed can be retried.
+    if (loadedRunCount >= nextCount && (refreshing || reloadQueued)) return;
+    loadedRunCount = nextCount;
+    // Queued, so asking for the next page during a refresh grows the window
+    // once that refresh lands instead of being dropped.
+    void load({ queue: true });
+  }
 
-  let groupCounts = $derived(
-    allRuns.reduce((acc, run) => {
-      const group = getGroup(run);
-      acc[group] = (acc[group] || 0) + 1;
-      return acc;
-    }, {}),
+  // Changing the query means a different result set, so paging restarts at the
+  // first page. Debounced: typing in the search box shouldn't be one request
+  // per keystroke.
+  let runQueryKey = $derived(
+    JSON.stringify({ q: search.trim(), facets: requestFacets() }),
   );
-
-  let filteredRuns = $derived(
-    allRuns
-      .filter((run) => {
-        if (!activeRecipes.has(getRecipe(run))) return false;
-        if (!activeStatuses.has(getStatus(run))) return false;
-        if (!activeGroups.has(getGroup(run))) return false;
-        if (search) {
-          const q = search.toLowerCase();
-          if (
-            !includesText(run.run_id, q) &&
-            !includesText(run.modal_app_id, q) &&
-            !includesText(run.group_id, q) &&
-            !includesText(JSON.stringify(run.group_tags || {}), q) &&
-            !includesText(run.model, q) &&
-            !includesText(run.dataset, q) &&
-            !includesText(run.train_result?.training_run_id, q) &&
-            !includesText(run.train_result?.checkpoint_dir, q) &&
-            !includesText(run.train_result?.model_name, q) &&
-            !includesText(run.train_result?.model_path, q) &&
-            !includesText(run.framework_status, q) &&
-            !includesText(run.deployment_id, q)
-          ) {
-            return false;
-          }
-        }
-        return true;
-      })
-      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
-  );
+  let lastRunQueryKey = "";
+  $effect(() => {
+    const key = runQueryKey;
+    if (!hasLoadedRuns || key === lastRunQueryKey) {
+      lastRunQueryKey = key;
+      return;
+    }
+    lastRunQueryKey = key;
+    const timer = window.setTimeout(() => {
+      loadedRunCount = RUNS_PAGE_SIZE;
+      void load({ queue: true });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  });
 
   const trainingGroupKeyFns = {
     group: getGroup,
@@ -358,19 +474,20 @@
   let trainingRunGroups = $derived.by(() => {
     if (trainingGroupBy === "none") return [];
     const buckets = Map.groupBy(filteredRuns, (run) => trainingGroupKey(run, trainingGroupBy));
-    return [...buckets].map(([key, runs]) => ({
+    return [...buckets].map(([key, bucketRuns]) => ({
       key,
-      runs,
-      latestCreatedAt: runs[0]?.created_at || null,
+      runs: bucketRuns,
+      latestCreatedAt: bucketRuns[0]?.created_at || null,
     }));
   });
 
-  let completedTotal = $derived(allRuns.filter((run) => getStatus(run) === "completed").length);
-  let cancelledTotal = $derived(allRuns.filter((run) => getStatus(run) === "cancelled").length);
-  let stoppedTotal = $derived(allRuns.filter((run) => getStatus(run) === "stopped").length);
-  let failedTotal = $derived(allRuns.filter((run) => getStatus(run) === "failed").length);
+  let totalRuns = $derived(runCounts.total || 0);
+  let completedTotal = $derived(statusCounts.completed || 0);
+  let cancelledTotal = $derived(statusCounts.cancelled || 0);
+  let stoppedTotal = $derived(statusCounts.stopped || 0);
+  let failedTotal = $derived(statusCounts.failed || 0);
   let runningTotal = $derived(
-    allRuns.length - completedTotal - cancelledTotal - stoppedTotal - failedTotal,
+    totalRuns - completedTotal - cancelledTotal - stoppedTotal - failedTotal,
   );
 
   function evalAccuracy(ev) {
@@ -595,7 +712,7 @@
     allEvals.filter((ev) => getEvalStatus(ev) === "Failed").length,
   );
   let activeTrainingRun = $derived(
-    allRuns.find((run) => run.run_id === activeTrainingRunId) || null,
+    runs.find((run) => run.run_id === activeTrainingRunId) || null,
   );
 
   let statusText = $derived.by(() => {
@@ -605,8 +722,8 @@
     if (error) return "error";
     if (activePage === "evals")
       return `${allEvals.length} eval${allEvals.length === 1 ? "" : "s"}`;
-    if (!allRuns.length) return "0 runs";
-    return `${filteredRuns.length} of ${allRuns.length} runs`;
+    if (!totalRuns) return "0 runs";
+    return `${matchingRunCount} of ${totalRuns} runs`;
   });
 
   function toggleRecipe(recipe) {
@@ -729,7 +846,7 @@
         title={pageMeta[activePage].title}
         {statusText}
         {refreshing}
-        onRefresh={load}
+        onRefresh={() => load()}
       />
 
     {#if activePage === "training" && activeTrainingRunId}
@@ -746,7 +863,10 @@
       />
     {:else if activePage === "training"}
       <TrainingPage
-        {allRuns}
+        {totalRuns}
+        {matchingRunCount}
+        {hasMoreRuns}
+        onLoadMore={loadMoreRuns}
         {completedTotal}
         {runningTotal}
         {stoppedTotal}

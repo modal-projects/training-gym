@@ -13,7 +13,15 @@ import os
 import secrets as _secrets
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Awaitable,
+    Callable,
+    Iterable,
+    TypedDict,
+    cast,
+)
 
 import modal
 from modal.exception import Error
@@ -23,13 +31,14 @@ if TYPE_CHECKING:
     from modal.client import _Client
     from modal_proto import api_pb2
 
-# Imported at module scope so FastAPI can resolve the ``request: Request``
-# annotation in stream_run_logs(). Under ``from __future__ import
+# Imported at module scope so FastAPI can resolve endpoint annotations such as
+# ``request: Request`` in stream_run_logs(). Under ``from __future__ import
 # annotations`` all type hints are strings, and FastAPI evaluates them
 # against the *defining function's* ``__globals__`` (i.e. this module).
 # Importing ``Request`` only inside ``fastapi_app()`` makes the name
 # invisible to FastAPI's introspection, which then mistakes the parameter
 # for a query string and 422s with ``{"loc": ["query", "request"]}``.
+from fastapi import Query
 from starlette.requests import Request
 
 # Used as endpoint parameter annotations, so — like ``Request`` above — these
@@ -50,6 +59,8 @@ from modal_training_gym.common.run import (
     TrainingRunStatus,
 )
 from modal_training_gym.common.run_list import (
+    FACET_NAMES,
+    count_run_facets,
     filter_run_summaries,
     run_list_field_metadata,
 )
@@ -79,6 +90,10 @@ from modal_training_gym.utils.metadata import (
 )
 
 SummaryLoader = Callable[[], Awaitable[list[JsonDict]]]
+
+# Repeated params (``?status=failed&status=stopped``) mirror the run list's
+# multi-select chips; an absent facet means "every bucket".
+FacetParam = Annotated[list[str] | None, Query()]
 
 
 # A single historical log line from ``AppFetchLogs``
@@ -427,7 +442,7 @@ def fastapi_app():
         Header,
         HTTPException,
         Path as FastAPIPath,
-    )  # Request imported at module scope
+    )  # Request and Query imported at module scope
     from fastapi.concurrency import run_in_threadpool
     from fastapi.responses import (
         FileResponse,
@@ -840,33 +855,99 @@ def fastapi_app():
 
     # ── Training runs ────────────────────────────────────────────────────
 
-    @web.get("/api/runs", response_model=list[RunSummary])
-    async def runs(
-        request: Request,
-        since: int | None = None,
-        limit: int | None = None,
-    ):
-        if limit is not None and limit < 1:
-            raise HTTPException(status_code=400, detail="Limit must be positive")
+    # The run list renders none of the full config or the per-step timing maps —
+    # the per-run detail endpoint serves those — yet they are most of the list
+    # payload (``config`` alone is ~60% of it), so the list drops them rather
+    # than shipping them on every poll. ``metadata`` stays: the list's group and
+    # tag columns fall back to it for runs that predate ``group_tags``.
+    run_list_excluded_fields = {"config", "step_times", "substep_times"}
+
+    def _requested_facets(
+        status: list[str] | None,
+        recipe: list[str] | None,
+        group: list[str] | None,
+    ) -> dict[str, set[str]]:
+        selected = {"status": status, "recipe": recipe, "group": group}
+        return {name: set(values) for name, values in selected.items() if values}
+
+    async def load_run_summaries() -> list[RunSummary]:
         try:
             data = await get_cached_list("runs", load_runs)
         except Exception:
             data = []
-        summaries = [
+        return [
             RunSummary.model_validate(item) for item in data if isinstance(item, dict)
         ]
+
+    # ``response_model`` is left off: FastAPI ignores ``response_model_exclude``
+    # for sequence response models, so the exclusion is applied here instead.
+    @web.get("/api/runs")
+    async def runs(
+        request: Request,
+        since: int | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        q: str = "",
+        status: FacetParam = None,
+        recipe: FacetParam = None,
+        group: FacetParam = None,
+    ):
+        if limit is not None and limit < 1:
+            raise HTTPException(status_code=400, detail="Limit must be positive")
+        if offset < 0:
+            raise HTTPException(status_code=400, detail="Offset must not be negative")
+        summaries = await load_run_summaries()
+        # Facet params are multi-select unions, declared above: taking them here
+        # too would intersect the union with whichever repeated value ``get``
+        # happens to return.
         filters = {
             name: request.query_params.get(name, "")
             for name, metadata in run_list_field_metadata().items()
-            if metadata.get("filterable")
+            if metadata.get("filterable") and name not in FACET_NAMES
         }
+        facets = _requested_facets(status, recipe, group)
         filtered = filter_run_summaries(
             summaries,
             filters=filters,
+            facets=facets,
+            query=q,
             since=since,
             limit=limit,
+            offset=offset,
+            # The list shows runs newest-first, and paging is only stable if the
+            # server orders by the same key: sorting by update time reshuffles
+            # the pages under the client whenever a run reports progress.
+            sort_by="created",
         )
-        return filtered
+        return JSONResponse(
+            [
+                summary.model_dump(mode="json", exclude=run_list_excluded_fields)
+                for summary in filtered
+            ]
+        )
+
+    # Declared before ``/api/runs/{training_run_id}`` so "counts" isn't read as a
+    # run id. The page's totals and filter-chip counts come from here, since a
+    # paged list can't count runs the client hasn't loaded. Chip counts cover
+    # every run (they're what the chips would select); ``matching`` counts the
+    # current query, which is how many rows paging can still reach.
+    @web.get("/api/runs/counts")
+    async def run_counts(
+        q: str = "",
+        status: FacetParam = None,
+        recipe: FacetParam = None,
+        group: FacetParam = None,
+    ):
+        summaries = await load_run_summaries()
+        counts = count_run_facets(summaries)
+        counts["matching"] = len(
+            filter_run_summaries(
+                summaries,
+                facets=_requested_facets(status, recipe, group),
+                query=q,
+            )
+        )
+        return counts
 
     @web.get("/api/runs/{training_run_id}", response_model=RunSummary)
     async def get_run(training_run_id: str):
@@ -1514,6 +1595,14 @@ def fastapi_app():
         )
 
     # ── SPA fallback ─────────────────────────────────────────────────────
+
+    # Declared before the fallback so an unknown API path is a JSON 404 rather
+    # than the SPA's HTML served with a 200: a frontend newer than the deployed
+    # backend would otherwise parse index.html as JSON and report the parser's
+    # error ("The string did not match the expected pattern", on WebKit).
+    @web.get("/api/{full_path:path}", include_in_schema=False)
+    async def api_not_found(full_path: str):
+        raise HTTPException(status_code=404, detail=f"No such API path: {full_path}")
 
     @web.get("/{full_path:path}")
     async def serve_spa(full_path: str):
