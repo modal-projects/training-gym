@@ -98,6 +98,11 @@ def _validate_resume_checkpoint(
 
 MILES_ROOT = "/root/miles"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
+
+# Modal injects the AWS EFA/OFI stack (libfabric 1.30 + NCCL's ofi net plugin)
+# on GPU hosts and prepends these dirs to the container's LD_LIBRARY_PATH.
+_EFA_LIB_DIRS = ("/opt/amazon/efa/lib", "/opt/amazon/ofi-nccl/lib")
+
 # libibverbs and the libmlx5 provider come from incompatible rdma package versions for miles multi-node training
 # reinstalling fixes this issue, mooncake transferengine imports successfully
 RDMA_RUNTIME_INSTALL_COMMAND = (
@@ -105,6 +110,8 @@ RDMA_RUNTIME_INSTALL_COMMAND = (
     "--reinstall libibverbs1 ibverbs-providers && "
     "rm -rf /var/lib/apt/lists/*"
 )
+
+
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
@@ -112,6 +119,12 @@ HARBOR_PKG_VERSION = "0.8.0"
 
 _MILES_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
 _PATCH_SGLANG_ABORT_B64 = encode_patch("patch_sglang_abort", _MILES_PATCHES)
+_PATCH_MOONCAKE_TOLERANCE_B64 = encode_patch(
+    "patch_mooncake_import_tolerance", _MILES_PATCHES
+)
+_PATCH_ROUTER_STARTUP_TIMEOUT_B64 = encode_patch(
+    "patch_router_startup_timeout", _MILES_PATCHES
+)
 _PATCH_ROLLOUT_STATUS_B64 = encode_patch(
     "patch_rollout_status_reporting", _MILES_PATCHES
 )
@@ -352,6 +365,15 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
+            # On EFA hosts a bind-mounted host libibverbs can break mooncake's
+            # TransferEngine import. Colocated sync does not use that P2P path,
+            # so keep mooncake out of the actor import chain and load it lazily.
+            f"echo {_PATCH_MOONCAKE_TOLERANCE_B64} | base64 -d | python3",
+            # miles allows the sglang router 30s to bind its port; the router's
+            # spawned child re-imports the whole stack first and overruns that
+            # under bring-up load. Raise the bound (it returns as soon as the
+            # port accepts, and still fails fast if the child dies).
+            f"echo {_PATCH_ROUTER_STARTUP_TIMEOUT_B64} | base64 -d | python3",
             f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
             (
                 f"if test -f {_MEGATRON_TORCH_STRATEGY_PY}; then "
@@ -370,6 +392,31 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
     return image
 
 
+def _overlay_local_miles(image: Image, local_miles: str) -> Image:
+    image = image.add_local_dir(
+        local_miles,
+        remote_path=MILES_ROOT,
+        copy=True,
+        ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
+    )
+    # The local checkout just overwrote the patched miles sources; re-apply
+    # the built-in patches. Keep custom checkouts usable when their layout has
+    # intentionally diverged, matching the existing local-overlay behavior.
+    return image.run_commands(
+        f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
+        " || echo 'WARNING: sglang abort patch did not apply to the"
+        " local_miles checkout; transient router failures during rollout"
+        " cleanup may crash the run'",
+        f"echo {_PATCH_MOONCAKE_TOLERANCE_B64} | base64 -d | python3"
+        " || echo 'WARNING: mooncake import tolerance patch did not apply to"
+        " the local_miles checkout; EFA-host actor imports may fail'",
+        f"echo {_PATCH_ROUTER_STARTUP_TIMEOUT_B64} | base64 -d | python3"
+        " || echo 'WARNING: router startup timeout patch did not apply to the"
+        " local_miles checkout; busy routers retain the upstream timeout'",
+        *_REPORTING_PATCH_COMMANDS,
+    )
+
+
 def _response_parser_path(model: Any) -> str:
     """Import path of the model's response parser so the rollout recorder can
     resolve and apply it remotely. Empty when the model sets no parser."""
@@ -382,7 +429,13 @@ def _response_parser_path(model: Any) -> str:
 
 
 def _compose_ld_library_path() -> str:
-    parts = [SYSTEM_LIB_DIR]
+    # The injected EFA dirs must precede SYSTEM_LIB_DIR: NCCL's ofi plugin
+    # requires the injected libfabric 1.30 (`FABRIC_1.8`), and with the system
+    # dir first the loader finds the image's libfabric 1.20 instead, so the
+    # plugin never loads in a Ray worker — fatal at engine bring-up on hosts
+    # whose env pins NCCL_NET_PLUGIN=ofi.
+    parts = list(_EFA_LIB_DIRS)
+    parts.append(SYSTEM_LIB_DIR)
     for part in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
         if part and part not in parts:
             parts.append(part)
@@ -402,8 +455,9 @@ def build_ray_runtime_env(
 
     Ray workers do not pick up the container's linker path on their own, and
     without it the Megatron actor can resolve a libibverbs that does not match
-    the image's libmlx5 and die importing mooncake. The system lib dir is put
-    in front for that reason; the rest is read from the container, so whatever
+    the image's libmlx5 and die importing mooncake. The leading dirs are
+    ordered by ``_compose_ld_library_path``; the rest is read from the
+    container, so whatever
     the image exports — including any wheel-shipped nvidia lib dirs — is
     carried through. Composing it here rather than in an ``image_env`` entry
     keeps it independent of whether the base image exports ``LD_LIBRARY_PATH``
@@ -454,21 +508,7 @@ def build_miles_app(
         )
 
     if miles.local_miles:
-        image = image.add_local_dir(
-            miles.local_miles,
-            remote_path=MILES_ROOT,
-            copy=True,
-            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
-        )
-        # The local checkout just overwrote the patched miles sources;
-        # re-apply the built-in patches.
-        image = image.run_commands(
-            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
-            " || echo 'WARNING: sglang abort patch did not apply to the"
-            " local_miles checkout; transient router failures during rollout"
-            " cleanup may crash the run'",
-            *_REPORTING_PATCH_COMMANDS,
-        )
+        image = _overlay_local_miles(image, miles.local_miles)
 
     if miles.image_run_commands:
         image = image.run_commands(*miles.image_run_commands)
