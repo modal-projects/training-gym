@@ -61,7 +61,23 @@ _NON_TAG_METADATA_KEYS = frozenset(
 )
 
 
-_GEMMA_MARKER_RE = re.compile(r"<\|(?:turn|channel)>|<(?:turn|channel)\|>")
+# Chat templates delimit turns with special tokens whose shape varies by family:
+# ChatML pairs ``<|im_start|>``/``<|im_end|>``, Gemma mirrors its delimiters
+# (``<|turn>`` … ``<turn|>``, ``<|channel>`` … ``<channel|>``) and adds bare
+# ``<bos>``/``<eos>``. Match every shape unconditionally — none of them is text
+# a model would produce as prose.
+_TURN_OPEN = r"<\|[^|<>]*\|>|<\|[A-Za-z][A-Za-z0-9_]*>"
+_TURN_OPEN_RE = re.compile(_TURN_OPEN)
+_TURN_CLOSE_RE = re.compile(r"<[A-Za-z][A-Za-z0-9_]*\|>|<(?:bos|eos)>|</?think>")
+# A role header is a turn-opening token plus a lone word filling out the line —
+# ``<|im_start|>user``, ``<|turn>model``, ``<|channel>thought``,
+# ``<|start_header_id|>user<|end_header_id|>``. Keying off that adjacency drops
+# the role without a per-family vocabulary, and without eating a line of prompt
+# text that happens to read "model" or "assistant".
+_ROLE_HEADER_RE = re.compile(
+    rf"(?m)^[ \t]*(?:{_TURN_OPEN})+[ \t]*[A-Za-z][A-Za-z0-9_]*[ \t]*"
+    rf"(?:{_TURN_OPEN})*[ \t]*$\n?"
+)
 
 
 def _clean_prompt(text: str) -> str:
@@ -87,18 +103,11 @@ def _clean_prompt(text: str) -> str:
                     return "\n\n".join(parts).strip()
         except (ValueError, SyntaxError):
             pass
-    # Gemma-style templates use bare <bos>/<eos> and half-delimited turn markers
-    # (<|turn>, <turn|>) alongside the usual <|...|> tokens, so strip all three.
-    is_gemma = _GEMMA_MARKER_RE.search(text) is not None
-    cleaned = _GEMMA_MARKER_RE.sub("", text)
-    cleaned = re.sub(r"<(?:bos|eos)>", "", cleaned)
-    cleaned = re.sub(r"<\|[^|<>]*\|>", "", cleaned)
-    cleaned = re.sub(r"</?think>", "", cleaned)
-    # Drop standalone role-header lines left behind by the template.
-    roles = (
-        "system|user|assistant|model|thought" if is_gemma else "system|user|assistant"
-    )
-    cleaned = re.sub(rf"(?m)^({roles})\s*$\n?", "", cleaned)
+    # Drop the closers first so an opener always starts its line, then the
+    # role headers, then whatever openers are left mid-line.
+    cleaned = _TURN_CLOSE_RE.sub("", text)
+    cleaned = _ROLE_HEADER_RE.sub("", cleaned)
+    cleaned = _TURN_OPEN_RE.sub("", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
