@@ -342,16 +342,46 @@ def test_trackio_adapter_preserves_native_train_and_eval_metric_names(monkeypatc
     ]
 
 
+def _stub_discovery(monkeypatch, *, url="https://trackio.example", secret_exists=True):
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio.deployed_trackio_url",
+        lambda app_name="training-gym-trackio": url,
+    )
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio._secret_exists",
+        lambda name: secret_exists,
+    )
+
+
+def test_a_custom_token_secret_is_not_guessed_at(monkeypatch):
+    """deploy_to_modal() takes modal_secret_name, so the name is a convention.
+
+    Adopting a name that doesn't exist mounts nothing and every metric write
+    401s -- the silent loss resolution exists to prevent -- so refuse instead.
+    """
+    _stub_discovery(monkeypatch, secret_exists=False)
+
+    with pytest.raises(TrainingGymConfigError, match="custom modal_secret_name"):
+        resolve_trackio_destination(TrackioConfig(project="rl"))
+
+
+def test_an_explicit_token_secret_is_kept(monkeypatch):
+    _stub_discovery(monkeypatch, secret_exists=False)
+    config = TrackioConfig(project="rl", modal_secret_name="_my-trackio-token")
+
+    resolve_trackio_destination(config)
+
+    assert config.server_url == "https://trackio.example"
+    assert config.modal_secret_name == "_my-trackio-token"
+
+
 def test_a_bare_config_resolves_to_the_deployed_server(monkeypatch):
     """A recipe names a project; the workspace's server is discovered at launch.
 
     This is what makes `metrics=TrackioConfig(project=...)` usable as a recipe
     default -- the preset can't know the server URL.
     """
-    monkeypatch.setattr(
-        "modal_training_gym.common.trackio.deployed_trackio_url",
-        lambda app_name="training-gym-trackio": "https://trackio.example",
-    )
+    _stub_discovery(monkeypatch)
     config = TrackioConfig(project="agentic-harbor")
 
     resolve_trackio_destination(config)
@@ -363,10 +393,7 @@ def test_a_bare_config_resolves_to_the_deployed_server(monkeypatch):
 
 
 def test_an_explicit_destination_is_left_alone(monkeypatch):
-    monkeypatch.setattr(
-        "modal_training_gym.common.trackio.deployed_trackio_url",
-        lambda app_name="training-gym-trackio": "https://discovered.example",
-    )
+    _stub_discovery(monkeypatch, url="https://discovered.example")
     config = TrackioConfig(project="rl", space_id="modal-labs/metrics")
 
     resolve_trackio_destination(config)
