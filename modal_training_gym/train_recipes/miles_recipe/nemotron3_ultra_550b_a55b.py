@@ -108,6 +108,24 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
             # with single-node engines keep fast dead-rank detection while this
             # one opts in.
             "MILES_LOAD_BARRIER_TIMEOUT_S": "3600",
+            # NCCL flight recorder. On EFA hosts the first compute_log_prob
+            # hangs in the pipeline-parallel shape exchange: the receiving PP
+            # stages wait the full collective timeout for a ncclUniqueId the
+            # sending stage never publishes, and the sender's own state is
+            # invisible in the logs — every failure so far has shown only the
+            # waiting side. With this on, torch keeps a ring buffer of every
+            # rank's in-flight collectives and, when the heartbeat monitor sees
+            # one outlive TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, dumps all of them
+            # before aborting. The dump goes to the checkpoints Volume so it
+            # survives the container. Inert on a healthy run.
+            "TORCH_NCCL_TRACE_BUFFER_SIZE": "20000",
+            "TORCH_NCCL_DUMP_ON_TIMEOUT": "1",
+            "TORCH_FR_DUMP_TEMP_FILE": "/checkpoints/nccl_flight_recorder/rank_",
+            # The heartbeat monitor is separate from distributed_timeout_minutes,
+            # which must stay at 60 for the cold TB-scale load. A collective
+            # that is silent for 10 min is a hang, not a slow load: dump and
+            # abort then, so a stuck rank costs minutes rather than an hour.
+            "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "600",
         }
     )
 

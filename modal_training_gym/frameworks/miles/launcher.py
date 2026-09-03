@@ -518,6 +518,31 @@ def _compose_ld_library_path() -> str:
     return ":".join(parts)
 
 
+_FLIGHT_RECORDER_KEY = "TORCH_FR_DUMP_TEMP_FILE"
+
+
+def flight_recorder_prefix(environment: dict[str, str], training_run_id: str) -> str:
+    """Per-run NCCL flight-recorder dump prefix, or "" when the recipe sets none.
+
+    torch writes ``<prefix><rank>`` lazily, only when a hang is detected, and
+    does not create the parent directory. A recipe points the prefix at the
+    checkpoints Volume so the dump outlives the container; scoping it under the
+    run id keeps runs from overwriting each other.
+    """
+    prefix = environment.get(_FLIGHT_RECORDER_KEY, "")
+    if not prefix:
+        return ""
+    directory, base = os.path.split(prefix)
+    return os.path.join(directory, training_run_id, base)
+
+
+def _scope_flight_recorder_dump(env_vars: dict[str, str]) -> None:
+    """Rewrite the dump prefix in the Ray env to its per-run form."""
+    run_id = env_vars.get("TRAINING_GYM_TRAINING_RUN_ID", "")
+    if run_id and env_vars.get(_FLIGHT_RECORDER_KEY):
+        env_vars[_FLIGHT_RECORDER_KEY] = flight_recorder_prefix(env_vars, run_id)
+
+
 def build_ray_runtime_env(
     *,
     head_addr: str,
@@ -552,6 +577,7 @@ def build_ray_runtime_env(
     env_vars.update(metric_env)
     env_vars.update(environment)
     env_vars.update(timing_debug_env())
+    _scope_flight_recorder_dump(env_vars)
     if framework_status_token:
         # Applied after `environment` so a recipe override can't blank the
         # dashboard auth token by accident.
@@ -1062,6 +1088,13 @@ def build_miles_app(
             data_volume.reload.aio(),
             checkpoints_volume.reload.aio(),
         )
+
+        # Every node creates the flight-recorder dump directory: torch writes
+        # the dump lazily on hang detection and will not create the parent,
+        # and a Volume directory made on the head is not visible to the other
+        # containers until committed.
+        if fr_prefix := flight_recorder_prefix(miles.environment, training_run_id):
+            os.makedirs(os.path.dirname(fr_prefix), exist_ok=True)
 
         cluster = ModalRayCluster()
         cluster.discover_cluster(miles.total_nodes)
