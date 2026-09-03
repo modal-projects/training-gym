@@ -11,6 +11,7 @@ import json
 import os
 import secrets as _secrets
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict, cast
 
 import modal
@@ -44,7 +45,6 @@ from modal_training_gym.common.dashboard import (
     DASHBOARD_PREVIEW_ENV_KEY,
     DASHBOARD_VERSION_ENV_KEY,
     current_dashboard_version,
-    dashboard_frontend_dir,
 )
 from modal_training_gym.common.run import (
     FrameworkStatusUpdate,
@@ -119,6 +119,9 @@ IS_PREVIEW = _is_preview()
 
 
 def _build_image() -> modal.Image:
+    _pkg = Path(__file__).resolve().parent
+    _checkout = _pkg.parent / "dashboards" / "frontend"
+    _frontend = _checkout if _checkout.is_dir() else _pkg / "_frontend"
     return (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("curl")
@@ -128,7 +131,7 @@ def _build_image() -> modal.Image:
         )
         .pip_install("fastapi[standard]==0.118.0", "modal")
         .add_local_dir(
-            str(dashboard_frontend_dir()),
+            str(_frontend),
             remote_path="/app/frontend",
             copy=True,
             ignore=["node_modules", "dist"],

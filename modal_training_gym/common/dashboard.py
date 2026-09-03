@@ -7,7 +7,6 @@ resolve the live dashboard without importing ``cli``, which imports ``common``.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 DASHBOARD_APP_NAME = "training-gym-dashboard"
 DASHBOARD_WEB_FUNCTION = "fastapi_app"
@@ -19,18 +18,6 @@ DASHBOARD_VERSION_ENV_KEY = "DASHBOARD_VERSION"
 
 # Bump when the deployed dashboard frontend or backend changes.
 DASHBOARD_VERSION = 1
-
-_PACKAGE_DIR = Path(__file__).resolve().parents[1]
-
-
-def dashboard_frontend_dir() -> Path:
-    """The frontend sources a dashboard image is built from.
-
-    A repo checkout has them at ``dashboards/frontend``; a wheel ships a copy
-    at ``modal_training_gym/_frontend`` (see ``pyproject.toml``).
-    """
-    checkout = _PACKAGE_DIR.parent / "dashboards" / "frontend"
-    return checkout if checkout.is_dir() else _PACKAGE_DIR / "_frontend"
 
 
 def current_dashboard_version() -> str:
