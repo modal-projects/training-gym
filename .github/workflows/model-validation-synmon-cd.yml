@@ -1,0 +1,48 @@
+name: Deploy model-validation synmon
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "modal_training_gym/**"
+      - "synthetic_monitoring/**"
+      - "scripts/**"
+  schedule:
+    - cron: "0 18 * * *"
+
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy model-validation synmon on Modal
+    runs-on: ubuntu-latest
+    environment: modal-deploy
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: training-gym
+      UV_CACHE_DIR: /tmp/uv-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Deploy gym-model-synmon on Modal
+        run: >
+          uv run modal deploy
+          -m synthetic_monitoring.model_validation::app
