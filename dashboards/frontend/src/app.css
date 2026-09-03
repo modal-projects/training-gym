@@ -1420,6 +1420,29 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
   font-size: 0.84rem;
 }
 
+.load-more-button {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-bright);
+  padding: 6px 14px;
+  font-size: 0.84rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.load-more-button:hover {
+  background: color-mix(in srgb, var(--border-strong) 22%, transparent);
+}
+
+.load-more-button:focus {
+  outline: none;
+}
+
+.load-more-button:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-strong) 55%, transparent);
+}
+
 .open-modal-link-disabled {
   opacity: 0.5;
   pointer-events: none;

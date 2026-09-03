@@ -218,7 +218,9 @@
   // signal that means "the reader reached the end of *this* scrollport": a
   // sentinel + IntersectionObserver either never re-fires once it is already
   // visible (a short group's table doesn't scroll at all) or pages the whole
-  // history unprompted, which is what this PR exists to stop.
+  // history unprompted, which is what this PR exists to stop. Grouped tables
+  // may not scroll at all, so the footer's button is what keeps every run
+  // reachable; scrolling is only the shortcut.
   function growOnScroll(event) {
     if (!hasMoreRuns) return;
     const el = event.currentTarget;
@@ -480,8 +482,13 @@
         </div>
       {/if}
 
-      <div class="page-empty">
-        Showing {filteredRuns.length} of {matchingRunCount} runs
+      <div class="page-empty flex flex-col items-center gap-[10px]">
+        <span>Showing {filteredRuns.length} of {matchingRunCount} runs</span>
+        {#if hasMoreRuns}
+          <button type="button" class="load-more-button" onclick={onLoadMore}>
+            Load more
+          </button>
+        {/if}
       </div>
     {/if}
   </div>
