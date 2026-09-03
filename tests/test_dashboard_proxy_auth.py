@@ -13,6 +13,13 @@ from modal_training_gym.cli import setup as cli_setup_module
 from modal_training_gym.common import config
 from modal_training_gym.common import status_reporter
 from modal_training_gym.common import reporting
+from modal_training_gym.common.dashboard import (
+    DASHBOARD_VERSION,
+    DashboardLookupUnknown,
+    current_dashboard_version,
+    deployed_dashboard_url,
+    is_dashboard_upgrade,
+)
 
 
 class _Response:
@@ -131,14 +138,67 @@ def test_auto_deploy_reuses_proxy_auth_mode(monkeypatch, last_proxy_auth, expect
     assert calls == [{"interactive": False, "require_proxy_auth": expected}]
 
 
-def _deployed_dashboard(monkeypatch, *, live_version, local_fingerprint):
+class _ModalFn:
+    def __init__(self, *, hydrate_error=None, web_url="https://dashboard.test"):
+        self._hydrate_error = hydrate_error
+        self._web_url = web_url
+
+    def hydrate(self):
+        if self._hydrate_error is not None:
+            raise self._hydrate_error
+
+    def get_web_url(self):
+        return self._web_url
+
+
+def _stub_modal_function(monkeypatch, fn):
+    import modal
+
+    monkeypatch.setattr(modal.Function, "from_name", lambda *_args, **_kwargs: fn)
+
+
+def test_deployed_dashboard_url_not_found_is_missing(monkeypatch):
+    from modal.exception import NotFoundError
+
+    _stub_modal_function(monkeypatch, _ModalFn(hydrate_error=NotFoundError("gone")))
+
+    assert deployed_dashboard_url() is None
+
+
+def test_deployed_dashboard_url_lookup_failure_is_unknown(monkeypatch):
+    _stub_modal_function(monkeypatch, _ModalFn(hydrate_error=TimeoutError("timed out")))
+
+    with pytest.raises(DashboardLookupUnknown):
+        deployed_dashboard_url()
+
+
+def test_deployed_dashboard_url_empty_web_url_is_unknown(monkeypatch):
+    _stub_modal_function(monkeypatch, _ModalFn(web_url=None))
+
+    with pytest.raises(DashboardLookupUnknown):
+        deployed_dashboard_url()
+
+
+def test_auto_deploy_skips_when_dashboard_lookup_is_unknown(config_path, monkeypatch):
+    config.save_dashboard_url("https://cached.test")
+
+    def unknown():
+        raise DashboardLookupUnknown("blip")
+
+    monkeypatch.setattr(cli_setup_module, "deployed_dashboard_url", unknown)
+    calls = _record_setup(monkeypatch)
+
+    assert cli_setup_module.ensure_dashboard_deployed() == "https://cached.test"
+    assert calls == []
+
+
+def _deployed_dashboard(monkeypatch, *, live_version, local_version):
     monkeypatch.setattr(
         cli_setup_module, "deployed_dashboard_url", lambda: "https://dashboard.test"
     )
     monkeypatch.setattr(
-        cli_setup_module, "current_dashboard_fingerprint", lambda: local_fingerprint
+        cli_setup_module, "current_dashboard_version", lambda: local_version
     )
-    # ensure_dashboard_deployed imports these from config at call time.
     monkeypatch.setattr(config, "get_dashboard_version", lambda _url: live_version)
     monkeypatch.setattr(config, "get_dashboard_proxy_auth", lambda: False)
 
@@ -154,25 +214,102 @@ def _record_setup(monkeypatch):
     return calls
 
 
-def test_auto_deploy_skips_when_fingerprint_matches(config_path, monkeypatch):
-    _deployed_dashboard(monkeypatch, live_version="fp-1", local_fingerprint="fp-1")
+def test_auto_deploy_skips_when_version_is_not_newer(config_path, monkeypatch):
+    _deployed_dashboard(monkeypatch, live_version="1", local_version="1")
     calls = _record_setup(monkeypatch)
 
     assert cli_setup_module.ensure_dashboard_deployed() == "https://dashboard.test"
     assert calls == []
 
 
-@pytest.mark.parametrize("live_version", ["fp-1", None])
-def test_auto_deploy_redeploys_when_fingerprint_is_stale(
-    config_path, monkeypatch, live_version
-):
-    _deployed_dashboard(
-        monkeypatch, live_version=live_version, local_fingerprint="fp-2"
-    )
+def test_auto_deploy_redeploys_when_incoming_version_is_newer(config_path, monkeypatch):
+    _deployed_dashboard(monkeypatch, live_version=1, local_version=2)
     calls = _record_setup(monkeypatch)
 
     assert cli_setup_module.ensure_dashboard_deployed() == "https://dashboard.test"
     assert calls == [{"interactive": False, "require_proxy_auth": False}]
+
+
+def _raise_version_error(error):
+    def urlopen(*_args, **_kwargs):
+        raise error
+
+    return urlopen
+
+
+def test_auto_deploy_skips_when_version_is_unknown(config_path, monkeypatch):
+    monkeypatch.setattr(
+        cli_setup_module, "deployed_dashboard_url", lambda: "https://dashboard.test"
+    )
+    monkeypatch.setattr(cli_setup_module, "current_dashboard_version", lambda: "2")
+    monkeypatch.setattr(config, "get_dashboard_proxy_auth", lambda: False)
+    monkeypatch.setattr(
+        config,
+        "urlopen",
+        _raise_version_error(
+            HTTPError(
+                "https://dashboard.test/api/version", 401, "Unauthorized", {}, None
+            )
+        ),
+    )
+    calls = _record_setup(monkeypatch)
+
+    assert cli_setup_module.ensure_dashboard_deployed() == "https://dashboard.test"
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("incoming", "deployed", "expected"),
+    [
+        ("2", None, True),
+        ("2", "1", True),
+        ("1", "1", False),
+        ("1", "deadbeef", True),
+    ],
+)
+def test_is_dashboard_upgrade(incoming, deployed, expected):
+    assert is_dashboard_upgrade(incoming, deployed) is expected
+
+
+def test_current_dashboard_version_uses_source_constant(monkeypatch):
+    monkeypatch.delenv(_dashboard.DASHBOARD_VERSION_ENV_KEY, raising=False)
+    assert current_dashboard_version() == str(DASHBOARD_VERSION)
+
+
+def test_current_dashboard_version_uses_baked_env(monkeypatch):
+    monkeypatch.setenv(_dashboard.DASHBOARD_VERSION_ENV_KEY, "9")
+
+    assert current_dashboard_version() == "9"
+
+
+def test_get_dashboard_version_reads_success_bodies(monkeypatch):
+    monkeypatch.setattr(config, "urlopen", lambda *_args, **_kwargs: _Response(b'"2"'))
+    assert config.get_dashboard_version("https://dashboard.test") == "2"
+
+
+def test_get_dashboard_version_404_is_unversioned(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "urlopen",
+        _raise_version_error(
+            HTTPError("https://dashboard.test/api/version", 404, "Not Found", {}, None)
+        ),
+    )
+    assert config.get_dashboard_version("https://dashboard.test") is None
+
+
+def test_get_dashboard_version_unread_is_unknown(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "urlopen",
+        _raise_version_error(
+            HTTPError(
+                "https://dashboard.test/api/version", 401, "Unauthorized", {}, None
+            )
+        ),
+    )
+    with pytest.raises(config.DashboardVersionUnknown):
+        config.get_dashboard_version("https://dashboard.test")
 
 
 def _capture_report(reporter, monkeypatch):

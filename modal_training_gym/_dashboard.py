@@ -1,8 +1,7 @@
 """Self-contained training-gym dashboard app.
 
-The image builds the frontend from the same sources the fingerprint hashes:
-``dashboards/frontend`` in a repo checkout, or the copy the wheel ships at
-``modal_training_gym/_frontend``.
+The image builds the frontend from ``dashboards/frontend`` in a repo
+checkout, or the copy the wheel ships at ``modal_training_gym/_frontend``.
 """
 
 from __future__ import annotations
@@ -43,7 +42,8 @@ from modal_training_gym.common.config import (
 from modal_training_gym.common.dashboard import (
     DASHBOARD_APP_NAME,
     DASHBOARD_PREVIEW_ENV_KEY,
-    current_dashboard_fingerprint,
+    DASHBOARD_VERSION_ENV_KEY,
+    current_dashboard_version,
     dashboard_frontend_dir,
 )
 from modal_training_gym.common.run import (
@@ -100,7 +100,6 @@ class TimingFileCache(TypedDict):
 
 
 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
-DASHBOARD_VERSION_ENV_KEY = "DASHBOARD_VERSION"
 TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
 
 
@@ -141,7 +140,7 @@ def _build_image() -> modal.Image:
                 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY: "true"
                 if dashboard_requires_proxy_auth()
                 else "false",
-                DASHBOARD_VERSION_ENV_KEY: current_dashboard_fingerprint(),
+                DASHBOARD_VERSION_ENV_KEY: current_dashboard_version(),
                 TIMING_DEBUG_ENV: os.environ.get(TIMING_DEBUG_ENV, ""),
                 DASHBOARD_PREVIEW_ENV_KEY: "true" if IS_PREVIEW else "",
             }

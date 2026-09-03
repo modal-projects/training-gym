@@ -14,7 +14,10 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from modal_training_gym.common.dashboard import deployed_dashboard_url
+from modal_training_gym.common.dashboard import (
+    DashboardLookupUnknown,
+    deployed_dashboard_url,
+)
 
 
 CONFIG_PATH = Path.home() / ".training-gym.toml"
@@ -67,8 +70,16 @@ def save_dashboard_url(url: str, *, proxy_auth: bool | None = None) -> None:
     CONFIG_PATH.write_text(_render(config))
 
 
+class DashboardVersionUnknown(Exception):
+    """The live dashboard exists but ``/api/version`` could not be read."""
+
+
 def get_dashboard_version(url: str) -> str | None:
-    """Return the source fingerprint the live dashboard was built from, or ``None``."""
+    """Return the live dashboard version, or ``None`` if it answered without one.
+
+    Raises ``DashboardVersionUnknown`` when the request fails before that can
+    be observed (timeout, 401, network, 5xx).
+    """
     request = Request(
         url.rstrip("/") + DASHBOARD_VERSION_PATH,
         headers=modal_proxy_auth_headers(),
@@ -76,7 +87,13 @@ def get_dashboard_version(url: str) -> str | None:
     try:
         with urlopen(request, timeout=5) as response:
             value = loads(response.read())
-    except (HTTPError, URLError, OSError, JSONDecodeError, UnicodeDecodeError):
+    except HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise DashboardVersionUnknown from exc
+    except (URLError, OSError) as exc:
+        raise DashboardVersionUnknown from exc
+    except (JSONDecodeError, UnicodeDecodeError):
         return None
     return value if isinstance(value, str) else None
 
@@ -107,7 +124,10 @@ def get_dashboard_proxy_auth() -> bool | None:
     if not isinstance(persisted, bool):
         persisted = None
 
-    url = dashboard.get("url") or deployed_dashboard_url()
+    try:
+        url = dashboard.get("url") or deployed_dashboard_url()
+    except DashboardLookupUnknown:
+        url = dashboard.get("url")
     if isinstance(url, str) and url.strip():
         request = Request(
             url.strip().rstrip("/") + DASHBOARD_PROXY_AUTH_PATH,
