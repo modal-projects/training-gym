@@ -26,12 +26,8 @@ from synthetic_monitoring.chart import RunPoint, render_timing_history_chart
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PROBE_TIMEOUT_S = 60 * 60
 CLEANUP_GRACE_S = 5 * 60
-LAUNCH_TIMEOUT_S = (
-    len(_ValidationConfig.select(pr_only=True)) * (PROBE_TIMEOUT_S + CLEANUP_GRACE_S)
-    + 30 * 60
-)
+LAUNCH_TIMEOUT_S = PROBE_TIMEOUT_S + CLEANUP_GRACE_S + 30 * 60
 MODAL_ENV = "training-gym"
-SLACK_CHANNEL_ID = "C0B9ZEA3ASD"
 HISTORY_DICT_NAME = "gym-synmon-timing-baselines"
 
 probe_image = (
@@ -193,14 +189,15 @@ def _post_report(rows: list[dict]) -> None:
     from slack_sdk.errors import SlackApiError
 
     client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    channel = os.environ["SLACK_CHANNEL_ID"]
     try:
-        client.conversations_join(channel=SLACK_CHANNEL_ID)
+        client.conversations_join(channel=channel)
     except SlackApiError as exc:
         if exc.response["error"] != "already_in_channel":
             raise
     header = f"Weekly model validation - {datetime.now(timezone.utc):%Y-%m-%d}"
     thread_ts = client.chat_postMessage(
-        channel=SLACK_CHANNEL_ID,
+        channel=channel,
         text=header,
         blocks=slack_report_blocks(rows),
         mrkdwn=True,
@@ -219,7 +216,7 @@ def _post_report(rows: list[dict]) -> None:
                 )
                 if png:
                     client.files_upload_v2(
-                        channel=SLACK_CHANNEL_ID,
+                        channel=channel,
                         thread_ts=thread_ts,
                         content=png,
                         filename=f"timing_history_{row['model'].replace('/', '_')}.png",
@@ -232,7 +229,7 @@ def _post_report(rows: list[dict]) -> None:
             if row.get("modal_app_url"):
                 text += f"\n<{row['modal_app_url']}|Modal logs>"
             client.chat_postMessage(
-                channel=SLACK_CHANNEL_ID,
+                channel=channel,
                 thread_ts=thread_ts,
                 text=text,
                 mrkdwn=True,
