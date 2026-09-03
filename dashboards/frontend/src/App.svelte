@@ -429,7 +429,11 @@
 
   function loadMoreRuns() {
     if (!hasMoreRuns) return;
-    loadedRunCount = runs.length + RUNS_PAGE_SIZE;
+    const nextCount = runs.length + RUNS_PAGE_SIZE;
+    // Scrolling fires this on every event, so the page already asked for is
+    // not asked for again: one queued page per set of rows on screen.
+    if (loadedRunCount >= nextCount) return;
+    loadedRunCount = nextCount;
     // Queued, so asking for the next page during a refresh grows the window
     // once that refresh lands instead of being dropped.
     void load({ queue: true });
