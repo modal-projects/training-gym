@@ -163,13 +163,13 @@ def test_nemotron_recipe_arms_the_flight_recorder():
     assert env["TORCH_FR_DUMP_TEMP_FILE"].startswith("/checkpoints/")
 
 
-def test_miles_recipes_are_pinned_off_aws():
-    """Every miles recipe inherits the base-class cloud pin; an explicit
-    cloud= still overrides it."""
+def test_nemotron_recipe_is_pinned_off_aws():
+    """Only the Nemotron recipe pins its cloud; the base class stays unpinned
+    and an explicit cloud= still overrides the pin."""
     from modal_training_gym.train_recipes.miles_recipe import (
         Nemotron3_Ultra_550B_A55B_Recipe,
     )
 
-    assert MilesRecipe().cloud == "oci"
+    assert MilesRecipe().cloud is None
     assert Nemotron3_Ultra_550B_A55B_Recipe().cloud == "oci"
     assert Nemotron3_Ultra_550B_A55B_Recipe(cloud="aws").cloud == "aws"

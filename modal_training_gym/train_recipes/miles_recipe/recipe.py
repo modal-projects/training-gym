@@ -127,9 +127,7 @@ class MilesRecipe(BaseTrainRecipe):
         cpu:
             Modal Function CPU request/limit in cores per container.
         cloud:
-            Modal cloud provider to pin the cluster to. Defaults to ``"oci"``:
-            miles multi-node runs hang on AWS EFA hosts (see the field), so
-            they stay on Mellanox/IB fleets until that is fixed.
+            Modal cloud provider to pin the cluster to.
         region:
             Modal region to pin the cluster to.
         miles_model_script:
@@ -438,12 +436,7 @@ class MilesRecipe(BaseTrainRecipe):
     gpu_type: str = "H100"
     memory: int | tuple[int, int] | None = None
     cpu: float | tuple[float, float] | None = None
-    # Every miles recipe here is multi-node RDMA. On AWS EFA hosts the first
-    # pipeline-parallel shape exchange can hang for the full collective timeout
-    # (Nemotron-3-Ultra, p5en.48xlarge); the same code trains every step on
-    # Mellanox/IB hosts. Pinned off AWS until that is root-caused. A recipe or
-    # launch can still pass cloud= to override.
-    cloud: str | None = "oci"
+    cloud: str | None = None
     region: str | None = None
     name: str = ""
     app_tags: dict = field(default_factory=dict)
