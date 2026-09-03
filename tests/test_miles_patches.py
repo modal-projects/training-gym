@@ -9,7 +9,6 @@ import pytest
 
 from modal_training_gym.frameworks.miles.modal_helpers.patches import (
     patch_advantage_distribution as advantage_patcher,
-    patch_mooncake_import_tolerance as mooncake_patcher,
     patch_skip_final_weight_sync as final_sync_patcher,
     patch_rollout_status_reporting as rollout_patcher,
 )
@@ -75,39 +74,6 @@ def test_patch_matches_golden(miles_inputs, tmp_path, request):
         assert actual == expected, (
             f"golden mismatch for {name}; rerun with --rewrite to accept"
         )
-
-
-def test_mooncake_import_is_moved_inside_p2p_setup(tmp_path):
-    work = tmp_path / "p2p_transfer_utils.py"
-    work.write_text(
-        "from mooncake.engine import TransferEngine\n\n"
-        "def setup_transfer_engine():\n"
-        "    transfer_engine = TransferEngine()\n"
-        "    return transfer_engine\n"
-    )
-
-    mooncake_patcher._patch_file(work)
-    patched = work.read_text()
-    tree = ast.parse(patched)
-
-    assert mooncake_patcher.MARKER in patched
-    assert not any(
-        isinstance(node, ast.ImportFrom) and node.module == "mooncake.engine"
-        for node in tree.body
-    )
-    setup = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "setup_transfer_engine"
-    )
-    assert any(
-        isinstance(node, ast.ImportFrom) and node.module == "mooncake.engine"
-        for node in ast.walk(setup)
-    )
-
-    # Image builds can layer the same patch more than once.
-    mooncake_patcher._patch_file(work)
-    assert work.read_text() == patched
 
 
 def test_final_weight_sync_is_skipped_only_on_the_last_rollout(tmp_path):

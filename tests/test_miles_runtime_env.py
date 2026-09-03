@@ -10,7 +10,6 @@ from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 class _FakeImage:
     def __init__(self):
         self.commands: list[str] = []
-        self.operations: list[str] = []
 
     @classmethod
     def from_registry(cls, _docker_image: str) -> "_FakeImage":
@@ -20,12 +19,7 @@ class _FakeImage:
         return self
 
     def run_commands(self, *commands: str) -> "_FakeImage":
-        self.operations.append("run_commands")
         self.commands.extend(commands)
-        return self
-
-    def add_local_dir(self, *_args, **_kwargs) -> "_FakeImage":
-        self.operations.append("add_local_dir")
         return self
 
     def env(self, _environment: dict[str, str]) -> "_FakeImage":
@@ -49,28 +43,6 @@ def test_single_node_image_keeps_base_rdma_runtime(monkeypatch):
     assert launcher.RDMA_RUNTIME_INSTALL_COMMAND not in image.commands
 
 
-def test_image_applies_efa_host_patches(monkeypatch):
-    """The mooncake-import-tolerance and router-timeout patches, both needed
-    for a miles run to complete on an EFA host, are baked into the image."""
-    monkeypatch.setattr(launcher, "Image", _FakeImage)
-
-    commands = "\n".join(launcher._build_miles_base_image(MilesRecipe()).commands)
-
-    assert launcher._PATCH_MOONCAKE_TOLERANCE_B64 in commands
-    assert launcher._PATCH_ROUTER_STARTUP_TIMEOUT_B64 in commands
-
-
-def test_local_miles_overlay_reapplies_efa_host_patches():
-    image = _FakeImage()
-
-    launcher._overlay_local_miles(image, "/tmp/local-miles")
-
-    assert image.operations == ["add_local_dir", "run_commands"]
-    commands = "\n".join(image.commands)
-    assert launcher._PATCH_MOONCAKE_TOLERANCE_B64 in commands
-    assert launcher._PATCH_ROUTER_STARTUP_TIMEOUT_B64 in commands
-
-
 def test_ld_library_path_comes_from_the_container(monkeypatch):
     """Workers get the container's linker path, behind the system lib dir."""
     monkeypatch.setenv("LD_LIBRARY_PATH", "/usr/local/cuda/lib64:/wheel/nvidia/lib")
@@ -80,8 +52,7 @@ def test_ld_library_path_comes_from_the_container(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib"
-        ":/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:/wheel/nvidia/lib"
+        "/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:/wheel/nvidia/lib"
     )
     assert env_vars["MASTER_ADDR"] == "10.0.0.1"
     assert env_vars["no_proxy"] == "127.0.0.1,10.0.0.1"
@@ -103,7 +74,7 @@ def test_recipe_environment_still_wins(monkeypatch):
     assert env_vars["PYTHONPATH"] == "/root/Megatron-LM/"
 
 
-def test_unset_container_path_yields_only_the_required_lib_dirs(monkeypatch):
+def test_unset_container_path_yields_only_the_system_lib_dir(monkeypatch):
     """No empty entry, which the loader would read as the working directory."""
     monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
 
@@ -111,9 +82,7 @@ def test_unset_container_path_yields_only_the_required_lib_dirs(monkeypatch):
         head_addr="10.0.0.1", metric_env={}, environment={}
     )["env_vars"]
 
-    assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib:/usr/lib/x86_64-linux-gnu"
-    )
+    assert env_vars["LD_LIBRARY_PATH"] == "/usr/lib/x86_64-linux-gnu"
 
 
 def test_system_lib_dir_is_not_duplicated(monkeypatch):
@@ -124,8 +93,7 @@ def test_system_lib_dir_is_not_duplicated(monkeypatch):
     )["env_vars"]
 
     assert env_vars["LD_LIBRARY_PATH"] == (
-        "/opt/amazon/efa/lib:/opt/amazon/ofi-nccl/lib"
-        ":/usr/lib/x86_64-linux-gnu:/wheel/nvidia/lib"
+        "/usr/lib/x86_64-linux-gnu:/wheel/nvidia/lib"
     )
 
 
@@ -142,20 +110,14 @@ def test_metric_env_is_preserved(monkeypatch):
     assert env_vars["WANDB_RESUME"] == "allow"
 
 
-def test_efa_dirs_lead_the_path(monkeypatch):
-    """The injected EFA dirs come first so NCCL's ofi plugin resolves the
-    injected libfabric, not the image's older one."""
-    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+def test_image_applies_final_weight_sync_patch(monkeypatch):
+    """The patch that stops miles syncing weights into idle engines after the
+    final save is baked into every miles image."""
+    monkeypatch.setattr(launcher, "Image", _FakeImage)
 
-    env_vars = build_ray_runtime_env(
-        head_addr="10.0.0.1", metric_env={}, environment={}
-    )["env_vars"]
+    commands = "\n".join(launcher._build_miles_base_image(MilesRecipe()).commands)
 
-    path = env_vars["LD_LIBRARY_PATH"].split(":")
-    assert path[: len(launcher._EFA_LIB_DIRS)] == list(launcher._EFA_LIB_DIRS)
-    assert launcher.SYSTEM_LIB_DIR in path
-    # The private-prefix machinery is gone: nothing shadows the host verbs libs.
-    assert not any("gym-rdma" in p for p in path)
+    assert launcher._PATCH_SKIP_FINAL_WEIGHT_SYNC_B64 in commands
 
 
 def test_flight_recorder_dump_is_scoped_per_run(monkeypatch):
@@ -199,3 +161,15 @@ def test_nemotron_recipe_arms_the_flight_recorder():
     # dump never fires before the run gives up.
     assert int(env["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"]) < 60 * 60
     assert env["TORCH_FR_DUMP_TEMP_FILE"].startswith("/checkpoints/")
+
+
+def test_miles_recipes_are_pinned_off_aws():
+    """Every miles recipe inherits the base-class cloud pin; an explicit
+    cloud= still overrides it."""
+    from modal_training_gym.train_recipes.miles_recipe import (
+        Nemotron3_Ultra_550B_A55B_Recipe,
+    )
+
+    assert MilesRecipe().cloud == "oci"
+    assert Nemotron3_Ultra_550B_A55B_Recipe().cloud == "oci"
+    assert Nemotron3_Ultra_550B_A55B_Recipe(cloud="aws").cloud == "aws"
