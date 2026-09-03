@@ -57,6 +57,7 @@ from modal_training_gym.common.launcher_helpers import (
     mark_run_stopped,
     resolve_caller_context,
     resolve_checkpoint_volumes,
+    volume_for,
     run_download_phase,
     run_prepare_dataset,
     ship_callable,
@@ -620,9 +621,7 @@ def build_slime_app(
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume = Volume.from_name(
-        slime.data_volume_name or f"{volume_prefix}-data", create_if_missing=True
-    )
+    data_volume = volume_for(slime.data_volume_name or f"{volume_prefix}-data")
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
         resolve_checkpoint_volumes(
             checkpoint,
