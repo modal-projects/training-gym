@@ -921,7 +921,7 @@ def build_miles_app(
         volumes=all_volumes,
         secrets=train_secrets,
         timeout=24 * 60 * 60,
-        retries=Retries(max_retries=10, initial_delay=0.0),
+        retries=Retries(max_retries=miles.max_retries, initial_delay=0.0),
         single_use_containers=True,
         experimental_options=train_experimental_options,
         serialized=True,
