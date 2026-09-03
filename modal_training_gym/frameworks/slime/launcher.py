@@ -463,9 +463,9 @@ def build_slime_app(
         image = image.env(slime.image_env)
 
     if slime.metrics is not None and slime.metrics.provider == "trackio":
-        from modal_training_gym.common.trackio import require_trackio_destination
+        from modal_training_gym.common.trackio import resolve_trackio_destination
 
-        require_trackio_destination(slime.metrics)
+        resolve_trackio_destination(slime.metrics)
     image = apply_metric_image(image, slime.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")

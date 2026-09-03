@@ -15,6 +15,7 @@ from modal_training_gym.common.trackio import (
     TrackioConfig,
     install_wandb_shim,
     require_trackio_destination,
+    resolve_trackio_destination,
 )
 
 
@@ -341,14 +342,49 @@ def test_trackio_adapter_preserves_native_train_and_eval_metric_names(monkeypatc
     ]
 
 
-def test_trackio_without_a_destination_is_refused():
-    """A destination-less config logs to a container-local DB that dies with it."""
+def test_a_bare_config_resolves_to_the_deployed_server(monkeypatch):
+    """A recipe names a project; the workspace's server is discovered at launch.
+
+    This is what makes `metrics=TrackioConfig(project=...)` usable as a recipe
+    default -- the preset can't know the server URL.
+    """
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio.deployed_trackio_url",
+        lambda app_name="training-gym-trackio": "https://trackio.example",
+    )
+    config = TrackioConfig(project="agentic-harbor")
+
+    resolve_trackio_destination(config)
+
+    assert config.server_url == "https://trackio.example"
+    assert config.dashboard_url == "https://trackio.example"
+    # Ingestion authenticates with the deployed server's write token.
+    assert config.modal_secret_name == "_training-gym-trackio-write-token"
+
+
+def test_an_explicit_destination_is_left_alone(monkeypatch):
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio.deployed_trackio_url",
+        lambda app_name="training-gym-trackio": "https://discovered.example",
+    )
+    config = TrackioConfig(project="rl", space_id="modal-labs/metrics")
+
+    resolve_trackio_destination(config)
+
+    assert config.server_url == ""
+    assert config.modal_secret_name == "huggingface-secret"
+
+
+def test_no_destination_and_nothing_deployed_is_refused(monkeypatch):
+    """Otherwise metrics go to a container-local DB that dies with the run."""
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio.deployed_trackio_url",
+        lambda app_name="training-gym-trackio": None,
+    )
+    with pytest.raises(TrainingGymConfigError, match="no destination"):
+        resolve_trackio_destination(TrackioConfig(project="rl"))
+
+    # The in-container assertion still holds for anything that slips through.
     with pytest.raises(TrainingGymConfigError, match="no destination"):
         require_trackio_destination(TrackioConfig(project="rl"))
-
-    for reachable in (
-        TrackioConfig(project="rl", server_url="https://trackio.example"),
-        TrackioConfig(project="rl", space_id="modal-labs/metrics"),
-        TrackioConfig(project="rl", dashboard_url="https://trackio.example"),
-    ):
-        require_trackio_destination(reachable)
+    require_trackio_destination(TrackioConfig(project="rl", server_url="https://x"))

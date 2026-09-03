@@ -283,21 +283,61 @@ def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
     ).run_commands(f"python3 -c {shlex.quote(install_code)}")
 
 
-def require_trackio_destination(config: TrackioConfig) -> None:
-    """Fail loudly when Trackio has nowhere to log.
+def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
+    """URL of an already-deployed Trackio server on Modal, if there is one."""
+    import modal
 
-    A TrackioConfig with no Space, server, or dashboard URL falls back to a
-    Trackio local to the training container, whose database dies with the
-    container — the run succeeds and the metrics are simply gone. Refuse that
-    instead, the way a missing W&B key would be refused.
+    try:
+        function = modal.Function.from_name(app_name, "dashboard")
+        function.hydrate()
+        return function.get_web_url()
+    except Exception:
+        return None
+
+
+def has_trackio_destination(config: TrackioConfig) -> bool:
+    """dashboard_url is only where links point; ingestion needs a real endpoint."""
+    return bool(config.space_id or config.server_url)
+
+
+def resolve_trackio_destination(
+    config: TrackioConfig, *, app_name: str = _DEFAULT_MODAL_APP_NAME
+) -> None:
+    """Point a destination-less config at the Trackio server already deployed.
+
+    A recipe can name a project without knowing where the workspace's Trackio
+    lives, so a bare ``TrackioConfig(project=...)`` resolves to the deployed
+    server here. Left unresolved it would log to a Trackio local to the
+    training container, whose database dies with the container — the run
+    succeeds and the metrics are simply gone — so raise when nothing is
+    deployed rather than let that happen silently.
     """
-    if config.space_id or config.server_url:
+    if has_trackio_destination(config):
+        return
+    url = deployed_trackio_url(app_name)
+    if not url:
+        raise TrainingGymConfigError(
+            f"TrackioConfig names project {config.project!r} but has no "
+            f"destination and no {app_name!r} server is deployed, so metrics "
+            "would be written to a Trackio local to the training container and "
+            "lost when it exits. Run TrackioConfig.deploy_to_modal(project=...) "
+            "once to deploy one, or set space_id= for a Hugging Face Space or "
+            "server_url= for your own."
+        )
+    config.server_url = url
+    config.dashboard_url = url
+    if not config.modal_secret_name or config.modal_secret_name == "huggingface-secret":
+        # Ingestion authenticates with the deployed server's write token.
+        config.modal_secret_name = f"_{app_name}-write-token"
+
+
+def require_trackio_destination(config: TrackioConfig) -> None:
+    """Assert a destination was resolved. Runs in the container, after launch."""
+    if has_trackio_destination(config):
         return
     raise TrainingGymConfigError(
-        "TrackioConfig has no destination, so metrics would be written to a "
-        "Trackio local to the training container and lost when it exits. Use "
-        "TrackioConfig.deploy_to_modal(project=...) for a server on Modal, or "
-        "set space_id= for a Hugging Face Space or server_url= for your own."
+        f"TrackioConfig names project {config.project!r} but reached the "
+        "training container with no destination; metrics would be lost."
     )
 
 
