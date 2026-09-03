@@ -58,6 +58,19 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     model_config_class: ClassVar[type[ModelConfig]] = Nemotron3_Ultra_550B_A55B
 
     gpu_type: str = "H200"
+    # Pinned off AWS. On EFA hosts the first compute_log_prob hangs in the
+    # pipeline-parallel shape exchange: receiving PP stages wait the full
+    # collective timeout for a ncclUniqueId the sending stage never publishes
+    # (feldspar-bookshelf attempts 1-2, p5en.48xlarge). The same code trains
+    # every step on Mellanox/IB hosts (isothermal-burgundy 5/5, achromatic-tint
+    # and timid-borzoi 3/3). The hang does not reproduce in isolation — PP p2p
+    # alone, and PP interleaved with cross-node EP all_to_all at the real
+    # 8-rank-per-node layout, both pass on EFA — so it needs something only the
+    # full run has; the flight recorder below is armed to capture it. Until
+    # then the recipe stays on a fleet where it is known to work. Lift this
+    # once the EFA path is root-caused; nothing else in the recipe depends on
+    # the cloud.
+    cloud: str | None = "oci"
     # Upstream's optimizer offload keeps fp32 main params and both Adam moments in
     # host RAM: measured (cgroup accounting, 16 nodes) ~1360 GiB steady state plus
     # ~320 GiB during a checkpoint save. 2600 GiB keeps the save peak well under
