@@ -334,25 +334,32 @@ def resolve_trackio_destination(
             "once to deploy one, or set space_id= for a Hugging Face Space or "
             "server_url= for your own."
         )
-    config.server_url = url
-    config.dashboard_url = url
-    if not config.modal_secret_name or config.modal_secret_name == "huggingface-secret":
+    secret_name = config.modal_secret_name
+    if not secret_name or secret_name == "huggingface-secret":
         # Ingestion authenticates with the deployed server's write token, whose
         # name is only a convention: deploy_to_modal() takes modal_secret_name.
         # Guessing a name that doesn't exist would mount nothing and every
         # metric write would 401 -- the silent loss this function exists to
         # prevent -- so confirm it before adopting it.
-        secret_name = f"_{app_name}-write-token"
-        if not _secret_exists(secret_name):
+        candidate = f"_{app_name}-write-token"
+        if not _secret_exists(candidate):
             raise TrainingGymConfigError(
                 f"Discovered the {app_name!r} Trackio server at {url}, but no "
-                f"{secret_name!r} Secret exists to authenticate ingestion with. "
+                f"{candidate!r} Secret exists to authenticate ingestion with. "
                 "A server deployed with a custom modal_secret_name cannot be "
                 "resolved by convention: pass the TrackioConfig that "
                 "deploy_to_modal() returned, or set server_url= and "
                 "modal_secret_name= explicitly."
             )
-        config.modal_secret_name = secret_name
+        secret_name = candidate
+
+    # Commit only once everything resolved. Writing the URLs before the secret
+    # check could fail would leave the config looking resolved, so a retry
+    # would skip discovery and launch with no write token -- metrics silently
+    # 401ing, which is what this function exists to prevent.
+    config.server_url = url
+    config.dashboard_url = url
+    config.modal_secret_name = secret_name
 
 
 def require_trackio_destination(config: TrackioConfig) -> None:

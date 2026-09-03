@@ -365,6 +365,31 @@ def test_a_custom_token_secret_is_not_guessed_at(monkeypatch):
         resolve_trackio_destination(TrackioConfig(project="rl"))
 
 
+def test_a_failed_resolution_leaves_the_config_untouched(monkeypatch):
+    """A half-resolved config is worse than an unresolved one.
+
+    Writing the URLs before the secret check can fail leaves the config looking
+    resolved, so a retry takes the early return, skips discovery, and launches
+    with no write token -- metrics 401 silently.
+    """
+    config = TrackioConfig(project="rl")
+
+    _stub_discovery(monkeypatch, secret_exists=False)
+    with pytest.raises(TrainingGymConfigError):
+        resolve_trackio_destination(config)
+
+    assert config.server_url == ""
+    assert config.dashboard_url == ""
+    assert config.modal_secret_name == "huggingface-secret"
+
+    # ... so retrying once the secret exists resolves fully rather than no-oping.
+    _stub_discovery(monkeypatch, secret_exists=True)
+    resolve_trackio_destination(config)
+
+    assert config.server_url == "https://trackio.example"
+    assert config.modal_secret_name == "_training-gym-trackio-write-token"
+
+
 def test_an_explicit_token_secret_is_kept(monkeypatch):
     _stub_discovery(monkeypatch, secret_exists=False)
     config = TrackioConfig(project="rl", modal_secret_name="_my-trackio-token")
