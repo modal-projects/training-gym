@@ -119,7 +119,7 @@ train_dataset = HuggingFaceDataset(
     hf_split="train[:100]",
     input_column="prompt",
     output_column="label",
-    apply_chat_template=False,
+    input_format="messages",
     always_download=True,
 )
 
@@ -128,7 +128,7 @@ eval_dataset = HuggingFaceDataset(
     hf_split="train[100:120]",
     input_column="prompt",
     output_column="label",
-    apply_chat_template=False,
+    input_format="messages",
     always_download=True,
 )
 

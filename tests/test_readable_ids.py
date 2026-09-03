@@ -91,7 +91,7 @@ def test_the_wandb_run_id_is_the_whole_training_run_id() -> None:
             hf_repo="some/dataset",
             input_column="prompt",
             output_column="answer",
-            apply_chat_template=True,
+            input_format="text",
         ),
         model=Qwen3_4B(),
         recipe=SlimeRecipe(

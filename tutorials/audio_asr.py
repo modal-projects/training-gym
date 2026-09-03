@@ -76,6 +76,9 @@ class LibriSpeechASRDataset(MultimodalDataset):
         self.hf_split = hf_split
         super().__init__(modality="audio")
 
+    def apply_chat_template(self) -> bool:
+        return False
+
     def source_rows(self):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         ds = ds.cast_column("audio", Audio(decode=False))  # decode with soundfile instead of torchcodec

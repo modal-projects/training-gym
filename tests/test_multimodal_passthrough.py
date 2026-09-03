@@ -38,6 +38,15 @@ def test_multimodal_keys_emitted(modality):
     assert json.loads(flags["--multimodal-keys"]) == {modality: f"{modality}s"}
     assert flags["--input-key"] == "prompt"
     assert flags["--label-key"] == "label"
+    assert ds.apply_chat_template() is True
+
+
+def test_multimodal_dataset_can_disable_chat_template():
+    class AudioDataset(MultimodalDataset):
+        def apply_chat_template(self) -> bool:
+            return False
+
+    assert AudioDataset(rows=[]).apply_chat_template() is False
 
 
 def test_write_writes_media_column(tmp_path):
@@ -56,17 +65,72 @@ def test_text_dataset_unaffected():
         hf_repo="statworx/haiku",
         input_column="keywords",
         output_column="text",
-        apply_chat_template=True,
+        input_format="text",
     )
     assert getattr(ds, "multimodal_keys", None) is None
     assert "--multimodal-keys" not in SlimeRecipe(**_RECIPE_KW).cli_args(dataset=ds)
 
 
-def test_hugging_face_dataset_requires_chat_template_choice():
-    import inspect
+@pytest.mark.parametrize(
+    ("input_format", "input_key", "label_key", "apply_chat_template"),
+    [
+        ("text", "messages", "label", True),
+        ("messages", "prompt", "answer", True),
+        ("raw", "prompt", "answer", False),
+    ],
+)
+def test_hugging_face_input_format_controls_dataset_fields(
+    input_format, input_key, label_key, apply_chat_template
+):
+    ds = HuggingFaceDataset(
+        hf_repo="some/dataset",
+        input_column="prompt",
+        output_column="answer",
+        input_format=input_format,
+    )
+    assert ds.input_key() == input_key
+    assert ds.label_key() == label_key
+    assert ds.apply_chat_template() is apply_chat_template
 
-    parameter = inspect.signature(HuggingFaceDataset).parameters["apply_chat_template"]
-    assert parameter.default is inspect.Parameter.empty
+
+def test_hugging_face_text_is_formatted_but_messages_pass_through(monkeypatch):
+    from datasets import Dataset
+
+    plain_text = Dataset.from_list([{"prompt": "hello", "answer": "world"}])
+    monkeypatch.setattr("datasets.load_dataset", lambda *args, **kwargs: plain_text)
+    text_dataset = HuggingFaceDataset(
+        hf_repo="some/dataset",
+        input_column="prompt",
+        output_column="answer",
+        input_format="text",
+    )
+    assert list(text_dataset.rows()) == [
+        {
+            "messages": [{"role": "user", "content": "hello"}],
+            "label": "world",
+        }
+    ]
+
+    messages = [{"role": "user", "content": "hello"}]
+    preformatted = Dataset.from_list([{"prompt": messages, "label": "world"}])
+    monkeypatch.setattr("datasets.load_dataset", lambda *args, **kwargs: preformatted)
+    messages_dataset = HuggingFaceDataset(
+        hf_repo="some/dataset",
+        input_column="prompt",
+        output_column="label",
+        input_format="messages",
+    )
+    assert list(messages_dataset.rows()) == [{"prompt": messages, "label": "world"}]
+
+
+def test_hugging_face_rejects_unknown_input_format():
+    with pytest.raises(ValueError, match="input_format"):
+        HuggingFaceDataset(
+            hf_repo="some/dataset",
+            input_column="prompt",
+            output_column="answer",
+            input_format="unknown",
+        )
 
 
 def test_media_column_must_be_distinct():

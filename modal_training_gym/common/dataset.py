@@ -56,6 +56,10 @@ class DatasetConfig(ABC):
         """The on-disk format written by `write()`, either `parquet` or `jsonl`."""
         return "jsonl"
 
+    def apply_chat_template(self) -> bool:
+        """Whether to apply the model's chat template to the input."""
+        return True
+
     @abstractmethod
     def rows(self) -> Iterable[DatasetRow]:
         """Load raw examples.
@@ -133,7 +137,8 @@ class HuggingFaceDataset(DatasetConfig):
         hf_config: Source dataset configuration name.
         input_column: Source prompt column.
         output_column: Source answer column.
-        apply_chat_template: Apply the model's chat template.
+        input_format: Shape of the source prompt: plain ``text`` to convert into
+            messages, preformatted ``messages``, or ``raw`` model input.
         system_prompt: System message added to formatted examples.
         prompt_template: Template applied to each source prompt.
         always_download: When training, always download the dataset from Hugging Face instead of caching it.
@@ -146,7 +151,7 @@ class HuggingFaceDataset(DatasetConfig):
     hf_config: str | None
     input_column: str
     output_column: str
-    apply_chat_template: bool
+    input_format: Literal["text", "messages", "raw"]
     system_prompt: str
     prompt_template: str
     always_download: bool
@@ -159,17 +164,21 @@ class HuggingFaceDataset(DatasetConfig):
         hf_config: str | None = None,
         input_column: str,
         output_column: str,
-        apply_chat_template: bool,
+        input_format: Literal["text", "messages", "raw"] = "text",
         system_prompt: str = "",
         prompt_template: str = "{input}",
         always_download: bool = False,
     ):
+        if input_format not in ("text", "messages", "raw"):
+            raise TrainingGymConfigError(
+                f"input_format must be one of text/messages/raw, got {input_format!r}"
+            )
         self.hf_repo = hf_repo
         self.hf_split = hf_split
         self.hf_config = hf_config
         self.input_column = input_column
         self.output_column = output_column
-        self.apply_chat_template = apply_chat_template
+        self.input_format = input_format
         self.system_prompt = system_prompt
         self.prompt_template = prompt_template
         self.always_download = always_download
@@ -184,7 +193,7 @@ class HuggingFaceDataset(DatasetConfig):
                 "hf_config": self.hf_config,
                 "input_column": self.input_column,
                 "output_column": self.output_column,
-                "apply_chat_template": self.apply_chat_template,
+                "input_format": self.input_format,
                 "system_prompt": self.system_prompt,
                 "prompt_template": self.prompt_template,
                 "output_format": self.output_format(),
@@ -192,16 +201,19 @@ class HuggingFaceDataset(DatasetConfig):
         )
 
     def input_key(self) -> str:
-        if self.apply_chat_template:
+        if self.input_format == "text":
             return "messages"
         else:
             return self.input_column
 
     def label_key(self) -> str:
-        if self.apply_chat_template:
+        if self.input_format == "text":
             return "label"
         else:
             return self.output_column
+
+    def apply_chat_template(self) -> bool:
+        return self.input_format != "raw"
 
     def _load_hf_dataset(self):
         from datasets import load_dataset
@@ -212,8 +224,8 @@ class HuggingFaceDataset(DatasetConfig):
             split=self.hf_split,
         )
 
-        if self.apply_chat_template:
-            ds = ds.map(self._to_chat)
+        if self.input_format == "text":
+            ds = ds.map(self._to_chat, remove_columns=ds.column_names)
 
         return ds
 
@@ -614,10 +626,8 @@ class MultimodalDataset(DatasetConfig):
         *,
         modality: Literal["image", "audio", "video"] = "audio",
         media_column: str | None = None,
-        apply_chat_template: bool = False,
     ) -> None:
         self.modality = modality
-        self.apply_chat_template = apply_chat_template
         if modality not in ("image", "audio", "video"):
             raise TrainingGymConfigError(
                 f"modality must be one of image/audio/video, got {modality!r}"

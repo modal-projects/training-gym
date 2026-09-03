@@ -17,7 +17,7 @@ def _base() -> TrainConfig:
             hf_repo="openai/gsm8k",
             input_column="question",
             output_column="answer",
-            apply_chat_template=True,
+            input_format="text",
         ),
         recipe=Qwen3_6_35B_Recipe(num_rollout=10),
     )
@@ -64,7 +64,7 @@ def test_variants_preserve_independent_eval_datasets():
         hf_split="test",
         input_column="question",
         output_column="answer",
-        apply_chat_template=True,
+        input_format="text",
     )
     configs = TrainingGroup(
         base=base, grid={"recipe.lr": [2e-6, 9e-6]}

@@ -38,6 +38,6 @@ def build_miles_validation(
         hf_split=f"train[:{n_rows}]",
         input_column="prompt",
         output_column="label",
-        apply_chat_template=False,
+        input_format="messages",
         always_download=True,
     )

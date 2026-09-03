@@ -55,13 +55,14 @@ SYSTEM_PROMPT = (
     "(AABB). Do not write any prose, preamble, or explanation outside the verse."
 )
 
+
 def rhyme_dataset(n_rows: int) -> HuggingFaceDataset:
     return HuggingFaceDataset(
         hf_repo="tatsu-lab/alpaca",
         hf_split=f"train[:{n_rows}]",
         input_column="instruction",
         output_column="output",
-        apply_chat_template=True,
+        input_format="text",
         system_prompt=SYSTEM_PROMPT,
     )
 ```

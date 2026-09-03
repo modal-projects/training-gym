@@ -29,7 +29,7 @@ train_dataset = HuggingFaceDataset(
     hf_split="train[:2000]",
     input_column="prompt",
     output_column="label",
-    apply_chat_template=False,
+    input_format="messages",
     always_download=True,
 )
 

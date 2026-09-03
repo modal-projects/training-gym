@@ -35,7 +35,7 @@ def _dataset() -> HuggingFaceDataset:
         hf_repo="some/dataset",
         input_column="prompt",
         output_column="answer",
-        apply_chat_template=True,
+        input_format="text",
     )
 
 

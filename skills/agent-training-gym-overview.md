@@ -82,15 +82,20 @@ dataset = HuggingFaceDataset(
     hf_split="train[:100]",
     input_column="question",
     output_column="answer",
-    apply_chat_template=True,
+    input_format="text",
 )
 ```
+
+Use `input_format="text"` for plain text that should be converted into
+messages, `"messages"` for an already formatted message column, and `"raw"`
+only when the framework must not apply the model's chat template.
 
 For custom data, subclass `DatasetConfig` and implement the methods
 `input_key()`, `label_key()`, and `rows()`. `rows()` is also the interface for
 explicit local or offline loops. The default `write(path)` serializes those
 rows to JSONL; launchers create the destination directory and call `write()` to
-materialize framework input on the shared data volume.
+materialize framework input on the shared data volume. Override
+`apply_chat_template()` when its default of `True` is not appropriate.
 
 `cache_key()` controls materialization reuse. Return the same stable key when
 equivalent configurations can share written data; return `None` to make every

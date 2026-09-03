@@ -12,7 +12,7 @@ Here, we’ll focus on the former, and in the [next guide](https://gym.modal.dev
 
 The [HuggingFaceDataset](https://gym.modal.dev/reference/huggingfacedataset) class handles all the subtle ways in which datasets differ.
 
-For example, [statworx/haiku](https://huggingface.co/datasets/statworx/haiku) contains a `keywords` column with only a single word as input, and a `text` column that contains a ground-truth label. Since the input isn’t in the OpenAI chat completions API format, we need to set `apply_chat_template` to True. By default, the Gym will format each prompt in the dataset as a single user message.
+For example, [statworx/haiku](https://huggingface.co/datasets/statworx/haiku) contains a `keywords` column with only a single word as input, and a `text` column that contains a ground-truth label. Since the input isn’t in the OpenAI chat completions API format, we need to set `input_format` to `text` so that the Gym can format each prompt in the dataset as a single user message.
 
 ```python
 from modal_training_gym import HuggingFaceDataset
@@ -21,7 +21,7 @@ haiku_dataset = HuggingFaceDataset(
     "statworx/haiku",
     input_column="keywords",
     output_column="text",
-    apply_chat_template=True,
+    input_format="text",
 )
 ```
 
@@ -30,7 +30,7 @@ You can customize this by adding a system prompt, or by providing a prompt templ
 ```python
 haiku_dataset = HuggingFaceDataset(
     # ...
-    apply_chat_template=True,
+    input_format="text",
     system_prompt="You are an expert poet.",
     prompt_template="Write a haiku about {input}.",
 )
@@ -38,14 +38,14 @@ haiku_dataset = HuggingFaceDataset(
 
 Note that only `input` is allowed.
 
-Other datasets like [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k) are already formatted using a chat template:
+Other datasets like [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k) are already formatted in the OpenAI chat completions format. For these datasets, set `input_format` to `messages`:
 
 ```python
 math_dataset = HuggingFaceDataset(
     "zhuzilin/dapo-math-17k",
     input_column="prompt",
     output_column="label",
-    apply_chat_template=False,
+    input_format="messages",
 )
 ```
 

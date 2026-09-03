@@ -68,7 +68,7 @@ class ScreenSpotDataset(MultimodalDataset):
     def __init__(self, *, n_rows: int, row_offset: int = 0):
         self.n_rows = n_rows
         self.row_offset = row_offset
-        super().__init__(modality="image", apply_chat_template=True)
+        super().__init__(modality="image")
 
     def source_rows(self):
         import base64

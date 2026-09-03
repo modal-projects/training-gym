@@ -157,7 +157,7 @@ class BaseTrainRecipe(ABC):
             ),
             "input_key": ds.input_key(),
             "label_key": ds.label_key(),
-            "apply_chat_template": getattr(ds, "apply_chat_template", True),
+            "apply_chat_template": ds.apply_chat_template(),
         }
 
     @staticmethod

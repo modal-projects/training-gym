@@ -54,6 +54,9 @@ class LibriSpeechASRDataset(MultimodalDataset):
         self.n_rows = n_rows
         super().__init__(modality="audio")
 
+    def apply_chat_template(self) -> bool:
+        return False
+
     def source_rows(self):
         import base64 as b64
         import io

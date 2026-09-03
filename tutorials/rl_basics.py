@@ -124,7 +124,7 @@ train_dataset = HuggingFaceDataset(
     hf_split="train[:10]",
     input_column="keywords",
     output_column="text",
-    apply_chat_template=True,
+    input_format="text",
     prompt_template="Write a haiku about {input}.",
     always_download=True,
 )
@@ -134,7 +134,7 @@ eval_dataset = HuggingFaceDataset(
     hf_split="train[10:15]",
     input_column="keywords",
     output_column="text",
-    apply_chat_template=True,
+    input_format="text",
     prompt_template="Write a haiku about {input}.",
     always_download=True,
 )
