@@ -1,8 +1,7 @@
 """Self-contained training-gym dashboard app.
 
-When deployed from a pip install (no local repo checkout), the image build
-clones the frontend source from GitHub. When running from a repo checkout,
-it uses the local ``dashboards/frontend`` directory instead.
+The image builds the frontend from ``dashboards/frontend`` in a repo
+checkout, or the copy the wheel ships at ``modal_training_gym/_frontend``.
 """
 
 from __future__ import annotations
@@ -38,11 +37,14 @@ from modal_training_gym.common.advantage_distribution import AdvantageDistributi
 from modal_training_gym.common.config import (
     DASHBOARD_PASSWORD_SECRET_NAME,
     DASHBOARD_PROXY_AUTH_PATH,
+    DASHBOARD_VERSION_PATH,
     dashboard_requires_proxy_auth,
 )
 from modal_training_gym.common.dashboard import (
     DASHBOARD_APP_NAME,
     DASHBOARD_PREVIEW_ENV_KEY,
+    DASHBOARD_VERSION_ENV_KEY,
+    current_dashboard_version,
 )
 from modal_training_gym.common.run import (
     FrameworkStatusUpdate,
@@ -97,9 +99,6 @@ class TimingFileCache(TypedDict):
     record: JsonDict | None
 
 
-REPO_URL = "https://github.com/modal-projects/training-gym.git"
-REPO_BRANCH = "main"
-
 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
 TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
 
@@ -118,12 +117,12 @@ def _is_preview() -> bool:
 # per open PR is a standing bill for a review aid.
 IS_PREVIEW = _is_preview()
 
-_repo_frontend = Path(__file__).resolve().parents[1] / "dashboards" / "frontend"
-_has_local_frontend = _repo_frontend.is_dir()
-
 
 def _build_image() -> modal.Image:
-    base = (
+    _pkg = Path(__file__).resolve().parent
+    _checkout = _pkg.parent / "dashboards" / "frontend"
+    _frontend = _checkout if _checkout.is_dir() else _pkg / "_frontend"
+    return (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("curl")
         .run_commands(
@@ -131,30 +130,20 @@ def _build_image() -> modal.Image:
             "apt-get install -y nodejs",
         )
         .pip_install("fastapi[standard]==0.118.0", "modal")
-    )
-
-    if _has_local_frontend:
-        base = base.add_local_dir(
-            str(_repo_frontend),
+        .add_local_dir(
+            str(_frontend),
             remote_path="/app/frontend",
             copy=True,
             ignore=["node_modules", "dist"],
         )
-    else:
-        base = base.apt_install("git").run_commands(
-            f"git clone --depth 1 -b {REPO_BRANCH} {REPO_URL} /tmp/training-gym",
-            "mkdir -p /app && cp -r /tmp/training-gym/dashboards/frontend /app/frontend",
-            "rm -rf /tmp/training-gym",
-        )
-
-    return (
-        base.run_commands("cd /app/frontend && npm install && npm run build")
+        .run_commands("cd /app/frontend && npm install && npm run build")
         .add_local_python_source("modal_training_gym", copy=True)
         .env(
             {
                 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY: "true"
                 if dashboard_requires_proxy_auth()
                 else "false",
+                DASHBOARD_VERSION_ENV_KEY: current_dashboard_version(),
                 TIMING_DEBUG_ENV: os.environ.get(TIMING_DEBUG_ENV, ""),
                 DASHBOARD_PREVIEW_ENV_KEY: "true" if IS_PREVIEW else "",
             }
@@ -179,6 +168,7 @@ MODAL_CREDS_SECRET_NAME = "_training-gym-modal-creds"
 PASSWORD_EXEMPT_PATHS = frozenset(
     {
         DASHBOARD_PROXY_AUTH_PATH,
+        DASHBOARD_VERSION_PATH,
         "/api/framework-status",
         "/api/training-rollouts",
         "/api/advantage-distributions",
@@ -477,6 +467,10 @@ def fastapi_app():
     @web.get(DASHBOARD_PROXY_AUTH_PATH)
     async def proxy_auth_status() -> bool:
         return os.environ.get(DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY, "false") == "true"
+
+    @web.get(DASHBOARD_VERSION_PATH)
+    async def version() -> str:
+        return os.environ.get(DASHBOARD_VERSION_ENV_KEY, "")
 
     cache_ttl_seconds = 30.0
     cache_keys = ("runs", "train_results", "evals")
