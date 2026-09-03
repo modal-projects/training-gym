@@ -213,18 +213,18 @@
 
   // A run row is ~50 DOM nodes, so a full history is seconds of layout on a
   // phone and a re-render of every row on each refresh. The server hands out
-  // one page at a time, and reaching the end of a table asks for the next one.
-  // Rows scroll inside `.table-wrap`, so that's the root the sentinel is
-  // measured against rather than the viewport.
-  function pageOnReveal(node) {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
-      },
-      { root: node.closest(".table-wrap"), rootMargin: "600px" },
-    );
-    observer.observe(node);
-    return { destroy: () => observer.disconnect() };
+  // one page at a time and scrolling a table near its end asks for the next
+  // one. Rows scroll inside `.table-wrap`, and a scroll event is the only
+  // signal that means "the reader reached the end of *this* scrollport": a
+  // sentinel + IntersectionObserver either never re-fires once it is already
+  // visible (a short group's table doesn't scroll at all) or pages the whole
+  // history unprompted, which is what this PR exists to stop.
+  function growOnScroll(event) {
+    if (!hasMoreRuns) return;
+    const el = event.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600) {
+      onLoadMore();
+    }
   }
 </script>
 
@@ -300,6 +300,7 @@
         <div
           class="table-wrap freeze-header"
           style={frozenOffset ? `--frozen-table-offset: ${frozenOffset};` : ""}
+          onscroll={growOnScroll}
         >
           <ResizableTable class="training-runs-table" {columns} stickyFirstColumn>
             <tbody>
@@ -452,9 +453,6 @@
               {/each}
             </tbody>
           </ResizableTable>
-          {#if hasMoreRuns}
-            <div class="table-page-sentinel" use:pageOnReveal></div>
-          {/if}
         </div>
       {/snippet}
 

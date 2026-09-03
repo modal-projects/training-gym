@@ -1420,11 +1420,6 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
   font-size: 0.84rem;
 }
 
-/* Sits at the bottom of a table's scrollport; revealing it loads the next page. */
-.table-page-sentinel {
-  height: 1px;
-}
-
 .open-modal-link-disabled {
   opacity: 0.5;
   pointer-events: none;
