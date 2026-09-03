@@ -191,6 +191,10 @@ class MilesRecipe(BaseTrainRecipe):
 
         num_rollout:
             Training and rollout steps for the run.
+        start_rollout_id:
+            Rollout step to start counting from. ``None`` continues from the
+            iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
+            ``0`` so ``num_rollout`` counts the steps this run performs.
         rollout_batch_size:
             Prompts per rollout step, each expanded into a group of responses.
         rollout_max_response_len:
@@ -511,6 +515,7 @@ class MilesRecipe(BaseTrainRecipe):
 
     # ── Rollout and sampling ────────────────────────────────────────────────
     num_rollout: int = 1
+    start_rollout_id: int | None = None
     rollout_batch_size: int = 8
     n_samples_per_prompt: int = 2
     rollout_max_response_len: int = 4096

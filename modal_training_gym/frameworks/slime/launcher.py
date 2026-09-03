@@ -62,6 +62,7 @@ from modal_training_gym.common.launcher_helpers import (
     ship_callable,
 )
 from modal_training_gym.common.launcher_utils import (
+    drop_materialized_config_key,
     serialize_recipe_params,
     timing_debug_env,
 )
@@ -1069,6 +1070,7 @@ def build_slime_app(
 
             original_save = slime.save
             original_load = slime.load
+            original_start_rollout_id = slime.start_rollout_id
             original_ref_load = slime.ref_load
             original_no_load_optim = slime.no_load_optim
             object.__setattr__(slime, "save", save_root)
@@ -1099,6 +1101,10 @@ def build_slime_app(
                     "resuming training from last saved iteration."
                 )
                 object.__setattr__(slime, "load", save_root)
+                # Continue from the iteration stored in the run's own checkpoint,
+                # even for runs launched with an explicit start_rollout_id.
+                object.__setattr__(slime, "start_rollout_id", None)
+                drop_materialized_config_key(slime, "start_rollout_id")
                 # Weights-only checkpoints (``no_save_optim``) have no Adam state;
                 # Megatron will KeyError on state_dict["optimizer"] unless we skip it.
                 if slime.no_save_optim and not slime.no_load_optim:
@@ -1120,6 +1126,7 @@ def build_slime_app(
             finally:
                 object.__setattr__(slime, "save", original_save)
                 object.__setattr__(slime, "load", original_load)
+                object.__setattr__(slime, "start_rollout_id", original_start_rollout_id)
                 object.__setattr__(slime, "ref_load", original_ref_load)
                 object.__setattr__(slime, "no_load_optim", original_no_load_optim)
 

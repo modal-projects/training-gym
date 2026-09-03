@@ -1729,9 +1729,9 @@
                 <td class="text-(--text-bright)">
                   {formatMean(r.mean)}
                   {#if r.error_summary?.verdict === "all_infra_failure"}
-                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(239,68,68,0.15)] text-[#ef4444] [border:1px_solid_rgba(239,68,68,0.25)]" title="All samples failed due to infrastructure error">infra failure</span>
+                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(239,68,68,0.15)] text-[#ef4444] [border:1px_solid_rgba(239,68,68,0.25)]" title="All samples hit infrastructure errors">infra failure</span>
                   {:else if r.error_summary?.verdict === "partial_infra_failure"}
-                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(251,191,36,0.15)] text-[#fbbf24] [border:1px_solid_rgba(251,191,36,0.25)]" title="Some samples failed due to infrastructure error">partial failure</span>
+                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(251,191,36,0.15)] text-[#fbbf24] [border:1px_solid_rgba(251,191,36,0.25)]" title="Some samples hit infrastructure errors">partial failure</span>
                   {/if}
                 </td>
                 <td>{r.episode_count ?? "—"}</td>
@@ -1777,7 +1777,7 @@
                           <div class="rollout-diagnostics" class:diag-critical={remoteErr >= totalSamples}>
                             <div class="diag-title">
                               {#if remoteErr >= totalSamples}
-                                All {totalSamples} samples failed — infrastructure error
+                                All {totalSamples} samples hit infrastructure errors
                               {:else}
                                 {remoteErr + infraInvalid} / {totalSamples} samples hit infrastructure errors
                               {/if}
@@ -1798,7 +1798,7 @@
                             </div>
                             {#if remoteErr >= totalSamples}
                               <div class="text-[11px] text-(--muted,#a3a3a3) mt-[6px]">
-                                Check the Modal app logs for sandbox/image build errors. Common cause: the environment image failed to build.
+                                Check the Modal app logs for sandbox or image build errors.
                               </div>
                             {/if}
                           </div>

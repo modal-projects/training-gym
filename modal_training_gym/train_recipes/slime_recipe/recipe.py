@@ -179,6 +179,10 @@ class SlimeRecipe(BaseTrainRecipe):
 
         num_rollout:
             Training and rollout steps for the run.
+        start_rollout_id:
+            Rollout step to start counting from. ``None`` continues from the
+            iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
+            ``0`` so ``num_rollout`` counts the steps this run performs.
         rollout_batch_size:
             Prompts sampled per rollout step; each prompt is expanded into a
             group of sampled responses.
@@ -387,6 +391,7 @@ class SlimeRecipe(BaseTrainRecipe):
     tensor_model_parallel_size: int = 1
     rollout_num_gpus_per_engine: int = 1
     num_rollout: int = 1
+    start_rollout_id: int | None = None
     rollout_batch_size: int = 8
 
     # ── App identity ─────────────────────────────────────────────────────────

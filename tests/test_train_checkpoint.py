@@ -81,6 +81,32 @@ def test_checkpoint_wins_over_recipe_load() -> None:
     assert config._prepare_recipe().load == "/checkpoints/run"
 
 
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        pytest.param(SlimeRecipe(**_RECIPE_KW), id="slime"),
+        pytest.param(MilesRecipe(), id="miles"),
+    ],
+)
+def test_checkpoint_restarts_rollout_count_from_zero(recipe) -> None:
+    config = _config(recipe, CheckpointType.megatron)
+    prepared = config._prepare_recipe()
+    args = prepared.cli_args(model=config.model)
+
+    assert prepared.start_rollout_id == 0
+    assert args[args.index("--start-rollout-id") + 1] == "0"
+    assert recipe.start_rollout_id is None
+    assert "--start-rollout-id" not in recipe.cli_args(model=config.model)
+
+
+def test_explicit_start_rollout_id_wins_over_checkpoint_default() -> None:
+    config = _config(
+        SlimeRecipe(**_RECIPE_KW, start_rollout_id=5), CheckpointType.megatron
+    )
+
+    assert config._prepare_recipe().start_rollout_id == 5
+
+
 def test_config_summary_records_resume_without_mutating_recipe() -> None:
     config = _config(SlimeRecipe(**_RECIPE_KW), CheckpointType.megatron)
 
@@ -147,3 +173,31 @@ def test_miles_conversion_uses_wrapper_with_expected_environment() -> None:
         '            env["CONVERT_KEEP_PP1"] = "1"'
     ) in source
     assert 'if num_nodes > 1:\n            env["SKIP_RELEASE_RENAME"] = "1"' in source
+
+
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        pytest.param(SlimeRecipe(**_RECIPE_KW), id="slime"),
+        pytest.param(MilesRecipe(), id="miles"),
+    ],
+)
+def test_auto_resume_drops_extra_config_start_rollout_id(recipe, tmp_path) -> None:
+    import yaml
+
+    from modal_training_gym.common.launcher_utils import (
+        drop_materialized_config_key,
+        prepare_launch_config,
+    )
+
+    recipe.extra_config = {"start_rollout_id": 0, "qkv_format": "bshd"}
+    prepare_launch_config(
+        recipe, None, str(tmp_path), yaml_config_fields=("extra_config",)
+    )
+    assert "start_rollout_id" in recipe._escape_hatch_keys()
+
+    drop_materialized_config_key(recipe, "start_rollout_id")
+
+    assert recipe._escape_hatch_keys() == ("qkv_format",)
+    with open(recipe.extra_config) as f:
+        assert yaml.safe_load(f) == {"qkv_format": "bshd"}

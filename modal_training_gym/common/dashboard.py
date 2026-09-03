@@ -9,6 +9,10 @@ from __future__ import annotations
 DASHBOARD_APP_NAME = "training-gym-dashboard"
 DASHBOARD_WEB_FUNCTION = "fastapi_app"
 
+# Set on a per-PR dashboard deploy (scripts/previews/dashboard_api.py) so it
+# serves the API without the scheduled jobs that rewrite shared metadata.
+DASHBOARD_PREVIEW_ENV_KEY = "TRAINING_GYM_DASHBOARD_PREVIEW"
+
 
 def deployed_dashboard_url() -> str | None:
     """Return the live dashboard web URL if its app is deployed, else ``None``.
