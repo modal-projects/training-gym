@@ -291,7 +291,7 @@ def require_trackio_destination(config: TrackioConfig) -> None:
     container — the run succeeds and the metrics are simply gone. Refuse that
     instead, the way a missing W&B key would be refused.
     """
-    if config.space_id or config.server_url or config.dashboard_url:
+    if config.space_id or config.server_url:
         return
     raise TrainingGymConfigError(
         "TrackioConfig has no destination, so metrics would be written to a "
