@@ -428,9 +428,11 @@
   let hasMoreRuns = $derived(runs.length < matchingRunCount);
 
   function loadMoreRuns() {
-    if (!hasMoreRuns || refreshing) return;
+    if (!hasMoreRuns) return;
     loadedRunCount = runs.length + RUNS_PAGE_SIZE;
-    void load();
+    // Queued, so asking for the next page during a refresh grows the window
+    // once that refresh lands instead of being dropped.
+    void load({ queue: true });
   }
 
   // Changing the query means a different result set, so paging restarts at the
