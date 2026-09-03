@@ -40,6 +40,7 @@ _EXPORTS = {
     ),
     "HuggingFaceDataset": ("modal_training_gym.common.dataset", "HuggingFaceDataset"),
     "MultimodalDataset": ("modal_training_gym.common.dataset", "MultimodalDataset"),
+    "OnlineRollout": ("modal_training_gym.common.dataset", "OnlineRollout"),
     "METADATA_VOLUME_NAME": (
         "modal_training_gym.utils.metadata",
         "METADATA_VOLUME_NAME",
@@ -167,6 +168,7 @@ __all__ = [
     "HFModelConfiguration",
     "HuggingFaceDataset",
     "MultimodalDataset",
+    "OnlineRollout",
     "METADATA_VOLUME_NAME",
     "MetadataStore",
     "MetricConfig",
