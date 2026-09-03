@@ -13,7 +13,15 @@ import os
 import secrets as _secrets
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Awaitable,
+    Callable,
+    Iterable,
+    TypedDict,
+    cast,
+)
 
 import modal
 from modal.exception import Error
@@ -23,13 +31,14 @@ if TYPE_CHECKING:
     from modal.client import _Client
     from modal_proto import api_pb2
 
-# Imported at module scope so FastAPI can resolve the ``request: Request``
-# annotation in stream_run_logs(). Under ``from __future__ import
+# Imported at module scope so FastAPI can resolve endpoint annotations such as
+# ``request: Request`` in stream_run_logs(). Under ``from __future__ import
 # annotations`` all type hints are strings, and FastAPI evaluates them
 # against the *defining function's* ``__globals__`` (i.e. this module).
 # Importing ``Request`` only inside ``fastapi_app()`` makes the name
 # invisible to FastAPI's introspection, which then mistakes the parameter
 # for a query string and 422s with ``{"loc": ["query", "request"]}``.
+from fastapi import Query
 from starlette.requests import Request
 
 # Used as endpoint parameter annotations, so — like ``Request`` above — these
@@ -81,6 +90,10 @@ from modal_training_gym.utils.metadata import (
 )
 
 SummaryLoader = Callable[[], Awaitable[list[JsonDict]]]
+
+# Repeated params (``?status=failed&status=stopped``) mirror the run list's
+# multi-select chips; an absent facet means "every bucket".
+FacetParam = Annotated[list[str] | None, Query()]
 
 
 # A single historical log line from ``AppFetchLogs``
@@ -429,7 +442,7 @@ def fastapi_app():
         Header,
         HTTPException,
         Path as FastAPIPath,
-    )  # Request imported at module scope
+    )  # Request and Query imported at module scope
     from fastapi.concurrency import run_in_threadpool
     from fastapi.responses import (
         FileResponse,
@@ -849,14 +862,13 @@ def fastapi_app():
     # tag columns fall back to it for runs that predate ``group_tags``.
     run_list_excluded_fields = {"config", "step_times", "substep_times"}
 
-    # Repeated params (``?status=failed&status=stopped``) mirror the run list's
-    # multi-select chips; an absent facet means "every bucket".
-    def _requested_facets(request: Request) -> dict[str, set[str]]:
-        return {
-            name: set(values)
-            for name in FACET_NAMES
-            if (values := request.query_params.getlist(name))
-        }
+    def _requested_facets(
+        status: list[str] | None,
+        recipe: list[str] | None,
+        group: list[str] | None,
+    ) -> dict[str, set[str]]:
+        selected = {"status": status, "recipe": recipe, "group": group}
+        return {name: set(values) for name, values in selected.items() if values}
 
     async def load_run_summaries() -> list[RunSummary]:
         try:
@@ -876,21 +888,24 @@ def fastapi_app():
         limit: int | None = None,
         offset: int = 0,
         q: str = "",
+        status: FacetParam = None,
+        recipe: FacetParam = None,
+        group: FacetParam = None,
     ):
         if limit is not None and limit < 1:
             raise HTTPException(status_code=400, detail="Limit must be positive")
         if offset < 0:
             raise HTTPException(status_code=400, detail="Offset must not be negative")
         summaries = await load_run_summaries()
-        # Facet params are multi-select unions, so they're read only by
-        # ``_requested_facets``: taking them here too would intersect the union
-        # with whichever repeated value ``get`` happens to return.
+        # Facet params are multi-select unions, declared above: taking them here
+        # too would intersect the union with whichever repeated value ``get``
+        # happens to return.
         filters = {
             name: request.query_params.get(name, "")
             for name, metadata in run_list_field_metadata().items()
             if metadata.get("filterable") and name not in FACET_NAMES
         }
-        facets = _requested_facets(request)
+        facets = _requested_facets(status, recipe, group)
         filtered = filter_run_summaries(
             summaries,
             filters=filters,
@@ -917,13 +932,18 @@ def fastapi_app():
     # every run (they're what the chips would select); ``matching`` counts the
     # current query, which is how many rows paging can still reach.
     @web.get("/api/runs/counts")
-    async def run_counts(request: Request, q: str = ""):
+    async def run_counts(
+        q: str = "",
+        status: FacetParam = None,
+        recipe: FacetParam = None,
+        group: FacetParam = None,
+    ):
         summaries = await load_run_summaries()
         counts = count_run_facets(summaries)
         counts["matching"] = len(
             filter_run_summaries(
                 summaries,
-                facets=_requested_facets(request),
+                facets=_requested_facets(status, recipe, group),
                 query=q,
             )
         )

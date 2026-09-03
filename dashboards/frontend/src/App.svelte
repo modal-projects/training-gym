@@ -18,10 +18,8 @@
 
   const DOCS_URL = "https://gym.modal.dev";
 
-  // The server filters, sorts and pages the run list: `runs` only ever holds
-  // the rows the page has asked for. Every total on the page comes from
-  // `runCounts` instead — the whole history is far too much JSON for a phone to
-  // download and keep resident just to count it.
+  // The server filters, sorts and pages the run list, so `runs` only holds the
+  // rows the page asked for and every total comes from `runCounts`.
   const RUNS_PAGE_SIZE = 100;
   let runs = $state([]);
   let loadedRunCount = $state(RUNS_PAGE_SIZE);
@@ -112,26 +110,42 @@
     // their status/stage and rollouts stay live. Current data stays on screen
     // (no skeleton) and only the refresh button spins while fetching. A run
     // detail page refreshes its own run, so skip the full list there.
-    // A backgrounded tab refreshes nothing and catches up on the way back:
-    // polling a hidden tab only burns memory and battery, and mobile browsers
-    // discard tabs that keep working while off-screen.
-    const refresh = window.setInterval(() => {
-      if (document.hidden) return;
-      if (activePage === "training" && activeTrainingRunId) return;
-      void load();
-    }, 5000);
+    // A hidden tab polls nothing — mobile browsers discard tabs that keep
+    // working off-screen — and catches up once on the way back.
+    let refresh = null;
+
+    const shouldRefresh = () =>
+      !(activePage === "training" && activeTrainingRunId);
+
+    const startPolling = () => {
+      if (refresh !== null) return;
+      refresh = window.setInterval(() => {
+        if (shouldRefresh()) void load();
+      }, 5000);
+    };
+
+    const stopPolling = () => {
+      if (refresh === null) return;
+      window.clearInterval(refresh);
+      refresh = null;
+    };
 
     const onVisibilityChange = () => {
-      if (document.hidden) return;
-      if (activePage === "training" && activeTrainingRunId) return;
-      void load();
+      if (document.hidden) {
+        stopPolling();
+        return;
+      }
+      startPolling();
+      if (shouldRefresh()) void load();
     };
+
+    if (!document.hidden) startPolling();
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       window.removeEventListener("popstate", syncPageWithPath);
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.clearInterval(refresh);
+      stopPolling();
     };
   });
 

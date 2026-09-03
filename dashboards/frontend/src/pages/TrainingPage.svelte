@@ -199,22 +199,6 @@
     collapsedGroupKeys = new Set();
   });
 
-  // A run row is ~50 DOM nodes, so a full history is seconds of layout on a
-  // phone and a re-render of every row on each refresh. The server hands out
-  // one page at a time and scrolling near the end asks for the next one.
-  let hiddenRunCount = $derived(
-    Math.max(matchingRunCount - filteredRuns.length, 0),
-  );
-
-  function growOnScroll(event) {
-    if (!hasMoreRuns) return;
-    const el = event.currentTarget;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600) {
-      onLoadMore();
-    }
-  }
-
-  let sentinel = $state(null);
   let list = $state(null);
 
   // A new query restarts paging at the first page. Staying scrolled to the
@@ -227,18 +211,21 @@
     for (const wrap of root.querySelectorAll(".table-wrap")) wrap.scrollTop = 0;
   });
 
-  $effect(() => {
-    const node = sentinel;
-    if (!node) return;
+  // A run row is ~50 DOM nodes, so a full history is seconds of layout on a
+  // phone and a re-render of every row on each refresh. The server hands out
+  // one page at a time, and reaching the end of a table asks for the next one.
+  // Rows scroll inside `.table-wrap`, so that's the root the sentinel is
+  // measured against rather than the viewport.
+  function pageOnReveal(node) {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
       },
-      { rootMargin: "600px" },
+      { root: node.closest(".table-wrap"), rootMargin: "600px" },
     );
     observer.observe(node);
-    return () => observer.disconnect();
-  });
+    return { destroy: () => observer.disconnect() };
+  }
 </script>
 
 <section class="summary-sticky grid grid-cols-5 gap-[14px] p-[0_24px] mb-[24px] max-[900px]:grid-cols-2">
@@ -313,7 +300,6 @@
         <div
           class="table-wrap freeze-header"
           style={frozenOffset ? `--frozen-table-offset: ${frozenOffset};` : ""}
-          onscroll={growOnScroll}
         >
           <ResizableTable class="training-runs-table" {columns} stickyFirstColumn>
             <tbody>
@@ -466,6 +452,9 @@
               {/each}
             </tbody>
           </ResizableTable>
+          {#if hasMoreRuns}
+            <div class="table-page-sentinel" use:pageOnReveal></div>
+          {/if}
         </div>
       {/snippet}
 
@@ -493,11 +482,9 @@
         </div>
       {/if}
 
-      {#if hiddenRunCount > 0}
-        <div bind:this={sentinel} class="page-empty">
-          Showing {filteredRuns.length} of {matchingRunCount} runs
-        </div>
-      {/if}
+      <div class="page-empty">
+        Showing {filteredRuns.length} of {matchingRunCount} runs
+      </div>
     {/if}
   </div>
 </section>
