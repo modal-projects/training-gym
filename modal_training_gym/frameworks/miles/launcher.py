@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import hashlib
 import os
+import re
 import shlex
 import subprocess
 import shutil
@@ -105,6 +106,8 @@ RDMA_RUNTIME_INSTALL_COMMAND = (
     "--reinstall libibverbs1 ibverbs-providers && "
     "rm -rf /var/lib/apt/lists/*"
 )
+
+
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
@@ -112,6 +115,15 @@ HARBOR_PKG_VERSION = "0.8.0"
 
 _MILES_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
 _PATCH_SGLANG_ABORT_B64 = encode_patch("patch_sglang_abort", _MILES_PATCHES)
+_PATCH_SGLANG_LOAD_BARRIER_B64 = encode_patch(
+    "patch_sglang_load_barrier", _MILES_PATCHES
+)
+_PATCH_ROUTER_STARTUP_TIMEOUT_B64 = encode_patch(
+    "patch_router_startup_timeout", _MILES_PATCHES
+)
+_PATCH_SKIP_FINAL_WEIGHT_SYNC_B64 = encode_patch(
+    "patch_skip_final_weight_sync", _MILES_PATCHES
+)
 _PATCH_ROLLOUT_STATUS_B64 = encode_patch(
     "patch_rollout_status_reporting", _MILES_PATCHES
 )
@@ -132,6 +144,12 @@ _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_PATCH_DIST_CKPT_FORK_RETRY_B64 = encode_patch(
+    "patch_dist_ckpt_fork_retry", _MEGATRON_PATCHES
+)
+_PATCH_DIST_CKPT_READ_RETRY_B64 = encode_patch(
+    "patch_dist_ckpt_read_retry", _MEGATRON_PATCHES
+)
 _MEGATRON_TORCH_STRATEGY_PY = (
     "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
 )
@@ -293,17 +311,60 @@ def _is_resumable_checkpoint(path: str) -> bool:
     one save shape: a LoRA run stores ``adapter/`` with per-rank ``.pt`` files and no
     ``.metadata``/``common.pt``/``.distcp`` at all, so the conversion predicate would
     report every adapter checkpoint as absent and silently restart from ``ref_load``.
-    Only the crashed-torch_dist signature is rejected — ``.distcp`` shards present but
-    the ``.metadata`` that is written last missing.
+
+    For torch_dist saves, two interrupted-write signatures are rejected:
+
+    - ``.distcp`` shards present but the ``.metadata`` written last missing — a
+      crashed writer.
+    - ``.metadata`` present but shards it references missing — on Modal each
+      node commits its Volume writes independently, so a node killed after the
+      coordinator committed ``.metadata`` leaves a checkpoint that looks
+      finished while missing that node's shards. Resuming into one fails every
+      retry with FileNotFoundError.
     """
     try:
-        names = os.listdir(path)
+        names = set(os.listdir(path))
     except OSError:
         return False
     if not names:
         return False
-    if any(name.endswith(".distcp") for name in names):
-        return ".metadata" in names
+    if ".metadata" in names:
+        return _metadata_shards_present(path, names)
+    return not any(name.endswith(".distcp") for name in names)
+
+
+def _metadata_shards_present(path: str, names: set[str]) -> bool:
+    """Whether every ``.distcp`` shard referenced by ``.metadata`` exists.
+
+    torch DCP's ``.metadata`` is a pickle whose storage entries carry each
+    shard's relative path as a literal string, so the referenced set can be
+    scanned out of the raw bytes without unpickling (which needs torch classes
+    unavailable outside the training image).
+    """
+    try:
+        with open(os.path.join(path, ".metadata"), "rb") as f:
+            blob = f.read()
+    except OSError:
+        return False
+    referenced = {m.decode() for m in re.findall(rb"__\d+_\d+\.distcp", blob)}
+    if not referenced:
+        # Unrecognized metadata shape; keep the pre-existing behavior rather
+        # than rejecting a save we cannot inspect.
+        return True
+    missing = sorted(referenced - names)
+    empty = sorted(
+        name
+        for name in referenced & names
+        if not os.path.getsize(os.path.join(path, name))
+    )
+    if missing or empty:
+        print(
+            f"WARNING: checkpoint {path} has .metadata but is missing "
+            f"{len(missing)} shard(s) and has {len(empty)} empty shard(s) it "
+            f"references (e.g. {(missing + empty)[:3]}); treating it as an "
+            "interrupted save."
+        )
+        return False
     return True
 
 
@@ -352,7 +413,30 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
+            # SGLang's post-load barrier allows 8 min; a TB-scale checkpoint on a
+            # Modal Volume reads at ~1 GiB/s cold, so every node that did not
+            # download it blows through that and the engine dies (Nemotron-3-Ultra
+            # 16-node run). Raise it.
+            f"echo {_PATCH_SGLANG_LOAD_BARRIER_B64} | base64 -d | python3",
+            # miles allows the sglang router 30s to bind its port; the router's
+            # spawned child re-imports the whole stack first and overruns that
+            # under bring-up load. Raise the bound (it returns as soon as the
+            # port accepts, and still fails fast if the child dies).
+            f"echo {_PATCH_ROUTER_STARTUP_TIMEOUT_B64} | base64 -d | python3",
+            # miles syncs weights into the rollout engines after *every* save,
+            # including the final rollout's, where nothing generates again. At
+            # TB scale that redundant post-save sync is where 16-node runs lose
+            # a node, after all requested work is already done.
+            f"echo {_PATCH_SKIP_FINAL_WEIGHT_SYNC_B64} | base64 -d | python3",
             f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
+            # Megatron's torch_dist writer forks 2 helper processes per rank; that
+            # fork intermittently returns EAGAIN on Modal and takes the whole run
+            # with it (2 of 3 saves on the Nemotron-3-Ultra slice). Retry instead.
+            f"echo {_PATCH_DIST_CKPT_FORK_RETRY_B64} | base64 -d | python3",
+            # Reads of a torch_dist checkpoint on a Modal Volume intermittently
+            # fail with EINVAL on a subset of ranks while the files are intact.
+            # Retry with reopen instead of losing a multi-node retry cycle.
+            f"echo {_PATCH_DIST_CKPT_READ_RETRY_B64} | base64 -d | python3",
             (
                 f"if test -f {_MEGATRON_TORCH_STRATEGY_PY}; then "
                 f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3; "
@@ -389,6 +473,31 @@ def _compose_ld_library_path() -> str:
     return ":".join(parts)
 
 
+_FLIGHT_RECORDER_KEY = "TORCH_FR_DUMP_TEMP_FILE"
+
+
+def flight_recorder_prefix(environment: dict[str, str], training_run_id: str) -> str:
+    """Per-run NCCL flight-recorder dump prefix, or "" when the recipe sets none.
+
+    torch writes ``<prefix><rank>`` lazily, only when a hang is detected, and
+    does not create the parent directory. A recipe points the prefix at the
+    checkpoints Volume so the dump outlives the container; scoping it under the
+    run id keeps runs from overwriting each other.
+    """
+    prefix = environment.get(_FLIGHT_RECORDER_KEY, "")
+    if not prefix:
+        return ""
+    directory, base = os.path.split(prefix)
+    return os.path.join(directory, training_run_id, base)
+
+
+def _scope_flight_recorder_dump(env_vars: dict[str, str]) -> None:
+    """Rewrite the dump prefix in the Ray env to its per-run form."""
+    run_id = env_vars.get("TRAINING_GYM_TRAINING_RUN_ID", "")
+    if run_id and env_vars.get(_FLIGHT_RECORDER_KEY):
+        env_vars[_FLIGHT_RECORDER_KEY] = flight_recorder_prefix(env_vars, run_id)
+
+
 def build_ray_runtime_env(
     *,
     head_addr: str,
@@ -422,6 +531,7 @@ def build_ray_runtime_env(
     env_vars.update(metric_env)
     env_vars.update(environment)
     env_vars.update(timing_debug_env())
+    _scope_flight_recorder_dump(env_vars)
     if framework_status_token:
         # Applied after `environment` so a recipe override can't blank the
         # dashboard auth token by accident.
@@ -467,6 +577,12 @@ def build_miles_app(
             " || echo 'WARNING: sglang abort patch did not apply to the"
             " local_miles checkout; transient router failures during rollout"
             " cleanup may crash the run'",
+            f"echo {_PATCH_ROUTER_STARTUP_TIMEOUT_B64} | base64 -d | python3"
+            " || echo 'WARNING: router startup timeout patch did not apply to the"
+            " local_miles checkout; busy routers retain the upstream timeout'",
+            f"echo {_PATCH_SKIP_FINAL_WEIGHT_SYNC_B64} | base64 -d | python3"
+            " || echo 'WARNING: final-weight-sync patch did not apply to the"
+            " local_miles checkout; the redundant post-save sync remains'",
             *_REPORTING_PATCH_COMMANDS,
         )
 
@@ -947,6 +1063,13 @@ def build_miles_app(
             checkpoints_volume.reload.aio(),
         )
 
+        # Every node creates the flight-recorder dump directory: torch writes
+        # the dump lazily on hang detection and will not create the parent,
+        # and a Volume directory made on the head is not visible to the other
+        # containers until committed.
+        if fr_prefix := flight_recorder_prefix(miles.environment, training_run_id):
+            os.makedirs(os.path.dirname(fr_prefix), exist_ok=True)
+
         cluster = ModalRayCluster()
         cluster.discover_cluster(miles.total_nodes)
 
@@ -1155,11 +1278,11 @@ def build_miles_app(
             elif unresumable := _unresumable_save_dirs(save_root):
                 print(
                     f"WARNING: {save_root} holds saves that cannot be resumed "
-                    f"({', '.join(unresumable)}) — they carry torch_dist shards "
-                    "without the .metadata written last, so they are interrupted "
-                    "writes. Training restarts from ref_load and their progress is "
-                    "discarded; Megatron follows latest_checkpointed_iteration.txt, "
-                    "so resuming into one of these would load a partial save."
+                    f"({', '.join(unresumable)}) — they are interrupted writes "
+                    "(missing the .metadata written last, or missing shards that "
+                    ".metadata references). Training restarts from ref_load and "
+                    "their progress is discarded; resuming into one of these "
+                    "would fail on the partial save."
                 )
             try:
                 cmd = build_train_cmd(miles, MILES_ROOT, model=model, dataset=dataset)

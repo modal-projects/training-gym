@@ -810,6 +810,9 @@ class MilesRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b import (
             Moonlight_16B_A3B_Recipe,
         )
+        from modal_training_gym.train_recipes.miles_recipe.nemotron3_ultra_550b_a55b import (
+            Nemotron3_Ultra_550B_A55B_Recipe,
+        )
         from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
             Qwen3_5_4B_Miles_Recipe,
         )
@@ -820,6 +823,8 @@ class MilesRecipe(BaseTrainRecipe):
             return Moonlight_16B_A3B_Recipe()
         if model_config.model_name == "google/gemma-4-26B-A4B-it":
             return Gemma4_26B_A4B_Recipe()
+        if model_config.model_name == "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16":
+            return Nemotron3_Ultra_550B_A55B_Recipe()
         if model_config.model_name == "thinkingmachines/Inkling-Small":
             if issubclass(cls, Inkling_Small_LoRA_Recipe):
                 return Inkling_Small_LoRA_Recipe()

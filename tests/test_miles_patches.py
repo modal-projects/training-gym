@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
 
 from modal_training_gym.frameworks.miles.modal_helpers.patches import (
     patch_advantage_distribution as advantage_patcher,
+    patch_skip_final_weight_sync as final_sync_patcher,
     patch_rollout_status_reporting as rollout_patcher,
 )
 
@@ -72,3 +74,174 @@ def test_patch_matches_golden(miles_inputs, tmp_path, request):
         assert actual == expected, (
             f"golden mismatch for {name}; rerun with --rewrite to accept"
         )
+
+
+def test_final_weight_sync_is_skipped_only_on_the_last_rollout(tmp_path):
+    """The guard must break before the post-save sync on the final rollout,
+    leave every earlier rollout's sync intact, and keep eval's weights fresh."""
+    work = tmp_path / "train.py"
+    work.write_text((TESTDATA / "train.py.input").read_text())
+
+    final_sync_patcher._patch_file(work)
+    patched = work.read_text()
+    assert final_sync_patcher.MARKER in patched
+
+    tree = ast.parse(patched)  # the patched loop must still be valid Python
+
+    # Find the guard: an `if` whose body is a bare `break`, sitting in the
+    # rollout loop ahead of the sync.
+    guards = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and any(isinstance(b, ast.Break) for b in node.body)
+        and "num_rollout" in ast.unparse(node.test)
+        and "should_run_periodic_action" in ast.unparse(node.test)
+    ]
+    assert len(guards) == 1, "expected exactly one final-rollout break guard"
+    assert "rollout_id + 1 >= args.num_rollout" in ast.unparse(guards[0].test)
+
+    # It has to precede the sync, or it would not prevent anything.
+    assert patched.index(final_sync_patcher.MARKER) < patched.index(
+        "await offload_train()"
+    )
+
+    # The real (non-final) syncs and the eval call must survive untouched.
+    original = (TESTDATA / "train.py.input").read_text()
+    for line in (
+        "await offload_train()",
+        "await rollout_manager.onload_weights.remote()",
+        "await actor_model.update_weights(rollout_id=rollout_id)",
+        "await rollout_manager.onload_kv.remote()",
+        "await rollout_manager.eval.remote(rollout_id)",
+    ):
+        assert patched.count(line) == original.count(line), line
+
+
+def test_final_weight_sync_patch_is_idempotent_and_fails_on_drift(tmp_path):
+    work = tmp_path / "train.py"
+    work.write_text((TESTDATA / "train.py.input").read_text())
+    final_sync_patcher._patch_file(work)
+    once = work.read_text()
+    final_sync_patcher._patch_file(work)
+    assert work.read_text() == once
+
+    drifted = tmp_path / "drifted.py"
+    drifted.write_text(
+        (TESTDATA / "train.py.input")
+        .read_text()
+        .replace("await offload_train()", "await offload_train_v2()")
+    )
+    with pytest.raises(SystemExit):
+        final_sync_patcher._patch_file(drifted)
+
+
+def _run_patched_loop_tail(num_rollout: int, eval_interval: int | None) -> list[str]:
+    """Execute the patched save->guard->sync tail of miles' train loop with
+    mocks, once per rollout, and return the ordered calls it makes."""
+    import asyncio
+    import textwrap
+
+    work_src = (TESTDATA / "train.py.input").read_text()
+    tmp = TESTDATA.parent / "_scratch_train.py"
+    try:
+        tmp.write_text(work_src)
+        final_sync_patcher._patch_file(tmp)
+        src = tmp.read_text()
+    finally:
+        tmp.unlink(missing_ok=True)
+
+    start = src.index("        external_save = args.save_trigger_sentinel")
+    end = src.index(
+        "        if should_run_periodic_action(rollout_id, args.eval_interval"
+    )
+    tail = textwrap.dedent(src[start:end]).replace("break", "return 'BREAK'")
+
+    calls: list[str] = []
+
+    class _Args:
+        save_trigger_sentinel = None
+        save_interval = 50
+        offload_rollout = True
+
+    args = _Args()
+    args.num_rollout = num_rollout
+    args.eval_interval = eval_interval
+
+    class _Remote:
+        def __init__(self, name):
+            self.name = name
+
+        async def remote(self):
+            calls.append(self.name)
+
+    class _RM:
+        onload_weights = _Remote("onload_weights")
+        onload_kv = _Remote("onload_kv")
+
+    class _Actor:
+        async def update_weights(self, rollout_id):
+            calls.append(f"update_weights[{rollout_id}]")
+
+    async def save(rollout_id, force_sync=False):
+        calls.append(f"save[{rollout_id}]")
+
+    async def offload_train():
+        calls.append("offload_train")
+
+    def should_run_periodic_action(rid, interval, per_epoch, num_rollout=None):
+        if interval is None:
+            return False
+        if num_rollout is not None and rid == num_rollout - 1:
+            return True
+        return (rid + 1) % interval == 0
+
+    class _Log:
+        def info(self, *a):
+            pass
+
+    ns = dict(
+        args=args,
+        rollout_manager=_RM,
+        actor_model=_Actor(),
+        save=save,
+        offload_train=offload_train,
+        should_run_periodic_action=should_run_periodic_action,
+        num_rollout_per_epoch=10**9,
+        logger=_Log(),
+        os=__import__("os"),
+    )
+
+    async def loop():
+        for rollout_id in range(num_rollout):
+            ns["rollout_id"] = rollout_id
+            exec("async def _b():\n" + textwrap.indent(tail, "    "), ns)
+            if await ns["_b"]() == "BREAK":
+                calls.append(f"BREAK@{rollout_id}")
+                break
+
+    asyncio.run(loop())
+    return calls
+
+
+def test_patched_loop_skips_only_the_final_post_save_sync():
+    calls = _run_patched_loop_tail(num_rollout=3, eval_interval=None)
+    # Final rollout: save, then break -- no onload/update_weights after it.
+    assert calls[-2:] == ["save[2]", "BREAK@2"]
+    assert "update_weights[2]" not in calls
+    # Earlier rollouts still sync exactly as upstream does.
+    assert calls.count("onload_weights") == 2
+    assert "update_weights[0]" in calls and "update_weights[1]" in calls
+
+
+def test_patched_loop_keeps_final_sync_when_eval_is_due():
+    calls = _run_patched_loop_tail(num_rollout=3, eval_interval=3)
+    assert "update_weights[2]" in calls
+    assert not any(c.startswith("BREAK") for c in calls)
+
+
+def test_patched_loop_single_rollout_saves_then_breaks():
+    assert _run_patched_loop_tail(num_rollout=1, eval_interval=None) == [
+        "save[0]",
+        "BREAK@0",
+    ]

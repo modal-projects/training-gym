@@ -108,3 +108,68 @@ def test_metric_env_is_preserved(monkeypatch):
 
     assert env_vars["WANDB_RUN_ID"] == "abc"
     assert env_vars["WANDB_RESUME"] == "allow"
+
+
+def test_image_applies_final_weight_sync_patch(monkeypatch):
+    """The patch that stops miles syncing weights into idle engines after the
+    final save is baked into every miles image."""
+    monkeypatch.setattr(launcher, "Image", _FakeImage)
+
+    commands = "\n".join(launcher._build_miles_base_image(MilesRecipe()).commands)
+
+    assert launcher._PATCH_SKIP_FINAL_WEIGHT_SYNC_B64 in commands
+
+
+def test_flight_recorder_dump_is_scoped_per_run(monkeypatch):
+    """The dump prefix a recipe sets is rewritten under the run id in the Ray
+    env, so concurrent or retried runs never overwrite each other's dumps."""
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+
+    env_vars = build_ray_runtime_env(
+        head_addr="10.0.0.1",
+        metric_env={},
+        environment={"TORCH_FR_DUMP_TEMP_FILE": "/checkpoints/nccl_fr/rank_"},
+        extra_env={"TRAINING_GYM_TRAINING_RUN_ID": "run-abc123"},
+    )["env_vars"]
+
+    assert (
+        env_vars["TORCH_FR_DUMP_TEMP_FILE"] == "/checkpoints/nccl_fr/run-abc123/rank_"
+    )
+
+
+def test_flight_recorder_prefix_absent_when_recipe_sets_none(monkeypatch):
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+    env_vars = build_ray_runtime_env(
+        head_addr="10.0.0.1",
+        metric_env={},
+        environment={},
+        extra_env={"TRAINING_GYM_TRAINING_RUN_ID": "run-abc123"},
+    )["env_vars"]
+    assert "TORCH_FR_DUMP_TEMP_FILE" not in env_vars
+    assert launcher.flight_recorder_prefix({}, "run-abc123") == ""
+
+
+def test_nemotron_recipe_arms_the_flight_recorder():
+    from modal_training_gym.train_recipes.miles_recipe import (
+        Nemotron3_Ultra_550B_A55B_Recipe,
+    )
+
+    env = Nemotron3_Ultra_550B_A55B_Recipe().environment
+    assert env["TORCH_NCCL_DUMP_ON_TIMEOUT"] == "1"
+    assert int(env["TORCH_NCCL_TRACE_BUFFER_SIZE"]) > 0
+    # Heartbeat must be far shorter than the 60 min collective timeout, or the
+    # dump never fires before the run gives up.
+    assert int(env["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"]) < 60 * 60
+    assert env["TORCH_FR_DUMP_TEMP_FILE"].startswith("/checkpoints/")
+
+
+def test_nemotron_recipe_is_pinned_off_aws():
+    """Only the Nemotron recipe pins its cloud; the base class stays unpinned
+    and an explicit cloud= still overrides the pin."""
+    from modal_training_gym.train_recipes.miles_recipe import (
+        Nemotron3_Ultra_550B_A55B_Recipe,
+    )
+
+    assert MilesRecipe().cloud is None
+    assert Nemotron3_Ultra_550B_A55B_Recipe().cloud == "oci"
+    assert Nemotron3_Ultra_550B_A55B_Recipe(cloud="aws").cloud == "aws"

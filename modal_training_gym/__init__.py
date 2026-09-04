@@ -68,6 +68,14 @@ _EXPORTS = {
         "modal_training_gym.train_recipes.miles_recipe",
         "Moonlight_16B_A3B_Recipe",
     ),
+    "Nemotron3_Ultra_550B_A55B": (
+        "modal_training_gym.common.models",
+        "Nemotron3_Ultra_550B_A55B",
+    ),
+    "Nemotron3_Ultra_550B_A55B_Recipe": (
+        "modal_training_gym.train_recipes.miles_recipe",
+        "Nemotron3_Ultra_550B_A55B_Recipe",
+    ),
     "MilesRecipe": ("modal_training_gym.train_recipes.miles_recipe", "MilesRecipe"),
     "parse_qwen3_response": (
         "modal_training_gym.common.models",
@@ -179,6 +187,8 @@ __all__ = [
     "Moonlight_16B_A3B_Instruct",
     "Moonlight_16B_A3B_Recipe",
     "MilesRecipe",
+    "Nemotron3_Ultra_550B_A55B",
+    "Nemotron3_Ultra_550B_A55B_Recipe",
     "parse_qwen3_response",
     "ParsedResponse",
     "Qwen3_0_6B",
