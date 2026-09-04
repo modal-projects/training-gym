@@ -23,8 +23,11 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import random
 import re
+import shutil
+import stat
 import sys
 import time
 import zipfile
@@ -35,6 +38,7 @@ from typing import Any
 
 import modal
 
+from modal_training_gym.common import hf_secrets
 from modal_training_gym.frameworks.slime.launcher import (
     SLIME_IMAGE,
     _slime_git_overlay_command,
@@ -54,6 +58,13 @@ DEFAULT_MIXED_RECIPE_SLUG = "qwen3-6-27b-agentic"
 def data_volume_name(recipe: Qwen3_6_27B_Recipe_Agentic) -> str:
     """The data volume the Slime launcher mounts at ``/data`` for ``recipe``."""
     return recipe.data_volume_name or f"slime-{type(recipe).__name__.lower()}-data"
+
+
+def dataset_root_name(value: str) -> str:
+    """Validate the directory name under ``/data`` that holds one dataset's subsets."""
+    if not value or value in {".", ".."} or "/" in value or "\\" in value:
+        raise ValueError(f"dataset root must be a single directory name, got {value!r}")
+    return value
 
 
 def _metadata(row: dict[str, Any], namespace: str) -> dict[str, Any]:
@@ -229,11 +240,17 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     ]
 
 
-def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+def write_text(path: Path, text: str) -> None:
+    """Replace ``path`` atomically so readers never observe a partial file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
-        encoding="utf-8",
+    staging = path.with_name(f".{path.name}.tmp")
+    staging.write_text(text, encoding="utf-8")
+    os.replace(staging, path)
+
+
+def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    write_text(
+        path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
     )
 
 
@@ -402,10 +419,7 @@ def write_mixed_subset(
         "selected_instance_ids": selected_ids,
         "sha256": sha256(output_path),
     }
-    metadata_path.write_text(
-        json.dumps(provenance, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_text(metadata_path, json.dumps(provenance, indent=2, sort_keys=True) + "\n")
     return output_path, provenance
 
 
@@ -419,6 +433,7 @@ class ArchivedHarborSource:
         dataset_key: str,
         hf_revision: str | None,
         metadata_namespace: str,
+        translator_revision: str,
         unpack_workers: int,
         max_archives: int | None,
     ) -> None:
@@ -426,10 +441,11 @@ class ArchivedHarborSource:
         self.dataset_key = dataset_key
         self.hf_revision = hf_revision
         self.metadata_namespace = metadata_namespace
+        self.translator_revision = translator_revision
         self.unpack_workers = unpack_workers
         self.max_archives = max_archives
 
-    def download(self, root: Path) -> None:
+    def download(self, root: Path) -> str:
         from huggingface_hub import HfApi, snapshot_download
 
         revision = HfApi().dataset_info(self.hf_repo, revision=self.hf_revision).sha
@@ -440,10 +456,53 @@ class ArchivedHarborSource:
             revision=revision,
         )
         print(f"[harbor] downloaded {self.hf_repo}@{revision}")
+        return revision
+
+    def bundles(self, root: Path) -> list[Path]:
+        bundles = sorted(root.glob("tasks/batch_*.zip"))
+        if self.max_archives is not None:
+            bundles = bundles[: self.max_archives]
+        return bundles
+
+    def source_record(self, root: Path, revision: str) -> dict[str, Any]:
+        """Every input the converted rows depend on; a change invalidates them."""
+        return {
+            "hf_repo": self.hf_repo,
+            "revision": revision,
+            "dataset_key": self.dataset_key,
+            "metadata_namespace": self.metadata_namespace,
+            "translator_revision": self.translator_revision,
+            "archives": [bundle.name for bundle in self.bundles(root)],
+        }
+
+    @staticmethod
+    def cached_rows(root: Path, source: dict[str, Any]) -> list[dict[str, Any]] | None:
+        """Rows converted from exactly ``source``, or ``None`` when they must be rebuilt."""
+        record_path = root / "all.converted.json"
+        converted_path = root / "all.converted.jsonl"
+        if not (record_path.is_file() and converted_path.is_file()):
+            return None
+        if json.loads(record_path.read_text(encoding="utf-8")) != source:
+            return None
+        return read_jsonl(converted_path)
+
+    @staticmethod
+    def clear_extracted(root: Path) -> None:
+        """Drop extracted tasks, their markers, and conversion outputs; keep the archives."""
+        tasks_root = root / "tasks"
+        for entry in tasks_root.iterdir() if tasks_root.is_dir() else ():
+            if entry.is_dir():
+                shutil.rmtree(entry)
+            elif entry.suffix == ".extracted":
+                entry.unlink()
+        for name in ("all.converted.json", "all.converted.jsonl"):
+            (root / name).unlink(missing_ok=True)
 
     @staticmethod
     def safe_extract(bundle: Path, tasks_root: Path) -> int:
-        destination = tasks_root.resolve()
+        """Extract one archive's task directories, or skip it if a previous run finished it."""
+        marker = tasks_root / f".{bundle.stem}.extracted"
+        staging = tasks_root / f".{bundle.stem}.partial"
         with zipfile.ZipFile(bundle) as archive:
             members = archive.infolist()
             task_roots = {
@@ -451,25 +510,33 @@ class ArchivedHarborSource:
                 for member in members
                 if "/" in member.filename
             }
-            if task_roots and all(
-                (tasks_root / task_root / "task.toml").is_file()
-                for task_root in task_roots
-            ):
+            if marker.is_file():
                 return len(task_roots)
+            shutil.rmtree(staging, ignore_errors=True)
+            staging.mkdir(parents=True)
+            destination = staging.resolve()
             for member in members:
-                target = (tasks_root / member.filename).resolve()
+                if stat.S_ISLNK(member.external_attr >> 16):
+                    raise ValueError(
+                        f"archive {bundle.name} contains a link {member.filename!r}"
+                    )
+                target = (staging / member.filename).resolve()
                 if not target.is_relative_to(destination):
                     raise ValueError(
                         f"archive {bundle.name} contains unsafe path {member.filename!r}"
                     )
-            archive.extractall(tasks_root)
-            return len(task_roots)
+            archive.extractall(staging)
+        for task_root in task_roots:
+            final = tasks_root / task_root
+            shutil.rmtree(final, ignore_errors=True)
+            os.replace(staging / task_root, final)
+        shutil.rmtree(staging, ignore_errors=True)
+        marker.touch()
+        return len(task_roots)
 
     def unpack(self, root: Path) -> None:
         tasks_root = root / "tasks"
-        bundles = sorted(root.glob("tasks/batch_*.zip"))
-        if self.max_archives is not None:
-            bundles = bundles[: self.max_archives]
+        bundles = self.bundles(root)
         if not bundles:
             raise FileNotFoundError(f"no task archives found under {tasks_root}")
         started = time.monotonic()
@@ -484,9 +551,6 @@ class ArchivedHarborSource:
                 )
 
     def convert(self, root: Path) -> list[dict[str, Any]]:
-        converted_path = root / "all.converted.jsonl"
-        if converted_path.is_file() and converted_path.stat().st_size:
-            return read_jsonl(converted_path)
         if "/root/slime" not in sys.path:
             sys.path.insert(0, "/root/slime")
         from agentic_rl.environment.convert2slime.harbor import (  # type: ignore[import-not-found]
@@ -516,7 +580,11 @@ class ArchivedHarborSource:
             except SkipTask as exc:
                 return task_dir, None, str(exc)
 
-        task_dirs = sorted(path for path in (root / "tasks").iterdir() if path.is_dir())
+        task_dirs = sorted(
+            path
+            for path in (root / "tasks").iterdir()
+            if path.is_dir() and not path.name.startswith(".")
+        )
         rows: list[dict[str, Any]] = []
         skipped: Counter[str] = Counter()
         with ThreadPoolExecutor(max_workers=self.unpack_workers) as pool:
@@ -535,20 +603,25 @@ class ArchivedHarborSource:
                 rows.append(row)
         if not rows:
             raise RuntimeError("Harbor conversion produced no rows")
-        write_jsonl(converted_path, rows)
+        write_jsonl(root / "all.converted.jsonl", rows)
         if skipped:
             print(f"[harbor] skipped {sum(skipped.values())} tasks: {dict(skipped)}")
         return rows
 
     def partition(self, root: Path) -> dict[str, int]:
         root.mkdir(parents=True, exist_ok=True)
-        self.download(root)
-        self.unpack(root)
-        return write_partitions(
-            root,
-            self.convert(root),
-            metadata_namespace=self.metadata_namespace,
-        )
+        revision = self.download(root)
+        source = self.source_record(root, revision)
+        rows = self.cached_rows(root, source)
+        if rows is None:
+            self.clear_extracted(root)
+            self.unpack(root)
+            rows = self.convert(root)
+            write_text(
+                root / "all.converted.json",
+                json.dumps(source, indent=2, sort_keys=True) + "\n",
+            )
+        return write_partitions(root, rows, metadata_namespace=self.metadata_namespace)
 
 
 def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
@@ -591,7 +664,7 @@ def _mixed_remote(
     dump = Path(probe_dump)
     if not dump.is_file():
         raise FileNotFoundError(f"probe dump does not exist: {dump}")
-    payload = torch.load(dump, weights_only=False)
+    payload = torch.load(dump, weights_only=True)
     path, provenance = write_mixed_subset(
         Path(root),
         source=source,
@@ -636,8 +709,12 @@ def main() -> None:
     dataset_root = args.dataset_root
     if args.command == "prepare":
         dataset_root = dataset_root or args.hf_repo.replace("/", "_")
-    if not dataset_root:
+    if dataset_root is None:
         parser.error("--dataset-root is required for mixed")
+    try:
+        dataset_root = dataset_root_name(dataset_root)
+    except ValueError as exc:
+        parser.error(str(exc))
     root = f"{DATA_PATH}/{dataset_root}"
 
     training_recipe = Qwen3_6_27B_Recipe_Agentic()
@@ -656,13 +733,14 @@ def main() -> None:
         "timeout": 24 * 60 * 60,
     }
     if args.command == "prepare":
-        remote_options["secrets"] = [modal.Secret.from_name("huggingface-secret")]
+        remote_options["secrets"] = hf_secrets()
         remote = app.function(**remote_options)(_partition_remote)
         kwargs = {
             "hf_repo": args.hf_repo,
             "dataset_key": args.dataset_key,
             "hf_revision": args.hf_revision,
             "metadata_namespace": args.metadata_namespace,
+            "translator_revision": training_recipe.slime_git_revision,
             "unpack_workers": args.unpack_workers,
             "max_archives": args.max_archives,
         }
