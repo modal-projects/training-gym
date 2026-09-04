@@ -189,7 +189,7 @@ Typically, your generation function will:
 
 If the function generates the prompts (i.e., no initial dataset), you must use the [OnlineRollout](https://gym.modal.dev/reference/onlinerollout) class.
 
-And since the containers use [Modal Images](https://modal.com/docs/guide/images) under the hood, you can easily use external packages by extending the base image:
+Since the containers use [Modal Images](https://modal.com/docs/guide/images) under the hood, you can easily use external packages by extending the base image:
 
 ```python
 recipe = Qwen3_5_4B_Recipe(
