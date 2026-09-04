@@ -62,6 +62,7 @@ from modal_training_gym.common.launcher_helpers import (
     run_download_phase,
     run_prepare_dataset,
     ship_callable,
+    write_dataset_if_needed,
 )
 from modal_training_gym.common.status import MilesStatus
 from modal_training_gym.train_recipes.miles_recipe.recipe import (
@@ -435,12 +436,20 @@ def build_miles_app(
     miles: MilesRecipe,
     model: ModelConfig,
     dataset: DatasetConfig,
+    eval_dataset: DatasetConfig | None = None,
     checkpoint: Checkpoint | None = None,
     name: str | None = None,
     group_id: str | None = None,
 ) -> App:
     app_name = name or miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
     volume_prefix = miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
+    MilesRecipe._validate_datasets(dataset, eval_dataset)
+    dataset_path = MilesRecipe._resolve_data_paths(dataset)
+    eval_dataset_path = (
+        MilesRecipe._resolve_data_paths(eval_dataset)
+        if eval_dataset is not None
+        else None
+    )
 
     _caller_module, caller_script = resolve_caller_context()
 
@@ -477,7 +486,7 @@ def build_miles_app(
         image = miles.image_overlay(image)
         miles.image_overlay = None
 
-    if isinstance(dataset, HarborDataset):
+    if isinstance(dataset, HarborDataset) or isinstance(eval_dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
     image = apply_metric_image(image, miles.metrics)
@@ -646,7 +655,13 @@ def build_miles_app(
         name="prepare_dataset",
     )
     def prepare_dataset():
-        run_prepare_dataset(dataset, data_volume, MilesRecipe._resolve_data_paths)
+        run_prepare_dataset(
+            dataset,
+            eval_dataset,
+            data_volume,
+            dataset_path,
+            eval_dataset_path,
+        )
 
     convert_nnodes = get_checkpoint_conversion_policy(miles, model=model)[0]
     convert_multi_node = convert_nnodes > 1
@@ -973,7 +988,14 @@ def build_miles_app(
                 "model": {"model_name": model.model_name} if model else {},
                 "recipe": {
                     "gpu_type": miles.gpu_type,
-                    **serialize_recipe_params(miles, dataset=dataset, model=model),
+                    **serialize_recipe_params(
+                        miles,
+                        dataset=dataset,
+                        eval_dataset=eval_dataset,
+                        dataset_path=dataset_path,
+                        eval_dataset_path=eval_dataset_path,
+                        model=model,
+                    ),
                 },
                 "metrics": metric_metadata(
                     miles.metrics,
@@ -984,6 +1006,14 @@ def build_miles_app(
                     "hf_repo": getattr(dataset, "hf_repo", ""),
                     "name": type(dataset).__name__,
                 },
+                "eval_dataset": (
+                    {
+                        "hf_repo": getattr(eval_dataset, "hf_repo", ""),
+                        "name": type(eval_dataset).__name__,
+                    }
+                    if eval_dataset is not None
+                    else None
+                ),
                 "lr": miles.lr,
                 "global_batch_size": miles.global_batch_size,
             }
@@ -1048,20 +1078,17 @@ def build_miles_app(
             await checkpoints_volume.commit.aio()
 
             await _set_framework_status(MilesStatus.PREPARE_DATASET)
-            prompt_data, eval_paths = MilesRecipe._resolve_data_paths(dataset)
-            needs_prepare = not os.path.exists(prompt_data)
-            if dataset.always_prepare and os.path.exists(prompt_data):
-                data_dir = os.path.dirname(prompt_data)
-                print(f"always_prepare=True - removing {data_dir}")
-                shutil.rmtree(data_dir, ignore_errors=True)
-                needs_prepare = True
-            if needs_prepare:
-                print(f"Preparing dataset ({prompt_data})...")
-                dataset.prepare(prompt_data, eval_paths)
+            wrote_data = write_dataset_if_needed(dataset, dataset_path)
+            if eval_dataset is not None and eval_dataset_path is not None:
+                wrote_data = (
+                    write_dataset_if_needed(
+                        eval_dataset,
+                        eval_dataset_path,
+                    )
+                    or wrote_data
+                )
+            if wrote_data:
                 await data_volume.commit.aio()
-            dataset.validate_prepared(prompt_data)
-            for ep in (eval_paths or {}).values():
-                dataset.validate_prepared(ep)
 
         if cluster.is_head:
             try:
@@ -1162,7 +1189,15 @@ def build_miles_app(
                     "so resuming into one of these would load a partial save."
                 )
             try:
-                cmd = build_train_cmd(miles, MILES_ROOT, model=model, dataset=dataset)
+                cmd = build_train_cmd(
+                    miles,
+                    MILES_ROOT,
+                    model=model,
+                    dataset=dataset,
+                    eval_dataset=eval_dataset,
+                    dataset_path=dataset_path,
+                    eval_dataset_path=eval_dataset_path,
+                )
             finally:
                 miles.save = original_save
                 miles.load = original_load

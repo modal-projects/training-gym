@@ -56,28 +56,14 @@ SYSTEM_PROMPT = (
 )
 
 
-class RhymeInstructionDataset(HuggingFaceDataset):
-    """Self-contained Alpaca instructions; the label is the reference answer."""
-
-    hf_repo = "tatsu-lab/alpaca"
-    input_column = "instruction"
-    output_column = "output"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
-    system_prompt = SYSTEM_PROMPT
-    prompt_template = "{input}"
-
-    def load(self, split: str = "all"):
-        from datasets import load_dataset
-
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        ds = ds.filter(
-            lambda r: not r["input"].strip() and 60 <= len(r["output"]) <= 600
-        )
-        if self.n_rows:
-            ds = ds.select(range(min(self.n_rows, len(ds))))
-        return ds
+rhyme_dataset = HuggingFaceDataset(
+    hf_repo="tatsu-lab/alpaca",
+    hf_split=f"train[:512]",
+    input_column="instruction",
+    output_column="output",
+    input_format="text",
+    system_prompt=SYSTEM_PROMPT,
+)
 ```
 
 Next, it defined the reward function. Here, we care about the model's ability to both rhyme and answer the user's question. As our [intro tutorial](https://gym.modal.dev/tutorials/rl_basics) shows, NLTK’s [CMU Pronouncing Dictionary](https://github.com/prosegrinder/python-cmudict) is a useful library for measuring the former.
@@ -286,10 +272,10 @@ def _image_overlay(image):
     )
 
 
-def build_config(*, num_rollout: int, n_rows: int, save_interval: int) -> TrainConfig:
+def build_config(*, num_rollout: int, save_interval: int) -> TrainConfig:
     return TrainConfig(
         model=Qwen3_4B(),
-        dataset=RhymeInstructionDataset(n_rows=n_rows),
+        dataset=rhyme_dataset,
         recipe=Qwen3_4B_Recipe(
             custom_rm_function=rhyme_rm,
             num_rollout=num_rollout,
@@ -312,7 +298,7 @@ Before making [GPUs go Brrr](https://hazyresearch.stanford.edu/blog/2024-05-12-t
 Following suit, it does a one-step run:
 
 ```python
-training_run = build_config(num_rollout=1, n_rows=512, save_interval=1)
+training_run = build_config(num_rollout=1, save_interval=1)
 run = training_run.launch()
 print(f"training_run_id: {run.training_run_id}")
 ```

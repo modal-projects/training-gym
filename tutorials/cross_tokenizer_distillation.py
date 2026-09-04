@@ -422,7 +422,7 @@ def run_eval(deployment, *, ready_timeout, max_concurrency: int = 4):
         return bfcl_eval_fn(deployment, example)
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        rows = list(executor.map(_score_one, eval_dataset.load()))
+        rows = list(executor.map(_score_one, eval_dataset.rows()))
     mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
     return mean, rows
 

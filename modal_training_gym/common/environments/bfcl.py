@@ -17,6 +17,7 @@ shape as :mod:`.base`.
 from __future__ import annotations
 
 import ast
+import hashlib
 import inspect
 import json
 import os
@@ -591,12 +592,6 @@ class BfclMultiTurnDataset(DatasetConfig):
     Last :attr:`config`.eval_tail ids are held out as eval.
     """
 
-    input_key: str = "messages"
-    label_key: str = "label"
-    # JSON-lines output (the gym default is parquet).
-    output_format: str = "jsonl"
-    writes_eval_paths: bool = False
-
     def __init__(
         self,
         split: str = "train",
@@ -606,8 +601,33 @@ class BfclMultiTurnDataset(DatasetConfig):
         self._split = split
         self.hf_split = split
         self.config = config if config is not None else BfclMultiTurnConfig()
+        self._options = dict(kwargs)
         for k, v in kwargs.items():
             setattr(self, k, v)
+
+    def cache_key(self) -> str:
+        payload = json.dumps(
+            {
+                "split": self._split,
+                "config": {
+                    "category": self.config.category,
+                    "eval_tail": self.config.eval_tail,
+                    "obs_limit": self.config.obs_limit,
+                },
+                "options": self._options,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        fingerprint = hashlib.sha256(payload.encode()).hexdigest()[:16]
+        return f"bfcl-{self.config.category}-{self._split}-{fingerprint}"
+
+    def input_key(self) -> str:
+        return "messages"
+
+    def label_key(self) -> str:
+        return "label"
 
     def _entries(self) -> list[dict]:
         return _load_jsonl(
@@ -674,16 +694,5 @@ class BfclMultiTurnDataset(DatasetConfig):
             if i in entries_by_id and i in gt_by_id and gt_by_id[i] and any(gt_by_id[i])
         ]
 
-    def load(self, split: str = "all") -> list[dict]:
-        if split in ("train", "eval"):
-            self._split = split
-            self.hf_split = split
+    def rows(self) -> list[dict]:
         return self._load_split()
-
-    def prepare(self, path: str, eval_paths: dict | None = None) -> None:
-        """Write this instance's split to ``path``. ``eval_paths`` is ignored."""
-        del eval_paths  # train/eval are separate DatasetConfig instances
-        rows = self._load_split()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            f.writelines(json.dumps(r) + "\n" for r in rows)
