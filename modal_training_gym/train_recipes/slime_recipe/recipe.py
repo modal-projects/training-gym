@@ -45,6 +45,7 @@ _SLIME_SKIP = {
     "local_slime",
     "slime_git_repository",
     "slime_git_revision",
+    "data_volume_name",
     "memory",
     "cpu",
     "cloud",
@@ -124,6 +125,9 @@ class SlimeRecipe(BaseTrainRecipe):
         slime_git_revision:
             Full 40-character commit SHA fetched from ``slime_git_repository``.
             Branches and tags are rejected because they can move between runs.
+        data_volume_name:
+            Existing Modal data volume to mount at ``/data``. When unset, the
+            launcher derives a volume name from the concrete recipe class.
         memory:
             Modal Function memory request/limit in MiB.
         cpu:
@@ -412,6 +416,7 @@ class SlimeRecipe(BaseTrainRecipe):
     local_slime: str | None = None
     slime_git_repository: str | None = None
     slime_git_revision: str | None = None
+    data_volume_name: str | None = None
     memory: int | tuple[int, int] | None = None
     cpu: float | tuple[float, float] | None = None
     cloud: str | None = None

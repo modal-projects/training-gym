@@ -68,9 +68,9 @@ def _model_recipe_classes() -> list[type[SlimeRecipe | MilesRecipe]]:
 def test_model_recipes_only_override_framework_defaults(
     recipe_cls: type[SlimeRecipe | MilesRecipe],
 ) -> None:
-    framework_cls = SlimeRecipe if issubclass(recipe_cls, SlimeRecipe) else MilesRecipe
+    baseline_cls = recipe_cls.__mro__[1]  # mro[1] corresponds to the parent class
     defaults = {}
-    for field in dataclasses.fields(framework_cls):
+    for field in dataclasses.fields(baseline_cls):
         if field.default is dataclasses.MISSING:
             if field.default_factory is dataclasses.MISSING:
                 continue

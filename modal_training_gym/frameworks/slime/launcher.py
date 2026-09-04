@@ -73,6 +73,7 @@ from modal_training_gym.common.metrics import (
     metric_secrets,
     preflight_metric,
 )
+from modal_training_gym.common.trackio import resolve_trackio_destination
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.status import SlimeStatus
 
@@ -462,6 +463,8 @@ def build_slime_app(
     if slime.image_env:
         image = image.env(slime.image_env)
 
+    if slime.metrics is not None and slime.metrics.provider == "trackio":
+        resolve_trackio_destination(slime.metrics)
     image = apply_metric_image(image, slime.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
@@ -617,7 +620,8 @@ def build_slime_app(
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
+    data_volume_name = slime.data_volume_name or f"{volume_prefix}-data"
+    data_volume = Volume.from_name(data_volume_name, create_if_missing=True)
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
         resolve_checkpoint_volumes(
             checkpoint,
@@ -972,7 +976,20 @@ def build_slime_app(
         print(f"Training run id: {training_run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
-            "recipe": _serialize_slime_params(slime, dataset=dataset, model=model),
+            # These fields are in _SLIME_SKIP, so _serialize_slime_params drops
+            # them; record them here so the run shows what it actually used.
+            "recipe": {
+                **_serialize_slime_params(slime, dataset=dataset, model=model),
+                **{
+                    key: value
+                    for key, value in (
+                        ("slime_git_repository", slime.slime_git_repository),
+                        ("slime_git_revision", slime.slime_git_revision),
+                        ("data_volume_name", slime.data_volume_name),
+                    )
+                    if value
+                },
+            },
             "metrics": metric_metadata(
                 slime.metrics,
                 entity=metric_entity,
