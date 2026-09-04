@@ -85,6 +85,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [DatasetConfig](https://gym.modal.dev/reference/datasetconfig)
 - [HuggingFaceDataset](https://gym.modal.dev/reference/huggingfacedataset)
 - [HarborDataset](https://gym.modal.dev/reference/harbordataset)
+- [OnlineRollout](https://gym.modal.dev/reference/onlinerollout)
 
 ### Recipes
 

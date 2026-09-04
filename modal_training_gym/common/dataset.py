@@ -665,3 +665,30 @@ class MultimodalDataset(DatasetConfig):
     def rows(self) -> Iterable[DatasetRow]:
         for row in self.source_rows():
             yield self._to_row(row)
+
+
+class OnlineRollout(DatasetConfig):
+    """Placeholder rows that size a live generate batch."""
+
+    def __init__(self, n_rows: int) -> None:
+        if n_rows < 1:
+            raise TrainingGymConfigError(
+                f"OnlineRollout n_rows must be a positive integer; got {n_rows!r}"
+            )
+        self.n_rows = n_rows
+
+    def cache_key(self) -> str | None:
+        return f"online-rollout-{self.n_rows}"
+
+    def input_key(self) -> str:
+        return "prompt"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def apply_chat_template(self) -> bool:
+        return False
+
+    def rows(self) -> Iterable[DatasetRow]:
+        for i in range(self.n_rows):
+            yield {self.input_key(): "", self.label_key(): str(i)}
