@@ -72,6 +72,7 @@ from modal_training_gym.common.metrics import (
     metric_secrets,
     preflight_metric,
 )
+from modal_training_gym.common.trackio import resolve_trackio_destination
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.status import SlimeStatus
 
@@ -462,8 +463,6 @@ def build_slime_app(
         image = image.env(slime.image_env)
 
     if slime.metrics is not None and slime.metrics.provider == "trackio":
-        from modal_training_gym.common.trackio import resolve_trackio_destination
-
         resolve_trackio_destination(slime.metrics)
     image = apply_metric_image(image, slime.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
@@ -620,9 +619,8 @@ def build_slime_app(
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume = Volume.from_name(
-        slime.data_volume_name or f"{volume_prefix}-data", create_if_missing=True
-    )
+    data_volume_name = slime.data_volume_name or f"{volume_prefix}-data"
+    data_volume = Volume.from_name(data_volume_name, create_if_missing=True)
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
         resolve_checkpoint_volumes(
             checkpoint,
@@ -977,9 +975,8 @@ def build_slime_app(
         print(f"Training run id: {training_run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
-            # _fields() omits _SLIME_SKIP, so the source overlay and data volume
-            # would otherwise leave no trace of what a run actually used. App
-            # tags are capped at 8 and already spoken for, so record them here.
+            # These fields are in _SLIME_SKIP, so _serialize_slime_params drops
+            # them; record them here so the run shows what it actually used.
             "recipe": {
                 **_serialize_slime_params(slime, dataset=dataset, model=model),
                 **{

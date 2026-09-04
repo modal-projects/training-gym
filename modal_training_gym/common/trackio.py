@@ -313,62 +313,47 @@ def has_trackio_destination(config: TrackioConfig) -> bool:
 def resolve_trackio_destination(
     config: TrackioConfig, *, app_name: str = _DEFAULT_MODAL_APP_NAME
 ) -> None:
-    """Point a destination-less config at the Trackio server already deployed.
+    """Point a bare ``TrackioConfig(project=...)`` at the deployed Trackio server.
 
-    A recipe can name a project without knowing where the workspace's Trackio
-    lives, so a bare ``TrackioConfig(project=...)`` resolves to the deployed
-    server here. Left unresolved it would log to a Trackio local to the
-    training container, whose database dies with the container — the run
-    succeeds and the metrics are simply gone — so raise when nothing is
-    deployed rather than let that happen silently.
+    Unresolved, Trackio logs to a database local to the training container and
+    the metrics die with it, so raise instead when nothing is deployed.
     """
     if has_trackio_destination(config):
         return
     url = deployed_trackio_url(app_name)
     if not url:
         raise TrainingGymConfigError(
-            f"TrackioConfig names project {config.project!r} but has no "
-            f"destination and no {app_name!r} server is deployed, so metrics "
-            "would be written to a Trackio local to the training container and "
-            "lost when it exits. Run TrackioConfig.deploy_to_modal(project=...) "
-            "once to deploy one, or set space_id= for a Hugging Face Space or "
-            "server_url= for your own."
+            f"TrackioConfig(project={config.project!r}) has no destination and no "
+            f"{app_name!r} server is deployed. Run TrackioConfig.deploy_to_modal() "
+            "once, or set space_id= or server_url=."
         )
     secret_name = config.modal_secret_name
     if not secret_name or secret_name == "huggingface-secret":
-        # Ingestion authenticates with the deployed server's write token, whose
-        # name is only a convention: deploy_to_modal() takes modal_secret_name.
-        # Guessing a name that doesn't exist would mount nothing and every
-        # metric write would 401 -- the silent loss this function exists to
-        # prevent -- so confirm it before adopting it.
+        # The write-token name is only a convention (deploy_to_modal takes
+        # modal_secret_name), so confirm it exists before adopting it.
         candidate = f"_{app_name}-write-token"
         if not _secret_exists(candidate):
             raise TrainingGymConfigError(
-                f"Discovered the {app_name!r} Trackio server at {url}, but no "
-                f"{candidate!r} Secret exists to authenticate ingestion with. "
-                "A server deployed with a custom modal_secret_name cannot be "
-                "resolved by convention: pass the TrackioConfig that "
-                "deploy_to_modal() returned, or set server_url= and "
-                "modal_secret_name= explicitly."
+                f"Found the {app_name!r} Trackio server at {url} but no "
+                f"{candidate!r} Secret. If it was deployed with a custom "
+                "modal_secret_name, pass the config deploy_to_modal() returned, "
+                "or set server_url= and modal_secret_name=."
             )
         secret_name = candidate
 
-    # Commit only once everything resolved. Writing the URLs before the secret
-    # check could fail would leave the config looking resolved, so a retry
-    # would skip discovery and launch with no write token -- metrics silently
-    # 401ing, which is what this function exists to prevent.
+    # Mutate only after everything resolved, so a failed attempt stays retryable.
     config.server_url = url
     config.dashboard_url = url
     config.modal_secret_name = secret_name
 
 
 def require_trackio_destination(config: TrackioConfig) -> None:
-    """Assert a destination was resolved. Runs in the container, after launch."""
+    """In-container check that a destination was resolved before launch."""
     if has_trackio_destination(config):
         return
     raise TrainingGymConfigError(
-        f"TrackioConfig names project {config.project!r} but reached the "
-        "training container with no destination; metrics would be lost."
+        f"TrackioConfig(project={config.project!r}) reached the training "
+        "container with no destination; metrics would be lost."
     )
 
 
@@ -457,11 +442,9 @@ def install_wandb_shim() -> None:
         *_args: Any,
         **_kwargs: Any,
     ) -> Any:
-        # trackio.log() resolves the run from a ContextVar, which a thread
-        # started after init() cannot see. W&B's run is process-global and
-        # callers depend on that: slime's SGLang engine-metrics thread guards
-        # on `wandb.run is not None` and then logs. Go through the run object
-        # we already hold so any thread reaches the same run.
+        # trackio.log() reads the run from a ContextVar that threads started
+        # after init() can't see (slime's engine-metrics thread, for one), so
+        # go through the run object directly.
         run = shim.run
         if run is None:
             return trackio.log(data, step=step)

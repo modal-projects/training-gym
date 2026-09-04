@@ -68,12 +68,7 @@ def _model_recipe_classes() -> list[type[SlimeRecipe | MilesRecipe]]:
 def test_model_recipes_only_override_framework_defaults(
     recipe_cls: type[SlimeRecipe | MilesRecipe],
 ) -> None:
-    # A preset may subclass another preset rather than the framework class, so
-    # the baseline is whatever this class actually inherits. For a preset that
-    # subclasses the framework directly the two are the same; for one built on
-    # another preset, resetting a field back to the framework default is a real
-    # override, not a restatement.
-    baseline_cls = recipe_cls.__mro__[1]
+    baseline_cls = recipe_cls.__mro__[1]  # mro[1] corresponds to the parent class
     defaults = {}
     for field in dataclasses.fields(baseline_cls):
         if field.default is dataclasses.MISSING:
