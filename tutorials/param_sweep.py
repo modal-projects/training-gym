@@ -8,6 +8,8 @@
 # and error-prone if not properly guided or documented. This is made a first-class
 # operation in the Gym so you can move faster and spend less.
 
+import time
+
 from modal_training_gym import (
     HuggingFaceDataset,
     Qwen3_5_4B,
@@ -82,8 +84,11 @@ if group.failures:
 
 results = []
 for launch in launches:
-    result = launch.result()
-    results.append(result)
-    print(f"completed {result.training_run_id} (group_id={result.group_id})")
+    while True:
+        if launch.done():
+            break
+        time.sleep(30)
+    results.append(launch)
+    print(f"completed {launch.training_run_id} (group_id={launch.group_id})")
 
 print(f"group {group.group_id}: {len(results)} runs completed")

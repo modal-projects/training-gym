@@ -16,6 +16,7 @@ import nltk
 from nltk.corpus import cmudict
 
 import re
+import time
 
 from modal_training_gym import (
     Endpoint,
@@ -212,8 +213,11 @@ print(f"run id: {run.training_run_id}")
 #
 # We'll get the latest checkpoint and create a new Endpoint so we may evaluate it.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
+while True:
+    checkpoint = run.latest_checkpoint()
+    if run.done():
+        break
+    time.sleep(30)
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
@@ -258,8 +262,11 @@ print(f"run id: {new_run.training_run_id}")
 #
 # Once again, we'll create a new Endpoint for the new checkpoint and run evals on it.
 
-new_result = new_run.result()
-new_checkpoint = new_result.checkpoints()[-1]
+while True:
+    new_checkpoint = new_run.latest_checkpoint()
+    if new_run.done():
+        break
+    time.sleep(30)
 print(new_checkpoint.path)
 
 new_deployment = Endpoint.launch(

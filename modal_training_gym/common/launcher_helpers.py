@@ -36,7 +36,9 @@ from modal_training_gym.common.run import (
     metric_run_id_for_attempt,
     record_metric_attempt,
     run_scoped_save_root,
+    set_checkpoint_location,
 )
+from modal_training_gym.common.checkpoint import require_within_volume_mount
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.metrics import MetricConfig, metric_metadata
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
@@ -242,6 +244,9 @@ async def init_training_run_record(
     metric_cfg: "MetricConfig | None",
     metric_entity: str,
     framework_status_token: str,
+    checkpoint_dir: str,
+    checkpoints_volume_name: str,
+    checkpoints_mount_path: str,
 ) -> tuple[Any, str, str]:
     """Create or resume the ``TrainingRun`` record for this attempt and persist
     the framework-status token. Returns
@@ -269,6 +274,12 @@ async def init_training_run_record(
             created_at=created_at,
             started_at=created_at,
         )
+    set_checkpoint_location(
+        run_record,
+        checkpoint_dir=checkpoint_dir,
+        checkpoints_volume_name=checkpoints_volume_name,
+        checkpoints_mount_path=checkpoints_mount_path,
+    )
     attempt_count = mark_training_attempt_started(
         run_record, started_at=int(time.time())
     )
@@ -309,18 +320,19 @@ def compute_save_root(
     mounted_save_root: str,
     training_run_id: str,
 ) -> str:
-    """Resolve the run-scoped checkpoint save root and ensure it exists. A
-    configured ``save`` equal to the recipe default is redirected to the mounted
-    volume path so checkpoints land on the checkpoints Volume."""
+    """Resolve the run-scoped checkpoint save root. A configured ``save`` equal
+    to the recipe default is redirected to the mounted volume path so checkpoints
+    land on the checkpoints Volume."""
     configured_save_root = str(save).rstrip("/") if save else mounted_save_root
-    save_root = run_scoped_save_root(
+    save_root = (
         mounted_save_root
         if configured_save_root == recipe_default_save_root
-        else configured_save_root,
-        training_run_id,
+        else configured_save_root
     )
-    os.makedirs(save_root, exist_ok=True)
-    return save_root
+    return require_within_volume_mount(
+        run_scoped_save_root(save_root, training_run_id),
+        mounted_save_root,
+    )[0]
 
 
 def build_train_result(

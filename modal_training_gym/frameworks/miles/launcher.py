@@ -64,6 +64,9 @@ from modal_training_gym.common.launcher_helpers import (
     ship_callable,
 )
 from modal_training_gym.common.status import MilesStatus
+from modal_training_gym.common.torch_dist_checkpoint import (
+    is_complete_torch_dist_checkpoint_dir,
+)
 from modal_training_gym.train_recipes.miles_recipe.recipe import (
     CHECKPOINTS_PATH,
     DATA_PATH,
@@ -123,15 +126,13 @@ _REPORTING_PATCH_COMMANDS = (
     f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
 )
 
-# Megatron-level torch_dist save fixes, shared with the slime image. Both no-op when
-# their target source doesn't match, so they are safe for every miles image; the
-# checkpoint-save one is skipped in the shell below when its target is absent
-# entirely, since guarding inside the script would change the bytes the slime image
-# already builds from.
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_PATCH_CHECKPOINT_COMMIT_B64 = encode_patch(
+    "patch_checkpoint_commit", _MEGATRON_PATCHES
+)
 _MEGATRON_TORCH_STRATEGY_PY = (
     "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
 )
@@ -289,12 +290,13 @@ def _release_convert_lock(run_id: str, volume_name: str, save_path: str) -> None
 def _is_resumable_checkpoint(path: str) -> bool:
     """Whether ``path`` holds a training save that can be resumed from.
 
-    Looser than ``_is_complete_torch_dist_checkpoint`` because miles writes more than
-    one save shape: a LoRA run stores ``adapter/`` with per-rank ``.pt`` files and no
-    ``.metadata``/``common.pt``/``.distcp`` at all, so the conversion predicate would
-    report every adapter checkpoint as absent and silently restart from ``ref_load``.
-    Only the crashed-torch_dist signature is rejected — ``.distcp`` shards present but
-    the ``.metadata`` that is written last missing.
+    Looser than ``is_complete_torch_dist_checkpoint_dir`` because miles writes
+    more than one save shape: a LoRA run stores ``adapter/`` with per-rank
+    ``.pt`` files and no ``.metadata``/``common.pt``/``.distcp`` at all, so the
+    conversion predicate would report every adapter checkpoint as absent and
+    silently restart from ``ref_load``. Only the crashed-torch_dist signature is
+    rejected: ``.distcp`` shards present but the ``.metadata`` written last
+    missing.
     """
     try:
         names = os.listdir(path)
@@ -319,29 +321,6 @@ def _unresumable_save_dirs(save_root: str) -> list[str]:
         if (name == "release" or name.startswith("iter_"))
         and os.path.isdir(os.path.join(save_root, name))
         and not _is_resumable_checkpoint(os.path.join(save_root, name))
-    )
-
-
-def _is_complete_torch_dist_checkpoint(path: str) -> bool:
-    """Whether ``path`` holds a *finished* torch_dist checkpoint.
-
-    ``.metadata`` is written last, by ``save_state_dict_async_finalize``, so its
-    presence is what separates a completed save from a crashed one. Without this
-    check ``torch_dist_resume_checkpoint``'s ``iter_*`` scan accepts any directory
-    (its default ``is_complete`` is ``os.path.isdir``), so a conversion that died
-    mid-write is reported as a cache hit and silently skips re-conversion — which
-    then feeds partial weights to training. A crashed conversion does leave
-    ``common.pt`` and the ``.distcp`` shards behind, so those alone are not enough
-    to tell the two apart.
-    """
-    try:
-        names = os.listdir(path)
-    except OSError:
-        return False
-    return (
-        ".metadata" in names
-        and "common.pt" in names
-        and any(name.endswith(".distcp") for name in names)
     )
 
 
@@ -418,10 +397,10 @@ def build_ray_runtime_env(
         "LD_LIBRARY_PATH": _compose_ld_library_path(),
         "TRAINING_GYM_SUBSTEP_TIMING": substep_timing,
     }
-    env_vars.update(extra_env or {})
     env_vars.update(metric_env)
     env_vars.update(environment)
     env_vars.update(timing_debug_env())
+    env_vars.update(extra_env or {})
     if framework_status_token:
         # Applied after `environment` so a recipe override can't blank the
         # dashboard auth token by accident.
@@ -582,6 +561,10 @@ def build_miles_app(
         )
         setattr(miles, attr, None)
 
+    image = image.run_commands(
+        f"echo {_PATCH_CHECKPOINT_COMMIT_B64} | base64 -d | python3"
+    )
+
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
     data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
@@ -590,6 +573,12 @@ def build_miles_app(
             volume_prefix=volume_prefix,
             default_mount_path=str(CHECKPOINTS_PATH),
         )
+    )
+    checkpoint_dir = compute_save_root(
+        miles.save,
+        recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
+        mounted_save_root=checkpoints_mount_path,
+        training_run_id=training_run_id,
     )
     all_volumes: dict[str | PurePosixPath, Any] = {
         str(HF_CACHE_PATH): hf_cache_volume,
@@ -692,7 +681,7 @@ def build_miles_app(
 
         save_path = str(miles.ref_load)
         if has_torch_dist_checkpoint(
-            save_path, is_complete=_is_complete_torch_dist_checkpoint
+            save_path, is_complete=is_complete_torch_dist_checkpoint_dir
         ):
             print(
                 f"Found existing torch_dist checkpoint at {save_path}; "
@@ -728,7 +717,7 @@ def build_miles_app(
                     for name in sorted(os.listdir(save_path))
                     if (name == "release" or name.startswith("iter_"))
                     and os.path.isdir(os.path.join(save_path, name))
-                    and not _is_complete_torch_dist_checkpoint(
+                    and not is_complete_torch_dist_checkpoint_dir(
                         os.path.join(save_path, name)
                     )
                 ]
@@ -865,7 +854,7 @@ def build_miles_app(
                     # Fail loudly here rather than leaving a partial checkpoint for a later
                     # run to mistake for a cache hit.
                     if not has_torch_dist_checkpoint(
-                        save_path, is_complete=_is_complete_torch_dist_checkpoint
+                        save_path, is_complete=is_complete_torch_dist_checkpoint_dir
                     ):
                         raise RuntimeError(
                             f"Conversion finished but {save_path} holds no complete "
@@ -1001,6 +990,9 @@ def build_miles_app(
                 metric_cfg=miles.metrics,
                 metric_entity=metric_entity,
                 framework_status_token=framework_status_token,
+                checkpoint_dir=checkpoint_dir,
+                checkpoints_volume_name=checkpoints_volume_name,
+                checkpoints_mount_path=checkpoints_mount_path,
             )
 
         # In-flight status updates are fire-and-forget HTTP POSTs to the
@@ -1122,12 +1114,8 @@ def build_miles_app(
                 if isinstance(miles.metrics, WandbConfig):
                     miles.metrics.key = wandb_key
 
-            save_root = compute_save_root(
-                miles.save,
-                recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
-                mounted_save_root=checkpoints_mount_path,
-                training_run_id=training_run_id,
-            )
+            save_root = checkpoint_dir
+            os.makedirs(save_root, exist_ok=True)
 
             original_save = miles.save
             original_load = miles.load
@@ -1192,6 +1180,7 @@ def build_miles_app(
                 extra_env={
                     "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
+                    "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": checkpoints_volume_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(miles.num_rollout),
                     "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
                     "TRAINING_GYM_CAPTURE_TRACE": (

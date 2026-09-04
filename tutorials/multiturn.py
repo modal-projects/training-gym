@@ -20,6 +20,7 @@
 
 import json
 import re
+import time
 
 from modal_training_gym import (
     DatasetConfig,
@@ -401,8 +402,11 @@ print(f"run id: {run.training_run_id}")
 
 # ## Evaluate trained checkpoint
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
+while True:
+    checkpoint = run.latest_checkpoint()
+    if run.done():
+        break
+    time.sleep(30)
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )
