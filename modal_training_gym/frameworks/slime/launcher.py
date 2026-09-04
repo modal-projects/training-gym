@@ -165,6 +165,7 @@ _PATCH_LOG_ELIDE_B64 = encode_patch("patch_log_elide", _SLIME_PATCHES)
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
+_PATCH_DIST_CKPT_NOFORK_B64 = encode_patch("patch_dist_ckpt_nofork", _MEGATRON_PATCHES)
 # OPD / multi-turn: zero-std metrics must skip non-numeric rewards (dict/None).
 _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATCHES)
 _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
@@ -193,6 +194,7 @@ _SLIME_EXTERNAL_PATCHES_B64 = (
     _PATCH_BRIDGE_NONE_TASK_B64,
     _PATCH_LOG_ELIDE_B64,
     _PATCH_DIST_CKPT_QUANTIZED_B64,
+    _PATCH_DIST_CKPT_NOFORK_B64,
 )
 
 
