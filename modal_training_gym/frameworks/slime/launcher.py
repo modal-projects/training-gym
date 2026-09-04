@@ -1146,7 +1146,6 @@ def build_slime_app(
                 "env_vars": {
                     "no_proxy": f"127.0.0.1,{cluster.head_addr}",
                     "MASTER_ADDR": cluster.head_addr,
-                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(slime.num_rollout),
                     "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
@@ -1165,6 +1164,10 @@ def build_slime_app(
                     ),
                     **slime.environment,
                     **timing_debug_env(),
+                    # After **slime.environment: a recipe's env dict must not be
+                    # able to reassign the run's identity, which keys metrics,
+                    # the run record, and the framework status callbacks.
+                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
             }
