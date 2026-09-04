@@ -667,6 +667,17 @@ def _sample_to_dict(
                 continue
             if _is_small_json_value(value):
                 metadata[key] = value
+            elif isinstance(value, dict):
+                # One oversized entry (an agent loop stashing its full prompt
+                # next to its turn counts and timings) should not erase the
+                # whole tag; keep the sub-entries that fit on their own.
+                compact = {
+                    sub_key: sub_value
+                    for sub_key, sub_value in value.items()
+                    if sub_value is not None and _is_small_json_value(sub_value)
+                }
+                if compact and _is_small_json_value(compact):
+                    metadata[key] = compact
         # Multi-turn trajectory (capped to the first N samples): lets the
         # dashboard's ConversationView render the full agent conversation.
         # Without it, multi-turn rollouts collapse to a single flat block.

@@ -102,19 +102,66 @@ def _clean_prompt(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
+# A multi-turn agent loop that appends later turns to the response verbatim
+# (chat-template tokens included) yields one flat string per episode:
+#   {assistant}<|im_end|>\n<|im_start|>user\n<tool_response>...</tool_response><|im_end|>\n
+#   <|im_start|>assistant\n<think>...</think>...<tool_call>...</tool_call><|im_end|>...
+_CHAT_TURN_RE = re.compile(r"<\|im_start\|>(\w+)\n")
+_TOOL_RESPONSE_RE = re.compile(
+    r"^\s*<tool_response>\s*(.*?)\s*</tool_response>\s*$", re.DOTALL
+)
+
+
+def _transcript_messages(text: str) -> list[dict[str, str]] | None:
+    """Split a flattened multi-turn chat transcript into role-tagged messages.
+
+    Returns ``None`` for a plain single-turn response. A ``user`` turn that is
+    nothing but a ``<tool_response>`` block is the environment answering a tool
+    call, so it is tagged ``tool`` and unwrapped for display.
+    """
+    if "<|im_start|>" not in text:
+        return None
+    pieces = _CHAT_TURN_RE.split(text)
+    turns = [("assistant", pieces[0]), *zip(pieces[1::2], pieces[2::2])]
+    messages: list[dict[str, str]] = []
+    for role, body in turns:
+        body = body.replace("<|im_end|>", "").replace("<|endoftext|>", "").strip()
+        if not body:
+            continue
+        if role == "user" and (match := _TOOL_RESPONSE_RE.match(body)):
+            role, body = "tool", match.group(1)
+        messages.append({"role": role, "content": body})
+    return messages if len(messages) > 1 else None
+
+
 def _apply_parsed(rows: object) -> None:
     if not isinstance(rows, list):
         return
     for row in rows:
         if not isinstance(row, dict):
             continue
+        raw = row.get("response")
+        transcript = _transcript_messages(raw) if isinstance(raw, str) else None
+        if transcript:
+            metadata = row.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                row["metadata"] = metadata
+            # The dashboard renders trajectory_messages turn by turn (roles,
+            # per-turn thinking, tool calls); a rollout hook that already
+            # recorded its own structured trajectory wins.
+            metadata.setdefault("trajectory_messages", transcript)
         parsed = row.get("parsed_response")
         if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
-            raw = row.get("response")
             if isinstance(raw, str):
                 row["raw_response"] = raw
-            row["response"] = parsed.get("content") or ""
-            if parsed.get("thinking"):
+            # The parser sees a single turn, so for a transcript its content is
+            # the last turn's text, which is empty when that turn is a tool
+            # call. Never replace a real response with nothing.
+            row["response"] = parsed.get("content") or (
+                raw if isinstance(raw, str) else ""
+            )
+            if parsed.get("thinking") and not transcript:
                 row["thinking"] = parsed["thinking"]
             if parsed.get("tool_calls"):
                 row["tool_calls"] = parsed["tool_calls"]
