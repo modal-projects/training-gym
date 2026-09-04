@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from scripts.diff_impact import analyze_diff
 
 
@@ -34,3 +36,14 @@ def test_flat_tutorial_diff_maps_to_tutorial() -> None:
     assert "on_policy_distillation" in {
         slug for slug, _, _ in report.affected_tutorials
     }
+
+
+@pytest.mark.parametrize(
+    ("path", "slug"),
+    [("tutorials/swe_bench/env.py", "swe_bench")],
+)
+def test_sibling_source_diff_maps_to_nested_tutorial(path: str, slug: str) -> None:
+    report = analyze_diff(f"diff --git a/{path} b/{path}\n")
+    reasons_by_slug = {slug: reasons for slug, _, reasons in report.affected_tutorials}
+
+    assert reasons_by_slug[slug] == ("tutorial source changed",)

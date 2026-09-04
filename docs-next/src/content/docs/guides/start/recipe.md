@@ -121,7 +121,7 @@ For logging purposes, you can attach metadata to each sample for more observabil
 
 When your task requires something beyond a single-turn interaction, all it takes is implementing a [custom generate](https://miles.radixark.com/docs/user-guide/generate-endpoint) function.
 
-For an in-depth example, see the [multi-turn RL tutorial](https://gym.modal.dev/tutorials/multiturn/#multi-turn-environment-and-reward).
+For an in-depth example, see the [SWE agent RL tutorial](https://gym.modal.dev/tutorials/swe_bench/).
 
 ```python
 async def my_custom_generate(args, sample, sampling_params):

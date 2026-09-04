@@ -114,7 +114,7 @@ def score_haiku(response: str) -> float:
 # will serve your needs.
 #
 # See the
-# [multi-turn example](https://gym.modal.dev/tutorials/multiturn) for a basic
+# [SWE agent example](https://gym.modal.dev/tutorials/swe_bench) for an
 # example of creating your own dataset, or the
 # [DatasetConfig](https://gym.modal.dev/reference/datasetconfig) documentation
 # for a deeper dive.

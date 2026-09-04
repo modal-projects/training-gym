@@ -40,14 +40,13 @@ Repo: https://github.com/modal-projects/training-gym
 
 - [Getting started with RL](https://gym.modal.dev/tutorials/rl_basics)
 - [Code RL with Harbor hello-world + Modal sandboxes](https://gym.modal.dev/tutorials/sandboxes)
-- [Build an agent harness with a self-hosted model + Modal Sandboxes](https://gym.modal.dev/tutorials/agent_sandbox)
-- [Multi-turn RL: guess a number from 1 to 20](https://gym.modal.dev/tutorials/multiturn)
+- [Fully-async SWE agent RL with Qwen3.6-27B](https://gym.modal.dev/tutorials/swe_bench)
 - [Efficient inference using on-policy distillation](https://gym.modal.dev/tutorials/on_policy_distillation)
 - [Long chain-of-thought reasoning for large-scale RL](https://gym.modal.dev/tutorials/dapo)
 - [Speech transcription that's better, faster, and cheaper](https://gym.modal.dev/tutorials/audio_asr)
 - [Massively-parallel hyperparameter sweeps](https://gym.modal.dev/tutorials/param_sweep)
 - [GUI Grounding with Qwen3-VL-8B](https://gym.modal.dev/tutorials/computer_use)
-- [On-policy Distillation (OPD) Across Model Families](https://gym.modal.dev/tutorials/cross_tokenizer_distillation)
+- [On-policy Distillation (OPD) Across Model Families](https://gym.modal.dev/tutorials/cross_tok_distill)
 - [Frontier-scale training](https://gym.modal.dev/tutorials/multinode)
 
 ## Reference

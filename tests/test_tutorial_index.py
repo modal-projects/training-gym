@@ -15,12 +15,48 @@ from scripts.generate_llms_txt import (
     _render,
     flatten_doc_id,
 )
-from scripts.tutorial_index import parse_tutorial
+from scripts.tutorial_index import discover_tutorial_paths, parse_tutorial
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE_PAGES = tuple(
     path for path in sorted(GUIDES_DIR.rglob("*.md")) if path.stem != "index"
 )
+
+
+def test_discover_tutorial_paths_finds_flat_and_nested(tmp_path: Path) -> None:
+    (tmp_path / "flat.py").write_text("# ---\n# order: 0\n# ---\n# # Flat\n")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "main.py").write_text("# ---\n# order: 1\n# ---\n# # Nested\n")
+    (nested / "env.py").write_text("VALUE = 1\n")
+    (tmp_path / "helpers").mkdir()
+    (tmp_path / "helpers" / "env.py").write_text("VALUE = 2\n")
+
+    paths = discover_tutorial_paths(tmp_path)
+
+    assert paths == (tmp_path / "flat.py", nested / "main.py")
+
+
+def test_parse_tutorial_nested_slug_and_run_target(tmp_path: Path) -> None:
+    tutorial = tmp_path / "cross_tok_distill" / "main.py"
+    tutorial.parent.mkdir()
+    tutorial.write_text("# ---\n# order: 0\n# ---\n# # Nested\n")
+
+    entry = parse_tutorial(tutorial)
+
+    assert entry.slug == "cross_tok_distill"
+    assert entry.source_path == "tutorials/cross_tok_distill/main.py"
+    assert entry.run_command == "uv run -m tutorials.cross_tok_distill.main"
+
+
+def test_discover_tutorial_paths_rejects_slug_collision(tmp_path: Path) -> None:
+    (tmp_path / "duplicate.py").write_text("# ---\n# order: 0\n# ---\n# # Flat\n")
+    nested = tmp_path / "duplicate"
+    nested.mkdir()
+    (nested / "main.py").write_text("# ---\n# order: 1\n# ---\n# # Nested\n")
+
+    with pytest.raises(ValueError, match="Tutorial slug 'duplicate'"):
+        discover_tutorial_paths(tmp_path)
 
 
 @pytest.mark.parametrize("order", ["+0", "-0", "1_0"])

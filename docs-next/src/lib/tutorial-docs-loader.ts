@@ -1,9 +1,10 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import type { Loader, LoaderContext } from 'astro/loaders';
 import { flattenDocId } from './docs-sections';
+import { discoverTutorialEntries } from './tutorial-slugs';
 
 const TUTORIAL_ENTRY_PREFIX = 'tutorials/';
 const frontmatterFieldPattern = /^# ([a-z_]+):\s*(.*)$/;
@@ -90,6 +91,8 @@ const pyprojectPath = path.join(repoRoot, 'pyproject.toml');
 export interface Tutorial {
   path: string;
   slug: string;
+  runTarget: string;
+  sourcePath: string;
   order: number;
   title: string;
   body: string;
@@ -189,34 +192,40 @@ async function derivedMarkdownData(
   };
 }
 
-function formatRunCommand(slug: string, extras: string[]): string {
+function formatRunCommand(runTarget: string, extras: string[]): string {
   if (extras.length === 0) {
-    return `uv run tutorials/${slug}.py`;
+    return `uv run ${runTarget}`;
   }
-  return `uv run ${extras.map((pkg) => `--with ${pkg}`).join(' ')} tutorials/${slug}.py`;
+  return `uv run ${extras.map((pkg) => `--with ${pkg}`).join(' ')} ${runTarget}`;
 }
 
-async function readTutorial(fileName: string): Promise<Tutorial> {
-  const tutorialPath = path.join(tutorialsDirectory, fileName);
+async function readTutorial(
+  tutorialPath: string,
+  slug: string,
+  runTarget: string,
+  sourcePath: string,
+): Promise<Tutorial> {
   const source = await readFile(tutorialPath, 'utf8');
   const { order, title, deps, content } = parseTutorialMetadata(source, tutorialPath);
-  const slug = path.basename(fileName, '.py');
   return {
     path: tutorialPath,
     slug,
+    runTarget,
+    sourcePath,
     order,
     title,
     body: renderBody(content),
-    runCommand: formatRunCommand(slug, deps),
+    runCommand: formatRunCommand(runTarget, deps),
     deps,
   };
 }
 
 export async function loadTutorials(): Promise<Tutorial[]> {
-  const fileNames = (await readdir(tutorialsDirectory))
-    .filter((fileName) => fileName.endsWith('.py'))
-    .sort();
-  const tutorials = await Promise.all(fileNames.map((fileName) => readTutorial(fileName)));
+  const tutorials = await Promise.all(
+    (await discoverTutorialEntries(tutorialsDirectory)).map((entry) =>
+      readTutorial(entry.path, entry.slug, entry.runTarget, entry.sourcePath),
+    ),
+  );
   tutorials.sort((left, right) => left.order - right.order || left.slug.localeCompare(right.slug));
   const expectedOrders = tutorials.map((_, index) => index);
   const actualOrders = tutorials.map((tutorial) => tutorial.order);
@@ -262,6 +271,7 @@ export function tutorialDocsLoader(): Loader {
           order: tutorial.order,
           sidebar: { order: tutorial.order },
           runCommand: tutorial.runCommand,
+          sourcePath: tutorial.sourcePath,
         },
         tutorial.body,
         path.relative(fileURLToPath(context.config.root), tutorial.path),
@@ -301,8 +311,11 @@ export function tutorialDocsLoader(): Loader {
 
       const isTutorialSource = (changedPath: string) => {
         const resolvedPath = path.resolve(changedPath);
+        const relativePath = path.relative(tutorialsDirectory, resolvedPath);
         return (
-          path.dirname(resolvedPath) === tutorialsDirectory &&
+          relativePath !== '' &&
+          !relativePath.startsWith('..') &&
+          !path.isAbsolute(relativePath) &&
           path.extname(resolvedPath) === '.py'
         );
       };

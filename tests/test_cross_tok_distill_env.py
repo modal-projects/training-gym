@@ -1,39 +1,61 @@
-from modal_training_gym.common.environments import bfcl
-from modal_training_gym.common.environments.base import (
-    EvalVerdict,
-    Observation,
-    StepResult,
-    ToolCall,
-)
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+import pytest
+
+from modal_training_gym.common.models import ToolCall
 from modal_training_gym.train_recipes.base import BaseTrainRecipe
+
+ENV_PATH = (
+    Path(__file__).resolve().parents[1] / "tutorials" / "cross_tok_distill" / "env.py"
+)
+
+
+@pytest.fixture(scope="module")
+def bfcl_env():
+    spec = importlib.util.spec_from_file_location("cross_tok_distill_env", ENV_PATH)
+    assert spec
+    assert spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    yield module
+    sys.modules.pop(spec.name, None)
 
 
 class _FakeEnvironment:
-    def __init__(self) -> None:
+    def __init__(self, module) -> None:
+        self.module = module
         self.actions: list[ToolCall] = []
 
-    def step(self, action: ToolCall) -> StepResult:
+    def step(self, action: ToolCall):
         self.actions.append(action)
-        return StepResult(observation=Observation(text=f"result:{action.name}"))
+        return self.module.StepResult(
+            observation=self.module.Observation(text=f"result:{action.name}")
+        )
 
-    def evaluate(self) -> EvalVerdict:
-        return EvalVerdict(passed=True)
+    def evaluate(self):
+        return self.module.EvalVerdict(passed=True)
 
 
-def test_run_bfcl_episode_executes_calls_and_appends_observations(monkeypatch) -> None:
-    environment = _FakeEnvironment()
-    monkeypatch.setattr(bfcl, "build_env", lambda label, start_step: environment)
+def test_run_bfcl_episode_executes_calls_and_appends_observations(
+    bfcl_env, monkeypatch
+) -> None:
+    environment = _FakeEnvironment(bfcl_env)
+    monkeypatch.setattr(bfcl_env, "build_env", lambda label, start_step: environment)
     monkeypatch.setattr(
-        bfcl,
+        bfcl_env,
         "build_prefix_messages",
         lambda label, start_step: [{"role": "user", "content": "start"}],
     )
     monkeypatch.setattr(
-        bfcl,
+        bfcl_env,
         "tool_schemas_to_openai",
         lambda schemas: [{"type": "function", "function": {"name": "lookup"}}],
     )
-
     responses = iter(
         [
             {
@@ -50,14 +72,11 @@ def test_run_bfcl_episode_executes_calls_and_appends_observations(monkeypatch) -
         assert tools[0]["function"]["name"] == "lookup"
         return next(responses)
 
-    result = bfcl.run_bfcl_episode(
+    result = bfcl_env.run_bfcl_episode(
         {},
         start_step=2,
         generate=generate,
-        parse_response=lambda message: (
-            message["content"],
-            message["actions"],
-        ),
+        parse_response=lambda message: (message["content"], message["actions"]),
         max_turns=3,
     )
 
@@ -77,22 +96,21 @@ def test_run_bfcl_episode_executes_calls_and_appends_observations(monkeypatch) -
     }
 
 
-def test_run_bfcl_episode_advances_to_later_user_turns(monkeypatch) -> None:
-    environment = _FakeEnvironment()
+def test_run_bfcl_episode_advances_to_later_user_turns(bfcl_env, monkeypatch) -> None:
+    environment = _FakeEnvironment(bfcl_env)
     label = {
         "turns": [
             {"user": "first request", "calls": [{"name": "first"}]},
             {"user": "second request", "calls": [{"name": "second"}]},
         ]
     }
-    monkeypatch.setattr(bfcl, "build_env", lambda label, start_step: environment)
+    monkeypatch.setattr(bfcl_env, "build_env", lambda label, start_step: environment)
     monkeypatch.setattr(
-        bfcl,
+        bfcl_env,
         "build_prefix_messages",
         lambda label, start_step: [{"role": "user", "content": "first request"}],
     )
-    monkeypatch.setattr(bfcl, "tool_schemas_to_openai", lambda schemas: [])
-
+    monkeypatch.setattr(bfcl_env, "tool_schemas_to_openai", lambda schemas: [])
     responses = iter(
         [
             {"content": "", "actions": [ToolCall(name="first", arguments={})]},
@@ -107,14 +125,11 @@ def test_run_bfcl_episode_advances_to_later_user_turns(monkeypatch) -> None:
         generated_messages.append(list(messages))
         return next(responses)
 
-    result = bfcl.run_bfcl_episode(
+    result = bfcl_env.run_bfcl_episode(
         label,
         start_step=0,
         generate=generate,
-        parse_response=lambda message: (
-            message["content"],
-            message["actions"],
-        ),
+        parse_response=lambda message: (message["content"], message["actions"]),
         max_turns=4,
     )
 
@@ -127,14 +142,14 @@ def test_run_bfcl_episode_advances_to_later_user_turns(monkeypatch) -> None:
     assert result.exit_reason == "no_further_calls"
 
 
-def test_bfcl_prompt_defers_to_model_tool_format() -> None:
-    assert "<emoji>" not in bfcl.DEFAULT_SYSTEM_PROMPT
-    assert "provided tool-calling interface" in bfcl.DEFAULT_SYSTEM_PROMPT
+def test_bfcl_prompt_defers_to_model_tool_format(bfcl_env) -> None:
+    assert "<emoji>" not in bfcl_env.DEFAULT_SYSTEM_PROMPT
+    assert "provided tool-calling interface" in bfcl_env.DEFAULT_SYSTEM_PROMPT
 
 
-def test_bfcl_dataset_paths_are_split_specific() -> None:
-    train = bfcl.BfclMultiTurnDataset(split="train")
-    evaluation = bfcl.BfclMultiTurnDataset(split="eval")
+def test_bfcl_dataset_paths_are_split_specific(bfcl_env) -> None:
+    train = bfcl_env.BfclMultiTurnDataset(split="train")
+    evaluation = bfcl_env.BfclMultiTurnDataset(split="eval")
 
     train_path, _ = BaseTrainRecipe._resolve_data_paths(train)
     eval_path, _ = BaseTrainRecipe._resolve_data_paths(evaluation)
