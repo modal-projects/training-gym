@@ -61,10 +61,16 @@ from modal_training_gym import (
 #
 # The dataset root is private to your workspace, so it is read from the
 # environment rather than hard-coded, and the remaining knobs follow suit so
-# the same file can launch a full run, a smoke test, or a probe. The dataset
-# class below is shipped to remote workers by value, and those workers may
-# import this module after launcher-only variables are gone, so everything is
-# read at module level with defaults.
+# the same file can launch a full run, a one-node experiment, a smoke test, or
+# a probe. The dataset class below is shipped to remote workers by value, and
+# those workers may import this module after launcher-only variables are gone,
+# so everything is read at module level with defaults.
+#
+# `AGENTIC_NODES` is 6 for the recipe's disaggregated topology or 1 for a
+# single colocated 8×H200 node. The batch shape and the agent step budget are
+# separate knobs so a one-node run can still use realistic episodes.
+# `AGENTIC_SMOKE=1` pins all of them to the cheapest shape that exercises the
+# plumbing.
 
 DATASET_ROOT = os.environ.get("AGENTIC_HARBOR_DATASET_ROOT", "")
 TRAIN_SUBSET = os.environ.get("AGENTIC_TRAIN_SUBSET", "train-300")
@@ -75,11 +81,19 @@ NUM_ROLLOUT = int(os.environ.get("AGENTIC_NUM_ROLLOUT", "500"))
 EVAL_SAMPLES = int(os.environ.get("AGENTIC_EVAL_SAMPLES", "1"))
 EVAL_INTERVAL_RAW = os.environ.get("AGENTIC_EVAL_INTERVAL", "")
 EVAL_INTERVAL = int(EVAL_INTERVAL_RAW) if EVAL_INTERVAL_RAW else None
+NODES = int(os.environ.get("AGENTIC_NODES", "6"))
+ROLLOUT_BATCH_SIZE = int(os.environ.get("AGENTIC_ROLLOUT_BATCH_SIZE", "32"))
+N_SAMPLES_PER_PROMPT = int(os.environ.get("AGENTIC_N_SAMPLES_PER_PROMPT", "8"))
+MAX_STEPS = int(os.environ.get("AGENTIC_MAX_STEPS", "75"))
 SMOKE = os.environ.get("AGENTIC_SMOKE", "") == "1"
 RUN_NAME = os.environ.get("AGENTIC_RUN_NAME", "agentic-harbor")
 TRACKIO_PROJECT = os.environ.get("AGENTIC_TRACKIO_PROJECT", "agentic-harbor")
 LOAD = os.environ.get("AGENTIC_LOAD", "")
 
+if SMOKE:
+    NODES, ROLLOUT_BATCH_SIZE, N_SAMPLES_PER_PROMPT, MAX_STEPS = 1, 2, 1, 2
+if NODES not in (1, 6):
+    raise ValueError("AGENTIC_NODES must be 6 (disaggregated) or 1 (one colocated node)")
 if not DATASET_ROOT:
     raise RuntimeError(
         "AGENTIC_HARBOR_DATASET_ROOT must name the dataset root written by "
@@ -147,13 +161,19 @@ metrics = TrackioConfig(project=TRACKIO_PROJECT)
 # Evaluation is driven by `eval_config`: each listed subset is scored
 # separately and reported as `eval/<subset>`. `save_debug_rollout_data` dumps
 # every rollout under a per-run directory, which the probe workflow at the end
-# of this tutorial reads back.
+# of this tutorial reads back. The global batch is always one optimizer step
+# over every sample of the rollout. `extra_config` replaces the recipe's
+# dictionary rather than merging into it, so the agent step budget is layered
+# onto the recipe's own values to keep the rollout function and timeouts.
 
 recipe = Qwen3_6_27B_Recipe_Agentic(
     num_rollout=NUM_ROLLOUT,
     eval_interval=EVAL_INTERVAL,
     load=LOAD,
     metrics=metrics,
+    rollout_batch_size=ROLLOUT_BATCH_SIZE,
+    n_samples_per_prompt=N_SAMPLES_PER_PROMPT,
+    global_batch_size=ROLLOUT_BATCH_SIZE * N_SAMPLES_PER_PROMPT,
     eval_config={
         "defaults": {
             "n_samples_per_eval_prompt": EVAL_SAMPLES,
@@ -173,33 +193,38 @@ recipe = Qwen3_6_27B_Recipe_Agentic(
         f"/checkpoints/agentic_rollout_dumps/{RUN_NAME}/rollout_{{rollout_id}}.pt"
     ),
 )
+recipe = replace(
+    recipe,
+    extra_config={**(recipe.extra_config or {}), "agentic_max_steps": MAX_STEPS},
+)
 
-# ## Smoke-test on one node
+# ## Run on one node
 #
-# `AGENTIC_SMOKE=1` shrinks the run to a single 8×H200 node: the actor and four
-# rollout engines are colocated, and context parallelism drops to 1 so
-# TP4 × PP2 × CP1 fills exactly eight GPUs. Pipeline parallelism stays at 2, so
-# the cached checkpoint conversion remains valid. Each agent gets two steps and
-# short timeouts, and tracing is off. `environment` and `extra_config` replace
-# the recipe's dictionaries rather than merging into them, so the overrides
-# are layered on top of the recipe's own values to keep the rollout function
-# and sandbox settings intact.
+# `AGENTIC_NODES=1` colocates the actor and four rollout engines on a single
+# 8×H200 node, and context parallelism drops to 1 so TP4 × PP2 × CP1 fills
+# exactly eight GPUs. Pipeline parallelism stays at 2, so the cached checkpoint
+# conversion remains valid. Size the batch to the node: two prompts with eight
+# samples each is 16 episodes per step, which keeps GRPO's within-group
+# advantage meaningful while a full 75-step agent budget stays affordable.
 #
-# With `n_samples_per_prompt=1` and binary rewards there is no advantage
-# variance, so this checks that rollouts, grading, and metric routing work; it
-# is not a learning experiment.
+# `AGENTIC_SMOKE=1` goes further: two-step agents with short timeouts, one
+# sample per prompt, short responses, and tracing off. With binary rewards and
+# a single sample there is no advantage variance, so a smoke checks that
+# rollouts, grading, and metric routing work; it is not a learning experiment.
 
-if SMOKE:
+if NODES == 1:
     recipe = replace(
         recipe,
         actor_num_nodes=1,
         rollout_num_gpus=8,
         colocate=True,
         context_parallel_size=1,
-        rollout_batch_size=2,
-        n_samples_per_prompt=1,
+    )
+
+if SMOKE:
+    recipe = replace(
+        recipe,
         n_samples_per_eval_prompt=1,
-        global_batch_size=2,
         rollout_max_response_len=1024,
         eval_max_response_len=1024,
         sglang_server_concurrency=4,
@@ -207,7 +232,6 @@ if SMOKE:
         environment={**recipe.environment, "PYTORCH_CUDA_ALLOC_CONF": ""},
         extra_config={
             **(recipe.extra_config or {}),
-            "agentic_max_steps": 2,
             "agentic_episode_timeout": 300,
             "agentic_eval_timeout": 120,
             "agentic_exec_timeout": 60,
@@ -219,6 +243,10 @@ print(f"nodes: {recipe.total_nodes}, gpus: {recipe.gpu_allocation.total_gpus}")
 print(
     f"parallelism: tp={recipe.tensor_model_parallel_size}, "
     f"pp={recipe.pipeline_model_parallel_size}, cp={recipe.context_parallel_size}"
+)
+print(
+    f"episodes per step: {recipe.rollout_batch_size} prompts x "
+    f"{recipe.n_samples_per_prompt} samples, up to {MAX_STEPS} agent steps each"
 )
 
 # ## Check the subsets before allocating the cluster
@@ -268,6 +296,23 @@ print(f"Modal app: {run.modal_app_url}")
 #
 # ```bash
 # AGENTIC_HARBOR_DATASET_ROOT=example-org_private-harbor-tasks \
+#   uv run tutorials/agentic_harbor.py
+# ```
+#
+# A one-node learning experiment on a small subset, here the two mixed-reward
+# tasks used for smoke tests, with real 75-step agents. Two prompts with eight
+# samples each per step; `rollout/rewards` in Trackio and the dashboard's
+# reward curve should move within a handful of steps:
+#
+# ```bash
+# AGENTIC_HARBOR_DATASET_ROOT=example-org_private-harbor-tasks \
+# AGENTIC_NODES=1 \
+# AGENTIC_TRAIN_SUBSET=train-2-mixed-smoke \
+# AGENTIC_EVAL_SUBSETS=eval-2-smoke \
+# AGENTIC_ROLLOUT_BATCH_SIZE=2 \
+# AGENTIC_N_SAMPLES_PER_PROMPT=8 \
+# AGENTIC_NUM_ROLLOUT=8 \
+# AGENTIC_EVAL_INTERVAL=4 \
 #   uv run tutorials/agentic_harbor.py
 # ```
 #
