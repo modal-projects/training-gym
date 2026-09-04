@@ -73,19 +73,19 @@ A [Harbor dataset](https://gym.modal.dev/reference/harbordataset) provides a ser
 ```python
 from modal_training_gym import HarborDataset
 
-hello_world = HarborDataset(dataset_name="harbor/hello-world")
+hello_dataset = HarborDataset(dataset_name="harbor/hello-world")
 ```
 
 If you have the files installed locally, you can instead use the filepath:
 
 ```python
-hello_world = HarborDataset(path="/path/to/task_root")
+hello_dataset = HarborDataset(path="/path/to/task_root")
 ```
 
 Some tasks provide additional metadata:
 
 ```python
-hello_world = HarborDataset(
+hello_dataset = HarborDataset(
     # ...
     label_metadata_path="task.toml",
     test_data_dir="tests",
@@ -95,7 +95,7 @@ hello_world = HarborDataset(
 During training, each task will be converted into a single user prompt. Like `HuggingFaceDataset`, you can optionally provide a system prompt or override the template for the user message. However, if the metadata contains variables, you can also use them in `prompt_template`!
 
 ```python
-hello_world = HarborDataset(
+hello_dataset = HarborDataset(
     # ...
     system_prompt="You are an expert Python programmer.",
     prompt_template="Perform task {task_name} stored at {task_path}: {instruction}",

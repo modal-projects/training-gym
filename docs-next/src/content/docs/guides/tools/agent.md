@@ -56,15 +56,14 @@ SYSTEM_PROMPT = (
 )
 
 
-def rhyme_dataset(n_rows: int) -> HuggingFaceDataset:
-    return HuggingFaceDataset(
-        hf_repo="tatsu-lab/alpaca",
-        hf_split=f"train[:{n_rows}]",
-        input_column="instruction",
-        output_column="output",
-        input_format="text",
-        system_prompt=SYSTEM_PROMPT,
-    )
+rhyme_dataset = HuggingFaceDataset(
+    hf_repo="tatsu-lab/alpaca",
+    hf_split=f"train[:512]",
+    input_column="instruction",
+    output_column="output",
+    input_format="text",
+    system_prompt=SYSTEM_PROMPT,
+)
 ```
 
 Next, it defined the reward function. Here, we care about the model's ability to both rhyme and answer the user's question. As our [intro tutorial](https://gym.modal.dev/tutorials/rl_basics) shows, NLTK’s [CMU Pronouncing Dictionary](https://github.com/prosegrinder/python-cmudict) is a useful library for measuring the former.
@@ -273,10 +272,10 @@ def _image_overlay(image):
     )
 
 
-def build_config(*, num_rollout: int, n_rows: int, save_interval: int) -> TrainConfig:
+def build_config(*, num_rollout: int, save_interval: int) -> TrainConfig:
     return TrainConfig(
         model=Qwen3_4B(),
-        dataset=rhyme_dataset(n_rows),
+        dataset=rhyme_dataset,
         recipe=Qwen3_4B_Recipe(
             custom_rm_function=rhyme_rm,
             num_rollout=num_rollout,
@@ -299,7 +298,7 @@ Before making [GPUs go Brrr](https://hazyresearch.stanford.edu/blog/2024-05-12-t
 Following suit, it does a one-step run:
 
 ```python
-training_run = build_config(num_rollout=1, n_rows=512, save_interval=1)
+training_run = build_config(num_rollout=1, save_interval=1)
 run = training_run.launch()
 print(f"training_run_id: {run.training_run_id}")
 ```
