@@ -126,27 +126,6 @@ def ship_callable(
     return image
 
 
-def volume_for(name: str) -> "Volume":
-    """Resolve a Modal Volume, saying so when one has to be created.
-
-    Volume names are derived from the recipe class, so renaming a recipe points
-    a run at a brand-new volume and silently orphans its cached conversions and
-    checkpoints. Creating one is expected on a first run and worth noticing on
-    any later one, so report which happened instead of doing it silently.
-    """
-    volume = Volume.from_name(name)
-    try:
-        volume.hydrate()
-    except Exception:
-        print(
-            f"Creating Modal Volume {name!r}. If you expected an existing one, "
-            "check whether the recipe class was renamed — volume names are "
-            "derived from it, and a rename starts over with an empty volume."
-        )
-        return Volume.from_name(name, create_if_missing=True)
-    return volume
-
-
 def resolve_checkpoint_volumes(
     checkpoint: Any,
     *,
@@ -165,7 +144,9 @@ def resolve_checkpoint_volumes(
         if checkpoint is not None and checkpoint.checkpoints_mount_path
         else default_mount_path.rstrip("/")
     )
-    checkpoints_volume = volume_for(checkpoints_volume_name)
+    checkpoints_volume = Volume.from_name(
+        checkpoints_volume_name, create_if_missing=True
+    )
     return checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume
 
 
