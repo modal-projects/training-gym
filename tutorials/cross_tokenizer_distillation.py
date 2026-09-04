@@ -30,6 +30,7 @@
 import asyncio
 import json
 import re
+import time
 
 from modal_training_gym import (
     CustomDeployment,
@@ -1044,9 +1045,12 @@ print(f"run id: {run.training_run_id}")
 #
 # Deploy the last checkpoint and re-run the held-out BFCL ids with the same evaluator from our earlier baseline.
 
-result = run.result()
+while True:
+    checkpoint = run.latest_checkpoint()
+    if run.done():
+        break
+    time.sleep(30)
 print("--- Training complete ---")
-checkpoint = result.checkpoints()[-1]
 print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(

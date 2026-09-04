@@ -77,6 +77,9 @@ from modal_training_gym.common.metrics import (
 from modal_training_gym.common.trackio import resolve_trackio_destination
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.status import SlimeStatus
+from modal_training_gym.common.torch_dist_checkpoint import (
+    is_complete_torch_dist_checkpoint_dir,
+)
 
 from modal_training_gym.train_recipes.slime_recipe.recipe import (
     CHECKPOINTS_PATH,
@@ -126,6 +129,9 @@ _PATCH_MEGATRON_BRIDGE_B64 = encode_patch("patch_megatron_bridge", _SLIME_PATCHE
 _PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", _MEGATRON_PATCHES)
 _PATCH_GLOBAL_PLAN_B64 = encode_patch("patch_global_plan", _SLIME_PATCHES)
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_PATCH_CHECKPOINT_COMMIT_B64 = encode_patch(
+    "patch_checkpoint_commit", _MEGATRON_PATCHES
+)
 _PATCH_ADVANTAGES_B64 = encode_patch("patch_advantages", _SLIME_PATCHES)
 _PATCH_BRIDGE_NONE_TASK_B64 = encode_patch("patch_bridge_none_task", _SLIME_PATCHES)
 _PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", _MEGATRON_PATCHES)
@@ -294,14 +300,6 @@ def _response_parser_path(model: Any) -> str:
     return f"{module}.{qualname}" if module and qualname else ""
 
 
-def _is_complete_torch_dist_checkpoint(path: str) -> bool:
-    try:
-        names = os.listdir(path)
-    except OSError:
-        return False
-    return "common.pt" in names and any(name.endswith(".distcp") for name in names)
-
-
 _PIPELINE_SPLIT_FLAGS = (
     "--decoder-first-pipeline-num-layers",
     "--decoder-last-pipeline-num-layers",
@@ -341,7 +339,7 @@ def _checkpoint_conversion_cache_status(
     if not os.path.exists(save_path):
         return "missing", None
     if not has_torch_dist_checkpoint(
-        save_path, is_complete=_is_complete_torch_dist_checkpoint
+        save_path, is_complete=is_complete_torch_dist_checkpoint_dir
     ):
         return "incomplete", None
 
@@ -611,7 +609,6 @@ def build_slime_app(
             )
         object.__setattr__(slime, "extra_config", cfg)
 
-    # Build train_image AFTER _ship_callable so shipped modules are included.
     train_image = image
     if _has_hybrid_spec:
         train_image = image.run_commands(
@@ -619,6 +616,9 @@ def build_slime_app(
             f"echo {_PATCH_GLOBAL_PLAN_B64} | base64 -d | python3",
             f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3",
         )
+    train_image = train_image.run_commands(
+        f"echo {_PATCH_CHECKPOINT_COMMIT_B64} | base64 -d | python3"
+    )
     if _has_gdn:
         train_image = train_image.run_commands(
             f"echo {_PATCH_GDN_PACKED_SEQ_B64} | base64 -d | python3",
@@ -638,6 +638,12 @@ def build_slime_app(
             volume_prefix=volume_prefix,
             default_mount_path=str(CHECKPOINTS_PATH),
         )
+    )
+    checkpoint_dir = compute_save_root(
+        slime.save,
+        recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
+        mounted_save_root=checkpoints_mount_path,
+        training_run_id=training_run_id,
     )
     metadata_volume = Volume.from_name("training-gym-metadata", create_if_missing=True)
     all_volumes: dict[str | PurePosixPath, Any] = {
@@ -1047,6 +1053,9 @@ def build_slime_app(
             metric_cfg=slime.metrics,
             metric_entity=metric_entity,
             framework_status_token=framework_status_token,
+            checkpoint_dir=checkpoint_dir,
+            checkpoints_volume_name=checkpoints_volume_name,
+            checkpoints_mount_path=checkpoints_mount_path,
         )
 
         try:  # Wraps all post-setup work so any failure marks the run terminal.
@@ -1100,12 +1109,8 @@ def build_slime_app(
             await _set_framework_status_async(SlimeStatus.CONVERT_MODEL)
             prepare_slime_config(slime, model, tempfile.mkdtemp())
 
-            save_root = compute_save_root(
-                slime.save,
-                recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
-                mounted_save_root=checkpoints_mount_path,
-                training_run_id=training_run_id,
-            )
+            save_root = checkpoint_dir
+            os.makedirs(save_root, exist_ok=True)
 
             original_save = slime.save
             original_load = slime.load
@@ -1126,7 +1131,7 @@ def build_slime_app(
                 )
 
             resume_checkpoint = torch_dist_resume_checkpoint(
-                save_root, is_complete=_is_complete_torch_dist_checkpoint
+                save_root, is_complete=is_complete_torch_dist_checkpoint_dir
             )
             record_resume_checkpoint(run_record, resume_checkpoint)
             await run_record.save(is_async=True)
@@ -1212,6 +1217,7 @@ def build_slime_app(
                         entity=metric_entity,
                     ),
                     **timing_debug_env(),
+                    "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": checkpoints_volume_name,
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
             }
