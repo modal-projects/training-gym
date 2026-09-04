@@ -383,7 +383,7 @@ def build_slime_app(
     volume_prefix = f"slime-{type(slime).__name__.lstrip('_').lower()}"
 
     SlimeRecipe._validate_custom_model_architecture(model)
-    SlimeRecipe._validate_dataset(dataset)
+    slime.validate_dataset(dataset)
 
     # Models that can't do THD packing (model.requires_bshd, e.g. Qwen3-ASR) must
     # train on padded (bshd) batches; fail fast with the fix if the recipe didn't.

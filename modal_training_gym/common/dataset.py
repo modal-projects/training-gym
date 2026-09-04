@@ -11,7 +11,7 @@ volume.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 import json
 import random
 import shutil
@@ -43,6 +43,8 @@ class DatasetConfig:
         always_prepare: Rerun `prepare()` when the output path exists.
         writes_eval_paths: Whether `prepare()` must materialize every `eval_paths`
             entry.
+        supports_sft: Whether prepared rows contain complete conversations with
+            at least one assistant turn. Custom datasets may opt in.
     """
 
     _type: DatasetType = DatasetType.DEFAULT
@@ -57,6 +59,7 @@ class DatasetConfig:
     # a separate DatasetConfig instance for offline eval (Toolathlon, BFCL) set
     # this False so resolvers don't invent a companion ``eval.*`` file.
     writes_eval_paths: bool = True
+    supports_sft: ClassVar[bool] = False
 
     def __init__(self, **kwargs: Any) -> None:
         if not self.dataset_id:
@@ -245,6 +248,111 @@ class HuggingFaceDataset(DatasetConfig):
         if eval_paths:
             for eval_path in eval_paths.values():
                 self._write_split(ds, eval_path)
+
+
+class SFTDataset(HuggingFaceDataset):
+    """A Hugging Face dataset formatted as complete conversations for SFT.
+
+    Args:
+        messages_column: Source column containing OpenAI-style messages. Use this
+            or `input_column` plus `output_column`, not both.
+        input_column: Source prompt column for constructing single-turn examples.
+        output_column: Source assistant-response column for constructing examples.
+        system_prompt: Optional system message for constructed examples.
+        prompt_template: Template applied to constructed user prompts.
+
+    Assistant turns are supervised targets. In-training evaluation is not
+    materialized because Slime's SFT rollout supports training data only.
+    """
+
+    messages_column: str = ""
+    input_key: str = "messages"
+    label_key: str = "label"
+    apply_chat_template: bool = False
+    writes_eval_paths: bool = False
+    supports_sft: ClassVar[bool] = True
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        if bool(self.input_column) != bool(self.output_column):
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} requires input_column and output_column together"
+            )
+        paired = bool(self.input_column and self.output_column)
+        if not paired and not self.messages_column:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} requires either input_column and "
+                "output_column, or messages_column"
+            )
+        if paired and self.messages_column:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} accepts either input/output columns or "
+                "messages_column, not both"
+            )
+        if self.messages_column and (
+            self.system_prompt or self.prompt_template != "{input}"
+        ):
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} does not accept system_prompt or "
+                "prompt_template with messages_column"
+            )
+        if self.apply_chat_template:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} requires apply_chat_template=False; "
+                "Slime's SFT rollout builds its loss mask from raw messages"
+            )
+
+    @staticmethod
+    def _validate_conversation(messages: Any) -> list[dict[str, Any]]:
+        if not isinstance(messages, list) or not messages:
+            raise TrainingGymConfigError(
+                "SFT messages must be a non-empty list of role/content dictionaries"
+            )
+        for message in messages:
+            if not isinstance(message, dict):
+                raise TrainingGymConfigError(
+                    "Every SFT message must be a role/content dictionary"
+                )
+            if message.get("role") not in {"system", "user", "assistant", "tool"}:
+                raise TrainingGymConfigError(
+                    f"Unsupported SFT message role: {message.get('role')!r}"
+                )
+            if "content" not in message:
+                raise TrainingGymConfigError("Every SFT message requires content")
+        if not any(message["role"] == "assistant" for message in messages):
+            raise TrainingGymConfigError(
+                "Each SFT conversation requires at least one assistant turn"
+            )
+        return messages
+
+    def _format_for_training(self, ds):
+        label_key = self.label_key
+        if self.messages_column:
+            messages_column = self.messages_column
+
+            def _from_messages(row: dict) -> dict:
+                messages = self._validate_conversation(row[messages_column])
+                return {"messages": messages, label_key: ""}
+
+            return ds.map(_from_messages, remove_columns=ds.column_names)
+
+        in_col, out_col = self.input_column, self.output_column
+        sys_prompt = self.system_prompt
+        template = self.prompt_template
+
+        def _from_pair(row: dict) -> dict:
+            messages = []
+            if sys_prompt:
+                messages.append({"role": "system", "content": sys_prompt})
+            messages.extend(
+                [
+                    {"role": "user", "content": template.format(input=row[in_col])},
+                    {"role": "assistant", "content": str(row[out_col])},
+                ]
+            )
+            return {"messages": messages, label_key: ""}
+
+        return ds.map(_from_pair, remove_columns=ds.column_names)
 
 
 class HarborDataset(DatasetConfig):

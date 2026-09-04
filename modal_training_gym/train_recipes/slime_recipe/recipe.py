@@ -34,6 +34,7 @@ import modal
 # ── Types ─────────────────────────────────────────────────────────────────────
 
 _SLIME_SKIP = {
+    "workload_type",
     "environment",
     "async_mode",
     "metrics",
@@ -89,6 +90,20 @@ _HOOK_WRAPPER_PATHS = {
     "custom_megatron_before_train_step_hook": "modal_training_gym.frameworks.slime.phase_reporting.before_train_step_hook",
 }
 
+_SFT_WORKLOAD_FIELDS = {
+    "async_mode": True,
+    "colocate": False,
+    "rollout_num_gpus": None,
+    "rollout_function": "slime.rollout.sft_rollout.generate_rollout",
+    "loss_type": "sft_loss",
+    "calculate_per_token_loss": True,
+    "disable_compute_advantages_and_returns": True,
+    "debug_train_only": True,
+    "n_samples_per_prompt": 1,
+    "use_fault_tolerance": False,
+    "eval_interval": None,
+}
+
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class SlimeRecipe(BaseTrainRecipe):
@@ -96,6 +111,9 @@ class SlimeRecipe(BaseTrainRecipe):
 
     Args:
 
+        workload_type:
+            Training objective. `"rl"` preserves the model recipe unchanged;
+            `"sft"` enables Slime's train-only supervised path.
         recipe_type:
             Internal discriminator fixed to slime.
         name:
@@ -399,6 +417,7 @@ class SlimeRecipe(BaseTrainRecipe):
     rollout_batch_size: int = 8
 
     # ── App identity ─────────────────────────────────────────────────────────
+    workload_type: Literal["rl", "sft"] = "rl"
     name: str = ""
     app_tags: dict = field(default_factory=dict)
 
@@ -458,6 +477,9 @@ class SlimeRecipe(BaseTrainRecipe):
     kl_coef: float = 0.0
     entropy_coef: float = 0.0
     calculate_per_token_loss: bool = False
+    loss_type: str | None = None
+    disable_compute_advantages_and_returns: bool = False
+    debug_train_only: bool = False
     ref_load: str = ""
 
     # ── Dynamic sampling (DAPO) ────────────────────────────────────────────
@@ -633,6 +655,24 @@ class SlimeRecipe(BaseTrainRecipe):
         return self
 
     @model_validator(mode="after")
+    def _resolve_workload(self) -> "SlimeRecipe":
+        if self.workload_type == "rl":
+            return self
+        conflicts = _SFT_WORKLOAD_FIELDS.keys() & self._escape_hatch_keys()
+        if conflicts:
+            raise TrainingGymConfigError(
+                "SFT manages these settings directly; remove them from extra_config: "
+                + ", ".join(sorted(conflicts))
+            )
+        if self.rollout_batch_size != self.global_batch_size:
+            raise TrainingGymConfigError(
+                "SFT requires rollout_batch_size == global_batch_size"
+            )
+        for field_name, value in _SFT_WORKLOAD_FIELDS.items():
+            object.__setattr__(self, field_name, value)
+        return self
+
+    @model_validator(mode="after")
     def _validate_gpu_allocation(self) -> "SlimeRecipe":
         resolve_gpu_allocation(self)
         validate_megatron_actor_parallelism(self)
@@ -677,6 +717,22 @@ class SlimeRecipe(BaseTrainRecipe):
             raise TrainingGymConfigError(
                 f"{type(ds).__name__}: input_key and label_key are both "
                 f"{ds.input_key!r}; they must name distinct columns."
+            )
+
+    def validate_dataset(self, dataset: "DatasetConfig") -> None:
+        """Validate that a dataset satisfies this recipe's input contract."""
+        self._validate_dataset(dataset)
+        if self.workload_type != "sft":
+            return
+        if not getattr(dataset, "supports_sft", False):
+            raise TrainingGymConfigError(
+                "SFT requires SFTDataset or a custom DatasetConfig with "
+                "supports_sft=True that writes complete assistant conversations"
+            )
+        if dataset.apply_chat_template:
+            raise TrainingGymConfigError(
+                "SFT requires apply_chat_template=False so Slime can build its "
+                "loss mask from raw messages"
             )
 
     @staticmethod

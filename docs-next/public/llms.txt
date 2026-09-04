@@ -1,6 +1,8 @@
 # Training Gym
 
-Modal Training Gym is an open-source Python SDK for RL post-training on [Modal](https://modal.com).
+Modal Training Gym is an open-source Python SDK for distributed post-training on
+[Modal](https://modal.com), including reinforcement learning and supervised
+fine-tuning.
 
 The library takes care of infrastructure concerns such as cluster topology, Ray/NCCL bring-up, volume mounts, checkpointing, and serving for eval and rollouts, so you (or your agent!) can focus on training models.
 
@@ -49,6 +51,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [GUI Grounding with Qwen3-VL-8B](https://gym.modal.dev/tutorials/computer_use)
 - [On-policy Distillation (OPD) Across Model Families](https://gym.modal.dev/tutorials/cross_tokenizer_distillation)
 - [Frontier-scale training](https://gym.modal.dev/tutorials/multinode)
+- [Supervised fine-tuning](https://gym.modal.dev/tutorials/sft)
 
 ## Reference
 
@@ -84,6 +87,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 - [DatasetConfig](https://gym.modal.dev/reference/datasetconfig)
 - [HuggingFaceDataset](https://gym.modal.dev/reference/huggingfacedataset)
+- [SFTDataset](https://gym.modal.dev/reference/sftdataset)
 - [HarborDataset](https://gym.modal.dev/reference/harbordataset)
 
 ### Recipes

@@ -49,6 +49,10 @@
       "link": "/reference/parsedresponse"
     },
     {
+      "label": "SFTDataset",
+      "link": "/reference/sftdataset"
+    },
+    {
       "label": "SglangRecipe",
       "link": "/reference/sglangrecipe"
     },

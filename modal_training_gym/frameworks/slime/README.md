@@ -35,6 +35,39 @@ uv run modal run my_tutorial.py::train
 `config.train()` handles model download and dataset prep automatically — if
 either isn't cached yet, it runs those steps before training.
 
+## Supervised fine-tuning
+
+Set `workload_type="sft"` on any model recipe and use `SFTDataset` to train
+on complete conversations:
+
+```python
+from modal_training_gym import Qwen3_4B, Qwen3_4B_Recipe, SFTDataset, TrainConfig
+
+config = TrainConfig(
+    model=Qwen3_4B(),
+    dataset=SFTDataset(
+        hf_repo="HuggingFaceH4/no_robots",
+        messages_column="messages",
+        n_rows=16,
+    ),
+    recipe=Qwen3_4B_Recipe(
+        workload_type="sft",
+        num_rollout=1,
+        rollout_batch_size=16,
+        global_batch_size=16,
+        lr=1e-5,
+        save_interval=1,
+    ),
+)
+
+result = config.train()
+```
+
+SFT starts only the Megatron trainer: no SGLang server or inference GPUs are
+allocated. The model recipe's topology and memory settings are preserved, so
+the same switch works for every existing model recipe. `num_rollout` is the
+number of optimizer steps; choose an SFT learning rate for the model's scale.
+
 ## SlimeRecipe
 
 `SlimeRecipe` is a Pydantic dataclass that holds all configuration for a slime training run:

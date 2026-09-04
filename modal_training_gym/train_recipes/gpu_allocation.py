@@ -154,6 +154,17 @@ def _rollout_gpus(
 ) -> int:
     explicit_rollout_gpus = _optional_positive_int_field(config, "rollout_num_gpus")
 
+    # Slime train-only modes use the rollout data buffer without starting
+    # inference engines or reserving rollout GPUs.
+    if getattr(config, "debug_train_only", False):
+        if warn and explicit_rollout_gpus is not None:
+            warnings.warn(
+                "debug_train_only=True does not start rollout engines; "
+                f"rollout_num_gpus={explicit_rollout_gpus} is ignored.",
+                stacklevel=2,
+            )
+        return 0
+
     if colocate:
         if warn and explicit_rollout_gpus not in (None, actor_gpus):
             warnings.warn(

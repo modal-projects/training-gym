@@ -168,6 +168,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "HuggingFaceDataset",
     },
     {
+        "class_name": "SFTDataset",
+        "module": "modal_training_gym.common.dataset",
+        "group": "datasets",
+        "class_type": "config_data",
+        "sidebar_label": "SFTDataset",
+    },
+    {
         "class_name": "HarborDataset",
         "module": "modal_training_gym.common.dataset",
         "group": "datasets",
@@ -528,6 +535,7 @@ SDK_SIDEBAR_CLASSES = frozenset(
         "ToolCall",
         "DatasetConfig",
         "HuggingFaceDataset",
+        "SFTDataset",
         "HarborDataset",
         "TrainConfig",
         "TrainingRun",
