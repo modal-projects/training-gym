@@ -288,9 +288,7 @@ def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
     import modal
 
     try:
-        function = modal.Function.from_name(app_name, "dashboard")
-        function.hydrate()
-        return function.get_web_url()
+        return modal.Function.from_name(app_name, "dashboard").get_web_url()
     except Exception:
         return None
 
