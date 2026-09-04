@@ -66,6 +66,7 @@ _SLIME_SKIP = {
     "image_run_commands",
     "image_env",
     "train_function_kwargs",
+    "max_retries",
     "substep_timing",
     "conversion_pipeline_model_parallel_size",
     "conversion_tensor_model_parallel_size",
@@ -148,6 +149,9 @@ class SlimeRecipe(BaseTrainRecipe):
             Extra env vars baked into the image.
         train_function_kwargs:
             Additional Modal Function keyword arguments for the training function.
+        max_retries:
+            Modal retries for the training function. Each retry resumes from
+            the last checkpoint.
         capture_trace:
             Attach sampled per-request execution traces to recorded rollouts.
         trace_sample_limit:
@@ -423,6 +427,7 @@ class SlimeRecipe(BaseTrainRecipe):
     image_run_commands: list[str] = field(default_factory=list)
     image_env: dict[str, str] = field(default_factory=dict)
     train_function_kwargs: dict[str, Any] = field(default_factory=dict)
+    max_retries: int = 3
 
     substep_timing: Literal["auto", "off"] = "auto"
 

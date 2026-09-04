@@ -920,7 +920,7 @@ def build_slime_app(
         # before the first save_interval checkpoint) re-runs from scratch and
         # crashloops through every attempt — 10 wasted ~4h of a 40-GPU cluster on
         # a step-1 crash. Cap low so a persistent failure surfaces fast.
-        retries=Retries(max_retries=3, initial_delay=0.0),
+        retries=Retries(max_retries=slime.max_retries, initial_delay=0.0),
         single_use_containers=True,
         experimental_options=train_experimental_options or None,
         serialized=True,
