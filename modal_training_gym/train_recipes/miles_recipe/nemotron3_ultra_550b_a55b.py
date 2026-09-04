@@ -67,7 +67,11 @@ class Nemotron3_Ultra_550B_A55B_Recipe(MilesRecipe):
     # all_to_all at the real 8-rank-per-node layout, both pass on EFA — so it
     # needs something only the full run has. Lift this once the EFA path is
     # root-caused; nothing else in the recipe depends on the cloud.
-    cloud: str | None = "oci"
+    #
+    # gcp rather than oci: both are Mellanox/IB fleets (a GCP H200 host shows
+    # no /opt/amazon/efa and no NCCL_NET_PLUGIN pin), but a 16-node OCI block
+    # queued 2.5 h without placing, where unpinned runs placed in ~1 min.
+    cloud: str | None = "gcp"
     # Upstream's optimizer offload keeps fp32 main params and both Adam moments in
     # host RAM: measured (cgroup accounting, 16 nodes) ~1360 GiB steady state plus
     # ~320 GiB during a checkpoint save. 2600 GiB keeps the save peak well under

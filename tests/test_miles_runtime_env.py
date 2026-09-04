@@ -171,5 +171,5 @@ def test_nemotron_recipe_is_pinned_off_aws():
     )
 
     assert MilesRecipe().cloud is None
-    assert Nemotron3_Ultra_550B_A55B_Recipe().cloud == "oci"
+    assert Nemotron3_Ultra_550B_A55B_Recipe().cloud == "gcp"
     assert Nemotron3_Ultra_550B_A55B_Recipe(cloud="aws").cloud == "aws"
