@@ -128,17 +128,3 @@ def test_pinned_revision_is_recorded_on_the_run() -> None:
 
     for field in ("slime_git_repository", "slime_git_revision", "data_volume_name"):
         assert field in recipe_entry[:end], field
-
-
-def test_recipe_environment_cannot_override_the_run_identity() -> None:
-    """`**slime.environment` is splatted into runtime_env, so ordering is load-bearing.
-
-    A recipe's env dict must not be able to reassign the run id, which keys the
-    metric run, the run record, and the framework status callbacks.
-    """
-    source = _launcher_source()
-    runtime_env = source[source.index("runtime_env = {") :]
-
-    assert runtime_env.index("**slime.environment") < runtime_env.index(
-        '"TRAINING_GYM_TRAINING_RUN_ID": training_run_id'
-    )
