@@ -2,10 +2,6 @@
 # order: 11
 # ---
 #
-# > **Multi-node workspace required:** This is a multi-node example. To run it,
-# > your Modal workspace must have multi-node enabled. Contact
-# > [support@modal.com](mailto:support@modal.com) to enable multi-node.
-
 # # Multi-turn RL for coding agents on Harbor tasks
 #
 # This tutorial trains [Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B)
@@ -31,6 +27,8 @@
 
 import os
 from dataclasses import replace
+
+import modal
 
 from modal_training_gym import (
     DatasetConfig,
@@ -223,13 +221,38 @@ print(
     f"pp={recipe.pipeline_model_parallel_size}, cp={recipe.context_parallel_size}"
 )
 
+# ## Check the subsets before allocating the cluster
+#
+# Dataset preparation runs inside the training function, after the cluster is
+# up, and the training function retries on failure. A missing subset would
+# therefore allocate the full 48-GPU cluster several times before the file
+# error surfaced. Listing the dataset root on the data volume from the
+# launching shell costs nothing and catches a typo in the subset names first.
+
+data_volume = modal.Volume.from_name(recipe.data_volume_name)
+try:
+    prepared = {os.path.basename(entry.path) for entry in data_volume.listdir(DATASET_ROOT)}
+except modal.exception.NotFoundError:
+    prepared = set()
+missing = [
+    subset
+    for subset in (TRAIN_SUBSET, *EVAL_SUBSETS)
+    if f"{subset}.jsonl" not in prepared
+]
+if missing:
+    raise FileNotFoundError(
+        f"{recipe.data_volume_name}:/{DATASET_ROOT} has no "
+        f"{', '.join(f'{subset}.jsonl' for subset in missing)}; "
+        "run scripts/partition_harbor_dataset.py prepare first"
+    )
+
 # ## Launch
 #
 # `launch()` starts a detached Modal app and returns immediately. With
 # `prepare_inputs=True` the model download and Megatron conversion run first,
-# so a missing subset or a stale conversion fails before the cluster is
-# allocated. The conversion is cached on the recipe's checkpoints volume, so
-# only the first launch pays for it.
+# so a stale conversion also fails before the cluster is allocated. The
+# conversion is cached on the recipe's checkpoints volume, so only the first
+# launch pays for it.
 
 run = TrainConfig(
     model=Qwen3_6_27B(),
