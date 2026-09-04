@@ -74,6 +74,21 @@ def test_recipe_environment_still_wins(monkeypatch):
     assert env_vars["PYTHONPATH"] == "/root/Megatron-LM/"
 
 
+def test_reserved_checkpoint_environment_wins(monkeypatch):
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+
+    env_vars = build_ray_runtime_env(
+        head_addr="10.0.0.1",
+        metric_env={},
+        environment={"TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": "wrong-volume"},
+        extra_env={
+            "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": "miles-checkpoints",
+        },
+    )["env_vars"]
+
+    assert env_vars["TRAINING_GYM_CHECKPOINTS_VOLUME_NAME"] == "miles-checkpoints"
+
+
 def test_unset_container_path_yields_only_the_system_lib_dir(monkeypatch):
     """No empty entry, which the loader would read as the working directory."""
     monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)

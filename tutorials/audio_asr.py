@@ -23,6 +23,7 @@ from datasets import Audio, load_dataset
 
 import base64
 import io
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from modal_training_gym import (
@@ -179,8 +180,11 @@ print(f"run id: {run.training_run_id}")
 #
 # Let's run the same eval on the trained checkpoint.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
+while True:
+    checkpoint = run.latest_checkpoint()
+    if run.done():
+        break
+    time.sleep(30)
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(

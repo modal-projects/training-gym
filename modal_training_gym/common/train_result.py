@@ -20,8 +20,8 @@ Typical flow:
 
     result = TrainResult.load(training_run_id)
 
-    print(result.checkpoint_dir)            # /checkpoints/my-app_train_...
-    print(result.checkpoints()[-1].path)    # .../iter_0000050
+    print(result.checkpoint_dir)                 # /checkpoints/my-app_train_...
+    print(result.latest_checkpoint().path)       # .../iter_0000050
 
     from modal_training_gym import CustomDeployment
     from modal_training_gym.deploy_recipes import SglangRecipe
@@ -48,6 +48,8 @@ from dataclasses import asdict, dataclass, field, fields
 import copy
 from typing import TYPE_CHECKING, Any
 
+from modal import Volume
+
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.utils.metadata import (
     MetadataStore,
@@ -56,8 +58,6 @@ from modal_training_gym.utils.metadata import (
 )
 
 if TYPE_CHECKING:
-    from modal import Volume
-
     from modal_training_gym.common.checkpoint import Checkpoint
     from modal_training_gym.common.models import ModelConfig
 
@@ -165,13 +165,13 @@ class TrainResult:
         return cls.from_training_run_id(training_run_id)
 
     def volume(self) -> "Volume":
-        """Open or create the checkpoints volume.
+        """Open the checkpoints volume.
 
         Returns:
             The Modal checkpoints ``Volume``.
         """
         volume_name = self.checkpoints_volume_name or f"{self.app_name}-checkpoints"
-        return Volume.from_name(volume_name, create_if_missing=True)
+        return Volume.from_name(volume_name, create_if_missing=False)
 
     def checkpoints(self) -> list["Checkpoint"]:
         """List this run's checkpoints.
@@ -188,8 +188,27 @@ class TrainResult:
             Framework.MILES,
             Framework.MILES.value,
         }:
-            return _list_checkpoints(self)
+            return _list_checkpoints(
+                self.checkpoint_dir,
+                self.checkpoints_volume_name or f"{self.app_name}-checkpoints",
+                self.checkpoints_mount_path or "/checkpoints",
+                include_hf=True,
+                fallback_without_tracker=True,
+                training_run_id=self.training_run_id,
+                app_name=self.app_name,
+            )
         raise TrainingGymConfigError(f"Unsupported framework: {self.framework}")
+
+    def latest_checkpoint(self) -> "Checkpoint | None":
+        """Return the last megatron ``iter_*`` checkpoint, if any."""
+        from modal_training_gym.common.checkpoint import CheckpointType
+
+        megatron = [
+            checkpoint
+            for checkpoint in self.checkpoints()
+            if checkpoint.checkpoint_type is CheckpointType.megatron
+        ]
+        return megatron[-1] if megatron else None
 
     @property
     def model(self) -> "ModelConfig":
@@ -206,9 +225,9 @@ class TrainResult:
             )
 
         model = copy.copy(self.model_config)
-        checkpoints = self.checkpoints()
-        if checkpoints:
-            model.model_path = checkpoints[-1].path
+        checkpoint = self.latest_checkpoint()
+        if checkpoint is not None:
+            model.model_path = checkpoint.path
         elif self.checkpoint_dir:
             model.model_path = self.checkpoint_dir
 

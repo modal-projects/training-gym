@@ -13,10 +13,16 @@ from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, overload
 
+from modal.exception import NotFoundError
 from pydantic import BaseModel, PrivateAttr, computed_field, field_validator
 
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.status import FrameworkStatus, resolve_framework_status
+from modal_training_gym.common.torch_dist_checkpoint import (
+    TORCH_DIST_TRACKER_NAME,
+    parse_torch_dist_iteration,
+    parse_torch_dist_tracker,
+)
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get,
@@ -24,10 +30,12 @@ from modal_training_gym.utils.metadata import (
 )
 
 if TYPE_CHECKING:
+    from modal_training_gym.common.checkpoint import Checkpoint
     from modal_training_gym.common.train_result import TrainResult
     from modal_training_gym.common.training_rollout import TrainingRolloutResult
 
 TRAINING_RUNS_STORE_NAME = MetadataStore.TRAINING_RUNS.value
+CHECKPOINT_LOCATION_METADATA_KEY = "checkpoint_location"
 
 
 class FrameworkStatusUpdate(BaseModel):
@@ -138,6 +146,46 @@ class TrainingRun(BaseModel):
         import modal
 
         return modal.FunctionCall.from_id(self.function_call_id)
+
+    def _reload(self) -> None:
+        try:
+            stored = TrainingRun.from_id(self.training_run_id)
+        except (KeyError, NotFoundError):
+            return
+        self.status = stored.status
+        self.metadata = stored.metadata
+        self._metadata_loaded_keys = stored._metadata_loaded_keys
+
+    def checkpoints(self) -> list["Checkpoint"]:
+        """Snapshot of committed megatron ``iter_*`` directories.
+
+        Miles LoRA adapters are not listed. Serving needs
+        ``convert_megatron_checkpoint_to_hf``.
+        """
+        from modal_training_gym.common.checkpoint import _list_checkpoints
+
+        self._reload()
+        location = checkpoint_location(self)
+        if location is None:
+            return []
+        directory, volume, mount = location
+        return _list_checkpoints(
+            directory,
+            volume,
+            mount,
+            include_hf=False,
+            fallback_without_tracker=False,
+            training_run_id=self.training_run_id,
+        )
+
+    def latest_checkpoint(self) -> "Checkpoint | None":
+        checkpoints = self.checkpoints()
+        return checkpoints[-1] if checkpoints else None
+
+    def done(self) -> bool:
+        """Return True when status is COMPLETED, FAILED, STOPPED, or CANCELLED."""
+        self._reload()
+        return self.status is not TrainingRunStatus.RUNNING
 
     def result(
         self,
@@ -414,6 +462,39 @@ class TrainingRun(BaseModel):
         return run
 
 
+def checkpoint_location(
+    run: TrainingRun,
+) -> tuple[str, str, str] | None:
+    loc = (run.metadata or {}).get(CHECKPOINT_LOCATION_METADATA_KEY)
+    if not isinstance(loc, dict):
+        return None
+    directory = loc.get("checkpoint_dir")
+    volume = loc.get("checkpoints_volume_name")
+    mount = loc.get("checkpoints_mount_path")
+    if not (
+        isinstance(directory, str) and directory and isinstance(volume, str) and volume
+    ):
+        return None
+    mount_path = mount if isinstance(mount, str) and mount else "/checkpoints"
+    return directory, volume, mount_path
+
+
+def set_checkpoint_location(
+    run: TrainingRun,
+    *,
+    checkpoint_dir: str,
+    checkpoints_volume_name: str,
+    checkpoints_mount_path: str,
+) -> None:
+    metadata = dict(run.metadata or {})
+    metadata[CHECKPOINT_LOCATION_METADATA_KEY] = {
+        "checkpoint_dir": checkpoint_dir,
+        "checkpoints_volume_name": checkpoints_volume_name,
+        "checkpoints_mount_path": checkpoints_mount_path,
+    }
+    run.metadata = metadata
+
+
 def _resume_checkpoint(path: str, name: str, iteration: int | None) -> dict[str, Any]:
     return {
         "resume_checkpoint_path": path,
@@ -439,25 +520,24 @@ def torch_dist_resume_checkpoint(
         return None
 
     is_complete = is_complete or os.path.isdir
-    tracker_path = os.path.join(save_path, "latest_checkpointed_iteration.txt")
+    tracker_path = os.path.join(save_path, TORCH_DIST_TRACKER_NAME)
     if os.path.isfile(tracker_path):
         try:
             with open(tracker_path) as f:
-                marker = f.read().strip()
+                tracker = f.read()
         except OSError:
-            marker = ""
-        if marker == "release":
+            tracker = ""
+        if tracker.strip() == "release":
             path = os.path.join(save_path, "release")
             return (
                 _resume_checkpoint(path, "release", None) if is_complete(path) else None
             )
-        if marker.isdigit():
-            name = f"iter_{int(marker):07d}"
+        iteration = parse_torch_dist_tracker(tracker)
+        if iteration is not None:
+            name = f"iter_{iteration:07d}"
             path = os.path.join(save_path, name)
             return (
-                _resume_checkpoint(path, name, int(marker))
-                if is_complete(path)
-                else None
+                _resume_checkpoint(path, name, iteration) if is_complete(path) else None
             )
 
     try:
@@ -469,9 +549,8 @@ def torch_dist_resume_checkpoint(
             if entry.name == "release":
                 release_path = entry.path
             elif entry.name.startswith("iter_"):
-                try:
-                    iteration = int(entry.name.removeprefix("iter_"))
-                except ValueError:
+                iteration = parse_torch_dist_iteration(entry.name)
+                if iteration is None:
                     continue
                 candidates.append((iteration, entry.name, entry.path))
     except OSError:

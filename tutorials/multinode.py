@@ -16,6 +16,8 @@
 # on
 # [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k).
 
+import time
+
 from modal_training_gym import (
     Endpoint,
     GLM_4_7,
@@ -69,8 +71,11 @@ print(f"run id: {run.training_run_id}")
 #
 # Spin up an [Endpoint](https://modal.com/docs/guide/endpoints) and try a prompt.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
+while True:
+    checkpoint = run.latest_checkpoint()
+    if run.done():
+        break
+    time.sleep(30)
 print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
