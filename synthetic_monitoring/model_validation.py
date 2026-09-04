@@ -296,10 +296,10 @@ def launch_weekly(model: str = "", num_steps: int = 1) -> list[dict]:
         raise RuntimeError("no validatable models registered")
 
     rows: list[dict] = []
-    for name, payload in zip(
-        names,
-        monitor.map(names, kwargs={"num_steps": num_steps}, return_exceptions=True),
-    ):
+    payloads = list(
+        monitor.map(names, kwargs={"num_steps": num_steps}, return_exceptions=True)
+    )
+    for name, payload in zip(names, payloads):
         if isinstance(payload, Exception):
             tb = "".join(
                 traceback.format_exception(
