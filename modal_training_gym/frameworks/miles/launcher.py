@@ -131,8 +131,14 @@ _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_PATCH_CKPT_WRITER_THREADS_B64 = encode_patch(
+    "patch_ckpt_writer_threads", _MEGATRON_PATCHES
+)
 _MEGATRON_TORCH_STRATEGY_PY = (
     "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
+)
+_MEGATRON_FILESYSTEM_ASYNC_PY = (
+    "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/filesystem_async.py"
 )
 
 
@@ -357,6 +363,12 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
                 f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3; "
                 f"else echo 'WARNING: {_MEGATRON_TORCH_STRATEGY_PY} not found, "
                 "skipping checkpoint-save patch'; fi"
+            ),
+            (
+                f"if test -f {_MEGATRON_FILESYSTEM_ASYNC_PY}; then "
+                f"echo {_PATCH_CKPT_WRITER_THREADS_B64} | base64 -d | python3; "
+                f"else echo 'WARNING: {_MEGATRON_FILESYSTEM_ASYNC_PY} not found, "
+                "skipping checkpoint-writer patch'; fi"
             ),
             *_REPORTING_PATCH_COMMANDS,
             f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",

@@ -123,6 +123,9 @@ _PATCH_MEGATRON_BRIDGE_B64 = encode_patch("patch_megatron_bridge", _SLIME_PATCHE
 _PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", _MEGATRON_PATCHES)
 _PATCH_GLOBAL_PLAN_B64 = encode_patch("patch_global_plan", _SLIME_PATCHES)
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_PATCH_CKPT_WRITER_THREADS_B64 = encode_patch(
+    "patch_ckpt_writer_threads", _MEGATRON_PATCHES
+)
 _PATCH_ADVANTAGES_B64 = encode_patch("patch_advantages", _SLIME_PATCHES)
 _PATCH_BRIDGE_NONE_TASK_B64 = encode_patch("patch_bridge_none_task", _SLIME_PATCHES)
 _PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", _MEGATRON_PATCHES)
@@ -192,6 +195,7 @@ _SLIME_EXTERNAL_PATCHES_B64 = (
     _PATCH_BRIDGE_NONE_TASK_B64,
     _PATCH_LOG_ELIDE_B64,
     _PATCH_DIST_CKPT_QUANTIZED_B64,
+    _PATCH_CKPT_WRITER_THREADS_B64,
 )
 
 
@@ -290,11 +294,25 @@ def _response_parser_path(model: Any) -> str:
 
 
 def _is_complete_torch_dist_checkpoint(path: str) -> bool:
+    """Whether ``path`` holds a *finished* torch_dist checkpoint.
+
+    ``.metadata`` is written last, by ``save_state_dict_async_finalize``, so its
+    presence is what separates a completed save from a crashed one. A save that
+    died mid-write leaves ``common.pt`` and the ``.distcp`` shards behind, so
+    those alone cannot tell the two apart: without the ``.metadata`` check a
+    retry resumes from the partial ``iter_*`` directory (Megatron then silently
+    ignores it and restarts from ``ref_load``), and a crashed conversion is
+    reported as a cache hit.
+    """
     try:
         names = os.listdir(path)
     except OSError:
         return False
-    return "common.pt" in names and any(name.endswith(".distcp") for name in names)
+    return (
+        ".metadata" in names
+        and "common.pt" in names
+        and any(name.endswith(".distcp") for name in names)
+    )
 
 
 _PIPELINE_SPLIT_FLAGS = (
