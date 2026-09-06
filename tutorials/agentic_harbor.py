@@ -203,9 +203,12 @@ recipe = replace(
 # `AGENTIC_NODES=1` colocates the actor and four rollout engines on a single
 # 8×H200 node, and context parallelism drops to 1 so TP4 × PP2 × CP1 fills
 # exactly eight GPUs. Pipeline parallelism stays at 2, so the cached checkpoint
-# conversion remains valid. Size the batch to the node: two prompts with eight
-# samples each is 16 episodes per step, which keeps GRPO's within-group
-# advantage meaningful while a full 75-step agent budget stays affordable.
+# conversion remains valid. Colocation parks the rollout engines in host memory
+# while the actor trains, using SGLang's memory saver, which does not work
+# under PyTorch's `expandable_segments` allocator setting, so that setting is
+# cleared here. Size the batch to the node: two prompts with eight samples each
+# is 16 episodes per step, which keeps GRPO's within-group advantage meaningful
+# while a full 75-step agent budget stays affordable.
 #
 # `AGENTIC_SMOKE=1` goes further: two-step agents with short timeouts, one
 # sample per prompt, short responses, and tracing off. With binary rewards and
@@ -219,6 +222,7 @@ if NODES == 1:
         rollout_num_gpus=8,
         colocate=True,
         context_parallel_size=1,
+        environment={**recipe.environment, "PYTORCH_CUDA_ALLOC_CONF": ""},
     )
 
 if SMOKE:
@@ -229,7 +233,6 @@ if SMOKE:
         eval_max_response_len=1024,
         sglang_server_concurrency=4,
         capture_trace=False,
-        environment={**recipe.environment, "PYTORCH_CUDA_ALLOC_CONF": ""},
         extra_config={
             **(recipe.extra_config or {}),
             "agentic_episode_timeout": 300,
