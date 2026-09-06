@@ -1,20 +1,36 @@
 """Partition an archived Harbor dataset into deterministic training subsets.
 
 Runs on Modal against the data volume of ``Qwen3_6_27B_Recipe_Agentic`` so the
-subsets land where that recipe reads them: a ``DatasetConfig`` with
-``hf_repo=<dataset-root>`` and ``hf_split=<subset>`` resolves to
-``/data/<dataset-root>/<subset>.jsonl``.
+subsets land where that recipe reads them, as ``/data/<dataset-root>/<subset>.jsonl``.
+The tutorial selects a subset by that path.
 
 ``prepare`` downloads the archived tasks from the Hugging Face Hub, unpacks and
-converts them once with the pinned Slime fork's Harbor translator, and writes a
-repository-disjoint 20% ``eval`` split plus nested, language-balanced
-``train-100``, ``train-300``, ``train-1000``, and ``train-full`` subsets to
-``/data/<dataset-root>/``.
+converts them once with the pinned Slime fork's Harbor translator, and writes
+the splits below to ``/data/<dataset-root>/``.
 
-``mixed`` filters one of those train subsets to tasks whose probe rollouts were
+``mixed`` filters one of the train splits to tasks whose probe rollouts were
 fully gradeable with both successes and failures. It reads the rollout dump a
 training run wrote via ``save_debug_rollout_data``, so it is only exercisable
 after a probe run has completed.
+
+Split design
+------------
+Each converted row is one Harbor task. Tasks belong to a *task group*, in
+practice the GitHub repository they were mined from, and carry a *language*
+from the dataset's metadata sheet. The splits make these guarantees:
+
+* ``eval`` holds ``EVAL_SPLIT_FRACTION`` of the rows and is task-group
+  disjoint from every train split: no repository appears on both sides.
+* ``eval`` covers every language that appears in at least two task groups,
+  and its language mix tracks the full dataset's as closely as disjointness
+  allows. Every language keeps at least two task groups in train.
+* ``train-full`` is everything not in ``eval``. ``train-<N>`` for each
+  ``TRAIN_SPLIT_SIZES`` entry is drawn from ``train-full`` with the full
+  dataset's language mix, and the splits nest: ``train-100`` is a subset of
+  ``train-300``, which is a subset of ``train-1000``.
+* Everything is deterministic under a fixed seed. Rerunning ``prepare`` on the
+  same source produces byte-identical files, and ``all.converted.json``
+  records the inputs the conversion depended on.
 """
 
 from __future__ import annotations
@@ -48,8 +64,17 @@ from modal_training_gym.train_recipes.slime_recipe import (
     Qwen3_6_27B_Recipe_Agentic,
 )
 
-TRAIN_SIZES = (100, 300, 1000)
-EVAL_FRACTION = 0.2
+# The eval split takes this fraction of all rows. The train splits below are
+# drawn from the remaining 1 - EVAL_SPLIT_FRACTION, so with 0.2 they come from
+# the other 80% of the dataset.
+EVAL_SPLIT_FRACTION = 0.2
+TRAIN_SPLIT_SIZES = (100, 300, 1000)
+SPLIT_SEED = 0
+# Every language keeps at least this many task groups in train, so moving a
+# group to eval never leaves train without examples of a language.
+MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE = 2
+# A mixed-reward subset keeps tasks whose n_samples probe episodes were all
+# gradeable and were neither all solved nor all failed.
 MIXED_CRITERION = "fully_gradeable_and_0_lt_solved_lt_n_samples"
 METADATA_COLUMNS = ("language", "language_bucket", "category", "difficulty")
 DEFAULT_MIXED_RECIPE_SLUG = "qwen3-6-27b-agentic"
@@ -67,17 +92,24 @@ def dataset_root_name(value: str) -> str:
     return value
 
 
-def _metadata(row: dict[str, Any], namespace: str) -> dict[str, Any]:
+def source_metadata(row: dict[str, Any], namespace: str) -> dict[str, Any]:
+    """The columns copied from the dataset's ``tasks.csv`` sheet, if the task had a row."""
     value = (row.get("metadata") or {}).get(namespace) or {}
     return value if isinstance(value, dict) else {}
 
 
-def _language(row: dict[str, Any], namespace: str) -> str:
-    metadata = _metadata(row, namespace)
+def language(row: dict[str, Any], namespace: str) -> str:
+    """The task's language for balancing: the coarse bucket, else the raw language, else ``?``."""
+    metadata = source_metadata(row, namespace)
     return str(metadata.get("language_bucket") or metadata.get("language") or "?")
 
 
-def _group(row: dict[str, Any], suffix_pattern: str) -> str:
+def task_group(row: dict[str, Any], suffix_pattern: str) -> str:
+    """The task's group, in practice its source repository.
+
+    Task directories are named ``<owner>_<repo>__<issue>``, so stripping the
+    ``__<issue>`` suffix maps ``aws_aws-cli__2819`` to ``aws_aws-cli``.
+    """
     task_path = str((row.get("metadata") or {}).get("task_path") or "")
     if not task_path:
         raise ValueError("converted row is missing metadata.task_path")
@@ -91,37 +123,61 @@ def nested_subset(
     seed: int,
     metadata_namespace: str,
 ) -> list[dict[str, Any]]:
-    """Select a deterministic language-balanced prefix."""
+    """Select ``count`` rows whose language mix matches ``rows``, as a nested prefix.
+
+    Args:
+        rows: The pool to draw from, normally the ``train-full`` split.
+        count: How many rows to select.
+        seed: Seeds the within-language shuffle and the tie-breaks. The same
+            seed and pool give the same selection.
+        metadata_namespace: The ``metadata`` key holding the ``tasks.csv``
+            columns that carry each task's language.
+
+    Rows are picked one position at a time. At each position the language that
+    is furthest below its share of the full pool gets the next row, so the
+    selection tracks the pool's language proportions at every prefix length.
+    Because the choice at a position never depends on ``count``, a smaller
+    ``count`` yields a prefix of a larger one: ``train-100`` is a subset of
+    ``train-300``, which is a subset of ``train-1000``.
+    """
     if count < 0 or count > len(rows):
         raise ValueError(f"sample count {count} is outside [0, {len(rows)}]")
 
-    by_language: dict[str, list[int]] = {}
+    rows_by_language: dict[str, list[int]] = {}
     for index, row in enumerate(rows):
-        by_language.setdefault(_language(row, metadata_namespace), []).append(index)
+        rows_by_language.setdefault(language(row, metadata_namespace), []).append(index)
 
+    # Shuffle within each language so the selection is not biased by conversion
+    # order. The seeded per-language tie-break keeps exact deficit ties from
+    # systematically favoring alphabetically earlier languages.
     rng = random.Random(seed)
-    for indices in by_language.values():
+    for indices in rows_by_language.values():
         rng.shuffle(indices)
-    tie_break = {language: rng.random() for language in sorted(by_language)}
+    tie_break = {name: rng.random() for name in sorted(rows_by_language)}
+    language_share = {
+        name: len(indices) / len(rows) for name, indices in rows_by_language.items()
+    }
 
     selected_counts: Counter[str] = Counter()
+
+    def language_deficit(name: str, position: int) -> tuple[float, float, str]:
+        """How far a language is below its expected count after ``position`` picks."""
+        expected = position * language_share[name]
+        return expected - selected_counts[name], tie_break[name], name
+
     selected: set[int] = set()
     for position in range(1, count + 1):
-        available = [
-            language
-            for language, indices in by_language.items()
-            if selected_counts[language] < len(indices)
+        languages_with_rows_left = [
+            name
+            for name, indices in rows_by_language.items()
+            if selected_counts[name] < len(indices)
         ]
-        language = max(
-            available,
-            key=lambda value: (
-                position * len(by_language[value]) / len(rows) - selected_counts[value],
-                tie_break[value],
-                value,
-            ),
+        name = max(
+            languages_with_rows_left,
+            key=lambda value: language_deficit(value, position),
         )
-        selected.add(by_language[language][selected_counts[language]])
-        selected_counts[language] += 1
+        selected.add(rows_by_language[name][selected_counts[name]])
+        selected_counts[name] += 1
     return [row for index, row in enumerate(rows) if index in selected]
 
 
@@ -133,100 +189,158 @@ def repo_disjoint_split(
     metadata_namespace: str,
     group_suffix_pattern: str = r"__\d+$",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Create an approximately language-balanced, repository-disjoint split."""
+    """Split ``rows`` into ``(train, eval)`` with no task group on both sides.
+
+    Args:
+        rows: Every converted task.
+        eval_fraction: Share of rows to move to eval.
+        seed: Seeds the tie-breaks between otherwise equal task groups.
+        metadata_namespace: The ``metadata`` key holding each task's language.
+        group_suffix_pattern: Regex stripped from a task directory name to get
+            its task group; the default removes the ``__<issue>`` suffix.
+
+    The first priority is disjointness: eval is built from whole task groups,
+    so a repository never contributes tasks to both train and eval. In
+    practice task groups are GitHub repositories, and leaking one across the
+    split would let a model score on eval tasks by recognizing code it
+    trained on.
+
+    The second priority is language balance. Eval should contain every
+    language and match the full dataset's language proportions, and train must
+    keep ``MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE`` groups of every language.
+    Whole-group moves make exact proportions impossible, so the eval size and
+    per-language counts are approximate targets.
+    """
     if not 0 < eval_fraction < 1:
         raise ValueError("eval_fraction must be between 0 and 1")
     if not rows:
         raise ValueError("cannot split an empty dataset")
 
-    groups: dict[str, list[int]] = {}
+    task_groups: dict[str, list[int]] = {}
     for index, row in enumerate(rows):
-        groups.setdefault(_group(row, group_suffix_pattern), []).append(index)
-    group_languages = {
-        group: Counter(_language(rows[index], metadata_namespace) for index in indices)
-        for group, indices in groups.items()
+        task_groups.setdefault(task_group(row, group_suffix_pattern), []).append(index)
+    task_group_language_counts = {
+        group: Counter(language(rows[index], metadata_namespace) for index in indices)
+        for group, indices in task_groups.items()
     }
-    language_totals = Counter(_language(row, metadata_namespace) for row in rows)
-    language_groups = {
-        language: {
-            group for group, counts in group_languages.items() if counts[language]
+    language_counts = Counter(language(row, metadata_namespace) for row in rows)
+    task_groups_by_language = {
+        name: {
+            group
+            for group, counts in task_group_language_counts.items()
+            if counts[name]
         }
-        for language in language_totals
+        for name in language_counts
     }
-    target_total = round(len(rows) * eval_fraction)
-    language_targets = {
-        language: count * eval_fraction for language, count in language_totals.items()
+    eval_target_num_rows = round(len(rows) * eval_fraction)
+    eval_target_language_counts = {
+        name: count * eval_fraction for name, count in language_counts.items()
     }
 
+    # Seeded per-group tie-break so equal candidates are not always resolved in
+    # alphabetical order.
     rng = random.Random(seed)
-    tie_break = {group: rng.random() for group in sorted(groups)}
-    selected: set[str] = set()
-    selected_total = 0
-    eval_languages: Counter[str] = Counter()
+    tie_break = {group: rng.random() for group in sorted(task_groups)}
+    eval_selected: set[str] = set()
+    eval_num_rows = 0
+    eval_language_counts: Counter[str] = Counter()
 
-    def can_select(group: str) -> bool:
-        if group in selected:
+    def can_move_to_eval(group: str) -> bool:
+        """Whether moving ``group`` to eval keeps every one of its languages in train.
+
+        A language must keep ``MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE`` groups out
+        of eval, so a language that only exists in one group stays train-only.
+        """
+        if group in eval_selected:
             return False
         return all(
-            len(language_groups[language]) > 1
-            and len(language_groups[language] - selected) > 1
-            for language in group_languages[group]
+            len(task_groups_by_language[name]) >= MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE
+            and len(task_groups_by_language[name] - eval_selected)
+            > MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE - 1
+            for name in task_group_language_counts[group]
         )
 
-    def add(group: str) -> None:
-        nonlocal selected_total
-        selected.add(group)
-        selected_total += len(groups[group])
-        eval_languages.update(group_languages[group])
+    def move_to_eval(group: str) -> None:
+        nonlocal eval_num_rows
+        eval_selected.add(group)
+        eval_num_rows += len(task_groups[group])
+        eval_language_counts.update(task_group_language_counts[group])
 
-    for language in sorted(
-        language_totals, key=lambda value: (language_totals[value], value)
+    # Ensure eval represents every language by preselecting one task group per
+    # language, rarest language first so it is not crowded out later. Languages
+    # confined to a single group are skipped: they cannot leave train.
+    for name in sorted(
+        language_counts, key=lambda value: (language_counts[value], value)
     ):
-        if len(language_groups[language]) < 2 or eval_languages[language]:
+        if (
+            len(task_groups_by_language[name]) < MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE
+            or eval_language_counts[name]
+        ):
             continue
-        candidates = [group for group in language_groups[language] if can_select(group)]
-        if candidates:
-            add(
+        eval_candidates = [
+            group for group in task_groups_by_language[name] if can_move_to_eval(group)
+        ]
+        if eval_candidates:
+            # Pick the task group with the fewest tasks, so this coverage pass
+            # spends as little of the eval budget as possible.
+            move_to_eval(
                 min(
-                    candidates,
+                    eval_candidates,
                     key=lambda group: (
-                        len(groups[group]),
+                        len(task_groups[group]),
                         tie_break[group],
                         group,
                     ),
                 )
             )
 
-    def objective(group: str) -> tuple[float, float, str]:
-        total_error = abs(selected_total + len(groups[group]) - target_total) / max(
-            target_total, 1
-        )
+    def eval_selection_error(group: str) -> tuple[float, float, str]:
+        """How far eval would be from its targets after adding ``group``.
+
+        Sums the relative error in total eval size with the mean relative error
+        across per-language counts, so a group is preferred when it moves both
+        toward target. Lower is better.
+        """
+        size_error = abs(
+            eval_num_rows + len(task_groups[group]) - eval_target_num_rows
+        ) / max(eval_target_num_rows, 1)
         language_error = sum(
-            abs(eval_languages[language] + group_languages[group][language] - target)
+            abs(
+                eval_language_counts[name]
+                + task_group_language_counts[group][name]
+                - target
+            )
             / max(target, 1.0)
-            for language, target in language_targets.items()
-        ) / max(len(language_targets), 1)
-        return total_error + language_error, tie_break[group], group
+            for name, target in eval_target_language_counts.items()
+        ) / max(len(eval_target_language_counts), 1)
+        return size_error + language_error, tie_break[group], group
 
-    while selected_total < target_total:
-        remaining = target_total - selected_total
-        candidates = [
+    # Fill eval greedily up to its target size. Prefer groups that fit in the
+    # remaining budget; if none fit, allow any movable group so the loop can
+    # still reach the target, then stop once nothing can move.
+    while eval_num_rows < eval_target_num_rows:
+        remaining = eval_target_num_rows - eval_num_rows
+        eval_candidates = [
             group
-            for group in groups
-            if can_select(group) and len(groups[group]) <= remaining
+            for group in task_groups
+            if can_move_to_eval(group) and len(task_groups[group]) <= remaining
         ]
-        if not candidates:
-            candidates = [group for group in groups if can_select(group)]
-        if not candidates:
+        if not eval_candidates:
+            eval_candidates = [
+                group for group in task_groups if can_move_to_eval(group)
+            ]
+        if not eval_candidates:
             break
-        add(min(candidates, key=objective))
+        move_to_eval(min(eval_candidates, key=eval_selection_error))
 
-    eval_indices = sorted(index for group in selected for index in groups[group])
+    eval_indices = sorted(
+        index for group in eval_selected for index in task_groups[group]
+    )
     eval_index_set = set(eval_indices)
     train_rows = [row for index, row in enumerate(rows) if index not in eval_index_set]
     eval_rows = [rows[index] for index in eval_indices]
-    train_groups = {_group(row, group_suffix_pattern) for row in train_rows}
-    eval_groups = {_group(row, group_suffix_pattern) for row in eval_rows}
+    train_groups = {task_group(row, group_suffix_pattern) for row in train_rows}
+    eval_groups = {task_group(row, group_suffix_pattern) for row in eval_rows}
     if train_groups & eval_groups:
         raise RuntimeError("repository-disjoint split leaked groups")
     return train_rows, eval_rows
@@ -267,17 +381,21 @@ def write_partitions(
     rows: list[dict[str, Any]],
     *,
     metadata_namespace: str = "source",
-    seed: int = 0,
+    seed: int = SPLIT_SEED,
 ) -> dict[str, int]:
-    """Write ``eval`` and the nested ``train-*`` subsets as ``<name>.jsonl`` under ``root``."""
+    """Write ``eval.jsonl``, ``train-full.jsonl``, and the nested ``train-<N>.jsonl`` splits under ``root``.
+
+    ``eval`` is task-group disjoint from ``train-full``; each ``train-<N>`` is
+    a language-balanced subset of ``train-full`` and of every larger ``train-<M>``.
+    """
     train_rows, eval_rows = repo_disjoint_split(
         rows,
-        eval_fraction=EVAL_FRACTION,
+        eval_fraction=EVAL_SPLIT_FRACTION,
         seed=seed,
         metadata_namespace=metadata_namespace,
     )
     outputs = {"eval": eval_rows, "train-full": train_rows}
-    for size in TRAIN_SIZES:
+    for size in TRAIN_SPLIT_SIZES:
         if size > len(train_rows):
             raise ValueError(
                 f"requested train-{size} from only {len(train_rows)} training rows"
@@ -296,7 +414,13 @@ def write_partitions(
 def aggregate_probe_samples(
     samples: list[Any], *, n_samples: int
 ) -> dict[str, dict[str, int]]:
-    """Count solved, gradeable, and total episodes for each task."""
+    """Count solved, gradeable, and total probe episodes per task.
+
+    An episode is one ``(instance_id, sample index)`` pair; a dump may hold
+    several records for one episode, which are merged. An episode is gradeable
+    when the rollout kept it and the environment reported ``is_solved``, and
+    solved when that report was true.
+    """
 
     def value(sample: Any, key: str, default: Any = None) -> Any:
         return (
@@ -362,7 +486,14 @@ def write_mixed_subset(
     probe_dump: str,
     replace: bool = False,
 ) -> tuple[Path, dict[str, Any]]:
-    """Filter a train subset to fully gradeable tasks with mixed outcomes."""
+    """Filter a train split to tasks that are neither too easy nor too hard for the probed model.
+
+    A task is kept when all ``n_samples`` probe episodes were gradeable and it
+    was solved at least once but not every time (``MIXED_CRITERION``). With
+    binary rewards, tasks solved always or never give GRPO zero advantage
+    signal. The output is ordered by closeness to a 50% solve rate, where that
+    signal is strongest, and a JSON sidecar records the provenance.
+    """
     if not re.fullmatch(r"train-(100|300|1000|full)", source):
         raise ValueError(
             "source must be train-100, train-300, train-1000, or train-full"
