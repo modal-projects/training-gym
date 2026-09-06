@@ -302,22 +302,23 @@ print(f"Modal app: {run.modal_app_url}")
 #   uv run tutorials/agentic_harbor.py
 # ```
 #
-# A one-node learning experiment on a small subset, here the two mixed-reward
-# tasks used for smoke tests, with real 75-step agents. Two prompts with eight
-# samples each per step; `rollout/rewards` in Trackio and the dashboard's
-# reward curve should move within a handful of steps:
+# The same topology and batch shape on a small subset, here the two
+# mixed-reward tasks used for smoke tests, for a handful of steps. Slime cycles
+# through a subset smaller than the batch, so each task still gets its 8-sample
+# GRPO groups every step, and `rollout/rewards` in Trackio and the dashboard's
+# reward curve should move within a few steps:
 #
 # ```bash
 # AGENTIC_HARBOR_DATASET_ROOT=example-org_private-harbor-tasks \
-# AGENTIC_NODES=1 \
 # AGENTIC_TRAIN_SUBSET=train-2-mixed-smoke \
 # AGENTIC_EVAL_SUBSETS=eval-2-smoke \
-# AGENTIC_ROLLOUT_BATCH_SIZE=2 \
-# AGENTIC_N_SAMPLES_PER_PROMPT=8 \
 # AGENTIC_NUM_ROLLOUT=8 \
 # AGENTIC_EVAL_INTERVAL=4 \
 #   uv run tutorials/agentic_harbor.py
 # ```
+#
+# Add `AGENTIC_NODES=1 AGENTIC_ROLLOUT_BATCH_SIZE=2` to run the same experiment
+# colocated on a single node when the full cluster is not available.
 #
 # A one-node smoke test against two-row subsets, producing `rollout/*` train
 # charts and separate `eval/train-2-smoke` and `eval/eval-2-smoke` charts in
