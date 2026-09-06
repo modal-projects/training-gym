@@ -302,16 +302,18 @@ print(f"Modal app: {run.modal_app_url}")
 #   uv run tutorials/agentic_harbor.py
 # ```
 #
-# The same topology and batch shape on a small subset, here the two
-# mixed-reward tasks used for smoke tests, for a handful of steps. Slime cycles
-# through a subset smaller than the batch, so each task still gets its 8-sample
-# GRPO groups every step, and `rollout/rewards` in Trackio and the dashboard's
-# reward curve should move within a few steps:
+# The same topology on a small subset, here the two mixed-reward tasks used
+# for smoke tests, for a handful of steps. Slime fills a rollout batch from at
+# most one pass over the subset plus the start of the next, so keep the rollout
+# batch no larger than twice the subset: four prompts from two tasks gives each
+# task two 8-sample GRPO groups per step, and `rollout/rewards` in Trackio and
+# the dashboard's reward curve should move within a few steps:
 #
 # ```bash
 # AGENTIC_HARBOR_DATASET_ROOT=example-org_private-harbor-tasks \
 # AGENTIC_TRAIN_SUBSET=train-2-mixed-smoke \
 # AGENTIC_EVAL_SUBSETS=eval-2-smoke \
+# AGENTIC_ROLLOUT_BATCH_SIZE=4 \
 # AGENTIC_NUM_ROLLOUT=8 \
 # AGENTIC_EVAL_INTERVAL=4 \
 #   uv run tutorials/agentic_harbor.py
