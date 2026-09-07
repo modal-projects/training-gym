@@ -60,17 +60,30 @@ def test_default_recipe_keeps_separate_data_and_checkpoint_mounts(build_app):
 def test_forced_preparation_preserves_other_files_in_shared_directory(tmp_path):
     prompt = tmp_path / "train.jsonl"
     prompt.write_text("old data")
+    eval_path = tmp_path / "eval.jsonl"
+    eval_path.write_text("old eval")
     checkpoint = tmp_path / "model" / "release" / "__0_0.distcp"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.write_text("weights")
     dataset = Mock(always_prepare=True)
-    dataset.prepare.side_effect = lambda path, evals: prompt.write_text("new data")
+
+    def prepare(path, evals):
+        assert not prompt.exists()
+        assert not eval_path.exists()
+        prompt.write_text("new data")
+        eval_path.write_text("new eval")
+
+    dataset.prepare.side_effect = prepare
 
     run_prepare_dataset(
-        dataset, Mock(), lambda _: (str(prompt), {}), clear_data_dir=False
+        dataset,
+        Mock(),
+        lambda _: (str(prompt), {"eval": str(eval_path)}),
+        clear_data_dir=False,
     )
 
     assert prompt.read_text() == "new data"
+    assert eval_path.read_text() == "new eval"
     assert checkpoint.read_text() == "weights"
 
 

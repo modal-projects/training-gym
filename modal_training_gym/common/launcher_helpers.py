@@ -17,6 +17,7 @@ import secrets as _secrets
 import tempfile
 import textwrap
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 import cloudpickle
@@ -221,7 +222,10 @@ def run_prepare_dataset(
     and validating the prepared prompt/eval paths."""
     data_volume.reload()
     prompt_data, eval_paths = resolve_data_paths(dataset)
-    if clear_data_dir and dataset.always_prepare and os.path.exists(prompt_data):
+    if dataset.always_prepare and not clear_data_dir:
+        for path in (prompt_data, *(eval_paths or {}).values()):
+            Path(path).unlink(missing_ok=True)
+    elif dataset.always_prepare and os.path.exists(prompt_data):
         import shutil
 
         data_dir = os.path.dirname(prompt_data)
