@@ -11,6 +11,7 @@ expected output with ``uv run pytest tests/test_substep_timing_patch.py
 from __future__ import annotations
 
 import importlib.util
+import ast
 import sys
 from pathlib import Path
 
@@ -18,6 +19,123 @@ import pytest
 
 TESTDATA = Path(__file__).parent / "testdata"
 FRAMEWORKS = Path(__file__).parents[1] / "modal_training_gym" / "frameworks"
+
+
+def test_miles_component_async_waits_and_snapshot_eval(patchers, tmp_path):
+    source = """from __future__ import annotations
+from miles.ray.placement_group import create_rollout_components
+async def train(args):
+    await update_weights(actor_model, rollout_executor)
+    await eval_dispatcher.dispatch(0, hf_dir=args.hf_checkpoint)
+    for rollout_id in range(args.start_rollout_id, args.num_rollout):
+        if rollout_data_next_future is not None:
+            rollout_data_curr_ref = await rollout_data_next_future
+        await actor_model.train(rollout_id, rollout_data_curr_ref)
+        rollout_data_curr_ref = (await x) if (x := rollout_data_next_future) is not None else None
+        rollout_data_next_future = None
+        await update_weights(actor_model, rollout_executor, rollout_id=rollout_id)
+        await eval_dispatcher.dispatch(rollout_id, force=rollout_id == args.num_rollout - 1)
+    await eval_dispatcher.drain()
+"""
+    patcher = patchers["miles"]
+    path = tmp_path / "train_async.py"
+    path.write_text(source)
+    patcher._patch_file(path, patcher.ENTRYPOINTS[path.name])
+    patched = path.read_text()
+    compile(patched, str(path), "exec")
+    for phase in (
+        "wait_for_rollout",
+        "wait_for_next_rollout",
+        "evaluate_rollouts",
+        "evaluate_rollouts_end",
+    ):
+        assert patcher.phase_marker(phase) in patched
+    assert patched.count("if not args.eval_uses_snapshots else _tg_nullcontext()") == 2
+
+
+def test_component_driver_does_not_write_partial_instrumentation(patchers, tmp_path):
+    source = """from miles.ray.placement_group import create_rollout_components
+async def train(args):
+    for rollout_id in range(args.start_rollout_id, args.num_rollout):
+        await actor_model.train(rollout_id, data)
+"""
+    path = tmp_path / "train.py"
+    path.write_text(source)
+    patcher = patchers["miles"]
+    with pytest.raises(RuntimeError, match="phases not instrumented"):
+        patcher._patch_file(path, patcher.ENTRYPOINTS[path.name])
+    assert path.read_text() == source
+
+
+def test_miles_controller_driver_preserves_calls_and_branches(patchers, tmp_path):
+    source = """import asyncio
+from miles.ray.placement_group import create_rollout_components
+async def train(args):
+    await update_weights(actor_model, rollout_executor)
+    for rollout_id in range(args.start_rollout_id, args.num_rollout):
+        await inference_controller.prepare_eval()
+        await rollout_executor.eval.remote(rollout_id)
+        await inference_controller.prepare_rollout(rollout_id)
+        rollout_data_pack = await rollout_executor.get.remote(rollout_id)
+        await actor_model.train(rollout_id, rollout_data_pack)
+        if args.colocate_memory_peak_device == "gpu":
+            await inference_controller.onload_weights()
+            await offload_train()
+        else:
+            await offload_train()
+            await inference_controller.onload_weights()
+        await update_weights(actor_model, rollout_executor, rollout_id=rollout_id)
+        await inference_controller.prepare_eval()
+        await rollout_executor.eval.remote(rollout_id)
+"""
+    path = tmp_path / "train.py"
+    path.write_text(source)
+    patcher = patchers["miles"]
+    patcher._patch_file(path, patcher.ENTRYPOINTS[path.name])
+    patched = path.read_text()
+    compile(patched, str(path), "exec")
+    for phase in (
+        "initial_weight_sync",
+        "evaluate_rollouts",
+        "generate_rollouts",
+        "train_models",
+        "offload_train",
+        "weight_sync",
+        "evaluate_rollouts_end",
+    ):
+        assert patcher.phase_marker(phase) in patched
+
+    class StripTiming(ast.NodeTransformer):
+        def visit_With(self, node):
+            node = self.generic_visit(node)
+            return (
+                node.body
+                if any("_tg_" in ast.unparse(i.context_expr) for i in node.items)
+                else node
+            )
+
+    before = ast.parse(source)
+    after = StripTiming().visit(ast.parse(patched))
+    after.body = after.body[-len(before.body) :]  # Remove injected bootstrap imports.
+    assert ast.dump(before) == ast.dump(after)
+    patcher._patch_file(path, patcher.ENTRYPOINTS[path.name])
+    assert path.read_text() == patched
+
+
+def test_miles_rollout_executor_layout(patchers, tmp_path):
+    patcher = patchers["miles"]
+    target = patcher.PACKAGE_TARGETS[0]
+    path = tmp_path / "miles/ray/rollout/rollout_executor.py"
+    path.parent.mkdir(parents=True)
+    source = (TESTDATA / "miles/rollout_manager.py.input").read_text()
+    path.write_text(
+        source.replace(
+            "async def generate(self, rollout_id):", "async def get(self, rollout_id):"
+        )
+    )
+    patcher._patch_package_file(tmp_path, target)
+    assert "with _tg_role('rollout', rollout_id):" in path.read_text()
+    compile(path.read_text(), str(path), "exec")
 
 
 def patcher_path(framework: str) -> Path:
