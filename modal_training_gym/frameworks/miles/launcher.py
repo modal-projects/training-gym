@@ -37,7 +37,6 @@ from modal_training_gym.common.metrics import (
     metric_secrets,
     preflight_metric,
 )
-from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import ModalRayCluster
@@ -1120,10 +1119,6 @@ def build_miles_app(
         try:  # Wraps all post-setup work so any failure marks the run terminal.
             prepare_miles_config(miles, model, tempfile.mkdtemp())
 
-            if wandb_key := os.environ.get("WANDB_API_KEY", ""):
-                if isinstance(miles.metrics, WandbConfig):
-                    miles.metrics.key = wandb_key
-
             save_root = compute_save_root(
                 miles.save,
                 recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
@@ -1212,7 +1207,8 @@ def build_miles_app(
                 f"Training {app_name} - {miles.total_nodes} node(s) x {gpu_spec} ({mode})"
             )
             print(miles.gpu_allocation.summary())
-            print(f"Command: {cmd}, runtime_env: {runtime_env}")
+            print(f"Command: {cmd}")
+            print(f"Runtime environment variables: {sorted(runtime_env['env_vars'])}")
 
             await _set_framework_status(MilesStatus.TRAINING)
             result = await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
