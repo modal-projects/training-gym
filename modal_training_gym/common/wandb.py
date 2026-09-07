@@ -98,4 +98,8 @@ def preflight_wandb(wandb_cfg: WandbConfig) -> str:
             f"The key in Modal secret '{wandb_cfg.modal_wandb_secret_name}' "
             "cannot log there. Fix the secret or drop metrics=."
         ) from exc
+    finally:
+        # Ray workers must start their own services for shared-mode logging.
+        # finish() closes the probe run but leaves WANDB_SERVICE inherited.
+        wandb.teardown()
     return entity
