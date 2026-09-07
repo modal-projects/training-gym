@@ -420,8 +420,9 @@ def build_ray_runtime_env(
         "TRAINING_GYM_SUBSTEP_TIMING": substep_timing,
     }
     env_vars.update(extra_env or {})
-    env_vars.update(metric_env)
     env_vars.update(environment)
+    # Tracker identity and credentials must match the preflight configuration.
+    env_vars.update(metric_env)
     env_vars.update(timing_debug_env())
     if framework_status_token:
         # Applied after `environment` so a recipe override can't blank the

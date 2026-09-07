@@ -1173,12 +1173,12 @@ def build_slime_app(
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                     "TRAINING_GYM_SUBSTEP_TIMING": slime.substep_timing,
+                    **slime.environment,
                     **metric_runtime_env(
                         slime.metrics,
                         run_id=metric_run_id,
                         entity=metric_entity,
                     ),
-                    **slime.environment,
                     **timing_debug_env(),
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
