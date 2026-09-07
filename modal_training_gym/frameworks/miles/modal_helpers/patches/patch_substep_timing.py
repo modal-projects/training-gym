@@ -659,7 +659,12 @@ def _patch_component_driver(src: str, path: Path) -> str:
         if not inside:
             if call == "update_weights":
                 phase = "initial_weight_sync"
-            elif call not in {"eval_dispatcher.dispatch", "eval_dispatcher.drain"}:
+            elif call not in {
+                "inference_controller.prepare_eval",
+                "rollout_executor.eval.remote",
+                "eval_dispatcher.dispatch",
+                "eval_dispatcher.drain",
+            }:
                 continue
         if inside and phase == "evaluate_rollouts" and node.lineno > train_line:
             phase = "evaluate_rollouts_end"
