@@ -26,6 +26,7 @@ def test_miles_component_async_waits_and_snapshot_eval(patchers, tmp_path):
 from miles.ray.placement_group import create_rollout_components
 async def train(args):
     await update_weights(actor_model, rollout_executor)
+    await inference_controller.prepare_eval()
     await eval_dispatcher.dispatch(0, hf_dir=args.hf_checkpoint)
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
         if rollout_data_next_future is not None:
@@ -51,6 +52,8 @@ async def train(args):
     ):
         assert patcher.phase_marker(phase) in patched
     assert patched.count("if not args.eval_uses_snapshots else _tg_nullcontext()") == 2
+    before_loop = patched.split("for rollout_id in range")[0]
+    assert before_loop.count("with _tg_rec.phase('evaluate_rollouts'):") == 1
 
 
 def test_component_driver_does_not_write_partial_instrumentation(patchers, tmp_path):
@@ -72,6 +75,9 @@ def test_miles_controller_driver_preserves_calls_and_branches(patchers, tmp_path
 from miles.ray.placement_group import create_rollout_components
 async def train(args):
     await update_weights(actor_model, rollout_executor)
+    if args.num_rollout == 0 and args.eval_interval is not None:
+        await inference_controller.prepare_eval()
+        await rollout_executor.eval.remote(rollout_id=0)
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
         await inference_controller.prepare_eval()
         await rollout_executor.eval.remote(rollout_id)
@@ -104,6 +110,9 @@ async def train(args):
         "evaluate_rollouts_end",
     ):
         assert patcher.phase_marker(phase) in patched
+
+    before_loop = patched.split("for rollout_id in range")[0]
+    assert before_loop.count("with _tg_rec.phase('evaluate_rollouts'):") == 2
 
     class StripTiming(ast.NodeTransformer):
         def visit_With(self, node):
