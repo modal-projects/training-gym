@@ -45,6 +45,10 @@ _ADVANTAGE_PATH = "/api/advantage-distributions"
 _PHASE_TIMEOUT_SECONDS = 1.0
 _STEP_EVENT_TIMEOUT_SECONDS = 5.0
 _ROLLOUT_TIMEOUT_SECONDS = 10.0
+# Rollout and advantage payloads carry every sample of a step; agentic rollouts
+# with 75-turn transcripts run to several MB. Give the dashboard time to store
+# them instead of abandoning the upload at a fixed budget.
+_TIMEOUT_SECONDS_PER_MB = 4.0
 REPORT_DRAIN_POST_TIMEOUT_SECONDS = 1.0
 REPORT_DRAIN_FINAL_POST_TIMEOUT_SECONDS = _ROLLOUT_TIMEOUT_SECONDS
 REPORT_DRAIN_FINAL_POST_COUNT = 4
@@ -205,7 +209,12 @@ def _enqueue_rollout(payload: dict[str, Any]) -> None:
     if not url:
         return
     _ensure_worker()
-    item = {"_url": url, "_timeout": _ROLLOUT_TIMEOUT_SECONDS, **payload}
+    item = {
+        "_url": url,
+        "_timeout": _ROLLOUT_TIMEOUT_SECONDS,
+        "_scale_timeout_with_size": True,
+        **payload,
+    }
     try:
         _REPORT_QUEUE.put_nowait(item)
     except Exception:
@@ -220,7 +229,12 @@ def _enqueue_advantage(payload: dict[str, Any]) -> None:
     if not url:
         return
     _ensure_worker()
-    item = {"_url": url, "_timeout": _ROLLOUT_TIMEOUT_SECONDS, **payload}
+    item = {
+        "_url": url,
+        "_timeout": _ROLLOUT_TIMEOUT_SECONDS,
+        "_scale_timeout_with_size": True,
+        **payload,
+    }
     try:
         _REPORT_QUEUE.put_nowait(item)
     except Exception:
@@ -325,6 +339,25 @@ def _retry_timing_final_during_drain(payload: dict[str, Any], retries: int) -> b
     return False
 
 
+def _warn_if_record_dropped(payload: dict[str, Any]) -> None:
+    """Say so when a rollout or advantage record never reached the dashboard.
+
+    These posts are best-effort and not retried, so without this line a step
+    silently goes missing from the dashboard's reward curve and sample view.
+    """
+    if "samples" not in payload and "stats" not in payload:
+        return
+    kind = "rollout" if "samples" in payload else "advantage"
+    reason = payload.get("_failure_reason") or {}
+    detail = ", ".join(f"{key}={value}" for key, value in sorted(reason.items()))
+    print(
+        f"[training-gym] {kind} record for step {payload.get('rollout_id')} was not "
+        f"stored by the dashboard ({detail or 'no response'}); it will be missing "
+        "from the run page.",
+        flush=True,
+    )
+
+
 def _worker() -> None:
     while True:
         try:
@@ -356,6 +389,8 @@ def _worker() -> None:
         try:
             try:
                 delivered = _post(payload)
+                if not delivered:
+                    _warn_if_record_dropped(payload)
                 retries = int(payload.get("_retry_count", 0) or 0)
                 if delivered and payload.get("final", False):
                     key = (
@@ -422,6 +457,8 @@ def _post(item: dict[str, Any]) -> bool:
         {key: value for key, value in item.items() if not key.startswith("_")},
         default=str,
     ).encode("utf-8")
+    if item.get("_scale_timeout_with_size") and not _REPORTER_DRAINING:
+        timeout = max(timeout, len(body) / 1e6 * _TIMEOUT_SECONDS_PER_MB)
 
     from modal_training_gym.common.config import modal_proxy_auth_headers
 
@@ -452,6 +489,7 @@ def _post(item: dict[str, Any]) -> bool:
         }
         if isinstance(exc, HTTPError):
             failure_reason["http_status"] = exc.code
+    item["_failure_reason"] = failure_reason
     if timing_debug:
         debug_payload = {
             "event": "post_attempt",
