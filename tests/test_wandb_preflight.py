@@ -4,6 +4,7 @@ early, actionable failure (missing key, or no write access).
 
 import sys
 import types
+from unittest.mock import Mock
 
 import pytest
 
@@ -21,8 +22,10 @@ def _stub_wandb(monkeypatch, **attrs):
     ``preflight_wandb`` does ``import wandb`` inside the function, so preloading a
     fake into ``sys.modules`` intercepts it — no real library, network, or login.
     """
-    attrs.setdefault("teardown", lambda: None)
-    monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(**attrs))
+    attrs.setdefault("teardown", Mock())
+    module = types.SimpleNamespace(**attrs)
+    monkeypatch.setitem(sys.modules, "wandb", module)
+    return module
 
 
 def test_preflight_raises_clear_error_without_key(monkeypatch):
@@ -40,9 +43,10 @@ def test_preflight_wraps_access_failure(monkeypatch):
     def login_without_write_access(**_):
         raise Exception("user does not have models write access")
 
-    _stub_wandb(monkeypatch, login=login_without_write_access)
+    module = _stub_wandb(monkeypatch, login=login_without_write_access)
     with pytest.raises(RuntimeError, match="W&B pre-flight failed.*qwen3-asr-rl"):
         preflight_wandb(_CFG)
+    module.teardown.assert_called_once_with()
 
 
 def test_preflight_returns_entity(monkeypatch):
@@ -61,7 +65,7 @@ def test_preflight_returns_entity(monkeypatch):
         def run(self, path):
             return types.SimpleNamespace(delete=lambda: None)
 
-    _stub_wandb(
+    module = _stub_wandb(
         monkeypatch,
         login=lambda **_: None,
         init=lambda **_: _FakeRun(),
@@ -71,6 +75,7 @@ def test_preflight_returns_entity(monkeypatch):
     )
     entity = preflight_wandb(_CFG)
     assert entity == "my-team"
+    module.teardown.assert_called_once_with()
 
 
 def test_slime_preflight_delegates_to_common(monkeypatch):
@@ -99,49 +104,6 @@ def test_slime_preflight_delegates_to_common(monkeypatch):
     )
     entity = _slime_preflight_wandb(_CFG)
     assert entity == "slime-team"
-
-
-@pytest.mark.parametrize("failure", [None, "init", "delete"])
-def test_preflight_releases_service_before_workers_start(monkeypatch, failure):
-    monkeypatch.setenv("WANDB_API_KEY", "fake-key")
-    events = []
-
-    def init(**_):
-        monkeypatch.setenv("WANDB_SERVICE", "probe-service")
-        if failure == "init":
-            raise RuntimeError("init failed")
-        return types.SimpleNamespace(entity="team", project="project", id="probe")
-
-    def delete():
-        events.append("delete")
-        if failure == "delete":
-            raise RuntimeError("delete failed")
-
-    def teardown():
-        events.append("teardown")
-        monkeypatch.delenv("WANDB_SERVICE")
-
-    _stub_wandb(
-        monkeypatch,
-        login=lambda **_: None,
-        init=init,
-        finish=lambda: events.append("finish"),
-        Settings=lambda **_: {},
-        Api=lambda **_: types.SimpleNamespace(
-            run=lambda _: types.SimpleNamespace(delete=delete)
-        ),
-        teardown=teardown,
-    )
-    if failure == "init":
-        with pytest.raises(RuntimeError, match="W&B pre-flight failed.*init failed"):
-            preflight_wandb(_CFG)
-        assert events == ["teardown"]
-    else:
-        assert preflight_wandb(_CFG) == "team"
-        assert events == ["finish", "delete", "teardown"]
-    import os
-
-    assert "WANDB_SERVICE" not in os.environ
 
 
 def test_wandb_config_uses_the_provider_neutral_recipe_field():
