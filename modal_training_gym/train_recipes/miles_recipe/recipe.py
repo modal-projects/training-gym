@@ -221,8 +221,9 @@ class MilesRecipe(BaseTrainRecipe):
             Checkpoint trained from; normally set from the attached ``ModelConfig``.
         save:
             Checkpoint output directory on the mounted ``/checkpoints`` volume.
+            Set both ``save`` and ``save_interval`` to ``None`` to disable saving.
         save_interval:
-            Save a checkpoint every N rollout steps; ``None`` disables saving.
+            Save a checkpoint every N rollout steps; use ``None`` with ``save=None``.
         load:
             Directory to resume from; empty starts from the converted HF weights.
         no_save_optim:
@@ -476,7 +477,7 @@ class MilesRecipe(BaseTrainRecipe):
 
     # ── Checkpointing ───────────────────────────────────────────────────────
     hf_checkpoint: str = ""
-    save: str = str(CHECKPOINTS_PATH)
+    save: str | None = str(CHECKPOINTS_PATH)
     load: str = ""
     ref_load: str = ""
     megatron_to_hf_mode: str = "bridge"
@@ -793,10 +794,6 @@ class MilesRecipe(BaseTrainRecipe):
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)
-        # Megatron rejects --save without --save-interval, even when Miles
-        # disables all periodic/final saves with a None interval.
-        if self.save_interval is None:
-            out.pop("save", None)
         for src, dst in _HOOK_PATH_FLAGS.items():
             if src in _HOOK_WRAPPER_PATHS:
                 out[dst] = _HOOK_WRAPPER_PATHS[src]
