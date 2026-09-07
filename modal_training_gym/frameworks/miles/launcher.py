@@ -585,19 +585,38 @@ def build_miles_app(
         setattr(miles, attr, None)
 
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
         resolve_checkpoint_volumes(
             checkpoint,
             volume_prefix=volume_prefix,
             default_mount_path=str(CHECKPOINTS_PATH),
+            default_volume_name=miles.project_volume_name,
         )
     )
+    if miles.project_volume_name:
+        if checkpoints_volume_name != miles.project_volume_name:
+            raise ValueError(
+                "The resume checkpoint must use the configured project volume."
+            )
+        data_mount_path = checkpoints_mount_path
+        data_volume = checkpoints_volume
+        prompt_data, eval_paths = miles._resolve_data_paths(dataset)
+        for path in (prompt_data, *(eval_paths or {}).values()):
+            if os.path.commonpath([os.path.normpath(path), data_mount_path]) != data_mount_path:
+                raise ValueError(
+                    f"With project_volume_name, dataset paths must be below "
+                    f"{data_mount_path}: {path}"
+                )
+    else:
+        data_mount_path = str(DATA_PATH)
+        data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
     all_volumes: dict[str | PurePosixPath, Any] = {
         str(HF_CACHE_PATH): hf_cache_volume,
-        str(DATA_PATH): data_volume,
+        data_mount_path: data_volume,
         checkpoints_mount_path: checkpoints_volume,
     }
+    # A project volume has one mount and must not be reloaded concurrently twice.
+    input_volumes = tuple(all_volumes.values())
 
     tags = build_app_tags(
         framework="miles",
@@ -641,14 +660,14 @@ def build_miles_app(
 
     @app.function(
         image=image,
-        volumes={str(DATA_PATH): data_volume},
+        volumes={str(HF_CACHE_PATH): hf_cache_volume, data_mount_path: data_volume},
         timeout=4 * 60 * 60,
         secrets=hf_secrets(),
         serialized=True,
         name="prepare_dataset",
     )
     def prepare_dataset():
-        run_prepare_dataset(dataset, data_volume, MilesRecipe._resolve_data_paths)
+        run_prepare_dataset(dataset, data_volume, miles._resolve_data_paths)
 
     convert_nnodes = get_checkpoint_conversion_policy(miles, model=model)[0]
     convert_multi_node = convert_nnodes > 1
@@ -943,11 +962,7 @@ def build_miles_app(
         if framework_status_token:
             os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
 
-        await asyncio.gather(
-            hf_cache_volume.reload.aio(),
-            data_volume.reload.aio(),
-            checkpoints_volume.reload.aio(),
-        )
+        await asyncio.gather(*(volume.reload.aio() for volume in input_volumes))
 
         cluster = ModalRayCluster()
         cluster.discover_cluster(miles.total_nodes)
@@ -1050,7 +1065,7 @@ def build_miles_app(
             await checkpoints_volume.commit.aio()
 
             await _set_framework_status(MilesStatus.PREPARE_DATASET)
-            prompt_data, eval_paths = MilesRecipe._resolve_data_paths(dataset)
+            prompt_data, eval_paths = miles._resolve_data_paths(dataset)
             needs_prepare = not os.path.exists(prompt_data)
             if dataset.always_prepare and os.path.exists(prompt_data):
                 data_dir = os.path.dirname(prompt_data)
@@ -1096,11 +1111,7 @@ def build_miles_app(
         else:
             deadline = time.time() + 4 * 60 * 60
             while True:
-                await asyncio.gather(
-                    hf_cache_volume.reload.aio(),
-                    data_volume.reload.aio(),
-                    checkpoints_volume.reload.aio(),
-                )
+                await asyncio.gather(*(volume.reload.aio() for volume in input_volumes))
                 if os.path.exists(prep_marker):
                     break
                 if os.path.exists(prep_error):

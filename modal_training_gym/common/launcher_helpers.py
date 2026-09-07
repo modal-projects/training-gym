@@ -131,13 +131,14 @@ def resolve_checkpoint_volumes(
     *,
     volume_prefix: str,
     default_mount_path: str,
+    default_volume_name: str | None = None,
 ) -> tuple[str, str, "Volume"]:
     """Resolve the checkpoints volume name / mount path / Volume, honoring an
     optional ``CheckpointConfig`` override."""
     checkpoints_volume_name = (
         checkpoint.checkpoints_volume_name
         if checkpoint is not None and checkpoint.checkpoints_volume_name
-        else f"{volume_prefix}-checkpoints"
+        else default_volume_name or f"{volume_prefix}-checkpoints"
     )
     checkpoints_mount_path = (
         checkpoint.checkpoints_mount_path.rstrip("/") or "/"
