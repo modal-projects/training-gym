@@ -602,7 +602,10 @@ def build_miles_app(
         data_volume = checkpoints_volume
         prompt_data, eval_paths = miles._resolve_data_paths(dataset)
         for path in (prompt_data, *(eval_paths or {}).values()):
-            if os.path.commonpath([os.path.normpath(path), data_mount_path]) != data_mount_path:
+            if (
+                os.path.commonpath([os.path.normpath(path), data_mount_path])
+                != data_mount_path
+            ):
                 raise ValueError(
                     f"With project_volume_name, dataset paths must be below "
                     f"{data_mount_path}: {path}"
