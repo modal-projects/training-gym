@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from modal_training_gym.common.dataset import HuggingFaceDataset
+from modal_training_gym.common.launcher_helpers import run_prepare_dataset
 from modal_training_gym.common.models import Qwen3_5_4B
 from modal_training_gym.frameworks.miles import launcher
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
@@ -44,6 +45,7 @@ def test_project_volume_is_mounted_once_for_training_and_preparation(
     monkeypatch.setattr(launcher, "run_prepare_dataset", prepare_data)
     prepare.get_raw_f()()
     assert prepare_data.call_args.args[2] is ProjectRecipe._resolve_data_paths
+    assert prepare_data.call_args.kwargs == {"clear_data_dir": False}
 
 
 def test_default_recipe_keeps_separate_data_and_checkpoint_mounts(build_app):
@@ -53,6 +55,23 @@ def test_default_recipe_keeps_separate_data_and_checkpoint_mounts(build_app):
         "/data",
         "/checkpoints",
     }
+
+
+def test_forced_preparation_preserves_other_files_in_shared_directory(tmp_path):
+    prompt = tmp_path / "train.jsonl"
+    prompt.write_text("old data")
+    checkpoint = tmp_path / "model" / "release" / "__0_0.distcp"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_text("weights")
+    dataset = Mock(always_prepare=True)
+    dataset.prepare.side_effect = lambda path, evals: prompt.write_text("new data")
+
+    run_prepare_dataset(
+        dataset, Mock(), lambda _: (str(prompt), {}), clear_data_dir=False
+    )
+
+    assert prompt.read_text() == "new data"
+    assert checkpoint.read_text() == "weights"
 
 
 @pytest.mark.parametrize(

@@ -670,7 +670,12 @@ def build_miles_app(
         name="prepare_dataset",
     )
     def prepare_dataset():
-        run_prepare_dataset(dataset, data_volume, miles._resolve_data_paths)
+        run_prepare_dataset(
+            dataset,
+            data_volume,
+            miles._resolve_data_paths,
+            clear_data_dir=not bool(miles.project_volume_name),
+        )
 
     convert_nnodes = get_checkpoint_conversion_policy(miles, model=model)[0]
     convert_multi_node = convert_nnodes > 1
@@ -1071,9 +1076,11 @@ def build_miles_app(
             prompt_data, eval_paths = miles._resolve_data_paths(dataset)
             needs_prepare = not os.path.exists(prompt_data)
             if dataset.always_prepare and os.path.exists(prompt_data):
-                data_dir = os.path.dirname(prompt_data)
-                print(f"always_prepare=True - removing {data_dir}")
-                shutil.rmtree(data_dir, ignore_errors=True)
+                # Shared storage does not grant ownership of the data file's parent.
+                if not miles.project_volume_name:
+                    data_dir = os.path.dirname(prompt_data)
+                    print(f"always_prepare=True - removing {data_dir}")
+                    shutil.rmtree(data_dir, ignore_errors=True)
                 needs_prepare = True
             if needs_prepare:
                 print(f"Preparing dataset ({prompt_data})...")

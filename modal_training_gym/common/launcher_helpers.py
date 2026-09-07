@@ -214,12 +214,14 @@ def run_prepare_dataset(
     dataset: Any,
     data_volume: "Volume",
     resolve_data_paths: Callable[[Any], tuple[str, Any]],
+    *,
+    clear_data_dir: bool = True,
 ) -> None:
     """Materialize the dataset onto the data volume, honoring ``always_prepare``
     and validating the prepared prompt/eval paths."""
     data_volume.reload()
     prompt_data, eval_paths = resolve_data_paths(dataset)
-    if dataset.always_prepare and os.path.exists(prompt_data):
+    if clear_data_dir and dataset.always_prepare and os.path.exists(prompt_data):
         import shutil
 
         data_dir = os.path.dirname(prompt_data)
