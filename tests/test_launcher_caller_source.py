@@ -90,6 +90,50 @@ def test_mount_caller_source_ships_tutorial_package(tmp_path: Path) -> None:
     ]
 
 
+def test_mount_caller_source_ships_tutorial_package_from_helper(tmp_path: Path) -> None:
+    package = tmp_path / "tutorials" / "nested"
+    package.mkdir(parents=True)
+    (package / "main.py").write_text("from .helper import score\n")
+    helper = package / "helper.py"
+    helper.write_text("def score() -> int:\n    return 1\n")
+
+    image = mount_caller_source(RecordingImage(), str(helper))
+
+    assert image.operations == [
+        (
+            "add_local_dir",
+            (package,),
+            {
+                "remote_path": "/root/tutorials/nested",
+                "copy": True,
+                "ignore": ["**/__pycache__", "**/*.pyc"],
+            },
+        )
+    ]
+
+
+def test_ship_callable_uses_package_path_when_caller_is_helper(tmp_path: Path) -> None:
+    package = tmp_path / "tutorials" / "nested"
+    package.mkdir(parents=True)
+    main = package / "main.py"
+    main.write_text("def train() -> None:\n    return None\n")
+    helper = package / "helper.py"
+    helper.write_text("def score() -> int:\n    return 1\n")
+    module = _load_module(main, "tutorials.nested.main")
+    paths: list[str] = []
+
+    image = ship_callable(
+        RecordingImage(),
+        module.train,
+        caller_script=str(helper),
+        fallback_name="train",
+        set_path=paths.append,
+    )
+
+    assert paths == ["tutorials.nested.main.train"]
+    assert image.operations == []
+
+
 def test_ship_callable_uses_package_path_for_sibling(tmp_path: Path) -> None:
     package = tmp_path / "tutorials" / "nested"
     package.mkdir(parents=True)
