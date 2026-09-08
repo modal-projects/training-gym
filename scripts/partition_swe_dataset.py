@@ -1,12 +1,11 @@
-"""Partition a zipped Harbor dataset into deterministic training subsets.
+"""Partition a SWE-bench-style dataset into deterministic training subsets.
 
-Harbor datasets are typically unpacked task directories, which is what
-``HarborDataset`` uses. Some Harbor tasks on Hugging Face, typically large
-bulk dumps, are zip files instead.
-
-``prepare`` downloads the zip files from the Hugging Face Hub, unpacks and
-converts them once with the pinned Slime fork's Harbor translator, and writes
-the splits below to ``/data/<dataset-root>/``.
+``prepare`` streams the rows of a Hugging Face dataset such as
+``nebius/SWE-rebench-V2``, renders each row into a Harbor task directory with
+the pinned Slime fork's SWE-rebench converter, converts it once with the fork's
+Harbor translator, and writes the splits below to ``/data/<dataset-root>/``.
+Every row is offered to the converter whatever its language; rows the fork
+cannot grade yet are skipped and counted.
 
 ``mixed`` filters a train split using rollouts from a prior training run.
 That run must have written a ``.pt`` dump via ``save_debug_rollout_data``.
@@ -16,8 +15,9 @@ solves give GRPO no advantage, so they are dropped.
 
 Split design
 ------------
-Each JSONL row is one Harbor task. Tasks are grouped by task group (the GitHub
-repository they came from), and each has a language from ``tasks.csv``.
+Each JSONL row is one task. Tasks are grouped by task group (the GitHub
+repository they came from, the row's ``repo`` column), and each has a
+language (the row's ``language`` column).
 
 * ``eval`` is about ``EVAL_SPLIT_FRACTION`` of the tasks. No task group
   appears in both train and eval.
@@ -25,8 +25,9 @@ repository they came from), and each has a language from ``tasks.csv``.
   includes every language that has groups to spare, matching the
   dataset's language mix as closely as whole-group moves allow.
 * ``train-full`` is everything left after ``eval``. Each ``train-<N>`` is a
-  subset of ``train-full`` with the same language mix. The sized splits
-  nest: ``train-100`` is a subset of ``train-300``, which is a subset of
+  subset of ``train-full`` with the same language mix, and each ``eval-<N>``
+  is a subset of ``eval`` in the same way. The sized splits nest:
+  ``train-100`` is a subset of ``train-300``, which is a subset of
   ``train-1000``.
 * The splits are deterministic. The same source and seed produce the same
   files. ``all.converted.json`` records the inputs the conversion used.
@@ -35,19 +36,16 @@ repository they came from), and each has a language from ``tasks.csv``.
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
 import json
 import os
 import random
 import re
 import shutil
-import stat
 import sys
-import time
-import zipfile
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +63,8 @@ from modal_training_gym.train_recipes.slime_recipe import (
 
 # Fraction of tasks that go to eval. Remainder go to train.
 EVAL_SPLIT_FRACTION = 0.2
-TRAIN_SPLIT_SIZES = (100, 300, 1000)
+EVAL_SPLIT_SIZES = (4, 100, 300)
+TRAIN_SPLIT_SIZES = (4, 100, 300, 1000)
 SPLIT_SEED = 0
 # Train keeps at least this many task groups of each language, so moving a
 # group to eval never leaves train without that language.
@@ -73,8 +72,33 @@ MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE = 2
 # ``mixed`` keeps a task when all n_samples episodes were gradeable and the
 # model solved it at least once but not every time.
 MIXED_CRITERION = "fully_gradeable_and_0_lt_solved_lt_n_samples"
-METADATA_COLUMNS = ("language", "language_bucket", "category", "difficulty")
+# Row columns kept under ``metadata.<namespace>`` for split balancing and analysis.
+SOURCE_COLUMNS = ("repo", "language", "license", "created_at")
 DEFAULT_MIXED_RECIPE_SLUG = "qwen3-6-27b-agentic"
+
+
+@dataclass(frozen=True)
+class SweDataset:
+    """A SWE-bench-style Hugging Face dataset the pinned fork's converter renders.
+
+    Attributes:
+        hf_repo: Hugging Face dataset repository id.
+        split: Source split to stream.
+        key: Directory under ``/data`` and the ``task_path`` prefix, following
+            the fork's dataset-key convention.
+    """
+
+    hf_repo: str
+    split: str
+    key: str
+
+
+SWE_DATASETS = {
+    "swe-rebench-v2": SweDataset(
+        hf_repo="nebius/SWE-rebench-V2", split="train", key="swe_rebench_v2"
+    ),
+}
+DEFAULT_SWE_DATASET = "swe-rebench-v2"
 
 
 def data_volume_name(recipe: Qwen3_6_27B_Recipe_Agentic) -> str:
@@ -90,7 +114,7 @@ def dataset_root_name(value: str) -> str:
 
 
 def source_metadata(row: dict[str, Any], namespace: str) -> dict[str, Any]:
-    """The ``tasks.csv`` columns for this task, if it had a row."""
+    """The source dataset's ``SOURCE_COLUMNS`` for this task."""
     value = (row.get("metadata") or {}).get(namespace) or {}
     return value if isinstance(value, dict) else {}
 
@@ -101,16 +125,12 @@ def language(row: dict[str, Any], namespace: str) -> str:
     return str(metadata.get("language_bucket") or metadata.get("language") or "?")
 
 
-def task_group(row: dict[str, Any], suffix_pattern: str) -> str:
-    """Extract the task group, often a repo name.
-
-    Task directories are named ``<owner>_<repo>__<issue>``, so stripping the
-    ``__<issue>`` suffix maps ``aws_aws-cli__2819`` to ``aws_aws-cli``.
-    """
-    task_path = str((row.get("metadata") or {}).get("task_path") or "")
-    if not task_path:
-        raise ValueError("converted row is missing metadata.task_path")
-    return re.sub(suffix_pattern, "", Path(task_path).name)
+def task_group(row: dict[str, Any], namespace: str) -> str:
+    """Extract the task group: the GitHub repository the task came from, e.g. ``aws/aws-cli``."""
+    repo = source_metadata(row, namespace).get("repo")
+    if not repo:
+        raise ValueError(f"converted row is missing metadata.{namespace}.repo")
+    return str(repo)
 
 
 def nested_subset(
@@ -127,8 +147,8 @@ def nested_subset(
         count: How many rows/tasks to select.
         seed: Seeds the within-language shuffle and the tie-breaks. The same
             seed and pool give the same selection.
-        metadata_namespace: The ``metadata`` key holding the ``tasks.csv``
-            columns that carry each task's language.
+        metadata_namespace: The ``metadata`` key holding the source columns
+            that carry each task's language.
 
     Tasks are picked one at a time. At each step the language furthest below
     its share of the pool gets the next task, so every prefix matches the
@@ -183,7 +203,6 @@ def repo_disjoint_split(
     eval_fraction: float,
     seed: int,
     metadata_namespace: str,
-    group_suffix_pattern: str = r"__\d+$",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split ``rows`` into ``(train, eval)`` with no task group on both sides.
 
@@ -191,9 +210,8 @@ def repo_disjoint_split(
         rows: Every converted task.
         eval_fraction: Share of rows to move to eval.
         seed: Seeds the tie-breaks between otherwise equal task groups.
-        metadata_namespace: The ``metadata`` key holding each task's language.
-        group_suffix_pattern: Regex stripped from a task directory name to get
-            its task group; the default removes a trailing ``__<digits>``.
+        metadata_namespace: The ``metadata`` key holding each task's
+            repository and language.
 
     The first priority is disjointness: eval is built from whole task groups,
     so a repository never contributes tasks to both train and eval. In
@@ -214,7 +232,7 @@ def repo_disjoint_split(
 
     task_groups: dict[str, list[int]] = {}
     for index, row in enumerate(rows):
-        task_groups.setdefault(task_group(row, group_suffix_pattern), []).append(index)
+        task_groups.setdefault(task_group(row, metadata_namespace), []).append(index)
     task_group_language_counts = {
         group: Counter(language(rows[index], metadata_namespace) for index in indices)
         for group, indices in task_groups.items()
@@ -336,8 +354,8 @@ def repo_disjoint_split(
     eval_index_set = set(eval_indices)
     train_rows = [row for index, row in enumerate(rows) if index not in eval_index_set]
     eval_rows = [rows[index] for index in eval_indices]
-    train_groups = {task_group(row, group_suffix_pattern) for row in train_rows}
-    eval_groups = {task_group(row, group_suffix_pattern) for row in eval_rows}
+    train_groups = {task_group(row, metadata_namespace) for row in train_rows}
+    eval_groups = {task_group(row, metadata_namespace) for row in eval_rows}
     if train_groups & eval_groups:
         raise RuntimeError("task-group-disjoint split leaked groups")
     return train_rows, eval_rows
@@ -380,10 +398,12 @@ def write_partitions(
     metadata_namespace: str = "source",
     seed: int = SPLIT_SEED,
 ) -> dict[str, int]:
-    """Write ``eval.jsonl``, ``train-full.jsonl``, and nested ``train-<N>.jsonl`` splits under ``root``.
+    """Write ``eval.jsonl``, ``train-full.jsonl``, and nested ``eval-<N>.jsonl`` and ``train-<N>.jsonl`` splits under ``root``.
 
-    ``eval`` is task-group disjoint from ``train-full``; each ``train-<N>`` is
-    a language-balanced subset of ``train-full`` and of every larger ``train-<M>``.
+    ``eval`` is task-group disjoint from ``train-full``; each sized split is a
+    language-balanced subset of its pool and of every larger sized split. A
+    size larger than its pool is skipped, so a ``--limit`` dry run still
+    writes the splits that fit.
     """
     train_rows, eval_rows = repo_disjoint_split(
         rows,
@@ -392,17 +412,20 @@ def write_partitions(
         metadata_namespace=metadata_namespace,
     )
     outputs = {"eval": eval_rows, "train-full": train_rows}
-    for size in TRAIN_SPLIT_SIZES:
-        if size > len(train_rows):
-            raise ValueError(
-                f"requested train-{size} from only {len(train_rows)} training rows"
+    for prefix, pool, sizes in (
+        ("eval", eval_rows, EVAL_SPLIT_SIZES),
+        ("train", train_rows, TRAIN_SPLIT_SIZES),
+    ):
+        for size in sizes:
+            if size > len(pool):
+                print(f"[swe] skipping {prefix}-{size}: only {len(pool)} {prefix} rows")
+                continue
+            outputs[f"{prefix}-{size}"] = nested_subset(
+                pool,
+                size,
+                seed=seed,
+                metadata_namespace=metadata_namespace,
             )
-        outputs[f"train-{size}"] = nested_subset(
-            train_rows,
-            size,
-            seed=seed,
-            metadata_namespace=metadata_namespace,
-        )
     staged: list[tuple[Path, Path]] = []
     for name, subset in outputs.items():
         final = root / f"{name}.jsonl"
@@ -501,10 +524,9 @@ def write_mixed_subset(
     solve rate, where that signal is strongest. A JSON sidecar records how the
     subset was built.
     """
-    if not re.fullmatch(r"train-(100|300|1000|full)", source):
-        raise ValueError(
-            "source must be train-100, train-300, train-1000, or train-full"
-        )
+    train_splits = {f"train-{size}" for size in TRAIN_SPLIT_SIZES} | {"train-full"}
+    if source not in train_splits:
+        raise ValueError(f"source must be one of {sorted(train_splits)}")
     source_path = root / f"{source}.jsonl"
     if not source_path.is_file():
         raise FileNotFoundError(f"source subset does not exist: {source_path}")
@@ -563,75 +585,53 @@ def write_mixed_subset(
     return output_path, provenance
 
 
-class HarborZipSource:
-    """Download, safely unpack, and convert a zipped Harbor dataset."""
+class SweBenchSource:
+    """Stream a SWE-bench-style dataset, render each row as a Harbor task, and convert it."""
 
     def __init__(
         self,
         *,
-        hf_repo: str,
-        dataset_key: str,
+        dataset: SweDataset,
         hf_revision: str | None,
         metadata_namespace: str,
         translator_revision: str,
-        unpack_workers: int,
-        max_archives: int | None,
+        min_grade: str | None,
+        limit: int | None,
     ) -> None:
-        self.hf_repo = hf_repo
-        self.dataset_key = dataset_key
+        self.dataset = dataset
         self.hf_revision = hf_revision
         self.metadata_namespace = metadata_namespace
         self.translator_revision = translator_revision
-        self.unpack_workers = unpack_workers
-        self.max_archives = max_archives
+        self.min_grade = min_grade
+        self.limit = limit
 
-    def download(self, root: Path) -> str:
-        from huggingface_hub import HfApi, snapshot_download
+    def resolve_revision(self) -> str:
+        from huggingface_hub import HfApi
 
-        api = HfApi()
-        revision = api.dataset_info(self.hf_repo, revision=self.hf_revision).sha
-        snapshot_download(
-            self.hf_repo,
-            repo_type="dataset",
-            local_dir=str(root),
+        return HfApi().dataset_info(self.dataset.hf_repo, revision=self.hf_revision).sha
+
+    def rows(self, revision: str) -> Iterator[dict[str, Any]]:
+        from datasets import load_dataset
+
+        for row in load_dataset(
+            self.dataset.hf_repo,
+            split=self.dataset.split,
             revision=revision,
-        )
-        self.drop_absent_archives(
-            root,
-            set(
-                api.list_repo_files(
-                    self.hf_repo, repo_type="dataset", revision=revision
-                )
-            ),
-        )
-        print(f"[harbor] downloaded {self.hf_repo}@{revision}")
-        return revision
+            streaming=True,
+        ):
+            yield dict(row)
 
-    @staticmethod
-    def drop_absent_archives(root: Path, snapshot_files: set[str]) -> None:
-        tasks_root = root / "tasks"
-        for path in tasks_root.glob("batch_*.zip") if tasks_root.is_dir() else ():
-            if path.relative_to(root).as_posix() not in snapshot_files:
-                path.unlink()
-
-    def bundles(self, root: Path) -> list[Path]:
-        bundles = sorted(root.glob("tasks/batch_*.zip"))
-        if self.max_archives is not None:
-            bundles = bundles[: self.max_archives]
-        return bundles
-
-    def source_record(self, root: Path, revision: str) -> dict[str, Any]:
+    def source_record(self, revision: str) -> dict[str, Any]:
         """Every input the converted rows depend on; a change invalidates them."""
         return {
-            "hf_repo": self.hf_repo,
+            "hf_repo": self.dataset.hf_repo,
+            "split": self.dataset.split,
             "revision": revision,
-            "dataset_key": self.dataset_key,
+            "key": self.dataset.key,
             "metadata_namespace": self.metadata_namespace,
             "translator_revision": self.translator_revision,
-            "archives": {bundle.name: sha256(bundle) for bundle in self.bundles(root)},
-            "tasks_csv": sha256(root / "tasks.csv")
-            if (root / "tasks.csv").is_file()
-            else None,
+            "min_grade": self.min_grade,
+            "limit": self.limit,
         }
 
     @staticmethod
@@ -646,138 +646,66 @@ class HarborZipSource:
         return read_jsonl(converted_path)
 
     @staticmethod
-    def clear_extracted(root: Path) -> None:
-        """Delete extracted tasks, extraction markers, conversion outputs, and derived mixed subsets. Keep the zip files."""
-        tasks_root = root / "tasks"
-        for entry in tasks_root.iterdir() if tasks_root.is_dir() else ():
-            if entry.is_dir():
-                shutil.rmtree(entry)
-            elif entry.suffix == ".extracted":
-                entry.unlink()
+    def clear_converted(root: Path) -> None:
+        """Delete converted tasks, conversion outputs, and derived mixed subsets."""
+        shutil.rmtree(root / "tasks", ignore_errors=True)
         for name in ("all.converted.json", "all.converted.jsonl"):
             (root / name).unlink(missing_ok=True)
         for path in root.glob("*-mixed-reward-*"):
             path.unlink()
 
-    @staticmethod
-    def safe_extract(bundle: Path, tasks_root: Path) -> int:
-        """Extract one zip file's task directories, or skip it if a previous run already finished it."""
-        marker = tasks_root / f".{bundle.stem}.extracted"
-        staging = tasks_root / f".{bundle.stem}.partial"
-        with zipfile.ZipFile(bundle) as archive:
-            members = archive.infolist()
-            task_roots = {
-                member.filename.split("/", 1)[0]
-                for member in members
-                if "/" in member.filename
-            }
-            if marker.is_file():
-                return len(task_roots)
-            shutil.rmtree(staging, ignore_errors=True)
-            staging.mkdir(parents=True)
-            destination = staging.resolve()
-            for member in members:
-                if stat.S_ISLNK(member.external_attr >> 16):
-                    raise ValueError(
-                        f"archive {bundle.name} contains a link {member.filename!r}"
-                    )
-                target = (staging / member.filename).resolve()
-                if not target.is_relative_to(destination):
-                    raise ValueError(
-                        f"archive {bundle.name} contains unsafe path {member.filename!r}"
-                    )
-            archive.extractall(staging)
-        for task_root in task_roots:
-            final = tasks_root / task_root
-            shutil.rmtree(final, ignore_errors=True)
-            os.replace(staging / task_root, final)
-        shutil.rmtree(staging, ignore_errors=True)
-        marker.touch()
-        return len(task_roots)
-
-    def unpack(self, root: Path) -> None:
-        tasks_root = root / "tasks"
-        bundles = self.bundles(root)
-        if not bundles:
-            raise FileNotFoundError(f"no task archives found under {tasks_root}")
-        started = time.monotonic()
-        with ThreadPoolExecutor(max_workers=self.unpack_workers) as pool:
-            for completed, task_count in enumerate(
-                pool.map(lambda bundle: self.safe_extract(bundle, tasks_root), bundles),
-                start=1,
-            ):
-                print(
-                    f"[harbor] unpacked {completed}/{len(bundles)} archives "
-                    f"({task_count} tasks, {time.monotonic() - started:.0f}s)"
-                )
-
-    def convert(self, root: Path) -> list[dict[str, Any]]:
+    def convert(self, root: Path, revision: str) -> list[dict[str, Any]]:
         if "/root/slime" not in sys.path:
             sys.path.insert(0, "/root/slime")
-        from agentic_rl.environment.convert2slime.harbor import (  # type: ignore[import-not-found]
-            SkipTask,
-            translate_task,
+        from agentic_rl.environment.convert2slime import (  # type: ignore[import-not-found]
+            harbor,
+            swerebench,
         )
 
-        metadata_path = root / "tasks.csv"
-        metadata_index: dict[str, dict[str, str]] = {}
-        if metadata_path.is_file():
-            with metadata_path.open(encoding="utf-8", newline="") as handle:
-                metadata_index = {
-                    row["task_id"]: row
-                    for row in csv.DictReader(handle)
-                    if row.get("task_id")
-                }
-
-        def convert_one(
-            task_dir: Path,
-        ) -> tuple[Path, dict[str, Any] | None, str | None]:
-            try:
-                return (
-                    task_dir,
-                    translate_task(task_dir, dataset=self.dataset_key),
-                    None,
-                )
-            except SkipTask as exc:
-                return task_dir, None, str(exc)
-
-        task_dirs = sorted(
-            path
-            for path in (root / "tasks").iterdir()
-            if path.is_dir() and not path.name.startswith(".")
-        )
+        tasks_root = root / "tasks"
         rows: list[dict[str, Any]] = []
         skipped: Counter[str] = Counter()
-        with ThreadPoolExecutor(max_workers=self.unpack_workers) as pool:
-            for task_dir, row, reason in pool.map(convert_one, task_dirs):
-                if reason:
-                    skipped[reason] += 1
-                    continue
-                assert row is not None
-                metadata = row.setdefault("metadata", {})
-                metadata["task_path"] = f"{root.name}/tasks/{task_dir.name}"
-                source = metadata_index.get(task_dir.name)
-                if source:
-                    metadata[self.metadata_namespace] = {
-                        key: source[key] for key in METADATA_COLUMNS if source.get(key)
-                    }
-                rows.append(row)
+        for row in self.rows(revision):
+            if self.limit is not None and len(rows) >= self.limit:
+                break
+            if not swerebench._passes_quality(row, self.min_grade):
+                skipped["quality grade"] += 1
+                continue
+            task_dir = tasks_root / swerebench._safe_id(row["instance_id"])
+            try:
+                swerebench.build_task_dir(row, task_dir)
+                converted = harbor.translate_task(task_dir, dataset=self.dataset.key)
+            except (swerebench.SkipRow, harbor.SkipTask) as exc:
+                skipped[str(exc)] += 1
+                shutil.rmtree(task_dir, ignore_errors=True)
+                continue
+            metadata = converted.setdefault("metadata", {})
+            metadata["task_path"] = f"{root.name}/tasks/{task_dir.name}"
+            metadata[self.metadata_namespace] = {
+                key: row[key] for key in SOURCE_COLUMNS if row.get(key)
+            }
+            rows.append(converted)
+            if len(rows) % 500 == 0:
+                print(
+                    f"[swe] converted {len(rows)} tasks ({sum(skipped.values())} skipped)"
+                )
         if not rows:
-            raise RuntimeError("Harbor conversion produced no rows")
+            raise RuntimeError("conversion produced no rows")
         write_jsonl(root / "all.converted.jsonl", rows)
         if skipped:
-            print(f"[harbor] skipped {sum(skipped.values())} tasks: {dict(skipped)}")
+            print(f"[swe] skipped {sum(skipped.values())} rows:")
+            for reason, count in skipped.most_common():
+                print(f"{count:>8}  {reason}")
         return rows
 
     def partition(self, root: Path) -> dict[str, int]:
         root.mkdir(parents=True, exist_ok=True)
-        revision = self.download(root)
-        source = self.source_record(root, revision)
+        revision = self.resolve_revision()
+        source = self.source_record(revision)
         rows = self.cached_rows(root, source)
         if rows is None:
-            self.clear_extracted(root)
-            self.unpack(root)
-            rows = self.convert(root)
+            self.clear_converted(root)
+            rows = self.convert(root, revision)
             write_text(
                 root / "all.converted.json",
                 json.dumps(source, indent=2, sort_keys=True) + "\n",
@@ -803,8 +731,12 @@ def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
     )
 
 
-def _partition_remote(root: str, kwargs: dict[str, Any], volume_name: str):
-    counts = HarborZipSource(**kwargs).partition(Path(root))
+def _partition_remote(
+    root: str, dataset: str, kwargs: dict[str, Any], volume_name: str
+):
+    counts = SweBenchSource(dataset=SWE_DATASETS[dataset], **kwargs).partition(
+        Path(root)
+    )
     modal.Volume.from_name(volume_name).commit()
     return counts
 
@@ -845,17 +777,25 @@ def main() -> None:
     parser.add_argument(
         "--dataset-root",
         help="Directory under /data holding the subsets. prepare defaults this "
-        "to the Hugging Face repo id with '/' replaced by '_'.",
+        "to the dataset's key.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     prepare = subparsers.add_parser("prepare")
-    prepare.add_argument("--hf-repo", required=True)
-    prepare.add_argument("--dataset-key", required=True)
+    prepare.add_argument(
+        "--dataset", choices=sorted(SWE_DATASETS), default=DEFAULT_SWE_DATASET
+    )
     prepare.add_argument("--hf-revision")
+    prepare.add_argument(
+        "--min-grade",
+        default="A",
+        help="Keep rows whose meta.llm_metadata.code grade is this or better "
+        "(A is best); 'none' keeps every row.",
+    )
+    prepare.add_argument(
+        "--limit", type=int, help="Stop after converting this many tasks."
+    )
     prepare.add_argument("--metadata-namespace", default="source")
-    prepare.add_argument("--unpack-workers", type=int, default=32)
-    prepare.add_argument("--max-archives", type=int)
 
     mixed = subparsers.add_parser("mixed")
     mixed.add_argument("--source", required=True)
@@ -869,7 +809,7 @@ def main() -> None:
 
     dataset_root = args.dataset_root
     if args.command == "prepare":
-        dataset_root = dataset_root or args.hf_repo.replace("/", "_")
+        dataset_root = dataset_root or SWE_DATASETS[args.dataset].key
     if dataset_root is None:
         parser.error("--dataset-root is required for mixed")
     try:
@@ -880,7 +820,7 @@ def main() -> None:
 
     training_recipe = Qwen3_6_27B_Recipe_Agentic()
     volume_name = data_volume_name(training_recipe)
-    app = modal.App("partition-harbor-dataset")
+    app = modal.App("partition-swe-dataset")
     volumes = {
         str(DATA_PATH): modal.Volume.from_name(volume_name, create_if_missing=True)
     }
@@ -897,16 +837,14 @@ def main() -> None:
         remote_options["secrets"] = hf_secrets()
         remote = app.function(**remote_options)(_partition_remote)
         kwargs = {
-            "hf_repo": args.hf_repo,
-            "dataset_key": args.dataset_key,
             "hf_revision": args.hf_revision,
             "metadata_namespace": args.metadata_namespace,
             "translator_revision": training_recipe.slime_git_revision,
-            "unpack_workers": args.unpack_workers,
-            "max_archives": args.max_archives,
+            "min_grade": None if args.min_grade.lower() == "none" else args.min_grade,
+            "limit": args.limit,
         }
         with app.run():
-            counts = remote.remote(root, kwargs, volume_name)
+            counts = remote.remote(root, args.dataset, kwargs, volume_name)
         print("\n".join(f"{name}: {count}" for name, count in counts.items()))
         return
 
