@@ -21,10 +21,18 @@ class TutorialEntry:
     deps: tuple[str, ...]
 
     @property
+    def source_path(self) -> str:
+        if self.path.name == "main.py":
+            return f"tutorials/{self.slug}/main.py"
+        return f"tutorials/{self.slug}.py"
+
+    @property
     def run_command(self) -> str:
         with_args = " ".join(f"--with {dependency}" for dependency in self.deps)
         prefix = f"uv run {with_args}" if with_args else "uv run"
-        return f"{prefix} tutorials/{self.slug}.py"
+        if self.path.name == "main.py":
+            return f"{prefix} -m tutorials.{self.slug}.main"
+        return f"{prefix} {self.source_path}"
 
 
 def parse_tutorial(path: Path) -> TutorialEntry:
@@ -78,11 +86,35 @@ def parse_tutorial(path: Path) -> TutorialEntry:
 
     return TutorialEntry(
         path=path,
-        slug=path.stem,
+        slug=path.parent.name if path.name == "main.py" else path.stem,
         order=order,
         title=title_line.removeprefix("# # ").strip(),
         deps=deps,
     )
+
+
+def discover_tutorial_paths(tutorials_dir: Path = TUTORIALS_DIR) -> tuple[Path, ...]:
+    paths: list[Path] = []
+    paths_by_slug: dict[str, Path] = {}
+    if not tutorials_dir.is_dir():
+        return ()
+    for child in sorted(tutorials_dir.iterdir(), key=lambda path: path.name):
+        if child.is_file() and child.suffix == ".py":
+            candidate = child
+            slug = child.stem
+        else:
+            candidate = child / "main.py"
+            if not child.is_dir() or not candidate.is_file():
+                continue
+            slug = child.name
+        previous = paths_by_slug.get(slug)
+        if previous is not None:
+            raise ValueError(
+                f"Tutorial slug {slug!r} is defined by both {previous} and {candidate}"
+            )
+        paths_by_slug[slug] = candidate
+        paths.append(candidate)
+    return tuple(paths)
 
 
 def load_tutorial_index(
@@ -90,7 +122,7 @@ def load_tutorial_index(
 ) -> tuple[TutorialEntry, ...]:
     entries = tuple(
         sorted(
-            (parse_tutorial(path) for path in tutorials_dir.glob("*.py")),
+            (parse_tutorial(path) for path in discover_tutorial_paths(tutorials_dir)),
             key=lambda entry: (entry.order, entry.slug),
         )
     )

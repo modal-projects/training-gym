@@ -9,6 +9,7 @@
     "start": "astro dev",
     "build": "astro build",
     "check": "astro check",
+    "test": "node --experimental-strip-types --test src/lib/*.test.ts",
     "preview": "astro preview",
     "astro": "astro"
   },

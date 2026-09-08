@@ -3,8 +3,7 @@
 BFCL grades agents against in-process Python state machines (``GorillaFileSystem``,
 ``TwitterAPI``, etc.): tool calls are Python expressions evaluated against live
 instances, and grading is a state diff plus a response-subsequence check. This
-module wraps ``bfcl_eval`` (imported lazily) into the same ``step``/``evaluate``
-shape as :mod:`.base`.
+module wraps ``bfcl_eval`` (imported lazily) into a ``step``/``evaluate`` shape.
 
 - **Data** — :class:`BfclMultiTurnDataset` loads a multi-turn category and flattens
   per-turn ground-truth calls into an ordered sequence.
@@ -26,17 +25,32 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from modal_training_gym.common.dataset import DatasetConfig
-from modal_training_gym.common.environments.base import (
-    EvalVerdict,
-    Environment,
-    Observation,
-    StepResult,
-    ToolCall,
-    tool_schemas_to_openai as _tool_schemas_to_openai,
-)
+from modal_training_gym.common.models.base import ToolCall
 
 # Empty for interface parity with Toolathlon's DONE_TOOLS.
 DONE_TOOLS: frozenset[str] = frozenset()
+
+
+@dataclass
+class Observation:
+    text: str = ""
+    is_error: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class StepResult:
+    observation: Observation
+    done: bool = False
+    info: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EvalVerdict:
+    passed: bool
+    detail: str = ""
+    harness_error: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 _JSON_TYPE_MAP = {
     "dict": "object",
@@ -219,16 +233,25 @@ def to_json_schema(node: Any) -> Any:
 
 def tool_schemas_to_openai(tool_schemas: dict) -> list[dict]:
     """Convert BFCL function docs to OpenAI tools, normalizing BFCL type names."""
-    normalized = {}
-    for name, spec in (tool_schemas or {}).items():
+    tools = []
+    for name in sorted(tool_schemas or {}):
+        spec = tool_schemas[name]
         if isinstance(spec, dict) and ("parameters" in spec or "description" in spec):
-            normalized[name] = {
-                **spec,
-                "parameters": to_json_schema(spec.get("parameters", {})),
-            }
+            desc = spec.get("description", "")
+            params = to_json_schema(spec.get("parameters", {}))
         else:
-            normalized[name] = to_json_schema(spec)
-    return _tool_schemas_to_openai(normalized)
+            desc, params = "", to_json_schema(spec)
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": desc,
+                    "parameters": params or {"type": "object", "properties": {}},
+                },
+            }
+        )
+    return tools
 
 
 def load_func_docs(
@@ -351,7 +374,7 @@ def prune_prefix(messages: list[dict], max_messages: int) -> list[dict]:
 
 
 @dataclass
-class BfclTurnEnvironment(Environment):
+class BfclTurnEnvironment:
     """One live multi-turn BFCL episode, seeded by replaying the first ``K`` ground-truth calls."""
 
     label: dict

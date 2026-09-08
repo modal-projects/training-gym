@@ -54,8 +54,8 @@ class DatasetConfig:
     always_prepare: bool = False
     # When True (default), ``prepare()`` is expected to materialize every path in
     # ``eval_paths`` and the launcher validates them strictly. Datasets that use
-    # a separate DatasetConfig instance for offline eval (Toolathlon, BFCL) set
-    # this False so resolvers don't invent a companion ``eval.*`` file.
+    # a separate DatasetConfig instance for offline eval set this False so
+    # resolvers skip synthesizing a companion ``eval.*`` file.
     writes_eval_paths: bool = True
 
     def __init__(self, **kwargs: Any) -> None:

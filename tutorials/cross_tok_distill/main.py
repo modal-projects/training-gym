@@ -1,5 +1,5 @@
 # ---
-# order: 9
+# order: 8
 # deps: bfcl-eval, jsonschema
 # ---
 #
@@ -39,15 +39,15 @@ from modal_training_gym import (
 )
 from modal_training_gym.common.models.base import HFModelConfiguration, ToolCall
 
-from modal_training_gym.common.environments import (
+from .env import (
     BfclMultiTurnConfig,
     BfclMultiTurnDataset,
-    build_bfcl_env as build_env,
-    build_bfcl_prefix_messages as build_prefix_messages,
-    bfcl_prefix_turn_index,
-    bfcl_tool_schemas_to_openai as tool_schemas_to_openai,
+    build_env,
+    build_prefix_messages,
+    prefix_turn_index as bfcl_prefix_turn_index,
     run_bfcl_episode,
     to_json_schema,
+    tool_schemas_to_openai,
 )
 from modal_training_gym.deploy_recipes.sglang_recipe import (
     DeepSeek_V4_Flash_SglangRecipe,
@@ -982,7 +982,7 @@ config = TrainConfig(
             "aiohttp~=3.13.0",
             "jsonschema~=4.23.0",
             "bfcl-eval==2026.3.23",
-        ),
+        ).add_local_python_source("tutorials.cross_tok_distill", copy=True),
 
         gpu_type="H100",
         colocate=False,

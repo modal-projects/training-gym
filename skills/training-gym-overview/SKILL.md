@@ -47,8 +47,9 @@ tests/                      <- plain-script tests (uv run tests/<x>.py)
 skills/                     <- packaged agent skills (you are here)
 ```
 
-Edit `tutorials/*.py` directly. Each file is both the runnable tutorial and the
-source for its docs page.
+Edit `tutorials/*.py` or `tutorials/<name>/main.py` directly; each entry is
+the runnable tutorial and the docs source, with sibling helpers beside
+`main.py`.
 
 ## Core abstractions
 
@@ -282,6 +283,6 @@ tutorial only. Don't expand to all tutorials on a single change.
 - Adding/modifying a framework -> `modal_training_gym/frameworks/<name>/`.
 - Cross-framework scripts -> `modal_training_gym/tools/`.
 - Cross-framework helpers -> `modal_training_gym/common/framework.py`.
-- Tutorial sources live in `tutorials/*.py`; their docs loader is
-  `docs-next/src/lib/tutorial-docs-loader.ts`.
+- Tutorial sources live in `tutorials/*.py` or `tutorials/<name>/main.py`;
+  their docs loader is `docs-next/src/lib/tutorial-docs-loader.ts`.
 - Tests -> `tests/test_*.py`, run via `uv run tests/<file>.py`.

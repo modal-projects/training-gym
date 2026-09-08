@@ -46,7 +46,7 @@ _IMAGE_REF_CHARS = 16
 # TRAJECTORY_SAMPLE_LIMIT_ENV samples of each rollout carry it and each message's
 # content is length-capped — enough for the dashboard's ConversationView to render
 # the conversation without bloating the rollout payload. Without it, multi-turn
-# rollouts (e.g. toolathlon) collapse to a single flat block on the dashboard.
+# rollouts collapse to a single flat block on the dashboard.
 TRAJECTORY_SAMPLE_LIMIT_ENV = "TRAINING_GYM_TRAJECTORY_SAMPLE_LIMIT"
 _TRAJECTORY_SAMPLE_LIMIT_DEFAULT = 16
 _TRAJECTORY_MSG_CHARS_MAX = 8000
