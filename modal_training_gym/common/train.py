@@ -13,9 +13,13 @@ from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
 from modal_training_gym.common.dataset import DatasetConfig
-from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.errors import (
+    TrainingGymConfigError,
+    TrainingGymError,
+)
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
+from modal_training_gym.common.launcher_helpers import mark_run_failed
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun, metric_run_id_for_attempt
@@ -580,6 +584,11 @@ class TrainConfig:
         print(f"TrainingRun recorded: {training_run_id}")
 
         app = self._build_app(training_run_id)
+        # A detached app whose client loses its connection exits `app.run()`
+        # normally rather than raising, skipping the spawn below. Without this
+        # the failure surfaces as an UnboundLocalError on `function_call`,
+        # which says nothing about what actually went wrong.
+        function_call = None
         output_context = modal.enable_output() if show_output else nullcontext()
         with output_context:
             with app.run(detach=True):
@@ -648,6 +657,35 @@ class TrainConfig:
                     framework_status_token=framework_status_token,
                 )
 
+        if function_call is None:
+            error = TrainingGymError(
+                f"Training was never started for {training_run_id}: the launch "
+                "exited before it could spawn the train function, usually "
+                "because the client lost its connection to Modal. The app is "
+                "detached, so anything already running continues"
+                + (
+                    f" — see {run_record.modal_app_url}"
+                    if run_record.modal_app_url
+                    else ""
+                )
+                + ". Re-run the launch; completed work on the volumes is reused."
+            )
+            # The record was saved RUNNING above, and the detached app stays
+            # live with nothing in it, so the reconciler would never close it
+            # out. Terminalize it here so the dashboard shows the failure.
+            finished_at = int(time.time())
+            mark_run_failed(run_record, error)
+            run_record.ended_at = finished_at
+            run_record.completed_at = finished_at
+            if run_record.started_at:
+                run_record.duration_seconds = max(
+                    0, finished_at - run_record.started_at
+                )
+            try:
+                run_record.save()
+            except RuntimeError:
+                pass
+            raise error
         run_record.function_call_id = function_call.object_id
         run_record._function_call = function_call
         run_record._status_display = status_display if show_output else None
