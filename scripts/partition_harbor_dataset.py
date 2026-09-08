@@ -403,8 +403,14 @@ def write_partitions(
             seed=seed,
             metadata_namespace=metadata_namespace,
         )
+    staged: list[tuple[Path, Path]] = []
     for name, subset in outputs.items():
-        write_jsonl(root / f"{name}.jsonl", subset)
+        final = root / f"{name}.jsonl"
+        staging = final.with_name(f".{final.name}.tmp")
+        write_jsonl(staging, subset)
+        staged.append((staging, final))
+    for staging, final in staged:
+        os.replace(staging, final)
     return {name: len(subset) for name, subset in outputs.items()}
 
 
@@ -460,8 +466,11 @@ def aggregate_probe_samples(
         }
         for instance_id, counts in sorted(totals.items())
     }
-    if any(counts["total"] > n_samples for counts in result.values()):
-        raise ValueError(f"probe contains more than {n_samples} episodes for a task")
+    if any(counts["total"] != n_samples for counts in result.values()):
+        raise ValueError(
+            f"rollout dump is not a fixed-sample evaluation dump: "
+            f"expected {n_samples} episodes per task"
+        )
     return result
 
 
@@ -577,15 +586,31 @@ class HarborZipSource:
     def download(self, root: Path) -> str:
         from huggingface_hub import HfApi, snapshot_download
 
-        revision = HfApi().dataset_info(self.hf_repo, revision=self.hf_revision).sha
+        api = HfApi()
+        revision = api.dataset_info(self.hf_repo, revision=self.hf_revision).sha
         snapshot_download(
             self.hf_repo,
             repo_type="dataset",
             local_dir=str(root),
             revision=revision,
         )
+        self.drop_absent_archives(
+            root,
+            set(
+                api.list_repo_files(
+                    self.hf_repo, repo_type="dataset", revision=revision
+                )
+            ),
+        )
         print(f"[harbor] downloaded {self.hf_repo}@{revision}")
         return revision
+
+    @staticmethod
+    def drop_absent_archives(root: Path, snapshot_files: set[str]) -> None:
+        tasks_root = root / "tasks"
+        for path in tasks_root.glob("batch_*.zip") if tasks_root.is_dir() else ():
+            if path.relative_to(root).as_posix() not in snapshot_files:
+                path.unlink()
 
     def bundles(self, root: Path) -> list[Path]:
         bundles = sorted(root.glob("tasks/batch_*.zip"))
