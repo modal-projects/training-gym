@@ -20,6 +20,7 @@ from modal_training_gym.common import run as run_mod
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
+from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import MetadataStore
 
 
@@ -63,6 +64,86 @@ def test_rollout_async_save_survives_unmounted_volume(fake_volume):
     assert summary_item["export_size_bytes"] == len(
         (json.dumps(json.loads(blob), ensure_ascii=False, indent=2) + "\n").encode()
     )
+
+
+@pytest.mark.parametrize("is_async", [False, True])
+def test_summary_upsert_survives_unreadable_summary_file(
+    fake_volume, monkeypatch, is_async
+):
+    """Summary upserts rebuild from canonical items when the cache is unreadable."""
+    summary_path = (
+        f"{metadata._store_path(MetadataStore.TRAINING_RUNS_SUMMARY)}/summary.json"
+    )
+    original_read = fake_volume._read_file
+    original_read_async = fake_volume._read_file_async
+
+    def unreadable_read(path: str):
+        if path == summary_path:
+            from modal.exception import ExecutionError
+
+            raise ExecutionError(
+                "Request failed with status 404 Not Found: block not found"
+            )
+        return original_read(path)
+
+    async def unreadable_read_async(path: str):
+        if path == summary_path:
+            from modal.exception import ExecutionError
+
+            raise ExecutionError(
+                "Request failed with status 404 Not Found: block not found"
+            )
+        async for chunk in original_read_async(path):
+            yield chunk
+
+    def put(*args, **kwargs):
+        return metadata.vol_put(*args, is_async=is_async, **kwargs)
+
+    def put_with_summary(*args, **kwargs):
+        return metadata.vol_put_with_summary(*args, is_async=is_async, **kwargs)
+
+    if is_async:
+        asyncio.run(
+            put(
+                MetadataStore.TRAINING_RUNS,
+                "run-a",
+                {"training_run_id": "run-a"},
+            )
+        )
+    else:
+        put(
+            MetadataStore.TRAINING_RUNS,
+            "run-a",
+            {"training_run_id": "run-a"},
+        )
+
+    with monkeypatch.context() as summary_monkeypatch:
+        summary_monkeypatch.setattr(fake_volume, "_read_file", unreadable_read)
+        summary_monkeypatch.setattr(
+            fake_volume, "_read_file_async", unreadable_read_async
+        )
+        summary_monkeypatch.setattr(fake_volume.read_file, "_sync_fn", unreadable_read)
+        summary_monkeypatch.setattr(fake_volume.read_file, "aio", unreadable_read_async)
+
+        write = put_with_summary(
+            MetadataStore.TRAINING_RUNS,
+            "run-b",
+            {"training_run_id": "run-b"},
+            summary_store=MetadataStore.TRAINING_RUNS_SUMMARY,
+            item_id_key="training_run_id",
+        )
+        if is_async:
+            asyncio.run(write)
+
+    if is_async:
+        items = asyncio.run(
+            metadata.vol_get_summary_items(
+                MetadataStore.TRAINING_RUNS_SUMMARY, is_async=True
+            )
+        )
+    else:
+        items = metadata.vol_get_summary_items(MetadataStore.TRAINING_RUNS_SUMMARY)
+    assert {item["training_run_id"] for item in items or []} == {"run-a", "run-b"}
 
 
 @pytest.mark.parametrize("fw", list(Framework))
