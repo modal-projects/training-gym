@@ -308,37 +308,36 @@ def _is_resumable_checkpoint(path: str) -> bool:
     return True
 
 
-def resolve_effective_save(
+def resolve_save_root(
     save: str | None,
     extra_config: dict[str, Any] | None,
     *,
     recipe_default_save_root: str,
     mounted_save_root: str,
     training_run_id: str,
-) -> tuple[str | None, str]:
-    """Resolve where Miles will actually write checkpoints.
+) -> str | None:
+    """Directory Miles will actually write checkpoints to, or ``None`` when
+    checkpointing is disabled.
 
-    Returns ``(effective_save, save_root)``. ``extra_config`` is the inline YAML
-    escape hatch and wins over the same-named ``--save`` flag, so a ``save`` key
-    there (including an explicit ``None``) is the effective destination. A YAML
-    path is used verbatim — Miles reads it as-is — while a top-level ``save`` is
-    run-scoped via ``compute_save_root``. ``effective_save`` is ``None`` when
-    checkpointing is disabled; ``save_root`` is still returned so resume
-    discovery has a directory to scan.
+    ``extra_config`` is the inline YAML escape hatch and wins over the same-named
+    ``--save`` flag, so a ``save`` key there (including an explicit ``None``)
+    decides. A YAML path is used verbatim — Miles reads it as-is — while a
+    top-level ``save`` is run-scoped via ``compute_save_root``.
     """
     cfg = extra_config or {}
     effective_save = cfg.get("save") if "save" in cfg else save
-    if "save" in cfg and effective_save:
+    if not effective_save:
+        return None
+    if "save" in cfg:
         save_root = str(effective_save).rstrip("/")
         os.makedirs(save_root, exist_ok=True)
-    else:
-        save_root = compute_save_root(
-            effective_save,
-            recipe_default_save_root=recipe_default_save_root,
-            mounted_save_root=mounted_save_root,
-            training_run_id=training_run_id,
-        )
-    return effective_save, save_root
+        return save_root
+    return compute_save_root(
+        effective_save,
+        recipe_default_save_root=recipe_default_save_root,
+        mounted_save_root=mounted_save_root,
+        training_run_id=training_run_id,
+    )
 
 
 def _unresumable_save_dirs(save_root: str) -> list[str]:
@@ -1158,7 +1157,7 @@ def build_miles_app(
                 if isinstance(miles.metrics, WandbConfig):
                     miles.metrics.key = wandb_key
 
-            effective_save, save_root = resolve_effective_save(
+            save_root = resolve_save_root(
                 miles.save,
                 extra_config,
                 recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
@@ -1169,9 +1168,13 @@ def build_miles_app(
             original_save = miles.save
             original_load = miles.load
             original_start_rollout_id = miles.start_rollout_id
-            miles.save = save_root if effective_save else None
-            resume_checkpoint = torch_dist_resume_checkpoint(
-                save_root, is_complete=_is_resumable_checkpoint
+            miles.save = save_root
+            resume_checkpoint = (
+                torch_dist_resume_checkpoint(
+                    save_root, is_complete=_is_resumable_checkpoint
+                )
+                if save_root
+                else None
             )
             record_resume_checkpoint(run_record, resume_checkpoint)
             await run_record.save(is_async=True)
@@ -1190,7 +1193,7 @@ def build_miles_app(
                 # even for runs launched with an explicit start_rollout_id.
                 miles.start_rollout_id = None
                 drop_materialized_config_key(miles, "start_rollout_id")
-            elif unresumable := _unresumable_save_dirs(save_root):
+            elif save_root and (unresumable := _unresumable_save_dirs(save_root)):
                 print(
                     f"WARNING: {save_root} holds saves that cannot be resumed "
                     f"({', '.join(unresumable)}) — they carry torch_dist shards "
@@ -1267,7 +1270,7 @@ def build_miles_app(
                 app_name=app_name,
                 framework=Framework.MILES,
                 training_run_id=training_run_id,
-                checkpoint_dir=save_root if effective_save else "",
+                checkpoint_dir=save_root or "",
                 model=model,
                 checkpoints_volume_name=checkpoints_volume_name,
                 checkpoints_mount_path=checkpoints_mount_path,
