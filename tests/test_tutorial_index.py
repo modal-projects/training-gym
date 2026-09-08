@@ -27,12 +27,39 @@ from scripts.generate_llms_txt import (
     _render,
     flatten_doc_id,
 )
-from scripts.tutorial_index import parse_tutorial
+from scripts.tutorial_index import discover_tutorial_paths, parse_tutorial
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE_PAGES = tuple(
     path for path in sorted(GUIDES_DIR.rglob("*.md")) if path.stem != "index"
 )
+
+
+def test_discover_tutorial_paths_finds_flat_and_nested(tmp_path: Path) -> None:
+    (tmp_path / "flat.py").write_text("# ---\n# order: 0\n# ---\n# # Flat\n")
+    (tmp_path / "main.py").write_text("# ---\n# order: 1\n# ---\n# # Main\n")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "main.py").write_text("# ---\n# order: 2\n# ---\n# # Nested\n")
+    (nested / "env.py").write_text("VALUE = 1\n")
+    (tmp_path / "helpers").mkdir()
+    (tmp_path / "helpers" / "env.py").write_text("VALUE = 2\n")
+
+    assert discover_tutorial_paths(tmp_path) == (
+        (tmp_path / "flat.py", "flat"),
+        (tmp_path / "main.py", "main"),
+        (nested / "main.py", "nested"),
+    )
+
+
+def test_discover_tutorial_paths_rejects_slug_collision(tmp_path: Path) -> None:
+    (tmp_path / "duplicate.py").write_text("# ---\n# order: 0\n# ---\n# # Flat\n")
+    nested = tmp_path / "duplicate"
+    nested.mkdir()
+    (nested / "main.py").write_text("# ---\n# order: 1\n# ---\n# # Nested\n")
+
+    with pytest.raises(ValueError, match="Tutorial slug 'duplicate'"):
+        discover_tutorial_paths(tmp_path)
 
 
 @pytest.mark.parametrize("order", ["+0", "-0", "1_0"])
@@ -44,7 +71,7 @@ def test_parse_tutorial_rejects_non_decimal_order(tmp_path: Path, order: str) ->
         ValueError,
         match="frontmatter requires a non-negative integer order",
     ):
-        parse_tutorial(tutorial)
+        parse_tutorial(tutorial, "example")
 
 
 def _frontmatter_lines(text: str) -> list[str]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from scripts.diff_impact import analyze_diff
+from scripts.diff_impact import TUTORIAL_SRC_ROOT, _tutorial_slug_for_path, analyze_diff
+from scripts.tutorial_index import TutorialEntry
 
 
 def test_model_file_diff_does_not_infer_tutorial_relationships() -> None:
@@ -34,3 +35,21 @@ def test_flat_tutorial_diff_maps_to_tutorial() -> None:
     assert "on_policy_distillation" in {
         slug for slug, _, _ in report.affected_tutorials
     }
+
+
+def test_tutorial_slug_for_path_reads_discovered_slug() -> None:
+    flat_main = TUTORIAL_SRC_ROOT / "main.py"
+    nested_main = TUTORIAL_SRC_ROOT / "nested" / "main.py"
+    helper = TUTORIAL_SRC_ROOT / "nested" / "env.py"
+    tutorials = {
+        "main": TutorialEntry(
+            path=flat_main, slug="main", order=0, title="Main", deps=()
+        ),
+        "nested": TutorialEntry(
+            path=nested_main, slug="nested", order=1, title="Nested", deps=()
+        ),
+    }
+
+    assert _tutorial_slug_for_path(flat_main, tutorials) == "main"
+    assert _tutorial_slug_for_path(nested_main, tutorials) == "nested"
+    assert _tutorial_slug_for_path(helper, tutorials) == "nested"
