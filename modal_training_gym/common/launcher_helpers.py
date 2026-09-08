@@ -17,6 +17,7 @@ import secrets as _secrets
 import tempfile
 import textwrap
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 import cloudpickle
@@ -59,6 +60,36 @@ def resolve_caller_context() -> tuple[Any, str | None]:
     return caller_module, caller_script
 
 
+def _tutorial_package(caller_script: str | None) -> tuple[Path, str] | None:
+    if caller_script is None:
+        return None
+    path = Path(caller_script)
+    if path.name != "main.py" or path.parent.parent.name != "tutorials":
+        return None
+    return path.parent, path.parent.name
+
+
+def mount_caller_source(image: "Image", caller_script: str | None) -> "Image":
+    """Preserve the caller's local import layout on the image."""
+    if caller_script is None:
+        return image
+    package = _tutorial_package(caller_script)
+    if package is not None:
+        package_dir, name = package
+        return image.add_local_dir(
+            package_dir,
+            remote_path=f"/root/tutorials/{name}",
+            copy=True,
+            ignore=["**/__pycache__", "**/*.pyc"],
+        )
+    name = os.path.splitext(os.path.basename(caller_script))[0]
+    return image.add_local_file(
+        caller_script,
+        remote_path=f"/root/{name}.py",
+        copy=True,
+    )
+
+
 def ship_callable(
     image: "Image",
     fn: Any,
@@ -70,9 +101,10 @@ def ship_callable(
     """Make a user-provided callable importable inside the remote container.
 
     Package-internal callables need no shipping but still get ``set_path``.
-    A callable defined in its own module is added as a local file pointed at
-    ``module.symbol``. Inline callables are cloudpickled into a tiny loader
-    module. Returns the (possibly extended) image.
+    A callable already covered by the mounted tutorial package is imported
+    by its package path. Other file-defined callables are added as a local
+    file pointed at ``module.symbol``. Inline callables are cloudpickled
+    into a tiny loader module. Returns the (possibly extended) image.
     """
     if fn is None:
         return image
@@ -85,6 +117,19 @@ def ship_callable(
     except (TypeError, OSError):
         fn_file = None
     if fn_file and os.path.isfile(fn_file) and fn_file != caller_script:
+        package = _tutorial_package(caller_script)
+        if package is not None:
+            package_dir, name = package
+            try:
+                relative = Path(fn_file).resolve().relative_to(package_dir.resolve())
+            except ValueError:
+                relative = None
+            if relative is not None and relative.suffix == ".py":
+                set_path(
+                    f"{'.'.join(('tutorials', name, *relative.with_suffix('').parts))}"
+                    f".{getattr(fn, '__name__', fallback_name)}"
+                )
+                return image
         fn_module_name = os.path.splitext(os.path.basename(fn_file))[0]
         image = image.add_local_file(
             fn_file,
