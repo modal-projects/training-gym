@@ -11,6 +11,7 @@ from scripts.generate_llms_txt import (
     README,
     _collect_guides,
     _guide_section,
+    _guide_section_sort_key,
     _readme_heading_and_intro,
     _render,
     flatten_doc_id,
@@ -83,7 +84,7 @@ def test_collect_guides_orders_by_section_then_order() -> None:
     for section, orders in orders_by_section.items():
         assert len(orders) == len(set(orders)), section
 
-    expected.sort()
+    expected.sort(key=lambda guide: (_guide_section_sort_key(guide[0]), *guide[1:]))
     guides = _collect_guides()
     assert [slug for slug, _, _ in guides] == [slug for _, _, _, slug in expected]
 
@@ -115,13 +116,15 @@ def test_render_groups_guides_by_section() -> None:
             ("start/model", "Model", 0),
             ("start/dataset", "Dataset", 1),
             ("tools/wandb-integration", "Weights & Biases integration", 2),
+            ("migration/dataset-migration", "Dataset migration", 0),
         ],
     )
     heading, intro = _readme_heading_and_intro(README.read_text())
     assert text.startswith(f"# {heading}\n")
     start = text.index("### Start")
     tools = text.index("### Tools")
-    assert start < tools
+    migration = text.index("### Migration")
+    assert start < tools < migration
     assert text.index("[Model]", start) < text.index("[Dataset]", start) < tools
     assert intro in text
     assert "https://gym.modal.dev/guides/model)" in text

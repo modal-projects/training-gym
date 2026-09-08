@@ -36,6 +36,10 @@ Repo: https://github.com/modal-projects/training-gym
 - [Observability dashboard](https://gym.modal.dev/guides/dashboard)
 - [Logging metrics](https://gym.modal.dev/guides/metric)
 
+### Migration
+
+- [Migrating to the new dataset API](https://gym.modal.dev/guides/dataset-migration)
+
 ## Tutorials
 
 - [Getting started with RL](https://gym.modal.dev/tutorials/rl_basics)
