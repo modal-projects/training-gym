@@ -14,7 +14,7 @@ on:
       - "scripts/generate_api_reference.py"
       - "scripts/api_reference_manifest.py"
       - "scripts/generate_llms_txt.py"
-      - "tutorials/*.py"
+      - "tutorials/**/*.py"
       - "uv.lock"
   push:
     paths:
@@ -29,7 +29,7 @@ on:
       - "scripts/generate_api_reference.py"
       - "scripts/api_reference_manifest.py"
       - "scripts/generate_llms_txt.py"
-      - "tutorials/*.py"
+      - "tutorials/**/*.py"
       - "uv.lock"
   workflow_dispatch:
 
@@ -59,7 +59,7 @@ jobs:
           node-version: 22
 
       - name: Test docs-sections
-        run: node --experimental-strip-types --test docs-next/src/lib/*.test.mts
+        run: node --experimental-strip-types --test docs-next/src/lib/*.test.mts docs-next/src/lib/*.test.ts
 
       - name: Sync Python dependencies
         run: uv sync --group docs
