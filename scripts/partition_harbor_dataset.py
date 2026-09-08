@@ -254,9 +254,8 @@ def repo_disjoint_split(
         if group in eval_selected:
             return False
         return all(
-            len(task_groups_by_language[name]) >= MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE
-            and len(task_groups_by_language[name] - eval_selected)
-            > MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE - 1
+            len(task_groups_by_language[name] - eval_selected - {group})
+            >= MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE
             for name in task_group_language_counts[group]
         )
 
