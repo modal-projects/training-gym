@@ -111,19 +111,8 @@ def test_mixed_subset_uses_recipe_and_sample_count_without_profile(
 ) -> None:
     write_partitions(tmp_path, _rows())
     source_rows = read_jsonl(tmp_path / "train-100.jsonl")
-    instance_ids = [row["metadata"]["instance_id"] for row in source_rows[:3]]
-    samples = []
-    for instance_id, solved in zip(instance_ids, (2, 4, 0)):
-        for index in range(4):
-            samples.append(
-                {
-                    "index": index,
-                    "metadata": {
-                        "instance_id": instance_id,
-                        "agentic": {"is_solved": index < solved},
-                    },
-                }
-            )
+    instance_ids = [row["metadata"]["instance_id"] for row in source_rows]
+    samples = _probe_samples(instance_ids, solved=[2, 4, 0] + [4] * 97)
 
     output, provenance = write_mixed_subset(
         tmp_path,
@@ -146,6 +135,42 @@ def test_mixed_subset_uses_recipe_and_sample_count_without_profile(
             source="train-100",
             recipe="Qwen3_6_27B_Recipe_Agentic",
             samples=samples,
+            n_samples=4,
+            checkpoint="base",
+            probe_dump="/checkpoints/probe.pt",
+        )
+
+
+def _probe_samples(instance_ids: list[str], solved: list[int]) -> list[dict]:
+    return [
+        {
+            "index": index,
+            "metadata": {
+                "instance_id": instance_id,
+                "agentic": {"is_solved": index < solved_count},
+            },
+        }
+        for instance_id, solved_count in zip(instance_ids, solved, strict=True)
+        for index in range(4)
+    ]
+
+
+@pytest.mark.parametrize("drop, extra", [(1, 0), (0, 1), (1, 1)])
+def test_mixed_subset_rejects_probes_that_do_not_cover_the_source(
+    tmp_path: Path, drop: int, extra: int
+) -> None:
+    write_partitions(tmp_path, _rows())
+    instance_ids = [
+        row["metadata"]["instance_id"]
+        for row in read_jsonl(tmp_path / "train-100.jsonl")
+    ]
+    probed = instance_ids[drop:] + ["not-in-train-100"] * extra
+    with pytest.raises(ValueError, match="does not cover train-100"):
+        write_mixed_subset(
+            tmp_path,
+            source="train-100",
+            recipe="Qwen3_6_27B_Recipe_Agentic",
+            samples=_probe_samples(probed, solved=[2] * len(probed)),
             n_samples=4,
             checkpoint="base",
             probe_dump="/checkpoints/probe.pt",
@@ -262,7 +287,8 @@ def test_converted_rows_are_reused_only_for_an_identical_source(
         max_archives=None,
     )
     record = source.source_record(tmp_path, revision="deadbeef")
-    assert record["archives"] == ["batch_0.zip"]
+    assert list(record["archives"]) == ["batch_0.zip"]
+    assert record["tasks_csv"] is None
     assert HarborZipSource.cached_rows(tmp_path, record) is None
 
     rows = _rows(1)
@@ -274,9 +300,30 @@ def test_converted_rows_are_reused_only_for_an_identical_source(
         {**record, "revision": "cafebabe"},
         {**record, "dataset_key": "other"},
         {**record, "translator_revision": "b" * 40},
-        {**record, "archives": ["batch_0.zip", "batch_1.zip"]},
+        {**record, "archives": {**record["archives"], "batch_1.zip": "0" * 64}},
     ):
         assert HarborZipSource.cached_rows(tmp_path, changed) is None
+
+    _task_archive(tmp_path / "tasks" / "batch_0.zip", {"repo__0/task.toml": "changed"})
+    assert (
+        HarborZipSource.cached_rows(
+            tmp_path, source.source_record(tmp_path, revision="deadbeef")
+        )
+        is None
+    )
+
+
+def test_source_refresh_drops_derived_mixed_subsets(tmp_path: Path) -> None:
+    (tmp_path / "tasks").mkdir()
+    write_partitions(tmp_path, _rows())
+    stale = tmp_path / "train-100-mixed-reward-qwen3-6-27b-agentic-n8"
+    stale.with_suffix(".jsonl").write_text("")
+    stale.with_suffix(".json").write_text("{}")
+
+    HarborZipSource.clear_extracted(tmp_path)
+
+    assert not list(tmp_path.glob("*-mixed-reward-*"))
+    assert (tmp_path / "train-100.jsonl").is_file()
 
 
 def test_stale_zip_files_are_dropped_when_absent_from_the_snapshot(
