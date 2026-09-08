@@ -7,7 +7,7 @@ import pytest
 
 from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_27B_Recipe_Agentic
 from scripts.partition_harbor_dataset import (
-    ArchivedHarborSource,
+    HarborZipSource,
     data_volume_name,
     dataset_root_name,
     mixed_subset_name,
@@ -89,7 +89,7 @@ def test_partitions_use_fixed_names_nested_rows_and_golden_hashes(
     )
 
 
-def test_eval_partition_is_repository_disjoint() -> None:
+def test_eval_partition_is_task_group_disjoint() -> None:
     train_rows, eval_rows = repo_disjoint_split(
         _rows(8),
         eval_fraction=0.25,
@@ -176,7 +176,7 @@ def test_archive_extraction_rejects_path_traversal(tmp_path: Path) -> None:
         handle.writestr("../escape/task.toml", "")
 
     with pytest.raises(ValueError, match="unsafe path"):
-        ArchivedHarborSource.safe_extract(archive, tasks)
+        HarborZipSource.safe_extract(archive, tasks)
     assert not (tmp_path / "escape").exists()
 
 
@@ -191,7 +191,7 @@ def test_archive_extraction_rejects_links(tmp_path: Path) -> None:
         handle.writestr("task__0/tests/escape.py", "")
 
     with pytest.raises(ValueError, match="contains a link"):
-        ArchivedHarborSource.safe_extract(archive, tasks)
+        HarborZipSource.safe_extract(archive, tasks)
 
 
 def _task_archive(path: Path, files: dict[str, str]) -> Path:
@@ -213,18 +213,18 @@ def test_archive_extraction_completes_interrupted_tasks_then_skips(
     (tasks / "repo__0").mkdir()
     (tasks / "repo__0" / "task.toml").write_text("")
 
-    assert ArchivedHarborSource.safe_extract(archive, tasks) == 1
+    assert HarborZipSource.safe_extract(archive, tasks) == 1
     assert (tasks / "repo__0" / "tests" / "test.py").read_text() == "assert True"
     assert not list(tasks.glob(".*.partial"))
 
     (tasks / "repo__0" / "tests" / "test.py").unlink()
-    assert ArchivedHarborSource.safe_extract(archive, tasks) == 1
+    assert HarborZipSource.safe_extract(archive, tasks) == 1
     assert not (tasks / "repo__0" / "tests" / "test.py").exists()
 
-    ArchivedHarborSource.clear_extracted(tmp_path)
+    HarborZipSource.clear_extracted(tmp_path)
     assert not (tasks / "repo__0").exists()
     assert archive.is_file()
-    assert ArchivedHarborSource.safe_extract(archive, tasks) == 1
+    assert HarborZipSource.safe_extract(archive, tasks) == 1
     assert (tasks / "repo__0" / "tests" / "test.py").is_file()
 
 
@@ -233,7 +233,7 @@ def test_converted_rows_are_reused_only_for_an_identical_source(
 ) -> None:
     (tmp_path / "tasks").mkdir()
     _task_archive(tmp_path / "tasks" / "batch_0.zip", {"repo__0/task.toml": ""})
-    source = ArchivedHarborSource(
+    source = HarborZipSource(
         hf_repo="org/repo",
         dataset_key="repo",
         hf_revision=None,
@@ -244,12 +244,12 @@ def test_converted_rows_are_reused_only_for_an_identical_source(
     )
     record = source.source_record(tmp_path, revision="deadbeef")
     assert record["archives"] == ["batch_0.zip"]
-    assert ArchivedHarborSource.cached_rows(tmp_path, record) is None
+    assert HarborZipSource.cached_rows(tmp_path, record) is None
 
     rows = _rows(1)
     write_jsonl(tmp_path / "all.converted.jsonl", rows)
     (tmp_path / "all.converted.json").write_text(json.dumps(record))
-    assert ArchivedHarborSource.cached_rows(tmp_path, record) == rows
+    assert HarborZipSource.cached_rows(tmp_path, record) == rows
 
     for changed in (
         {**record, "revision": "cafebabe"},
@@ -257,4 +257,4 @@ def test_converted_rows_are_reused_only_for_an_identical_source(
         {**record, "translator_revision": "b" * 40},
         {**record, "archives": ["batch_0.zip", "batch_1.zip"]},
     ):
-        assert ArchivedHarborSource.cached_rows(tmp_path, changed) is None
+        assert HarborZipSource.cached_rows(tmp_path, changed) is None
