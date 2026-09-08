@@ -113,12 +113,8 @@ def test_mixed_subset_uses_recipe_and_sample_count_without_profile(
     source_rows = read_jsonl(tmp_path / "train-100.jsonl")
     instance_ids = [row["metadata"]["instance_id"] for row in source_rows[:3]]
     samples = []
-    for instance_id, solved, episodes in zip(
-        instance_ids,
-        (2, 4, 1),
-        (4, 4, 3),
-    ):
-        for index in range(episodes):
+    for instance_id, solved in zip(instance_ids, (2, 4, 0)):
+        for index in range(4):
             samples.append(
                 {
                     "index": index,
@@ -145,6 +141,29 @@ def test_mixed_subset_uses_recipe_and_sample_count_without_profile(
     assert read_jsonl(output)[0]["metadata"]["instance_id"] == instance_ids[0]
     assert output.with_suffix(".json").is_file()
     with pytest.raises(FileExistsError):
+        write_mixed_subset(
+            tmp_path,
+            source="train-100",
+            recipe="Qwen3_6_27B_Recipe_Agentic",
+            samples=samples,
+            n_samples=4,
+            checkpoint="base",
+            probe_dump="/checkpoints/probe.pt",
+        )
+
+
+def test_mixed_subset_rejects_dumps_without_fixed_samples_per_task(
+    tmp_path: Path,
+) -> None:
+    write_partitions(tmp_path, _rows())
+    instance_id = read_jsonl(tmp_path / "train-100.jsonl")[0]["metadata"]["instance_id"]
+    samples = [
+        {
+            "index": 0,
+            "metadata": {"instance_id": instance_id, "agentic": {"is_solved": True}},
+        }
+    ]
+    with pytest.raises(ValueError, match="fixed-sample evaluation dump"):
         write_mixed_subset(
             tmp_path,
             source="train-100",
@@ -258,3 +277,15 @@ def test_converted_rows_are_reused_only_for_an_identical_source(
         {**record, "archives": ["batch_0.zip", "batch_1.zip"]},
     ):
         assert HarborZipSource.cached_rows(tmp_path, changed) is None
+
+
+def test_stale_zip_files_are_dropped_when_absent_from_the_snapshot(
+    tmp_path: Path,
+) -> None:
+    tasks = tmp_path / "tasks"
+    tasks.mkdir()
+    (tasks / "batch_0.zip").write_bytes(b"keep")
+    (tasks / "batch_1.zip").write_bytes(b"stale")
+    HarborZipSource.drop_absent_archives(tmp_path, {"tasks/batch_0.zip"})
+    assert (tasks / "batch_0.zip").read_bytes() == b"keep"
+    assert not (tasks / "batch_1.zip").exists()
