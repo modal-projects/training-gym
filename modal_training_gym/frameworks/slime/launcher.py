@@ -1076,10 +1076,6 @@ def build_slime_app(
             await _set_framework_status_async(SlimeStatus.CONVERT_MODEL)
             prepare_slime_config(slime, model, tempfile.mkdtemp())
 
-            if wandb_key := os.environ.get("WANDB_API_KEY", ""):
-                if isinstance(slime.metrics, WandbConfig):
-                    slime.metrics.key = wandb_key
-
             save_root = compute_save_root(
                 slime.save,
                 recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
@@ -1177,12 +1173,12 @@ def build_slime_app(
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                     "TRAINING_GYM_SUBSTEP_TIMING": slime.substep_timing,
+                    **slime.environment,
                     **metric_runtime_env(
                         slime.metrics,
                         run_id=metric_run_id,
                         entity=metric_entity,
                     ),
-                    **slime.environment,
                     **timing_debug_env(),
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
@@ -1193,7 +1189,8 @@ def build_slime_app(
                 f"Training {app_name} — {slime.total_nodes} node(s) × {gpu_spec}  ({mode})"
             )
             print(slime.gpu_allocation.summary())
-            print(f"Command: {cmd}, runtime_env: {runtime_env}")
+            print(f"Command: {cmd}")
+            print(f"Runtime environment variables: {sorted(runtime_env['env_vars'])}")
 
             await _set_framework_status_async(SlimeStatus.ROLLOUT_INITIALIZING)
             async with cluster.forward_dashboard() as tunnel:

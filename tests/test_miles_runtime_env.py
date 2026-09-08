@@ -102,9 +102,14 @@ def test_metric_env_is_preserved(monkeypatch):
 
     env_vars = build_ray_runtime_env(
         head_addr="10.0.0.1",
-        metric_env={"WANDB_RUN_ID": "abc", "WANDB_RESUME": "allow"},
-        environment={},
+        metric_env={
+            "WANDB_RUN_ID": "abc",
+            "WANDB_RESUME": "allow",
+            "WANDB_API_KEY": "validated-key",
+        },
+        environment={"WANDB_RUN_ID": "other-run", "WANDB_API_KEY": "other-key"},
     )["env_vars"]
 
     assert env_vars["WANDB_RUN_ID"] == "abc"
     assert env_vars["WANDB_RESUME"] == "allow"
+    assert env_vars["WANDB_API_KEY"] == "validated-key"
