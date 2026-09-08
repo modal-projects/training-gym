@@ -18,6 +18,20 @@ test('rejects flat and nested tutorials with the same slug', async (context) => 
   );
 });
 
+for (const name of ['has.dot', 'has space']) {
+  test(`rejects folder name ${JSON.stringify(name)}`, async (context) => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'tutorial-slugs-'));
+    context.after(() => rm(directory, { recursive: true, force: true }));
+    await mkdir(path.join(directory, name));
+    await writeFile(path.join(directory, name, 'main.py'), '');
+
+    await assert.rejects(
+      discoverTutorialEntries(directory),
+      /not a valid Python module name/,
+    );
+  });
+}
+
 test('nested sourcePath is a directory and runTarget is a module', async (context) => {
   const directory = await mkdtemp(path.join(tmpdir(), 'tutorial-slugs-'));
   context.after(() => rm(directory, { recursive: true, force: true }));

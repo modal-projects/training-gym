@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TUTORIALS_DIR = REPO_ROOT / "tutorials"
 FIELD_PATTERN = re.compile(r"^# ([a-z_]+):\s*(.*)$")
 DEP_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+FOLDER_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ORDER_PATTERN = re.compile(r"^\d+$")
 MAX_SAFE_INTEGER = (1 << 53) - 1
 
@@ -91,6 +92,11 @@ def discover_tutorial_paths(
             candidate = child
             slug = child.stem
         elif child.is_dir() and (child / "main.py").is_file():
+            if FOLDER_NAME_PATTERN.fullmatch(child.name) is None:
+                raise ValueError(
+                    f"Tutorial folder {child.name!r} is not a valid Python module "
+                    f"name; use only letters, digits, and underscores"
+                )
             candidate = child / "main.py"
             slug = child.name
         else:
