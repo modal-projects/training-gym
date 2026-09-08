@@ -682,6 +682,10 @@ class SweBenchSource:
                 continue
             metadata = converted.setdefault("metadata", {})
             metadata["task_path"] = f"{root.name}/tasks/{task_dir.name}"
+            if self.metadata_namespace in metadata:
+                raise ValueError(
+                    f"metadata namespace {self.metadata_namespace!r} conflicts with converted task metadata"
+                )
             metadata[self.metadata_namespace] = {
                 key: row[key] for key in SOURCE_COLUMNS if row.get(key)
             }
