@@ -64,7 +64,7 @@ def _tutorial_package(caller_script: str | None) -> tuple[Path, str] | None:
     if caller_script is None:
         return None
     path = Path(caller_script)
-    if path.name != "main.py" or path.parent.parent.name != "tutorials":
+    if path.suffix != ".py" or path.parent.parent.name != "tutorials":
         return None
     return path.parent, path.parent.name
 
