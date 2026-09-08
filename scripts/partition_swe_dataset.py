@@ -418,6 +418,7 @@ def write_partitions(
     ):
         for size in sizes:
             if size > len(pool):
+                (root / f"{prefix}-{size}.jsonl").unlink(missing_ok=True)
                 print(f"[swe] skipping {prefix}-{size}: only {len(pool)} {prefix} rows")
                 continue
             outputs[f"{prefix}-{size}"] = nested_subset(
