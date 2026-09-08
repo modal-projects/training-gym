@@ -45,6 +45,7 @@ _SLIME_SKIP = {
     "local_slime",
     "slime_git_repository",
     "slime_git_revision",
+    "data_volume_name",
     "memory",
     "cpu",
     "cloud",
@@ -66,6 +67,7 @@ _SLIME_SKIP = {
     "image_run_commands",
     "image_env",
     "train_function_kwargs",
+    "max_retries",
     "substep_timing",
     "conversion_pipeline_model_parallel_size",
     "conversion_tensor_model_parallel_size",
@@ -124,6 +126,9 @@ class SlimeRecipe(BaseTrainRecipe):
         slime_git_revision:
             Full 40-character commit SHA fetched from ``slime_git_repository``.
             Branches and tags are rejected because they can move between runs.
+        data_volume_name:
+            Existing Modal data volume to mount at ``/data``. When unset, the
+            launcher derives a volume name from the concrete recipe class.
         memory:
             Modal Function memory request/limit in MiB.
         cpu:
@@ -148,6 +153,9 @@ class SlimeRecipe(BaseTrainRecipe):
             Extra env vars baked into the image.
         train_function_kwargs:
             Additional Modal Function keyword arguments for the training function.
+        max_retries:
+            Modal retries for the training function. Each retry resumes from
+            the last checkpoint.
         capture_trace:
             Attach sampled per-request execution traces to recorded rollouts.
         trace_sample_limit:
@@ -179,6 +187,10 @@ class SlimeRecipe(BaseTrainRecipe):
 
         num_rollout:
             Training and rollout steps for the run.
+        start_rollout_id:
+            Rollout step to start counting from. ``None`` continues from the
+            iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
+            ``0`` so ``num_rollout`` counts the steps this run performs.
         rollout_batch_size:
             Prompts sampled per rollout step; each prompt is expanded into a
             group of sampled responses.
@@ -387,6 +399,7 @@ class SlimeRecipe(BaseTrainRecipe):
     tensor_model_parallel_size: int = 1
     rollout_num_gpus_per_engine: int = 1
     num_rollout: int = 1
+    start_rollout_id: int | None = None
     rollout_batch_size: int = 8
 
     # ── App identity ─────────────────────────────────────────────────────────
@@ -407,6 +420,7 @@ class SlimeRecipe(BaseTrainRecipe):
     local_slime: str | None = None
     slime_git_repository: str | None = None
     slime_git_revision: str | None = None
+    data_volume_name: str | None = None
     memory: int | tuple[int, int] | None = None
     cpu: float | tuple[float, float] | None = None
     cloud: str | None = None
@@ -418,6 +432,7 @@ class SlimeRecipe(BaseTrainRecipe):
     image_run_commands: list[str] = field(default_factory=list)
     image_env: dict[str, str] = field(default_factory=dict)
     train_function_kwargs: dict[str, Any] = field(default_factory=dict)
+    max_retries: int = 3
 
     substep_timing: Literal["auto", "off"] = "auto"
 

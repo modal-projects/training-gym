@@ -40,6 +40,7 @@ PKG_ROOT = REPO_ROOT / "modal_training_gym"
 REMOTE_ONLY = frozenset(
     {
         "modal_training_gym.common.megatron_patches.patch_checkpoint_save",
+        "modal_training_gym.common.megatron_patches.patch_dist_ckpt_nofork",
         "modal_training_gym.common.megatron_patches.patch_dist_ckpt_quantized",
         "modal_training_gym.common.megatron_patches.patch_gdn_packed_seq",
         "modal_training_gym.common.megatron_patches.patch_torch_load",

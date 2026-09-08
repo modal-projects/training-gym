@@ -63,6 +63,7 @@ from modal_training_gym.common.launcher_helpers import (
     write_dataset_if_needed,
 )
 from modal_training_gym.common.launcher_utils import (
+    drop_materialized_config_key,
     serialize_recipe_params,
     timing_debug_env,
 )
@@ -73,6 +74,7 @@ from modal_training_gym.common.metrics import (
     metric_secrets,
     preflight_metric,
 )
+from modal_training_gym.common.trackio import resolve_trackio_destination
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.status import SlimeStatus
 
@@ -165,6 +167,7 @@ _PATCH_LOG_ELIDE_B64 = encode_patch("patch_log_elide", _SLIME_PATCHES)
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
+_PATCH_DIST_CKPT_NOFORK_B64 = encode_patch("patch_dist_ckpt_nofork", _MEGATRON_PATCHES)
 # OPD / multi-turn: zero-std metrics must skip non-numeric rewards (dict/None).
 _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATCHES)
 _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
@@ -193,6 +196,7 @@ _SLIME_EXTERNAL_PATCHES_B64 = (
     _PATCH_BRIDGE_NONE_TASK_B64,
     _PATCH_LOG_ELIDE_B64,
     _PATCH_DIST_CKPT_QUANTIZED_B64,
+    _PATCH_DIST_CKPT_NOFORK_B64,
 )
 
 
@@ -469,6 +473,8 @@ def build_slime_app(
     if slime.image_env:
         image = image.env(slime.image_env)
 
+    if slime.metrics is not None and slime.metrics.provider == "trackio":
+        resolve_trackio_destination(slime.metrics)
     image = apply_metric_image(image, slime.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
@@ -624,7 +630,8 @@ def build_slime_app(
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
+    data_volume_name = slime.data_volume_name or f"{volume_prefix}-data"
+    data_volume = Volume.from_name(data_volume_name, create_if_missing=True)
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
         resolve_checkpoint_volumes(
             checkpoint,
@@ -933,7 +940,7 @@ def build_slime_app(
         # before the first save_interval checkpoint) re-runs from scratch and
         # crashloops through every attempt — 10 wasted ~4h of a 40-GPU cluster on
         # a step-1 crash. Cap low so a persistent failure surfaces fast.
-        retries=Retries(max_retries=3, initial_delay=0.0),
+        retries=Retries(max_retries=slime.max_retries, initial_delay=0.0),
         single_use_containers=True,
         experimental_options=train_experimental_options or None,
         serialized=True,
@@ -985,14 +992,27 @@ def build_slime_app(
         print(f"Training run id: {training_run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
-            "recipe": _serialize_slime_params(
-                slime,
-                dataset=dataset,
-                eval_dataset=eval_dataset,
-                dataset_path=dataset_path,
-                eval_dataset_path=eval_dataset_path,
-                model=model,
-            ),
+            # These fields are in _SLIME_SKIP, so _serialize_slime_params drops
+            # them; record them here so the run shows what it actually used.
+            "recipe": {
+                **_serialize_slime_params(
+                    slime,
+                    dataset=dataset,
+                    eval_dataset=eval_dataset,
+                    dataset_path=dataset_path,
+                    eval_dataset_path=eval_dataset_path,
+                    model=model,
+                ),
+                **{
+                    key: value
+                    for key, value in (
+                        ("slime_git_repository", slime.slime_git_repository),
+                        ("slime_git_revision", slime.slime_git_revision),
+                        ("data_volume_name", slime.data_volume_name),
+                    )
+                    if value
+                },
+            },
             "metrics": metric_metadata(
                 slime.metrics,
                 entity=metric_entity,
@@ -1093,6 +1113,7 @@ def build_slime_app(
 
             original_save = slime.save
             original_load = slime.load
+            original_start_rollout_id = slime.start_rollout_id
             original_ref_load = slime.ref_load
             original_no_load_optim = slime.no_load_optim
             object.__setattr__(slime, "save", save_root)
@@ -1123,6 +1144,10 @@ def build_slime_app(
                     "resuming training from last saved iteration."
                 )
                 object.__setattr__(slime, "load", save_root)
+                # Continue from the iteration stored in the run's own checkpoint,
+                # even for runs launched with an explicit start_rollout_id.
+                object.__setattr__(slime, "start_rollout_id", None)
+                drop_materialized_config_key(slime, "start_rollout_id")
                 # Weights-only checkpoints (``no_save_optim``) have no Adam state;
                 # Megatron will KeyError on state_dict["optimizer"] unless we skip it.
                 if slime.no_save_optim and not slime.no_load_optim:
@@ -1152,6 +1177,7 @@ def build_slime_app(
             finally:
                 object.__setattr__(slime, "save", original_save)
                 object.__setattr__(slime, "load", original_load)
+                object.__setattr__(slime, "start_rollout_id", original_start_rollout_id)
                 object.__setattr__(slime, "ref_load", original_ref_load)
                 object.__setattr__(slime, "no_load_optim", original_no_load_optim)
 

@@ -4,6 +4,7 @@ early, actionable failure (missing key, or no write access).
 
 import sys
 import types
+from unittest.mock import Mock
 
 import pytest
 
@@ -21,7 +22,10 @@ def _stub_wandb(monkeypatch, **attrs):
     ``preflight_wandb`` does ``import wandb`` inside the function, so preloading a
     fake into ``sys.modules`` intercepts it — no real library, network, or login.
     """
-    monkeypatch.setitem(sys.modules, "wandb", types.SimpleNamespace(**attrs))
+    attrs.setdefault("teardown", Mock())
+    module = types.SimpleNamespace(**attrs)
+    monkeypatch.setitem(sys.modules, "wandb", module)
+    return module
 
 
 def test_preflight_raises_clear_error_without_key(monkeypatch):
@@ -39,9 +43,10 @@ def test_preflight_wraps_access_failure(monkeypatch):
     def login_without_write_access(**_):
         raise Exception("user does not have models write access")
 
-    _stub_wandb(monkeypatch, login=login_without_write_access)
+    module = _stub_wandb(monkeypatch, login=login_without_write_access)
     with pytest.raises(RuntimeError, match="W&B pre-flight failed.*qwen3-asr-rl"):
         preflight_wandb(_CFG)
+    module.teardown.assert_called_once_with()
 
 
 def test_preflight_returns_entity(monkeypatch):
@@ -60,7 +65,7 @@ def test_preflight_returns_entity(monkeypatch):
         def run(self, path):
             return types.SimpleNamespace(delete=lambda: None)
 
-    _stub_wandb(
+    module = _stub_wandb(
         monkeypatch,
         login=lambda **_: None,
         init=lambda **_: _FakeRun(),
@@ -70,6 +75,7 @@ def test_preflight_returns_entity(monkeypatch):
     )
     entity = preflight_wandb(_CFG)
     assert entity == "my-team"
+    module.teardown.assert_called_once_with()
 
 
 def test_slime_preflight_delegates_to_common(monkeypatch):
@@ -107,7 +113,7 @@ def test_wandb_config_uses_the_provider_neutral_recipe_field():
     with pytest.raises(TypeError, match="abstract"):
         MetricConfig()
 
-    metric = WandbConfig(project="training")
+    metric = WandbConfig(project="training", group="experiment")
     recipe = Qwen3_4B_Recipe(metrics=metric)
 
     assert isinstance(metric, MetricConfig)
@@ -121,4 +127,6 @@ def test_wandb_config_uses_the_provider_neutral_recipe_field():
         metrics=metric,
     )
     assert tags["_modal_metric_project"] == "training"
-    assert tags["_modal_wandb_project"] == "training"
+    assert tags["_modal_metric_group"] == "experiment"
+    assert "_modal_wandb_project" not in tags
+    assert len(tags) <= 8

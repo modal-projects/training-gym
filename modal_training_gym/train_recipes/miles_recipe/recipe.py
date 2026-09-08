@@ -57,6 +57,7 @@ _MILES_SKIP = {
     "custom_megatron_before_log_prob_hook",
     "custom_megatron_before_train_step_hook",
     "train_function_kwargs",
+    "max_retries",
     # Conversion-only parallelism and scratch: launcher-side, never forwarded to
     # the miles CLI.
     "conversion_tensor_model_parallel_size",
@@ -147,6 +148,9 @@ class MilesRecipe(BaseTrainRecipe):
             Extra env vars baked into the image.
         train_function_kwargs:
             Additional Modal Function keyword arguments for the training function.
+        max_retries:
+            Modal retries for the training function. Each retry resumes from
+            the last checkpoint.
         capture_trace:
             Attach sampled per-request execution traces to recorded rollouts.
         trace_sample_limit:
@@ -189,6 +193,10 @@ class MilesRecipe(BaseTrainRecipe):
 
         num_rollout:
             Training and rollout steps for the run.
+        start_rollout_id:
+            Rollout step to start counting from. ``None`` continues from the
+            iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
+            ``0`` so ``num_rollout`` counts the steps this run performs.
         rollout_batch_size:
             Prompts per rollout step, each expanded into a group of responses.
         rollout_max_response_len:
@@ -504,6 +512,7 @@ class MilesRecipe(BaseTrainRecipe):
 
     # ── Rollout and sampling ────────────────────────────────────────────────
     num_rollout: int = 1
+    start_rollout_id: int | None = None
     rollout_batch_size: int = 8
     n_samples_per_prompt: int = 2
     rollout_max_response_len: int = 4096
@@ -636,6 +645,7 @@ class MilesRecipe(BaseTrainRecipe):
     # samples of each rollout. Off by default — traces inflate payloads, so
     # sampling keeps the added volume well under 1%. Not a miles CLI flag.
     train_function_kwargs: dict[str, Any] = field(default_factory=dict)
+    max_retries: int = 10
     capture_trace: bool = False
     trace_sample_limit: int = 16
 

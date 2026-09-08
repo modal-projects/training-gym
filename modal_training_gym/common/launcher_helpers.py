@@ -169,10 +169,8 @@ def build_app_tags(
         tags["_modal_metric_project"] = modal_tag_value(metrics.project)
         if metrics.group:
             tags["_modal_metric_group"] = modal_tag_value(metrics.group)
-        if metrics.provider == "wandb":
-            tags["_modal_wandb_project"] = modal_tag_value(metrics.project)
-            if metrics.group:
-                tags["_modal_wandb_group"] = modal_tag_value(metrics.group)
+        # Provider-neutral tags already identify W&B. Duplicating the project
+        # and group as legacy W&B tags exceeds Modal's eight-tag limit.
     return tags
 
 

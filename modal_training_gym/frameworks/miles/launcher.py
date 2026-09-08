@@ -26,6 +26,7 @@ from modal_training_gym.common.framework import (
     mount_tools_dir,
 )
 from modal_training_gym.common.launcher_utils import (
+    drop_materialized_config_key,
     serialize_recipe_params,
     timing_debug_env,
 )
@@ -131,6 +132,7 @@ _REPORTING_PATCH_COMMANDS = (
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
+_PATCH_DIST_CKPT_NOFORK_B64 = encode_patch("patch_dist_ckpt_nofork", _MEGATRON_PATCHES)
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
 _MEGATRON_TORCH_STRATEGY_PY = (
     "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
@@ -353,6 +355,7 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
             f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
+            f"echo {_PATCH_DIST_CKPT_NOFORK_B64} | base64 -d | python3",
             (
                 f"if test -f {_MEGATRON_TORCH_STRATEGY_PY}; then "
                 f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3; "
@@ -935,7 +938,7 @@ def build_miles_app(
         volumes=all_volumes,
         secrets=train_secrets,
         timeout=24 * 60 * 60,
-        retries=Retries(max_retries=10, initial_delay=0.0),
+        retries=Retries(max_retries=miles.max_retries, initial_delay=0.0),
         single_use_containers=True,
         experimental_options=train_experimental_options,
         serialized=True,
@@ -1157,6 +1160,7 @@ def build_miles_app(
 
             original_save = miles.save
             original_load = miles.load
+            original_start_rollout_id = miles.start_rollout_id
             miles.save = save_root
             resume_checkpoint = torch_dist_resume_checkpoint(
                 save_root, is_complete=_is_resumable_checkpoint
@@ -1173,6 +1177,10 @@ def build_miles_app(
                     "resuming training from last saved iteration."
                 )
                 miles.load = save_root
+                # Continue from the iteration stored in the run's own checkpoint,
+                # even for runs launched with an explicit start_rollout_id.
+                miles.start_rollout_id = None
+                drop_materialized_config_key(miles, "start_rollout_id")
             elif unresumable := _unresumable_save_dirs(save_root):
                 print(
                     f"WARNING: {save_root} holds saves that cannot be resumed "
@@ -1195,6 +1203,7 @@ def build_miles_app(
             finally:
                 miles.save = original_save
                 miles.load = original_load
+                miles.start_rollout_id = original_start_rollout_id
 
             phase_report_url = (
                 os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL")

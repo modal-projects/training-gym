@@ -188,7 +188,8 @@ def get_checkpoint_conversion_policy(
     attribute is populated (the model script already sources them).
 
     TP/PP come from the ``conversion_*`` overrides when set, else from the training
-    layout. EP/ETP are emitted only when their ``conversion_*`` fields are set
+    layout. Explicit TP1/PP1 uses one rank instead of the automatic node-wide
+    conversion. EP/ETP are emitted only when their ``conversion_*`` fields are set
     explicitly, and the pipeline-split args are dropped at conversion PP1.
     """
     gpus_per_node = getattr(cfg, "actor_num_gpus_per_node", 8)
@@ -200,6 +201,12 @@ def get_checkpoint_conversion_policy(
     )
     pp = getattr(cfg, "conversion_pipeline_model_parallel_size", None) or getattr(
         cfg, "pipeline_model_parallel_size", 1
+    )
+    pins_layout = (
+        tp > 1
+        or pp > 1
+        or getattr(cfg, "conversion_tensor_model_parallel_size", None) is not None
+        or getattr(cfg, "conversion_pipeline_model_parallel_size", None) is not None
     )
     # Expert parallelism is opt-in: torch_dist reshards, so most models convert fine
     # at the implicit EP1. Models whose full expert set does not fit a rank at EP1
@@ -214,7 +221,7 @@ def get_checkpoint_conversion_policy(
             "Megatron otherwise defaults ETP to TP and the expert world size no "
             "longer matches tp*pp"
         )
-    if ep and etp and not (tp > 1 or pp > 1):
+    if ep and etp and not pins_layout:
         raise ValueError(
             "checkpoint conversion expert parallelism needs a pinned conversion "
             "layout: set conversion_tensor_model_parallel_size or "
@@ -225,7 +232,7 @@ def get_checkpoint_conversion_policy(
     if single_rank_mtp and tp == 1 and pp == 1 and getattr(cfg, "mtp_num_layers", 0):
         world_size = 1
     else:
-        world_size = tp * pp if (tp > 1 or pp > 1) else gpus_per_node
+        world_size = tp * pp if pins_layout else gpus_per_node
 
     if ep and etp and world_size % (etp * ep * pp) != 0:
         raise ValueError(
@@ -247,7 +254,6 @@ def get_checkpoint_conversion_policy(
             continue
 
         extra_args: list[str] = []
-        pins_layout = tp > 1 or pp > 1
         if pins_layout:
             extra_args += [
                 f"--tensor-model-parallel-size {tp}",
@@ -266,7 +272,9 @@ def get_checkpoint_conversion_policy(
             # dropping the split would then describe a layout nobody asked for.
             if pp == 1 and pins_layout and attr in _PIPELINE_SPLIT_ARGS:
                 continue
-            if x := getattr(cfg, attr, None):
+            # Zero is meaningful for MTP: it overrides model-script defaults
+            # during conversion just as the recipe does during training.
+            if (x := getattr(cfg, attr, None)) is not None:
                 extra_args.append(f"--{flag} {x}")
 
         emit_arch = bool(model and getattr(model, "architecture", None))
@@ -476,6 +484,33 @@ def prepare_launch_config(
             if field == escape_hatch:
                 object.__setattr__(cfg, "_materialized_config_keys", tuple(val))
             object.__setattr__(cfg, field, path)
+
+
+def drop_materialized_config_key(cfg: Any, key: str) -> None:
+    """Remove ``key`` from the recipe's already-materialized escape-hatch YAML.
+
+    Runs after ``prepare_launch_config`` has replaced the escape-hatch dict
+    with a file path, so the YAML is rewritten and the recorded keys updated
+    so ``_emit_fields`` stops suppressing the same-named flag.
+    """
+    import yaml
+
+    escape_hatch = getattr(cfg, "_ESCAPE_HATCH_FIELD", None)
+    if not escape_hatch:
+        return
+    keys = tuple(getattr(cfg, "_materialized_config_keys", ()) or ())
+    if key not in keys:
+        return
+    path = getattr(cfg, escape_hatch, None)
+    if isinstance(path, str) and os.path.isfile(path):
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        data.pop(key, None)
+        with open(path, "w") as f:
+            yaml.dump(data, f)
+    object.__setattr__(
+        cfg, "_materialized_config_keys", tuple(k for k in keys if k != key)
+    )
 
 
 def build_train_cmd(
