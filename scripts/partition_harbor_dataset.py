@@ -526,6 +526,14 @@ def write_mixed_subset(
         raise ValueError(f"{source_path} contains duplicate instance ids")
 
     counts = aggregate_probe_samples(samples, n_samples=n_samples)
+    absent = sorted(set(indexed) - set(counts))
+    unexpected = sorted(set(counts) - set(indexed))
+    if absent or unexpected:
+        raise ValueError(
+            f"probe dump does not cover {source}: {len(absent)} source tasks are "
+            f"missing from the probe and {len(unexpected)} probe tasks are not in "
+            f"{source}"
+        )
     selected_ids = sorted(
         (
             instance_id
@@ -538,12 +546,6 @@ def write_mixed_subset(
             instance_id,
         ),
     )
-    missing = [
-        instance_id for instance_id in selected_ids if instance_id not in indexed
-    ]
-    if missing:
-        raise ValueError(f"probe references {len(missing)} tasks absent from {source}")
-
     write_jsonl(output_path, [indexed[instance_id] for instance_id in selected_ids])
     provenance = {
         "subset": name,
@@ -626,7 +628,10 @@ class HarborZipSource:
             "dataset_key": self.dataset_key,
             "metadata_namespace": self.metadata_namespace,
             "translator_revision": self.translator_revision,
-            "archives": [bundle.name for bundle in self.bundles(root)],
+            "archives": {bundle.name: sha256(bundle) for bundle in self.bundles(root)},
+            "tasks_csv": sha256(root / "tasks.csv")
+            if (root / "tasks.csv").is_file()
+            else None,
         }
 
     @staticmethod
@@ -642,7 +647,7 @@ class HarborZipSource:
 
     @staticmethod
     def clear_extracted(root: Path) -> None:
-        """Delete extracted tasks, extraction markers, and conversion outputs. Keep the zip files."""
+        """Delete extracted tasks, extraction markers, conversion outputs, and derived mixed subsets. Keep the zip files."""
         tasks_root = root / "tasks"
         for entry in tasks_root.iterdir() if tasks_root.is_dir() else ():
             if entry.is_dir():
@@ -651,6 +656,8 @@ class HarborZipSource:
                 entry.unlink()
         for name in ("all.converted.json", "all.converted.jsonl"):
             (root / name).unlink(missing_ok=True)
+        for path in root.glob("*-mixed-reward-*"):
+            path.unlink()
 
     @staticmethod
     def safe_extract(bundle: Path, tasks_root: Path) -> int:
