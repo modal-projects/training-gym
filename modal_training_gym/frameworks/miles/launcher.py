@@ -1118,6 +1118,7 @@ def build_miles_app(
         assert run_record is not None
 
         try:  # Wraps all post-setup work so any failure marks the run terminal.
+            extra_config = miles.extra_config or {}
             prepare_miles_config(miles, model, tempfile.mkdtemp())
 
             if wandb_key := os.environ.get("WANDB_API_KEY", ""):
@@ -1134,7 +1135,7 @@ def build_miles_app(
             original_save = miles.save
             original_load = miles.load
             original_start_rollout_id = miles.start_rollout_id
-            miles.save = save_root
+            miles.save = save_root if original_save else None
             resume_checkpoint = torch_dist_resume_checkpoint(
                 save_root, is_complete=_is_resumable_checkpoint
             )
@@ -1231,7 +1232,10 @@ def build_miles_app(
                 app_name=app_name,
                 framework=Framework.MILES,
                 training_run_id=training_run_id,
-                checkpoint_dir=save_root,
+                checkpoint_dir=extra_config.get(
+                    "save", save_root if original_save else ""
+                )
+                or "",
                 model=model,
                 checkpoints_volume_name=checkpoints_volume_name,
                 checkpoints_mount_path=checkpoints_mount_path,
