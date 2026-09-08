@@ -52,6 +52,18 @@ def test_discover_tutorial_paths_finds_flat_and_nested(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("name", ["has.dot", "has space"])
+def test_discover_tutorial_paths_rejects_unsafe_folder_names(
+    tmp_path: Path, name: str
+) -> None:
+    nested = tmp_path / name
+    nested.mkdir()
+    (nested / "main.py").write_text("# ---\n# order: 0\n# ---\n# # Nested\n")
+
+    with pytest.raises(ValueError, match="not a valid Python module name"):
+        discover_tutorial_paths(tmp_path)
+
+
 def test_discover_tutorial_paths_rejects_slug_collision(tmp_path: Path) -> None:
     (tmp_path / "duplicate.py").write_text("# ---\n# order: 0\n# ---\n# # Flat\n")
     nested = tmp_path / "duplicate"

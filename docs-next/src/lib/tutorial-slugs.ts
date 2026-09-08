@@ -8,6 +8,8 @@ export interface TutorialSource {
   sourcePath: string;
 }
 
+const FOLDER_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 function assertUniqueTutorialSlugs(entries: TutorialSource[]): void {
   const pathsBySlug = new Map<string, string>();
   for (const entry of entries) {
@@ -44,17 +46,23 @@ export async function discoverTutorialEntries(
     const tutorialPath = path.join(tutorialsDirectory, child.name, 'main.py');
     try {
       const info = await stat(tutorialPath);
-      if (info.isFile()) {
-        entries.push({
-          path: tutorialPath,
-          slug: child.name,
-          runTarget: `-m tutorials.${child.name}.main`,
-          sourcePath: `tutorials/${child.name}`,
-        });
+      if (!info.isFile()) {
+        continue;
       }
     } catch {
       continue;
     }
+    if (!FOLDER_NAME_PATTERN.test(child.name)) {
+      throw new Error(
+        `Tutorial folder ${JSON.stringify(child.name)} is not a valid Python module name; use only letters, digits, and underscores`,
+      );
+    }
+    entries.push({
+      path: tutorialPath,
+      slug: child.name,
+      runTarget: `-m tutorials.${child.name}.main`,
+      sourcePath: `tutorials/${child.name}`,
+    });
   }
   assertUniqueTutorialSlugs(entries);
   return entries;
