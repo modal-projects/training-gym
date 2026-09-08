@@ -308,6 +308,39 @@ def _is_resumable_checkpoint(path: str) -> bool:
     return True
 
 
+def resolve_effective_save(
+    save: str | None,
+    extra_config: dict[str, Any] | None,
+    *,
+    recipe_default_save_root: str,
+    mounted_save_root: str,
+    training_run_id: str,
+) -> tuple[str | None, str]:
+    """Resolve where Miles will actually write checkpoints.
+
+    Returns ``(effective_save, save_root)``. ``extra_config`` is the inline YAML
+    escape hatch and wins over the same-named ``--save`` flag, so a ``save`` key
+    there (including an explicit ``None``) is the effective destination. A YAML
+    path is used verbatim — Miles reads it as-is — while a top-level ``save`` is
+    run-scoped via ``compute_save_root``. ``effective_save`` is ``None`` when
+    checkpointing is disabled; ``save_root`` is still returned so resume
+    discovery has a directory to scan.
+    """
+    cfg = extra_config or {}
+    effective_save = cfg.get("save") if "save" in cfg else save
+    if "save" in cfg and effective_save:
+        save_root = str(effective_save).rstrip("/")
+        os.makedirs(save_root, exist_ok=True)
+    else:
+        save_root = compute_save_root(
+            effective_save,
+            recipe_default_save_root=recipe_default_save_root,
+            mounted_save_root=mounted_save_root,
+            training_run_id=training_run_id,
+        )
+    return effective_save, save_root
+
+
 def _unresumable_save_dirs(save_root: str) -> list[str]:
     """Save directories that exist but cannot be resumed from."""
     try:
@@ -1125,8 +1158,9 @@ def build_miles_app(
                 if isinstance(miles.metrics, WandbConfig):
                     miles.metrics.key = wandb_key
 
-            save_root = compute_save_root(
+            effective_save, save_root = resolve_effective_save(
                 miles.save,
+                extra_config,
                 recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
                 mounted_save_root=checkpoints_mount_path,
                 training_run_id=training_run_id,
@@ -1135,7 +1169,7 @@ def build_miles_app(
             original_save = miles.save
             original_load = miles.load
             original_start_rollout_id = miles.start_rollout_id
-            miles.save = save_root if original_save else None
+            miles.save = save_root if effective_save else None
             resume_checkpoint = torch_dist_resume_checkpoint(
                 save_root, is_complete=_is_resumable_checkpoint
             )
@@ -1151,6 +1185,7 @@ def build_miles_app(
                     "resuming training from last saved iteration."
                 )
                 miles.load = save_root
+                drop_materialized_config_key(miles, "load")
                 # Continue from the iteration stored in the run's own checkpoint,
                 # even for runs launched with an explicit start_rollout_id.
                 miles.start_rollout_id = None
@@ -1232,10 +1267,7 @@ def build_miles_app(
                 app_name=app_name,
                 framework=Framework.MILES,
                 training_run_id=training_run_id,
-                checkpoint_dir=extra_config.get(
-                    "save", save_root if original_save else ""
-                )
-                or "",
+                checkpoint_dir=save_root if effective_save else "",
                 model=model,
                 checkpoints_volume_name=checkpoints_volume_name,
                 checkpoints_mount_path=checkpoints_mount_path,
