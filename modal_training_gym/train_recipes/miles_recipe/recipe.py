@@ -37,6 +37,7 @@ _MILES_SKIP = {
     "cloud",
     "region",
     "name",
+    "project_volume_name",
     "app_tags",
     "image_overlay",
     "image_run_commands",
@@ -107,6 +108,9 @@ class MilesRecipe(BaseTrainRecipe):
             Internal discriminator fixed to Miles.
         name:
             Modal app title. The launcher derives it from the class when empty.
+        project_volume_name:
+            Optional shared volume for data and checkpoints, mounted once at
+            ``/checkpoints``. The recipe's dataset paths must use this mount.
         app_tags:
             Extra tags merged into the Modal app metadata for the dashboard.
 
@@ -444,6 +448,7 @@ class MilesRecipe(BaseTrainRecipe):
     cloud: str | None = None
     region: str | None = None
     name: str = ""
+    project_volume_name: str | None = None
     app_tags: dict = field(default_factory=dict)
     image_overlay: Callable[[modal.Image], modal.Image] | None = None
     image_run_commands: list[str] = field(default_factory=list)

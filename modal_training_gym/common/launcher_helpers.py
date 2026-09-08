@@ -17,6 +17,7 @@ import secrets as _secrets
 import tempfile
 import textwrap
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 import cloudpickle
@@ -131,13 +132,14 @@ def resolve_checkpoint_volumes(
     *,
     volume_prefix: str,
     default_mount_path: str,
+    default_volume_name: str | None = None,
 ) -> tuple[str, str, "Volume"]:
     """Resolve the checkpoints volume name / mount path / Volume, honoring an
     optional ``CheckpointConfig`` override."""
     checkpoints_volume_name = (
         checkpoint.checkpoints_volume_name
         if checkpoint is not None and checkpoint.checkpoints_volume_name
-        else f"{volume_prefix}-checkpoints"
+        else default_volume_name or f"{volume_prefix}-checkpoints"
     )
     checkpoints_mount_path = (
         checkpoint.checkpoints_mount_path.rstrip("/") or "/"
@@ -211,12 +213,17 @@ def run_prepare_dataset(
     dataset: Any,
     data_volume: "Volume",
     resolve_data_paths: Callable[[Any], tuple[str, Any]],
+    *,
+    clear_data_dir: bool = True,
 ) -> None:
     """Materialize the dataset onto the data volume, honoring ``always_prepare``
     and validating the prepared prompt/eval paths."""
     data_volume.reload()
     prompt_data, eval_paths = resolve_data_paths(dataset)
-    if dataset.always_prepare and os.path.exists(prompt_data):
+    if dataset.always_prepare and not clear_data_dir:
+        for path in (prompt_data, *(eval_paths or {}).values()):
+            Path(path).unlink(missing_ok=True)
+    elif dataset.always_prepare and os.path.exists(prompt_data):
         import shutil
 
         data_dir = os.path.dirname(prompt_data)
