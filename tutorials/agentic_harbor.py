@@ -358,7 +358,9 @@ print(f"Modal app: {run.modal_app_url}")
 # ```
 #
 # Once the probe finishes, keep only the tasks whose eight fully gradeable
-# outcomes contain both successes and failures:
+# outcomes contain both successes and failures. `mixed` reads that eval dump
+# and requires it to cover every task in `--source` with a fixed sample count;
+# a training dump or a truncated eval is rejected.
 #
 # ```bash
 # uv run scripts/partition_harbor_dataset.py \
