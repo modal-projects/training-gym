@@ -107,7 +107,7 @@ def test_wandb_config_uses_the_provider_neutral_recipe_field():
     with pytest.raises(TypeError, match="abstract"):
         MetricConfig()
 
-    metric = WandbConfig(project="training")
+    metric = WandbConfig(project="training", group="experiment")
     recipe = Qwen3_4B_Recipe(metrics=metric)
 
     assert isinstance(metric, MetricConfig)
@@ -121,4 +121,6 @@ def test_wandb_config_uses_the_provider_neutral_recipe_field():
         metrics=metric,
     )
     assert tags["_modal_metric_project"] == "training"
-    assert tags["_modal_wandb_project"] == "training"
+    assert tags["_modal_metric_group"] == "experiment"
+    assert "_modal_wandb_project" not in tags
+    assert len(tags) <= 8
