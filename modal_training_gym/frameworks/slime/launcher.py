@@ -125,9 +125,6 @@ _PATCH_MEGATRON_BRIDGE_B64 = encode_patch("patch_megatron_bridge", _SLIME_PATCHE
 _PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", _MEGATRON_PATCHES)
 _PATCH_GLOBAL_PLAN_B64 = encode_patch("patch_global_plan", _SLIME_PATCHES)
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
-_PATCH_CKPT_WRITER_THREADS_B64 = encode_patch(
-    "patch_ckpt_writer_threads", _MEGATRON_PATCHES
-)
 _PATCH_ADVANTAGES_B64 = encode_patch("patch_advantages", _SLIME_PATCHES)
 _PATCH_BRIDGE_NONE_TASK_B64 = encode_patch("patch_bridge_none_task", _SLIME_PATCHES)
 _PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", _MEGATRON_PATCHES)
@@ -199,7 +196,6 @@ _SLIME_EXTERNAL_PATCHES_B64 = (
     _PATCH_LOG_ELIDE_B64,
     _PATCH_DIST_CKPT_QUANTIZED_B64,
     _PATCH_DIST_CKPT_NOFORK_B64,
-    _PATCH_CKPT_WRITER_THREADS_B64,
 )
 
 
