@@ -1,36 +1,35 @@
-"""Partition an archived Harbor dataset into deterministic training subsets.
+"""Partition a zipped Harbor dataset into deterministic training subsets.
 
-Runs on Modal against the data volume of ``Qwen3_6_27B_Recipe_Agentic`` so the
-subsets land where that recipe reads them, as ``/data/<dataset-root>/<subset>.jsonl``.
-The tutorial selects a subset by that path.
+Harbor datasets are typically unpacked task directories, which is what
+``HarborDataset`` uses. Some Harbor tasks on Hugging Face, typically large
+bulk dumps, are zip files instead.
 
-``prepare`` downloads the archived tasks from the Hugging Face Hub, unpacks and
+``prepare`` downloads the zip files from the Hugging Face Hub, unpacks and
 converts them once with the pinned Slime fork's Harbor translator, and writes
 the splits below to ``/data/<dataset-root>/``.
 
-``mixed`` filters one of the train splits to tasks whose probe rollouts were
-fully gradeable with both successes and failures. It reads the rollout dump a
-training run wrote via ``save_debug_rollout_data``, so it is only exercisable
-after a probe run has completed.
+``mixed`` filters a train split using rollouts from a prior training run.
+That run must have written a ``.pt`` dump via ``save_debug_rollout_data``.
+A task is kept when all ``n_samples`` episodes were gradeable and the model
+solved it at least once but not every time. Tasks the model always or never
+solves give GRPO no advantage, so they are dropped.
 
 Split design
 ------------
-Each converted row is one Harbor task. Tasks belong to a *task group*, in
-practice the GitHub repository they were mined from, and carry a *language*
-from the dataset's metadata sheet. The splits make these guarantees:
+Each JSONL row is one Harbor task. Tasks are grouped by task group (the GitHub
+repository they came from), and each has a language from ``tasks.csv``.
 
-* ``eval`` holds ``EVAL_SPLIT_FRACTION`` of the rows and is task-group
-  disjoint from every train split: no repository appears on both sides.
-* ``eval`` covers every language that appears in at least two task groups,
-  and its language mix tracks the full dataset's as closely as disjointness
-  allows. Every language keeps at least two task groups in train.
-* ``train-full`` is everything not in ``eval``. ``train-<N>`` for each
-  ``TRAIN_SPLIT_SIZES`` entry is drawn from ``train-full`` with the full
-  dataset's language mix, and the splits nest: ``train-100`` is a subset of
-  ``train-300``, which is a subset of ``train-1000``.
-* Everything is deterministic under a fixed seed. Rerunning ``prepare`` on the
-  same source produces byte-identical files, and ``all.converted.json``
-  records the inputs the conversion depended on.
+* ``eval`` is about ``EVAL_SPLIT_FRACTION`` of the tasks. No task group
+  appears in both train and eval.
+* Train always keeps at least two task groups of each language. Eval also
+  includes every language that has groups to spare, matching the
+  dataset's language mix as closely as whole-group moves allow.
+* ``train-full`` is everything left after ``eval``. Each ``train-<N>`` is a
+  subset of ``train-full`` with the same language mix. The sized splits
+  nest: ``train-100`` is a subset of ``train-300``, which is a subset of
+  ``train-1000``.
+* The splits are deterministic. The same source and seed produce the same
+  files. ``all.converted.json`` records the inputs the conversion used.
 """
 
 from __future__ import annotations
@@ -64,17 +63,15 @@ from modal_training_gym.train_recipes.slime_recipe import (
     Qwen3_6_27B_Recipe_Agentic,
 )
 
-# The eval split takes this fraction of all rows. The train splits below are
-# drawn from the remaining 1 - EVAL_SPLIT_FRACTION, so with 0.2 they come from
-# the other 80% of the dataset.
+# Fraction of tasks that go to eval. Remainder go to train.
 EVAL_SPLIT_FRACTION = 0.2
 TRAIN_SPLIT_SIZES = (100, 300, 1000)
 SPLIT_SEED = 0
-# Every language keeps at least this many task groups in train, so moving a
-# group to eval never leaves train without examples of a language.
+# Train keeps at least this many task groups of each language, so moving a
+# group to eval never leaves train without that language.
 MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE = 2
-# A mixed-reward subset keeps tasks whose n_samples probe episodes were all
-# gradeable and were neither all solved nor all failed.
+# ``mixed`` keeps a task when all n_samples episodes were gradeable and the
+# model solved it at least once but not every time.
 MIXED_CRITERION = "fully_gradeable_and_0_lt_solved_lt_n_samples"
 METADATA_COLUMNS = ("language", "language_bucket", "category", "difficulty")
 DEFAULT_MIXED_RECIPE_SLUG = "qwen3-6-27b-agentic"
@@ -93,19 +90,19 @@ def dataset_root_name(value: str) -> str:
 
 
 def source_metadata(row: dict[str, Any], namespace: str) -> dict[str, Any]:
-    """The columns copied from the dataset's ``tasks.csv`` sheet, if the task had a row."""
+    """The ``tasks.csv`` columns for this task, if it had a row."""
     value = (row.get("metadata") or {}).get(namespace) or {}
     return value if isinstance(value, dict) else {}
 
 
 def language(row: dict[str, Any], namespace: str) -> str:
-    """The task's language for balancing: the coarse bucket, else the raw language, else ``?``."""
+    """Extract the task's language for split balancing: ``language_bucket``, else ``language``, else ``?``."""
     metadata = source_metadata(row, namespace)
     return str(metadata.get("language_bucket") or metadata.get("language") or "?")
 
 
 def task_group(row: dict[str, Any], suffix_pattern: str) -> str:
-    """The task's group, in practice its source repository.
+    """Extract the task group, often a repo name.
 
     Task directories are named ``<owner>_<repo>__<issue>``, so stripping the
     ``__<issue>`` suffix maps ``aws_aws-cli__2819`` to ``aws_aws-cli``.
@@ -123,22 +120,21 @@ def nested_subset(
     seed: int,
     metadata_namespace: str,
 ) -> list[dict[str, Any]]:
-    """Select ``count`` rows whose language mix matches ``rows``, as a nested prefix.
+    """Select ``count`` tasks from ``rows``, matching its language mix.
 
     Args:
         rows: The pool to draw from, normally the ``train-full`` split.
-        count: How many rows to select.
+        count: How many rows/tasks to select.
         seed: Seeds the within-language shuffle and the tie-breaks. The same
             seed and pool give the same selection.
         metadata_namespace: The ``metadata`` key holding the ``tasks.csv``
             columns that carry each task's language.
 
-    Rows are picked one position at a time. At each position the language that
-    is furthest below its share of the full pool gets the next row, so the
-    selection tracks the pool's language proportions at every prefix length.
-    Because the choice at a position never depends on ``count``, a smaller
-    ``count`` yields a prefix of a larger one: ``train-100`` is a subset of
-    ``train-300``, which is a subset of ``train-1000``.
+    Tasks are picked one at a time. At each step the language furthest below
+    its share of the pool gets the next task, so every prefix matches the
+    pool's language mix. The choice at a position never depends on
+    ``count``, so a smaller split is a prefix of a larger one: ``train-100``
+    is a subset of ``train-300``, which is a subset of ``train-1000``.
     """
     if count < 0 or count > len(rows):
         raise ValueError(f"sample count {count} is outside [0, {len(rows)}]")
@@ -147,9 +143,9 @@ def nested_subset(
     for index, row in enumerate(rows):
         rows_by_language.setdefault(language(row, metadata_namespace), []).append(index)
 
-    # Shuffle within each language so the selection is not biased by conversion
-    # order. The seeded per-language tie-break keeps exact deficit ties from
-    # systematically favoring alphabetically earlier languages.
+    # Shuffle within each language so conversion order does not bias the
+    # selection. Seeded per-language tie-breaks keep exact ties from always
+    # favoring alphabetically earlier languages.
     rng = random.Random(seed)
     for indices in rows_by_language.values():
         rng.shuffle(indices)
@@ -197,7 +193,7 @@ def repo_disjoint_split(
         seed: Seeds the tie-breaks between otherwise equal task groups.
         metadata_namespace: The ``metadata`` key holding each task's language.
         group_suffix_pattern: Regex stripped from a task directory name to get
-            its task group; the default removes the ``__<issue>`` suffix.
+            its task group; the default removes a trailing ``__<digits>``.
 
     The first priority is disjointness: eval is built from whole task groups,
     so a repository never contributes tasks to both train and eval. In
@@ -246,10 +242,11 @@ def repo_disjoint_split(
     eval_language_counts: Counter[str] = Counter()
 
     def can_move_to_eval(group: str) -> bool:
-        """Whether moving ``group`` to eval keeps every one of its languages in train.
+        """Whether moving this task group to eval leaves each of its languages in train.
 
-        A language must keep ``MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE`` groups out
-        of eval, so a language that only exists in one group stays train-only.
+        After the move, every language in the group must still have
+        ``MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE`` groups in train. Languages
+        with too few groups stay train-only.
         """
         if group in eval_selected:
             return False
@@ -265,9 +262,10 @@ def repo_disjoint_split(
         eval_num_rows += len(task_groups[group])
         eval_language_counts.update(task_group_language_counts[group])
 
-    # Ensure eval represents every language by preselecting one task group per
-    # language, rarest language first so it is not crowded out later. Languages
-    # confined to a single group are skipped: they cannot leave train.
+    # Put at least one task group of each language into eval, rarest language
+    # first so later languages cannot crowd it out. Skip a language that cannot
+    # spare a group without dropping train below
+    # ``MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE``.
     for name in sorted(
         language_counts, key=lambda value: (language_counts[value], value)
     ):
@@ -280,8 +278,8 @@ def repo_disjoint_split(
             group for group in task_groups_by_language[name] if can_move_to_eval(group)
         ]
         if eval_candidates:
-            # Pick the task group with the fewest tasks, so this coverage pass
-            # spends as little of the eval budget as possible.
+            # Pick the group with the fewest tasks so this coverage pass uses
+            # as little of the eval budget as possible.
             move_to_eval(
                 min(
                     eval_candidates,
@@ -314,9 +312,9 @@ def repo_disjoint_split(
         ) / max(len(eval_target_language_counts), 1)
         return size_error + language_error, tie_break[group], group
 
-    # Fill eval greedily up to its target size. Prefer groups that fit in the
-    # remaining budget; if none fit, allow any movable group so the loop can
-    # still reach the target, then stop once nothing can move.
+    # Fill eval up to its target size. Prefer groups that fit in the remaining
+    # budget; if none fit, take any that can still move. Stop when nothing can
+    # move.
     while eval_num_rows < eval_target_num_rows:
         remaining = eval_target_num_rows - eval_num_rows
         eval_candidates = [
@@ -341,7 +339,7 @@ def repo_disjoint_split(
     train_groups = {task_group(row, group_suffix_pattern) for row in train_rows}
     eval_groups = {task_group(row, group_suffix_pattern) for row in eval_rows}
     if train_groups & eval_groups:
-        raise RuntimeError("repository-disjoint split leaked groups")
+        raise RuntimeError("task-group-disjoint split leaked groups")
     return train_rows, eval_rows
 
 
@@ -382,7 +380,7 @@ def write_partitions(
     metadata_namespace: str = "source",
     seed: int = SPLIT_SEED,
 ) -> dict[str, int]:
-    """Write ``eval.jsonl``, ``train-full.jsonl``, and the nested ``train-<N>.jsonl`` splits under ``root``.
+    """Write ``eval.jsonl``, ``train-full.jsonl``, and nested ``train-<N>.jsonl`` splits under ``root``.
 
     ``eval`` is task-group disjoint from ``train-full``; each ``train-<N>`` is
     a language-balanced subset of ``train-full`` and of every larger ``train-<M>``.
@@ -413,10 +411,10 @@ def write_partitions(
 def aggregate_probe_samples(
     samples: list[Any], *, n_samples: int
 ) -> dict[str, dict[str, int]]:
-    """Count solved, gradeable, and total probe episodes per task.
+    """Count solved, gradeable, and total episodes per task in a rollout dump.
 
-    An episode is one ``(instance_id, sample index)`` pair; a dump may hold
-    several records for one episode, which are merged. An episode is gradeable
+    An episode is one ``(instance_id, sample index)`` pair. A dump may hold
+    several records for one episode; those are merged. An episode is gradeable
     when the rollout kept it and the environment reported ``is_solved``, and
     solved when that report was true.
     """
@@ -485,13 +483,14 @@ def write_mixed_subset(
     probe_dump: str,
     replace: bool = False,
 ) -> tuple[Path, dict[str, Any]]:
-    """Filter a train split to tasks that are neither too easy nor too hard for the probed model.
+    """Filter a train split to tasks the model sometimes solved and sometimes failed.
 
-    A task is kept when all ``n_samples`` probe episodes were gradeable and it
-    was solved at least once but not every time (``MIXED_CRITERION``). With
-    binary rewards, tasks solved always or never give GRPO zero advantage
-    signal. The output is ordered by closeness to a 50% solve rate, where that
-    signal is strongest, and a JSON sidecar records the provenance.
+    A task is kept when all ``n_samples`` episodes in the rollout dump were
+    gradeable and it was solved at least once but not every time
+    (``MIXED_CRITERION``). With binary rewards, always-solved and never-solved
+    tasks give GRPO no advantage. The output is ordered by closeness to a 50%
+    solve rate, where that signal is strongest. A JSON sidecar records how the
+    subset was built.
     """
     if not re.fullmatch(r"train-(100|300|1000|full)", source):
         raise ValueError(
@@ -553,7 +552,7 @@ def write_mixed_subset(
     return output_path, provenance
 
 
-class ArchivedHarborSource:
+class HarborZipSource:
     """Download, safely unpack, and convert a zipped Harbor dataset."""
 
     def __init__(
@@ -618,7 +617,7 @@ class ArchivedHarborSource:
 
     @staticmethod
     def clear_extracted(root: Path) -> None:
-        """Drop extracted tasks, their markers, and conversion outputs; keep the archives."""
+        """Delete extracted tasks, extraction markers, and conversion outputs. Keep the zip files."""
         tasks_root = root / "tasks"
         for entry in tasks_root.iterdir() if tasks_root.is_dir() else ():
             if entry.is_dir():
@@ -630,7 +629,7 @@ class ArchivedHarborSource:
 
     @staticmethod
     def safe_extract(bundle: Path, tasks_root: Path) -> int:
-        """Extract one archive's task directories, or skip it if a previous run finished it."""
+        """Extract one zip file's task directories, or skip it if a previous run already finished it."""
         marker = tasks_root / f".{bundle.stem}.extracted"
         staging = tasks_root / f".{bundle.stem}.partial"
         with zipfile.ZipFile(bundle) as archive:
@@ -755,7 +754,7 @@ class ArchivedHarborSource:
 
 
 def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
-    """The Slime image with the recipe's pinned fork, whose translator converts tasks."""
+    """Slime image with the recipe's pinned fork. That fork's translator converts Harbor tasks."""
     if not (recipe.slime_git_repository and recipe.slime_git_revision):
         raise ValueError(f"{type(recipe).__name__} does not pin a Slime fork")
     return (
@@ -773,7 +772,7 @@ def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
 
 
 def _partition_remote(root: str, kwargs: dict[str, Any], volume_name: str):
-    counts = ArchivedHarborSource(**kwargs).partition(Path(root))
+    counts = HarborZipSource(**kwargs).partition(Path(root))
     modal.Volume.from_name(volume_name).commit()
     return counts
 
@@ -813,7 +812,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--dataset-root",
-        help="Directory under /data holding the subsets; `prepare` defaults it "
+        help="Directory under /data holding the subsets. prepare defaults this "
         "to the Hugging Face repo id with '/' replaced by '_'.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
