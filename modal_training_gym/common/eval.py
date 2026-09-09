@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from modal_training_gym._api_reference import exclude_from_api_reference
 from modal_training_gym.common.dataset import DatasetRow
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.ids import create_hash
@@ -37,6 +38,7 @@ def _callable_name(fn: Callable[..., Any]) -> str:
     return type(fn).__name__
 
 
+@exclude_from_api_reference
 class EvalConfigDurable(BaseModel):
     """JSON-serializable audit record for an :class:`EvalConfig`."""
 
@@ -60,9 +62,11 @@ class EvalConfigDurable(BaseModel):
 
 # An eval row is just a Sample. Kept as an alias for the public API / existing
 # imports; new code should use Sample directly.
+exclude_from_api_reference("EvalRowResult")
 EvalRowResult = Sample
 
 
+@exclude_from_api_reference
 class AudioEvalRowResult(Sample):
     """``Sample`` for an audio eval, with the audio fields lifted to
     constructor arguments.
@@ -98,6 +102,7 @@ class AudioEvalRowResult(Sample):
         return data
 
 
+@exclude_from_api_reference
 class ImageEvalRowResult(Sample):
     """``Sample`` for an image eval, with the image fields lifted to
     constructor arguments.
@@ -180,6 +185,7 @@ class EvalSummary(BaseModel):
         )
 
 
+@exclude_from_api_reference
 class EvalResult(BaseModel):
     """Saved results for one evaluation run across a dataset."""
 
@@ -234,6 +240,7 @@ EvalResponseFn = Callable[[DatasetRow, Response], EvalRowResult]  # TOOD: bad na
 EvalFn = Callable[["CustomDeployment", DatasetRow], EvalRowResult]
 
 
+@exclude_from_api_reference
 @dataclass
 class EvalConfig:
     """Evaluate a deployed model on a dataset config.
@@ -444,13 +451,7 @@ _CODE_FENCE_RE = re.compile(r"```python\s*\n(.*?)```", re.DOTALL)
 
 
 def extract_code(text: str, model: "ModelConfig | None" = None) -> str:
-    """Extract Python code from an LLM response.
-
-    When *model* is provided, uses ``model.parse_response`` to strip
-    thinking tags and chat-template artifacts, and checks tool-call
-    arguments for a ``code`` key.  Falls back to regex heuristics when
-    *model* is ``None``.
-    """
+    """Extract Python code from an LLM response."""
     if model is not None:
         parsed = model.parse_response(text)
         for tool_call in parsed.tool_calls:
@@ -518,19 +519,7 @@ def score_in_sandbox(
     cpu_policy: str = "limit",
     memory_policy: str = "limit",
 ) -> tuple[float, dict[str, Any]]:
-    """Run *code* against *test_cases* in a Modal sandbox.
-
-    Each test case is a dict with ``input`` and ``expected_output`` keys.
-    The code is executed once per test case with the input piped to stdin.
-    Returns ``(fraction_passed, metadata_dict)``.
-
-    ``cpu_policy`` and ``memory_policy`` control how ``sandbox_cpu`` / ``sandbox_memory``
-    are enforced on Modal (see :data:`RESOURCE_POLICIES`). The default ``"limit"`` treats
-    them as burst ceilings rather than reservations, so the sandbox is billed by actual
-    CPU-/RAM-second usage instead of over-provisioning a static reservation. Use
-    ``"ignore"`` to let tasks burst above the configured values, or ``"reserve"`` for the
-    legacy fixed-reservation behavior.
-    """
+    """Run code against test cases in a Modal sandbox."""
     import modal
 
     if not test_cases:
@@ -607,6 +596,7 @@ def score_in_sandbox(
         return 0.0, metadata
 
 
+@exclude_from_api_reference
 @dataclass
 class HarborEval(EvalConfig):
     """Evaluate a deployed model on a Harbor dataset using sandbox execution.

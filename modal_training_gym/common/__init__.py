@@ -17,7 +17,6 @@ from modal_training_gym.common.modal_refs import (
     register_modal_cloudpickle_reducers,
 )
 from modal_training_gym.utils.metadata import (
-    METADATA_VOLUME_NAME,
     MetadataStore,
     vol_get,
     vol_list,
@@ -92,7 +91,6 @@ def proxy_auth_secrets() -> list:
 __all__ = [
     "COMMON_TRAINING_GYM_TAGS",
     "GPUType",
-    "METADATA_VOLUME_NAME",
     "MetadataStore",
     "ModalCaptureError",
     "modal_tag_value",

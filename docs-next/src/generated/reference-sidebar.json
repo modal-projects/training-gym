@@ -1,6 +1,14 @@
 {
   "sdk": [
     {
+      "label": "Checkpoint",
+      "link": "/reference/checkpoint"
+    },
+    {
+      "label": "CheckpointType",
+      "link": "/reference/checkpointtype"
+    },
+    {
       "label": "CustomDeployment",
       "link": "/reference/customdeployment"
     },
@@ -11,6 +19,10 @@
     {
       "label": "Endpoint",
       "link": "/reference/endpoint"
+    },
+    {
+      "label": "GpuAllocationError",
+      "link": "/reference/gpuallocationerror"
     },
     {
       "label": "HarborDataset",
@@ -33,8 +45,8 @@
       "link": "/reference/milesrecipe"
     },
     {
-      "label": "ModalRayCluster",
-      "link": "/reference/modalraycluster"
+      "label": "ModalCaptureError",
+      "link": "/reference/modalcaptureerror"
     },
     {
       "label": "ModelArchitecture",
@@ -45,12 +57,20 @@
       "link": "/reference/modelconfig"
     },
     {
+      "label": "MultimodalDataset",
+      "link": "/reference/multimodaldataset"
+    },
+    {
       "label": "OnlineRollout",
       "link": "/reference/onlinerollout"
     },
     {
       "label": "ParsedResponse",
       "link": "/reference/parsedresponse"
+    },
+    {
+      "label": "Sample",
+      "link": "/reference/sample"
     },
     {
       "label": "SglangRecipe",
@@ -77,6 +97,14 @@
       "link": "/reference/traininggroup"
     },
     {
+      "label": "TrainingGymConfigError",
+      "link": "/reference/traininggymconfigerror"
+    },
+    {
+      "label": "TrainingGymError",
+      "link": "/reference/traininggymerror"
+    },
+    {
       "label": "TrainingRun",
       "link": "/reference/trainingrun"
     },
@@ -91,6 +119,18 @@
     {
       "label": "WandbConfig",
       "link": "/reference/wandbconfig"
+    },
+    {
+      "label": "convert_megatron_checkpoint_to_hf",
+      "link": "/reference/convert_megatron_checkpoint_to_hf"
+    },
+    {
+      "label": "extract_code",
+      "link": "/reference/extract_code"
+    },
+    {
+      "label": "score_in_sandbox",
+      "link": "/reference/score_in_sandbox"
     }
   ],
   "cli": [

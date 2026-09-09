@@ -22,13 +22,26 @@ _CONVERT_COMPLETE_MARKER = ".training_gym_convert_complete"
 
 
 class CheckpointType(Enum):
+    """Whether a checkpoint is Hugging Face or Megatron weights."""
+
     hf = "hf"
     megatron = "megatron"
 
 
 @dataclass
 class Checkpoint:
-    """A single discovered checkpoint on the local filesystem."""
+    """A single discovered checkpoint on the local filesystem.
+
+    Attributes:
+        checkpoint_type: Hugging Face or Megatron layout.
+        name: Volume directory basename, such as ``iter_0000050``.
+        path: Absolute path on the checkpoints volume mount.
+        timestamp: POSIX mtime of the checkpoint directory.
+        training_run_id: Training run that wrote this checkpoint.
+        app_name: Modal app name for the run.
+        checkpoints_volume_name: Modal Volume that stores the checkpoint.
+        checkpoints_mount_path: Container mount path for that volume.
+    """
 
     checkpoint_type: CheckpointType
     name: str
@@ -41,6 +54,7 @@ class Checkpoint:
 
     @property
     def path_relative_to_volume(self) -> str:
+        """Path relative to the checkpoints volume mount."""
         return _to_volume_path(
             self.path, self.checkpoints_mount_path or _CHECKPOINTS_MOUNT_FALLBACK
         )
@@ -156,6 +170,7 @@ def convert_megatron_checkpoint_to_hf(
     model: ModelConfig,
     recipe: VllmRecipe | SglangRecipe = SglangRecipe(),
 ) -> Checkpoint:
+    """Convert a Megatron checkpoint to Hugging Face format."""
     if checkpoint.checkpoint_type == CheckpointType.hf:
         return checkpoint
 

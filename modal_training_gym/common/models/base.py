@@ -43,6 +43,29 @@ class ModelArchitecture:
         use_rotary_position_embeddings: Whether to use RoPE.
         rotary_base: Base frequency for RoPE.
         rotary_percent: Fraction of hidden dimensions that use RoPE.
+        no_masked_softmax_fusion: Disable fused masked softmax.
+        multi_latent_attention: Use multi-latent attention instead of standard MHA.
+        kv_lora_rank: LoRA rank for compressed key/value projections.
+        qk_head_dim: Query/key head dimension for multi-latent attention.
+        qk_pos_emb_head_dim: Query/key positional-embedding head dimension.
+        v_head_dim: Value head dimension for multi-latent attention.
+        moe_layer_freq: Which layers are MoE, as a Megatron frequency string.
+        moe_grouped_gemm: Fuse MoE expert GEMMs into a grouped kernel.
+        moe_shared_expert_gate: Apply a gate to the shared expert.
+        moe_router_topk: Experts selected per token.
+        moe_router_pre_softmax: Softmax router scores before top-k.
+        moe_router_enable_expert_bias: Add a learned bias to router scores.
+        moe_router_load_balancing_type: Load-balancing loss used by the router.
+        moe_token_dispatcher_type: How tokens are dispatched to experts.
+        moe_router_bias_update_rate: Step size for router expert-bias updates.
+        moe_router_group_topk: Groups considered before the per-group top-k.
+        moe_router_num_groups: Expert groups for grouped routing.
+        moe_router_topk_scaling_factor: Scale applied to top-k router scores.
+        megatron_spec: Megatron transformer-spec import path segments.
+        rotary_scaling_factor: RoPE frequency scale for long context.
+        mscale: YaRN mscale applied to RoPE.
+        mscale_all_dim: YaRN mscale applied across all rotary dimensions.
+        no_rope_fusion: Disable fused RoPE kernels.
     """
 
     num_layers: int = 0
@@ -101,7 +124,12 @@ class ModelArchitecture:
 
 @dataclass
 class ToolCall:
-    """Tool invocation parsed from model output."""
+    """Tool invocation parsed from model output.
+
+    Attributes:
+        name: Function the model asked to call.
+        arguments: Values the model passed for that function's parameters.
+    """
 
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -109,7 +137,13 @@ class ToolCall:
 
 @dataclass
 class ParsedResponse:
-    """Structured result of parsing raw model output."""
+    """Structured result of parsing raw model output.
+
+    Attributes:
+        content: Visible text after thinking and tool-call markup is stripped.
+        tool_calls: Tool invocations parsed from the response.
+        thinking: Reasoning text when the response includes a thinking block.
+    """
 
     content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
@@ -120,12 +154,24 @@ ResponseParser = Callable[[str], ParsedResponse]
 
 
 class ModelConfig:
-    """Defines model identity, weight download, and response parsing."""
+    """Defines model identity, weight download, and response parsing.
+
+    Attributes:
+        model_name: Hugging Face repo id or other weight identifier.
+        model_path: Local directory of already-downloaded weights, if any.
+        architecture: Megatron transformer sizes used for conversion and training.
+        response_parser: Turns raw model text into a ``ParsedResponse``.
+        requires_bshd: Use padded (bshd) batches so training skips the THD packing path.
+        audio_placeholder: Token sequence the processor expands at ``<|audio_pad|>``.
+            Raw audio in the prompt OOMs.
+    """
 
     model_name: str = ""
     model_path: str | None = None
     architecture: ModelArchitecture | None = None
     response_parser: ResponseParser | None = None
+    requires_bshd: bool = False
+    audio_placeholder: str = ""
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():

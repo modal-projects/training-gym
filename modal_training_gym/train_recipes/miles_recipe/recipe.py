@@ -103,8 +103,6 @@ class MilesRecipe(BaseTrainRecipe):
 
     Args:
 
-        recipe_type:
-            Internal discriminator fixed to Miles.
         name:
             Modal app title. The launcher derives it from the class when empty.
         app_tags:
@@ -434,6 +432,22 @@ class MilesRecipe(BaseTrainRecipe):
             Tool-call output parser.
         sglang_reasoning_parser:
             Parser for reasoning/thinking output.
+        substep_timing:
+            Record per-substep timings for the dashboard. Defaults to ``auto``,
+            which enables substep time reporting.
+        model_name:
+            Miles megatron-to-HF weight mapping. Miles infers it from the HF
+            config class name when empty.
+        conversion_tensor_model_parallel_size:
+            Tensor-parallel size used only during HF to Megatron conversion.
+        conversion_pipeline_model_parallel_size:
+            Pipeline-parallel size used only during conversion.
+        conversion_expert_model_parallel_size:
+            Expert-parallel size used only during conversion.
+        conversion_expert_tensor_parallel_size:
+            Expert tensor-parallel size used only during conversion.
+        convert_ephemeral_disk_mb:
+            Ephemeral disk in MiB for the conversion job.
     """
 
     # ── Launcher instructions (not Miles CLI flags) ─────────────────────────
