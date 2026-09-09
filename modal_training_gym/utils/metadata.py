@@ -738,6 +738,8 @@ def vol_get_summary_items(
     payload_key: str = SUMMARY_ITEMS_KEY,
     is_async: bool = False,
 ) -> list[dict[str, Any]] | None | Awaitable[list[dict[str, Any]] | None]:
+    from modal.exception import ExecutionError
+
     vol = _metadata_volume()
     if is_async:
 
@@ -747,6 +749,12 @@ def vol_get_summary_items(
                 payload = await vol_get(store, key, is_async=True)
             except KeyError:
                 return None
+            except (ExecutionError, ValueError) as exc:
+                print(
+                    f"WARNING: unreadable summary {store}/{key}; "
+                    f"rebuilding from canonical items: {exc}"
+                )
+                return None
             return summary_items_from_payload(payload, payload_key=payload_key)
 
         return _run()
@@ -754,6 +762,12 @@ def vol_get_summary_items(
     try:
         payload = vol_get(store, key)
     except KeyError:
+        return None
+    except (ExecutionError, ValueError) as exc:
+        print(
+            f"WARNING: unreadable summary {store}/{key}; "
+            f"rebuilding from canonical items: {exc}"
+        )
         return None
     return summary_items_from_payload(payload, payload_key=payload_key)
 

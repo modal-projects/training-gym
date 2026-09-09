@@ -157,7 +157,6 @@ config = TrainConfig(
     dataset=train_dataset,
     eval_dataset=eval_dataset,
     recipe=Qwen3_5_4B_Recipe(
-        eval_interval=None,
         num_rollout=10,
         rollout_batch_size=8,
         rollout_max_response_len=2048,

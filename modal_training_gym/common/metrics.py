@@ -56,8 +56,6 @@ def metric_cli_fields(metric: MetricConfig) -> dict[str, Any]:
         "wandb_group": metric.group,
         "disable_wandb_random_suffix": metric.disable_random_suffix,
     }
-    if metric.provider == "wandb":
-        fields["wandb_key"] = getattr(metric, "key", "")
     return fields
 
 

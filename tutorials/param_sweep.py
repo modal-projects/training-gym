@@ -37,7 +37,6 @@ base = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=Qwen3_5_4B_Recipe(
-        eval_interval=None,
         rollout_num_gpus=8,
         num_rollout=15,
         rollout_max_response_len=8192,
