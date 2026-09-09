@@ -298,7 +298,6 @@ def build_config(*, num_rollout: int, n_rows: int, save_interval: int) -> TrainC
             rollout_max_response_len=1024,
             rollout_temperature=1.0,
             save_interval=save_interval,
-            eval_interval=None,
             apply_chat_template_kwargs='{"enable_thinking": false}',
             capture_trace=True,
             trace_sample_limit=16,
