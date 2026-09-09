@@ -2,11 +2,12 @@
 # order: 11
 # ---
 #
-# # Multi-turn RL for coding agents on Harbor tasks
+# # Multi-turn RL for coding agents on SWE-rebench tasks
 #
 # This tutorial trains [Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B)
-# to solve [Harbor](https://github.com/laude-institute/harbor) coding tasks as a
-# multi-turn agent. Every rollout is a full agent episode: the policy reads the
+# to solve [SWE-rebench V2](https://huggingface.co/datasets/nebius/SWE-rebench-V2)
+# coding tasks, rendered as [Harbor](https://github.com/laude-institute/harbor)
+# tasks, as a multi-turn agent. Every rollout is a full agent episode: the policy reads the
 # task, edits and runs code in its own Modal Sandbox for up to 75 steps, and is
 # graded by the task's tests. The reward is binary, so the model is rewarded
 # only for tasks it actually solves.
@@ -14,8 +15,8 @@
 # Three pieces are specific to this workload, and each has its own section
 # below:
 #
-# 1. deterministic train/eval subsets partitioned from an archived Harbor
-#    dataset, consumed by filename;
+# 1. deterministic train/eval subsets partitioned from SWE-rebench V2,
+#    consumed by filename;
 # 2. `Qwen3_6_27B_Recipe_Agentic`, which pins a Slime fork that ships the agent
 #    loop and the Harbor sandbox environment;
 # 3. Trackio experiment tracking, so the fork's native `rollout/*` and
@@ -38,24 +39,22 @@ from modal_training_gym import (
     TrainConfig,
 )
 
-# ## Partition the Harbor dataset
+# ## Partition the dataset
 #
-# Harbor tasks are archived on the Hugging Face Hub. The partition script
-# downloads and converts them once with the pinned fork's translator, then
-# writes a repository-disjoint 20% `eval.jsonl` alongside nested,
-# language-balanced `train-100.jsonl`, `train-300.jsonl`, `train-1000.jsonl`,
-# and `train-full.jsonl` subsets:
+# The partition script streams SWE-rebench V2 from the Hugging Face Hub,
+# renders each row into a Harbor task directory with the pinned fork's
+# converter, then writes a repository-disjoint 20% `eval.jsonl` alongside
+# nested, language-balanced `eval-4`, `eval-100`, `eval-300` and `train-4`,
+# `train-100`, `train-300`, `train-1000`, `train-full` subsets:
 #
 # ```bash
-# uv run scripts/partition_harbor_dataset.py prepare \
-#   --hf-repo example-org/private-harbor-tasks \
-#   --dataset-key private-harbor-tasks
+# uv run scripts/partition_swe_dataset.py prepare
 # ```
 #
-# The subsets land at `/data/<dataset-root>/<subset>.jsonl` on the `slime-data`
-# Modal Volume, where `<dataset-root>` defaults to the Hub repo id with `/`
-# replaced by `_`. The script reads the fork pin and the volume name from the
-# recipe, so what it writes is always what training mounts.
+# The subsets land at `/data/swe_rebench_v2/<subset>.jsonl` on the `slime-data`
+# Modal Volume, next to the rendered task directories. The script reads the
+# fork pin and the volume name from the recipe, so what it writes is always
+# what training mounts.
 
 # ## Configure the run
 #
@@ -72,7 +71,7 @@ from modal_training_gym import (
 # `AGENTIC_SMOKE=1` pins all of them to the cheapest shape that exercises the
 # plumbing.
 
-DATASET_ROOT = os.environ.get("AGENTIC_HARBOR_DATASET_ROOT", "")
+DATASET_ROOT = os.environ.get("AGENTIC_HARBOR_DATASET_ROOT", "swe_rebench_v2")
 TRAIN_SUBSET = os.environ.get("AGENTIC_TRAIN_SUBSET", "train-300")
 EVAL_SUBSETS = tuple(
     value for value in os.environ.get("AGENTIC_EVAL_SUBSETS", "eval").split(",") if value
@@ -97,7 +96,7 @@ if NODES not in (1, 6):
 if not DATASET_ROOT:
     raise RuntimeError(
         "AGENTIC_HARBOR_DATASET_ROOT must name the dataset root written by "
-        "scripts/partition_harbor_dataset.py, e.g. example-org_private-harbor-tasks"
+        "scripts/partition_swe_dataset.py, e.g. swe_rebench_v2"
     )
 DATA_ROOT = f"/data/{DATASET_ROOT}"
 
@@ -130,7 +129,7 @@ class PreparedHarborSubset(DatasetConfig):
     def prepare(self, path: str, eval_paths=None):
         raise FileNotFoundError(
             f"prepared Harbor subset is missing: {path}; "
-            "run scripts/partition_harbor_dataset.py prepare first"
+            "run scripts/partition_swe_dataset.py prepare first"
         )
 
 
@@ -274,7 +273,7 @@ if missing:
     raise FileNotFoundError(
         f"{recipe.data_volume_name}:/{DATASET_ROOT} has no "
         f"{', '.join(f'{subset}.jsonl' for subset in missing)}; "
-        "run scripts/partition_harbor_dataset.py prepare first"
+        "run scripts/partition_swe_dataset.py prepare first"
     )
 
 # ## Launch
@@ -298,21 +297,19 @@ print(f"Modal app: {run.modal_app_url}")
 # A full run on the default 48-GPU topology:
 #
 # ```bash
-# AGENTIC_HARBOR_DATASET_ROOT=example-org_private-harbor-tasks \
-#   uv run tutorials/agentic_harbor.py
+# uv run tutorials/agentic_harbor.py
 # ```
 #
-# The same topology on a small subset, here the two mixed-reward tasks used
-# for smoke tests, for a handful of steps. Slime fills a rollout batch from at
-# most one pass over the subset plus the start of the next, so keep the rollout
-# batch no larger than twice the subset: four prompts from two tasks gives each
-# task two 8-sample GRPO groups per step, and `rollout/rewards` in Trackio and
-# the dashboard's reward curve should move within a few steps:
+# The same topology on a small subset, here the four-task `train-4` split, for
+# a handful of steps. Slime fills a rollout batch from at most one pass over
+# the subset plus the start of the next, so keep the rollout batch no larger
+# than twice the subset: four prompts from four tasks gives each task one
+# 8-sample GRPO group per step, and `rollout/rewards` in Trackio and the
+# dashboard's reward curve should move within a few steps:
 #
 # ```bash
-# AGENTIC_HARBOR_DATASET_ROOT=example-org_private-harbor-tasks \
-# AGENTIC_TRAIN_SUBSET=train-2-mixed-smoke \
-# AGENTIC_EVAL_SUBSETS=eval-2-smoke \
+# AGENTIC_TRAIN_SUBSET=train-4 \
+# AGENTIC_EVAL_SUBSETS=eval-4 \
 # AGENTIC_ROLLOUT_BATCH_SIZE=4 \
 # AGENTIC_NUM_ROLLOUT=8 \
 # AGENTIC_EVAL_INTERVAL=4 \
@@ -322,15 +319,14 @@ print(f"Modal app: {run.modal_app_url}")
 # Add `AGENTIC_NODES=1 AGENTIC_ROLLOUT_BATCH_SIZE=2` to run the same experiment
 # colocated on a single node when the full cluster is not available.
 #
-# A one-node smoke test against two-row subsets, producing `rollout/*` train
-# charts and separate `eval/train-2-smoke` and `eval/eval-2-smoke` charts in
-# Trackio after two rollouts:
+# A one-node smoke test against the four-task splits, producing `rollout/*`
+# train charts and separate `eval/train-4` and `eval/eval-4` charts in Trackio
+# after two rollouts:
 #
 # ```bash
-# AGENTIC_HARBOR_DATASET_ROOT=example-org_private-harbor-tasks \
 # AGENTIC_SMOKE=1 \
-# AGENTIC_TRAIN_SUBSET=train-2-mixed-smoke \
-# AGENTIC_EVAL_SUBSETS=train-2-smoke,eval-2-smoke \
+# AGENTIC_TRAIN_SUBSET=train-4 \
+# AGENTIC_EVAL_SUBSETS=train-4,eval-4 \
 # AGENTIC_NUM_ROLLOUT=2 \
 # AGENTIC_EVAL_INTERVAL=1 \
 # AGENTIC_EVAL_SAMPLES=1 \
@@ -347,7 +343,6 @@ print(f"Modal app: {run.modal_app_url}")
 # step:
 #
 # ```bash
-# AGENTIC_HARBOR_DATASET_ROOT=example-org_private-harbor-tasks \
 # AGENTIC_TRAIN_SUBSET=train-300 \
 # AGENTIC_EVAL_SUBSETS=train-300 \
 # AGENTIC_NUM_ROLLOUT=1 \
@@ -363,8 +358,8 @@ print(f"Modal app: {run.modal_app_url}")
 # a training dump or a truncated eval is rejected.
 #
 # ```bash
-# uv run scripts/partition_harbor_dataset.py \
-#   --dataset-root example-org_private-harbor-tasks \
+# uv run scripts/partition_swe_dataset.py \
+#   --dataset-root swe_rebench_v2 \
 #   mixed \
 #   --source train-300 \
 #   --recipe qwen3-6-27b-agentic \
