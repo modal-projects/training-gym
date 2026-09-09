@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -31,6 +32,14 @@ def _diff_touching(*repo_relative_paths: str) -> str:
 
 ALL_CONFIGS = _ValidationConfig.select(pr_only=False)
 DISPATCH_ONLY_CONFIGS = [c for c in ALL_CONFIGS if not c.run_on_pr]
+
+
+@pytest.fixture(autouse=True)
+def _pin_hugging_face_datasets(monkeypatch):
+    monkeypatch.setattr(
+        "huggingface_hub.dataset_info",
+        lambda _repo: SimpleNamespace(sha="test-revision"),
+    )
 
 
 def test_registry_has_both_frameworks_represented():

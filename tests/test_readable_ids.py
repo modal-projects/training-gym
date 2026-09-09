@@ -89,6 +89,7 @@ def test_the_wandb_run_id_is_the_whole_training_run_id() -> None:
     summary = TrainConfig(
         dataset=HuggingFaceDataset(
             hf_repo="some/dataset",
+            hf_revision="test-revision",
             input_column="prompt",
             output_column="answer",
             input_format="text",

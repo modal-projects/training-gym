@@ -1,8 +1,13 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
-from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
+from modal_training_gym.common.dataset import (
+    DatasetConfig,
+    HarborDataset,
+    HuggingFaceDataset,
+)
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.launcher_helpers import (
     run_prepare_dataset,
@@ -61,6 +66,62 @@ def test_resolve_data_paths_generates_fresh_random_id():
     assert BaseTrainRecipe._resolve_data_paths(dataset) != first
     assert BaseTrainRecipe._resolve_data_paths(RowsDataset(None)) != first
     assert not hasattr(dataset, "_materialization_id")
+
+
+def test_hugging_face_dataset_pins_latest_revision(monkeypatch):
+    monkeypatch.setattr(
+        "huggingface_hub.dataset_info",
+        lambda repo: SimpleNamespace(sha=f"{repo}-sha"),
+    )
+
+    dataset = HuggingFaceDataset(
+        hf_repo="org/data",
+        input_column="prompt",
+        output_column="answer",
+    )
+    explicitly_pinned = HuggingFaceDataset(
+        hf_repo="org/data",
+        hf_revision="org/data-sha",
+        input_column="prompt",
+        output_column="answer",
+    )
+
+    assert dataset.hf_revision == "org/data-sha"
+    assert dataset.cache_key() == explicitly_pinned.cache_key()
+
+
+def test_hugging_face_revision_controls_cache_and_loading(monkeypatch):
+    loaded = object()
+    calls = []
+
+    def fake_load_dataset(*args, **kwargs):
+        calls.append((args, kwargs))
+        return loaded
+
+    monkeypatch.setattr("datasets.load_dataset", fake_load_dataset)
+    first = HuggingFaceDataset(
+        hf_repo="org/data",
+        hf_revision="revision-a",
+        input_column="prompt",
+        output_column="answer",
+        input_format="raw",
+    )
+    second = HuggingFaceDataset(
+        hf_repo="org/data",
+        hf_revision="revision-b",
+        input_column="prompt",
+        output_column="answer",
+        input_format="raw",
+    )
+
+    assert first.cache_key() != second.cache_key()
+    assert first._load_hf_dataset() is loaded
+    assert calls == [
+        (
+            ("org/data", "default"),
+            {"split": "train", "revision": "revision-a"},
+        )
+    ]
 
 
 def test_dataset_fields_use_discrete_eval_dataset():

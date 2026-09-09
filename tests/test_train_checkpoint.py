@@ -45,6 +45,7 @@ def _config(recipe, checkpoint_type: CheckpointType) -> TrainConfig:
         model=Qwen3_5_4B(),
         dataset=HuggingFaceDataset(
             hf_repo="some/dataset",
+            hf_revision="test-revision",
             input_column="prompt",
             output_column="answer",
             input_format="text",

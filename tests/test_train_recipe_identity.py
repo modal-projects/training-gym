@@ -16,6 +16,7 @@ def _config(recipe: SlimeRecipe | MilesRecipe, model: ModelConfig) -> TrainConfi
     return TrainConfig(
         dataset=HuggingFaceDataset(
             hf_repo="some/dataset",
+            hf_revision="test-revision",
             input_column="prompt",
             output_column="answer",
             input_format="text",
