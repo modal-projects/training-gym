@@ -4,7 +4,7 @@ order: 0
 
 # Migrating to the new dataset API
 
-Newer versions of the Training Gym feature a reworked `DatasetConfig` API that is simpler and easier to customize. This guide breaks down the breaking changes so you can migrate your existing datasets to the new API.
+New versions of the Training Gym feature a reworked `DatasetConfig` API that is simpler and easier to customize. This guide breaks down the breaking changes so you can migrate your existing datasets to the new API.
 
 ## Training and evaluation datasets are now separate
 
