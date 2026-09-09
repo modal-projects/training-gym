@@ -11,11 +11,14 @@ from enum import Enum
 from functools import partial
 from typing import Any, Literal, TypeVar, cast, overload
 
+from modal_training_gym._api_reference import exclude_from_api_reference
+
 T = TypeVar("T")
 
 METADATA_VOLUME_NAME = "training-gym-metadata"
 
 
+@exclude_from_api_reference
 class MetadataStore(Enum):
     """Named prefixes for JSON records on the shared metadata volume."""
 

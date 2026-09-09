@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from modal_training_gym._api_reference import exclude_from_api_reference
 from modal_training_gym.common.dataset import DatasetRow
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.ids import create_hash
@@ -37,6 +38,7 @@ def _callable_name(fn: Callable[..., Any]) -> str:
     return type(fn).__name__
 
 
+@exclude_from_api_reference
 class EvalConfigDurable(BaseModel):
     """JSON-serializable audit record for an :class:`EvalConfig`."""
 
@@ -60,9 +62,11 @@ class EvalConfigDurable(BaseModel):
 
 # An eval row is just a Sample. Kept as an alias for the public API / existing
 # imports; new code should use Sample directly.
+exclude_from_api_reference("EvalRowResult")
 EvalRowResult = Sample
 
 
+@exclude_from_api_reference
 class AudioEvalRowResult(Sample):
     """``Sample`` for an audio eval, with the audio fields lifted to
     constructor arguments.
@@ -98,6 +102,7 @@ class AudioEvalRowResult(Sample):
         return data
 
 
+@exclude_from_api_reference
 class ImageEvalRowResult(Sample):
     """``Sample`` for an image eval, with the image fields lifted to
     constructor arguments.
@@ -180,6 +185,7 @@ class EvalSummary(BaseModel):
         )
 
 
+@exclude_from_api_reference
 class EvalResult(BaseModel):
     """Saved results for one evaluation run across a dataset."""
 
@@ -234,6 +240,7 @@ EvalResponseFn = Callable[[DatasetRow, Response], EvalRowResult]  # TOOD: bad na
 EvalFn = Callable[["CustomDeployment", DatasetRow], EvalRowResult]
 
 
+@exclude_from_api_reference
 @dataclass
 class EvalConfig:
     """Evaluate a deployed model on a dataset config.
@@ -589,6 +596,7 @@ def score_in_sandbox(
         return 0.0, metadata
 
 
+@exclude_from_api_reference
 @dataclass
 class HarborEval(EvalConfig):
     """Evaluate a deployed model on a Harbor dataset using sandbox execution.

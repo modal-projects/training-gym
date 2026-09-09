@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any
 
 import modal_training_gym as gym
+from modal_training_gym._api_reference import is_excluded_from_api_reference
 from scripts.generate_models_table import (
     collect_deploy_preset_names,
     collect_model_preset_names,
@@ -13,12 +14,7 @@ from scripts.generate_models_table import (
 API_REFERENCE_DENYLIST: frozenset[str] = frozenset(
     name
     for name in gym.__all__
-    if inspect.isclass(obj := getattr(gym, name))
-    and (
-        (module := getattr(obj, "__module__", "")).endswith(".eval")
-        or ".eval." in module
-        or "Eval" in name
-    )
+    if is_excluded_from_api_reference(name, getattr(gym, name))
 )
 
 GROUPS = {

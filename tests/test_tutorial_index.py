@@ -239,6 +239,7 @@ def test_eval_classes_are_not_documented() -> None:
     assert labels.isdisjoint(API_REFERENCE_DENYLIST)
     for name in API_REFERENCE_DENYLIST:
         assert inspect.isclass(getattr(gym, name))
+    assert "MetadataStore" in API_REFERENCE_DENYLIST
     assert {"extract_code", "score_in_sandbox"} <= documented
     assert {"extract_code", "score_in_sandbox"}.isdisjoint(API_REFERENCE_DENYLIST)
 

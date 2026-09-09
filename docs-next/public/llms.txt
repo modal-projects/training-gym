@@ -123,7 +123,6 @@ Repo: https://github.com/modal-projects/training-gym
 - [Checkpoint](https://gym.modal.dev/reference/checkpoint)
 - [CheckpointType](https://gym.modal.dev/reference/checkpointtype)
 - [GpuAllocationError](https://gym.modal.dev/reference/gpuallocationerror)
-- [MetadataStore](https://gym.modal.dev/reference/metadatastore)
 - [MetricConfig](https://gym.modal.dev/reference/metricconfig)
 - [ModalCaptureError](https://gym.modal.dev/reference/modalcaptureerror)
 - [Sample](https://gym.modal.dev/reference/sample)

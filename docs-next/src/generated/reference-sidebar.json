@@ -37,10 +37,6 @@
       "link": "/reference/huggingfacedataset"
     },
     {
-      "label": "MetadataStore",
-      "link": "/reference/metadatastore"
-    },
-    {
       "label": "MetricConfig",
       "link": "/reference/metricconfig"
     },
