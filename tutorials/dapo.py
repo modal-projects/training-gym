@@ -77,7 +77,6 @@ train_dataset = HuggingFaceDataset(
     input_column="prompt",
     output_column="label",
     input_format="messages",
-    always_download=True,
 )
 
 eval_dataset = HuggingFaceDataset(
@@ -86,7 +85,6 @@ eval_dataset = HuggingFaceDataset(
     input_column="prompt",
     output_column="label",
     input_format="messages",
-    always_download=True,
 )
 
 # ## Evaluate the base model
