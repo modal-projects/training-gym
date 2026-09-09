@@ -162,7 +162,7 @@ class HuggingFaceDataset(DatasetConfig):
         *,
         hf_revision: str | None = None,
         hf_split: str = "train",
-        hf_config: str = "default",
+        hf_config: str | None = None,
         input_column: str,
         output_column: str,
         input_format: Literal["text", "messages", "raw"] = "text",
