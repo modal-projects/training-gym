@@ -433,8 +433,8 @@ class MilesRecipe(BaseTrainRecipe):
         sglang_reasoning_parser:
             Parser for reasoning/thinking output.
         substep_timing:
-            Record per-substep timings for the dashboard. ``auto`` follows the
-            framework default.
+            Record per-substep timings for the dashboard. Defaults to ``auto``,
+            which enables substep time reporting.
         model_name:
             Miles megatron-to-HF weight mapping. Miles infers it from the HF
             config class name when empty.

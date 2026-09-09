@@ -32,7 +32,7 @@ class Sample(BaseModel):
         prompt: Text sent to the model for this call.
         response: Raw model output.
         parsed_response: Structured parse of ``response``, if available.
-        metadata: Tags a reward or rollout function attached to this call.
+        metadata: Custom metadata attached to this call by a reward or rollout function.
         trace: Execution spans for a sampled subset of rollouts when recording
             is on. ``None`` otherwise.
     """

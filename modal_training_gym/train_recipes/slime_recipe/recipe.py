@@ -388,8 +388,8 @@ class SlimeRecipe(BaseTrainRecipe):
         no_load_optim:
             Skip loading optimizer state when resuming from ``load``.
         substep_timing:
-            Record per-substep timings for the dashboard. ``auto`` follows the
-            framework default.
+            Record per-substep timings for the dashboard. Defaults to ``auto``,
+            which enables substep time reporting.
     """
 
     # ── Required ────────────────────────────────────────────────────────────

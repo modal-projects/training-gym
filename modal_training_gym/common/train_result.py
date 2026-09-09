@@ -73,7 +73,7 @@ class TrainResult:
         app_name:
             Modal app name and default checkpoint volume prefix.
         framework:
-            Slime or Miles identifier used to list this run's checkpoints.
+            Framework identifier used to list this run's checkpoints.
         training_run_id:
             Run ID and key in the shared results store.
         checkpoint_dir:
