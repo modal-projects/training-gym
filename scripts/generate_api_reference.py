@@ -28,7 +28,7 @@ from pydantic_core import PydanticUndefined
 from api_reference_manifest import (
     API_REFERENCE_MANIFEST,
     GROUPS,
-    SDK_SIDEBAR_CLASSES,
+    entry_sort_key,
 )
 from modal_training_gym.cli import entrypoint_cli
 
@@ -80,7 +80,6 @@ def _is_pydantic_model(cls: type) -> bool:
 
 
 def _uses_structural_field_rendering(cls: type) -> bool:
-    """Return whether every declared field belongs in the public schema."""
     return _is_dataclass(cls) or is_typeddict(cls) or _is_pydantic_model(cls)
 
 
@@ -118,6 +117,8 @@ def _get_class_attrs(cls: type) -> dict[str, tuple[type, Any]]:
     if _is_dataclass(cls):
         MISSING = dataclasses.MISSING
         for f in dataclass_fields(cls):
+            if f.name.startswith("_"):
+                continue
             if f.default is not MISSING:
                 default = f.default
             elif f.default_factory is not MISSING:
@@ -363,7 +364,7 @@ def _parse_docstring_sections(docstring: str) -> _DocSections:
 def _orders_within_group() -> dict[str, int]:
     next_order: dict[str, int] = {}
     orders: dict[str, int] = {}
-    for entry in API_REFERENCE_MANIFEST:
+    for entry in sorted(API_REFERENCE_MANIFEST, key=entry_sort_key):
         group = entry["group"]
         orders[entry["class_name"]] = next_order.get(group, 0)
         next_order[group] = next_order.get(group, 0) + 1
@@ -460,17 +461,27 @@ def _callable_signature(attr: Any) -> inspect.Signature | None:
     return signature.replace(parameters=parameters)
 
 
+def _own_field_docs(
+    cls: type, *, include_constructor_params: bool = True
+) -> dict[str, str]:
+    doc = cls.__dict__.get("__doc__") or ""
+    sections = _parse_docstring_sections(doc)
+    merged = dict(sections.attributes)
+    if include_constructor_params:
+        merged = {**sections.params, **merged}
+    return merged
+
+
 def _extract_field_docs_from_mro(
     cls: type, *, include_constructor_params: bool = True
 ) -> dict[str, str]:
     merged: dict[str, str] = {}
     for klass in reversed(cls.__mro__):
-        doc = klass.__dict__.get("__doc__") or ""
-        if doc:
-            sections = _parse_docstring_sections(doc)
-            if include_constructor_params:
-                merged.update(sections.params)
-            merged.update(sections.attributes)
+        merged.update(
+            _own_field_docs(
+                klass, include_constructor_params=include_constructor_params
+            )
+        )
     return merged
 
 
@@ -554,6 +565,12 @@ def _structured_section_lines(sections: _DocSections) -> list[str]:
     return lines
 
 
+def _page_doc(obj: Any) -> str:
+    if inspect.isfunction(obj) or inspect.isroutine(obj):
+        return inspect.getdoc(obj) or ""
+    return obj.__dict__.get("__doc__") or ""
+
+
 def _page_preamble(cls: type, entry: dict, order: int) -> list[str]:
     module_path = entry["module"]
     lines = [
@@ -564,7 +581,7 @@ def _page_preamble(cls: type, entry: dict, order: int) -> list[str]:
         "",
     ]
 
-    class_sections = _parse_docstring_sections(cls.__dict__.get("__doc__") or "")
+    class_sections = _parse_docstring_sections(_page_doc(cls))
     if class_sections.description:
         lines.append(class_sections.description)
         lines.append("")
@@ -688,7 +705,8 @@ def _fields_sections(cls: type, *, documented_only: bool = False) -> list[str]:
     if not attrs:
         return []
     field_docs = _extract_field_docs_from_mro(
-        cls, include_constructor_params=not documented_only
+        cls,
+        include_constructor_params=not documented_only,
     )
     cards = _render_param_list(attrs, field_docs, documented_only=documented_only)
     if not cards:
@@ -741,11 +759,51 @@ def _constructor_section(cls: type, entry: dict) -> list[str]:
 def generate_class_page(cls: type, entry: dict, order: int) -> str:
     lines = _page_preamble(cls, entry, order)
     structural = _uses_structural_field_rendering(cls)
-    lines.extend(_fields_sections(cls, documented_only=not structural))
+    if not entry.get("sidebar_excluded", False):
+        lines.extend(_fields_sections(cls, documented_only=not structural))
     if not structural:
         lines.extend(_constructor_section(cls, entry))
     lines.extend(_members_section(cls))
     return "\n".join(lines)
+
+
+def generate_function_page(fn: Any, entry: dict, order: int) -> str:
+    lines = _page_preamble(fn, entry, order)
+    signature = _callable_signature(fn)
+    if signature is None:
+        return "\n".join(lines)
+    lines.extend(
+        [
+            "```python",
+            f"{entry['class_name']}{_clean_signature(signature)}",
+            "```",
+            "",
+        ]
+    )
+    sections = _parse_docstring_sections(_page_doc(fn))
+    cards = _render_param_list(
+        _callable_params(fn), sections.params, documented_only=True
+    )
+    if cards:
+        lines.extend(["**Parameters**", "", *cards])
+    return "\n".join(lines)
+
+
+def generate_enum_page(cls: type, entry: dict, order: int) -> str:
+    lines = _page_preamble(cls, entry, order)
+    members = [f"{member.name} = {member.value!r}" for member in cls]
+    if not members:
+        return "\n".join(lines)
+    lines.extend(["```python", *members, "```", ""])
+    return "\n".join(lines)
+
+
+def generate_sdk_page(obj: Any, entry: dict, order: int) -> str:
+    if inspect.isfunction(obj):
+        return generate_function_page(obj, entry, order)
+    if inspect.isclass(obj) and issubclass(obj, Enum):
+        return generate_enum_page(obj, entry, order)
+    return generate_class_page(obj, entry, order)
 
 
 class CliPage(NamedTuple):
@@ -832,12 +890,18 @@ def collect_cli_pages() -> list[CliPage]:
 
 
 def build_reference_sidebar() -> dict[str, Any]:
+    sdk_entries = sorted(
+        (
+            entry
+            for entry in API_REFERENCE_MANIFEST
+            if not entry.get("sidebar_excluded")
+        ),
+        key=entry_sort_key,
+    )
     sdk_items = [
         {"label": entry["sidebar_label"], "link": _sdk_link(entry)}
-        for entry in API_REFERENCE_MANIFEST
-        if entry["class_name"] in SDK_SIDEBAR_CLASSES
+        for entry in sdk_entries
     ]
-    sdk_items.sort(key=lambda item: item["label"].casefold())
     return {
         "sdk": sdk_items,
         "cli": [
@@ -1018,14 +1082,14 @@ def generate_cli_page(page: CliPage, order: int) -> str:
 def generate_index_page(manifest: list[dict]) -> str:
     lines = [
         *_page_heading(0, "SDK reference"),
-        "Classes and methods in the `modal-training-gym` Python SDK.",
+        "Types and functions in the `modal-training-gym` Python SDK.",
         "",
     ]
 
     for group_key, group_info in sorted(GROUPS.items(), key=lambda x: x[1]["order"]):
         group_entries = sorted(
             [e for e in manifest if e["group"] == group_key],
-            key=lambda e: e["sidebar_label"].casefold(),
+            key=entry_sort_key,
         )
         if not group_entries:
             continue
@@ -1094,7 +1158,7 @@ def main() -> None:
             continue
 
         order = orders[entry["class_name"]]
-        content = generate_class_page(obj, entry, order)
+        content = generate_sdk_page(obj, entry, order)
 
         group_dir = output_dir / entry["group"]
         group_dir.mkdir(parents=True, exist_ok=True)

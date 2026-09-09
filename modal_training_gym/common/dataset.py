@@ -599,19 +599,7 @@ class HarborDataset(DatasetConfig):
 
 
 class MultimodalDataset(DatasetConfig):
-    """Modality-agnostic dataset for image / audio / video RL.
-
-    Each row pairs a text ``prompt`` with one or more ``media`` items and a
-    ``label``. ``rows()`` writes the media verbatim into a column named by
-    ``media_column`` (default ``"<modality>s"``), and the column is surfaced to
-    the trainer/rollout via ``multimodal_keys`` (``{modality: media_column}``,
-    e.g. slime's ``--multimodal-keys``). Media items may be URLs, local paths,
-    or base64 data — whatever the serving engine accepts; the gym never
-    inspects them.
-
-    Pass ``rows=[{"prompt": str, "media": list, "label": Any}, ...]`` or
-    subclass and override ``source_rows()``.
-    """
+    """Dataset of text prompts paired with image, audio, or video data."""
 
     # TODO(ben/joy): gate-check media at this boundary so the evals dashboard can
     # reliably visualize it. Two parts: (1) normalize each emitted media item to a

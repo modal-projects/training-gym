@@ -75,7 +75,30 @@ class TrainingRunStatus(Enum):
 
 
 class TrainingRun(BaseModel):
-    """A launched training run that can be inspected, awaited, or loaded by ID."""
+    """A launched training run that can be inspected, awaited, or loaded by ID.
+
+    Attributes:
+        training_run_id: Stable id for this run in the metadata volume.
+        modal_app_id: Modal app id after the run is spawned.
+        modal_app_url: Dashboard URL for that Modal app.
+        framework: Training framework that executed the run.
+        config: Serialized train config captured at launch.
+        dataset_id: Dataset id materialized for this run.
+        deployment_id: Linked deployment id, when the run served a model.
+        status: Gym-level run status.
+        framework_status: Latest phase reported by the framework.
+        created_at: Unix time the record was created.
+        started_at: Unix time training started.
+        ended_at: Unix time the process exited.
+        completed_at: Unix time the run reached a terminal success.
+        updated_at: Unix time the record was last written.
+        duration_seconds: Wall time from start to end, when known.
+        step_times: Per-step timings, when present.
+        substep_times: Per-substep timings, when present.
+        error_message: Failure text. Empty while running or after success.
+        metadata: Extra keys such as sweep ``group_id``.
+        function_call_id: Modal FunctionCall id used to wait on the spawned run.
+    """
 
     training_run_id: str
     modal_app_id: str = ""

@@ -97,8 +97,6 @@ class SlimeRecipe(BaseTrainRecipe):
 
     Args:
 
-        recipe_type:
-            Internal discriminator fixed to slime.
         name:
             Modal app title. The launcher derives it from the recipe class when
             empty.
@@ -385,6 +383,13 @@ class SlimeRecipe(BaseTrainRecipe):
             Tool-call output parser.
         sglang_reasoning_parser:
             Parser for reasoning/thinking output.
+        sglang_cuda_graph_backend_prefill:
+            SGLang CUDA-graph backend used during prefill.
+        no_load_optim:
+            Skip loading optimizer state when resuming from ``load``.
+        substep_timing:
+            Record per-substep timings for the dashboard. ``auto`` follows the
+            framework default.
     """
 
     # ── Required ────────────────────────────────────────────────────────────

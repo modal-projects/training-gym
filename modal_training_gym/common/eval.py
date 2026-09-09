@@ -444,13 +444,7 @@ _CODE_FENCE_RE = re.compile(r"```python\s*\n(.*?)```", re.DOTALL)
 
 
 def extract_code(text: str, model: "ModelConfig | None" = None) -> str:
-    """Extract Python code from an LLM response.
-
-    When *model* is provided, uses ``model.parse_response`` to strip
-    thinking tags and chat-template artifacts, and checks tool-call
-    arguments for a ``code`` key.  Falls back to regex heuristics when
-    *model* is ``None``.
-    """
+    """Extract Python code from an LLM response."""
     if model is not None:
         parsed = model.parse_response(text)
         for tool_call in parsed.tool_calls:
@@ -518,19 +512,7 @@ def score_in_sandbox(
     cpu_policy: str = "limit",
     memory_policy: str = "limit",
 ) -> tuple[float, dict[str, Any]]:
-    """Run *code* against *test_cases* in a Modal sandbox.
-
-    Each test case is a dict with ``input`` and ``expected_output`` keys.
-    The code is executed once per test case with the input piped to stdin.
-    Returns ``(fraction_passed, metadata_dict)``.
-
-    ``cpu_policy`` and ``memory_policy`` control how ``sandbox_cpu`` / ``sandbox_memory``
-    are enforced on Modal (see :data:`RESOURCE_POLICIES`). The default ``"limit"`` treats
-    them as burst ceilings rather than reservations, so the sandbox is billed by actual
-    CPU-/RAM-second usage instead of over-provisioning a static reservation. Use
-    ``"ignore"`` to let tasks burst above the configured values, or ``"reserve"`` for the
-    legacy fixed-reservation behavior.
-    """
+    """Run code against test cases in a Modal sandbox."""
     import modal
 
     if not test_cases:

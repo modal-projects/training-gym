@@ -47,7 +47,7 @@ class SglangRecipe(BaseDeployRecipe):
             check.
     """
 
-    recipe_type: DeployRecipeType = DeployRecipeType.SGLANG
+    _recipe_type: DeployRecipeType = field(default=DeployRecipeType.SGLANG, init=False)
 
     gpu: GPUType = "H100"
     tp: int | None = None

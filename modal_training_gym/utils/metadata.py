@@ -17,6 +17,8 @@ METADATA_VOLUME_NAME = "training-gym-metadata"
 
 
 class MetadataStore(Enum):
+    """Named prefixes for JSON records on the shared metadata volume."""
+
     TRAINING_RUNS = "training-runs"
     TRAINING_RUNS_SUMMARY = "training-runs-summary"
     FRAMEWORK_STATUS_TOKENS = "framework-status-tokens"

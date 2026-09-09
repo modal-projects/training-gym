@@ -106,3 +106,24 @@ const sections = surface
     <div class="tg-sidebar-empty" aria-hidden="true" />
   )
 }
+
+<script>
+  function revealActiveSidebarItem() {
+    const active = document.querySelector('#starlight__sidebar .tg-tutorial-sidebar .active');
+    if (!(active instanceof HTMLElement)) return;
+    const pane = active.closest('.sidebar-pane');
+    if (!(pane instanceof HTMLElement)) return;
+    const paneRect = pane.getBoundingClientRect();
+    const itemRect = active.getBoundingClientRect();
+    pane.scrollTop +=
+      itemRect.top - paneRect.top - pane.clientHeight / 2 + itemRect.height / 2;
+  }
+
+  function revealAfterLayout() {
+    revealActiveSidebarItem();
+    requestAnimationFrame(revealActiveSidebarItem);
+  }
+
+  revealAfterLayout();
+  document.addEventListener('astro:page-load', revealAfterLayout);
+</script>

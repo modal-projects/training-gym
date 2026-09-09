@@ -25,13 +25,16 @@ class TraceSpan(BaseModel):
 
 
 class Sample(BaseModel):
-    """One model interaction: the prompt, the raw response, its parsed
-    structure (thinking / answer / tool calls), a score, and free-form
-    metadata.
+    """A prompt, response, parsed structure, score, and metadata from one model call.
 
-    Shared by eval rows (``EvalResult.rows``) and training rollout samples
-    (``TrainingRolloutResult.samples``) — they were the same shape, so this is
-    the single canonical type for both.
+    Attributes:
+        score: Reward or eval score for this call.
+        prompt: Text sent to the model for this call.
+        response: Raw model output.
+        parsed_response: Structured parse of ``response``, if available.
+        metadata: Tags a reward or rollout function attached to this call.
+        trace: Execution spans for a sampled subset of rollouts when recording
+            is on. ``None`` otherwise.
     """
 
     score: float = 0.0
@@ -39,6 +42,4 @@ class Sample(BaseModel):
     response: str = ""
     parsed_response: ParsedResponse | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    # captured only when trace recording is enabled and only for a sampled
-    # subset of each rollout's samples. ``None`` for untraced samples.
     trace: list[TraceSpan] | None = None

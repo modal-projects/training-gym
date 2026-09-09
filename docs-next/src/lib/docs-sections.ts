@@ -91,6 +91,13 @@ export function flattenSidebarLinks(
   return links;
 }
 
+export function compareSdkSidebarLabels(left: string, right: string): number {
+  const leftFunction = /^[a-z]/.test(left) ? 1 : 0;
+  const rightFunction = /^[a-z]/.test(right) ? 1 : 0;
+  if (leftFunction !== rightFunction) return leftFunction - rightFunction;
+  return left.localeCompare(right, 'en', { sensitivity: 'base' });
+}
+
 export function referenceSidebarSections(
   surface: ReferenceSurface,
   groupEntries: readonly SidebarTreeEntry[],
@@ -100,9 +107,7 @@ export function referenceSidebarSections(
     (entry) => !samePath(entry.href, surface.href),
   );
   if (surface.label === 'SDK') {
-    items.sort((left, right) =>
-      left.label.localeCompare(right.label, 'en', { sensitivity: 'base' }),
-    );
+    items.sort((left, right) => compareSdkSidebarLabels(left.label, right.label));
   }
   return [
     {

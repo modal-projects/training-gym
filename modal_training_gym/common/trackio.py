@@ -33,37 +33,15 @@ _PTH_LINE = (
 class TrackioConfig(MetricConfig):
     """Trackio logging configuration shared across all frameworks.
 
-    Trackio can log to a Hugging Face Space or a self-hosted server. Training
-    images install Trackio automatically and adapt the W&B calls made by the
-    underlying framework.
-
-    ## Fields
-
-    project : str
-        Trackio project name. Default ``""`` (uses ``"training-gym"``).
-    group : str
-        Group tag for related runs. Default ``""``.
-    exp_name : str
-        Run display name. Default ``""``.
-    disable_random_suffix : bool
-        Whether the framework should preserve the configured group name.
-        Default ``True``.
-    space_id : str
-        Hugging Face Space ID, such as ``"owner/trackio"``. Optional.
-    server_url : str
-        URL of a self-hosted Trackio server. Optional.
-    dashboard_url : str
-        Explicit dashboard URL. Optional; otherwise derived from ``space_id``
-        or ``server_url``.
-    bucket_id : str
-        Hugging Face Bucket used by the Trackio Space. Optional.
-    modal_secret_name : str
-        Modal Secret containing ``HF_TOKEN`` or ``TRACKIO_WRITE_TOKEN``.
-        The standard optional ``"huggingface-secret"`` is used by default.
-    TRACKIO_PACKAGE_VERSION : str
-        Trackio release installed in the training image, and in the server
-        deployed by ``deploy_to_modal``. Defaults to the version this release
-        of Training Gym is tested against; bump it to pick up a newer Trackio.
+    Attributes:
+        space_id: Hugging Face Space id such as ``owner/trackio``.
+        server_url: Self-hosted Trackio server URL.
+        dashboard_url: Dashboard URL. Derived from ``space_id`` or ``server_url``
+            when empty.
+        bucket_id: Hugging Face Bucket used by the Trackio Space.
+        modal_secret_name: Modal Secret with ``HF_TOKEN`` or ``TRACKIO_WRITE_TOKEN``.
+        TRACKIO_PACKAGE_VERSION: Trackio release installed in the training image
+            and by ``deploy_to_modal``.
     """
 
     project: str = ""
