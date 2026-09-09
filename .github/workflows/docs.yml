@@ -59,7 +59,7 @@ jobs:
           node-version: 22
 
       - name: Test docs-sections
-        run: node --experimental-strip-types --test docs-next/src/lib/docs-sections.test.mts
+        run: node --experimental-strip-types --test docs-next/src/lib/*.test.mts
 
       - name: Sync Python dependencies
         run: uv sync --group docs

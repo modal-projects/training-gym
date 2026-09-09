@@ -144,11 +144,26 @@ html:has(.tg-sidebar-empty) .content-panel .sl-container {
   background: var(--sl-color-bg-sidebar);
   border-inline-end: 1px solid #2f2f2f;
   inset-block-start: calc(var(--sl-nav-height) - 1px);
-  scrollbar-width: none;
+  overflow-y: auto;
+  overflow-y: overlay;
+  scrollbar-color: transparent transparent;
+}
+
+.sidebar-pane:hover {
+  scrollbar-color: rgb(90, 90, 90) rgba(0, 0, 0, 0);
 }
 
 .sidebar-pane::-webkit-scrollbar {
-  display: none;
+  width: 8px;
+}
+
+.sidebar-pane::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 10px;
+}
+
+.sidebar-pane:hover::-webkit-scrollbar-thumb {
+  background: rgb(90, 90, 90);
 }
 
 .sidebar:has(.tg-sidebar-empty) {

@@ -77,6 +77,7 @@ const sections = surface
           'tg-tutorial-sidebar',
           { 'is-reference': isReference },
         ]}
+        data-sidebar-key={currentSection ?? 'Home'}
       >
         {sections.map((section) => (
           <li>
@@ -107,23 +108,70 @@ const sections = surface
   )
 }
 
+<script is:inline>
+  (function () {
+    var list = document.querySelector('#starlight__sidebar .tg-tutorial-sidebar');
+    var pane = list && list.closest('.sidebar-pane');
+    if (!(list instanceof HTMLElement) || !(pane instanceof HTMLElement)) return;
+    var key = 'tg-sidebar-scroll:' + (list.getAttribute('data-sidebar-key') || 'Home');
+    try {
+      var raw = sessionStorage.getItem(key);
+      var top = raw == null ? NaN : Number(raw);
+      if (Number.isFinite(top)) pane.scrollTop = top;
+    } catch (e) {}
+  })();
+</script>
+
 <script>
-  function revealActiveSidebarItem() {
-    const active = document.querySelector('#starlight__sidebar .tg-tutorial-sidebar .active');
+  import { nextPaneScrollTop, sidebarScrollKey } from '../lib/sidebar-scroll';
+
+  function sidebarPane(): { list: HTMLElement; pane: HTMLElement; key: string } | null {
+    const list = document.querySelector('#starlight__sidebar .tg-tutorial-sidebar');
+    if (!(list instanceof HTMLElement)) return null;
+    const pane = list.closest('.sidebar-pane');
+    if (!(pane instanceof HTMLElement)) return null;
+    return {
+      list,
+      pane,
+      key: sidebarScrollKey(list.getAttribute('data-sidebar-key') || 'Home'),
+    };
+  }
+
+  function persistSidebarScroll() {
+    const found = sidebarPane();
+    if (!found) return;
+    try {
+      sessionStorage.setItem(found.key, String(found.pane.scrollTop));
+    } catch {
+      return;
+    }
+  }
+
+  function nudgeActiveItem() {
+    const found = sidebarPane();
+    if (!found) return;
+    const active = found.list.querySelector('.active');
     if (!(active instanceof HTMLElement)) return;
-    const pane = active.closest('.sidebar-pane');
-    if (!(pane instanceof HTMLElement)) return;
-    const paneRect = pane.getBoundingClientRect();
-    const itemRect = active.getBoundingClientRect();
-    pane.scrollTop +=
-      itemRect.top - paneRect.top - pane.clientHeight / 2 + itemRect.height / 2;
+    const itemOffsetTop =
+      active.getBoundingClientRect().top -
+      found.pane.getBoundingClientRect().top +
+      found.pane.scrollTop;
+    found.pane.scrollTop = nextPaneScrollTop(
+      found.pane.scrollTop,
+      found.pane.clientHeight,
+      itemOffsetTop,
+      active.offsetHeight,
+    );
   }
 
-  function revealAfterLayout() {
-    revealActiveSidebarItem();
-    requestAnimationFrame(revealActiveSidebarItem);
+  function bindSidebarScroll() {
+    const found = sidebarPane();
+    if (!found) return;
+    found.pane.addEventListener('scroll', persistSidebarScroll, { passive: true });
+    found.pane.addEventListener('click', persistSidebarScroll);
+    requestAnimationFrame(nudgeActiveItem);
   }
 
-  revealAfterLayout();
-  document.addEventListener('astro:page-load', revealAfterLayout);
+  bindSidebarScroll();
+  document.addEventListener('astro:page-load', bindSidebarScroll);
 </script>
