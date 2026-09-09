@@ -18,6 +18,7 @@ def _config(recipe: SlimeRecipe | MilesRecipe, model: ModelConfig) -> TrainConfi
             hf_repo="some/dataset",
             input_column="prompt",
             output_column="answer",
+            input_format="text",
         ),
         model=model,
         recipe=recipe,

@@ -1,11 +1,10 @@
 <script>
   import { formatDistance } from "date-fns";
-  import { readable } from "svelte/store";
+  import { nowMs } from "../lib/clock.js";
   import { fmtDate, toEpochSeconds } from "../lib/format.js";
 
   let {
     timestamp,
-    updateInterval = 5000,
     allowFuture = false,
     falsyRepresentation = "",
     showJustNow = false,
@@ -21,15 +20,6 @@
     return date.toISOString();
   });
 
-  const now = readable(Date.now(), (set) => {
-    if (typeof window !== "undefined") {
-      const id = window.setInterval(() => {
-        set(Date.now());
-      }, updateInterval);
-      return () => window.clearInterval(id);
-    }
-  });
-
   $effect(() => {
     if (!hasTimestamp) {
       text = falsyRepresentation;
@@ -37,16 +27,16 @@
     }
 
     let valueMs = normalizedSeconds * 1000;
-    if (!allowFuture && valueMs > $now) {
-      valueMs = $now;
+    if (!allowFuture && valueMs > $nowMs) {
+      valueMs = $nowMs;
     }
 
-    if (showJustNow && valueMs > $now - 60 * 1000) {
+    if (showJustNow && valueMs > $nowMs - 60 * 1000) {
       text = "just now";
       return;
     }
 
-    text = formatDistance(valueMs, $now, {
+    text = formatDistance(valueMs, $nowMs, {
       addSuffix: true,
       includeSeconds: true,
     });

@@ -17,22 +17,13 @@ from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_response
 
 
 class Qwen3_VL_8B(HFModelConfiguration):
-    """Alibaba Qwen3-VL-8B-Instruct model.
-
-    Attributes:
-        model_name: Hugging Face repository ID.
-        architecture: Megatron architecture parameters for the text backbone.
-        response_parser: Parser for generated text.
-        requires_bshd: Requires padded BSHD batches during training.
-    """
+    """Alibaba Qwen3-VL-8B-Instruct model."""
 
     response_parser = staticmethod(parse_qwen3_response)
 
     model_name = "Qwen/Qwen3-VL-8B-Instruct"
 
-    # Image patches expand prompts into many tokens; padded (bshd) batches avoid
-    # the THD packing path that VL models may not support in megatron-bridge.
-    requires_bshd: bool = True
+    requires_bshd = True
 
     architecture = ModelArchitecture(
         # text_config from config.json

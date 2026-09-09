@@ -17,6 +17,7 @@ def _base() -> TrainConfig:
             hf_repo="openai/gsm8k",
             input_column="question",
             output_column="answer",
+            input_format="text",
         ),
         recipe=Qwen3_6_35B_Recipe(num_rollout=10),
     )
@@ -54,6 +55,24 @@ def test_variants_are_independent_and_base_untouched():
     assert base.recipe.lr == Qwen3_6_35B_Recipe().lr
     assert configs[0].recipe is not configs[1].recipe
     assert all(c.recipe.num_rollout == 10 for c in configs)
+
+
+def test_variants_preserve_independent_eval_datasets():
+    base = _base()
+    base.eval_dataset = HuggingFaceDataset(
+        hf_repo="openai/gsm8k",
+        hf_split="test",
+        input_column="question",
+        output_column="answer",
+        input_format="text",
+    )
+    configs = TrainingGroup(
+        base=base, grid={"recipe.lr": [2e-6, 9e-6]}
+    ).get_train_configs()
+
+    assert all(config.eval_dataset is not None for config in configs)
+    assert configs[0].eval_dataset is not configs[1].eval_dataset
+    assert configs[0].eval_dataset is not base.eval_dataset
 
 
 def test_each_variant_shares_group_id():

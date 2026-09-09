@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from modal_training_gym.common import GPUType
 from modal_training_gym.deploy_recipes.base import BaseDeployRecipe, DeployRecipeType
@@ -25,7 +25,7 @@ class VllmRecipe(BaseDeployRecipe):
             Maximum time in seconds for container startup.
     """
 
-    recipe_type: DeployRecipeType = DeployRecipeType.VLLM
+    _recipe_type: DeployRecipeType = field(default=DeployRecipeType.VLLM, init=False)
     gpu: GPUType | None = None
     n_gpu: int | None = None
     extra_vllm_args: list[str] | None = None

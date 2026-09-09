@@ -82,7 +82,6 @@ class GLM_4_7_Recipe(SlimeRecipe):
     rollout_stop_token_ids: list[int] | None = None
     skip_eval_before_train: bool = True
 
-    eval_interval: int | None = 20
     eval_max_response_len: int = 8192
 
     def __post_init__(self) -> None:

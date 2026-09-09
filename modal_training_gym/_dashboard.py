@@ -1,8 +1,7 @@
 """Self-contained training-gym dashboard app.
 
-When deployed from a pip install (no local repo checkout), the image build
-clones the frontend source from GitHub. When running from a repo checkout,
-it uses the local ``dashboards/frontend`` directory instead.
+The image builds the frontend from ``dashboards/frontend`` in a repo
+checkout, or the copy the wheel ships at ``modal_training_gym/_frontend``.
 """
 
 from __future__ import annotations
@@ -13,7 +12,15 @@ import os
 import secrets as _secrets
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, TypedDict, cast
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Awaitable,
+    Callable,
+    Iterable,
+    TypedDict,
+    cast,
+)
 
 import modal
 from modal.exception import Error
@@ -23,13 +30,14 @@ if TYPE_CHECKING:
     from modal.client import _Client
     from modal_proto import api_pb2
 
-# Imported at module scope so FastAPI can resolve the ``request: Request``
-# annotation in stream_run_logs(). Under ``from __future__ import
+# Imported at module scope so FastAPI can resolve endpoint annotations such as
+# ``request: Request`` in stream_run_logs(). Under ``from __future__ import
 # annotations`` all type hints are strings, and FastAPI evaluates them
 # against the *defining function's* ``__globals__`` (i.e. this module).
 # Importing ``Request`` only inside ``fastapi_app()`` makes the name
 # invisible to FastAPI's introspection, which then mistakes the parameter
 # for a query string and 422s with ``{"loc": ["query", "request"]}``.
+from fastapi import Query
 from starlette.requests import Request
 
 # Used as endpoint parameter annotations, so — like ``Request`` above — these
@@ -38,15 +46,23 @@ from modal_training_gym.common.advantage_distribution import AdvantageDistributi
 from modal_training_gym.common.config import (
     DASHBOARD_PASSWORD_SECRET_NAME,
     DASHBOARD_PROXY_AUTH_PATH,
+    DASHBOARD_VERSION_PATH,
     dashboard_requires_proxy_auth,
 )
-from modal_training_gym.common.dashboard import DASHBOARD_APP_NAME
+from modal_training_gym.common.dashboard import (
+    DASHBOARD_APP_NAME,
+    DASHBOARD_PREVIEW_ENV_KEY,
+    DASHBOARD_VERSION_ENV_KEY,
+    current_dashboard_version,
+)
 from modal_training_gym.common.run import (
     FrameworkStatusUpdate,
     TrainingRun,
     TrainingRunStatus,
 )
 from modal_training_gym.common.run_list import (
+    FACET_NAMES,
+    count_run_facets,
     filter_run_summaries,
     run_list_field_metadata,
 )
@@ -77,6 +93,10 @@ from modal_training_gym.utils.metadata import (
 
 SummaryLoader = Callable[[], Awaitable[list[JsonDict]]]
 
+# Repeated params (``?status=failed&status=stopped``) mirror the run list's
+# multi-select chips; an absent facet means "every bucket".
+FacetParam = Annotated[list[str] | None, Query()]
+
 
 # A single historical log line from ``AppFetchLogs``
 class LogEntry(TypedDict):
@@ -94,18 +114,30 @@ class TimingFileCache(TypedDict):
     record: JsonDict | None
 
 
-REPO_URL = "https://github.com/modal-projects/training-gym.git"
-REPO_BRANCH = "main"
-
 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
 TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
 
-_repo_frontend = Path(__file__).resolve().parents[1] / "dashboards" / "frontend"
-_has_local_frontend = _repo_frontend.is_dir()
+
+def _is_preview() -> bool:
+    return os.environ.get(DASHBOARD_PREVIEW_ENV_KEY, "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+# A preview deploy is one dashboard per open PR (see scripts/previews) reading
+# the same metadata volume as the real one, so it serves the API and nothing
+# else: the scheduled jobs rewrite that shared metadata, and a warm container
+# per open PR is a standing bill for a review aid.
+IS_PREVIEW = _is_preview()
 
 
 def _build_image() -> modal.Image:
-    base = (
+    _pkg = Path(__file__).resolve().parent
+    _checkout = _pkg.parent / "dashboards" / "frontend"
+    _frontend = _checkout if _checkout.is_dir() else _pkg / "_frontend"
+    return (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("curl")
         .run_commands(
@@ -113,31 +145,22 @@ def _build_image() -> modal.Image:
             "apt-get install -y nodejs",
         )
         .pip_install("fastapi[standard]==0.118.0", "modal")
-    )
-
-    if _has_local_frontend:
-        base = base.add_local_dir(
-            str(_repo_frontend),
+        .add_local_dir(
+            str(_frontend),
             remote_path="/app/frontend",
             copy=True,
             ignore=["node_modules", "dist"],
         )
-    else:
-        base = base.apt_install("git").run_commands(
-            f"git clone --depth 1 -b {REPO_BRANCH} {REPO_URL} /tmp/training-gym",
-            "mkdir -p /app && cp -r /tmp/training-gym/dashboards/frontend /app/frontend",
-            "rm -rf /tmp/training-gym",
-        )
-
-    return (
-        base.run_commands("cd /app/frontend && npm install && npm run build")
+        .run_commands("cd /app/frontend && npm install && npm run build")
         .add_local_python_source("modal_training_gym", copy=True)
         .env(
             {
                 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY: "true"
                 if dashboard_requires_proxy_auth()
                 else "false",
+                DASHBOARD_VERSION_ENV_KEY: current_dashboard_version(),
                 TIMING_DEBUG_ENV: os.environ.get(TIMING_DEBUG_ENV, ""),
+                DASHBOARD_PREVIEW_ENV_KEY: "true" if IS_PREVIEW else "",
             }
         )
     )
@@ -160,6 +183,7 @@ MODAL_CREDS_SECRET_NAME = "_training-gym-modal-creds"
 PASSWORD_EXEMPT_PATHS = frozenset(
     {
         DASHBOARD_PROXY_AUTH_PATH,
+        DASHBOARD_VERSION_PATH,
         "/api/framework-status",
         "/api/training-rollouts",
         "/api/advantage-distributions",
@@ -363,7 +387,11 @@ def _run_compact_sync() -> None:
         compact_summary_store(summary_store)
 
 
-@app.function(schedule=modal.Cron("*/30 * * * *"), retries=3, timeout=1800)
+@app.function(
+    schedule=None if IS_PREVIEW else modal.Cron("*/30 * * * *"),
+    retries=3,
+    timeout=1800,
+)
 def compact_summaries() -> None:
     """Scheduled compaction of summary stores (every 30 min)."""
     _run_compact_sync()
@@ -371,7 +399,7 @@ def compact_summaries() -> None:
 
 
 @app.function(
-    schedule=modal.Cron("*/30 * * * *"),
+    schedule=None if IS_PREVIEW else modal.Cron("*/30 * * * *"),
     secrets=_function_secrets(),
     retries=3,
     timeout=1800,
@@ -390,7 +418,7 @@ def reconcile() -> None:
 
 
 @app.function(
-    min_containers=1,
+    min_containers=0 if IS_PREVIEW else 1,
     secrets=_function_secrets(),
 )
 @modal.concurrent(max_inputs=50, target_inputs=20)
@@ -404,7 +432,7 @@ def fastapi_app():
         Header,
         HTTPException,
         Path as FastAPIPath,
-    )  # Request imported at module scope
+    )  # Request and Query imported at module scope
     from fastapi.concurrency import run_in_threadpool
     from fastapi.responses import (
         FileResponse,
@@ -454,6 +482,10 @@ def fastapi_app():
     @web.get(DASHBOARD_PROXY_AUTH_PATH)
     async def proxy_auth_status() -> bool:
         return os.environ.get(DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY, "false") == "true"
+
+    @web.get(DASHBOARD_VERSION_PATH)
+    async def version() -> str:
+        return os.environ.get(DASHBOARD_VERSION_ENV_KEY, "")
 
     cache_ttl_seconds = 30.0
     cache_keys = ("runs", "train_results", "evals")
@@ -817,33 +849,99 @@ def fastapi_app():
 
     # ── Training runs ────────────────────────────────────────────────────
 
-    @web.get("/api/runs", response_model=list[RunSummary])
-    async def runs(
-        request: Request,
-        since: int | None = None,
-        limit: int | None = None,
-    ):
-        if limit is not None and limit < 1:
-            raise HTTPException(status_code=400, detail="Limit must be positive")
+    # The run list renders none of the full config or the per-step timing maps —
+    # the per-run detail endpoint serves those — yet they are most of the list
+    # payload (``config`` alone is ~60% of it), so the list drops them rather
+    # than shipping them on every poll. ``metadata`` stays: the list's group and
+    # tag columns fall back to it for runs that predate ``group_tags``.
+    run_list_excluded_fields = {"config", "step_times", "substep_times"}
+
+    def _requested_facets(
+        status: list[str] | None,
+        recipe: list[str] | None,
+        group: list[str] | None,
+    ) -> dict[str, set[str]]:
+        selected = {"status": status, "recipe": recipe, "group": group}
+        return {name: set(values) for name, values in selected.items() if values}
+
+    async def load_run_summaries() -> list[RunSummary]:
         try:
             data = await get_cached_list("runs", load_runs)
         except Exception:
             data = []
-        summaries = [
+        return [
             RunSummary.model_validate(item) for item in data if isinstance(item, dict)
         ]
+
+    # ``response_model`` is left off: FastAPI ignores ``response_model_exclude``
+    # for sequence response models, so the exclusion is applied here instead.
+    @web.get("/api/runs")
+    async def runs(
+        request: Request,
+        since: int | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        q: str = "",
+        status: FacetParam = None,
+        recipe: FacetParam = None,
+        group: FacetParam = None,
+    ):
+        if limit is not None and limit < 1:
+            raise HTTPException(status_code=400, detail="Limit must be positive")
+        if offset < 0:
+            raise HTTPException(status_code=400, detail="Offset must not be negative")
+        summaries = await load_run_summaries()
+        # Facet params are multi-select unions, declared above: taking them here
+        # too would intersect the union with whichever repeated value ``get``
+        # happens to return.
         filters = {
             name: request.query_params.get(name, "")
             for name, metadata in run_list_field_metadata().items()
-            if metadata.get("filterable")
+            if metadata.get("filterable") and name not in FACET_NAMES
         }
+        facets = _requested_facets(status, recipe, group)
         filtered = filter_run_summaries(
             summaries,
             filters=filters,
+            facets=facets,
+            query=q,
             since=since,
             limit=limit,
+            offset=offset,
+            # The list shows runs newest-first, and paging is only stable if the
+            # server orders by the same key: sorting by update time reshuffles
+            # the pages under the client whenever a run reports progress.
+            sort_by="created",
         )
-        return filtered
+        return JSONResponse(
+            [
+                summary.model_dump(mode="json", exclude=run_list_excluded_fields)
+                for summary in filtered
+            ]
+        )
+
+    # Declared before ``/api/runs/{training_run_id}`` so "counts" isn't read as a
+    # run id. The page's totals and filter-chip counts come from here, since a
+    # paged list can't count runs the client hasn't loaded. Chip counts cover
+    # every run (they're what the chips would select); ``matching`` counts the
+    # current query, which is how many rows paging can still reach.
+    @web.get("/api/runs/counts")
+    async def run_counts(
+        q: str = "",
+        status: FacetParam = None,
+        recipe: FacetParam = None,
+        group: FacetParam = None,
+    ):
+        summaries = await load_run_summaries()
+        counts = count_run_facets(summaries)
+        counts["matching"] = len(
+            filter_run_summaries(
+                summaries,
+                facets=_requested_facets(status, recipe, group),
+                query=q,
+            )
+        )
+        return counts
 
     @web.get("/api/runs/{training_run_id}", response_model=RunSummary)
     async def get_run(training_run_id: str):
@@ -1491,6 +1589,14 @@ def fastapi_app():
         )
 
     # ── SPA fallback ─────────────────────────────────────────────────────
+
+    # Declared before the fallback so an unknown API path is a JSON 404 rather
+    # than the SPA's HTML served with a 200: a frontend newer than the deployed
+    # backend would otherwise parse index.html as JSON and report the parser's
+    # error ("The string did not match the expected pattern", on WebKit).
+    @web.get("/api/{full_path:path}", include_in_schema=False)
+    async def api_not_found(full_path: str):
+        raise HTTPException(status_code=404, detail=f"No such API path: {full_path}")
 
     @web.get("/{full_path:path}")
     async def serve_spa(full_path: str):

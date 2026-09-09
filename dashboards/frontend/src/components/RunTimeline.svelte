@@ -6,7 +6,6 @@
     APPROXIMATE_LANE_NOTE,
     breakLabelLayout,
     colorFor,
-    descriptionFor,
     fmtSecs,
     groupTooltipChildren,
     labelFor,
@@ -256,13 +255,10 @@
   }
 
   const roleDescriptions = {
-    driver:
-      "driver — orchestrates the training loop; sequences generation, weight sync and checkpointing (not a GPU worker)",
-    rollout:
-      "rollout — inference engines generating samples from the current policy",
-    actor: "actor — the policy model being trained",
-    critic:
-      "critic — value model scoring states; PPO-style runs only (use_critic=true)",
+    driver: "Runs the training loop.",
+    rollout: "Inference engines sampling from the current policy.",
+    actor: "Policy being trained.",
+    critic: "Value model.",
   };
 
   function nestedChild(bar, name) {
@@ -493,7 +489,7 @@
                 class="step"
                 style:left={`${pct(step.renderOffset ?? step.offset)}%`}
                 style:width={`${Math.max(pct(step.renderDuration ?? step.duration), 0.05)}%`}
-                title={`Step ${step.number}: ${fmtSecs(step.duration)} wall clock — ${fmtSecs(step.work)} work, ${fmtSecs(step.idle)} measured idle`}
+                title={`Step ${step.number}: ${fmtSecs(step.duration)} wall clock, ${fmtSecs(step.work)} work, ${fmtSecs(step.idle)} measured idle`}
               >
                 <span class="step-text"
                   >Step {step.number} · {fmtSecs(step.duration)}</span
@@ -636,8 +632,8 @@
               class="timeline-break"
               style:left={`${pct(gap.offset)}%`}
               style:width={`${Math.max(pct(gap.duration), 0.4)}%`}
-              title={`${fmtSecs(gap.hidden)} not instrumented — compressed to keep measured phases readable`}
-              aria-label={`${fmtSecs(gap.hidden)} of unmeasured time, compressed`}
+              title={`${fmtSecs(gap.hidden)} not instrumented, drawn compressed`}
+              aria-label={`${fmtSecs(gap.hidden)} not instrumented, drawn compressed`}
             >
               <span
                 class="timeline-break-label"
@@ -686,9 +682,6 @@
     </span>
     {#if clockSpan(tip.bar)}
       <span class="tg-tip-when">{clockSpan(tip.bar)}</span>
-    {/if}
-    {#if descriptionFor(tip.bar.name)}
-      <span class="tg-tip-desc">{descriptionFor(tip.bar.name)}</span>
     {/if}
     {#if concurrencyStat(tip.bar)}
       <span class="tg-tip-stat">{concurrencyStat(tip.bar)}</span>
@@ -1203,16 +1196,6 @@
   .tg-tip-name {
     color: var(--color-c-gray-100);
     font-weight: 600;
-  }
-
-  .tg-tip-desc {
-    display: block;
-    max-width: 34ch;
-    white-space: normal;
-    margin-top: 2px;
-    color: var(--color-c-gray-70, #8a8a8a);
-    font-size: 10px;
-    line-height: 13px;
   }
 
   .tg-tip-stat {

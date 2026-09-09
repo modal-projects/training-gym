@@ -33,7 +33,6 @@ class Qwen3_5_4B_Miles_Recipe(MilesRecipe):
     global_batch_size: int = 256
     balance_data: bool = True
 
-    eval_interval: int | None = 20
     n_samples_per_eval_prompt: int = 16
 
     tensor_model_parallel_size: int = 2

@@ -73,7 +73,7 @@ class TrainResult:
         app_name:
             Modal app name and default checkpoint volume prefix.
         framework:
-            Training framework.
+            Framework identifier used to list this run's checkpoints.
         training_run_id:
             Run ID and key in the shared results store.
         checkpoint_dir:
@@ -84,6 +84,12 @@ class TrainResult:
             ``TrainingGroup`` sweep ID.
         extra:
             Framework-specific run metadata.
+        checkpoints_volume_name:
+            Modal Volume that stores the checkpoints.
+        checkpoints_mount_path:
+            Container path where that volume is mounted.
+        metrics:
+            Final scalar metrics written at the end of the run.
     """
 
     app_name: str

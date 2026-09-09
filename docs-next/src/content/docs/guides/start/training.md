@@ -70,7 +70,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         return score(response, example["label"])
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        scores = list(executor.map(_score_one, eval_dataset.load()))
+        scores = list(executor.map(_score_one, eval_dataset.rows()))
     percent_correct = (
         len([s for s in scores if s == 1]) / len(scores) if scores else float("nan")
     )

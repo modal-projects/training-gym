@@ -37,8 +37,13 @@ _ASR_PATCHES = (
 
 def _asr_image_run_commands() -> list[str]:
     # soundfile/librosa decode audio (transcription rollout); jiwer powers the −WER
-    # reward. Then apply the upstream-gap shims at image build.
-    cmds = ["pip install --no-cache-dir jiwer librosa soundfile"]
+    # reward. Pinned: librosa>=1.0 requires numpy 2.x, which Megatron rejects; the
+    # numpy<2 constraint keeps pip from upgrading the base image's numpy. Then apply
+    # the upstream-gap shims at image build.
+    cmds = [
+        "pip install --no-cache-dir jiwer==4.0.0 librosa==0.11.0 soundfile==0.14.0 "
+        '"numpy<2"'
+    ]
     cmds += [
         f"echo {encode_patch(name, _ASR_PATCH_DIR)} | base64 -d | python3"
         for name in _ASR_PATCHES

@@ -9,12 +9,16 @@
   import RunSummary from "../components/RunSummary.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
+  import { fetchRun } from "../lib/api.js";
   import { formatTagValue, getGroupTags } from "../lib/format.js";
   import { normalizeMetricLinks } from "../lib/metricLinks.js";
   import { toggleInSet } from "../lib/set.js";
 
   let {
-    allRuns,
+    totalRuns,
+    matchingRunCount,
+    hasMoreRuns,
+    onLoadMore = () => {},
     completedTotal,
     runningTotal,
     stoppedTotal,
@@ -57,9 +61,36 @@
   // full rollouts/logs detail lives on its own page. Clicking a run (or the
   // drawer's Expand button) navigates to that page; the page's Collapse button
   // brings the summary back as this drawer.
-  let selectedRun = $derived.by(
-    () => allRuns.find((run) => run.run_id === drawerRunId) || null,
-  );
+  // The list payload carries only the fields the table renders, so the drawer
+  // fetches the run's full record (config and all) when it opens.
+  let drawerDetail = $state(null);
+  // Set only when the server says the run is gone. The list holds one page, so
+  // a run being absent from it means nothing — the drawer renders from the
+  // detail fetch for runs deep-linked or scrolled past.
+  let drawerRunMissing = $state(false);
+
+  $effect(() => {
+    const runId = drawerRunId;
+    drawerDetail = null;
+    drawerRunMissing = false;
+    if (!runId) return;
+    const controller = new AbortController();
+    fetchRun(runId, { signal: controller.signal })
+      .then((detail) => {
+        if (detail) drawerDetail = detail;
+        else drawerRunMissing = true;
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  });
+
+  let selectedRun = $derived.by(() => {
+    const listRun = filteredRuns.find((run) => run.run_id === drawerRunId) || null;
+    const detail = drawerDetail?.run_id === drawerRunId ? drawerDetail : null;
+    if (!listRun) return detail;
+    if (!detail) return listRun;
+    return { ...listRun, ...detail };
+  });
 
   const drawerWidth = "min(420px, calc(100vw - 24px))";
   const columns = [
@@ -150,11 +181,7 @@
   }
 
   $effect(() => {
-    if (
-      !loading &&
-      drawerRunId &&
-      !allRuns.some((run) => run.run_id === drawerRunId)
-    ) {
+    if (drawerRunId && drawerRunMissing) {
       onCloseDrawer();
     }
   });
@@ -171,12 +198,42 @@
     void groupBy;
     collapsedGroupKeys = new Set();
   });
+
+  let list = $state(null);
+
+  // A new query restarts paging at the first page. Staying scrolled to the
+  // bottom of the old, longer list would immediately ask for page after page
+  // again, so send the reader back to the top of the new results.
+  $effect(() => {
+    void search;
+    const root = list;
+    if (!root) return;
+    for (const wrap of root.querySelectorAll(".table-wrap")) wrap.scrollTop = 0;
+  });
+
+  // A run row is ~50 DOM nodes, so a full history is seconds of layout on a
+  // phone and a re-render of every row on each refresh. The server hands out
+  // one page at a time and scrolling a table near its end asks for the next
+  // one. Rows scroll inside `.table-wrap`, and a scroll event is the only
+  // signal that means "the reader reached the end of *this* scrollport": a
+  // sentinel + IntersectionObserver either never re-fires once it is already
+  // visible (a short group's table doesn't scroll at all) or pages the whole
+  // history unprompted, which is what this PR exists to stop. Grouped tables
+  // may not scroll at all, so the footer's button is what keeps every run
+  // reachable; scrolling is only the shortcut.
+  function growOnScroll(event) {
+    if (!hasMoreRuns) return;
+    const el = event.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600) {
+      onLoadMore();
+    }
+  }
 </script>
 
 <section class="summary-sticky grid grid-cols-5 gap-[14px] p-[0_24px] mb-[24px] max-[900px]:grid-cols-2">
   <article class="summary-card">
     <span class="summary-label">Total runs</span>
-    <strong>{allRuns.length}</strong>
+    <strong>{totalRuns}</strong>
   </article>
   <article class="summary-card">
     <span class="summary-label">Completed runs</span>
@@ -225,7 +282,7 @@
     />
   </div>
 
-  <div class="p-0">
+  <div class="p-0" bind:this={list}>
     {#if loading}
       <div class="table-wrap freeze-header">
         <MinimalTableSkeleton
@@ -236,13 +293,17 @@
       </div>
     {:else if error}
       <div class="page-empty">Failed to load: {error}</div>
-    {:else if !allRuns.length}
+    {:else if !totalRuns}
       <div class="page-empty">No training runs found yet.</div>
     {:else if !filteredRuns.length}
       <div class="page-empty">No runs match the current filters.</div>
     {:else}
       {#snippet runsTable(runs, frozenOffset)}
-        <div class="table-wrap freeze-header" style={frozenOffset ? `--frozen-table-offset: ${frozenOffset};` : ""}>
+        <div
+          class="table-wrap freeze-header"
+          style={frozenOffset ? `--frozen-table-offset: ${frozenOffset};` : ""}
+          onscroll={growOnScroll}
+        >
           <ResizableTable class="training-runs-table" {columns} stickyFirstColumn>
             <tbody>
               {#each runs as run, runIndex (`${run.run_id || "run"}-${run.created_at || 0}-${runIndex}`)}
@@ -420,6 +481,15 @@
           {/each}
         </div>
       {/if}
+
+      <div class="page-empty flex flex-col items-center gap-[10px]">
+        <span>Showing {filteredRuns.length} of {matchingRunCount} runs</span>
+        {#if hasMoreRuns}
+          <button type="button" class="load-more-button" onclick={onLoadMore}>
+            Load more
+          </button>
+        {/if}
+      </div>
     {/if}
   </div>
 </section>

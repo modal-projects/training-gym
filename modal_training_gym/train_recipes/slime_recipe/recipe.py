@@ -45,6 +45,7 @@ _SLIME_SKIP = {
     "local_slime",
     "slime_git_repository",
     "slime_git_revision",
+    "data_volume_name",
     "memory",
     "cpu",
     "cloud",
@@ -66,6 +67,7 @@ _SLIME_SKIP = {
     "image_run_commands",
     "image_env",
     "train_function_kwargs",
+    "max_retries",
     "substep_timing",
     "conversion_pipeline_model_parallel_size",
     "conversion_tensor_model_parallel_size",
@@ -97,8 +99,6 @@ class SlimeRecipe(BaseTrainRecipe):
 
     Args:
 
-        recipe_type:
-            Internal discriminator fixed to slime.
         name:
             Modal app title. The launcher derives it from the recipe class when
             empty.
@@ -126,6 +126,9 @@ class SlimeRecipe(BaseTrainRecipe):
         slime_git_revision:
             Full 40-character commit SHA fetched from ``slime_git_repository``.
             Branches and tags are rejected because they can move between runs.
+        data_volume_name:
+            Existing Modal data volume to mount at ``/data``. When unset, the
+            launcher derives a volume name from the concrete recipe class.
         memory:
             Modal Function memory request/limit in MiB.
         cpu:
@@ -150,6 +153,9 @@ class SlimeRecipe(BaseTrainRecipe):
             Extra env vars baked into the image.
         train_function_kwargs:
             Additional Modal Function keyword arguments for the training function.
+        max_retries:
+            Modal retries for the training function. Each retry resumes from
+            the last checkpoint.
         capture_trace:
             Attach sampled per-request execution traces to recorded rollouts.
         trace_sample_limit:
@@ -181,6 +187,10 @@ class SlimeRecipe(BaseTrainRecipe):
 
         num_rollout:
             Training and rollout steps for the run.
+        start_rollout_id:
+            Rollout step to start counting from. ``None`` continues from the
+            iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
+            ``0`` so ``num_rollout`` counts the steps this run performs.
         rollout_batch_size:
             Prompts sampled per rollout step; each prompt is expanded into a
             group of sampled responses.
@@ -375,6 +385,13 @@ class SlimeRecipe(BaseTrainRecipe):
             Tool-call output parser.
         sglang_reasoning_parser:
             Parser for reasoning/thinking output.
+        sglang_cuda_graph_backend_prefill:
+            SGLang CUDA-graph backend used during prefill.
+        no_load_optim:
+            Skip loading optimizer state when resuming from ``load``.
+        substep_timing:
+            Record per-substep timings for the dashboard. Defaults to ``auto``,
+            which enables substep time reporting.
     """
 
     # ── Required ────────────────────────────────────────────────────────────
@@ -389,6 +406,7 @@ class SlimeRecipe(BaseTrainRecipe):
     tensor_model_parallel_size: int = 1
     rollout_num_gpus_per_engine: int = 1
     num_rollout: int = 1
+    start_rollout_id: int | None = None
     rollout_batch_size: int = 8
 
     # ── App identity ─────────────────────────────────────────────────────────
@@ -409,6 +427,7 @@ class SlimeRecipe(BaseTrainRecipe):
     local_slime: str | None = None
     slime_git_repository: str | None = None
     slime_git_revision: str | None = None
+    data_volume_name: str | None = None
     memory: int | tuple[int, int] | None = None
     cpu: float | tuple[float, float] | None = None
     cloud: str | None = None
@@ -420,6 +439,7 @@ class SlimeRecipe(BaseTrainRecipe):
     image_run_commands: list[str] = field(default_factory=list)
     image_env: dict[str, str] = field(default_factory=dict)
     train_function_kwargs: dict[str, Any] = field(default_factory=dict)
+    max_retries: int = 3
 
     substep_timing: Literal["auto", "off"] = "auto"
 
@@ -645,8 +665,20 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── Container → slime flag converters ────────────────────────────────────
 
     @classmethod
-    def _dataset_to_fields(cls, ds: "DatasetConfig") -> dict[str, Any]:
-        fields = super()._dataset_to_fields(ds)
+    def _dataset_to_fields(
+        cls,
+        ds: "DatasetConfig",
+        eval_ds: "DatasetConfig | None" = None,
+        *,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
+    ) -> dict[str, Any]:
+        fields = super()._dataset_to_fields(
+            ds,
+            eval_ds,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+        )
         if getattr(ds, "multimodal_keys", None):
             fields["multimodal_keys"] = ds.multimodal_keys
         return fields
@@ -663,25 +695,35 @@ class SlimeRecipe(BaseTrainRecipe):
             )
         return m.architecture
 
-    @staticmethod
-    def _validate_dataset(ds: "DatasetConfig") -> None:
+    @classmethod
+    def _validate_datasets(
+        cls,
+        ds: "DatasetConfig",
+        eval_ds: "DatasetConfig | None" = None,
+    ) -> None:
         """Local preflight for the most common dataset misconfigurations.
 
         Slime indexes ``data[input_key]`` and ``data[label_key]`` inside a Ray
         actor's ``__init__``; if those are unset or collide, the failure only
         surfaces after image build + Ray bringup. Catch it here instead.
         """
-        if not ds.input_key:
-            raise TrainingGymConfigError(
-                f"{type(ds).__name__}.input_key is unset. Slime requires a "
-                "column name (e.g. 'messages' for chat data, 'text' for raw "
-                "prompts). Set `input_key = ...` on your DatasetConfig subclass."
-            )
-        if ds.label_key and ds.label_key == ds.input_key:
-            raise TrainingGymConfigError(
-                f"{type(ds).__name__}: input_key and label_key are both "
-                f"{ds.input_key!r}; they must name distinct columns."
-            )
+        super()._validate_datasets(ds, eval_ds)
+        for dataset in (ds, eval_ds):
+            if dataset is None:
+                continue
+            input_key = dataset.input_key()
+            label_key = dataset.label_key()
+            if not input_key:
+                raise TrainingGymConfigError(
+                    f"{type(dataset).__name__}.input_key() is unset. Slime requires a "
+                    "column name (e.g. 'messages' for chat data, 'text' for raw "
+                    "prompts). Implement `input_key()` on your DatasetConfig subclass."
+                )
+            if label_key and label_key == input_key:
+                raise TrainingGymConfigError(
+                    f"{type(dataset).__name__}: input_key() and label_key() are both "
+                    f"{input_key!r}; they must name distinct columns."
+                )
 
     @staticmethod
     def _model_to_fields(m: "ModelConfig") -> dict[str, Any]:
@@ -764,6 +806,9 @@ class SlimeRecipe(BaseTrainRecipe):
     def _fields(
         self,
         dataset: "DatasetConfig | None" = None,
+        eval_dataset: "DatasetConfig | None" = None,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
         model: "ModelConfig | None" = None,
     ) -> dict[str, Any]:
         fields = self._field_values()
@@ -774,7 +819,14 @@ class SlimeRecipe(BaseTrainRecipe):
         ):
             fields["sglang_cuda_graph_backend_prefill"] = "disabled"
         if dataset is not None:
-            fields.update(self._dataset_to_fields(dataset))
+            fields.update(
+                self._dataset_to_fields(
+                    dataset,
+                    eval_dataset,
+                    dataset_path=dataset_path,
+                    eval_dataset_path=eval_dataset_path,
+                )
+            )
         if model is not None:
             self.validate_model_parallelism(model)
             if not self.slime_model_script:

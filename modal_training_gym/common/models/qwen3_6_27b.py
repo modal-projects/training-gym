@@ -4,13 +4,7 @@ from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_6_respons
 
 
 class Qwen3_6_27B(HFModelConfiguration):
-    """Qwen3.6-27B dense hybrid Gated DeltaNet/attention model.
-
-    Attributes:
-        model_name: Hugging Face repository ID.
-        architecture: Megatron architecture parameters for this model.
-        response_parser: Parser for generated text.
-    """
+    """Qwen3.6-27B dense hybrid Gated DeltaNet/attention model."""
 
     response_parser = staticmethod(parse_qwen3_6_response)
 

@@ -57,6 +57,7 @@ _MILES_SKIP = {
     "custom_megatron_before_log_prob_hook",
     "custom_megatron_before_train_step_hook",
     "train_function_kwargs",
+    "max_retries",
     # Conversion-only parallelism and scratch: launcher-side, never forwarded to
     # the miles CLI.
     "conversion_tensor_model_parallel_size",
@@ -102,8 +103,6 @@ class MilesRecipe(BaseTrainRecipe):
 
     Args:
 
-        recipe_type:
-            Internal discriminator fixed to Miles.
         name:
             Modal app title. The launcher derives it from the class when empty.
         app_tags:
@@ -147,6 +146,9 @@ class MilesRecipe(BaseTrainRecipe):
             Extra env vars baked into the image.
         train_function_kwargs:
             Additional Modal Function keyword arguments for the training function.
+        max_retries:
+            Modal retries for the training function. Each retry resumes from
+            the last checkpoint.
         capture_trace:
             Attach sampled per-request execution traces to recorded rollouts.
         trace_sample_limit:
@@ -189,6 +191,10 @@ class MilesRecipe(BaseTrainRecipe):
 
         num_rollout:
             Training and rollout steps for the run.
+        start_rollout_id:
+            Rollout step to start counting from. ``None`` continues from the
+            iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
+            ``0`` so ``num_rollout`` counts the steps this run performs.
         rollout_batch_size:
             Prompts per rollout step, each expanded into a group of responses.
         rollout_max_response_len:
@@ -213,8 +219,9 @@ class MilesRecipe(BaseTrainRecipe):
             Checkpoint trained from; normally set from the attached ``ModelConfig``.
         save:
             Checkpoint output directory on the mounted ``/checkpoints`` volume.
+            Set both ``save`` and ``save_interval`` to ``None`` to disable saving.
         save_interval:
-            Save a checkpoint every N rollout steps.
+            Save a checkpoint every N rollout steps; use ``None`` with ``save=None``.
         load:
             Directory to resume from; empty starts from the converted HF weights.
         no_save_optim:
@@ -425,6 +432,22 @@ class MilesRecipe(BaseTrainRecipe):
             Tool-call output parser.
         sglang_reasoning_parser:
             Parser for reasoning/thinking output.
+        substep_timing:
+            Record per-substep timings for the dashboard. Defaults to ``auto``,
+            which enables substep time reporting.
+        model_name:
+            Miles megatron-to-HF weight mapping. Miles infers it from the HF
+            config class name when empty.
+        conversion_tensor_model_parallel_size:
+            Tensor-parallel size used only during HF to Megatron conversion.
+        conversion_pipeline_model_parallel_size:
+            Pipeline-parallel size used only during conversion.
+        conversion_expert_model_parallel_size:
+            Expert-parallel size used only during conversion.
+        conversion_expert_tensor_parallel_size:
+            Expert tensor-parallel size used only during conversion.
+        convert_ephemeral_disk_mb:
+            Ephemeral disk in MiB for the conversion job.
     """
 
     # ── Launcher instructions (not Miles CLI flags) ─────────────────────────
@@ -468,14 +491,14 @@ class MilesRecipe(BaseTrainRecipe):
 
     # ── Checkpointing ───────────────────────────────────────────────────────
     hf_checkpoint: str = ""
-    save: str = str(CHECKPOINTS_PATH)
+    save: str | None = str(CHECKPOINTS_PATH)
     load: str = ""
     ref_load: str = ""
     megatron_to_hf_mode: str = "bridge"
     # Selects miles' megatron→HF weight mapping (e.g. "inkling"); when empty miles
     # infers it from the HF config's class name.
     model_name: str = ""
-    save_interval: int = 10
+    save_interval: int | None = 10
     no_save_optim: bool = False
 
     # ── Checkpoint conversion ───────────────────────────────────────────
@@ -504,6 +527,7 @@ class MilesRecipe(BaseTrainRecipe):
 
     # ── Rollout and sampling ────────────────────────────────────────────────
     num_rollout: int = 1
+    start_rollout_id: int | None = None
     rollout_batch_size: int = 8
     n_samples_per_prompt: int = 2
     rollout_max_response_len: int = 4096
@@ -636,6 +660,7 @@ class MilesRecipe(BaseTrainRecipe):
     # samples of each rollout. Off by default — traces inflate payloads, so
     # sampling keeps the added volume well under 1%. Not a miles CLI flag.
     train_function_kwargs: dict[str, Any] = field(default_factory=dict)
+    max_retries: int = 10
     capture_trace: bool = False
     trace_sample_limit: int = 16
 
@@ -672,8 +697,20 @@ class MilesRecipe(BaseTrainRecipe):
     # ── Container → miles flag converters ────────────────────────────────────
 
     @classmethod
-    def _dataset_to_fields(cls, ds: "DatasetConfig") -> dict[str, Any]:
-        fields = super()._dataset_to_fields(ds)
+    def _dataset_to_fields(
+        cls,
+        ds: "DatasetConfig",
+        eval_ds: "DatasetConfig | None" = None,
+        *,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
+    ) -> dict[str, Any]:
+        fields = super()._dataset_to_fields(
+            ds,
+            eval_ds,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+        )
         if getattr(ds, "multimodal_keys", None):
             fields["multimodal_keys"] = ds.multimodal_keys
         return fields
@@ -763,6 +800,9 @@ class MilesRecipe(BaseTrainRecipe):
     def _fields(
         self,
         dataset: DatasetConfig | None = None,
+        eval_dataset: DatasetConfig | None = None,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
         model: ModelConfig | None = None,
     ) -> dict[str, Any]:
         fields = self._field_values()
@@ -779,7 +819,14 @@ class MilesRecipe(BaseTrainRecipe):
                     continue
                 fields[k] = v
         if dataset is not None:
-            fields.update(self._dataset_to_fields(dataset))
+            fields.update(
+                self._dataset_to_fields(
+                    dataset,
+                    eval_dataset,
+                    dataset_path=dataset_path,
+                    eval_dataset_path=eval_dataset_path,
+                )
+            )
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)

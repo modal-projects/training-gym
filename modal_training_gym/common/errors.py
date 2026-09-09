@@ -1,10 +1,10 @@
 class TrainingGymError(ValueError):
-    pass
+    """Base error for Training Gym."""
 
 
 class TrainingGymConfigError(TrainingGymError):
-    pass
+    """Raised when a training or deploy config is invalid."""
 
 
 class GpuAllocationError(TrainingGymConfigError):
-    pass
+    """Raised when a recipe's cluster or parallelism settings are invalid."""
