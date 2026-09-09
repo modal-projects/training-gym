@@ -27,6 +27,8 @@ class TraceSpan(BaseModel):
 class RewardEvent(BaseModel):
     """One incremental or checkpoint-window reward emitted during a sample.
 
+    Experimental: the field set and semantics may change without notice.
+
     ``reward`` is the credit assigned to this event/window, not the final
     sample score. Token offsets are relative to the sample response/loss-mask
     sequence, when the environment can provide them. Keeping this separate
