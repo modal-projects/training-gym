@@ -52,7 +52,7 @@ from modal_training_gym.common.launcher_helpers import (
     build_app_tags,
     build_terminal_run_record,
     build_train_result,
-    compute_save_root,
+    compute_recipe_save_root,
     init_training_run_record,
     mark_run_failed,
     mark_run_stopped,
@@ -585,8 +585,8 @@ def build_miles_app(
             default_mount_path=str(CHECKPOINTS_PATH),
         )
     )
-    checkpoint_dir = compute_save_root(
-        miles.save,
+    checkpoint_dir = compute_recipe_save_root(
+        miles,
         recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
         mounted_save_root=checkpoints_mount_path,
         training_run_id=training_run_id,

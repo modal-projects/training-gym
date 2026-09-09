@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
 import modal_training_gym.common.checkpoint as checkpoint_mod
 from modal_training_gym.common.framework import Framework
-from modal_training_gym.common.launcher_helpers import init_training_run_record
+from modal_training_gym.common.launcher_helpers import (
+    compute_recipe_save_root,
+    init_training_run_record,
+)
 from modal_training_gym.common.models import Qwen3_5_4B
 from modal_training_gym.common.run import (
     CHECKPOINT_LOCATION_METADATA_KEY,
@@ -212,6 +216,53 @@ def test_checkpoint_reads_do_not_create_missing_volume(
         result.volume()
 
     assert calls == [False, False]
+
+
+def test_latest_checkpoint_reads_extra_config_save_override(
+    monkeypatch, fake_volume
+) -> None:
+    recipe = SimpleNamespace(
+        save="/checkpoints",
+        extra_config={"save": "/checkpoints/custom"},
+    )
+    checkpoint_dir = compute_recipe_save_root(
+        recipe,
+        recipe_default_save_root="/checkpoints",
+        mounted_save_root="/checkpoints",
+        training_run_id="run-1",
+    )
+    run = TrainingRun(
+        training_run_id="run-1",
+        framework=Framework.SLIME,
+        config={},
+    )
+    set_checkpoint_location(
+        run,
+        checkpoint_dir=checkpoint_dir,
+        checkpoints_volume_name="slime-slime4brecipe-checkpoints",
+        checkpoints_mount_path="/checkpoints",
+    )
+    volume = _ListingVolume(
+        {
+            "custom/run-1": [_DirEntry("iter_0000001", is_directory=True)],
+            "custom/run-1/iter_0000001": [
+                _DirEntry("custom/run-1/iter_0000001/common.pt"),
+                _DirEntry("custom/run-1/iter_0000001/shard.distcp"),
+                _DirEntry("custom/run-1/iter_0000001/.metadata"),
+            ],
+        },
+        files={"custom/run-1/latest_checkpointed_iteration.txt": b"1\n"},
+    )
+    monkeypatch.setattr(
+        checkpoint_mod.Volume, "from_name", lambda *args, **kwargs: volume
+    )
+
+    latest = run.latest_checkpoint()
+
+    assert checkpoint_dir == "/checkpoints/custom/run-1"
+    assert latest is not None
+    assert latest.name == "iter_0000001"
+    assert latest.path == "/checkpoints/custom/run-1/iter_0000001"
 
 
 def test_listing_without_checkpoint_location_is_empty(fake_volume) -> None:

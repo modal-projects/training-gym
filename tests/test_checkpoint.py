@@ -16,7 +16,10 @@ from modal_training_gym.common.checkpoint import (
     volume_relative_path,
 )
 from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.launcher_helpers import compute_save_root
+from modal_training_gym.common.launcher_helpers import (
+    compute_recipe_save_root,
+    compute_save_root,
+)
 from modal_training_gym.common.models import ModelConfig
 
 
@@ -74,6 +77,42 @@ def test_save_root_must_stay_inside_checkpoint_volume() -> None:
             mounted_save_root="/checkpoints",
             training_run_id="run-1",
         )
+
+
+def test_extra_config_save_wins_and_is_pinned_to_scoped_root() -> None:
+    recipe = types.SimpleNamespace(
+        save="/checkpoints",
+        extra_config={"save": "/checkpoints/custom", "qkv_format": "bshd"},
+    )
+
+    root = compute_recipe_save_root(
+        recipe,
+        recipe_default_save_root="/checkpoints",
+        mounted_save_root="/checkpoints",
+        training_run_id="run-1",
+    )
+
+    assert root == "/checkpoints/custom/run-1"
+    assert recipe.extra_config == {
+        "save": "/checkpoints/custom/run-1",
+        "qkv_format": "bshd",
+    }
+
+
+def test_recipe_save_is_used_when_extra_config_omits_save() -> None:
+    recipe = types.SimpleNamespace(
+        save="/checkpoints", extra_config={"qkv_format": "thd"}
+    )
+
+    root = compute_recipe_save_root(
+        recipe,
+        recipe_default_save_root="/checkpoints",
+        mounted_save_root="/checkpoints",
+        training_run_id="run-1",
+    )
+
+    assert root == "/checkpoints/run-1"
+    assert recipe.extra_config == {"qkv_format": "thd"}
 
 
 @pytest.mark.parametrize("training_run_id", ["../outside", "/tmp/outside"])

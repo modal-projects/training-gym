@@ -338,6 +338,35 @@ def compute_save_root(
     )[0]
 
 
+def compute_recipe_save_root(
+    recipe: Any,
+    *,
+    recipe_default_save_root: str,
+    mounted_save_root: str,
+    training_run_id: str,
+) -> str:
+    """Resolve the run-scoped save root after ``extra_config`` save precedence.
+
+    Keys in ``extra_config`` drop the matching CLI flag, so a ``save`` override
+    is the path training writes. The live listing directory must match, and the
+    override is rewritten to the scoped root so later YAML materialization
+    writes there too.
+    """
+    extra = getattr(recipe, "extra_config", None)
+    save = extra.get("save") if isinstance(extra, dict) else None
+    if not save:
+        save = getattr(recipe, "save", None)
+    root = compute_save_root(
+        save,
+        recipe_default_save_root=recipe_default_save_root,
+        mounted_save_root=mounted_save_root,
+        training_run_id=training_run_id,
+    )
+    if isinstance(extra, dict) and extra.get("save"):
+        object.__setattr__(recipe, "extra_config", {**extra, "save": root})
+    return root
+
+
 def build_train_result(
     *,
     app_name: str,
