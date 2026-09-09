@@ -187,6 +187,8 @@ Typically, your generation function will:
 3. Tokenize the prompt and response with a corresponding loss mask.
 4. Set response fields on the sample.
 
+If the function generates the prompts (i.e., no initial dataset), you must use the [OnlineRollout](https://gym.modal.dev/reference/onlinerollout) class.
+
 Since the containers use [Modal Images](https://modal.com/docs/guide/images) under the hood, you can easily use external packages by extending the base image:
 
 ```python

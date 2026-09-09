@@ -175,6 +175,13 @@ API_REFERENCE_MANIFEST = [
         "sidebar_label": "HarborDataset",
     },
     {
+        "class_name": "OnlineRollout",
+        "module": "modal_training_gym.common.dataset",
+        "group": "datasets",
+        "class_type": "config_data",
+        "sidebar_label": "OnlineRollout",
+    },
+    {
         "class_name": "Qwen3_5_4B_Miles_Recipe",
         "module": "modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b",
         "group": "recipes",
@@ -529,6 +536,7 @@ SDK_SIDEBAR_CLASSES = frozenset(
         "DatasetConfig",
         "HuggingFaceDataset",
         "HarborDataset",
+        "OnlineRollout",
         "TrainConfig",
         "TrainingRun",
         "TrainingGroup",
