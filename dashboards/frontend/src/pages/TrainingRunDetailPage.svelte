@@ -85,6 +85,10 @@
   let run = $state(null);
   let runLoading = $state(false);
   let runError = $state("");
+  // A run id that isn't in the metadata volume won't appear later, so the
+  // 5s poll stops instead of refetching the same 404 for as long as the page
+  // stays open.
+  let runMissing = $state(false);
 
   async function loadRun(id, parentSignal) {
     if (parentSignal.aborted) return;
@@ -103,6 +107,7 @@
       if (parentSignal.aborted) return;
       if (nextRun === null) {
         run = null;
+        runMissing = true;
         runError = `Training run "${id}" was not found.`;
         return;
       }
@@ -153,6 +158,7 @@
     const id = runId;
     run = initialRun?.run_id === id ? initialRun : null;
     runError = "";
+    runMissing = false;
     if (!id) {
       runLoading = false;
       return;
@@ -161,7 +167,8 @@
     const controller = new AbortController();
     void loadRun(id, controller.signal);
     const interval = window.setInterval(() => {
-      if (runLoading || (runStatus && runStatus !== "running")) return;
+      if (runMissing || runLoading || (runStatus && runStatus !== "running"))
+        return;
       void loadRun(id, controller.signal);
     }, 5000);
 
@@ -636,7 +643,7 @@
   // steps stream in on a running run.
   $effect(() => {
     const id = runId;
-    if (!id || activeTab !== "summary") return;
+    if (!id || runMissing || activeTab !== "summary") return;
 
     const controller = new AbortController();
     void loadAdvantages(controller.signal);
@@ -657,7 +664,7 @@
   $effect(() => {
     const id = runId;
     const tab = activeTab;
-    if (!id || (tab !== "summary" && tab !== "rollouts")) return;
+    if (!id || runMissing || (tab !== "summary" && tab !== "rollouts")) return;
 
     const controller = new AbortController();
     rolloutsLoading = true;
