@@ -238,7 +238,7 @@ EvalFn = Callable[["CustomDeployment", DatasetRow], EvalRowResult]
 class EvalConfig:
     """Evaluate a deployed model on a dataset config.
 
-    The dataset must expose ``load()`` and return iterable dict examples.
+    The dataset must expose ``rows()`` and return iterable dict examples.
     """
 
     dataset: "DatasetConfig"
@@ -407,7 +407,7 @@ class EvalConfig:
             with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
                 futures = [
                     executor.submit(_evaluate_indexed, item)
-                    for item in enumerate(self.dataset.load(split="eval"), start=1)
+                    for item in enumerate(self.dataset.rows(), start=1)
                 ]
                 for future in as_completed(futures):
                     idx, row_result = future.result()

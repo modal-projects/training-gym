@@ -388,6 +388,7 @@ def run_base_training(
     train_config = TrainConfig(
         model=model_config,
         dataset=dataset,
+        eval_dataset=dataset,
         recipe=train_recipe,
     )
 

@@ -47,6 +47,7 @@ def _config(recipe, checkpoint_type: CheckpointType) -> TrainConfig:
             hf_repo="some/dataset",
             input_column="prompt",
             output_column="answer",
+            input_format="text",
         ),
         recipe=recipe,
         checkpoint=_checkpoint(checkpoint_type),
