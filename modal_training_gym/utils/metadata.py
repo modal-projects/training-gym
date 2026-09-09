@@ -375,6 +375,8 @@ def vol_list(
 
 
 _LIST_ATTEMPTS = 3
+# Torn-read retries for whole-file summaries (see vol_get_summary_items).
+_SUMMARY_READ_ATTEMPTS = 3
 
 
 def _is_rate_limit(exc: BaseException) -> bool:
@@ -743,19 +745,40 @@ def vol_get_summary_items(
 
         async def _run() -> list[dict[str, Any]] | None:
             await _safe_reload(vol, is_async=True)
-            try:
-                payload = await vol_get(store, key, is_async=True)
-            except KeyError:
-                return None
-            return summary_items_from_payload(payload, payload_key=payload_key)
+            for attempt in range(_SUMMARY_READ_ATTEMPTS):
+                try:
+                    payload = await vol_get(store, key, is_async=True)
+                except KeyError:
+                    return None
+                except ValueError:
+                    # A concurrent writer is replacing the file; see the sync path.
+                    if attempt + 1 == _SUMMARY_READ_ATTEMPTS:
+                        return None
+                    await _safe_reload(vol, is_async=True)
+                    continue
+                return summary_items_from_payload(payload, payload_key=payload_key)
+            return None
 
         return _run()
     _safe_reload(vol)
-    try:
-        payload = vol_get(store, key)
-    except KeyError:
-        return None
-    return summary_items_from_payload(payload, payload_key=payload_key)
+    for attempt in range(_SUMMARY_READ_ATTEMPTS):
+        try:
+            payload = vol_get(store, key)
+        except KeyError:
+            return None
+        except ValueError:
+            # Summaries are rewritten whole by every writer (status reporters,
+            # the dashboard reconciler, launches), so a reader can catch a file
+            # mid-replacement and get truncated JSON. That is a torn read, not
+            # a corrupt store: reload and try again, and if it is still
+            # unreadable report "no summary" so the caller rebuilds from the
+            # canonical per-item files instead of aborting a launch.
+            if attempt + 1 == _SUMMARY_READ_ATTEMPTS:
+                return None
+            _safe_reload(vol)
+            continue
+        return summary_items_from_payload(payload, payload_key=payload_key)
+    return None
 
 
 def vol_put_summary_items(
