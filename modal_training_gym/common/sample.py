@@ -24,6 +24,27 @@ class TraceSpan(BaseModel):
     parent: str | None = None
 
 
+class RewardEvent(BaseModel):
+    """One incremental or checkpoint-window reward emitted during a sample.
+
+    Experimental: the field set and semantics may change without notice.
+
+    ``reward`` is the credit assigned to this event/window, not the final
+    sample score. Token offsets are relative to the sample response/loss-mask
+    sequence, when the environment can provide them. Keeping this separate
+    from ``Sample.score`` lets dashboards inspect shaped rewards without
+    changing the scalar reward contract used by current trainers.
+    """
+
+    turn: int | None = None
+    reward: float = 0.0
+    cumulative_reward: float | None = None
+    components: dict[str, float] = Field(default_factory=dict)
+    token_start: int | None = None
+    token_end: int | None = None
+    label: str | None = None
+
+
 class Sample(BaseModel):
     """A prompt, response, parsed structure, score, and metadata from one model call.
 
@@ -42,4 +63,8 @@ class Sample(BaseModel):
     response: str = ""
     parsed_response: ParsedResponse | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Optional transition-level rewards. ``score`` remains the episode-level
+    # scalar; token-aware trainers may consume these events individually.
+    reward_granularity: str | None = None
+    reward_events: list[RewardEvent] | None = None
     trace: list[TraceSpan] | None = None
