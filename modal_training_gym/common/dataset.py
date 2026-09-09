@@ -133,6 +133,7 @@ class HuggingFaceDataset(DatasetConfig):
 
     Attributes:
         hf_repo: Hugging Face dataset repository ID.
+        hf_revision: Hugging Face dataset revision. If None, the dataset will be pinned to the latest revision.
         hf_split: Source dataset split.
         hf_config: Source dataset configuration name.
         input_column: Source prompt column.
@@ -141,12 +142,12 @@ class HuggingFaceDataset(DatasetConfig):
             messages, preformatted ``messages``, or ``raw`` model input.
         system_prompt: System message added to formatted examples.
         prompt_template: Template applied to each source prompt.
-        always_download: When training, always download the dataset from Hugging Face instead of caching it.
     """
 
     _type: DatasetType = DatasetType.HUGGING_FACE
 
     hf_repo: str
+    hf_revision: str
     hf_split: str
     hf_config: str | None
     input_column: str
@@ -154,26 +155,36 @@ class HuggingFaceDataset(DatasetConfig):
     input_format: Literal["text", "messages", "raw"]
     system_prompt: str
     prompt_template: str
-    always_download: bool
 
     def __init__(
         self,
         hf_repo: str,
         *,
+        hf_revision: str | None = None,
         hf_split: str = "train",
-        hf_config: str | None = None,
+        hf_config: str = "default",
         input_column: str,
         output_column: str,
         input_format: Literal["text", "messages", "raw"] = "text",
         system_prompt: str = "",
         prompt_template: str = "{input}",
-        always_download: bool = False,
     ):
         if input_format not in ("text", "messages", "raw"):
             raise TrainingGymConfigError(
                 f"input_format must be one of text/messages/raw, got {input_format!r}"
             )
+
+        if hf_revision is None:
+            from huggingface_hub import dataset_info
+
+            hf_revision = dataset_info(hf_repo).sha
+            if hf_revision is None:
+                raise TrainingGymConfigError(
+                    f"Could not find latest revision for {hf_repo}"
+                )
+
         self.hf_repo = hf_repo
+        self.hf_revision = hf_revision
         self.hf_split = hf_split
         self.hf_config = hf_config
         self.input_column = input_column
@@ -181,14 +192,12 @@ class HuggingFaceDataset(DatasetConfig):
         self.input_format = input_format
         self.system_prompt = system_prompt
         self.prompt_template = prompt_template
-        self.always_download = always_download
 
     def cache_key(self) -> str | None:
-        if self.always_download:
-            return None
         return _materialization_fingerprint(
             {
                 "hf_repo": self.hf_repo,
+                "hf_revision": self.hf_revision,
                 "hf_split": self.hf_split,
                 "hf_config": self.hf_config,
                 "input_column": self.input_column,
@@ -222,6 +231,7 @@ class HuggingFaceDataset(DatasetConfig):
             self.hf_repo,
             self.hf_config,
             split=self.hf_split,
+            revision=self.hf_revision,
         )
 
         if self.input_format == "text":
