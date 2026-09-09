@@ -21,5 +21,4 @@ class Qwen3_5_2B_Recipe(SlimeRecipe):
     n_samples_per_prompt: int = 8
     lr: float = 5e-7
     max_tokens_per_gpu: int = 12288
-    eval_interval: int | None = 10
     eval_max_response_len: int = 4096

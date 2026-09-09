@@ -370,7 +370,6 @@ config = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=Qwen3_5_4B_Recipe(
-        eval_interval=None,
         custom_generate_function=number_guess_generate,
         custom_rm_function=number_guess_rm,
         extra_config={

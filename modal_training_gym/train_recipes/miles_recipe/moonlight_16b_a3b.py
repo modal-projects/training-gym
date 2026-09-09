@@ -38,7 +38,6 @@ class Moonlight_16B_A3B_Recipe(MilesRecipe):
     global_batch_size: int | None = None
     balance_data: bool = True
 
-    eval_interval: int | None = 20
     n_samples_per_eval_prompt: int = 8
     eval_max_response_len: int = 4096
 
