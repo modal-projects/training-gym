@@ -35,7 +35,6 @@ class TrackioConfig(MetricConfig):
 
     Attributes:
         space_id: Optional Hugging Face Space id such as ``owner/trackio``.
-            Leave empty to use hosted Trackio.
         server_url: Optional self-hosted Trackio server URL. Leave empty to use
             hosted Trackio.
         dashboard_url: Dashboard URL. Derived from ``space_id`` or ``server_url``
