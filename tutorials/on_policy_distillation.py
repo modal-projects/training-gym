@@ -278,20 +278,19 @@ config = TrainConfig(
     ),
 )
 
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained student
 #
 # We'll deploy our trained student and compare it
 # to our baseline evaluation from earlier.
 
-while True:
-    checkpoint = run.latest_checkpoint()
-    if run.done():
-        break
-    time.sleep(30)
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_student_deployment = Endpoint.launch(
     student_model, checkpoint, unauthenticated=True, recreate_if_existing=True

@@ -61,19 +61,18 @@ config = TrainConfig(
     recipe=recipe,
 )
 
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Test out the trained model
 #
 # Spin up an [Endpoint](https://modal.com/docs/guide/endpoints) and try a prompt.
 
-while True:
-    checkpoint = run.latest_checkpoint()
-    if run.done():
-        break
-    time.sleep(30)
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True

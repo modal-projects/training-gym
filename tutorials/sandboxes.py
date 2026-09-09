@@ -172,16 +172,15 @@ config = TrainConfig(
     ),
 )
 print("Starting training...")
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained checkpoint
 
-while True:
-    checkpoint = run.latest_checkpoint()
-    if run.done():
-        break
-    time.sleep(30)
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )

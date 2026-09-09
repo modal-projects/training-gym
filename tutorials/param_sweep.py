@@ -82,11 +82,12 @@ if group.failures:
 
 results = []
 for launch in launches:
-    while True:
-        if launch.done():
-            break
-        time.sleep(30)
-    results.append(launch)
-    print(f"completed {launch.training_run_id} (group_id={launch.group_id})")
+    with launch:
+        while True:
+            if launch.done():
+                break
+            time.sleep(30)
+        results.append(launch)
+        print(f"completed {launch.training_run_id} (group_id={launch.group_id})")
 
 print(f"group {group.group_id}: {len(results)} runs completed")

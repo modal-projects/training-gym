@@ -172,19 +172,18 @@ config = TrainConfig(
         custom_rm_function=wer_rm,
     ),
 )
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained checkpoint
 #
 # Let's run the same eval on the trained checkpoint.
 
-while True:
-    checkpoint = run.latest_checkpoint()
-    if run.done():
-        break
-    time.sleep(30)
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(
     model,

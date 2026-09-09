@@ -31,16 +31,17 @@ Note that you can always access runs by their ID:
 run = TrainingRun.from_id("bristled-pine-a7c3e91d4b2")
 ```
 
-While the run is in-progress, you can poll for the latest checkpoint:
+While the run is in-progress, you can poll for the latest checkpoint. Leaving the `with` block stops the detached Modal app:
 
 ```python
 import time
 
-while True:
-    checkpoint = run.latest_checkpoint()
-    if run.done():
-        break
-    time.sleep(30)
+with config.launch() as run:
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
 ```
 
 Now, we could do offline evals:
@@ -101,12 +102,12 @@ simple_config = TrainConfig(
     recipe=simple_recipe,
 )
 
-simple_run = simple_config.launch()
-while True:
-    simple_checkpoint = simple_run.latest_checkpoint()
-    if simple_run.done():
-        break
-    time.sleep(30)
+with simple_config.launch() as simple_run:
+    while True:
+        simple_checkpoint = simple_run.latest_checkpoint()
+        if simple_run.done():
+            break
+        time.sleep(30)
 
 complex_config = TrainConfig(
     model=model,
@@ -115,10 +116,10 @@ complex_config = TrainConfig(
     recipe=complex_recipe,
 )
 
-complex_run = complex_config.launch()
-while True:
-    complex_checkpoint = complex_run.latest_checkpoint()
-    if complex_run.done():
-        break
-    time.sleep(30)
+with complex_config.launch() as complex_run:
+    while True:
+        complex_checkpoint = complex_run.latest_checkpoint()
+        if complex_run.done():
+            break
+        time.sleep(30)
 ```

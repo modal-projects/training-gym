@@ -146,6 +146,7 @@ class TrainingRun(BaseModel):
     _status_display: Any = PrivateAttr(default=None)
     _metadata_removed_keys: set[str] = PrivateAttr(default_factory=set)
     _metadata_loaded_keys: set[str] | None = PrivateAttr(default=None)
+    _closed: bool = PrivateAttr(default=False)
 
     @computed_field
     @property
@@ -227,7 +228,6 @@ class TrainingRun(BaseModel):
         Returns:
             The completed training result.
         """
-        from modal_training_gym.common.modal_lifecycle import stop_app
         from modal_training_gym.common.status_reporter import (
             flush as flush_status_reporter,
         )
@@ -258,11 +258,26 @@ class TrainingRun(BaseModel):
                 self._status_display.stop_polling()
             flush_status_reporter(timeout_seconds=2.0)
 
-        if stop_app_on_success and self.modal_app_id:
-            stop_app(self.modal_app_id)
+        if stop_app_on_success:
+            self.close()
         result = TrainResult(**TrainResult._parse_model_config(result_dict))
         print(f"Training complete: {result.training_run_id}")
         return result
+
+    def close(self) -> None:
+        """Stop the detached Modal app. Safe to call more than once."""
+        if self._closed:
+            return
+        self._closed = True
+        from modal_training_gym.common.modal_lifecycle import stop_app
+
+        stop_app(self.modal_app_id)
+
+    def __enter__(self) -> "TrainingRun":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        self.close()
 
     def __await__(self):
         import asyncio

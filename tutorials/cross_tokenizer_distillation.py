@@ -1038,20 +1038,19 @@ print("  Teacher: DeepSeek V4 Flash")
 print("  Student: Qwen3.6-35B-A3B")
 print("  Dataset: BFCL multi_turn_base, prefix-conditioned (task, K) rows")
 print("  Reward: schema + live exec + structural match + terminal state/response verdict")
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained student
 #
 # Deploy the last checkpoint and re-run the held-out BFCL ids with the same evaluator from our earlier baseline.
 
-while True:
-    checkpoint = run.latest_checkpoint()
-    if run.done():
-        break
-    time.sleep(30)
-print("--- Training complete ---")
-print(f"Checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
+    print("--- Training complete ---")
+    print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True

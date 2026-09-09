@@ -64,3 +64,59 @@ def test_reload_reraises_non_miss_errors(monkeypatch, fake_volume):
     monkeypatch.setattr(TrainingRun, "from_id", boom)
     with pytest.raises(RuntimeError, match="corrupt metadata"):
         live.done()
+
+
+def test_context_manager_stops_app(monkeypatch):
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        "modal_training_gym.common.modal_lifecycle.stop_app", stopped.append
+    )
+    run = _run(TrainingRunStatus.RUNNING)
+    run.modal_app_id = "ap-1"
+
+    with run as entered:
+        assert entered is run
+        assert stopped == []
+
+    assert stopped == ["ap-1"]
+
+
+def test_exit_closes_after_exception(monkeypatch):
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        "modal_training_gym.common.modal_lifecycle.stop_app", stopped.append
+    )
+    run = _run(TrainingRunStatus.RUNNING)
+    run.modal_app_id = "ap-1"
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with run:
+            raise RuntimeError("boom")
+
+    assert stopped == ["ap-1"]
+
+
+def test_close_is_idempotent(monkeypatch):
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        "modal_training_gym.common.modal_lifecycle.stop_app", stopped.append
+    )
+    run = _run(TrainingRunStatus.COMPLETED)
+    run.modal_app_id = "ap-1"
+
+    run.close()
+    run.close()
+
+    assert stopped == ["ap-1"]
+
+
+def test_done_does_not_stop_app(monkeypatch, fake_volume):
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        "modal_training_gym.common.modal_lifecycle.stop_app", stopped.append
+    )
+    run = _run(TrainingRunStatus.COMPLETED)
+    run.modal_app_id = "ap-1"
+
+    assert run.done() is True
+    assert stopped == []

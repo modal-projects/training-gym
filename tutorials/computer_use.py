@@ -299,19 +299,18 @@ config = TrainConfig(
         metrics=WandbConfig(project="computer-use-grounding"),
     ),
 )
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained model
 #
 # Let's run the same eval on the trained checkpoint and compare accuracy.
 
-while True:
-    checkpoint = run.latest_checkpoint()
-    if run.done():
-        break
-    time.sleep(30)
-print(f"Checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
+    print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(
     model,
