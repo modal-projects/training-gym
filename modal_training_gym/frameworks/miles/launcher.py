@@ -332,18 +332,14 @@ def _is_complete_torch_dist_checkpoint(path: str) -> bool:
     (its default ``is_complete`` is ``os.path.isdir``), so a conversion that died
     mid-write is reported as a cache hit and silently skips re-conversion — which
     then feeds partial weights to training. A crashed conversion does leave
-    ``common.pt`` and the ``.distcp`` shards behind, so those alone are not enough
-    to tell the two apart.
+    data shards behind, so those alone are not enough to tell the two apart.
+    Newer Megatron stores common state inside torch_dist rather than common.pt.
     """
     try:
         names = os.listdir(path)
     except OSError:
         return False
-    return (
-        ".metadata" in names
-        and "common.pt" in names
-        and any(name.endswith(".distcp") for name in names)
-    )
+    return ".metadata" in names and any(name.endswith(".distcp") for name in names)
 
 
 def _build_miles_base_image(miles: MilesRecipe) -> Image:
