@@ -386,20 +386,6 @@ def build_slime_app(
     SlimeRecipe._validate_custom_model_architecture(model)
     SlimeRecipe._validate_dataset(dataset)
 
-    # Models that can't do THD packing (model.requires_bshd, e.g. Qwen3-ASR) must
-    # train on padded (bshd) batches; fail fast with the fix if the recipe didn't.
-    if model and getattr(model, "requires_bshd", False):
-        cfg = slime.extra_config or {}
-        if cfg.get("qkv_format") != "bshd" or slime.use_dynamic_batch_size:
-            raise ValueError(
-                f"{model.model_name} requires padded (bshd) batches: its "
-                "megatron-bridge forward doesn't implement THD sequence packing. "
-                'Set extra_config={"qkv_format": "bshd", "micro_batch_size": N} and '
-                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7B_Recipe, which sets "
-                f"these. Got qkv_format={cfg.get('qkv_format')!r}, "
-                f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
-            )
-
     if (
         model
         and getattr(slime, "megatron_to_hf_mode", "") != "bridge"

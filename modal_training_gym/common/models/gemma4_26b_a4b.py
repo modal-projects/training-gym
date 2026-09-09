@@ -16,11 +16,10 @@ class Gemma4_26B_A4B(HFModelConfiguration):
 
     model_name = "google/gemma-4-26B-A4B-it"
     response_parser = staticmethod(parse_gemma4_response)
+    supported_modalities = frozenset({"image"})
+    thd_forward = False
 
     architecture = ModelArchitecture(
-        # text_config from config.json. The recipe sets ``miles_model_script``, so
-        # these are not emitted as flags, but they drive the expert-parallel
-        # validator; keep them in step with that script.
         num_layers=30,
         hidden_size=2816,
         ffn_hidden_size=2112,

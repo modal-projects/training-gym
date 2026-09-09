@@ -8,6 +8,7 @@ from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.metrics import MetricConfig
+from modal_training_gym.common.modality import requested_media_modalities
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.base import (
     BaseTrainRecipe,
@@ -621,6 +622,7 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_server_concurrency: int | None = None
     sglang_tool_call_parser: str | None = None
     sglang_reasoning_parser: str | None = None
+    sglang_enable_multimodal: bool = False
 
     # ── Config overrides ────────────────────────────────────────────────────
     extra_config: dict | None = None
@@ -652,6 +654,7 @@ class MilesRecipe(BaseTrainRecipe):
     # ── Validators ───────────────────────────────────────────────────────────
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = frozenset(_MILES_SKIP)
+    served_media_modalities: ClassVar[frozenset[str]] = frozenset({"image", "audio"})
 
     @model_validator(mode="after")
     def _resolve_callable_paths(self) -> "MilesRecipe":
@@ -684,7 +687,7 @@ class MilesRecipe(BaseTrainRecipe):
     @classmethod
     def _dataset_to_fields(cls, ds: "DatasetConfig") -> dict[str, Any]:
         fields = super()._dataset_to_fields(ds)
-        if getattr(ds, "multimodal_keys", None):
+        if ds.multimodal_keys:
             fields["multimodal_keys"] = ds.multimodal_keys
         return fields
 
@@ -768,6 +771,23 @@ class MilesRecipe(BaseTrainRecipe):
     def validate_model_parallelism(self, model: ModelConfig) -> None:
         validate_num_experts_divisible_by_expert_parallel_size(self, model)
 
+    def overrides(
+        self,
+        dataset: DatasetConfig | None,
+        model: ModelConfig | None,
+    ) -> dict[str, Any]:
+        if model is None:
+            return {}
+        media = bool(requested_media_modalities(dataset) if dataset is not None else ())
+        out: dict[str, Any] = {}
+        if not model.thd_forward:
+            out["qkv_format"] = "bshd"
+            self._override_default(out, "use_dynamic_batch_size", False, True)
+            self._override_default(out, "micro_batch_size", 1, None)
+        if media:
+            self._override_default(out, "sglang_enable_multimodal", True, False)
+        return out
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(
@@ -790,6 +810,7 @@ class MilesRecipe(BaseTrainRecipe):
                 fields[k] = v
         if dataset is not None:
             fields.update(self._dataset_to_fields(dataset))
+        fields.update(self.overrides(dataset, model))
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)

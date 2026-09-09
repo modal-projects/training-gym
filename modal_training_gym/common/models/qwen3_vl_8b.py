@@ -23,16 +23,14 @@ class Qwen3_VL_8B(HFModelConfiguration):
         model_name: Hugging Face repository ID.
         architecture: Megatron architecture parameters for the text backbone.
         response_parser: Parser for generated text.
-        requires_bshd: Requires padded BSHD batches during training.
     """
 
     response_parser = staticmethod(parse_qwen3_response)
 
     model_name = "Qwen/Qwen3-VL-8B-Instruct"
-
-    # Image patches expand prompts into many tokens; padded (bshd) batches avoid
-    # the THD packing path that VL models may not support in megatron-bridge.
-    requires_bshd: bool = True
+    supported_modalities = frozenset({"image"})
+    thd_forward = False
+    has_vision_tower = True
 
     architecture = ModelArchitecture(
         # text_config from config.json

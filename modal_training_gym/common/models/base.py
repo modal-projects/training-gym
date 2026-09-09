@@ -126,6 +126,10 @@ class ModelConfig:
     model_path: str | None = None
     architecture: ModelArchitecture | None = None
     response_parser: ResponseParser | None = None
+    supported_modalities: frozenset[str] = frozenset()
+    thd_forward: bool = True
+    has_vision_tower: bool = False
+    eagle_ok_with_media: bool = True
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():

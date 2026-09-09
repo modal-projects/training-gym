@@ -36,10 +36,14 @@ _EPHEMERAL_DISK_MIB = 768 * 1024
 class _InklingSmallRecipe(MilesRecipe):
     _SKIP_FIELDS: ClassVar[frozenset[str]] = MilesRecipe._SKIP_FIELDS | {"modality"}
 
-    # Selects the model provider below, the same way Gemma4_26B_A4B_Recipe's flag picks
-    # its mode. A vision run also needs a MultimodalDataset with apply_chat_template
-    # off and its images materialized as files.
-    modality: Literal["text", "vision"] = "text"
+    modality: Literal["text", "vision", "audio"] = "text"
+
+    def served_media(self) -> frozenset[str]:
+        if self.modality == "vision":
+            return frozenset({"image"})
+        if self.modality == "audio":
+            return frozenset({"audio"})
+        return frozenset()
 
     # Inkling landed upstream on 2026-08-03 (miles 5c517599 / 92ccb87d), well after
     # MilesRecipe's default image was built, so this recipe pins its own. Do not use
@@ -171,7 +175,7 @@ class _InklingSmallRecipe(MilesRecipe):
         # InklingTrainProcessor off the checkpoint's model_type and forwards its
         # patch tensors into forward() generically.
         if (
-            self.modality == "vision"
+            self.modality in {"vision", "audio"}
             and not self.custom_model_provider_path
             and "custom_model_provider_path" not in self._escape_hatch_keys()
         ):
@@ -187,7 +191,6 @@ class Inkling_Small_Recipe(_InklingSmallRecipe):
 
     # Dynamic token packing exposes a PP-p2p x EP-all-to-all NCCL launch-order race
     # on varlen shapes, so upstream pins a fixed micro-batch for full-parameter runs.
-    # This overrides MilesRecipe's use_dynamic_batch_size=True default.
     use_dynamic_batch_size: bool = False
     micro_batch_size: int = 1
 

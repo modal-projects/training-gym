@@ -57,6 +57,7 @@ class DatasetConfig:
     # a separate DatasetConfig instance for offline eval (Toolathlon, BFCL) set
     # this False so resolvers don't invent a companion ``eval.*`` file.
     writes_eval_paths: bool = True
+    multimodal_keys: dict[str, str] | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         if not self.dataset_id:

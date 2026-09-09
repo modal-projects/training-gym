@@ -35,21 +35,17 @@ class Qwen3_ASR_1_7B(HFModelConfiguration):
         model_name: Hugging Face repository ID.
         architecture: Megatron architecture parameters for the text backbone.
         response_parser: Parser for generated text.
-        requires_bshd: Requires padded BSHD batches during training.
         audio_placeholder: Token sequence that marks audio input.
     """
 
     model_name = "Qwen/Qwen3-ASR-1.7B"
+    supported_modalities = frozenset({"audio"})
+    thd_forward = False
 
     # Qwen3 dense backbone, same ``<|im_start|>``/``<|im_end|>`` delimiters as the
     # rest of the family. ASR output is plain transcription (no tool calls), so
     # this just strips the chat-template scaffolding off the decoded text.
     response_parser = staticmethod(parse_qwen3_response)
-
-    # The native megatron-bridge Qwen3-ASR forward doesn't implement THD sequence
-    # packing, so training must use padded (bshd) batches; the slime launcher
-    # enforces this when the recipe leaves slime's default thd packing on.
-    requires_bshd: bool = True
 
     # The processor expands this single <|audio_pad|> to N tokens (N = the audio
     # encoder's output length for the clip), aligning audio embeddings with token

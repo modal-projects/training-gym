@@ -17,6 +17,7 @@ from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.modality import requested_media_modalities
 from modal_training_gym.common.models import (
     ModelArchitecture,
     ModelConfig,
@@ -587,6 +588,7 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── Validators ───────────────────────────────────────────────────────────
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = frozenset(_SLIME_SKIP)
+    served_media_modalities: ClassVar[frozenset[str]] = frozenset({"image", "audio"})
 
     @model_validator(mode="after")
     def _validate_slime_source_overlay(self) -> "SlimeRecipe":
@@ -648,7 +650,7 @@ class SlimeRecipe(BaseTrainRecipe):
     @classmethod
     def _dataset_to_fields(cls, ds: "DatasetConfig") -> dict[str, Any]:
         fields = super()._dataset_to_fields(ds)
-        if getattr(ds, "multimodal_keys", None):
+        if ds.multimodal_keys:
             fields["multimodal_keys"] = ds.multimodal_keys
         return fields
 
@@ -760,6 +762,33 @@ class SlimeRecipe(BaseTrainRecipe):
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
         validate_num_experts_divisible_by_expert_parallel_size(self, model)
 
+    def overrides(
+        self,
+        dataset: "DatasetConfig | None",
+        model: "ModelConfig | None",
+    ) -> dict[str, Any]:
+        if model is None:
+            return {}
+        media = bool(requested_media_modalities(dataset) if dataset is not None else ())
+        out: dict[str, Any] = {}
+        if not model.thd_forward:
+            out["qkv_format"] = "bshd"
+            self._override_default(out, "use_dynamic_batch_size", False, True)
+            self._override_default(out, "micro_batch_size", 1, None)
+        if model.has_vision_tower and (not model.thd_forward or media):
+            out["freeze_params_name_list"] = ["vision_model"]
+        if media and not model.eagle_ok_with_media:
+            hatch = self._escape_hatch_keys()
+            for key in (
+                "sglang_speculative_algorithm",
+                "sglang_speculative_num_steps",
+                "sglang_speculative_eagle_topk",
+                "sglang_speculative_num_draft_tokens",
+            ):
+                if key not in hatch:
+                    out[key] = None
+        return out
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(
@@ -780,6 +809,7 @@ class SlimeRecipe(BaseTrainRecipe):
             self.validate_model_parallelism(model)
             if not self.slime_model_script:
                 fields.update(self._model_to_fields(model))
+        fields.update(self.overrides(dataset, model))
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)
