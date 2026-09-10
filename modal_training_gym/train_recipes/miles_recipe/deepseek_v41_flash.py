@@ -95,7 +95,6 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     # ep_size = actor_num_nodes * gpus_per_node / pp_size).
     actor_num_nodes: int = 8
     tensor_model_parallel_size: int = 4
-    pipeline_model_parallel_size: int = 1
     context_parallel_size: int = 1
     sequence_parallel: bool = True
     expert_model_parallel_size: int = 64
