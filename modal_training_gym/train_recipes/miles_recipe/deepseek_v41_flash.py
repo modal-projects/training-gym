@@ -41,6 +41,7 @@ _PATCHES = (
     "patch_deepseek_v41_fp8_hopper_gemm",
     "patch_deepseek_v41_chat_template",
     "patch_deepseek_v41_fp4_dequant_block",
+    "patch_deepseek_v41_vision_topk_capture",
 )
 
 
