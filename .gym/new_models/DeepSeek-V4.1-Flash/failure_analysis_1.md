@@ -199,3 +199,17 @@ like. Fixed by bounding the loader through `extra_config`:
 shard) and `sglang_model_loader_extra_config='{"num_threads": 2}'` (3 shards in
 flight per rank). Verified the overrides survive miles' ServerArgs argv
 round-trip inside the recipe image (`.gym/probe_sglang_loader_argv.py`).
+
+## Run 17: eager (non-mmap) shard reads cannot decode F8_E8M0
+
+With `--weight-loader-disable-mmap` every rank failed on its first shard:
+
+    File ".../safetensors/torch.py", line 456, in _getdtype
+        return _TYPES[dtype_str]
+    KeyError: 'F8_E8M0'
+
+sglang's eager path deserializes with `safetensors.torch.load`, whose Python
+dtype table in the image's safetensors has no e8m0 entry; the mmap path goes
+through `safe_open`'s Rust reader, which does. Dropped `disable_mmap` and kept
+the other two bounds (3 mmap'd shards in flight per rank instead of 9, page
+cache released per shard). Stopped by hand.

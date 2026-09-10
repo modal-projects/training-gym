@@ -206,12 +206,13 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     # ranks hold their offloaded weights in host RAM. sglang's default loader
     # keeps 9 mmap'd shards in flight per rank, and the sandbox counts those
     # pages against the container, so 8 ranks can exhaust the 2 TB node and get
-    # a scheduler SIGKILLed mid-load. Read shards eagerly with a 2-shard window
-    # and drop each from the page cache once it is copied to the GPU.
+    # a scheduler SIGKILLed mid-load. Narrow the window to 3 shards and drop
+    # each from the page cache once it is copied to the GPU. (mmap stays on:
+    # the eager `safetensors.torch.load` path cannot decode V4.1's F8_E8M0
+    # scale tensors.)
     extra_config: dict | None = field(
         default_factory=lambda: {
             "sglang_device": "cuda",
-            "sglang_weight_loader_disable_mmap": True,
             "sglang_weight_loader_drop_cache_after_load": True,
             "sglang_model_loader_extra_config": '{"num_threads": 2}',
         }
