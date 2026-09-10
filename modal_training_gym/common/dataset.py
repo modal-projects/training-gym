@@ -28,8 +28,8 @@ def _materialization_fingerprint(fields: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _resolve_hf_revision_remotely(hf_repo: str) -> str:
-    """Resolve a dataset revision in a CPU container with the configured HF secret."""
+def _build_hf_revision_resolver() -> tuple[Any, Any]:
+    """Build the local/remote function used to resolve a dataset revision."""
     import modal
 
     from modal_training_gym.common import hf_secrets
@@ -53,8 +53,7 @@ def _resolve_hf_revision_remotely(hf_repo: str) -> str:
             raise RuntimeError(f"Could not find latest revision for {repo}")
         return revision
 
-    with app.run():
-        return resolve_revision.remote(hf_repo)
+    return app, resolve_revision
 
 
 class DatasetType(Enum):
@@ -226,16 +225,12 @@ class HuggingFaceDataset(DatasetConfig):
         if self.hf_revision is not None:
             return
 
+        app, resolve_revision = _build_hf_revision_resolver()
         try:
-            from huggingface_hub import dataset_info
-
-            revision = dataset_info(self.hf_repo).sha
-            if revision is None:
-                raise TrainingGymConfigError(
-                    f"Could not find latest revision for {self.hf_repo}"
-                )
+            revision = resolve_revision.local(self.hf_repo)
         except Exception:
-            revision = _resolve_hf_revision_remotely(self.hf_repo)
+            with app.run():
+                revision = resolve_revision.remote(self.hf_repo)
 
         if not revision:
             raise TrainingGymConfigError(
