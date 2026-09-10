@@ -37,6 +37,7 @@ _PATCH_DIR = (
 # over the nightly's checkout and the edits land on that tree.
 _PATCHES = (
     "patch_deepseek_v41_sglang_tree",
+    "patch_deepseek_v41_processor_tokenizer",
     "patch_deepseek_v41_chat_template",
     "patch_deepseek_v41_fp4_dequant_block",
 )
