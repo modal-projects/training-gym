@@ -350,7 +350,7 @@ class TrainingRolloutResult(BaseModel):
             if (summary := parse(item)) is None:
                 continue
             key = f"{training_run_id}__{summary.rollout_id:08d}"
-            if key not in summaries:
+            if key not in summaries and key not in keys:
                 summaries[key] = summary
                 recovered[key] = summary.model_dump(mode="json")
 

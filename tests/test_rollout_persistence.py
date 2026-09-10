@@ -186,7 +186,9 @@ def test_cleanup_removes_individual_summaries(fake_volume, monkeypatch):
     )
 
 
-def test_legacy_summary_and_canonical_gaps_are_recovered_once(fake_volume, monkeypatch):
+def test_stale_legacy_summary_and_canonical_gaps_are_recovered_once(
+    fake_volume, monkeypatch
+):
     known, hidden = _rollout(step=12), _rollout(step=13)
     for result in (known, hidden):
         metadata.vol_put(
@@ -196,7 +198,10 @@ def test_legacy_summary_and_canonical_gaps_are_recovered_once(fake_volume, monke
         )
     metadata.vol_put_summary_items(
         MetadataStore.TRAINING_ROLLOUTS_SUMMARY,
-        [known.to_summary(), _rollout(run_id="other").to_summary()],
+        [
+            {**known.to_summary(), "mean": 0.2, "total": 99},
+            _rollout(run_id="other").to_summary(),
+        ],
     )
     read = fake_volume.read_file._sync_fn
     paths = []
@@ -208,9 +213,13 @@ def test_legacy_summary_and_canonical_gaps_are_recovered_once(fake_volume, monke
     monkeypatch.setattr(fake_volume.read_file, "_sync_fn", track_read)
     summaries = TrainingRolloutResult.list_summaries_for_run("run")
     assert [s.rollout_id for s in summaries] == [12, 13]
+    assert summaries[0].mean == 0.5
+    assert summaries[0].total == 1
+    assert summaries[0].export_size_bytes > 0
     assert summaries[1].export_size_bytes > 0
     assert [p for p in paths if p.startswith("training-rollouts/")] == [
-        "training-rollouts/run__00000013.json"
+        "training-rollouts/run__00000012.json",
+        "training-rollouts/run__00000013.json",
     ]
     paths.clear()
     assert TrainingRolloutResult.list_summaries_for_run("run") == summaries
