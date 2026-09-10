@@ -15,6 +15,7 @@ import threading
 import time
 from queue import Full, Queue
 import atexit
+from http.client import IncompleteRead
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -45,6 +46,12 @@ _ADVANTAGE_PATH = "/api/advantage-distributions"
 _PHASE_TIMEOUT_SECONDS = 1.0
 _STEP_EVENT_TIMEOUT_SECONDS = 5.0
 _ROLLOUT_TIMEOUT_SECONDS = 10.0
+# Rollout and advantage payloads carry every sample of a step; agentic rollouts
+# with 75-turn transcripts run to several MB. Give the dashboard time to store
+# them instead of abandoning the upload at a fixed budget.
+_TIMEOUT_SECONDS_PER_MB = 4.0
+_MAX_RECORD_TIMEOUT_SECONDS = 120.0
+_RECORD_POST_ATTEMPTS = 3
 REPORT_DRAIN_POST_TIMEOUT_SECONDS = 1.0
 REPORT_DRAIN_FINAL_POST_TIMEOUT_SECONDS = _ROLLOUT_TIMEOUT_SECONDS
 REPORT_DRAIN_FINAL_POST_COUNT = 4
@@ -199,32 +206,33 @@ def _enqueue(
 
 def _enqueue_rollout(payload: dict[str, Any]) -> None:
     """Enqueue a rollout-data payload (large, longer timeout)."""
-    if _REPORTER_DRAINING:
-        return
-    url = _rollout_url()
-    if not url:
-        return
-    _ensure_worker()
-    item = {"_url": url, "_timeout": _ROLLOUT_TIMEOUT_SECONDS, **payload}
-    try:
-        _REPORT_QUEUE.put_nowait(item)
-    except Exception:
-        pass
+    _enqueue_record(payload, _rollout_url())
 
 
 def _enqueue_advantage(payload: dict[str, Any]) -> None:
-    """Enqueue an advantage-distribution payload (longer timeout like rollouts)."""
-    if _REPORTER_DRAINING:
-        return
-    url = _advantage_url()
+    """Enqueue an advantage-distribution payload."""
+    _enqueue_record(payload, _advantage_url())
+
+
+def _enqueue_record(payload: dict[str, Any], url: str) -> None:
     if not url:
         return
+    item = {
+        **payload,
+        "_url": url,
+        "_timeout": _ROLLOUT_TIMEOUT_SECONDS,
+        "_scale_timeout_with_size": True,
+    }
+    if _REPORTER_DRAINING:
+        item["_failure_reason"] = {"reason": "reporter draining"}
+        _warn_if_record_dropped(item)
+        return
     _ensure_worker()
-    item = {"_url": url, "_timeout": _ROLLOUT_TIMEOUT_SECONDS, **payload}
     try:
         _REPORT_QUEUE.put_nowait(item)
-    except Exception:
-        pass
+    except Full:
+        item["_failure_reason"] = {"reason": "queue full"}
+        _warn_if_record_dropped(item)
 
 
 def _enqueue_timing(payload: dict[str, Any], *, final: bool = False) -> None:
@@ -325,6 +333,56 @@ def _retry_timing_final_during_drain(payload: dict[str, Any], retries: int) -> b
     return False
 
 
+def _warn_if_record_dropped(payload: dict[str, Any]) -> None:
+    """Report unacknowledged records without logging sample contents."""
+    if not _is_record(payload):
+        return
+    kind = (
+        "advantage"
+        if str(payload["_url"]).rstrip("/").endswith(_ADVANTAGE_PATH)
+        else "rollout"
+    )
+    reason = payload.get("_failure_reason") or {}
+    detail = ", ".join(f"{key}={value}" for key, value in sorted(reason.items()))
+    print(
+        f"[training-gym] {kind} upload for run {payload.get('training_run_id')} "
+        f"step {payload.get('rollout_id')} was not acknowledged by the dashboard "
+        f"({detail or 'no response'}); the record may be missing from the run page.",
+        flush=True,
+    )
+
+
+def _is_record(item: dict[str, Any]) -> bool:
+    return (
+        str(item.get("_url", "")).rstrip("/").endswith((_ROLLOUT_PATH, _ADVANTAGE_PATH))
+    )
+
+
+def _post_record(item: dict[str, Any]) -> bool:
+    """Retry idempotent record writes, within the process-exit drain deadline.
+
+    Keep retries on the worker so queue.join/drain includes pending attempts.
+    A timeout can mean the server saved the record but its reply was lost.
+    """
+    for attempt in range(_RECORD_POST_ATTEMPTS):
+        if _REPORTER_DRAINING and _REPORT_DRAIN_DEADLINE is not None:
+            if time.monotonic() >= _REPORT_DRAIN_DEADLINE:
+                item["_failure_reason"] = {"reason": "drain deadline expired"}
+                return False
+        if _post(item):
+            return True
+        status = (item.get("_failure_reason") or {}).get("http_status")
+        if status is not None and status not in (408, 429, 500, 502, 503, 504):
+            return False
+        if attempt + 1 == _RECORD_POST_ATTEMPTS:
+            break
+        delay = float(2**attempt)
+        if _REPORTER_DRAINING and _REPORT_DRAIN_DEADLINE is not None:
+            delay = min(delay, max(0.0, _REPORT_DRAIN_DEADLINE - time.monotonic()))
+        time.sleep(delay)
+    return False
+
+
 def _worker() -> None:
     while True:
         try:
@@ -355,7 +413,11 @@ def _worker() -> None:
                 _REPORT_QUEUE.task_done()
         try:
             try:
-                delivered = _post(payload)
+                delivered = (
+                    _post_record(payload) if _is_record(payload) else _post(payload)
+                )
+                if not delivered:
+                    _warn_if_record_dropped(payload)
                 retries = int(payload.get("_retry_count", 0) or 0)
                 if delivered and payload.get("final", False):
                     key = (
@@ -377,6 +439,8 @@ def _worker() -> None:
                     elif not _REPORTER_DRAINING:
                         _schedule_timing_retry(payload, retries - 1)
             except Exception as exc:
+                payload["_failure_reason"] = {"exception_type": type(exc).__name__}
+                _warn_if_record_dropped(payload)
                 if payload.get("_timing_debug"):
                     debug_payload = {
                         "event": "post_attempt",
@@ -403,8 +467,17 @@ def _post(item: dict[str, Any]) -> bool:
     timeout = float(
         item.get("_timeout", _PHASE_TIMEOUT_SECONDS) or _PHASE_TIMEOUT_SECONDS
     )
+    body = json.dumps(
+        {key: value for key, value in item.items() if not key.startswith("_")},
+        default=str,
+    ).encode("utf-8")
+    if item.get("_scale_timeout_with_size"):
+        timeout = min(
+            _MAX_RECORD_TIMEOUT_SECONDS,
+            max(timeout, len(body) / 1e6 * _TIMEOUT_SECONDS_PER_MB),
+        )
     if _REPORTER_DRAINING:
-        if _is_final_timing(item):
+        if _is_final_timing(item) or _is_record(item):
             remaining = (
                 _REPORT_DRAIN_DEADLINE - time.monotonic()
                 if _REPORT_DRAIN_DEADLINE is not None
@@ -417,11 +490,6 @@ def _post(item: dict[str, Any]) -> bool:
     timing_debug = item.get("_timing_debug", False)
     if not url:
         return False
-
-    body = json.dumps(
-        {key: value for key, value in item.items() if not key.startswith("_")},
-        default=str,
-    ).encode("utf-8")
 
     from modal_training_gym.common.config import modal_proxy_auth_headers
 
@@ -445,13 +513,14 @@ def _post(item: dict[str, Any]) -> bool:
         with urlopen(request, timeout=timeout) as response:
             response.read()
         result = "ok"
-    except (OSError, URLError) as exc:
+    except (OSError, URLError, IncompleteRead) as exc:
         failure_reason = {
             "exception_type": type(exc).__name__,
             "message": str(exc),
         }
         if isinstance(exc, HTTPError):
             failure_reason["http_status"] = exc.code
+    item["_failure_reason"] = failure_reason
     if timing_debug:
         debug_payload = {
             "event": "post_attempt",

@@ -9,6 +9,7 @@ from modal.exception import InvalidError, NotFoundError
 from modal_training_gym.common.advantage_distribution import AdvantageDistribution
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.step_timing import RoleTimingRecord
+from modal_training_gym.common.training_rollout import TrainingRolloutResult
 from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import (
     MetadataStore,
@@ -76,6 +77,10 @@ def cleanup(*, older_than_days: int = 7, dry_run: bool = False) -> None:
             MetadataStore.ADVANTAGE_DISTRIBUTIONS,
             AdvantageDistribution.run_prefix(rid),
         )
+        deleted_rollouts += vol_remove_keys_with_prefix(
+            MetadataStore.TRAINING_ROLLOUTS, f"{rid}__"
+        )
+        vol_remove_keys_with_prefix(TrainingRolloutResult.summary_store(rid), "")
         timing_volume = metadata._metadata_volume()
         metadata._safe_reload(timing_volume)
         try:
@@ -86,23 +91,6 @@ def cleanup(*, older_than_days: int = 7, dry_run: bool = False) -> None:
             if "No such file or directory" not in str(exc):
                 raise
         deleted_tokens += 1
-
-    rollout_summary = (
-        vol_get_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY) or []
-    )
-    kept_rollout_items = []
-    for item in rollout_summary:
-        if item.get("training_run_id") in target_ids:
-            key = item.get("summary_key") or ""
-            if key:
-                vol_remove(MetadataStore.TRAINING_ROLLOUTS, key)
-                deleted_rollouts += 1
-        else:
-            kept_rollout_items.append(item)
-    if deleted_rollouts:
-        vol_put_summary_items(
-            MetadataStore.TRAINING_ROLLOUTS_SUMMARY, kept_rollout_items
-        )
 
     run_summary = vol_get_summary_items(MetadataStore.TRAINING_RUNS_SUMMARY) or []
     kept_run_items = [
