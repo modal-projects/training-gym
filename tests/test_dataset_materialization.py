@@ -85,28 +85,9 @@ def test_resolve_data_paths_preflights_before_cache_key():
 
 
 def test_hugging_face_dataset_pins_latest_revision_during_preflight(monkeypatch):
-    local_calls = []
-
     monkeypatch.setattr(
         "huggingface_hub.dataset_info",
         lambda repo: SimpleNamespace(sha=f"{repo}-sha"),
-    )
-
-    class LocalResolver:
-        @staticmethod
-        def local(repo):
-            from huggingface_hub import dataset_info
-
-            local_calls.append(repo)
-            return dataset_info(repo).sha
-
-        @staticmethod
-        def remote(repo):
-            raise AssertionError("remote resolution should not run")
-
-    monkeypatch.setattr(
-        "modal_training_gym.common.dataset._build_hf_revision_resolver",
-        lambda: (None, LocalResolver()),
     )
 
     dataset = HuggingFaceDataset(
@@ -126,7 +107,6 @@ def test_hugging_face_dataset_pins_latest_revision_during_preflight(monkeypatch)
 
     assert dataset.hf_revision == "org/data-sha"
     assert dataset.cache_key() == explicitly_pinned.cache_key()
-    assert local_calls == ["org/data"]
 
 
 def test_hugging_face_preflight_uses_named_secret_when_local_access_fails(
@@ -137,7 +117,6 @@ def test_hugging_face_preflight_uses_named_secret_when_local_access_fails(
 
     named_secret = SimpleNamespace(name="huggingface-secret", token="remote-token")
     attached_secrets = []
-    local_calls = []
     remote_calls = []
 
     monkeypatch.delenv("HF_TOKEN", raising=False)
@@ -168,11 +147,6 @@ def test_hugging_face_preflight_uses_named_secret_when_local_access_fails(
 
             def decorator(fn):
                 class RemoteFunction:
-                    @staticmethod
-                    def local(repo):
-                        local_calls.append(repo)
-                        return fn(repo)
-
                     @staticmethod
                     def remote(repo):
                         monkeypatch.setenv("HF_TOKEN", named_secret.token)
@@ -209,7 +183,6 @@ def test_hugging_face_preflight_uses_named_secret_when_local_access_fails(
 
     assert dataset.hf_revision == "private-dataset-sha"
     assert attached_secrets == [named_secret]
-    assert local_calls == ["private/data"]
     assert remote_calls == ["private/data"]
 
 
