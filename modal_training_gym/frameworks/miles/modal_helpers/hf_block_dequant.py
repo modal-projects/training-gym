@@ -5,9 +5,9 @@ DeepSeek's native checkpoints (V4.1 onwards) ship fp8 e4m3 dense weights with
 32-column e8m0 scales, each next to a sibling ``<name>.scale`` tensor. mbridge
 maps HF names onto bf16 Megatron parameters and only reshapes: a raw fp8 tensor
 is upcast without its scale and a packed fp4 tensor has half the columns the
-parameter expects, so the load scatters mismatched shapes. This module wraps
-``SafeTensorIO.load_some_hf_weight`` so every weight with a sibling scale comes
-back dequantized to bf16 and the rest of the bridge sees a plain bf16 checkpoint.
+parameter expects, so the load scatters mismatched shapes. This module wraps the
+bridge's safetensor reader so every weight with a sibling scale comes back
+dequantized to bf16 and the rest of the bridge sees a plain bf16 checkpoint.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def dequant_fp4_packed(weight: torch.Tensor, scale: torch.Tensor) -> torch.Tenso
     m, half = weight.shape
     packed = weight.view(torch.uint8)
     nibbles = torch.stack([packed & 0x0F, packed >> 4], dim=-1).reshape(m, half * 2)
-    values = FP4_TABLE[nibbles.to(torch.long)]
+    values = FP4_TABLE.to(weight.device)[nibbles.to(torch.long)]
     scale = e8m0_to_float(scale).repeat_interleave(FP4_BLOCK, dim=1)
     return (values * scale).to(torch.bfloat16)
 
@@ -78,29 +78,45 @@ def dequant(weight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     raise TypeError(f"no block dequantization for {weight.dtype}")
 
 
-def install() -> None:
-    from mbridge.core.safetensor_io import SafeTensorIO
+QUANTIZED_DTYPES = (torch.float8_e4m3fn, torch.int8, torch.uint8)
 
-    original = SafeTensorIO.load_some_hf_weight
 
-    def load_some_hf_weight(self, hf_weight_names: list[str]) -> dict:
-        available = set(self.index) if self.index else set(self.load_hf_weight_names())
+def wrap_safetensor_io(io):
+    """Make ``io.load_some_hf_weight`` return dequantized bf16 for block-scaled weights.
+
+    Wraps the instance rather than a class: DeepSeek bridges swap in
+    ``SafeTensorIO`` subclasses (the V3 ``_scale_inv`` dequantizer passes
+    ``.scale`` checkpoints through untouched), so a class patch on the base
+    would be shadowed by their overrides.
+    """
+    original = io.load_some_hf_weight
+
+    def load_some_hf_weight(hf_weight_names: list[str]) -> dict:
+        available = set(io.index) if io.index else set(io.load_hf_weight_names())
         scales = {
             name: scale_name(name)
             for name in hf_weight_names
             if scale_name(name) in available and scale_name(name) != name
         }
-        loaded = original(self, list(hf_weight_names) + sorted(set(scales.values())))
+        loaded = original(list(hf_weight_names) + sorted(set(scales.values())))
         out = {}
         for name in hf_weight_names:
             weight = loaded[name]
-            if name in scales and weight.dtype in (
-                torch.float8_e4m3fn,
-                torch.int8,
-                torch.uint8,
-            ):
+            if name in scales and weight.dtype in QUANTIZED_DTYPES:
                 weight = dequant(weight, loaded[scales[name]])
             out[name] = weight
         return out
 
-    SafeTensorIO.load_some_hf_weight = load_some_hf_weight
+    io.load_some_hf_weight = load_some_hf_weight
+    return io
+
+
+def install() -> None:
+    from mbridge.core.bridge import Bridge
+
+    original = Bridge._get_safetensor_io
+
+    def _get_safetensor_io(self, weights_path: str):
+        return wrap_safetensor_io(original(self, weights_path))
+
+    Bridge._get_safetensor_io = _get_safetensor_io
