@@ -90,9 +90,9 @@ def wrap_safetensor_io(io):
     would be shadowed by their overrides.
     """
     original = io.load_some_hf_weight
+    available = set(io.index) if io.index else set(io.load_hf_weight_names())
 
     def load_some_hf_weight(hf_weight_names: list[str]) -> dict:
-        available = set(io.index) if io.index else set(io.load_hf_weight_names())
         scales = {
             name: scale_name(name)
             for name in hf_weight_names
