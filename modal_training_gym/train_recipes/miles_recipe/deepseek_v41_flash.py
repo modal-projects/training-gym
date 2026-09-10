@@ -1,12 +1,14 @@
 """DeepSeek-V4.1-Flash GRPO recipe, ported from upstream's ``run_deepseek_v41.py``."""
 
 from dataclasses import field
+from pathlib import Path
 from typing import ClassVar
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.models import DeepSeek_V4_1_Flash, ModelConfig
+from modal_training_gym.common.patches import encode_patch
 from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 
 # radixark/miles#3179 (DeepSeek-V4.1 RL support) and sgl-project/sglang#38798
@@ -19,6 +21,25 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 _MILES_PR = "pull/3179/head"  # b7e51b026e6d5cb681d145794be1af666e037520
 _SGLANG_PR = "pull/38798/head"  # 1aa0e962b206102b7c439a4a0c4981cfec6e87bc
 
+_PATCH_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "frameworks"
+    / "miles"
+    / "modal_helpers"
+    / "patches"
+)
+
+# Build-time shims for gaps in the overlaid refs; see each patch's docstring.
+# They run after ``apply_source_overlays`` so they land on the checked-out tree.
+_PATCHES = ("patch_deepseek_v41_chat_template",)
+
+
+def _image_patches() -> list[str]:
+    return [
+        f"echo {encode_patch(name, _PATCH_DIR)} | base64 -d | python3"
+        for name in _PATCHES
+    ]
+
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
@@ -29,6 +50,7 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     docker_image: str = "radixark/miles:dev-202609100049"
     miles_git_ref: str | None = _MILES_PR
     sglang_git_ref: str | None = _SGLANG_PR
+    image_run_commands: list[str] = field(default_factory=_image_patches)
     gpu_type: str = "H200"
     # The fp32 optimizer state is offloaded to host RAM: ~8.5B params per GPU at
     # 12 bytes each is ~100 GiB per rank.
@@ -175,3 +197,21 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     # The first engine start compiles deepgemm kernels for a 560B MoE; without a
     # long grace period the health checker kills the engines mid-warmup.
     rollout_health_check_first_wait: int = 3600
+
+    @model_validator(mode="after")
+    def _keep_image_patches(self) -> "DeepSeek_V4_1_Flash_Recipe":
+        """Keep the build-time patches at the head of ``image_run_commands``.
+
+        The field is replaced wholesale, so a caller adding their own command
+        would otherwise drop the chat-template shim and every prompt would fail
+        to render.
+        """
+        patches = _image_patches()
+        current = list(self.image_run_commands or [])
+        if current[: len(patches)] != patches:
+            object.__setattr__(
+                self,
+                "image_run_commands",
+                [*patches, *(c for c in current if c not in patches)],
+            )
+        return self
