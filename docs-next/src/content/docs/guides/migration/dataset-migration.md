@@ -98,7 +98,7 @@ You then implement these additional methods to migrate other aspects of your dat
 
 These fields have been removed:
 
-* `always_prepare` has been removed on the base `DatasetConfig` class. For `HarborDataset`, this functionality is now provided by the `always_download` property. For custom subclasses, returning `None` from `cache_key()` is equivalent to setting `always_prepare` to `True`.
+* `always_prepare` has been removed on the base `DatasetConfig` class. For `HarborDataset`, this functionality is now provided by the `always_fetch` property. For custom subclasses, returning `None` from `cache_key()` is equivalent to setting `always_prepare` to `True`.
 * `writes_eval_paths` has been removed, as evaluation datasets are now completely separate from training datasets.
 * `dataset_id` and `name` have been removed altogether.
 
