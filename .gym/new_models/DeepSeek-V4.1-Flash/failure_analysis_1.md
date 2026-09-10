@@ -174,3 +174,28 @@ recipe image (`.gym/probe_fp4_dequant_moe.py`): the 32-block cast is lossless
 against a table dequant, `fused_moe(block_shape=[32, 32])` runs and matches an
 fp32 reference to 4% mean relative error (fp8 activation quant noise). The
 stuck app was stopped by hand.
+
+## Run 16: one engine rank SIGKILLed while reading HF shards
+
+Checkpoint cache hit, Megatron loaded and offloaded (62.5 GB/rank to host),
+engines began loading. Seven nodes finished their 48 shards in 2.5-3 min; on
+one node rank 0 died ~100 s into the load:
+
+    RuntimeError: Rank 0 scheduler died during initialization (exit code: -9).
+    If exit code is -9 (SIGKILL), a common cause is the OS OOM killer.
+
+Nothing in the dequant patch touches host memory (it runs on the GPU in
+`process_weights_after_loading`), so this is the load itself. Each of the 8 TP
+ranks reads all 48 ~10 GB shards through sglang's buffered multi-thread loader,
+which keeps `num_threads + 1 = 9` mmap'd shards in flight per rank, and the
+Modal sandbox charges mmap'd file pages to the process (the same behaviour that
+SIGKILLed the conversion in runs 8-9) — up to ~720 GB of page-cache pressure on
+top of ~500 GB of offloaded Megatron weights on a 2 TB node (probed:
+`MemTotal 2096911076 kB`, no cgroup limit exposed). Run 15 survived the same
+load; run 16 did not, which is what a timing-dependent page-cache race looks
+like. Fixed by bounding the loader through `extra_config`:
+`sglang_weight_loader_disable_mmap` (eager reads, freed after each shard),
+`sglang_weight_loader_drop_cache_after_load` (`posix_fadvise(DONTNEED)` per
+shard) and `sglang_model_loader_extra_config='{"num_threads": 2}'` (3 shards in
+flight per rank). Verified the overrides survive miles' ServerArgs argv
+round-trip inside the recipe image (`.gym/probe_sglang_loader_argv.py`).

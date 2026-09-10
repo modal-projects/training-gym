@@ -201,7 +201,21 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     # ``device`` when a ServerArgs is constructed, and miles always renders it on
     # the engine command line, so an unset device becomes ``--device None`` and
     # fails its own argv round-trip check. Naming the device sidesteps that.
-    extra_config: dict | None = field(default_factory=lambda: {"sglang_device": "cuda"})
+    #
+    # Each TP rank reads all 48 ~10 GB HF shards while the co-located Megatron
+    # ranks hold their offloaded weights in host RAM. sglang's default loader
+    # keeps 9 mmap'd shards in flight per rank, and the sandbox counts those
+    # pages against the container, so 8 ranks can exhaust the 2 TB node and get
+    # a scheduler SIGKILLed mid-load. Read shards eagerly with a 2-shard window
+    # and drop each from the page cache once it is copied to the GPU.
+    extra_config: dict | None = field(
+        default_factory=lambda: {
+            "sglang_device": "cuda",
+            "sglang_weight_loader_disable_mmap": True,
+            "sglang_weight_loader_drop_cache_after_load": True,
+            "sglang_model_loader_extra_config": '{"num_threads": 2}',
+        }
+    )
 
     rollout_health_check_interval: int = 300
     rollout_health_check_timeout: int = 300
