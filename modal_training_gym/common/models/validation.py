@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from ..framework import Framework
 from .base import ModelConfig
+from .deepseek_v41_flash import DeepSeek_V4_1_Flash
 from .gemma4_26b_a4b import Gemma4_26B_A4B
 from .inkling_small import Inkling_Small
 from .moonlight_16b_a3b_instruct import Moonlight_16B_A3B_Instruct
@@ -109,4 +110,10 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
         "Gemma-4-26B-A4B-it", Gemma4_26B_A4B, Framework.MILES, run_on_pr=False
     ),
     _ValidationConfig("Inkling-Small", Inkling_Small, Framework.MILES, run_on_pr=False),
+    _ValidationConfig(
+        "DeepSeek-V4.1-Flash",
+        DeepSeek_V4_1_Flash,
+        Framework.MILES,
+        run_on_pr=False,
+    ),
 }

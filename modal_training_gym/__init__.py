@@ -32,6 +32,14 @@ _EXPORTS = {
     "Sample": ("modal_training_gym.common.sample", "Sample"),
     "extract_code": ("modal_training_gym.common.eval", "extract_code"),
     "HarborEval": ("modal_training_gym.common.eval", "HarborEval"),
+    "DeepSeek_V4_1_Flash": (
+        "modal_training_gym.common.models",
+        "DeepSeek_V4_1_Flash",
+    ),
+    "DeepSeek_V4_1_Flash_Recipe": (
+        "modal_training_gym.train_recipes.miles_recipe",
+        "DeepSeek_V4_1_Flash_Recipe",
+    ),
     "Gemma4_26B_A4B": ("modal_training_gym.common.models", "Gemma4_26B_A4B"),
     "Gemma4_26B_A4B_Recipe": (
         "modal_training_gym.train_recipes.miles_recipe",
@@ -229,6 +237,8 @@ __all__ = [
     "DatasetConfig",
     "DeepSeek_V4_Flash_SglangRecipe",
     "Endpoint",
+    "DeepSeek_V4_1_Flash",
+    "DeepSeek_V4_1_Flash_Recipe",
     "Gemma4_26B_A4B",
     "Gemma4_26B_A4B_Recipe",
     "GLM_4_7",

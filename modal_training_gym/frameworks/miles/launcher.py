@@ -97,6 +97,8 @@ def _validate_resume_checkpoint(
 
 
 MILES_ROOT = "/root/miles"
+# Editable install location of sglang inside the miles images.
+SGLANG_ROOT = "/sgl-workspace/sglang"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
 # libibverbs and the libmlx5 provider come from incompatible rdma package versions for miles multi-node training
 # reinstalling fixes this issue, mooncake transferengine imports successfully
@@ -432,6 +434,36 @@ def build_ray_runtime_env(
     return {"env_vars": env_vars}
 
 
+def apply_source_overlays(image: Image, miles: MilesRecipe) -> Image:
+    """Check out upstream sglang/miles refs over the image's own copies.
+
+    Lets a recipe train on support that landed after the last image build:
+    sglang is an editable install and miles is run from a source checkout, so
+    a checkout is all it takes as long as no compiled extension changed.
+    """
+    if miles.sglang_git_ref:
+        image = image.run_commands(
+            f"cd {SGLANG_ROOT} && git fetch --depth=1 origin {miles.sglang_git_ref}"
+            " && git checkout -f FETCH_HEAD"
+        )
+
+    if miles.miles_git_ref:
+        image = image.run_commands(
+            f"cd {MILES_ROOT} && git fetch --depth=1 origin {miles.miles_git_ref}"
+            " && git checkout -f FETCH_HEAD",
+            # The checkout just reverted the patched miles sources.
+            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
+            " || echo 'WARNING: sglang abort patch did not apply to the"
+            " miles_git_ref checkout; transient router failures during rollout"
+            " cleanup may crash the run'",
+            *_REPORTING_PATCH_COMMANDS,
+            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3"
+            " || echo 'WARNING: substep timing patch did not apply to the"
+            " miles_git_ref checkout; substep timings will be missing'",
+        )
+    return image
+
+
 def build_miles_app(
     *,
     training_run_id: str,
@@ -480,6 +512,8 @@ def build_miles_app(
             " cleanup may crash the run'",
             *_REPORTING_PATCH_COMMANDS,
         )
+
+    image = apply_source_overlays(image, miles)
 
     if miles.image_run_commands:
         image = image.run_commands(*miles.image_run_commands)
