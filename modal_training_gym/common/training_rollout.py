@@ -27,8 +27,8 @@ from modal_training_gym.utils.metadata import (
     vol_get_summary_items,
     vol_list,
     vol_list_keys,
-    vol_put,
     vol_put_many,
+    vol_put_records,
 )
 
 
@@ -303,27 +303,13 @@ class TrainingRolloutResult(BaseModel):
         self._touch_created_at()
         payload = self.model_dump(mode="json")
         summary = self._stored_summary(payload)
-        # Canonical data first; readers recover an interrupted summary write.
-        # Each step owns its summary file, so writers never replace a shared index.
-        if is_async:
-
-            async def _run() -> None:
-                await vol_put(
-                    MetadataStore.TRAINING_ROLLOUTS,
-                    self.storage_key,
-                    payload,
-                    is_async=True,
-                )
-                await vol_put(
-                    self.summary_store(self.training_run_id),
-                    self.storage_key,
-                    summary,
-                    is_async=True,
-                )
-
-            return _run()
-        vol_put(MetadataStore.TRAINING_ROLLOUTS, self.storage_key, payload)
-        vol_put(self.summary_store(self.training_run_id), self.storage_key, summary)
+        return vol_put_records(
+            [
+                (MetadataStore.TRAINING_ROLLOUTS, self.storage_key, payload),
+                (self.summary_store(self.training_run_id), self.storage_key, summary),
+            ],
+            is_async=is_async,
+        )
 
     @classmethod
     def list_summaries_for_run(
@@ -355,15 +341,18 @@ class TrainingRolloutResult(BaseModel):
             vol_list_keys(MetadataStore.TRAINING_ROLLOUTS, f"{training_run_id}__")
         )
         recovered: dict[str, dict[str, Any]] = {}
-        legacy = vol_get_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY) or []
+        legacy = (
+            vol_get_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY) or []
+            if not summaries or keys - summaries.keys()
+            else []
+        )
         for item in legacy:
             if (summary := parse(item)) is None:
                 continue
             key = f"{training_run_id}__{summary.rollout_id:08d}"
             if key not in summaries:
                 summaries[key] = summary
-                if key in keys:
-                    recovered[key] = summary.model_dump(mode="json")
+                recovered[key] = summary.model_dump(mode="json")
 
         for key in sorted(keys - summaries.keys()):
             try:

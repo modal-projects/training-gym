@@ -4,6 +4,7 @@ import json
 from http.client import IncompleteRead
 from io import BytesIO
 from queue import Queue
+from unittest.mock import Mock
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -156,6 +157,37 @@ def test_drain_stops_retrying_at_deadline(monkeypatch):
     assert not reporting._post_record(item)
     assert calls == [0.5]
     assert now[0] == 100.5
+
+
+def test_shutdown_budget_allows_full_large_record_retries(monkeypatch):
+    item = _item(text="x" * 31_000_000)
+    thread = Mock()
+    now = [100.0]
+    monkeypatch.setattr(reporting.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        reporting.time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay)
+    )
+    monkeypatch.setattr(reporting, "_REPORTER_THREAD", thread)
+    monkeypatch.setattr(reporting, "_REPORTER_STARTED", True)
+    monkeypatch.setattr(reporting, "_REPORT_DRAIN_SENTINEL_QUEUED", False)
+    monkeypatch.setattr(reporting, "_run_pre_drain_hooks", lambda: None)
+    reporting._drain_report_queue()
+    thread.join.assert_called_once_with(timeout=reporting.REPORT_DRAIN_TIMEOUT_SECONDS)
+    now[0] += (
+        reporting.REPORT_DRAIN_FINAL_POST_TIMEOUT_SECONDS
+        * reporting.REPORT_DRAIN_FINAL_POST_COUNT
+    )
+    timeouts = []
+
+    def send(request, timeout):
+        timeouts.append(timeout)
+        now[0] += timeout
+        raise TimeoutError()
+
+    monkeypatch.setattr(reporting, "urlopen", send)
+    assert not reporting._post_record(item)
+    assert timeouts == [120.0, 120.0, 120.0]
+    assert now[0] <= reporting._REPORT_DRAIN_DEADLINE
 
 
 @pytest.mark.parametrize("kind", ["rollout", "advantage"])

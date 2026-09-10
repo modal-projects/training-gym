@@ -84,24 +84,61 @@ def test_listing_reads_only_small_summaries(fake_volume, monkeypatch):
 
 
 @pytest.mark.parametrize("is_async", [False, True])
-def test_failed_summary_write_is_recoverable(fake_volume, monkeypatch, is_async):
-    from modal_training_gym.common import training_rollout
+def test_overwrite_commits_data_and_summary_together(
+    fake_volume, monkeypatch, is_async
+):
+    batches = []
+    fail = False
 
-    put = training_rollout.vol_put
+    class Batch:
+        def __init__(self, force=False):
+            self.files = {}
+            batches.append(self.files)
 
-    def fail_summary(store, *args, **kwargs):
-        if store == TrainingRolloutResult.summary_store("run"):
-            raise OSError("summary write failed")
-        return put(store, *args, **kwargs)
+        def __enter__(self):
+            return self
 
-    monkeypatch.setattr(training_rollout, "vol_put", fail_summary)
-    with pytest.raises(OSError, match="summary write failed"):
+        def put_file(self, fileobj, path):
+            self.files[path] = fileobj.read()
+
+        def __exit__(self, *args):
+            if fail:
+                raise OSError("commit failed")
+            fake_volume.files.update(self.files)
+
+        async def __aenter__(self):
+            return self.__enter__()
+
+        async def __aexit__(self, *args):
+            return self.__exit__(*args)
+
+    def save(result):
         if is_async:
-            asyncio.run(_rollout().save(is_async=True))
+            asyncio.run(result.save(is_async=True))
         else:
-            _rollout().save()
-    assert list(fake_volume.files) == ["training-rollouts/run__00000000.json"]
-    assert len(TrainingRolloutResult.list_summaries_for_run("run")) == 1
+            result.save()
+
+    monkeypatch.setattr(fake_volume, "batch_upload", Batch)
+    result = _rollout()
+    save(result)
+    assert len(batches) == 1
+    assert len(batches[0]) == 2
+    before = dict(fake_volume.files)
+    result.samples[0].score = 1.0
+    fail = True
+    with pytest.raises(OSError, match="commit failed"):
+        save(result)
+    assert fake_volume.files == before
+    fail = False
+    save(result)
+    assert len(batches) == 3
+    assert TrainingRolloutResult.list_summaries_for_run("run")[0].mean == 1.0
+    assert (
+        metadata.vol_get(MetadataStore.TRAINING_ROLLOUTS, result.storage_key)[
+            "samples"
+        ][0]["score"]
+        == 1.0
+    )
 
 
 def test_listing_skips_invalid_summary(fake_volume):
@@ -178,11 +215,18 @@ def test_legacy_summary_and_canonical_gaps_are_recovered_once(fake_volume, monke
     paths.clear()
     assert TrainingRolloutResult.list_summaries_for_run("run") == summaries
     assert not any(p.startswith("training-rollouts/") for p in paths)
+    assert "training-rollouts-summary/summary.json" not in paths
 
 
 def test_new_summaries_win_over_legacy_and_legacy_rows_remain_visible(fake_volume):
     result = _rollout(step=13)
     result.save()
+    older = _rollout(step=12)
+    metadata.vol_put(
+        MetadataStore.TRAINING_ROLLOUTS,
+        older.storage_key,
+        older.model_dump(mode="json"),
+    )
     metadata.vol_put_summary_items(
         MetadataStore.TRAINING_ROLLOUTS_SUMMARY,
         [
@@ -217,6 +261,26 @@ def test_missing_legacy_summary_recovers_canonical_and_discovers_later_steps(
     assert [
         s.rollout_id for s in TrainingRolloutResult.list_summaries_for_run("run")
     ] == [13, 18]
+
+
+def test_legacy_only_summary_is_cached(fake_volume, monkeypatch):
+    metadata.vol_put_summary_items(
+        MetadataStore.TRAINING_ROLLOUTS_SUMMARY, [_rollout(step=12).to_summary()]
+    )
+    assert [
+        s.rollout_id for s in TrainingRolloutResult.list_summaries_for_run("run")
+    ] == [12]
+    from modal_training_gym.common import training_rollout
+
+    def unexpected_legacy_read(*args, **kwargs):
+        pytest.fail("legacy index was reread")
+
+    monkeypatch.setattr(
+        training_rollout, "vol_get_summary_items", unexpected_legacy_read
+    )
+    assert [
+        s.rollout_id for s in TrainingRolloutResult.list_summaries_for_run("run")
+    ] == [12]
 
 
 def test_recovery_ignores_bad_records_and_survives_cache_failure(

@@ -274,10 +274,20 @@ def vol_put_many(
     is_async: bool = False,
 ) -> None | Awaitable[None]:
     """Write several keys from one store in a single volume commit."""
+    return vol_put_records(
+        [(store, key, value) for key, value in values.items()], is_async=is_async
+    )
+
+
+def vol_put_records(
+    records: Iterable[tuple[MetadataStore | str, str, dict[str, Any]]],
+    *,
+    is_async: bool = False,
+) -> None | Awaitable[None]:
     vol = _metadata_volume()
     data = {
         f"{_store_path(store)}/{key}.json": json.dumps(value).encode()
-        for key, value in values.items()
+        for store, key, value in records
     }
     if is_async:
 
@@ -945,6 +955,7 @@ __all__ = [
     "vol_get_summary_items",
     "vol_put_summary_items",
     "vol_put_with_summary",
+    "vol_put_records",
     "vol_compact_summary_items",
     "vol_upsert_summary_item",
 ]
