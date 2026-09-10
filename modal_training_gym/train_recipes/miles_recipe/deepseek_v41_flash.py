@@ -81,13 +81,15 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     ref_load: str = "/checkpoints/DeepSeek-V4.1-Flash_torch_dist"
 
     # Two nodes' worth of ranks, expert-sharded so the 384 experts fit. The
-    # converter builds the model on GPU, and the bf16 weights are ~970 GB: at
-    # upstream's single-node layout that is ~121 GiB a rank, which OOMs an H200
-    # (upstream converts on 288 GiB GB300s). PP2 halves it. torch_dist reshards
-    # on load, so this layout is independent of the training one below.
-    conversion_tensor_model_parallel_size: int = 8
-    conversion_pipeline_model_parallel_size: int = 2
-    conversion_expert_model_parallel_size: int = 8
+    # converter builds the model on GPU and the bf16 weights are ~970 GB, so
+    # upstream's single-node layout is ~121 GiB a rank: fine on their 288 GiB
+    # GB300s, an OOM on an H200. Pipelining over 16 ranks halves that again.
+    # TP stays at upstream's 4 — the mbridge V4.1 weight split scatters
+    # mismatched shards at TP8 (129280 vocab rows against 8 * 16192). torch_dist
+    # reshards on load, so this layout is independent of the training one below.
+    conversion_tensor_model_parallel_size: int = 4
+    conversion_pipeline_model_parallel_size: int = 4
+    conversion_expert_model_parallel_size: int = 4
     conversion_expert_tensor_parallel_size: int = 1
     # The bf16 torch_dist checkpoint is ~1.1 TB, and a Volume buffers writes on
     # container-local disk before committing them.
