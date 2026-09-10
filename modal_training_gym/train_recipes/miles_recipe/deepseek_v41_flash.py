@@ -31,7 +31,10 @@ _PATCH_DIR = (
 
 # Build-time shims for gaps in the overlaid refs; see each patch's docstring.
 # They run after ``apply_source_overlays`` so they land on the checked-out tree.
-_PATCHES = ("patch_deepseek_v41_chat_template",)
+_PATCHES = (
+    "patch_deepseek_v41_chat_template",
+    "patch_deepseek_v41_fp4_dequant_block",
+)
 
 
 def _image_patches() -> list[str]:

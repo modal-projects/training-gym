@@ -152,3 +152,25 @@ Upstream's 0.6 (84 GB of an H200) does not cover 112 GB of resident weights.
 Raised `sglang_mem_fraction_static` to 0.9, leaving ~11 GB per GPU for the KV
 pool of the smoke step. Modal retried the crashed train function before the
 app was stopped by hand.
+
+## Run 15: engines serve; first forward asserts on the dequantized scale shape
+
+With a 0.9 static budget every engine reached "The server is fired up and ready
+to roll!" (`load_weight=529 s`, `kv_cache_allocation=16 s`, ~13 GB left), but
+the first generation died in the fused-MoE Triton runner:
+
+    assert triton.cdiv(B.shape[-2], block_n) == B_scale.shape[-2]
+
+`cast_e2m1fn_to_e4m3fn` (sglang#38798) hardcodes 128x128 scale blocks for the
+FP4→FP8 expert dequant, which matched DeepSeek-V4's `weight_block_size=[128,
+128]`. DeepSeek-V4.1 declares `[32, 32]`, and the MoE runner keeps reading
+`quant_config.weight_block_size`, so `(N/128, K/128)` scales met a kernel
+configured for `(N/32, K/32)`. Miles' weight sync also quantizes trainer experts
+at the config's block size, so the 128-block parameters would have been wrong
+even without the assert. Fixed with a build-time patch
+(`patch_deepseek_v41_fp4_dequant_block`) that lets the cast take the target
+block size and passes the config's. Verified on one H100 against the real
+recipe image (`.gym/probe_fp4_dequant_moe.py`): the 32-block cast is lossless
+against a table dequant, `fused_moe(block_shape=[32, 32])` runs and matches an
+fp32 reference to 4% mean relative error (fp8 activation quant noise). The
+stuck app was stopped by hand.
