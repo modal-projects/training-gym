@@ -138,3 +138,17 @@ FP4 and taking sglang's Hopper path: `SGLANG_DSV4_FP4_EXPERTS=1` plus
 `SGLANG_DSV4_FP4_DEQUANT=1` (`Fp8MoEMethod` dequantizes e2m1 → e4m3 after load,
 mxfp4 kernels are never selected). Modal retried the crashed train function
 before the app was stopped by hand.
+
+## Run 14: engines load every weight; no static budget left for the KV pool
+
+With the FP4 experts declared and dequantized, all eight engines completed the
+HF load (`Load weight end ... quant=fp8, mem usage=111.65 GB`, Megatron having
+offloaded to 136.9 GB free beforehand), then failed sizing the KV cache:
+
+    ValueError: Loaded weights leave no GPU memory for the KV cache under
+    --mem-fraction-static=0.6. Raise --mem-fraction-static above 0.820
+
+Upstream's 0.6 (84 GB of an H200) does not cover 112 GB of resident weights.
+Raised `sglang_mem_fraction_static` to 0.9, leaving ~11 GB per GPU for the KV
+pool of the smoke step. Modal retried the crashed train function before the
+app was stopped by hand.
