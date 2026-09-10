@@ -6,6 +6,7 @@
   import TimeAgo from "./TimeAgo.svelte";
   import { formatTagValue, getGroupTags } from "../lib/format.js";
   import { normalizeMetricLinks } from "../lib/metricLinks.js";
+  import { isSft } from "../lib/trainingType.js";
 
   // The run-summary block shared by the list drawer and the detail page's
   // Summary tab, so both render identical metadata: status, stage, model,
@@ -149,6 +150,10 @@
 {#if run}
   <div class="run-summary">
     <section class="summary-section">
+      <div class="kv">
+        <span class="kv-key">Training type</span>
+        <span class="kv-value">{isSft(run) ? "Supervised fine-tuning (SFT)" : "Reinforcement learning (RL)"}</span>
+      </div>
       <div class="kv">
         <span class="kv-key">Status</span>
         <StatusPill status={getStatus(run)} />

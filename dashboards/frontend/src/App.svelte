@@ -36,6 +36,7 @@
   let error = $state(null);
   let search = $state("");
   let activeRecipes = $state(new Set());
+  let trainingTypeFilter = $state("");
   let activeStatuses = $state(new Set());
   let activeGroups = $state(new Set());
   let trainingGroupBy = $state("none");
@@ -217,6 +218,7 @@
       group: activeGroups,
     };
     const facets = {};
+    if (trainingTypeFilter) facets.training_type = [trainingTypeFilter];
     for (const [name, selected] of Object.entries(selections)) {
       const universe = universes[name];
       if (!universe.length) continue;
@@ -863,6 +865,7 @@
       />
     {:else if activePage === "training"}
       <TrainingPage
+        bind:trainingTypeFilter
         {totalRuns}
         {matchingRunCount}
         {hasMoreRuns}

@@ -3,6 +3,12 @@ const slot = (name) => `var(--color-c-dataviz-${name})`;
 export const TRAIN_OUTLINE_COLOR = slot("train-outline");
 
 export const CATEGORIES = {
+  data: {
+    label: "Data",
+    color: slot("primary-3"),
+    owner: "prepare_batch",
+    phases: ["prepare_batch"],
+  },
   train: {
     label: "Train",
     color: slot("primary-1"),
@@ -52,7 +58,7 @@ export const CATEGORIES = {
   idle: {
     label: "Idle",
     color: "var(--color-c-gray-30)",
-    phases: ["wait_for_rollout", "wait_for_next_rollout"],
+    phases: ["wait_for_rollout", "wait_for_next_rollout", "wait_for_batch", "wait_for_next_batch"],
   },
 };
 
@@ -71,6 +77,9 @@ export const PHASE_COLORS = {
 };
 
 export const TIMING_LABELS = {
+  prepare_batch: "Prepare training batch",
+  wait_for_batch: "Waiting for training data",
+  wait_for_next_batch: "Waiting for the next batch",
   evaluate_rollouts: "Eval (before training)",
   evaluate_rollouts_end: "Eval (after training)",
   generate_rollouts: "Rollout generation",
@@ -97,6 +106,8 @@ export const TIMING_LABELS = {
 };
 
 export const IDLE_PHASES = new Set([
+  "wait_for_batch",
+  "wait_for_next_batch",
   "wait_for_rollout",
   "wait_for_next_rollout",
 ]);

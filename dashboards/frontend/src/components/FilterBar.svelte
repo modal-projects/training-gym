@@ -16,6 +16,7 @@
     activeGroups,
     allGroupsActive,
     search = $bindable(),
+    trainingTypeFilter = $bindable(""),
     groupBy = $bindable(),
     onToggleRecipe,
     onSelectAllRecipes,
@@ -63,6 +64,14 @@
     />
   </label>
 
+  <label class="filter-button">
+    <span>Training type</span>
+    <select aria-label="Filter by training type" bind:value={trainingTypeFilter} class="bg-transparent text-(--text) text-[12px] [border:0]">
+      <option value="">All</option>
+      <option value="rl">RL</option>
+      <option value="sft">SFT</option>
+    </select>
+  </label>
   <div class="filterbar-menu-wrap">
     <button
       class="filter-button ghost-hover"

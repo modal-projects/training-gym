@@ -13,6 +13,7 @@
   import { formatTagValue, getGroupTags } from "../lib/format.js";
   import { normalizeMetricLinks } from "../lib/metricLinks.js";
   import { toggleInSet } from "../lib/set.js";
+  import { isSft } from "../lib/trainingType.js";
 
   let {
     totalRuns,
@@ -43,6 +44,7 @@
     showFrameworkStatus,
     fmtDuration,
     search = $bindable(),
+    trainingTypeFilter = $bindable(""),
     drawerRunId = null,
     onOpenDetail = () => {},
     onCloseDrawer = () => {},
@@ -256,6 +258,7 @@
 <section class="[border:0] [background:transparent] flex flex-col gap-[24px] p-[0_24px_16px] max-[900px]:p-[0_16px_24px] min-w-0">
   <div class="m-0">
     <FilterBar
+      bind:trainingTypeFilter
       {recipes}
       {recipeCounts}
       {activeRecipes}
@@ -322,6 +325,7 @@
                       onclick={(event) => selectRun(run.run_id, event)}
                     >
                       <div class="block text-(--text-bright) [font-family:var(--font-mono)] [font-weight:400] text-[14px] leading-[20px] overflow-hidden text-ellipsis whitespace-nowrap">{runName}</div>
+                      <span class="text-(--muted) text-[10px]">{isSft(run) ? "SFT" : "RL"}</span>
                     </a>
                   </td>
                   <td class="row-open-cell">
