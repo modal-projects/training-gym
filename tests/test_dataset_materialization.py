@@ -68,7 +68,23 @@ def test_resolve_data_paths_generates_fresh_random_id():
     assert not hasattr(dataset, "_materialization_id")
 
 
-def test_hugging_face_dataset_pins_latest_revision(monkeypatch):
+def test_resolve_data_paths_preflights_before_cache_key():
+    calls = []
+
+    class PreflightDataset(RowsDataset):
+        def preflight(self) -> None:
+            calls.append("preflight")
+
+        def cache_key(self) -> str | None:
+            calls.append("cache_key")
+            return super().cache_key()
+
+    BaseTrainRecipe._resolve_data_paths(PreflightDataset("train"))
+
+    assert calls == ["preflight", "cache_key"]
+
+
+def test_hugging_face_dataset_pins_latest_revision_during_preflight(monkeypatch):
     monkeypatch.setattr(
         "huggingface_hub.dataset_info",
         lambda repo: SimpleNamespace(sha=f"{repo}-sha"),
@@ -86,8 +102,88 @@ def test_hugging_face_dataset_pins_latest_revision(monkeypatch):
         output_column="answer",
     )
 
+    assert dataset.hf_revision is None
+    dataset.preflight()
+
     assert dataset.hf_revision == "org/data-sha"
     assert dataset.cache_key() == explicitly_pinned.cache_key()
+
+
+def test_hugging_face_preflight_uses_named_secret_when_local_access_fails(
+    monkeypatch,
+):
+    import modal
+    import modal_training_gym.common as common
+
+    named_secret = SimpleNamespace(name="huggingface-secret", token="remote-token")
+    attached_secrets = []
+    remote_calls = []
+
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+
+    def gated_dataset_info(repo):
+        import os
+
+        if os.environ.get("HF_TOKEN") != named_secret.token:
+            raise PermissionError(f"{repo} requires authentication")
+        remote_calls.append(repo)
+        return SimpleNamespace(sha="private-dataset-sha")
+
+    class FakeImage:
+        @classmethod
+        def debian_slim(cls, **kwargs):
+            return cls()
+
+        def pip_install(self, *packages):
+            return self
+
+    class FakeApp:
+        def __init__(self, name):
+            assert name == "training-gym-dataset-preflight"
+
+        def function(self, **kwargs):
+            attached_secrets.extend(kwargs["secrets"])
+
+            def decorator(fn):
+                class RemoteFunction:
+                    @staticmethod
+                    def remote(repo):
+                        monkeypatch.setenv("HF_TOKEN", named_secret.token)
+                        try:
+                            return fn(repo)
+                        finally:
+                            monkeypatch.delenv("HF_TOKEN")
+
+                return RemoteFunction()
+
+            return decorator
+
+        def run(self):
+            class RunContext:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+            return RunContext()
+
+    monkeypatch.setattr("huggingface_hub.dataset_info", gated_dataset_info)
+    monkeypatch.setattr(common, "hf_secrets", lambda: [named_secret])
+    monkeypatch.setattr(modal, "App", FakeApp)
+    monkeypatch.setattr(modal, "Image", FakeImage)
+
+    dataset = HuggingFaceDataset(
+        hf_repo="private/data",
+        input_column="prompt",
+        output_column="answer",
+    )
+    dataset.preflight()
+
+    assert dataset.hf_revision == "private-dataset-sha"
+    assert attached_secrets == [named_secret]
+    assert remote_calls == ["private/data"]
 
 
 def test_hugging_face_revision_controls_cache_and_loading(monkeypatch):
@@ -118,7 +214,7 @@ def test_hugging_face_revision_controls_cache_and_loading(monkeypatch):
     assert first._load_hf_dataset() is loaded
     assert calls == [
         (
-            ("org/data", "default"),
+            ("org/data", None),
             {"split": "train", "revision": "revision-a"},
         )
     ]
@@ -286,10 +382,10 @@ def test_harbor_dataset_uses_latest_content_hash(monkeypatch):
     assert dataset._harbor_dataset_ref() == "harbor/example@sha256:abc"
 
 
-def test_harbor_always_download_disables_materialization_reuse():
+def test_harbor_always_fetch_disables_materialization_reuse():
     dataset = HarborDataset(
         dataset_name="harbor/example@1.2.3",
-        always_download=True,
+        always_fetch=True,
     )
 
     assert dataset.cache_key() is None

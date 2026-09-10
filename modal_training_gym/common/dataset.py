@@ -28,6 +28,35 @@ def _materialization_fingerprint(fields: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _resolve_hf_revision_remotely(hf_repo: str) -> str:
+    """Resolve a dataset revision in a CPU container with the configured HF secret."""
+    import modal
+
+    from modal_training_gym.common import hf_secrets
+
+    app = modal.App("training-gym-dataset-preflight")
+    image = modal.Image.debian_slim(python_version="3.12").pip_install(
+        "huggingface_hub"
+    )
+
+    @app.function(
+        image=image,
+        secrets=hf_secrets(),
+        timeout=5 * 60,
+        serialized=True,
+    )
+    def resolve_revision(repo: str) -> str:
+        from huggingface_hub import dataset_info
+
+        revision = dataset_info(repo).sha
+        if revision is None:
+            raise RuntimeError(f"Could not find latest revision for {repo}")
+        return revision
+
+    with app.run():
+        return resolve_revision.remote(hf_repo)
+
+
 class DatasetType(Enum):
     DEFAULT = "default"
     HUGGING_FACE = "hugging_face"
@@ -38,6 +67,13 @@ class DatasetConfig(ABC):
     """Dataset fields and materialization behavior shared across training frameworks."""
 
     _type: DatasetType = DatasetType.DEFAULT
+
+    def preflight(self) -> None:
+        """Resolve configuration required before computing ``cache_key()``.
+
+        The Gym always calls this method before invoking ``cache_key()``.
+        """
+        return None
 
     def cache_key(self) -> str | None:
         return None
@@ -133,7 +169,9 @@ class HuggingFaceDataset(DatasetConfig):
 
     Attributes:
         hf_repo: Hugging Face dataset repository ID.
-        hf_revision: Hugging Face dataset revision. If None, the dataset will be pinned to the latest revision.
+        hf_revision: Hugging Face dataset revision. If omitted, version pinning
+            is deferred until the first training run, when the latest revision
+            is resolved.
         hf_split: Source dataset split.
         hf_config: Source dataset configuration name.
         input_column: Source prompt column.
@@ -147,7 +185,7 @@ class HuggingFaceDataset(DatasetConfig):
     _type: DatasetType = DatasetType.HUGGING_FACE
 
     hf_repo: str
-    hf_revision: str
+    hf_revision: str | None
     hf_split: str
     hf_config: str | None
     input_column: str
@@ -174,15 +212,6 @@ class HuggingFaceDataset(DatasetConfig):
                 f"input_format must be one of text/messages/raw, got {input_format!r}"
             )
 
-        if hf_revision is None:
-            from huggingface_hub import dataset_info
-
-            hf_revision = dataset_info(hf_repo).sha
-            if hf_revision is None:
-                raise TrainingGymConfigError(
-                    f"Could not find latest revision for {hf_repo}"
-                )
-
         self.hf_repo = hf_repo
         self.hf_revision = hf_revision
         self.hf_split = hf_split
@@ -193,7 +222,32 @@ class HuggingFaceDataset(DatasetConfig):
         self.system_prompt = system_prompt
         self.prompt_template = prompt_template
 
+    def preflight(self) -> None:
+        if self.hf_revision is not None:
+            return
+
+        try:
+            from huggingface_hub import dataset_info
+
+            revision = dataset_info(self.hf_repo).sha
+            if revision is None:
+                raise TrainingGymConfigError(
+                    f"Could not find latest revision for {self.hf_repo}"
+                )
+        except Exception:
+            revision = _resolve_hf_revision_remotely(self.hf_repo)
+
+        if not revision:
+            raise TrainingGymConfigError(
+                f"Could not find latest revision for {self.hf_repo}"
+            )
+        self.hf_revision = revision
+
     def cache_key(self) -> str | None:
+        if self.hf_revision is None:
+            raise TrainingGymConfigError(
+                "HuggingFaceDataset.preflight() must run before cache_key()"
+            )
         return _materialization_fingerprint(
             {
                 "hf_repo": self.hf_repo,
