@@ -433,6 +433,7 @@ class TrainConfig:
         metrics = getattr(recipe, "metrics", None)
         summary: dict[str, Any] = {
             "model": {"model_name": model.model_name} if model else {},
+            "training_type": getattr(recipe, "training_type", "rl"),
             "metrics": (
                 metrics.metadata(
                     entity=getattr(metrics, "entity", ""),

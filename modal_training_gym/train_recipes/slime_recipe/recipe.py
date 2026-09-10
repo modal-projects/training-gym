@@ -34,6 +34,11 @@ import modal
 # ── Types ─────────────────────────────────────────────────────────────────────
 
 _SLIME_SKIP = {
+    "training_type",
+    "num_steps",
+    "num_gpus_per_node",
+    "num_nodes",
+    "shuffle",
     "environment",
     "async_mode",
     "metrics",
@@ -90,6 +95,24 @@ _HOOK_WRAPPER_PATHS = {
     "custom_megatron_before_train_step_hook": "modal_training_gym.frameworks.slime.phase_reporting.before_train_step_hook",
 }
 
+_SFT_TRAINING_FIELDS = {
+    "async_mode": True,  # use slime's async mode so next batch is prepared while the current batch trains
+    "colocate": False,
+    "rollout_num_gpus": None,
+    "rollout_function": "slime.rollout.sft_rollout.generate_rollout",  # loads SFT batch
+    "loss_type": "sft_loss",
+    "calculate_per_token_loss": True,
+    "disable_compute_advantages_and_returns": True,
+    "debug_train_only": True,
+    "n_samples_per_prompt": 1,
+    "use_fault_tolerance": False,  # controls SGLang rollout engine health which we don't use
+    "eval_interval": None,
+    "use_critic": False,
+    "use_kl_loss": False,
+    "kl_coef": 0.0,
+    "entropy_coef": 0.0,
+}
+
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class SlimeRecipe(BaseTrainRecipe):
@@ -97,6 +120,9 @@ class SlimeRecipe(BaseTrainRecipe):
 
     Args:
 
+        training_type:
+            Training type. `"rl"` preserves the model recipe unchanged,
+            `"sft"` enables Slime's train-only supervised path.
         name:
             Modal app title. The launcher derives it from the recipe class when
             empty.
@@ -167,6 +193,12 @@ class SlimeRecipe(BaseTrainRecipe):
             Megatron actor nodes.
         actor_num_gpus_per_node:
             GPUs per actor node.
+        num_gpus_per_node:
+            SFT GPUs per training node. ``None`` preserves the model recipe's
+            ``actor_num_gpus_per_node``. Ignored for RL.
+        num_nodes:
+            SFT training nodes. ``None`` preserves the model recipe's
+            ``actor_num_nodes``. Ignored for RL.
         rollout_num_gpus:
             Total GPUs for rollout engines when disaggregated; ``None`` lets the
             allocation resolver size it.
@@ -184,20 +216,25 @@ class SlimeRecipe(BaseTrainRecipe):
             GPUs per critic node.
 
         num_rollout:
-            Training and rollout steps for the run.
+            Training and rollout steps for RL. Derived from ``num_steps`` for SFT.
+        num_steps:
+            Number of SFT optimizer steps. Ignored for RL.
         start_rollout_id:
             Rollout step to start counting from. ``None`` continues from the
             iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
             ``0`` so ``num_rollout`` counts the steps this run performs.
         rollout_batch_size:
             Prompts sampled per rollout step; each prompt is expanded into a
-            group of sampled responses.
+            group of sampled responses. Derived from ``global_batch_size`` for SFT.
         rollout_max_response_len:
             Max generated tokens per sample.
         rollout_temperature:
             Sampling temperature for rollout generation.
         rollout_shuffle:
             Shuffle the prompt dataset between epochs.
+        shuffle:
+            Shuffle SFT training data between epochs. ``None`` preserves the
+            model recipe's ``rollout_shuffle``. Ignored for RL.
         rollout_top_p:
             Nucleus-sampling top-p for rollout generation.
         rollout_stop_token_ids:
@@ -404,10 +441,15 @@ class SlimeRecipe(BaseTrainRecipe):
     tensor_model_parallel_size: int = 1
     rollout_num_gpus_per_engine: int = 1
     num_rollout: int = 1
+    num_steps: int = 1
+    num_gpus_per_node: int | None = None
+    num_nodes: int | None = None
+    shuffle: bool | None = None
     start_rollout_id: int | None = None
     rollout_batch_size: int = 8
 
     # ── App identity ─────────────────────────────────────────────────────────
+    training_type: Literal["rl", "sft"] = "rl"
     name: str = ""
     app_tags: dict = field(default_factory=dict)
 
@@ -468,6 +510,9 @@ class SlimeRecipe(BaseTrainRecipe):
     kl_coef: float = 0.0
     entropy_coef: float = 0.0
     calculate_per_token_loss: bool = False
+    loss_type: str | None = None
+    disable_compute_advantages_and_returns: bool = False
+    debug_train_only: bool = False
     ref_load: str = ""
 
     # ── Dynamic sampling (DAPO) ────────────────────────────────────────────
@@ -640,6 +685,37 @@ class SlimeRecipe(BaseTrainRecipe):
                 cfg[config_key] = self._callable_path(value)
         if cfg != (self.extra_config or {}):
             object.__setattr__(self, "extra_config", cfg)
+        return self
+
+    @model_validator(mode="after")
+    def _configure_sft(self) -> "SlimeRecipe":
+        if self.training_type == "rl":
+            return self
+
+        sft_fields = {
+            **_SFT_TRAINING_FIELDS,
+            "num_rollout": self.num_steps,
+            "rollout_batch_size": self.global_batch_size,
+            "actor_num_gpus_per_node": (
+                self.num_gpus_per_node
+                if self.num_gpus_per_node is not None
+                else self.actor_num_gpus_per_node
+            ),
+            "actor_num_nodes": (
+                self.num_nodes if self.num_nodes is not None else self.actor_num_nodes
+            ),
+            "rollout_shuffle": (
+                self.shuffle if self.shuffle is not None else self.rollout_shuffle
+            ),
+        }
+        conflicts = sft_fields.keys() & self._escape_hatch_keys()
+        if conflicts:
+            raise TrainingGymConfigError(
+                "SFT manages these settings directly, remove them from extra_config: "
+                + ", ".join(sorted(conflicts))
+            )
+        for field_name, value in sft_fields.items():
+            setattr(self, field_name, value)
         return self
 
     @model_validator(mode="after")
