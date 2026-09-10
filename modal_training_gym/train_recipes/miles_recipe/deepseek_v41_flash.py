@@ -38,6 +38,7 @@ _PATCH_DIR = (
 _PATCHES = (
     "patch_deepseek_v41_sglang_tree",
     "patch_deepseek_v41_processor_tokenizer",
+    "patch_deepseek_v41_fp8_hopper_gemm",
     "patch_deepseek_v41_chat_template",
     "patch_deepseek_v41_fp4_dequant_block",
 )

@@ -213,3 +213,37 @@ dtype table in the image's safetensors has no e8m0 entry; the mmap path goes
 through `safe_open`'s Rust reader, which does. Dropped `disable_mmap` and kept
 the other two bounds (3 mmap'd shards in flight per rank instead of 9, page
 cache released per shard). Stopped by hand.
+
+## Run 18: engines ready; miles' weight sync 404s on `/begin_weight_update`
+
+First run with all 64 engine ranks loaded and `/health` returning 200. Miles
+then opened its weight-update session and the engine answered:
+
+    httpx.HTTPStatusError: Client error '404 Not Found'
+    for url 'http://10.100.0.1:20000/begin_weight_update'
+
+The standalone sgl-project/sglang#38798 head has the V4.1 model but not the
+`begin/end_weight_update` session endpoints, which live on radixark's
+`sglang-miles` branch (the default `WeightUpdateProtocol.use_weight_update_session`
+is `True`). The published `radixark/miles:deepseek-v41` image (arm64) ships an
+sglang tree that already merges both; a blind merge of the two branches locally
+conflicted across `overrides.py`, `communication_op.py`, `weight_updater.py`
+and `deepseek_v4.py`. Fixed by dropping `sglang_git_ref` and unpacking that
+image's sglang python layer (pinned by digest, 4967 entries) over the
+v0.5.18-based amd64 nightly `dev-202609050049` instead
+(`patch_deepseek_v41_sglang_tree`). Stopped by hand.
+
+## Run 19: shipped sglang tree dies importing `get_tokenizer`
+
+Every engine failed at `TokenizerManager` construction:
+
+    File ".../sglang/srt/utils/hf_transformers/processor.py", line 252, in get_processor
+        return get_tokenizer(
+    UnboundLocalError: cannot access local variable 'get_tokenizer' where it is not associated with a value
+
+The shipped tree merged #38798's `deepseek_v41`-with-vision early return onto a
+base whose `processor.py` imports `get_tokenizer` lazily inside the function
+(the TokenizersBackend reload branch); the early return runs first, so the
+name is a local that is never bound. Fixed by hoisting the import to module
+scope, as the PR branch has it (`patch_deepseek_v41_processor_tokenizer`).
+Stopped by hand.
