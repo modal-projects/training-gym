@@ -50,7 +50,8 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
             "PYTHONPATH": "/root/Megatron-LM/",
             "CUDA_DEVICE_MAX_CONNECTIONS": "1",
             "NCCL_NVLS_ENABLE": "1",
-            # Keep HF → torch_dist at PP1, as the conversion layout below assumes.
+            # Pin the conversion to the pipeline layout below; the converter
+            # otherwise inflates PP to the rank count.
             "CONVERT_KEEP_PP1": "1",
             "NCCL_CUMEM_ENABLE": "1",
             "SGLANG_SKIP_CHECKPOINT_LOAD_CHECK": "1",
@@ -79,10 +80,13 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     megatron_to_hf_mode: str = "raw"
     ref_load: str = "/checkpoints/DeepSeek-V4.1-Flash_torch_dist"
 
-    # One node's worth of ranks, expert-sharded so the 384 experts fit. torch_dist
-    # reshards on load, so this layout is independent of the training one below.
+    # Two nodes' worth of ranks, expert-sharded so the 384 experts fit. The
+    # converter builds the model on GPU, and the bf16 weights are ~970 GB: at
+    # upstream's single-node layout that is ~121 GiB a rank, which OOMs an H200
+    # (upstream converts on 288 GiB GB300s). PP2 halves it. torch_dist reshards
+    # on load, so this layout is independent of the training one below.
     conversion_tensor_model_parallel_size: int = 8
-    conversion_pipeline_model_parallel_size: int = 1
+    conversion_pipeline_model_parallel_size: int = 2
     conversion_expert_model_parallel_size: int = 8
     conversion_expert_tensor_parallel_size: int = 1
     # The bf16 torch_dist checkpoint is ~1.1 TB, and a Volume buffers writes on
