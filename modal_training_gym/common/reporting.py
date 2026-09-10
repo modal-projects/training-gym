@@ -120,7 +120,13 @@ def _step_progress(args: Any, rollout_id: int | None = None) -> dict[str, Any]:
     if rollout_id is None:
         current = 0
     else:
-        current = max(0, int(rollout_id) + 1)
+        if (
+            _arg_value(args, "loss_type") == "sft_loss"
+            or os.environ.get("TRAINING_GYM_TRAINING_TYPE") == "sft"
+        ):
+            current = max(0, int(rollout_id))  # since SFT counts starting 0
+        else:
+            current = max(0, int(rollout_id) + 1)
     if total is not None:
         current = min(current, total)
     return {
@@ -182,11 +188,17 @@ def _enqueue(
     payload: dict[str, Any],
     *,
     timeout_seconds: float = _PHASE_TIMEOUT_SECONDS,
+    url: str | None = None,
 ) -> None:
     """Enqueue a framework-status payload with its request timeout."""
+    if os.environ.get("TRAINING_GYM_TRAINING_TYPE") == "sft" and payload.get(
+        "phase"
+    ) in {"weight_sync", "compute_log_probs", "offload_rollout", "evaluate_rollouts"}:
+        return
     if _REPORTER_DRAINING:
         return
-    url = _phase_url()
+    if url is None:
+        url = _phase_url()
     if not url:
         return
     _ensure_worker()

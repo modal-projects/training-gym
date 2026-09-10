@@ -365,6 +365,20 @@ class TrainingRun(BaseModel):
                     merged_metadata["framework_progress"] = stored_progress
             elif isinstance(stored_progress, dict):
                 merged_metadata["framework_progress"] = stored_progress
+
+            training_steps = [
+                value
+                for value in (
+                    stored_metadata.get("latest_training_step"),
+                    current_metadata.get("latest_training_step"),
+                )
+                if isinstance(value, dict)
+            ]
+            if training_steps:
+                merged_metadata["latest_training_step"] = max(
+                    training_steps,
+                    key=lambda value: (value["step"], value["created_at"]),
+                )
             payload["metadata"] = merged_metadata
             return payload
 

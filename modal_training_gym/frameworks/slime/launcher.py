@@ -160,6 +160,7 @@ _PATCH_ROLLOUT_STATUS_B64 = encode_patch(
 _PATCH_SUBSTEP_TIMING_B64 = encode_patch("patch_substep_timing", _SLIME_PATCHES)
 _PATCH_ADVANTAGE_DIST_B64 = encode_patch("patch_advantage_distribution", _SLIME_PATCHES)
 _PATCH_LOG_ELIDE_B64 = encode_patch("patch_log_elide", _SLIME_PATCHES)
+_PATCH_SFT_REPORTING_B64 = encode_patch("patch_sft_reporting", _SLIME_PATCHES)
 # Backport of NVIDIA/Megatron-LM #3845: dequantize quantized CUDA tensors in the
 # async dist-checkpoint writer before serialization. slime pins a pre-#3845
 # Megatron, so FP8/TE _extra_state tensors otherwise crash the torch_dist save
@@ -476,6 +477,8 @@ def build_slime_app(
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
     image = _overlay_slime_source(image, slime)
+    if slime.training_type == "sft":
+        image = image.run_commands(*_patch_commands((_PATCH_SFT_REPORTING_B64,)))
 
     if slime.image_run_commands:
         image = image.run_commands(*slime.image_run_commands)
@@ -1206,6 +1209,7 @@ def build_slime_app(
                     "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(slime.num_rollout),
+                    "TRAINING_GYM_TRAINING_TYPE": slime.training_type,
                     "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
                     "TRAINING_GYM_CAPTURE_TRACE": (
                         "1" if getattr(slime, "capture_trace", False) else ""
