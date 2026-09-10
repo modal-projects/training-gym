@@ -29,6 +29,9 @@ _CONVERSION_EXTRA_ARGS = [
     ("decoder_last_pipeline_num_layers", "decoder-last-pipeline-num-layers"),
     ("mtp_num_layers", "mtp-num-layers"),
     ("make_vocab_size_divisible_by", "make-vocab-size-divisible-by"),
+    # The DeepSeek-V4 family selects its attention implementation here too: the
+    # converter builds the model, and the default (megatron) rejects TP > 1.
+    ("dsv4_impl", "dsv4-impl"),
 ]
 
 _PIPELINE_SPLIT_ARGS = {
