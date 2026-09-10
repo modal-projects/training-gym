@@ -112,11 +112,23 @@ def wrap_safetensor_io(io):
 
 
 def install() -> None:
+    """Hook ``Bridge.load_weights`` so the reader it builds is wrapped.
+
+    ``_get_safetensor_io`` itself is overridden down the DeepSeek bridge MRO, so
+    it is resolved through the instance at call time rather than patched on a class.
+    """
     from mbridge.core.bridge import Bridge
 
-    original = Bridge._get_safetensor_io
+    original_load_weights = Bridge.load_weights
 
-    def _get_safetensor_io(self, weights_path: str):
-        return wrap_safetensor_io(original(self, weights_path))
+    def load_weights(self, *args, **kwargs):
+        get_io = self._get_safetensor_io
+        self._get_safetensor_io = lambda weights_path: wrap_safetensor_io(
+            get_io(weights_path)
+        )
+        print(
+            "[hf_block_dequant] dequantizing block-scaled weights on load", flush=True
+        )
+        return original_load_weights(self, *args, **kwargs)
 
-    Bridge._get_safetensor_io = _get_safetensor_io
+    Bridge.load_weights = load_weights
