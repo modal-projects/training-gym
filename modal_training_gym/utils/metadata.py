@@ -274,10 +274,20 @@ def vol_put_many(
     is_async: bool = False,
 ) -> None | Awaitable[None]:
     """Write several keys from one store in a single volume commit."""
+    return vol_put_records(
+        [(store, key, value) for key, value in values.items()], is_async=is_async
+    )
+
+
+def vol_put_records(
+    records: Iterable[tuple[MetadataStore | str, str, dict[str, Any]]],
+    *,
+    is_async: bool = False,
+) -> None | Awaitable[None]:
     vol = _metadata_volume()
     data = {
         f"{_store_path(store)}/{key}.json": json.dumps(value).encode()
-        for key, value in values.items()
+        for store, key, value in records
     }
     if is_async:
 
@@ -605,6 +615,18 @@ def vol_list_metadata_with_failures(
     return entries_result, failure is not None
 
 
+def vol_list_keys(store: MetadataStore | str, prefix: str = "") -> list[str]:
+    """List matching JSON keys without downloading their payloads."""
+    entries, failure = _list_metadata_entries(store)
+    if failure is not None:
+        raise failure
+    return [
+        key
+        for entry in entries
+        if (key := entry["path"].rsplit("/", 1)[-1][:-5]).startswith(prefix)
+    ]
+
+
 def vol_list_prefix(store: MetadataStore | str, prefix: str) -> list[dict[str, Any]]:
     """Read only the items whose key (file basename) starts with ``prefix``.
 
@@ -923,6 +945,7 @@ __all__ = [
     "vol_get",
     "vol_list",
     "vol_list_prefix",
+    "vol_list_keys",
     "vol_count_items",
     "compact_summary_store",
     "vol_get_summary_items_healed",
@@ -932,6 +955,7 @@ __all__ = [
     "vol_get_summary_items",
     "vol_put_summary_items",
     "vol_put_with_summary",
+    "vol_put_records",
     "vol_compact_summary_items",
     "vol_upsert_summary_item",
 ]

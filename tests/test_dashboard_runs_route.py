@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from io import BytesIO
 from queue import Queue
 from types import SimpleNamespace
 
@@ -53,6 +54,82 @@ def _save_records() -> None:
         training_run_id="run-route-1",
         checkpoint_dir="/checkpoints/run-route-1",
     ).save()
+
+
+def test_rollout_retry_after_lost_ack_keeps_one_complete_record(
+    fake_volume, monkeypatch, tmp_path
+):
+    from modal_training_gym.common import config
+
+    _save_records()
+    metadata.vol_put(
+        MetadataStore.FRAMEWORK_STATUS_TOKENS,
+        "run-route-1",
+        {"token": "test-token"},
+    )
+    monkeypatch.setattr(reporting, "_REPORTER_DRAINING", False)
+    monkeypatch.setattr(reporting, "_report_token", lambda: "test-token")
+    monkeypatch.setattr(reporting.time, "sleep", lambda _: None)
+    monkeypatch.setattr(config, "modal_proxy_auth_headers", lambda: {})
+    requests = []
+    with _client(monkeypatch, tmp_path) as client:
+
+        def send(request, timeout):
+            response = client.post(
+                "/api/training-rollouts",
+                content=request.data,
+                headers=dict(request.header_items()),
+            )
+            assert response.status_code == 200
+            requests.append(request.data)
+            if len(requests) == 1:
+                # The server committed, but the reporter did not receive its ACK.
+                raise TimeoutError("response lost")
+            return BytesIO(response.content)
+
+        monkeypatch.setattr(reporting, "urlopen", send)
+        payload = TrainingRolloutResult(
+            training_run_id="run-route-1",
+            rollout_id=13,
+            samples=[{"prompt": "question", "response": "answer", "score": 1.0}],
+        ).model_dump(mode="json")
+        assert reporting._post_record(
+            {"_url": "https://dashboard.test/api/training-rollouts", **payload}
+        )
+        listed = client.get("/api/runs/run-route-1/rollouts")
+        detail = client.get("/api/runs/run-route-1/rollouts/13")
+
+    assert requests[0] == requests[1]
+    assert listed.status_code == 200
+    assert [row["rollout_id"] for row in listed.json()] == [13]
+    assert listed.json()[0]["total"] == 1
+    assert detail.status_code == 200
+    assert detail.json()["samples"][0]["response"] == "answer"
+
+
+def test_rollout_list_recovers_legacy_index_gap(fake_volume, monkeypatch, tmp_path):
+    for step in (12, 13):
+        result = TrainingRolloutResult(
+            training_run_id="old-run",
+            rollout_id=step,
+            samples=[{"prompt": "p", "response": "r", "score": 1.0}],
+        )
+        metadata.vol_put(
+            MetadataStore.TRAINING_ROLLOUTS,
+            result.storage_key,
+            result.model_dump(mode="json"),
+        )
+        if step == 12:
+            metadata.vol_put_summary_items(
+                MetadataStore.TRAINING_ROLLOUTS_SUMMARY, [result.to_summary()]
+            )
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.get("/api/runs/old-run/rollouts")
+    assert response.status_code == 200
+    assert [item["rollout_id"] for item in response.json()] == [12, 13]
+    assert (
+        "training-rollouts-summary/old-run/old-run__00000013.json" in fake_volume.files
+    )
 
 
 def test_runs_route_returns_typed_joined_summaries(fake_volume, monkeypatch, tmp_path):
