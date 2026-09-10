@@ -30,6 +30,7 @@ from modal_training_gym.common import hf_secrets, proxy_auth_secrets
 
 
 from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import (
     mount_tools_dir,
 )
@@ -387,6 +388,14 @@ def build_slime_app(
 
     SlimeRecipe._validate_custom_model_architecture(model)
     SlimeRecipe._validate_datasets(dataset, eval_dataset)
+
+    if slime.training_type == "sft" and dataset.apply_chat_template():
+        raise TrainingGymConfigError(
+            "SFT requires raw messages (use SFTDataset or input_format='raw') "
+            "so Slime can build its "
+            "loss mask from raw messages"
+        )
+
     dataset_path = SlimeRecipe._resolve_data_paths(dataset)
     eval_dataset_path = (
         SlimeRecipe._resolve_data_paths(eval_dataset)
@@ -991,6 +1000,7 @@ def build_slime_app(
 
         print(f"Training run id: {training_run_id}")
         config_summary: dict = {
+            "training_type": slime.training_type,
             "model": {"model_name": model.model_name} if model else {},
             # These fields are in _SLIME_SKIP, so _serialize_slime_params drops
             # them; record them here so the run shows what it actually used.

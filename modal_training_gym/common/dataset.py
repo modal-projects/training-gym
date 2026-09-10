@@ -252,6 +252,145 @@ class HuggingFaceDataset(DatasetConfig):
             ds.to_json(path, orient="records", lines=True)
 
 
+class SFTDataset(HuggingFaceDataset):
+    """A Hugging Face dataset formatted as complete conversations for SFT.
+
+    Args:
+        messages_column: Source column containing OpenAI-style messages. Use this
+            or `input_column` plus `output_column`, not both.
+        input_column: Source prompt column for constructing single-turn examples.
+        output_column: Source assistant-response column for constructing examples.
+        system_prompt: Optional system message for constructed examples.
+        prompt_template: Template applied to constructed user prompts.
+
+    Existing conversations are preserved. Slime applies the model's chat
+    template and computes loss on assistant responses.
+    """
+
+    def __init__(
+        self,
+        hf_repo: str,
+        *,
+        hf_split: str = "train",
+        hf_config: str | None = None,
+        messages_column: str = "",
+        input_column: str = "",
+        output_column: str = "",
+        system_prompt: str = "",
+        prompt_template: str = "{input}",
+        always_download: bool = False,
+    ):
+        if bool(input_column) != bool(output_column):
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} requires input_column and output_column together"
+            )
+        paired = bool(input_column and output_column)
+        if not paired and not messages_column:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} requires either input_column and "
+                "output_column, or messages_column"
+            )
+        if paired and messages_column:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} accepts either input/output columns or "
+                "messages_column, not both"
+            )
+        if messages_column and (system_prompt or prompt_template != "{input}"):
+            raise TrainingGymConfigError(
+                f"{type(self).__name__} does not accept system_prompt or "
+                "prompt_template with messages_column"
+            )
+
+        super().__init__(
+            hf_repo,
+            hf_split=hf_split,
+            hf_config=hf_config,
+            input_column=messages_column or input_column,
+            output_column="label" if messages_column else output_column,
+            input_format="raw",
+            system_prompt=system_prompt,
+            prompt_template=prompt_template,
+            always_download=always_download,
+        )
+        self.messages_column = messages_column
+        if self.input_key() == self.label_key():
+            raise TrainingGymConfigError(
+                "SFT input and output columns must be distinct"
+            )
+
+    def cache_key(self) -> str | None:
+        key = super().cache_key()
+        if key is None:
+            return None
+        return _materialization_fingerprint(
+            {
+                "format": "sft",
+                "source": key,
+                "messages_column": self.messages_column,
+            }
+        )
+
+    def _load_hf_dataset(self):
+        return self._format_for_training(super()._load_hf_dataset())
+
+    @staticmethod
+    def _validate_conversation(messages: Any) -> list[dict[str, Any]]:
+        if not isinstance(messages, list) or not messages:
+            raise TrainingGymConfigError(
+                "SFT messages must be a non-empty list of message dictionaries"
+            )
+        for message in messages:
+            if not isinstance(message, dict):
+                raise TrainingGymConfigError("Every SFT message must be a dictionary")
+            if not isinstance(message.get("role"), str) or not message["role"].strip():
+                raise TrainingGymConfigError(
+                    "Every SFT message requires a non-empty role string"
+                )
+        if not any(message["role"] == "assistant" for message in messages):
+            raise TrainingGymConfigError(
+                "Each SFT conversation requires at least one assistant turn"
+            )
+        return messages
+
+    def _format_for_training(self, ds):
+        required = (
+            [self.messages_column]
+            if self.messages_column
+            else [self.input_column, self.output_column]
+        )
+        missing = set(required) - set(ds.column_names)
+        if missing:
+            raise TrainingGymConfigError(
+                f"Missing SFT columns: {', '.join(sorted(missing))}"
+            )
+
+        def _to_chat(row: dict) -> dict:
+            if self.messages_column:
+                messages = self._validate_conversation(row[self.messages_column])
+            else:
+                for column in (self.input_column, self.output_column):
+                    if not isinstance(row[column], str) or not row[column].strip():
+                        raise TrainingGymConfigError(
+                            f"SFT column {column!r} requires non-empty text"
+                        )
+                messages = [
+                    {
+                        "role": "user",
+                        "content": self.prompt_template.format(
+                            input=row[self.input_column]
+                        ),
+                    },
+                    {"role": "assistant", "content": row[self.output_column]},
+                ]
+                if self.system_prompt:
+                    messages.insert(
+                        0, {"role": "system", "content": self.system_prompt}
+                    )
+            return {self.input_key(): messages, self.label_key(): ""}
+
+        return ds.map(_to_chat, remove_columns=ds.column_names)
+
+
 class HarborDataset(DatasetConfig):
     """A dataset loaded from Harbor tasks.
 

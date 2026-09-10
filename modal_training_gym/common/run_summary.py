@@ -216,6 +216,7 @@ class RunSummary(BaseModel):
         default="",
     )
     framework: str = ""
+    training_type: str = _run_list_field("Training type", default="rl", filterable=True)
     framework_status: str = ""
     framework_progress: FrameworkProgress | None = None
     latest_rollout: LatestRollout | None = None
@@ -600,6 +601,7 @@ def build_run_summary(
     metadata = _mapping(run.get("metadata"))
     raw_config = run.get("config")
     config = _mapping(raw_config)
+    training_type = _text(config.get("training_type")) or "rl"
     config_summary = _config_summary(raw_config, training_run_id)
     result_summary = _train_result_summary(result) if result else None
     group_id = (
@@ -654,6 +656,7 @@ def build_run_summary(
         ),
         display_stage=_display_stage(framework_status, framework_progress),
         framework=framework,
+        training_type=training_type,
         framework_status=framework_status,
         framework_progress=framework_progress,
         latest_rollout=_latest_rollout(metadata),

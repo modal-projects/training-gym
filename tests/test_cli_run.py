@@ -812,6 +812,7 @@ def test_run_list_forwards_filters_and_prints_configured_fields_as_json():
             "/api/runs",
             {
                 "display_status": "failed",
+                "training_type": None,
                 "model": None,
                 "dataset": None,
                 "recipe": None,
@@ -826,6 +827,7 @@ def test_run_list_forwards_filters_and_prints_configured_fields_as_json():
             "run_id": "run-1",
             "status": "failed",
             "stage": "Training",
+            "training_type": "rl",
             "model": "org/model",
             "dataset": "org/data",
             "recipe": "slime",
