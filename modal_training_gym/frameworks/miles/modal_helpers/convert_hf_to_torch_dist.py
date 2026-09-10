@@ -12,12 +12,17 @@ Pipeline-parallel auto-inflation is suppressed upstream via CONVERT_KEEP_PP1,
 which the launcher sets when it pins PP/TP explicitly (slime has no such env
 var, hence the source patch in its wrapper).
 
-When SKIP_RELEASE_RENAME is unset this wrapper is a transparent pass-through.
+CONVERT_DEQUANT_HF_WEIGHTS=1 dequantizes DeepSeek block-scaled fp8/fp4 weights
+as mbridge reads them (see hf_block_dequant), for checkpoints that ship without
+a bf16 export.
+
+When neither variable is set this wrapper is a transparent pass-through.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 
 _UPSTREAM = "/root/miles/tools/convert_hf_to_torch_dist.py"
 
@@ -38,6 +43,13 @@ def main() -> None:
             'f.write("release")',
             'f.write("1")  # SKIP_RELEASE_RENAME: keep iter_0000001',
         )
+    if os.environ.get("CONVERT_DEQUANT_HF_WEIGHTS"):
+        # torchrun runs this file as a script, so its directory heads sys.path
+        # while the package itself may not be importable under PYTHONPATH.
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import hf_block_dequant
+
+        hf_block_dequant.install()
     exec(
         compile(src, _UPSTREAM, "exec"), {"__name__": "__main__", "__file__": _UPSTREAM}
     )

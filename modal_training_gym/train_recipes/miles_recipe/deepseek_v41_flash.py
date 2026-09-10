@@ -53,6 +53,10 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
             # Pin the conversion to the pipeline layout below; the converter
             # otherwise inflates PP to the rank count.
             "CONVERT_KEEP_PP1": "1",
+            # The HF release is fp8 dense / packed-fp4 experts with e8m0 block
+            # scales and no bf16 export; mbridge expects bf16, so the conversion
+            # wrapper dequantizes weights as it reads them.
+            "CONVERT_DEQUANT_HF_WEIGHTS": "1",
             "NCCL_CUMEM_ENABLE": "1",
             "SGLANG_SKIP_CHECKPOINT_LOAD_CHECK": "1",
             # Upstream's V4.1 engine settings. FP4 experts are Blackwell-only, so
@@ -83,11 +87,10 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     # Upstream's conversion layout (TP4, PP1) over two nodes instead of one: the
     # converter builds the model on GPU and the bf16 weights are ~970 GB, which
     # is ~121 GiB a rank at EP8 — fine on their 288 GiB GB300s, an OOM on an
-    # H200. EP16 halves it, served by data-parallel replicas. Neither of the
-    # other two axes can absorb it: TP8 makes the mbridge V4.1 split scatter
-    # mismatched shards (129280 vocab rows against 8 * 16192), and PP > 1 does
-    # the same for the later pipeline stages' layers. torch_dist reshards on
-    # load, so this layout is independent of the training one below.
+    # H200. EP16 halves it, served by data-parallel replicas; TP stays at 4
+    # since the 129280 vocab only splits 8 ways with a smaller
+    # make-vocab-size-divisible-by. torch_dist reshards on load, so this layout
+    # is independent of the training one below.
     conversion_tensor_model_parallel_size: int = 4
     conversion_pipeline_model_parallel_size: int = 1
     conversion_expert_model_parallel_size: int = 16
