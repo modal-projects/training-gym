@@ -164,6 +164,12 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     sglang_disable_cuda_graph: bool = True
     sglang_disable_radix_cache: bool = True
 
+    # miles#3179 predates miles#3124: sglang >= 0.5.19 no longer auto-detects
+    # ``device`` when a ServerArgs is constructed, and miles always renders it on
+    # the engine command line, so an unset device becomes ``--device None`` and
+    # fails its own argv round-trip check. Naming the device sidesteps that.
+    extra_config: dict | None = field(default_factory=lambda: {"sglang_device": "cuda"})
+
     rollout_health_check_interval: int = 300
     rollout_health_check_timeout: int = 300
     # The first engine start compiles deepgemm kernels for a 560B MoE; without a
