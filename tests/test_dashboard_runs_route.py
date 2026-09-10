@@ -318,6 +318,34 @@ def test_runs_counts_route_counts_every_run_and_the_current_query(
     assert failed["matching"] == 1
 
 
+@pytest.mark.parametrize("training_type", ["rl", "sft"])
+def test_training_type_filter_applies_before_paging_and_matches_counts(
+    fake_volume, monkeypatch, tmp_path, training_type
+):
+    _save_records()
+    TrainingRun(
+        training_run_id="run-sft",
+        framework=Framework.SLIME,
+        status="completed",
+        config={"training_type": "sft"},
+        created_at=50,
+        updated_at=50,
+    ).save()
+
+    with _client(monkeypatch, tmp_path) as client:
+        params = {"training_type": training_type}
+        counts = client.get("/api/runs/counts", params=params).json()
+        runs = client.get("/api/runs", params={**params, "limit": 1}).json()
+        next_page = client.get(
+            "/api/runs", params={**params, "limit": 1, "offset": 1}
+        ).json()
+
+    assert counts["total"] == 2
+    assert counts["matching"] == len(runs) == 1
+    assert runs[0]["training_type"] == training_type
+    assert next_page == []
+
+
 def test_unknown_api_path_is_a_json_404_not_the_spa(monkeypatch, tmp_path):
     with _client(monkeypatch, tmp_path) as client:
         missing = client.get("/api/nope")
