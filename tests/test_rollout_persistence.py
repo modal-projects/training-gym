@@ -87,7 +87,9 @@ def test_listing_reads_only_small_summaries(fake_volume, monkeypatch):
 
     monkeypatch.setattr(fake_volume.read_file, "_sync_fn", read_summary)
     assert len(TrainingRolloutResult.list_summaries_for_run("run")) == 1
-    assert paths == ["training-rollouts-summary/run/run__00000000.json"]
+    assert "training-rollouts-summary/run/run__00000000.json" in paths
+    assert all(path.startswith("training-rollouts-summary/") for path in paths)
+    assert not any("/other/" in path for path in paths)
 
 
 def test_failed_batch_is_not_acknowledged(fake_volume, monkeypatch):
@@ -123,6 +125,10 @@ def test_cleanup_removes_individual_summaries(fake_volume, monkeypatch):
     _rollout().save()
     _rollout(run_id="other").save()
     remove = fake_volume.remove_file
+    metadata.vol_put_summary_items(
+        MetadataStore.TRAINING_ROLLOUTS_SUMMARY,
+        [_rollout().to_summary(), _rollout(run_id="other").to_summary()],
+    )
 
     def remove_file(path, *, recursive=False):
         if recursive:
@@ -138,3 +144,96 @@ def test_cleanup_removes_individual_summaries(fake_volume, monkeypatch):
         for path, blob in fake_volume.files.items()
         if path.startswith(f"{MetadataStore.TRAINING_ROLLOUTS.value}/")
     )
+
+
+def test_legacy_summary_and_canonical_gaps_are_recovered_once(fake_volume, monkeypatch):
+    known, hidden = _rollout(step=12), _rollout(step=13)
+    for result in (known, hidden):
+        metadata.vol_put(
+            MetadataStore.TRAINING_ROLLOUTS,
+            result.storage_key,
+            result.model_dump(mode="json"),
+        )
+    metadata.vol_put_summary_items(
+        MetadataStore.TRAINING_ROLLOUTS_SUMMARY,
+        [known.to_summary(), _rollout(run_id="other").to_summary()],
+    )
+    read = fake_volume.read_file._sync_fn
+    paths = []
+
+    def track_read(path):
+        paths.append(path)
+        return read(path)
+
+    monkeypatch.setattr(fake_volume.read_file, "_sync_fn", track_read)
+    summaries = TrainingRolloutResult.list_summaries_for_run("run")
+    assert [s.rollout_id for s in summaries] == [12, 13]
+    assert summaries[1].export_size_bytes > 0
+    assert [p for p in paths if p.startswith("training-rollouts/")] == [
+        "training-rollouts/run__00000013.json"
+    ]
+    paths.clear()
+    assert TrainingRolloutResult.list_summaries_for_run("run") == summaries
+    assert not any(p.startswith("training-rollouts/") for p in paths)
+
+
+def test_new_summaries_win_over_legacy_and_legacy_rows_remain_visible(fake_volume):
+    result = _rollout(step=13)
+    result.save()
+    metadata.vol_put_summary_items(
+        MetadataStore.TRAINING_ROLLOUTS_SUMMARY,
+        [
+            {**result.to_summary(), "mean": 99},
+            _rollout(step=12).to_summary(),
+            {"training_run_id": "run"},
+        ],
+    )
+    summaries = TrainingRolloutResult.list_summaries_for_run("run")
+    assert [s.rollout_id for s in summaries] == [12, 13]
+    assert summaries[1].mean == 0.5
+
+
+def test_missing_legacy_summary_recovers_canonical_and_discovers_later_steps(
+    fake_volume,
+):
+    result = _rollout(step=13)
+    metadata.vol_put(
+        MetadataStore.TRAINING_ROLLOUTS,
+        result.storage_key,
+        result.model_dump(mode="json"),
+    )
+    assert [
+        s.rollout_id for s in TrainingRolloutResult.list_summaries_for_run("run")
+    ] == [13]
+    later = _rollout(step=18)
+    metadata.vol_put(
+        MetadataStore.TRAINING_ROLLOUTS,
+        later.storage_key,
+        later.model_dump(mode="json"),
+    )
+    assert [
+        s.rollout_id for s in TrainingRolloutResult.list_summaries_for_run("run")
+    ] == [13, 18]
+
+
+def test_recovery_ignores_bad_records_and_survives_cache_failure(
+    fake_volume, monkeypatch
+):
+    result = _rollout(step=13)
+    metadata.vol_put(
+        MetadataStore.TRAINING_ROLLOUTS,
+        result.storage_key,
+        result.model_dump(mode="json"),
+    )
+    metadata.vol_put(
+        MetadataStore.TRAINING_ROLLOUTS, "run__00000018", {"bad": "record"}
+    )
+    from modal_training_gym.common import training_rollout
+
+    def fail_cache(*args, **kwargs):
+        raise OSError("unavailable")
+
+    monkeypatch.setattr(training_rollout, "vol_put_many", fail_cache)
+    assert [
+        s.rollout_id for s in TrainingRolloutResult.list_summaries_for_run("run")
+    ] == [13]

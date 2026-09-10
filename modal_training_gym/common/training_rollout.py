@@ -23,7 +23,11 @@ from modal_training_gym.common.coerce import optional_int, safe_int
 from modal_training_gym.common.sample import Sample
 from modal_training_gym.utils.metadata import (
     MetadataStore,
+    vol_get,
+    vol_get_summary_items,
     vol_list,
+    vol_list_keys,
+    vol_put_many,
     vol_put_records,
 )
 
@@ -313,12 +317,63 @@ class TrainingRolloutResult(BaseModel):
         cls, training_run_id: str
     ) -> list[TrainingRolloutSummary]:
         """Lightweight per-rollout summaries for one run, sorted by rollout_id."""
-        summaries: list[TrainingRolloutSummary] = []
-        for item in vol_list(cls.summary_store(training_run_id)):
-            if item.get("training_run_id") != training_run_id:
-                continue
+        from modal.exception import Error
+
+        store = cls.summary_store(training_run_id)
+        summaries: dict[str, TrainingRolloutSummary] = {}
+
+        def parse(item: Any) -> TrainingRolloutSummary | None:
+            if (
+                not isinstance(item, dict)
+                or item.get("training_run_id") != training_run_id
+            ):
+                return None
             try:
-                summaries.append(TrainingRolloutSummary.model_validate(item))
+                return TrainingRolloutSummary.model_validate(item)
             except ValidationError:
+                return None
+
+        for item in vol_list(store):
+            if summary := parse(item):
+                summaries[f"{training_run_id}__{summary.rollout_id:08d}"] = summary
+
+        # Directory entries are cheap even when each canonical record is many MB.
+        keys = set(
+            vol_list_keys(MetadataStore.TRAINING_ROLLOUTS, f"{training_run_id}__")
+        )
+        recovered: dict[str, dict[str, Any]] = {}
+        legacy = vol_get_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY) or []
+        for item in legacy:
+            if (summary := parse(item)) is None:
                 continue
-        return sorted(summaries, key=lambda summary: summary.rollout_id)
+            key = f"{training_run_id}__{summary.rollout_id:08d}"
+            if key not in summaries:
+                summaries[key] = summary
+                if key in keys:
+                    recovered[key] = summary.model_dump(mode="json")
+
+        for key in sorted(keys - summaries.keys()):
+            try:
+                payload = vol_get(MetadataStore.TRAINING_ROLLOUTS, key)
+                result = cls.model_validate(payload)
+                if (
+                    result.training_run_id != training_run_id
+                    or result.storage_key != key
+                ):
+                    continue
+                item = result._stored_summary(payload)
+                summaries[key] = TrainingRolloutSummary.model_validate(item)
+                recovered[key] = item
+            except (KeyError, ValueError):
+                # A deleted or malformed record must not hide the other steps.
+                continue
+        if recovered:
+            try:
+                # Persist the small summaries so other dashboard containers and
+                # subsequent requests do not download these payloads again.
+                vol_put_many(store, recovered)
+            except (OSError, Error) as exc:
+                print(
+                    f"WARNING: could not cache rollout summaries for {training_run_id}: {exc}"
+                )
+        return sorted(summaries.values(), key=lambda summary: summary.rollout_id)

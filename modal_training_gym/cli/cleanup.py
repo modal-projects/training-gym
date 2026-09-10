@@ -92,6 +92,17 @@ def cleanup(*, older_than_days: int = 7, dry_run: bool = False) -> None:
                 raise
         deleted_tokens += 1
 
+    rollout_summary = (
+        vol_get_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY) or []
+    )
+    kept_rollouts = [
+        item
+        for item in rollout_summary
+        if item.get("training_run_id") not in target_ids
+    ]
+    if len(kept_rollouts) != len(rollout_summary):
+        vol_put_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY, kept_rollouts)
+
     run_summary = vol_get_summary_items(MetadataStore.TRAINING_RUNS_SUMMARY) or []
     kept_run_items = [
         item for item in run_summary if item.get("training_run_id") not in target_ids

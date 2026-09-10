@@ -107,6 +107,31 @@ def test_rollout_retry_after_lost_ack_keeps_one_complete_record(
     assert detail.json()["samples"][0]["response"] == "answer"
 
 
+def test_rollout_list_recovers_legacy_index_gap(fake_volume, monkeypatch, tmp_path):
+    for step in (12, 13):
+        result = TrainingRolloutResult(
+            training_run_id="old-run",
+            rollout_id=step,
+            samples=[{"prompt": "p", "response": "r", "score": 1.0}],
+        )
+        metadata.vol_put(
+            MetadataStore.TRAINING_ROLLOUTS,
+            result.storage_key,
+            result.model_dump(mode="json"),
+        )
+        if step == 12:
+            metadata.vol_put_summary_items(
+                MetadataStore.TRAINING_ROLLOUTS_SUMMARY, [result.to_summary()]
+            )
+    with _client(monkeypatch, tmp_path) as client:
+        response = client.get("/api/runs/old-run/rollouts")
+    assert response.status_code == 200
+    assert [item["rollout_id"] for item in response.json()] == [12, 13]
+    assert (
+        "training-rollouts-summary/old-run/old-run__00000013.json" in fake_volume.files
+    )
+
+
 def test_runs_route_returns_typed_joined_summaries(fake_volume, monkeypatch, tmp_path):
     _save_records()
 
