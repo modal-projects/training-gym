@@ -106,7 +106,7 @@ def _table_rows(
     return rows
 
 
-def _format_reward(value: float | None) -> str:
+def _format_metric(value: float | None) -> str:
     if value is None:
         return "—"
     return f"{value:.4f}".rstrip("0").rstrip(".")
@@ -121,6 +121,12 @@ def _current_step(summary: RunSummary) -> tuple[int | None, int | None, str]:
 
 def _run_payload(summary: RunSummary) -> dict[str, object]:
     current_step, total_steps, step_unit = _current_step(summary)
+    if summary.training_type == "sft":
+        metric = (
+            summary.latest_training_step.loss if summary.latest_training_step else None
+        )
+    else:
+        metric = summary.latest_rollout.mean if summary.latest_rollout else None
     return {
         "run_id": summary.run_id,
         "modal_app_id": summary.modal_app_id or None,
@@ -129,9 +135,8 @@ def _run_payload(summary: RunSummary) -> dict[str, object]:
         "current_step": current_step,
         "total_steps": total_steps,
         "step_unit": step_unit,
-        "current_reward": (
-            summary.latest_rollout.mean if summary.latest_rollout is not None else None
-        ),
+        "training_type": summary.training_type,
+        "current_metric": metric,
         "resume_state": (
             summary.resume_state.model_dump(mode="json")
             if summary.resume_state is not None
@@ -468,11 +473,22 @@ def _run_summary_panel(summary: RunSummary) -> Panel:
         heading.append("  ")
         heading.append(summary.display_stage, style="bold")
 
-    reward = summary.latest_rollout.mean if summary.latest_rollout is not None else None
+    is_sft = summary.training_type == "sft"
+    if is_sft:
+        metric_value = (
+            summary.latest_training_step.loss if summary.latest_training_step else None
+        )
+    else:
+        metric_value = (
+            summary.latest_rollout.mean if summary.latest_rollout is not None else None
+        )
     metrics = Table.grid(padding=(0, 4))
     metrics.add_row(
         Text.assemble(("Step  ", "dim"), (_format_step(summary), "bold")),
-        Text.assemble(("Reward  ", "dim"), (_format_reward(reward), "bold")),
+        Text.assemble(
+            ("Training loss  " if is_sft else "Reward  ", "dim"),
+            (_format_metric(metric_value), "bold"),
+        ),
     )
 
     chips = [
@@ -544,7 +560,7 @@ def _reward_panel(rollouts: list[TrainingRolloutSummary]) -> Panel:
         for rollout in rollouts:
             table.add_row(
                 str(rollout.rollout_id),
-                _format_reward(rollout.mean),
+                _format_metric(rollout.mean),
                 str(rollout.total),
                 (
                     f"{rollout.rollout_time:.2f}s"
@@ -560,9 +576,9 @@ def _reward_panel(rollouts: list[TrainingRolloutSummary]) -> Panel:
         content = Group(
             Text(_reward_sparkline(rollouts), style="bold bright_green"),
             Text.assemble(
-                (_format_reward(first), "dim"),
+                (_format_metric(first), "dim"),
                 ("  →  ", "dim"),
-                (_format_reward(latest), "bold"),
+                (_format_metric(latest), "bold"),
                 (f"   {len(rollouts)} rollouts", "dim"),
             ),
             Text(""),
@@ -602,25 +618,33 @@ def get_run(*, run_id: str, verbose: bool, json_output: bool) -> None:
                     params=None,
                 )
             )
-            if verbose
+            if verbose and summary.training_type != "sft"
+            else []
+        )
+        steps = (
+            client.get_json(f"/api/runs/{encoded_run_id}/steps", params=None)
+            if verbose and summary.training_type == "sft"
             else []
         )
 
     if json_output:
         payload = _run_payload(summary)
         if verbose:
-            payload["reward_over_time"] = [
-                {
-                    "rollout_id": rollout.rollout_id,
-                    "reward": rollout.mean,
-                    "created_at": _format_timestamp(rollout.created_at),
-                }
-                for rollout in rollouts
-            ]
-            payload["rollouts"] = [
-                rollout.model_dump(mode="json", exclude_none=True)
-                for rollout in rollouts
-            ]
+            if summary.training_type == "sft":
+                payload["training_steps"] = steps
+            else:
+                payload["reward_over_time"] = [
+                    {
+                        "rollout_id": rollout.rollout_id,
+                        "reward": rollout.mean,
+                        "created_at": _format_timestamp(rollout.created_at),
+                    }
+                    for rollout in rollouts
+                ]
+                payload["rollouts"] = [
+                    rollout.model_dump(mode="json", exclude_none=True)
+                    for rollout in rollouts
+                ]
         print_json(payload)
         return
 
@@ -628,7 +652,17 @@ def get_run(*, run_id: str, verbose: bool, json_output: bool) -> None:
     if not verbose:
         return
 
-    print_renderable(_reward_panel(rollouts))
+    if summary.training_type == "sft":
+        table = Table("Completed step", "Training loss", "Gradient norm")
+        for step in steps:
+            table.add_row(
+                str(step["step"] + 1),
+                _format_metric(step["loss"]),
+                _format_metric(step.get("grad_norm")),
+            )
+        print_renderable(table)
+    else:
+        print_renderable(_reward_panel(rollouts))
 
 
 def show_run_params(*, run_id: str, json_output: bool) -> None:

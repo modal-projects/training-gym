@@ -84,6 +84,7 @@ from modal_training_gym.common.training_rollout import (
     TrainingRolloutSummary,
     _apply_parsed,
 )
+from modal_training_gym.common.training_steps import TrainingStep
 from modal_training_gym.utils.metadata import (
     bounded_gather_with_retries,
     vol_get as _metadata_vol_get,
@@ -186,6 +187,7 @@ PASSWORD_EXEMPT_PATHS = frozenset(
         DASHBOARD_VERSION_PATH,
         "/api/framework-status",
         "/api/training-rollouts",
+        "/api/training-steps",
         "/api/advantage-distributions",
         "/api/timing-events",
     }
@@ -999,6 +1001,30 @@ def fastapi_app():
                     detail=str(exc),
                 )
         return JSONResponse({"status": "ok", "framework_status": status.value})
+
+    @web.post("/api/training-steps")
+    async def training_step(
+        step: TrainingStep,
+        authorization: str | None = Header(default=None),
+    ):
+        await _require_framework_status_token(step.training_run_id, authorization)
+        run = await _get_run_or_404(step.training_run_id)
+        data = step.model_dump()
+        await run_in_threadpool(step.save)
+        run.metadata = {**(run.metadata or {}), "latest_training_step": data}
+        await run.save(is_async=True)
+        invalidate_cache("runs")
+        return {"status": "ok", "step": step.step}
+
+    @web.get(
+        "/api/runs/{training_run_id}/steps",
+        response_model=list[TrainingStep],
+    )
+    async def training_steps(training_run_id: str):
+        await _get_run_or_404(training_run_id)
+        return await run_in_threadpool(
+            TrainingStep.list_summaries_for_run, training_run_id
+        )
 
     # ── Training rollouts ────────────────────────────────────────────────
 

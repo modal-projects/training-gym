@@ -28,6 +28,8 @@ class MetadataStore(Enum):
     TRAIN_RESULTS = "train-results"
     TRAIN_RESULTS_SUMMARY = "train-results-summary"
     TRAINING_ROLLOUTS = "training-rollouts"
+    TRAINING_STEPS = "training-steps"
+    TRAINING_STEPS_SUMMARY = "training-steps-summary"
     TRAINING_ROLLOUTS_SUMMARY = "training-rollouts-summary"
     # Per-step, per-group advantage distributions. slime only logs the mean
     # advantage per step; this store keeps the full per-sample distribution so
@@ -881,6 +883,7 @@ def vol_put_with_summary(
     payload: dict[str, Any],
     *,
     summary_store: MetadataStore | str,
+    summary_key: str = SUMMARY_KEY,
     summary_item: dict[str, Any] | None = None,
     item_id_key: str,
     sort_key: Callable[[dict[str, Any]], Any] | None = None,
@@ -899,6 +902,7 @@ def vol_put_with_summary(
         summary_store,
         payload if summary_item is None else summary_item,
         item_id_key=item_id_key,
+        key=summary_key,
         sort_key=sort_key,
         reverse=reverse,
     )

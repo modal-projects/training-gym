@@ -19,7 +19,7 @@ from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import MetadataStore
 
 
-def _client(monkeypatch, tmp_path) -> TestClient:
+def _client(monkeypatch, tmp_path, password="") -> TestClient:
     static = tmp_path / "static"
     (static / "assets").mkdir(parents=True)
     (static / "index.html").write_text("ok")
@@ -28,7 +28,7 @@ def _client(monkeypatch, tmp_path) -> TestClient:
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
     )
     monkeypatch.setattr(_dashboard, "STATIC_DIR", str(static))
-    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    monkeypatch.setenv("DASHBOARD_PASSWORD", password)
     return TestClient(_dashboard.fastapi_app.local())
 
 
@@ -103,6 +103,53 @@ def test_get_run_route_returns_404_for_unknown_run(fake_volume, monkeypatch, tmp
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Training run 'missing' not found"
+
+
+@pytest.mark.parametrize("password", ["", "password"])
+def test_sft_steps_endpoint_returns_loss_without_reward(
+    fake_volume, monkeypatch, tmp_path, password
+):
+    TrainingRun(
+        training_run_id="sft-route",
+        framework=Framework.SLIME,
+        config={"training_type": "sft", "recipe": {"num_rollout": 10}},
+    ).save()
+    metadata.vol_put(
+        MetadataStore.FRAMEWORK_STATUS_TOKENS, "sft-route", {"token": "secret"}
+    )
+    read_headers = {"Authorization": "Basic dXNlcjpwYXNzd29yZA=="}
+    with _client(monkeypatch, tmp_path, password) as client:
+        url = "/api/runs/sft-route/steps"
+        payload = {
+            "training_run_id": "sft-route",
+            "step": 1,
+            "loss": 1.5,
+            "created_at": 100,
+        }
+        assert client.post("/api/training-steps", json=payload).status_code == 403
+        if password:
+            assert client.get(url).status_code == 401
+        assert client.get(url, headers=read_headers).json() == []
+        for step in (1, 0):
+            response = client.post(
+                "/api/training-steps",
+                json={**payload, "step": step},
+                headers={"Authorization": "Bearer secret"},
+            )
+            assert response.status_code == 200
+        response = client.get(url, headers=read_headers)
+        assert (
+            client.get("/api/runs/missing/steps", headers=read_headers).status_code
+            == 404
+        )
+        summary = client.get("/api/runs/sft-route", headers=read_headers).json()
+        assert summary["latest_training_step"]["loss"] == 1.5
+        assert summary["framework_progress"]["current"] == 2
+        assert summary["framework_progress"]["total"] == 10
+    assert response.status_code == 200
+    assert [step["step"] for step in response.json()] == [0, 1]
+    assert response.json()[0]["loss"] == 1.5
+    assert "reward" not in response.json()[0]
 
 
 def test_rollout_route_preserves_raw_text_and_adds_cleaned_text(

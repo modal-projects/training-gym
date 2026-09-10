@@ -42,7 +42,9 @@ def report_advantage_distribution(
     rank covers its own data-parallel shard of the step's samples; the dashboard
     merges shards into per-group distributions.
     """
-    if not isinstance(rollout_data, dict):
+    if getattr(args, "loss_type", None) == "sft_loss" or not isinstance(
+        rollout_data, dict
+    ):
         return
     try:
         import torch
