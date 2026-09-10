@@ -81,10 +81,15 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
             "CONVERT_DEQUANT_HF_WEIGHTS": "1",
             "NCCL_CUMEM_ENABLE": "1",
             "SGLANG_SKIP_CHECKPOINT_LOAD_CHECK": "1",
-            # Upstream's V4.1 engine settings. FP4 experts are Blackwell-only, so
-            # they stay off on H200; the rest guard against slow/absent kernels
-            # and a load that outlives the default health-check window.
-            "SGLANG_DSV4_FP4_EXPERTS": "0",
+            # Upstream serves an FP4→FP8 pre-converted checkpoint
+            # (SGLANG_DSV4_FP4_EXPERTS=0). We load the public release, whose
+            # routed experts are packed mxfp4, so the engine must expect FP4
+            # and dequantize them to FP8 at load: the mxfp4 MoE kernels are
+            # Blackwell-only, the dequantized path runs on H200.
+            "SGLANG_DSV4_FP4_EXPERTS": "1",
+            "SGLANG_DSV4_FP4_DEQUANT": "1",
+            # The rest guard against slow/absent kernels and a load that
+            # outlives the default health-check window.
             "SGLANG_HEALTH_CHECK_TIMEOUT": "900",
             "SGLANG_DG_CACHE_DIR_PER_PROCESS": "1",
             "SGLANG_OPT_FP8_WO_A_GEMM": "0",
