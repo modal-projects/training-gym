@@ -266,7 +266,8 @@ class HarborDataset(DatasetConfig):
     """A dataset loaded from Harbor tasks.
 
     Attributes:
-        dataset_name: Harbor dataset ID.
+        dataset_name: Harbor dataset ID. Unversioned IDs are pinned to the
+            latest version available when this object is created.
         path: Local Harbor dataset path.
         task_root: Local directory containing Harbor tasks.
         task_glob: Glob used to select task directories.
@@ -314,6 +315,11 @@ class HarborDataset(DatasetConfig):
             )
         self.split = split
         self.dataset_name = dataset_name
+        self._latest_version = (
+            self._resolve_latest_harbor_version()
+            if dataset_name and "@" not in dataset_name
+            else None
+        )
         self.path = path
         self.task_root = task_root
         self.task_glob = task_glob
@@ -336,7 +342,7 @@ class HarborDataset(DatasetConfig):
             return None
         return _materialization_fingerprint(
             {
-                "dataset_name": self.dataset_name,
+                "dataset_ref": self._harbor_dataset_ref(),
                 "path": self.path,
                 "task_root": self.task_root,
                 "task_glob": self.task_glob,
@@ -362,10 +368,52 @@ class HarborDataset(DatasetConfig):
     def label_key(self) -> str:
         return "label"
 
+    def _resolve_latest_harbor_version(self) -> str:
+        import subprocess
+
+        harbor_bin = shutil.which("harbor")
+        if harbor_bin is not None:
+            cmd = [
+                harbor_bin,
+                "version",
+                "show",
+                f"{self.dataset_name}@latest",
+                "--json",
+            ]
+        else:
+            uvx_bin = shutil.which("uvx")
+            if uvx_bin is None:
+                raise FileNotFoundError(
+                    "Harbor CLI not found. Install `harbor` or `uvx` to resolve "
+                    f"the latest version of {self.dataset_name!r}."
+                )
+            cmd = [
+                uvx_bin,
+                "harbor",
+                "version",
+                "show",
+                f"{self.dataset_name}@latest",
+                "--json",
+            ]
+
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        metadata = json.loads(result.stdout)
+        version = metadata.get("version") or metadata.get("content_hash")
+        if not version:
+            raise TrainingGymConfigError(
+                f"Could not find latest version for {self.dataset_name}"
+            )
+        return str(version)
+
     def _harbor_dataset_ref(self) -> str:
         if "@" in self.dataset_name:
             return self.dataset_name
-        return f"{self.dataset_name}@latest"
+        return f"{self.dataset_name}@{self._latest_version or 'latest'}"
 
     def _harbor_cache_dir(self) -> Path:
         slug = self._harbor_dataset_ref().replace("/", "--").replace("@", "--")

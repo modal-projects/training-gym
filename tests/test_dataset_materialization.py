@@ -234,9 +234,61 @@ def test_harbor_instances_select_discrete_splits(tmp_path):
     assert train.cache_key() != evaluation.cache_key()
 
 
+def test_harbor_dataset_pins_latest_version(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        "modal_training_gym.common.dataset.shutil.which",
+        lambda executable: "/usr/bin/harbor" if executable == "harbor" else None,
+    )
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return SimpleNamespace(stdout=json.dumps({"version": "1.2.3"}))
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    dataset = HarborDataset(dataset_name="harbor/example")
+    explicitly_pinned = HarborDataset(dataset_name="harbor/example@1.2.3")
+
+    assert dataset._latest_version == "1.2.3"
+    assert dataset._harbor_dataset_ref() == "harbor/example@1.2.3"
+    assert dataset.cache_key() == explicitly_pinned.cache_key()
+    assert calls == [
+        (
+            [
+                "/usr/bin/harbor",
+                "version",
+                "show",
+                "harbor/example@latest",
+                "--json",
+            ],
+            {"check": True, "capture_output": True, "text": True},
+        )
+    ]
+
+
+def test_harbor_dataset_uses_latest_content_hash(monkeypatch):
+    monkeypatch.setattr(
+        "modal_training_gym.common.dataset.shutil.which",
+        lambda executable: "/usr/bin/harbor" if executable == "harbor" else None,
+    )
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout=json.dumps({"version": None, "content_hash": "sha256:abc"})
+        ),
+    )
+
+    dataset = HarborDataset(dataset_name="harbor/example")
+
+    assert dataset._latest_version == "sha256:abc"
+    assert dataset._harbor_dataset_ref() == "harbor/example@sha256:abc"
+
+
 def test_harbor_always_download_disables_materialization_reuse():
     dataset = HarborDataset(
-        dataset_name="harbor/example",
+        dataset_name="harbor/example@1.2.3",
         always_download=True,
     )
 
