@@ -333,19 +333,16 @@ def _is_complete_torch_dist_checkpoint(path: str) -> bool:
     check ``torch_dist_resume_checkpoint``'s ``iter_*`` scan accepts any directory
     (its default ``is_complete`` is ``os.path.isdir``), so a conversion that died
     mid-write is reported as a cache hit and silently skips re-conversion — which
-    then feeds partial weights to training. A crashed conversion does leave
-    ``common.pt`` and the ``.distcp`` shards behind, so those alone are not enough
-    to tell the two apart.
+    then feeds partial weights to training. A crashed conversion does leave the
+    ``.distcp`` shards behind, so those alone are not enough to tell the two apart.
+    ``common.pt`` is not required: newer megatron-core folds the common state into
+    the torch_dist metadata and writes no such file.
     """
     try:
         names = os.listdir(path)
     except OSError:
         return False
-    return (
-        ".metadata" in names
-        and "common.pt" in names
-        and any(name.endswith(".distcp") for name in names)
-    )
+    return ".metadata" in names and any(name.endswith(".distcp") for name in names)
 
 
 def _build_miles_base_image(miles: MilesRecipe) -> Image:
@@ -920,7 +917,7 @@ def build_miles_app(
                     ):
                         raise RuntimeError(
                             f"Conversion finished but {save_path} holds no complete "
-                            "torch_dist checkpoint (missing .metadata)."
+                            "torch_dist checkpoint (.metadata or .distcp shards missing)."
                         )
             if node_rank == 0:
                 _release_convert_lock(
