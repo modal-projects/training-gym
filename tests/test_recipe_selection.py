@@ -33,6 +33,7 @@ _RECIPE_PACKAGES = (
 def _dataset() -> HuggingFaceDataset:
     return HuggingFaceDataset(
         hf_repo="some/dataset",
+        hf_revision="test-revision",
         input_column="prompt",
         output_column="answer",
         input_format="text",

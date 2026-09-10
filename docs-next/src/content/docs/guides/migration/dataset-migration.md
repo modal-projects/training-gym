@@ -98,7 +98,7 @@ You then implement these additional methods to migrate other aspects of your dat
 
 These fields have been removed:
 
-* `always_prepare` has been removed on the base `DatasetConfig` class. For `HuggingFaceDataset` and `HarborDataset`, this functionality is now provided by the `always_download` property. For custom subclasses, returning `None` from `cache_key()` is equivalent to setting `always_prepare` to `True`.
+* `always_prepare` has been removed on the base `DatasetConfig` class. For `HarborDataset`, this functionality is now provided by the `always_fetch` property. For custom subclasses, returning `None` from `cache_key()` is equivalent to setting `always_prepare` to `True`.
 * `writes_eval_paths` has been removed, as evaluation datasets are now completely separate from training datasets.
 * `dataset_id` and `name` have been removed altogether.
 
@@ -114,7 +114,6 @@ class HaikuDataset(HuggingFaceDataset):
     output_column = "text"
     prompt_template = "Write a haiku about {input}."
     output_format = "jsonl"
-    always_prepare = True
 
 train_dataset = HaikuDataset(hf_split="train[:10]")
 
@@ -127,7 +126,6 @@ haiku_dataset = HuggingFaceDataset(
     output_column="text",
     input_format="text",
     prompt_template="Write a haiku about {input}.",
-    always_download=True,
 )
 ```
 
@@ -154,9 +152,9 @@ for row in eval_dataset.rows():
 
 If your `input_format` is set to `text`, you will need to update your evaluation logic to read from each row's `input_key()` instead, regardless of whether you are iterating through the dataset yourself or using `EvalConfig`. Prompts in your dataset will be given as a list of formatted messages.
 
-Finally, some fields and methods have been replaced or renamed:
+Finally, some fields and methods have been removed:
 
-* `always_prepare` has been renamed to `always_download`.
+* `always_prepare` has been removed. You should instead pin your datasets to specific commit hashes using the `hf_revision` parameter for finer-grained control over new versions.
 * `n_rows` has been removed. You should migrate to [Hugging Face's native slicing syntax instead.](https://gym.modal.dev/guides/dataset#hugging-face)
 
 ## Using the new HarborDataset API

@@ -28,6 +28,35 @@ def _materialization_fingerprint(fields: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _resolve_hf_revision_remotely(hf_repo: str) -> str:
+    """Resolve a dataset revision in a CPU container with the configured HF secret."""
+    import modal
+
+    from modal_training_gym.common import hf_secrets
+
+    app = modal.App("training-gym-dataset-preflight")
+    image = modal.Image.debian_slim(python_version="3.12").pip_install(
+        "huggingface_hub"
+    )
+
+    @app.function(
+        image=image,
+        secrets=hf_secrets(),
+        timeout=5 * 60,
+        serialized=True,
+    )
+    def resolve_revision(repo: str) -> str:
+        from huggingface_hub import dataset_info
+
+        revision = dataset_info(repo).sha
+        if revision is None:
+            raise RuntimeError(f"Could not find latest revision for {repo}")
+        return revision
+
+    with app.run():
+        return resolve_revision.remote(hf_repo)
+
+
 class DatasetType(Enum):
     DEFAULT = "default"
     HUGGING_FACE = "hugging_face"
@@ -38,6 +67,13 @@ class DatasetConfig(ABC):
     """Dataset fields and materialization behavior shared across training frameworks."""
 
     _type: DatasetType = DatasetType.DEFAULT
+
+    def preflight(self) -> None:
+        """Resolve configuration required before computing ``cache_key()``.
+
+        The Gym always calls this method before invoking ``cache_key()``.
+        """
+        return None
 
     def cache_key(self) -> str | None:
         return None
@@ -133,6 +169,9 @@ class HuggingFaceDataset(DatasetConfig):
 
     Attributes:
         hf_repo: Hugging Face dataset repository ID.
+        hf_revision: Hugging Face dataset revision. If omitted, version pinning
+            is deferred until the first training run, when the latest revision
+            is resolved.
         hf_split: Source dataset split.
         hf_config: Source dataset configuration name.
         input_column: Source prompt column.
@@ -141,12 +180,12 @@ class HuggingFaceDataset(DatasetConfig):
             messages, preformatted ``messages``, or ``raw`` model input.
         system_prompt: System message added to formatted examples.
         prompt_template: Template applied to each source prompt.
-        always_download: When training, always download the dataset from Hugging Face instead of caching it.
     """
 
     _type: DatasetType = DatasetType.HUGGING_FACE
 
     hf_repo: str
+    hf_revision: str | None
     hf_split: str
     hf_config: str | None
     input_column: str
@@ -154,12 +193,12 @@ class HuggingFaceDataset(DatasetConfig):
     input_format: Literal["text", "messages", "raw"]
     system_prompt: str
     prompt_template: str
-    always_download: bool
 
     def __init__(
         self,
         hf_repo: str,
         *,
+        hf_revision: str | None = None,
         hf_split: str = "train",
         hf_config: str | None = None,
         input_column: str,
@@ -167,13 +206,14 @@ class HuggingFaceDataset(DatasetConfig):
         input_format: Literal["text", "messages", "raw"] = "text",
         system_prompt: str = "",
         prompt_template: str = "{input}",
-        always_download: bool = False,
     ):
         if input_format not in ("text", "messages", "raw"):
             raise TrainingGymConfigError(
                 f"input_format must be one of text/messages/raw, got {input_format!r}"
             )
+
         self.hf_repo = hf_repo
+        self.hf_revision = hf_revision
         self.hf_split = hf_split
         self.hf_config = hf_config
         self.input_column = input_column
@@ -181,14 +221,37 @@ class HuggingFaceDataset(DatasetConfig):
         self.input_format = input_format
         self.system_prompt = system_prompt
         self.prompt_template = prompt_template
-        self.always_download = always_download
+
+    def preflight(self) -> None:
+        if self.hf_revision is not None:
+            return
+
+        try:
+            from huggingface_hub import dataset_info
+
+            revision = dataset_info(self.hf_repo).sha
+            if revision is None:
+                raise TrainingGymConfigError(
+                    f"Could not find latest revision for {self.hf_repo}"
+                )
+        except Exception:
+            revision = _resolve_hf_revision_remotely(self.hf_repo)
+
+        if not revision:
+            raise TrainingGymConfigError(
+                f"Could not find latest revision for {self.hf_repo}"
+            )
+        self.hf_revision = revision
 
     def cache_key(self) -> str | None:
-        if self.always_download:
-            return None
+        if self.hf_revision is None:
+            raise TrainingGymConfigError(
+                "HuggingFaceDataset.preflight() must run before cache_key()"
+            )
         return _materialization_fingerprint(
             {
                 "hf_repo": self.hf_repo,
+                "hf_revision": self.hf_revision,
                 "hf_split": self.hf_split,
                 "hf_config": self.hf_config,
                 "input_column": self.input_column,
@@ -222,6 +285,7 @@ class HuggingFaceDataset(DatasetConfig):
             self.hf_repo,
             self.hf_config,
             split=self.hf_split,
+            revision=self.hf_revision,
         )
 
         if self.input_format == "text":
@@ -256,7 +320,8 @@ class HarborDataset(DatasetConfig):
     """A dataset loaded from Harbor tasks.
 
     Attributes:
-        dataset_name: Harbor dataset ID.
+        dataset_name: Harbor dataset ID. Unversioned IDs are pinned to the
+            latest version available when this object is created.
         path: Local Harbor dataset path.
         task_root: Local directory containing Harbor tasks.
         task_glob: Glob used to select task directories.
@@ -296,7 +361,7 @@ class HarborDataset(DatasetConfig):
         eval_repeats: int = 1,
         shuffle_tasks: bool = False,
         shuffle_seed: int = 0,
-        always_download: bool = False,
+        always_fetch: bool = False,
     ) -> None:
         if split not in ("all", "train", "eval"):
             raise TrainingGymConfigError(
@@ -304,6 +369,11 @@ class HarborDataset(DatasetConfig):
             )
         self.split = split
         self.dataset_name = dataset_name
+        self._latest_version = (
+            self._resolve_latest_harbor_version()
+            if dataset_name and "@" not in dataset_name
+            else None
+        )
         self.path = path
         self.task_root = task_root
         self.task_glob = task_glob
@@ -319,14 +389,14 @@ class HarborDataset(DatasetConfig):
         self.eval_repeats = eval_repeats
         self.shuffle_tasks = shuffle_tasks
         self.shuffle_seed = shuffle_seed
-        self.always_download = always_download
+        self.always_fetch = always_fetch
 
     def cache_key(self) -> str | None:
-        if self.always_download:
+        if self.always_fetch:
             return None
         return _materialization_fingerprint(
             {
-                "dataset_name": self.dataset_name,
+                "dataset_ref": self._harbor_dataset_ref(),
                 "path": self.path,
                 "task_root": self.task_root,
                 "task_glob": self.task_glob,
@@ -352,10 +422,52 @@ class HarborDataset(DatasetConfig):
     def label_key(self) -> str:
         return "label"
 
+    def _resolve_latest_harbor_version(self) -> str:
+        import subprocess
+
+        harbor_bin = shutil.which("harbor")
+        if harbor_bin is not None:
+            cmd = [
+                harbor_bin,
+                "version",
+                "show",
+                f"{self.dataset_name}@latest",
+                "--json",
+            ]
+        else:
+            uvx_bin = shutil.which("uvx")
+            if uvx_bin is None:
+                raise FileNotFoundError(
+                    "Harbor CLI not found. Install `harbor` or `uvx` to resolve "
+                    f"the latest version of {self.dataset_name!r}."
+                )
+            cmd = [
+                uvx_bin,
+                "harbor",
+                "version",
+                "show",
+                f"{self.dataset_name}@latest",
+                "--json",
+            ]
+
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        metadata = json.loads(result.stdout)
+        version = metadata.get("version") or metadata.get("content_hash")
+        if not version:
+            raise TrainingGymConfigError(
+                f"Could not find latest version for {self.dataset_name}"
+            )
+        return str(version)
+
     def _harbor_dataset_ref(self) -> str:
         if "@" in self.dataset_name:
             return self.dataset_name
-        return f"{self.dataset_name}@latest"
+        return f"{self.dataset_name}@{self._latest_version or 'latest'}"
 
     def _harbor_cache_dir(self) -> Path:
         slug = self._harbor_dataset_ref().replace("/", "--").replace("@", "--")
