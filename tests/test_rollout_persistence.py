@@ -21,21 +21,12 @@ def _rollout(run_id="run", step=0):
 
 
 @pytest.mark.parametrize("is_async", [False, True])
-def test_data_and_summary_share_one_batch(fake_volume, monkeypatch, is_async):
-    batches = []
-    upload = fake_volume.batch_upload
-
-    def record_batch(force=False):
-        batches.append(force)
-        return upload(force=force)
-
-    monkeypatch.setattr(fake_volume, "batch_upload", record_batch)
+def test_data_and_summary_are_persisted(fake_volume, is_async):
     result = _rollout()
     if is_async:
         asyncio.run(result.save(is_async=True))
     else:
         result.save()
-    assert batches == [True]
     assert set(fake_volume.files) == {
         "training-rollouts/run__00000000.json",
         "training-rollouts-summary/run/run__00000000.json",
@@ -92,13 +83,25 @@ def test_listing_reads_only_small_summaries(fake_volume, monkeypatch):
     assert not any("/other/" in path for path in paths)
 
 
-def test_failed_batch_is_not_acknowledged(fake_volume, monkeypatch):
-    def fail_commit(*args, **kwargs):
-        raise OSError("storage unavailable")
+@pytest.mark.parametrize("is_async", [False, True])
+def test_failed_summary_write_is_recoverable(fake_volume, monkeypatch, is_async):
+    from modal_training_gym.common import training_rollout
 
-    monkeypatch.setattr(fake_volume, "batch_upload", fail_commit)
-    with pytest.raises(OSError, match="storage unavailable"):
-        _rollout().save()
+    put = training_rollout.vol_put
+
+    def fail_summary(store, *args, **kwargs):
+        if store == TrainingRolloutResult.summary_store("run"):
+            raise OSError("summary write failed")
+        return put(store, *args, **kwargs)
+
+    monkeypatch.setattr(training_rollout, "vol_put", fail_summary)
+    with pytest.raises(OSError, match="summary write failed"):
+        if is_async:
+            asyncio.run(_rollout().save(is_async=True))
+        else:
+            _rollout().save()
+    assert list(fake_volume.files) == ["training-rollouts/run__00000000.json"]
+    assert len(TrainingRolloutResult.list_summaries_for_run("run")) == 1
 
 
 def test_listing_skips_invalid_summary(fake_volume):

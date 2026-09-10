@@ -221,7 +221,6 @@ def _enqueue_record(payload: dict[str, Any], url: str) -> None:
         **payload,
         "_url": url,
         "_timeout": _ROLLOUT_TIMEOUT_SECONDS,
-        "_scale_timeout_with_size": True,
     }
     if _REPORTER_DRAINING:
         item["_failure_reason"] = {"reason": "reporter draining"}
@@ -471,7 +470,7 @@ def _post(item: dict[str, Any]) -> bool:
         {key: value for key, value in item.items() if not key.startswith("_")},
         default=str,
     ).encode("utf-8")
-    if item.get("_scale_timeout_with_size"):
+    if _is_record(item):
         timeout = min(
             _MAX_RECORD_TIMEOUT_SECONDS,
             max(timeout, len(body) / 1e6 * _TIMEOUT_SECONDS_PER_MB),

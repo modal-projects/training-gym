@@ -27,8 +27,8 @@ from modal_training_gym.utils.metadata import (
     vol_get_summary_items,
     vol_list,
     vol_list_keys,
+    vol_put,
     vol_put_many,
-    vol_put_records,
 )
 
 
@@ -303,14 +303,27 @@ class TrainingRolloutResult(BaseModel):
         self._touch_created_at()
         payload = self.model_dump(mode="json")
         summary = self._stored_summary(payload)
-        # Both files share a batch; concurrent steps never overwrite a shared index.
-        return vol_put_records(
-            [
-                (MetadataStore.TRAINING_ROLLOUTS, self.storage_key, payload),
-                (self.summary_store(self.training_run_id), self.storage_key, summary),
-            ],
-            is_async=is_async,
-        )
+        # Canonical data first; readers recover an interrupted summary write.
+        # Each step owns its summary file, so writers never replace a shared index.
+        if is_async:
+
+            async def _run() -> None:
+                await vol_put(
+                    MetadataStore.TRAINING_ROLLOUTS,
+                    self.storage_key,
+                    payload,
+                    is_async=True,
+                )
+                await vol_put(
+                    self.summary_store(self.training_run_id),
+                    self.storage_key,
+                    summary,
+                    is_async=True,
+                )
+
+            return _run()
+        vol_put(MetadataStore.TRAINING_ROLLOUTS, self.storage_key, payload)
+        vol_put(self.summary_store(self.training_run_id), self.storage_key, summary)
 
     @classmethod
     def list_summaries_for_run(
