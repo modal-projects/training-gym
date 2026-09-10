@@ -156,7 +156,7 @@ def test_train_result_lists_complete_dirs_without_tracker(monkeypatch) -> None:
     ]
 
 
-def test_train_result_lists_hf_and_latest_checkpoint_stays_megatron(
+def test_train_result_skips_hf_and_latest_checkpoint_stays_megatron(
     monkeypatch,
 ) -> None:
     volume = _ListingVolume(
@@ -184,7 +184,6 @@ def test_train_result_lists_hf_and_latest_checkpoint_stays_megatron(
         (checkpoint.name, checkpoint.checkpoint_type) for checkpoint in checkpoints
     ] == [
         ("iter_0000001", checkpoint_mod.CheckpointType.megatron),
-        ("iter_0000001_hf", checkpoint_mod.CheckpointType.hf),
     ]
     assert result.latest_checkpoint() is not None
     assert result.latest_checkpoint().name == "iter_0000001"

@@ -197,7 +197,6 @@ class TrainingRun(BaseModel):
             directory,
             volume,
             mount,
-            include_hf=False,
             fallback_without_tracker=False,
             training_run_id=self.training_run_id,
         )

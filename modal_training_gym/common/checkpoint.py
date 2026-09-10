@@ -100,7 +100,6 @@ def _list_checkpoints(
     checkpoints_volume_name: str,
     checkpoints_mount_path: str,
     *,
-    include_hf: bool,
     fallback_without_tracker: bool,
     training_run_id: str = "",
     app_name: str = "",
@@ -140,9 +139,8 @@ def _list_checkpoints(
         key=_entry_name,
     ):
         name = _entry_name(entry)
-        if not name.startswith("iter_"):
+        if not name.startswith("iter_") or name.endswith("_hf"):
             continue
-        is_hf = name.endswith("_hf")
         child_rel = f"{rel}/{name}" if rel else name
         try:
             child_names = {
@@ -151,9 +149,7 @@ def _list_checkpoints(
             }
         except (FileNotFoundError, NotFoundError):
             child_names = set()
-        if is_hf:
-            is_visible = include_hf and _CONVERT_COMPLETE_MARKER in child_names
-        elif not is_complete_torch_dist_checkpoint(child_names):
+        if not is_complete_torch_dist_checkpoint(child_names):
             is_visible = False
         elif tracker_iteration is None:
             is_visible = fallback_without_tracker
@@ -164,7 +160,7 @@ def _list_checkpoints(
             continue
         checkpoints.append(
             Checkpoint(
-                checkpoint_type=CheckpointType.hf if is_hf else CheckpointType.megatron,
+                checkpoint_type=CheckpointType.megatron,
                 name=name,
                 path=posixpath.join(checkpoint_dir, name),
                 timestamp=float(getattr(entry, "mtime", 0.0)),

@@ -180,10 +180,10 @@ class TrainResult:
         return Volume.from_name(volume_name, create_if_missing=False)
 
     def checkpoints(self) -> list["Checkpoint"]:
-        """List this run's checkpoints.
+        """Snapshot of committed megatron ``iter_*`` directories.
 
-        Returns:
-            This run's ``Checkpoint`` objects.
+        Miles LoRA adapters are not listed. Serving needs
+        ``convert_megatron_checkpoint_to_hf``.
         """
         from modal_training_gym.common.checkpoint import _list_checkpoints
         from modal_training_gym.common.errors import TrainingGymConfigError
@@ -198,7 +198,6 @@ class TrainResult:
                 self.checkpoint_dir,
                 self.checkpoints_volume_name or f"{self.app_name}-checkpoints",
                 self.checkpoints_mount_path or "/checkpoints",
-                include_hf=True,
                 fallback_without_tracker=True,
                 training_run_id=self.training_run_id,
                 app_name=self.app_name,
@@ -206,15 +205,8 @@ class TrainResult:
         raise TrainingGymConfigError(f"Unsupported framework: {self.framework}")
 
     def latest_checkpoint(self) -> "Checkpoint | None":
-        """Return the last megatron ``iter_*`` checkpoint, if any."""
-        from modal_training_gym.common.checkpoint import CheckpointType
-
-        megatron = [
-            checkpoint
-            for checkpoint in self.checkpoints()
-            if checkpoint.checkpoint_type is CheckpointType.megatron
-        ]
-        return megatron[-1] if megatron else None
+        checkpoints = self.checkpoints()
+        return checkpoints[-1] if checkpoints else None
 
     @property
     def model(self) -> "ModelConfig":
