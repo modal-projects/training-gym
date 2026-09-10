@@ -11,15 +11,18 @@ from modal_training_gym.common.models import DeepSeek_V4_1_Flash, ModelConfig
 from modal_training_gym.common.patches import encode_patch
 from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 
-# radixark/miles#3179 (DeepSeek-V4.1 RL support) and sgl-project/sglang#38798
-# (the matching engine support) are both unmerged, and the only image built from
-# them, `radixark/miles:deepseek-v41`, is arm64/GB300-only — Modal's builder
-# resolves amd64 and rejects it. So this recipe layers the two upstream refs onto
-# the newest amd64 nightly instead: sglang is an editable install and miles' JIT
-# kernels compile at runtime, so checking the refs out is enough. Replace all
-# three with a single published tag once the PRs land in a nightly.
-_MILES_PR = "pull/3179/head"  # b7e51b026e6d5cb681d145794be1af666e037520
-_SGLANG_PR = "pull/38798/head"  # 1aa0e962b206102b7c439a4a0c4981cfec6e87bc
+# radixark/miles#3179 (DeepSeek-V4.1 RL support) is unmerged, and the only image
+# built from it, `radixark/miles:deepseek-v41`, is arm64/GB300-only — Modal's
+# builder resolves amd64 and rejects it. That image is the last amd64+arm64
+# nightly built on `lmsysorg/sglang:v0.5.18` with two source trees copied over
+# it: miles at the PR head, and an sglang tree that merges sgl-project/sglang#38798
+# (V4.1 engine support) into `sglang-miles` (the weight-update session API miles
+# needs) and exists nowhere public but inside that image. So this recipe starts
+# from the same v0.5.18 nightly for amd64, checks out the miles PR, and unpacks
+# the sglang tree from the published image's layer
+# (patch_deepseek_v41_sglang_tree). Replace all of it with a single published tag
+# once the PR lands in a nightly.
+_MILES_PR = "pull/3179/head"  # 6a54b4629c4259f4733990a7fcd6c77c3c56296e
 
 _PATCH_DIR = (
     Path(__file__).resolve().parents[2]
@@ -29,9 +32,11 @@ _PATCH_DIR = (
     / "patches"
 )
 
-# Build-time shims for gaps in the overlaid refs; see each patch's docstring.
-# They run after ``apply_source_overlays`` so they land on the checked-out tree.
+# Build-time source overlay and shims for gaps in it; see each script's
+# docstring. They run after ``apply_source_overlays`` so the sglang tree lands
+# over the nightly's checkout and the edits land on that tree.
 _PATCHES = (
+    "patch_deepseek_v41_sglang_tree",
     "patch_deepseek_v41_chat_template",
     "patch_deepseek_v41_fp4_dequant_block",
 )
@@ -50,9 +55,8 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
 
     model_config_class: ClassVar[type[ModelConfig]] = DeepSeek_V4_1_Flash
 
-    docker_image: str = "radixark/miles:dev-202609100049"
+    docker_image: str = "radixark/miles:dev-202609050049"
     miles_git_ref: str | None = _MILES_PR
-    sglang_git_ref: str | None = _SGLANG_PR
     image_run_commands: list[str] = field(default_factory=_image_patches)
     gpu_type: str = "H200"
     # The fp32 optimizer state is offloaded to host RAM: ~8.5B params per GPU at
@@ -197,10 +201,9 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     sglang_disable_cuda_graph: bool = True
     sglang_disable_radix_cache: bool = True
 
-    # miles#3179 predates miles#3124: sglang >= 0.5.19 no longer auto-detects
-    # ``device`` when a ServerArgs is constructed, and miles always renders it on
-    # the engine command line, so an unset device becomes ``--device None`` and
-    # fails its own argv round-trip check. Naming the device sidesteps that.
+    # miles always renders ``device`` on the engine command line, and sglang
+    # builds from 0.5.19 on no longer fill in an unset one, so name it rather
+    # than depend on the nightly's auto-detect.
     #
     # Each TP rank reads all 48 ~10 GB HF shards while the co-located Megatron
     # ranks hold their offloaded weights in host RAM. sglang's default loader
