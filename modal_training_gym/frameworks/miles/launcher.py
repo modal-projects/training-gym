@@ -1130,7 +1130,7 @@ def build_miles_app(
                     with open(prep_error) as f:
                         raise RuntimeError(f"Head preparation failed: {f.read()}")
                 if time.time() > deadline:
-                    raise TimeoutError("Timed out waiting for head preparation marker")
+                    raise RuntimeError("Timed out waiting for head preparation marker")
                 await asyncio.sleep(5)
 
         cluster.start_ray()
