@@ -16,6 +16,8 @@
 # 3. Reuse the same scorer as a SLIME `custom_rm_function`.
 # 4. Train and compare base vs. trained behavior.
 
+import time
+
 import modal
 
 from modal_training_gym import (
@@ -170,13 +172,15 @@ config = TrainConfig(
     ),
 )
 print("Starting training...")
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained checkpoint
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )

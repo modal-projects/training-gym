@@ -15,6 +15,7 @@
 # You can read more about the algorithm in [the paper](https://arxiv.org/abs/2503.14476).
 
 import re
+import time
 
 from modal_training_gym import (
     Endpoint,
@@ -198,16 +199,18 @@ config = TrainConfig(
     ),
 )
 
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained model
 #
 # Let's run the same eval on the trained checkpoint.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True

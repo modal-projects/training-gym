@@ -129,7 +129,7 @@ cfg = TrainConfig(
     model=Qwen3_4B(),
     recipe=Qwen3_4B_Recipe(gpu_type="H100", ...),
 )
-result = cfg.train()
+run = cfg.train()
 ```
 
 ### Caller resolution for cloudpickle
@@ -218,7 +218,7 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
    from modal_training_gym import TrainConfig
 
-   train_result = TrainConfig(...).train()
+   run = TrainConfig(...).train()
    ```
 
    Markdown comment blocks become prose on the docs page. Python blocks become

@@ -13,7 +13,10 @@ from modal_training_gym.common import reporting
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.step_timing import RoleTimingRecord
-from modal_training_gym.common.train_result import TrainResult
+from modal_training_gym.common.train_result import (
+    save_train_result_blob,
+    train_result_payload,
+)
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
 from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import MetadataStore
@@ -47,12 +50,14 @@ def _save_records() -> None:
         updated_at=150,
         metadata={"group_id": "route-group"},
     ).save()
-    TrainResult(
-        app_name="route-app",
-        framework=Framework.SLIME,
-        training_run_id="run-route-1",
-        checkpoint_dir="/checkpoints/run-route-1",
-    ).save()
+    save_train_result_blob(
+        train_result_payload(
+            app_name="route-app",
+            framework=Framework.SLIME,
+            training_run_id="run-route-1",
+            checkpoint_dir="/checkpoints/run-route-1",
+        )
+    )
 
 
 def test_runs_route_returns_typed_joined_summaries(fake_volume, monkeypatch, tmp_path):

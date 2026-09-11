@@ -2,8 +2,9 @@ import yaml
 import pytest
 
 from modal_training_gym.common.framework import Framework
+from modal_training_gym.common.launcher_helpers import configured_recipe_save
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.train_result import TrainResult
+from modal_training_gym.common.run import TrainingRun, set_checkpoint_location
 from modal_training_gym.frameworks.miles.modal_helpers.utils import prepare_miles_config
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
@@ -45,14 +46,40 @@ def test_save_overrides_survive_yaml_materialization(tmp_path, enabled):
         assert "--save-interval" not in recipe.cli_args()
 
 
-def test_result_without_checkpoint_keeps_original_model_source():
+def test_run_without_checkpoint_keeps_original_model_source(fake_volume):
     model = ModelConfig(model_name="org/model", model_path="/hf/model")
-    result = TrainResult(
-        app_name="test",
-        framework=Framework.MILES,
+    run = TrainingRun(
         training_run_id="run",
-        checkpoint_dir="",
-        model_config=model,
+        framework=Framework.MILES,
+        config={},
+        app_name="test",
+        source_model=model,
     )
-    assert result.checkpoints() == []
-    assert result.model.model_path == "/hf/model"
+    assert run.checkpoints() == []
+    assert run.model.model_path == "/hf/model"
+
+
+def test_disabled_save_does_not_record_a_checkpoint_dir() -> None:
+    recipe = MilesRecipe(save=None, save_interval=None)
+
+    assert configured_recipe_save(recipe) is None
+
+
+def test_empty_recorded_location_keeps_source_model(fake_volume):
+    model = ModelConfig(model_name="org/model", model_path="/hf/model")
+    run = TrainingRun(
+        training_run_id="run",
+        framework=Framework.MILES,
+        config={},
+        app_name="test",
+        source_model=model,
+    )
+    set_checkpoint_location(
+        run,
+        checkpoint_dir="",
+        checkpoints_volume_name="miles-checkpoints",
+        checkpoints_mount_path="/checkpoints",
+    )
+
+    assert run.checkpoint_dir == ""
+    assert run.model.model_path == "/hf/model"

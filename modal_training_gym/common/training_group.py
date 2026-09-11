@@ -35,7 +35,6 @@ from typing import Any
 
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.train import TrainConfig
-from modal_training_gym.common.train_result import TrainResult
 
 
 class TrainingGroupError(ValueError):
@@ -107,7 +106,7 @@ class TrainingGroup:
         self.name = name
         self.group_id = _slugify(name) if name else f"group-{secrets.token_hex(6)}"
 
-        self.results: list[TrainResult] = []
+        self.results: list[TrainingRun] = []
         self.launches: list[TrainingRun] = []
         self.failures: list[tuple[dict[str, Any], BaseException]] = []
         self._variants: list[tuple[dict[str, Any], TrainConfig]] | None = None
@@ -232,7 +231,7 @@ class TrainingGroup:
         *,
         max_parallel: int = 1,
         continue_on_error: bool = True,
-    ) -> list[TrainResult]:
+    ) -> list[TrainingRun]:
         """Train every variant.
 
         Args:
@@ -242,10 +241,10 @@ class TrainingGroup:
                 Continue after a variant fails.
 
         Returns:
-            Successful training results.
+            Successful training runs.
         """
         variants = self.iter_variants()
-        results: list[TrainResult] = []
+        results: list[TrainingRun] = []
         failures: list[tuple[dict[str, Any], BaseException]] = []
 
         def _record_failure(overrides: dict[str, Any], exc: BaseException) -> None:
