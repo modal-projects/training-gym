@@ -382,16 +382,21 @@ def test_write_jsonl_materializes_data_uris(tmp_path):
         (Qwen3_8_27B(), Qwen3_8_27B_Recipe),
     ],
 )
-def test_qwen36_38_reject_image(model, recipe_cls):
-    with pytest.raises(ValidationError, match="cannot serve image"):
-        TrainConfig(
-            dataset=_mm("image"),
-            model=model,
-            recipe=recipe_cls(),
-        )
+def test_qwen36_38_accept_image(model, recipe_cls):
+    TrainConfig(
+        dataset=_mm("image"),
+        model=model,
+        recipe=recipe_cls(),
+    )
     recipe = recipe_cls()
     args = recipe.cli_args(dataset=_mm("image"), model=model)
-    assert "--custom-model-provider-path" not in args
+    flags = _flags(args)
+    assert flags["--qkv-format"] == "thd"
+    assert flags["--freeze-params-name-list"] == "visual"
+    assert "--use-dynamic-batch-size" in args
+    assert "--micro-batch-size" not in args
+    assert flags["--custom-model-provider-path"] == _QWEN35_VL_PROVIDER
+    assert not (recipe.extra_config or {}).get("custom_model_provider_path")
 
 
 def test_miles_qwen35_rejects_image():
