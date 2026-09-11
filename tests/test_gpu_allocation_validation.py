@@ -16,6 +16,7 @@ from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 _SLIME_KW = dict(
     gpu_type="H100",
     colocate=False,
+    actor_num_gpus_per_node=8,
     tensor_model_parallel_size=1,
     sequence_parallel=False,
     rollout_num_gpus_per_engine=4,
@@ -71,6 +72,7 @@ def test_miles_uses_same_gpu_allocation_math() -> None:
         warnings.simplefilter("error")
         config = MilesRecipe(
             colocate=False,
+            actor_num_gpus_per_node=8,
             rollout_num_gpus=8,
             rollout_num_gpus_per_engine=4,
         )
@@ -186,5 +188,5 @@ def test_miles_num_experts_validation_allows_unset_expert_parallel_size() -> Non
         warnings.simplefilter("ignore")
         recipe = MilesRecipe()
 
-    assert recipe.expert_model_parallel_size is None
+    assert recipe.expert_model_parallel_size == 1
     recipe.validate_model_parallelism(_moe_model(160))

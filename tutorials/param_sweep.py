@@ -38,10 +38,6 @@ base = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=Qwen3_5_4B_Recipe(
-        rollout_num_gpus=8,
-        num_rollout=15,
-        rollout_max_response_len=8192,
-        global_batch_size=32,
         rm_type="dapo",
     ),
 )

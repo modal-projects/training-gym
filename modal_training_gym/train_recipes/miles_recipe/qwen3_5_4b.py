@@ -10,11 +10,14 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Qwen3_5_4B_Miles_Recipe(MilesRecipe):
-    """Qwen3.5-4B GRPO recipe for 1 node with 8 H100 GPUs."""
+    """Qwen3.5-4B recipe."""
 
     model_config_class: ClassVar[type[ModelConfig]] = Qwen3_5_4B
 
     miles_model_name: str = "qwen3.5-4B"
+    optimizer_cpu_offload: bool = True
+    overlap_cpu_optimizer_d2h_h2d: bool = True
+    use_precision_aware_optimizer: bool = True
     environment: dict[str, str] = field(
         default_factory=lambda: {
             "PYTHONPATH": "/root/Megatron-LM/",
@@ -26,30 +29,15 @@ class Qwen3_5_4B_Miles_Recipe(MilesRecipe):
     ref_load: str = "/checkpoints/Qwen3.5-4B_torch_dist"
     megatron_to_hf_mode: str = ""
 
-    num_rollout: int = 3000
-    rollout_batch_size: int = 32
-    n_samples_per_prompt: int = 8
-    rollout_max_response_len: int = 8192
-    global_batch_size: int = 256
     balance_data: bool = True
-
-    n_samples_per_eval_prompt: int = 16
-
-    tensor_model_parallel_size: int = 2
-    sequence_parallel: bool = True
-    context_parallel_size: int | None = 1
-    expert_model_parallel_size: int | None = 1
-    expert_tensor_parallel_size: int | None = 1
 
     recompute_granularity: str | None = "full"
     recompute_method: str | None = "uniform"
     recompute_num_layers: int | None = 1
 
-    rm_type: str | None = "deepscaler"
     use_kl_loss: bool = True
+    rm_type: str | None = "deepscaler"
 
     sglang_mem_fraction_static: float = 0.7
 
     attention_backend: str | None = "flash"
-
-    save_interval: int = 20

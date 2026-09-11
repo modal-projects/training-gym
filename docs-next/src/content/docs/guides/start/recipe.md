@@ -16,22 +16,7 @@ While the model and dataset dictate what will be trained, the recipe dictates ho
 ```python
 from modal_training_gym import Qwen3_5_4B_Recipe
 
-recipe = Qwen3_5_4B_Recipe(
-    gpu_type="H100",
-    actor_num_nodes=1,
-    actor_num_gpus_per_node=8,
-    tensor_model_parallel_size=1,
-    sequence_parallel=False,
-    rollout_num_gpus=8,
-    rollout_num_gpus_per_engine=1,
-    colocate=True,
-    num_rollout=1,
-    n_samples_per_prompt=4,
-    rollout_batch_size=8,
-    rollout_max_response_len=2048,
-    save_interval=5,
-    custom_rm_function=my_custom_rm,
-)
+recipe = Qwen3_5_4B_Recipe()
 ```
 
 We provide optimized recipes for all supported models in the Training Gym, but note that they are easily extensible to fit whatever use case you may have. Under the hood, each recipe is backed by one of two backend frameworks: [Miles](https://github.com/radixark/miles) or [Slime](https://github.com/THUDM/slime). All recipes allow you to specify framework-native parameters using the corresponding recipe fields.
@@ -48,8 +33,6 @@ recipe = Qwen3_5_4B_Recipe(
     gpu_type="H100",
     actor_num_nodes=1,
     actor_num_gpus_per_node=8,
-    rollout_num_gpus=8,
-    rollout_num_gpus_per_engine=1,
     colocate=True,
 )
 ```
@@ -57,9 +40,8 @@ recipe = Qwen3_5_4B_Recipe(
 The Gym runs your training workloads across one or more nodes on Modal, each with one or more GPUs. Smaller models (i.e., tens of billions of parameters) can be trained on a single node, while larger models may require a [multi-node cluster](https://modal.com/docs/guide/multi-node-training).
 
 > **Note:** Single-node training is open to everyone. Multi-node clusters are still in Beta. [Contact us on Slack](https://modal.com/slack) for access.
-> 
 
-Each recipe automatically provisions the cluster shape that strikes a balance between cost and throughput, but you may want to optimize this for your needs. You can choose any type from [Modal’s supported GPUs](https://modal.com/docs/guide/gpu#picking-a-gpu). Also, note that you may not actually need (or even want!) multiple nodes: we suggest setting `actor_num_gpus_per_node` to the [maximum amount](https://modal.com/docs/guide/gpu#specifying-gpu-count) to minimize unnecessary communication between nodes.
+Each recipe automatically provisions the smallest cluster shape that will work, but you may want to increase this to maximize throughput. You can choose any type from [Modal’s supported GPUs](https://modal.com/docs/guide/gpu#picking-a-gpu). Also, note that you may not actually need (or even want!) multiple nodes: we suggest setting `actor_num_gpus_per_node` to the [maximum amount](https://modal.com/docs/guide/gpu#specifying-gpu-count) to minimize unnecessary communication between nodes.
 
 Actor parameters pertain to your training cluster, and rollout parameters your rollout cluster. When `colocate` is set to `True`, these are one and the same. When set to `False`, this will create a separate cluster for inference (i.e., disaggregated, async RL), so be sure you have the budget for it!
 
@@ -77,18 +59,23 @@ Qwen3_5_4B_Recipe(
 
 Each step of training involves the model generating rollouts to calculate rewards. More specifically, a random subset is taken from our dataset to prompt the model, and the model generates one or more completions for each prompt.
 
-The three most important parameters to specify are:
+The four most important parameters to specify are:
 
-- `num_rollout`: (confusingly) the number of steps.
+- `num_rollout`: the number of steps.
 - `rollout_batch_size`: the number of prompts taken from the dataset for each step.
 - `n_samples_per_prompt`: the number of rollouts sampled for each prompt.
+- `global_batch_size`: the number of samples per optimizer step.
+
+Note that the latter three are [related](https://miles.radixark.com/docs/user-guide/concepts#the-four-knob-invariant).
 
 ```python
 Qwen3_5_4B_Recipe(
     # ...
     num_rollout=10,
+    save_interval=10,
     rollout_batch_size=8,
     n_samples_per_prompt=4,
+    global_batch_size=16,
 )
 ```
 

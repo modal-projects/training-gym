@@ -65,7 +65,6 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         prompt = example["prompt"][0]["content"]
         msg = deployment.chat(
             [{"role": "user", "content": prompt}],
-            chat_template_kwargs={"enable_thinking": True},
         )
         response = msg.get("content") or msg.get("reasoning_content") or ""
         return score(response, example["label"])

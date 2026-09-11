@@ -37,6 +37,10 @@ def _supports_rdma(gpu_type: str) -> bool:
     return gpu_type.split(":")[0].strip().upper() in _RDMA_GPU_TYPES
 
 
+def cluster_when_multi_node(n_nodes: int) -> bool:
+    return n_nodes > 1
+
+
 def clustered_if(
     use_clustered: bool, size: int, *, gpu_type: str
 ) -> Callable[[Callable], Callable]:

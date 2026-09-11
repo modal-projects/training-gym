@@ -8,7 +8,7 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class GLM_4_7_Recipe(SlimeRecipe):
-    """GLM-4.7 MoE GSPO recipe for 8 trainer nodes and 8 rollout nodes, each with 8 H200 GPUs."""
+    """GLM-4.7 recipe."""
 
     gpu_type: str = "H200"
     memory: int | tuple[int, int] | None = (128, 2_097_152)
@@ -23,66 +23,48 @@ class GLM_4_7_Recipe(SlimeRecipe):
         }
     )
     colocate: bool = False
+    actor_num_nodes: int = 8
+    actor_num_gpus_per_node: int = 8
     rollout_num_gpus: int | None = 64
     tensor_model_parallel_size: int = 8
     sequence_parallel: bool = True
     rollout_num_gpus_per_engine: int = 32
 
-    num_rollout: int = 3000
-    rollout_batch_size: int = 64
-    rollout_max_response_len: int = 8192
-    rollout_temperature: float = 1.0
     sglang_mem_fraction_static: float = 0.7
 
-    save_interval: int = 10
     async_save: bool = True
     use_persistent_ckpt_worker: bool = True
 
-    actor_num_nodes: int = 8
-    n_samples_per_prompt: int = 8
-    global_batch_size: int = 128
     max_tokens_per_gpu: int = 8192
 
-    # MoE parallelism
     pipeline_model_parallel_size: int = 4
     context_parallel_size: int = 2
     expert_model_parallel_size: int = 16
     expert_tensor_parallel_size: int = 1
     attention_backend: str = "flash"
 
-    # RL algorithm (GSPO)
     advantage_estimator: str = "gspo"
     eps_clip: float = 1e-4
     eps_clip_high: float = 2e-4
     use_tis: bool = True
 
-    # Optimizer
     optimizer_cpu_offload: bool = True
     overlap_cpu_optimizer_d2h_h2d: bool = True
     use_precision_aware_optimizer: bool = True
 
-    # Rollout sglang
     sglang_enable_dp_attention: bool = True
     sglang_dp_size: int | None = 4
     sglang_ep_size: int | None = 32
     sglang_enable_dp_lm_head: bool = True
     sglang_moe_dense_tp_size: int = 1
-    # EAGLE speculative decoding disabled: it requires
-    # num_nextn_predict_layers=1 in the HF config, but that field also causes
-    # the megatron-bridge to create MTP layers whose duplicate embedding
-    # collides across PP ranks during update_weights().
     sglang_speculative_algorithm: str | None = None
     sglang_speculative_num_steps: int | None = None
     sglang_speculative_eagle_topk: int | None = None
     sglang_speculative_num_draft_tokens: int | None = None
 
-    # Data
-    num_steps_per_rollout: int = 4
     balance_data: bool = True
     rollout_stop_token_ids: list[int] | None = None
     skip_eval_before_train: bool = True
-
-    eval_max_response_len: int = 8192
 
     def __post_init__(self) -> None:
         if self.rollout_stop_token_ids is None:

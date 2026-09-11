@@ -7,6 +7,7 @@ import pytest
 from modal_training_gym.common.ray_cluster import (
     _supports_rdma,
     _with_container_pythonpath,
+    cluster_when_multi_node,
     clustered_if,
 )
 
@@ -29,6 +30,20 @@ def test_clustered_if_single_node_is_identity():
 
     # Single node: no @clustered, just a plain registration — fn returned unchanged.
     assert clustered_if(False, 1, gpu_type="H100")(fn) is fn
+
+
+def test_miles_single_node_skips_clustered():
+    def fn():
+        return None
+
+    assert clustered_if(cluster_when_multi_node(1), 1, gpu_type="H100")(fn) is fn
+
+
+def test_miles_multi_node_applies_clustered():
+    def fn():
+        return None
+
+    assert clustered_if(cluster_when_multi_node(2), 2, gpu_type="H100")(fn) is not fn
 
 
 def test_recipe_pythonpath_keeps_container_entries(monkeypatch):
