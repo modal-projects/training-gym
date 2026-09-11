@@ -227,7 +227,6 @@ def _checkpoint(
         ("/checkpoints/run-1/iter_10_hf", "/checkpoints", "run-1/iter_10_hf"),
         ("/checkpoints/run-1/iter_10_hf/", "/checkpoints", "run-1/iter_10_hf"),
         ("/data/ckpt/iter_5_hf", "/data/ckpt", "iter_5_hf"),
-        ("run-1/iter_10_hf", "/checkpoints", "run-1/iter_10_hf"),
         ("/checkpoints", "/checkpoints", ""),
     ],
 )

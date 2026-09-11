@@ -31,16 +31,17 @@ Note that you can always access runs by their ID:
 run = TrainingRun.from_id("bristled-pine-a7c3e91d4b2")
 ```
 
-From there, we get the run's result after it has completed:
+While the run is in-progress, you can poll for the latest checkpoint:
 
 ```python
-result = run.result()
-```
+import time
 
-Then, get the latest checkpoint:
-
-```python
-checkpoint = result.checkpoints()[-1]
+with config.launch() as run:
+    while True:
+        checkpoint = run.latest_checkpoint()
+        if run.done():
+            break
+        time.sleep(30)
 ```
 
 Now, we could do offline evals:
@@ -101,9 +102,12 @@ simple_config = TrainConfig(
     recipe=simple_recipe,
 )
 
-simple_run = simple_config.launch()
-simple_result = simple_run.result()
-simple_checkpoint = simple_result.latest_checkpoint()
+with simple_config.launch() as simple_run:
+    while True:
+        simple_checkpoint = simple_run.latest_checkpoint()
+        if simple_run.done():
+            break
+        time.sleep(30)
 
 complex_config = TrainConfig(
     model=model,
@@ -112,7 +116,10 @@ complex_config = TrainConfig(
     recipe=complex_recipe,
 )
 
-complex_run = complex_config.launch()
-complex_result = complex_run.result()
-complex_checkpoint = complex_result.latest_checkpoint()
+with complex_config.launch() as complex_run:
+    while True:
+        complex_checkpoint = complex_run.latest_checkpoint()
+        if complex_run.done():
+            break
+        time.sleep(30)
 ```

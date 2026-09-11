@@ -1,6 +1,6 @@
 """Drive the real ``save()`` chain to completion without Modal or a GPU.
 
-``TrainingRun.save()``, ``TrainResult.save()``, and
+``TrainingRun.save()``, ``save_train_result_blob()``, and
 ``TrainingRolloutResult.save(is_async=True)`` are exercised against an in-memory
 ``FakeVolume`` (see ``conftest.py``) so the full serialize-and-write path is
 covered in CI: the payload must stay JSON-serializable, and ``save()`` (in both
@@ -18,7 +18,10 @@ import pytest
 
 from modal_training_gym.common import run as run_mod
 from modal_training_gym.common.framework import Framework
-from modal_training_gym.common.train_result import TrainResult
+from modal_training_gym.common.train_result import (
+    save_train_result_blob,
+    train_result_payload,
+)
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
 from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import MetadataStore
@@ -34,9 +37,11 @@ def test_training_run_save_survives_unmounted_volume(fake_volume, fw):
 
 
 @pytest.mark.parametrize("fw", list(Framework))
-def test_train_result_save_survives_unmounted_volume(fake_volume, fw):
-    """TrainResult.save() completes when reload() raises, for every framework."""
-    TrainResult(app_name="a", framework=fw, training_run_id="t2").save()
+def test_train_result_blob_save_survives_unmounted_volume(fake_volume, fw):
+    """``save_train_result_blob()`` completes when reload() raises, for every framework."""
+    save_train_result_blob(
+        train_result_payload(app_name="a", framework=fw, training_run_id="t2")
+    )
 
     blob = fake_volume.files[f"{MetadataStore.TRAIN_RESULTS.value}/t2.json"]
     assert json.loads(blob)["framework"] == fw.value
@@ -148,7 +153,7 @@ def test_summary_upsert_survives_unreadable_summary_file(
 
 @pytest.mark.parametrize("fw", list(Framework))
 def test_train_result_payload_is_json_serializable(fw):
-    payload = TrainResult(app_name="a", framework=fw, training_run_id="t")._to_dict()
+    payload = train_result_payload(app_name="a", framework=fw, training_run_id="t")
     assert json.loads(json.dumps(payload))["framework"] == fw.value
 
 
@@ -177,7 +182,10 @@ def test_remote_save_from_unmounted_container():
     def _save_probe() -> str:
         from modal_training_gym.common.framework import Framework
         from modal_training_gym.common.run import TrainingRun
-        from modal_training_gym.common.train_result import TrainResult
+        from modal_training_gym.common.train_result import (
+            save_train_result_blob,
+            train_result_payload,
+        )
 
         # Framework is incidental here — this probes volume/reload mechanics,
         # which are framework-independent. Per-framework serialization is
@@ -185,7 +193,11 @@ def test_remote_save_from_unmounted_container():
         # real Modal apps to re-check it.
         rid = "ci-remote-save-probe"  # fixed id → overwrites, no junk accrual
         TrainingRun(training_run_id=rid, framework=Framework.SLIME, config={}).save()
-        TrainResult(app_name=rid, framework=Framework.SLIME, training_run_id=rid).save()
+        save_train_result_blob(
+            train_result_payload(
+                app_name=rid, framework=Framework.SLIME, training_run_id=rid
+            )
+        )
         return "ok"
 
     with modal.enable_output():

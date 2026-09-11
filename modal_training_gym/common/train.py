@@ -24,7 +24,6 @@ from modal_training_gym.common.status import (
     MilesStatus,
     SlimeStatus,
 )
-from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.frameworks.miles import build_miles_app
 from modal_training_gym.frameworks.slime import build_slime_app
 from modal_training_gym.train_recipes.base import BaseTrainRecipe
@@ -81,7 +80,7 @@ def _warn_if_external_build_app() -> None:
         "app: spawning train() on it yourself means the run dies when the "
         "enclosing app.run() block exits or is interrupted. Use "
         "TrainConfig.launch() (returns a TrainingRun handle immediately) or "
-        "TrainConfig.train() (blocks for the TrainResult) instead.",
+        "TrainConfig.train() (blocks for the TrainingRun) instead.",
         stacklevel=3,
     )
 
@@ -536,11 +535,11 @@ class TrainConfig:
             f"ep={getattr(recipe, 'expert_model_parallel_size', 'n/a')})"
         )
 
-    def train(self, *, show_output: bool = True) -> TrainResult:
+    def train(self, *, show_output: bool = True) -> TrainingRun:
         """Run one training configuration.
 
         Returns:
-            The completed training result.
+            The completed training run.
         """
         from modal_training_gym.common.modal_lifecycle import stop_app
 

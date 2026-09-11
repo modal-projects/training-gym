@@ -109,10 +109,6 @@
       "link": "/reference/trainingrun"
     },
     {
-      "label": "TrainResult",
-      "link": "/reference/trainresult"
-    },
-    {
       "label": "VllmRecipe",
       "link": "/reference/vllmrecipe"
     },

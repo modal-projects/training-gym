@@ -216,7 +216,6 @@ _EXPORTS = {
     "TrainingGymError": ("modal_training_gym.common.errors", "TrainingGymError"),
     "TrainingGroup": ("modal_training_gym.common.training_group", "TrainingGroup"),
     "TrainingRun": ("modal_training_gym.common.run", "TrainingRun"),
-    "TrainResult": ("modal_training_gym.common.train_result", "TrainResult"),
     "VllmRecipe": ("modal_training_gym.deploy_recipes.vllm_recipe", "VllmRecipe"),
     "WandbConfig": ("modal_training_gym.common.wandb", "WandbConfig"),
 }
@@ -311,7 +310,6 @@ __all__ = [
     "TrainingGymError",
     "TrainingGroup",
     "TrainingRun",
-    "TrainResult",
     "TrackioConfig",
     "VllmRecipe",
     "WandbConfig",

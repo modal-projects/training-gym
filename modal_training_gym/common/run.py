@@ -5,18 +5,33 @@ It is used to track the training run and its results.
 
 from __future__ import annotations
 
+import copy
 import math
 import inspect
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, overload
 
-from pydantic import BaseModel, PrivateAttr, computed_field, field_validator
+from modal.exception import NotFoundError
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    computed_field,
+    field_serializer,
+    field_validator,
+)
 
 from modal_training_gym.common.framework import Framework
+from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.status import FrameworkStatus, resolve_framework_status
+from modal_training_gym.common.torch_dist_checkpoint import (
+    TORCH_DIST_TRACKER_NAME,
+    parse_torch_dist_iteration,
+    parse_torch_dist_tracker,
+)
 from modal_training_gym.utils.metadata import (
     MetadataStore,
     vol_get,
@@ -24,10 +39,11 @@ from modal_training_gym.utils.metadata import (
 )
 
 if TYPE_CHECKING:
-    from modal_training_gym.common.train_result import TrainResult
+    from modal_training_gym.common.checkpoint import Checkpoint
     from modal_training_gym.common.training_rollout import TrainingRolloutResult
 
 TRAINING_RUNS_STORE_NAME = MetadataStore.TRAINING_RUNS.value
+CHECKPOINT_LOCATION_METADATA_KEY = "checkpoint_location"
 
 
 class FrameworkStatusUpdate(BaseModel):
@@ -98,6 +114,9 @@ class TrainingRun(BaseModel):
         error_message: Failure text. Empty while running or after success.
         metadata: Extra keys such as sweep ``group_id``.
         function_call_id: Modal FunctionCall id used to wait on the spawned run.
+        app_name: Modal app name used as the default checkpoint volume prefix.
+        source_model: Model used for training.
+        metrics: Final scalar metrics written at the end of the run.
     """
 
     training_run_id: str
@@ -132,12 +151,32 @@ class TrainingRun(BaseModel):
     # can be waited on (see ``result()`` / ``__await__``). Empty until the run
     # is actually spawned by ``TrainConfig.launch()``.
     function_call_id: str = ""
+    app_name: str = ""
+    source_model: Any = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
 
     # Runtime-only handles attached by ``TrainConfig.launch()``; never persisted.
     _function_call: Any = PrivateAttr(default=None)
     _status_display: Any = PrivateAttr(default=None)
     _metadata_removed_keys: set[str] = PrivateAttr(default_factory=set)
     _metadata_loaded_keys: set[str] | None = PrivateAttr(default=None)
+    _closed: bool = PrivateAttr(default=False)
+
+    @field_serializer("source_model")
+    def _serialize_source_model(self, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return {
+                "model_name": value.get("model_name", ""),
+                "model_path": value.get("model_path"),
+            }
+        if not isinstance(value, ModelConfig):
+            raise ValueError("source_model is not a ModelConfig or dict.")
+        return {
+            "model_name": value.model_name,
+            "model_path": value.model_path,
+        }
 
     @computed_field
     @property
@@ -162,64 +201,212 @@ class TrainingRun(BaseModel):
 
         return modal.FunctionCall.from_id(self.function_call_id)
 
-    def result(
-        self,
-        *,
-        timeout: float | None = None,
-        stop_app_on_success: bool = True,
-    ) -> TrainResult:
-        """Wait for this training run to finish.
+    def _reload(self) -> None:
+        try:
+            stored = TrainingRun.from_id(self.training_run_id)
+        except (KeyError, NotFoundError):
+            return
+        self.status = stored.status
+        self.metadata = stored.metadata
+        self._metadata_loaded_keys = stored._metadata_loaded_keys
+        self.app_name = stored.app_name
+        self.source_model = stored.source_model
+        self.metrics = stored.metrics
+        self.error_message = stored.error_message
 
-        Args:
-            timeout:
-                Maximum number of seconds to wait.
-            stop_app_on_success:
-                Stop the Modal app after successful training.
+    def _function_call_outcome(self) -> tuple[bool, BaseException | None]:
+        if self._function_call is None and not self.function_call_id:
+            return False, None
+        try:
+            call = self.function_call
+        except Exception:
+            return False, None
+        try:
+            call.get(timeout=0)
+            return True, None
+        except TimeoutError:
+            return False, None
+        except BaseException as exc:
+            return True, exc
 
-        Returns:
-            The completed training result.
+    def checkpoints(self) -> list["Checkpoint"]:
+        """Snapshot of committed megatron ``iter_*`` directories.
+
+        Miles LoRA adapters are not listed. Serving needs
+        ``convert_megatron_checkpoint_to_hf``.
         """
-        from modal_training_gym.common.modal_lifecycle import stop_app
+        from modal_training_gym.common.checkpoint import _list_checkpoints
+
+        self._reload()
+        location = checkpoint_location(self)
+        if location is None:
+            return []
+        directory, volume, mount = location
+        return _list_checkpoints(
+            directory,
+            volume,
+            mount,
+            training_run_id=self.training_run_id,
+            app_name=self.app_name,
+        )
+
+    def latest_checkpoint(self) -> "Checkpoint | None":
+        checkpoints = self.checkpoints()
+        return checkpoints[-1] if checkpoints else None
+
+    @property
+    def checkpoint_dir(self) -> str:
+        location = checkpoint_location(self)
+        return location[0] if location else ""
+
+    @property
+    def error(self) -> str | None:
+        return self.error_message
+
+    @property
+    def model(self) -> "ModelConfig":
+        """Build a ``ModelConfig`` whose path targets the latest megatron checkpoint."""
+        self._reload()
+        raw = self.source_model
+        if raw is None:
+            raise ValueError("No source_model on this TrainingRun.")
+        if isinstance(raw, ModelConfig):
+            model = copy.copy(raw)
+        elif isinstance(raw, dict):
+            model = ModelConfig(**raw)
+        else:
+            raise ValueError("source_model is not a ModelConfig or dict.")
+        checkpoint = self.latest_checkpoint()
+        if checkpoint is not None:
+            model.model_path = checkpoint.path
+        elif self.checkpoint_dir:
+            model.model_path = self.checkpoint_dir
+        return model
+
+    def done(self) -> bool:
+        """True if status is not RUNNING or the FunctionCall has finished.
+
+        Does not stop the Modal app.
+        """
+        self._reload()
+        if self.status is not TrainingRunStatus.RUNNING:
+            return True
+        finished, exc = self._function_call_outcome()
+        if not finished:
+            return False
+        self.status = (
+            TrainingRunStatus.FAILED if exc is not None else TrainingRunStatus.COMPLETED
+        )
+        if exc is not None:
+            self.error_message = self.error_message or str(exc)
+        return True
+
+    def wait(self, *, timeout: float | None = None) -> "TrainingRun":
+        """Block until this run is done. Does not stop the Modal app."""
         from modal_training_gym.common.status_reporter import (
             flush as flush_status_reporter,
         )
-        from modal_training_gym.common.train_result import TrainResult
 
         if self._status_display is not None:
             self._status_display.start_polling(self.training_run_id)
         try:
-            try:
-                result_dict = self.function_call.get(timeout=timeout)
-            except BaseException as exc:
-                message = str(exc)
-                if self.training_run_id not in message:
-                    try:
-                        exc.args = (
-                            f"{message} (training_run_id={self.training_run_id})",
-                            *exc.args[1:],
-                        )
-                    except (AttributeError, TypeError):
-                        pass
+            if self._function_call is not None or self.function_call_id:
                 try:
-                    exc.training_run_id = self.training_run_id  # pyright: ignore[reportAttributeAccessIssue]  # exception metadata is consumed by downstream callers
-                except AttributeError:
-                    pass
-                raise
+                    payload = self.function_call.get(timeout=timeout)
+                except BaseException as exc:
+                    message = str(exc)
+                    if self.training_run_id not in message:
+                        try:
+                            exc.args = (
+                                f"{message} (training_run_id={self.training_run_id})",
+                                *exc.args[1:],
+                            )
+                        except (AttributeError, TypeError):
+                            pass
+                    try:
+                        exc.training_run_id = self.training_run_id  # pyright: ignore[reportAttributeAccessIssue]
+                    except AttributeError:
+                        pass
+                    self._reload()
+                    if self.status is TrainingRunStatus.RUNNING:
+                        self.status = TrainingRunStatus.FAILED
+                        self.error_message = self.error_message or str(exc)
+                    raise
+                self._reload()
+                if isinstance(payload, dict):
+                    if payload.get("app_name"):
+                        self.app_name = str(payload["app_name"])
+                    if "model_config" in payload:
+                        self.source_model = payload["model_config"]
+                    metrics = payload.get("metrics")
+                    if isinstance(metrics, dict):
+                        self.metrics = metrics
+                return self
+            deadline = None if timeout is None else time.monotonic() + timeout
+            while not self.done():
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"Timed out waiting for training_run_id={self.training_run_id}"
+                    )
+                time.sleep(1.0)
+            return self
         finally:
             if self._status_display is not None:
                 self._status_display.stop_polling()
             flush_status_reporter(timeout_seconds=2.0)
 
-        if stop_app_on_success and self.modal_app_id:
-            stop_app(self.modal_app_id)
-        result = TrainResult(**TrainResult._parse_model_config(result_dict))
-        print(f"Training complete: {result.training_run_id}")
-        return result
+    def result(
+        self,
+        *,
+        timeout: float | None = None,
+        stop_app_on_success: bool = True,
+    ) -> "TrainingRun":
+        self.wait(timeout=timeout)
+        if stop_app_on_success:
+            self.close()
+        print(f"Training complete: {self.training_run_id}")
+        return self
+
+    @classmethod
+    def wait_all(
+        cls,
+        runs: Sequence["TrainingRun"],
+        *,
+        poll_interval: float = 30,
+    ) -> list["TrainingRun"]:
+        """Wait for every run. Close each run when that run is done."""
+        pending = list(runs)
+        while pending:
+            still_running: list[TrainingRun] = []
+            for run in pending:
+                if run.done():
+                    run.close()
+                else:
+                    still_running.append(run)
+            pending = still_running
+            if pending:
+                time.sleep(poll_interval)
+        return list(runs)
+
+    def close(self) -> None:
+        """Stop the detached Modal app. Safe to call more than once."""
+        if self._closed:
+            return
+        self._closed = True
+        from modal_training_gym.common.modal_lifecycle import stop_app
+
+        stop_app(self.modal_app_id)
+
+    def __enter__(self) -> "TrainingRun":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        self.close()
 
     def __await__(self):
         import asyncio
 
-        async def _wait() -> TrainResult:
+        async def _wait() -> TrainingRun:
             return await asyncio.to_thread(self.result)
 
         return _wait().__await__()
@@ -437,6 +624,39 @@ class TrainingRun(BaseModel):
         return run
 
 
+def checkpoint_location(
+    run: TrainingRun,
+) -> tuple[str, str, str] | None:
+    loc = (run.metadata or {}).get(CHECKPOINT_LOCATION_METADATA_KEY)
+    if not isinstance(loc, dict):
+        return None
+    directory = loc.get("checkpoint_dir")
+    volume = loc.get("checkpoints_volume_name")
+    mount = loc.get("checkpoints_mount_path")
+    if not (
+        isinstance(directory, str) and directory and isinstance(volume, str) and volume
+    ):
+        return None
+    mount_path = mount if isinstance(mount, str) and mount else "/checkpoints"
+    return directory, volume, mount_path
+
+
+def set_checkpoint_location(
+    run: TrainingRun,
+    *,
+    checkpoint_dir: str,
+    checkpoints_volume_name: str,
+    checkpoints_mount_path: str,
+) -> None:
+    metadata = dict(run.metadata or {})
+    metadata[CHECKPOINT_LOCATION_METADATA_KEY] = {
+        "checkpoint_dir": checkpoint_dir,
+        "checkpoints_volume_name": checkpoints_volume_name,
+        "checkpoints_mount_path": checkpoints_mount_path,
+    }
+    run.metadata = metadata
+
+
 def _resume_checkpoint(path: str, name: str, iteration: int | None) -> dict[str, Any]:
     return {
         "resume_checkpoint_path": path,
@@ -462,25 +682,24 @@ def torch_dist_resume_checkpoint(
         return None
 
     is_complete = is_complete or os.path.isdir
-    tracker_path = os.path.join(save_path, "latest_checkpointed_iteration.txt")
+    tracker_path = os.path.join(save_path, TORCH_DIST_TRACKER_NAME)
     if os.path.isfile(tracker_path):
         try:
             with open(tracker_path) as f:
-                marker = f.read().strip()
+                tracker = f.read()
         except OSError:
-            marker = ""
-        if marker == "release":
+            tracker = ""
+        if tracker.strip() == "release":
             path = os.path.join(save_path, "release")
             return (
                 _resume_checkpoint(path, "release", None) if is_complete(path) else None
             )
-        if marker.isdigit():
-            name = f"iter_{int(marker):07d}"
+        iteration = parse_torch_dist_tracker(tracker)
+        if iteration is not None:
+            name = f"iter_{iteration:07d}"
             path = os.path.join(save_path, name)
             return (
-                _resume_checkpoint(path, name, int(marker))
-                if is_complete(path)
-                else None
+                _resume_checkpoint(path, name, iteration) if is_complete(path) else None
             )
 
     try:
@@ -492,9 +711,8 @@ def torch_dist_resume_checkpoint(
             if entry.name == "release":
                 release_path = entry.path
             elif entry.name.startswith("iter_"):
-                try:
-                    iteration = int(entry.name.removeprefix("iter_"))
-                except ValueError:
+                iteration = parse_torch_dist_iteration(entry.name)
+                if iteration is None:
                     continue
                 candidates.append((iteration, entry.name, entry.path))
     except OSError:
