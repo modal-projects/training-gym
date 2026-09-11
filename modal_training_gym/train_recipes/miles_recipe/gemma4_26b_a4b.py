@@ -73,12 +73,17 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
 
     modality: Literal["text", "vision"] = "text"
 
+    def served_media(self) -> frozenset[str]:
+        if self.modality == "vision":
+            return frozenset({"image"})
+        return frozenset()
+
     gpu_type: str = "H200"
     image_run_commands: list[str] = field(default_factory=_image_patches)
 
     hf_checkpoint: str = "google/gemma-4-26B-A4B-it"
     ref_load: str = "google/gemma-4-26B-A4B-it"
-    miles_model_script: str = "scripts/models/gemma-4-26b-a4b-it.sh"
+    miles_model_name: str = "gemma-4-26b-a4b-it"
     # Model overflows container disk, so reserve 1 TiB.
     train_function_kwargs: dict[str, Any] = field(
         default_factory=lambda: {"ephemeral_disk": _EPHEMERAL_DISK_MIB}
@@ -90,10 +95,6 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     expert_model_parallel_size: int = 8
     expert_tensor_parallel_size: int = 1
 
-    # bshd rules out dynamic batching and miles asserts on the pair (upstream passes
-    # both and trips it), so use an explicit micro batch; max_tokens_per_gpu is inert.
-    use_dynamic_batch_size: bool = False
-    micro_batch_size: int = 1
     max_tokens_per_gpu: int = 1024
 
     rm_type: str | None = "gemma_math"
@@ -130,7 +131,6 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     use_kl_loss: bool = True
 
     attention_backend: str = "unfused"
-    qkv_format: str = "bshd"
     no_gradient_accumulation_fusion: bool = True
     no_check_for_nan_in_loss_and_grad: bool = True
 

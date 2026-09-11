@@ -36,7 +36,7 @@ class Gsm8kDataset(DatasetConfig):
 
 
 class LibriSpeechASRDataset(MultimodalDataset):
-    """LibriSpeech ASR rows (prompt + audio data-URI + transcript label).
+    """LibriSpeech ASR rows (prompt + audio path + transcript label).
 
     Mirrors the audio_asr tutorial dataset. Audio models validate on a handful
     of LibriSpeech clips. gsm8k is text-only.
@@ -58,8 +58,9 @@ class LibriSpeechASRDataset(MultimodalDataset):
         return False
 
     def source_rows(self):
-        import base64 as b64
         import io
+        import tempfile
+        from pathlib import Path
 
         import soundfile as sf
         from datasets import Audio, load_dataset
@@ -67,7 +68,9 @@ class LibriSpeechASRDataset(MultimodalDataset):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         ds = ds.select(range(min(self.n_rows, len(ds))))
         ds = ds.cast_column("audio", Audio(decode=False))
-        for ex in ds:
+        cache = Path(tempfile.gettempdir()) / "training-gym-asr" / self.dataset_id
+        cache.mkdir(parents=True, exist_ok=True)
+        for i, ex in enumerate(ds):
             audio = ex["audio"]
             data = (
                 audio["bytes"]
@@ -75,14 +78,11 @@ class LibriSpeechASRDataset(MultimodalDataset):
                 else open(audio["path"], "rb").read()
             )
             arr, sr = sf.read(io.BytesIO(data))
-            buf = io.BytesIO()
-            sf.write(buf, arr, sr, format="WAV")
-            data_uri = "data:audio/wav;base64," + b64.b64encode(buf.getvalue()).decode(
-                "ascii"
-            )
+            wav_path = cache / f"{i:06d}.wav"
+            sf.write(wav_path, arr, sr, format="WAV")
             yield {
                 "prompt": self._INSTRUCTION,
-                "media": data_uri,
+                "media": str(wav_path),
                 "label": ex["text"].lower().strip(),
             }
 

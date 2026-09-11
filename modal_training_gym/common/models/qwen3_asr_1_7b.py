@@ -32,6 +32,8 @@ class Qwen3_ASR_1_7B(HFModelConfiguration):
     """Alibaba Qwen3-ASR-1.7B speech recognition model."""
 
     model_name = "Qwen/Qwen3-ASR-1.7B"
+    supported_modalities = frozenset({"audio"})
+    thd_forward = False
 
     # Qwen3 dense backbone, same ``<|im_start|>``/``<|im_end|>`` delimiters as the
     # rest of the family. ASR output is plain transcription (no tool calls), so
@@ -39,6 +41,11 @@ class Qwen3_ASR_1_7B(HFModelConfiguration):
     response_parser = staticmethod(parse_qwen3_response)
 
     requires_bshd = True
+    # The processor expands this single <|audio_pad|> to N tokens (N = the audio
+    # encoder's output length for the clip), aligning audio embeddings with token
+    # positions. It must appear in the prompt text; the raw audio path or payload
+    # must not, or it tokenizes into ~100k-1M text tokens (scales with clip
+    # duration) and OOMs the actor.
     audio_placeholder = "<|audio_start|><|audio_pad|><|audio_end|>"
 
     # thinker_config.text_config (Qwen3 dense backbone), verbatim from config.json.

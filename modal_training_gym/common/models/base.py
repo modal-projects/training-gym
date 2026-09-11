@@ -172,6 +172,10 @@ class ModelConfig:
     response_parser: ResponseParser | None = None
     requires_bshd: bool = False
     audio_placeholder: str = ""
+    supported_modalities: frozenset[str] = frozenset()
+    thd_forward: bool = True
+    has_vision_tower: bool = False
+    needs_qwen35_vl_provider: bool = False
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():

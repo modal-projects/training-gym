@@ -22,8 +22,10 @@ class Qwen3_VL_8B(HFModelConfiguration):
     response_parser = staticmethod(parse_qwen3_response)
 
     model_name = "Qwen/Qwen3-VL-8B-Instruct"
-
     requires_bshd = True
+    supported_modalities = frozenset({"image"})
+    thd_forward = False
+    has_vision_tower = True
 
     architecture = ModelArchitecture(
         # text_config from config.json

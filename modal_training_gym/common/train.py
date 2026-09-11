@@ -8,7 +8,7 @@ import warnings
 from contextlib import nullcontext
 from typing import Any
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
@@ -17,6 +17,7 @@ from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
+from modal_training_gym.common.modality import validate_served_modalities
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun, metric_run_id_for_attempt
 from modal_training_gym.common.status import (
@@ -341,6 +342,11 @@ class TrainConfig:
                 "OnlineRollout requires recipe.custom_generate_function or "
                 "recipe.extra_config['custom_generate_function_path']"
             )
+
+    @model_validator(mode="after")
+    def _validate_served_modalities(self) -> "TrainConfig":
+        validate_served_modalities(self.recipe, self.model, self.dataset)
+        return self
 
     def _generate_training_run_id(self) -> str:
         """Mint a new run id. ``launch()`` calls this once per invocation, so

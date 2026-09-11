@@ -9,6 +9,9 @@ class Qwen3_6_27B(HFModelConfiguration):
     response_parser = staticmethod(parse_qwen3_6_response)
 
     model_name = "Qwen/Qwen3.6-27B"
+    supported_modalities = frozenset({"image"})
+    has_vision_tower = True
+    needs_qwen35_vl_provider = True
     architecture = ModelArchitecture(
         num_layers=64,
         hidden_size=5120,

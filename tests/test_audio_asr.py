@@ -14,15 +14,17 @@ from modal_training_gym.common.models.qwen3_asr_1_7b import (
     _prompt_user_text,
     render_prompt,
 )
+from modal_training_gym.common.audio import coerce_audio_to_bytes
 from modal_training_gym.frameworks.slime.audio_transcription_rollout import _audio_ref
 
 _PLACEHOLDER = Qwen3_ASR_1_7B.audio_placeholder
 _DATA_URI = "data:audio/wav;base64," + base64.b64encode(b"RIFFxxxx").decode()
+_AUDIO_PATH = "/tmp/training-gym-asr/clip.wav"
 
 
-def _audio_prompt(text="Transcribe the speech."):
+def _audio_prompt(text="Transcribe the speech.", audio=_AUDIO_PATH):
     """A slime conversation-list prompt: one audio item + one text item."""
-    content = [{"type": "audio", "audio": _DATA_URI}, {"type": "text", "text": text}]
+    content = [{"type": "audio", "audio": audio}, {"type": "text", "text": text}]
     return [{"role": "user", "content": content}]
 
 
@@ -30,8 +32,9 @@ def _audio_prompt(text="Transcribe the speech."):
 
 
 def test_render_prompt_never_leaks_audio_payload():
-    out = render_prompt(_audio_prompt())
+    out = render_prompt(_audio_prompt(audio=_DATA_URI))
     assert _DATA_URI not in out and "data:audio" not in out
+    assert _AUDIO_PATH not in render_prompt(_audio_prompt())
     assert _PLACEHOLDER in out
     assert "Transcribe the speech." in out
     assert out.endswith("<|im_start|>assistant\n")
@@ -71,8 +74,15 @@ def test_prompt_user_text_ignores_non_user_roles():
 # ── _audio_ref ───────────────────────────────────────────────────────────────
 
 
-def test_audio_ref_extracts_data_uri():
-    assert _audio_ref(types.SimpleNamespace(prompt=_audio_prompt())) == _DATA_URI
+def test_audio_ref_extracts_path():
+    assert _audio_ref(types.SimpleNamespace(prompt=_audio_prompt())) == _AUDIO_PATH
+
+
+def test_coerce_audio_reads_path(tmp_path):
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF")
+    assert coerce_audio_to_bytes(str(wav)) == b"RIFF"
+    assert coerce_audio_to_bytes(b"raw") == b"raw"
 
 
 def test_audio_ref_raises_when_no_audio():

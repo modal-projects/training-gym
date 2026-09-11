@@ -21,7 +21,10 @@
 # element scores +1 (a real click succeeds), and predictions that miss decay
 # toward −1 over a margin scaled to the element's own size.
 
+import base64
 import re
+import tempfile
+from pathlib import Path
 
 from modal_training_gym import (
     CustomDeployment,
@@ -59,6 +62,7 @@ GROUNDING_PROMPT = (
     "horizontal and vertical position on the screen."
 )
 
+
 class ScreenSpotDataset(MultimodalDataset):
     """GUI grounding dataset from ScreenSpot."""
 
@@ -71,29 +75,24 @@ class ScreenSpotDataset(MultimodalDataset):
         super().__init__(modality="image")
 
     def source_rows(self):
-        import base64
-        import io
-
         from datasets import load_dataset
 
         ds = load_dataset(self.hf_repo, split=self.hf_split)
         start = min(self.row_offset, len(ds))
         stop = min(start + self.n_rows, len(ds))
-        # Demo-scale: inline base64 rows in memory; stream large corpora.
-        for row in ds.select(range(start, stop)):
+        cache = Path(tempfile.gettempdir()) / "training-gym-mm" / self.dataset_id
+        cache.mkdir(parents=True, exist_ok=True)
+        for i, row in enumerate(ds.select(range(start, stop))):
             left, top, right, bottom = row["bbox"]
             instruction = row["instruction"]
-
-            buf = io.BytesIO()
-            row["image"].save(buf, format="PNG")
-            img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-            data_uri = f"data:image/png;base64,{img_b64}"
-
+            img_path = cache / f"{i:06d}.png"
+            row["image"].save(img_path, format="PNG")
             yield {
                 "prompt": GROUNDING_PROMPT.format(instruction=instruction),
-                "media": data_uri,
+                "media": str(img_path),
                 "label": f"{left:.4f},{top:.4f},{right:.4f},{bottom:.4f}",
             }
+
 
 train_dataset = ScreenSpotDataset(n_rows=800)
 
@@ -124,6 +123,7 @@ eval_dataset = ScreenSpotDataset(n_rows=200, row_offset=800)
 #
 # The model also gets −1 if it fails to output parseable coordinates.
 
+
 def _parse_coordinates(text: str) -> tuple[float, float] | None:
     """Extract (x, y) from model output like '(0.45, 0.32)' or '0.45, 0.32'."""
     nums = re.findall(r"([\d.]+)", text)
@@ -137,10 +137,12 @@ def _parse_coordinates(text: str) -> tuple[float, float] | None:
         pass
     return None
 
+
 def _parse_bbox(label: str) -> tuple[float, float, float, float]:
     """Parse a 'left,top,right,bottom' label into floats."""
     left, top, right, bottom = (float(v) for v in label.split(","))
     return left, top, right, bottom
+
 
 def _distance_outside_box(
     x: float, y: float, box: tuple[float, float, float, float]
@@ -150,6 +152,7 @@ def _distance_outside_box(
     dx = max(left - x, 0.0, x - right)
     dy = max(top - y, 0.0, y - bottom)
     return (dx * dx + dy * dy) ** 0.5
+
 
 async def grounding_reward(args, sample, **kwargs) -> float:
     response = getattr(sample, "response", "") or ""
@@ -175,14 +178,21 @@ async def grounding_reward(args, sample, **kwargs) -> float:
         return -1.0
     return 1.0 - 2.0 * outside / margin
 
+
 # ## Baseline Eval
 #
 # Let's evaluate the base Qwen3-VL-8B model on our held-out set before
 # training to see how well it grounds UI elements out of the box.
 
-def grounding_eval_fn(
-    deployment: CustomDeployment, example: dict
-) -> dict:
+
+def _image_url(img: str) -> str:
+    if img.startswith(("data:", "http://", "https://")):
+        return img
+    raw = Path(img).read_bytes()
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+
+def grounding_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
     # Eval sends the screenshot as a separate image_url, so drop the marker.
     prompt = example["prompt"].replace("<image>", "").strip()
     label = example["label"]
@@ -191,7 +201,7 @@ def grounding_eval_fn(
     # OpenAI multimodal user message: text + one image_url part per screenshot.
     content = [
         {"type": "text", "text": prompt},
-        *({"type": "image_url", "image_url": {"url": img}} for img in images),
+        *({"type": "image_url", "image_url": {"url": _image_url(img)}} for img in images),
     ]
     msg = deployment.chat(
         [{"role": "user", "content": content}],
@@ -216,9 +226,8 @@ def grounding_eval_fn(
         "label": label,
     }
 
-def run_eval(
-    deployment, *, max_concurrency: int = 2
-) -> tuple[float, list[dict]]:
+
+def run_eval(deployment, *, max_concurrency: int = 2) -> tuple[float, list[dict]]:
     from concurrent.futures import ThreadPoolExecutor
 
     deployment.wait_until_ready(timeout=3000)
@@ -230,6 +239,7 @@ def run_eval(
         rows = list(executor.map(_score_one, eval_dataset.rows()))
     mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
     return mean, rows
+
 
 model = Qwen3_VL_8B()
 base_deployment = CustomDeployment.launch(
@@ -249,11 +259,10 @@ print(
 # ## Training
 #
 # We use `Qwen3_VL_8B_Recipe` which carries VL-specific defaults:
-# - **Frozen vision tower** (`freeze_params_name_list=["vision_model"]`) — RL
-#   only updates the language backbone. This is the standard recipe for VLM RL:
-#   a single sparse reward is too noisy to safely fine-tune a pretrained visual
-#   encoder (you'd risk collapsing its features), and grounding is really about
-#   teaching the decoder to *read out* coordinates from features the ViT already
+# - **Frozen vision tower** — the recipe freezes `vision_model` so RL only
+#   updates the language backbone. A single sparse reward is too noisy to
+#   safely fine-tune a pretrained visual encoder, and grounding is about
+#   teaching the decoder to read out coordinates from features the ViT already
 #   provides. It's also cheaper — no optimizer state or backward pass for the ViT.
 # - Padded (bshd) batches for the vision encoder
 # - TP=4 for the 8B model across 8 H100s

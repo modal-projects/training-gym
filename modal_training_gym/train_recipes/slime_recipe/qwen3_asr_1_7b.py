@@ -76,11 +76,6 @@ class Qwen3_ASR_1_7B_Recipe(SlimeRecipe):
     global_batch_size: int = 8
     lr_decay_style: str = "cosine"
 
-    use_dynamic_batch_size: bool = False
-    extra_config: dict | None = field(
-        default_factory=lambda: {"qkv_format": "bshd", "micro_batch_size": 1}
-    )
-
     # Save at the final rollout so the run produces a checkpoint to export to HF.
     save_interval: int = 8
     megatron_to_hf_mode: str = "bridge"
