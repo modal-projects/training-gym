@@ -35,9 +35,16 @@ def coerce_audio_to_bytes(value: Any) -> bytes | None:
     if isinstance(first, (bytes, bytearray)):
         return bytes(first)
     if isinstance(first, str) and first:
-        path = Path(first)
-        if path.is_file():
-            return path.read_bytes()
+        if first.startswith("data:"):
+            return data_uri_to_bytes(first)
+        if first.startswith(("http://", "https://")):
+            return None
+        try:
+            path = Path(first)
+            if path.is_file():
+                return path.read_bytes()
+        except OSError:
+            pass
         return data_uri_to_bytes(first)
     return None
 

@@ -85,6 +85,16 @@ def test_coerce_audio_reads_path(tmp_path):
     assert coerce_audio_to_bytes(b"raw") == b"raw"
 
 
+def test_coerce_audio_long_https_url_is_not_local_bytes():
+    url = "https://example.com/clip.wav?" + ("x" * 8000)
+    assert coerce_audio_to_bytes(url) is None
+
+
+def test_coerce_audio_long_base64_survives_path_probe():
+    raw = b"RIFF" + b"A" * 8000
+    assert coerce_audio_to_bytes(base64.b64encode(raw).decode()) == raw
+
+
 def test_audio_ref_raises_when_no_audio():
     text_only = [{"role": "user", "content": [{"type": "text", "text": "no audio"}]}]
     with pytest.raises(RuntimeError, match="no audio"):

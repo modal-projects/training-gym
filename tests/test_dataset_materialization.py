@@ -143,6 +143,15 @@ def test_eval_dataset_fields_must_match_training_dataset():
             RowsDataset("train"), OtherChatTemplateDataset("eval")
         )
 
+    class ImageKeys(RowsDataset):
+        multimodal_keys = {"image": "images"}
+
+    class PictureKeys(RowsDataset):
+        multimodal_keys = {"image": "pictures"}
+
+    with pytest.raises(TrainingGymConfigError, match="same multimodal_keys"):
+        BaseTrainRecipe._validate_datasets(ImageKeys("train"), PictureKeys("eval"))
+
 
 def test_harbor_instances_select_discrete_splits(tmp_path):
     for name in ("one", "two", "three"):

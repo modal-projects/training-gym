@@ -20,6 +20,7 @@ import tempfile
 import tomllib
 import uuid
 from pathlib import Path
+from urllib.parse import unquote_to_bytes
 
 from modal_training_gym.common.errors import TrainingGymConfigError
 
@@ -56,11 +57,15 @@ def _materialize_data_uri(uri: str, dest_dir: Path, index: int) -> str:
     if ";base64" in header:
         raw = base64.b64decode(payload)
     else:
-        raw = payload.encode()
+        raw = unquote_to_bytes(payload)
     dest_dir.mkdir(parents=True, exist_ok=True)
     path = dest_dir / f"{index:06d}.{_MIME_EXT.get(mime, 'bin')}"
     path.write_bytes(raw)
     return str(path.resolve())
+
+
+def _dataset_media_dir(dest: Path) -> Path:
+    return dest.with_name(dest.name + ".media")
 
 
 def _as_media_path(item: Any, dest_dir: Path, index: int) -> Any:
@@ -72,8 +77,14 @@ def _as_media_path(item: Any, dest_dir: Path, index: int) -> Any:
     if isinstance(item, str) and item.startswith(_DATA_URI_PREFIX):
         return _materialize_data_uri(item, dest_dir, index)
     if isinstance(item, str):
-        src = Path(item)
-        if src.is_file():
+        if item.startswith(("http://", "https://")):
+            return item
+        try:
+            src = Path(item)
+            is_file = src.is_file()
+        except OSError:
+            return item
+        if is_file:
             dest_dir.mkdir(parents=True, exist_ok=True)
             dest = dest_dir / f"{index:06d}{src.suffix}"
             if src.resolve() != dest.resolve():
@@ -764,7 +775,7 @@ class MultimodalDataset(DatasetConfig):
     def _write_jsonl(self, rows: list[dict[str, Any]], path: str) -> None:
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        rows = self._rows_with_paths(rows, dest.parent / "media")
+        rows = self._rows_with_paths(rows, _dataset_media_dir(dest))
         with dest.open("w") as f:
             for row in rows:
                 f.write(json.dumps(row) + "\n")
@@ -772,7 +783,7 @@ class MultimodalDataset(DatasetConfig):
     def write(self, path: str) -> None:
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        rows = self._rows_with_paths(list(self.rows()), dest.parent / "media")
+        rows = self._rows_with_paths(list(self.rows()), _dataset_media_dir(dest))
         with dest.open("w") as f:
             for row in rows:
                 f.write(json.dumps(row) + "\n")

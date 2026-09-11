@@ -358,10 +358,9 @@ def test_write_jsonl_materializes_data_uris(tmp_path):
     row = json.loads(path.read_text().splitlines()[0])
     written, leftover = row["images"]
     assert leftover == "/already/a/path.png"
-    assert written == str((tmp_path / "media" / "000000.png").resolve())
-    assert path.with_name("media").joinpath("000000.png").read_bytes()[:8] == (
-        b"\x89PNG\r\n\x1a\n"
-    )
+    media_dir = path.with_name(path.name + ".media")
+    assert written == str((media_dir / "000000.png").resolve())
+    assert (media_dir / "000000.png").read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
     audio = MultimodalDataset(
         rows=[{"prompt": "p", "media": [f"data:audio/wav;base64,{wav}"], "label": "l"}],
@@ -370,8 +369,82 @@ def test_write_jsonl_materializes_data_uris(tmp_path):
     audio_path = tmp_path / "audio.jsonl"
     audio._write_jsonl(audio.load(), str(audio_path))
     audio_row = json.loads(audio_path.read_text().splitlines()[0])
-    assert audio_row["audios"] == [str((tmp_path / "media" / "000000.wav").resolve())]
-    assert (tmp_path / "media" / "000000.wav").read_bytes()[:4] == b"RIFF"
+    audio_media = audio_path.with_name(audio_path.name + ".media")
+    assert audio_row["audios"] == [str((audio_media / "000000.wav").resolve())]
+    assert (audio_media / "000000.wav").read_bytes()[:4] == b"RIFF"
+
+
+def test_write_keeps_train_and_eval_media_separate(tmp_path):
+    train = MultimodalDataset(
+        rows=[{"prompt": "p", "media": [b"train-bytes"], "label": "l"}],
+        modality="image",
+    )
+    eval_ds = MultimodalDataset(
+        rows=[{"prompt": "p", "media": [b"eval-bytes"], "label": "l"}],
+        modality="image",
+    )
+    train_path = tmp_path / "train.jsonl"
+    eval_path = tmp_path / "eval.jsonl"
+    train.write(str(train_path))
+    eval_ds.write(str(eval_path))
+    train_media = Path(json.loads(train_path.read_text().splitlines()[0])["images"][0])
+    eval_media = Path(json.loads(eval_path.read_text().splitlines()[0])["images"][0])
+    assert train_media != eval_media
+    assert train_media.read_bytes() == b"train-bytes"
+    assert eval_media.read_bytes() == b"eval-bytes"
+
+
+def test_write_decodes_percent_encoded_data_uri(tmp_path):
+    ds = MultimodalDataset(
+        rows=[
+            {
+                "prompt": "p",
+                "media": ["data:image/png,%89PNG%0D%0A%1A%0A"],
+                "label": "l",
+            }
+        ],
+        modality="image",
+    )
+    path = tmp_path / "train.jsonl"
+    ds.write(str(path))
+    written = Path(json.loads(path.read_text().splitlines()[0])["images"][0])
+    assert written.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_write_keeps_long_https_url(tmp_path):
+    url = "https://example.com/img.png?" + ("a" * 8000)
+    ds = MultimodalDataset(
+        rows=[{"prompt": "p", "media": [url], "label": "l"}],
+        modality="image",
+    )
+    path = tmp_path / "train.jsonl"
+    ds.write(str(path))
+    assert json.loads(path.read_text().splitlines()[0])["images"] == [url]
+
+
+def test_train_config_rejects_incompatible_eval_media():
+    with pytest.raises(ValidationError, match="cannot serve audio"):
+        TrainConfig(
+            dataset=_mm("image"),
+            model=Qwen3_VL_8B(),
+            recipe=Qwen3_VL_8B_Recipe(),
+            eval_dataset=_mm("audio"),
+        )
+
+
+def test_train_config_rejects_mismatched_eval_media_columns():
+    eval_ds = MultimodalDataset(
+        rows=[{"prompt": "p", "media": ["ref"], "label": "l"}],
+        modality="image",
+        media_column="pictures",
+    )
+    with pytest.raises(ValidationError, match="multimodal_keys"):
+        TrainConfig(
+            dataset=_mm("image"),
+            model=Qwen3_VL_8B(),
+            recipe=Qwen3_VL_8B_Recipe(),
+            eval_dataset=eval_ds,
+        )
 
 
 @pytest.mark.parametrize(

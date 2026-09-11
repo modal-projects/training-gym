@@ -346,6 +346,9 @@ class TrainConfig:
     @model_validator(mode="after")
     def _validate_served_modalities(self) -> "TrainConfig":
         validate_served_modalities(self.recipe, self.model, self.dataset)
+        if self.eval_dataset is not None:
+            validate_served_modalities(self.recipe, self.model, self.eval_dataset)
+            type(self.recipe)._validate_datasets(self.dataset, self.eval_dataset)
         return self
 
     def _generate_training_run_id(self) -> str:

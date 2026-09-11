@@ -156,6 +156,13 @@ class BaseTrainRecipe(ABC):
                     f"Training and evaluation datasets must use the same "
                     f"{dataset_method}(): got {train_value!r} and {eval_value!r}."
                 )
+        train_keys = getattr(ds, "multimodal_keys", None)
+        eval_keys = getattr(eval_ds, "multimodal_keys", None)
+        if train_keys != eval_keys:
+            raise TrainingGymConfigError(
+                f"Training and evaluation datasets must use the same "
+                f"multimodal_keys: got {train_keys!r} and {eval_keys!r}."
+            )
 
     @classmethod
     def _dataset_to_fields(
