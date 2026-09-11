@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shlex
 from enum import Enum
+from math import lcm
 from os import PathLike
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -29,6 +30,9 @@ _CONVERSION_EXTRA_ARGS = [
     ("decoder_last_pipeline_num_layers", "decoder-last-pipeline-num-layers"),
     ("mtp_num_layers", "mtp-num-layers"),
     ("make_vocab_size_divisible_by", "make-vocab-size-divisible-by"),
+    # The DeepSeek-V4 family selects its attention implementation here too: the
+    # converter builds the model, and the default (megatron) rejects TP > 1.
+    ("dsv4_impl", "dsv4-impl"),
 ]
 
 _PIPELINE_SPLIT_ARGS = {
@@ -190,7 +194,8 @@ def get_checkpoint_conversion_policy(
     TP/PP come from the ``conversion_*`` overrides when set, else from the training
     layout. Explicit TP1/PP1 uses one rank instead of the automatic node-wide
     conversion. EP/ETP are emitted only when their ``conversion_*`` fields are set
-    explicitly, and the pipeline-split args are dropped at conversion PP1.
+    explicitly, and the pipeline-split args are dropped at conversion PP1. An EP
+    wider than tp*pp widens the world with data-parallel replicas.
     """
     gpus_per_node = getattr(cfg, "actor_num_gpus_per_node", 8)
     actor_nodes = getattr(cfg, "actor_num_nodes", 1)
@@ -234,11 +239,13 @@ def get_checkpoint_conversion_policy(
     else:
         world_size = tp * pp if pins_layout else gpus_per_node
 
-    if ep and etp and world_size % (etp * ep * pp) != 0:
-        raise ValueError(
-            f"checkpoint conversion expert world size etp*ep*pp={etp}*{ep}*{pp}"
-            f"={etp * ep * pp} does not divide the conversion world size {world_size}"
-        )
+    if ep and etp:
+        # The expert world can be wider than tp*pp: Megatron forms expert groups
+        # over the (dp x tp) ranks, so a larger EP is served by data-parallel
+        # replicas rather than by more tensor or pipeline shards. Widening the
+        # world is what makes a big MoE fit — every replica holds only its
+        # 1/EP slice of the experts.
+        world_size = lcm(world_size, etp * ep * pp)
     max_world_size = actor_nodes * gpus_per_node
     if world_size > max_world_size:
         raise ValueError(

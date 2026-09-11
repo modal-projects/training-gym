@@ -42,6 +42,8 @@ _MILES_SKIP = {
     "image_run_commands",
     "image_env",
     "local_miles",
+    "miles_git_ref",
+    "sglang_git_ref",
     "patch_files",
     "substep_timing",
     "metrics",
@@ -121,6 +123,13 @@ class MilesRecipe(BaseTrainRecipe):
             Function that modifies the Modal image.
         local_miles:
             Local Miles checkout mounted over the image copy without rebuilding it.
+        miles_git_ref:
+            Upstream Miles ref (e.g. ``pull/3179/head``) checked out over the
+            image's copy at build time, for model support that landed after the
+            image was built.
+        sglang_git_ref:
+            Upstream SGLang ref checked out over the image's editable install,
+            for engine support that landed after the image was built.
         memory:
             Modal Function memory request/limit in MiB.
         cpu:
@@ -463,6 +472,8 @@ class MilesRecipe(BaseTrainRecipe):
     image_run_commands: list[str] = field(default_factory=list)
     image_env: dict[str, str] = field(default_factory=dict)
     local_miles: str | None = None
+    miles_git_ref: str | None = None
+    sglang_git_ref: str | None = None
     patch_files: list[str] = field(default_factory=list)
     substep_timing: Literal["auto", "off"] = "auto"
 
@@ -842,6 +853,9 @@ class MilesRecipe(BaseTrainRecipe):
 
     @classmethod
     def get_base_recipe(cls, model_config: ModelConfig) -> "MilesRecipe | None":
+        from modal_training_gym.train_recipes.miles_recipe.deepseek_v41_flash import (
+            DeepSeek_V4_1_Flash_Recipe,
+        )
         from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
             Gemma4_26B_A4B_Recipe,
         )
@@ -860,6 +874,8 @@ class MilesRecipe(BaseTrainRecipe):
             return Qwen3_5_4B_Miles_Recipe()
         if model_config.model_name == "moonshotai/Moonlight-16B-A3B-Instruct":
             return Moonlight_16B_A3B_Recipe()
+        if model_config.model_name == "deepseek-ai/DeepSeek-V4.1-Flash":
+            return DeepSeek_V4_1_Flash_Recipe()
         if model_config.model_name == "google/gemma-4-26B-A4B-it":
             return Gemma4_26B_A4B_Recipe()
         if model_config.model_name == "thinkingmachines/Inkling-Small":

@@ -97,6 +97,8 @@ def _validate_resume_checkpoint(
 
 
 MILES_ROOT = "/root/miles"
+# Editable install location of sglang inside the miles images.
+SGLANG_ROOT = "/sgl-workspace/sglang"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
 # libibverbs and the libmlx5 provider come from incompatible rdma package versions for miles multi-node training
 # reinstalling fixes this issue, mooncake transferengine imports successfully
@@ -331,19 +333,16 @@ def _is_complete_torch_dist_checkpoint(path: str) -> bool:
     check ``torch_dist_resume_checkpoint``'s ``iter_*`` scan accepts any directory
     (its default ``is_complete`` is ``os.path.isdir``), so a conversion that died
     mid-write is reported as a cache hit and silently skips re-conversion — which
-    then feeds partial weights to training. A crashed conversion does leave
-    ``common.pt`` and the ``.distcp`` shards behind, so those alone are not enough
-    to tell the two apart.
+    then feeds partial weights to training. A crashed conversion does leave the
+    ``.distcp`` shards behind, so those alone are not enough to tell the two apart.
+    ``common.pt`` is not required: newer megatron-core folds the common state into
+    the torch_dist metadata and writes no such file.
     """
     try:
         names = os.listdir(path)
     except OSError:
         return False
-    return (
-        ".metadata" in names
-        and "common.pt" in names
-        and any(name.endswith(".distcp") for name in names)
-    )
+    return ".metadata" in names and any(name.endswith(".distcp") for name in names)
 
 
 def _build_miles_base_image(miles: MilesRecipe) -> Image:
@@ -432,6 +431,36 @@ def build_ray_runtime_env(
     return {"env_vars": env_vars}
 
 
+def apply_source_overlays(image: Image, miles: MilesRecipe) -> Image:
+    """Check out upstream sglang/miles refs over the image's own copies.
+
+    Lets a recipe train on support that landed after the last image build:
+    sglang is an editable install and miles is run from a source checkout, so
+    a checkout is all it takes as long as no compiled extension changed.
+    """
+    if miles.sglang_git_ref:
+        image = image.run_commands(
+            f"cd {SGLANG_ROOT} && git fetch --depth=1 origin {miles.sglang_git_ref}"
+            " && git checkout -f FETCH_HEAD"
+        )
+
+    if miles.miles_git_ref:
+        image = image.run_commands(
+            f"cd {MILES_ROOT} && git fetch --depth=1 origin {miles.miles_git_ref}"
+            " && git checkout -f FETCH_HEAD",
+            # The checkout just reverted the patched miles sources.
+            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
+            " || echo 'WARNING: sglang abort patch did not apply to the"
+            " miles_git_ref checkout; transient router failures during rollout"
+            " cleanup may crash the run'",
+            *_REPORTING_PATCH_COMMANDS,
+            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3"
+            " || echo 'WARNING: substep timing patch did not apply to the"
+            " miles_git_ref checkout; substep timings will be missing'",
+        )
+    return image
+
+
 def build_miles_app(
     *,
     training_run_id: str,
@@ -480,6 +509,8 @@ def build_miles_app(
             " cleanup may crash the run'",
             *_REPORTING_PATCH_COMMANDS,
         )
+
+    image = apply_source_overlays(image, miles)
 
     if miles.image_run_commands:
         image = image.run_commands(*miles.image_run_commands)
@@ -886,7 +917,7 @@ def build_miles_app(
                     ):
                         raise RuntimeError(
                             f"Conversion finished but {save_path} holds no complete "
-                            "torch_dist checkpoint (missing .metadata)."
+                            "torch_dist checkpoint (.metadata or .distcp shards missing)."
                         )
             if node_rank == 0:
                 _release_convert_lock(
