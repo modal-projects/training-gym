@@ -313,6 +313,8 @@ class TrainingRun(BaseModel):
             if self._function_call is not None or self.function_call_id:
                 try:
                     payload = self.function_call.get(timeout=timeout)
+                except TimeoutError:
+                    raise
                 except BaseException as exc:
                     message = str(exc)
                     if self.training_run_id not in message:

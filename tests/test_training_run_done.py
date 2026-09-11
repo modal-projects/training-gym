@@ -99,6 +99,12 @@ class _PendingCall:
         raise TimeoutError()
 
 
+class _TimeoutCall:
+    def get(self, timeout=None):
+        del timeout
+        raise TimeoutError("expired")
+
+
 def test_done_is_true_when_function_call_succeeds(fake_volume):
     run = _run(TrainingRunStatus.RUNNING)
     run._function_call = _FinishedCall()
@@ -130,6 +136,17 @@ def test_done_is_false_while_function_call_is_pending(fake_volume):
 
     assert run.done() is False
     assert run.status is TrainingRunStatus.RUNNING
+
+
+def test_wait_timeout_does_not_mark_failed(fake_volume):
+    run = _run(TrainingRunStatus.RUNNING)
+    run._function_call = _TimeoutCall()
+
+    with pytest.raises(TimeoutError, match="expired"):
+        run.wait(timeout=0.01)
+
+    assert run.status is TrainingRunStatus.RUNNING
+    assert run.error is None
 
 
 def test_wait_all_closes_each_run_when_that_run_is_done(monkeypatch, fake_volume):

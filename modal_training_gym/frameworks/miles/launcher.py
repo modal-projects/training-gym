@@ -53,6 +53,7 @@ from modal_training_gym.common.launcher_helpers import (
     build_app_tags,
     build_terminal_run_record,
     compute_recipe_save_root,
+    configured_recipe_save,
     init_training_run_record,
     persist_completed_run,
     mark_run_failed,
@@ -593,6 +594,7 @@ def build_miles_app(
         mounted_save_root=checkpoints_mount_path,
         training_run_id=training_run_id,
     )
+    recorded_checkpoint_dir = checkpoint_dir if configured_recipe_save(miles) else ""
     all_volumes: dict[str | PurePosixPath, Any] = {
         str(HF_CACHE_PATH): hf_cache_volume,
         str(DATA_PATH): data_volume,
@@ -1024,7 +1026,7 @@ def build_miles_app(
                 metric_cfg=miles.metrics,
                 metric_entity=metric_entity,
                 framework_status_token=framework_status_token,
-                checkpoint_dir=checkpoint_dir,
+                checkpoint_dir=recorded_checkpoint_dir,
                 checkpoints_volume_name=checkpoints_volume_name,
                 checkpoints_mount_path=checkpoints_mount_path,
             )
@@ -1256,7 +1258,7 @@ def build_miles_app(
                 app_name=app_name,
                 framework=Framework.MILES,
                 training_run_id=training_run_id,
-                checkpoint_dir=save_root,
+                checkpoint_dir=recorded_checkpoint_dir,
                 model=model,
                 checkpoints_volume_name=checkpoints_volume_name,
                 checkpoints_mount_path=checkpoints_mount_path,

@@ -338,6 +338,14 @@ def compute_save_root(
     )[0]
 
 
+def configured_recipe_save(recipe: Any) -> str | None:
+    extra = recipe.extra_config
+    save = extra.get("save") if isinstance(extra, dict) else None
+    if not save:
+        save = recipe.save
+    return str(save) if save else None
+
+
 def compute_recipe_save_root(
     recipe: Any,
     *,
@@ -350,12 +358,8 @@ def compute_recipe_save_root(
     Keys in ``extra_config`` drop the matching CLI flag, so a ``save`` override
     is the path training writes. This function does not mutate ``recipe``.
     """
-    extra = recipe.extra_config
-    save = extra.get("save") if isinstance(extra, dict) else None
-    if not save:
-        save = recipe.save
     return compute_save_root(
-        save,
+        configured_recipe_save(recipe),
         recipe_default_save_root=recipe_default_save_root,
         mounted_save_root=mounted_save_root,
         training_run_id=training_run_id,
