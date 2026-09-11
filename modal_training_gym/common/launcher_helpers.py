@@ -59,6 +59,18 @@ def resolve_caller_context() -> tuple[Any, str | None]:
     return caller_module, caller_script
 
 
+def mount_caller_source(image: "Image", caller_script: str | None) -> "Image":
+    """Copy the caller script onto the image at ``/root/<name>.py``."""
+    if caller_script is None:
+        return image
+    name = os.path.splitext(os.path.basename(caller_script))[0]
+    return image.add_local_file(
+        caller_script,
+        remote_path=f"/root/{name}.py",
+        copy=True,
+    )
+
+
 def ship_callable(
     image: "Image",
     fn: Any,

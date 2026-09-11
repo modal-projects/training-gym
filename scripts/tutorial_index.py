@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TUTORIALS_DIR = REPO_ROOT / "tutorials"
 FIELD_PATTERN = re.compile(r"^# ([a-z_]+):\s*(.*)$")
 DEP_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+FOLDER_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ORDER_PATTERN = re.compile(r"^\d+$")
 MAX_SAFE_INTEGER = (1 << 53) - 1
 
@@ -20,14 +21,8 @@ class TutorialEntry:
     title: str
     deps: tuple[str, ...]
 
-    @property
-    def run_command(self) -> str:
-        with_args = " ".join(f"--with {dependency}" for dependency in self.deps)
-        prefix = f"uv run {with_args}" if with_args else "uv run"
-        return f"{prefix} tutorials/{self.slug}.py"
 
-
-def parse_tutorial(path: Path) -> TutorialEntry:
+def parse_tutorial(path: Path, slug: str) -> TutorialEntry:
     lines = path.read_text().splitlines()
     if not lines or lines[0] != "# ---":
         raise ValueError(f"{path} must start with tutorial frontmatter")
@@ -78,11 +73,42 @@ def parse_tutorial(path: Path) -> TutorialEntry:
 
     return TutorialEntry(
         path=path,
-        slug=path.stem,
+        slug=slug,
         order=order,
         title=title_line.removeprefix("# # ").strip(),
         deps=deps,
     )
+
+
+def discover_tutorial_paths(
+    tutorials_dir: Path = TUTORIALS_DIR,
+) -> tuple[tuple[Path, str], ...]:
+    discovered: list[tuple[Path, str]] = []
+    paths_by_slug: dict[str, Path] = {}
+    if not tutorials_dir.is_dir():
+        return ()
+    for child in sorted(tutorials_dir.iterdir(), key=lambda path: path.name):
+        if child.is_file() and child.suffix == ".py":
+            candidate = child
+            slug = child.stem
+        elif child.is_dir() and (child / "main.py").is_file():
+            if FOLDER_NAME_PATTERN.fullmatch(child.name) is None:
+                raise ValueError(
+                    f"Tutorial folder {child.name!r} is not a valid Python module "
+                    f"name; use only letters, digits, and underscores"
+                )
+            candidate = child / "main.py"
+            slug = child.name
+        else:
+            continue
+        previous = paths_by_slug.get(slug)
+        if previous is not None:
+            raise ValueError(
+                f"Tutorial slug {slug!r} is defined by both {previous} and {candidate}"
+            )
+        paths_by_slug[slug] = candidate
+        discovered.append((candidate, slug))
+    return tuple(discovered)
 
 
 def load_tutorial_index(
@@ -90,7 +116,10 @@ def load_tutorial_index(
 ) -> tuple[TutorialEntry, ...]:
     entries = tuple(
         sorted(
-            (parse_tutorial(path) for path in tutorials_dir.glob("*.py")),
+            (
+                parse_tutorial(path, slug)
+                for path, slug in discover_tutorial_paths(tutorials_dir)
+            ),
             key=lambda entry: (entry.order, entry.slug),
         )
     )

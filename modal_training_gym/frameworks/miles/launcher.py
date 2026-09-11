@@ -56,6 +56,7 @@ from modal_training_gym.common.launcher_helpers import (
     init_training_run_record,
     mark_run_failed,
     mark_run_stopped,
+    mount_caller_source,
     resolve_caller_context,
     resolve_checkpoint_volumes,
     run_download_phase,
@@ -495,13 +496,7 @@ def build_miles_app(
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)
-    if caller_script is not None:
-        caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]
-        image = image.add_local_file(
-            caller_script,
-            remote_path=f"/root/{caller_module_name}.py",
-            copy=True,
-        )
+    image = mount_caller_source(image, caller_script)
 
     def _set_custom_config_value(key: str, value: str) -> None:
         cfg = dict(miles.extra_config or {})
