@@ -348,7 +348,6 @@ class TrainConfig:
         validate_served_modalities(self.recipe, self.model, self.dataset)
         return self
 
-
     def _generate_training_run_id(self) -> str:
         """Mint a new run id. ``launch()`` calls this once per invocation, so
         each launch of the same config gets its own TrainingRun record."""
