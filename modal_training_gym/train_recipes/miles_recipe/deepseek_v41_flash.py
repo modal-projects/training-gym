@@ -2,7 +2,7 @@
 
 from dataclasses import field
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
@@ -23,6 +23,10 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 # (patch_deepseek_v41_sglang_tree). Replace all of it with a single published tag
 # once the PR lands in a nightly.
 _MILES_PR = "pull/3179/head"  # 6a54b4629c4259f4733990a7fcd6c77c3c56296e
+
+# Local write buffer for the params-only save (~1.1 TB bf16 over 8 nodes, so
+# ~140 GB a node) on top of the CPU-offloaded optimizer's own host usage.
+_TRAIN_EPHEMERAL_DISK_MIB = 768 * 1024
 
 _PATCH_DIR = (
     Path(__file__).resolve().parents[2]
@@ -188,6 +192,17 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     optimizer_cpu_offload: bool = True
     overlap_cpu_optimizer_d2h_h2d: bool = True
     use_precision_aware_optimizer: bool = True
+    # A Volume buffers writes on container-local disk before committing them, and
+    # the fp32 master weights plus Adam moments for 560B params are ~7 TB on top
+    # of the ~1.1 TB bf16 params — over what a training node can stage, and the
+    # writer dies with the zip writer's "unexpected pos" rather than ENOSPC.
+    # Save params only; a resumed run restarts the Adam moments. no_load_optim
+    # must be paired with it or Megatron's load dies with KeyError: 'optimizer'.
+    no_save_optim: bool = True
+    no_load_optim: bool = True
+    train_function_kwargs: dict[str, Any] = field(
+        default_factory=lambda: {"ephemeral_disk": _TRAIN_EPHEMERAL_DISK_MIB}
+    )
 
     # ── SGLang ───────────────────────────────────────────────────────────────
     # One engine per node, expert-parallel across it.
@@ -229,6 +244,22 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     # The first engine start compiles deepgemm kernels for a 560B MoE; without a
     # long grace period the health checker kills the engines mid-warmup.
     rollout_health_check_first_wait: int = 3600
+
+    @model_validator(mode="after")
+    def _keep_disk_reservation(self) -> "DeepSeek_V4_1_Flash_Recipe":
+        """Keep the reservation when a caller supplies their own kwargs.
+
+        Passing ``{"secrets": [...]}`` would otherwise drop it and the save would
+        exhaust local disk. A caller who names ``ephemeral_disk`` wins.
+        """
+        kwargs = self.train_function_kwargs or {}
+        if "ephemeral_disk" not in kwargs:
+            object.__setattr__(
+                self,
+                "train_function_kwargs",
+                {"ephemeral_disk": _TRAIN_EPHEMERAL_DISK_MIB, **kwargs},
+            )
+        return self
 
     @model_validator(mode="after")
     def _keep_image_patches(self) -> "DeepSeek_V4_1_Flash_Recipe":
