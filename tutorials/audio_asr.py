@@ -12,7 +12,7 @@
 # in terms of WER. But there's no reason to stop there: we can achieve state-of-the-art
 # performance by post-training open models to redefine your task's Pareto frontier.
 # As an example, we show how to post-train
-# [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on the 
+# [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on the
 # [hf-internal-testing/librispeech_asr_dummy](https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy)
 # dataset.
 
@@ -21,9 +21,10 @@ import requests
 import soundfile as sf
 from datasets import Audio, load_dataset
 
-import base64
 import io
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from modal_training_gym import (
     CustomDeployment,
@@ -53,6 +54,7 @@ print(f"base model deployed to {base_deployment.url}")
 # As mentioned before, we measure capability by lower WER, so that's what we'll use.
 # We can use the `jiwer` library to calculate this so we don't have to ourselves.
 
+
 def score_transcript(response: str, label: str) -> float:
     response = (response or "").lower().strip()
     label = (label or "").lower().strip()
@@ -60,13 +62,13 @@ def score_transcript(response: str, label: str) -> float:
         return 0.0
     return float(jiwer.wer(label, response))
 
+
 # ## Get the dataset
 #
 # Since this dataset contains audio files, we create a `MultimodalDataset`
-# to pass the audio clips to rollouts. We do some pre-processing with
-# `soundfile` and store as base64 inline for demonstration purposes.
-# In a production use case, you'd likely instead store references and
-# resolve them in a custom `generate` function.
+# to pass the audio clips to rollouts. Clips are written as WAV files.
+# Trainers and the transcription rollout read those paths.
+
 
 class LibriSpeechASRDataset(MultimodalDataset):
     hf_repo = "hf-internal-testing/librispeech_asr_dummy"
@@ -81,8 +83,12 @@ class LibriSpeechASRDataset(MultimodalDataset):
 
     def source_rows(self):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        ds = ds.cast_column("audio", Audio(decode=False))  # decode with soundfile instead of torchcodec
-        for ex in ds:
+        ds = ds.cast_column(
+            "audio", Audio(decode=False)
+        )  # decode with soundfile instead of torchcodec
+        cache = Path(tempfile.gettempdir()) / "training-gym-asr" / self.dataset_id
+        cache.mkdir(parents=True, exist_ok=True)
+        for i, ex in enumerate(ds):
             audio = ex["audio"]
             data = (
                 audio["bytes"]
@@ -90,16 +96,14 @@ class LibriSpeechASRDataset(MultimodalDataset):
                 else open(audio["path"], "rb").read()
             )
             arr, sr = sf.read(io.BytesIO(data))
-            buf = io.BytesIO()
-            sf.write(buf, arr, sr, format="WAV")
-            data_uri = "data:audio/wav;base64," + base64.b64encode(
-                buf.getvalue()
-            ).decode("ascii")
+            wav_path = cache / f"{i:06d}.wav"
+            sf.write(wav_path, arr, sr, format="WAV")
             yield {
                 "prompt": "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
-                "media": data_uri,
+                "media": str(wav_path),
                 "label": ex["text"].lower().strip(),
             }
+
 
 train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
 
@@ -109,14 +113,14 @@ eval_dataset = LibriSpeechASRDataset(hf_split="validation[8:16]")
 #
 # Let's get our baseline measure of performance.
 
+
 def run_eval(deployment, max_concurrency: int = 2) -> float:
     deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
-        data_uri = example["audios"][0]
+        audio_path = example["audios"][0]
         reference = (example["label"] or "").lower().strip()
-        b64 = data_uri.split(",", 1)[1] if data_uri.startswith("data:") else data_uri
-        arr, sr = sf.read(io.BytesIO(base64.b64decode(b64)))
+        arr, sr = sf.read(audio_path)
 
         buf = io.BytesIO()
         sf.write(buf, arr, sr, format="WAV")
@@ -138,6 +142,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         wers = list(executor.map(_score_one, eval_dataset.rows()))
     return sum(wers) / len(wers) if wers else float("nan")
 
+
 print("running base model evaluation...")
 base_mean = run_eval(base_deployment)
 print(f"average WER: {base_mean:.1%}")
@@ -147,8 +152,10 @@ print(f"average WER: {base_mean:.1%}")
 # To make our scoring function a reward function, we must return the
 # negative WER so that lower WER leads to higher rewards.
 
+
 async def wer_rm(args, sample, **kwargs) -> float:
     return -score_transcript(sample.response, sample.label)
+
 
 # ## Begin training
 #
