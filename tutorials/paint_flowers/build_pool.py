@@ -170,6 +170,8 @@ SPECIES = {
     "iris": dict(petals=6, length=148, width=92, notch=0.22, curl=32, rows=1),
 }
 
+N_NEGATIVES = 84
+
 
 def flower_sketch(species: str, palette: str, *, seed: int = 0) -> str:
     rng = random.Random(seed)
@@ -469,7 +471,7 @@ def render_corpus(out: pathlib.Path, sandboxes: int = 64, workers: int = 8) -> N
                     flower_sketch(species, palette, seed=seed),
                 )
             )
-    items += make_negatives(84, seed=3)
+    items += make_negatives(N_NEGATIVES, seed=3)
     out.mkdir(parents=True, exist_ok=True)
     render_app = modal.App.lookup(RENDER_APP_NAME, create_if_missing=True)
     with cf.ThreadPoolExecutor(sandboxes) as created:
@@ -609,7 +611,11 @@ def pick_refs(corpus: pathlib.Path, X, names, w, b, k: int = 20):
 @app.function(image=POOL_IMAGE, timeout=7200, cpu=4.0, memory=8192, serialized=True)
 def build_pool_remote(corpus: str = "/tmp/flower-corpus") -> dict:
     dest = pathlib.Path(corpus)
-    if not any(dest.glob("pos*.png")):
+    n_pos = len(SPECIES) * len(PALETTES) * 3
+    if (
+        len(list(dest.glob("pos*.png"))) < n_pos
+        or len(list(dest.glob("neg*.png"))) < N_NEGATIVES
+    ):
         render_corpus(dest)
     probe, X, names, w, b = fit_probe(dest)
     refs, _ = pick_refs(dest, X, names, w, b)
