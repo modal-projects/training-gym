@@ -187,8 +187,7 @@ class SlimeRecipe(BaseTrainRecipe):
             Training and rollout steps for the run.
         start_rollout_id:
             Rollout step to start counting from. ``None`` continues from the
-            iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
-            ``0`` so ``num_rollout`` counts the steps this run performs.
+            iteration stored in ``load``.
         rollout_batch_size:
             Prompts sampled per rollout step; each prompt is expanded into a
             group of sampled responses.

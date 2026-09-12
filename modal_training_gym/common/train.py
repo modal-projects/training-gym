@@ -32,6 +32,37 @@ from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
 
 
+def _megatron_load_dir(checkpoint: Checkpoint) -> str:
+    if checkpoint.checkpoint_type != CheckpointType.megatron:
+        raise TrainingGymConfigError(
+            "Training can only resume from a Megatron checkpoint; "
+            "Hugging Face exports are serving artifacts."
+        )
+    return os.path.dirname(checkpoint.path.rstrip("/"))
+
+
+def _no_load_optim_for_resume(checkpoint: Checkpoint) -> bool:
+    no_save_optim = None
+    if checkpoint.training_run_id:
+        try:
+            run = TrainingRun.from_id(checkpoint.training_run_id)
+        except KeyError:
+            run = None
+        else:
+            config = run.config
+            recipe = config.get("recipe") if isinstance(config, dict) else None
+            if isinstance(recipe, dict) and "no_save_optim" in recipe:
+                no_save_optim = bool(recipe["no_save_optim"])
+    if no_save_optim is None:
+        warnings.warn(
+            "Source run optimizer metadata omitted, skipping optimizer load "
+            f"(training_run_id={checkpoint.training_run_id!r}).",
+            stacklevel=3,
+        )
+        return True
+    return no_save_optim
+
+
 def _try_validate_model_parallelism(
     recipe: BaseTrainRecipe, model: ModelConfig
 ) -> None:
@@ -300,9 +331,11 @@ class TrainConfig:
             Model identity and weight download behavior.
         recipe:
             Training framework, Modal resources, and framework arguments.
-        checkpoint:
-            Megatron checkpoint to resume from. ``model`` remains the source for
-            tokenizer and architecture metadata.
+        resume:
+            Continue from this Megatron checkpoint's stored iteration.
+            Loads Adam only if the source run saved it
+            (``TrainingRun.config.recipe.no_save_optim`` via
+            ``resume.training_run_id``).
         detach:
             Keep training on Modal if the local ``train()`` wait is interrupted.
             ``False`` stops the app.
@@ -319,7 +352,7 @@ class TrainConfig:
     model: ModelConfig
     recipe: SlimeRecipe | MilesRecipe
     eval_dataset: DatasetConfig | None = None
-    checkpoint: Checkpoint | None = None
+    resume: Checkpoint | None = None
     # Whether a run outlives the local client. The app itself is always started
     # detached (the CLI's ``modal run --detach`` only detaches the entrypoint,
     # not the nested ``app.run()`` the driver opens), so this only decides
@@ -346,29 +379,21 @@ class TrainConfig:
         each launch of the same config gets its own TrainingRun record."""
         return create_hash(
             self.model.model_name,
-            self.checkpoint.path if self.checkpoint is not None else "",
+            self.resume.path if self.resume is not None else "",
             f"{type(self.recipe).__name__}:{self.framework.value}",
             "",
             self.model.model_path or "",
         )
 
     def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
-        if self.checkpoint is None:
+        if self.resume is None:
             recipe = _dc.replace(self.recipe)
         else:
-            if self.checkpoint.checkpoint_type != CheckpointType.megatron:
-                raise TrainingGymConfigError(
-                    "Training can only resume from a Megatron checkpoint; "
-                    "Hugging Face exports are serving artifacts."
-                )
             recipe = _dc.replace(
                 self.recipe,
-                load=os.path.dirname(self.checkpoint.path.rstrip("/")),
-                start_rollout_id=(
-                    0
-                    if self.recipe.start_rollout_id is None
-                    else self.recipe.start_rollout_id
-                ),
+                load=_megatron_load_dir(self.resume),
+                start_rollout_id=None,
+                no_load_optim=_no_load_optim_for_resume(self.resume),
             )
         _try_validate_model_parallelism(recipe, self.model)
         return recipe
@@ -385,7 +410,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.checkpoint,
+                checkpoint=self.resume,
                 name=training_run_id,
                 group_id=self.group_id,
             )
@@ -396,7 +421,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.checkpoint,
+                checkpoint=self.resume,
                 name=training_run_id,
                 group_id=self.group_id,
             )

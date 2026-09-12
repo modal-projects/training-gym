@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
@@ -40,7 +41,14 @@ def _checkpoint(checkpoint_type: CheckpointType) -> Checkpoint:
     )
 
 
-def _config(recipe, checkpoint_type: CheckpointType) -> TrainConfig:
+def _config(
+    recipe,
+    checkpoint_type: CheckpointType,
+    *,
+    training_run_id: str = "",
+) -> TrainConfig:
+    checkpoint = _checkpoint(checkpoint_type)
+    checkpoint.training_run_id = training_run_id
     return TrainConfig(
         model=Qwen3_5_4B(),
         dataset=HuggingFaceDataset(
@@ -50,8 +58,12 @@ def _config(recipe, checkpoint_type: CheckpointType) -> TrainConfig:
             input_format="text",
         ),
         recipe=recipe,
-        checkpoint=_checkpoint(checkpoint_type),
+        resume=checkpoint,
     )
+
+
+def _source_run(*, no_save_optim: bool) -> SimpleNamespace:
+    return SimpleNamespace(config={"recipe": {"no_save_optim": no_save_optim}})
 
 
 @pytest.mark.parametrize(
@@ -61,9 +73,10 @@ def _config(recipe, checkpoint_type: CheckpointType) -> TrainConfig:
         pytest.param(MilesRecipe(), id="miles"),
     ],
 )
-def test_megatron_checkpoint_only_sets_load(recipe) -> None:
+def test_megatron_resume_only_sets_load(recipe) -> None:
     config = _config(recipe, CheckpointType.megatron)
-    prepared = config._prepare_recipe()
+    with pytest.warns(UserWarning, match="optimizer metadata omitted"):
+        prepared = config._prepare_recipe()
     fields = prepared._fields(model=config.model)
 
     assert prepared is not recipe
@@ -73,45 +86,21 @@ def test_megatron_checkpoint_only_sets_load(recipe) -> None:
     assert recipe.load == ""
 
 
-def test_checkpoint_wins_over_recipe_load() -> None:
+def test_resume_wins_over_recipe_load() -> None:
     config = _config(
         SlimeRecipe(**_RECIPE_KW, load="/checkpoints/other"),
         CheckpointType.megatron,
     )
 
-    assert config._prepare_recipe().load == "/checkpoints/run"
-
-
-@pytest.mark.parametrize(
-    "recipe",
-    [
-        pytest.param(SlimeRecipe(**_RECIPE_KW), id="slime"),
-        pytest.param(MilesRecipe(), id="miles"),
-    ],
-)
-def test_checkpoint_restarts_rollout_count_from_zero(recipe) -> None:
-    config = _config(recipe, CheckpointType.megatron)
-    prepared = config._prepare_recipe()
-    args = prepared.cli_args(model=config.model)
-
-    assert prepared.start_rollout_id == 0
-    assert args[args.index("--start-rollout-id") + 1] == "0"
-    assert recipe.start_rollout_id is None
-    assert "--start-rollout-id" not in recipe.cli_args(model=config.model)
-
-
-def test_explicit_start_rollout_id_wins_over_checkpoint_default() -> None:
-    config = _config(
-        SlimeRecipe(**_RECIPE_KW, start_rollout_id=5), CheckpointType.megatron
-    )
-
-    assert config._prepare_recipe().start_rollout_id == 5
+    with pytest.warns(UserWarning, match="optimizer metadata omitted"):
+        assert config._prepare_recipe().load == "/checkpoints/run"
 
 
 def test_config_summary_records_resume_without_mutating_recipe() -> None:
     config = _config(SlimeRecipe(**_RECIPE_KW), CheckpointType.megatron)
 
-    summary = config._build_config_summary("run-id")
+    with pytest.warns(UserWarning, match="optimizer metadata omitted"):
+        summary = config._build_config_summary("run-id")
 
     assert summary["recipe"]["load"] == "/checkpoints/run"
     assert summary["recipe"]["hf_checkpoint"] == "Qwen/Qwen3.5-4B"
@@ -127,6 +116,67 @@ def test_hf_export_is_not_a_training_resume_checkpoint() -> None:
         match="Hugging Face exports are serving artifacts",
     ):
         config._prepare_recipe()
+
+
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        pytest.param(
+            SlimeRecipe(**_RECIPE_KW, no_save_optim=True, start_rollout_id=5),
+            id="slime",
+        ),
+        pytest.param(MilesRecipe(no_save_optim=True, start_rollout_id=5), id="miles"),
+    ],
+)
+def test_resume_loads_adam_when_source_saved_it(recipe, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "modal_training_gym.common.train.TrainingRun.from_id",
+        lambda run_id: _source_run(no_save_optim=False),
+    )
+    config = _config(recipe, CheckpointType.megatron, training_run_id="src-run")
+    prepared = config._prepare_recipe()
+
+    assert prepared.load == "/checkpoints/run"
+    assert prepared.start_rollout_id is None
+    assert prepared.no_load_optim is False
+    assert "--start-rollout-id" not in prepared.cli_args(model=config.model)
+    assert "--no-load-optim" not in prepared.cli_args(model=config.model)
+
+
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        pytest.param(SlimeRecipe(**_RECIPE_KW), id="slime"),
+        pytest.param(MilesRecipe(), id="miles"),
+    ],
+)
+def test_resume_skips_adam_when_source_did_not_save_it(recipe, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "modal_training_gym.common.train.TrainingRun.from_id",
+        lambda run_id: _source_run(no_save_optim=True),
+    )
+    config = _config(recipe, CheckpointType.megatron, training_run_id="src-run")
+    prepared = config._prepare_recipe()
+
+    assert prepared.start_rollout_id is None
+    assert prepared.no_load_optim is True
+    assert "--no-load-optim" in prepared.cli_args(model=config.model)
+
+
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        pytest.param(SlimeRecipe(**_RECIPE_KW), id="slime"),
+        pytest.param(MilesRecipe(), id="miles"),
+    ],
+)
+def test_resume_skips_adam_when_source_metadata_is_omitted(recipe) -> None:
+    config = _config(recipe, CheckpointType.megatron)
+    with pytest.warns(UserWarning, match="optimizer metadata omitted"):
+        prepared = config._prepare_recipe()
+
+    assert prepared.start_rollout_id is None
+    assert prepared.no_load_optim is True
 
 
 def test_launchers_do_not_replace_model_path_with_checkpoint() -> None:

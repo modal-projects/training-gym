@@ -193,8 +193,7 @@ class MilesRecipe(BaseTrainRecipe):
             Training and rollout steps for the run.
         start_rollout_id:
             Rollout step to start counting from. ``None`` continues from the
-            iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
-            ``0`` so ``num_rollout`` counts the steps this run performs.
+            iteration stored in ``load``.
         rollout_batch_size:
             Prompts per rollout step, each expanded into a group of responses.
         rollout_max_response_len:
@@ -227,6 +226,8 @@ class MilesRecipe(BaseTrainRecipe):
         no_save_optim:
             Omit optimizer state from checkpoints. The resulting checkpoints cannot
             resume the optimizer exactly.
+        no_load_optim:
+            Skip loading optimizer state when resuming from ``load``.
         megatron_to_hf_mode:
             Export mode for saved Megatron checkpoints; empty disables the export.
 
@@ -500,6 +501,7 @@ class MilesRecipe(BaseTrainRecipe):
     model_name: str = ""
     save_interval: int | None = 10
     no_save_optim: bool = False
+    no_load_optim: bool = False
 
     # ── Checkpoint conversion ───────────────────────────────────────────
     # Conversion-only parallelism overrides. Launcher instructions, not CLI flags
