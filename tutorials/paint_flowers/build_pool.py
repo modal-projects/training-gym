@@ -14,6 +14,7 @@ import pathlib
 import random
 import re
 import sys
+import threading
 
 import modal
 
@@ -443,8 +444,13 @@ def open_sandbox(render_app: modal.App, timeout: int = 5400) -> modal.Sandbox:
         timeout=timeout,
         cpu=4.0,
         memory=8192,
+        block_network=True,
     )
-    sb.filesystem.write_text(RENDER_JS, "/render/render.js")
+    try:
+        sb.filesystem.write_text(RENDER_JS, "/render/render.js")
+    except BaseException:
+        sb.terminate()
+        raise
     return sb
 
 
@@ -474,10 +480,19 @@ def render_corpus(out: pathlib.Path, sandboxes: int = 64, workers: int = 8) -> N
     items += make_negatives(N_NEGATIVES, seed=3)
     out.mkdir(parents=True, exist_ok=True)
     render_app = modal.App.lookup(RENDER_APP_NAME, create_if_missing=True)
-    with cf.ThreadPoolExecutor(sandboxes) as created:
-        sbs = list(created.map(lambda _: open_sandbox(render_app), range(sandboxes)))
-    chunk = (len(items) + sandboxes - 1) // sandboxes
+    sbs: list[modal.Sandbox] = []
+    lock = threading.Lock()
+
+    def _open(_: int) -> modal.Sandbox:
+        sb = open_sandbox(render_app)
+        with lock:
+            sbs.append(sb)
+        return sb
+
     try:
+        with cf.ThreadPoolExecutor(sandboxes) as created:
+            list(created.map(_open, range(sandboxes)))
+        chunk = (len(items) + sandboxes - 1) // sandboxes
 
         def run(sb, batch):
             with cf.ThreadPoolExecutor(workers) as ex:
