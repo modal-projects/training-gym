@@ -83,6 +83,7 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import (
     DATA_PATH,
     HF_CACHE_PATH,
     SlimeRecipe,
+    qwen35_vl_image_train,
 )
 from .modal_helpers.utils import (
     build_train_cmd,
@@ -202,6 +203,30 @@ _SLIME_EXTERNAL_PATCHES_B64 = (
 
 def _patch_commands(patches: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(f"echo {patch} | base64 -d | python3" for patch in patches)
+
+
+_QWEN35_VL_PLUGIN = _SLIME_PATCHES / "model_specific_patches" / "qwen3_5_vl"
+
+
+def _with_qwen35_vl_plugin(image: "Image") -> "Image":
+    models = f"{SLIME_ROOT}/slime_plugins/models"
+    for name in ("qwen3_5_vl.py", "qwen3_5_vl_utils.py"):
+        image = image.add_local_file(
+            str(_QWEN35_VL_PLUGIN / name),
+            remote_path=f"{models}/{name}",
+            copy=True,
+        )
+    return image
+
+
+def _apply_qwen35_vl_image_train(
+    slime: SlimeRecipe, model: ModelConfig, dataset: DatasetConfig | None
+) -> None:
+    if not qwen35_vl_image_train(model, dataset):
+        return
+    slime._qwen35_vl_provider_fields()
+    if getattr(slime, "megatron_to_hf_mode", "") != "bridge":
+        object.__setattr__(slime, "megatron_to_hf_mode", "bridge")
 
 
 def _build_slime_base_image(*, apply_root_patches: bool = True) -> "Image":
@@ -393,20 +418,7 @@ def build_slime_app(
         if eval_dataset is not None
         else None
     )
-
-    # Models that can't do THD packing (model.requires_bshd, e.g. Qwen3-ASR) must
-    # train on padded (bshd) batches; fail fast with the fix if the recipe didn't.
-    if model and getattr(model, "requires_bshd", False):
-        cfg = slime.extra_config or {}
-        if cfg.get("qkv_format") != "bshd" or slime.use_dynamic_batch_size:
-            raise ValueError(
-                f"{model.model_name} requires padded (bshd) batches: its "
-                "megatron-bridge forward doesn't implement THD sequence packing. "
-                'Set extra_config={"qkv_format": "bshd", "micro_batch_size": N} and '
-                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7B_Recipe, which sets "
-                f"these. Got qkv_format={cfg.get('qkv_format')!r}, "
-                f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
-            )
+    _apply_qwen35_vl_image_train(slime, model, dataset)
 
     if (
         model
@@ -467,6 +479,8 @@ def build_slime_app(
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
     image = _overlay_slime_source(image, slime)
+    if qwen35_vl_image_train(model, dataset):
+        image = _with_qwen35_vl_plugin(image)
 
     if slime.image_run_commands:
         image = image.run_commands(*slime.image_run_commands)

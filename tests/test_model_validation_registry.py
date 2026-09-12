@@ -7,6 +7,9 @@ import json
 import pytest
 
 from modal_training_gym.common.models.qwen3_0_6b import Qwen3_0_6B
+from modal_training_gym.common.models.qwen3_5_0_8b import Qwen3_5_0_8B
+from modal_training_gym.common.models.qwen3_5_4b import Qwen3_5_4B
+from modal_training_gym.common.models.qwen3_vl_8b import Qwen3_VL_8B
 from modal_training_gym.common.models.validation import (
     VALIDATION_CONFIGS,
     Framework,
@@ -53,6 +56,30 @@ def test_registry_uses_the_packages_one_framework_enum():
         CanonicalFramework.SLIME, Qwen3_0_6B(), step_count=1
     )
     assert recipe is not None and dataset is not None
+
+
+def test_qwen35_08b_validation_is_the_slime_image_row():
+    """PR CI must hit THD + qwen3_5_vl. Other Qwen3.5 / VL jobs stay on gsm8k."""
+    image_recipe, image_ds = build_recipe_and_dataset(
+        Framework.SLIME, Qwen3_5_0_8B(), step_count=1
+    )
+    assert image_ds.multimodal_keys == {"image": "images"}
+    args = image_recipe.cli_args(dataset=image_ds, model=Qwen3_5_0_8B())
+    flags = {
+        args[i]: args[i + 1] for i in range(len(args) - 1) if args[i].startswith("--")
+    }
+    assert (
+        flags["--custom-model-provider-path"]
+        == "slime_plugins.models.qwen3_5_vl.provide_qwen3_5_vl"
+    )
+    assert flags["--qkv-format"] == "thd"
+    assert flags["--freeze-params-name-list"] == "visual"
+
+    _, text_4b = build_recipe_and_dataset(Framework.SLIME, Qwen3_5_4B(), step_count=1)
+    assert getattr(text_4b, "multimodal_keys", None) is None
+
+    _, text_vl = build_recipe_and_dataset(Framework.SLIME, Qwen3_VL_8B(), step_count=1)
+    assert getattr(text_vl, "multimodal_keys", None) is None
 
 
 def test_registry_names_are_unique():

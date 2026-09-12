@@ -7,6 +7,7 @@ from modal_training_gym.common.dataset import (
     MultimodalDataset,
 )
 from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.models.qwen3_5_0_8b import Qwen3_5_0_8B
 from modal_training_gym.common.models.qwen3_asr_1_7b import Qwen3_ASR_1_7B
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 
@@ -36,7 +37,7 @@ class Gsm8kDataset(DatasetConfig):
 
 
 class LibriSpeechASRDataset(MultimodalDataset):
-    """LibriSpeech ASR rows (prompt + audio data-URI + transcript label).
+    """LibriSpeech ASR rows (prompt + audio path + transcript label).
 
     Mirrors the audio_asr tutorial dataset. Audio models validate on a handful
     of LibriSpeech clips. gsm8k is text-only.
@@ -58,8 +59,9 @@ class LibriSpeechASRDataset(MultimodalDataset):
         return False
 
     def source_rows(self):
-        import base64 as b64
         import io
+        import tempfile
+        from pathlib import Path
 
         import soundfile as sf
         from datasets import Audio, load_dataset
@@ -67,7 +69,9 @@ class LibriSpeechASRDataset(MultimodalDataset):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         ds = ds.select(range(min(self.n_rows, len(ds))))
         ds = ds.cast_column("audio", Audio(decode=False))
-        for ex in ds:
+        cache = Path(tempfile.gettempdir()) / "training-gym-asr" / self.dataset_id
+        cache.mkdir(parents=True, exist_ok=True)
+        for i, ex in enumerate(ds):
             audio = ex["audio"]
             data = (
                 audio["bytes"]
@@ -75,25 +79,79 @@ class LibriSpeechASRDataset(MultimodalDataset):
                 else open(audio["path"], "rb").read()
             )
             arr, sr = sf.read(io.BytesIO(data))
-            buf = io.BytesIO()
-            sf.write(buf, arr, sr, format="WAV")
-            data_uri = "data:audio/wav;base64," + b64.b64encode(buf.getvalue()).decode(
-                "ascii"
-            )
+            wav_path = cache / f"{i:06d}.wav"
+            sf.write(wav_path, arr, sr, format="WAV")
             yield {
                 "prompt": self._INSTRUCTION,
-                "media": data_uri,
+                "media": str(wav_path),
                 "label": ex["text"].lower().strip(),
+            }
+
+
+def _solid_png(width: int = 224, height: int = 224) -> bytes:
+    """RGB PNG large enough for Qwen VL resize (factor 28)."""
+    import struct
+    import zlib
+
+    raw = b"".join(b"\x00" + bytes([128, 128, 128]) * width for _ in range(height))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+class Gsm8kImageDataset(MultimodalDataset):
+    """gsm8k questions paired with a dummy image.
+
+    Qwen3.5 slime image training is a different GPU path than text (THD + the
+    remote Megatron VL plugin). gsm8k alone never loads the vision tower.
+    """
+
+    def __init__(self, *, n_rows: int = 10) -> None:
+        self.n_rows = n_rows
+        super().__init__(modality="image")
+
+    def source_rows(self):
+        import tempfile
+        from pathlib import Path
+
+        from datasets import load_dataset
+
+        dataset = load_dataset("openai/gsm8k", "main", split="train")
+        dataset = dataset.select(range(min(self.n_rows, len(dataset))))
+        cache = Path(tempfile.gettempdir()) / "training-gym-mm" / self.dataset_id
+        cache.mkdir(parents=True, exist_ok=True)
+        png = _solid_png()
+        for i, row in enumerate(dataset):
+            img_path = cache / f"{i:06d}.png"
+            img_path.write_bytes(png)
+            yield {
+                "prompt": f"<image>\n{row['question']}",
+                "media": str(img_path),
+                "label": row["answer"].split("####")[-1].strip(),
             }
 
 
 def build_slime_validation(
     model_config: ModelConfig, step_count: int
 ) -> tuple[SlimeRecipe, DatasetConfig]:
-    """The model's base slime recipe and a dataset matching its modality.
+    """The model's base slime recipe and its validation dataset.
 
-    Audio models (Qwen3-ASR) need speech clips, so they get LibriSpeech;
-    everything else validates against gsm8k, scored by ``deepscaler``.
+    Audio models (Qwen3-ASR) need speech clips, so they get LibriSpeech.
+    Qwen3.5-0.8B is the cheap slime image row (THD + qwen3_5_vl). Everything
+    else validates against gsm8k, scored by ``deepscaler``.
     """
     recipe = SlimeRecipe.get_base_recipe(model_config)
     recipe.rm_type = "deepscaler"
@@ -104,4 +162,6 @@ def build_slime_validation(
 
     if isinstance(model_config, Qwen3_ASR_1_7B):
         return recipe, LibriSpeechASRDataset(n_rows=8)
+    if isinstance(model_config, Qwen3_5_0_8B):
+        return recipe, Gsm8kImageDataset(n_rows=10)
     return recipe, Gsm8kDataset(n_rows=10)

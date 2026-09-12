@@ -17,6 +17,7 @@ from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.modality import requested_media_modalities
 from modal_training_gym.common.models import (
     ModelArchitecture,
     ModelConfig,
@@ -76,6 +77,19 @@ _SLIME_SKIP = {
 }
 
 YAML_CONFIG_FIELDS = ("eval_config", "extra_config", "sglang_config")
+
+QWEN35_VL_PROVIDER = "slime_plugins.models.qwen3_5_vl.provide_qwen3_5_vl"
+
+
+def qwen35_vl_image_train(
+    model: "ModelConfig | None", dataset: "DatasetConfig | None"
+) -> bool:
+    if model is None or dataset is None:
+        return False
+    if "image" not in requested_media_modalities(dataset):
+        return False
+    return bool(getattr(model, "needs_qwen35_vl_provider", False))
+
 
 _HOOK_PATH_CONFIG_KEYS = {
     "custom_rollout_log_function": "training_gym_custom_rollout_log_function_path",
@@ -592,6 +606,7 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── Validators ───────────────────────────────────────────────────────────
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = frozenset(_SLIME_SKIP)
+    served_media_modalities: ClassVar[frozenset[str]] = frozenset({"image", "audio"})
 
     @model_validator(mode="after")
     def _validate_slime_source_overlay(self) -> "SlimeRecipe":
@@ -787,6 +802,44 @@ class SlimeRecipe(BaseTrainRecipe):
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
         validate_num_experts_divisible_by_expert_parallel_size(self, model)
 
+    def overrides(
+        self,
+        dataset: "DatasetConfig | None",
+        model: "ModelConfig | None",
+    ) -> dict[str, Any]:
+        if model is None:
+            return {}
+        media = bool(requested_media_modalities(dataset) if dataset is not None else ())
+        out: dict[str, Any] = {}
+        if not model.thd_forward:
+            out["qkv_format"] = "bshd"
+            self._override_default(out, "use_dynamic_batch_size", False, True)
+            self._override_default(out, "micro_batch_size", 1, None)
+        if model.has_vision_tower and (not model.thd_forward or media):
+            freeze = (
+                ["visual"]
+                if qwen35_vl_image_train(model, dataset)
+                else ["vision_model"]
+            )
+            self._override_default(out, "freeze_params_name_list", freeze, None)
+        if qwen35_vl_image_train(model, dataset):
+            out.update(self._qwen35_vl_provider_fields())
+        return out
+
+    def _qwen35_vl_provider_fields(self) -> dict[str, Any]:
+        if "custom_model_provider_path" in self._escape_hatch_keys():
+            return {}
+        if (
+            isinstance(self.extra_config, str)
+            and getattr(self, "_materialized_config_keys", None) is None
+        ):
+            raise TrainingGymConfigError(
+                "Qwen3.5 image training requires custom_model_provider_path. "
+                "Pass extra_config as a dict, or put custom_model_provider_path "
+                "in that YAML. A path-only extra_config would train text-only."
+            )
+        return {"custom_model_provider_path": QWEN35_VL_PROVIDER}
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(
@@ -817,6 +870,7 @@ class SlimeRecipe(BaseTrainRecipe):
             self.validate_model_parallelism(model)
             if not self.slime_model_script:
                 fields.update(self._model_to_fields(model))
+        fields.update(self.overrides(dataset, model))
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)

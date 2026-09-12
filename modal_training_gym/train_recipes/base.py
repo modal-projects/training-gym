@@ -41,6 +41,7 @@ JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimoda
 
 class BaseTrainRecipe(ABC):
     model_config_class: ClassVar["type[ModelConfig] | None"] = None
+    served_media_modalities: ClassVar[frozenset[str]] = frozenset()
 
     # Fields consumed by the Modal launcher (image build, cluster topology,
     # callable shipping) and never forwarded to the framework CLI. Every
@@ -109,6 +110,24 @@ class BaseTrainRecipe(ABC):
         """Validate the model's parallelism settings."""
         return None
 
+    def served_media(self) -> frozenset[str]:
+        return self.served_media_modalities
+
+    def overrides(
+        self,
+        dataset: "DatasetConfig | None",
+        model: "ModelConfig | None",
+    ) -> dict[str, Any]:
+        return {}
+
+    def _override_default(
+        self, out: dict[str, Any], key: str, value: Any, default: Any
+    ) -> None:
+        if key in self._escape_hatch_keys():
+            return
+        if getattr(self, key, default) == default:
+            out[key] = value
+
     # ── Container → framework flag converters ────────────────────────────────
 
     @staticmethod
@@ -137,6 +156,13 @@ class BaseTrainRecipe(ABC):
                     f"Training and evaluation datasets must use the same "
                     f"{dataset_method}(): got {train_value!r} and {eval_value!r}."
                 )
+        train_keys = getattr(ds, "multimodal_keys", None)
+        eval_keys = getattr(eval_ds, "multimodal_keys", None)
+        if train_keys != eval_keys:
+            raise TrainingGymConfigError(
+                f"Training and evaluation datasets must use the same "
+                f"multimodal_keys: got {train_keys!r} and {eval_keys!r}."
+            )
 
     @classmethod
     def _dataset_to_fields(
