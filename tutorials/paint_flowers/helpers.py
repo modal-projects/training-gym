@@ -82,7 +82,7 @@ const puppeteer = require('puppeteer-core');
   }
 })();
 </script>
-<script>try{(0,eval)(${JSON.stringify(sketch).replace(/</g, '\\u003c')})}catch(e){window.__err=String(e)}</script>
+<script>try{(0,eval)(${JSON.stringify(sketch).replace(/</g, '\\u003c')} + ";window.setup=setup")}catch(e){window.__err=String(e)}</script>
 </body></html>`;
   const browser = await puppeteer.launch({
     executablePath: '/usr/bin/chromium',
