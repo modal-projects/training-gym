@@ -174,6 +174,11 @@ def test_miles_conversion_uses_wrapper_with_expected_environment() -> None:
         '            env["CONVERT_KEEP_PP1"] = "1"'
     ) in source
     assert 'if num_nodes > 1:\n            env["SKIP_RELEASE_RENAME"] = "1"' in source
+    convert_decorator = source.split('name="convert_checkpoint"', 1)[0].rsplit(
+        "@app.function(", 1
+    )[1]
+    assert "memory=miles.memory" in convert_decorator
+    assert "cpu=miles.cpu" in convert_decorator
 
 
 @pytest.mark.parametrize(

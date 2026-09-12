@@ -777,6 +777,8 @@ def build_miles_app(
     @app.function(
         image=image,
         gpu=gpu_spec,
+        memory=miles.memory,
+        cpu=miles.cpu,
         volumes=all_volumes,
         timeout=4 * 60 * 60,
         secrets=proxy_auth_secrets() or None,
