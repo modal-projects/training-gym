@@ -347,6 +347,7 @@ def judge_pair(candidate: bytes, reference: bytes, prompt: str, flip: bool, judg
             timeout=180,
             max_tokens=96,
             temperature=0.3,
+            chat_template_kwargs={"enable_thinking": False},
         )
         text = msg.get("content") or ""
     except Exception:
