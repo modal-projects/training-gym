@@ -244,7 +244,7 @@ print(f"average score: {trained_mean:.1f}")
 new_config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    checkpoint=checkpoint,
+    resume=checkpoint,
     recipe=Qwen3_5_4B_Recipe(
         custom_rm_function=haiku_rm,
         rollout_num_gpus=8,
