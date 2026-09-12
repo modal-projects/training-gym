@@ -29,6 +29,7 @@ def build_miles_validation(
             "which is registered as a miles validation target"
         )
     recipe.skip_eval_before_train = True
+    recipe.rm_type = "deepscaler"
     prompts_per_step = max(
         recipe.rollout_batch_size, recipe.over_sampling_batch_size or 0
     )

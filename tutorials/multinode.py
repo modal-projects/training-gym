@@ -10,8 +10,8 @@
 #
 # When you decide you need a frontier-scale model for your workload, you want
 # the biggest hardware you can get, and runs that stay up. This tutorial trains
-# [GLM-4.7](https://huggingface.co/zai-org/GLM-4.7) across 8 nodes with 8 H200s
-# each (64 GPUs) using full-weight
+# [GLM-4.7](https://huggingface.co/zai-org/GLM-4.7) on 8 trainer nodes with 8
+# H200s each plus 64 disaggregated rollout GPUs, using full-weight
 # [Group Sequence Policy Optimization](https://arxiv.org/abs/2507.18071) (GSPO)
 # on
 # [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k).
@@ -28,8 +28,7 @@ from modal_training_gym.train_recipes.slime_recipe import GLM_4_7_Recipe
 
 # ## Set up
 #
-# Model and recipe classes carry the settings that make this run correct and
-# fast. A few parameters are printed below so you can see the cluster shape.
+# The recipe constructor sets packing knobs. Prints below show the cluster shape.
 
 model = GLM_4_7()
 
@@ -43,14 +42,26 @@ train_dataset = HuggingFaceDataset(
     always_download=True,
 )
 recipe = GLM_4_7_Recipe(
+    num_rollout=3000,
+    save_interval=10,
+    rollout_batch_size=64,
+    n_samples_per_prompt=8,
+    global_batch_size=128,
+    rollout_max_response_len=8192,
     rm_type="deepscaler",
 )
 
 print(f"training and rollout gpus colocated: {recipe.colocate}")
-print(f"training nodes: {recipe.actor_num_nodes}, gpus/node: {recipe.actor_num_gpus_per_node}")
-print(f"rollout gpus: {recipe.rollout_num_gpus}, rollout gpus/engine: {recipe.rollout_num_gpus_per_engine}")
-print(f"parallelism: tp={recipe.tensor_model_parallel_size}, pp={recipe.pipeline_model_parallel_size}, "
-      f"cp={recipe.context_parallel_size}, ep={recipe.expert_model_parallel_size}")
+print(
+    f"training nodes: {recipe.actor_num_nodes}, gpus/node: {recipe.actor_num_gpus_per_node}"
+)
+print(
+    f"rollout gpus: {recipe.rollout_num_gpus}, rollout gpus/engine: {recipe.rollout_num_gpus_per_engine}"
+)
+print(
+    f"parallelism: tp={recipe.tensor_model_parallel_size}, pp={recipe.pipeline_model_parallel_size}, "
+    f"cp={recipe.context_parallel_size}, ep={recipe.expert_model_parallel_size}"
+)
 print(f"optimizer cpu offload: {recipe.optimizer_cpu_offload}")
 
 # ## Kick off training

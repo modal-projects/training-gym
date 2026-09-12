@@ -363,8 +363,9 @@ def run_base_training(
     train_recipe.num_rollout = step_count
     if eval_interval is not None:
         train_recipe.eval_interval = eval_interval
-    if save_interval is not None:
-        train_recipe.save_interval = save_interval
+    train_recipe.save_interval = (
+        save_interval if save_interval is not None else step_count
+    )
     if non_colocated:
         train_recipe.colocate = False
         if train_recipe.rollout_num_gpus is None:

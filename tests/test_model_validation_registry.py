@@ -100,6 +100,7 @@ def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     )
     assert recipe is not None
     assert dataset is not None
+    assert recipe.rm_type, f"{config.name} validation recipe has no rm_type"
 
 
 def test_list_shows_every_model_by_default_and_narrows_with_pr_only():

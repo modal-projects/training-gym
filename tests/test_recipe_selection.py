@@ -13,16 +13,12 @@ from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
     Gemma4_26B_A4B_Recipe,
 )
+from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
+    Qwen3_5_4B_Miles_Recipe,
+)
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
-
-
-_SLIME_RECIPE_KW = {
-    "sequence_parallel": False,
-    "rollout_max_response_len": 4096,
-    "rollout_temperature": 1.0,
-    "save_interval": 10,
-}
+from modal_training_gym.train_recipes.slime_recipe.qwen3_5_4b import Qwen3_5_4B_Recipe
 
 _RECIPE_PACKAGES = (
     "modal_training_gym.train_recipes.slime_recipe",
@@ -98,8 +94,18 @@ def test_gemma_recipe_disables_unsupported_recompute_and_routing_replay() -> Non
     assert recipe.use_rollout_routing_replay is False
 
 
+def test_slime_recipe_is_constructible_without_kwargs() -> None:
+    recipe = SlimeRecipe()
+
+    assert recipe.num_rollout == 1
+    assert recipe.save_interval == recipe.num_rollout
+    assert recipe.optimizer_cpu_offload is False
+    assert recipe.overlap_cpu_optimizer_d2h_h2d is False
+    assert recipe.use_precision_aware_optimizer is False
+
+
 def test_generic_recipe_uses_framework_defaults_for_known_model() -> None:
-    config = _config(SlimeRecipe(**_SLIME_RECIPE_KW))
+    config = _config(SlimeRecipe())
 
     recipe = config._prepare_recipe()
     assert recipe.gpu_type == "H100"
@@ -107,21 +113,42 @@ def test_generic_recipe_uses_framework_defaults_for_known_model() -> None:
     assert recipe.rollout_num_gpus_per_engine == 1
     assert recipe.colocate is True
     assert recipe.num_rollout == 1
+    assert recipe.save_interval == recipe.num_rollout
     assert recipe.n_samples_per_prompt == 2
-    assert recipe.rollout_batch_size == 8
+    assert recipe.rollout_batch_size == 2
 
 
 def test_miles_recipe_uses_shared_sampling_defaults() -> None:
     recipe = MilesRecipe()
 
     assert recipe.n_samples_per_prompt == 2
-    assert recipe.rollout_batch_size == 8
+    assert recipe.save_interval == recipe.num_rollout
+    assert recipe.rollout_batch_size == 2
 
 
 def test_model_recipe_uses_its_class_defaults() -> None:
-    config = _config(Qwen3_4B_Recipe())
+    recipe = _config(Qwen3_4B_Recipe())._prepare_recipe()
 
-    assert config._prepare_recipe().n_samples_per_prompt == 8
+    assert recipe.actor_num_gpus_per_node == 1
+    assert recipe.max_tokens_per_gpu == 8192
+
+
+def test_miles_4b_inherits_one_gpu_and_enables_cpu_offload() -> None:
+    recipe = Qwen3_5_4B_Miles_Recipe()
+
+    assert recipe.actor_num_gpus_per_node == 1
+    assert recipe.optimizer_cpu_offload is True
+    assert recipe.overlap_cpu_optimizer_d2h_h2d is True
+    assert recipe.use_precision_aware_optimizer is True
+    assert recipe.tensor_model_parallel_size == 1
+
+
+def test_slime_35_4b_keeps_one_gpu_offload() -> None:
+    recipe = Qwen3_5_4B_Recipe()
+
+    assert recipe.actor_num_gpus_per_node == 1
+    assert recipe.optimizer_cpu_offload is True
+    assert recipe.sglang_mem_fraction_static == 0.7
 
 
 def test_prepare_recipe_does_not_mutate_stored_launch_callables() -> None:
@@ -132,7 +159,6 @@ def test_prepare_recipe_does_not_mutate_stored_launch_callables() -> None:
         return 1.0
 
     recipe = SlimeRecipe(
-        **_SLIME_RECIPE_KW,
         image_overlay=image_overlay,
         custom_rm_function=custom_rm_function,
     )

@@ -383,7 +383,7 @@ def build_slime_app(
 ) -> App:
     """Return a Modal App with `download`, `prepare_dataset`, `convert_checkpoint`, and `train` defined."""
     app_name = name or f"slime-{type(slime).__name__.lstrip('_').lower()}"
-    volume_prefix = f"slime-{type(slime).__name__.lstrip('_').lower()}"
+    volume_prefix = slime.name or f"slime-{type(slime).__name__.lstrip('_').lower()}"
 
     SlimeRecipe._validate_custom_model_architecture(model)
     SlimeRecipe._validate_datasets(dataset, eval_dataset)
@@ -708,7 +708,10 @@ def build_slime_app(
             eval_dataset_path,
         )
 
-    convert_nnodes = get_checkpoint_conversion_policy(slime, model=model)[0]
+    convert_nnodes, convert_nproc, _ = get_checkpoint_conversion_policy(
+        slime, model=model
+    )
+    convert_gpu = f"{slime.gpu_type}:{convert_nproc}"
 
     @app.function(
         image=image,
@@ -719,6 +722,7 @@ def build_slime_app(
         timeout=60 * 60,
         secrets=[*hf_secrets(), *proxy_auth_secrets()],
         serialized=True,
+        single_use_containers=True,
         name="resolve_checkpoint",
     )
     def resolve_checkpoint(
@@ -762,6 +766,7 @@ def build_slime_app(
             if training_run_id:
                 flush_status_reporter(timeout_seconds=2.0)
             return None
+        print(f"torch_dist checkpoint at {save_path} is {cache_status}.")
 
         if cache_status == "stale":
             if stored_config is None:
@@ -792,7 +797,7 @@ def build_slime_app(
 
     @app.function(
         image=image,
-        gpu=gpu_spec,
+        gpu=convert_gpu,
         memory=slime.memory,
         cpu=slime.cpu,
         cloud=slime.cloud,
@@ -802,6 +807,7 @@ def build_slime_app(
         secrets=proxy_auth_secrets() or None,
         experimental_options={"efa_enabled": True},
         serialized=True,
+        single_use_containers=True,
         name="convert_checkpoint",
     )
     @clustered_if(convert_nnodes > 1, convert_nnodes, gpu_type=slime.gpu_type)

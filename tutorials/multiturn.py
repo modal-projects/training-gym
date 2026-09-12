@@ -50,6 +50,7 @@ _PROMPT = (
 TRAIN_TARGETS = list(range(1, _MAX_VALUE + 1, 2))
 TEST_TARGETS = list(range(2, _MAX_VALUE + 1, 2))
 
+
 class NumberGuessDataset(DatasetConfig):
     def __init__(self, targets: list[int], *, repeats: int = 1):
         self.targets = targets
@@ -72,6 +73,7 @@ class NumberGuessDataset(DatasetConfig):
             for _ in range(self.repeats)
         ]
 
+
 train_dataset = NumberGuessDataset(TRAIN_TARGETS, repeats=20)
 
 eval_dataset = NumberGuessDataset(TEST_TARGETS)
@@ -90,6 +92,7 @@ eval_dataset = NumberGuessDataset(TEST_TARGETS)
 
 _ANSWER_RE = re.compile(r"<answer>\s*(\d+)\s*</answer>", re.IGNORECASE)
 
+
 def _parse_label(sample) -> dict:
     raw = getattr(sample, "label", None)
     if isinstance(raw, dict):
@@ -101,6 +104,7 @@ def _parse_label(sample) -> dict:
             return {}
     return {}
 
+
 def _extract_answer(text: str) -> int | None:
     matches = list(_ANSWER_RE.finditer(text))
     if not matches:
@@ -109,6 +113,7 @@ def _extract_answer(text: str) -> int | None:
     if 1 <= guess <= _MAX_VALUE:
         return guess
     return None
+
 
 async def number_guess_generate(args, sample, sampling_params):
     from slime.rollout.sglang_rollout import GenerateState
@@ -196,6 +201,7 @@ async def number_guess_generate(args, sample, sampling_params):
     sample.metadata = sample_metadata
     return sample
 
+
 def _trajectory_reward(success: bool, format_error: bool, turns_taken: int) -> float:
     if success:
         return float(2.0 - 0.1 * max(0, turns_taken - 1))
@@ -203,23 +209,30 @@ def _trajectory_reward(success: bool, format_error: bool, turns_taken: int) -> f
         return -2.0
     return -1.0
 
+
 async def number_guess_rm(args, sample, **kwargs) -> float:
     sample_metadata = getattr(sample, "metadata", None)
-    guessing_meta = sample_metadata.get("guessing", {}) if isinstance(sample_metadata, dict) else {}
+    guessing_meta = (
+        sample_metadata.get("guessing", {}) if isinstance(sample_metadata, dict) else {}
+    )
 
     success = bool(guessing_meta.get("success", False))
     format_error = bool(guessing_meta.get("format_error", False))
-    turns_taken = int(guessing_meta.get("turns_taken", getattr(args, "max_turns", _MAX_TURNS)))
+    turns_taken = int(
+        guessing_meta.get("turns_taken", getattr(args, "max_turns", _MAX_TURNS))
+    )
     return _trajectory_reward(
         success=success,
         format_error=format_error,
         turns_taken=turns_taken,
     )
 
+
 # ## Offline multi-turn trajectory evaluator
 #
 # We create a full multi-turn evaluator that aggregates scores in a
 # small loop over the eval dataset.
+
 
 def run_guessing_trajectory(
     deployment: Endpoint,
@@ -232,7 +245,6 @@ def run_guessing_trajectory(
         prompt = f"{_PROMPT}\n{trace}".strip()
         msg = deployment.chat(
             [{"role": "user", "content": prompt}],
-            chat_template_kwargs={"enable_thinking": False},
         )
         response = msg.get("content") or msg.get("reasoning_content") or ""
         guess = _extract_answer(response)
@@ -258,6 +270,7 @@ def run_guessing_trajectory(
         "turns_taken": max_turns,
         "response": trace,
     }
+
 
 def guessing_eval_fn(
     deployment: Endpoint,
@@ -285,6 +298,7 @@ def guessing_eval_fn(
         },
     }
 
+
 def summarize_eval(rows: list[dict]) -> dict:
     success_rate = sum(1 for row in rows if row["metadata"].get("success")) / max(
         len(rows), 1
@@ -297,9 +311,8 @@ def summarize_eval(rows: list[dict]) -> dict:
         "mean_turns": float(mean_turns),
     }
 
-def run_eval(
-    deployment, *, max_concurrency: int = 2
-) -> tuple[float, list[dict]]:
+
+def run_eval(deployment, *, max_concurrency: int = 2) -> tuple[float, list[dict]]:
     from concurrent.futures import ThreadPoolExecutor
 
     deployment.wait_until_ready(timeout=15 * 60)
@@ -311,6 +324,7 @@ def run_eval(
         rows = list(executor.map(_score_one, eval_dataset.rows()))
     mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
     return mean, rows
+
 
 # ## Serve and evaluate the base model
 
@@ -336,25 +350,19 @@ print(f"Base mean turns:  {base_summary['mean_turns']:.2f}")
 #   (Megatron) ranks.
 # - `colocate=True` — share the same GPUs between rollout and training, alternating
 #   between the two. Set `False` to give sglang dedicated GPUs (faster, more expensive).
-# - `tensor_model_parallel_size=1` — Megatron tensor-parallel degree. The 4B
-#   preset still uses 8 H100s; bump TP for larger models that outgrow one GPU.
-# - `sequence_parallel=False` — only meaningful when `tensor_model_parallel_size > 1`.
-# - `rollout_num_gpus_per_engine=1` — GPUs per sglang inference engine (sglang's TP).
+# - `tensor_model_parallel_size=1` — Megatron tensor-parallel degree.
 #
 # **Rollout**
 # - `num_rollout=20` — total rollout/train iterations to run. Each iteration samples
 #   a batch, scores it, and applies one policy update.
 # - `rollout_batch_size=8` — prompts sampled per rollout iteration.
+# - `n_samples_per_prompt=4` — completions sampled per prompt.
 # - `rollout_max_response_len=64` — max new tokens per sglang call. We keep it tiny
 #    because every turn is `<answer>N</answer>` plus a bit of thinking.
-# - `rollout_temperature=1.0` — sampling temperature during rollouts.
 #
 # **Training and checkpoints**
 # - `global_batch_size=8` — effective batch size for the policy gradient update.
-# - `save_interval=10` — write a Megatron checkpoint every N rollout iterations.
-# - `apply_chat_template_kwargs='{"enable_thinking": false}'` — passed to the
-#   tokenizer's chat template; disables Qwen3's `<think>` block so responses stay
-#   short and parseable.
+# - `save_interval=20` — write a Megatron checkpoint at the last rollout.
 
 config = TrainConfig(
     model=model,
@@ -367,22 +375,12 @@ config = TrainConfig(
             "max_turns": _MAX_TURNS,
             "log_multi_turn": True,
         },
-
-        gpu_type="H100",
-        colocate=True,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus_per_engine=1,
-
         num_rollout=20,
+        save_interval=20,
         rollout_batch_size=8,
         n_samples_per_prompt=4,
-        rollout_max_response_len=64,
-        rollout_temperature=1.0,
-
         global_batch_size=8,
-        save_interval=10,
-        apply_chat_template_kwargs='{"enable_thinking": false}',
+        rollout_max_response_len=64,
     ),
 )
 print("Starting training...")
