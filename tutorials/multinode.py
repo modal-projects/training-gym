@@ -10,8 +10,8 @@
 #
 # When you decide you need a frontier-scale model for your workload, you want
 # the biggest hardware you can get, and runs that stay up. This tutorial trains
-# [GLM-4.7](https://huggingface.co/zai-org/GLM-4.7) on 4 trainer nodes with 8
-# H200s each plus 32 disaggregated rollout GPUs, using full-weight
+# [GLM-4.7](https://huggingface.co/zai-org/GLM-4.7) on 8 trainer nodes with 8
+# H200s each plus 64 disaggregated rollout GPUs, using full-weight
 # [Group Sequence Policy Optimization](https://arxiv.org/abs/2507.18071) (GSPO)
 # on
 # [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k).
