@@ -43,6 +43,7 @@ train_dataset = HuggingFaceDataset(
 )
 recipe = GLM_4_7_Recipe(
     num_rollout=3000,
+    save_interval=10,
     rollout_batch_size=64,
     n_samples_per_prompt=8,
     global_batch_size=128,

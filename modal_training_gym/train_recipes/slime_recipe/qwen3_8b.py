@@ -13,3 +13,4 @@ class Qwen3_8B_Recipe(SlimeRecipe):
     use_precision_aware_optimizer: bool = True
     sglang_mem_fraction_static: float = 0.72
     max_tokens_per_gpu: int = 6144
+    lr: float = 5e-7

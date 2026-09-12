@@ -42,7 +42,6 @@ _EPHEMERAL_DISK_MIB = 1_048_576
 _VISION_MODE: dict[str, Any] = {
     "rollout_top_p": 0.95,
     "rollout_top_k": 64,
-    "rm_type": None,
     "sglang_max_running_requests": 8,
 }
 
@@ -74,7 +73,6 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     micro_batch_size: int = 1
     max_tokens_per_gpu: int = 1024
 
-    rm_type: str | None = "gemma_math"
     balance_data: bool = True
     rollout_top_p: float | None = None
     rollout_stop_token_ids: list[int] | None = field(
@@ -178,17 +176,10 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
 
     @model_validator(mode="after")
     def _require_vision_reward(self) -> "Gemma4_26B_A4B_Recipe":
-        """A vision run scores nothing unless the caller brings a reward.
-
-        ``_VISION_MODE`` clears the text path's ``gemma_math``, so without this
-        the run would reach a rollout before anything noticed.
-        """
         if self.modality == "vision" and not self._brings_own_reward():
             raise TrainingGymConfigError(
-                f"{type(self).__name__}(modality='vision') needs its own reward: "
-                "the text default rm_type='gemma_math' scores maths, not images, "
-                "so vision mode clears it. Pass custom_rm_function=..., or "
-                "rm_type=... to choose a built-in deliberately."
+                f"{type(self).__name__}(modality='vision') needs its own reward. "
+                "Pass custom_rm_function=... or rm_type=... to choose a built-in."
             )
         return self
 

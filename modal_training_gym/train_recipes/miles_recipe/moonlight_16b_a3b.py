@@ -42,7 +42,6 @@ class Moonlight_16B_A3B_Recipe(MilesRecipe):
     max_tokens_per_gpu: int = 8192
 
     use_kl_loss: bool = True
-    rm_type: str | None = "deepscaler"
 
     optimizer_cpu_offload: bool = True
     overlap_cpu_optimizer_d2h_h2d: bool = True

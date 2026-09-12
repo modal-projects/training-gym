@@ -36,7 +36,6 @@ class Qwen3_5_4B_Miles_Recipe(MilesRecipe):
     recompute_num_layers: int | None = 1
 
     use_kl_loss: bool = True
-    rm_type: str | None = "deepscaler"
 
     sglang_mem_fraction_static: float = 0.7
 

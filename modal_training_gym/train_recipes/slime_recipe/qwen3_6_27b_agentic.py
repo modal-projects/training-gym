@@ -67,7 +67,6 @@ class Qwen3_6_27B_Recipe_Agentic(Qwen3_6_27B_Recipe):
 
     max_tokens_per_gpu: int = 16384
     log_probs_chunk_size: int = 128
-    rm_type: str | None = None
 
     save_debug_rollout_data: str = (
         "/checkpoints/agentic_rollout_dumps/rollout_{rollout_id}.pt"

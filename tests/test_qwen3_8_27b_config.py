@@ -26,7 +26,6 @@ def test_qwen3_8_27b_adapts_current_slime_qwen3_5_recipe() -> None:
     assert recipe.sglang_speculative_algorithm == "EAGLE"
     assert recipe.use_kl_loss is False
     assert recipe.calculate_per_token_loss is True
-    assert recipe.rm_type == "deepscaler"
     assert recipe.eval_interval is None
     assert recipe.max_tokens_per_gpu == 8192
     assert recipe.memory == (128, 2_097_152)

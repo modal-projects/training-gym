@@ -17,6 +17,9 @@ class Qwen3_6_35B_Recipe_Long_Context(SlimeRecipe):
         default_factory=lambda: {"ephemeral_disk": 1_048_576}
     )
 
+    colocate: bool = False
+    rollout_num_gpus: int = 8
+
     actor_num_gpus_per_node: int = 4
 
     tensor_model_parallel_size: int = 2
@@ -27,6 +30,7 @@ class Qwen3_6_35B_Recipe_Long_Context(SlimeRecipe):
     expert_tensor_parallel_size: int = 1
 
     rollout_num_gpus_per_engine: int = 2
+    rollout_max_response_len: int = 8192
     sglang_ep_size: int | None = 2
     sglang_disable_custom_all_reduce: bool = True
     sglang_cuda_graph_bs: list[int] | None = field(
@@ -47,7 +51,6 @@ class Qwen3_6_35B_Recipe_Long_Context(SlimeRecipe):
 
     max_tokens_per_gpu: int = 16384
     calculate_per_token_loss: bool = True
-    rm_type: str | None = "deepscaler"
     moe_token_dispatcher_type: str = "flex"
     moe_enable_deepep: bool = True
 
@@ -58,3 +61,14 @@ class Qwen3_6_35B_Recipe_Long_Context(SlimeRecipe):
     attention_backend: str = "flash"
 
     ref_load: str = "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp2pp2"
+    apply_chat_template_kwargs: dict | str = field(
+        default_factory=lambda: {"enable_thinking": True}
+    )
+    environment: dict = field(
+        default_factory=lambda: {
+            "PYTHONPATH": "/root/Megatron-LM/",
+            "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+            "NCCL_NVLS_ENABLE": "1",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        }
+    )

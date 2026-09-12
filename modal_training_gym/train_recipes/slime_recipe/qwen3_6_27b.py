@@ -35,7 +35,6 @@ class Qwen3_6_27B_Recipe(SlimeRecipe):
     max_tokens_per_gpu: int = 8192
     calculate_per_token_loss: bool = True
     balance_data: bool = True
-    rm_type: str | None = "deepscaler"
     optimizer_cpu_offload: bool = True
     overlap_cpu_optimizer_d2h_h2d: bool = True
     use_precision_aware_optimizer: bool = True

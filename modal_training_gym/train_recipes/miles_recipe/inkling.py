@@ -66,7 +66,6 @@ class _InklingSmallRecipe(MilesRecipe):
     no_bias_dropout_fusion: bool = True
     distributed_timeout_minutes: int = 30
 
-    rm_type: str = "math"
     balance_data: bool = True
     rollout_num_gpus_per_engine: int = 16
     skip_eval_before_train: bool = True
