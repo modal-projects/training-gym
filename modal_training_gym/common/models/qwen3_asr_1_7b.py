@@ -40,7 +40,6 @@ class Qwen3_ASR_1_7B(HFModelConfiguration):
     # this just strips the chat-template scaffolding off the decoded text.
     response_parser = staticmethod(parse_qwen3_response)
 
-    requires_bshd = True
     # The processor expands this single <|audio_pad|> to N tokens (N = the audio
     # encoder's output length for the clip), aligning audio embeddings with token
     # positions. It must appear in the prompt text; the raw audio path or payload

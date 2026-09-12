@@ -90,7 +90,7 @@ class LibriSpeechASRDataset(MultimodalDataset):
 def build_slime_validation(
     model_config: ModelConfig, step_count: int
 ) -> tuple[SlimeRecipe, DatasetConfig]:
-    """The model's base slime recipe and a dataset matching its modality.
+    """The model's base slime recipe and its validation dataset.
 
     Audio models (Qwen3-ASR) need speech clips, so they get LibriSpeech;
     everything else validates against gsm8k, scored by ``deepscaler``.

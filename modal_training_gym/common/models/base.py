@@ -161,7 +161,8 @@ class ModelConfig:
         model_path: Local directory of already-downloaded weights, if any.
         architecture: Megatron transformer sizes used for conversion and training.
         response_parser: Turns raw model text into a ``ParsedResponse``.
-        requires_bshd: Use padded (bshd) batches so training skips the THD packing path.
+        thd_forward: When False, training uses padded (bshd) batches instead of
+            THD packing.
         audio_placeholder: Token sequence the processor expands at ``<|audio_pad|>``.
             Raw audio in the prompt OOMs.
     """
@@ -170,7 +171,6 @@ class ModelConfig:
     model_path: str | None = None
     architecture: ModelArchitecture | None = None
     response_parser: ResponseParser | None = None
-    requires_bshd: bool = False
     audio_placeholder: str = ""
     supported_modalities: frozenset[str] = frozenset()
     thd_forward: bool = True

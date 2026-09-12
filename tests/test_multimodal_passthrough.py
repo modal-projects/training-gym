@@ -473,7 +473,9 @@ def test_qwen36_38_accept_image(model, recipe_cls):
 
 
 def test_miles_qwen35_rejects_image():
-    with pytest.raises(ValidationError, match="cannot serve image"):
+    with pytest.raises(
+        ValidationError, match="Qwen3_5_4B_Miles_Recipe cannot serve image"
+    ):
         TrainConfig(
             dataset=_mm("image"),
             model=Qwen3_5_4B(),
