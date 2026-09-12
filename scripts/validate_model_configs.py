@@ -392,7 +392,7 @@ def run_base_training(
         recipe=train_recipe,
     )
 
-    launch = train_config.launch(prepare_inputs=True)
+    launch = train_config.launch()
     try:
         train_result = launch.result(timeout=timeout)
     except BaseException:

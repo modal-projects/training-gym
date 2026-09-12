@@ -68,7 +68,7 @@ for cfg in configs:
 #
 # Once it all looks good, `.launch()` it!
 
-launches = group.launch(prepare_inputs=True)
+launches = group.launch()
 print(f"group {group.group_id}: {len(launches)} runs launched")
 for launch in launches:
     print(

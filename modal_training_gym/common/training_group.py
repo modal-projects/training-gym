@@ -280,7 +280,7 @@ class TrainingGroup:
                         launched.append(
                             (
                                 overrides,
-                                cfg.launch(show_output=False, prepare_inputs=True),
+                                cfg.launch(show_output=False),
                             )
                         )
                     except BaseException as exc:  # noqa: BLE001
@@ -303,15 +303,12 @@ class TrainingGroup:
         self,
         *,
         continue_on_error: bool = True,
-        prepare_inputs: bool = False,
     ) -> list[TrainingRun]:
         """Launch every variant as a detached Modal call.
 
         Args:
             continue_on_error:
                 Continue after a variant fails to launch.
-            prepare_inputs:
-                Materialize model and dataset inputs before launching.
 
         Returns:
             Launched training runs.
@@ -324,10 +321,7 @@ class TrainingGroup:
         self._print_variant_plan(variants)
         for overrides, cfg in variants:
             try:
-                launch = cfg.launch(
-                    show_output=False,
-                    prepare_inputs=prepare_inputs,
-                )
+                launch = cfg.launch(show_output=False)
                 launches.append(launch)
                 print(
                     f"[TrainingGroup] launched {overrides!r}: "
