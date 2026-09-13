@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import time
@@ -44,10 +45,20 @@ def _create_endpoint_and_wait_for_url(
         ]
         if environment:
             stop.extend(["--env", environment])
-        try:
-            subprocess.run(stop, check=False, capture_output=True, timeout=120)
-        except subprocess.TimeoutExpired:
-            pass
+        stopped = subprocess.run(
+            stop, check=False, capture_output=True, text=True, timeout=120
+        )
+        if stopped.returncode != 0:
+            text = f"{stopped.stdout or ''}{stopped.stderr or ''}"
+            if not re.search(r"endpoint '[^']+' not found", text, flags=re.IGNORECASE):
+                sys.stdout.write(stopped.stdout or "")
+                sys.stderr.write(stopped.stderr or "")
+                raise subprocess.CalledProcessError(
+                    stopped.returncode,
+                    stop,
+                    output=stopped.stdout,
+                    stderr=stopped.stderr,
+                )
 
     command = [
         sys.executable,
@@ -74,7 +85,20 @@ def _create_endpoint_and_wait_for_url(
         command.extend(["--custom-volume-name", checkpoint.checkpoints_volume_name])
         command.extend(["--custom-volume-path", checkpoint.path_relative_to_volume])
 
-    subprocess.run(command, check=True, timeout=120)
+    created = subprocess.run(
+        command, check=False, timeout=120, capture_output=True, text=True
+    )
+    if created.returncode != 0:
+        text = f"{created.stdout or ''}{created.stderr or ''}"
+        if "already exists" not in text.lower():
+            sys.stdout.write(created.stdout or "")
+            sys.stderr.write(created.stderr or "")
+            raise subprocess.CalledProcessError(
+                created.returncode,
+                command,
+                output=created.stdout,
+                stderr=created.stderr,
+            )
 
     server = modal.Server.from_name(
         f"ep-{endpoint_name}", "Server", environment_name=environment
