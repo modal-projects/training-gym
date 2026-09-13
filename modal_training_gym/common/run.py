@@ -403,7 +403,8 @@ class TrainingRun(BaseModel):
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        self.close()
+        if exc_type is None:
+            self.close()
 
     def __await__(self):
         import asyncio

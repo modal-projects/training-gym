@@ -217,9 +217,14 @@ config = TrainConfig(
 
 with config.launch() as run:
     print(f"run id: {run.training_run_id}")
+    checkpoint = None
     while True:
-        checkpoint = run.latest_checkpoint()
-        if run.done():
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
             break
         time.sleep(30)
     print(f"checkpoint: {checkpoint.path}")
@@ -264,11 +269,18 @@ new_config = TrainConfig(
 
 with new_config.launch() as new_run:
     print(f"run id: {new_run.training_run_id}")
+    new_checkpoint = None
     while True:
-        new_checkpoint = new_run.latest_checkpoint()
-        if new_run.done():
+        done = new_run.done()
+        latest = new_run.latest_checkpoint()
+        if latest is not None and latest != new_checkpoint:
+            new_checkpoint = latest
+            print(f"new checkpoint: {new_checkpoint.path}")  # run offline evals here
+        if done:
             break
         time.sleep(30)
+    if new_checkpoint is None:
+        raise RuntimeError("run produced no checkpoint")
     print(new_checkpoint.path)
 
 new_deployment = Endpoint.launch(

@@ -55,6 +55,21 @@ def test_context_manager_stops_app(monkeypatch):
     assert stopped == ["ap-1"]
 
 
+def test_context_manager_leaves_app_running_on_exception(monkeypatch):
+    stopped: list[str] = []
+    monkeypatch.setattr(
+        "modal_training_gym.common.modal_lifecycle.stop_app", stopped.append
+    )
+    run = _run(TrainingRunStatus.RUNNING)
+    run.modal_app_id = "ap-1"
+
+    with pytest.raises(KeyboardInterrupt):
+        with run:
+            raise KeyboardInterrupt
+
+    assert stopped == []
+
+
 def test_close_is_idempotent(monkeypatch):
     stopped: list[str] = []
     monkeypatch.setattr(

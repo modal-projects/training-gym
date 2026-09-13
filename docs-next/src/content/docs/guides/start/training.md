@@ -37,9 +37,13 @@ While the run is in-progress, you can poll for the latest checkpoint:
 import time
 
 with config.launch() as run:
+    checkpoint = None
     while True:
-        checkpoint = run.latest_checkpoint()
-        if run.done():
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+        if done:
             break
         time.sleep(30)
 ```
@@ -103,9 +107,13 @@ simple_config = TrainConfig(
 )
 
 with simple_config.launch() as simple_run:
+    simple_checkpoint = None
     while True:
-        simple_checkpoint = simple_run.latest_checkpoint()
-        if simple_run.done():
+        done = simple_run.done()
+        latest = simple_run.latest_checkpoint()
+        if latest is not None and latest != simple_checkpoint:
+            simple_checkpoint = latest
+        if done:
             break
         time.sleep(30)
 
@@ -117,9 +125,13 @@ complex_config = TrainConfig(
 )
 
 with complex_config.launch() as complex_run:
+    complex_checkpoint = None
     while True:
-        complex_checkpoint = complex_run.latest_checkpoint()
-        if complex_run.done():
+        done = complex_run.done()
+        latest = complex_run.latest_checkpoint()
+        if latest is not None and latest != complex_checkpoint:
+            complex_checkpoint = latest
+        if done:
             break
         time.sleep(30)
 ```

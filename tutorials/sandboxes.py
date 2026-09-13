@@ -176,9 +176,14 @@ print("Starting training...")
 
 with config.launch() as run:
     print(f"run id: {run.training_run_id}")
+    checkpoint = None
     while True:
-        checkpoint = run.latest_checkpoint()
-        if run.done():
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
             break
         time.sleep(30)
 trained_deployment = Endpoint.launch(
