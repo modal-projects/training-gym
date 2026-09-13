@@ -50,7 +50,11 @@ def _create_endpoint_and_wait_for_url(
         )
         if stopped.returncode != 0:
             text = f"{stopped.stdout or ''}{stopped.stderr or ''}"
-            if not re.search(r"endpoint '[^']+' not found", text, flags=re.IGNORECASE):
+            if not re.search(
+                r"endpoint '[^']+' not found|endpoint .+ is already stopped",
+                text,
+                flags=re.IGNORECASE,
+            ):
                 sys.stdout.write(stopped.stdout or "")
                 sys.stderr.write(stopped.stderr or "")
                 raise subprocess.CalledProcessError(

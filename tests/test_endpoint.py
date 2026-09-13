@@ -578,6 +578,24 @@ def test_recreate_creates_when_stop_name_is_absent(fake_modal_cli) -> None:
     assert endpoint.url == _FakeModalCli.DEFAULT_URL
 
 
+def test_recreate_creates_when_stop_already_stopped(fake_modal_cli) -> None:
+    cli = fake_modal_cli(stop_returncode=1)
+    cli._stop_stderr = (
+        "Endpoint 'my-ft' in environment 'ajhinh-dev' is already stopped."
+    )
+
+    endpoint = Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        endpoint_name="my-ft",
+        unauthenticated=True,
+        recreate_if_existing=True,
+    )
+
+    assert [command[4] for command in cli.commands] == ["stop", "create"]
+    assert endpoint.endpoint_name == "my-ft"
+    assert endpoint.url == _FakeModalCli.DEFAULT_URL
+
+
 def test_recreate_raises_when_stop_app_is_absent(fake_modal_cli) -> None:
     cli = fake_modal_cli(stop_returncode=1)
     cli._stop_stderr = "App ap-test not found"
