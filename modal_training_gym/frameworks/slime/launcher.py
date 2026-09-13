@@ -1151,13 +1151,14 @@ def build_slime_app(
                 # even for runs launched with an explicit start_rollout_id.
                 object.__setattr__(slime, "start_rollout_id", None)
                 drop_materialized_config_key(slime, "start_rollout_id")
-                # Weights-only checkpoints (``no_save_optim``) have no Adam state;
-                # Megatron will KeyError on state_dict["optimizer"] unless we skip it.
+                # This run's saves include Adam only when no_save_optim is false.
+                # TrainConfig.resume forces no_load_optim for the source seed;
+                # that flag is not a property of later saves in this directory.
                 if slime.no_save_optim and not slime.no_load_optim:
                     print(
                         "WARNING: no_save_optim=True — enabling no_load_optim for resume."
                     )
-                    object.__setattr__(slime, "no_load_optim", True)
+                object.__setattr__(slime, "no_load_optim", slime.no_save_optim)
             elif (
                 slime.megatron_to_hf_mode == "bridge" and not slime.ref_load and _hf_ref
             ):

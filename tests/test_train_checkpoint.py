@@ -167,12 +167,13 @@ def test_slime_conversion_uses_wrapper_with_expected_environment() -> None:
     assert 'if num_nodes > 1:\n            env["SKIP_RELEASE_RENAME"] = "1"' in source
 
 
-def test_miles_internal_resume_skips_adam_when_no_save_optim() -> None:
-    source = inspect.getsource(build_miles_app)
+def test_internal_resume_loads_adam_when_the_run_saved_it() -> None:
+    miles = inspect.getsource(build_miles_app)
+    slime = inspect.getsource(build_slime_app)
 
-    assert "if miles.no_save_optim and not miles.no_load_optim:" in source
-    assert "miles.no_load_optim = True" in source
-    assert "miles.no_load_optim = original_no_load_optim" in source
+    assert "miles.no_load_optim = miles.no_save_optim" in miles
+    assert "miles.no_load_optim = original_no_load_optim" in miles
+    assert 'object.__setattr__(slime, "no_load_optim", slime.no_save_optim)' in slime
 
 
 def test_miles_conversion_uses_wrapper_with_expected_environment() -> None:

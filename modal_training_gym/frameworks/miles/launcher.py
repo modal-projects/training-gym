@@ -1171,11 +1171,14 @@ def build_miles_app(
                 # even for runs launched with an explicit start_rollout_id.
                 miles.start_rollout_id = None
                 drop_materialized_config_key(miles, "start_rollout_id")
+                # This run's saves include Adam only when no_save_optim is false.
+                # TrainConfig.resume forces no_load_optim for the source seed;
+                # that flag is not a property of later saves in this directory.
                 if miles.no_save_optim and not miles.no_load_optim:
                     print(
                         "WARNING: no_save_optim=True — enabling no_load_optim for resume."
                     )
-                    miles.no_load_optim = True
+                miles.no_load_optim = miles.no_save_optim
             elif unresumable := _unresumable_save_dirs(save_root):
                 print(
                     f"WARNING: {save_root} holds saves that cannot be resumed "
