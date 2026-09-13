@@ -41,28 +41,6 @@ def _megatron_load_dir(checkpoint: Checkpoint) -> str:
     return os.path.dirname(checkpoint.path.rstrip("/"))
 
 
-def _no_load_optim_for_resume(checkpoint: Checkpoint) -> bool:
-    no_save_optim = None
-    if checkpoint.training_run_id:
-        try:
-            run = TrainingRun.from_id(checkpoint.training_run_id)
-        except KeyError:
-            run = None
-        else:
-            config = run.config
-            recipe = config.get("recipe") if isinstance(config, dict) else None
-            if isinstance(recipe, dict) and "no_save_optim" in recipe:
-                no_save_optim = bool(recipe["no_save_optim"])
-    if no_save_optim is None:
-        warnings.warn(
-            "Source run optimizer metadata omitted, skipping optimizer load "
-            f"(training_run_id={checkpoint.training_run_id!r}).",
-            stacklevel=3,
-        )
-        return True
-    return no_save_optim
-
-
 def _try_validate_model_parallelism(
     recipe: BaseTrainRecipe, model: ModelConfig
 ) -> None:
@@ -332,10 +310,11 @@ class TrainConfig:
         recipe:
             Training framework, Modal resources, and framework arguments.
         resume:
-            Continue from this Megatron checkpoint's stored iteration.
-            Loads Adam only if the source run saved it
-            (``TrainingRun.config.recipe.no_save_optim`` via
-            ``resume.training_run_id``).
+            Start a new run from this Megatron checkpoint's weights with a
+            fresh optimizer and LR schedule; ``recipe.num_rollout`` counts
+            from zero. To continue the source run in place with its Adam
+            state and iteration count, leave ``resume`` unset and point
+            ``recipe.load`` at the checkpoint directory.
         detach:
             Keep training on Modal if the local ``train()`` wait is interrupted.
             ``False`` stops the app.
@@ -392,8 +371,12 @@ class TrainConfig:
             recipe = _dc.replace(
                 self.recipe,
                 load=_megatron_load_dir(self.resume),
-                start_rollout_id=None,
-                no_load_optim=_no_load_optim_for_resume(self.resume),
+                start_rollout_id=(
+                    0
+                    if self.recipe.start_rollout_id is None
+                    else self.recipe.start_rollout_id
+                ),
+                no_load_optim=True,
             )
         _try_validate_model_parallelism(recipe, self.model)
         return recipe
