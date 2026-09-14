@@ -92,12 +92,12 @@ Or train the model further with the existing checkpoint as a starting point:
 config = TrainConfig(
     model=model,
     dataset=dataset,
-    checkpoint=checkpoint,
+    resume=checkpoint,
     recipe=recipe,
 )
 ```
 
-Why might you want to continue training the model? As an example, you can implement curriculum learning by increasing the difficulty of the data and reward function over time:
+Why might you want to continue training the model? As an example, you can implement curriculum learning by increasing the difficulty of the data and reward function over time. The new run starts from the trained weights with an untrained optimizer:
 
 ```python
 simple_config = TrainConfig(
@@ -119,8 +119,8 @@ with simple_config.launch() as simple_run:
 
 complex_config = TrainConfig(
     model=model,
-    checkpoint=simple_checkpoint,
     dataset=complex_dataset,
+    resume=simple_checkpoint,
     recipe=complex_recipe,
 )
 

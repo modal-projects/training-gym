@@ -32,6 +32,15 @@ from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
 
 
+def _megatron_load_dir(checkpoint: Checkpoint) -> str:
+    if checkpoint.checkpoint_type != CheckpointType.megatron:
+        raise TrainingGymConfigError(
+            "Training can only resume from a Megatron checkpoint; "
+            "Hugging Face exports are serving artifacts."
+        )
+    return os.path.dirname(checkpoint.path.rstrip("/"))
+
+
 def _try_validate_model_parallelism(
     recipe: BaseTrainRecipe, model: ModelConfig
 ) -> None:
@@ -300,9 +309,12 @@ class TrainConfig:
             Model identity and weight download behavior.
         recipe:
             Training framework, Modal resources, and framework arguments.
-        checkpoint:
-            Megatron checkpoint to resume from. ``model`` remains the source for
-            tokenizer and architecture metadata.
+        resume:
+            Start a new run from this Megatron checkpoint's weights with a
+            fresh optimizer and LR schedule; ``recipe.num_rollout`` counts
+            from zero. To continue the source run in place with its Adam
+            state and iteration count, leave ``resume`` unset and point
+            ``recipe.load`` at the checkpoint directory.
         detach:
             Keep training on Modal if the local ``train()`` wait is interrupted.
             ``False`` stops the app.
@@ -319,7 +331,7 @@ class TrainConfig:
     model: ModelConfig
     recipe: SlimeRecipe | MilesRecipe
     eval_dataset: DatasetConfig | None = None
-    checkpoint: Checkpoint | None = None
+    resume: Checkpoint | None = None
     # Whether a run outlives the local client. The app itself is always started
     # detached (the CLI's ``modal run --detach`` only detaches the entrypoint,
     # not the nested ``app.run()`` the driver opens), so this only decides
@@ -346,29 +358,25 @@ class TrainConfig:
         each launch of the same config gets its own TrainingRun record."""
         return create_hash(
             self.model.model_name,
-            self.checkpoint.path if self.checkpoint is not None else "",
+            self.resume.path if self.resume is not None else "",
             f"{type(self.recipe).__name__}:{self.framework.value}",
             "",
             self.model.model_path or "",
         )
 
     def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
-        if self.checkpoint is None:
+        if self.resume is None:
             recipe = _dc.replace(self.recipe)
         else:
-            if self.checkpoint.checkpoint_type != CheckpointType.megatron:
-                raise TrainingGymConfigError(
-                    "Training can only resume from a Megatron checkpoint; "
-                    "Hugging Face exports are serving artifacts."
-                )
             recipe = _dc.replace(
                 self.recipe,
-                load=os.path.dirname(self.checkpoint.path.rstrip("/")),
+                load=_megatron_load_dir(self.resume),
                 start_rollout_id=(
                     0
                     if self.recipe.start_rollout_id is None
                     else self.recipe.start_rollout_id
                 ),
+                no_load_optim=True,
             )
         _try_validate_model_parallelism(recipe, self.model)
         return recipe
@@ -385,7 +393,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.checkpoint,
+                checkpoint=self.resume,
                 name=training_run_id,
                 group_id=self.group_id,
             )
@@ -396,7 +404,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.checkpoint,
+                checkpoint=self.resume,
                 name=training_run_id,
                 group_id=self.group_id,
             )
