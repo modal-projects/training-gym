@@ -50,7 +50,9 @@ def _config(recipe, checkpoint_type: CheckpointType | None) -> TrainConfig:
             input_format="text",
         ),
         recipe=recipe,
-        resume=None if checkpoint_type is None else _checkpoint(checkpoint_type),
+        resume_from_checkpoint=None
+        if checkpoint_type is None
+        else _checkpoint(checkpoint_type),
     )
 
 
@@ -80,7 +82,7 @@ def test_megatron_resume_starts_new_run_from_weights(recipe) -> None:
     assert "--start-rollout-id" not in recipe.cli_args(model=config.model)
 
 
-def test_explicit_start_rollout_id_wins_over_resume_default() -> None:
+def test_explicit_start_rollout_id_wins_over_resume_from_checkpoint_default() -> None:
     config = _config(
         SlimeRecipe(**_RECIPE_KW, start_rollout_id=5), CheckpointType.megatron
     )
@@ -97,7 +99,7 @@ def test_explicit_start_rollout_id_wins_over_resume_default() -> None:
         pytest.param(MilesRecipe(load="/checkpoints/run"), id="miles"),
     ],
 )
-def test_recipe_load_without_resume_continues_with_adam(recipe) -> None:
+def test_recipe_load_without_resume_from_checkpoint_continues_with_adam(recipe) -> None:
     config = _config(recipe, None)
     prepared = config._prepare_recipe()
     args = prepared.cli_args(model=config.model)
@@ -109,7 +111,7 @@ def test_recipe_load_without_resume_continues_with_adam(recipe) -> None:
     assert "--no-load-optim" not in args
 
 
-def test_resume_wins_over_recipe_load() -> None:
+def test_resume_from_checkpoint_wins_over_recipe_load() -> None:
     config = _config(
         SlimeRecipe(**_RECIPE_KW, load="/checkpoints/other"),
         CheckpointType.megatron,
@@ -118,7 +120,7 @@ def test_resume_wins_over_recipe_load() -> None:
     assert config._prepare_recipe().load == "/checkpoints/run"
 
 
-def test_config_summary_records_resume_without_mutating_recipe() -> None:
+def test_config_summary_records_resume_from_checkpoint() -> None:
     config = _config(SlimeRecipe(**_RECIPE_KW), CheckpointType.megatron)
 
     summary = config._build_config_summary("run-id")
