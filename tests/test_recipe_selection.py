@@ -139,6 +139,8 @@ def test_registered_recipe_batch_sizes_divide_data_parallel(
 def test_slime_recipe_is_constructible_without_kwargs() -> None:
     SlimeRecipe()
     assert SlimeRecipe(num_rollout=7)._fields()["save_interval"] == 7
+    assert "--save-interval" not in SlimeRecipe(save=None).cli_args()
+    assert "--save-interval" in SlimeRecipe().cli_args()
 
 
 def test_generic_recipe_uses_framework_defaults_for_known_model() -> None:

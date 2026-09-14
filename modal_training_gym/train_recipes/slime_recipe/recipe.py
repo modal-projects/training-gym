@@ -790,7 +790,7 @@ class SlimeRecipe(BaseTrainRecipe):
         model: "ModelConfig | None" = None,
     ) -> dict[str, Any]:
         fields = self._field_values()
-        if fields["save_interval"] is None:
+        if fields["save_interval"] is None and fields["save"] is not None:
             fields["save_interval"] = self.num_rollout
         if (
             self.colocate
