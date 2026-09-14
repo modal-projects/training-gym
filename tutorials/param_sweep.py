@@ -14,6 +14,7 @@ from modal_training_gym import (
     Qwen3_5_4B_Recipe,
     TrainConfig,
     TrainingGroup,
+    TrainingRun,
 )
 
 # ## Define the training base
@@ -60,9 +61,7 @@ group = TrainingGroup(
 configs = group.get_train_configs()
 print(f"{len(configs)} runs in group {group.group_id}:")
 for cfg in configs:
-    print(
-        f"- lr={cfg.recipe.lr:<8}, temp={cfg.recipe.rollout_temperature}"
-    )
+    print(f"- lr={cfg.recipe.lr:<8}, temp={cfg.recipe.rollout_temperature}")
 
 # ## Launch it!
 #
@@ -78,10 +77,7 @@ if group.failures:
     for overrides, err in group.failures:
         print(f"- FAILED {overrides}: {err}")
 
-results = []
-for launch in launches:
-    result = launch.result()
-    results.append(result)
-    print(f"completed {result.training_run_id} (group_id={result.group_id})")
-
+results = TrainingRun.wait_all(launches)
 print(f"group {group.group_id}: {len(results)} runs completed")
+for run in results:
+    print(f"completed {run.training_run_id} (group_id={run.group_id})")

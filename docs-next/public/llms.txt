@@ -132,7 +132,6 @@ Repo: https://github.com/modal-projects/training-gym
 - [TrainingGymConfigError](https://gym.modal.dev/reference/traininggymconfigerror)
 - [TrainingGymError](https://gym.modal.dev/reference/traininggymerror)
 - [TrainingRun](https://gym.modal.dev/reference/trainingrun)
-- [TrainResult](https://gym.modal.dev/reference/trainresult)
 - [WandbConfig](https://gym.modal.dev/reference/wandbconfig)
 - [convert_megatron_checkpoint_to_hf](https://gym.modal.dev/reference/convert_megatron_checkpoint_to_hf)
 - [extract_code](https://gym.modal.dev/reference/extract_code)

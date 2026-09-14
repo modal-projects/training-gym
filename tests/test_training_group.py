@@ -160,33 +160,30 @@ def test_bad_value_type_caught_before_training():
         group.get_train_configs()
 
 
-def test_train_result_persists_group_id():
+def test_training_run_persists_group_id(fake_volume):
     from modal_training_gym.common.framework import Framework
-    from modal_training_gym.common.train_result import TrainResult
 
-    result = TrainResult(
-        app_name="run-x",
-        framework=Framework.SLIME,
+    run = TrainingRun(
         training_run_id="run-x",
-        group_id="group-abc123",
+        framework=Framework.SLIME,
+        config={},
+        metadata={"group_id": "group-abc123"},
     )
-    restored = TrainResult(**TrainResult._parse_model_config(result._to_dict()))
+    run.save()
+    restored = TrainingRun.from_id("run-x")
     assert restored.group_id == "group-abc123"
 
 
-def test_training_run_resolves_train_result():
+def test_training_run_result_returns_self(fake_volume):
     from modal_training_gym.common.framework import Framework
-    from modal_training_gym.common.train_result import TrainResult
 
     class FakeFunctionCall:
         def get(self, timeout=None):
             assert timeout == 123
-            return TrainResult(
-                app_name="run-x",
-                framework=Framework.SLIME,
-                training_run_id="run-x",
-                group_id="group-abc123",
-            )._to_dict()
+            return {
+                "app_name": "run-x",
+                "metrics": {"score": 1},
+            }
 
     run = TrainingRun(
         training_run_id="run-x",
@@ -199,12 +196,14 @@ def test_training_run_resolves_train_result():
     )
     run._function_call = FakeFunctionCall()
 
-    # group_id is derived from metadata, not stored separately.
     assert run.group_id == "group-abc123"
 
     result = run.result(timeout=123, stop_app_on_success=False)
+    assert result is run
     assert result.training_run_id == "run-x"
     assert result.group_id == "group-abc123"
+    assert result.app_name == "run-x"
+    assert result.metrics == {"score": 1}
 
 
 def test_iter_variants_pairs_overrides_with_configs():

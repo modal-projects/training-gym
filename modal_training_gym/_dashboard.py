@@ -1552,7 +1552,7 @@ def fastapi_app():
         except KeyError:
             raise HTTPException(
                 status_code=404,
-                detail=f"TrainResult {training_run_id!r} not found",
+                detail=f"No training result for {training_run_id!r}",
             )
 
     # ── Eval results ─────────────────────────────────────────────────────

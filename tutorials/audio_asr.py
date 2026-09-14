@@ -23,6 +23,7 @@ from datasets import Audio, load_dataset
 
 import base64
 import io
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from modal_training_gym import (
@@ -171,16 +172,23 @@ config = TrainConfig(
         custom_rm_function=wer_rm,
     ),
 )
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained checkpoint
 #
 # Let's run the same eval on the trained checkpoint.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(
     model,

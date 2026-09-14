@@ -22,6 +22,7 @@
 # toward −1 over a margin scaled to the element's own size.
 
 import re
+import time
 
 from modal_training_gym import (
     CustomDeployment,
@@ -298,16 +299,23 @@ config = TrainConfig(
         metrics=WandbConfig(project="computer-use-grounding"),
     ),
 )
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained model
 #
 # Let's run the same eval on the trained checkpoint and compare accuracy.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
-print(f"Checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(
     model,
