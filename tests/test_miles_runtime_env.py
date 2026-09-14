@@ -63,8 +63,8 @@ def test_ld_library_path_comes_from_the_container(monkeypatch):
     assert env_vars["LD_LIBRARY_PATH"] == (
         "/usr/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:/wheel/nvidia/lib"
     )
+    assert env_vars["MASTER_ADDR"] == "10.0.0.1"
     assert env_vars["no_proxy"] == "127.0.0.1,10.0.0.1"
-    assert "MASTER_ADDR" not in env_vars
     assert "MASTER_PORT" not in env_vars
 
 
