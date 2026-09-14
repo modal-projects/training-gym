@@ -1200,7 +1200,15 @@ def build_slime_app(
             runtime_env = {
                 "env_vars": {
                     **slime.environment,
-                    "no_proxy": f"127.0.0.1,{cluster.head_addr}",
+                    "no_proxy": ",".join(
+                        value
+                        for value in (
+                            "127.0.0.1",
+                            cluster.head_addr,
+                            slime.environment.get("no_proxy", ""),
+                        )
+                        if value
+                    ),
                     "MASTER_ADDR": cluster.head_addr,
                     "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(slime.num_rollout),
