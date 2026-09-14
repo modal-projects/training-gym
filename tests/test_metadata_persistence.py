@@ -57,9 +57,9 @@ def test_rollout_async_save_survives_unmounted_volume(fake_volume):
     ]
     assert json.loads(blob)["rollout_id"] == 0
     summary = fake_volume.files[
-        f"{TrainingRolloutResult.summary_store('t3')}/t3__00000000.json"
+        f"{TrainingRolloutResult.summary_store('t3')}/summary.json"
     ]
-    summary_item = json.loads(summary)
+    summary_item = json.loads(summary)["items"][0]
     assert summary_item["rollout_id"] == 0
     assert summary_item["export_size_bytes"] == len(
         (json.dumps(json.loads(blob), ensure_ascii=False, indent=2) + "\n").encode()

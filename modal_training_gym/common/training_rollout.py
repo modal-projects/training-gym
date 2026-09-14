@@ -27,8 +27,8 @@ from modal_training_gym.utils.metadata import (
     vol_get_summary_items,
     vol_list,
     vol_list_keys,
-    vol_put_many,
-    vol_put_records,
+    vol_put_summary_items,
+    vol_put_with_summary,
 )
 
 
@@ -302,12 +302,15 @@ class TrainingRolloutResult(BaseModel):
     def save(self, *, is_async: bool = False) -> None | Awaitable[None]:
         self._touch_created_at()
         payload = self.model_dump(mode="json")
-        summary = self._stored_summary(payload)
-        return vol_put_records(
-            [
-                (MetadataStore.TRAINING_ROLLOUTS, self.storage_key, payload),
-                (self.summary_store(self.training_run_id), self.storage_key, summary),
-            ],
+        return vol_put_with_summary(
+            MetadataStore.TRAINING_ROLLOUTS,
+            self.storage_key,
+            payload,
+            summary_store=self.summary_store(self.training_run_id),
+            summary_item=self._stored_summary(payload),
+            item_id_key="rollout_id",
+            sort_key=lambda item: int(item["rollout_id"]),
+            reverse=False,
             is_async=is_async,
         )
 
@@ -316,10 +319,29 @@ class TrainingRolloutResult(BaseModel):
         cls, training_run_id: str
     ) -> list[TrainingRolloutSummary]:
         """Lightweight per-rollout summaries for one run, sorted by rollout_id."""
-        from modal.exception import Error
+        items = vol_get_summary_items(cls.summary_store(training_run_id)) or []
+        summaries = []
+        for item in items:
+            if (
+                not isinstance(item, dict)
+                or item.get("training_run_id") != training_run_id
+            ):
+                continue
+            try:
+                summaries.append(TrainingRolloutSummary.model_validate(item))
+            except ValidationError:
+                continue
+        return sorted(summaries, key=lambda summary: summary.rollout_id)
 
+    @classmethod
+    def rebuild_summaries_for_run(
+        cls, training_run_id: str
+    ) -> list[TrainingRolloutSummary]:
         store = cls.summary_store(training_run_id)
-        summaries: dict[str, TrainingRolloutSummary] = {}
+        summaries = {
+            f"{training_run_id}__{summary.rollout_id:08d}": summary
+            for summary in cls.list_summaries_for_run(training_run_id)
+        }
 
         def parse(item: Any) -> TrainingRolloutSummary | None:
             if (
@@ -334,17 +356,14 @@ class TrainingRolloutResult(BaseModel):
 
         for item in vol_list(store):
             if summary := parse(item):
-                summaries[f"{training_run_id}__{summary.rollout_id:08d}"] = summary
+                summaries.setdefault(
+                    f"{training_run_id}__{summary.rollout_id:08d}", summary
+                )
 
         keys = set(
             vol_list_keys(MetadataStore.TRAINING_ROLLOUTS, f"{training_run_id}__")
         )
-        recovered: dict[str, dict[str, Any]] = {}
-        legacy = (
-            vol_get_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY) or []
-            if not summaries or keys - summaries.keys()
-            else []
-        )
+        legacy = vol_get_summary_items(MetadataStore.TRAINING_ROLLOUTS_SUMMARY) or []
         for key in sorted(keys - summaries.keys()):
             try:
                 payload = vol_get(MetadataStore.TRAINING_ROLLOUTS, key)
@@ -356,7 +375,6 @@ class TrainingRolloutResult(BaseModel):
                     continue
                 item = result._stored_summary(payload)
                 summaries[key] = TrainingRolloutSummary.model_validate(item)
-                recovered[key] = item
             except (KeyError, ValueError):
                 continue
         for item in legacy:
@@ -365,14 +383,7 @@ class TrainingRolloutResult(BaseModel):
             key = f"{training_run_id}__{summary.rollout_id:08d}"
             if key not in summaries:
                 summaries[key] = summary
-                if key not in keys:
-                    recovered[key] = summary.model_dump(mode="json")
 
-        if recovered:
-            try:
-                vol_put_many(store, recovered)
-            except (OSError, Error) as exc:
-                print(
-                    f"WARNING: could not cache rollout summaries for {training_run_id}: {exc}"
-                )
-        return sorted(summaries.values(), key=lambda summary: summary.rollout_id)
+        items = sorted(summaries.values(), key=lambda summary: summary.rollout_id)
+        vol_put_summary_items(store, [item.model_dump(mode="json") for item in items])
+        return items
