@@ -27,8 +27,9 @@ from modal_training_gym.utils.metadata import (
     vol_get_summary_items,
     vol_list,
     vol_list_keys,
+    vol_put,
     vol_put_summary_items,
-    vol_put_with_summary,
+    vol_upsert_summary_item,
 )
 
 
@@ -304,15 +305,13 @@ class TrainingRolloutResult(BaseModel):
             from asyncio import to_thread
 
             return to_thread(self.save)
-        self.list_summaries_for_run(self.training_run_id)
         self._touch_created_at()
         payload = self.model_dump(mode="json")
-        return vol_put_with_summary(
-            MetadataStore.TRAINING_ROLLOUTS,
-            self.storage_key,
-            payload,
-            summary_store=self.summary_store(self.training_run_id),
-            summary_item=self._stored_summary(payload),
+        vol_put(MetadataStore.TRAINING_ROLLOUTS, self.storage_key, payload)
+        self.list_summaries_for_run(self.training_run_id)
+        return vol_upsert_summary_item(
+            self.summary_store(self.training_run_id),
+            self._stored_summary(payload),
             item_id_key="rollout_id",
             sort_key=lambda item: int(item["rollout_id"]),
             reverse=False,
