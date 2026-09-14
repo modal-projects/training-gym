@@ -41,9 +41,6 @@ def launch(monkeypatch):
         _build_run_metadata=lambda: {},
         _build_app=Mock(return_value=app),
     )
-    config._start_detached_app = lambda *args, **kwargs: (
-        TrainConfig._start_detached_app(config, *args, **kwargs)
-    )
     monkeypatch.setattr(TrainingRun, "save", lambda self: saved.append(self))
     monkeypatch.setattr(
         "modal_training_gym.cli.setup.ensure_dashboard_deployed", lambda: None

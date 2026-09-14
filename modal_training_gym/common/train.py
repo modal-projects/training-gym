@@ -591,13 +591,16 @@ class TrainConfig:
         Returns:
             The launched training run.
         """
-        from modal_training_gym.common.modal_lifecycle import stop_app
+        import modal
 
         from modal_training_gym.cli.setup import ensure_dashboard_deployed
         from modal_training_gym.common.config import (
             CONFIG_PATH,
             get_framework_status_url,
         )
+
+        from modal_training_gym.common.modal_lifecycle import stop_app
+        from modal_training_gym.common.status_reporter import enqueue_framework_status
 
         training_run_id = self._generate_training_run_id()
         ensure_dashboard_deployed()
@@ -638,14 +641,76 @@ class TrainConfig:
         app = None
         try:
             app = self._build_app(training_run_id)
-            function_call = self._start_detached_app(
-                app,
-                run_record,
-                framework_status_url=framework_status_url,
-                framework_status_token=framework_status_token,
-                status_display=status_display,
-                show_output=show_output,
-            )
+            function_call = None
+            launch_error = None
+            output_context = modal.enable_output() if show_output else nullcontext()
+            with output_context:
+                with app.run(detach=True):
+                    try:
+                        modal_app_id = app.app_id or ""
+                        modal_app_url = modal_app_dashboard_url(modal_app_id)
+                        if show_output:
+                            status_display.set_modal_app_url(modal_app_url)
+
+                        run_record.modal_app_id = modal_app_id
+                        run_record.modal_app_url = modal_app_url
+                        try:
+                            run_record.save()
+                        except RuntimeError:
+                            pass
+
+                        def _set_status(
+                            status: FrameworkStatus, *, is_active: bool = True
+                        ) -> None:
+                            run_record.framework_status = status
+                            if show_output:
+                                status_display.emit_stage(status.value)
+                            enqueue_framework_status(
+                                training_run_id,
+                                status.value,
+                                token=framework_status_token,
+                                is_active=is_active,
+                            )
+
+                        megatron_to_hf_mode = getattr(
+                            self.recipe, "megatron_to_hf_mode", ""
+                        )
+                        needs_conversion = megatron_to_hf_mode != "bridge"
+                        download_status, convert_status = (
+                            (SlimeStatus.DOWNLOAD_MODEL, SlimeStatus.CONVERT_MODEL)
+                            if isinstance(self.recipe, SlimeRecipe)
+                            else (MilesStatus.DOWNLOAD_MODEL, MilesStatus.CONVERT_MODEL)
+                        )
+                        _set_status(download_status, is_active=False)
+                        app.download.remote(
+                            training_run_id=training_run_id,
+                            framework_status_url=framework_status_url,
+                            framework_status_token=framework_status_token,
+                        )
+                        if needs_conversion:
+                            _set_status(convert_status, is_active=False)
+                            _convert_checkpoint_on_cache_miss(
+                                app,
+                                training_run_id=training_run_id,
+                                framework_status_url=framework_status_url,
+                                framework_status_token=framework_status_token,
+                            )
+
+                        function_call = app.train.spawn(
+                            modal_app_id=modal_app_id,
+                            modal_app_url=modal_app_url,
+                            framework_status_url=framework_status_url,
+                            framework_status_token=framework_status_token,
+                        )
+                    except BaseException as exc:
+                        launch_error = exc
+
+            if launch_error is not None:
+                raise launch_error
+            if function_call is None:
+                raise TrainingGymError(
+                    "Modal app setup exited without a training call."
+                )
         except KeyboardInterrupt as exc:
             app_id = run_record.modal_app_id or (app.app_id if app else "")
             if app_id:
@@ -682,88 +747,3 @@ class TrainConfig:
             f"app={run_record.modal_app_id}, function_call={run_record.function_call_id}"
         )
         return run_record
-
-    def _start_detached_app(
-        self,
-        app: Any,
-        run_record: TrainingRun,
-        *,
-        framework_status_url: str,
-        framework_status_token: str,
-        status_display: Any,
-        show_output: bool,
-    ) -> Any:
-        import modal
-
-        from modal_training_gym.common.status_reporter import enqueue_framework_status
-
-        training_run_id = run_record.training_run_id
-        function_call = None
-        launch_error = None
-        output_context = modal.enable_output() if show_output else nullcontext()
-        with output_context:
-            with app.run(detach=True):
-                try:
-                    modal_app_id = app.app_id or ""
-                    modal_app_url = modal_app_dashboard_url(modal_app_id)
-                    if show_output:
-                        status_display.set_modal_app_url(modal_app_url)
-
-                    run_record.modal_app_id = modal_app_id
-                    run_record.modal_app_url = modal_app_url
-                    try:
-                        run_record.save()
-                    except RuntimeError:
-                        pass
-
-                    def _set_status(
-                        status: FrameworkStatus, *, is_active: bool = True
-                    ) -> None:
-                        run_record.framework_status = status
-                        if show_output:
-                            status_display.emit_stage(status.value)
-                        enqueue_framework_status(
-                            training_run_id,
-                            status.value,
-                            token=framework_status_token,
-                            is_active=is_active,
-                        )
-
-                    megatron_to_hf_mode = getattr(
-                        self.recipe, "megatron_to_hf_mode", ""
-                    )
-                    needs_conversion = megatron_to_hf_mode != "bridge"
-                    download_status, convert_status = (
-                        (SlimeStatus.DOWNLOAD_MODEL, SlimeStatus.CONVERT_MODEL)
-                        if isinstance(self.recipe, SlimeRecipe)
-                        else (MilesStatus.DOWNLOAD_MODEL, MilesStatus.CONVERT_MODEL)
-                    )
-                    _set_status(download_status, is_active=False)
-                    app.download.remote(
-                        training_run_id=training_run_id,
-                        framework_status_url=framework_status_url,
-                        framework_status_token=framework_status_token,
-                    )
-                    if needs_conversion:
-                        _set_status(convert_status, is_active=False)
-                        _convert_checkpoint_on_cache_miss(
-                            app,
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
-
-                    function_call = app.train.spawn(
-                        modal_app_id=modal_app_id,
-                        modal_app_url=modal_app_url,
-                        framework_status_url=framework_status_url,
-                        framework_status_token=framework_status_token,
-                    )
-                except BaseException as exc:
-                    launch_error = exc
-
-        if launch_error is not None:
-            raise launch_error
-        if function_call is None:
-            raise TrainingGymError("Modal app setup exited without a training call.")
-        return function_call
