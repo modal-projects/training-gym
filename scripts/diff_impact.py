@@ -136,15 +136,12 @@ def _model_index() -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]
     the model's ``ModelConfig`` subclass and the recipe class its framework
     returns from ``get_base_recipe`` gate that model, so a change to either
     re-validates it.
-
-    Only the PR-matrix set is indexed. A model registered with
-    ``run_on_pr=False`` must never reach a PR matrix, so no diff can select it.
     """
     from modal_training_gym.common.models.validation import _ValidationConfig
 
     class_to_models: dict[str, set[str]] = defaultdict(set)
     framework_to_models: dict[str, set[str]] = defaultdict(set)
-    for config in _ValidationConfig.select(pr_only=True):
+    for config in _ValidationConfig.select():
         class_to_models[config.model_config.__name__].add(config.name)
         framework_to_models[config.framework.value].add(config.name)
         recipe = _base_recipe_for(config.framework, config.model_config())

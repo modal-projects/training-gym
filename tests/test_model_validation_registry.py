@@ -15,7 +15,6 @@ from modal_training_gym.common.models.validation import (
 from scripts.diff_impact import (
     FRAMEWORK_VALIDATION_HARNESS_PATHS,
     REPO_ROOT,
-    SHARED_VALIDATION_HARNESS_PATHS,
     affected_models,
 )
 from scripts.validation_backends import build_recipe_and_dataset
@@ -29,8 +28,7 @@ def _diff_touching(*repo_relative_paths: str) -> str:
     )
 
 
-ALL_CONFIGS = _ValidationConfig.select(pr_only=False)
-DISPATCH_ONLY_CONFIGS = [c for c in ALL_CONFIGS if not c.run_on_pr]
+ALL_CONFIGS = _ValidationConfig.select()
 
 
 def test_registry_has_both_frameworks_represented():
@@ -88,6 +86,22 @@ def test_unknown_model_names_are_rejected():
         _ValidationConfig.find("not-a-real-model")
 
 
+@pytest.mark.parametrize(
+    ("name", "recipe_cls_name"),
+    [
+        ("Inkling-Small", "Inkling_Small_Recipe"),
+        ("Inkling-Small-LoRA", "Inkling_Small_LoRA_Recipe"),
+        ("Qwen3.6-35B-A3B", "Qwen3_6_35B_Recipe"),
+        ("Qwen3.6-35B-A3B-Long-Context", "Qwen3_6_35B_Recipe_Long_Context"),
+    ],
+)
+def test_named_validation_resolves_expected_recipe(name, recipe_cls_name):
+    """``check -m`` must pick the registry variant, not only the model default."""
+    config = _ValidationConfig.find(name)
+    recipe, _ = build_recipe_and_dataset(config.framework, config.model_config(), 1)
+    assert type(recipe).__name__ == recipe_cls_name
+
+
 @pytest.mark.parametrize("config", ALL_CONFIGS, ids=lambda c: c.name)
 def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     """The declared framework must actually have a base recipe for the model.
@@ -100,41 +114,31 @@ def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     )
     assert recipe is not None
     assert dataset is not None
+    assert recipe.rm_type, f"{config.name} validation recipe has no rm_type"
 
 
-def test_list_shows_every_model_by_default_and_narrows_with_pr_only():
-    """A dev listing models should see the dispatch-only ones without a flag.
+def test_list_prints_every_registered_model():
+    """``list`` and ``list --names-only`` both emit the whole registry."""
+    from scripts.validate_model_configs import available_model_names, available_models
 
-    The narrowing is the opt-in, so ``--pr-only`` is what a matrix asks for.
-    """
-    from scripts.validate_model_configs import available_model_names
+    names = {config.name for config in VALIDATION_CONFIGS}
+    listed = available_models()
 
-    everything = set(available_model_names())
-    pr_set = set(available_model_names(pr_only=True))
-
-    assert pr_set <= everything
-    if DISPATCH_ONLY_CONFIGS:
-        assert pr_set < everything
-    for config in DISPATCH_ONLY_CONFIGS:
-        assert config.name in everything
-        assert config.name not in pr_set
+    assert set(available_model_names()) == names
+    assert {row["name"] for row in listed} == names
 
 
-def test_blank_dispatch_asks_for_the_pr_only_set():
-    """The workflow's blank-models branch must narrow explicitly.
-
-    ``list`` prints the whole registry, so a blank dispatch must retain the
-    explicit narrowing even when no dispatch-only models are registered.
-    """
+def test_blank_dispatch_lists_every_registered_model():
+    """The workflow's blank-models branch must emit the full registry."""
     import re
 
     workflow = (REPO_ROOT / ".github/workflows/validate-models.yml").read_text()
     unnarrowed = re.findall(
-        r"validate_model_configs\.py list(?! --names-only --pr-only)", workflow
+        r"validate_model_configs\.py list(?! --names-only)", workflow
     )
 
-    assert "validate_model_configs.py list --names-only --pr-only" in workflow
-    assert not unnarrowed, "a `list` in the workflow is missing matrix-only flags"
+    assert "validate_model_configs.py list --names-only" in workflow
+    assert not unnarrowed, "a `list` in the workflow is missing --names-only"
 
 
 def test_baselines_are_fetched_only_for_models_that_ran(tmp_path):
@@ -210,26 +214,6 @@ def test_validation_dataset_unpickles_without_the_scripts_directory(config, tmp_
     assert result.stdout.strip() == type(dataset).__name__
 
 
-@pytest.mark.skipif(not DISPATCH_ONLY_CONFIGS, reason="every model runs on PRs")
-def test_no_diff_can_select_a_dispatch_only_model():
-    """The load-bearing invariant: PRs never launch a run_on_pr=False model.
-
-    The broadest possible trigger — every harness path at once, which forces a
-    full re-validation — still must not select one.
-    """
-    every_harness_path = SHARED_VALIDATION_HARNESS_PATHS.union(
-        *FRAMEWORK_VALIDATION_HARNESS_PATHS.values()
-    )
-    diff = _diff_touching(
-        *(str(path.relative_to(REPO_ROOT)) for path in every_harness_path)
-    )
-
-    selected = set(affected_models(diff))
-    assert selected, "a full-harness diff should still select the PR-matrix set"
-    for config in DISPATCH_ONLY_CONFIGS:
-        assert config.name not in selected
-
-
 def test_framework_harness_change_only_revalidates_that_framework():
     """A miles-only change must not re-run the slime set, and vice versa."""
     slime_models = {c.name for c in _ValidationConfig.select(Framework.SLIME)}
@@ -243,30 +227,30 @@ def test_framework_harness_change_only_revalidates_that_framework():
     assert not selected & (miles_models - slime_models)
 
 
-def test_shared_harness_change_revalidates_every_gating_model():
-    gating = {c.name for c in _ValidationConfig.select()}
+def test_shared_harness_change_revalidates_every_registered_model():
+    names = {c.name for c in VALIDATION_CONFIGS}
     diff = _diff_touching("scripts/validate_model_configs.py")
 
-    assert set(affected_models(diff)) == gating
+    assert set(affected_models(diff)) == names
 
 
 def test_framework_change_does_not_narrow_shared_harness_impact():
-    gating = {c.name for c in _ValidationConfig.select()}
+    names = {c.name for c in VALIDATION_CONFIGS}
     miles_launcher = next(iter(FRAMEWORK_VALIDATION_HARNESS_PATHS["miles"]))
     diff = _diff_touching(
         "scripts/validate_model_configs.py",
         str(miles_launcher.relative_to(REPO_ROOT)),
     )
 
-    assert set(affected_models(diff)) == gating
+    assert set(affected_models(diff)) == names
 
 
 def test_framework_change_preserves_shared_class_impact():
-    gating = {c.name for c in _ValidationConfig.select()}
+    names = {c.name for c in VALIDATION_CONFIGS}
     miles_launcher = next(iter(FRAMEWORK_VALIDATION_HARNESS_PATHS["miles"]))
     diff = _diff_touching(
         "modal_training_gym/common/models/base.py",
         str(miles_launcher.relative_to(REPO_ROOT)),
     )
 
-    assert set(affected_models(diff)) == gating
+    assert set(affected_models(diff)) == names

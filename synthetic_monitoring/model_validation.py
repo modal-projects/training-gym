@@ -290,7 +290,7 @@ def launch_weekly(model: str = "", num_steps: int = 1) -> list[dict]:
     names = (
         [_ValidationConfig.find(model).name]
         if model
-        else [config.name for config in _ValidationConfig.select(pr_only=True)]
+        else [config.name for config in _ValidationConfig.select()]
     )
     if not names:
         raise RuntimeError("no validatable models registered")

@@ -181,6 +181,12 @@ _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATC
 _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
+_PATCH_QWEN3_5_HF_DISPATCH_B64 = encode_patch(
+    "patch_qwen3_5_hf_dispatch", _SLIME_PATCHES
+)
+_PATCH_SGLANG_TRTLLM_MOE_REPACK_B64 = encode_patch(
+    "patch_sglang_trtllm_moe_repack", _SLIME_PATCHES
+)
 
 # Patches targeting /root/slime* — a git overlay replaces that directory, so
 # these are skipped in the base image when an overlay is configured and applied
@@ -196,6 +202,7 @@ _SLIME_ROOT_PATCHES_B64 = (
     _PATCH_ADVANTAGE_DIST_B64,
     _PATCH_ZERO_STD_METRICS_B64,
     _PATCH_SGLANG_PARALLEL_ALIASES_B64,
+    _PATCH_QWEN3_5_HF_DISPATCH_B64,
     _PATCH_SUBSTEP_TIMING_B64,
 )
 
@@ -205,6 +212,7 @@ _SLIME_EXTERNAL_PATCHES_B64 = (
     _PATCH_LOG_ELIDE_B64,
     _PATCH_DIST_CKPT_QUANTIZED_B64,
     _PATCH_DIST_CKPT_NOFORK_B64,
+    _PATCH_SGLANG_TRTLLM_MOE_REPACK_B64,
 )
 
 
@@ -664,7 +672,7 @@ def build_slime_app(
     )
 
     app = App(app_name, tags=tags)
-    gpu_spec = f"{slime.gpu_type}:{slime.actor_num_gpus_per_node}"
+    gpu_spec = f"{slime.gpu_type}:{slime.gpu_allocation.gpus_per_node}"
 
     @app.function(
         image=image,
@@ -708,7 +716,10 @@ def build_slime_app(
             eval_dataset_path,
         )
 
-    convert_nnodes = get_checkpoint_conversion_policy(slime, model=model)[0]
+    convert_nnodes, convert_nproc, _ = get_checkpoint_conversion_policy(
+        slime, model=model
+    )
+    convert_gpu = f"{slime.gpu_type}:{convert_nproc}"
 
     @app.function(
         image=image,
@@ -719,6 +730,7 @@ def build_slime_app(
         timeout=60 * 60,
         secrets=[*hf_secrets(), *proxy_auth_secrets()],
         serialized=True,
+        single_use_containers=True,
         name="resolve_checkpoint",
     )
     def resolve_checkpoint(
@@ -762,6 +774,7 @@ def build_slime_app(
             if training_run_id:
                 flush_status_reporter(timeout_seconds=2.0)
             return None
+        print(f"torch_dist checkpoint at {save_path} is {cache_status}.")
 
         if cache_status == "stale":
             if stored_config is None:
@@ -792,7 +805,7 @@ def build_slime_app(
 
     @app.function(
         image=image,
-        gpu=gpu_spec,
+        gpu=convert_gpu,
         memory=slime.memory,
         cpu=slime.cpu,
         cloud=slime.cloud,
@@ -802,6 +815,7 @@ def build_slime_app(
         secrets=proxy_auth_secrets() or None,
         experimental_options={"efa_enabled": True},
         serialized=True,
+        single_use_containers=True,
         name="convert_checkpoint",
     )
     @clustered_if(convert_nnodes > 1, convert_nnodes, gpu_type=slime.gpu_type)

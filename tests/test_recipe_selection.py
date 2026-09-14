@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import importlib
 import inspect
@@ -7,27 +8,33 @@ from typing import Any
 import pytest
 
 from modal_training_gym.common.dataset import HuggingFaceDataset
+from modal_training_gym.common.launcher_utils import get_checkpoint_conversion_policy
 from modal_training_gym.common.models import Qwen3_4B
+from modal_training_gym.common.models.validation import Framework, _ValidationConfig
 from modal_training_gym.common.train import TrainConfig
+from modal_training_gym.train_recipes.gpu_allocation import (
+    validate_megatron_actor_parallelism,
+)
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
     Gemma4_26B_A4B_Recipe,
 )
+from modal_training_gym.train_recipes.miles_recipe.inkling import Inkling_Small_Recipe
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
-
-
-_SLIME_RECIPE_KW = {
-    "sequence_parallel": False,
-    "rollout_max_response_len": 4096,
-    "rollout_temperature": 1.0,
-    "save_interval": 10,
-}
+from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b_long_context import (
+    Qwen3_6_35B_Recipe_Long_Context,
+)
 
 _RECIPE_PACKAGES = (
     "modal_training_gym.train_recipes.slime_recipe",
     "modal_training_gym.train_recipes.miles_recipe",
 )
+
+_BASE_RECIPE = {
+    Framework.SLIME: SlimeRecipe.get_base_recipe,
+    Framework.MILES: MilesRecipe.get_base_recipe,
+}
 
 
 def _dataset() -> HuggingFaceDataset:
@@ -98,8 +105,44 @@ def test_gemma_recipe_disables_unsupported_recompute_and_routing_replay() -> Non
     assert recipe.use_rollout_routing_replay is False
 
 
+@pytest.mark.parametrize(
+    "config",
+    _ValidationConfig.select(),
+    ids=lambda config: config.name,
+)
+def test_registered_recipe_batch_sizes_divide_data_parallel(
+    config: _ValidationConfig,
+) -> None:
+    recipe = _BASE_RECIPE[config.framework](config.model_config())
+    assert recipe is not None
+    validate_megatron_actor_parallelism(recipe)
+
+    world = recipe.actor_num_nodes * recipe.actor_num_gpus_per_node
+    model_parallel = (
+        (getattr(recipe, "tensor_model_parallel_size", 1) or 1)
+        * (getattr(recipe, "pipeline_model_parallel_size", 1) or 1)
+        * (getattr(recipe, "context_parallel_size", 1) or 1)
+    )
+    dp = world // model_parallel
+    micro = getattr(recipe, "micro_batch_size", None) or 1
+    global_batch_size = getattr(recipe, "global_batch_size", None)
+    samples = recipe.rollout_batch_size * recipe.n_samples_per_prompt
+    if global_batch_size:
+        assert global_batch_size % (micro * dp) == 0
+        assert samples % global_batch_size == 0
+
+    if isinstance(recipe, MilesRecipe):
+        convert_nodes, convert_nproc, _ = get_checkpoint_conversion_policy(recipe)
+        assert convert_nodes * convert_nproc <= world
+
+
+def test_slime_recipe_is_constructible_without_kwargs() -> None:
+    SlimeRecipe()
+    assert SlimeRecipe(num_rollout=7)._fields()["save_interval"] == 7
+
+
 def test_generic_recipe_uses_framework_defaults_for_known_model() -> None:
-    config = _config(SlimeRecipe(**_SLIME_RECIPE_KW))
+    config = _config(SlimeRecipe())
 
     recipe = config._prepare_recipe()
     assert recipe.gpu_type == "H100"
@@ -108,20 +151,50 @@ def test_generic_recipe_uses_framework_defaults_for_known_model() -> None:
     assert recipe.colocate is True
     assert recipe.num_rollout == 1
     assert recipe.n_samples_per_prompt == 2
-    assert recipe.rollout_batch_size == 8
+    assert recipe.rollout_batch_size == 2
 
 
 def test_miles_recipe_uses_shared_sampling_defaults() -> None:
     recipe = MilesRecipe()
 
     assert recipe.n_samples_per_prompt == 2
-    assert recipe.rollout_batch_size == 8
+    assert MilesRecipe(num_rollout=7)._fields()["save_interval"] == 7
+    assert recipe.rollout_batch_size == 2
+
+
+def _inkling_image_patch_sources(recipe: MilesRecipe) -> list[str]:
+    sources = []
+    for cmd in recipe.image_run_commands:
+        parts = cmd.split()
+        if len(parts) >= 2 and "base64" in cmd:
+            sources.append(base64.b64decode(parts[1]).decode())
+    return sources
+
+
+def test_inkling_patches_router_startup_timeout() -> None:
+    recipe = Inkling_Small_Recipe(image_run_commands=["echo extra"])
+    sources = _inkling_image_patch_sources(recipe)
+    assert any("PATCHED_ROUTER_STARTUP_TIMEOUT" in src for src in sources)
+    assert any("PATCHED_QKVR_CPU_MERGE" in src for src in sources)
+    assert "echo extra" in recipe.image_run_commands
 
 
 def test_model_recipe_uses_its_class_defaults() -> None:
-    config = _config(Qwen3_4B_Recipe())
+    recipe = _config(Qwen3_4B_Recipe())._prepare_recipe()
 
-    assert config._prepare_recipe().n_samples_per_prompt == 8
+    assert recipe.actor_num_gpus_per_node == 1
+    assert recipe.max_tokens_per_gpu == 8192
+
+
+def test_qwen3_6_35b_long_context_uses_disagg_two_nodes() -> None:
+    recipe = Qwen3_6_35B_Recipe_Long_Context()
+
+    assert recipe.colocate is False
+    assert recipe.gpu_allocation.actor_gpus == 1
+    assert recipe.gpu_allocation.rollout_gpus == 1
+    assert recipe.gpu_allocation.total_gpus == 2
+    assert recipe.gpu_allocation.gpus_per_node == 1
+    assert recipe.gpu_allocation.total_nodes == 2
 
 
 def test_prepare_recipe_does_not_mutate_stored_launch_callables() -> None:
@@ -132,7 +205,6 @@ def test_prepare_recipe_does_not_mutate_stored_launch_callables() -> None:
         return 1.0
 
     recipe = SlimeRecipe(
-        **_SLIME_RECIPE_KW,
         image_overlay=image_overlay,
         custom_rm_function=custom_rm_function,
     )
