@@ -1199,6 +1199,7 @@ def build_slime_app(
 
             runtime_env = {
                 "env_vars": {
+                    **slime.environment,
                     "no_proxy": f"127.0.0.1,{cluster.head_addr}",
                     "MASTER_ADDR": cluster.head_addr,
                     "TRAINING_GYM_APP_NAME": app_name,
@@ -1212,7 +1213,6 @@ def build_slime_app(
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                     "TRAINING_GYM_SUBSTEP_TIMING": slime.substep_timing,
-                    **slime.environment,
                     **metric_runtime_env(
                         slime.metrics,
                         run_id=metric_run_id,
