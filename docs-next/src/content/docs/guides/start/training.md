@@ -92,7 +92,7 @@ Or train the model further with the existing checkpoint as a starting point:
 config = TrainConfig(
     model=model,
     dataset=dataset,
-    resume=checkpoint,
+    resume_from_checkpoint=checkpoint,
     recipe=recipe,
 )
 ```
@@ -120,7 +120,7 @@ with simple_config.launch() as simple_run:
 complex_config = TrainConfig(
     model=model,
     dataset=complex_dataset,
-    resume=simple_checkpoint,
+    resume_from_checkpoint=simple_checkpoint,
     recipe=complex_recipe,
 )
 

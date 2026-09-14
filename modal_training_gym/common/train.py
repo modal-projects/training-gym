@@ -309,12 +309,12 @@ class TrainConfig:
             Model identity and weight download behavior.
         recipe:
             Training framework, Modal resources, and framework arguments.
-        resume:
+        resume_from_checkpoint:
             Start a new run from this Megatron checkpoint's weights with a
             fresh optimizer and LR schedule; ``recipe.num_rollout`` counts
             from zero. To continue the source run in place with its Adam
-            state and iteration count, leave ``resume`` unset and point
-            ``recipe.load`` at the checkpoint directory.
+            state and iteration count, leave ``resume_from_checkpoint`` unset
+            and point ``recipe.load`` at the checkpoint directory.
         detach:
             Keep training on Modal if the local ``train()`` wait is interrupted.
             ``False`` stops the app.
@@ -331,7 +331,7 @@ class TrainConfig:
     model: ModelConfig
     recipe: SlimeRecipe | MilesRecipe
     eval_dataset: DatasetConfig | None = None
-    resume: Checkpoint | None = None
+    resume_from_checkpoint: Checkpoint | None = None
     # Whether a run outlives the local client. The app itself is always started
     # detached (the CLI's ``modal run --detach`` only detaches the entrypoint,
     # not the nested ``app.run()`` the driver opens), so this only decides
@@ -358,19 +358,21 @@ class TrainConfig:
         each launch of the same config gets its own TrainingRun record."""
         return create_hash(
             self.model.model_name,
-            self.resume.path if self.resume is not None else "",
+            self.resume_from_checkpoint.path
+            if self.resume_from_checkpoint is not None
+            else "",
             f"{type(self.recipe).__name__}:{self.framework.value}",
             "",
             self.model.model_path or "",
         )
 
     def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
-        if self.resume is None:
+        if self.resume_from_checkpoint is None:
             recipe = _dc.replace(self.recipe)
         else:
             recipe = _dc.replace(
                 self.recipe,
-                load=_megatron_load_dir(self.resume),
+                load=_megatron_load_dir(self.resume_from_checkpoint),
                 start_rollout_id=(
                     0
                     if self.recipe.start_rollout_id is None
@@ -393,7 +395,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.resume,
+                checkpoint=self.resume_from_checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
             )
@@ -404,7 +406,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.resume,
+                checkpoint=self.resume_from_checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
             )

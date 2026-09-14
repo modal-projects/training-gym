@@ -1152,7 +1152,7 @@ def build_slime_app(
                 object.__setattr__(slime, "start_rollout_id", None)
                 drop_materialized_config_key(slime, "start_rollout_id")
                 # This run's saves include Adam only when no_save_optim is false.
-                # TrainConfig.resume forces no_load_optim for the source seed;
+                # TrainConfig.resume_from_checkpoint forces no_load_optim for the source seed;
                 # that flag is not a property of later saves in this directory.
                 if slime.no_save_optim and not slime.no_load_optim:
                     print(
