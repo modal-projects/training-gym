@@ -300,6 +300,11 @@ class TrainingRolloutResult(BaseModel):
         return {**self.to_summary(), "export_size_bytes": export_size_bytes}
 
     def save(self, *, is_async: bool = False) -> None | Awaitable[None]:
+        if is_async:
+            from asyncio import to_thread
+
+            return to_thread(self.save)
+        self.list_summaries_for_run(self.training_run_id)
         self._touch_created_at()
         payload = self.model_dump(mode="json")
         return vol_put_with_summary(
@@ -311,7 +316,6 @@ class TrainingRolloutResult(BaseModel):
             item_id_key="rollout_id",
             sort_key=lambda item: int(item["rollout_id"]),
             reverse=False,
-            is_async=is_async,
         )
 
     @classmethod
@@ -319,29 +323,8 @@ class TrainingRolloutResult(BaseModel):
         cls, training_run_id: str
     ) -> list[TrainingRolloutSummary]:
         """Lightweight per-rollout summaries for one run, sorted by rollout_id."""
-        items = vol_get_summary_items(cls.summary_store(training_run_id)) or []
-        summaries = []
-        for item in items:
-            if (
-                not isinstance(item, dict)
-                or item.get("training_run_id") != training_run_id
-            ):
-                continue
-            try:
-                summaries.append(TrainingRolloutSummary.model_validate(item))
-            except ValidationError:
-                continue
-        return sorted(summaries, key=lambda summary: summary.rollout_id)
-
-    @classmethod
-    def rebuild_summaries_for_run(
-        cls, training_run_id: str
-    ) -> list[TrainingRolloutSummary]:
         store = cls.summary_store(training_run_id)
-        summaries = {
-            f"{training_run_id}__{summary.rollout_id:08d}": summary
-            for summary in cls.list_summaries_for_run(training_run_id)
-        }
+        summaries: dict[str, TrainingRolloutSummary] = {}
 
         def parse(item: Any) -> TrainingRolloutSummary | None:
             if (
@@ -353,6 +336,13 @@ class TrainingRolloutResult(BaseModel):
                 return TrainingRolloutSummary.model_validate(item)
             except ValidationError:
                 return None
+
+        items = vol_get_summary_items(store)
+        if items is not None:
+            return sorted(
+                (summary for item in items if (summary := parse(item)) is not None),
+                key=lambda summary: summary.rollout_id,
+            )
 
         for item in vol_list(store):
             if summary := parse(item):
