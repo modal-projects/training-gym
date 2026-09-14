@@ -707,10 +707,6 @@ class TrainConfig:
 
             if launch_error is not None:
                 raise launch_error
-            if function_call is None:
-                raise TrainingGymError(
-                    "Modal app setup exited without a training call."
-                )
         except (KeyboardInterrupt, Exception) as exc:
             if function_call is None:
                 app_id = run_record.modal_app_id or (app.app_id if app else "")
