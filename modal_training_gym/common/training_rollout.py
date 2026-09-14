@@ -336,7 +336,6 @@ class TrainingRolloutResult(BaseModel):
             if summary := parse(item):
                 summaries[f"{training_run_id}__{summary.rollout_id:08d}"] = summary
 
-        # Directory entries are cheap even when each canonical record is many MB.
         keys = set(
             vol_list_keys(MetadataStore.TRAINING_ROLLOUTS, f"{training_run_id}__")
         )
@@ -346,14 +345,6 @@ class TrainingRolloutResult(BaseModel):
             if not summaries or keys - summaries.keys()
             else []
         )
-        for item in legacy:
-            if (summary := parse(item)) is None:
-                continue
-            key = f"{training_run_id}__{summary.rollout_id:08d}"
-            if key not in summaries and key not in keys:
-                summaries[key] = summary
-                recovered[key] = summary.model_dump(mode="json")
-
         for key in sorted(keys - summaries.keys()):
             try:
                 payload = vol_get(MetadataStore.TRAINING_ROLLOUTS, key)
@@ -367,12 +358,18 @@ class TrainingRolloutResult(BaseModel):
                 summaries[key] = TrainingRolloutSummary.model_validate(item)
                 recovered[key] = item
             except (KeyError, ValueError):
-                # A deleted or malformed record must not hide the other steps.
                 continue
+        for item in legacy:
+            if (summary := parse(item)) is None:
+                continue
+            key = f"{training_run_id}__{summary.rollout_id:08d}"
+            if key not in summaries:
+                summaries[key] = summary
+                if key not in keys:
+                    recovered[key] = summary.model_dump(mode="json")
+
         if recovered:
             try:
-                # Persist the small summaries so other dashboard containers and
-                # subsequent requests do not download these payloads again.
                 vol_put_many(store, recovered)
             except (OSError, Error) as exc:
                 print(
