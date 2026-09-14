@@ -639,10 +639,10 @@ class TrainConfig:
         print(f"TrainingRun recorded: {training_run_id}")
 
         app = None
+        function_call = None
+        launch_error = None
         try:
             app = self._build_app(training_run_id)
-            function_call = None
-            launch_error = None
             output_context = modal.enable_output() if show_output else nullcontext()
             with output_context:
                 with app.run(detach=True):
@@ -711,29 +711,21 @@ class TrainConfig:
                 raise TrainingGymError(
                     "Modal app setup exited without a training call."
                 )
-        except KeyboardInterrupt as exc:
-            app_id = run_record.modal_app_id or (app.app_id if app else "")
-            if app_id:
-                print(
-                    f'Disconnected from Modal app "{app.name}". The app was left running.'
+        except (KeyboardInterrupt, Exception) as exc:
+            if function_call is None:
+                app_id = run_record.modal_app_id or (app.app_id if app else "")
+                if app_id:
+                    stop_app(app_id)
+                if isinstance(exc, KeyboardInterrupt) or app is None:
+                    _terminalize_launch(run_record, exc)
+                    raise
+                error = TrainingGymError(
+                    f'Setup of Modal app "{app.name}" was interrupted before training '
+                    "could begin. Relaunch your TrainConfig to try again."
                 )
-                print(modal_app_dashboard_url(app_id))
-            else:
-                _terminalize_launch(run_record, exc)
-            raise
-        except Exception as exc:
-            app_id = run_record.modal_app_id or (app.app_id if app else "")
-            if app_id:
-                stop_app(app_id)
-            if app is None:
-                _terminalize_launch(run_record, exc)
-                raise
-            error = TrainingGymError(
-                f'Setup of Modal app "{app.name}" was interrupted before training '
-                "could begin. Relaunch your TrainConfig to try again."
-            )
-            _terminalize_launch(run_record, error)
-            raise error from exc
+                _terminalize_launch(run_record, error)
+                raise error from exc
+            launch_error = exc
 
         run_record.function_call_id = function_call.object_id
         run_record._function_call = function_call
@@ -742,6 +734,16 @@ class TrainConfig:
             run_record.save()
         except RuntimeError:
             pass
+        if isinstance(launch_error, KeyboardInterrupt):
+            print(
+                f'Disconnected from Modal app "{app.name}". The app was left running.'
+            )
+            print(run_record.modal_app_url)
+            raise launch_error
+        if launch_error is not None:
+            print(
+                f"WARNING: training was launched, but Modal client cleanup failed: {launch_error}"
+            )
         print(
             f"Launched training {run_record.training_run_id}: "
             f"app={run_record.modal_app_id}, function_call={run_record.function_call_id}"
