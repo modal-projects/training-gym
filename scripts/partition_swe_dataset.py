@@ -63,7 +63,8 @@ from modal_training_gym.train_recipes.slime_recipe import (
 
 # Fraction of tasks that go to eval. Remainder go to train.
 EVAL_SPLIT_FRACTION = 0.2
-EVAL_SPLIT_SIZES = (4, 100, 300)
+# Tiny subset for smoke tests; normal evaluation uses the full eval split.
+EVAL_SPLIT_SIZES = (4,)
 TRAIN_SPLIT_SIZES = (4, 100, 300, 1000)
 SPLIT_SEED = 0
 # Train keeps at least this many task groups of each language, so moving a

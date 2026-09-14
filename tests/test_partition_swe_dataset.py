@@ -64,7 +64,6 @@ def test_partitions_use_fixed_names_nested_rows_and_golden_hashes(
     assert counts == {
         "eval": 260,
         "eval-4": 4,
-        "eval-100": 100,
         "train-full": 1040,
         "train-4": 4,
         "train-100": 100,
@@ -74,7 +73,7 @@ def test_partitions_use_fixed_names_nested_rows_and_golden_hashes(
     assert {path.name for path in tmp_path.glob("*.jsonl")} == {
         f"{name}.jsonl" for name in counts
     }
-    for prefix, sizes in (("train", (4, 100, 300, 1000)), ("eval", (4, 100))):
+    for prefix, sizes in (("train", (4, 100, 300, 1000)), ("eval", (4,))):
         ids = [
             {
                 row["metadata"]["instance_id"]
