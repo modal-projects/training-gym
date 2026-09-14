@@ -36,12 +36,14 @@ probe_image = (
     .uv_pip_install("slack-sdk==3.27.1", "matplotlib==3.10.1")
     .env({"MODAL_ENVIRONMENT": MODAL_ENV})
     .add_local_python_source("modal_training_gym", "synthetic_monitoring", "scripts")
+    .add_local_dir(
+        str(REPO_ROOT / "dashboards" / "frontend"),
+        remote_path="/root/dashboards/frontend",
+        ignore=["node_modules", "dist"],
+    )
 )
 
 slack_secret = modal.Secret.from_name("gym-bot-slack", environment_name=MODAL_ENV)
-modal_creds_secret = modal.Secret.from_name(
-    "_training-gym-modal-creds", environment_name=MODAL_ENV
-)
 
 app = modal.App("gym-synmon-launcher")
 
@@ -243,7 +245,6 @@ def _post_report(rows: list[dict]) -> None:
 @app.function(
     image=probe_image,
     timeout=PROBE_TIMEOUT_S + CLEANUP_GRACE_S,
-    secrets=[modal_creds_secret],
 )
 def monitor(model: str = "", num_steps: int = 1) -> dict:
     selected = _ValidationConfig.find(model).name
@@ -283,7 +284,7 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
     image=probe_image,
     timeout=LAUNCH_TIMEOUT_S,
     schedule=modal.Cron("17 0 * * 0"),
-    secrets=[slack_secret, modal_creds_secret],
+    secrets=[slack_secret],
 )
 def launch_weekly(model: str = "", num_steps: int = 1) -> list[dict]:
     names = (
@@ -295,10 +296,10 @@ def launch_weekly(model: str = "", num_steps: int = 1) -> list[dict]:
         raise RuntimeError("no validatable models registered")
 
     rows: list[dict] = []
-    for name, payload in zip(
-        names,
-        monitor.map(names, kwargs={"num_steps": num_steps}, return_exceptions=True),
-    ):
+    payloads = list(
+        monitor.map(names, kwargs={"num_steps": num_steps}, return_exceptions=True)
+    )
+    for name, payload in zip(names, payloads):
         if isinstance(payload, Exception):
             tb = "".join(
                 traceback.format_exception(

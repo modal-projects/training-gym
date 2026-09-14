@@ -4,13 +4,7 @@ from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_6_respons
 
 
 class Qwen3_5_2B(HFModelConfiguration):
-    """Alibaba Qwen3.5-2B model.
-
-    Attributes:
-        model_name: Hugging Face repository ID.
-        architecture: Megatron architecture parameters for this model.
-        response_parser: Parser for generated text.
-    """
+    """Alibaba Qwen3.5-2B model."""
 
     response_parser = staticmethod(parse_qwen3_6_response)
 

@@ -13,13 +13,7 @@ _TOOLS_PATH = "/opt/training-gym/tools"
 
 
 class GLM_4_7(HFModelConfiguration):
-    """Zhipu AI GLM-4.7 MoE model with 355B total and 32B active parameters.
-
-    Attributes:
-        model_name: Hugging Face repository ID.
-        architecture: Megatron architecture parameters for this model.
-        response_parser: Parser for generated text.
-    """
+    """Zhipu AI GLM-4.7 MoE model with 355B total and 32B active parameters."""
 
     response_parser = staticmethod(parse_glm_response)
 

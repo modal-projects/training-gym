@@ -16,6 +16,7 @@ import nltk
 from nltk.corpus import cmudict
 
 import re
+import time
 
 from modal_training_gym import (
     Endpoint,
@@ -119,18 +120,25 @@ def score_haiku(response: str) -> float:
 # [DatasetConfig](https://gym.modal.dev/reference/datasetconfig) documentation
 # for a deeper dive.
 
-class HaikuDataset(HuggingFaceDataset):
-    hf_repo = "statworx/haiku"
-    input_column = "keywords"
-    output_column = "text"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
-    prompt_template = "Write a haiku about {input}."
+train_dataset = HuggingFaceDataset(
+    "statworx/haiku",
+    hf_split="train[:10]",
+    input_column="keywords",
+    output_column="text",
+    input_format="text",
+    prompt_template="Write a haiku about {input}.",
+    always_download=True,
+)
 
-train_dataset = HaikuDataset(hf_split="train[:10]")
-
-eval_dataset = HaikuDataset(hf_split="train[10:15]")
+eval_dataset = HuggingFaceDataset(
+    "statworx/haiku",
+    hf_split="train[10:15]",
+    input_column="keywords",
+    output_column="text",
+    input_format="text",
+    prompt_template="Write a haiku about {input}.",
+    always_download=True,
+)
 
 # ## Evaluate the base model
 #
@@ -146,16 +154,14 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
     deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
-        topic = str(example[eval_dataset.input_column])
-        prompt = eval_dataset.prompt_template.format(input=topic)
         msg = deployment.chat(
-            [{"role": "user", "content": prompt}],
+            example[eval_dataset.input_key()],
             chat_template_kwargs={"enable_thinking": False},
         )
         return score_haiku(msg.get("content") or msg.get("reasoning_content") or "")
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        scores = list(executor.map(_score_one, eval_dataset.load()))
+        scores = list(executor.map(_score_one, eval_dataset.rows()))
     return sum(scores) / len(scores) if scores else float("nan")
 
 print("running base model evaluation...")
@@ -190,8 +196,8 @@ async def haiku_rm(args, sample, **kwargs) -> float:
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
+    eval_dataset=eval_dataset,
     recipe=Qwen3_5_4B_Recipe(
-        eval_interval=None,
         rollout_num_gpus=8,
         num_rollout=10,
         n_samples_per_prompt=8,
@@ -205,16 +211,23 @@ config = TrainConfig(
     ),
 )
 
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Serve and evaluate the trained checkpoint
 #
 # We'll get the latest checkpoint and create a new Endpoint so we may evaluate it.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True
@@ -236,9 +249,8 @@ print(f"average score: {trained_mean:.1f}")
 new_config = TrainConfig(
     model=model,
     dataset=train_dataset,
-    checkpoint=checkpoint,
+    resume_from_checkpoint=checkpoint,
     recipe=Qwen3_5_4B_Recipe(
-        eval_interval=None,
         custom_rm_function=haiku_rm,
         rollout_num_gpus=8,
         num_rollout=20,
@@ -251,16 +263,25 @@ new_config = TrainConfig(
     ),
 )
 
-new_run = new_config.launch()
-print(f"run id: {new_run.training_run_id}")
-
 # ## Evals Evals Evals
 #
 # Once again, we'll create a new Endpoint for the new checkpoint and run evals on it.
 
-new_result = new_run.result()
-new_checkpoint = new_result.checkpoints()[-1]
-print(new_checkpoint.path)
+with new_config.launch() as new_run:
+    print(f"run id: {new_run.training_run_id}")
+    new_checkpoint = None
+    while True:
+        done = new_run.done()
+        latest = new_run.latest_checkpoint()
+        if latest is not None and latest != new_checkpoint:
+            new_checkpoint = latest
+            print(f"new checkpoint: {new_checkpoint.path}")  # run offline evals here
+        if done:
+            break
+        time.sleep(30)
+    if new_checkpoint is None:
+        raise RuntimeError("run produced no checkpoint")
+    print(new_checkpoint.path)
 
 new_deployment = Endpoint.launch(
     model, new_checkpoint, unauthenticated=True, recreate_if_existing=True

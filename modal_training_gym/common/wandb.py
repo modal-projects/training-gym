@@ -48,6 +48,8 @@ class WandbConfig(MetricConfig):
 
     def runtime_env(self, *, run_id: str, entity: str = "") -> dict[str, str]:
         env = super().runtime_env(run_id=run_id, entity=entity)
+        if key := os.environ.get("WANDB_API_KEY", "") or self.key:
+            env["WANDB_API_KEY"] = key
         if run_id:
             env.update(WANDB_RUN_ID=run_id, WANDB_RESUME="allow")
         if entity:
@@ -98,4 +100,8 @@ def preflight_wandb(wandb_cfg: WandbConfig) -> str:
             f"The key in Modal secret '{wandb_cfg.modal_wandb_secret_name}' "
             "cannot log there. Fix the secret or drop metrics=."
         ) from exc
+    finally:
+        # Ray workers must start their own services for shared-mode logging.
+        # finish() closes the probe run but leaves WANDB_SERVICE inherited.
+        wandb.teardown()
     return entity

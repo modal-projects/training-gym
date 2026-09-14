@@ -23,6 +23,7 @@ from datasets import Audio, load_dataset
 
 import base64
 import io
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from modal_training_gym import (
@@ -69,17 +70,19 @@ def score_transcript(response: str, label: str) -> float:
 # resolve them in a custom `generate` function.
 
 class LibriSpeechASRDataset(MultimodalDataset):
-    modality = "audio"
     hf_repo = "hf-internal-testing/librispeech_asr_dummy"
     hf_config = "clean"
-    hf_split = "validation"
-    always_prepare = True
-    apply_chat_template = False  # ensures the data URI is valid throughout the rollout
 
-    def load(self) -> list[dict]:
+    def __init__(self, *, hf_split: str):
+        self.hf_split = hf_split
+        super().__init__(modality="audio")
+
+    def apply_chat_template(self) -> bool:
+        return False
+
+    def source_rows(self):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
         ds = ds.cast_column("audio", Audio(decode=False))  # decode with soundfile instead of torchcodec
-        rows = []
         for ex in ds:
             audio = ex["audio"]
             data = (
@@ -93,14 +96,11 @@ class LibriSpeechASRDataset(MultimodalDataset):
             data_uri = "data:audio/wav;base64," + base64.b64encode(
                 buf.getvalue()
             ).decode("ascii")
-            rows.append(
-                {
-                    self.input_key: "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
-                    self.media_column: [data_uri],
-                    self.label_key: ex["text"].lower().strip(),
-                }
-            )
-        return rows
+            yield {
+                "prompt": "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
+                "media": data_uri,
+                "label": ex["text"].lower().strip(),
+            }
 
 train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
 
@@ -136,7 +136,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         return score_transcript(hypothesis, reference)
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        wers = list(executor.map(_score_one, eval_dataset.load()))
+        wers = list(executor.map(_score_one, eval_dataset.rows()))
     return sum(wers) / len(wers) if wers else float("nan")
 
 print("running base model evaluation...")
@@ -172,16 +172,23 @@ config = TrainConfig(
         custom_rm_function=wer_rm,
     ),
 )
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained checkpoint
 #
 # Let's run the same eval on the trained checkpoint.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(
     model,

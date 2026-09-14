@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
+  compareSdkSidebarLabels,
   flattenDocId,
   isIdentifierTitlePath,
   REFERENCE_SURFACES,
@@ -96,10 +97,8 @@ test('reference sidebar renders the current surface only', () => {
 
   const sdk = sidebarLabels('SDK', '/reference/sdk');
   assert.equal(sdk.header, 'SDK');
-  assert.deepEqual(
-    sdk.items,
-    generatedSidebar.sdk.map((item) => item.label),
-  );
+  const sdkLabels = generatedSidebar.sdk.map((item) => item.label);
+  assert.deepEqual(sdk.items, [...sdkLabels].sort(compareSdkSidebarLabels));
   assert.deepEqual(sidebarLabels('SDK', '/reference/customdeployment'), sdk);
   assert.equal(sdk.items.includes('CLI'), false);
   assert.equal(sdk.header.includes('CLI'), false);
@@ -111,12 +110,18 @@ test('reference sidebar renders the current surface only', () => {
   );
 });
 
-test('SDK sidebar sorts A-Z even when entries arrive in group order', () => {
+test('SDK sidebar lists classes A-Z, then functions A-Z', () => {
   const surface = REFERENCE_SURFACES.find((item) => item.label === 'SDK');
   assert.ok(surface);
   const sections = referenceSidebarSections(
     surface,
     [
+      {
+        type: 'link',
+        label: 'extract_code',
+        href: '/reference/extract_code',
+        isCurrent: false,
+      },
       {
         type: 'link',
         label: 'TrainConfig',
@@ -135,12 +140,24 @@ test('SDK sidebar sorts A-Z even when entries arrive in group order', () => {
         href: '/reference/datasetconfig',
         isCurrent: false,
       },
+      {
+        type: 'link',
+        label: 'convert_megatron_checkpoint_to_hf',
+        href: '/reference/convert_megatron_checkpoint_to_hf',
+        isCurrent: false,
+      },
     ],
     '/reference/sdk',
   );
   assert.deepEqual(
     sections[0].items.map((item) => item.label),
-    ['CustomDeployment', 'DatasetConfig', 'TrainConfig'],
+    [
+      'CustomDeployment',
+      'DatasetConfig',
+      'TrainConfig',
+      'convert_megatron_checkpoint_to_hf',
+      'extract_code',
+    ],
   );
 });
 

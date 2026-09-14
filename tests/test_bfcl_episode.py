@@ -136,8 +136,20 @@ def test_bfcl_dataset_paths_are_split_specific() -> None:
     train = bfcl.BfclMultiTurnDataset(split="train")
     evaluation = bfcl.BfclMultiTurnDataset(split="eval")
 
-    train_path, _ = BaseTrainRecipe._resolve_data_paths(train)
-    eval_path, _ = BaseTrainRecipe._resolve_data_paths(evaluation)
+    train_path = BaseTrainRecipe._resolve_data_paths(train)
+    eval_path = BaseTrainRecipe._resolve_data_paths(evaluation)
 
-    assert train_path == "/data/BfclMultiTurnDataset/train.jsonl"
-    assert eval_path == "/data/BfclMultiTurnDataset/eval.jsonl"
+    assert train.cache_key() != evaluation.cache_key()
+    assert train_path != eval_path
+    assert train_path.startswith("/data/bfcl-multi_turn_base-train-")
+    assert eval_path.startswith("/data/bfcl-multi_turn_base-eval-")
+
+
+def test_bfcl_dataset_implements_dataset_config_methods(monkeypatch) -> None:
+    dataset = bfcl.BfclMultiTurnDataset(split="train")
+    expected = [{"messages": [], "label": "{}"}]
+    monkeypatch.setattr(dataset, "_load_split", lambda: expected)
+
+    assert dataset.input_key() == "messages"
+    assert dataset.label_key() == "label"
+    assert dataset.rows() == expected

@@ -26,6 +26,7 @@ DEFAULT_OUTPUT = ROOT / "docs-next" / "public" / "llms.txt"
 
 SITE = "https://gym.modal.dev"
 REPO = "https://github.com/modal-projects/training-gym"
+GUIDE_SECTION_ORDER = ("start", "tools", "migration")
 
 
 def flatten_doc_id(entry: str) -> str:
@@ -55,6 +56,13 @@ def _first_heading(body: str) -> str | None:
 
 def _guide_section(slug: str) -> str:
     return slug.split("/", 1)[0] if "/" in slug else ""
+
+
+def _guide_section_sort_key(section: str) -> tuple[int, str]:
+    try:
+        return (GUIDE_SECTION_ORDER.index(section), "")
+    except ValueError:
+        return (len(GUIDE_SECTION_ORDER), section)
 
 
 def _is_badge_line(line: str) -> bool:
@@ -120,7 +128,11 @@ def _collect_guides() -> list[tuple[str, str, int]]:
             guides.append((slug, title, order))
 
     guides.sort(
-        key=lambda guide: (_guide_section(guide[0]), guide[2], guide[1].lower())
+        key=lambda guide: (
+            _guide_section_sort_key(_guide_section(guide[0])),
+            guide[2],
+            guide[1].lower(),
+        )
     )
     return guides
 

@@ -12,11 +12,54 @@ async function getErrorFromResponse(res) {
   return detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`;
 }
 
-export async function fetchRuns({ signal } = {}) {
-  const response = await fetch(`${SERVER}/runs`, { signal });
+// `Response.json()` on a non-JSON body throws a parser error that says nothing
+// about the request — on WebKit it's the famously opaque "The string did not
+// match the expected pattern" — so a proxy login page, an edge error page or a
+// truncated response all surface as the same riddle. Parse the text ourselves
+// and say what came back instead.
+async function readJson(res, what) {
+  const body = await res.text();
+  try {
+    return JSON.parse(body);
+  } catch {
+    const contentType = res.headers.get("content-type") || "unknown type";
+    throw new Error(
+      `${what}: expected JSON, got ${contentType} (HTTP ${res.status}, ${body.length} bytes)`,
+    );
+  }
+}
+
+// The run list is paged and filtered server-side: `facets` maps a facet name
+// ("status", "recipe", "group") to the selected buckets, and a facet left out
+// means every bucket. Totals and per-bucket counts come from `fetchRunCounts`,
+// which sees every run rather than the page the client holds.
+function runQueryParams({ limit, offset, query, facets }) {
+  const params = new URLSearchParams();
+  if (limit != null) params.set("limit", String(limit));
+  if (offset) params.set("offset", String(offset));
+  if (query) params.set("q", query);
+  for (const [facet, values] of Object.entries(facets || {})) {
+    for (const value of values) params.append(facet, value);
+  }
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
+
+export async function fetchRuns({ signal, limit, offset, query, facets } = {}) {
+  const search = runQueryParams({ limit, offset, query, facets });
+  const response = await fetch(`${SERVER}/runs${search}`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const runs = await response.json();
+  const runs = await readJson(response, "runs");
   return Array.isArray(runs) ? runs : [];
+}
+
+// Per-bucket counts cover every run; `matching` counts the given query, so the
+// page knows how many rows are still reachable by paging.
+export async function fetchRunCounts({ signal, query, facets } = {}) {
+  const search = runQueryParams({ query, facets });
+  const res = await fetch(`${SERVER}/runs/counts${search}`, { signal });
+  if (!res.ok) throw new Error(await getErrorFromResponse(res));
+  return await readJson(res, "run counts");
 }
 
 export async function fetchRun(trainingRunId, { signal } = {}) {
@@ -28,7 +71,7 @@ export async function fetchRun(trainingRunId, { signal } = {}) {
   if (!res.ok) {
     throw new Error(await getErrorFromResponse(res));
   }
-  return await res.json();
+  return await readJson(res, "run detail");
 }
 
 export async function fetchEvals({ signal } = {}) {
@@ -36,7 +79,7 @@ export async function fetchEvals({ signal } = {}) {
   if (!res.ok) {
     throw new Error(await getErrorFromResponse(res));
   }
-  const evals = await res.json();
+  const evals = await readJson(res, "evals");
   const seen = new Set();
   return evals.filter((e) => {
     if (seen.has(e.eval_id)) return false;

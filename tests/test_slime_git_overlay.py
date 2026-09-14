@@ -105,3 +105,26 @@ def test_local_overlay_preserves_unpatched_dev_checkout_behavior() -> None:
     assert [operation[0] for operation in image.operations] == ["add_local_dir"]
     assert image.operations[0][1] == ("/tmp/local-slime",)
     assert image.operations[0][2]["remote_path"] == SLIME_ROOT
+
+
+def _launcher_source() -> str:
+    from pathlib import Path
+
+    import modal_training_gym.frameworks.slime.launcher as launcher_module
+
+    return Path(launcher_module.__file__).read_text()
+
+
+def test_pinned_revision_is_recorded_on_the_run() -> None:
+    """Provenance is the point of pinning; a run must say which commit it used.
+
+    ``_fields()`` omits ``_SLIME_SKIP``, so the overlay fields reach the run
+    record only if the launcher adds them explicitly. Modal caps apps at 8
+    tags, which the agentic recipe already exhausts, so this cannot be a tag.
+    """
+    source = _launcher_source()
+    recipe_entry = source[source.index('"recipe": {') :]
+    end = recipe_entry.index('"metrics"')
+
+    for field in ("slime_git_repository", "slime_git_revision", "data_volume_name"):
+        assert field in recipe_entry[:end], field

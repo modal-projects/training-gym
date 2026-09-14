@@ -27,12 +27,7 @@ from .base import HFModelConfiguration, parse_inkling_response
 
 
 class Inkling_Small(HFModelConfiguration):
-    """Thinking Machines Lab Inkling-Small MoE model with 276B total and 12B active parameters.
-
-    Attributes:
-        model_name: Hugging Face repository ID.
-        response_parser: Parser for generated text.
-    """
+    """Thinking Machines Lab Inkling-Small MoE model with 276B total and 12B active parameters."""
 
     model_name = "thinkingmachines/Inkling-Small"
     response_parser = staticmethod(parse_inkling_response)

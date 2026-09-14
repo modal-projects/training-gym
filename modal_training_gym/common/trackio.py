@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.metrics import MetricConfig
 
 
@@ -32,37 +33,16 @@ _PTH_LINE = (
 class TrackioConfig(MetricConfig):
     """Trackio logging configuration shared across all frameworks.
 
-    Trackio can log to a Hugging Face Space or a self-hosted server. Training
-    images install Trackio automatically and adapt the W&B calls made by the
-    underlying framework.
-
-    ## Fields
-
-    project : str
-        Trackio project name. Default ``""`` (uses ``"training-gym"``).
-    group : str
-        Group tag for related runs. Default ``""``.
-    exp_name : str
-        Run display name. Default ``""``.
-    disable_random_suffix : bool
-        Whether the framework should preserve the configured group name.
-        Default ``True``.
-    space_id : str
-        Hugging Face Space ID, such as ``"owner/trackio"``. Optional.
-    server_url : str
-        URL of a self-hosted Trackio server. Optional.
-    dashboard_url : str
-        Explicit dashboard URL. Optional; otherwise derived from ``space_id``
-        or ``server_url``.
-    bucket_id : str
-        Hugging Face Bucket used by the Trackio Space. Optional.
-    modal_secret_name : str
-        Modal Secret containing ``HF_TOKEN`` or ``TRACKIO_WRITE_TOKEN``.
-        The standard optional ``"huggingface-secret"`` is used by default.
-    TRACKIO_PACKAGE_VERSION : str
-        Trackio release installed in the training image, and in the server
-        deployed by ``deploy_to_modal``. Defaults to the version this release
-        of Training Gym is tested against; bump it to pick up a newer Trackio.
+    Attributes:
+        space_id: Optional Hugging Face Space id such as ``owner/trackio``.
+        server_url: Optional self-hosted Trackio server URL. Leave empty to use
+            hosted Trackio.
+        dashboard_url: Dashboard URL. Derived from ``space_id`` or ``server_url``
+            when empty.
+        bucket_id: Hugging Face Bucket used by the Trackio Space.
+        modal_secret_name: Modal Secret with ``HF_TOKEN`` or ``TRACKIO_WRITE_TOKEN``.
+        TRACKIO_PACKAGE_VERSION: Trackio release installed in the training image
+            and by ``deploy_to_modal``.
     """
 
     project: str = ""
@@ -282,13 +262,86 @@ def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
     ).run_commands(f"python3 -c {shlex.quote(install_code)}")
 
 
-def preflight_trackio(_config: TrackioConfig) -> str:
+def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
+    """URL of an already-deployed Trackio server on Modal, if there is one."""
+    import modal
+
+    try:
+        return modal.Function.from_name(app_name, "dashboard").get_web_url()
+    except Exception:
+        return None
+
+
+def _secret_exists(name: str) -> bool:
+    import modal
+
+    try:
+        modal.Secret.from_name(name).hydrate()
+        return True
+    except Exception:
+        return False
+
+
+def has_trackio_destination(config: TrackioConfig) -> bool:
+    """dashboard_url is only where links point; ingestion needs a real endpoint."""
+    return bool(config.space_id or config.server_url)
+
+
+def resolve_trackio_destination(
+    config: TrackioConfig, *, app_name: str = _DEFAULT_MODAL_APP_NAME
+) -> None:
+    """Point a bare ``TrackioConfig(project=...)`` at the deployed Trackio server.
+
+    Unresolved, Trackio logs to a database local to the training container and
+    the metrics die with it, so raise instead when nothing is deployed.
+    """
+    if has_trackio_destination(config):
+        return
+    url = deployed_trackio_url(app_name)
+    if not url:
+        raise TrainingGymConfigError(
+            f"TrackioConfig(project={config.project!r}) has no destination and no "
+            f"{app_name!r} server is deployed. Run TrackioConfig.deploy_to_modal() "
+            "once, or set space_id= or server_url=."
+        )
+    secret_name = config.modal_secret_name
+    if not secret_name or secret_name == "huggingface-secret":
+        # The write-token name is only a convention (deploy_to_modal takes
+        # modal_secret_name), so confirm it exists before adopting it.
+        candidate = f"_{app_name}-write-token"
+        if not _secret_exists(candidate):
+            raise TrainingGymConfigError(
+                f"Found the {app_name!r} Trackio server at {url} but no "
+                f"{candidate!r} Secret. If it was deployed with a custom "
+                "modal_secret_name, pass the config deploy_to_modal() returned, "
+                "or set server_url= and modal_secret_name=."
+            )
+        secret_name = candidate
+
+    # Mutate only after everything resolved, so a failed attempt stays retryable.
+    config.server_url = url
+    config.dashboard_url = url
+    config.modal_secret_name = secret_name
+
+
+def require_trackio_destination(config: TrackioConfig) -> None:
+    """In-container check that a destination was resolved before launch."""
+    if has_trackio_destination(config):
+        return
+    raise TrainingGymConfigError(
+        f"TrackioConfig(project={config.project!r}) reached the training "
+        "container with no destination; metrics would be lost."
+    )
+
+
+def preflight_trackio(config: TrackioConfig) -> str:
     try:
         import trackio  # noqa: F401
     except ImportError as exc:
         raise RuntimeError(
             "Trackio logging is enabled, but Trackio is missing from the training image."
         ) from exc
+    require_trackio_destination(config)
     return ""
 
 
@@ -366,7 +419,13 @@ def install_wandb_shim() -> None:
         *_args: Any,
         **_kwargs: Any,
     ) -> Any:
-        return trackio.log(data, step=step)
+        # trackio.log() reads the run from a ContextVar that threads started
+        # after init() can't see (slime's engine-metrics thread, for one), so
+        # go through the run object directly.
+        run = shim.run
+        if run is None:
+            return trackio.log(data, step=step)
+        return run.log(metrics=data, step=step)
 
     def finish(*_args: Any, **_kwargs: Any) -> Any:
         try:
