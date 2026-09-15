@@ -15,8 +15,9 @@ Modal prints the URL where the dashboard is served.
 ## Custom trajectory viewer
 
 The rollout detail page includes a default `TrajectoryViewer.svelte` that
-extracts structured trajectory state and renders Balatro's deck, discard pile,
-and hand. Replace it for a deployment with your own Svelte component:
+renders the conversation (messages, thinking, tool calls, and eval report).
+It is environment-agnostic; replace it for a deployment with your own Svelte
+component:
 
 ```bash
 training-gym setup --trajectory-viewer ./MyTrajectoryViewer.svelte
@@ -32,6 +33,12 @@ builds the dashboard. It receives these props:
 - `rewardEvents`: `sample.reward_events` when emitted.
 - `rollout`: the expanded `TrainingRolloutResult`.
 - `run`: the current `TrainingRun` summary.
+
+Examples of run-scoped viewers are
+`examples/dashboard_components/ConversationTrajectoryViewer.svelte` for
+generic chat and
+`examples/dashboard_components/BalatroTrajectoryViewer.svelte` for game-state
+cards.
 
 The override path is saved in `~/.training-gym.toml`, so later `setup` or
 password redeploys keep using it. To restore the built-in viewer, run
@@ -49,7 +56,7 @@ run = TrainingRun.from_id("bristled-pine-a7c3e91d4b")
 run.add_dashboard_component(
     name="balatro",
     component_type=DashboardComponent.TRAJECTORY_VIEWER,
-    from_path="./dashboard/TrajectoryViewer.svelte",
+    from_path="examples/dashboard_components/BalatroTrajectoryViewer.svelte",
 )
 ```
 

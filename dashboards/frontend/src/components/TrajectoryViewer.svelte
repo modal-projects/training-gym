@@ -5,7 +5,7 @@
    * This is the slot that `training-gym setup --trajectory-viewer` replaces
    * at build time, and the fallback when a run has no run-scoped viewer. It
    * renders the conversation exactly as the rollout page always has (tool
-   * calls, thinking, structured game state, eval reports) via
+   * calls, thinking, eval reports) via
    * `ConversationView`; replacements receive the same props.
    *
    * Props supplied by TrainingRunDetailPage:
