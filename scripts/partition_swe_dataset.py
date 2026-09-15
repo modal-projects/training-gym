@@ -2,16 +2,14 @@
 
 ``prepare`` streams the rows of a Hugging Face dataset such as
 ``nebius/SWE-rebench-V2``, renders each row into a Harbor task directory with
-the pinned Slime fork's SWE-rebench converter, converts it once with the fork's
+the pinned slime fork's SWE-rebench converter, converts it with the fork's
 Harbor translator, and writes the splits below to ``/data/<dataset-root>/``.
-Every row is offered to the converter whatever its language; rows the fork
-cannot grade yet are skipped and counted.
 
 ``mixed`` filters a train split using rollouts from a prior training run.
 That run must have written a ``.pt`` dump via ``save_debug_rollout_data``.
 A task is kept when all ``n_samples`` episodes were gradeable and the model
 solved it at least once but not every time. Tasks the model always or never
-solves give GRPO no advantage, so they are dropped.
+solves give GRPO no advantage, so they are dropped. Note the pinned slime fork grades Python only.
 
 Split design
 ------------
@@ -19,7 +17,7 @@ Each JSONL row is one task. Tasks are grouped by task group (the GitHub
 repository they came from, the row's ``repo`` column), and each has a
 language (the row's ``language`` column).
 
-* ``eval`` is about ``EVAL_SPLIT_FRACTION`` of the tasks. No task group
+* ``eval`` is ``EVAL_SPLIT_FRACTION`` of the tasks. No task group
   appears in both train and eval.
 * Train always keeps at least two task groups of each language. Eval also
   includes every language that has groups to spare, matching the
@@ -63,7 +61,7 @@ from modal_training_gym.train_recipes.slime_recipe import (
 
 # Fraction of tasks that go to eval. Remainder go to train.
 EVAL_SPLIT_FRACTION = 0.2
-# Tiny subset for smoke tests; normal evaluation uses the full eval split.
+# Subset for smoke tests
 EVAL_SPLIT_SIZES = (4,)
 TRAIN_SPLIT_SIZES = (4, 100, 300, 1000)
 SPLIT_SEED = 0
