@@ -1,5 +1,7 @@
 <script>
   import DefaultTrajectoryViewer from "./TrajectoryViewer.svelte";
+  import ConversationView from "./ConversationView.svelte";
+  import { rolloutIndex } from "../lib/rolloutGrouping.js";
 
   let {
     sample = null,
@@ -17,12 +19,21 @@
   let loadKey = $state("");
   let generation = 0;
 
+  let hasTrajectory = $derived(Array.isArray(trajectory) && trajectory.length > 0);
+
   function runId() {
     return run?.training_run_id || run?.run_id || "";
   }
 
   function sampleKey() {
-    return sample?.id || sample?.sample_id || sample?.metadata?.rollout_id || "";
+    const coords = [
+      rollout?.rollout_id ?? "",
+      sample?.id ?? sample?.sample_id ?? "",
+      rolloutIndex(sample) ?? "",
+      sample?.sample_index ?? "",
+      sample?.group_index ?? "",
+    ];
+    return coords.join("/");
   }
 
   function componentKey() {
@@ -30,15 +41,18 @@
   }
 
   function dispose() {
-    if (mounted?.unmount) mounted.unmount();
-    else if (mounted?.$destroy) mounted.$destroy();
+    if (typeof mounted?.unmount === "function") mounted.unmount();
+    else if (typeof mounted?.$destroy === "function") mounted.$destroy();
     mounted = null;
     if (host) host.replaceChildren();
   }
 
   async function load() {
     const id = runId();
-    const key = `${id}:${sampleKey()}:${componentKey()}:${Array.isArray(trajectory) ? trajectory.length : 0}`;
+    const trajectoryLength = Array.isArray(trajectory) ? trajectory.length : 0;
+    const rewardLength = Array.isArray(rewardEvents) ? rewardEvents.length : 0;
+    const sampleCount = Array.isArray(samples) ? samples.length : 0;
+    const key = `${id}:${sampleKey()}:${componentKey()}:${trajectoryLength}:${rewardLength}:${sampleCount}`;
     if (!host || !id || key === loadKey) return;
     loadKey = key;
     const current = ++generation;
@@ -72,6 +86,8 @@
     sampleKey();
     componentKey();
     trajectory;
+    rewardEvents;
+    samples;
     if (host) load();
   });
 
@@ -82,14 +98,23 @@
 </script>
 
 {#if mode !== "custom"}
-  <DefaultTrajectoryViewer
-    {sample}
-    {samples}
-    {trajectory}
-    {rewardEvents}
-    {rollout}
-    {run}
-  />
+  {#if hasTrajectory}
+    <DefaultTrajectoryViewer
+      {sample}
+      {samples}
+      {trajectory}
+      {rewardEvents}
+      {rollout}
+      {run}
+    />
+  {:else}
+    <ConversationView
+      messages={null}
+      response={sample?.response || ""}
+      thinking={sample?.thinking || ""}
+      evalReport={sample?.metadata?.eval_report}
+    />
+  {/if}
   {#if mode === "loading"}
     <div class="viewer-note">Loading run-scoped trajectory viewer…</div>
   {:else if loadError}

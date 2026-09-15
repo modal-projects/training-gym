@@ -7,6 +7,8 @@ checkout, or the copy the wheel ships at ``modal_training_gym/_frontend``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 import secrets as _secrets
@@ -997,6 +999,9 @@ def fastapi_app():
         The source and an association copy are both mounted from the overlay
         Volume. Metadata remains the authoritative list of components because
         it is already part of the run record returned by the dashboard API.
+        When several names register the same component type, the most
+        recently attached one wins (``add_dashboard_component`` re-inserts an
+        entry on replace so insertion order is attachment order).
         """
         try:
             kind = DashboardComponent(component_type).value
@@ -1009,7 +1014,7 @@ def fastapi_app():
             raise HTTPException(
                 status_code=404, detail="No dashboard component attached"
             )
-        for value in components.values():
+        for value in reversed(list(components.values())):
             if not isinstance(value, dict) or value.get("type") != kind:
                 continue
             manifest = dict(value)
@@ -1031,6 +1036,60 @@ def fastapi_app():
                 status_code=404, detail="Dashboard component source unavailable"
             )
         return source
+
+    def _verify_component_source(source: Path, digest: str) -> None:
+        """Only compile source whose content matches the manifest's sha256.
+
+        Run metadata selects the component, but the overlay Volume is the
+        only thing that should decide what code ships to the browser.
+        """
+        actual = hashlib.sha256(source.read_bytes()).hexdigest()
+        if not hmac.compare_digest(actual, digest):
+            raise HTTPException(
+                status_code=409,
+                detail="Dashboard component source does not match its manifest",
+            )
+
+    component_compile_locks: dict[str, asyncio.Lock] = {}
+
+    def _component_compile_lock(digest: str) -> asyncio.Lock:
+        lock = component_compile_locks.get(digest)
+        if lock is None:
+            lock = component_compile_locks[digest] = asyncio.Lock()
+        return lock
+
+    async def _compile_component_bundle(source: Path, bundle: Path) -> None:
+        script = Path("/app/frontend/component_bundle.mjs")
+        if not script.is_file():
+            raise HTTPException(
+                status_code=500, detail="Dashboard component compiler unavailable"
+            )
+        staging = bundle.with_name(f"{bundle.stem}.{_secrets.token_hex(8)}.js")
+        try:
+            try:
+                completed = await run_in_threadpool(
+                    subprocess.run,
+                    ["node", str(script), str(source), str(staging)],
+                    capture_output=True,
+                    text=True,
+                    timeout=90,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Dashboard component failed to compile: timed out",
+                ) from exc
+            if completed.returncode != 0 or not staging.is_file():
+                detail = (
+                    completed.stderr or completed.stdout or "compile failed"
+                ).strip()
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Dashboard component failed to compile: {detail[-1000:]}",
+                )
+            os.replace(staging, bundle)
+        finally:
+            staging.unlink(missing_ok=True)
 
     async def _refresh_dashboard_component_volume() -> None:
         """Refresh the mounted overlay before reading a newly registered component.
@@ -1069,26 +1128,10 @@ def fastapi_app():
         bundle = cache_root / f"{digest}.js"
 
         if not bundle.is_file():
-            script = Path("/app/frontend/component_bundle.mjs")
-            if not script.is_file():
-                raise HTTPException(
-                    status_code=500, detail="Dashboard component compiler unavailable"
-                )
-            completed = await run_in_threadpool(
-                subprocess.run,
-                ["node", str(script), str(source), str(bundle)],
-                capture_output=True,
-                text=True,
-                timeout=90,
-            )
-            if completed.returncode != 0 or not bundle.is_file():
-                detail = (
-                    completed.stderr or completed.stdout or "compile failed"
-                ).strip()
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Dashboard component failed to compile: {detail[-1000:]}",
-                )
+            async with _component_compile_lock(digest):
+                if not bundle.is_file():
+                    await run_in_threadpool(_verify_component_source, source, digest)
+                    await _compile_component_bundle(source, bundle)
 
         return Response(
             bundle.read_bytes(),

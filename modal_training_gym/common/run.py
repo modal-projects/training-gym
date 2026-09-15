@@ -505,15 +505,10 @@ class TrainingRun(BaseModel):
         after a run has started or completed.
         """
         from modal_training_gym.common.dashboard_components import (
+            read_dashboard_component,
             store_dashboard_component,
         )
 
-        manifest = store_dashboard_component(
-            name=name,
-            component_type=component_type,
-            from_path=from_path,
-            training_run_id=self.training_run_id,
-        )
         metadata = dict(self.metadata or {})
         components = metadata.get("dashboard_components")
         components = dict(components) if isinstance(components, dict) else {}
@@ -522,11 +517,24 @@ class TrainingRun(BaseModel):
             previous_hash = (
                 previous.get("sha256") if isinstance(previous, dict) else None
             )
-            if previous_hash != manifest["sha256"]:
+            _, _, digest = read_dashboard_component(
+                component_type=component_type, from_path=from_path
+            )
+            if previous_hash != digest:
                 raise ValueError(
                     f"dashboard component {name!r} is already attached to run "
                     f"{self.training_run_id!r}; pass replace=True to replace it"
                 )
+
+        manifest = store_dashboard_component(
+            name=name,
+            component_type=component_type,
+            from_path=from_path,
+            training_run_id=self.training_run_id,
+        )
+        # Re-insert so dict order reflects attachment order; the dashboard
+        # resolves a component type to its most recently attached entry.
+        components.pop(name, None)
         components[name] = manifest
         metadata["dashboard_components"] = components
         self.metadata = metadata

@@ -57,6 +57,8 @@ The source is stored content-addressably in the
 `training-gym-dashboard-overlay` Modal Volume, with a per-run association
 record under `runs/<training_run_id>/<name>.json`. The immutable artifact
 manifest is also associated with the run under
-`metadata.dashboard_components`. The dashboard mounts this Volume and
-compiles the selected Svelte component on demand; the built-in viewer remains
-the fallback when no run-scoped component is available (or compilation fails).
+`metadata.dashboard_components`. The dashboard mounts this Volume, verifies
+the source against the manifest's `sha256`, and compiles the selected Svelte
+component on demand; the built-in viewer remains the fallback when no
+run-scoped component is available (or compilation fails). If several names are
+attached for the same component type, the most recently attached one is used.

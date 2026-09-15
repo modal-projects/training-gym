@@ -28,21 +28,11 @@ class DashboardComponent(str, Enum):
     TRAJECTORY_VIEWER = "trajectory_viewer"
 
 
-def store_dashboard_component(
-    *,
-    name: str,
+def _coerce_component_type(
     component_type: DashboardComponent | str,
-    from_path: str | Path,
-    training_run_id: str | None = None,
-) -> dict[str, Any]:
-    """Upload a local component and return its immutable artifact manifest.
-
-    When ``training_run_id`` is provided, a second association manifest is
-    written under ``runs/<training_run_id>/<name>.json`` so a mounted dashboard
-    can resolve the registration without relying on a local filesystem.
-    """
+) -> DashboardComponent:
     try:
-        component_type = DashboardComponent(component_type)
+        return DashboardComponent(component_type)
     except ValueError as exc:
         supported = ", ".join(item.value for item in DashboardComponent)
         raise ValueError(
@@ -50,12 +40,14 @@ def store_dashboard_component(
             f"supported types: {supported}"
         ) from exc
 
-    if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
-        raise ValueError(
-            "dashboard component name must be 1-64 characters containing only "
-            "letters, numbers, '.', '_' or '-'."
-        )
 
+def read_dashboard_component(
+    *,
+    component_type: DashboardComponent | str,
+    from_path: str | Path,
+) -> tuple[Path, bytes, str]:
+    """Validate a local component file and return ``(path, data, sha256)``."""
+    component_type = _coerce_component_type(component_type)
     path = Path(from_path).expanduser().resolve()
     if not path.is_file():
         raise ValueError(f"dashboard component file does not exist: {path}")
@@ -74,7 +66,32 @@ def store_dashboard_component(
             f"maximum {_MAX_COMPONENT_BYTES} bytes): {path}"
         )
 
-    digest = hashlib.sha256(data).hexdigest()
+    return path, data, hashlib.sha256(data).hexdigest()
+
+
+def store_dashboard_component(
+    *,
+    name: str,
+    component_type: DashboardComponent | str,
+    from_path: str | Path,
+    training_run_id: str | None = None,
+) -> dict[str, Any]:
+    """Upload a local component and return its immutable artifact manifest.
+
+    When ``training_run_id`` is provided, a second association manifest is
+    written under ``runs/<training_run_id>/<name>.json`` so a mounted dashboard
+    can resolve the registration without relying on a local filesystem.
+    """
+    component_type = _coerce_component_type(component_type)
+    if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
+        raise ValueError(
+            "dashboard component name must be 1-64 characters containing only "
+            "letters, numbers, '.', '_' or '-'."
+        )
+
+    path, data, digest = read_dashboard_component(
+        component_type=component_type, from_path=from_path
+    )
     remote_path = f"components/{component_type.value}/{digest}/{name}{path.suffix}"
     manifest_path = f"components/{component_type.value}/{digest}/manifest.json"
     manifest = {
@@ -119,5 +136,6 @@ def store_dashboard_component(
 __all__ = [
     "DASHBOARD_OVERLAY_VOLUME_NAME",
     "DashboardComponent",
+    "read_dashboard_component",
     "store_dashboard_component",
 ]

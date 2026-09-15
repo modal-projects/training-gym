@@ -17,15 +17,16 @@ const compiled = compile(source, {
   dev: false,
 });
 
-const temporary = `${outputPath}.component.js`;
+const temporary = `${outputPath}.${process.pid}.component.js`;
 const frontendRoot = path.dirname(fileURLToPath(import.meta.url));
 await fs.writeFile(temporary, compiled.js.code, "utf8");
 try {
   const entry = [
     `import Component from ${JSON.stringify(temporary)};`,
-    `import { mount } from "svelte";`,
+    `import { mount, unmount } from "svelte";`,
     `export function mountViewer(target, props) {`,
-    `  return mount(Component, { target, props });`,
+    `  const component = mount(Component, { target, props });`,
+    `  return { component, unmount: () => unmount(component) };`,
     `}`,
   ].join("\n");
   const result = await esbuild.build({
