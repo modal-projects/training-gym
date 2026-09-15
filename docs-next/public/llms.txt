@@ -61,6 +61,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 ### Models
 
+- [DeepSeek_V4_1_Flash](https://gym.modal.dev/reference/deepseek_v4_1_flash)
 - [Gemma4_26B_A4B](https://gym.modal.dev/reference/gemma4_26b_a4b)
 - [GLM_4_7](https://gym.modal.dev/reference/glm_4_7)
 - [HFModelConfiguration](https://gym.modal.dev/reference/hfmodelconfiguration)
@@ -95,6 +96,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 ### Recipes
 
+- [DeepSeek_V4_1_Flash_Recipe](https://gym.modal.dev/reference/deepseek_v4_1_flash_recipe)
 - [Gemma4_26B_A4B_Recipe](https://gym.modal.dev/reference/gemma4_26b_a4b_recipe)
 - [GLM_4_7_Recipe](https://gym.modal.dev/reference/glm_4_7_recipe)
 - [Inkling_Small_LoRA_Recipe](https://gym.modal.dev/reference/inkling_small_lora_recipe)

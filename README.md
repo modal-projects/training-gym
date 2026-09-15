@@ -103,6 +103,7 @@ print(run.training_run_id)
 
 | Family | Models |
 |---|---|
+| DeepSeek | <ul><li>[DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)</li></ul> |
 | GLM | <ul><li>[GLM-4.7](https://huggingface.co/zai-org/GLM-4.7)</li></ul> |
 | Gemma | <ul><li>[gemma-4-26B-A4B-it](https://huggingface.co/google/gemma-4-26B-A4B-it)</li></ul> |
 | Inkling | <ul><li>[Inkling-Small](https://huggingface.co/thinkingmachines/Inkling-Small)</li></ul> |
