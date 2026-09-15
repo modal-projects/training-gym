@@ -18,7 +18,7 @@
 
 <aside
   class={[
-    "flex flex-col min-h-0 [border-right:1px_solid_rgba(255,255,255,0.1)] bg-(--bg-depth) transition-[padding] duration-100 ease-out max-[900px]:[border-right:0] max-[900px]:[border-bottom:1px_solid_var(--border)] max-[900px]:p-[0_8px]",
+    "flex flex-col min-h-0 overflow-hidden [border-right:1px_solid_rgba(255,255,255,0.1)] bg-(--bg-depth) transition-[padding] duration-100 ease-out max-[900px]:[border-right:0] max-[900px]:[border-bottom:1px_solid_var(--border)] max-[900px]:p-[0_8px]",
     collapsed ? "p-[4px_8px_0]" : "p-[4px_20px_0]",
   ]}
   aria-label="Primary"
@@ -31,10 +31,7 @@
     {#each navItems as item (item.key)}
       <a
         href={item.path}
-        class={[
-          "nav-item max-[900px]:flex-[1_1_0] max-[900px]:justify-center max-[900px]:whitespace-nowrap max-[900px]:p-[10px_8px] max-[900px]:min-h-[44px] max-[900px]:text-[13px]",
-          collapsed && "justify-center",
-        ]}
+        class="nav-item overflow-hidden whitespace-nowrap max-[900px]:flex-[1_1_0] max-[900px]:justify-center max-[900px]:p-[10px_8px] max-[900px]:min-h-[44px] max-[900px]:text-[13px]"
         class:sidebar-active={activePage === item.key}
         aria-current={activePage === item.key ? "page" : undefined}
         aria-label={item.label}
@@ -47,7 +44,14 @@
         <span class="inline-flex items-center flex-[0_0_auto] opacity-[0.6]">
           <item.Icon size={14} strokeWidth={2.1} />
         </span>
-        <span class={[collapsed && "hidden max-[900px]:inline"]}>{item.label}</span>
+        <span
+          class={[
+            "transition-opacity duration-150 ease-out max-[900px]:opacity-100",
+            collapsed ? "opacity-0" : "opacity-100",
+          ]}
+        >
+          {item.label}
+        </span>
       </a>
     {/each}
   </nav>
@@ -60,7 +64,7 @@
   >
     <button
       type="button"
-      class={["nav-item w-full", collapsed && "justify-center"]}
+      class="nav-item w-full"
       aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       aria-controls={navId}
       aria-expanded={!collapsed}
