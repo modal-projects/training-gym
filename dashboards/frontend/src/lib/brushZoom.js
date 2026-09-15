@@ -82,8 +82,9 @@ export function brushZoom(node, params = {}) {
     renderArea();
   }
 
-  // Swallow the click that trails a completed drag so host click handlers
-  // don't also fire.
+  // Swallow the click that trails a completed drag so click handlers on the
+  // host and its descendants don't also fire (registered in the capture
+  // phase so it runs before them).
   function handleClick(event) {
     if (didDrag) {
       event.stopPropagation();
@@ -114,7 +115,7 @@ export function brushZoom(node, params = {}) {
   }
 
   node.addEventListener("pointerdown", handlePointerDown);
-  node.addEventListener("click", handleClick);
+  node.addEventListener("click", handleClick, true);
   node.addEventListener("wheel", handleWheel, { passive: false });
   window.addEventListener("pointermove", handleWindowPointerMove);
   window.addEventListener("pointerup", handlePointerUp);
@@ -128,7 +129,7 @@ export function brushZoom(node, params = {}) {
     },
     destroy() {
       node.removeEventListener("pointerdown", handlePointerDown);
-      node.removeEventListener("click", handleClick);
+      node.removeEventListener("click", handleClick, true);
       node.removeEventListener("wheel", handleWheel);
       window.removeEventListener("pointermove", handleWindowPointerMove);
       window.removeEventListener("pointerup", handlePointerUp);

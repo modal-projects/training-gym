@@ -1314,10 +1314,12 @@
 
   let rolloutKnots = $derived(rolloutTimeKnots(rolloutSummaries));
   let chartRunStart = $derived.by(() => {
-    const started = toEpochSeconds(run?.started_at || run?.created_at);
-    const first = rolloutKnots[0]?.t;
-    if (started != null && started > 0) return first != null ? Math.min(started, first) : started;
-    return first ?? clockNow;
+    const candidates = [
+      toEpochSeconds(run?.started_at || run?.created_at),
+      rolloutKnots[0]?.t,
+      timelineRunOrigin,
+    ].filter((t) => Number.isFinite(t) && t > 0);
+    return candidates.length ? Math.min(...candidates) : clockNow;
   });
   // A finished run's clock stops when it did, so "Past 1 hour" reads as the
   // last hour of the run rather than an empty window.
@@ -1638,6 +1640,34 @@
               <pre class="[border:1px_solid_color-mix(in_srgb,var(--red,#f87171)_45%,transparent)] rounded-[8px] bg-[color-mix(in_srgb,var(--red,#f87171)_12%,transparent)] text-(--red,#f87171) [font-family:var(--font-mono)] text-[12px] leading-[17px] m-0 max-h-[320px] overflow-auto p-[12px_14px] whitespace-pre-wrap [word-break:break-word]">{run.error_message}</pre>
             </div>
           {/if}
+          {#if showTimingSection || rolloutSummaries.length}
+            <div class="chart-range-bar">
+              <div class="chart-range-dropdown">
+                <MetricsRangeDropdown
+                  live={chartRangeParams.live}
+                  start={chartRangeParams.start}
+                  end={chartRangeParams.end}
+                  duration={chartRangeParams.duration}
+                  entireRun={chartRange.entireRun}
+                  now={chartNow}
+                  liveLabel={isRunning ? "now" : "end of run"}
+                  onupdate={setChartRange}
+                />
+              </div>
+              <ChartControls
+                timeRange={chartRange}
+                setTimeRange={setChartRange}
+                minStart={chartRunStart}
+                now={chartNow}
+              />
+              <ZoomOutButton
+                timeRange={chartRange}
+                setTimeRange={setChartRange}
+                maxDuration={chartMaxDuration}
+                now={chartNow}
+              />
+            </div>
+          {/if}
           {#if timingError || showTimingSection}
             <div class="rollout-chart">
               {#if timingError}
@@ -1658,6 +1688,8 @@
                 downloadName={`substep_timing_${runId}.json`}
                 rolloutIds={rolloutSummaries.map((r) => r.rollout_id)}
                 {attemptMarkers}
+                timeRange={chartRange.entireRun ? null : chartRange}
+                onChangeTimeRange={setChartRange}
                 onOpenRollout={(id) => {
                   selectTab("rollouts");
                   if (expandedRolloutId !== id) void toggleRolloutDetail(id);
@@ -1689,32 +1721,6 @@
           {:else if !rolloutSummaries.length}
             <div class="detail-empty">No rollouts recorded yet.</div>
           {:else}
-            <div class="chart-range-bar">
-              <div class="chart-range-dropdown">
-                <MetricsRangeDropdown
-                  live={chartRangeParams.live}
-                  start={chartRangeParams.start}
-                  end={chartRangeParams.end}
-                  duration={chartRangeParams.duration}
-                  entireRun={chartRange.entireRun}
-                  now={chartNow}
-                  liveLabel={isRunning ? "now" : "end of run"}
-                  onupdate={setChartRange}
-                />
-              </div>
-              <ChartControls
-                timeRange={chartRange}
-                setTimeRange={setChartRange}
-                minStart={chartRunStart}
-                now={chartNow}
-              />
-              <ZoomOutButton
-                timeRange={chartRange}
-                setTimeRange={setChartRange}
-                maxDuration={chartMaxDuration}
-                now={chartNow}
-              />
-            </div>
             <div class="rollout-chart">
               <div class="chart-scroll">
                 <LineChart
