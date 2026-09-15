@@ -169,6 +169,8 @@ class ModelConfig:
         vision_tower_param: Parameter-name prefix of the vision tower to freeze
             during media training. ``None`` when the model has no separately
             frozen tower.
+        custom_model_provider: Import path of the Megatron model provider slime
+            should use for this model. ``None`` means slime's default.
     """
 
     model_name: str = ""
@@ -179,6 +181,7 @@ class ModelConfig:
     audio_placeholder: str = ""
     supported_modalities: frozenset[str] = frozenset()
     vision_tower_param: str | None = None
+    custom_model_provider: str | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -275,6 +278,8 @@ def _coerce_arg_value(raw: str) -> Any:
 
 
 # ── Qwen family ────────────────────────────────────────────────────────
+
+QWEN3_5_VL_PROVIDER = "slime_plugins.models.qwen3_5_vl.provide_qwen3_5_vl"
 
 _QWEN3_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 # Qwen3.5/3.6 (Qwen3-Coder lineage) wire format inside <tool_call> blocks:

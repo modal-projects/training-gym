@@ -88,13 +88,14 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import (
     DATA_PATH,
     HF_CACHE_PATH,
     SlimeRecipe,
-    qwen35_vl_image_train,
 )
 from .modal_helpers.utils import (
+    SLIME_ROOT,
     build_train_cmd,
     get_checkpoint_conversion_policy,
     get_modal_cluster_context,
     prepare_slime_config,
+    provider_support,
     resolve_checkpoint_ref,
 )
 from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
@@ -118,7 +119,6 @@ def _validate_resume_checkpoint(
         )
 
 
-SLIME_ROOT = "/root/slime"
 # Pin by digest to prevent mutable-tag drift.  Tag: nightly-dev-20260722a
 SLIME_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02b31a0109dc850f8ca342"
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
@@ -219,30 +219,6 @@ _SLIME_EXTERNAL_PATCHES_B64 = (
 
 def _patch_commands(patches: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(f"echo {patch} | base64 -d | python3" for patch in patches)
-
-
-_QWEN35_VL_PLUGIN = _SLIME_PATCHES / "model_specific_patches" / "qwen3_5_vl"
-_PATCH_QWEN3_5_HF_TO_MEGATRON_B64 = encode_patch(
-    "patch_qwen3_5_hf_to_megatron", _QWEN35_VL_PLUGIN
-)
-
-
-def _with_qwen35_vl_plugin(image: "Image") -> "Image":
-    models = f"{SLIME_ROOT}/slime_plugins/models"
-    for name in ("qwen3_5_vl.py", "qwen3_5_vl_utils.py"):
-        image = image.add_local_file(
-            str(_QWEN35_VL_PLUGIN / name),
-            remote_path=f"{models}/{name}",
-            copy=True,
-        )
-    loader = f"{SLIME_ROOT}/slime/backends/megatron_utils/hf_to_megatron"
-    for name in ("__init__.py", "common.py", "qwen3_5.py"):
-        image = image.add_local_file(
-            str(_QWEN35_VL_PLUGIN / "hf_to_megatron" / name),
-            remote_path=f"{loader}/{name}",
-            copy=True,
-        )
-    return image.run_commands(*_patch_commands((_PATCH_QWEN3_5_HF_TO_MEGATRON_B64,)))
 
 
 def _build_slime_base_image(*, apply_root_patches: bool = True) -> "Image":
@@ -499,8 +475,9 @@ def build_slime_app(
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
     image = _overlay_slime_source(image, slime)
-    if qwen35_vl_image_train(model, dataset):
-        image = _with_qwen35_vl_plugin(image)
+    support = provider_support(model, dataset)
+    if support is not None:
+        image = support.apply_plugin(image)
 
     if slime.image_run_commands:
         image = image.run_commands(*slime.image_run_commands)

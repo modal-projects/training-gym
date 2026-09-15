@@ -4,6 +4,11 @@ Shared implementations live in :mod:`modal_training_gym.common.launcher_utils`;
 this module keeps slime's parametrization and the historical import path.
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
 from modal_training_gym.common.launcher_utils import (
     build_train_cmd as _build_train_cmd,
     get_checkpoint_conversion_policy as _get_checkpoint_conversion_policy,
@@ -11,6 +16,53 @@ from modal_training_gym.common.launcher_utils import (
     prepare_launch_config as _prepare_launch_config,
     resolve_checkpoint_ref as resolve_checkpoint_ref,
 )
+from modal_training_gym.common.modality import requested_modalities
+from modal_training_gym.common.models.base import QWEN3_5_VL_PROVIDER
+from modal_training_gym.common.patches import encode_patch
+
+SLIME_ROOT = "/root/slime"
+
+
+@dataclass(frozen=True)
+class ProviderSupport:
+    apply_plugin: Callable[[Any], Any]
+    overrides: dict[str, str] = field(default_factory=dict)
+
+
+def _with_qwen35_vl_plugin(image: Any) -> Any:
+    plugin = Path(__file__).parent / "patches" / "model_specific_patches" / "qwen3_5_vl"
+    models = f"{SLIME_ROOT}/slime_plugins/models"
+    for name in ("qwen3_5_vl.py", "qwen3_5_vl_utils.py"):
+        image = image.add_local_file(
+            str(plugin / name),
+            remote_path=f"{models}/{name}",
+            copy=True,
+        )
+    loader = f"{SLIME_ROOT}/slime/backends/megatron_utils/hf_to_megatron"
+    for name in ("__init__.py", "common.py", "qwen3_5.py"):
+        image = image.add_local_file(
+            str(plugin / "hf_to_megatron" / name),
+            remote_path=f"{loader}/{name}",
+            copy=True,
+        )
+    patch_b64 = encode_patch("patch_qwen3_5_hf_to_megatron", plugin)
+    return image.run_commands(f"echo {patch_b64} | base64 -d | python3")
+
+
+SLIME_PROVIDERS: dict[str, ProviderSupport] = {
+    QWEN3_5_VL_PROVIDER: ProviderSupport(
+        overrides={"megatron_to_hf_mode": "bridge"},
+        apply_plugin=_with_qwen35_vl_plugin,
+    ),
+}
+
+
+def provider_support(model, dataset) -> ProviderSupport | None:
+    if model is None or not model.custom_model_provider:
+        return None
+    if dataset is None or "image" not in requested_modalities(dataset):
+        return None
+    return SLIME_PROVIDERS.get(model.custom_model_provider)
 
 
 def get_checkpoint_conversion_policy(

@@ -14,6 +14,8 @@ from modal_training_gym.common.launcher_utils import prepare_launch_config
 from modal_training_gym.common.models import (
     Gemma4_26B_A4B,
     Inkling_Small,
+    ModelConfig,
+    QWEN3_5_VL_PROVIDER,
     Qwen3_4B,
     Qwen3_5_0_8B,
     Qwen3_5_2B,
@@ -38,10 +40,7 @@ from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
 )
 from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_5_4b import Qwen3_5_4B_Recipe
-from modal_training_gym.train_recipes.slime_recipe.recipe import (
-    CUSTOM_VL_PROVIDER,
-    SlimeRecipe,
-)
+from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_asr_1_7b import (
     Qwen3_ASR_1_7B_Recipe,
 )
@@ -237,7 +236,7 @@ def test_recipe_active_modalities():
 def test_qwen35_image_path_extra_config_fails_fast(tmp_path):
     recipe = Qwen3_5_4B_Recipe()
     object.__setattr__(recipe, "extra_config", "configs/extra.yaml")
-    with pytest.raises(TrainingGymConfigError, match="custom_model_provider_path"):
+    with pytest.raises(TrainingGymConfigError, match="custom_model_provider"):
         recipe.cli_args(dataset=_mm("image"), model=Qwen3_5_4B())
 
     materialized = Qwen3_5_4B_Recipe()
@@ -249,7 +248,7 @@ def test_qwen35_image_path_extra_config_fails_fast(tmp_path):
         yaml_config_fields=("extra_config",),
     )
     flags = _flags(materialized.cli_args(dataset=_mm("image"), model=Qwen3_5_4B()))
-    assert flags["--custom-model-provider-path"] == CUSTOM_VL_PROVIDER
+    assert flags["--custom-model-provider-path"] == QWEN3_5_VL_PROVIDER
 
     owned = Qwen3_5_4B_Recipe()
     object.__setattr__(
@@ -271,7 +270,7 @@ def test_qwen35_recipe_reuse_does_not_stick_vl_provider():
     recipe = Qwen3_5_4B_Recipe()
     image_args = recipe.cli_args(dataset=_mm("image"), model=Qwen3_5_4B())
     text_args = recipe.cli_args(model=Qwen3_5_4B())
-    assert _flags(image_args)["--custom-model-provider-path"] == CUSTOM_VL_PROVIDER
+    assert _flags(image_args)["--custom-model-provider-path"] == QWEN3_5_VL_PROVIDER
     assert "--custom-model-provider-path" not in text_args
     assert "--megatron-to-hf-mode" not in text_args
     assert not (recipe.extra_config or {}).get("custom_model_provider_path")
@@ -372,7 +371,7 @@ def test_qwen35_line_accepts_image(model_cls):
     args = recipe.cli_args(dataset=_mm("image"), model=model)
     flags = _flags(args)
     assert flags["--freeze-params-name-list"] == "visual"
-    assert flags["--custom-model-provider-path"] == CUSTOM_VL_PROVIDER
+    assert flags["--custom-model-provider-path"] == QWEN3_5_VL_PROVIDER
     assert flags["--megatron-to-hf-mode"] == "bridge"
     assert not (recipe.extra_config or {}).get("custom_model_provider_path")
 
@@ -384,7 +383,7 @@ def test_qwen36_38_reject_image(model_cls):
     with pytest.raises(ValidationError, match="cannot serve image"):
         TrainConfig(dataset=_mm("image"), model=model, recipe=recipe)
     flags = _flags(recipe.cli_args(dataset=_mm("image"), model=model))
-    assert flags.get("--custom-model-provider-path") != CUSTOM_VL_PROVIDER
+    assert flags.get("--custom-model-provider-path") != QWEN3_5_VL_PROVIDER
 
 
 def test_qwen35_4b_image_uses_thd():
@@ -401,7 +400,16 @@ def test_qwen3_vl_does_not_use_qwen35_line_provider():
     flags = _flags(
         Qwen3_VL_8B_Recipe().cli_args(dataset=_mm("image"), model=Qwen3_VL_8B())
     )
-    assert flags.get("--custom-model-provider-path") != CUSTOM_VL_PROVIDER
+    assert flags.get("--custom-model-provider-path") != QWEN3_5_VL_PROVIDER
+
+
+def test_custom_model_provider_forwards_as_path():
+    provider = "slime_plugins.models.other.provide"
+    provided = SlimeRecipe().overrides(
+        _mm("image"),
+        ModelConfig(custom_model_provider=provider),
+    )
+    assert provided["custom_model_provider_path"] == provider
 
 
 @pytest.mark.parametrize(

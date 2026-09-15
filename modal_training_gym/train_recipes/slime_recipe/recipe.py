@@ -16,6 +16,7 @@ from modal_training_gym.common.models import (
     ModelArchitecture,
     ModelConfig,
 )
+from modal_training_gym.frameworks.slime.modal_helpers.utils import provider_support
 from modal_training_gym.train_recipes.base import (
     # Re-exported for backwards compatibility (e.g. frameworks/slime/launcher.py
     # imports the volume paths from this module).
@@ -84,19 +85,6 @@ _SLIME_SKIP = {
 }
 
 YAML_CONFIG_FIELDS = ("eval_config", "extra_config", "sglang_config")
-
-CUSTOM_VL_PROVIDER = "slime_plugins.models.qwen3_5_vl.provide_qwen3_5_vl"
-
-
-def qwen35_vl_image_train(
-    model: "ModelConfig | None", dataset: "DatasetConfig | None"
-) -> bool:
-    if model is None or dataset is None:
-        return False
-    if "image" not in requested_modalities(dataset):
-        return False
-    return bool(model.vision_tower_param) and "image" in model.supported_modalities
-
 
 _HOOK_PATH_CONFIG_KEYS = {
     "custom_rollout_log_function": "training_gym_custom_rollout_log_function_path",
@@ -810,13 +798,15 @@ class SlimeRecipe(BaseTrainRecipe):
             self._override_default(
                 out, "freeze_params_name_list", [model.vision_tower_param]
             )
-        if qwen35_vl_image_train(model, dataset):
-            out.update(self._qwen35_vl_provider_fields())
-            # Patched validate_args flips bridge to raw so load uses the vendored hf_to_megatron path.
-            self._override_default(out, "megatron_to_hf_mode", "bridge")
+        if model.custom_model_provider and "image" in media:
+            out.update(self._custom_provider_fields(model.custom_model_provider))
+        support = provider_support(model, dataset)
+        if support is not None:
+            for key, value in support.overrides.items():
+                self._override_default(out, key, value)
         return out
 
-    def _qwen35_vl_provider_fields(self) -> dict[str, Any]:
+    def _custom_provider_fields(self, path: str) -> dict[str, Any]:
         if "custom_model_provider_path" in self._escape_hatch_keys():
             return {}
         if (
@@ -824,11 +814,9 @@ class SlimeRecipe(BaseTrainRecipe):
             and self._materialized_config_keys is None
         ):
             raise TrainingGymConfigError(
-                "Qwen3.5 image training requires custom_model_provider_path. "
-                "Pass extra_config as a dict. A path-only extra_config would "
-                "train text-only."
+                "Image training with custom_model_provider requires extra_config as a dict."
             )
-        return {"custom_model_provider_path": CUSTOM_VL_PROVIDER}
+        return {"custom_model_provider_path": path}
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
