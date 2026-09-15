@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import inspect
 import re
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from modal_training_gym.common import models
+from modal_training_gym.common.models.base import ModelConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_README = ROOT / "README.md"
@@ -21,7 +25,13 @@ FRAMEWORKS = (
     "modal_training_gym.train_recipes.slime_recipe",
     "modal_training_gym.train_recipes.miles_recipe",
 )
+DEPLOY_FRAMEWORKS = (
+    "modal_training_gym.deploy_recipes.sglang_recipe",
+    "modal_training_gym.deploy_recipes.vllm_recipe",
+)
 BASE_RECIPES = {"SlimeRecipe", "MilesRecipe"}
+BASE_DEPLOY_RECIPES = {"SglangRecipe", "VllmRecipe"}
+FRAMEWORK_BASES = frozenset({*BASE_RECIPES, *BASE_DEPLOY_RECIPES, "MilesConfig"})
 MODEL_CONFIGS = {name.lower(): getattr(models, name) for name in models.__all__}
 FAMILY_RE = re.compile(r"^([A-Za-z]+(?:\d+(?:\.\d+)*|\d+)?)")
 HF_URL = "https://huggingface.co"
@@ -55,9 +65,7 @@ def model_link(hf_id: str) -> ModelLink:
     return ModelLink(display_name=display_name, href=f"{HF_URL}/{hf_id}")
 
 
-def collect_models() -> tuple[FamilyRow, ...]:
-    families: dict[str, set[str]] = defaultdict(set)
-    unmatched: list[str] = []
+def iter_registered_recipes() -> Iterator[tuple[str, Any, Any, str]]:
     for module_path in FRAMEWORKS:
         registry = importlib.import_module(module_path)
         for recipe_name in registry.__all__:
@@ -67,11 +75,49 @@ def collect_models() -> tuple[FamilyRow, ...]:
             config = recipe.model_config_class or MODEL_CONFIGS.get(
                 model_key(recipe_name)
             )
-            model_name = getattr(config, "model_name", None)
-            if not model_name:
-                unmatched.append(f"{module_path}.{recipe_name}")
-                continue
-            families[family_of(model_name)].add(model_name)
+            yield recipe_name, recipe, config, module_path
+
+
+def _is_preset_class(obj: Any, name: str) -> bool:
+    if name in FRAMEWORK_BASES or not inspect.isclass(obj):
+        return False
+    module = obj.__module__
+    if issubclass(obj, ModelConfig):
+        return "common.models" in module and not module.endswith(".base")
+    return "train_recipes" in module
+
+
+def collect_model_preset_names() -> frozenset[str]:
+    names: set[str] = set()
+    for recipe_name, _recipe, config, _module_path in iter_registered_recipes():
+        names.add(recipe_name)
+        if config is not None:
+            names.add(config.__name__)
+    for name in models.__all__:
+        if _is_preset_class(getattr(models, name), name):
+            names.add(name)
+    return frozenset(names)
+
+
+def collect_deploy_preset_names() -> frozenset[str]:
+    names: set[str] = set()
+    for module_path in DEPLOY_FRAMEWORKS:
+        registry = importlib.import_module(module_path)
+        for name in registry.__all__:
+            if name not in BASE_DEPLOY_RECIPES:
+                names.add(name)
+    return frozenset(names)
+
+
+def collect_models() -> tuple[FamilyRow, ...]:
+    families: dict[str, set[str]] = defaultdict(set)
+    unmatched: list[str] = []
+    for recipe_name, _recipe, config, module_path in iter_registered_recipes():
+        model_name = getattr(config, "model_name", None)
+        if not model_name:
+            unmatched.append(f"{module_path}.{recipe_name}")
+            continue
+        families[family_of(model_name)].add(model_name)
     if unmatched:
         raise SystemExit(
             "No ModelConfig found for these recipes:\n  "

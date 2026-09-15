@@ -11,12 +11,17 @@ from enum import Enum
 from functools import partial
 from typing import Any, Literal, TypeVar, cast, overload
 
+from modal_training_gym._api_reference import exclude_from_api_reference
+
 T = TypeVar("T")
 
 METADATA_VOLUME_NAME = "training-gym-metadata"
 
 
+@exclude_from_api_reference
 class MetadataStore(Enum):
+    """Named prefixes for JSON records on the shared metadata volume."""
+
     TRAINING_RUNS = "training-runs"
     TRAINING_RUNS_SUMMARY = "training-runs-summary"
     FRAMEWORK_STATUS_TOKENS = "framework-status-tokens"
@@ -375,8 +380,6 @@ def vol_list(
 
 
 _LIST_ATTEMPTS = 3
-# Torn-read retries for whole-file summaries (see vol_get_summary_items).
-_SUMMARY_READ_ATTEMPTS = 3
 
 
 def _is_rate_limit(exc: BaseException) -> bool:
@@ -740,45 +743,38 @@ def vol_get_summary_items(
     payload_key: str = SUMMARY_ITEMS_KEY,
     is_async: bool = False,
 ) -> list[dict[str, Any]] | None | Awaitable[list[dict[str, Any]] | None]:
+    from modal.exception import ExecutionError
+
     vol = _metadata_volume()
     if is_async:
 
         async def _run() -> list[dict[str, Any]] | None:
             await _safe_reload(vol, is_async=True)
-            for attempt in range(_SUMMARY_READ_ATTEMPTS):
-                try:
-                    payload = await vol_get(store, key, is_async=True)
-                except KeyError:
-                    return None
-                except ValueError:
-                    # A concurrent writer is replacing the file; see the sync path.
-                    if attempt + 1 == _SUMMARY_READ_ATTEMPTS:
-                        return None
-                    await _safe_reload(vol, is_async=True)
-                    continue
-                return summary_items_from_payload(payload, payload_key=payload_key)
-            return None
+            try:
+                payload = await vol_get(store, key, is_async=True)
+            except KeyError:
+                return None
+            except (ExecutionError, ValueError) as exc:
+                print(
+                    f"WARNING: unreadable summary {store}/{key}; "
+                    f"rebuilding from canonical items: {exc}"
+                )
+                return None
+            return summary_items_from_payload(payload, payload_key=payload_key)
 
         return _run()
     _safe_reload(vol)
-    for attempt in range(_SUMMARY_READ_ATTEMPTS):
-        try:
-            payload = vol_get(store, key)
-        except KeyError:
-            return None
-        except ValueError:
-            # Summaries are rewritten whole by every writer (status reporters,
-            # the dashboard reconciler, launches), so a reader can catch a file
-            # mid-replacement and get truncated JSON. That is a torn read, not
-            # a corrupt store: reload and try again, and if it is still
-            # unreadable report "no summary" so the caller rebuilds from the
-            # canonical per-item files instead of aborting a launch.
-            if attempt + 1 == _SUMMARY_READ_ATTEMPTS:
-                return None
-            _safe_reload(vol)
-            continue
-        return summary_items_from_payload(payload, payload_key=payload_key)
-    return None
+    try:
+        payload = vol_get(store, key)
+    except KeyError:
+        return None
+    except (ExecutionError, ValueError) as exc:
+        print(
+            f"WARNING: unreadable summary {store}/{key}; "
+            f"rebuilding from canonical items: {exc}"
+        )
+        return None
+    return summary_items_from_payload(payload, payload_key=payload_key)
 
 
 def vol_put_summary_items(

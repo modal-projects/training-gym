@@ -36,13 +36,23 @@ def test_create_hash_suffix_differs_for_different_parts(monkeypatch) -> None:
 
 def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
     class DummyDataset(DatasetConfig):
-        label_key = "label"
+        def cache_key(self) -> str | None:
+            raise AssertionError("run ID generation must not resolve dataset paths")
 
-    descriptors: list[str] = []
+        def input_key(self) -> str:
+            return "prompt"
+
+        def label_key(self) -> str:
+            return "label"
+
+        def rows(self):
+            yield {"prompt": "p", "label": "l"}
+
+    calls: list[tuple[str, ...]] = []
 
     def fake_create_hash(*parts: str) -> str:
-        descriptors.append(parts[2])
-        return f"brisk-river-{len(descriptors):08x}"
+        calls.append(parts)
+        return f"brisk-river-{len(calls):08x}"
 
     monkeypatch.setattr(
         "modal_training_gym.common.train.create_hash",
@@ -59,7 +69,9 @@ def test_train_config_generates_fresh_run_id_per_call(monkeypatch) -> None:
     second = config._generate_training_run_id()
 
     assert first != second
-    assert descriptors == ["Qwen3_4B_Recipe:slime"] * 2
+    assert len(calls) == 2
+    assert [parts[2] for parts in calls] == ["Qwen3_4B_Recipe:slime"] * 2
+    assert all(parts[3] == "" for parts in calls)
 
 
 def test_the_wandb_run_id_is_the_whole_training_run_id() -> None:
@@ -76,7 +88,10 @@ def test_the_wandb_run_id_is_the_whole_training_run_id() -> None:
 
     summary = TrainConfig(
         dataset=HuggingFaceDataset(
-            hf_repo="some/dataset", input_column="prompt", output_column="answer"
+            hf_repo="some/dataset",
+            input_column="prompt",
+            output_column="answer",
+            input_format="text",
         ),
         model=Qwen3_4B(),
         recipe=SlimeRecipe(

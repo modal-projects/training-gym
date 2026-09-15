@@ -29,15 +29,7 @@ if TYPE_CHECKING:
 
 
 class Qwen3_ASR_1_7B(HFModelConfiguration):
-    """Alibaba Qwen3-ASR-1.7B speech recognition model.
-
-    Attributes:
-        model_name: Hugging Face repository ID.
-        architecture: Megatron architecture parameters for the text backbone.
-        response_parser: Parser for generated text.
-        requires_bshd: Requires padded BSHD batches during training.
-        audio_placeholder: Token sequence that marks audio input.
-    """
+    """Alibaba Qwen3-ASR-1.7B speech recognition model."""
 
     model_name = "Qwen/Qwen3-ASR-1.7B"
 
@@ -46,17 +38,8 @@ class Qwen3_ASR_1_7B(HFModelConfiguration):
     # this just strips the chat-template scaffolding off the decoded text.
     response_parser = staticmethod(parse_qwen3_response)
 
-    # The native megatron-bridge Qwen3-ASR forward doesn't implement THD sequence
-    # packing, so training must use padded (bshd) batches; the slime launcher
-    # enforces this when the recipe leaves slime's default thd packing on.
-    requires_bshd: bool = True
-
-    # The processor expands this single <|audio_pad|> to N tokens (N = the audio
-    # encoder's output length for the clip), aligning audio embeddings with token
-    # positions. It must appear in the prompt text; the raw audio data-URI must not,
-    # or it tokenizes into ~100k-1M text tokens (scales with clip duration) and OOMs
-    # the actor.
-    audio_placeholder: str = "<|audio_start|><|audio_pad|><|audio_end|>"
+    requires_bshd = True
+    audio_placeholder = "<|audio_start|><|audio_pad|><|audio_end|>"
 
     # thinker_config.text_config (Qwen3 dense backbone), verbatim from config.json.
     architecture = ModelArchitecture(

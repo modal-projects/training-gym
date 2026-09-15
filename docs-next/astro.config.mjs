@@ -12,6 +12,13 @@ import { parseTutorialMetadata } from './src/lib/tutorial-docs-loader.ts';
 import referenceSidebar from './src/generated/reference-sidebar.json';
 
 const configDirectory = path.dirname(fileURLToPath(import.meta.url));
+const guideSectionOrder = ['start', 'tools', 'migration'];
+
+/** @param {string} section */
+function guideSectionRank(section) {
+  const index = guideSectionOrder.indexOf(section);
+  return index === -1 ? guideSectionOrder.length : index;
+}
 
 function remarkStripPageTitle() {
   return (/** @type {{ children: Array<{ type: string, depth?: number }> }} */ tree) => {
@@ -61,6 +68,7 @@ function firstGuidePath() {
     })
     .sort(
       (left, right) =>
+        guideSectionRank(left.section) - guideSectionRank(right.section) ||
         left.section.localeCompare(right.section) ||
         left.order - right.order ||
         left.slug.localeCompare(right.slug)
@@ -104,7 +112,8 @@ export default defineConfig({
     '/reference/core/datasetconfig': '/reference/datasetconfig',
     '/reference/core/huggingfacedataset': '/reference/huggingfacedataset',
     '/reference/core/harbordataset': '/reference/harbordataset',
-    '/reference/core/trainresult': '/reference/trainresult',
+    '/reference/core/trainresult': '/reference/trainingrun',
+    '/reference/trainresult': '/reference/trainingrun',
     '/reference/core/metricconfig': '/reference/metricconfig',
     '/reference/core/trackioconfig': '/reference/trackioconfig',
     '/reference/core/wandbconfig': '/reference/wandbconfig',

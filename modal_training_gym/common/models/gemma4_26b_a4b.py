@@ -6,13 +6,7 @@ from .base import HFModelConfiguration, ModelArchitecture, parse_gemma4_response
 
 
 class Gemma4_26B_A4B(HFModelConfiguration):
-    """Google Gemma-4-26B-A4B-it multimodal MoE model with 25.2B total and 3.8B active parameters.
-
-    Attributes:
-        model_name: Hugging Face repository ID.
-        architecture: Megatron architecture parameters for this model.
-        response_parser: Parser for generated text.
-    """
+    """Google Gemma-4-26B-A4B-it multimodal MoE model with 26B total and 4B active parameters."""
 
     model_name = "google/gemma-4-26B-A4B-it"
     response_parser = staticmethod(parse_gemma4_response)

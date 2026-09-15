@@ -144,11 +144,26 @@ html:has(.tg-sidebar-empty) .content-panel .sl-container {
   background: var(--sl-color-bg-sidebar);
   border-inline-end: 1px solid #2f2f2f;
   inset-block-start: calc(var(--sl-nav-height) - 1px);
-  scrollbar-width: none;
+  overflow-y: auto;
+  overflow-y: overlay;
+  scrollbar-color: transparent transparent;
+}
+
+.sidebar-pane:hover {
+  scrollbar-color: rgb(90, 90, 90) rgba(0, 0, 0, 0);
 }
 
 .sidebar-pane::-webkit-scrollbar {
-  display: none;
+  width: 8px;
+}
+
+.sidebar-pane::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 10px;
+}
+
+.sidebar-pane:hover::-webkit-scrollbar-thumb {
+  background: rgb(90, 90, 90);
 }
 
 .sidebar:has(.tg-sidebar-empty) {
@@ -237,7 +252,7 @@ html:has(.tg-sidebar-empty) .content-panel .sl-container {
 #starlight__sidebar .tg-tutorial-sidebar.is-reference > li > :is(
     .tg-tutorial-sidebar__header,
     .tg-tutorial-sidebar__item
-  ) {
+  ):not(.active) {
   border-inline-start-color: #2f2f2f;
 }
 
@@ -1031,6 +1046,8 @@ a:hover {
 
 .sl-markdown-content :is(td, th) > code:not(pre code) {
   display: inline-block;
+  vertical-align: middle;
+  line-height: 1;
   border: 1px solid #2f2f2f;
   border-radius: 0.125rem;
   background: #242424;
@@ -1040,7 +1057,9 @@ a:hover {
 }
 
 .sl-markdown-content :is(td, th) > a > code:not(pre code) {
-  display: inline;
+  display: inline-block;
+  vertical-align: middle;
+  line-height: 1;
   border: 1px solid #2f2f2f;
   border-radius: 0.125rem;
   background: #242424;
@@ -1276,26 +1295,34 @@ a:hover {
 }
 
 .sl-markdown-content td:first-child > a {
-  display: inline;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .sl-markdown-content td > a > code:not(pre code),
 .sl-markdown-content td > code:not(pre code) {
-  display: inline;
+  display: inline-block;
+  vertical-align: middle;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
-.sl-markdown-content table th:nth-child(1),
-.sl-markdown-content table td:nth-child(1) {
-  min-width: 8.5rem;
+.sl-markdown-content .table-wrapper > table:has(> thead > tr > th:nth-child(2):last-child) {
+  table-layout: fixed;
 }
 
-.sl-markdown-content table th:nth-child(2),
-.sl-markdown-content table td:nth-child(2) {
-  min-width: 18rem;
+.sl-markdown-content table:has(> thead > tr > th:nth-child(2):last-child) th:nth-child(1),
+.sl-markdown-content table:has(> thead > tr > th:nth-child(2):last-child) td:nth-child(1) {
+  width: 40%;
+  min-width: 0;
+}
+
+.sl-markdown-content table:has(> thead > tr > th:nth-child(2):last-child) th:nth-child(2),
+.sl-markdown-content table:has(> thead > tr > th:nth-child(2):last-child) td:nth-child(2) {
+  width: 60%;
+  min-width: 0;
 }
 
 .sl-markdown-content.tg-cli-index .table-wrapper > table {

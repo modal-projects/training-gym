@@ -130,3 +130,21 @@ def test_wandb_config_uses_the_provider_neutral_recipe_field():
     assert tags["_modal_metric_group"] == "experiment"
     assert "_modal_wandb_project" not in tags
     assert len(tags) <= 8
+
+
+@pytest.mark.parametrize(
+    "config_key,environment_key",
+    [("config-key", ""), ("config-key", "env-key"), ("", "")],
+)
+def test_wandb_credentials_use_environment_instead_of_cli(
+    monkeypatch, config_key, environment_key
+):
+    from modal_training_gym.common.metrics import metric_cli_fields
+
+    monkeypatch.setenv("WANDB_API_KEY", environment_key)
+    metric = WandbConfig(project="test", key=config_key)
+    assert "wandb_key" not in metric_cli_fields(metric)
+    env = metric.runtime_env(run_id="run-1")
+    assert env.get("WANDB_API_KEY", "") == (environment_key or config_key)
+    assert env["WANDB_RUN_ID"] == "run-1"
+    assert metric.key == config_key

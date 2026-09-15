@@ -48,6 +48,8 @@ class WandbConfig(MetricConfig):
 
     def runtime_env(self, *, run_id: str, entity: str = "") -> dict[str, str]:
         env = super().runtime_env(run_id=run_id, entity=entity)
+        if key := os.environ.get("WANDB_API_KEY", "") or self.key:
+            env["WANDB_API_KEY"] = key
         if run_id:
             env.update(WANDB_RUN_ID=run_id, WANDB_RESUME="allow")
         if entity:

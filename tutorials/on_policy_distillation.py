@@ -37,6 +37,7 @@
 # [this tutorial](https://gym.modal.dev/tutorials/cross_tokenizer_distillation).
 
 import re
+import time
 
 from modal_training_gym import (
     CustomDeployment,
@@ -114,17 +115,23 @@ def score_answer(response: str, label: str) -> int:
 # describes, using a small number of samples with a larger number of rollouts can be
 # sufficient for OPD. Following suit, we'll only use 100 training samples and 20 for evaluation.
 
-class MathDataset(HuggingFaceDataset):
-    hf_repo = "zhuzilin/dapo-math-17k"
-    input_key = "prompt"
-    label_key = "label"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
+train_dataset = HuggingFaceDataset(
+    "zhuzilin/dapo-math-17k",
+    hf_split="train[:100]",
+    input_column="prompt",
+    output_column="label",
+    input_format="messages",
+    always_download=True,
+)
 
-train_dataset = MathDataset(hf_split="train[:100]")
-
-eval_dataset = MathDataset(hf_split="train[100:120]")
+eval_dataset = HuggingFaceDataset(
+    "zhuzilin/dapo-math-17k",
+    hf_split="train[100:120]",
+    input_column="prompt",
+    output_column="label",
+    input_format="messages",
+    always_download=True,
+)
 
 # ## Evaluate the base models
 #
@@ -151,16 +158,15 @@ def run_eval(
     deployment.wait_until_ready(timeout=15 * 60)
 
     def _score_one(example):
-        prompt = example["prompt"][0]["content"]
         msg = deployment.chat(
-            [{"role": "user", "content": prompt}],
+            example[eval_dataset.input_key()],
             chat_template_kwargs={"enable_thinking": True},
         )
         response = msg.get("content") or msg.get("reasoning_content") or ""
-        return score_answer(response, example["label"])
+        return score_answer(response, example[eval_dataset.label_key()])
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        scores = list(executor.map(_score_one, eval_dataset.load()))
+        scores = list(executor.map(_score_one, eval_dataset.rows()))
     percent_correct = (
         len([s for s in scores if s == 1]) / len(scores) if scores else float("nan")
     )
@@ -250,7 +256,6 @@ config = TrainConfig(
     model=student_model,
     dataset=train_dataset,
     recipe=Qwen3_5_4B_Recipe(
-        eval_interval=None,
         rollout_num_gpus=8,
         num_rollout=10,
         n_samples_per_prompt=4,
@@ -273,17 +278,24 @@ config = TrainConfig(
     ),
 )
 
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained student
 #
 # We'll deploy our trained student and compare it
 # to our baseline evaluation from earlier.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_student_deployment = Endpoint.launch(
     student_model, checkpoint, unauthenticated=True, recreate_if_existing=True
