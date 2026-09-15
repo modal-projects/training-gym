@@ -10,7 +10,15 @@
   // A least-squares trend line is fitted to std and its net change over the run
   // is reported with a direction arrow.
 
-  let { steps = [] } = $props();
+  import { brushZoom } from "../lib/brushZoom.js";
+
+  let {
+    steps = [],
+    // `[min, max]` rollout ids; defaults to the data extent.
+    xDomain = null,
+    // Called with `[min, max]` rollout ids when the user drags or wheels.
+    onChangeDomainX = null,
+  } = $props();
 
   const W = 640;
   const H = 200;
@@ -25,8 +33,16 @@
     return Number.isFinite(v) ? v.toFixed(3) : "—";
   }
 
-  let model = $derived.by(() => {
-    const pts = (steps || [])
+  let hasDomain = $derived(
+    Array.isArray(xDomain) &&
+      Number.isFinite(xDomain[0]) &&
+      Number.isFinite(xDomain[1]) &&
+      xDomain[1] > xDomain[0],
+  );
+  let zoomable = $derived(typeof onChangeDomainX === "function");
+
+  let allPts = $derived(
+    (steps || [])
       .filter((s) => s && s.stats)
       .map((s) => {
         const st = s.stats;
@@ -36,13 +52,21 @@
           std: num(st.std),
           iqr: Math.max(num(q.p75, num(st.max)) - num(q.p25, num(st.min)), 0),
         };
-      });
-    if (pts.length < 2) return null;
+      })
+      .sort((a, b) => a.x - b.x),
+  );
+
+  let model = $derived.by(() => {
+    const pts = hasDomain
+      ? allPts.filter((p) => p.x >= xDomain[0] && p.x <= xDomain[1])
+      : allPts;
+    if (pts.length < 2 && !(hasDomain && allPts.length >= 2)) return null;
 
     const xs = pts.map((p) => p.x);
-    const xMin = Math.min(...xs);
-    const xSpan = Math.max(...xs) - xMin || 1;
-    const yHi = Math.max(...pts.map((p) => Math.max(p.std, p.iqr))) || 1;
+    const xMin = hasDomain ? xDomain[0] : Math.min(...xs);
+    const xMax = hasDomain ? xDomain[1] : Math.max(...xs);
+    const xSpan = xMax - xMin || 1;
+    const yHi = (pts.length ? Math.max(...pts.map((p) => Math.max(p.std, p.iqr))) : 0) || 1;
     const ySpan = yHi || 1;
 
     const sx = (x) => PAD + ((x - xMin) / xSpan) * (W - 2 * PAD);
@@ -66,8 +90,10 @@
     const slope = sxx ? sxy / sxx : 0;
     const intercept = my - slope * mx;
     const fit = (x) => intercept + slope * x;
-    const fitStart = fit(xMin);
-    const fitEnd = fit(Math.max(...xs));
+    const firstX = pts.length ? Math.min(...xs) : xMin;
+    const lastX = pts.length ? Math.max(...xs) : xMax;
+    const fitStart = fit(firstX);
+    const fitEnd = fit(lastX);
     const delta = fitEnd - fitStart;
     const pct = fitStart > 1e-9 ? (delta / fitStart) * 100 : null;
     const dir = delta > ySpan * 0.02 ? "up" : delta < -ySpan * 0.02 ? "down" : "flat";
@@ -75,17 +101,35 @@
     return {
       std: line("std"),
       iqr: line("iqr"),
-      trend: `M ${sx(xMin).toFixed(1)} ${sy(fitStart).toFixed(1)} L ${sx(Math.max(...xs)).toFixed(1)} ${sy(fitEnd).toFixed(1)}`,
+      trend:
+        pts.length >= 2
+          ? `M ${sx(firstX).toFixed(1)} ${sy(fitStart).toFixed(1)} L ${sx(lastX).toFixed(1)} ${sy(fitEnd).toFixed(1)}`
+          : "",
       dots: pts.map((p) => ({ cx: sx(p.x).toFixed(1), cy: sy(p.std).toFixed(1) })),
       yHi,
-      firstX: xMin,
-      lastX: Math.max(...xs),
-      latestStd: pts[pts.length - 1].std,
+      xMin,
+      xMax,
+      firstX,
+      lastX,
+      count: pts.length,
+      latestStd: pts.length ? pts[pts.length - 1].std : NaN,
       delta,
       pct,
       dir,
     };
   });
+
+  function handleBrush([f0, f1]) {
+    if (!zoomable || !model) return;
+    const { xMin, xMax } = model;
+    const plotW = W - 2 * PAD;
+    const toX = (f) => xMin + ((f * W - PAD) / plotW) * (xMax - xMin);
+    onChangeDomainX([toX(f0), toX(f1)]);
+  }
+
+  function fmtStep(x) {
+    return Number.isInteger(x) ? String(x) : x.toFixed(1);
+  }
 
   const ARROW = { up: "↑", down: "↓", flat: "→" };
 </script>
@@ -106,30 +150,42 @@
       over run
     </span>
   </div>
-  <svg class="w-full h-[200px] block" viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
-    <path d={model.iqr} fill="none" stroke="var(--muted)" stroke-width="1.25" stroke-opacity="0.7" />
-    <path
-      d={model.trend}
-      fill="none"
-      stroke="var(--accent)"
-      stroke-width="1"
-      stroke-opacity="0.55"
-      stroke-dasharray="5 4"
-    />
-    <path d={model.std} fill="none" stroke="var(--accent)" stroke-width="1.75" />
-    {#each model.dots as d}
-      <circle cx={d.cx} cy={d.cy} r="2" fill="var(--accent)" />
-    {/each}
-  </svg>
+  <div
+    class="relative overflow-hidden rounded-[4px]"
+    use:brushZoom={{ onChangeDomainX: handleBrush, enabled: zoomable }}
+  >
+    <svg class="w-full h-[200px] block" viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
+      <path d={model.iqr} fill="none" stroke="var(--muted)" stroke-width="1.25" stroke-opacity="0.7" />
+      {#if model.trend}
+        <path
+          d={model.trend}
+          fill="none"
+          stroke="var(--accent)"
+          stroke-width="1"
+          stroke-opacity="0.55"
+          stroke-dasharray="5 4"
+        />
+      {/if}
+      <path d={model.std} fill="none" stroke="var(--accent)" stroke-width="1.75" />
+      {#each model.dots as d}
+        <circle cx={d.cx} cy={d.cy} r="2" fill="var(--accent)" />
+      {/each}
+    </svg>
+    {#if !model.count}
+      <div class="absolute inset-0 flex items-center justify-center text-(--muted) text-[12px] pointer-events-none">
+        No data in this range.
+      </div>
+    {/if}
+  </div>
   <div class="fan-meta">
     <span>0</span>
     <span>latest std {fmt(model.latestStd)}</span>
     <span>max {fmt(model.yHi)}</span>
   </div>
   <div class="fan-axis">
-    <span>step {model.firstX}</span>
+    <span>step {fmtStep(model.xMin)}</span>
     <span class="fan-axis-label">training step</span>
-    <span>step {model.lastX}</span>
+    <span>step {fmtStep(model.xMax)}</span>
   </div>
 {:else}
   <div class="plot-empty">Advantage distribution needs ≥2 steps of data.</div>
