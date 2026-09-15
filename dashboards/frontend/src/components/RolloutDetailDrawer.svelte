@@ -315,7 +315,7 @@
       <div class="detail-empty px-[24px]">No samples recorded.</div>
     {:else}
       <!-- Top: timing + diagnostics + histogram -->
-      <div class="p-[0_24px] shrink-0">
+      <div class="p-[0_24px] shrink-0 max-h-[55vh] overflow-y-auto overscroll-contain">
         {#if timings}
           <div class="mb-[12px]">
             <RunTimeline
