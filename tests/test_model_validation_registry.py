@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from modal_training_gym.common.models.qwen3_0_6b import Qwen3_0_6B
 from modal_training_gym.common.models.validation import (
     VALIDATION_CONFIGS,
@@ -51,6 +50,20 @@ def test_registry_uses_the_packages_one_framework_enum():
         CanonicalFramework.SLIME, Qwen3_0_6B(), step_count=1
     )
     assert recipe is not None and dataset is not None
+
+
+MEDIA_CONFIGS = [c for c in ALL_CONFIGS if c.modality != "text"]
+
+
+@pytest.mark.parametrize("config", MEDIA_CONFIGS, ids=lambda c: c.name)
+def test_media_rows_train_on_the_modality_dataset(config):
+    _, dataset = build_recipe_and_dataset(
+        config.framework, config.model_config(), 1, config.modality
+    )
+    if config.modality == "image":
+        assert dataset.multimodal_keys == {"image": "images"}
+        return
+    assert dataset.multimodal_keys == {"audio": "audios"}
 
 
 def test_registry_names_are_unique():
@@ -110,7 +123,7 @@ def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     fail on a GPU, minutes into a run.
     """
     recipe, dataset = build_recipe_and_dataset(
-        config.framework, config.model_config(), step_count=1
+        config.framework, config.model_config(), 1, config.modality
     )
     assert recipe is not None
     assert dataset is not None
@@ -179,7 +192,9 @@ def test_validation_dataset_unpickles_without_the_scripts_directory(config, tmp_
 
     from scripts.validate_model_configs import _ship_dataset_definition
 
-    _, dataset = build_recipe_and_dataset(config.framework, config.model_config(), 1)
+    _, dataset = build_recipe_and_dataset(
+        config.framework, config.model_config(), 1, config.modality
+    )
 
     _ship_dataset_definition(dataset)
     payload = serialize(dataset)
@@ -227,11 +242,43 @@ def test_framework_harness_change_only_revalidates_that_framework():
     assert not selected & (miles_models - slime_models)
 
 
-def test_shared_harness_change_revalidates_every_registered_model():
+@pytest.mark.parametrize(
+    "path",
+    [
+        "scripts/validate_model_configs.py",
+        "scripts/validation_backends/datasets.py",
+        "modal_training_gym/common/modality.py",
+    ],
+)
+def test_shared_harness_change_revalidates_every_registered_model(path):
     names = {c.name for c in VALIDATION_CONFIGS}
-    diff = _diff_touching("scripts/validate_model_configs.py")
+    assert set(affected_models(_diff_touching(path))) == names
 
-    assert set(affected_models(diff)) == names
+
+def test_qwen35_4b_change_revalidates_pr_image_row():
+    selected = set(
+        affected_models(
+            _diff_touching("modal_training_gym/common/models/qwen3_5_4b.py")
+        )
+    )
+    assert {"Qwen3.5-4B", "Qwen3.5-4B/image"} <= selected
+    assert "Qwen3.5-9B/image" not in selected
+
+
+def test_qwen35_vl_overlay_revalidates_slime_pr_models():
+    selected = set(
+        affected_models(
+            _diff_touching(
+                "modal_training_gym/frameworks/slime/modal_helpers/"
+                "patches/model_specific_patches/qwen3_5_vl/qwen3_5_vl.py"
+            )
+        )
+    )
+    slime_models = {c.name for c in _ValidationConfig.select(Framework.SLIME)}
+    miles_models = {c.name for c in _ValidationConfig.select(Framework.MILES)}
+    assert selected == slime_models
+    assert "Qwen3.5-4B/image" in selected
+    assert not selected & (miles_models - slime_models)
 
 
 def test_framework_change_does_not_narrow_shared_harness_impact():

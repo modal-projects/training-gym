@@ -24,6 +24,7 @@ class Qwen3_VL_8B(HFModelConfiguration):
     model_name = "Qwen/Qwen3-VL-8B-Instruct"
 
     requires_bshd = True
+    supported_modalities = frozenset({"image"})
 
     architecture = ModelArchitecture(
         # text_config from config.json

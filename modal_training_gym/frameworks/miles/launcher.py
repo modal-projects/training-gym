@@ -468,7 +468,6 @@ def build_miles_app(
 ) -> App:
     app_name = name or miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
     volume_prefix = miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
-    MilesRecipe._validate_datasets(dataset, eval_dataset)
     dataset_path = MilesRecipe._resolve_data_paths(dataset)
     eval_dataset_path = (
         MilesRecipe._resolve_data_paths(eval_dataset)

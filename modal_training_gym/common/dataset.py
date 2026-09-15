@@ -7,20 +7,83 @@ common sources like Hugging Face and Harbor.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from collections.abc import Iterable
-from enum import Enum
-from typing import Any, Literal
+import base64
 import hashlib
 import json
 import random
 import shutil
 import tomllib
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
+from enum import Enum
 from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import unquote_to_bytes
 
 from modal_training_gym.common.errors import TrainingGymConfigError
 
 DatasetRow = dict[str, Any]
+
+_DATA_URI_PREFIX = "data:"
+_MIME_EXT = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/mp4": "m4a",
+    "audio/ogg": "ogg",
+    "audio/flac": "flac",
+}
+
+
+def _materialize_data_uri(uri: str, dest_dir: Path, index: int) -> str:
+    header, sep, payload = uri.partition(",")
+    if not sep or not header.startswith(_DATA_URI_PREFIX):
+        raise TrainingGymConfigError(f"invalid data URI: {uri[:64]!r}")
+    mime = (
+        header[len(_DATA_URI_PREFIX) :].split(";", 1)[0].lower()
+        or "application/octet-stream"
+    )
+    if ";base64" in header:
+        raw = base64.b64decode(payload)
+    else:
+        raw = unquote_to_bytes(payload)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    path = dest_dir / f"{index:06d}.{_MIME_EXT.get(mime, 'bin')}"
+    path.write_bytes(raw)
+    return str(path.resolve())
+
+
+def _as_media_path(item: Any, dest_dir: Path, index: int) -> Any:
+    if isinstance(item, (bytes, bytearray)):
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        path = dest_dir / f"{index:06d}.bin"
+        path.write_bytes(bytes(item))
+        return str(path.resolve())
+    if isinstance(item, str) and item.startswith(_DATA_URI_PREFIX):
+        return _materialize_data_uri(item, dest_dir, index)
+    if isinstance(item, str):
+        if item.startswith(("http://", "https://")):
+            return item
+        try:
+            src = Path(item)
+            is_file = src.is_file()
+        except OSError:
+            return item
+        if is_file:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / f"{index:06d}{src.suffix}"
+            if src.resolve() != dest.resolve():
+                shutil.copy2(src, dest)
+            return str(dest.resolve())
+        return item
+    return item
 
 
 def _materialization_fingerprint(fields: dict[str, Any]) -> str:
@@ -38,6 +101,7 @@ class DatasetConfig(ABC):
     """Dataset fields and materialization behavior shared across training frameworks."""
 
     _type: DatasetType = DatasetType.DEFAULT
+    multimodal_keys: dict[str, str] | None = None
 
     def cache_key(self) -> str | None:
         return None
@@ -81,6 +145,8 @@ class DatasetConfig(ABC):
             cols.add(self.input_key())
         if self.label_key():
             cols.add(self.label_key())
+        if self.multimodal_keys:
+            cols.update(self.multimodal_keys.values())
         return cols
 
     def validate_written(self, path: str) -> None:
@@ -599,7 +665,12 @@ class HarborDataset(DatasetConfig):
 
 
 class MultimodalDataset(DatasetConfig):
-    """Dataset of text prompts paired with image, audio, or video data."""
+    """Dataset of text prompts paired with image or audio media.
+
+    Paths are resolved inside the dataset-preparation container and are not
+    uploaded from the launching machine; to ship local files, provide bytes or
+    data URIs.
+    """
 
     # TODO(ben/joy): gate-check media at this boundary so the evals dashboard can
     # reliably visualize it. Two parts: (1) normalize each emitted media item to a
@@ -612,13 +683,13 @@ class MultimodalDataset(DatasetConfig):
         self,
         rows: Iterable[dict[str, Any]] | None = None,
         *,
-        modality: Literal["image", "audio", "video"] = "audio",
+        modality: Literal["image", "audio"] = "audio",
         media_column: str | None = None,
     ) -> None:
         self.modality = modality
-        if modality not in ("image", "audio", "video"):
+        if modality not in ("image", "audio"):
             raise TrainingGymConfigError(
-                f"modality must be one of image/audio/video, got {modality!r}"
+                f"modality must be one of image/audio, got {modality!r}"
             )
         self.media_column = media_column or f"{modality}s"
         if (
@@ -653,6 +724,33 @@ class MultimodalDataset(DatasetConfig):
     def rows(self) -> Iterable[DatasetRow]:
         for row in self.source_rows():
             yield self._to_row(row)
+
+    def _rows_with_paths(
+        self, rows: list[DatasetRow], dest_dir: Path
+    ) -> list[DatasetRow]:
+        n = 0
+        out: list[DatasetRow] = []
+        for row in rows:
+            media = row.get(self.media_column)
+            if not isinstance(media, list):
+                out.append(row)
+                continue
+            written = [
+                _as_media_path(item, dest_dir, n + i) for i, item in enumerate(media)
+            ]
+            n += len(media)
+            out.append({**row, self.media_column: written})
+        return out
+
+    def write(self, path: str) -> None:
+        dest = Path(path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        rows = self._rows_with_paths(
+            list(self.rows()), dest.with_name(dest.name + ".media")
+        )
+        with dest.open("w") as f:
+            for row in rows:
+                f.write(json.dumps(row) + "\n")
 
 
 class OnlineRollout(DatasetConfig):
