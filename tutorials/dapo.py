@@ -1,5 +1,5 @@
 # ---
-# order: 5
+# order: 3
 # ---
 #
 # # Long chain-of-thought reasoning for large-scale RL

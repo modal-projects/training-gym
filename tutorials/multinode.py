@@ -1,5 +1,5 @@
 # ---
-# order: 10
+# order: 8
 # ---
 #
 # > **Multi-node workspace required:** This is a multi-node example. To run it,

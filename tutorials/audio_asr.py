@@ -1,5 +1,5 @@
 # ---
-# order: 6
+# order: 4
 # deps: jiwer, requests, soundfile
 # ---
 #
