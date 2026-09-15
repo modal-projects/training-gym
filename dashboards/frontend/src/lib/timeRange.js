@@ -83,9 +83,10 @@ export function zoomOutRange({ start, end, live }, { now, maxDuration }) {
   return { start: newEnd - newDuration, end: newEnd, live: live && newEnd === now };
 }
 
-export function shiftRangeLeft({ start, end }) {
+export function shiftRangeLeft({ start, end }, { minStart = -Infinity } = {}) {
   const duration = end - start;
-  return { start: start - duration, end: end - duration, live: false };
+  const newStart = Math.max(minStart, start - duration);
+  return { start: newStart, end: newStart + duration, live: false };
 }
 
 export function shiftRangeRight({ start, end }, { now }) {
@@ -96,7 +97,9 @@ export function shiftRangeRight({ start, end }, { now }) {
 
 /**
  * Sorted `(x, t)` knots — one per rollout that carries a timestamp — with
- * `t` forced monotonic so the mapping inverts cleanly.
+ * `t` strictly increasing so the mapping inverts cleanly. Timestamps are
+ * whole seconds, so rollouts recorded in the same second are spread evenly
+ * across that second (or up to the next distinct timestamp, if sooner).
  */
 export function rolloutTimeKnots(rollouts) {
   const knots = [];
@@ -109,6 +112,16 @@ export function rolloutTimeKnots(rollouts) {
   knots.sort((a, b) => a.x - b.x);
   for (let i = 1; i < knots.length; i++) {
     if (knots[i].t < knots[i - 1].t) knots[i].t = knots[i - 1].t;
+  }
+  for (let i = 0; i < knots.length; ) {
+    let j = i + 1;
+    while (j < knots.length && knots[j].t === knots[i].t) j++;
+    if (j - i > 1) {
+      const t = knots[i].t;
+      const room = j < knots.length ? Math.min(1, knots[j].t - t) : 1;
+      for (let k = i; k < j; k++) knots[k].t = t + ((k - i) / (j - i)) * room;
+    }
+    i = j;
   }
   return knots;
 }

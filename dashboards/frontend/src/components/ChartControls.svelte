@@ -46,7 +46,7 @@
 
   function shiftLeft() {
     if (!timeRange || !canShiftLeft) return;
-    setTimeRange(shiftRangeLeft(timeRange));
+    setTimeRange(shiftRangeLeft(timeRange, { minStart }));
   }
 
   function shiftRight() {

@@ -53,6 +53,11 @@ test("zoomOutRange triples the window, centred, capped at now", () => {
 
 test("shift left/right move by one duration and re-arm live at now", () => {
   assert.deepEqual(shiftRangeLeft({ start: 100, end: 200 }), { start: 0, end: 100, live: false });
+  assert.deepEqual(shiftRangeLeft({ start: 50, end: 150 }, { minStart: 0 }), {
+    start: 0,
+    end: 100,
+    live: false,
+  });
   assert.deepEqual(shiftRangeRight({ start: 100, end: 200 }, { now: 1000 }), {
     start: 200,
     end: 300,
@@ -88,8 +93,24 @@ test("rollout<->time mapping tolerates a single knot and unordered/untimed input
   ]);
   assert.deepEqual(messy, [
     { x: 1, t: T0 + 100 },
-    { x: 2, t: T0 + 100 },
+    { x: 2, t: T0 + 100.5 },
   ]);
+});
+
+test("rollouts recorded in the same second still map to a non-empty window", () => {
+  const knots = rolloutTimeKnots([
+    { rollout_id: 3, created_at: T0 },
+    { rollout_id: 4, created_at: T0 + 100 },
+    { rollout_id: 5, created_at: T0 + 100 },
+    { rollout_id: 6, created_at: T0 + 100 },
+    { rollout_id: 7, created_at: T0 + 100.2 },
+  ]);
+  for (let i = 1; i < knots.length; i++) assert.ok(knots[i].t > knots[i - 1].t);
+  assert.ok(knots[3].t < T0 + 100.2);
+  const range = rolloutDomainToTimeRange(knots, [4, 5], { runStart: T0, now: T0 + 1000 });
+  assert.ok(range && range.end > range.start);
+  assert.ok(Math.abs(timeToRollout(knots, range.start) - 4) < 1e-9);
+  assert.ok(Math.abs(timeToRollout(knots, range.end) - 5) < 1e-9);
 });
 
 test("rolloutDomainToTimeRange clamps to the run and collapses a full-run selection", () => {

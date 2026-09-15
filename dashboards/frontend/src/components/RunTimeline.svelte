@@ -56,19 +56,26 @@
   // Evaluate once to derive unmeasured gaps, then again for pixel-aware rendering.
   // Parent-bounded minimum widths leave both passes with the same overall span.
   let baseTimeline = $derived(runTimeline(timings, asyncOverride));
-  // The slice of the compressed axis `[0, span]` that fills the viewport.
+  // The slice of the compressed axis `[0, span]` that fills the viewport. A
+  // window narrower than the zoom cap is widened around its centre so the
+  // track always fills the viewport.
   let window_ = $derived.by(() => {
     const span = baseTimeline.span;
     if (!span || baseTimeline.runStart == null || !activeRange) return [0, span];
     const clamp = (o) => Math.min(span, Math.max(0, o));
-    const o0 = clamp(baseTimeline.mapOffset(Number(activeRange.start) - baseTimeline.runStart));
-    const o1 = clamp(baseTimeline.mapOffset(Number(activeRange.end) - baseTimeline.runStart));
+    let o0 = clamp(baseTimeline.mapOffset(Number(activeRange.start) - baseTimeline.runStart));
+    let o1 = clamp(baseTimeline.mapOffset(Number(activeRange.end) - baseTimeline.runStart));
+    if (!(o1 > o0)) return [o0, o1];
+    const minWidth = span / MAX_ZOOM;
+    if (o1 - o0 < minWidth) {
+      o0 = clamp((o0 + o1) / 2 - minWidth / 2);
+      o1 = clamp(o0 + minWidth);
+      o0 = clamp(o1 - minWidth);
+    }
     return [o0, o1];
   });
   let outOfRange = $derived(window_[1] - window_[0] <= 0);
-  let zoom = $derived(
-    outOfRange ? 1 : Math.min(MAX_ZOOM, baseTimeline.span / (window_[1] - window_[0])),
-  );
+  let zoom = $derived(outOfRange ? 1 : baseTimeline.span / (window_[1] - window_[0]));
   let trackShift = $derived(outOfRange ? 0 : (window_[0] / baseTimeline.span) * zoom * 100);
   let zoomed = $derived(!outOfRange && zoom > 1.001);
   let pixelsPerSecond = $derived(
