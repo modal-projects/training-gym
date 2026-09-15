@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from modal_training_gym.frameworks.slime.modal_helpers.patches import (
     patch_sglang_trtllm_moe_repack as patcher,
 )
@@ -82,3 +84,23 @@ def test_patch_skips_already_packed_moe(tmp_path) -> None:
     runner = ns["ModelRunner"](_Model(packed=True))
     assert runner.forward() == "fwd"
     assert runner.model.moe.quant_method.calls == 0
+
+
+def test_repack_failure_stops_forward(tmp_path) -> None:
+    target = tmp_path / "model_runner.py"
+    target.write_text(_RUNNER_SRC)
+    patcher._patch_file(target)
+    ns: dict[str, object] = {}
+    exec(target.read_text(), ns)
+
+    model = _Model()
+
+    def boom(_module):
+        raise ValueError("packed layout invalid")
+
+    model.moe.quant_method.process_weights_after_loading = boom
+    runner = ns["ModelRunner"](model)
+    with pytest.raises(RuntimeError, match="TRT-LLM MoE repack failed") as ei:
+        runner.forward()
+    assert isinstance(ei.value.__cause__, ValueError)
+    assert str(ei.value.__cause__) == "packed layout invalid"

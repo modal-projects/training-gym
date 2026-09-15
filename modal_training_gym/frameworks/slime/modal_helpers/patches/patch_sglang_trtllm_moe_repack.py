@@ -65,7 +65,7 @@ def _tg_try_repack(owner, label):
         if n:
             print(f"TRTLLM_MOE_REPACK {label} n={n}", flush=True)
     except Exception as exc:
-        print(f"TRTLLM_MOE_REPACK_FAIL {exc}", flush=True)
+        raise RuntimeError("TRT-LLM MoE repack failed") from exc
 
 
 def _tg_wrap_forward(cls):
