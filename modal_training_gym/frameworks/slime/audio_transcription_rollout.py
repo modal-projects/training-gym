@@ -41,12 +41,12 @@ def _iter_content_items(prompt: Any):
 
 
 def _audio_ref(sample: Any) -> Any:
-    """Pull the raw audio reference (data-URI / bytes) off a slime Sample.
+    """Pull the audio path off a slime Sample.
 
     The audio transcription dataset returns ``False`` from
     ``apply_chat_template()``, so slime keeps ``sample.prompt`` a conversation list
     and the audio rides in the message content as
-    ``{"type": "audio", "audio": <data-uri>}`` (slime's ``process_vision_info``
+    ``{"type": "audio", "audio": <path>}`` (slime's ``process_vision_info``
     extracts only images/videos, so audio never reaches ``multimodal_inputs``).
     Fail loudly if it's missing — a silent miss would train on audio-free prompts.
 
@@ -60,7 +60,7 @@ def _audio_ref(sample: Any) -> Any:
                 return ref
     raise RuntimeError(
         "transcription_rollout: no audio on the slime Sample. Expected a "
-        "conversation-list prompt with a {'type': 'audio', 'audio': <data-uri>} item."
+        "conversation-list prompt with a {'type': 'audio', 'audio': <path>} item."
     )
 
 
@@ -183,7 +183,7 @@ async def transcription_rollout(args: Any, sample: Any, sampling_params: dict) -
     if audio_bytes is None:
         raise RuntimeError(
             "transcription_rollout: the Sample's audio reference did not decode to "
-            "bytes (expected raw bytes or a base64 / data-URI string)."
+            "bytes (expected a file path or raw bytes)."
         )
     model = getattr(args, "served_model_name", None) or "qwen3-asr"
     temperature = float(sampling_params.get("temperature", 1.0))

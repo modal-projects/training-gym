@@ -3,10 +3,11 @@
 import pytest
 
 from modal_training_gym import TrainConfig, TrainingGroup
-from modal_training_gym.common.dataset import HuggingFaceDataset
-from modal_training_gym.common.models import Qwen3_6_35B
+from modal_training_gym.common.dataset import HuggingFaceDataset, MultimodalDataset
+from modal_training_gym.common.models import Inkling_Small, Qwen3_6_35B
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.training_group import TrainingGroupError
+from modal_training_gym.train_recipes.miles_recipe.inkling import Inkling_Small_Recipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import Qwen3_6_35B_Recipe
 
 
@@ -269,3 +270,37 @@ def test_group_variants_record_tag_metadata():
             ],
         },
     }
+
+
+def _inkling_image_base() -> TrainConfig:
+    return TrainConfig(
+        model=Inkling_Small(),
+        dataset=MultimodalDataset(
+            rows=[{"prompt": "p", "media": ["ref"], "label": "l"}],
+            modality="image",
+        ),
+        recipe=Inkling_Small_Recipe(modality="vision"),
+    )
+
+
+def test_modality_sweep_revalidates_dataset_pairing():
+    group = TrainingGroup(
+        base=_inkling_image_base(),
+        grid={"recipe.modality": ["vision", "audio"]},
+    )
+    with pytest.raises(TrainingGroupError, match="cannot serve image"):
+        group.get_train_configs()
+
+
+def test_valid_modality_variant_keeps_group_metadata():
+    group = TrainingGroup(
+        base=_inkling_image_base(),
+        grid={"recipe.modality": ["vision"]},
+        name="Vision Only",
+    )
+    overrides, cfg = group.iter_variants()[0]
+    assert overrides == {"recipe.modality": "vision"}
+    assert cfg.recipe.modality == "vision"
+    assert cfg.group_id == "vision-only"
+    assert cfg.group_overrides == overrides
+    assert cfg.group_axes == ["recipe.modality"]

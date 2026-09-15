@@ -45,10 +45,23 @@ SHARED_VALIDATION_HARNESS_PATHS = frozenset(
         REPO_ROOT / "scripts" / "validate_model_configs.py",
         REPO_ROOT / "scripts" / "diff_impact.py",
         VALIDATION_BACKEND_ROOT / "__init__.py",
+        VALIDATION_BACKEND_ROOT / "datasets.py",
         REPO_ROOT / "modal_training_gym" / "common" / "models" / "validation.py",
+        REPO_ROOT / "modal_training_gym" / "common" / "modality.py",
         REPO_ROOT / "modal_training_gym" / "common" / "train.py",
         REPO_ROOT / "modal_training_gym" / "common" / "train_result.py",
     }
+)
+
+_QWEN35_VL_PLUGIN = (
+    REPO_ROOT
+    / "modal_training_gym"
+    / "frameworks"
+    / "slime"
+    / "modal_helpers"
+    / "patches"
+    / "model_specific_patches"
+    / "qwen3_5_vl"
 )
 
 # Per-framework harness paths invalidate only the models that train on that
@@ -59,6 +72,12 @@ FRAMEWORK_VALIDATION_HARNESS_PATHS: dict[str, frozenset[Path]] = {
         {
             REPO_ROOT / "modal_training_gym" / "frameworks" / "slime" / "launcher.py",
             VALIDATION_BACKEND_ROOT / "slime.py",
+            _QWEN35_VL_PLUGIN / "qwen3_5_vl.py",
+            _QWEN35_VL_PLUGIN / "qwen3_5_vl_utils.py",
+            _QWEN35_VL_PLUGIN / "patch_qwen3_5_hf_to_megatron.py",
+            _QWEN35_VL_PLUGIN / "hf_to_megatron" / "__init__.py",
+            _QWEN35_VL_PLUGIN / "hf_to_megatron" / "common.py",
+            _QWEN35_VL_PLUGIN / "hf_to_megatron" / "qwen3_5.py",
         }
     ),
     "miles": frozenset(

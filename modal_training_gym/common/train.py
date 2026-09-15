@@ -8,7 +8,7 @@ import warnings
 from contextlib import nullcontext
 from typing import Any
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
@@ -17,6 +17,7 @@ from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
+from modal_training_gym.common.modality import validate_modalities
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun, metric_run_id_for_attempt
 from modal_training_gym.common.status import (
@@ -353,6 +354,14 @@ class TrainConfig:
                 "recipe.extra_config['custom_generate_function_path']"
             )
 
+    @model_validator(mode="after")
+    def _validate_modalities(self) -> "TrainConfig":
+        validate_modalities(self.recipe, self.model, self.dataset)
+        if self.eval_dataset is not None:
+            validate_modalities(self.recipe, self.model, self.eval_dataset)
+        type(self.recipe)._validate_datasets(self.dataset, self.eval_dataset)
+        return self
+
     def _generate_training_run_id(self) -> str:
         """Mint a new run id. ``launch()`` calls this once per invocation, so
         each launch of the same config gets its own TrainingRun record."""
@@ -645,8 +654,10 @@ class TrainConfig:
                         is_active=is_active,
                     )
 
-                megatron_to_hf_mode = getattr(self.recipe, "megatron_to_hf_mode", "")
-                needs_conversion = megatron_to_hf_mode != "bridge"
+                needs_conversion = (
+                    self.recipe.effective_megatron_to_hf_mode(self.dataset, self.model)
+                    != "bridge"
+                )
                 download_status, convert_status = (
                     (SlimeStatus.DOWNLOAD_MODEL, SlimeStatus.CONVERT_MODEL)
                     if isinstance(self.recipe, SlimeRecipe)
