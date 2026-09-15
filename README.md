@@ -113,8 +113,3 @@ print(run.training_run_id)
 | Qwen3.6 | <ul><li>[Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B)</li><li>[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)</li></ul> |
 | Qwen3.8 | <ul><li>[Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B)</li></ul> |
 <!-- END MODELS LIST -->
-
-## Multi-node access
-
-> [!IMPORTANT]
-> Single-node training is open to everyone. Multi-node clusters are still in Beta and are required for larger models. [Contact us on Slack](https://modal.com/slack) for access.

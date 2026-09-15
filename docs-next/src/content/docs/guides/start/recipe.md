@@ -56,9 +56,6 @@ recipe = Qwen3_5_4B_Recipe(
 
 The Gym runs your training workloads across one or more nodes on Modal, each with one or more GPUs. Smaller models (i.e., tens of billions of parameters) can be trained on a single node, while larger models may require a [multi-node cluster](https://modal.com/docs/guide/multi-node-training).
 
-> **Note:** Single-node training is open to everyone. Multi-node clusters are still in Beta. [Contact us on Slack](https://modal.com/slack) for access.
-> 
-
 Each recipe automatically provisions the cluster shape that strikes a balance between cost and throughput, but you may want to optimize this for your needs. You can choose any type from [Modal’s supported GPUs](https://modal.com/docs/guide/gpu#picking-a-gpu). Also, note that you may not actually need (or even want!) multiple nodes: we suggest setting `actor_num_gpus_per_node` to the [maximum amount](https://modal.com/docs/guide/gpu#specifying-gpu-count) to minimize unnecessary communication between nodes.
 
 Actor parameters pertain to your training cluster, and rollout parameters your rollout cluster. When `colocate` is set to `True`, these are one and the same. When set to `False`, this will create a separate cluster for inference (i.e., disaggregated, async RL), so be sure you have the budget for it!
