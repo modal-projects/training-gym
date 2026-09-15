@@ -90,9 +90,9 @@ One registry, one script, one workflow, across every framework.
 
 Launchers use `resolve_caller_module()` (in `common/framework.py`) to find the user's tutorial module by walking the stack past `modal_training_gym.*` frames. This enables cloudpickle to serialize inline `DatasetConfig`/`ModelConfig` subclasses by value to remote containers.
 
-### TrainResult persistence
+### TrainingRun persistence
 
-`TrainResult` is a dataclass written to the metadata volume (`MetadataStore.TRAIN_RESULTS`, keyed by `training_run_id`). Created by each framework's `train()` on rank 0. Loaded by eval scripts via `TrainResult.load(training_run_id)`. The `.model` property reconstructs a `ModelConfig` pointing at the checkpoint for serving.
+`TrainingRun` is written to the metadata volume (`MetadataStore.TRAINING_RUNS`, keyed by `training_run_id`). `TrainConfig.train()` and `TrainingRun.from_id` return that handle. `.model` reconstructs a `ModelConfig` pointing at the latest megatron checkpoint. A dashboard-only blob may also be written to `MetadataStore.TRAIN_RESULTS`.
 
 ### Tutorial system
 

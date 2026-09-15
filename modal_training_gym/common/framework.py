@@ -87,7 +87,7 @@ def resolve_caller_module(
 
 class Framework(str, Enum):
     # ``str`` mixin so a Framework serializes straight to its value in plain
-    # ``json.dumps`` (e.g. TrainResult, whose ``asdict`` payload doesn't coerce
-    # enums) — matching the SlimeStatus/MilesStatus convention.
+    # ``json.dumps`` (dashboard blobs do not coerce enums), matching the
+    # SlimeStatus/MilesStatus convention.
     SLIME = "slime"
     MILES = "miles"

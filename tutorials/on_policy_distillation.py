@@ -37,6 +37,7 @@
 # [this tutorial](https://gym.modal.dev/tutorials/cross_tokenizer_distillation).
 
 import re
+import time
 
 from modal_training_gym import (
     CustomDeployment,
@@ -277,17 +278,24 @@ config = TrainConfig(
     ),
 )
 
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained student
 #
 # We'll deploy our trained student and compare it
 # to our baseline evaluation from earlier.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_student_deployment = Endpoint.launch(
     student_model, checkpoint, unauthenticated=True, recreate_if_existing=True

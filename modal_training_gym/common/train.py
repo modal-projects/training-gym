@@ -24,13 +24,21 @@ from modal_training_gym.common.status import (
     MilesStatus,
     SlimeStatus,
 )
-from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.frameworks.miles import build_miles_app
 from modal_training_gym.frameworks.slime import build_slime_app
 from modal_training_gym.train_recipes.base import BaseTrainRecipe
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
+
+
+def _megatron_load_dir(checkpoint: Checkpoint) -> str:
+    if checkpoint.checkpoint_type != CheckpointType.megatron:
+        raise TrainingGymConfigError(
+            "Training can only resume from a Megatron checkpoint; "
+            "Hugging Face exports are serving artifacts."
+        )
+    return os.path.dirname(checkpoint.path.rstrip("/"))
 
 
 def _try_validate_model_parallelism(
@@ -81,7 +89,7 @@ def _warn_if_external_build_app() -> None:
         "app: spawning train() on it yourself means the run dies when the "
         "enclosing app.run() block exits or is interrupted. Use "
         "TrainConfig.launch() (returns a TrainingRun handle immediately) or "
-        "TrainConfig.train() (blocks for the TrainResult) instead.",
+        "TrainConfig.train() (blocks for the TrainingRun) instead.",
         stacklevel=3,
     )
 
@@ -301,9 +309,12 @@ class TrainConfig:
             Model identity and weight download behavior.
         recipe:
             Training framework, Modal resources, and framework arguments.
-        checkpoint:
-            Megatron checkpoint to resume from. ``model`` remains the source for
-            tokenizer and architecture metadata.
+        resume_from_checkpoint:
+            Start a new run from this Megatron checkpoint's weights with a
+            fresh optimizer and LR schedule; ``recipe.num_rollout`` counts
+            from zero. To continue the source run in place with its Adam
+            state and iteration count, leave ``resume_from_checkpoint`` unset
+            and point ``recipe.load`` at the checkpoint directory.
         detach:
             Keep training on Modal if the local ``train()`` wait is interrupted.
             ``False`` stops the app.
@@ -320,7 +331,7 @@ class TrainConfig:
     model: ModelConfig
     recipe: SlimeRecipe | MilesRecipe
     eval_dataset: DatasetConfig | None = None
-    checkpoint: Checkpoint | None = None
+    resume_from_checkpoint: Checkpoint | None = None
     # Whether a run outlives the local client. The app itself is always started
     # detached (the CLI's ``modal run --detach`` only detaches the entrypoint,
     # not the nested ``app.run()`` the driver opens), so this only decides
@@ -347,29 +358,27 @@ class TrainConfig:
         each launch of the same config gets its own TrainingRun record."""
         return create_hash(
             self.model.model_name,
-            self.checkpoint.path if self.checkpoint is not None else "",
+            self.resume_from_checkpoint.path
+            if self.resume_from_checkpoint is not None
+            else "",
             f"{type(self.recipe).__name__}:{self.framework.value}",
             "",
             self.model.model_path or "",
         )
 
     def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
-        if self.checkpoint is None:
+        if self.resume_from_checkpoint is None:
             recipe = _dc.replace(self.recipe)
         else:
-            if self.checkpoint.checkpoint_type != CheckpointType.megatron:
-                raise TrainingGymConfigError(
-                    "Training can only resume from a Megatron checkpoint; "
-                    "Hugging Face exports are serving artifacts."
-                )
             recipe = _dc.replace(
                 self.recipe,
-                load=os.path.dirname(self.checkpoint.path.rstrip("/")),
+                load=_megatron_load_dir(self.resume_from_checkpoint),
                 start_rollout_id=(
                     0
                     if self.recipe.start_rollout_id is None
                     else self.recipe.start_rollout_id
                 ),
+                no_load_optim=True,
             )
         _try_validate_model_parallelism(recipe, self.model)
         return recipe
@@ -386,7 +395,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.checkpoint,
+                checkpoint=self.resume_from_checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
             )
@@ -397,7 +406,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.checkpoint,
+                checkpoint=self.resume_from_checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
             )
@@ -536,15 +545,15 @@ class TrainConfig:
             f"ep={getattr(recipe, 'expert_model_parallel_size', 'n/a')})"
         )
 
-    def train(self, *, show_output: bool = True) -> TrainResult:
+    def train(self, *, show_output: bool = True) -> TrainingRun:
         """Run one training configuration.
 
         Returns:
-            The completed training result.
+            The completed training run.
         """
         from modal_training_gym.common.modal_lifecycle import stop_app
 
-        launch = self.launch(show_output=show_output, prepare_inputs=True)
+        launch = self.launch(show_output=show_output)
         try:
             return launch.result(stop_app_on_success=True)
         except BaseException:
@@ -556,7 +565,6 @@ class TrainConfig:
         self,
         *,
         show_output: bool = True,
-        prepare_inputs: bool = False,
     ) -> TrainingRun:
         """Start one training run in a detached Modal app.
 
@@ -639,36 +647,25 @@ class TrainConfig:
 
                 megatron_to_hf_mode = getattr(self.recipe, "megatron_to_hf_mode", "")
                 needs_conversion = megatron_to_hf_mode != "bridge"
-                if prepare_inputs:
-                    if isinstance(self.recipe, SlimeRecipe):
-                        _set_status(SlimeStatus.DOWNLOAD_MODEL, is_active=False)
-                        app.download.remote(
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
-                        if needs_conversion:
-                            _set_status(SlimeStatus.CONVERT_MODEL, is_active=False)
-                            _convert_checkpoint_on_cache_miss(
-                                app,
-                                training_run_id=training_run_id,
-                                framework_status_url=framework_status_url,
-                                framework_status_token=framework_status_token,
-                            )
-                    elif isinstance(self.recipe, MilesRecipe) and needs_conversion:
-                        _set_status(MilesStatus.DOWNLOAD_MODEL, is_active=False)
-                        app.download.remote(
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
-                        _set_status(MilesStatus.CONVERT_MODEL, is_active=False)
-                        _convert_checkpoint_on_cache_miss(
-                            app,
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
+                download_status, convert_status = (
+                    (SlimeStatus.DOWNLOAD_MODEL, SlimeStatus.CONVERT_MODEL)
+                    if isinstance(self.recipe, SlimeRecipe)
+                    else (MilesStatus.DOWNLOAD_MODEL, MilesStatus.CONVERT_MODEL)
+                )
+                _set_status(download_status, is_active=False)
+                app.download.remote(
+                    training_run_id=training_run_id,
+                    framework_status_url=framework_status_url,
+                    framework_status_token=framework_status_token,
+                )
+                if needs_conversion:
+                    _set_status(convert_status, is_active=False)
+                    _convert_checkpoint_on_cache_miss(
+                        app,
+                        training_run_id=training_run_id,
+                        framework_status_url=framework_status_url,
+                        framework_status_token=framework_status_token,
+                    )
 
                 function_call = app.train.spawn(
                     modal_app_id=modal_app_id,

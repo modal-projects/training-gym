@@ -20,6 +20,7 @@
 
 import json
 import re
+import time
 
 from modal_training_gym import (
     DatasetConfig,
@@ -385,13 +386,20 @@ config = TrainConfig(
     ),
 )
 print("Starting training...")
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate trained checkpoint
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )
