@@ -15,6 +15,7 @@ def _base() -> TrainConfig:
         model=Qwen3_6_35B(),
         dataset=HuggingFaceDataset(
             hf_repo="openai/gsm8k",
+            hf_revision="test-revision",
             input_column="question",
             output_column="answer",
             input_format="text",
@@ -61,6 +62,7 @@ def test_variants_preserve_independent_eval_datasets():
     base = _base()
     base.eval_dataset = HuggingFaceDataset(
         hf_repo="openai/gsm8k",
+        hf_revision="test-revision",
         hf_split="test",
         input_column="question",
         output_column="answer",

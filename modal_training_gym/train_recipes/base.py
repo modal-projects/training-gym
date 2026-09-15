@@ -116,6 +116,7 @@ class BaseTrainRecipe(ABC):
         ds: "DatasetConfig",
     ) -> str:
         """Return the materialized path for one dataset instance."""
+        ds.preflight()
         cache_key = ds.cache_key()
         if cache_key is None:
             cache_key = str(uuid.uuid4())

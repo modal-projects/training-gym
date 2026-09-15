@@ -63,6 +63,7 @@ def test_write_writes_media_column(tmp_path):
 def test_text_dataset_unaffected():
     ds = HuggingFaceDataset(
         hf_repo="statworx/haiku",
+        hf_revision="test-revision",
         input_column="keywords",
         output_column="text",
         input_format="text",
@@ -84,6 +85,7 @@ def test_hugging_face_input_format_controls_dataset_fields(
 ):
     ds = HuggingFaceDataset(
         hf_repo="some/dataset",
+        hf_revision="test-revision",
         input_column="prompt",
         output_column="answer",
         input_format=input_format,
@@ -100,6 +102,7 @@ def test_hugging_face_text_is_formatted_but_messages_pass_through(monkeypatch):
     monkeypatch.setattr("datasets.load_dataset", lambda *args, **kwargs: plain_text)
     text_dataset = HuggingFaceDataset(
         hf_repo="some/dataset",
+        hf_revision="test-revision",
         input_column="prompt",
         output_column="answer",
         input_format="text",
@@ -116,6 +119,7 @@ def test_hugging_face_text_is_formatted_but_messages_pass_through(monkeypatch):
     monkeypatch.setattr("datasets.load_dataset", lambda *args, **kwargs: preformatted)
     messages_dataset = HuggingFaceDataset(
         hf_repo="some/dataset",
+        hf_revision="test-revision",
         input_column="prompt",
         output_column="label",
         input_format="messages",
@@ -127,6 +131,7 @@ def test_hugging_face_rejects_unknown_input_format():
     with pytest.raises(ValueError, match="input_format"):
         HuggingFaceDataset(
             hf_repo="some/dataset",
+            hf_revision="test-revision",
             input_column="prompt",
             output_column="answer",
             input_format="unknown",

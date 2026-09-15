@@ -127,7 +127,6 @@ train_dataset = HuggingFaceDataset(
     output_column="text",
     input_format="text",
     prompt_template="Write a haiku about {input}.",
-    always_download=True,
 )
 
 eval_dataset = HuggingFaceDataset(
@@ -137,7 +136,6 @@ eval_dataset = HuggingFaceDataset(
     output_column="text",
     input_format="text",
     prompt_template="Write a haiku about {input}.",
-    always_download=True,
 )
 
 # ## Evaluate the base model

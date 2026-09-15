@@ -39,5 +39,4 @@ def build_miles_validation(
         input_column="prompt",
         output_column="label",
         input_format="messages",
-        always_download=True,
     )
