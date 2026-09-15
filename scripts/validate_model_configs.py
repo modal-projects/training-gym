@@ -309,6 +309,7 @@ def available_models(
             "name": config.name,
             "model_name": config.model_name,
             "framework": config.framework.value,
+            "modality": config.modality,
         }
         for config in _ValidationConfig.select(framework)
     ]
@@ -348,7 +349,7 @@ def run_base_training(
     model_config = config.model_config()
 
     train_recipe, dataset = build_recipe_and_dataset(
-        config.framework, model_config, step_count
+        config.framework, model_config, step_count, config.modality
     )
     train_recipe.num_rollout = step_count
     if eval_interval is not None:

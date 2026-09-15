@@ -11,6 +11,7 @@ from pydantic.dataclasses import dataclass
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.metrics import MetricConfig
+from modal_training_gym.common.modality import requested_modalities
 from modal_training_gym.common.models import (
     ModelArchitecture,
     ModelConfig,
@@ -585,6 +586,7 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── Validators ───────────────────────────────────────────────────────────
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = frozenset(_SLIME_SKIP)
+    trainable_modalities = frozenset({"image", "audio"})
 
     @model_validator(mode="after")
     def _validate_slime_source_overlay(self) -> "SlimeRecipe":
@@ -780,6 +782,36 @@ class SlimeRecipe(BaseTrainRecipe):
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
         validate_num_experts_divisible_by_expert_parallel_size(self, model)
 
+    def overrides(
+        self,
+        dataset: "DatasetConfig | None",
+        model: "ModelConfig | None",
+    ) -> dict[str, Any]:
+        out = super().overrides(dataset, model)
+        if model is None:
+            return out
+        media = requested_modalities(dataset) if dataset is not None else frozenset()
+        if model.vision_tower_param and media:
+            self._override_default(
+                out, "freeze_params_name_list", [model.vision_tower_param]
+            )
+        if model.custom_model_provider and "image" in media:
+            out.update(self._custom_provider_fields(model.custom_model_provider))
+            self._override_default(out, "megatron_to_hf_mode", "bridge")
+        return out
+
+    def _custom_provider_fields(self, path: str) -> dict[str, Any]:
+        if "custom_model_provider_path" in self._escape_hatch_keys():
+            return {}
+        if (
+            isinstance(self.extra_config, str)
+            and self._materialized_config_keys is None
+        ):
+            raise TrainingGymConfigError(
+                "Image training with custom_model_provider requires extra_config as a dict."
+            )
+        return {"custom_model_provider_path": path}
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(
@@ -814,6 +846,7 @@ class SlimeRecipe(BaseTrainRecipe):
             self.validate_model_parallelism(model)
             if not self.slime_model_script:
                 fields.update(self._model_to_fields(model))
+        fields.update(self.overrides(dataset, model))
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)

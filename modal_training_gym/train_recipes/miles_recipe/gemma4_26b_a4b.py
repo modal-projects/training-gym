@@ -2,7 +2,7 @@ import dataclasses as _dc
 from collections.abc import Mapping
 from dataclasses import field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
@@ -50,9 +50,7 @@ _VISION_MODE: dict[str, Any] = {
 class Gemma4_26B_A4B_Recipe(MilesRecipe):
     """Gemma-4-26B-A4B recipe."""
 
-    _SKIP_FIELDS: ClassVar[frozenset[str]] = MilesRecipe._SKIP_FIELDS | {"modality"}
-
-    modality: Literal["text", "vision"] = "text"
+    trainable_modalities: ClassVar[frozenset[str]] = frozenset({"image"})
 
     gpu_type: str = "B300"
     image_run_commands: list[str] = field(default_factory=_image_patches)
