@@ -416,8 +416,11 @@ def build_slime_app(
                 f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
             )
 
-    megatron_to_hf_mode = slime.overrides(dataset, model).get(
+    configured_megatron_to_hf_mode = slime._escape_hatch_values().get(
         "megatron_to_hf_mode", slime.megatron_to_hf_mode
+    )
+    megatron_to_hf_mode = slime.overrides(dataset, model).get(
+        "megatron_to_hf_mode", configured_megatron_to_hf_mode
     )
 
     if model and megatron_to_hf_mode != "bridge" and not slime.ref_load:

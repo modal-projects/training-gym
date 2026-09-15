@@ -28,6 +28,7 @@ from modal_training_gym.common.models import (
     Qwen3_VL_8B,
 )
 from modal_training_gym.common.train import TrainConfig
+from modal_training_gym.frameworks.slime.launcher import build_slime_app
 from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
     Gemma4_26B_A4B_Recipe,
 )
@@ -274,6 +275,17 @@ def test_qwen35_recipe_reuse_does_not_stick_vl_provider():
     assert "--custom-model-provider-path" not in text_args
     assert "--megatron-to-hf-mode" not in text_args
     assert not (recipe.extra_config or {}).get("custom_model_provider_path")
+
+
+def test_yaml_bridge_mode_does_not_assign_torch_dist_ref_load():
+    recipe = Qwen3_5_4B_Recipe(extra_config={"megatron_to_hf_mode": "bridge"})
+    build_slime_app(
+        training_run_id="bridge-yaml",
+        slime=recipe,
+        model=Qwen3_5_4B(),
+        dataset=_mm("image"),
+    )
+    assert recipe.ref_load == ""
 
 
 def test_write_jsonl_materializes_data_uris(tmp_path):
