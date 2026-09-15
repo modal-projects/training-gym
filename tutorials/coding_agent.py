@@ -26,8 +26,10 @@
 # nodes and four rollout nodes. A one-node smoke profile is described at the
 # end for checking the plumbing before committing that much hardware.
 
+import json
 import os
 from dataclasses import replace
+from pathlib import Path
 
 import modal
 
@@ -44,7 +46,7 @@ from modal_training_gym import (
 # The partition script streams SWE-rebench V2 from the Hugging Face Hub,
 # renders each row into a Harbor task directory with the pinned fork's
 # converter, then writes a repository-disjoint 20% `eval.jsonl` alongside
-# nested, language-balanced `eval-4`, `eval-100`, `eval-300` and `train-4`,
+# a smoke-test `eval-4` and nested, language-balanced `train-4`,
 # `train-100`, `train-300`, `train-1000`, `train-full` subsets:
 #
 # ```bash
@@ -58,8 +60,8 @@ from modal_training_gym import (
 
 # ## Configure the run
 #
-# The dataset root is private to your workspace, so it is read from the
-# environment rather than hard-coded, and the remaining knobs follow suit so
+# The dataset root defaults to `swe_rebench_v2` and can be overridden through
+# the environment. The remaining knobs follow suit so
 # the same file can launch a full run, a one-node experiment, a smoke test, or
 # a probe. The dataset class below is shipped to remote workers by value, and
 # those workers may import this module after launcher-only variables are gone,
@@ -102,35 +104,31 @@ DATA_ROOT = f"/data/{DATASET_ROOT}"
 
 # ## Select a prepared subset by filename
 #
-# The recipes resolve a dataset's `hf_repo` and `hf_split` to
-# `/data/<hf_repo>/<hf_split>.jsonl`, so a `DatasetConfig` that sets those two
-# attributes to the dataset root and subset name points straight at a
-# partitioned file. Its `prepare()` refuses to run: if the file is missing, the
-# fix is to run the partition script, not to silently materialize a different
-# dataset. Evaluation subsets are listed in the recipe's `eval_config` instead,
-# so `writes_eval_paths` is off and no companion `eval.jsonl` is expected.
+# The dataset reads an already partitioned JSONL file from the data volume.
+# The launcher materializes these rows for training using the DatasetConfig
+# API. Evaluation reads the prepared files directly through `eval_config`.
 
 
 class PreparedHarborSubset(DatasetConfig):
-    input_key = "prompt"
-    label_key = "label"
-    apply_chat_template = False
-    output_format = "jsonl"
-    writes_eval_paths = False
-
     def __init__(self, subset: str):
         if not subset or "/" in subset or subset in {".", ".."}:
             raise ValueError(f"invalid subset name: {subset!r}")
-        self.hf_repo = DATASET_ROOT
-        self.hf_split = subset
-        self.dataset_id = f"{DATASET_ROOT}-{subset}"
-        self._validate()
+        self.path = Path(DATA_ROOT) / f"{subset}.jsonl"
 
-    def prepare(self, path: str, eval_paths=None):
-        raise FileNotFoundError(
-            f"prepared Harbor subset is missing: {path}; "
-            "run scripts/partition_swe_dataset.py prepare first"
-        )
+    def input_key(self) -> str:
+        return "prompt"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def apply_chat_template(self) -> bool:
+        return False
+
+    def rows(self):
+        with self.path.open() as source:
+            for line in source:
+                if line.strip():
+                    yield json.loads(line)
 
 
 train_dataset = PreparedHarborSubset(TRAIN_SUBSET)
@@ -140,7 +138,7 @@ train_dataset = PreparedHarborSubset(TRAIN_SUBSET)
 # The recipe logs to [Trackio](https://huggingface.co/docs/trackio) by default,
 # and a `TrackioConfig` that only names a project resolves at launch to the
 # `training-gym-trackio` server deployed in your workspace. Deploy one once with
-# `TrackioConfig.deploy_to_modal(project=...)` (see the
+# `training-gym setup` (see the
 # [metrics guide](https://gym.modal.dev/guides/tools/metric)); the launch fails
 # fast if no server exists rather than logging to a database that dies with the
 # training container. The fork's native `rollout/*` train charts and one
@@ -278,17 +276,15 @@ if missing:
 
 # ## Launch
 #
-# `launch()` starts a detached Modal app and returns immediately. With
-# `prepare_inputs=True` the model download and Megatron conversion run first,
-# so a stale conversion also fails before the cluster is allocated. The
-# conversion is cached on the recipe's checkpoints volume, so only the first
-# launch pays for it.
+# `launch()` starts a detached Modal app and handles model download, dataset
+# preparation, and training. Model conversion is cached on the recipe's
+# checkpoints volume, so only the first launch pays for it.
 
 run = TrainConfig(
     model=Qwen3_6_27B(),
     dataset=train_dataset,
     recipe=recipe,
-).launch(prepare_inputs=True)
+).launch()
 print(f"run id: {run.training_run_id}")
 print(f"Modal app: {run.modal_app_url}")
 
