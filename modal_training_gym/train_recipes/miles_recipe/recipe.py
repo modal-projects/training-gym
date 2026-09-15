@@ -8,6 +8,7 @@ from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.metrics import MetricConfig
+from modal_training_gym.common.modality import requested_modalities
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.base import (
     # Re-exported for backwards compatibility (e.g. frameworks/miles/launcher.py
@@ -533,6 +534,7 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_server_concurrency: int | None = None
     sglang_tool_call_parser: str | None = None
     sglang_reasoning_parser: str | None = None
+    sglang_enable_multimodal: bool = False
 
     # ── RL algorithm ────────────────────────────────────────────────────────
     advantage_estimator: str = "grpo"
@@ -806,6 +808,16 @@ class MilesRecipe(BaseTrainRecipe):
     def validate_model_parallelism(self, model: ModelConfig) -> None:
         validate_num_experts_divisible_by_expert_parallel_size(self, model)
 
+    def overrides(
+        self,
+        dataset: DatasetConfig | None,
+        model: ModelConfig | None,
+    ) -> dict[str, Any]:
+        out = super().overrides(dataset, model)
+        if dataset is not None and requested_modalities(dataset):
+            self._override_default(out, "sglang_enable_multimodal", True)
+        return out
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(
@@ -842,6 +854,7 @@ class MilesRecipe(BaseTrainRecipe):
                     eval_dataset_path=eval_dataset_path,
                 )
             )
+        fields.update(self.overrides(dataset, model))
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)

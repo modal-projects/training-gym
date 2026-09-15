@@ -7,7 +7,8 @@ class Qwen3_5_2B(HFModelConfiguration):
     """Alibaba Qwen3.5-2B model."""
 
     response_parser = staticmethod(parse_qwen3_6_response)
-
+    supported_modalities = frozenset({"image"})
+    vision_tower_param = "visual"
     model_name = "Qwen/Qwen3.5-2B"
     architecture = ModelArchitecture(
         num_layers=24,

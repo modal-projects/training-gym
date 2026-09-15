@@ -10,6 +10,7 @@ class Gemma4_26B_A4B(HFModelConfiguration):
 
     model_name = "google/gemma-4-26B-A4B-it"
     response_parser = staticmethod(parse_gemma4_response)
+    supported_modalities = frozenset({"image"})
 
     architecture = ModelArchitecture(
         # text_config from config.json. The recipe sets ``miles_model_script``, so

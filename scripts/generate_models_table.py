@@ -35,6 +35,7 @@ FRAMEWORK_BASES = frozenset({*BASE_RECIPES, *BASE_DEPLOY_RECIPES, "MilesConfig"}
 MODEL_CONFIGS = {name.lower(): getattr(models, name) for name in models.__all__}
 FAMILY_RE = re.compile(r"^([A-Za-z]+(?:\d+(?:\.\d+)*|\d+)?)")
 HF_URL = "https://huggingface.co"
+MODALITY_ORDER = {"image": 0, "audio": 1}
 
 
 @dataclass(frozen=True)
@@ -44,9 +45,10 @@ class ModelLink:
 
 
 @dataclass(frozen=True)
-class FamilyRow:
+class ModelRow:
     family: str
-    models: tuple[ModelLink, ...]
+    model: ModelLink
+    modalities: tuple[str, ...]
 
 
 def model_key(recipe_name: str) -> str:
@@ -63,6 +65,25 @@ def family_of(hf_id: str) -> str:
 def model_link(hf_id: str) -> ModelLink:
     display_name = hf_id.rsplit("/", 1)[-1]
     return ModelLink(display_name=display_name, href=f"{HF_URL}/{hf_id}")
+
+
+def ordered_modalities(values: set[str]) -> tuple[str, ...]:
+    return tuple(sorted(values, key=lambda name: (MODALITY_ORDER.get(name, 99), name)))
+
+
+def recipe_trainable_modalities(recipe: Any) -> frozenset[str]:
+    return frozenset(getattr(recipe, "trainable_modalities", None) or ())
+
+
+def training_modalities(recipe: Any, config: Any) -> frozenset[str]:
+    supported = getattr(config, "supported_modalities", None) or frozenset()
+    return frozenset(supported) & recipe_trainable_modalities(recipe)
+
+
+def render_modalities(modalities: tuple[str, ...]) -> str:
+    if not modalities:
+        return "—"
+    return ", ".join(modalities)
 
 
 def iter_registered_recipes() -> Iterator[tuple[str, Any, Any, str]]:
@@ -109,15 +130,15 @@ def collect_deploy_preset_names() -> frozenset[str]:
     return frozenset(names)
 
 
-def collect_models() -> tuple[FamilyRow, ...]:
-    families: dict[str, set[str]] = defaultdict(set)
+def collect_models() -> tuple[ModelRow, ...]:
+    by_hf_id: dict[str, set[str]] = defaultdict(set)
     unmatched: list[str] = []
-    for recipe_name, _recipe, config, module_path in iter_registered_recipes():
+    for recipe_name, recipe, config, module_path in iter_registered_recipes():
         model_name = getattr(config, "model_name", None)
         if not model_name:
             unmatched.append(f"{module_path}.{recipe_name}")
             continue
-        families[family_of(model_name)].add(model_name)
+        by_hf_id[model_name].update(training_modalities(recipe, config))
     if unmatched:
         raise SystemExit(
             "No ModelConfig found for these recipes:\n  "
@@ -126,40 +147,38 @@ def collect_models() -> tuple[FamilyRow, ...]:
             "ModelConfig from modal_training_gym.common.models."
         )
     return tuple(
-        FamilyRow(
-            family=family,
-            models=tuple(
-                model_link(hf_id)
-                for hf_id in sorted(ids, key=lambda name: name.rsplit("/", 1)[-1])
-            ),
+        ModelRow(
+            family=family_of(hf_id),
+            model=model_link(hf_id),
+            modalities=ordered_modalities(modalities),
         )
-        for family, ids in sorted(families.items())
+        for hf_id, modalities in sorted(
+            by_hf_id.items(),
+            key=lambda item: (family_of(item[0]), item[0].rsplit("/", 1)[-1]),
+        )
     )
 
 
-def render_section(families: tuple[FamilyRow, ...]) -> str:
-    rows = []
-    for row in families:
-        items = "".join(
-            f"<li>[{model.display_name}]({model.href})</li>" for model in row.models
-        )
-        rows.append(f"| {row.family} | <ul>{items}</ul> |")
+def render_section(models: tuple[ModelRow, ...]) -> str:
+    rows = [
+        f"| {row.family} | [{row.model.display_name}]({row.model.href}) | "
+        f"{render_modalities(row.modalities)} |"
+        for row in models
+    ]
     return "\n".join(
         [
             BEGIN_MARKER,
             BANNER,
             "",
-            "| Family | Models |",
-            "|---|---|",
+            "| Family | Model | Multimodal |",
+            "|---|---|---|",
             *rows,
             END_MARKER,
         ]
     )
 
 
-def rendered_readme(
-    readme_path: Path, families: tuple[FamilyRow, ...]
-) -> tuple[str, str]:
+def rendered_readme(readme_path: Path, models: tuple[ModelRow, ...]) -> tuple[str, str]:
     content = readme_path.read_text()
     if BEGIN_MARKER not in content or END_MARKER not in content:
         raise SystemExit(
@@ -167,12 +186,12 @@ def rendered_readme(
         )
     before, rest = content.split(BEGIN_MARKER, 1)
     _, after = rest.split(END_MARKER, 1)
-    return content, f"{before}{render_section(families)}{after}"
+    return content, f"{before}{render_section(models)}{after}"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate the Family | Models table in README.md."
+        description="Generate the Family | Model | Multimodal table in README.md."
     )
     parser.add_argument("--readme", type=Path, default=DEFAULT_README)
     parser.add_argument(
@@ -181,9 +200,9 @@ def main() -> None:
         help="Exit non-zero if the model table is out of date.",
     )
     args = parser.parse_args()
-    families = collect_models()
-    current, updated = rendered_readme(args.readme, families)
-    count = sum(len(row.models) for row in families)
+    models = collect_models()
+    current, updated = rendered_readme(args.readme, models)
+    count = len(models)
     if args.check:
         if current != updated:
             raise SystemExit(

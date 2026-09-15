@@ -60,6 +60,11 @@ REMOTE_ONLY = frozenset(
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_megatron_bridge",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_stop_token_diagnostic",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_zero_std_metrics",
+        "modal_training_gym.frameworks.slime.modal_helpers.patches.model_specific_patches.qwen3_5_vl.hf_to_megatron",
+        "modal_training_gym.frameworks.slime.modal_helpers.patches.model_specific_patches.qwen3_5_vl.hf_to_megatron.common",
+        "modal_training_gym.frameworks.slime.modal_helpers.patches.model_specific_patches.qwen3_5_vl.hf_to_megatron.qwen3_5",
+        "modal_training_gym.frameworks.slime.modal_helpers.patches.model_specific_patches.qwen3_5_vl.qwen3_5_vl",
+        "modal_training_gym.frameworks.slime.modal_helpers.patches.model_specific_patches.qwen3_5_vl.qwen3_5_vl_utils",
         "modal_training_gym.frameworks.slime.opd_reward",
     }
 )

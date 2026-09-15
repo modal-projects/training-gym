@@ -1,7 +1,8 @@
 """Model configs supported by the CI validation run.
 
 One registry for every framework. Each entry names the model, its
-``ModelConfig``, and the framework whose base recipe trains it.
+``ModelConfig``, the framework whose base recipe trains it, and the
+modality that row trains.
 """
 
 from __future__ import annotations
@@ -32,13 +33,14 @@ from .qwen3_vl_8b import Qwen3_VL_8B
 
 @dataclass(frozen=True)
 class _ValidationConfig:
-    """One model/framework pair the validation harness runs."""
+    """One model/framework/modality row the validation harness runs."""
 
     # Short name used as ``check --model`` and as the CI matrix entry.
     name: str
     model_config: type[ModelConfig]
     # Which framework's ``get_base_recipe`` trains this model.
     framework: Framework
+    modality: str = "text"
 
     @property
     def model_name(self) -> str:
@@ -81,13 +83,38 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
     _ValidationConfig("Qwen3-1.7B", Qwen3_1_7B, Framework.SLIME),
     _ValidationConfig("Qwen3-4B", Qwen3_4B, Framework.SLIME),
     _ValidationConfig("Qwen3-8B", Qwen3_8B, Framework.SLIME),
-    _ValidationConfig("Qwen3-ASR-1.7B", Qwen3_ASR_1_7B, Framework.SLIME),
-    _ValidationConfig("Qwen3-VL-8B-Instruct", Qwen3_VL_8B, Framework.SLIME),
+    _ValidationConfig(
+        "Qwen3-ASR-1.7B", Qwen3_ASR_1_7B, Framework.SLIME, modality="audio"
+    ),
+    _ValidationConfig(
+        "Qwen3-VL-8B-Instruct", Qwen3_VL_8B, Framework.SLIME, modality="image"
+    ),
     _ValidationConfig("Qwen3.5-0.8B", Qwen3_5_0_8B, Framework.SLIME),
+    _ValidationConfig(
+        "Qwen3.5-0.8B/image",
+        Qwen3_5_0_8B,
+        Framework.SLIME,
+        modality="image",
+    ),
     _ValidationConfig("Qwen3.5-2B", Qwen3_5_2B, Framework.SLIME),
+    _ValidationConfig(
+        "Qwen3.5-2B/image",
+        Qwen3_5_2B,
+        Framework.SLIME,
+        modality="image",
+    ),
     _ValidationConfig("Qwen3.5-4B", Qwen3_5_4B, Framework.SLIME),
+    _ValidationConfig(
+        "Qwen3.5-4B/image", Qwen3_5_4B, Framework.SLIME, modality="image"
+    ),
     _ValidationConfig("Qwen3.5-4B-Miles", Qwen3_5_4B, Framework.MILES),
     _ValidationConfig("Qwen3.5-9B", Qwen3_5_9B, Framework.SLIME),
+    _ValidationConfig(
+        "Qwen3.5-9B/image",
+        Qwen3_5_9B,
+        Framework.SLIME,
+        modality="image",
+    ),
     _ValidationConfig("Qwen3.6-27B", Qwen3_6_27B, Framework.SLIME),
     _ValidationConfig("Qwen3.6-35B-A3B", Qwen3_6_35B, Framework.SLIME),
     _ValidationConfig(
@@ -102,7 +129,25 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
         Framework.MILES,
     ),
     _ValidationConfig("Gemma-4-26B-A4B-it", Gemma4_26B_A4B, Framework.MILES),
+    _ValidationConfig(
+        "Gemma-4-26B-A4B-it/image",
+        Gemma4_26B_A4B,
+        Framework.MILES,
+        modality="image",
+    ),
     _ValidationConfig("Inkling-Small", Inkling_Small, Framework.MILES),
+    _ValidationConfig(
+        "Inkling-Small/image",
+        Inkling_Small,
+        Framework.MILES,
+        modality="image",
+    ),
+    _ValidationConfig(
+        "Inkling-Small/audio",
+        Inkling_Small,
+        Framework.MILES,
+        modality="audio",
+    ),
     _ValidationConfig("Inkling-Small-LoRA", Inkling_Small_LoRA, Framework.MILES),
     _ValidationConfig("DeepSeek-V4.1-Flash", DeepSeek_V4_1_Flash, Framework.MILES),
 }

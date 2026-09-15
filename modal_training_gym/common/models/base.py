@@ -164,6 +164,11 @@ class ModelConfig:
         requires_bshd: Use padded (bshd) batches so training skips the THD packing path.
         audio_placeholder: Token sequence the processor expands at ``<|audio_pad|>``.
             Raw audio in the prompt OOMs.
+        supported_modalities: Dataset media keys this model can train on
+            (``image``, ``audio``). Empty means text-only.
+        vision_tower_param: Parameter-name prefix of the vision tower to freeze
+            during media training. ``None`` when the model has no separately
+            frozen tower.
     """
 
     model_name: str = ""
@@ -172,6 +177,8 @@ class ModelConfig:
     response_parser: ResponseParser | None = None
     requires_bshd: bool = False
     audio_placeholder: str = ""
+    supported_modalities: frozenset[str] = frozenset()
+    vision_tower_param: str | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():

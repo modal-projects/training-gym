@@ -4,9 +4,11 @@ from dataclasses import field
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, field_validator, model_validator
 from pydantic.dataclasses import dataclass
 
+from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.patches import encode_patch
 from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 
@@ -51,8 +53,19 @@ def _image_patches() -> list[str]:
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class _InklingSmallRecipe(MilesRecipe):
     _SKIP_FIELDS: ClassVar[frozenset[str]] = MilesRecipe._SKIP_FIELDS | {"modality"}
+    trainable_modalities: ClassVar[frozenset[str]] = frozenset({"image", "audio"})
 
-    modality: Literal["text", "vision"] = "text"
+    # Selects the model provider below, the same way Gemma4_26B_A4B_Recipe's flag picks
+    # its mode. A vision or audio run also needs a MultimodalDataset with
+    # apply_chat_template off and its media materialized as files.
+    modality: Literal["text", "vision", "audio"] = "text"
+
+    def active_modalities(self) -> frozenset[str]:
+        if self.modality == "text":
+            return frozenset()
+        if self.modality == "vision":
+            return frozenset({"image"})
+        return frozenset({self.modality})
 
     docker_image: str = "radixark/miles:dev-202608041247"
     image_run_commands: list[str] = field(default_factory=_image_patches)
@@ -132,7 +145,7 @@ class _InklingSmallRecipe(MilesRecipe):
         # InklingTrainProcessor off the checkpoint's model_type and forwards its
         # patch tensors into forward() generically.
         if (
-            self.modality == "vision"
+            self.modality != "text"
             and not self.custom_model_provider_path
             and "custom_model_provider_path" not in self._escape_hatch_keys()
         ):
@@ -150,6 +163,16 @@ class _InklingSmallRecipe(MilesRecipe):
                 [*patches, *(c for c in current if c not in patches)],
             )
         return self
+
+    def overrides(
+        self,
+        dataset: DatasetConfig | None,
+        model: ModelConfig | None,
+    ) -> dict[str, Any]:
+        out = super().overrides(dataset, model)
+        if self.modality != "text":
+            self._override_default(out, "apply_chat_template", False)
+        return out
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
@@ -225,6 +248,7 @@ class Inkling_Small_LoRA_Recipe(_InklingSmallRecipe):
     """Inkling-Small rank-32 LoRA recipe."""
 
     gpu_type: str = "B300"
+    trainable_modalities: ClassVar[frozenset[str]] = frozenset({"image"})
     lr: float = 2e-4
     memory: tuple[int, int] = (1792 * 1024, 2048 * 1024)
 
@@ -250,7 +274,6 @@ class Inkling_Small_LoRA_Recipe(_InklingSmallRecipe):
     sglang_max_total_tokens: int = 320000
     sglang_cuda_graph_max_bs: int = 64
     sglang_max_mamba_cache_size: int = 256
-
     offload_train: bool = True
     offload_rollout: bool = True
     train_memory_margin_bytes: int = 128 * 1024 * 1024
@@ -265,3 +288,10 @@ class Inkling_Small_LoRA_Recipe(_InklingSmallRecipe):
             "MILES_SGLANG_DUMMY_LOAD": "1",
         }
     )
+
+    @field_validator("modality")
+    @classmethod
+    def _reject_audio(cls, value: str) -> str:
+        if value == "audio":
+            raise ValueError("Inkling_Small_LoRA_Recipe does not support audio")
+        return value

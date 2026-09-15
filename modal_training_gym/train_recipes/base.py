@@ -41,6 +41,7 @@ JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimoda
 
 class BaseTrainRecipe(ABC):
     model_config_class: ClassVar["type[ModelConfig] | None"] = None
+    trainable_modalities: ClassVar[frozenset[str]] = frozenset()
 
     # Fields consumed by the Modal launcher (image build, cluster topology,
     # callable shipping) and never forwarded to the framework CLI. Every
@@ -54,6 +55,7 @@ class BaseTrainRecipe(ABC):
     # win over same-named top-level fields.
     _ESCAPE_HATCH_FIELD: ClassVar[str] = "extra_config"
     _ESCAPE_HATCH_FLAG: ClassVar[str] = "custom_config_path"
+    _materialized_config_keys: tuple[str, ...] | None = None
 
     # ── Callable → import path ────────────────────────────────────────────────
 
@@ -109,6 +111,31 @@ class BaseTrainRecipe(ABC):
         """Validate the model's parallelism settings."""
         return None
 
+    def active_modalities(self) -> frozenset[str]:
+        """Media this recipe instance is training on, beyond text."""
+        return frozenset()
+
+    def overrides(
+        self,
+        dataset: "DatasetConfig | None",
+        model: "ModelConfig | None",
+    ) -> dict[str, Any]:
+        return {}
+
+    def _override_default(self, out: dict[str, Any], key: str, value: Any) -> None:
+        if key in self._escape_hatch_keys():
+            return
+        default = _dc.MISSING
+        for field in _dc.fields(self):
+            if field.name != key:
+                continue
+            if field.default_factory is not _dc.MISSING:
+                raise TypeError(f"{type(self).__name__}.{key} uses default_factory")
+            default = field.default
+            break
+        if getattr(self, key, default) == default:
+            out[key] = value
+
     # ── Container → framework flag converters ────────────────────────────────
 
     @staticmethod
@@ -137,6 +164,13 @@ class BaseTrainRecipe(ABC):
                     f"Training and evaluation datasets must use the same "
                     f"{dataset_method}(): got {train_value!r} and {eval_value!r}."
                 )
+        train_keys = ds.multimodal_keys
+        eval_keys = eval_ds.multimodal_keys
+        if train_keys != eval_keys:
+            raise TrainingGymConfigError(
+                f"Training and evaluation datasets must use the same "
+                f"multimodal_keys: got {train_keys!r} and {eval_keys!r}."
+            )
 
     @classmethod
     def _dataset_to_fields(

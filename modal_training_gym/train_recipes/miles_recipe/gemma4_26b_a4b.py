@@ -51,6 +51,7 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     """Gemma-4-26B-A4B recipe."""
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = MilesRecipe._SKIP_FIELDS | {"modality"}
+    trainable_modalities: ClassVar[frozenset[str]] = frozenset({"image"})
 
     modality: Literal["text", "vision"] = "text"
 
@@ -96,6 +97,11 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     qkv_format: str = "bshd"
     no_gradient_accumulation_fusion: bool = True
     no_check_for_nan_in_loss_and_grad: bool = True
+
+    def active_modalities(self) -> frozenset[str]:
+        if self.modality == "vision":
+            return frozenset({"image"})
+        return frozenset()
 
     @model_validator(mode="before")
     @classmethod
