@@ -34,12 +34,6 @@ builds the dashboard. It receives these props:
 - `rollout`: the expanded `TrainingRolloutResult`.
 - `run`: the current `TrainingRun` summary.
 
-Examples of run-scoped viewers are
-`examples/dashboard_components/ConversationTrajectoryViewer.svelte` for
-generic chat and
-`examples/dashboard_components/BalatroTrajectoryViewer.svelte` for game-state
-cards.
-
 The override path is saved in `~/.training-gym.toml`, so later `setup` or
 password redeploys keep using it. To restore the built-in viewer, run
 `training-gym setup --no-trajectory-viewer`.
@@ -54,9 +48,9 @@ from modal_training_gym import DashboardComponent, TrainingRun
 
 run = TrainingRun.from_id("bristled-pine-a7c3e91d4b")
 run.add_dashboard_component(
-    name="balatro",
+    name="my-viewer",
     component_type=DashboardComponent.TRAJECTORY_VIEWER,
-    from_path="examples/dashboard_components/BalatroTrajectoryViewer.svelte",
+    from_path="./MyTrajectoryViewer.svelte",
 )
 ```
 
