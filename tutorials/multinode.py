@@ -2,10 +2,6 @@
 # order: 10
 # ---
 #
-# > **Multi-node workspace required:** This is a multi-node example. To run it,
-# > your Modal workspace must have multi-node enabled. Contact
-# > [support@modal.com](mailto:support@modal.com) to enable multi-node.
-
 # # Frontier-scale training
 #
 # When you decide you need a frontier-scale model for your workload, you want
