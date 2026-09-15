@@ -166,6 +166,10 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     update_weight_buffer_size: int = 1024**3
 
     # ── Rollout + reward ─────────────────────────────────────────────────────
+    rollout_batch_size: int = 16
+    n_samples_per_prompt: int = 8
+    # One train step per rollout, so the global batch is the rollout itself.
+    global_batch_size: int = 128
     # Dynamic packing conflicts with --qkv-format bshd upstream.
     use_dynamic_batch_size: bool = False
     rollout_temperature: float = 0.8
