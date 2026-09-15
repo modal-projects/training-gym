@@ -138,6 +138,12 @@ export async function fetchRollout(trainingRunId, rolloutId) {
   return await res.json();
 }
 
+export async function fetchRunSteps(trainingRunId, { signal } = {}) {
+  const res = await fetch(`${SERVER}/runs/${encodeURIComponent(trainingRunId)}/steps`, { signal });
+  if (!res.ok) return [];
+  return await res.json();
+}
+
 // Historical Modal logs for a run, served from the durable storage.
 //
 // Returns the newest `maxLines` lines within the (since, until] window, oldest

@@ -28,6 +28,7 @@
     runOrigin = null,
     asyncOverride = null,
     showOpenRollout = true,
+    trainingType = "rl",
     attemptMarkers = [],
   } = $props();
 
@@ -251,15 +252,16 @@
   }
 
   function tipRole(role) {
+    if (trainingType === "sft" && role === "rollout") return "Data";
     return role ? role[0].toUpperCase() + role.slice(1) : null;
   }
 
-  const roleDescriptions = {
+  const roleDescriptions = $derived({
     driver: "Runs the training loop.",
-    rollout: "Inference engines sampling from the current policy.",
-    actor: "Policy being trained.",
+    rollout: trainingType === "sft" ? "Prepares training batches." : "Inference engines sampling from the current policy.",
+    actor: trainingType === "sft" ? "Model being trained." : "Policy being trained.",
     critic: "Value model.",
-  };
+  });
 
   function nestedChild(bar, name) {
     for (const child of bar.children || []) {
@@ -469,7 +471,7 @@
                 onmousemove={moveLaneTip}
                 onmouseleave={hideLaneTip}
               >
-                {row.label}{#if row.unaligned}<span class="lane-note-mark">*</span>{/if}
+                {trainingType === "sft" && row.role === "rollout" ? "Data" : row.label}{#if row.unaligned}<span class="lane-note-mark">*</span>{/if}
               </div>
             {/each}
           </div>

@@ -3,6 +3,8 @@
   import { ArrowLeft, ChevronLeft, ChevronRight, Download, ExternalLink, Minimize2, X } from "lucide-svelte";
   import Tabs from "../components/Tabs.svelte";
   import RunSummary from "../components/RunSummary.svelte";
+  import SftProgress from "../components/SftProgress.svelte";
+  import { isSft } from "../lib/trainingType.js";
   import RunTimeline from "../components/RunTimeline.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
@@ -83,6 +85,7 @@
   } = $props();
 
   let run = $state(null);
+  let sft = $derived(isSft(run));
   let runLoading = $state(false);
   let runError = $state("");
   // A run id that isn't in the metadata volume won't appear later, so the
@@ -181,6 +184,10 @@
   // Active tab: "summary" | "rollouts" | "logs". One-way sync with the URL:
   // init/popstate/runId read URL → activeTab; selectTab writes pushState.
   let activeTab = $state(/** @type {TabId} */ (DEFAULT_TAB));
+
+  $effect(() => {
+    if (sft && activeTab === "rollouts") selectTab("summary");
+  });
 
   function selectTab(tab) {
     const next = DETAIL_TABS.has(tab) ? /** @type {TabId} */ (tab) : DEFAULT_TAB;
@@ -606,7 +613,7 @@
   }
 
   async function loadAdvantages(signal) {
-    if (!runId) return;
+    if (!runId || sft) return;
     try {
       const rows = await fetchRunAdvantages(runId, { signal });
       if (signal?.aborted) return;
@@ -643,7 +650,7 @@
   // steps stream in on a running run.
   $effect(() => {
     const id = runId;
-    if (!id || runMissing || activeTab !== "summary") return;
+    if (!id || runMissing || activeTab !== "summary" || sft) return;
 
     const controller = new AbortController();
     void loadAdvantages(controller.signal);
@@ -668,7 +675,7 @@
 
     const controller = new AbortController();
     rolloutsLoading = true;
-    void loadRollouts(controller.signal);
+    if (!sft) void loadRollouts(controller.signal);
     void loadTimings(controller.signal);
 
     // Poll while the run is active so new rollouts stream in.
@@ -683,7 +690,7 @@
       )
         return;
       if (!status || status === "running") {
-        void loadRollouts(controller.signal);
+        if (!sft) void loadRollouts(controller.signal);
       }
       void loadTimings(controller.signal);
     }, 5000);
@@ -1409,7 +1416,7 @@
   // Fetch the two rollouts' samples only when the endpoints change (a new step
   // lands), not on every 5s poll — the payloads are large.
   $effect(() => {
-    if (activeTab !== "summary") return;
+    if (activeTab !== "summary" || sft) return;
     const id = runId;
     const fId = firstRolloutId;
     const lId = lastRolloutId;
@@ -1445,7 +1452,7 @@
   }
 
   $effect(() => {
-    if (activeTab !== "summary") return;
+    if (activeTab !== "summary" || sft) return;
     const id = runId;
     const fId = firstRolloutId;
     const lId = lastRolloutId;
@@ -1539,7 +1546,7 @@
       onSelect={selectTab}
       tabs={[
         { value: "summary", label: "Summary" },
-        { value: "rollouts", label: "Rollouts", count: rolloutSummaries.length || undefined },
+        ...(!sft ? [{ value: "rollouts", label: "Rollouts", count: rolloutSummaries.length || undefined }] : []),
         { value: "logs", label: "Logs" },
       ]}
     />
@@ -1552,6 +1559,9 @@
               <div class="text-(--red,#f87171) text-[12px] font-[600] tracking-[0.02em] mb-[6px] uppercase">Error</div>
               <pre class="[border:1px_solid_color-mix(in_srgb,var(--red,#f87171)_45%,transparent)] rounded-[8px] bg-[color-mix(in_srgb,var(--red,#f87171)_12%,transparent)] text-(--red,#f87171) [font-family:var(--font-mono)] text-[12px] leading-[17px] m-0 max-h-[320px] overflow-auto p-[12px_14px] whitespace-pre-wrap [word-break:break-word]">{run.error_message}</pre>
             </div>
+          {/if}
+          {#if sft}
+            {#key runId}<SftProgress {run} />{/key}
           {/if}
           {#if timingError || showTimingSection}
             <div class="rollout-chart">
@@ -1566,6 +1576,8 @@
                   {stepTimingIds.length === 1 ? "step" : "steps"}){/if}
               </div>
               <RunTimeline
+                trainingType={sft ? "sft" : "rl"}
+                showOpenRollout={!sft}
                 timings={runTimings}
                 asyncOverride={timelineAsync}
                 runOrigin={timelineRunOrigin}
@@ -1581,6 +1593,7 @@
               {/if}
             </div>
           {/if}
+          {#if !sft}
           {#if rolloutsLoading && !rolloutSummaries.length}
             <div class="rollout-chart">
               <ChartSkeleton variant="line" height={140} showTitle />
@@ -1701,6 +1714,7 @@
               </div>
             {/if}
           {/if}
+          {/if}
         </div>
         <aside class="summary-tab-side">
           <RunSummary
@@ -1713,7 +1727,7 @@
           />
         </aside>
       </div>
-    {:else if activeTab === "rollouts"}
+    {:else if activeTab === "rollouts" && !sft}
       <div class="tab-panel">
       {#if rolloutsLoading && !rolloutSummaries.length}
         <div class="detail-empty">Loading rollouts…</div>

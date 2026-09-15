@@ -5,7 +5,7 @@
 # # Supervised fine-tuning
 #
 # SFT teaches a model from complete example conversations. It computes loss on
-# assistant responses directly, without a reward function or inference server.
+# assistant responses directly.
 
 from modal_training_gym import Qwen3_4B, Qwen3_4B_Recipe, SFTDataset, TrainConfig
 
@@ -35,3 +35,13 @@ result = TrainConfig(
 ).train()
 
 print(result.checkpoints())
+
+# Use `training-gym run get <run-id> --verbose` to inspect the loss history.
+# Loss is reported after each optimizer step. Evaluate saved checkpoints on held-out prompts before
+# treating a falling training loss as improved model quality.
+#
+# To continue training, keep the original model and set `recipe.load` to the
+# saved `/checkpoints/<run-id>` directory. Set `num_steps` to the desired
+# total step count, not the number of additional steps. When extending that
+# horizon, also set `extra_config={"override_opt_param_scheduler": True}`
+# which loads training state.

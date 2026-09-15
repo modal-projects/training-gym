@@ -930,6 +930,7 @@ def fastapi_app():
     @web.get("/api/runs/counts")
     async def run_counts(
         q: str = "",
+        training_type: str = "",
         status: FacetParam = None,
         recipe: FacetParam = None,
         group: FacetParam = None,
@@ -939,6 +940,7 @@ def fastapi_app():
         counts["matching"] = len(
             filter_run_summaries(
                 summaries,
+                filters={"training_type": training_type},
                 facets=_requested_facets(status, recipe, group),
                 query=q,
             )
