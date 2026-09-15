@@ -1104,7 +1104,9 @@ def fastapi_app():
             result = None
         return build_run_summary(run.model_dump(mode="json"), result)
 
-    def _component_manifest(run: TrainingRun, component_type: str) -> JsonDict:
+    def _component_manifest(
+        run: TrainingRun, component_type: str, digest: str | None = None
+    ) -> JsonDict:
         """Resolve a run's component manifest from run metadata.
 
         The source and an association copy are both mounted from the overlay
@@ -1112,7 +1114,9 @@ def fastapi_app():
         it is already part of the run record returned by the dashboard API.
         When several names register the same component type, the most
         recently attached one wins (``add_dashboard_component`` re-inserts an
-        entry on replace so insertion order is attachment order).
+        entry on replace so insertion order is attachment order). With
+        ``digest`` the entry carrying exactly that ``sha256`` is returned, so
+        a URL that names an artifact can never be answered with another one.
         """
         try:
             kind = DashboardComponent(component_type).value
@@ -1130,6 +1134,8 @@ def fastapi_app():
                 continue
             manifest = dict(value)
             if not manifest.get("path") or not manifest.get("sha256"):
+                continue
+            if digest is not None and manifest["sha256"] != digest:
                 continue
             return manifest
         raise HTTPException(status_code=404, detail="No dashboard component attached")
@@ -1208,6 +1214,7 @@ def fastapi_app():
                 del component_compile_locks[digest]
 
     _CLOSE_SCRIPT_RE = re.compile(r"</(script)", re.IGNORECASE)
+    _COMPONENT_DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 
     def _component_frame_html(bundle_js: str, nonce: str) -> str:
         """Wrap a compiled component in a self-contained host document.
@@ -1247,14 +1254,18 @@ def fastapi_app():
         return JSONResponse(manifest)
 
     @web.get(
-        "/api/runs/{training_run_id}/dashboard-components/{component_type}/frame.html"
+        "/api/runs/{training_run_id}/dashboard-components/{component_type}"
+        "/{digest}/frame.html"
     )
-    async def get_dashboard_component_frame(training_run_id: str, component_type: str):
+    async def get_dashboard_component_frame(
+        training_run_id: str, component_type: str, digest: str
+    ):
+        if not _COMPONENT_DIGEST_RE.fullmatch(digest):
+            raise HTTPException(status_code=404, detail="Unknown dashboard component")
         run = await _get_run_or_404(training_run_id)
-        manifest = _component_manifest(run, component_type)
+        manifest = _component_manifest(run, component_type, digest)
         await _refresh_dashboard_component_volume()
         source = _component_source_path(manifest)
-        digest = str(manifest["sha256"])
         cache_root = Path("/tmp/training-gym-dashboard-components")
         cache_root.mkdir(parents=True, exist_ok=True)
         bundle = cache_root / f"{digest}.js"

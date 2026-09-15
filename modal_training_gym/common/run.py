@@ -161,6 +161,7 @@ class TrainingRun(BaseModel):
     _status_display: Any = PrivateAttr(default=None)
     _metadata_removed_keys: set[str] = PrivateAttr(default_factory=set)
     _metadata_loaded_keys: set[str] | None = PrivateAttr(default=None)
+    _dashboard_component_updates: set[str] = PrivateAttr(default_factory=set)
     _closed: bool = PrivateAttr(default=False)
 
     @field_serializer("source_model")
@@ -538,6 +539,7 @@ class TrainingRun(BaseModel):
         components[name] = manifest
         metadata["dashboard_components"] = components
         self.metadata = metadata
+        self._dashboard_component_updates.add(name)
         self.save()
         return manifest
 
@@ -609,22 +611,23 @@ class TrainingRun(BaseModel):
             elif isinstance(stored_progress, dict):
                 merged_metadata["framework_progress"] = stored_progress
             # Components are attached by name from independent handles (often
-            # after launch), so merge per name instead of letting the handle
-            # that saves last drop everyone else's attachments. Entries this
-            # handle added or replaced are appended so insertion order stays
-            # attachment order (the dashboard picks the last matching entry).
+            # after launch). The stored map is authoritative; only the names
+            # this handle attached since its last save are written over it,
+            # appended so insertion order stays attachment order (the
+            # dashboard picks the last matching entry). A handle that merely
+            # carries a stale copy of the map can neither drop nor revert
+            # another handle's attachments.
             stored_components = stored_metadata.get("dashboard_components")
             current_components = current_metadata.get("dashboard_components")
             if isinstance(stored_components, dict) and isinstance(
                 current_components, dict
             ):
-                merged_components = {
-                    name: value
-                    for name, value in stored_components.items()
-                    if name not in current_components
-                    or current_components[name] == value
-                }
-                merged_components.update(current_components)
+                merged_components = dict(stored_components)
+                for name in self._dashboard_component_updates:
+                    if name not in current_components:
+                        continue
+                    merged_components.pop(name, None)
+                    merged_components[name] = current_components[name]
                 merged_metadata["dashboard_components"] = merged_components
             payload["metadata"] = merged_metadata
             return payload
@@ -648,7 +651,9 @@ class TrainingRun(BaseModel):
         except Exception:
             stored = None
         if not is_async:
-            return write(payload_with_stored_metadata(stored))
+            write(payload_with_stored_metadata(stored))
+            self._dashboard_component_updates.clear()
+            return None
 
         async def _save_async() -> None:
             stored_data = None
@@ -660,6 +665,7 @@ class TrainingRun(BaseModel):
             result = write(payload_with_stored_metadata(stored_data))
             if result is not None:
                 await result
+            self._dashboard_component_updates.clear()
 
         return _save_async()
 

@@ -7,7 +7,7 @@
    * otherwise the built-in `TrajectoryViewer`.
    *
    * Run-scoped components are untrusted code. They run inside a sandboxed
-   * <iframe> served by `/dashboard-components/trajectory_viewer/frame.html`
+   * <iframe> served by `/dashboard-components/trajectory_viewer/<sha256>/frame.html`
    * (opaque origin, CSP without network access) and only receive props via
    * postMessage, so they can never act with the dashboard's authority.
    */
@@ -23,6 +23,9 @@
 
   const MARK = "trainingGymDashboardComponent";
   const READY_TIMEOUT_MS = 20000;
+  // Components can be attached after a run finishes, when the page has
+  // stopped polling `run`; re-check the manifest so they still show up.
+  const MANIFEST_POLL_MS = 30000;
 
   let frame = $state(null);
   let frameSrc = $state("");
@@ -32,6 +35,8 @@
   let frameReady = false;
   let generation = 0;
   let readyTimer = null;
+  let loadedDigest = null;
+  let loading = false;
 
   function runId() {
     return run?.training_run_id || run?.run_id || "";
@@ -48,6 +53,7 @@
     readyTimer = null;
     frameSrc = "";
     frameHeight = 0;
+    loadedDigest = null;
   }
 
   function fail(message) {
@@ -63,47 +69,83 @@
     frame.contentWindow.postMessage({ [MARK]: true, type: "props", props }, "*");
   }
 
-  async function load() {
+  async function fetchManifest(base) {
+    const response = await fetch(base, { credentials: "same-origin" });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`component lookup failed (${response.status})`);
+    const manifest = await response.json();
+    const digest = manifest?.sha256;
+    return typeof digest === "string" && digest ? digest : null;
+  }
+
+  // `force` tears down whatever is mounted; otherwise a manifest whose digest
+  // matches the mounted component is a no-op so polling never flickers.
+  async function load(force = true) {
     const id = runId();
-    reset();
-    loadError = "";
-    if (!id) {
-      mode = "fallback";
-      return;
-    }
-    const current = generation;
-    mode = "loading";
-    try {
-      const base = `/api/runs/${encodeURIComponent(id)}/dashboard-components/trajectory_viewer`;
-      const manifestResponse = await fetch(base, { credentials: "same-origin" });
-      if (current !== generation) return;
-      if (manifestResponse.status === 404) {
+    if (force) {
+      reset();
+      loadError = "";
+      if (!id) {
         mode = "fallback";
         return;
       }
-      if (!manifestResponse.ok) throw new Error(`component lookup failed (${manifestResponse.status})`);
-      const manifest = await manifestResponse.json();
-      if (current !== generation) return;
-      const src = `${base}/frame.html?v=${encodeURIComponent(manifest?.sha256 || "")}`;
-      // Compile errors surface here as a readable status instead of a blank frame.
-      const frameResponse = await fetch(src, { credentials: "same-origin" });
-      if (current !== generation) return;
-      if (!frameResponse.ok) {
-        let detail = `component request failed (${frameResponse.status})`;
-        try {
-          detail = (await frameResponse.json())?.detail || detail;
-        } catch {
-          // Non-JSON error bodies keep the generic status message.
-        }
-        throw new Error(detail);
+      mode = "loading";
+    } else if (!id || loading) {
+      return;
+    }
+    loading = true;
+    const before = generation;
+    const base = `/api/runs/${encodeURIComponent(id)}/dashboard-components/trajectory_viewer`;
+    try {
+      let digest;
+      try {
+        digest = await fetchManifest(base);
+      } catch (error) {
+        if (before !== generation || !force) return;
+        fail(error?.message || String(error));
+        return;
       }
-      frameSrc = src;
-      readyTimer = setTimeout(() => {
-        if (current === generation && !frameReady) fail("run-scoped viewer did not start");
-      }, READY_TIMEOUT_MS);
-    } catch (error) {
-      if (current !== generation) return;
-      fail(error?.message || String(error));
+      if (before !== generation) return;
+      if (!force) {
+        if (digest === loadedDigest) return;
+        reset();
+        loadError = "";
+        mode = "loading";
+      }
+      const current = generation;
+      if (!digest) {
+        mode = "fallback";
+        return;
+      }
+      const src = `${base}/${encodeURIComponent(digest)}/frame.html`;
+      try {
+        // Compile errors surface here as a readable status instead of a blank frame.
+        const frameResponse = await fetch(src, { credentials: "same-origin" });
+        if (current !== generation) return;
+        if (!frameResponse.ok) {
+          let detail = `component request failed (${frameResponse.status})`;
+          try {
+            detail = (await frameResponse.json())?.detail || detail;
+          } catch {
+            // Non-JSON error bodies keep the generic status message.
+          }
+          throw new Error(detail);
+        }
+        frameSrc = src;
+        loadedDigest = digest;
+        readyTimer = setTimeout(() => {
+          if (current !== generation || frameReady) return;
+          fail("run-scoped viewer did not start");
+          loadedDigest = digest;
+        }, READY_TIMEOUT_MS);
+      } catch (error) {
+        if (current !== generation) return;
+        fail(error?.message || String(error));
+        // Keep the digest so polling does not retry a broken component every tick.
+        loadedDigest = digest;
+      }
+    } finally {
+      loading = false;
     }
   }
 
@@ -129,7 +171,12 @@
   $effect(() => {
     runId();
     componentKey();
-    untrack(load);
+    untrack(() => load(true));
+  });
+
+  $effect(() => {
+    const timer = setInterval(() => load(false), MANIFEST_POLL_MS);
+    return () => clearInterval(timer);
   });
 
   $effect(() => {
