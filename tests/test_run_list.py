@@ -36,6 +36,7 @@ def test_schema_metadata_drives_columns_and_filters():
         "run_id",
         "display_status",
         "display_stage",
+        "training_type",
         "model",
         "dataset",
         "recipe",
@@ -44,6 +45,7 @@ def test_schema_metadata_drives_columns_and_filters():
         "updated_at",
     ]
     assert {name for name, metadata in fields.items() if metadata["filterable"]} == {
+        "training_type",
         "display_status",
         "model",
         "dataset",

@@ -1,6 +1,6 @@
 # Training Gym
 
-Modal Training Gym is an open-source Python SDK for RL post-training on [Modal](https://modal.com).
+Modal Training Gym is an open-source Python SDK for RL and SFT post-training on [Modal](https://modal.com).
 
 The library takes care of infrastructure concerns such as cluster topology, Ray/NCCL bring-up, volume mounts, checkpointing, and serving for eval and rollouts, so you (or your agent!) can focus on training models.
 
