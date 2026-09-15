@@ -471,6 +471,7 @@
             response={activeSample.sample.response || ""}
             thinking={activeSample.sample.thinking || ""}
             evalReport={activeSample.sample.metadata?.eval_report}
+            clamp={false}
           />
           {#if activeSample.sample.metadata?.reference}
             <div class="rollout-sample-label">reference</div>

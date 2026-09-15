@@ -2078,8 +2078,6 @@ table.rollout-table th:nth-child(4) .column-label {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 240px;
-  overflow: auto;
 }
 
 .exit-ok {

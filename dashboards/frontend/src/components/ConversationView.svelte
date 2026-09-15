@@ -1,7 +1,9 @@
 <script>
   import { ChevronDown } from "lucide-svelte";
 
-  let { messages = null, response = "", thinking = "", evalReport = null } = $props();
+  // `clamp` caps long message / tool blocks with their own scrollbars; turn it
+  // off when the parent already provides a single scroll container.
+  let { messages = null, response = "", thinking = "", evalReport = null, clamp = true } = $props();
 
   // ── Parse structured trajectory_messages into renderable turns ──────
   function parseStructuredMessage(msg) {
@@ -298,7 +300,7 @@
       {/if}
 
       {#if msg.content}
-        <pre class="m-0 p-0 [background:none] text-[12px] text-(--text) whitespace-pre-wrap [word-break:break-word] max-h-[400px] overflow-auto leading-[1.5]" class:tool-output={msg.role === "tool"}>{msg.content}</pre>
+        <pre class={["m-0 p-0 [background:none] text-[12px] text-(--text) whitespace-pre-wrap [word-break:break-word] leading-[1.5]", clamp ? "max-h-[400px] overflow-auto" : "max-h-none!", msg.role === "tool" && "tool-output"]}>{msg.content}</pre>
       {/if}
 
       {#if msg.toolCalls.length}
@@ -307,7 +309,7 @@
             <div class="[border-left:2px_solid_#fbbf24] p-[6px_10px] rounded-[0_4px_4px_0] bg-[rgba(251,191,36,0.05)]">
               <div class="text-[12px] font-[600] text-[#fbbf24] [font-family:ui-monospace,_SFMono-Regular,_Menlo,_monospace] mb-[2px]">{call.name}()</div>
               {#if Object.keys(call.arguments || {}).length}
-                <pre class="m-0 p-0 text-[11px] text-(--text) whitespace-pre-wrap [word-break:break-word] max-h-[160px] overflow-auto [font-family:ui-monospace,_SFMono-Regular,_Menlo,_monospace] leading-[1.4]">{formatArgs(call.arguments)}</pre>
+                <pre class={["m-0 p-0 text-[11px] text-(--text) whitespace-pre-wrap [word-break:break-word] [font-family:ui-monospace,_SFMono-Regular,_Menlo,_monospace] leading-[1.4]", clamp && "max-h-[160px] overflow-auto"]}>{formatArgs(call.arguments)}</pre>
               {/if}
             </div>
           {/each}
@@ -339,7 +341,7 @@
             {/if}
           </div>
           {#if !check.passed && check.errors.length}
-            <pre class="m-[2px_0_4px_20px] p-[6px_8px] bg-[rgba(248,113,113,0.06)] rounded-[4px] text-[11px] text-(--muted) whitespace-pre-wrap [word-break:break-word] max-h-[120px] overflow-auto">{check.errors.join("\n")}</pre>
+            <pre class={["m-[2px_0_4px_20px] p-[6px_8px] bg-[rgba(248,113,113,0.06)] rounded-[4px] text-[11px] text-(--muted) whitespace-pre-wrap [word-break:break-word]", clamp && "max-h-[120px] overflow-auto"]}>{check.errors.join("\n")}</pre>
           {/if}
         {/each}
       </div>
