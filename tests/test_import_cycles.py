@@ -51,6 +51,7 @@ REMOTE_ONLY = frozenset(
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_advantages",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_bridge_provider_per_token_loss",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_megatron_bridge",
+        "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_restore_actor_after_ref_load",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_stop_token_diagnostic",
         "modal_training_gym.frameworks.slime.modal_helpers.patches.patch_zero_std_metrics",
         "modal_training_gym.frameworks.slime.opd_reward",
