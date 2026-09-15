@@ -5,8 +5,6 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any, Callable
 
-from modal import Volume
-
 TORCH_DIST_TRACKER_NAME = "latest_checkpointed_iteration.txt"
 
 
@@ -63,6 +61,8 @@ def _raise_gathered_errors(
 
 
 def _commit_volume(volume_name: str) -> None:
+    from modal import Volume
+
     Volume.from_name(volume_name, create_if_missing=False).commit()
 
 
