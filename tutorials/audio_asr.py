@@ -12,7 +12,7 @@
 # in terms of WER. But there's no reason to stop there: we can achieve state-of-the-art
 # performance by post-training open models to redefine your task's Pareto frontier.
 # As an example, we show how to post-train
-# [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on the 
+# [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on the
 # [hf-internal-testing/librispeech_asr_dummy](https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy)
 # dataset.
 
@@ -54,12 +54,14 @@ print(f"base model deployed to {base_deployment.url}")
 # As mentioned before, we measure capability by lower WER, so that's what we'll use.
 # We can use the `jiwer` library to calculate this so we don't have to ourselves.
 
+
 def score_transcript(response: str, label: str) -> float:
     response = (response or "").lower().strip()
     label = (label or "").lower().strip()
     if not label:
         return 0.0
     return float(jiwer.wer(label, response))
+
 
 # ## Get the dataset
 #
@@ -68,6 +70,7 @@ def score_transcript(response: str, label: str) -> float:
 # `soundfile` and store as base64 inline for demonstration purposes.
 # In a production use case, you'd likely instead store references and
 # resolve them in a custom `generate` function.
+
 
 class LibriSpeechASRDataset(MultimodalDataset):
     hf_repo = "hf-internal-testing/librispeech_asr_dummy"
@@ -82,7 +85,9 @@ class LibriSpeechASRDataset(MultimodalDataset):
 
     def source_rows(self):
         ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        ds = ds.cast_column("audio", Audio(decode=False))  # decode with soundfile instead of torchcodec
+        ds = ds.cast_column(
+            "audio", Audio(decode=False)
+        )  # decode with soundfile instead of torchcodec
         for ex in ds:
             audio = ex["audio"]
             data = (
@@ -102,6 +107,7 @@ class LibriSpeechASRDataset(MultimodalDataset):
                 "label": ex["text"].lower().strip(),
             }
 
+
 train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
 
 eval_dataset = LibriSpeechASRDataset(hf_split="validation[8:16]")
@@ -109,6 +115,7 @@ eval_dataset = LibriSpeechASRDataset(hf_split="validation[8:16]")
 # ## Evaluate the base model
 #
 # Let's get our baseline measure of performance.
+
 
 def run_eval(deployment, max_concurrency: int = 2) -> float:
     deployment.wait_until_ready(timeout=15 * 60)
@@ -139,6 +146,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         wers = list(executor.map(_score_one, eval_dataset.rows()))
     return sum(wers) / len(wers) if wers else float("nan")
 
+
 print("running base model evaluation...")
 base_mean = run_eval(base_deployment)
 print(f"average WER: {base_mean:.1%}")
@@ -148,8 +156,10 @@ print(f"average WER: {base_mean:.1%}")
 # To make our scoring function a reward function, we must return the
 # negative WER so that lower WER leads to higher rewards.
 
+
 async def wer_rm(args, sample, **kwargs) -> float:
     return -score_transcript(sample.response, sample.label)
+
 
 # ## Begin training
 #
@@ -157,18 +167,16 @@ async def wer_rm(args, sample, **kwargs) -> float:
 # the transcription rollout, padded (bshd) batches, and the many-samples/high-temperature
 # settings that surface reward variance. To not pass the burden of specifying onto you,
 # we created `Qwen3_ASR_1_7B_Recipe` so that you can focus on training.
-
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=Qwen3_ASR_1_7B_Recipe(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=2,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus=2,
-        rollout_num_gpus_per_engine=1,
+        num_rollout=8,
+        save_interval=8,
+        rollout_batch_size=4,
+        n_samples_per_prompt=8,
+        global_batch_size=8,
+        rollout_max_response_len=128,
         custom_rm_function=wer_rm,
     ),
 )

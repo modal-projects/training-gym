@@ -88,7 +88,8 @@ class LibriSpeechASRDataset(MultimodalDataset):
 
 
 def build_slime_validation(
-    model_config: ModelConfig, step_count: int
+    model_config: ModelConfig,
+    step_count: int,
 ) -> tuple[SlimeRecipe, DatasetConfig]:
     """The model's base slime recipe and a dataset matching its modality.
 

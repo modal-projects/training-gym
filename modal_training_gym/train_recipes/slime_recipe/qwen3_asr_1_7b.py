@@ -11,13 +11,6 @@ from modal_training_gym.frameworks.slime.audio_transcription_rollout import (
 )
 from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
-# Training-time image-build shims for upstream gaps that block Qwen3-ASR on the
-# native slime stack (bridge config validate-order, slime processor loading, bridge
-# pg_collection). These are slime-specific, so they live on the recipe (not the
-# model) and are applied via ``image_run_commands``. The Megatron->HF audio-tower
-# converter (``patch_qwen3_asr_export``) instead lives in the slime base image, since
-# conversion also runs in the recipe-less deploy/eval path. Each should be reported
-# upstream; once fixed, drop the corresponding patch.
 _ASR_PATCH_DIR = (
     Path(__file__).resolve().parents[2]
     / "frameworks"
@@ -36,10 +29,6 @@ _ASR_PATCHES = (
 
 
 def _asr_image_run_commands() -> list[str]:
-    # soundfile/librosa decode audio (transcription rollout); jiwer powers the −WER
-    # reward. Pinned: librosa>=1.0 requires numpy 2.x, which Megatron rejects; the
-    # numpy<2 constraint keeps pip from upgrading the base image's numpy. Then apply
-    # the upstream-gap shims at image build.
     cmds = [
         "pip install --no-cache-dir jiwer==4.0.0 librosa==0.11.0 soundfile==0.14.0 "
         '"numpy<2"'
@@ -53,27 +42,10 @@ def _asr_image_run_commands() -> list[str]:
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Qwen3_ASR_1_7B_Recipe(SlimeRecipe):
-    """Qwen3-ASR-1.7B audio GRPO recipe for 1 node with 2 H100 GPUs.
-
-    Args:
-        custom_rm_function:
-            Reward function for transcriptions.
-    """
-
-    sequence_parallel: bool = False
-
-    actor_num_gpus_per_node: int = 2
+    """Qwen3-ASR-1.7B recipe."""
 
     custom_generate_function: Callable | None = transcription_rollout
-
-    num_rollout: int = 8
-    rollout_batch_size: int = 4
-    n_samples_per_prompt: int = 8
-    rollout_max_response_len: int = 128
-    rollout_temperature: float = 1.0
     sglang_mem_fraction_static: float = 0.45
-
-    global_batch_size: int = 8
     lr_decay_style: str = "cosine"
 
     use_dynamic_batch_size: bool = False
@@ -81,8 +53,6 @@ class Qwen3_ASR_1_7B_Recipe(SlimeRecipe):
         default_factory=lambda: {"qkv_format": "bshd", "micro_batch_size": 1}
     )
 
-    # Save at the final rollout so the run produces a checkpoint to export to HF.
-    save_interval: int = 8
     megatron_to_hf_mode: str = "bridge"
 
     image_run_commands: list[str] = field(default_factory=_asr_image_run_commands)

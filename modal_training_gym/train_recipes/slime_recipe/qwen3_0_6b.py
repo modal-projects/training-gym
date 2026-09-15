@@ -6,18 +6,8 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Qwen3_0_6B_Recipe(SlimeRecipe):
-    """Qwen3-0.6B GRPO recipe for 1 node with 8 H100 GPUs."""
+    """Qwen3-0.6B recipe."""
 
-    sequence_parallel: bool = False
-
-    rollout_batch_size: int = 24
-    rollout_max_response_len: int = 4096
-    rollout_temperature: float = 1.0
     sglang_mem_fraction_static: float = 0.78
-
-    save_interval: int = 10
-
-    n_samples_per_prompt: int = 8
-    lr: float = 5e-7
     max_tokens_per_gpu: int = 12288
-    eval_max_response_len: int = 4096
+    lr: float = 5e-7
