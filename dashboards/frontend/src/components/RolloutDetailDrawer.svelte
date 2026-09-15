@@ -1,5 +1,5 @@
 <script>
-  import { ChevronDown, ChevronLeft, ChevronRight, Download, PanelRightClose } from "lucide-svelte";
+  import { ChevronLeft, ChevronRight, Download, PanelRightClose } from "lucide-svelte";
   import Drawer from "./Drawer.svelte";
   import RunTimeline from "./RunTimeline.svelte";
   import InferenceStats from "./InferenceStats.svelte";
@@ -26,7 +26,6 @@
   const BUCKET_COUNT = 12;
   let activeBucket = $state(null); // histogram bucket index, or null
   let activeSamplePos = $state(0); // position within the active bucket's list
-  let timingOpen = $state(false);
   let detailsEl = $state(null);
 
   // Reset the drill-in whenever a different rollout is shown.
@@ -315,8 +314,21 @@
     {:else if !rollout || !sampleDist}
       <div class="detail-empty px-[24px]">No samples recorded.</div>
     {:else}
-      <!-- Top: diagnostics + histogram (+ collapsible timing) -->
+      <!-- Top: timing + diagnostics + histogram -->
       <div class="p-[0_24px] shrink-0">
+        {#if timings}
+          <div class="mb-[12px]">
+            <RunTimeline
+              timings={{ [rolloutId]: timings }}
+              asyncOverride={timelineAsync}
+              runOrigin={timelineRunOrigin}
+              showOpenRollout={false}
+              timelineKey={`${runId}:${rolloutId}`}
+              downloadName={`substep_timing_${runId}_rollout_${rolloutId}.json`}
+              rolloutIds={[rolloutId]}
+            />
+          </div>
+        {/if}
         {#if diagnostics}
           {@const d = diagnostics}
           <div class="rollout-diagnostics" class:diag-critical={d.remoteErr >= d.totalSamples}>
@@ -377,34 +389,6 @@
           </div>
         </div>
 
-        {#if timings}
-          <div class="mt-[12px]">
-            <button
-              type="button"
-              class="inline-flex items-center gap-[4px] [background:none] [border:0] p-0 text-[12px] font-semibold text-(--text-bright) cursor-pointer hover:text-(--text)"
-              onclick={() => (timingOpen = !timingOpen)}
-              aria-expanded={timingOpen}
-            >
-              <span class="inline-flex transition-transform" style:transform={timingOpen ? undefined : "rotate(-90deg)"}>
-                <ChevronDown size={14} />
-              </span>
-              Substep timing
-            </button>
-            {#if timingOpen}
-              <div class="mt-[6px]">
-                <RunTimeline
-                  timings={{ [rolloutId]: timings }}
-                  asyncOverride={timelineAsync}
-                  runOrigin={timelineRunOrigin}
-                  showOpenRollout={false}
-                  timelineKey={`${runId}:${rolloutId}`}
-                  downloadName={`substep_timing_${runId}_rollout_${rolloutId}.json`}
-                  rolloutIds={[rolloutId]}
-                />
-              </div>
-            {/if}
-          </div>
-        {/if}
       </div>
 
       <!-- Toolbar -->
