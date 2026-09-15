@@ -18,7 +18,7 @@
 
 <aside
   class={[
-    "flex flex-col min-h-0 overflow-hidden [border-right:1px_solid_rgba(255,255,255,0.1)] bg-(--bg-depth) transition-[padding] duration-100 ease-out max-[900px]:[border-right:0] max-[900px]:[border-bottom:1px_solid_var(--border)] max-[900px]:p-[0_8px]",
+    "flex flex-col min-h-0 [border-right:1px_solid_rgba(255,255,255,0.1)] bg-(--bg-depth) transition-[padding] duration-100 ease-out max-[900px]:[border-right:0] max-[900px]:[border-bottom:1px_solid_var(--border)] max-[900px]:p-[0_8px]",
     collapsed ? "p-[4px_8px_0]" : "p-[4px_20px_0]",
   ]}
   aria-label="Primary"
