@@ -235,6 +235,23 @@ def _classes_for_path(path: Path) -> set[str]:
     return set()
 
 
+def _tutorial_slug_for_path(
+    path: Path,
+    tutorials: dict[str, TutorialEntry],
+) -> str | None:
+    if not path.is_relative_to(TUTORIAL_SRC_ROOT):
+        return None
+    for slug, tutorial in tutorials.items():
+        owner = (
+            tutorial.path
+            if tutorial.path.parent == TUTORIAL_SRC_ROOT
+            else tutorial.path.parent
+        )
+        if path == owner or path.is_relative_to(owner):
+            return slug
+    return None
+
+
 def analyze_diff(diff_text: str) -> ImpactReport:
     tutorials = _load_tutorial_index()
     changed_paths = _paths_from_diff(diff_text)
@@ -244,9 +261,8 @@ def analyze_diff(diff_text: str) -> ImpactReport:
 
     for path in changed_paths:
         if path.is_relative_to(TUTORIAL_SRC_ROOT):
-            slug = path.stem
-            info = tutorials.get(slug)
-            if info is not None:
+            slug = _tutorial_slug_for_path(path, tutorials)
+            if slug is not None:
                 affected_tutorial_reasons[slug].add("tutorial source changed")
             continue
 
