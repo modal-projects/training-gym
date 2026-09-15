@@ -34,8 +34,8 @@ builds the dashboard. It receives these props:
 - `run`: the current `TrainingRun` summary.
 
 The override path is saved in `~/.training-gym.toml`, so later `setup` or
-password redeploys keep using it. To restore the built-in viewer, remove the
-`trajectory_viewer` entry from that file and run `training-gym setup` again.
+password redeploys keep using it. To restore the built-in viewer, run
+`training-gym setup --no-trajectory-viewer`.
 
 ## Run-scoped dashboard components
 
@@ -59,6 +59,10 @@ record under `runs/<training_run_id>/<name>.json`. The immutable artifact
 manifest is also associated with the run under
 `metadata.dashboard_components`. The dashboard mounts this Volume, verifies
 the source against the manifest's `sha256`, and compiles the selected Svelte
-component on demand; the built-in viewer remains the fallback when no
-run-scoped component is available (or compilation fails). If several names are
-attached for the same component type, the most recently attached one is used.
+component on demand in a separate Modal function that has no secrets or
+Volumes. The compiled component is served as a self-contained page and
+rendered in a sandboxed `<iframe>` (opaque origin, no network access), so it
+receives its props over `postMessage` and cannot use the dashboard's
+credentials. The built-in viewer remains the fallback when no run-scoped
+component is available (or compilation fails). If several names are attached
+for the same component type, the most recently attached one is used.

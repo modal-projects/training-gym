@@ -1934,6 +1934,7 @@
                             rewardEvents={activeSample.sample.reward_events || []}
                             rollout={expandedRollout}
                             run={run}
+                            position={`${activeBucket}/${activeSample.pos}`}
                           />
                           {#if activeSample.sample.metadata?.reference}
                             <div class="rollout-sample-label">reference</div>

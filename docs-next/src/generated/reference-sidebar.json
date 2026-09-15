@@ -13,6 +13,10 @@
       "link": "/reference/customdeployment"
     },
     {
+      "label": "DashboardComponent",
+      "link": "/reference/dashboardcomponent"
+    },
+    {
       "label": "DatasetConfig",
       "link": "/reference/datasetconfig"
     },

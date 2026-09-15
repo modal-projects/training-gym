@@ -608,6 +608,24 @@ class TrainingRun(BaseModel):
                     merged_metadata["framework_progress"] = stored_progress
             elif isinstance(stored_progress, dict):
                 merged_metadata["framework_progress"] = stored_progress
+            # Components are attached by name from independent handles (often
+            # after launch), so merge per name instead of letting the handle
+            # that saves last drop everyone else's attachments. Entries this
+            # handle added or replaced are appended so insertion order stays
+            # attachment order (the dashboard picks the last matching entry).
+            stored_components = stored_metadata.get("dashboard_components")
+            current_components = current_metadata.get("dashboard_components")
+            if isinstance(stored_components, dict) and isinstance(
+                current_components, dict
+            ):
+                merged_components = {
+                    name: value
+                    for name, value in stored_components.items()
+                    if name not in current_components
+                    or current_components[name] == value
+                }
+                merged_components.update(current_components)
+                merged_metadata["dashboard_components"] = merged_components
             payload["metadata"] = merged_metadata
             return payload
 

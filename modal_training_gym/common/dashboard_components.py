@@ -19,7 +19,7 @@ from typing import Any
 
 DASHBOARD_OVERLAY_VOLUME_NAME = "training-gym-dashboard-overlay"
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-_MAX_COMPONENT_BYTES = 2 * 1024 * 1024
+MAX_COMPONENT_BYTES = 2 * 1024 * 1024
 
 
 class DashboardComponent(str, Enum):
@@ -60,10 +60,10 @@ def read_dashboard_component(
     data = path.read_bytes()
     if not data:
         raise ValueError(f"dashboard component file is empty: {path}")
-    if len(data) > _MAX_COMPONENT_BYTES:
+    if len(data) > MAX_COMPONENT_BYTES:
         raise ValueError(
             f"dashboard component file is too large ({len(data)} bytes; "
-            f"maximum {_MAX_COMPONENT_BYTES} bytes): {path}"
+            f"maximum {MAX_COMPONENT_BYTES} bytes): {path}"
         )
 
     return path, data, hashlib.sha256(data).hexdigest()
@@ -135,6 +135,7 @@ def store_dashboard_component(
 
 __all__ = [
     "DASHBOARD_OVERLAY_VOLUME_NAME",
+    "MAX_COMPONENT_BYTES",
     "DashboardComponent",
     "read_dashboard_component",
     "store_dashboard_component",

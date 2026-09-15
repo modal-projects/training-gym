@@ -55,6 +55,7 @@ def setup(
     require_proxy_auth: bool,
     interactive: bool = True,
     trajectory_viewer: str | Path | None = None,
+    reset_trajectory_viewer: bool = False,
 ) -> str:
     """Deploy the training-gym dashboard, persist its URL, and return it.
 
@@ -71,7 +72,10 @@ def setup(
         save_dashboard_url,
     )
 
-    if trajectory_viewer is not None:
+    if reset_trajectory_viewer:
+        save_dashboard_trajectory_viewer(None)
+        trajectory_viewer_path = None
+    elif trajectory_viewer is not None:
         viewer_path = Path(trajectory_viewer).expanduser().resolve()
         if not viewer_path.is_file():
             raise ValueError(f"trajectory viewer must be a file: {viewer_path}")

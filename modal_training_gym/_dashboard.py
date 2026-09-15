@@ -11,8 +11,10 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets as _secrets
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import (
@@ -61,6 +63,7 @@ from modal_training_gym.common.dashboard import (
 )
 from modal_training_gym.common.dashboard_components import (
     DASHBOARD_OVERLAY_VOLUME_NAME,
+    MAX_COMPONENT_BYTES,
     DashboardComponent,
 )
 from modal_training_gym.common.run import (
@@ -415,6 +418,114 @@ def _run_compact_sync() -> None:
         MetadataStore.TRAIN_RESULTS_SUMMARY,
     ):
         compact_summary_store(summary_store)
+
+
+# Host document for run-scoped components. It is loaded into a sandboxed
+# <iframe> (opaque origin, no network) and only talks to the dashboard through
+# postMessage: the parent sends ``props``; the frame reports ``ready``,
+# ``rendered``, ``resize`` and ``error``.
+_COMPONENT_FRAME_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark light">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body { color: #d1d1d1; font: 12px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #viewer { min-height: 1px; }
+</style>
+</head>
+<body>
+<div id="viewer"></div>
+<script type="module" nonce="__NONCE__">
+__COMPONENT__
+
+const __target = document.getElementById("viewer");
+let __mounted = null;
+function __post(message) {
+  window.parent.postMessage({ trainingGymDashboardComponent: true, ...message }, "*");
+}
+function __render(props) {
+  if (__mounted && typeof __mounted.unmount === "function") __mounted.unmount();
+  __mounted = null;
+  __target.replaceChildren();
+  __mounted = mountViewer(__target, props);
+}
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent) return;
+  const data = event.data;
+  if (!data || data.trainingGymDashboardComponent !== true || data.type !== "props") return;
+  try {
+    __render(data.props);
+    __post({ type: "rendered" });
+  } catch (error) {
+    __post({ type: "error", message: String((error && error.message) || error) });
+  }
+});
+window.addEventListener("error", (event) => {
+  __post({ type: "error", message: String(event.message || "component error") });
+});
+new ResizeObserver(() => {
+  __post({ type: "resize", height: document.documentElement.scrollHeight });
+}).observe(document.body);
+__post({ type: "ready" });
+</script>
+</body>
+</html>
+"""
+
+
+class DashboardComponentCompileError(Exception):
+    """A user-supplied dashboard component could not be compiled."""
+
+
+def _component_compiler_script() -> Path:
+    installed = Path("/app/frontend/component_bundle.mjs")
+    if installed.is_file():
+        return installed
+    checkout = (
+        Path(__file__).resolve().parent.parent
+        / "dashboards"
+        / "frontend"
+        / "component_bundle.mjs"
+    )
+    if checkout.is_file():
+        return checkout
+    raise DashboardComponentCompileError("Dashboard component compiler unavailable")
+
+
+def compile_dashboard_component_source(source: bytes) -> bytes:
+    """Compile Svelte component source into a self-contained ES module.
+
+    The source is written to a scratch directory that is discarded afterwards,
+    so the compiler never touches the overlay Volume or the caller's paths.
+    """
+    script = _component_compiler_script()
+    with tempfile.TemporaryDirectory(prefix="training-gym-component-") as scratch:
+        source_path = Path(scratch) / "Component.svelte"
+        output_path = Path(scratch) / "bundle.js"
+        source_path.write_bytes(source)
+        try:
+            completed = subprocess.run(
+                ["node", str(script), str(source_path), str(output_path)],
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise DashboardComponentCompileError("timed out") from exc
+        if completed.returncode != 0 or not output_path.is_file():
+            detail = (completed.stderr or completed.stdout or "compile failed").strip()
+            raise DashboardComponentCompileError(detail[-1000:])
+        return output_path.read_bytes()
+
+
+# Deliberately no secrets and no Volumes: the compiler only ever sees the
+# bytes it is handed, and a runaway or hostile build is bounded by this
+# container's limits instead of the dashboard's.
+@app.function(timeout=120, cpu=1.0, memory=1024)
+def compile_dashboard_component(source: bytes) -> bytes:
+    return compile_dashboard_component_source(source)
 
 
 @app.function(
@@ -1037,59 +1148,78 @@ def fastapi_app():
             )
         return source
 
-    def _verify_component_source(source: Path, digest: str) -> None:
-        """Only compile source whose content matches the manifest's sha256.
+    def _read_component_source(source: Path, digest: str) -> bytes:
+        """Read source whose content matches the manifest's sha256.
 
         Run metadata selects the component, but the overlay Volume is the
         only thing that should decide what code ships to the browser.
         """
-        actual = hashlib.sha256(source.read_bytes()).hexdigest()
+        data = source.read_bytes()
+        if len(data) > MAX_COMPONENT_BYTES:
+            raise HTTPException(
+                status_code=413, detail="Dashboard component source is too large"
+            )
+        actual = hashlib.sha256(data).hexdigest()
         if not hmac.compare_digest(actual, digest):
             raise HTTPException(
                 status_code=409,
                 detail="Dashboard component source does not match its manifest",
             )
+        return data
 
     component_compile_locks: dict[str, asyncio.Lock] = {}
 
-    def _component_compile_lock(digest: str) -> asyncio.Lock:
-        lock = component_compile_locks.get(digest)
-        if lock is None:
-            lock = component_compile_locks[digest] = asyncio.Lock()
-        return lock
+    async def _compile_component_bundle(
+        source: Path, digest: str, bundle: Path
+    ) -> None:
+        """Compile ``source`` into ``bundle`` exactly once per digest.
 
-    async def _compile_component_bundle(source: Path, bundle: Path) -> None:
-        script = Path("/app/frontend/component_bundle.mjs")
-        if not script.is_file():
-            raise HTTPException(
-                status_code=500, detail="Dashboard component compiler unavailable"
-            )
-        staging = bundle.with_name(f"{bundle.stem}.{_secrets.token_hex(8)}.js")
+        Concurrent first requests for the same digest wait on a shared lock;
+        the finished bundle is installed atomically so readers never observe a
+        partial file. The lock is dropped once the compile settles so the map
+        does not grow with every component revision.
+        """
+        lock = component_compile_locks.setdefault(digest, asyncio.Lock())
         try:
-            try:
-                completed = await run_in_threadpool(
-                    subprocess.run,
-                    ["node", str(script), str(source), str(staging)],
-                    capture_output=True,
-                    text=True,
-                    timeout=90,
-                )
-            except subprocess.TimeoutExpired as exc:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Dashboard component failed to compile: timed out",
-                ) from exc
-            if completed.returncode != 0 or not staging.is_file():
-                detail = (
-                    completed.stderr or completed.stdout or "compile failed"
-                ).strip()
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Dashboard component failed to compile: {detail[-1000:]}",
-                )
-            os.replace(staging, bundle)
+            async with lock:
+                if bundle.is_file():
+                    return
+                data = await run_in_threadpool(_read_component_source, source, digest)
+                try:
+                    if _is_local():
+                        compiled = await run_in_threadpool(
+                            compile_dashboard_component_source, data
+                        )
+                    else:
+                        compiled = await compile_dashboard_component.remote.aio(data)
+                except DashboardComponentCompileError as exc:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Dashboard component failed to compile: {exc}",
+                    ) from exc
+                staging = bundle.with_name(f"{bundle.stem}.{_secrets.token_hex(8)}.js")
+                try:
+                    await run_in_threadpool(staging.write_bytes, compiled)
+                    os.replace(staging, bundle)
+                finally:
+                    staging.unlink(missing_ok=True)
         finally:
-            staging.unlink(missing_ok=True)
+            if not lock.locked() and component_compile_locks.get(digest) is lock:
+                del component_compile_locks[digest]
+
+    _CLOSE_SCRIPT_RE = re.compile(r"</(script)", re.IGNORECASE)
+
+    def _component_frame_html(bundle_js: str, nonce: str) -> str:
+        """Wrap a compiled component in a self-contained host document.
+
+        The document is served to a sandboxed ``<iframe>`` so the component
+        runs in an opaque origin: it receives props over ``postMessage`` and
+        cannot read dashboard storage or issue authenticated requests.
+        """
+        script = _CLOSE_SCRIPT_RE.sub(r"<\\/\1", bundle_js)
+        return _COMPONENT_FRAME_TEMPLATE.replace("__NONCE__", nonce).replace(
+            "__COMPONENT__", script
+        )
 
     async def _refresh_dashboard_component_volume() -> None:
         """Refresh the mounted overlay before reading a newly registered component.
@@ -1099,11 +1229,13 @@ def fastapi_app():
         reload the volume to make that version visible at the mount point.  Keep
         this best-effort for local/test contexts where ``reload`` is unavailable.
         """
-        try:
-            await run_in_threadpool(dashboard_component_volume.reload)
-        except (AttributeError, RuntimeError):
+        if _is_local():
             # ``reload`` is only meaningful inside a Modal container; the source
             # path check below still works for local test mounts.
+            return
+        try:
+            await run_in_threadpool(dashboard_component_volume.reload)
+        except (AttributeError, RuntimeError, Error):
             return
 
     @web.get("/api/runs/{training_run_id}/dashboard-components/{component_type}")
@@ -1115,9 +1247,9 @@ def fastapi_app():
         return JSONResponse(manifest)
 
     @web.get(
-        "/api/runs/{training_run_id}/dashboard-components/{component_type}/bundle.js"
+        "/api/runs/{training_run_id}/dashboard-components/{component_type}/frame.html"
     )
-    async def get_dashboard_component_bundle(training_run_id: str, component_type: str):
+    async def get_dashboard_component_frame(training_run_id: str, component_type: str):
         run = await _get_run_or_404(training_run_id)
         manifest = _component_manifest(run, component_type)
         await _refresh_dashboard_component_volume()
@@ -1128,15 +1260,33 @@ def fastapi_app():
         bundle = cache_root / f"{digest}.js"
 
         if not bundle.is_file():
-            async with _component_compile_lock(digest):
-                if not bundle.is_file():
-                    await run_in_threadpool(_verify_component_source, source, digest)
-                    await _compile_component_bundle(source, bundle)
+            await _compile_component_bundle(source, digest, bundle)
 
+        nonce = _secrets.token_urlsafe(16)
+        bundle_js = await run_in_threadpool(bundle.read_text, "utf-8")
+        csp = "; ".join(
+            [
+                "default-src 'none'",
+                f"script-src 'nonce-{nonce}'",
+                "style-src 'unsafe-inline'",
+                "img-src data: blob:",
+                "font-src data:",
+                "connect-src 'none'",
+                "frame-ancestors 'self'",
+                "base-uri 'none'",
+                "form-action 'none'",
+                "sandbox allow-scripts",
+            ]
+        )
         return Response(
-            bundle.read_bytes(),
-            media_type="application/javascript",
-            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            _component_frame_html(bundle_js, nonce),
+            media_type="text/html",
+            headers={
+                "Cache-Control": "private, max-age=31536000, immutable",
+                "Content-Security-Policy": csp,
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     @web.post("/api/framework-status")

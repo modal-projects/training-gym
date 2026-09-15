@@ -26,13 +26,25 @@ from .commands import _TrainingGymCommand
     default=None,
     help="Mount a custom TrajectoryViewer.svelte over the dashboard default.",
 )
+@click.option(
+    "--no-trajectory-viewer",
+    is_flag=True,
+    help="Forget a saved --trajectory-viewer and redeploy the built-in viewer.",
+)
 def setup_command(
-    proxy_auth: bool, no_proxy_auth: bool, trajectory_viewer: Path | None
+    proxy_auth: bool,
+    no_proxy_auth: bool,
+    trajectory_viewer: Path | None,
+    no_trajectory_viewer: bool,
 ) -> None:
     """Deploy the dashboard."""
     if proxy_auth and no_proxy_auth:
         raise click.UsageError(
             "--proxy-auth and --no-proxy-auth cannot be used together."
+        )
+    if trajectory_viewer is not None and no_trajectory_viewer:
+        raise click.UsageError(
+            "--trajectory-viewer and --no-trajectory-viewer cannot be used together."
         )
 
     from .setup import setup
@@ -45,7 +57,9 @@ def setup_command(
                 "Pass either --proxy-auth or --no-proxy-auth explicitly."
             )
 
-    if trajectory_viewer is None:
+    if no_trajectory_viewer:
+        setup(require_proxy_auth=proxy_auth, reset_trajectory_viewer=True)
+    elif trajectory_viewer is None:
         setup(require_proxy_auth=proxy_auth)
     else:
         setup(require_proxy_auth=proxy_auth, trajectory_viewer=trajectory_viewer)
