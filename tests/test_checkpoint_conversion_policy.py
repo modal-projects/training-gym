@@ -47,11 +47,12 @@ def test_mtp_none_is_omitted_but_zero_is_an_override(mtp):
     )
 
 
-def test_expert_parallelism_must_fit_explicit_single_rank():
+def test_expert_parallelism_wider_than_tp_pp_widens_the_world():
     cfg = SimpleNamespace(
         conversion_tensor_model_parallel_size=1,
         conversion_expert_model_parallel_size=2,
         conversion_expert_tensor_parallel_size=1,
     )
-    with pytest.raises(ValueError, match="does not divide"):
-        get_checkpoint_conversion_policy(cfg)
+    nodes, processes, args = get_checkpoint_conversion_policy(cfg)
+    assert (nodes, processes) == (1, 2)
+    assert "--expert-model-parallel-size 2" in args
