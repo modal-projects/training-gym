@@ -654,8 +654,10 @@ class TrainConfig:
                         is_active=is_active,
                     )
 
-                megatron_to_hf_mode = getattr(self.recipe, "megatron_to_hf_mode", "")
-                needs_conversion = megatron_to_hf_mode != "bridge"
+                needs_conversion = (
+                    self.recipe.effective_megatron_to_hf_mode(self.dataset, self.model)
+                    != "bridge"
+                )
                 download_status, convert_status = (
                     (SlimeStatus.DOWNLOAD_MODEL, SlimeStatus.CONVERT_MODEL)
                     if isinstance(self.recipe, SlimeRecipe)

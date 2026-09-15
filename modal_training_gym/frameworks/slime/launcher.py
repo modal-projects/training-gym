@@ -416,12 +416,7 @@ def build_slime_app(
                 f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
             )
 
-    configured_megatron_to_hf_mode = slime._escape_hatch_values().get(
-        "megatron_to_hf_mode", slime.megatron_to_hf_mode
-    )
-    megatron_to_hf_mode = slime.overrides(dataset, model).get(
-        "megatron_to_hf_mode", configured_megatron_to_hf_mode
-    )
+    megatron_to_hf_mode = slime.effective_megatron_to_hf_mode(dataset, model)
 
     if model and megatron_to_hf_mode != "bridge" and not slime.ref_load:
         # Non-bridge: pre-convert HF -> torch_dist (convert_checkpoint) and load that as the

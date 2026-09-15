@@ -288,6 +288,24 @@ def test_yaml_bridge_mode_does_not_assign_torch_dist_ref_load():
     assert recipe.ref_load == ""
 
 
+def test_yaml_raw_mode_overrides_bridge_field_for_conversion():
+    model = Qwen3_5_4B()
+    dataset = _mm("image")
+    recipe = Qwen3_5_4B_Recipe(
+        megatron_to_hf_mode="bridge",
+        extra_config={"megatron_to_hf_mode": "raw"},
+    )
+    assert recipe.megatron_to_hf_mode == "bridge"
+    assert recipe.effective_megatron_to_hf_mode(dataset, model) == "raw"
+    build_slime_app(
+        training_run_id="raw-yaml",
+        slime=recipe,
+        model=model,
+        dataset=dataset,
+    )
+    assert recipe.ref_load == "/checkpoints/torch_dist/Qwen--Qwen3.5-4B-v31"
+
+
 def test_write_jsonl_materializes_data_uris(tmp_path):
     png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     wav = "UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="

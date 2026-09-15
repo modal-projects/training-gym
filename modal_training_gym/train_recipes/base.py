@@ -228,6 +228,17 @@ class BaseTrainRecipe(ABC):
         stored = getattr(self, "_materialized_config", None)
         return stored if isinstance(stored, dict) else {}
 
+    def effective_megatron_to_hf_mode(
+        self,
+        dataset: "DatasetConfig | None" = None,
+        model: "ModelConfig | None" = None,
+    ) -> str:
+        """Mode after escape-hatch and provider overrides, matching CLI emission."""
+        configured = self._escape_hatch_values().get(
+            "megatron_to_hf_mode", getattr(self, "megatron_to_hf_mode", "")
+        )
+        return self.overrides(dataset, model).get("megatron_to_hf_mode", configured)
+
     def _emit_fields(self, fields: dict[str, Any]) -> dict[str, Any]:
         """Drop launcher-only fields and let the escape hatch win over same-named flags.
 
