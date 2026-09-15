@@ -36,6 +36,9 @@
   let generation = 0;
   let readyTimer = null;
   let loadedDigest = null;
+  // Digests the server rejected deterministically (bad source / compile
+  // error); polling skips these, but retries anything transient.
+  const brokenDigests = new Set();
   let loading = false;
 
   function runId() {
@@ -107,7 +110,7 @@
       }
       if (before !== generation) return;
       if (!force) {
-        if (digest === loadedDigest) return;
+        if (digest === loadedDigest || brokenDigests.has(digest)) return;
         reset();
         loadError = "";
         mode = "loading";
@@ -129,6 +132,7 @@
           } catch {
             // Non-JSON error bodies keep the generic status message.
           }
+          if ([409, 413, 422].includes(frameResponse.status)) brokenDigests.add(digest);
           throw new Error(detail);
         }
         frameSrc = src;
@@ -136,13 +140,10 @@
         readyTimer = setTimeout(() => {
           if (current !== generation || frameReady) return;
           fail("run-scoped viewer did not start");
-          loadedDigest = digest;
         }, READY_TIMEOUT_MS);
       } catch (error) {
         if (current !== generation) return;
         fail(error?.message || String(error));
-        // Keep the digest so polling does not retry a broken component every tick.
-        loadedDigest = digest;
       }
     } finally {
       loading = false;

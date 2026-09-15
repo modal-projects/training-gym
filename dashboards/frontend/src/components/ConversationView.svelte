@@ -397,12 +397,21 @@
 
   // Resolve turns: prefer structured messages, then multi-turn response
   // parsing, and finally render a plain single-turn response as one assistant
-  // turn.
+  // turn. Balatro trajectories may be stored truncated while the flattened
+  // response still holds the remaining action/state pairs; those are appended
+  // after the structured turns rather than replacing them, so system/user
+  // context, thinking and tool-call metadata survive.
   let parsed = $derived.by(() => {
     if (Array.isArray(messages) && messages.length > 0) {
       const structured = messages.map(parseStructuredMessage);
       const reconstructed = parseBalatroResponse(response);
-      return reconstructed.length > structured.length ? reconstructed : structured;
+      const actionTurns = structured.filter((turn) => turn.role === "assistant").length;
+      const lastRole = structured[structured.length - 1]?.role;
+      // Each reconstructed pair is [assistant action, tool state]; skip the
+      // pairs the structured trajectory already covers (a trailing assistant
+      // turn still needs its state).
+      const covered = actionTurns * 2 - (lastRole === "assistant" ? 1 : 0);
+      return reconstructed.length > covered ? structured.concat(reconstructed.slice(covered)) : structured;
     }
     const turns = parseFlatResponse(response);
     if (turns.length) return turns;
