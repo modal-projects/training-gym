@@ -425,14 +425,14 @@ def apply_source_overlays(image: Image, miles: MilesRecipe) -> Image:
     """
     if miles.sglang_git_ref:
         image = image.run_commands(
-            f"cd {SGLANG_ROOT} && git fetch --depth=1 origin {miles.sglang_git_ref}"
-            " && git checkout -f FETCH_HEAD"
+            f"cd {SGLANG_ROOT} && git fetch --depth=1 origin"
+            f" {shlex.quote(miles.sglang_git_ref)} && git checkout -f FETCH_HEAD"
         )
 
     if miles.miles_git_ref:
         image = image.run_commands(
-            f"cd {MILES_ROOT} && git fetch --depth=1 origin {miles.miles_git_ref}"
-            " && git checkout -f FETCH_HEAD",
+            f"cd {MILES_ROOT} && git fetch --depth=1 origin"
+            f" {shlex.quote(miles.miles_git_ref)} && git checkout -f FETCH_HEAD",
             # The checkout just reverted the patched miles sources.
             f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
             " || echo 'WARNING: sglang abort patch did not apply to the"
