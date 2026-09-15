@@ -181,9 +181,6 @@ _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATC
 _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
-_PATCH_RESTORE_ACTOR_AFTER_REF_LOAD_B64 = encode_patch(
-    "patch_restore_actor_after_ref_load", _SLIME_PATCHES
-)
 
 # Patches targeting /root/slime* — a git overlay replaces that directory, so
 # these are skipped in the base image when an overlay is configured and applied
@@ -200,7 +197,6 @@ _SLIME_ROOT_PATCHES_B64 = (
     _PATCH_ZERO_STD_METRICS_B64,
     _PATCH_SGLANG_PARALLEL_ALIASES_B64,
     _PATCH_SUBSTEP_TIMING_B64,
-    _PATCH_RESTORE_ACTOR_AFTER_REF_LOAD_B64,
 )
 
 # Patches targeting Megatron-LM or site-packages — survive a git overlay.
