@@ -22,14 +22,15 @@
 # 3. Trackio experiment tracking, so the fork's native `rollout/*` and
 #    `eval/<dataset>` charts land on a server you host on Modal.
 #
-# The recipe trains on six 8×H200 nodes (48 GPUs) by default, with two trainer
-# nodes and four rollout nodes. A one-node smoke profile is described at the
-# end for checking the plumbing before committing that much hardware.
+# The tutorial defaults to a one-step smoke on one 8×H200 node. Set
+# `AGENTIC_SMOKE=0` for six 8×H200 nodes (48 GPUs), with two trainer
+# nodes and four rollout nodes; both profiles are described below.
 
 import json
 import os
 from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 import modal
 
@@ -73,33 +74,34 @@ from modal_training_gym import (
 # `AGENTIC_SMOKE=1` pins all of them to the cheapest shape that exercises the
 # plumbing.
 
+SMOKE = os.environ.get("AGENTIC_SMOKE", "1") == "1"
 DATASET_ROOT = os.environ.get("AGENTIC_HARBOR_DATASET_ROOT", "swe_rebench_v2")
-TRAIN_SUBSET = os.environ.get("AGENTIC_TRAIN_SUBSET", "train-300")
+TRAIN_SUBSET = os.environ.get("AGENTIC_TRAIN_SUBSET", "train-4" if SMOKE else "train-300")
 EVAL_SUBSETS = tuple(
-    value for value in os.environ.get("AGENTIC_EVAL_SUBSETS", "eval").split(",") if value
+    value
+    for value in os.environ.get("AGENTIC_EVAL_SUBSETS", "eval-4" if SMOKE else "eval").split(",")
+    if value
 )
-NUM_ROLLOUT = int(os.environ.get("AGENTIC_NUM_ROLLOUT", "500"))
+NUM_ROLLOUT = int(os.environ.get("AGENTIC_NUM_ROLLOUT", "1" if SMOKE else "500"))
 EVAL_SAMPLES = int(os.environ.get("AGENTIC_EVAL_SAMPLES", "1"))
-EVAL_INTERVAL_RAW = os.environ.get("AGENTIC_EVAL_INTERVAL", "")
+EVAL_INTERVAL_RAW = os.environ.get("AGENTIC_EVAL_INTERVAL", "1" if SMOKE else "")
 EVAL_INTERVAL = int(EVAL_INTERVAL_RAW) if EVAL_INTERVAL_RAW else None
 NODES = int(os.environ.get("AGENTIC_NODES", "6"))
 ROLLOUT_BATCH_SIZE = int(os.environ.get("AGENTIC_ROLLOUT_BATCH_SIZE", "32"))
 N_SAMPLES_PER_PROMPT = int(os.environ.get("AGENTIC_N_SAMPLES_PER_PROMPT", "8"))
 MAX_STEPS = int(os.environ.get("AGENTIC_MAX_STEPS", "75"))
-SMOKE = os.environ.get("AGENTIC_SMOKE", "") == "1"
-RUN_NAME = os.environ.get("AGENTIC_RUN_NAME", "agentic-harbor")
+RUN_NAME = os.environ.get("AGENTIC_RUN_NAME") or f"agentic-harbor-{uuid4().hex}"
 TRACKIO_PROJECT = os.environ.get("AGENTIC_TRACKIO_PROJECT", "agentic-harbor")
 LOAD = os.environ.get("AGENTIC_LOAD", "")
 
 if SMOKE:
     NODES, ROLLOUT_BATCH_SIZE, N_SAMPLES_PER_PROMPT, MAX_STEPS = 1, 2, 1, 2
+    EVAL_SAMPLES = 1
 if NODES not in (1, 6):
     raise ValueError("AGENTIC_NODES must be 6 (disaggregated) or 1 (one colocated node)")
-if not DATASET_ROOT:
-    raise RuntimeError(
-        "AGENTIC_HARBOR_DATASET_ROOT must name the dataset root written by "
-        "scripts/partition_swe_dataset.py, e.g. swe_rebench_v2"
-    )
+for name in (DATASET_ROOT, TRAIN_SUBSET, *EVAL_SUBSETS, RUN_NAME):
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise ValueError(f"expected a single directory or subset name, got {name!r}")
 DATA_ROOT = f"/data/{DATASET_ROOT}"
 
 # ## Select a prepared subset by filename
@@ -111,7 +113,7 @@ DATA_ROOT = f"/data/{DATASET_ROOT}"
 
 class PreparedHarborSubset(DatasetConfig):
     def __init__(self, subset: str):
-        if not subset or "/" in subset or subset in {".", ".."}:
+        if not subset or "/" in subset or "\\" in subset or subset in {".", ".."}:
             raise ValueError(f"invalid subset name: {subset!r}")
         self.path = Path(DATA_ROOT) / f"{subset}.jsonl"
 
@@ -239,6 +241,7 @@ if SMOKE:
     )
 
 print(f"training and rollout gpus colocated: {recipe.colocate}")
+print(f"rollout dumps: /checkpoints/agentic_rollout_dumps/{RUN_NAME}/")
 print(f"nodes: {recipe.total_nodes}, gpus: {recipe.gpu_allocation.total_gpus}")
 print(
     f"parallelism: tp={recipe.tensor_model_parallel_size}, "
@@ -290,10 +293,10 @@ print(f"Modal app: {run.modal_app_url}")
 
 # ## Run it
 #
-# A full run on the default 48-GPU topology:
+# A full run on the recipe's 48-GPU topology (the default command runs a smoke):
 #
 # ```bash
-# uv run tutorials/agentic_harbor.py
+# AGENTIC_SMOKE=0 uv run tutorials/coding_agent.py
 # ```
 #
 # The same topology on a small subset, here the four-task `train-4` split, for
@@ -304,12 +307,12 @@ print(f"Modal app: {run.modal_app_url}")
 # dashboard's reward curve should move within a few steps:
 #
 # ```bash
-# AGENTIC_TRAIN_SUBSET=train-4 \
+# AGENTIC_SMOKE=0 AGENTIC_TRAIN_SUBSET=train-4 \
 # AGENTIC_EVAL_SUBSETS=eval-4 \
 # AGENTIC_ROLLOUT_BATCH_SIZE=4 \
 # AGENTIC_NUM_ROLLOUT=8 \
 # AGENTIC_EVAL_INTERVAL=4 \
-#   uv run tutorials/agentic_harbor.py
+#   uv run tutorials/coding_agent.py
 # ```
 #
 # Add `AGENTIC_NODES=1 AGENTIC_ROLLOUT_BATCH_SIZE=2` to run the same experiment
@@ -326,7 +329,7 @@ print(f"Modal app: {run.modal_app_url}")
 # AGENTIC_NUM_ROLLOUT=2 \
 # AGENTIC_EVAL_INTERVAL=1 \
 # AGENTIC_EVAL_SAMPLES=1 \
-#   uv run tutorials/agentic_harbor.py
+#   uv run tutorials/coding_agent.py
 # ```
 #
 # ## Probe for a mixed-reward subset
@@ -339,13 +342,13 @@ print(f"Modal app: {run.modal_app_url}")
 # step:
 #
 # ```bash
-# AGENTIC_TRAIN_SUBSET=train-300 \
+# AGENTIC_SMOKE=0 AGENTIC_TRAIN_SUBSET=train-300 \
 # AGENTIC_EVAL_SUBSETS=train-300 \
 # AGENTIC_NUM_ROLLOUT=1 \
 # AGENTIC_EVAL_SAMPLES=8 \
 # AGENTIC_EVAL_INTERVAL=5 \
 # AGENTIC_RUN_NAME=qwen3-6-27b-agentic-probe \
-#   uv run tutorials/agentic_harbor.py
+#   uv run tutorials/coding_agent.py
 # ```
 #
 # Once the probe finishes, keep only the tasks whose eight fully gradeable
