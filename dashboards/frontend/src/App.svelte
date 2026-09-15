@@ -15,6 +15,7 @@
   } from "./lib/api.js";
   import logoSvg from "./lib/logo.svg";
   import { fmtDuration } from "./lib/format.js";
+  import { createSidebarCollapsedState } from "./lib/sidebarCollapsed.svelte.js";
 
   const DOCS_URL = "https://gym.modal.dev";
 
@@ -46,6 +47,7 @@
   let seenStatuses = new Set();
   let seenGroups = new Set();
   let activePage = $state("training");
+  const sidebar = createSidebarCollapsedState();
   let activeTrainingRunId = $state(null);
   // When set (and no full detail page is open), the training list shows a
   // summary drawer for this run — set by "Collapse" on the detail page.
@@ -106,6 +108,23 @@
 
     window.addEventListener("popstate", syncPageWithPath);
 
+    // Cmd/Ctrl+B toggles the sidebar, except while typing in a field.
+    const onKeyDown = (event) => {
+      if (event.key.toLowerCase() !== "b" || !(event.metaKey || event.ctrlKey)) return;
+      if (event.altKey || event.shiftKey || event.defaultPrevented) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      sidebar.toggle();
+    };
+    window.addEventListener("keydown", onKeyDown);
+
     // Auto-refresh the active page's data every 5s so running training runs,
     // their status/stage and rollouts stay live. Current data stays on screen
     // (no skeleton) and only the refresh button spins while fetching. A run
@@ -144,6 +163,7 @@
 
     return () => {
       window.removeEventListener("popstate", syncPageWithPath);
+      window.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       stopPolling();
     };
@@ -838,8 +858,21 @@
     </a>
   </header>
 
-  <div class="grid grid-cols-[232px_minmax(0,1fr)] min-h-0 h-full bg-(--bg) max-[900px]:grid-cols-[1fr] max-[900px]:grid-rows-[auto_minmax(0,1fr)]">
-    <Sidebar {navItems} {activePage} onNavigate={setActivePage} />
+  <div
+    class={[
+      "grid min-h-0 h-full bg-(--bg) transition-[grid-template-columns] duration-100 ease-out max-[900px]:grid-cols-[1fr] max-[900px]:grid-rows-[auto_minmax(0,1fr)]",
+      sidebar.collapsed
+        ? "grid-cols-[56px_minmax(0,1fr)]"
+        : "grid-cols-[232px_minmax(0,1fr)]",
+    ]}
+  >
+    <Sidebar
+      {navItems}
+      {activePage}
+      onNavigate={setActivePage}
+      collapsed={sidebar.collapsed}
+      onToggleCollapsed={() => sidebar.toggle()}
+    />
 
     <main class="min-w-0 min-h-0 h-full flex flex-col overflow-y-auto">
       <DashboardHeader
