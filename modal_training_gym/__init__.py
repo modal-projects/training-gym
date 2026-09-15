@@ -13,6 +13,14 @@ _EXPORTS = {
         "modal_training_gym.common.deployment",
         "CustomDeployment",
     ),
+    "DASHBOARD_OVERLAY_VOLUME_NAME": (
+        "modal_training_gym.common.dashboard_components",
+        "DASHBOARD_OVERLAY_VOLUME_NAME",
+    ),
+    "DashboardComponent": (
+        "modal_training_gym.common.dashboard_components",
+        "DashboardComponent",
+    ),
     "DeepSeek_V4_Flash_SglangRecipe": (
         "modal_training_gym.deploy_recipes.sglang_recipe",
         "DeepSeek_V4_Flash_SglangRecipe",
@@ -239,6 +247,8 @@ _EXPORTS = {
 
 __all__ = [
     "CustomDeployment",
+    "DASHBOARD_OVERLAY_VOLUME_NAME",
+    "DashboardComponent",
     "Checkpoint",
     "CheckpointType",
     "convert_megatron_checkpoint_to_hf",
