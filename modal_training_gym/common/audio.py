@@ -39,7 +39,7 @@ def coerce_audio_to_bytes(value: Any) -> bytes | None:
             return data_uri_to_bytes(first)
         if first.startswith(("http://", "https://")):
             return None
-        if len(first) <= 4096 and ("/" in first or "\\" in first):
+        if len(first) <= 4096:
             try:
                 path = Path(first)
                 if path.is_file():
