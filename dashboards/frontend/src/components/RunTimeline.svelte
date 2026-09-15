@@ -19,6 +19,7 @@
     shouldShowOpenRolloutAction,
   } from "../lib/timing.js";
   import { fmtDate } from "../lib/format.js";
+  import TimeAxis from "./TimeAxis.svelte";
 
   let {
     timings = null,
@@ -156,6 +157,22 @@
   function changeRange(next) {
     if (controlled) onChangeTimeRange(next);
     else localRange = next;
+  }
+
+  // Wall-clock bounds of the visible window; ticks are placed through the
+  // gap compression so they line up with the bars above them.
+  let axisRange = $derived.by(() => {
+    if (outOfRange || !baseTimeline.span || baseTimeline.runStart == null) return null;
+    const [w0, w1] = window_;
+    return {
+      start: baseTimeline.runStart + baseTimeline.unmapOffset(w0),
+      end: baseTimeline.runStart + baseTimeline.unmapOffset(w1),
+    };
+  });
+
+  function axisFraction(t) {
+    const [w0, w1] = window_;
+    return (baseTimeline.mapOffset(t - baseTimeline.runStart) - w0) / (w1 - w0);
   }
 
   // Brush/wheel output arrives as fractions of the viewport; walk them back
@@ -675,6 +692,9 @@
             </div>
           {/each}
         </div>
+        {#if axisRange}
+          <TimeAxis start={axisRange.start} end={axisRange.end} fractionAt={axisFraction} />
+        {/if}
       </div>
     </div>
 

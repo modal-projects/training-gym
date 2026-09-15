@@ -24,6 +24,7 @@
     resolveTimeRange,
     rolloutDomainToTimeRange,
     rolloutTimeKnots,
+    rolloutToTime,
     timeToRollout,
   } from "../lib/timeRange.js";
   import {
@@ -1369,6 +1370,15 @@
     return !chartXDomain || (x >= chartXDomain[0] && x <= chartXDomain[1]);
   }
 
+  // Rollout id <-> wall clock for the charts' time axes; needs two timed
+  // rollouts to interpolate between.
+  let chartXToTime = $derived(
+    rolloutKnots.length >= 2 ? (x) => rolloutToTime(rolloutKnots, x) : null,
+  );
+  let chartTimeToX = $derived(
+    rolloutKnots.length >= 2 ? (t) => timeToRollout(rolloutKnots, t) : null,
+  );
+
   function _seriesStats(getY) {
     const rows = rolloutSummaries.filter((r) => inChartDomain(Number(r.rollout_id) || 0));
     if (!rows.length) return null;
@@ -1731,6 +1741,8 @@
                   ariaLabel="Reward chart"
                   xDomain={chartXDomain}
                   onChangeDomainX={onChartDomainChange}
+                  xToTime={chartXToTime}
+                  timeToX={chartTimeToX}
                 />
               </div>
               {#if chartStats}
@@ -1773,6 +1785,8 @@
                     steps={advantageSteps}
                     xDomain={chartXDomain}
                     onChangeDomainX={onChartDomainChange}
+                    xToTime={chartXToTime}
+                    timeToX={chartTimeToX}
                   />
                 </div>
                 <div class="rollout-chart">
@@ -1781,6 +1795,8 @@
                     steps={advantageSteps}
                     xDomain={chartXDomain}
                     onChangeDomainX={onChartDomainChange}
+                    xToTime={chartXToTime}
+                    timeToX={chartTimeToX}
                   />
                 </div>
                 <div class="rollout-chart">
@@ -1817,6 +1833,8 @@
                       ariaLabel={`${tag} chart`}
                       xDomain={chartXDomain}
                       onChangeDomainX={onChartDomainChange}
+                      xToTime={chartXToTime}
+                      timeToX={chartTimeToX}
                     />
                     {#if tagChartStats(tag)}
                       <div class="flex gap-[16px] mt-[6px] text-[11px] text-(--muted) [font-variant-numeric:tabular-nums]">

@@ -11,6 +11,7 @@
   // is reported with a direction arrow.
 
   import { brushZoom } from "../lib/brushZoom.js";
+  import TimeAxis from "./TimeAxis.svelte";
 
   let {
     steps = [],
@@ -18,6 +19,10 @@
     xDomain = null,
     // Called with `[min, max]` rollout ids when the user drags or wheels.
     onChangeDomainX = null,
+    // rollout id <-> epoch seconds; when both are given a wall-clock axis is
+    // drawn under the plot.
+    xToTime = null,
+    timeToX = null,
   } = $props();
 
   const W = 640;
@@ -127,6 +132,17 @@
     onChangeDomainX([toX(f0), toX(f1)]);
   }
 
+  let timeAxis = $derived(
+    model && typeof xToTime === "function" && typeof timeToX === "function"
+      ? { start: xToTime(model.xMin), end: xToTime(model.xMax) }
+      : null,
+  );
+
+  function timeFraction(t) {
+    const { xMin, xMax } = model;
+    return (PAD + ((timeToX(t) - xMin) / (xMax - xMin || 1)) * (W - 2 * PAD)) / W;
+  }
+
   function fmtStep(x) {
     return Number.isInteger(x) ? String(x) : x.toFixed(1);
   }
@@ -177,6 +193,9 @@
       </div>
     {/if}
   </div>
+  {#if timeAxis}
+    <TimeAxis start={timeAxis.start} end={timeAxis.end} fractionAt={timeFraction} />
+  {/if}
   <div class="fan-meta">
     <span>0</span>
     <span>latest std {fmt(model.latestStd)}</span>

@@ -15,6 +15,7 @@
   // across all buckets of all violins so widths are comparable between steps.
 
   import { brushZoom } from "../lib/brushZoom.js";
+  import TimeAxis from "./TimeAxis.svelte";
 
   let {
     steps = [],
@@ -23,6 +24,10 @@
     xDomain = null,
     // Called with `[min, max]` rollout ids when the user drags or wheels.
     onChangeDomainX = null,
+    // rollout id <-> epoch seconds; when both are given a wall-clock axis is
+    // drawn under the plot.
+    xToTime = null,
+    timeToX = null,
   } = $props();
 
   const W = 640;
@@ -117,6 +122,39 @@
   let pts = $derived(
     hasDomain ? allPts.filter((p) => p.x >= xDomain[0] && p.x <= xDomain[1]) : allPts,
   );
+
+  // Inverse of the brush mapping: rollout id -> horizontal fraction of the
+  // plot, with the same linear extrapolation past the outermost columns.
+  function columnFraction(x) {
+    const xs = pts.map((p) => p.x);
+    const n = xs.length;
+    if (n === 0) {
+      const [lo, hi] = hasDomain ? xDomain : [0, 1];
+      return (x - lo) / (hi - lo || 1);
+    }
+    const spacing = n > 1 ? (xs[n - 1] - xs[0]) / (n - 1) : 1;
+    let idx;
+    if (x <= xs[0]) idx = (x - xs[0]) / spacing;
+    else if (x >= xs[n - 1]) idx = n - 1 + (x - xs[n - 1]) / spacing;
+    else {
+      let i = 0;
+      while (i < n - 2 && xs[i + 1] < x) i++;
+      idx = i + (x - xs[i]) / (xs[i + 1] - xs[i] || 1);
+    }
+    return (idx + 0.5) / n;
+  }
+
+  let timeAxis = $derived.by(() => {
+    if (typeof xToTime !== "function" || typeof timeToX !== "function") return null;
+    if (hasDomain) return { start: xToTime(xDomain[0]), end: xToTime(xDomain[1]) };
+    const n = pts.length;
+    if (!n) return null;
+    const spacing = n > 1 ? (pts[n - 1].x - pts[0].x) / (n - 1) : 1;
+    return {
+      start: xToTime(pts[0].x - spacing / 2),
+      end: xToTime(pts[n - 1].x + spacing / 2),
+    };
+  });
 
   // Violins sit in equal-width columns, so a brush selection is a span of
   // column indices; map it back to rollout ids, extrapolating past the ends
@@ -307,6 +345,13 @@
     </div>
   </div>
   <div class="pl-[56px]">
+    {#if timeAxis}
+      <TimeAxis
+        start={timeAxis.start}
+        end={timeAxis.end}
+        fractionAt={(t) => columnFraction(timeToX(t))}
+      />
+    {/if}
     <div class="fan-meta">
       <span>min {fmt(model.yLo)}</span>
       <span>latest median {fmt(model.latestMedian)}</span>

@@ -1,5 +1,6 @@
 <script>
   import { brushZoom, fractionsToDomain } from "../lib/brushZoom.js";
+  import TimeAxis from "./TimeAxis.svelte";
 
   let {
     title = "",
@@ -13,6 +14,10 @@
     xDomain = null,
     // Called with `[min, max]` in x units when the user drags or wheels.
     onChangeDomainX = null,
+    // x units <-> epoch seconds; when both are given a wall-clock axis is
+    // drawn under the plot.
+    xToTime = null,
+    timeToX = null,
   } = $props();
 
   let chartEl = $state(null);
@@ -73,6 +78,11 @@
   }
 
   let zoomable = $derived(typeof onChangeDomainX === "function");
+  let timeAxis = $derived(
+    typeof xToTime === "function" && typeof timeToX === "function" && !singlePoint
+      ? { start: xToTime(xMin), end: xToTime(xMax) }
+      : null,
+  );
 
   function handleBrush(fractions) {
     if (!zoomable) return;
@@ -198,6 +208,13 @@
         </div>
       {/if}
     </div>
+    {#if timeAxis}
+      <TimeAxis
+        start={timeAxis.start}
+        end={timeAxis.end}
+        fractionAt={(t) => (timeToX(t) - xMin) / xSpan}
+      />
+    {/if}
   {:else}
     <div class="text-(--muted) text-[12px] leading-[16px]">No data.</div>
   {/if}
