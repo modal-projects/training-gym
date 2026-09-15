@@ -670,13 +670,11 @@ class HarborDataset(DatasetConfig):
 
 
 class MultimodalDataset(DatasetConfig):
-    """Dataset of text prompts paired with image or audio data.
+    """Dataset of text prompts paired with image or audio ``media``.
 
-    Each row has a text ``prompt``, one or more ``media`` items, and a
-    ``label``. ``write()`` decodes ``data:`` URIs and raw bytes to files
-    and copies local files beside the JSONL. Paths that are not files and
-    HTTP or HTTPS URLs stay as written. ``multimodal_keys`` maps the
-    modality to that media column name.
+    Paths are resolved inside the dataset-preparation container and are not
+    uploaded from the launching machine; to ship local files, provide bytes or
+    data URIs.
     """
 
     # TODO(ben/joy): gate-check media at this boundary so the evals dashboard can
