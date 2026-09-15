@@ -273,7 +273,7 @@
       <div class="turn-header">
         <span class="text-[10px] font-[600] uppercase tracking-[0.05em] p-[2px_6px] rounded-[3px] bg-[rgba(168,139,250,0.12)] text-[#a78bfa]">Thinking</span>
       </div>
-      <pre class="thinking-block">{thinking}</pre>
+      <pre class={["thinking-block", !clamp && "max-h-none!"]}>{thinking}</pre>
     </div>
   {/if}
 
@@ -295,7 +295,7 @@
           <span>Thinking</span>
         </button>
         {#if thinkingOpen[idx]}
-          <pre class="thinking-block">{msg.thinking}</pre>
+          <pre class={["thinking-block", !clamp && "max-h-none!"]}>{msg.thinking}</pre>
         {/if}
       {/if}
 
