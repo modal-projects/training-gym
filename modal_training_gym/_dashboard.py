@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import secrets as _secrets
+import subprocess
 import time
 from pathlib import Path
 from typing import (
@@ -48,12 +49,17 @@ from modal_training_gym.common.config import (
     DASHBOARD_PROXY_AUTH_PATH,
     DASHBOARD_VERSION_PATH,
     dashboard_requires_proxy_auth,
+    get_dashboard_trajectory_viewer,
 )
 from modal_training_gym.common.dashboard import (
     DASHBOARD_APP_NAME,
     DASHBOARD_PREVIEW_ENV_KEY,
     DASHBOARD_VERSION_ENV_KEY,
     current_dashboard_version,
+)
+from modal_training_gym.common.dashboard_components import (
+    DASHBOARD_OVERLAY_VOLUME_NAME,
+    DashboardComponent,
 )
 from modal_training_gym.common.run import (
     FrameworkStatusUpdate,
@@ -116,6 +122,10 @@ class TimingFileCache(TypedDict):
 
 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
 TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
+DASHBOARD_COMPONENT_VOLUME_MOUNT = "/mnt/training-gym-dashboard-overlay"
+dashboard_component_volume = modal.Volume.from_name(
+    DASHBOARD_OVERLAY_VOLUME_NAME, create_if_missing=True
+)
 
 
 def _is_preview() -> bool:
@@ -137,7 +147,7 @@ def _build_image() -> modal.Image:
     _pkg = Path(__file__).resolve().parent
     _checkout = _pkg.parent / "dashboards" / "frontend"
     _frontend = _checkout if _checkout.is_dir() else _pkg / "_frontend"
-    return (
+    base = (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("curl")
         .run_commands(
@@ -151,7 +161,25 @@ def _build_image() -> modal.Image:
             copy=True,
             ignore=["node_modules", "dist"],
         )
-        .run_commands("cd /app/frontend && npm install && npm run build")
+    )
+
+    trajectory_viewer = get_dashboard_trajectory_viewer()
+    if trajectory_viewer:
+        viewer_path = Path(trajectory_viewer).expanduser().resolve()
+        if not viewer_path.is_file():
+            raise FileNotFoundError(
+                "Configured trajectory viewer does not exist: "
+                f"{viewer_path}. Run `training-gym setup --trajectory-viewer PATH` "
+                "with a Svelte component file."
+            )
+        base = base.add_local_file(
+            str(viewer_path),
+            remote_path="/app/frontend/src/components/TrajectoryViewer.svelte",
+            copy=True,
+        )
+
+    return (
+        base.run_commands("cd /app/frontend && npm install && npm run build")
         .add_local_python_source("modal_training_gym", copy=True)
         .env(
             {
@@ -420,6 +448,7 @@ def reconcile() -> None:
 @app.function(
     min_containers=0 if IS_PREVIEW else 1,
     secrets=_function_secrets(),
+    volumes={DASHBOARD_COMPONENT_VOLUME_MOUNT: dashboard_component_volume},
 )
 @modal.concurrent(max_inputs=50, target_inputs=20)
 @modal.asgi_app(requires_proxy_auth=dashboard_requires_proxy_auth())
@@ -961,6 +990,111 @@ def fastapi_app():
         except KeyError:
             result = None
         return build_run_summary(run.model_dump(mode="json"), result)
+
+    def _component_manifest(run: TrainingRun, component_type: str) -> JsonDict:
+        """Resolve a run's component manifest from run metadata.
+
+        The source and an association copy are both mounted from the overlay
+        Volume. Metadata remains the authoritative list of components because
+        it is already part of the run record returned by the dashboard API.
+        """
+        try:
+            kind = DashboardComponent(component_type).value
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404, detail="Unknown dashboard component"
+            ) from exc
+        components = (run.metadata or {}).get("dashboard_components")
+        if not isinstance(components, dict):
+            raise HTTPException(
+                status_code=404, detail="No dashboard component attached"
+            )
+        for value in components.values():
+            if not isinstance(value, dict) or value.get("type") != kind:
+                continue
+            manifest = dict(value)
+            if not manifest.get("path") or not manifest.get("sha256"):
+                continue
+            return manifest
+        raise HTTPException(status_code=404, detail="No dashboard component attached")
+
+    def _component_source_path(manifest: JsonDict) -> Path:
+        relative = str(manifest.get("path", ""))
+        root = Path(DASHBOARD_COMPONENT_VOLUME_MOUNT).resolve()
+        source = (root / relative).resolve()
+        if root != source and root not in source.parents:
+            raise HTTPException(
+                status_code=500, detail="Invalid dashboard component path"
+            )
+        if not source.is_file():
+            raise HTTPException(
+                status_code=404, detail="Dashboard component source unavailable"
+            )
+        return source
+
+    async def _refresh_dashboard_component_volume() -> None:
+        """Refresh the mounted overlay before reading a newly registered component.
+
+        Modal volumes are mounted from a snapshot.  A training client can attach a
+        component after the dashboard container has started, so the container must
+        reload the volume to make that version visible at the mount point.  Keep
+        this best-effort for local/test contexts where ``reload`` is unavailable.
+        """
+        try:
+            await run_in_threadpool(dashboard_component_volume.reload)
+        except (AttributeError, RuntimeError):
+            # ``reload`` is only meaningful inside a Modal container; the source
+            # path check below still works for local test mounts.
+            return
+
+    @web.get("/api/runs/{training_run_id}/dashboard-components/{component_type}")
+    async def get_dashboard_component_manifest(
+        training_run_id: str, component_type: str
+    ):
+        run = await _get_run_or_404(training_run_id)
+        manifest = _component_manifest(run, component_type)
+        return JSONResponse(manifest)
+
+    @web.get(
+        "/api/runs/{training_run_id}/dashboard-components/{component_type}/bundle.js"
+    )
+    async def get_dashboard_component_bundle(training_run_id: str, component_type: str):
+        run = await _get_run_or_404(training_run_id)
+        manifest = _component_manifest(run, component_type)
+        await _refresh_dashboard_component_volume()
+        source = _component_source_path(manifest)
+        digest = str(manifest["sha256"])
+        cache_root = Path("/tmp/training-gym-dashboard-components")
+        cache_root.mkdir(parents=True, exist_ok=True)
+        bundle = cache_root / f"{digest}.js"
+
+        if not bundle.is_file():
+            script = Path("/app/frontend/component_bundle.mjs")
+            if not script.is_file():
+                raise HTTPException(
+                    status_code=500, detail="Dashboard component compiler unavailable"
+                )
+            completed = await run_in_threadpool(
+                subprocess.run,
+                ["node", str(script), str(source), str(bundle)],
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+            if completed.returncode != 0 or not bundle.is_file():
+                detail = (
+                    completed.stderr or completed.stdout or "compile failed"
+                ).strip()
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Dashboard component failed to compile: {detail[-1000:]}",
+                )
+
+        return Response(
+            bundle.read_bytes(),
+            media_type="application/javascript",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     @web.post("/api/framework-status")
     async def framework_status(

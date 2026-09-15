@@ -11,3 +11,52 @@ modal deploy dashboards/app.py
 ```
 
 Modal prints the URL where the dashboard is served.
+
+## Custom trajectory viewer
+
+The rollout detail page includes a default `TrajectoryViewer.svelte` that
+extracts structured trajectory state and renders Balatro's deck, discard pile,
+and hand. Replace it for a deployment with your own Svelte component:
+
+```bash
+training-gym setup --trajectory-viewer ./MyTrajectoryViewer.svelte
+```
+
+The component is mounted over
+`dashboards/frontend/src/components/TrajectoryViewer.svelte` before Vite
+builds the dashboard. It receives these props:
+
+- `sample`: the selected normalized sample.
+- `samples`: all samples in the selected rollout/prompt group.
+- `trajectory`: `sample.metadata.trajectory_messages`.
+- `rewardEvents`: `sample.reward_events` when emitted.
+- `rollout`: the expanded `TrainingRolloutResult`.
+- `run`: the current `TrainingRun` summary.
+
+The override path is saved in `~/.training-gym.toml`, so later `setup` or
+password redeploys keep using it. To restore the built-in viewer, remove the
+`trajectory_viewer` entry from that file and run `training-gym setup` again.
+
+## Run-scoped dashboard components
+
+For a component that belongs to one run, attach it after launch instead of
+changing the global dashboard setup:
+
+```python
+from modal_training_gym import DashboardComponent, TrainingRun
+
+run = TrainingRun.from_id("bristled-pine-a7c3e91d4b")
+run.add_dashboard_component(
+    name="balatro",
+    component_type=DashboardComponent.TRAJECTORY_VIEWER,
+    from_path="./dashboard/TrajectoryViewer.svelte",
+)
+```
+
+The source is stored content-addressably in the
+`training-gym-dashboard-overlay` Modal Volume, with a per-run association
+record under `runs/<training_run_id>/<name>.json`. The immutable artifact
+manifest is also associated with the run under
+`metadata.dashboard_components`. The dashboard mounts this Volume and
+compiles the selected Svelte component on demand; the built-in viewer remains
+the fallback when no run-scoped component is available (or compilation fails).

@@ -40,6 +40,7 @@ from modal_training_gym.utils.metadata import (
 
 if TYPE_CHECKING:
     from modal_training_gym.common.checkpoint import Checkpoint
+    from modal_training_gym.common.dashboard_components import DashboardComponent
     from modal_training_gym.common.training_rollout import TrainingRolloutResult
 
 TRAINING_RUNS_STORE_NAME = MetadataStore.TRAINING_RUNS.value
@@ -487,6 +488,50 @@ class TrainingRun(BaseModel):
             "created_at": rollout.created_at,
         }
         self.metadata = metadata
+
+    def add_dashboard_component(
+        self,
+        *,
+        name: str,
+        component_type: "DashboardComponent | str",
+        from_path: str | os.PathLike[str],
+        replace: bool = False,
+    ) -> dict[str, Any]:
+        """Attach a local dashboard component to this run.
+
+        The source is uploaded to the shared dashboard-overlay Volume and the
+        resulting immutable manifest is associated with this run's metadata.
+        This operation is independent of the training job and may be called
+        after a run has started or completed.
+        """
+        from modal_training_gym.common.dashboard_components import (
+            store_dashboard_component,
+        )
+
+        manifest = store_dashboard_component(
+            name=name,
+            component_type=component_type,
+            from_path=from_path,
+            training_run_id=self.training_run_id,
+        )
+        metadata = dict(self.metadata or {})
+        components = metadata.get("dashboard_components")
+        components = dict(components) if isinstance(components, dict) else {}
+        previous = components.get(name)
+        if previous is not None and not replace:
+            previous_hash = (
+                previous.get("sha256") if isinstance(previous, dict) else None
+            )
+            if previous_hash != manifest["sha256"]:
+                raise ValueError(
+                    f"dashboard component {name!r} is already attached to run "
+                    f"{self.training_run_id!r}; pass replace=True to replace it"
+                )
+        components[name] = manifest
+        metadata["dashboard_components"] = components
+        self.metadata = metadata
+        self.save()
+        return manifest
 
     def _touch(self) -> None:
         self.updated_at = int(time.time())

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 
 from .commands import _TrainingGymCommand
@@ -18,7 +20,15 @@ from .commands import _TrainingGymCommand
     is_flag=True,
     help="Deploy the dashboard without Modal proxy authentication.",
 )
-def setup_command(proxy_auth: bool, no_proxy_auth: bool) -> None:
+@click.option(
+    "--trajectory-viewer",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Mount a custom TrajectoryViewer.svelte over the dashboard default.",
+)
+def setup_command(
+    proxy_auth: bool, no_proxy_auth: bool, trajectory_viewer: Path | None
+) -> None:
     """Deploy the dashboard."""
     if proxy_auth and no_proxy_auth:
         raise click.UsageError(
@@ -35,7 +45,10 @@ def setup_command(proxy_auth: bool, no_proxy_auth: bool) -> None:
                 "Pass either --proxy-auth or --no-proxy-auth explicitly."
             )
 
-    setup(require_proxy_auth=proxy_auth)
+    if trajectory_viewer is None:
+        setup(require_proxy_auth=proxy_auth)
+    else:
+        setup(require_proxy_auth=proxy_auth, trajectory_viewer=trajectory_viewer)
 
 
 @click.command("open", cls=_TrainingGymCommand)
