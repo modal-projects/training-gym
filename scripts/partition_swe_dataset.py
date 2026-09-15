@@ -45,6 +45,7 @@ from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import modal
@@ -434,6 +435,11 @@ def write_partitions(
         staged.append((staging, final))
     for staging, final in staged:
         os.replace(staging, final)
+    for name in ("eval-100.jsonl", "eval-300.jsonl"):
+        (root / name).unlink(missing_ok=True)
+    print(
+        f"[swe] eval: {len(eval_rows)}/{len(rows)} tasks ({len(eval_rows) / len(rows):.1%})"
+    )
     return {name: len(subset) for name, subset in outputs.items()}
 
 
@@ -645,15 +651,6 @@ class SweBenchSource:
             return None
         return read_jsonl(converted_path)
 
-    @staticmethod
-    def clear_converted(root: Path) -> None:
-        """Delete converted tasks, conversion outputs, and derived mixed subsets."""
-        shutil.rmtree(root / "tasks", ignore_errors=True)
-        for name in ("all.converted.json", "all.converted.jsonl"):
-            (root / name).unlink(missing_ok=True)
-        for path in root.glob("*-mixed-reward-*"):
-            path.unlink()
-
     def convert(self, root: Path, revision: str) -> list[dict[str, Any]]:
         if "/root/slime" not in sys.path:
             sys.path.insert(0, "/root/slime")
@@ -708,12 +705,28 @@ class SweBenchSource:
         source = self.source_record(revision)
         rows = self.cached_rows(root, source)
         if rows is None:
-            self.clear_converted(root)
-            rows = self.convert(root, revision)
-            write_text(
-                root / "all.converted.json",
-                json.dumps(source, indent=2, sort_keys=True) + "\n",
-            )
+            with TemporaryDirectory(
+                dir=root.parent, prefix=f".{root.name}-"
+            ) as temporary:
+                staging = Path(temporary) / root.name
+                staging.mkdir()
+                rows = self.convert(staging, revision)
+                counts = write_partitions(
+                    staging, rows, metadata_namespace=self.metadata_namespace
+                )
+                write_text(
+                    staging / "all.converted.json",
+                    json.dumps(source, indent=2, sort_keys=True) + "\n",
+                )
+                previous = Path(f"{temporary}.previous")
+                root.rename(previous)
+                try:
+                    staging.rename(root)
+                except OSError:
+                    previous.rename(root)
+                    raise
+                shutil.rmtree(previous, ignore_errors=True)
+                return counts
         return write_partitions(root, rows, metadata_namespace=self.metadata_namespace)
 
 
@@ -805,7 +818,7 @@ def main() -> None:
     mixed.add_argument("--source", required=True)
     mixed.add_argument("--recipe", default=DEFAULT_MIXED_RECIPE_SLUG)
     mixed.add_argument("--probe-dump", required=True)
-    mixed.add_argument("--n-samples", type=int, default=8)
+    mixed.add_argument("--n-samples", type=int, default=4)
     mixed.add_argument("--checkpoint", default="base")
     mixed.add_argument("--checkpoints-volume", required=True)
     mixed.add_argument("--replace", action="store_true")

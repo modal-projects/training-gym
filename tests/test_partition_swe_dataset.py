@@ -59,6 +59,8 @@ def _rows(groups: int = 650) -> list[dict]:
 def test_partitions_use_fixed_names_nested_rows_and_golden_hashes(
     tmp_path: Path,
 ) -> None:
+    for name in ("eval-100.jsonl", "eval-300.jsonl"):
+        (tmp_path / name).write_text("stale")
     counts = write_partitions(tmp_path, _rows())
 
     assert counts == {
@@ -281,20 +283,66 @@ def test_converted_rows_are_reused_only_for_an_identical_source(
         assert SweBenchSource.cached_rows(tmp_path, changed) is None
 
 
-def test_source_refresh_drops_converted_tasks_and_derived_mixed_subsets(
+@pytest.mark.parametrize("failure", [None, "conversion", "partition", "publish"])
+def test_source_refresh_preserves_existing_dataset_on_failure(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str | None,
 ) -> None:
-    (tmp_path / "tasks" / "repo__1").mkdir(parents=True)
-    write_partitions(tmp_path, _rows())
-    stale = tmp_path / "train-100-mixed-reward-qwen3-6-27b-agentic-n8"
+    _install_fake_fork(monkeypatch)
+    root = tmp_path / "fixture"
+    (root / "tasks" / "old").mkdir(parents=True)
+    (root / "tasks" / "old" / "task.toml").write_text("old task")
+    write_partitions(root, _rows())
+    stale = root / "train-100-mixed-reward-qwen3-6-27b-agentic-n8"
     stale.with_suffix(".jsonl").write_text("")
     stale.with_suffix(".json").write_text("{}")
+    before = {
+        p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()
+    }
+    source = _source()
+    monkeypatch.setattr(source, "resolve_revision", lambda: "new")
 
-    SweBenchSource.clear_converted(tmp_path)
+    def rows(revision):
+        for i in range(10):
+            yield {"instance_id": f"r/p-{i}", "repo": f"r/p{i}", "language": "python"}
+            if failure == "conversion":
+                raise RuntimeError("conversion failed")
 
-    assert not (tmp_path / "tasks").exists()
-    assert not list(tmp_path.glob("*-mixed-reward-*"))
-    assert (tmp_path / "train-100.jsonl").is_file()
+    monkeypatch.setattr(source, "rows", rows)
+    if failure == "partition":
+
+        def fail_partition(*args, **kwargs):
+            raise RuntimeError("partition failed")
+
+        monkeypatch.setattr(
+            "scripts.partition_swe_dataset.write_partitions", fail_partition
+        )
+    if failure == "publish":
+        rename = Path.rename
+
+        def fail_publish(path, target):
+            if path.name == root.name and path != root:
+                raise OSError("publish failed")
+            return rename(path, target)
+
+        monkeypatch.setattr(Path, "rename", fail_publish)
+
+    if failure:
+        with pytest.raises((RuntimeError, OSError), match=f"{failure} failed"):
+            source.partition(root)
+        assert {
+            p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()
+        } == before
+    else:
+        counts = source.partition(root)
+        assert sum(counts[name] for name in ("eval", "train-full")) == 10
+        assert not (root / "tasks" / "old").exists()
+        assert not list(root.glob("*-mixed-reward-*"))
+        assert source.cached_rows(root, source.source_record("new")) is not None
+        for row in read_jsonl(root / "all.converted.jsonl"):
+            assert (tmp_path / row["metadata"]["task_path"] / "task.toml").is_file()
+    assert list(tmp_path.iterdir()) == [root]
 
 
 def _install_fake_fork(monkeypatch: pytest.MonkeyPatch) -> None:
