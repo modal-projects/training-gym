@@ -1926,7 +1926,6 @@
                             <div class="rollout-sample-label">prompt</div>
                             <pre class="rollout-sample-text">{activeSample.sample.prompt}</pre>
                           {/if}
-                          <div class="rollout-sample-label">trajectory viewer</div>
                           <DynamicTrajectoryViewer
                             sample={activeSample.sample}
                             samples={activeSample.samples}

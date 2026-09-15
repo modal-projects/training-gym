@@ -203,6 +203,7 @@
 </script>
 
 {#if mode !== "custom"}
+  <div class="rollout-sample-label">conversation</div>
   <DefaultTrajectoryViewer
     {sample}
     {samples}
@@ -216,6 +217,9 @@
   {:else if loadError}
     <div class="viewer-note viewer-error" title={loadError}>Run-scoped viewer unavailable; showing the default viewer.</div>
   {/if}
+{/if}
+{#if mode === "custom"}
+  <div class="rollout-sample-label">trajectory viewer</div>
 {/if}
 {#if frameSrc}
   <iframe

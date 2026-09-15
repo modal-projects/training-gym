@@ -27,6 +27,9 @@
     run = null,
   } = $props();
 
+  // `trajectory` is the page's copy of metadata.trajectory_messages; fall back
+  // to the sample itself so the viewer still works when mounted with only a
+  // sample (e.g. from a run-scoped bundle that omits the prop).
   let messages = $derived(
     Array.isArray(trajectory) && trajectory.length
       ? trajectory
