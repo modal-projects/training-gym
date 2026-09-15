@@ -41,13 +41,10 @@
   const brokenDigests = new Set();
   let loading = false;
 
-  function runId() {
-    return run?.training_run_id || run?.run_id || "";
-  }
-
-  function componentKey() {
-    return JSON.stringify(run?.metadata?.dashboard_components || "");
-  }
+  // Primitive derivations of `run`, so the load effect only reruns when the
+  // id or attached components actually change, not on every run poll.
+  const activeRunId = $derived(run?.training_run_id || run?.run_id || "");
+  const componentKey = $derived(JSON.stringify(run?.metadata?.dashboard_components || ""));
 
   function reset() {
     generation += 1;
@@ -84,7 +81,7 @@
   // `force` tears down whatever is mounted; otherwise a manifest whose digest
   // matches the mounted component is a no-op so polling never flickers.
   async function load(force = true) {
-    const id = runId();
+    const id = activeRunId;
     if (force) {
       reset();
       loadError = "";
@@ -170,8 +167,8 @@
   }
 
   $effect(() => {
-    runId();
-    componentKey();
+    activeRunId;
+    componentKey;
     untrack(() => load(true));
   });
 
