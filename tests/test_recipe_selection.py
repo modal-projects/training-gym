@@ -8,7 +8,10 @@ from typing import Any
 import pytest
 
 from modal_training_gym.common.dataset import HuggingFaceDataset
-from modal_training_gym.common.launcher_utils import get_checkpoint_conversion_policy
+from modal_training_gym.common.launcher_utils import (
+    get_checkpoint_conversion_policy,
+    prepare_launch_config,
+)
 from modal_training_gym.common.models import Qwen3_4B
 from modal_training_gym.common.models.validation import Framework, _ValidationConfig
 from modal_training_gym.common.train import TrainConfig
@@ -162,6 +165,17 @@ def test_miles_recipe_uses_shared_sampling_defaults() -> None:
     assert recipe.n_samples_per_prompt == 2
     assert MilesRecipe(num_rollout=7)._fields()["save_interval"] == 7
     assert recipe.rollout_batch_size == 2
+
+
+@pytest.mark.parametrize("recipe_cls", [SlimeRecipe, MilesRecipe])
+def test_save_interval_follows_extra_config_num_rollout(recipe_cls, tmp_path) -> None:
+    recipe = recipe_cls(num_rollout=1, extra_config={"num_rollout": 10})
+    assert recipe._fields()["save_interval"] == 10
+
+    prepare_launch_config(
+        recipe, None, str(tmp_path), yaml_config_fields=("extra_config",)
+    )
+    assert recipe._fields()["save_interval"] == 10
 
 
 def _inkling_image_patch_sources(recipe: MilesRecipe) -> list[str]:
