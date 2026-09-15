@@ -116,6 +116,25 @@ class RoleRecorder:
         if timing_mode() == "off":
             yield
             return
+        if os.environ.get("TRAINING_GYM_TRAINING_TYPE") == "sft":
+            if name in {
+                "weight_sync",
+                "initial_weight_sync",
+                "compute_log_probs",
+                "reward",
+                "reward_batch",
+                "reward_post_process",
+                "offload_rollout",
+            }:
+                yield
+                return
+
+            name = {
+                "generate_rollouts": "prepare_batch",
+                "generate_samples": "prepare_batch",
+                "wait_for_rollout": "wait_for_batch",
+                "wait_for_next_rollout": "wait_for_next_batch",
+            }.get(name, name)
         start = time.monotonic()
         try:
             yield

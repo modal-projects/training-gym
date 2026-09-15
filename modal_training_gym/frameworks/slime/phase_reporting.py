@@ -18,6 +18,7 @@ This module keeps the reporting entry points (``report_*``, ``log_*``,
 from __future__ import annotations
 
 import time
+from .sft_reporting import is_sft
 from typing import Any
 
 from modal_training_gym.common.status import SlimeStatus
@@ -190,6 +191,8 @@ def log_rollout_data(
     rollout_extra_metrics: Any,
     rollout_time: Any,
 ) -> bool:
+    if is_sft(args):
+        return True
     progress = _step_progress(args, rollout_id)
     report_phase(
         SlimeStatus.ROLLOUT_LOGGING,

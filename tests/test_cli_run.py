@@ -223,7 +223,10 @@ def test_run_get_verbose_json_includes_reward_history_and_rollouts():
     assert payload["modal_app_id"] == "ap-test123"
     assert payload["current_step"] == 4
     assert payload["total_steps"] == 10
-    assert payload["current_reward"] == 0.75
+    assert payload["training_type"] == "rl"
+    assert payload["current_metric"] == 0.75
+    assert "current_reward" not in payload
+    assert "training_loss" not in payload
     assert payload["reward_over_time"] == [
         {
             "rollout_id": 1,
@@ -239,6 +242,29 @@ def test_run_get_verbose_json_includes_reward_history_and_rollouts():
     assert (
         payload["rollouts"] == FakeDashboardClient.payloads["/api/runs/run-1/rollouts"]
     )
+
+
+@pytest.mark.parametrize("loss", [None, 0.0, 1.5])
+def test_run_get_sft_json_uses_current_metric(loss):
+    FakeDashboardClient.payload = _summary(
+        training_type="sft",
+        latest_training_step=(
+            {"training_run_id": "run-1", "step": 0, "loss": loss, "created_at": 200}
+            if loss is not None
+            else None
+        ),
+        latest_rollout={"rollout_id": 0, "mean": 0.75, "total": 8, "created_at": 200},
+    )
+    result = CliRunner().invoke(
+        cli_module.entrypoint_cli, ["run", "get", "run-1", "-j"]
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["training_type"] == "sft"
+    assert payload["current_metric"] == loss
+    assert "current_reward" not in payload
+    assert "training_loss" not in payload
 
 
 def test_run_get_missing_run_returns_not_found_without_fetching_rollouts():

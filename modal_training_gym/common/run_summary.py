@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ValidationError, model_serializer
 from pydantic.fields import FieldInfo
 
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
+from modal_training_gym.common.training_steps import TrainingStep
 
 
 JsonDict = dict[str, object]
@@ -220,6 +221,7 @@ class RunSummary(BaseModel):
     framework_status: str = ""
     framework_progress: FrameworkProgress | None = None
     latest_rollout: LatestRollout | None = None
+    latest_training_step: TrainingStep | None = None
     model: str = _run_list_field("Model", default="", filterable=True)
     dataset: str = _run_list_field("Dataset", default="", filterable=True)
     recipe: str = _run_list_field("Recipe", default="", filterable=True)
@@ -646,6 +648,29 @@ def build_run_summary(
     framework = _text(run.get("framework")) or "(untagged)"
     framework_status = _text(run.get("framework_status"))
     framework_progress = _framework_progress(metadata)
+    latest_training_step = (
+        TrainingStep.model_validate(metadata["latest_training_step"])
+        if metadata.get("latest_training_step") is not None
+        else None
+    )
+    display_stage = _display_stage(framework_status, framework_progress)
+    if training_type == "sft":
+        framework_progress = framework_progress or FrameworkProgress()
+        framework_progress.current = (
+            latest_training_step.step + 1 if latest_training_step else 0
+        )
+        framework_progress.total = _optional_int(
+            _mapping(config.get("recipe")).get("num_rollout")
+        )
+        framework_progress.unit = "step"
+        if framework_status in {"weight_sync", "compute_log_probs", "offload_rollout"}:
+            display_stage = "Training"
+        elif framework_status in {
+            "initialize_rollouts",
+            "generate_rollouts",
+            "rollout_logging",
+        }:
+            display_stage = "Preparing training data"
     return RunSummary(
         training_run_id=training_run_id,
         run_id=training_run_id,
@@ -654,9 +679,10 @@ def build_run_summary(
             status,
             has_train_result=result_summary is not None,
         ),
-        display_stage=_display_stage(framework_status, framework_progress),
+        display_stage=display_stage,
         framework=framework,
         training_type=training_type,
+        latest_training_step=latest_training_step,
         framework_status=framework_status,
         framework_progress=framework_progress,
         latest_rollout=_latest_rollout(metadata),
