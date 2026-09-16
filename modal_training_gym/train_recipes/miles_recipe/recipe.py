@@ -7,6 +7,7 @@ from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.base import (
@@ -106,6 +107,17 @@ _HOOK_WRAPPER_PATHS = {
     "custom_megatron_before_log_prob_hook": "modal_training_gym.frameworks.miles.phase_reporting.before_log_prob_hook",
     "custom_megatron_before_train_step_hook": "modal_training_gym.frameworks.miles.phase_reporting.before_train_step_hook",
 }
+
+# Flags only ``serve_tinker.py`` registers (``add_tinker_arguments``); ``train.py``
+# rejects them, so they are emitted only when ``multi_lora_n_adapters`` is set.
+_TINKER_TRAIN_GROUPS = ("attn", "mlp", "unembed")
+_TINKER_FIELDS = (
+    "tinker_server_host",
+    "tinker_server_port",
+    "tinker_base_model",
+    "tinker_checkpoint_root",
+    *(f"tinker_train_{group}" for group in _TINKER_TRAIN_GROUPS),
+)
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
@@ -300,6 +312,30 @@ class MilesRecipe(BaseTrainRecipe):
             SGLang LoRA kernel backend.
         sglang_lora_use_virtual_experts:
             Serve MoE LoRA adapters as virtual experts in sglang.
+
+        multi_lora_n_adapters:
+            Concurrent LoRA adapter slots for Miles' multi-LoRA Tinker gateway
+            (``serve_tinker.py``). ``None`` runs ordinary dataset-driven training.
+            Requires disaggregated GPUs (``colocate=False``), ``lora_rank``,
+            bridge mode, and the Megatron backend with PP=CP=1.
+        tinker_server_host:
+            Bind address of the Tinker HTTP gateway; ``None`` uses Miles' default.
+        tinker_server_port:
+            Port of the Tinker HTTP gateway; ``None`` uses Miles' default (10613).
+        tinker_base_model:
+            Model name the gateway advertises; defaults to ``hf_checkpoint``.
+        tinker_checkpoint_root:
+            Directory for ``tinker://`` training-state and sampler-weight
+            snapshots. Must be visible to the trainer and every rollout engine;
+            defaults to ``<save>/tinker``.
+        tinker_train_attn:
+            Attach LoRA to the attention projections. Clients' ``train_attn``
+            must match.
+        tinker_train_mlp:
+            Attach LoRA to the MLP (or per-expert) projections. Clients'
+            ``train_mlp`` must match.
+        tinker_train_unembed:
+            Attach LoRA to the output layer. Clients' ``train_unembed`` must match.
 
         attention_dropout:
             Attention dropout probability.
@@ -576,6 +612,16 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_lora_backend: str | None = None
     sglang_lora_use_virtual_experts: bool = False
 
+    # ── Multi-LoRA / Tinker gateway ─────────────────────────────────────────
+    multi_lora_n_adapters: int | None = None
+    tinker_server_host: str | None = None
+    tinker_server_port: int | None = None
+    tinker_base_model: str | None = None
+    tinker_checkpoint_root: str | None = None
+    tinker_train_attn: bool = True
+    tinker_train_mlp: bool = True
+    tinker_train_unembed: bool = True
+
     # ── Memory and precision ────────────────────────────────────────────────
     attention_dropout: float = 0.0
     hidden_dropout: float = 0.0
@@ -706,6 +752,86 @@ class MilesRecipe(BaseTrainRecipe):
         validate_multi_node_gpu_count(resolve_gpu_allocation(self), self.gpu_type)
         return self
 
+    @model_validator(mode="after")
+    def _validate_multi_lora(self) -> "MilesRecipe":
+        if not self.is_tinker_gateway:
+            return self
+        problems = [
+            message
+            for failed, message in (
+                (
+                    (self.multi_lora_n_adapters or 0) < 0,
+                    "multi_lora_n_adapters must be positive",
+                ),
+                (
+                    self.colocate,
+                    "colocate must be False: multi-LoRA keeps per-adapter "
+                    "gradients resident on dedicated training GPUs",
+                ),
+                (
+                    not self.lora_rank,
+                    "lora_rank must be set; it caps the rank clients may request",
+                ),
+                (
+                    self.target_modules is not None,
+                    "target_modules must be unset; the gateway derives modules "
+                    "from tinker_train_attn/mlp/unembed",
+                ),
+                (
+                    not any(
+                        getattr(self, f"tinker_train_{group}")
+                        for group in _TINKER_TRAIN_GROUPS
+                    ),
+                    "at least one of tinker_train_attn/mlp/unembed must be True",
+                ),
+                (
+                    self.train_backend != "megatron",
+                    "train_backend must be 'megatron'",
+                ),
+                (
+                    self.megatron_to_hf_mode != "bridge",
+                    "megatron_to_hf_mode must be 'bridge': trainers and engines "
+                    "load the same frozen HF base",
+                ),
+                (
+                    self.pipeline_model_parallel_size != 1,
+                    "pipeline_model_parallel_size must be 1",
+                ),
+                (
+                    self.context_parallel_size != 1,
+                    "context_parallel_size must be 1",
+                ),
+                (self.qkv_format != "thd", "qkv_format must be 'thd'"),
+                (
+                    self.experts_shared_outer_loras,
+                    "experts_shared_outer_loras is not supported",
+                ),
+                (
+                    self.optimizer.lower() != "adam",
+                    "optimizer must be 'adam': per-slot optimizers only implement Adam",
+                ),
+                (
+                    self.calculate_per_token_loss,
+                    "calculate_per_token_loss is not supported",
+                ),
+                (self.use_critic, "use_critic is not supported"),
+                (self.async_mode, "async_mode is not supported"),
+            )
+            if failed
+        ]
+        if problems:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__}(multi_lora_n_adapters="
+                f"{self.multi_lora_n_adapters}) is not a valid Tinker gateway "
+                "config:\n  - " + "\n  - ".join(problems)
+            )
+        return self
+
+    @property
+    def is_tinker_gateway(self) -> bool:
+        """Whether the recipe serves Miles' multi-LoRA Tinker gateway."""
+        return bool(self.multi_lora_n_adapters)
+
     # ── Container → miles flag converters ────────────────────────────────────
 
     @classmethod
@@ -822,6 +948,15 @@ class MilesRecipe(BaseTrainRecipe):
             fields["save_interval"] = self._escape_hatch_values().get(
                 "num_rollout", self.num_rollout
             )
+        if self.is_tinker_gateway:
+            for group in _TINKER_TRAIN_GROUPS:
+                key = f"tinker_train_{group}"
+                if fields[key] is False:
+                    fields.pop(key)
+                    fields[f"no_{key}"] = True
+        else:
+            for key in _TINKER_FIELDS:
+                fields.pop(key, None)
         if model is not None:
             self.validate_model_parallelism(model)
             for k, v in self._model_to_fields(model).items():

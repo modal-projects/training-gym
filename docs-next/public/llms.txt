@@ -107,6 +107,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [Moonlight_16B_A3B_Recipe](https://gym.modal.dev/reference/moonlight_16b_a3b_recipe)
 - [Qwen3_0_6B_Recipe](https://gym.modal.dev/reference/qwen3_0_6b_recipe)
 - [Qwen3_1_7B_Recipe](https://gym.modal.dev/reference/qwen3_1_7b_recipe)
+- [Qwen3_30B_A3B_Tinker_Recipe](https://gym.modal.dev/reference/qwen3_30b_a3b_tinker_recipe)
 - [Qwen3_4B_Recipe](https://gym.modal.dev/reference/qwen3_4b_recipe)
 - [Qwen3_5_0_8B_Recipe](https://gym.modal.dev/reference/qwen3_5_0_8b_recipe)
 - [Qwen3_5_2B_Recipe](https://gym.modal.dev/reference/qwen3_5_2b_recipe)

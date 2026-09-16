@@ -12,6 +12,9 @@ from modal_training_gym.train_recipes.miles_recipe.inkling import (
 from modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b import (
     Moonlight_16B_A3B_Recipe,
 )
+from modal_training_gym.train_recipes.miles_recipe.qwen3_30b_a3b_tinker import (
+    Qwen3_30B_A3B_Tinker_Recipe,
+)
 from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
     Qwen3_5_4B_Miles_Recipe,
 )
@@ -23,5 +26,6 @@ __all__ = [
     "Inkling_Small_Recipe",
     "Inkling_Small_LoRA_Recipe",
     "Moonlight_16B_A3B_Recipe",
+    "Qwen3_30B_A3B_Tinker_Recipe",
     "Qwen3_5_4B_Miles_Recipe",
 ]
