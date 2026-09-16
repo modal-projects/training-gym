@@ -1,5 +1,5 @@
 # ---
-# order: 4
+# order: 3
 # ---
 #
 # # Efficient inference using on-policy distillation
