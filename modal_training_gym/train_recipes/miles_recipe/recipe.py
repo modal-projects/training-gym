@@ -754,6 +754,15 @@ class MilesRecipe(BaseTrainRecipe):
 
     @model_validator(mode="after")
     def _validate_multi_lora(self) -> "MilesRecipe":
+        hatch_keys = {"multi_lora_n_adapters", *_TINKER_FIELDS} & set(
+            self._escape_hatch_values()
+        )
+        if hatch_keys:
+            raise TrainingGymConfigError(
+                f"{type(self).__name__}: set {', '.join(sorted(hatch_keys))} as "
+                f"recipe fields, not in {self._ESCAPE_HATCH_FIELD}; the Tinker "
+                "gateway layout is validated from the recipe fields"
+            )
         if not self.is_tinker_gateway:
             return self
         problems = [
@@ -769,8 +778,8 @@ class MilesRecipe(BaseTrainRecipe):
                     "gradients resident on dedicated training GPUs",
                 ),
                 (
-                    not self.lora_rank,
-                    "lora_rank must be set; it caps the rank clients may request",
+                    self.lora_rank is None or self.lora_rank <= 0,
+                    "lora_rank must be positive; it caps the rank clients may request",
                 ),
                 (
                     self.target_modules is not None,

@@ -88,6 +88,7 @@ def test_unset_tinker_options_are_omitted() -> None:
     [
         ({"colocate": True, "rollout_num_gpus": None}, "colocate"),
         ({"lora_rank": None}, "lora_rank"),
+        ({"lora_rank": -8}, "lora_rank must be positive"),
         ({"target_modules": "q_proj,k_proj"}, "target_modules"),
         (
             {
@@ -117,6 +118,32 @@ def test_gateway_rejects_unsupported_settings(overrides, message) -> None:
 def test_constraints_only_apply_to_gateway_recipes() -> None:
     # The same settings are legal for ordinary Miles training.
     MilesRecipe(colocate=True, target_modules="q_proj", qkv_format="bshd")
+
+
+@pytest.mark.parametrize(
+    "extra_config",
+    [{"multi_lora_n_adapters": 2}, {"tinker_server_port": 1}],
+)
+def test_gateway_settings_are_rejected_in_extra_config(extra_config) -> None:
+    # extra_config keys override same-named flags in Miles, which would let
+    # them switch on the gateway without any of the checks above.
+    with pytest.raises(ValueError, match="recipe fields"):
+        MilesRecipe(extra_config=extra_config, lora_rank=8)
+
+
+def test_gateway_recipe_is_rejected_by_train_launcher() -> None:
+    from modal_training_gym.common.dataset import HuggingFaceDataset
+    from modal_training_gym.frameworks.miles.launcher import build_miles_app
+
+    with pytest.raises(ValueError, match="TrainConfig.train"):
+        build_miles_app(
+            training_run_id="run",
+            miles=_gateway(),
+            model=Qwen3_30B(),
+            dataset=HuggingFaceDataset(
+                hf_repo="org/data", input_column="prompt", output_column="answer"
+            ),
+        )
 
 
 def test_qwen3_30b_a3b_preset_matches_upstream_example() -> None:
