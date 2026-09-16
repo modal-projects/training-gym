@@ -151,7 +151,7 @@ print(f"run id: {run.training_run_id}")
 print(f"Modal app: {run.modal_app_url}")
 print(f"rollout dumps: /checkpoints/agentic_rollout_dumps/{RUN_NAME}/")
 
-# Run with `uv run -m tutorials.coding_agent.train`. Open the training run in the
+# Run with `uv run -m tutorials.coding_agent.main`. Open the training run in the
 # dashboard to inspect tool calls, verifier outcomes, and rewards. Before
 # increasing the training horizon, check that tasks are gradeable and sample
 # groups contain both successes and failures; uniform rewards give GRPO no
