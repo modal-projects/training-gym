@@ -9,9 +9,10 @@ from .base import (
     parse_inkling_response,
     parse_qwen3_6_response,
 )
+from .deepseek_v41_flash import DeepSeek_V4_1_Flash
 from .gemma4_26b_a4b import Gemma4_26B_A4B
 from .glm_4_7 import GLM_4_7
-from .inkling_small import Inkling_Small
+from .inkling_small import Inkling_Small, Inkling_Small_LoRA
 from .moonlight_16b_a3b_instruct import Moonlight_16B_A3B_Instruct
 from .qwen3_0_6b import Qwen3_0_6B
 from .qwen3_1_7b import Qwen3_1_7B
@@ -22,7 +23,7 @@ from .qwen3_5_0_8b import Qwen3_5_0_8B
 from .qwen3_5_2b import Qwen3_5_2B
 from .qwen3_5_4b import Qwen3_5_4B
 from .qwen3_5_9b import Qwen3_5_9B
-from .qwen3_6_35b import Qwen3_6_35B
+from .qwen3_6_35b import Qwen3_6_35B, Qwen3_6_35B_Long_Context
 from .qwen3_6_27b import Qwen3_6_27B
 from .qwen3_8_27b import Qwen3_8_27B
 from .qwen3_asr_1_7b import Qwen3_ASR_1_7B
@@ -33,9 +34,11 @@ __all__ = [
     "ModelArchitecture",
     "ModelConfig",
     "ParsedResponse",
+    "DeepSeek_V4_1_Flash",
     "Gemma4_26B_A4B",
     "GLM_4_7",
     "Inkling_Small",
+    "Inkling_Small_LoRA",
     "Qwen3_0_6B",
     "Qwen3_1_7B",
     "Qwen3_4B",
@@ -52,6 +55,7 @@ __all__ = [
     "Qwen3_5_4B",
     "Qwen3_5_9B",
     "Qwen3_6_35B",
+    "Qwen3_6_35B_Long_Context",
     "Qwen3_6_27B",
     "Qwen3_8_27B",
     "Qwen3_ASR_1_7B",

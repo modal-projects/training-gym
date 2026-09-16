@@ -328,8 +328,22 @@ function collapseUnmeasuredGaps(spans, runStart, timelineEnd) {
     }
     return mapped;
   };
+  // Inverse of `mapTime`: a position on the compressed axis back to wall time.
+  const unmapTime = (mapped) => {
+    let removed = 0;
+    for (const [start, end] of gaps) {
+      const mappedStart = start - removed;
+      if (mapped <= mappedStart) break;
+      if (mapped < mappedStart + width) {
+        return start + (mapped - mappedStart) * ((end - start) / width);
+      }
+      removed += end - start - width;
+    }
+    return mapped + removed;
+  };
   return {
     mapTime,
+    unmapTime,
     span: Math.max(mapTime(timelineEnd) - runStart, 1e-6),
     breaks: gaps.map(([start, end]) => ({
       offset: mapTime(start) - runStart,
@@ -539,6 +553,7 @@ export function runTimeline(
       unaligned: false,
       breaks: [],
       mapOffset: (seconds) => seconds,
+      unmapOffset: (offset) => offset,
       async: false,
       groups: [],
       steps: [],
@@ -668,6 +683,7 @@ export function runTimeline(
 
   const collapsed = collapseUnmeasuredGaps(spans, runStart, timelineEnd);
   const mapTime = collapsed ? collapsed.mapTime : (seconds) => seconds;
+  const unmapTime = collapsed ? collapsed.unmapTime : (seconds) => seconds;
   if (collapsed) {
     // Nested spans appear both in `spans` and in their parent's children, and
     // mapping a time twice is not the same as mapping it once, so each span is
@@ -705,6 +721,7 @@ export function runTimeline(
     // Absolute-time affordances drawn on the track (attempt boundaries) have to
     // travel through the same compression as the bars.
     mapOffset: (seconds) => mapTime(runStart + seconds) - runStart,
+    unmapOffset: (offset) => unmapTime(runStart + offset) - runStart,
     async,
     groups,
     steps: steps.map((step) => ({

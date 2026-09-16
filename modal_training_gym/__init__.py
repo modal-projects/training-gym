@@ -32,6 +32,14 @@ _EXPORTS = {
     "Sample": ("modal_training_gym.common.sample", "Sample"),
     "extract_code": ("modal_training_gym.common.eval", "extract_code"),
     "HarborEval": ("modal_training_gym.common.eval", "HarborEval"),
+    "DeepSeek_V4_1_Flash": (
+        "modal_training_gym.common.models",
+        "DeepSeek_V4_1_Flash",
+    ),
+    "DeepSeek_V4_1_Flash_Recipe": (
+        "modal_training_gym.train_recipes.miles_recipe",
+        "DeepSeek_V4_1_Flash_Recipe",
+    ),
     "Gemma4_26B_A4B": ("modal_training_gym.common.models", "Gemma4_26B_A4B"),
     "Gemma4_26B_A4B_Recipe": (
         "modal_training_gym.train_recipes.miles_recipe",
@@ -61,6 +69,7 @@ _EXPORTS = {
     "ModelArchitecture": ("modal_training_gym.common.models", "ModelArchitecture"),
     "ModelConfig": ("modal_training_gym.common.models", "ModelConfig"),
     "Inkling_Small": ("modal_training_gym.common.models", "Inkling_Small"),
+    "Inkling_Small_LoRA": ("modal_training_gym.common.models", "Inkling_Small_LoRA"),
     "Inkling_Small_Recipe": (
         "modal_training_gym.train_recipes.miles_recipe",
         "Inkling_Small_Recipe",
@@ -165,9 +174,17 @@ _EXPORTS = {
         "Qwen3_30B_VllmRecipe",
     ),
     "Qwen3_6_35B": ("modal_training_gym.common.models", "Qwen3_6_35B"),
+    "Qwen3_6_35B_Long_Context": (
+        "modal_training_gym.common.models",
+        "Qwen3_6_35B_Long_Context",
+    ),
     "Qwen3_6_35B_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_6_35B_Recipe",
+    ),
+    "Qwen3_6_35B_Recipe_Long_Context": (
+        "modal_training_gym.train_recipes.slime_recipe",
+        "Qwen3_6_35B_Recipe_Long_Context",
     ),
     "Qwen3_6_35B_SglangRecipe": (
         "modal_training_gym.deploy_recipes.sglang_recipe",
@@ -228,6 +245,8 @@ __all__ = [
     "DatasetConfig",
     "DeepSeek_V4_Flash_SglangRecipe",
     "Endpoint",
+    "DeepSeek_V4_1_Flash",
+    "DeepSeek_V4_1_Flash_Recipe",
     "Gemma4_26B_A4B",
     "Gemma4_26B_A4B_Recipe",
     "GLM_4_7",
@@ -254,6 +273,7 @@ __all__ = [
     "ModelArchitecture",
     "ModelConfig",
     "Inkling_Small",
+    "Inkling_Small_LoRA",
     "Inkling_Small_Recipe",
     "Inkling_Small_LoRA_Recipe",
     "Moonlight_16B_A3B_Instruct",
@@ -289,7 +309,9 @@ __all__ = [
     "Qwen3_30B_SglangRecipe",
     "Qwen3_30B_VllmRecipe",
     "Qwen3_6_35B",
+    "Qwen3_6_35B_Long_Context",
     "Qwen3_6_35B_Recipe",
+    "Qwen3_6_35B_Recipe_Long_Context",
     "Qwen3_6_35B_SglangRecipe",
     "Qwen3_6_35B_VllmRecipe",
     "Qwen3_6_27B",

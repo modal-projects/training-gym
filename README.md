@@ -75,20 +75,6 @@ config = TrainConfig(
         input_format="messages",
     ),
     recipe=Qwen3_4B_Recipe(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus=8,
-        rollout_num_gpus_per_engine=1,
-        colocate=True,
-        num_rollout=1,
-        n_samples_per_prompt=4,
-        rollout_batch_size=8,
-        rollout_max_response_len=2048,
-        max_tokens_per_gpu=4096,
-        sglang_mem_fraction_static=0.6,
         rm_type="deepscaler",
     ),
 )
@@ -103,6 +89,7 @@ print(run.training_run_id)
 
 | Family | Models |
 |---|---|
+| DeepSeek | <ul><li>[DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)</li></ul> |
 | GLM | <ul><li>[GLM-4.7](https://huggingface.co/zai-org/GLM-4.7)</li></ul> |
 | Gemma | <ul><li>[gemma-4-26B-A4B-it](https://huggingface.co/google/gemma-4-26B-A4B-it)</li></ul> |
 | Inkling | <ul><li>[Inkling-Small](https://huggingface.co/thinkingmachines/Inkling-Small)</li></ul> |
@@ -112,8 +99,3 @@ print(run.training_run_id)
 | Qwen3.6 | <ul><li>[Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B)</li><li>[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)</li></ul> |
 | Qwen3.8 | <ul><li>[Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B)</li></ul> |
 <!-- END MODELS LIST -->
-
-## Multi-node access
-
-> [!IMPORTANT]
-> Single-node training is open to everyone. Multi-node clusters are still in Beta and are required for larger models. [Contact us on Slack](https://modal.com/slack) for access.

@@ -1,6 +1,7 @@
 <script>
   import { onDestroy } from "svelte";
-  import { Download, ZoomIn, ZoomOut } from "lucide-svelte";
+  import { Download, ZoomOut } from "lucide-svelte";
+  import { brushZoom } from "../lib/brushZoom.js";
   import {
     CATEGORIES,
     APPROXIMATE_LANE_NOTE,
@@ -18,6 +19,7 @@
     shouldShowOpenRolloutAction,
   } from "../lib/timing.js";
   import { fmtDate } from "../lib/format.js";
+  import TimeAxis from "./TimeAxis.svelte";
 
   let {
     timings = null,
@@ -29,12 +31,15 @@
     asyncOverride = null,
     showOpenRollout = true,
     attemptMarkers = [],
+    // Wall-clock window `{ start, end }` (epoch seconds) to show; null shows
+    // the whole timeline. With `onChangeTimeRange` the window is controlled
+    // by the parent and every brush/wheel gesture is reported back through it;
+    // without it the timeline keeps its own.
+    timeRange = null,
+    onChangeTimeRange = null,
   } = $props();
 
-  const MIN_ZOOM = 1;
   const MAX_ZOOM = 128;
-  const ZOOM_BTN_FACTOR = 1.5;
-  const WHEEL_SENSITIVITY = 0.0025;
 
   const ROW_HEIGHT_PX = 15;
   const DETAIL_ROW_HEIGHT_PX = 22;
@@ -45,12 +50,35 @@
   const BAR_GAP_PX = 1;
   const ATTEMPT_STRIP_PX = 14;
   let showDetails = $state(false);
-  let zoom = $state(1);
-  let viewport = $state(null);
+  let localRange = $state(null);
+  let controlled = $derived(typeof onChangeTimeRange === "function");
+  let activeRange = $derived(controlled ? timeRange : localRange);
   let viewportWidth = $state(0);
   // Evaluate once to derive unmeasured gaps, then again for pixel-aware rendering.
   // Parent-bounded minimum widths leave both passes with the same overall span.
   let baseTimeline = $derived(runTimeline(timings, asyncOverride));
+  // The slice of the compressed axis `[0, span]` that fills the viewport. A
+  // window narrower than the zoom cap is widened around its centre so the
+  // track always fills the viewport.
+  let window_ = $derived.by(() => {
+    const span = baseTimeline.span;
+    if (!span || baseTimeline.runStart == null || !activeRange) return [0, span];
+    const clamp = (o) => Math.min(span, Math.max(0, o));
+    let o0 = clamp(baseTimeline.mapOffset(Number(activeRange.start) - baseTimeline.runStart));
+    let o1 = clamp(baseTimeline.mapOffset(Number(activeRange.end) - baseTimeline.runStart));
+    if (!(o1 > o0)) return [o0, o1];
+    const minWidth = span / MAX_ZOOM;
+    if (o1 - o0 < minWidth) {
+      o0 = clamp((o0 + o1) / 2 - minWidth / 2);
+      o1 = clamp(o0 + minWidth);
+      o0 = clamp(o1 - minWidth);
+    }
+    return [o0, o1];
+  });
+  let outOfRange = $derived(window_[1] - window_[0] <= 0);
+  let zoom = $derived(outOfRange ? 1 : baseTimeline.span / (window_[1] - window_[0]));
+  let trackShift = $derived(outOfRange ? 0 : (window_[0] / baseTimeline.span) * zoom * 100);
+  let zoomed = $derived(!outOfRange && zoom > 1.001);
   let pixelsPerSecond = $derived(
     viewportWidth > 0 ? (viewportWidth * zoom) / baseTimeline.span : 0,
   );
@@ -131,29 +159,52 @@
     return targets;
   });
 
-  function setZoom(next, anchorX = null) {
-    const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
-    if (clamped === zoom) return;
-    if (viewport) {
-      const rect = viewport.getBoundingClientRect();
-      const cursorX = anchorX == null ? rect.width / 2 : anchorX - rect.left;
-      const contentX = viewport.scrollLeft + cursorX;
-      const scale = clamped / zoom;
-      zoom = clamped;
-      requestAnimationFrame(() => {
-        if (viewport) {
-          viewport.scrollLeft = contentX * scale - cursorX;
-        }
-      });
-    } else {
-      zoom = clamped;
-    }
+  function changeRange(next) {
+    if (controlled) onChangeTimeRange(next);
+    else localRange = next;
   }
 
-  function handleWheel(e) {
-    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-    e.preventDefault();
-    setZoom(zoom * Math.exp(-e.deltaY * WHEEL_SENSITIVITY), e.clientX);
+  // Wall-clock bounds of the visible window; ticks are placed through the
+  // gap compression so they line up with the bars above them.
+  let axisRange = $derived.by(() => {
+    if (outOfRange || !baseTimeline.span || baseTimeline.runStart == null) return null;
+    const [w0, w1] = window_;
+    return {
+      start: baseTimeline.runStart + baseTimeline.unmapOffset(w0),
+      end: baseTimeline.runStart + baseTimeline.unmapOffset(w1),
+    };
+  });
+
+  function axisFraction(t) {
+    const [w0, w1] = window_;
+    return (baseTimeline.mapOffset(t - baseTimeline.runStart) - w0) / (w1 - w0);
+  }
+
+  // Brush/wheel output arrives as fractions of the viewport; walk them back
+  // through the visible window and the gap compression to wall-clock seconds.
+  function handleBrush([f0, f1]) {
+    const span = baseTimeline.span;
+    if (!span || baseTimeline.runStart == null || outOfRange) return;
+    const [w0, w1] = window_;
+    const width = w1 - w0;
+    let r0 = Math.max(0, w0 + f0 * width);
+    let r1 = Math.min(span, w0 + f1 * width);
+    if (!(r1 > r0)) return;
+    const minWidth = span / MAX_ZOOM;
+    if (r1 - r0 < minWidth) {
+      const mid = (r0 + r1) / 2;
+      r0 = Math.max(0, mid - minWidth / 2);
+      r1 = Math.min(span, r0 + minWidth);
+    }
+    if (r0 <= 0 && r1 >= span) {
+      changeRange(null);
+      return;
+    }
+    changeRange({
+      start: baseTimeline.runStart + baseTimeline.unmapOffset(r0),
+      end: baseTimeline.runStart + baseTimeline.unmapOffset(r1),
+      live: false,
+    });
   }
 
   function downloadJson() {
@@ -412,32 +463,16 @@
         {/each}
       </div>
       <div class="controls">
-        <div class="zoom-controls">
+        {#if !controlled && zoomed}
           <button
-            class="zoom-btn"
-            onclick={() => setZoom(zoom / ZOOM_BTN_FACTOR)}
-            disabled={zoom <= MIN_ZOOM}
-            title="Zoom out"
+            class="dl-btn"
+            onclick={() => changeRange(null)}
+            title="Show the whole timeline"
           >
             <ZoomOut size={13} />
+            {zoom >= 10 ? Math.round(zoom) : zoom.toFixed(1).replace(/\.0$/, "")}× · reset
           </button>
-          <button
-            class="zoom-level"
-            onclick={() => setZoom(MIN_ZOOM)}
-            disabled={zoom <= MIN_ZOOM}
-            title="Reset zoom to fit"
-          >
-            {zoom >= 10 ? Math.round(zoom) : zoom.toFixed(1).replace(/\.0$/, "")}×
-          </button>
-          <button
-            class="zoom-btn"
-            onclick={() => setZoom(zoom * ZOOM_BTN_FACTOR)}
-            disabled={zoom >= MAX_ZOOM}
-            title="Zoom in"
-          >
-            <ZoomIn size={13} />
-          </button>
-        </div>
+        {/if}
         <button class="dl-btn" onclick={downloadJson} title="Download timing as JSON">
           <Download size={13} />
           Download JSON
@@ -483,12 +518,24 @@
 
       <div
         class="viewport"
-        bind:this={viewport}
         bind:clientWidth={viewportWidth}
-        onwheel={handleWheel}
+        use:brushZoom={{ onChangeDomainX: handleBrush, enabled: !outOfRange }}
       >
-        <div class="track" style:width={`${zoom * 100}%`} style:padding-top={`${stripPx}px`}>
-          <div class="steps" style:height={`${stepRowPx ? rowHeight : 0}px`} style:margin-bottom={`${stepRowPx ? STEP_GAP_PX : 0}px`}>
+        {#if outOfRange}
+          <div class="empty">No substep timing in the selected range.</div>
+        {/if}
+        <div
+          class="track"
+          class:hidden-track={outOfRange}
+          style:width={`${zoom * 100}%`}
+          style:margin-left={`-${trackShift}%`}
+          style:padding-top={`${stripPx}px`}
+        >
+          <div
+            class="steps"
+            style:height={`${stepRowPx ? rowHeight : 0}px`}
+            style:margin-bottom={`${stepRowPx ? STEP_GAP_PX : 0}px`}
+          >
             {#each timeline.steps as step (step.id)}
               <div
                 class="step"
@@ -655,6 +702,9 @@
             </div>
           {/each}
         </div>
+        {#if axisRange}
+          <TimeAxis start={axisRange.start} end={axisRange.end} fractionAt={axisFraction} />
+        {/if}
       </div>
     </div>
 
@@ -831,47 +881,6 @@
     flex-shrink: 0;
   }
 
-  .zoom-controls {
-    display: inline-flex;
-    align-items: center;
-    border: 1px solid var(--border, #2f2f2f);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-
-  .zoom-btn,
-  .zoom-level {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: none;
-    color: var(--muted);
-    font-size: 11px;
-    padding: 3px 7px;
-    cursor: pointer;
-    font-family: inherit;
-  }
-
-  .zoom-level {
-    min-width: 38px;
-    border-left: 1px solid var(--border, #2f2f2f);
-    border-right: 1px solid var(--border, #2f2f2f);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .zoom-btn:hover:not(:disabled),
-  .zoom-level:hover:not(:disabled) {
-    color: var(--text);
-    background: var(--color-c-gray-08, #1c1c1c);
-  }
-
-  .zoom-btn:disabled,
-  .zoom-level:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
   .dl-btn {
     display: inline-flex;
     align-items: center;
@@ -918,15 +927,16 @@
   }
 
   .viewport {
+    position: relative;
     flex: 1;
     min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: hidden;
     padding-bottom: 10px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-c-gray-20, #464646) transparent;
     overscroll-behavior-x: contain;
-    touch-action: pan-x;
+  }
+
+  .hidden-track {
+    visibility: hidden;
   }
 
   .track {

@@ -984,8 +984,6 @@ config = TrainConfig(
             "jsonschema~=4.23.0",
             "bfcl-eval==2026.3.23",
         ),
-
-        gpu_type="H100",
         colocate=False,
         actor_num_nodes=2,
         actor_num_gpus_per_node=8,
@@ -1002,17 +1000,14 @@ config = TrainConfig(
         sglang_max_running_requests=48,
 
         num_rollout=5,
+        save_interval=5,
         rollout_batch_size=16,
         n_samples_per_prompt=8,
+        global_batch_size=16,
         rollout_max_response_len=4000,
-        rollout_temperature=1,
         sglang_mem_fraction_static=0.75,
 
-        global_batch_size=16,
-        lr=1e-6,
         kl_loss_coef=0.02,
-        # The demo has five rollouts, so save one model-only checkpoint at the end.
-        save_interval=5,
         no_save_optim=True,
 
         environment={

@@ -5,17 +5,14 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any, Callable
 
-from modal import Volume
-
 TORCH_DIST_TRACKER_NAME = "latest_checkpointed_iteration.txt"
 
 
 def is_complete_torch_dist_checkpoint(names: Collection[str]) -> bool:
-    return (
-        ".metadata" in names
-        and "common.pt" in names
-        and any(name.endswith(".distcp") for name in names)
-    )
+    """``.metadata`` is written last, so it separates a finished save from a crashed
+    one. ``common.pt`` is not required: newer megatron-core folds the common state
+    into the torch_dist metadata and writes no such file."""
+    return ".metadata" in names and any(name.endswith(".distcp") for name in names)
 
 
 def is_complete_torch_dist_checkpoint_dir(
@@ -64,6 +61,8 @@ def _raise_gathered_errors(
 
 
 def _commit_volume(volume_name: str) -> None:
+    from modal import Volume
+
     Volume.from_name(volume_name, create_if_missing=False).commit()
 
 

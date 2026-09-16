@@ -8,6 +8,7 @@ import pytest
 
 from modal_training_gym.frameworks.miles.modal_helpers.patches import (
     patch_advantage_distribution as advantage_patcher,
+    patch_qkvr_cpu_merge as qkvr_patcher,
     patch_rollout_status_reporting as rollout_patcher,
 )
 
@@ -72,3 +73,27 @@ def test_patch_matches_golden(miles_inputs, tmp_path, request):
         assert actual == expected, (
             f"golden mismatch for {name}; rerun with --rewrite to accept"
         )
+
+
+def test_qkvr_cpu_merge_rewrites_factory(tmp_path, capsys):
+    # Indent matches the pinned miles image (nested under `if qkey in sd`).
+    work = tmp_path / "layers.py"
+    work.write_text(
+        "class InklingSelfAttention:\n"
+        "    def sharded_state_dict(self):\n"
+        "        if True:\n"
+        "            def _qkvr_merge(sub):\n"
+        "                return torch.cat(list(sub), dim=0)\n"
+        "\n"
+        "            return _qkvr_merge\n"
+    )
+
+    assert qkvr_patcher.apply(work) == 1
+    patched = work.read_text()
+    assert qkvr_patcher.MARKER in patched
+    assert "return torch.cat(list(sub), dim=0)" not in patched
+    assert "resize_" not in patched
+    assert ".to(device)" not in patched
+    compile(patched, str(work), "exec")
+    assert qkvr_patcher.apply(work) == 0
+    assert "already applied" in capsys.readouterr().out
