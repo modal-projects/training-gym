@@ -74,7 +74,10 @@ class DocQADataset(DatasetConfig):
         return "label"
 
     def rows(self):
+        prompt_limit = GLM_4_7_Recipe.max_tokens_per_gpu - _ANSWER_TOKENS
         for row in load_dataset("Tongyi-Zhiwen/DocQA-RL-1.6K", split="train"):
+            if int(row["extra_info"]["input_length"]) > prompt_limit:
+                continue
             packed = _pack_docqa(row)
             yield {
                 "messages": [{"role": "user", "content": packed["prompt"]}],
