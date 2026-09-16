@@ -51,7 +51,7 @@ def _normalize(text: str) -> str:
 
 def answers_equal(pred: str, label: str) -> bool:
     try:
-        return math.isclose(float(pred), float(label), rel_tol=1e-2)
+        return math.isclose(float(pred), float(label), rel_tol=0.0, abs_tol=1e-9)
     except ValueError:
         return _normalize(pred) == _normalize(label)
 
