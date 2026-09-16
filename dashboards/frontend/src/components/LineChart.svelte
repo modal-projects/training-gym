@@ -8,13 +8,9 @@
     data = [],
     height = 140,
     color = "var(--accent)",
-    // Name of the primary `y` series in the legend and tooltip.
     label = "mean",
-    // Secondary series read from `row[key]`: `{ key, label, color, dash }`.
-    // Drawn thinner than the primary line and toggleable from the legend.
+    // `{ key, label, color, dash }` secondary series read from `row[key]`.
     lines = [],
-    // Show a "Smoothing" toggle that replaces every series with its trailing
-    // mean over the last `smoothingWindow` steps.
     smoothable = false,
     smoothingWindow = 5,
     ariaLabel = title || "Line chart",
@@ -131,8 +127,6 @@
     onChangeDomainX(fractionsToDomain(fractions, [xMin, xMax]));
   }
 
-  // Gaps (rows without a value for `key`) break the line instead of being
-  // bridged.
   function pathFor(key) {
     let d = "";
     let pen = false;

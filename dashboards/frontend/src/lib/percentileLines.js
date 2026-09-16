@@ -1,7 +1,3 @@
-// Secondary series drawn on every per-rollout metric chart, read from the
-// backend's per-rollout stats (`reward_stats` / `tag_stats[tag]`): the
-// min/p50/p90/p99/max of the per-episode values that the plotted mean
-// averages over.
 export const PERCENTILE_LINES = [
   { key: "pmin", stat: "min", label: "pmin", color: "var(--color-c-gray-40, #747474)", dash: "3 3" },
   { key: "p50", stat: "p50", label: "p50", color: "var(--color-c-yellow-80, #d1c05f)" },
@@ -15,9 +11,6 @@ function finiteOrNull(value) {
   return value == null || !Number.isFinite(n) ? null : n;
 }
 
-// `{ pmin, p50, p90, p99, pmax }` for one chart row from a stats dict. Rollouts
-// summarised before percentiles were recorded yield nulls, which the chart
-// draws as a gap in that line.
 export function percentileRowFields(stats) {
   const out = {};
   for (const line of PERCENTILE_LINES) out[line.key] = finiteOrNull(stats?.[line.stat]);

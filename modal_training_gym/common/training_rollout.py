@@ -139,13 +139,10 @@ def _numeric_tags(samples: list[TrainingRolloutSample]) -> dict[str, list[float]
     return values_by_tag
 
 
-# Percentiles reported alongside mean/min/max in per-rollout summaries so the
-# dashboard can chart the spread of a metric over training, not just its mean.
 _SUMMARY_PERCENTILES: dict[str, float] = {"p50": 0.5, "p90": 0.9, "p99": 0.99}
 
 
 def _value_stats(values: list[float]) -> dict[str, Any]:
-    """count/mean/min/max plus ``_SUMMARY_PERCENTILES`` of a non-empty list."""
     ordered = sorted(values)
     return {
         "count": len(ordered),
@@ -194,7 +191,6 @@ class TrainingRolloutResult(BaseModel):
         return list(groups.values())
 
     def _episode_rewards(self) -> list[float]:
-        """One reward per episode: the mean score of its samples."""
         return [
             sum(s.score for s in group) / len(group) for group in self._rollout_groups()
         ]
@@ -216,7 +212,6 @@ class TrainingRolloutResult(BaseModel):
 
     @property
     def reward_stats(self) -> dict[str, Any] | None:
-        """count/mean/min/max/p50/p90/p99 of per-episode rewards."""
         rewards = self._episode_rewards()
         return _value_stats(rewards) if rewards else None
 
@@ -273,7 +268,7 @@ class TrainingRolloutResult(BaseModel):
 
     @property
     def tag_stats(self) -> dict[str, dict[str, Any]]:
-        """Per-tag count/mean/min/max/p50/p90/p99, weighted per rollout like ``mean``."""
+        """Per-tag count/mean/min/max, weighted per rollout like ``mean``."""
         values_by_tag: dict[str, list[float]] = {}
         for group in self._rollout_groups():
             for tag, values in _numeric_tags(group).items():
