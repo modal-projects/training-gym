@@ -2078,12 +2078,7 @@ table.training-runs-table td.row-open-cell {
     padding: 8px 8px;
   }
 
-  .sample-viewer {
-    margin-inline: 2px;
-    padding: 8px 10px;
-  }
-
-  .sample-viewer-header {
+  .sample-toolbar {
     flex-wrap: wrap;
     gap: 8px;
   }
@@ -2149,7 +2144,7 @@ table.rollout-table tbody tr:hover {
   background: var(--color-c-gray-10, #2f2f2f);
 }
 
-table.rollout-table tbody tr.expanded {
+table.rollout-table tbody tr.selected {
   background: var(--color-c-gray-10, #2f2f2f);
 }
 
@@ -2213,24 +2208,18 @@ table.rollout-table th:nth-child(4) .column-label {
   letter-spacing: 0.04em;
 }
 
-/* ── Single-sample viewer (bucket drill-in) ──────────────────────────── */
-.sample-viewer {
-  border-left: 2px solid var(--accent);
-  padding: 8px 12px;
-  margin-bottom: 12px;
-  background: var(--color-c-gray-10, #2f2f2f);
-  border-radius: 0 4px 4px 0;
-  max-width: 100%;
-  min-width: 0;
-}
-
-.sample-viewer-header {
+/* ── Sample viewer toolbar (rollout drawer) ──────────────────────────── */
+.sample-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
   min-width: 0;
+  margin-top: 12px;
+  padding: 8px 24px;
+  background: var(--color-c-gray-10, #2f2f2f);
+  border-top: 1px solid var(--border, #2f2f2f);
+  border-bottom: 1px solid var(--border, #2f2f2f);
 }
 
 .sample-viewer-nav,
@@ -2292,8 +2281,6 @@ table.rollout-table th:nth-child(4) .column-label {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 240px;
-  overflow: auto;
 }
 
 .exit-ok {
