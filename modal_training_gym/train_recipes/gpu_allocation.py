@@ -7,7 +7,7 @@ from typing import Any
 
 from modal_training_gym.common.errors import GpuAllocationError
 
-MULTI_NODE_GPUS_PER_NODE = 8
+_MAX_GPUS_PER_CONTAINER = {"A10": 4}
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,10 @@ class GpuAllocation:
         return "GPU allocation: " + ", ".join(parts)
 
 
+def _max_gpus_per_container(gpu_type: str | None) -> int:
+    return _MAX_GPUS_PER_CONTAINER.get((gpu_type or "").rstrip("!+"), 8)
+
+
 def resolve_gpu_allocation(config: Any, *, warn: bool = True) -> GpuAllocation:
     gpus_per_node = _positive_int_field(config, "actor_num_gpus_per_node")
     actor_nodes = _positive_int_field(config, "actor_num_nodes")
@@ -63,7 +67,8 @@ def resolve_gpu_allocation(config: Any, *, warn: bool = True) -> GpuAllocation:
             "Adjust actor_num_nodes, rollout_num_gpus, or actor_num_gpus_per_node."
         )
     total_nodes = total_gpus // gpus_per_node
-    if total_nodes > 1 and total_gpus <= MULTI_NODE_GPUS_PER_NODE:
+    max_gpus = _max_gpus_per_container(getattr(config, "gpu_type", None))
+    if actor_nodes == 1 and total_nodes > 1 and total_gpus <= max_gpus:
         gpus_per_node = total_gpus
         total_nodes = 1
     rollout_engines = rollout_gpus // rollout_num_gpus_per_engine if rollout_gpus else 0
@@ -81,16 +86,18 @@ def resolve_gpu_allocation(config: Any, *, warn: bool = True) -> GpuAllocation:
     )
 
 
-def validate_multi_node_gpu_count(allocation: GpuAllocation) -> None:
+def validate_multi_node_gpu_count(
+    allocation: GpuAllocation, gpu_type: str | None = None
+) -> None:
     if allocation.total_nodes <= 1:
         return
-    if allocation.gpus_per_node == MULTI_NODE_GPUS_PER_NODE:
+    max_gpus = _max_gpus_per_container(gpu_type)
+    if allocation.gpus_per_node == max_gpus:
         return
     raise GpuAllocationError(
-        f"Multi-node functions must use {MULTI_NODE_GPUS_PER_NODE} GPUs per node; "
-        f"requested {allocation.gpus_per_node}. Keep the total at or under "
-        f"{MULTI_NODE_GPUS_PER_NODE} GPUs to fit one node, or set "
-        f"actor_num_gpus_per_node={MULTI_NODE_GPUS_PER_NODE}."
+        f"Multi-node functions must use {max_gpus} GPUs per node; "
+        f"requested {allocation.gpus_per_node}. Use actor_num_nodes=1 to pack "
+        f"one node, or actor_num_gpus_per_node={max_gpus}."
     )
 
 

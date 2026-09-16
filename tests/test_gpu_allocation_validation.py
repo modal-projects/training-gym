@@ -72,11 +72,31 @@ def test_multi_node_requires_full_node_gpus() -> None:
         SlimeRecipe(
             **{
                 **_SLIME_KW,
-                "actor_num_gpus_per_node": 1,
-                "rollout_num_gpus": 8,
-                "rollout_num_gpus_per_engine": 1,
+                "gpu_type": "B300",
+                "actor_num_nodes": 2,
+                "actor_num_gpus_per_node": 4,
+                "colocate": True,
             }
         )
+
+
+def test_a10_one_plus_three_packs_onto_one_node() -> None:
+    config = SimpleNamespace(
+        gpu_type="A10",
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=1,
+        rollout_num_gpus_per_engine=1,
+        colocate=False,
+        use_critic=False,
+        rollout_num_gpus=3,
+    )
+
+    allocation = resolve_gpu_allocation(config, warn=False)
+    assert allocation.actor_gpus == 1
+    assert allocation.rollout_gpus == 3
+    assert allocation.gpus_per_node == 4
+    assert allocation.total_gpus == 4
+    assert allocation.total_nodes == 1
 
 
 def test_disagg_one_plus_one_packs_onto_one_node() -> None:

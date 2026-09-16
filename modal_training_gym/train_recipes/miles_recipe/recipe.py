@@ -703,7 +703,7 @@ class MilesRecipe(BaseTrainRecipe):
 
     @model_validator(mode="after")
     def _validate_gpu_allocation(self) -> "MilesRecipe":
-        validate_multi_node_gpu_count(resolve_gpu_allocation(self))
+        validate_multi_node_gpu_count(resolve_gpu_allocation(self), self.gpu_type)
         return self
 
     # ── Container → miles flag converters ────────────────────────────────────
