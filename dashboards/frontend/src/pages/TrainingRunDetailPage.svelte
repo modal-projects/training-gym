@@ -38,6 +38,7 @@
   } from "../lib/api.js";
   import { groupByRollout, rolloutIndex, rolloutScores } from "../lib/rolloutGrouping.js";
   import { normalizeMetricLinks } from "../lib/metricLinks.js";
+  import { PERCENTILE_LINES, percentileRowFields } from "../lib/percentileLines.js";
   import {
     MAX_TERMINAL_TIMING_FAILURES,
     TERMINAL_TIMING_SETTLE_WINDOW_MS,
@@ -1401,6 +1402,7 @@
       x: Number(r.rollout_id) || 0,
       y: Number(r.mean) || 0,
       rollout_id: Number(r.rollout_id) || 0,
+      ...percentileRowFields(r.reward_stats),
     })),
   );
 
@@ -1421,6 +1423,7 @@
         x: Number(r.rollout_id) || 0,
         y: Number(r.tag_stats[tag].mean) || 0,
         rollout_id: Number(r.rollout_id) || 0,
+        ...percentileRowFields(r.tag_stats[tag]),
       }));
   }
 
@@ -1741,6 +1744,8 @@
                 <LineChart
                   title="Reward"
                   data={rewardChartData}
+                  lines={PERCENTILE_LINES}
+                  smoothable
                   formatX={(row) => `rollout ${row.rollout_id}`}
                   formatY={(value) => formatMean(value)}
                   ariaLabel="Reward chart"
@@ -1831,8 +1836,10 @@
                 {#each customTagNames as tag (tag)}
                   <div class="rollout-chart">
                     <LineChart
-                      title={`${tag} (mean)`}
+                      title={tag}
                       data={tagChartData(tag)}
+                      lines={PERCENTILE_LINES}
+                      smoothable
                       formatX={(row) => `rollout ${row.rollout_id}`}
                       formatY={(value) => formatMean(value)}
                       ariaLabel={`${tag} chart`}

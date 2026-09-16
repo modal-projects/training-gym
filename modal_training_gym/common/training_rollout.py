@@ -19,6 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from modal_training_gym.common.advantage_distribution import quantile
 from modal_training_gym.common.coerce import optional_int, safe_int
 from modal_training_gym.common.sample import Sample
 from modal_training_gym.utils.metadata import (
@@ -138,6 +139,23 @@ def _numeric_tags(samples: list[TrainingRolloutSample]) -> dict[str, list[float]
     return values_by_tag
 
 
+# Percentiles reported alongside mean/min/max in per-rollout summaries so the
+# dashboard can chart the spread of a metric over training, not just its mean.
+_SUMMARY_PERCENTILES: dict[str, float] = {"p50": 0.5, "p90": 0.9, "p99": 0.99}
+
+
+def _value_stats(values: list[float]) -> dict[str, Any]:
+    """count/mean/min/max plus ``_SUMMARY_PERCENTILES`` of a non-empty list."""
+    ordered = sorted(values)
+    return {
+        "count": len(ordered),
+        "mean": sum(ordered) / len(ordered),
+        "min": ordered[0],
+        "max": ordered[-1],
+        **{name: quantile(ordered, q) for name, q in _SUMMARY_PERCENTILES.items()},
+    }
+
+
 class TrainingRolloutSummary(BaseModel):
     """Lightweight rollout data returned by the run-rollouts list endpoint."""
 
@@ -147,6 +165,7 @@ class TrainingRolloutSummary(BaseModel):
     total: int
     episode_count: int | None = None
     mean: float
+    reward_stats: dict[str, Any] | None = None
     export_size_bytes: int | None = None
     rollout_time: float | None = None
     error_summary: dict[str, Any] | None = None
@@ -174,6 +193,12 @@ class TrainingRolloutResult(BaseModel):
             groups.setdefault(key, []).append(sample)
         return list(groups.values())
 
+    def _episode_rewards(self) -> list[float]:
+        """One reward per episode: the mean score of its samples."""
+        return [
+            sum(s.score for s in group) / len(group) for group in self._rollout_groups()
+        ]
+
     @property
     def total(self) -> int:
         return len(self.samples)
@@ -184,12 +209,16 @@ class TrainingRolloutResult(BaseModel):
 
     @property
     def mean(self) -> float:
-        groups = self._rollout_groups()
-        if not groups:
+        rewards = self._episode_rewards()
+        if not rewards:
             return 0.0
-        return sum(sum(s.score for s in group) / len(group) for group in groups) / len(
-            groups
-        )
+        return sum(rewards) / len(rewards)
+
+    @property
+    def reward_stats(self) -> dict[str, Any] | None:
+        """count/mean/min/max/p50/p90/p99 of per-episode rewards."""
+        rewards = self._episode_rewards()
+        return _value_stats(rewards) if rewards else None
 
     @property
     def storage_key(self) -> str:
@@ -244,21 +273,13 @@ class TrainingRolloutResult(BaseModel):
 
     @property
     def tag_stats(self) -> dict[str, dict[str, Any]]:
-        """Per-tag count/mean/min/max, weighted per rollout like ``mean``."""
+        """Per-tag count/mean/min/max/p50/p90/p99, weighted per rollout like ``mean``."""
         values_by_tag: dict[str, list[float]] = {}
         for group in self._rollout_groups():
             for tag, values in _numeric_tags(group).items():
                 values_by_tag.setdefault(tag, []).append(sum(values) / len(values))
 
-        return {
-            tag: {
-                "count": len(values),
-                "mean": sum(values) / len(values),
-                "min": min(values),
-                "max": max(values),
-            }
-            for tag, values in values_by_tag.items()
-        }
+        return {tag: _value_stats(values) for tag, values in values_by_tag.items()}
 
     def to_summary(self) -> dict[str, Any]:
         summary: dict[str, Any] = {
@@ -269,6 +290,9 @@ class TrainingRolloutResult(BaseModel):
             "episode_count": self.episode_count,
             "mean": self.mean,
         }
+        reward_stats = self.reward_stats
+        if reward_stats:
+            summary["reward_stats"] = reward_stats
         if self.rollout_time is not None:
             summary["rollout_time"] = self.rollout_time
         err = self.error_summary

@@ -32,7 +32,7 @@ from modal_training_gym.utils.metadata import (
 _QUANTILES: tuple[float, ...] = (0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0)
 
 
-def _quantile(sorted_values: list[float], q: float) -> float:
+def quantile(sorted_values: list[float], q: float) -> float:
     """Linear-interpolated quantile of an already-sorted, non-empty list."""
     if not sorted_values:
         return 0.0
@@ -72,7 +72,7 @@ def distribution_stats(values: list[float]) -> dict[str, Any]:
         "std": math.sqrt(var),
         "min": ordered[0],
         "max": ordered[-1],
-        "quantiles": {f"p{int(q * 100)}": _quantile(ordered, q) for q in _QUANTILES},
+        "quantiles": {f"p{int(q * 100)}": quantile(ordered, q) for q in _QUANTILES},
     }
 
 
