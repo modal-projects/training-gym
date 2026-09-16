@@ -19,6 +19,12 @@
   //   showValueLabels   boolean                        — direct labels above bars
   //   yMax              number | null                  — fix the positive top of the scale
   //   emptyText         string
+  //   zoomable          boolean                        — drag / wheel over the plot narrows
+  //                                                      the visible span of categories
+
+  import ZoomOutIcon from "lucide-svelte/icons/zoom-out";
+
+  import { brushZoom } from "../lib/brushZoom.js";
 
   let {
     categories = [],
@@ -31,7 +37,64 @@
     showValueLabels = false,
     yMax = null,
     emptyText = "No data to compare.",
+    zoomable = true,
   } = $props();
+
+  // Inclusive `[lo, hi]` category indices on screen; `null` shows everything.
+  let zoomRange = $state(null);
+  let categoryCount = $derived((categories || []).length);
+  $effect(() => {
+    categoryCount;
+    zoomRange = null;
+  });
+
+  let visibleRange = $derived.by(() => {
+    const n = categoryCount;
+    if (!n) return [0, -1];
+    if (!zoomRange) return [0, n - 1];
+    const lo = Math.max(0, Math.min(n - 1, zoomRange[0]));
+    const hi = Math.max(lo, Math.min(n - 1, zoomRange[1]));
+    return [lo, hi];
+  });
+  let isZoomed = $derived(
+    categoryCount > 0 && (visibleRange[0] > 0 || visibleRange[1] < categoryCount - 1),
+  );
+
+  function setZoom(lo, hi) {
+    const n = categoryCount;
+    if (!n) return;
+    lo = Math.max(0, Math.min(n - 1, Math.round(lo)));
+    hi = Math.max(lo, Math.min(n - 1, Math.round(hi)));
+    zoomRange = lo === 0 && hi === n - 1 ? null : [lo, hi];
+  }
+
+  // The plot lays visible clusters out in equal columns, so brush fractions
+  // are column offsets from the current window.
+  function handleBrush([f0, f1]) {
+    const [lo, hi] = visibleRange;
+    const count = hi - lo + 1;
+    if (count <= 0) return;
+    // Column `i` spans `[i, i + 1)`; a column counts as selected when more
+    // than half of it is covered.
+    let newLo = Math.round(lo + f0 * count);
+    let newHi = Math.round(lo + f1 * count) - 1;
+    if (newLo === lo && newHi === hi) {
+      // A wheel step too small to move a whole column still has to do
+      // something, or fine-grained scrolling would feel dead.
+      if (f1 - f0 > 1) {
+        newLo = lo - 1;
+        newHi = hi + 1;
+      } else if (f1 - f0 < 1 && count > 1) {
+        if (f0 > 1 - f1) newLo = lo + 1;
+        else newHi = hi - 1;
+      }
+    }
+    setZoom(newLo, newHi);
+  }
+
+  function resetZoom() {
+    zoomRange = null;
+  }
 
   // Validated dark-surface categorical ramp (skill reference palette), in fixed
   // order — never cycled cosmetically; the order itself is the CVD-safety choice.
@@ -58,13 +121,15 @@
     const ser = (series || []).filter((s) => s && Array.isArray(s.values));
     if (!cats.length || !ser.length) return null;
 
+    const [lo, hi] = visibleRange;
+
     // Loop (not Math.min(...arr)): value arrays can be large enough that the
     // spread would blow the engine's max-argument limit.
     let dataMax = 0;
     let dataMin = 0;
     for (const s of ser) {
-      for (const raw of s.values) {
-        const v = finite(raw);
+      for (let ci = lo; ci <= hi; ci++) {
+        const v = finite(s.values[ci]);
         if (v > dataMax) dataMax = v;
         if (v < dataMin) dataMin = v;
       }
@@ -73,7 +138,8 @@
     const span = posTop - dataMin || 1;
     const zeroPct = (posTop / span) * 100; // distance from top down to the zero line
 
-    const clusters = cats.map((label, ci) => {
+    const clusters = cats.slice(lo, hi + 1).map((label, offset) => {
+      const ci = lo + offset;
       const bars = ser.map((s, si) => {
         const v = finite(s.values[ci]);
         const magPct = (Math.abs(v) / span) * 100;
@@ -93,6 +159,7 @@
 
     return {
       clusters,
+      total: cats.length,
       series: ser.map((s, si) => ({ name: s.name ?? `series ${si + 1}`, color: colorFor(s, si) })),
       zeroPct,
       hasNegative: dataMin < 0,
@@ -118,7 +185,7 @@
 
   let tip = $derived.by(() => {
     if (!hover || !model) return null;
-    const cluster = model.clusters[hover.ci];
+    const cluster = model.clusters.find((c) => c.ci === hover.ci);
     if (!cluster) return null;
     const TIP_W = 168;
     const left = Math.max(0, Math.min(ptr.x + 12, Math.max(0, ptr.w - TIP_W)));
@@ -141,25 +208,40 @@
 </script>
 
 {#if model}
-  {#if showLegend && model.multi}
-    <div class="flex flex-wrap gap-[16px] mb-[8px] text-[11px] text-(--muted)">
-      {#each model.series as s (s.name)}
-        <span class="inline-flex items-center gap-[6px]">
-          <span class="cbc-swatch" style:background={s.color}></span>
-          {s.name}
-        </span>
-      {/each}
+  {#if (showLegend && model.multi) || isZoomed}
+    <div class="flex flex-wrap items-center gap-[16px] mb-[8px] text-[11px] text-(--muted)">
+      {#if showLegend && model.multi}
+        {#each model.series as s (s.name)}
+          <span class="inline-flex items-center gap-[6px]">
+            <span class="cbc-swatch" style:background={s.color}></span>
+            {s.name}
+          </span>
+        {/each}
+      {/if}
+      {#if isZoomed}
+        <button
+          type="button"
+          class="cbc-zoom-reset"
+          onclick={resetZoom}
+          title="Show all categories"
+        >
+          <ZoomOutIcon size={12} />
+          {model.clusters[0]?.label} – {model.clusters[model.clusters.length - 1]?.label}
+          <span class="text-(--text)">· reset</span>
+        </button>
+      {/if}
     </div>
   {/if}
 
   <div
-    class="cbc-plot"
+    class="cbc-plot overflow-hidden"
     class:has-negative={model.hasNegative}
     style:height={`${height}px`}
     role="img"
-    aria-label={`Comparative bar chart across ${model.clusters.length} categories`}
+    aria-label={`Comparative bar chart across ${model.clusters.length} of ${model.total} categories`}
     onpointermove={onPlotMove}
     onpointerleave={clearHover}
+    use:brushZoom={{ onChangeDomainX: handleBrush, enabled: zoomable && model.total > 1 }}
   >
     <div class="cbc-baseline" style:top={`${model.zeroPct}%`}></div>
 
