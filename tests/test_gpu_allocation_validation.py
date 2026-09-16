@@ -80,9 +80,23 @@ def test_multi_node_requires_full_node_gpus() -> None:
         )
 
 
-def test_a10_one_plus_three_packs_onto_one_node() -> None:
+def test_single_node_rejects_gpus_over_container_max() -> None:
+    with pytest.raises(ValueError, match="exceeds the 4 GPU container limit"):
+        SlimeRecipe(
+            **{
+                **_SLIME_KW,
+                "gpu_type": "A10",
+                "actor_num_nodes": 1,
+                "actor_num_gpus_per_node": 8,
+                "colocate": True,
+            }
+        )
+
+
+@pytest.mark.parametrize("gpu_type", ["A10", "A10!"])
+def test_a10_one_plus_three_packs_onto_one_node(gpu_type: str) -> None:
     config = SimpleNamespace(
-        gpu_type="A10",
+        gpu_type=gpu_type,
         actor_num_nodes=1,
         actor_num_gpus_per_node=1,
         rollout_num_gpus_per_engine=1,
@@ -94,6 +108,25 @@ def test_a10_one_plus_three_packs_onto_one_node() -> None:
     allocation = resolve_gpu_allocation(config, warn=False)
     assert allocation.actor_gpus == 1
     assert allocation.rollout_gpus == 3
+    assert allocation.gpus_per_node == 4
+    assert allocation.total_gpus == 4
+    assert allocation.total_nodes == 1
+
+
+def test_disagg_three_plus_one_packs_onto_one_node() -> None:
+    config = SimpleNamespace(
+        gpu_type="H100",
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=3,
+        rollout_num_gpus_per_engine=1,
+        colocate=False,
+        use_critic=False,
+        rollout_num_gpus=1,
+    )
+
+    allocation = resolve_gpu_allocation(config, warn=False)
+    assert allocation.actor_gpus == 3
+    assert allocation.rollout_gpus == 1
     assert allocation.gpus_per_node == 4
     assert allocation.total_gpus == 4
     assert allocation.total_nodes == 1
