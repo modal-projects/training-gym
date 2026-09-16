@@ -7,6 +7,8 @@ from typing import Any
 
 from modal_training_gym.common.errors import GpuAllocationError
 
+MULTI_NODE_GPUS_PER_NODE = 8
+
 
 @dataclass(frozen=True)
 class GpuAllocation:
@@ -61,6 +63,9 @@ def resolve_gpu_allocation(config: Any, *, warn: bool = True) -> GpuAllocation:
             "Adjust actor_num_nodes, rollout_num_gpus, or actor_num_gpus_per_node."
         )
     total_nodes = total_gpus // gpus_per_node
+    if total_nodes > 1 and total_gpus <= MULTI_NODE_GPUS_PER_NODE:
+        gpus_per_node = total_gpus
+        total_nodes = 1
     rollout_engines = rollout_gpus // rollout_num_gpus_per_engine if rollout_gpus else 0
 
     return GpuAllocation(
@@ -73,6 +78,19 @@ def resolve_gpu_allocation(config: Any, *, warn: bool = True) -> GpuAllocation:
         rollout_num_gpus_per_engine=rollout_num_gpus_per_engine,
         rollout_engines=rollout_engines,
         colocate=colocate,
+    )
+
+
+def validate_multi_node_gpu_count(allocation: GpuAllocation) -> None:
+    if allocation.total_nodes <= 1:
+        return
+    if allocation.gpus_per_node == MULTI_NODE_GPUS_PER_NODE:
+        return
+    raise GpuAllocationError(
+        f"Multi-node functions must use {MULTI_NODE_GPUS_PER_NODE} GPUs per node; "
+        f"requested {allocation.gpus_per_node}. Keep the total at or under "
+        f"{MULTI_NODE_GPUS_PER_NODE} GPUs to fit one node, or set "
+        f"actor_num_gpus_per_node={MULTI_NODE_GPUS_PER_NODE}."
     )
 
 

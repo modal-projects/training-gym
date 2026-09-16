@@ -209,8 +209,8 @@ def test_qwen3_6_35b_long_context_uses_disagg_two_nodes() -> None:
     assert recipe.gpu_allocation.actor_gpus == 1
     assert recipe.gpu_allocation.rollout_gpus == 1
     assert recipe.gpu_allocation.total_gpus == 2
-    assert recipe.gpu_allocation.gpus_per_node == 1
-    assert recipe.gpu_allocation.total_nodes == 2
+    assert recipe.gpu_allocation.gpus_per_node == 2
+    assert recipe.gpu_allocation.total_nodes == 1
 
 
 def test_prepare_recipe_does_not_mutate_stored_launch_callables() -> None:

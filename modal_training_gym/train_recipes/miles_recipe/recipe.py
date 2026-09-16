@@ -28,6 +28,7 @@ from modal_training_gym.train_recipes.base import (
 )
 from modal_training_gym.train_recipes.gpu_allocation import (
     resolve_gpu_allocation,
+    validate_multi_node_gpu_count,
     validate_num_experts_divisible_by_expert_parallel_size,
 )
 
@@ -702,7 +703,7 @@ class MilesRecipe(BaseTrainRecipe):
 
     @model_validator(mode="after")
     def _validate_gpu_allocation(self) -> "MilesRecipe":
-        resolve_gpu_allocation(self)
+        validate_multi_node_gpu_count(resolve_gpu_allocation(self))
         return self
 
     # ── Container → miles flag converters ────────────────────────────────────

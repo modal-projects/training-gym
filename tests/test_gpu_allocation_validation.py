@@ -67,7 +67,19 @@ def test_large_rollout_allocation_warns() -> None:
     assert any("more than 2x actor allocation" in message for message in messages)
 
 
-def test_disagg_one_plus_one_uses_two_nodes() -> None:
+def test_multi_node_requires_full_node_gpus() -> None:
+    with pytest.raises(ValueError, match="8 GPUs per node"):
+        SlimeRecipe(
+            **{
+                **_SLIME_KW,
+                "actor_num_gpus_per_node": 1,
+                "rollout_num_gpus": 8,
+                "rollout_num_gpus_per_engine": 1,
+            }
+        )
+
+
+def test_disagg_one_plus_one_packs_onto_one_node() -> None:
     config = SimpleNamespace(
         actor_num_nodes=1,
         actor_num_gpus_per_node=1,
@@ -81,9 +93,9 @@ def test_disagg_one_plus_one_uses_two_nodes() -> None:
     assert allocation.actor_gpus == 1
     assert allocation.rollout_gpus == 1
     assert allocation.critic_gpus == 0
-    assert allocation.gpus_per_node == 1
+    assert allocation.gpus_per_node == 2
     assert allocation.total_gpus == 2
-    assert allocation.total_nodes == 2
+    assert allocation.total_nodes == 1
 
 
 def test_miles_uses_same_gpu_allocation_math() -> None:

@@ -20,8 +20,8 @@ def test_qwen3_6_35b_uses_disagg_two_b300_tp1_ep1() -> None:
     assert recipe.gpu_allocation.actor_gpus == 1
     assert recipe.gpu_allocation.rollout_gpus == 1
     assert recipe.gpu_allocation.total_gpus == 2
-    assert recipe.gpu_allocation.gpus_per_node == 1
-    assert recipe.gpu_allocation.total_nodes == 2
+    assert recipe.gpu_allocation.gpus_per_node == 2
+    assert recipe.gpu_allocation.total_nodes == 1
     assert recipe.ref_load == "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp1pp1"
 
     cli_args = recipe.cli_args(model=model)
