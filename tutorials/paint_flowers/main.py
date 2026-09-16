@@ -23,7 +23,7 @@ import asyncio
 import itertools
 import random
 
-import helpers
+from . import helpers
 from modal_training_gym import (
     DatasetConfig,
     Endpoint,
