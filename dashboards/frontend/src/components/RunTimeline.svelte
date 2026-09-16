@@ -112,7 +112,8 @@
   });
   let visibleGroups = $derived(groups);
   let trackHeight = $derived(
-    visibleGroups.reduce((total, group) => total + group.height + GROUP_GAP_PX, 0),
+    visibleGroups.reduce((total, group) => total + group.height, 0) +
+      Math.max(visibleGroups.length - 1, 0) * GROUP_GAP_PX,
   );
 
   const pct = (seconds) => (seconds / timeline.span) * 100;
@@ -143,6 +144,10 @@
           marker.offset < timeline.span,
       ),
   );
+  // Only reserve the step header row and attempt-marker strip when there is
+  // something to draw in them.
+  let stepRowPx = $derived(timeline.steps.length ? rowHeight + STEP_GAP_PX : 0);
+  let stripPx = $derived(markers.length ? ATTEMPT_STRIP_PX : 0);
 
   let nestedHitTargets = $derived.by(() => {
     const targets = new WeakMap();
@@ -488,10 +493,10 @@
     <div class="chart">
       <div
         class="gutter"
-        style:padding-top={`${ATTEMPT_STRIP_PX + rowHeight + STEP_GAP_PX}px`}
+        style:padding-top={`${stripPx + stepRowPx}px`}
       >
-        {#each visibleGroups as group (group.key)}
-          <div style:margin-bottom={`${GROUP_GAP_PX}px`}>
+        {#each visibleGroups as group, gi (group.key)}
+          <div style:margin-bottom={`${gi < visibleGroups.length - 1 ? GROUP_GAP_PX : 0}px`}>
             {#each group.rows as row, index (index)}
               <div
                 class="gutter-row"
@@ -524,8 +529,13 @@
           class:hidden-track={outOfRange}
           style:width={`${zoom * 100}%`}
           style:margin-left={`-${trackShift}%`}
+          style:padding-top={`${stripPx}px`}
         >
-          <div class="steps" style:height={`${rowHeight}px`}>
+          <div
+            class="steps"
+            style:height={`${stepRowPx ? rowHeight : 0}px`}
+            style:margin-bottom={`${stepRowPx ? STEP_GAP_PX : 0}px`}
+          >
             {#each timeline.steps as step (step.id)}
               <div
                 class="step"
@@ -541,11 +551,11 @@
           </div>
 
           <div class="groups" style:height={`${trackHeight}px`}>
-            {#each visibleGroups as group (group.key)}
+            {#each visibleGroups as group, gi (group.key)}
               <div
                 class="group"
                 style:height={`${group.height}px`}
-                style:margin-bottom={`${GROUP_GAP_PX}px`}
+                style:margin-bottom={`${gi < visibleGroups.length - 1 ? GROUP_GAP_PX : 0}px`}
               >
                 {#each group.rows as row, index (index)}
                   <div
@@ -803,7 +813,7 @@
   .run-timeline {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
     font-family: var(--font-sans);
   }
 
@@ -817,8 +827,8 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
+    align-items: center;
+    gap: 6px 12px;
   }
 
   .lane-note {
@@ -834,7 +844,7 @@
   }
 
   .legend {
-    flex: 1 1 100%;
+    flex: 1 1 auto;
     min-width: 0;
     display: flex;
     flex-wrap: wrap;
@@ -932,14 +942,12 @@
   .track {
     position: relative;
     min-width: 100%;
-    /* Reserve a strip for attempt-boundary labels so they never sit on top of
-       the step headers; the gutter reserves the same strip to stay aligned. */
-    padding-top: 14px;
+    /* Padding-top reserves a strip for attempt-boundary labels so they never
+       sit on top of the step headers; the gutter reserves the same strip. */
   }
 
   .steps {
     position: relative;
-    margin-bottom: 8px;
   }
 
   .step {

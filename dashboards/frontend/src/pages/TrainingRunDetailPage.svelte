@@ -1,14 +1,12 @@
 <script>
   import { onMount, tick, untrack } from "svelte";
-  import { ArrowLeft, ChevronLeft, ChevronRight, Download, ExternalLink, Minimize2, X } from "lucide-svelte";
+  import { ArrowLeft, ExternalLink, Minimize2 } from "lucide-svelte";
   import Tabs from "../components/Tabs.svelte";
   import RunSummary from "../components/RunSummary.svelte";
   import RunTimeline from "../components/RunTimeline.svelte";
   import StatusPill from "../components/StatusPill.svelte";
   import TimeAgo from "../components/TimeAgo.svelte";
-  import InferenceStats from "../components/InferenceStats.svelte";
-  import SampleTimeline from "../components/SampleTimeline.svelte";
-  import ConversationView from "../components/ConversationView.svelte";
+  import RolloutDetailDrawer from "../components/RolloutDetailDrawer.svelte";
   import AdvantageViolins from "../components/AdvantageViolins.svelte";
   import AdvantageSpreadChart from "../components/AdvantageSpreadChart.svelte";
   import ComparativeBarChart from "../components/ComparativeBarChart.svelte";
@@ -36,7 +34,6 @@
     fetchRunAdvantageStep,
     fetchRunLogs,
   } from "../lib/api.js";
-  import { groupByRollout, rolloutIndex, rolloutScores } from "../lib/rolloutGrouping.js";
   import { normalizeMetricLinks } from "../lib/metricLinks.js";
   import {
     MAX_TERMINAL_TIMING_FAILURES,
@@ -299,215 +296,13 @@
   let advantageSteps = $state([]);
   let hasAdvantages = $derived(advantageSteps.length > 0);
 
-  const BUCKET_COUNT = 12;
-  let activeBucket = $state(null); // histogram bucket index, or null
-  let activeSamplePos = $state(0); // position within the active bucket's list
-
-  let sampleDist = $derived.by(() => {
-    const samples = expandedRollout?.samples || [];
-    const rollouts = groupByRollout(samples);
-    if (!rollouts.length) return null;
-    const scores = rolloutScores(samples, rollouts);
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const v of scores) {
-      if (v < lo) lo = v;
-      if (v > hi) hi = v;
-    }
-    const count = lo === hi ? 1 : BUCKET_COUNT;
-    const span = hi - lo || 1;
-    const buckets = Array.from({ length: count }, () => []);
-    rollouts.forEach((positions, r) => {
-      let b = count === 1 ? 0 : Math.floor(((scores[r] - lo) / span) * count);
-      b = Math.max(0, Math.min(count - 1, b));
-      buckets[b].push({ positions, score: scores[r] });
-    });
-    const maxCount = Math.max(...buckets.map((b) => b.length), 1);
-    return {
-      lo,
-      hi,
-      count,
-      span,
-      buckets,
-      maxCount,
-      total: rollouts.length,
-      sampleCount: samples.length,
-    };
-  });
-
-  let distSummary = $derived(!sampleDist ? "" : plural(sampleDist.total, "rollout"));
-
-  function plural(n, unit) {
-    return `${n} ${unit}${n === 1 ? "" : "s"}`;
-  }
-
-  function bucketLabel(bucket, b) {
-    return `${plural(bucket.length, "rollout")} · reward ${bucketRange(b)}`;
-  }
-
-  function bucketRange(b) {
-    const d = sampleDist;
-    if (!d) return "";
-    if (d.count === 1) return formatMean(d.lo);
-    const step = d.span / d.count;
-    return `${formatMean(d.lo + b * step)}–${formatMean(d.lo + (b + 1) * step)}`;
-  }
-
-  function openBucket(b) {
-    const d = sampleDist;
-    if (!d || !d.buckets[b]?.length) return;
-    activeBucket = b;
-    activeSamplePos = 0;
-  }
-
-  function closeBucket() {
-    activeBucket = null;
-    activeSamplePos = 0;
-  }
-
-  function stepSample(delta) {
-    const d = sampleDist;
-    if (!d || activeBucket == null) return;
-    const list = d.buckets[activeBucket] || [];
-    if (!list.length) return;
-    activeSamplePos = Math.max(0, Math.min(list.length - 1, activeSamplePos + delta));
-  }
-
-  // A prompt group shares one screenshot: bytes on the first sample as `image`, the
-  // rest carry only `image_ref`.
-  let rolloutImages = $derived.by(() => {
-    const byRef = {};
-    for (const s of expandedRollout?.samples ?? []) {
-      const meta = s?.metadata;
-      if (meta?.image_ref && meta.image) byRef[meta.image_ref] = meta.image;
-    }
-    return byRef;
-  });
-
-  function sampleImage(sample) {
-    const meta = sample?.metadata;
-    if (!meta) return null;
-    return meta.image ?? (meta.image_ref ? rolloutImages[meta.image_ref] : null) ?? null;
-  }
-
-  // The rollout currently shown in the viewer (or null when no bucket is open).
-  let activeSample = $derived.by(() => {
-    const d = sampleDist;
-    if (!d || activeBucket == null) return null;
-    const list = d.buckets[activeBucket] || [];
-    const entry = list[activeSamplePos];
-    if (!entry) return null;
-    const sample = expandedRollout.samples[entry.positions[0]];
-    return {
-      sample,
-      samples: entry.positions.map((p) => expandedRollout.samples[p]),
-      score: entry.score,
-      image: sampleImage(sample),
-      pos: activeSamplePos,
-      count: list.length,
-    };
-  });
-
-  function onSampleKeydown(e) {
-    if (activeBucket == null) return;
-    const tag = (e.target?.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea") return;
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      stepSample(-1);
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      stepSample(1);
-    }
-  }
-
-  // `imageHandling`: "ignore" | "refs_only" | "resolve".
-  function sampleToPayload(s, imageHandling = "ignore") {
-    let metadata = s.metadata || null;
-    if (imageHandling === "resolve" && metadata?.image_ref && !metadata.image) {
-      // Only add bytes if the lookup resolved — the carrier sample may not be loaded.
-      const resolved = sampleImage(s);
-      if (resolved) metadata = { ...metadata, image: resolved };
-    } else if (imageHandling === "refs_only" && metadata?.image && metadata.image_ref) {
-      // Bytes travel once in the payload's `images` map; keep only the ref here.
-      const { image, ...rest } = metadata;
-      metadata = rest;
-    }
-    return {
-      score: s.score,
-      rollout_index: rolloutIndex(s),
-      sample_index: s.sample_index ?? null,
-      group_index: s.group_index ?? null,
-      prompt: s.prompt || null,
-      response: s.response || null,
-      thinking: s.thinking || null,
-      raw_response: s.raw_response || null,
-      raw_prompt: s.raw_prompt || null,
-      trace: s.trace || null,
-      metadata,
-    };
-  }
-
-  function downloadSampleTrajectory() {
-    if (!activeSample) return;
-    const turns = activeSample.samples;
-    const payload =
-      turns.length === 1
-        ? sampleToPayload(turns[0], "resolve")
-        : {
-            mean: activeSample.score,
-            turns: turns.length,
-            samples: turns.map((s) => sampleToPayload(s, "resolve")),
-          };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const rollout = expandedRolloutId ?? 0;
-    a.download = `trajectory_r${rollout}_rollout${rolloutIndex(activeSample.sample) ?? activeSample.pos}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function downloadAllTrajectories() {
-    if (!expandedRollout?.samples?.length) return;
-    const rollout = expandedRolloutId ?? 0;
-    const samples = expandedRollout.samples;
-    const groups = groupByRollout(samples);
-    const scores = rolloutScores(samples, groups);
-    const payload = {
-      training_run_id: runId,
-      rollout_id: rollout,
-      total: samples.length,
-      rollouts: groups.length,
-      n_samples_per_prompt: expandedRollout.n_samples_per_prompt ?? null,
-      mean: scores.reduce((a, v) => a + v, 0) / scores.length,
-      // Shared images, keyed by the `metadata.image_ref` each sample carries.
-      images: rolloutImages,
-      samples: samples.map((s) => sampleToPayload(s, "refs_only")),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `rollout_${runId}_r${rollout}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   async function loadRollouts(signal) {
     if (!runId) return;
     try {
-      const wasEmpty = untrack(() => rolloutSummaries.length === 0);
       const rows = await fetchRunRollouts(runId, { signal });
       if (signal?.aborted) return;
       rolloutSummaries = rows;
       rolloutsError = "";
-
-      // Reveal the first rollout
-      if (wasEmpty && rolloutSummaries.length > 0 && expandedRolloutId === null) {
-        toggleRolloutDetail(rolloutSummaries[0].rollout_id);
-      }
     } catch (err) {
       if (signal?.aborted) return;
       // Keep the rollouts we already have on a transient poll failure — only
@@ -648,7 +443,6 @@
     expandedRolloutId = null;
     expandedRollout = null;
     advantageSteps = [];
-    closeBucket();
   });
 
   // Load advantage distributions while the Summary tab is active; poll so new
@@ -718,28 +512,28 @@
   async function toggleRolloutDetail(rolloutId) {
     if (!runId) return;
     if (expandedRolloutId === rolloutId) {
-      expandedRolloutId = null;
-      expandedRollout = null;
-      closeBucket();
+      closeRolloutDetail();
       return;
     }
     expandedRolloutId = rolloutId;
     expandedRollout = null;
-    closeBucket();
     expandedRolloutLoading = true;
     try {
       const detail = await fetchRollout(runId, rolloutId);
       if (expandedRolloutId === rolloutId) {
         expandedRollout = detail;
-        const d = sampleDist;
-        const first = d ? d.buckets.findIndex((b) => b.length > 0) : -1;
-        if (first >= 0) openBucket(first);
       }
     } finally {
       if (expandedRolloutId === rolloutId) {
         expandedRolloutLoading = false;
       }
     }
+  }
+
+  function closeRolloutDetail() {
+    expandedRolloutId = null;
+    expandedRollout = null;
+    expandedRolloutLoading = false;
   }
 
   // ── Live Modal log stream (SSE, pure pass-through) ───────────────────
@@ -1577,8 +1371,6 @@
   });
 </script>
 
-<svelte:window onkeydown={onSampleKeydown} />
-
 <section class="detail" class:embedded>
   {#if !embedded}
     <header class="flex flex-wrap items-center gap-x-[10px] gap-y-[8px] p-[0_24px] mb-[16px] max-[900px]:p-[0_16px]">
@@ -1879,7 +1671,7 @@
           <tbody>
             {#each rolloutSummaries as r (r.rollout_id)}
               <tr
-                class:expanded={expandedRolloutId === r.rollout_id}
+                class:selected={expandedRolloutId === r.rollout_id}
                 class:rollout-error={r.error_summary?.verdict === "all_infra_failure"}
                 class:rollout-warn={r.error_summary?.verdict === "partial_infra_failure"}
                 onclick={() => toggleRolloutDetail(r.rollout_id)}
@@ -1898,257 +1690,6 @@
                   <TimeAgo timestamp={r.created_at} showJustNow falsyRepresentation="—" />
                 </td>
               </tr>
-              {#if expandedRolloutId === r.rollout_id}
-                <tr>
-                  <td class="p-[12px_10px] bg-(--color-c-gray-08,#1c1c1c) cursor-default" colspan={rolloutColumns.length}>
-                    {#if expandedRolloutLoading}
-                      <div class="detail-empty">Loading rollouts…</div>
-                    {:else if !expandedRollout || !sampleDist}
-                      <div class="detail-empty">No rollouts recorded.</div>
-                    {:else}
-                      {#if runTimings[r.rollout_id]}
-                        <div class="rollout-chart">
-                          <div class="rollout-chart-title">Substep timing</div>
-                          <RunTimeline
-                            timings={{ [r.rollout_id]: runTimings[r.rollout_id] }}
-                            asyncOverride={timelineAsync}
-                            runOrigin={timelineRunOrigin}
-                            showOpenRollout={false}
-                            timelineKey={`${runId}:${r.rollout_id}`}
-                            downloadName={`substep_timing_${runId}_rollout_${r.rollout_id}.json`}
-                            rolloutIds={[r.rollout_id]}
-                            onOpenRollout={(id) => {
-                              selectTab("rollouts");
-                              if (expandedRolloutId !== id) void toggleRolloutDetail(id);
-                            }}
-                          />
-                        </div>
-                      {/if}
-                      {#if expandedRollout.metrics && Object.keys(expandedRollout.metrics).length}
-                        {@const m = expandedRollout.metrics}
-                        {@const remoteErr = Number(m["agent/exit_status/remoteerror_sample_count"]) || 0}
-                        {@const responseMissing = Number(m["agent/response_missing_sample_count"]) || 0}
-                        {@const infraInvalid = Number(m["agent/invalid_infra_sample_count"]) || 0}
-                        {@const limitsExceeded = Number(m["agent/limits_exceeded_sample_count"]) || 0}
-                        {@const totalSamples = Number(m["agent/valid_sample_count"]) || sampleDist.sampleCount || 0}
-                        {@const hasErrors = remoteErr > 0 || responseMissing > 0 || infraInvalid > 0}
-                        {#if hasErrors}
-                          <div class="rollout-diagnostics" class:diag-critical={remoteErr >= totalSamples}>
-                            <div class="diag-title">
-                              {#if remoteErr >= totalSamples}
-                                All {totalSamples} samples hit infrastructure errors
-                              {:else}
-                                {remoteErr + infraInvalid} / {totalSamples} samples hit infrastructure errors
-                              {/if}
-                            </div>
-                            <div class="flex flex-wrap gap-[6px] mb-[4px]">
-                              {#if remoteErr}
-                                <span class="diag-tag">RemoteError: {remoteErr}</span>
-                              {/if}
-                              {#if responseMissing}
-                                <span class="diag-tag">Response missing: {responseMissing}</span>
-                              {/if}
-                              {#if infraInvalid}
-                                <span class="diag-tag">Infra invalid: {infraInvalid}</span>
-                              {/if}
-                              {#if limitsExceeded}
-                                <span class="diag-tag">Limits exceeded: {limitsExceeded}</span>
-                              {/if}
-                            </div>
-                            {#if remoteErr >= totalSamples}
-                              <div class="text-[11px] text-(--muted,#a3a3a3) mt-[6px]">
-                                Check the Modal app logs for sandbox or image build errors.
-                              </div>
-                            {/if}
-                          </div>
-                        {/if}
-                      {/if}
-                      <div class="mb-[16px]">
-                        <div class="flex justify-end mb-[6px]">
-                          <button
-                            type="button"
-                            class="inline-flex items-center gap-[5px] [background:none] [border:1px_solid_var(--border,#2f2f2f)] rounded-[4px] text-(--muted) text-[11px] p-[3px_8px] cursor-pointer hover:text-(--text) hover:border-(--border-strong,#4a4a4a)"
-                            onclick={downloadAllTrajectories}
-                            title="Download all samples as JSON"
-                          >
-                            <Download size={13} />
-                            Download all ({sampleDist.sampleCount} samples)
-                          </button>
-                        </div>
-                        <div class="chart-scroll">
-                          <div
-                            class="flex items-end gap-[2px] h-[120px] pt-[14px] min-w-[280px] [border-bottom:1px_solid_var(--border,#2f2f2f)]"
-                            role="group"
-                            aria-label="Reward distribution"
-                          >
-                            {#each sampleDist.buckets as bucket, b (b)}
-                              <button
-                                type="button"
-                                class="dist-bar"
-                                class:detail-active={activeBucket === b}
-                                class:is-empty={!bucket.length}
-                                style:height={`${(bucket.length / sampleDist.maxCount) * 100}%`}
-                                disabled={!bucket.length}
-                                title={bucketLabel(bucket, b)}
-                                onclick={() => openBucket(b)}
-                              >
-                                <span class="absolute top-[-14px] left-0 right-0 text-center text-[10px] text-(--muted) [font-variant-numeric:tabular-nums]">{bucket.length || ""}</span>
-                              </button>
-                            {/each}
-                          </div>
-                          <div class="dist-axis">
-                            <span>{formatMean(sampleDist.lo)}</span>
-                            <span class="dist-axis-label">reward · {distSummary}</span>
-                            <span>{formatMean(sampleDist.hi)}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {#if activeSample}
-                        <div class="sample-viewer">
-                          <div class="sample-viewer-header">
-                            <div class="sample-viewer-nav">
-                              <button
-                                class="sample-nav-btn"
-                                onclick={() => stepSample(-1)}
-                                disabled={activeSample.pos === 0}
-                                aria-label="Previous rollout"
-                              >
-                                <ChevronLeft size={14} />
-                              </button>
-                              <span class="text-[12px] text-(--text-bright) [font-variant-numeric:tabular-nums]">
-                                Rollout {activeSample.pos + 1} / {activeSample.count}
-                              </span>
-                              <button
-                                class="sample-nav-btn"
-                                onclick={() => stepSample(1)}
-                                disabled={activeSample.pos === activeSample.count - 1}
-                                aria-label="Next rollout"
-                              >
-                                <ChevronRight size={14} />
-                              </button>
-                              <span class="sample-viewer-hint">← / → to navigate</span>
-                            </div>
-                            <div class="sample-viewer-actions">
-                              <span class="text-(--text-bright) [font-variant-numeric:tabular-nums]">
-                                reward {formatMean(activeSample.score)}{activeSample.samples.length > 1
-                                  ? ` · first of ${activeSample.samples.length} turns`
-                                  : ""}
-                              </span>
-                              <button
-                                class="sample-nav-btn"
-                                onclick={downloadSampleTrajectory}
-                                aria-label="Download trajectory JSON"
-                                title="Download trajectory"
-                              >
-                                <Download size={14} />
-                              </button>
-                              <button
-                                class="sample-nav-btn"
-                                onclick={closeBucket}
-                                aria-label="Close rollout viewer"
-                              >
-                                <X size={14} />
-                              </button>
-                            </div>
-                          </div>
-                          {#if activeSample.sample.metadata?.inference}
-                            <div class="rollout-sample-label">inference</div>
-                            <InferenceStats inference={activeSample.sample.metadata.inference} />
-                          {/if}
-                          {#if activeSample.sample.metadata?._metadata_type === "audio" || activeSample.sample.metadata?.audio}
-                            <div class="rollout-sample-label">audio</div>
-                            <audio
-                              class="block w-full max-w-[400px] m-[4px_0_8px] rounded-[4px]"
-                              controls
-                              preload="none"
-                              src={activeSample.sample.metadata.audio}
-                            ></audio>
-                          {/if}
-                          {#if activeSample.image}
-                            <div class="rollout-sample-label">image</div>
-                            <img
-                              class="block w-full max-w-[400px] h-auto m-[4px_0_8px] rounded-[4px] [border:1px_solid_var(--border)]"
-                              src={activeSample.image}
-                              alt="rollout input"
-                              loading="lazy"
-                            />
-                          {/if}
-                          {#if activeSample.sample.prompt}
-                            <div class="rollout-sample-label">prompt</div>
-                            <pre class="rollout-sample-text">{activeSample.sample.prompt}</pre>
-                          {/if}
-                          <div class="rollout-sample-label">conversation</div>
-                          <ConversationView
-                            messages={activeSample.sample.metadata?.trajectory_messages}
-                            response={activeSample.sample.response || ""}
-                            thinking={activeSample.sample.thinking || ""}
-                            evalReport={activeSample.sample.metadata?.eval_report}
-                          />
-                          {#if activeSample.sample.metadata?.reference}
-                            <div class="rollout-sample-label">reference</div>
-                            <pre class="rollout-sample-text">{activeSample.sample.metadata.reference}</pre>
-                          {/if}
-                          {#each Object.entries(activeSample.sample.metadata?.metrics ?? {}) as [name, value]}
-                            <div class="rollout-sample-label">{name}</div>
-                            <span class="rollout-sample-metric">
-                              {typeof value === "number" ? value.toFixed(3) : value}
-                            </span>
-                          {/each}
-                          {#if activeSample.sample.metadata?.exit_status}
-                            <div class="rollout-sample-label">exit status</div>
-                            <span class="rollout-sample-metric p-[2px_8px] rounded-[3px] text-[11px]! font-medium" class:exit-ok={activeSample.sample.metadata.exit_status === "ok"} class:exit-err={activeSample.sample.metadata.exit_status !== "ok"}>
-                              {activeSample.sample.metadata.exit_status}
-                            </span>
-                          {/if}
-                          {#if activeSample.sample.metadata?.eval_detail}
-                            <div class="rollout-sample-label">failure reason</div>
-                            <pre class="rollout-sample-text">{activeSample.sample.metadata.eval_detail}</pre>
-                          {/if}
-                          <!-- Catch-all: any other tag a custom reward/rollout function set on
-                               sample.metadata (e.g. sample.metadata["guessing"] = {...}) that
-                               isn't one of the known keys rendered explicitly above. -->
-                          {#each Object.entries(activeSample.sample.metadata ?? {}).filter(
-                            ([key]) =>
-                              ![
-                                "inference",
-                                "_metadata_type",
-                                "audio",
-                                "image",
-                                "image_ref",
-                                "trajectory_messages",
-                                "eval_report",
-                                "reference",
-                                "metrics",
-                                "exit_status",
-                                "eval_detail",
-                                "response_length",
-                                "prompt_length",
-                                "rollout_id",
-                                "rollout_idx",
-                              ].includes(key),
-                          ) as [name, value] (name)}
-                            <div class="rollout-sample-label">{name}</div>
-                            {#if value !== null && typeof value === "object"}
-                              <pre class="rollout-sample-text">{JSON.stringify(value, null, 2)}</pre>
-                            {:else}
-                              <span class="rollout-sample-metric">{String(value)}</span>
-                            {/if}
-                          {/each}
-                          {#if activeSample.sample.trace?.length}
-                            <div class="rollout-sample-label">trajectory timeline</div>
-                            <div class="chart-scroll">
-                              <SampleTimeline trace={activeSample.sample.trace} />
-                            </div>
-                          {/if}
-                        </div>
-                      {:else}
-                        <div class="text-[12px] text-(--muted) p-[4px_0]">Click a bar to inspect its rollouts.</div>
-                      {/if}
-                    {/if}
-                  </td>
-                </tr>
-              {/if}
             {/each}
           </tbody>
         </ResizableTable>
@@ -2342,3 +1883,18 @@
     {/if}
   {/if}
 </section>
+
+{#if expandedRolloutId != null}
+  <RolloutDetailDrawer
+    {runId}
+    rolloutId={expandedRolloutId}
+    summary={rolloutSummaries.find((r) => r.rollout_id === expandedRolloutId) ?? null}
+    rollout={expandedRollout}
+    loading={expandedRolloutLoading}
+    timings={runTimings[expandedRolloutId] ?? null}
+    {timelineAsync}
+    {timelineRunOrigin}
+    {formatMean}
+    onclose={closeRolloutDetail}
+  />
+{/if}
