@@ -102,10 +102,6 @@ def _clean_prompt(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
-# A multi-turn agent loop that appends later turns to the response verbatim
-# (chat-template tokens included) yields one flat string per episode:
-#   {assistant}<|im_end|>\n<|im_start|>user\n<tool_response>...</tool_response><|im_end|>\n
-#   <|im_start|>assistant\n<think>...</think>...<tool_call>...</tool_call><|im_end|>...
 _CHAT_TURN_RE = re.compile(r"<\|im_start\|>(\w+)\n")
 _TOOL_RESPONSE_RE = re.compile(
     r"^\s*<tool_response>\s*(.*?)\s*</tool_response>\s*$", re.DOTALL
@@ -147,17 +143,11 @@ def _apply_parsed(rows: object) -> None:
             if not isinstance(metadata, dict):
                 metadata = {}
                 row["metadata"] = metadata
-            # The dashboard renders trajectory_messages turn by turn (roles,
-            # per-turn thinking, tool calls); a rollout hook that already
-            # recorded its own structured trajectory wins.
             metadata.setdefault("trajectory_messages", transcript)
         parsed = row.get("parsed_response")
         if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
             if isinstance(raw, str):
                 row["raw_response"] = raw
-            # The parser sees a single turn, so for a transcript its content is
-            # the last turn's text, which is empty when that turn is a tool
-            # call. Never replace a real response with nothing.
             row["response"] = parsed.get("content") or (
                 raw if isinstance(raw, str) else ""
             )
