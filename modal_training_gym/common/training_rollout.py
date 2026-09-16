@@ -148,8 +148,10 @@ def _apply_parsed(rows: object) -> None:
         if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
             if isinstance(raw, str):
                 row["raw_response"] = raw
-            row["response"] = parsed.get("content") or (
-                raw if isinstance(raw, str) else ""
+            row["response"] = (
+                raw
+                if transcript and isinstance(raw, str)
+                else parsed.get("content") or ""
             )
             if parsed.get("thinking") and not transcript:
                 row["thinking"] = parsed["thinking"]
