@@ -206,6 +206,8 @@ class DatasetSubset(DatasetConfig):
         self._input_key = source.input_key()
         self._label_key = source.label_key()
         self._apply_chat_template = source.apply_chat_template()
+        if multimodal_keys := getattr(source, "multimodal_keys", None):
+            self.multimodal_keys = deepcopy(multimodal_keys)
 
     def input_key(self) -> str:
         return self._input_key
