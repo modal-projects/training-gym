@@ -33,7 +33,7 @@ def test_qwen3_6_35b_uses_disagg_two_b300_tp1_ep1() -> None:
     attn = cli_args.index("--sglang-attention-backend")
     assert cli_args[attn + 1] == "triton"
     moe = cli_args.index("--sglang-moe-runner-backend")
-    assert cli_args[moe + 1] == "flashinfer_trtllm_routed"
+    assert cli_args[moe + 1] == "triton"
 
     nodes, processes, conversion_args = get_checkpoint_conversion_policy(
         recipe, model=model

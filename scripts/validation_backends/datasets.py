@@ -35,7 +35,12 @@ class Gsm8kDataset(DatasetConfig):
         dataset = dataset.select(range(min(self.n_rows, len(dataset))))
         for row in dataset:
             yield {
-                "messages": [{"role": "user", "content": row["question"]}],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"{row['question']}\n{GSM8K_INSTRUCTION}",
+                    }
+                ],
                 "label": row["answer"].split("####")[-1].strip(),
             }
 

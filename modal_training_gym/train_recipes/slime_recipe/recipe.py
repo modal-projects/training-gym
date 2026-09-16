@@ -193,6 +193,10 @@ class SlimeRecipe(BaseTrainRecipe):
             Parser for reasoning/thinking output.
         sglang_request_params:
             Additional parameters for SGLang generation requests.
+        sglang_mm_attention_backend:
+            SGLang multimodal attention kernel. Unset, SGLang picks fa4, which
+            imports flash_attn.cute and fails on the pinned slime image
+            (cutlass.utils.ampere_helpers).
 
         advantage_estimator:
             Advantage estimator.
@@ -461,6 +465,7 @@ class SlimeRecipe(BaseTrainRecipe):
     sglang_tool_call_parser: str | None = None
     sglang_reasoning_parser: str | None = None
     sglang_request_params: dict | None = None
+    sglang_mm_attention_backend: str | None = None
 
     # ── RL algorithm ────────────────────────────────────────────────────────
     advantage_estimator: str = "grpo"
@@ -798,6 +803,7 @@ class SlimeRecipe(BaseTrainRecipe):
         if model.custom_model_provider and "image" in media:
             out.update(self._custom_provider_fields(model.custom_model_provider))
             self._override_default(out, "megatron_to_hf_mode", "bridge")
+            self._override_default(out, "sglang_mm_attention_backend", "triton_attn")
         return out
 
     def _custom_provider_fields(self, path: str) -> dict[str, Any]:

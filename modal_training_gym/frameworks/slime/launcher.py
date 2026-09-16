@@ -1168,7 +1168,7 @@ def build_slime_app(
                         "WARNING: no_save_optim=True — enabling no_load_optim for resume."
                     )
                 object.__setattr__(slime, "no_load_optim", slime.no_save_optim)
-            elif megatron_to_hf_mode == "bridge" and not slime.ref_load and _hf_ref:
+            elif megatron_to_hf_mode == "bridge" and _hf_ref:
                 # Fresh bridge run: load the HF weights directly via AutoBridge. slime falls back
                 # args.load -> args.ref_load, and _load_checkpoint_hf maps the HF dir into Megatron
                 # (weights only — no optimizer/RNG state, so no torch_dist is required). Pointing

@@ -24,7 +24,7 @@ class Qwen3_6_35B_Recipe(SlimeRecipe):
     expert_tensor_parallel_size: int = 1
     sglang_ep_size: int | None = 1
     sglang_attention_backend: str | None = "triton"
-    sglang_moe_runner_backend: str | None = "flashinfer_trtllm_routed"
+    sglang_moe_runner_backend: str | None = "triton"
     sglang_cuda_graph_bs: list[int] | None = field(
         default_factory=lambda: [1, 2, 4, 8] + list(range(16, 257, 8))
     )
