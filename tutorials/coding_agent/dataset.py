@@ -1,34 +1,8 @@
-"""Partition a SWE-bench-style dataset into deterministic training subsets.
+"""Prepare SWE-rebench tasks and train/eval subsets for the coding tutorial.
 
-``prepare`` streams the rows of a Hugging Face dataset such as
-``nebius/SWE-rebench-V2``, renders each row into a Harbor task directory with
-the pinned slime fork's SWE-rebench converter, converts it with the fork's
-Harbor translator, and writes the splits below to ``/data/<dataset-root>/``.
-
-``mixed`` filters a train split using rollouts from a prior training run.
-That run must have written a ``.pt`` dump via ``save_debug_rollout_data``.
-A task is kept when all ``n_samples`` episodes were gradeable and the model
-solved it at least once but not every time. Tasks the model always or never
-solves give GRPO no advantage, so they are dropped. Note the pinned slime fork grades Python only.
-
-Split design
-------------
-Each JSONL row is one task. Tasks are grouped by task group (the GitHub
-repository they came from, the row's ``repo`` column), and each has a
-language (the row's ``language`` column).
-
-* ``eval`` is ``EVAL_SPLIT_FRACTION`` of the tasks. No task group
-  appears in both train and eval.
-* Train always keeps at least two task groups of each language. Eval also
-  includes every language that has groups to spare, matching the
-  dataset's language mix as closely as whole-group moves allow.
-* ``train-full`` is everything left after ``eval``. Each ``train-<N>`` is a
-  subset of ``train-full`` with the same language mix, and each ``eval-<N>``
-  is a subset of ``eval`` in the same way. The sized splits nest:
-  ``train-100`` is a subset of ``train-300``, which is a subset of
-  ``train-1000``.
-* The splits are deterministic. The same source and seed produce the same
-  files. ``all.converted.json`` records the inputs the conversion used.
+``prepare`` converts tasks with the pinned Slime fork and writes balanced,
+repository-disjoint subsets to /data/<dataset-root>. ``mixed`` selects tasks
+with both passing and failing gradeable episodes from a prior rollout dump.
 """
 
 from __future__ import annotations
@@ -37,7 +11,6 @@ import argparse
 import hashlib
 import json
 import os
-import random
 import re
 import shutil
 import sys
@@ -49,6 +22,8 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 import modal
+
+from modal_training_gym import DatasetConfig
 
 from modal_training_gym.common import hf_secrets
 from modal_training_gym.frameworks.slime.launcher import (
@@ -113,6 +88,26 @@ def dataset_root_name(value: str) -> str:
     return value
 
 
+class PreparedTaskSubset(DatasetConfig):
+    def __init__(self, path: Path):
+        self.path = path
+
+    def input_key(self) -> str:
+        return "prompt"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def apply_chat_template(self) -> bool:
+        return False
+
+    def rows(self):
+        with self.path.open() as source:
+            for line in source:
+                if line.strip():
+                    yield json.loads(line)
+
+
 def source_metadata(row: dict[str, Any], namespace: str) -> dict[str, Any]:
     """The source dataset's ``SOURCE_COLUMNS`` for this task."""
     value = (row.get("metadata") or {}).get(namespace) or {}
@@ -131,234 +126,6 @@ def task_group(row: dict[str, Any], namespace: str) -> str:
     if not repo:
         raise ValueError(f"converted row is missing metadata.{namespace}.repo")
     return str(repo)
-
-
-def nested_subset(
-    rows: list[dict[str, Any]],
-    count: int,
-    *,
-    seed: int,
-    metadata_namespace: str,
-) -> list[dict[str, Any]]:
-    """Select ``count`` tasks from ``rows``, matching its language mix.
-
-    Args:
-        rows: The pool to draw from, normally the ``train-full`` split.
-        count: How many rows/tasks to select.
-        seed: Seeds the within-language shuffle and the tie-breaks. The same
-            seed and pool give the same selection.
-        metadata_namespace: The ``metadata`` key holding the source columns
-            that carry each task's language.
-
-    Tasks are picked one at a time. At each step the language furthest below
-    its share of the pool gets the next task, so every prefix matches the
-    pool's language mix. The choice at a position never depends on
-    ``count``, so a smaller split is a prefix of a larger one: ``train-100``
-    is a subset of ``train-300``, which is a subset of ``train-1000``.
-    """
-    if count < 0 or count > len(rows):
-        raise ValueError(f"sample count {count} is outside [0, {len(rows)}]")
-
-    rows_by_language: dict[str, list[int]] = {}
-    for index, row in enumerate(rows):
-        rows_by_language.setdefault(language(row, metadata_namespace), []).append(index)
-
-    # Shuffle within each language so conversion order does not bias the
-    # selection. Seeded per-language tie-breaks keep exact ties from always
-    # favoring alphabetically earlier languages.
-    rng = random.Random(seed)
-    for indices in rows_by_language.values():
-        rng.shuffle(indices)
-    tie_break = {name: rng.random() for name in sorted(rows_by_language)}
-    language_share = {
-        name: len(indices) / len(rows) for name, indices in rows_by_language.items()
-    }
-
-    selected_counts: Counter[str] = Counter()
-
-    def language_deficit(name: str, position: int) -> tuple[float, float, str]:
-        """How far a language is below its expected count after ``position`` picks."""
-        expected = position * language_share[name]
-        return expected - selected_counts[name], tie_break[name], name
-
-    selected: set[int] = set()
-    for position in range(1, count + 1):
-        languages_with_rows_left = [
-            name
-            for name, indices in rows_by_language.items()
-            if selected_counts[name] < len(indices)
-        ]
-        name = max(
-            languages_with_rows_left,
-            key=lambda value: language_deficit(value, position),
-        )
-        selected.add(rows_by_language[name][selected_counts[name]])
-        selected_counts[name] += 1
-    return [row for index, row in enumerate(rows) if index in selected]
-
-
-def repo_disjoint_split(
-    rows: list[dict[str, Any]],
-    *,
-    eval_fraction: float,
-    seed: int,
-    metadata_namespace: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split ``rows`` into ``(train, eval)`` with no task group on both sides.
-
-    Args:
-        rows: Every converted task.
-        eval_fraction: Share of rows to move to eval.
-        seed: Seeds the tie-breaks between otherwise equal task groups.
-        metadata_namespace: The ``metadata`` key holding each task's
-            repository and language.
-
-    The first priority is disjointness: eval is built from whole task groups,
-    so a repository never contributes tasks to both train and eval. In
-    practice task groups are GitHub repositories, and leaking one across the
-    split would let a model score on eval tasks by recognizing code it
-    trained on.
-
-    The second priority is language balance. Eval should contain every
-    language and match the full dataset's language proportions, and train must
-    keep ``MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE`` groups of every language.
-    Whole-group moves make exact proportions impossible, so the eval size and
-    per-language counts are approximate targets.
-    """
-    if not 0 < eval_fraction < 1:
-        raise ValueError("eval_fraction must be between 0 and 1")
-    if not rows:
-        raise ValueError("cannot split an empty dataset")
-
-    task_groups: dict[str, list[int]] = {}
-    for index, row in enumerate(rows):
-        task_groups.setdefault(task_group(row, metadata_namespace), []).append(index)
-    task_group_language_counts = {
-        group: Counter(language(rows[index], metadata_namespace) for index in indices)
-        for group, indices in task_groups.items()
-    }
-    language_counts = Counter(language(row, metadata_namespace) for row in rows)
-    task_groups_by_language = {
-        name: {
-            group
-            for group, counts in task_group_language_counts.items()
-            if counts[name]
-        }
-        for name in language_counts
-    }
-    eval_target_num_rows = round(len(rows) * eval_fraction)
-    eval_target_language_counts = {
-        name: count * eval_fraction for name, count in language_counts.items()
-    }
-
-    # Seeded per-group tie-break so equal candidates are not always resolved in
-    # alphabetical order.
-    rng = random.Random(seed)
-    tie_break = {group: rng.random() for group in sorted(task_groups)}
-    eval_selected: set[str] = set()
-    eval_num_rows = 0
-    eval_language_counts: Counter[str] = Counter()
-
-    def can_move_to_eval(group: str) -> bool:
-        """Whether moving this task group to eval leaves each of its languages in train.
-
-        After the move, every language in the group must still have
-        ``MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE`` groups in train. Languages
-        with too few groups stay train-only.
-        """
-        if group in eval_selected:
-            return False
-        return all(
-            len(task_groups_by_language[name] - eval_selected - {group})
-            >= MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE
-            for name in task_group_language_counts[group]
-        )
-
-    def move_to_eval(group: str) -> None:
-        nonlocal eval_num_rows
-        eval_selected.add(group)
-        eval_num_rows += len(task_groups[group])
-        eval_language_counts.update(task_group_language_counts[group])
-
-    # Put at least one task group of each language into eval, rarest language
-    # first so later languages cannot crowd it out. Skip a language that cannot
-    # spare a group without dropping train below
-    # ``MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE``.
-    for name in sorted(
-        language_counts, key=lambda value: (language_counts[value], value)
-    ):
-        if (
-            len(task_groups_by_language[name]) < MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE
-            or eval_language_counts[name]
-        ):
-            continue
-        eval_candidates = [
-            group for group in task_groups_by_language[name] if can_move_to_eval(group)
-        ]
-        if eval_candidates:
-            # Pick the group with the fewest tasks so this coverage pass uses
-            # as little of the eval budget as possible.
-            move_to_eval(
-                min(
-                    eval_candidates,
-                    key=lambda group: (
-                        len(task_groups[group]),
-                        tie_break[group],
-                        group,
-                    ),
-                )
-            )
-
-    def eval_selection_error(group: str) -> tuple[float, float, str]:
-        """How far eval would be from its targets after adding ``group``.
-
-        Sums the relative error in total eval size with the mean relative error
-        across per-language counts, so a group is preferred when it moves both
-        toward target. Lower is better.
-        """
-        size_error = abs(
-            eval_num_rows + len(task_groups[group]) - eval_target_num_rows
-        ) / max(eval_target_num_rows, 1)
-        language_error = sum(
-            abs(
-                eval_language_counts[name]
-                + task_group_language_counts[group][name]
-                - target
-            )
-            / max(target, 1.0)
-            for name, target in eval_target_language_counts.items()
-        ) / max(len(eval_target_language_counts), 1)
-        return size_error + language_error, tie_break[group], group
-
-    # Fill eval up to its target size. Prefer groups that fit in the remaining
-    # budget; if none fit, take any that can still move. Stop when nothing can
-    # move.
-    while eval_num_rows < eval_target_num_rows:
-        remaining = eval_target_num_rows - eval_num_rows
-        eval_candidates = [
-            group
-            for group in task_groups
-            if can_move_to_eval(group) and len(task_groups[group]) <= remaining
-        ]
-        if not eval_candidates:
-            eval_candidates = [
-                group for group in task_groups if can_move_to_eval(group)
-            ]
-        if not eval_candidates:
-            break
-        move_to_eval(min(eval_candidates, key=eval_selection_error))
-
-    eval_indices = sorted(
-        index for group in eval_selected for index in task_groups[group]
-    )
-    eval_index_set = set(eval_indices)
-    train_rows = [row for index, row in enumerate(rows) if index not in eval_index_set]
-    eval_rows = [rows[index] for index in eval_indices]
-    train_groups = {task_group(row, metadata_namespace) for row in train_rows}
-    eval_groups = {task_group(row, metadata_namespace) for row in eval_rows}
-    if train_groups & eval_groups:
-        raise RuntimeError("task-group-disjoint split leaked groups")
-    return train_rows, eval_rows
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -405,28 +172,33 @@ def write_partitions(
     size larger than its pool is skipped, so a ``--limit`` dry run still
     writes the splits that fit.
     """
-    train_rows, eval_rows = repo_disjoint_split(
-        rows,
+    source = PreparedTaskSubset(root / "all.converted.jsonl")
+    train, evaluation = source.snapshot(rows).split(
         eval_fraction=EVAL_SPLIT_FRACTION,
         seed=seed,
-        metadata_namespace=metadata_namespace,
+        group_key=lambda row: task_group(row, metadata_namespace),
+        stratify_key=lambda row: language(row, metadata_namespace),
+        min_train_groups=MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE,
     )
+    train_rows, eval_rows = list(train.rows()), list(evaluation.rows())
     outputs = {"eval": eval_rows, "train-full": train_rows}
     for prefix, pool, sizes in (
-        ("eval", eval_rows, EVAL_SPLIT_SIZES),
-        ("train", train_rows, TRAIN_SPLIT_SIZES),
+        ("eval", evaluation, EVAL_SPLIT_SIZES),
+        ("train", train, TRAIN_SPLIT_SIZES),
     ):
+        pool_size = len(list(pool.rows()))
+        available = [size for size in sizes if size <= pool_size]
+        subsets = pool.nested_subsets(
+            available,
+            seed=seed,
+            stratify_key=lambda row: language(row, metadata_namespace),
+        )
         for size in sizes:
-            if size > len(pool):
+            if size > pool_size:
                 (root / f"{prefix}-{size}.jsonl").unlink(missing_ok=True)
-                print(f"[swe] skipping {prefix}-{size}: only {len(pool)} {prefix} rows")
+                print(f"[swe] skipping {prefix}-{size}: only {pool_size} {prefix} rows")
                 continue
-            outputs[f"{prefix}-{size}"] = nested_subset(
-                pool,
-                size,
-                seed=seed,
-                metadata_namespace=metadata_namespace,
-            )
+            outputs[f"{prefix}-{size}"] = list(subsets[size].rows())
     staged: list[tuple[Path, Path]] = []
     for name, subset in outputs.items():
         final = root / f"{name}.jsonl"
@@ -744,7 +516,9 @@ def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
             ),
             "uv pip install --system modal datasets huggingface_hub",
         )
-        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_python_source(
+            "modal_training_gym", "tutorials.coding_agent", copy=True
+        )
     )
 
 

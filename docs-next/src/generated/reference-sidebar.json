@@ -17,6 +17,10 @@
       "link": "/reference/datasetconfig"
     },
     {
+      "label": "DatasetSubset",
+      "link": "/reference/datasetsubset"
+    },
+    {
       "label": "Endpoint",
       "link": "/reference/endpoint"
     },

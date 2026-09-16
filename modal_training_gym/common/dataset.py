@@ -8,6 +8,8 @@ common sources like Hugging Face and Harbor.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from copy import deepcopy
+
 from collections.abc import Iterable
 from enum import Enum
 from typing import Any, Literal
@@ -18,6 +20,7 @@ import shutil
 import tomllib
 from pathlib import Path
 
+from modal_training_gym.common.dataset_sampling import RowKey, sample_rows, split_rows
 from modal_training_gym.common.errors import TrainingGymConfigError
 
 DatasetRow = dict[str, Any]
@@ -75,6 +78,69 @@ class DatasetConfig(ABC):
             for row in self.rows():
                 f.write(json.dumps(row) + "\n")
 
+    def snapshot(self, rows: Iterable[DatasetRow] | None = None) -> DatasetSubset:
+        """Capture rows in memory once, preserving this dataset's input settings.
+
+        This eagerly reads the source. Run expensive preparation before calling
+        it, on a machine with access to the source and enough host memory.
+        """
+        return DatasetSubset(self, self.rows() if rows is None else rows)
+
+    def split(
+        self,
+        *,
+        eval_fraction: float = 0.2,
+        group_key: RowKey | None = None,
+        stratify_key: RowKey | None = None,
+        seed: int = 0,
+        min_train_groups: int = 1,
+    ) -> tuple[DatasetSubset, DatasetSubset]:
+        """Capture one snapshot and return separate train and eval datasets.
+
+        Keys are dotted field paths or callables. Groups never cross the split.
+        Category proportions and eval size are approximate with whole groups;
+        categories unable to spare ``min_train_groups`` stay train-only.
+        An impossible nonempty eval split raises ValueError.
+        """
+        rows = list(self.rows())
+        train, evaluation = split_rows(
+            rows,
+            eval_fraction=eval_fraction,
+            group_key=group_key,
+            stratify_key=stratify_key,
+            seed=seed,
+            min_train_groups=min_train_groups,
+        )
+        if not evaluation:
+            raise ValueError("no groups can be assigned to eval with these constraints")
+        return DatasetSubset(self, train), DatasetSubset(self, evaluation)
+
+    def sample(
+        self,
+        size: int,
+        *,
+        stratify_key: RowKey | None = None,
+        seed: int = 0,
+    ) -> DatasetSubset:
+        """Capture a deterministic sample, optionally preserving category proportions."""
+        return self.nested_subsets([size], stratify_key=stratify_key, seed=seed)[size]
+
+    def nested_subsets(
+        self,
+        sizes: Iterable[int],
+        *,
+        stratify_key: RowKey | None = None,
+        seed: int = 0,
+    ) -> dict[int, DatasetSubset]:
+        """Sample one snapshot; every smaller selection is contained in larger ones."""
+        rows = list(self.rows())
+        return {
+            size: DatasetSubset(
+                self, sample_rows(rows, size, seed=seed, stratify_key=stratify_key)
+            )
+            for size in sizes
+        }
+
     def _expected_columns(self) -> set[str]:
         cols: set[str] = set()
         if self.input_key():
@@ -126,6 +192,32 @@ class DatasetConfig(ABC):
                 "Either rename the column(s) your write() writes, or implement "
                 "input_key()/label_key() on your DatasetConfig subclass to match."
             )
+
+
+class DatasetSubset(DatasetConfig):
+    """An in-memory snapshot of selected rows, materialized as JSONL.
+
+    Returned by DatasetConfig.split/sample/nested_subsets. Source and returned
+    row mutations cannot change the captured data. Materialization is uncached.
+    """
+
+    def __init__(self, source: DatasetConfig, rows: Iterable[DatasetRow]):
+        self._rows = deepcopy(tuple(rows))
+        self._input_key = source.input_key()
+        self._label_key = source.label_key()
+        self._apply_chat_template = source.apply_chat_template()
+
+    def input_key(self) -> str:
+        return self._input_key
+
+    def label_key(self) -> str:
+        return self._label_key
+
+    def apply_chat_template(self) -> bool:
+        return self._apply_chat_template
+
+    def rows(self) -> Iterable[DatasetRow]:
+        return (deepcopy(row) for row in self._rows)
 
 
 class HuggingFaceDataset(DatasetConfig):

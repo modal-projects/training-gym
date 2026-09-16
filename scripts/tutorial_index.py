@@ -91,13 +91,24 @@ def discover_tutorial_paths(
         if child.is_file() and child.suffix == ".py":
             candidate = child
             slug = child.stem
-        elif child.is_dir() and (child / "main.py").is_file():
+        elif child.is_dir() and any(
+            (child / name).is_file() for name in ("main.py", "train.py")
+        ):
             if FOLDER_NAME_PATTERN.fullmatch(child.name) is None:
                 raise ValueError(
                     f"Tutorial folder {child.name!r} is not a valid Python module "
                     f"name; use only letters, digits, and underscores"
                 )
-            candidate = child / "main.py"
+            candidates = [
+                child / name
+                for name in ("main.py", "train.py")
+                if (child / name).is_file()
+            ]
+            if len(candidates) != 1:
+                raise ValueError(
+                    f"Tutorial folder {child.name!r} has multiple entrypoints"
+                )
+            candidate = candidates[0]
             slug = child.name
         else:
             continue

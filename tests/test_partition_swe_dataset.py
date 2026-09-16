@@ -5,8 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from modal_training_gym.common.dataset_sampling import split_rows
+
 from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_27B_Recipe_Agentic
-from scripts.partition_swe_dataset import (
+from tutorials.coding_agent.dataset import (
     DEFAULT_SWE_DATASET,
     SWE_DATASETS,
     SweBenchSource,
@@ -14,7 +16,6 @@ from scripts.partition_swe_dataset import (
     dataset_root_name,
     mixed_subset_name,
     read_jsonl,
-    repo_disjoint_split,
     sha256,
     write_jsonl,
     write_mixed_subset,
@@ -114,11 +115,13 @@ def test_sized_splits_larger_than_their_pool_are_skipped(
 
 
 def test_eval_partition_is_task_group_disjoint() -> None:
-    train_rows, eval_rows = repo_disjoint_split(
+    train_rows, eval_rows = split_rows(
         _rows(8),
         eval_fraction=0.25,
         seed=7,
-        metadata_namespace="source",
+        group_key="metadata.source.repo",
+        stratify_key="metadata.source.language",
+        min_train_groups=2,
     )
 
     def repos(rows: list[dict]) -> set[str]:
@@ -316,7 +319,7 @@ def test_source_refresh_preserves_existing_dataset_on_failure(
             raise RuntimeError("partition failed")
 
         monkeypatch.setattr(
-            "scripts.partition_swe_dataset.write_partitions", fail_partition
+            "tutorials.coding_agent.dataset.write_partitions", fail_partition
         )
     if failure == "publish":
         rename = Path.rename

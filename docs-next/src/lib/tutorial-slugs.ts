@@ -43,15 +43,20 @@ export async function discoverTutorialEntries(
     if (!child.isDirectory()) {
       continue;
     }
-    const tutorialPath = path.join(tutorialsDirectory, child.name, 'main.py');
-    try {
-      const info = await stat(tutorialPath);
-      if (!info.isFile()) {
-        continue;
+    const candidates: string[] = [];
+    for (const filename of ['main.py', 'train.py']) {
+      const candidate = path.join(tutorialsDirectory, child.name, filename);
+      try {
+        if ((await stat(candidate)).isFile()) candidates.push(candidate);
+      } catch {
+        // A folder may contain only helper files.
       }
-    } catch {
-      continue;
     }
+    if (candidates.length === 0) continue;
+    if (candidates.length > 1) {
+      throw new Error(`Tutorial folder ${JSON.stringify(child.name)} has multiple entrypoints`);
+    }
+    const tutorialPath = candidates[0];
     if (!FOLDER_NAME_PATTERN.test(child.name)) {
       throw new Error(
         `Tutorial folder ${JSON.stringify(child.name)} is not a valid Python module name; use only letters, digits, and underscores`,
@@ -60,7 +65,7 @@ export async function discoverTutorialEntries(
     entries.push({
       path: tutorialPath,
       slug: child.name,
-      runTarget: `-m tutorials.${child.name}.main`,
+      runTarget: `-m tutorials.${child.name}.${path.basename(tutorialPath, '.py')}`,
       sourcePath: `tutorials/${child.name}`,
     });
   }
