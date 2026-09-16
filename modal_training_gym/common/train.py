@@ -344,6 +344,13 @@ class TrainConfig:
     group_axes: list[str] | None = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.recipe, MilesRecipe) and self.recipe.is_tinker_gateway:
+            raise TrainingGymConfigError(
+                f"{type(self.recipe).__name__}(multi_lora_n_adapters="
+                f"{self.recipe.multi_lora_n_adapters}) serves Miles' Tinker "
+                "gateway (serve_tinker.py) and cannot run as a dataset-driven "
+                "training job; it is not supported by TrainConfig."
+            )
         if not isinstance(self.dataset, OnlineRollout):
             return
         path = (self.recipe.extra_config or {}).get("custom_generate_function_path")

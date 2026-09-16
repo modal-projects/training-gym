@@ -131,18 +131,24 @@ def test_gateway_settings_are_rejected_in_extra_config(extra_config) -> None:
         MilesRecipe(extra_config=extra_config, lora_rank=8)
 
 
-def test_gateway_recipe_is_rejected_by_train_launcher() -> None:
+def test_gateway_recipe_is_rejected_before_any_run_is_recorded() -> None:
     from modal_training_gym.common.dataset import HuggingFaceDataset
+    from modal_training_gym.common.train import TrainConfig
     from modal_training_gym.frameworks.miles.launcher import build_miles_app
 
-    with pytest.raises(ValueError, match="TrainConfig.train"):
+    dataset = HuggingFaceDataset(
+        hf_repo="org/data", input_column="prompt", output_column="answer"
+    )
+    # TrainConfig.launch() persists a TrainingRun before building the app, so
+    # the constructor is where a gateway recipe has to be turned away.
+    with pytest.raises(ValueError, match="not supported by TrainConfig"):
+        TrainConfig(dataset=dataset, model=Qwen3_30B(), recipe=_gateway())
+    with pytest.raises(ValueError, match="not supported by TrainConfig"):
         build_miles_app(
             training_run_id="run",
             miles=_gateway(),
             model=Qwen3_30B(),
-            dataset=HuggingFaceDataset(
-                hf_repo="org/data", input_column="prompt", output_column="answer"
-            ),
+            dataset=dataset,
         )
 
 
