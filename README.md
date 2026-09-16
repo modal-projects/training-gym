@@ -7,7 +7,7 @@ The library takes care of infrastructure concerns such as cluster topology, Ray/
 To get started, you can go through the [Quickstart](#quickstart) section below, or paste the prompt below into your favorite agent:
 
 ```txt
-Install the `training-gym` library. Then, install the skill bundle into the local project with `training-gym skills install`. Finally, tell the user that they can ask you to do something like: "Given a budget of 1 B300, train Qwen3.8 27B to correctly solve problems taken from agentica-org/DeepCoder-Preview-Dataset with xhigh reasoning and a length penalty to limit the number of reasoning tokens."
+Install the `training-gym` library. Then, install the skill bundle into the local project with `training-gym skills install`. Finally, tell the user that they can ask you to do something like: "Walk through tutorials/rl_basics.py and train Qwen3.5-4B to write 5-7-5 haikus from statworx/haiku."
 ```
 
 ## Quickstart
@@ -55,31 +55,10 @@ And empower your agents with the Gym's skill bundle:
 training-gym skills install
 ```
 
-Then, it's as easy as:
+Then run the intro tutorial:
 
-```python
-from modal_training_gym import (
-    HuggingFaceDataset,
-    Qwen3_4B,
-    Qwen3_4B_Recipe,
-    TrainConfig,
-)
-
-config = TrainConfig(
-    model=Qwen3_4B(),
-    dataset=HuggingFaceDataset(
-        hf_repo="zhuzilin/dapo-math-17k",
-        hf_split="train[:120]",
-        input_column="prompt",
-        output_column="label",
-        input_format="messages",
-    ),
-    recipe=Qwen3_4B_Recipe(
-        rm_type="deepscaler",
-    ),
-)
-run = config.launch()
-print(run.training_run_id)
+```bash
+uv run --with nltk tutorials/rl_basics.py
 ```
 
 ## Supported models

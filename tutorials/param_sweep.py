@@ -8,8 +8,12 @@
 # and error-prone if not properly guided or documented. This is made a first-class
 # operation in the Gym so you can move faster and spend less.
 
+import re
+
+from datasets import load_dataset
+
 from modal_training_gym import (
-    HuggingFaceDataset,
+    DatasetConfig,
     Qwen3_5_4B,
     Qwen3_5_4B_Recipe,
     TrainConfig,
@@ -25,20 +29,59 @@ from modal_training_gym import (
 
 model = Qwen3_5_4B()
 
-train_dataset = HuggingFaceDataset(
-    "zhuzilin/dapo-math-17k",
-    hf_split="train[:2000]",
-    input_column="prompt",
-    output_column="label",
-    input_format="messages",
-    always_download=True,
-)
+
+def _letter_answer(row) -> bool:
+    return bool(re.fullmatch(r"[A-J]", str(row["expected_answer"]).strip().upper()))
+
+
+def _upper_letter(row):
+    return {
+        "input": row["input"],
+        "expected_answer": str(row["expected_answer"]).strip().upper(),
+    }
+
+
+class OpenScienceDataset(DatasetConfig):
+    def input_key(self) -> str:
+        return "messages"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def rows(self):
+        ds = load_dataset(
+            "nvidia/OpenScienceReasoning-2", split="train", streaming=True
+        )
+        kept = 0
+        for row in ds:
+            if not _letter_answer(row):
+                continue
+            packed = _upper_letter(row)
+            yield {
+                "messages": [{"role": "user", "content": packed["input"]}],
+                "label": packed["expected_answer"],
+            }
+            kept += 1
+            if kept >= 80:
+                break
+
+
+train_dataset = OpenScienceDataset()
+
+_BOXED_RE = re.compile(r"\\boxed\{([A-J])\}", re.IGNORECASE)
+
+
+async def letter_rm(args, sample, **kwargs) -> float:
+    matches = _BOXED_RE.findall(sample.response or "")
+    pred = matches[-1].upper() if matches else ""
+    return float(bool(pred) and pred == sample.label)
+
 
 base = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=Qwen3_5_4B_Recipe(
-        rm_type="dapo",
+        custom_rm_function=letter_rm,
     ),
 )
 

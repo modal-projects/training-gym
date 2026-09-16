@@ -1,5 +1,6 @@
 # ---
 # order: 4
+# deps: ifbench @ git+https://github.com/allenai/IFBench.git@fcd289db21d43aaa96c6d9291d32561cd6e19305
 # ---
 #
 # # Efficient inference using on-policy distillation
@@ -8,10 +9,11 @@
 # but the capabilities afforded by a larger model, on-policy distillation (OPD) is
 # an effective and practical way to hit your targets. In this tutorial, we'll use
 # [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) to teach the smaller
-# [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) how to better solve
-# olympiad-style math problems sourced from the
-# [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k)
-# Huggingface dataset.
+# [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) how to satisfy
+# writing constraints from
+# [allenai/IF_multi_constraints_upto5](https://huggingface.co/datasets/allenai/IF_multi_constraints_upto5).
+# When we do offline evals, we'll use the held-out
+# [allenai/IFBench_test](https://huggingface.co/datasets/allenai/IFBench_test).
 #
 # <details>
 # <summary>How does OPD work?</summary>
@@ -36,13 +38,16 @@
 # To do cross-family OPD (i.e., use a teacher from a different model family such as Deepseek), see
 # [this tutorial](https://gym.modal.dev/tutorials/cross_tokenizer_distillation).
 
-import re
+import ast
+import json
 import time
+
+from datasets import load_dataset
 
 from modal_training_gym import (
     CustomDeployment,
+    DatasetConfig,
     Endpoint,
-    HuggingFaceDataset,
     Qwen3_5_4B,
     Qwen3_5_4B_Recipe,
     Qwen3_5_9B,
@@ -81,85 +86,117 @@ print(f"teacher base model deployed to {teacher_deployment.url}")
 TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 
 # ## Define a scoring function
-#
-# Following the [DAPO paper](https://arxiv.org/abs/2503.14476), we'll normalize as
-# they do and return 1 for correct answers and -1 for incorrect answers. Although
-# we'd like to give a more granular score for predictions, we can't simply use
-# the numerical difference between a prediction and a ground-truth answer, since
-# a numerically-close answer can be more wrong than one further away.
 
 
-def _extract_answer(response: str) -> str:
-    match = re.findall(r"(?i)Answer\s*:\s*([^\n]+)", response)
-    return match[-1].strip() if match else "[INVALID]"
+def score_constraints(response: str, label: str) -> int:
+    from ifbench import instructions_registry
 
-
-def _normalize_answer(answer: str) -> str:
-    answer = str(answer).strip()
-    answer = answer.split("=")[-1]
-    for old, new in [
-        ("$", ""),
-        ("\\$", ""),
-        (",", ""),
-        (" ", ""),
-        ("\\text{", ""),
-        ("}", ""),
-        ("\\boxed{", ""),
-    ]:
-        answer = answer.replace(old, new)
-    return answer.strip()
-
-
-def score_answer(response: str, label: str) -> int:
-    pred = _normalize_answer(_extract_answer(response))
-    gt = _normalize_answer(label)
-    try:
-        gt = str(int(float(gt)))
-    except (ValueError, OverflowError):
-        pass
-    return 1 if pred == gt else -1
+    spec = json.loads(label)
+    text = response or ""
+    for instruction_id, raw_kwargs in zip(spec["instruction_id_list"], spec["kwargs"]):
+        instruction = instructions_registry.INSTRUCTION_DICT[instruction_id](
+            instruction_id
+        )
+        kwargs = {k: v for k, v in (raw_kwargs or {}).items() if v is not None}
+        instruction.build_description(**kwargs)
+        if "prompt" in (instruction.get_instruction_args() or ()):
+            instruction.build_description(prompt=spec["prompt"])
+        if not (text.strip() and instruction.check_following(text)):
+            return -1
+    return 1
 
 
 # ## Get the dataset
 #
 # As [this Thinking Machines blog](https://thinkingmachines.ai/blog/on-policy-distillation/)
-# describes, using a small number of samples with a larger number of rollouts can be
-# sufficient for OPD. Following suit, we'll only use 100 training samples and 20 for evaluation.
+# describes, using a small number of samples with many rollouts can be sufficient for OPD.
+# Following suit, we'll only use 300 training samples.
 
-train_dataset = HuggingFaceDataset(
-    "zhuzilin/dapo-math-17k",
-    hf_split="train[:100]",
-    input_column="prompt",
-    output_column="label",
-    input_format="messages",
-    always_download=True,
-)
 
-eval_dataset = HuggingFaceDataset(
-    "zhuzilin/dapo-math-17k",
-    hf_split="train[100:120]",
-    input_column="prompt",
-    output_column="label",
-    input_format="messages",
-    always_download=True,
-)
+def _known_if_instructions(row) -> bool:
+    from ifbench import instructions_registry
+
+    spec = ast.literal_eval(row["ground_truth"])[0]
+    return all(
+        instruction_id in instructions_registry.INSTRUCTION_DICT
+        for instruction_id in spec["instruction_id"]
+    )
+
+
+def _pack_if_multi(row):
+    spec = ast.literal_eval(row["ground_truth"])[0]
+    prompt = row["messages"][0]["content"]
+    return {
+        "prompt": prompt,
+        "label": json.dumps(
+            {
+                "prompt": prompt,
+                "instruction_id_list": spec["instruction_id"],
+                "kwargs": spec["kwargs"],
+            }
+        ),
+    }
+
+
+def _pack_ifbench(row):
+    return {
+        "prompt": row["prompt"],
+        "label": json.dumps(
+            {k: row[k] for k in ("prompt", "instruction_id_list", "kwargs")}
+        ),
+    }
+
+
+class IFMultiConstraintsDataset(DatasetConfig):
+    def input_key(self) -> str:
+        return "messages"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def rows(self):
+        ds = load_dataset(
+            "allenai/IF_multi_constraints_upto5", split="train", streaming=True
+        )
+        kept = 0
+        for row in ds:
+            if not _known_if_instructions(row):
+                continue
+            packed = _pack_if_multi(row)
+            yield {
+                "messages": [{"role": "user", "content": packed["prompt"]}],
+                "label": packed["label"],
+            }
+            kept += 1
+            if kept >= 300:
+                break
+
+
+class IFBenchTestDataset(DatasetConfig):
+    def input_key(self) -> str:
+        return "messages"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def rows(self):
+        for row in load_dataset("allenai/IFBench_test", split="train"):
+            packed = _pack_ifbench(row)
+            yield {
+                "messages": [{"role": "user", "content": packed["prompt"]}],
+                "label": packed["label"],
+            }
+
+
+train_dataset = IFMultiConstraintsDataset()
+
+eval_dataset = IFBenchTestDataset()
 
 # ## Evaluate the base models
 #
 # First, we should check if our teacher is good enough to, well, be a teacher.
 # Then, we'll see how the student fares in comparison to establish the gap we
 # must close.
-#
-# <details>
-# <summary>On strict formats for evaluation</summary>
-#
-# Thankfully, our dataset requires simple-enough answers that a tiny,
-# 4B model shouldn't cause issues for our deterministic parser. In our own experience,
-# requiring a strict JSON output format can cause evaluation issues!
-# See [this LoRA adapter](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora)
-# for an example of adapting a small Qwen model to strict output formats.
-#
-# </details>
 
 
 def run_eval(deployment, *, max_concurrency: int = 2) -> float:
@@ -173,7 +210,7 @@ def run_eval(deployment, *, max_concurrency: int = 2) -> float:
             chat_template_kwargs={"enable_thinking": True},
         )
         response = msg.get("content") or msg.get("reasoning_content") or ""
-        return score_answer(response, example[eval_dataset.label_key()])
+        return score_constraints(response, example[eval_dataset.label_key()])
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
         scores = list(executor.map(_score_one, eval_dataset.rows()))
@@ -236,13 +273,13 @@ print(f"percent correct: {base_student_correct:.1%}")
 # </details>
 
 
-async def math_opd_rm(args, sample, **kwargs):
+async def ifbench_opd_rm(args, sample, **kwargs):
     from slime.rollout.on_policy_distillation import reward_func as _opd_reward
 
     teacher_response = await _opd_reward(args, sample, **kwargs)
 
     response = student_model.parse_response(sample.response)
-    score = score_answer(response.content, sample.label)
+    score = score_constraints(response.content, sample.label)
     sample.score = score
     if not isinstance(getattr(sample, "metadata", None), dict):
         sample.metadata = {}
@@ -251,13 +288,13 @@ async def math_opd_rm(args, sample, **kwargs):
     return teacher_response
 
 
-def math_opd_post_process(args, samples, **kwargs):
+def ifbench_opd_post_process(args, samples, **kwargs):
     from slime.rollout.on_policy_distillation import post_process_rewards as _opd_post
 
     _, _ = _opd_post(args, samples, **kwargs)
 
-    math_rewards = [getattr(sample, "score", -1) for sample in samples]
-    return math_rewards, math_rewards  # quirk of slime
+    rewards = [getattr(sample, "score", -1) for sample in samples]
+    return rewards, rewards
 
 
 # ## Start training
@@ -276,8 +313,12 @@ config = TrainConfig(
         n_samples_per_prompt=4,
         global_batch_size=16,
         rollout_max_response_len=2048,
-        custom_rm_function=math_opd_rm,
-        custom_reward_post_process_function=math_opd_post_process,
+        custom_rm_function=ifbench_opd_rm,
+        custom_reward_post_process_function=ifbench_opd_post_process,
+        apply_chat_template_kwargs={"enable_thinking": True},
+        image_overlay=lambda img: img.pip_install(
+            "ifbench @ git+https://github.com/allenai/IFBench.git@fcd289db21d43aaa96c6d9291d32561cd6e19305"
+        ),
         environment={
             "PYTHONPATH": "/root/Megatron-LM/:/root",
             "CUDA_DEVICE_MAX_CONNECTIONS": "1",

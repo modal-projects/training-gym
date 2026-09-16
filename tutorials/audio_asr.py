@@ -12,19 +12,18 @@
 # in terms of WER. But there's no reason to stop there: we can achieve state-of-the-art
 # performance by post-training open models to redefine your task's Pareto frontier.
 # As an example, we show how to post-train
-# [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on the
-# [hf-internal-testing/librispeech_asr_dummy](https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy)
-# dataset.
-
-import jiwer
-import requests
-import soundfile as sf
-from datasets import Audio, load_dataset
+# [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on
+# [disco-eth/EuroSpeech](https://huggingface.co/datasets/disco-eth/EuroSpeech).
 
 import base64
 import io
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+import jiwer
+import requests
+import soundfile as sf
+from datasets import Audio, load_dataset
 
 from modal_training_gym import (
     CustomDeployment,
@@ -72,22 +71,24 @@ def score_transcript(response: str, label: str) -> float:
 # resolve them in a custom `generate` function.
 
 
-class LibriSpeechASRDataset(MultimodalDataset):
-    hf_repo = "hf-internal-testing/librispeech_asr_dummy"
-    hf_config = "clean"
+class EuroSpeechASRDataset(MultimodalDataset):
+    hf_repo = "disco-eth/EuroSpeech"
+    hf_config = "uk"
 
-    def __init__(self, *, hf_split: str):
+    def __init__(self, *, hf_split: str, max_seconds: float = 3600):
         self.hf_split = hf_split
+        self.max_seconds = max_seconds
         super().__init__(modality="audio")
 
     def apply_chat_template(self) -> bool:
         return False
 
     def source_rows(self):
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        ds = ds.cast_column(
-            "audio", Audio(decode=False)
-        )  # decode with soundfile instead of torchcodec
+        ds = load_dataset(
+            self.hf_repo, self.hf_config, split=self.hf_split, streaming=True
+        )
+        ds = ds.cast_column("audio", Audio(decode=False))
+        seconds = 0.0
         for ex in ds:
             audio = ex["audio"]
             data = (
@@ -96,6 +97,9 @@ class LibriSpeechASRDataset(MultimodalDataset):
                 else open(audio["path"], "rb").read()
             )
             arr, sr = sf.read(io.BytesIO(data))
+            seconds += len(arr) / sr
+            if seconds > self.max_seconds:
+                break
             buf = io.BytesIO()
             sf.write(buf, arr, sr, format="WAV")
             data_uri = "data:audio/wav;base64," + base64.b64encode(
@@ -104,13 +108,13 @@ class LibriSpeechASRDataset(MultimodalDataset):
             yield {
                 "prompt": "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
                 "media": data_uri,
-                "label": ex["text"].lower().strip(),
+                "label": (ex["human_transcript"] or "").lower().strip(),
             }
 
 
-train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
+train_dataset = EuroSpeechASRDataset(hf_split="train", max_seconds=3600)
 
-eval_dataset = LibriSpeechASRDataset(hf_split="validation[8:16]")
+eval_dataset = EuroSpeechASRDataset(hf_split="validation", max_seconds=300)
 
 # ## Evaluate the base model
 #
