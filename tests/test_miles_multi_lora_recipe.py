@@ -143,6 +143,12 @@ def test_gateway_recipe_is_rejected_before_any_run_is_recorded() -> None:
     # the constructor is where a gateway recipe has to be turned away.
     with pytest.raises(ValueError, match="not supported by TrainConfig"):
         TrainConfig(dataset=dataset, model=Qwen3_30B(), recipe=_gateway())
+    # Sweep variants mutate a copied recipe without re-running __post_init__,
+    # so launch() has to re-check before it persists a TrainingRun.
+    cfg = TrainConfig(dataset=dataset, model=Qwen3_30B(), recipe=MilesRecipe())
+    cfg.recipe = _gateway()
+    with pytest.raises(ValueError, match="not supported by TrainConfig"):
+        cfg.launch(show_output=False)
     with pytest.raises(ValueError, match="not supported by TrainConfig"):
         build_miles_app(
             training_run_id="run",
