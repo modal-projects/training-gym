@@ -7,7 +7,8 @@ import { flattenDocId } from './docs-sections';
 
 const TUTORIAL_ENTRY_PREFIX = 'tutorials/';
 const frontmatterFieldPattern = /^# ([a-z_]+):\s*(.*)$/;
-const dependencyPattern = /^[A-Za-z0-9_.-]+$/;
+const dependencyPattern =
+  /^[A-Za-z0-9_.-]+(?: @ (?:git\+)?https:\/\/[A-Za-z0-9._/-]+(?:@[A-Za-z0-9._-]+)?)?$/;
 
 function generateDocsId({
   entry,
@@ -193,7 +194,7 @@ function formatRunCommand(slug: string, extras: string[]): string {
   if (extras.length === 0) {
     return `uv run tutorials/${slug}.py`;
   }
-  return `uv run ${extras.map((pkg) => `--with ${pkg}`).join(' ')} tutorials/${slug}.py`;
+  return `uv run ${extras.map((pkg) => `--with '${pkg}'`).join(' ')} tutorials/${slug}.py`;
 }
 
 async function readTutorial(fileName: string): Promise<Tutorial> {

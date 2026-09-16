@@ -7,7 +7,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TUTORIALS_DIR = REPO_ROOT / "tutorials"
 FIELD_PATTERN = re.compile(r"^# ([a-z_]+):\s*(.*)$")
-DEP_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+DEP_PATTERN = re.compile(
+    r"^[A-Za-z0-9_.-]+"
+    r"(?: @ (?:git\+)?https://[A-Za-z0-9._/-]+(?:@[A-Za-z0-9._-]+)?)?"
+    r"$"
+)
 ORDER_PATTERN = re.compile(r"^\d+$")
 MAX_SAFE_INTEGER = (1 << 53) - 1
 
@@ -22,7 +26,7 @@ class TutorialEntry:
 
     @property
     def run_command(self) -> str:
-        with_args = " ".join(f"--with {dependency}" for dependency in self.deps)
+        with_args = " ".join(f"--with '{dependency}'" for dependency in self.deps)
         prefix = f"uv run {with_args}" if with_args else "uv run"
         return f"{prefix} tutorials/{self.slug}.py"
 

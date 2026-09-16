@@ -16,6 +16,7 @@ DOCS_DIR = REPO_ROOT / "docs-next"
 
 GENERATORS = [
     [sys.executable, "scripts/generate_models_table.py"],
+    [sys.executable, "scripts/generate_quickstart.py"],
     [sys.executable, "scripts/generate_docs_pages.py"],
     [sys.executable, "scripts/generate_api_reference.py"],
     [sys.executable, "-m", "scripts.generate_llms_txt"],

@@ -7,7 +7,7 @@ The library takes care of infrastructure concerns such as cluster topology, Ray/
 To get started, you can go through the [Quickstart](#quickstart) section below, or paste the prompt below into your favorite agent:
 
 ```txt
-Install the `training-gym` library. Then, install the skill bundle into the local project with `training-gym skills install`. Finally, tell the user that they can ask you to do something like: "Given a budget of 1 B300, train Qwen3.8 27B to correctly solve problems taken from agentica-org/DeepCoder-Preview-Dataset with xhigh reasoning and a length penalty to limit the number of reasoning tokens."
+Install the `training-gym` library. Then, install the skill bundle into the local project with `training-gym skills install`. Finally, tell the user that they can ask you to do something like: "Walk through tutorials/rl_basics.py and train Qwen3.5-4B to write 5-7-5 haikus from statworx/haiku."
 ```
 
 ## Quickstart
@@ -57,30 +57,49 @@ training-gym skills install
 
 Then, it's as easy as:
 
+<!-- BEGIN QUICKSTART -->
 ```python
+import re
+
 from modal_training_gym import (
     HuggingFaceDataset,
-    Qwen3_4B,
-    Qwen3_4B_Recipe,
+    Qwen3_5_4B,
+    Qwen3_5_4B_Recipe,
     TrainConfig,
 )
 
+model = Qwen3_5_4B()
+
+
+async def gsm8k_rm(args, sample, **kwargs) -> float:
+    text = model.parse_response(sample.response or "").content
+    boxed = re.findall(r"\\boxed\{([^}]+)\}", text)
+    pred = boxed[-1] if boxed else (re.findall(r"-?[\d,]+(?:\.\d+)?", text) or [""])[-1]
+    try:
+        return float(float(pred.replace(",", "")) == float(sample.label))
+    except ValueError:
+        return 0.0
+
+
 config = TrainConfig(
-    model=Qwen3_4B(),
+    model=model,
     dataset=HuggingFaceDataset(
-        hf_repo="zhuzilin/dapo-math-17k",
+        hf_repo="skrishna/gsm8k_only_answer",
         hf_split="train[:120]",
-        input_column="prompt",
+        input_column="text",
         output_column="label",
-        input_format="messages",
+        input_format="text",
     ),
-    recipe=Qwen3_4B_Recipe(
-        rm_type="deepscaler",
+    recipe=Qwen3_5_4B_Recipe(
+        custom_rm_function=gsm8k_rm,
     ),
 )
 run = config.launch()
 print(run.training_run_id)
 ```
+<!-- END QUICKSTART -->
+
+For a step-by-step walkthrough, see the [Getting started tutorial](https://gym.modal.dev/tutorials/rl_basics).
 
 ## Supported models
 
