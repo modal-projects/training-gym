@@ -157,3 +157,33 @@ test("empty packed rollout groups do not produce labelled rows", () => {
   assert.equal(rolloutRows[0].key, "rollout-0");
   assert.ok(rolloutRows[0].spans.some((span) => span.name === "generate_samples"));
 });
+
+test("unmapOffset inverts the collapsed-gap compression", () => {
+  const phase = (start, end) => ({
+    count: 1,
+    busy_duration_s: end - start,
+    first_start_s: start,
+    last_end_s: end,
+    invocations: [[start, end]],
+  });
+  const timeline = runTimeline({
+    0: {
+      roles: {
+        driver: { lane_start_unix_s: 1000, phases: { train_models: phase(0, 10) } },
+      },
+    },
+    1: {
+      roles: {
+        driver: { lane_start_unix_s: 1000, phases: { train_models: phase(600, 610) } },
+      },
+    },
+  });
+  assert.ok(timeline.breaks.length > 0);
+  assert.ok(timeline.span < 610);
+  for (const seconds of [0, 5, 10, 300, 599, 600, 605, 610]) {
+    const mapped = timeline.mapOffset(seconds);
+    assert.ok(Math.abs(timeline.unmapOffset(mapped) - seconds) < 1e-6, `${seconds}`);
+  }
+  assert.equal(timeline.unmapOffset(0), 0);
+  assert.ok(Math.abs(timeline.unmapOffset(timeline.span) - 610) < 1e-6);
+});

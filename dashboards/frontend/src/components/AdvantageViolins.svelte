@@ -14,7 +14,21 @@
   // it over each bucket to get that bucket's mass. Bar lengths are normalised
   // across all buckets of all violins so widths are comparable between steps.
 
-  let { steps = [], labels = null } = $props();
+  import { brushZoom } from "../lib/brushZoom.js";
+  import TimeAxis from "./TimeAxis.svelte";
+
+  let {
+    steps = [],
+    labels = null,
+    // `[min, max]` rollout ids; only steps inside are drawn.
+    xDomain = null,
+    // Called with `[min, max]` rollout ids when the user drags or wheels.
+    onChangeDomainX = null,
+    // rollout id <-> epoch seconds; when both are given a wall-clock axis is
+    // drawn under the plot.
+    xToTime = null,
+    timeToX = null,
+  } = $props();
 
   const W = 640;
   const H = 210;
@@ -76,8 +90,16 @@
     ["p90", "max", 0.1],
   ];
 
-  let model = $derived.by(() => {
-    const pts = (steps || [])
+  let hasDomain = $derived(
+    Array.isArray(xDomain) &&
+      Number.isFinite(xDomain[0]) &&
+      Number.isFinite(xDomain[1]) &&
+      xDomain[1] > xDomain[0],
+  );
+  let zoomable = $derived(typeof onChangeDomainX === "function");
+
+  let allPts = $derived(
+    (steps || [])
       .filter((s) => s && s.stats)
       .map((s) => {
         const st = s.stats;
@@ -93,7 +115,72 @@
           p75: num(q.p75, num(st.max)),
           p90: num(q.p90, num(st.max)),
         };
-      });
+      })
+      .sort((a, b) => a.x - b.x),
+  );
+
+  let pts = $derived(
+    hasDomain ? allPts.filter((p) => p.x >= xDomain[0] && p.x <= xDomain[1]) : allPts,
+  );
+
+  // Inverse of the brush mapping: rollout id -> horizontal fraction of the
+  // plot, with the same linear extrapolation past the outermost columns.
+  function columnFraction(x) {
+    const xs = pts.map((p) => p.x);
+    const n = xs.length;
+    if (n === 0) {
+      const [lo, hi] = hasDomain ? xDomain : [0, 1];
+      return (x - lo) / (hi - lo || 1);
+    }
+    const spacing = n > 1 ? (xs[n - 1] - xs[0]) / (n - 1) : 1;
+    let idx;
+    if (x <= xs[0]) idx = (x - xs[0]) / spacing;
+    else if (x >= xs[n - 1]) idx = n - 1 + (x - xs[n - 1]) / spacing;
+    else {
+      let i = 0;
+      while (i < n - 2 && xs[i + 1] < x) i++;
+      idx = i + (x - xs[i]) / (xs[i + 1] - xs[i] || 1);
+    }
+    return (idx + 0.5) / n;
+  }
+
+  let timeAxis = $derived.by(() => {
+    if (typeof xToTime !== "function" || typeof timeToX !== "function") return null;
+    if (hasDomain) return { start: xToTime(xDomain[0]), end: xToTime(xDomain[1]) };
+    const n = pts.length;
+    if (!n) return null;
+    const spacing = n > 1 ? (pts[n - 1].x - pts[0].x) / (n - 1) : 1;
+    return {
+      start: xToTime(pts[0].x - spacing / 2),
+      end: xToTime(pts[n - 1].x + spacing / 2),
+    };
+  });
+
+  // Violins sit in equal-width columns, so a brush selection is a span of
+  // column indices; map it back to rollout ids, extrapolating past the ends
+  // with the mean step spacing so wheel zoom-out keeps working.
+  function handleBrush([f0, f1]) {
+    if (!zoomable) return;
+    const xs = pts.map((p) => p.x);
+    const n = xs.length;
+    let toX;
+    if (n === 0) {
+      const [lo, hi] = hasDomain ? xDomain : [0, 1];
+      toX = (f) => lo + f * (hi - lo);
+    } else {
+      const spacing = n > 1 ? (xs[n - 1] - xs[0]) / (n - 1) : 1;
+      toX = (f) => {
+        const idx = f * n - 0.5;
+        if (idx <= 0) return xs[0] + idx * spacing;
+        if (idx >= n - 1) return xs[n - 1] + (idx - (n - 1)) * spacing;
+        const i = Math.floor(idx);
+        return xs[i] + (idx - i) * (xs[i + 1] - xs[i]);
+      };
+    }
+    onChangeDomainX([toX(f0), toX(f1)]);
+  }
+
+  let model = $derived.by(() => {
     if (!pts.length) return null;
 
     const yLo = Math.min(...pts.map((p) => p.min));
@@ -227,10 +314,11 @@
       </div>
     </div>
     <div
-      class="relative flex-1 min-w-0 h-[210px]"
+      class="relative flex-1 min-w-0 h-[210px] overflow-hidden rounded-[4px]"
       role="presentation"
       onpointermove={onPlotMove}
       onpointerleave={onPlotLeave}
+      use:brushZoom={{ onChangeDomainX: handleBrush, enabled: zoomable }}
     >
       <svg class="w-full h-[210px] block bg-[#0a0e14] rounded-[4px]" viewBox="0 0 {W} {H}" preserveAspectRatio="none" aria-hidden="true">
         {#each model.ticks as t (t.val)}
@@ -257,6 +345,13 @@
     </div>
   </div>
   <div class="pl-[56px]">
+    {#if timeAxis}
+      <TimeAxis
+        start={timeAxis.start}
+        end={timeAxis.end}
+        fractionAt={(t) => columnFraction(timeToX(t))}
+      />
+    {/if}
     <div class="fan-meta">
       <span>min {fmt(model.yLo)}</span>
       <span>latest median {fmt(model.latestMedian)}</span>
@@ -275,6 +370,13 @@
         <span>step {model.lastX}</span>
       </div>
     {/if}
+  </div>
+{:else if hasDomain && allPts.length}
+  <div
+    class="relative h-[210px] rounded-[4px] bg-[#0a0e14] flex items-center justify-center text-(--muted) text-[12px]"
+    use:brushZoom={{ onChangeDomainX: handleBrush, enabled: zoomable }}
+  >
+    No data in this range.
   </div>
 {:else}
   <div class="plot-empty">Advantage distribution needs ≥1 step of data.</div>
