@@ -58,7 +58,7 @@ from modal_training_gym import (
 
 # ## Choose the experiment
 #
-# Edit these constants to configure the experiment. The default smoke runs
+# Edit these constants to configure the experiment. The default proof runs
 # one training step with two prompts and one sample per prompt, plus eval on
 # four held-out tasks. Two agent actions and short timeouts keep it small.
 # A single sample per prompt gives GRPO no within-group advantage variance:
@@ -66,7 +66,8 @@ from modal_training_gym import (
 #
 # For a learning experiment, set `SMOKE = False`. This selects 300 training
 # tasks, eight samples per prompt, a 75-action budget, and 500 rollout steps.
-# Set `NUM_ROLLOUT = 2` to exercise consecutive steps in a smoke test.
+# After a successful one-step proof, keep `SMOKE = True` and set
+# `NUM_ROLLOUT = 10` for a separate smoke run before increasing the horizon.
 
 SMOKE = True
 DATASET_ROOT = "swe_rebench_v2"
