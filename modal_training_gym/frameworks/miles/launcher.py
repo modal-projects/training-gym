@@ -13,7 +13,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from modal import App, Dict as ModalDict, Image, Retries, Volume
-from modal.experimental import clustered
 
 from modal_training_gym.common import (
     hf_secrets,
@@ -39,7 +38,10 @@ from modal_training_gym.common.metrics import (
 )
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.ray_cluster import ModalRayCluster
+from modal_training_gym.common.ray_cluster import (
+    ModalRayCluster,
+    clustered_if,
+)
 from modal_training_gym.common.run import (
     TrainingRun,
     TrainingRunStatus,
@@ -106,8 +108,11 @@ MILES_ROOT = "/root/miles"
 # Editable install location of sglang inside the miles images.
 SGLANG_ROOT = "/sgl-workspace/sglang"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
-# libibverbs and the libmlx5 provider come from incompatible rdma package versions for miles multi-node training
-# reinstalling fixes this issue, mooncake transferengine imports successfully
+# Disagg multi-node mooncake needs matching libibverbs/libmlx5. The apt
+# reinstall strips NCCL NET plugins, so 2-node SGLang dies in
+# ncclCommInitRank ("invalid usage" / "Failed to initialize any NET
+# plugin"). Colocate syncs over CUDA IPC and must keep the image NET
+# stack. 1-node jobs never take this path.
 RDMA_RUNTIME_INSTALL_COMMAND = (
     "apt-get update && apt-get install -y --no-install-recommends "
     "--reinstall libibverbs1 ibverbs-providers && "
@@ -349,7 +354,11 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
         )
     )
-    if miles.total_nodes > 1:
+    if (
+        miles.total_nodes > 1
+        and not miles.colocate
+        and miles.environment.get("MILES_REINSTALL_RDMA", "1") != "0"
+    ):
         image = image.run_commands(RDMA_RUNTIME_INSTALL_COMMAND)
     if miles.image_env:
         image = image.env(miles.image_env)
@@ -643,7 +652,7 @@ def build_miles_app(
     )
 
     app = App(app_name, tags=tags)
-    gpu_spec = f"{miles.gpu_type}:{miles.actor_num_gpus_per_node}"
+    gpu_spec = f"{miles.gpu_type}:{miles.gpu_allocation.gpus_per_node}"
 
     @app.function(
         image=image,
@@ -692,7 +701,10 @@ def build_miles_app(
             eval_dataset_path,
         )
 
-    convert_nnodes = get_checkpoint_conversion_policy(miles, model=model)[0]
+    convert_nnodes, convert_nproc, _ = get_checkpoint_conversion_policy(
+        miles, model=model
+    )
+    convert_gpu = f"{miles.gpu_type}:{convert_nproc}"
     convert_multi_node = convert_nnodes > 1
 
     @app.function(
@@ -803,7 +815,7 @@ def build_miles_app(
 
     @app.function(
         image=image,
-        gpu=gpu_spec,
+        gpu=convert_gpu,
         volumes=all_volumes,
         timeout=4 * 60 * 60,
         secrets=proxy_auth_secrets() or None,
@@ -812,7 +824,11 @@ def build_miles_app(
         serialized=True,
         name="convert_checkpoint",
     )
-    @clustered(convert_nnodes, rdma=convert_multi_node)
+    @clustered_if(
+        convert_multi_node,
+        convert_nnodes,
+        gpu_type=miles.gpu_type,
+    )
     def convert_checkpoint(
         hf_path: str,
         training_run_id: str = "",
@@ -971,7 +987,11 @@ def build_miles_app(
         serialized=True,
         name="train",
     )
-    @clustered(miles.total_nodes, rdma=_multi_node)
+    @clustered_if(
+        _multi_node,
+        miles.total_nodes,
+        gpu_type=miles.gpu_type,
+    )
     async def train(
         modal_app_id: str = "",
         modal_app_url: str = "",

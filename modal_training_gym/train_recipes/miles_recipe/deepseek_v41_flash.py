@@ -145,11 +145,10 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     # expert dimension is sharded across every rank (upstream's default
     # ep_size = actor_num_nodes * gpus_per_node / pp_size).
     actor_num_nodes: int = 8
+    actor_num_gpus_per_node: int = 8
     tensor_model_parallel_size: int = 4
-    context_parallel_size: int = 1
     sequence_parallel: bool = True
     expert_model_parallel_size: int = 64
-    expert_tensor_parallel_size: int = 1
 
     recompute_granularity: str = "full"
     recompute_method: str = "uniform"
@@ -167,19 +166,13 @@ class DeepSeek_V4_1_Flash_Recipe(MilesRecipe):
     update_weight_buffer_size: int = 1024**3
 
     # ── Rollout + reward ─────────────────────────────────────────────────────
-    rm_type: str = "math"
-    balance_data: bool = True
-    num_rollout: int = 5
     rollout_batch_size: int = 16
     n_samples_per_prompt: int = 8
     # One train step per rollout, so the global batch is the rollout itself.
-    num_steps_per_rollout: int = 1
     global_batch_size: int = 128
     # Dynamic packing conflicts with --qkv-format bshd upstream.
     use_dynamic_batch_size: bool = False
     rollout_temperature: float = 0.8
-    # Upstream's gsm8k debug default is 256; math-RL prompts need room to finish.
-    rollout_max_response_len: int = 2048
     max_tokens_per_gpu: int = 2048
     micro_batch_size: int = 1
     skip_eval_before_train: bool = True

@@ -7,8 +7,8 @@
 # For workloads where you need the throughput and/or cost-savings of a smaller model,
 # but the capabilities afforded by a larger model, on-policy distillation (OPD) is
 # an effective and practical way to hit your targets. In this tutorial, we'll use
-# [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) to teach the smaller 
-# [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) how to better solve 
+# [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) to teach the smaller
+# [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) how to better solve
 # olympiad-style math problems sourced from the
 # [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k)
 # Huggingface dataset.
@@ -53,7 +53,7 @@ from modal_training_gym import (
 #
 # First, we'll deploy the teacher and base models to derive a baseline.
 # We can use an [Endpoint](https://modal.com/docs/guide/endpoints)
-# to serve the student. However, for the teacher model, we need per-token logprobs, 
+# to serve the student. However, for the teacher model, we need per-token logprobs,
 # which are not currently supported by Endpoints when speculative decoding is
 # enabled. So we instead use a
 # [CustomDeployment](https://gym.modal.dev/reference/customdeployment)
@@ -82,23 +82,33 @@ TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 
 # ## Define a scoring function
 #
-# Following the [DAPO paper](https://arxiv.org/abs/2503.14476), we'll normalize as 
+# Following the [DAPO paper](https://arxiv.org/abs/2503.14476), we'll normalize as
 # they do and return 1 for correct answers and -1 for incorrect answers. Although
 # we'd like to give a more granular score for predictions, we can't simply use
 # the numerical difference between a prediction and a ground-truth answer, since
 # a numerically-close answer can be more wrong than one further away.
 
+
 def _extract_answer(response: str) -> str:
     match = re.findall(r"(?i)Answer\s*:\s*([^\n]+)", response)
     return match[-1].strip() if match else "[INVALID]"
 
+
 def _normalize_answer(answer: str) -> str:
     answer = str(answer).strip()
     answer = answer.split("=")[-1]
-    for old, new in [("$", ""), ("\\$", ""), (",", ""), (" ", ""),
-                      ("\\text{", ""), ("}", ""), ("\\boxed{", "")]:
+    for old, new in [
+        ("$", ""),
+        ("\\$", ""),
+        (",", ""),
+        (" ", ""),
+        ("\\text{", ""),
+        ("}", ""),
+        ("\\boxed{", ""),
+    ]:
         answer = answer.replace(old, new)
     return answer.strip()
+
 
 def score_answer(response: str, label: str) -> int:
     pred = _normalize_answer(_extract_answer(response))
@@ -108,6 +118,7 @@ def score_answer(response: str, label: str) -> int:
     except (ValueError, OverflowError):
         pass
     return 1 if pred == gt else -1
+
 
 # ## Get the dataset
 #
@@ -142,7 +153,7 @@ eval_dataset = HuggingFaceDataset(
 # <details>
 # <summary>On strict formats for evaluation</summary>
 #
-# Thankfully, our dataset requires simple-enough answers that a tiny, 
+# Thankfully, our dataset requires simple-enough answers that a tiny,
 # 4B model shouldn't cause issues for our deterministic parser. In our own experience,
 # requiring a strict JSON output format can cause evaluation issues!
 # See [this LoRA adapter](https://huggingface.co/uchkw/qwen3-4b-structured-output-lora)
@@ -150,9 +161,8 @@ eval_dataset = HuggingFaceDataset(
 #
 # </details>
 
-def run_eval(
-    deployment, *, max_concurrency: int = 2
-) -> float:
+
+def run_eval(deployment, *, max_concurrency: int = 2) -> float:
     from concurrent.futures import ThreadPoolExecutor
 
     deployment.wait_until_ready(timeout=15 * 60)
@@ -171,6 +181,7 @@ def run_eval(
         len([s for s in scores if s == 1]) / len(scores) if scores else float("nan")
     )
     return percent_correct
+
 
 print("running teacher base model evaluation...")
 teacher_correct = run_eval(teacher_deployment)
@@ -224,6 +235,7 @@ print(f"percent correct: {base_student_correct:.1%}")
 #
 # </details>
 
+
 async def math_opd_rm(args, sample, **kwargs):
     from slime.rollout.on_policy_distillation import reward_func as _opd_reward
 
@@ -238,6 +250,7 @@ async def math_opd_rm(args, sample, **kwargs):
 
     return teacher_response
 
+
 def math_opd_post_process(args, samples, **kwargs):
     from slime.rollout.on_policy_distillation import post_process_rewards as _opd_post
 
@@ -245,6 +258,7 @@ def math_opd_post_process(args, samples, **kwargs):
 
     math_rewards = [getattr(sample, "score", -1) for sample in samples]
     return math_rewards, math_rewards  # quirk of slime
+
 
 # ## Start training
 #
@@ -256,14 +270,14 @@ config = TrainConfig(
     model=student_model,
     dataset=train_dataset,
     recipe=Qwen3_5_4B_Recipe(
-        rollout_num_gpus=8,
         num_rollout=10,
+        save_interval=10,
+        rollout_batch_size=16,
         n_samples_per_prompt=4,
+        global_batch_size=16,
         rollout_max_response_len=2048,
-        save_interval=5,
         custom_rm_function=math_opd_rm,
         custom_reward_post_process_function=math_opd_post_process,
-        apply_chat_template_kwargs='{"enable_thinking": true}',
         environment={
             "PYTHONPATH": "/root/Megatron-LM/:/root",
             "CUDA_DEVICE_MAX_CONNECTIONS": "1",

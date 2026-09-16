@@ -44,3 +44,7 @@ class Qwen3_6_35B(HFModelConfiguration):
         rotary_base=10000000,
         rotary_percent=0.25,
     )
+
+
+class Qwen3_6_35B_Long_Context(Qwen3_6_35B):
+    """Selects ``Qwen3_6_35B_Recipe_Long_Context``."""

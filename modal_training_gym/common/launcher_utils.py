@@ -490,6 +490,7 @@ def prepare_launch_config(
             # (see BaseTrainRecipe._escape_hatch_keys).
             if field == escape_hatch:
                 object.__setattr__(cfg, "_materialized_config_keys", tuple(val))
+                object.__setattr__(cfg, "_materialized_config", dict(val))
             object.__setattr__(cfg, field, path)
 
 
@@ -515,6 +516,11 @@ def drop_materialized_config_key(cfg: Any, key: str) -> None:
         data.pop(key, None)
         with open(path, "w") as f:
             yaml.dump(data, f)
+    stored = getattr(cfg, "_materialized_config", None)
+    if isinstance(stored, dict):
+        stored = dict(stored)
+        stored.pop(key, None)
+        object.__setattr__(cfg, "_materialized_config", stored)
     object.__setattr__(
         cfg, "_materialized_config_keys", tuple(k for k in keys if k != key)
     )

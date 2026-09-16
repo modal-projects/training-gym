@@ -13,7 +13,7 @@ from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b import (
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
 class Qwen3_6_27B_Recipe_Agentic(Qwen3_6_27B_Recipe):
-    """Qwen3.6-27B with fork-backed Harbor agent rollouts on 6×8×H200."""
+    """Qwen3.6-27B recipe with fork-backed Harbor agent rollouts."""
 
     slime_git_repository: str | None = "https://github.com/modal-projects/slime.git"
     slime_git_revision: str | None = "ba324bebdd3a3cbfc1946b58404a012ad607f38b"
@@ -22,7 +22,6 @@ class Qwen3_6_27B_Recipe_Agentic(Qwen3_6_27B_Recipe):
         default_factory=lambda: TrackioConfig(project="agentic-harbor")
     )
 
-    gpu_type: str = "H200"
     memory: int | tuple[int, int] | None = (1024, 2 * 1024 * 1024)
     train_function_kwargs: dict[str, Any] = field(
         default_factory=lambda: {"ephemeral_disk": 2 * 1024 * 1024}
@@ -56,25 +55,15 @@ class Qwen3_6_27B_Recipe_Agentic(Qwen3_6_27B_Recipe):
     capture_trace: bool = True
 
     colocate: bool = False
-    actor_num_nodes: int = 2
-    rollout_num_gpus: int | None = 32
+    rollout_num_gpus: int | None = 1
     sglang_server_concurrency: int = 32
-    context_parallel_size: int = 2
 
-    num_rollout: int = 500
-    rollout_batch_size: int = 32
-    rollout_max_response_len: int = 8192
-    global_batch_size: int = 256
     max_tokens_per_gpu: int = 16384
     log_probs_chunk_size: int = 128
-    rm_type: str | None = None
 
-    eval_max_response_len: int = 8192
-    save_interval: int = 5
     save_debug_rollout_data: str = (
         "/checkpoints/agentic_rollout_dumps/rollout_{rollout_id}.pt"
     )
-    ref_load: str = ""
     lr: float = 4e-6
 
     custom_rollout_log_function: str | None = "agentic_rl.metrics.log_rollout_data"
