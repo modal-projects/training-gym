@@ -233,7 +233,10 @@
 
 <style>
   .custom-viewer-frame { display: block; width: 100%; height: 0; border: 0; overflow: hidden; color-scheme: dark; }
-  .custom-viewer-frame:not(.visible) { position: absolute; width: 0; height: 0; }
+  /* Keep the full width while hidden: the frame measures itself as soon as it
+     loads, and a zero-width frame reflows its content into a far taller box
+     than the one the viewer actually renders at. */
+  .custom-viewer-frame:not(.visible) { height: 0; visibility: hidden; }
   .viewer-note { margin: -8px 0 10px; color: var(--muted, #8b8b8b); font-size: 10px; }
   .viewer-error { color: var(--red, #f87171); }
 </style>

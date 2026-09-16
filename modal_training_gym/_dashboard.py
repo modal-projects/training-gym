@@ -432,7 +432,9 @@ _COMPONENT_FRAME_TEMPLATE = """<!doctype html>
 <style>
   html, body { margin: 0; padding: 0; background: transparent; }
   body { color: #d1d1d1; font: 12px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  #viewer { min-height: 1px; }
+  /* ``flow-root`` keeps child margins inside #viewer, so its box height is
+     the component's real content height. */
+  #viewer { min-height: 1px; display: flow-root; }
 </style>
 </head>
 <body>
@@ -465,9 +467,15 @@ window.addEventListener("message", (event) => {
 window.addEventListener("error", (event) => {
   __post({ type: "error", message: String(event.message || "component error") });
 });
-new ResizeObserver(() => {
-  __post({ type: "resize", height: document.documentElement.scrollHeight });
-}).observe(document.body);
+// Measure the mount target, not the document: the parent sizes this frame to
+// whatever height we report, so `documentElement.scrollHeight` (never smaller
+// than the viewport) would ratchet the frame up and never let it shrink back
+// when a shorter rollout renders.
+function __reportHeight() {
+  const box = __target.getBoundingClientRect().height;
+  __post({ type: "resize", height: Math.max(box, __target.scrollHeight) });
+}
+new ResizeObserver(__reportHeight).observe(__target);
 __post({ type: "ready" });
 </script>
 </body>
@@ -693,7 +701,25 @@ def fastapi_app():
     cache_locks = {key: asyncio.Lock() for key in cache_keys}
     # Hold strong refs to background refresh tasks so they aren't GC'd mid-flight.
     refresh_tasks: set[asyncio.Task[list[JsonDict]]] = set()
-    web.mount("/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets")
+
+    class _HashedAssets(StaticFiles):
+        """Serve Vite's content-hashed bundles as immutable.
+
+        The filename changes whenever the contents do, so a cached copy can
+        never be stale; pairing this with a revalidated ``index.html`` (see the
+        SPA fallback) is what keeps a deploy from ever serving old HTML that
+        points at a bundle this image no longer has.
+        """
+
+        def file_response(self, *args, **kwargs):
+            response = super().file_response(*args, **kwargs)
+            if response.status_code == 200:
+                response.headers["Cache-Control"] = (
+                    "public, max-age=31536000, immutable"
+                )
+            return response
+
+    web.mount("/assets", _HashedAssets(directory=f"{STATIC_DIR}/assets"), name="assets")
 
     # ── Shared Modal client ───────────────────────────────────────────────
     # Opens a client at startup and reuses it across all requests.
@@ -1938,6 +1964,15 @@ def fastapi_app():
 
     @web.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        return FileResponse(f"{STATIC_DIR}/index.html")
+        # index.html names content-hashed bundles that the next deploy deletes,
+        # so it must never be served from cache without revalidating: a browser
+        # holding yesterday's HTML would request a bundle this image no longer
+        # has and get a 404 with a blank page. The document is a fraction of a
+        # kilobyte, so refetching it on every load costs nothing next to the
+        # immutable bundles it points at.
+        return FileResponse(
+            f"{STATIC_DIR}/index.html",
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )
 
     return web
