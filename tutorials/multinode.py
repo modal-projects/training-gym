@@ -45,25 +45,8 @@ def extract_answer(response: str) -> str | None:
     return re.split(r"\.(?:\s|$)", match.group(1).strip(), maxsplit=1)[0].strip()
 
 
-def _normalize(text: str) -> str:
-    return text.translate(str.maketrans("", "", string.punctuation)).casefold().strip()
-
-
-def answers_equal(pred: str, label: str) -> bool:
-    try:
-        return math.isclose(float(pred), float(label), rel_tol=0.0, abs_tol=1e-9)
-    except ValueError:
-        return _normalize(pred) == _normalize(label)
-
-
 def scored_answer(text: str) -> str:
     return extract_answer(text) or str(text).strip()
-
-
-def _pack_docqa(row):
-    prompt = next(m["content"] for m in row["prompt"] if m["role"] == "user")
-    gold = str(row["reward_model"]["ground_truth"])
-    return {"prompt": prompt, "label": scored_answer(gold)}
 
 
 class DocQADataset(DatasetConfig):
@@ -78,15 +61,27 @@ class DocQADataset(DatasetConfig):
         for row in load_dataset("Tongyi-Zhiwen/DocQA-RL-1.6K", split="train"):
             if int(row["extra_info"]["input_length"]) > prompt_limit:
                 continue
-            packed = _pack_docqa(row)
+            prompt = next(m["content"] for m in row["prompt"] if m["role"] == "user")
+            gold = str(row["reward_model"]["ground_truth"])
             yield {
-                "messages": [{"role": "user", "content": packed["prompt"]}],
-                "label": packed["label"],
+                "messages": [{"role": "user", "content": prompt}],
+                "label": scored_answer(gold),
             }
 
 
 model = GLM_4_7()
 dataset = DocQADataset()
+
+
+def _normalize(text: str) -> str:
+    return text.translate(str.maketrans("", "", string.punctuation)).casefold().strip()
+
+
+def answers_equal(pred: str, label: str) -> bool:
+    try:
+        return math.isclose(float(pred), float(label), rel_tol=0.0, abs_tol=1e-9)
+    except ValueError:
+        return _normalize(pred) == _normalize(label)
 
 
 async def docqa_rm(args, sample, **kwargs) -> float:

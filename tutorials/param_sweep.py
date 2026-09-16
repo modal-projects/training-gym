@@ -34,13 +34,6 @@ def _letter_answer(row) -> bool:
     return bool(re.fullmatch(r"[A-J]", str(row["expected_answer"]).strip().upper()))
 
 
-def _upper_letter(row):
-    return {
-        "input": row["input"],
-        "expected_answer": str(row["expected_answer"]).strip().upper(),
-    }
-
-
 class OpenScienceDataset(DatasetConfig):
     def input_key(self) -> str:
         return "messages"
@@ -56,10 +49,9 @@ class OpenScienceDataset(DatasetConfig):
         for row in ds:
             if not _letter_answer(row):
                 continue
-            packed = _upper_letter(row)
             yield {
-                "messages": [{"role": "user", "content": packed["input"]}],
-                "label": packed["expected_answer"],
+                "messages": [{"role": "user", "content": row["input"]}],
+                "label": str(row["expected_answer"]).strip().upper(),
             }
             kept += 1
             if kept >= 80:

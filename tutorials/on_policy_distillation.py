@@ -123,30 +123,6 @@ def _known_if_instructions(row) -> bool:
     )
 
 
-def _pack_if_multi(row):
-    spec = ast.literal_eval(row["ground_truth"])[0]
-    prompt = row["messages"][0]["content"]
-    return {
-        "prompt": prompt,
-        "label": json.dumps(
-            {
-                "prompt": prompt,
-                "instruction_id_list": spec["instruction_id"],
-                "kwargs": spec["kwargs"],
-            }
-        ),
-    }
-
-
-def _pack_ifbench(row):
-    return {
-        "prompt": row["prompt"],
-        "label": json.dumps(
-            {k: row[k] for k in ("prompt", "instruction_id_list", "kwargs")}
-        ),
-    }
-
-
 class IFMultiConstraintsDataset(DatasetConfig):
     def input_key(self) -> str:
         return "messages"
@@ -162,10 +138,17 @@ class IFMultiConstraintsDataset(DatasetConfig):
         for row in ds:
             if not _known_if_instructions(row):
                 continue
-            packed = _pack_if_multi(row)
+            spec = ast.literal_eval(row["ground_truth"])[0]
+            prompt = row["messages"][0]["content"]
             yield {
-                "messages": [{"role": "user", "content": packed["prompt"]}],
-                "label": packed["label"],
+                "messages": [{"role": "user", "content": prompt}],
+                "label": json.dumps(
+                    {
+                        "prompt": prompt,
+                        "instruction_id_list": spec["instruction_id"],
+                        "kwargs": spec["kwargs"],
+                    }
+                ),
             }
             kept += 1
             if kept >= 300:
@@ -181,10 +164,11 @@ class IFBenchTestDataset(DatasetConfig):
 
     def rows(self):
         for row in load_dataset("allenai/IFBench_test", split="train"):
-            packed = _pack_ifbench(row)
             yield {
-                "messages": [{"role": "user", "content": packed["prompt"]}],
-                "label": packed["label"],
+                "messages": [{"role": "user", "content": row["prompt"]}],
+                "label": json.dumps(
+                    {k: row[k] for k in ("prompt", "instruction_id_list", "kwargs")}
+                ),
             }
 
 
