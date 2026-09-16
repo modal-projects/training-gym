@@ -22,8 +22,11 @@
 import asyncio
 import itertools
 import random
+import sys
+from pathlib import Path
 
-from . import helpers
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import helpers
 from modal_training_gym import (
     DatasetConfig,
     Endpoint,
