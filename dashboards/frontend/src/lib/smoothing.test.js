@@ -29,18 +29,20 @@ test("trailingMean smooths every requested key independently", () => {
   assert.deepEqual(out[1], { x: 1, y: 1, p90: 15 });
 });
 
-test("trailingMean skips non-finite values without breaking the window", () => {
+test("trailingMean leaves gaps in place and does not average across them", () => {
   const out = trailingMean(
     [
       { x: 0, y: 2 },
       { x: 1, y: null },
       { x: 2, y: 4 },
+      { x: 3, y: 6 },
     ],
     ["y"],
     3,
   );
   assert.equal(out[1].y, null);
-  assert.equal(out[2].y, 3);
+  assert.equal(out[2].y, 4);
+  assert.equal(out[3].y, 5);
 });
 
 test("trailingMean with a window of 1 returns the rows unchanged", () => {

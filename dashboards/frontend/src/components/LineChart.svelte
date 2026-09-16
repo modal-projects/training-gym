@@ -108,9 +108,16 @@
 
   function point(row, key = "y") {
     const x = singlePoint ? 2 : ((row.x - xMin) / xSpan) * 100;
-    const y = singlePoint ? 50 : 100 - ((row[key] - yMin) / ySpan) * 96 - 2;
+    const y = 100 - ((row[key] - yMin) / ySpan) * 96 - 2;
     return { x, y };
   }
+  let singlePointMarkers = $derived(
+    singlePoint
+      ? [{ key: "y", color }, ...visibleExtraLines]
+          .filter((line) => !hiddenKeys.has(line.key) && rows[0][line.key] != null)
+          .map((line) => ({ ...line, ...point(rows[0], line.key) }))
+      : [],
+  );
 
   let zoomable = $derived(typeof onChangeDomainX === "function");
   let timeAxis = $derived(
@@ -283,15 +290,16 @@
         </div>
       {/if}
 
-      {#if singlePoint}
-        {@const p = point(rows[0])}
+      {#each singlePointMarkers as p (p.key)}
         <span
           class="point-dot"
+          style:width={p.key === "y" ? null : "5px"}
+          style:height={p.key === "y" ? null : "5px"}
           style:left={`${p.x}%`}
           style:top={`${p.y}%`}
-          style:background={color}
+          style:background={p.color}
         ></span>
-      {/if}
+      {/each}
 
       {#if hoveredPoint && !hiddenKeys.has("y")}
         <span
