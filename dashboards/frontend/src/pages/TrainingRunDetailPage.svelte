@@ -1345,11 +1345,14 @@
     const start = Math.max(chartRunStart, next.start);
     const end = Math.min(chartNow, next.end);
     if (!(end > start)) return;
-    if (start <= chartRunStart && end >= chartNow) {
+    const live = Boolean(next.live) && end >= chartNow;
+    // A paused full-run window stays explicit so it freezes instead of
+    // tailing like "entire run" does.
+    if (live && start <= chartRunStart) {
       chartRangeSelection = null;
       return;
     }
-    chartRangeSelection = { start, end, live: Boolean(next.live) && end >= chartNow };
+    chartRangeSelection = { start, end, live };
   }
 
   // Rollout-id window the charts show; null while the whole run is visible.
@@ -1361,9 +1364,11 @@
   });
 
   function onChartDomainChange(domain) {
-    setChartRange(
-      rolloutDomainToTimeRange(rolloutKnots, domain, { runStart: chartRunStart, now: chartNow }),
-    );
+    const next = rolloutDomainToTimeRange(rolloutKnots, domain, {
+      runStart: chartRunStart,
+      now: chartNow,
+    });
+    if (next !== undefined) setChartRange(next);
   }
 
   function inChartDomain(x) {

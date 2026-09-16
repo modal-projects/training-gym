@@ -132,7 +132,24 @@ test("rolloutDomainToTimeRange clamps to the run and collapses a full-run select
     end: T0 + 1000,
     live: true,
   });
-  assert.equal(rolloutDomainToTimeRange(knots, [2, 2], clock), null);
+  assert.equal(rolloutDomainToTimeRange(knots, [2, 2], clock), undefined);
+});
+
+test("rolloutDomainToTimeRange snaps a window panned past either end to that boundary", () => {
+  const knots = rolloutTimeKnots(rollouts);
+  const clock = { runStart: T0, now: T0 + 1000 };
+  // Ids past rollout 4 extrapolate at 200s each, so [12, 13] lies entirely
+  // after `now`; it comes back as the last 200s.
+  assert.deepEqual(rolloutDomainToTimeRange(knots, [12, 13], clock), {
+    start: T0 + 800,
+    end: T0 + 1000,
+    live: true,
+  });
+  assert.deepEqual(rolloutDomainToTimeRange(knots, [-3, -2], clock), {
+    start: T0,
+    end: T0 + 100,
+    live: false,
+  });
 });
 
 test("filterRolloutsByRange keeps timed rollouts inside the window", () => {
