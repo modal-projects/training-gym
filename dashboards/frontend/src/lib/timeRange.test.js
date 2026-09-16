@@ -113,7 +113,7 @@ test("rollouts recorded in the same second still map to a non-empty window", () 
   assert.ok(Math.abs(timeToRollout(knots, range.end) - 5) < 1e-9);
 });
 
-test("rolloutDomainToTimeRange clamps to the run and collapses a full-run selection", () => {
+test("rolloutDomainToTimeRange keeps duration at the run's edges and collapses a full-run selection", () => {
   const knots = rolloutTimeKnots(rollouts);
   const clock = { runStart: T0, now: T0 + 1000 };
   assert.deepEqual(rolloutDomainToTimeRange(knots, [1, 2], clock), {
@@ -127,19 +127,27 @@ test("rolloutDomainToTimeRange clamps to the run and collapses a full-run select
     live: false,
   });
   assert.equal(rolloutDomainToTimeRange(knots, [-10, 50], clock), null);
-  assert.deepEqual(rolloutDomainToTimeRange(knots, [2, 50], clock), {
+  // Rollout 4 is at T0 + 600 and later ids extrapolate at 200s each, so
+  // [2, 6] runs to T0 + 1000 and [3, 7] would run 200s past `now`; the
+  // window slides back to end at `now` instead of losing those 200s.
+  assert.deepEqual(rolloutDomainToTimeRange(knots, [2, 6], clock), {
     start: T0 + 200,
     end: T0 + 1000,
     live: true,
   });
+  assert.deepEqual(rolloutDomainToTimeRange(knots, [3, 7], clock), {
+    start: T0 + 200,
+    end: T0 + 1000,
+    live: true,
+  });
+  assert.equal(rolloutDomainToTimeRange(knots, [2, 50], clock), null);
   assert.equal(rolloutDomainToTimeRange(knots, [2, 2], clock), undefined);
 });
 
 test("rolloutDomainToTimeRange snaps a window panned past either end to that boundary", () => {
   const knots = rolloutTimeKnots(rollouts);
   const clock = { runStart: T0, now: T0 + 1000 };
-  // Ids past rollout 4 extrapolate at 200s each, so [12, 13] lies entirely
-  // after `now`; it comes back as the last 200s.
+  // [12, 13] lies entirely after `now`; it comes back as the last 200s.
   assert.deepEqual(rolloutDomainToTimeRange(knots, [12, 13], clock), {
     start: T0 + 800,
     end: T0 + 1000,

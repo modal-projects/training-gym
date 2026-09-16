@@ -167,10 +167,10 @@ export function timeToRollout(knots, t) {
  * Translate an x-domain selection on a rollout-indexed chart into a time
  * range. A selection that spans the whole run collapses back to `null`
  * (entire run) so the controls read "entire run" instead of a near-identical
- * explicit window. A selection lying wholly outside the run (a pan past
- * either end) is pulled back to hug that boundary with its duration kept, so
- * panning stops at the edge instead of resetting. An empty selection yields
- * `undefined`: nothing to apply.
+ * explicit window. A selection that crosses either end of the run (a pan or
+ * zoom-out past the edge) is pulled back inside with its duration kept, so
+ * panning stops at the edge instead of shrinking or resetting. An empty
+ * selection yields `undefined`: nothing to apply.
  */
 export function rolloutDomainToTimeRange(knots, [x0, x1], { runStart, now }) {
   const lo = Math.min(x0, x1);
@@ -179,15 +179,12 @@ export function rolloutDomainToTimeRange(knots, [x0, x1], { runStart, now }) {
   let end = rolloutToTime(knots, hi);
   if (!(end > start) || !(now > runStart)) return undefined;
   const duration = Math.min(end - start, now - runStart);
-  if (start >= now) {
+  if (end > now) {
     end = now;
     start = now - duration;
-  } else if (end <= runStart) {
+  } else if (start < runStart) {
     start = runStart;
     end = runStart + duration;
-  } else {
-    start = Math.max(runStart, start);
-    end = Math.min(now, end);
   }
   if (start <= runStart && end >= now) return null;
   return { start, end, live: end >= now };
