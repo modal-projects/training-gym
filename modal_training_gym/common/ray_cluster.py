@@ -18,6 +18,8 @@ from dataclasses import dataclass
 
 from modal.experimental import clustered
 
+from modal_training_gym.train_recipes.gpu_allocation import _normalize_gpu_type
+
 RAY_PORT = 6379
 RAY_DASHBOARD_PORT = 8265
 
@@ -34,7 +36,7 @@ _RDMA_GPU_TYPES = frozenset({"H100", "H200", "B200", "B300", "GB200"})
 
 def _supports_rdma(gpu_type: str) -> bool:
     """Whether *gpu_type* (e.g. ``"H100"`` or ``"H100:8"``) is RDMA/EFA-capable."""
-    return gpu_type.split(":")[0].strip().upper() in _RDMA_GPU_TYPES
+    return _normalize_gpu_type(gpu_type) in _RDMA_GPU_TYPES
 
 
 def clustered_if(
