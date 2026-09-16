@@ -9,15 +9,19 @@
 # [GLM-4.7](https://huggingface.co/zai-org/GLM-4.7) on 4 trainer nodes with 8
 # B300s each plus 8 disaggregated rollout GPUs, using full-weight
 # [Group Sequence Policy Optimization](https://arxiv.org/abs/2507.18071) (GSPO)
-# on
-# [zhuzilin/dapo-math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17k).
+# on [Tongyi-Zhiwen/DocQA-RL-1.6K](https://huggingface.co/datasets/Tongyi-Zhiwen/DocQA-RL-1.6K).
 
+import math
+import re
+import string
 import time
 
+from datasets import load_dataset
+
 from modal_training_gym import (
+    DatasetConfig,
     Endpoint,
     GLM_4_7,
-    HuggingFaceDataset,
     TrainConfig,
 )
 from modal_training_gym.train_recipes.slime_recipe import GLM_4_7_Recipe
@@ -27,25 +31,72 @@ from modal_training_gym.train_recipes.slime_recipe import GLM_4_7_Recipe
 # The model and recipe classes already contain most of the presets that you'd
 # care about, but we print a few parameters you may find interesting.
 
+_ANSWER_TOKENS = 2048
+
+
+def extract_answer(response: str) -> str | None:
+    text = response.replace("*", "")
+    match = re.search(r"The correct answer is \(?([A-D])\)?", text)
+    if match:
+        return match.group(1)
+    match = re.search(r"Therefore, the answer is\s*([^\n]+)", text)
+    if not match:
+        return None
+    return re.split(r"\.(?:\s|$)", match.group(1).strip(), maxsplit=1)[0].strip()
+
+
+def scored_answer(text: str) -> str:
+    return extract_answer(text) or str(text).strip()
+
+
+class DocQADataset(DatasetConfig):
+    def input_key(self) -> str:
+        return "messages"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def rows(self):
+        prompt_limit = GLM_4_7_Recipe.max_tokens_per_gpu - _ANSWER_TOKENS
+        for row in load_dataset("Tongyi-Zhiwen/DocQA-RL-1.6K", split="train"):
+            if int(row["extra_info"]["input_length"]) > prompt_limit:
+                continue
+            prompt = next(m["content"] for m in row["prompt"] if m["role"] == "user")
+            gold = str(row["reward_model"]["ground_truth"])
+            yield {
+                "messages": [{"role": "user", "content": prompt}],
+                "label": scored_answer(gold),
+            }
+
+
 model = GLM_4_7()
+dataset = DocQADataset()
 
 
-train_dataset = HuggingFaceDataset(
-    "zhuzilin/dapo-math-17k",
-    hf_split="train[:2000]",
-    input_column="prompt",
-    output_column="label",
-    input_format="messages",
-    always_download=True,
-)
+def _normalize(text: str) -> str:
+    return text.translate(str.maketrans("", "", string.punctuation)).casefold().strip()
+
+
+def answers_equal(pred: str, label: str) -> bool:
+    try:
+        return math.isclose(float(pred), float(label), rel_tol=0.0, abs_tol=1e-9)
+    except ValueError:
+        return _normalize(pred) == _normalize(label)
+
+
+async def docqa_rm(args, sample, **kwargs) -> float:
+    pred = scored_answer(model.parse_response(sample.response or "").content)
+    return float(bool(pred) and answers_equal(pred, sample.label))
+
+
 recipe = GLM_4_7_Recipe(
     num_rollout=3000,
     save_interval=10,
     rollout_batch_size=64,
     n_samples_per_prompt=8,
     global_batch_size=128,
-    rollout_max_response_len=8192,
-    rm_type="deepscaler",
+    rollout_max_response_len=_ANSWER_TOKENS,
+    custom_rm_function=docqa_rm,
 )
 
 print(f"training and rollout gpus colocated: {recipe.colocate}")
@@ -65,7 +116,7 @@ print(f"optimizer cpu offload: {recipe.optimizer_cpu_offload}")
 
 config = TrainConfig(
     model=model,
-    dataset=train_dataset,
+    dataset=dataset,
     recipe=recipe,
 )
 
@@ -93,15 +144,6 @@ trained_deployment = Endpoint.launch(
 trained_deployment.wait_until_ready(timeout=45 * 60)
 print(f"checkpoint deployed to {trained_deployment.url}")
 
-msg = trained_deployment.chat(
-    [
-        {
-            "role": "user",
-            "content": (
-                "Let $p$ be a prime number. Find the number of integers $n$ "
-                "with $1 \\le n \\le p^2$ such that $n^{p-1} \\equiv 1 \\pmod{p^2}$."
-            ),
-        }
-    ],
-)
+example = next(iter(dataset.rows()))
+msg = trained_deployment.chat(example[dataset.input_key()])
 print(msg.get("content") or msg.get("reasoning_content") or "")

@@ -7,7 +7,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TUTORIALS_DIR = REPO_ROOT / "tutorials"
 FIELD_PATTERN = re.compile(r"^# ([a-z_]+):\s*(.*)$")
-DEP_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+DEP_PATTERN = re.compile(
+    r"^[A-Za-z0-9_.-]+"
+    r"(?: @ (?:git\+)?https://[A-Za-z0-9._/-]+(?:@[A-Za-z0-9._-]+)?)?"
+    r"$"
+)
 FOLDER_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ORDER_PATTERN = re.compile(r"^\d+$")
 MAX_SAFE_INTEGER = (1 << 53) - 1

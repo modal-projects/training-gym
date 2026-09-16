@@ -28,7 +28,7 @@ class _FakeImage:
 
 def test_multinode_image_reinstalls_matching_rdma_runtime(monkeypatch):
     monkeypatch.setattr(launcher, "Image", _FakeImage)
-    recipe = MilesRecipe(colocate=False, rollout_num_gpus=8)
+    recipe = MilesRecipe(colocate=False, actor_num_gpus_per_node=8, rollout_num_gpus=8)
 
     image = launcher._build_miles_base_image(recipe)
 

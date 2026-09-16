@@ -8,7 +8,8 @@ import { discoverTutorialEntries } from './tutorial-slugs';
 
 const TUTORIAL_ENTRY_PREFIX = 'tutorials/';
 const frontmatterFieldPattern = /^# ([a-z_]+):\s*(.*)$/;
-const dependencyPattern = /^[A-Za-z0-9_.-]+$/;
+const dependencyPattern =
+  /^[A-Za-z0-9_.-]+(?: @ (?:git\+)?https:\/\/[A-Za-z0-9._/-]+(?:@[A-Za-z0-9._-]+)?)?$/;
 
 function generateDocsId({
   entry,
@@ -196,7 +197,7 @@ function formatRunCommand(runTarget: string, extras: string[]): string {
   if (extras.length === 0) {
     return `uv run ${runTarget}`;
   }
-  return `uv run ${extras.map((pkg) => `--with ${pkg}`).join(' ')} ${runTarget}`;
+  return `uv run ${extras.map((pkg) => `--with '${pkg}'`).join(' ')} ${runTarget}`;
 }
 
 async function readTutorial(
