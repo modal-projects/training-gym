@@ -1,5 +1,6 @@
 <script>
   import { brushZoom, fractionsToDomain } from "../lib/brushZoom.js";
+  import { trailingMean } from "../lib/smoothing.js";
   import TimeAxis from "./TimeAxis.svelte";
 
   let {
@@ -7,6 +8,11 @@
     data = [],
     height = 140,
     color = "var(--accent)",
+    label = "mean",
+    // `{ key, label, color, dash }` secondary series read from `row[key]`.
+    lines = [],
+    smoothable = false,
+    smoothingWindow = 5,
     ariaLabel = title || "Line chart",
     formatX = (row) => String(row?.x ?? ""),
     formatY = (value) => String(value),
@@ -22,18 +28,40 @@
 
   let chartEl = $state(null);
   let hoveredIndex = $state(null);
+  let smoothing = $state(false);
+  let hiddenKeys = $state(new Set());
   let pendingEvent = null;
   let frame = null;
 
+  function num(value) {
+    const n = Number(value);
+    return value == null || value === "" || !Number.isFinite(n) ? null : n;
+  }
+
+  let extraLines = $derived(
+    (Array.isArray(lines) ? lines : []).filter((line) => line && typeof line.key === "string"),
+  );
+  let extraKeys = $derived(extraLines.map((line) => line.key));
+  let seriesKeys = $derived(["y", ...extraKeys]);
+  let visibleExtraLines = $derived(extraLines.filter((line) => !hiddenKeys.has(line.key)));
+  let visibleKeys = $derived([
+    ...(hiddenKeys.has("y") ? [] : ["y"]),
+    ...visibleExtraLines.map((line) => line.key),
+  ]);
+
+  let rawRows = $derived.by(() => {
+    const extras = extraKeys;
+    return (Array.isArray(data) ? data : [])
+      .map((row, index) => {
+        const out = { ...row, index, x: Number(row?.x), y: num(row?.y) };
+        for (const key of extras) out[key] = num(row?.[key]);
+        return out;
+      })
+      .filter((row) => Number.isFinite(row.x) && row.y != null);
+  });
+  let smoothingOn = $derived(smoothable && smoothing);
   let allRows = $derived(
-    (Array.isArray(data) ? data : [])
-      .map((row, index) => ({
-        ...row,
-        index,
-        x: Number(row?.x),
-        y: Number(row?.y),
-      }))
-      .filter((row) => Number.isFinite(row.x) && Number.isFinite(row.y)),
+    smoothingOn ? trailingMean(rawRows, seriesKeys, smoothingWindow) : rawRows,
   );
 
   let hasDomain = $derived(
@@ -65,17 +93,27 @@
     return allRows.slice(Math.max(0, first - 1), Math.min(allRows.length, last + 2));
   });
 
-  let yMin = $derived(rows.length ? Math.min(0, ...rows.map((row) => row.y)) : 0);
-  let yMax = $derived(rows.length ? Math.max(0, ...rows.map((row) => row.y)) : 1);
+  let yValues = $derived(
+    rows.flatMap((row) => visibleKeys.map((key) => row[key]).filter((v) => v != null)),
+  );
+  let yMin = $derived(yValues.length ? Math.min(0, ...yValues) : 0);
+  let yMax = $derived(yValues.length ? Math.max(0, ...yValues) : 1);
   let ySpan = $derived(yMax - yMin || 1);
 
   let singlePoint = $derived(rows.length === 1 && !hasDomain);
 
-  function point(row) {
+  function point(row, key = "y") {
     const x = singlePoint ? 2 : ((row.x - xMin) / xSpan) * 100;
-    const y = singlePoint ? 50 : 100 - ((row.y - yMin) / ySpan) * 96 - 2;
+    const y = 100 - ((row[key] - yMin) / ySpan) * 96 - 2;
     return { x, y };
   }
+  let singlePointMarkers = $derived(
+    singlePoint
+      ? [{ key: "y", color }, ...visibleExtraLines]
+          .filter((line) => !hiddenKeys.has(line.key) && rows[0][line.key] != null)
+          .map((line) => ({ ...line, ...point(rows[0], line.key) }))
+      : [],
+  );
 
   let zoomable = $derived(typeof onChangeDomainX === "function");
   let timeAxis = $derived(
@@ -89,19 +127,43 @@
     onChangeDomainX(fractionsToDomain(fractions, [xMin, xMax]));
   }
 
-  let path = $derived(
-    drawnRows
-      .map((row, index) => {
-        const p = point(row);
-        return `${index === 0 ? "M" : "L"} ${p.x.toFixed(3)} ${p.y.toFixed(3)}`;
-      })
-      .join(" "),
-  );
+  function pathFor(key) {
+    let d = "";
+    let pen = false;
+    for (const row of drawnRows) {
+      if (row[key] == null) {
+        pen = false;
+        continue;
+      }
+      const p = point(row, key);
+      d += `${pen ? " L" : " M"} ${p.x.toFixed(3)} ${p.y.toFixed(3)}`;
+      pen = true;
+    }
+    return d.trim();
+  }
+  let path = $derived(hiddenKeys.has("y") ? "" : pathFor("y"));
+  let extraPaths = $derived(visibleExtraLines.map((line) => ({ ...line, d: pathFor(line.key) })));
+
   let hoveredRow = $derived(
     hoveredIndex == null ? null : rows[Math.max(0, Math.min(rows.length - 1, hoveredIndex))],
   );
   let hoveredPoint = $derived(hoveredRow ? point(hoveredRow) : null);
   let reverseTooltip = $derived(hoveredPoint ? hoveredPoint.x > 72 : false);
+  let hoveredExtras = $derived(
+    hoveredRow
+      ? visibleExtraLines
+          .filter((line) => hoveredRow[line.key] != null)
+          .map((line) => ({ ...line, value: hoveredRow[line.key] }))
+      : [],
+  );
+  let showLegend = $derived(extraLines.length > 0);
+
+  function toggleKey(key) {
+    const next = new Set(hiddenKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    hiddenKeys = next;
+  }
 
   function updateHoverFromPointer(event) {
     if (!chartEl || !rows.length) return;
@@ -143,8 +205,42 @@
 </script>
 
 <div class="min-w-0">
-  {#if title}
-    <div class="text-(--text-bright) text-[12px] font-[600] mb-[6px]">{title}</div>
+  {#if title || showLegend || smoothable}
+    <div class="flex flex-wrap items-center gap-x-[12px] gap-y-[4px] mb-[6px]">
+      {#if title}
+        <div class="text-(--text-bright) text-[12px] font-[600] mr-auto">{title}</div>
+      {/if}
+      {#if showLegend}
+        <div class="flex flex-wrap items-center gap-[10px] text-[11px] text-(--muted)" aria-label="Series">
+          {#each [{ key: "y", label, color }, ...extraLines] as line (line.key)}
+            <button
+              type="button"
+              class="inline-flex items-center gap-[5px] bg-transparent border-0 p-0 text-inherit cursor-pointer hover:text-(--text-bright)"
+              class:opacity-40={hiddenKeys.has(line.key)}
+              aria-pressed={!hiddenKeys.has(line.key)}
+              title={`${hiddenKeys.has(line.key) ? "Show" : "Hide"} ${line.label}`}
+              onclick={() => toggleKey(line.key)}
+            >
+              <span
+                class="inline-block w-[12px] h-0 border-t-2"
+                class:border-dashed={Boolean(line.dash)}
+                style:border-color={line.color}
+              ></span>
+              {line.label}
+            </button>
+          {/each}
+        </div>
+      {/if}
+      {#if smoothable}
+        <label
+          class="inline-flex items-center gap-[5px] text-[11px] text-(--muted) cursor-pointer select-none"
+          title={`Trailing mean over the last ${smoothingWindow} steps`}
+        >
+          <input type="checkbox" bind:checked={smoothing} />
+          <span>Smoothing</span>
+        </label>
+      {/if}
+    </div>
   {/if}
 
   {#if rows.length || (hasDomain && allRows.length)}
@@ -159,6 +255,16 @@
       use:brushZoom={{ onChangeDomainX: handleBrush, enabled: zoomable }}
     >
       <svg class="block w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        {#each extraPaths as line (line.key)}
+          <path
+            d={line.d}
+            fill="none"
+            stroke={line.color}
+            stroke-width="1"
+            stroke-dasharray={line.dash || null}
+            vector-effect="non-scaling-stroke"
+          />
+        {/each}
         <path d={path} fill="none" stroke={color} stroke-width="1.5" vector-effect="non-scaling-stroke" />
         {#if hoveredPoint}
           <line
@@ -178,17 +284,18 @@
         </div>
       {/if}
 
-      {#if singlePoint}
-        {@const p = point(rows[0])}
+      {#each singlePointMarkers as p (p.key)}
         <span
           class="point-dot"
+          style:width={p.key === "y" ? null : "5px"}
+          style:height={p.key === "y" ? null : "5px"}
           style:left={`${p.x}%`}
           style:top={`${p.y}%`}
-          style:background={color}
+          style:background={p.color}
         ></span>
-      {/if}
+      {/each}
 
-      {#if hoveredPoint}
+      {#if hoveredPoint && !hiddenKeys.has("y")}
         <span
           class="point-dot z-[2]! w-[8px]! h-[8px]!"
           style:left={`${hoveredPoint.x}%`}
@@ -204,7 +311,25 @@
           style:left={`${hoveredPoint.x}%`}
         >
           <div class="text-[rgba(255,255,255,0.72)]">{formatX(hoveredRow)}</div>
-          <div class="[color:white] font-[600] [font-variant-numeric:tabular-nums]">{formatY(hoveredRow.y, hoveredRow)}</div>
+          {#if showLegend && !hiddenKeys.has("y")}
+            <div class="flex items-center gap-[5px] [font-variant-numeric:tabular-nums]">
+              <span class="inline-block w-[8px] h-[8px] rounded-[2px]" style:background={color}></span>
+              <span class="text-[rgba(255,255,255,0.72)]">{label}</span>
+              <span class="[color:white] font-[600]">{formatY(hoveredRow.y, hoveredRow)}</span>
+            </div>
+          {:else if !showLegend}
+            <div class="[color:white] font-[600] [font-variant-numeric:tabular-nums]">{formatY(hoveredRow.y, hoveredRow)}</div>
+          {/if}
+          {#each hoveredExtras as line (line.key)}
+            <div class="flex items-center gap-[5px] [font-variant-numeric:tabular-nums]">
+              <span class="inline-block w-[8px] h-[8px] rounded-[2px]" style:background={line.color}></span>
+              <span class="text-[rgba(255,255,255,0.72)]">{line.label}</span>
+              <span class="[color:white]">{formatY(line.value, hoveredRow)}</span>
+            </div>
+          {/each}
+          {#if smoothingOn}
+            <div class="text-[rgba(255,255,255,0.5)] text-[10px]">smoothed · last {smoothingWindow}</div>
+          {/if}
         </div>
       {/if}
     </div>
