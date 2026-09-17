@@ -8,7 +8,18 @@
 # [SWE-rebench V2](https://huggingface.co/datasets/nebius/SWE-rebench-V2).
 # The agent inspects repositories, edits code, and runs commands in
 # [Harbor](https://github.com/laude-institute/harbor) sandboxes on Modal.
-# Passing the task's tests earns a reward of one; otherwise, zero.
+#
+# Loop per rollout:
+# 1. Start a task environment in a [Modal Sandbox](https://modal.com/docs/guide/sandbox),
+#    an isolated container with its own filesystem.
+# 2. Ask the model for the next action using the task and conversation so far.
+# 3. Execute its shell command in the sandbox and append the output as feedback.
+# 4. Repeat until the agent finishes or reaches its action or time budget.
+# 5. Run the task verifier against the edited repository and use its reward
+#    to train the model.
+#
+# The entire stack runs on Modal — model serving, tool execution,
+# and the sandbox — so you control cost, latency, and data privacy.
 
 import json
 
@@ -57,6 +68,8 @@ MAX_STEPS = 2 if SMOKE else 75
 RUN_NAME = f"coding-agent-{uuid4().hex}"
 DATA_ROOT = Path("/data") / DATASET_ROOT
 
+# ## Load the training tasks
+#
 # `AgentTaskDataset` reads the prepared JSONL, preserving prompts, labels,
 # and task metadata. The agent loop formats conversations, so the reader
 # disables chat templating. Evaluation reads the files via `eval_config`.
@@ -84,9 +97,38 @@ class AgentTaskDataset(DatasetConfig):
 
 train_dataset = AgentTaskDataset(DATA_ROOT / f"{TRAIN_SUBSET}.jsonl")
 
-# The recipe uses one B300 for training and one for rollouts. These settings
-# configure GRPO and the episode budget. Set up Trackio and the dashboard
-# with `uv run training-gym setup` before launching.
+# ## Multi-turn rollouts and rewards
+#
+# The pinned Slime fork's `agentic_rl.generate.generate` runs the agent loop
+# and computes rewards inline. It also records a `loss_mask`: model-generated
+# tokens contribute to training (`1`), while task text and environment feedback
+# are masked out (`0`). The model learns its actions, not the tool's output.
+#
+# `ASYNC_RL_REWARD_SHAPE="binary"` selects the task's pass/fail reward. GRPO
+# compares samples for the same task, giving higher-reward samples a positive
+# advantage. The full configuration samples eight episodes per task.
+#
+# See the pinned [rollout implementation](https://github.com/modal-projects/slime/blob/ba324bebdd3a3cbfc1946b58404a012ad607f38b/agentic_rl/generate.py)
+# and [Harbor environment](https://github.com/modal-projects/slime/blob/ba324bebdd3a3cbfc1946b58404a012ad607f38b/agentic_rl/environment/harbor.py)
+# for the interaction and verification code.
+#
+# ## Configure the recipe
+#
+# Both configurations use two B300 GPUs on one node: one for Megatron training
+# and one for SGLang inference. `colocate=False` gives each its own GPU;
+# sandbox commands run separately on CPUs.
+#
+# The main controls are:
+# - `num_rollout`: number of rollout/training iterations.
+# - `rollout_batch_size`: tasks sampled per iteration; `n_samples_per_prompt`
+#   sets how many episodes to generate for each task.
+# - `MAX_STEPS`: agent action budget; the episode and command timeouts below
+#   also bound tool execution.
+# - `eval_interval` and `save_interval`: evaluation and checkpoint frequency.
+#
+# Evaluation uses the same agent loop and verifier on the held-out tasks.
+# Set up Trackio and the dashboard with `uv run training-gym setup` before
+# launching to inspect metrics and trajectories.
 
 recipe = Qwen3_6_27B_Recipe_Agentic(
     metrics=TrackioConfig(project="coding-agent"),
