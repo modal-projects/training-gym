@@ -225,17 +225,40 @@ def test_set_password_preserves_arguments(runner, monkeypatch, args, expected):
 
 
 @pytest.mark.parametrize(
-    ("trackio_url", "should_redeploy"),
+    ("trackio_url", "spec"),
     [
-        ("https://example--training-gym-trackio.modal.run", True),
-        (None, False),
+        (None, None),
+        ("https://example--training-gym-trackio.modal.run", None),
+        (
+            "https://example--custom-trackio.modal.run",
+            {
+                "app_name": "custom-trackio",
+                "volume_name": "custom-trackio-data",
+                "modal_secret_name": "_custom-trackio-write-token",
+                "TRACKIO_PACKAGE_VERSION": "0.34.0",
+            },
+        ),
+        (
+            "https://example--training-gym-trackio.modal.run",
+            {
+                "app_name": "training-gym-trackio",
+                "volume_name": "production-metrics",
+                "modal_secret_name": "_production-trackio-write-token",
+                "TRACKIO_PACKAGE_VERSION": "0.35.0",
+            },
+        ),
     ],
 )
-def test_set_password_redeploys_trackio_only_when_deployed(
-    monkeypatch, trackio_url, should_redeploy
+def test_set_password_redeploys_trackio_with_saved_deploy_options(
+    monkeypatch, tmp_path, capsys, trackio_url, spec
 ):
     from modal_training_gym.cli.setup import set_password
+    from modal_training_gym.common import config as gym_config
     from modal_training_gym.common.trackio import TrackioConfig
+
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
+    if spec is not None:
+        gym_config.save_trackio_deploy(**spec)
 
     setup = Mock()
     deploy = Mock()
@@ -245,19 +268,24 @@ def test_set_password_redeploys_trackio_only_when_deployed(
         "modal_training_gym.common.config.get_dashboard_proxy_auth",
         lambda: False,
     )
+    expected_app = spec["app_name"] if spec else "training-gym-trackio"
     monkeypatch.setattr(
         "modal_training_gym.common.trackio.deployed_trackio_url",
-        lambda: trackio_url,
+        lambda app_name="training-gym-trackio": (
+            trackio_url if app_name == expected_app else None
+        ),
     )
     monkeypatch.setattr(TrackioConfig, "deploy_to_modal", deploy)
 
     set_password(password="secret")
 
     setup.assert_called_once_with(interactive=False, require_proxy_auth=False)
-    if should_redeploy:
-        deploy.assert_called_once_with()
-    else:
+    if spec is None:
         deploy.assert_not_called()
+        if trackio_url is not None:
+            assert "Skipping Trackio redeploy" in capsys.readouterr().out
+    else:
+        deploy.assert_called_once_with(**spec)
 
 
 @pytest.mark.parametrize(

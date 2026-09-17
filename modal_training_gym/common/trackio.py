@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
+from modal_training_gym.common.config import get_trackio_deploy, save_trackio_deploy
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.metrics import MetricConfig
 
@@ -82,6 +83,12 @@ class TrackioConfig(MetricConfig):
         volume_name = volume_name or f"{app_name}-data"
         modal_secret_name = modal_secret_name or f"_{app_name}-write-token"
         server_url = _deploy_modal_dashboard(
+            app_name=app_name,
+            volume_name=volume_name,
+            modal_secret_name=modal_secret_name,
+            TRACKIO_PACKAGE_VERSION=TRACKIO_PACKAGE_VERSION,
+        )
+        save_trackio_deploy(
             app_name=app_name,
             volume_name=volume_name,
             modal_secret_name=modal_secret_name,
@@ -270,6 +277,22 @@ def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
         return modal.Function.from_name(app_name, "dashboard").get_web_url()
     except Exception:
         return None
+
+
+def redeploy_trackio_for_password() -> None:
+    spec = get_trackio_deploy()
+    if spec is None:
+        if deployed_trackio_url():
+            print(
+                "Skipping Trackio redeploy: no saved deploy options. "
+                "Run TrackioConfig.deploy_to_modal(...) or "
+                "`training-gym trackio setup`, then set-password again."
+            )
+        return
+    if not deployed_trackio_url(spec["app_name"]):
+        return
+    print("Redeploying Trackio dashboard so the password takes effect...")
+    TrackioConfig.deploy_to_modal(**spec)
 
 
 def _secret_exists(name: str) -> bool:

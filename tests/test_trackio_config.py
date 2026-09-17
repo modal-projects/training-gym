@@ -74,7 +74,10 @@ def test_trackio_dashboard_urls_do_not_expose_credentials():
     )
 
 
-def test_deploy_to_modal_returns_a_self_hosted_config(monkeypatch):
+def test_deploy_to_modal_returns_a_self_hosted_config(monkeypatch, tmp_path):
+    from modal_training_gym.common import config as gym_config
+
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
     calls = {}
 
     def fake_deploy(**kwargs):
@@ -104,6 +107,51 @@ def test_deploy_to_modal_returns_a_self_hosted_config(monkeypatch):
         dashboard_url="https://example--training-gym-trackio.modal.run",
         modal_secret_name="_my-trackio-write-token",
     )
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "my-trackio",
+        "volume_name": "my-trackio-data",
+        "modal_secret_name": "_my-trackio-write-token",
+        "TRACKIO_PACKAGE_VERSION": "0.34.0",
+    }
+
+
+def test_deploy_to_modal_persists_custom_volume_secret_and_version(
+    monkeypatch, tmp_path
+):
+    from modal_training_gym.common import config as gym_config
+
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio._deploy_modal_dashboard",
+        lambda **_kwargs: "https://example--training-gym-trackio.modal.run",
+    )
+
+    TrackioConfig.deploy_to_modal(
+        volume_name="production-metrics",
+        modal_secret_name="_production-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "production-metrics",
+        "modal_secret_name": "_production-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
+
+
+def test_get_trackio_deploy_rejects_a_partial_record(tmp_path, monkeypatch):
+    from modal_training_gym.common import config as gym_config
+
+    path = tmp_path / ".training-gym.toml"
+    path.write_text(
+        "[trackio]\n"
+        'app_name = "training-gym-trackio"\n'
+        'volume_name = "production-metrics"\n'
+    )
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", path)
+
+    assert gym_config.get_trackio_deploy() is None
 
 
 class _FakeImage:

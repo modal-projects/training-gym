@@ -202,6 +202,13 @@ def get_dashboard_proxy_auth() -> bool | None:
 
 
 PROXY_AUTH_SECTION = "proxy_auth"
+TRACKIO_SECTION = "trackio"
+TRACKIO_DEPLOY_KEYS = (
+    "app_name",
+    "volume_name",
+    "modal_secret_name",
+    "TRACKIO_PACKAGE_VERSION",
+)
 
 
 def get_proxy_auth() -> tuple[str, str]:
@@ -221,6 +228,36 @@ def save_proxy_auth(key: str, secret: str) -> None:
     """Persist the proxy-auth token pair under ``[proxy_auth]``."""
     config = load_config()
     config[PROXY_AUTH_SECTION] = {"key": key.strip(), "secret": secret.strip()}
+    CONFIG_PATH.write_text(_render(config))
+
+
+def get_trackio_deploy() -> dict[str, str] | None:
+    section = load_config().get(TRACKIO_SECTION)
+    if not isinstance(section, dict):
+        return None
+    values: dict[str, str] = {}
+    for key in TRACKIO_DEPLOY_KEYS:
+        value = section.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return None
+        values[key] = value.strip()
+    return values
+
+
+def save_trackio_deploy(
+    *,
+    app_name: str,
+    volume_name: str,
+    modal_secret_name: str,
+    TRACKIO_PACKAGE_VERSION: str,
+) -> None:
+    config = load_config()
+    config[TRACKIO_SECTION] = {
+        "app_name": app_name,
+        "volume_name": volume_name,
+        "modal_secret_name": modal_secret_name,
+        "TRACKIO_PACKAGE_VERSION": TRACKIO_PACKAGE_VERSION,
+    }
     CONFIG_PATH.write_text(_render(config))
 
 
