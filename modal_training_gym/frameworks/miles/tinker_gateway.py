@@ -34,7 +34,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -51,6 +51,9 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import (
     HF_CACHE_PATH,
     MilesRecipe,
 )
+
+if TYPE_CHECKING:
+    import tinker
 
 TINKER_PORT = 10613
 TINKER_HEALTH_PATH = "/api/v1/healthz"
@@ -471,6 +474,25 @@ class TinkerGateway(BaseModel):
     @property
     def health_url(self) -> str:
         return f"{self.url.rstrip('/')}{TINKER_HEALTH_PATH}"
+
+    def service_client(self, tenant: str, **kwargs: object) -> "tinker.ServiceClient":
+        """``tinker.ServiceClient`` for ``tenant`` with proxy auth attached.
+
+        See :func:`modal_training_gym.tinker.service_client`; requires the
+        ``tinker`` SDK (``pip install tinker==0.26.2``).
+        """
+        from modal_training_gym.tinker import service_client
+
+        return service_client(self, tenant=tenant, **kwargs)
+
+    def lora_config_kwargs(self, rank: int | None = None) -> dict[str, int | bool]:
+        """``create_lora_training_client`` arguments matching this gateway's layout.
+
+        See :func:`modal_training_gym.tinker.lora_config_kwargs`.
+        """
+        from modal_training_gym.tinker import lora_config_kwargs
+
+        return lora_config_kwargs(self.recipe, rank=rank)
 
     @classmethod
     def launch(
