@@ -209,6 +209,24 @@ TRACKIO_DEPLOY_KEYS = (
     "modal_secret_name",
     "TRACKIO_PACKAGE_VERSION",
 )
+DEFAULT_MODAL_ENVIRONMENT = "main"
+
+
+def active_modal_environment() -> str:
+    """Environment name Modal uses to resolve apps, Volumes, and Secrets.
+
+    ``MODAL_ENVIRONMENT`` wins, then the active ``~/.modal.toml`` profile's
+    ``environment``, then Modal's default ``main``.
+    """
+    env = os.environ.get("MODAL_ENVIRONMENT", "").strip()
+    if env:
+        return env
+    profiles = _iter_modal_profiles()
+    if profiles:
+        env = str(profiles[0][1].get("environment") or "").strip()
+        if env:
+            return env
+    return DEFAULT_MODAL_ENVIRONMENT
 
 
 def get_proxy_auth() -> tuple[str, str]:
@@ -235,6 +253,12 @@ def get_trackio_deploy() -> dict[str, str] | None:
     section = load_config().get(TRACKIO_SECTION)
     if not isinstance(section, dict):
         return None
+    saved_env = section.get("environment")
+    if (
+        not isinstance(saved_env, str)
+        or saved_env.strip() != active_modal_environment()
+    ):
+        return None
     values: dict[str, str] = {}
     for key in TRACKIO_DEPLOY_KEYS:
         value = section.get(key)
@@ -253,6 +277,7 @@ def save_trackio_deploy(
 ) -> None:
     config = load_config()
     config[TRACKIO_SECTION] = {
+        "environment": active_modal_environment(),
         "app_name": app_name,
         "volume_name": volume_name,
         "modal_secret_name": modal_secret_name,
@@ -335,28 +360,22 @@ def _format_value(value: Any) -> str:
 # ── Modal credential resolution ──────────────────────────────────────────
 
 
-def read_modal_toml_creds() -> tuple[str, str, str]:
-    """Resolve ``(token_id, token_secret, profile_name)`` from ``~/.modal.toml``.
-
-    Follows Modal's own profile-selection rules: the ``MODAL_PROFILE`` env
-    var wins if set; otherwise the profile flagged ``active = true``;
-    otherwise the ``[default]`` profile; otherwise the first profile in the
-    file. Returns empty strings if no credentials can be found.
-    """
+def _iter_modal_profiles() -> list[tuple[str, dict[str, Any]]]:
+    """``~/.modal.toml`` profiles in Modal's selection order, unique."""
     if not MODAL_CONFIG_PATH.is_file():
-        return "", "", ""
+        return []
 
     try:
         with MODAL_CONFIG_PATH.open("rb") as f:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
-        return "", "", ""
+        return []
 
     profiles = {
         name: section for name, section in data.items() if isinstance(section, dict)
     }
     if not profiles:
-        return "", "", ""
+        return []
 
     candidate_names: list[str] = []
     env_profile = os.environ.get("MODAL_PROFILE", "").strip()
@@ -369,12 +388,25 @@ def read_modal_toml_creds() -> tuple[str, str, str]:
         candidate_names.append("default")
     candidate_names.extend(profiles.keys())
 
+    ordered: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
     for name in candidate_names:
         if name in seen or name not in profiles:
             continue
         seen.add(name)
-        section = profiles[name]
+        ordered.append((name, profiles[name]))
+    return ordered
+
+
+def read_modal_toml_creds() -> tuple[str, str, str]:
+    """Resolve ``(token_id, token_secret, profile_name)`` from ``~/.modal.toml``.
+
+    Follows Modal's own profile-selection rules: the ``MODAL_PROFILE`` env
+    var wins if set; otherwise the profile flagged ``active = true``;
+    otherwise the ``[default]`` profile; otherwise the first profile in the
+    file. Returns empty strings if no credentials can be found.
+    """
+    for name, section in _iter_modal_profiles():
         token_id = str(section.get("token_id") or "").strip()
         token_secret = str(section.get("token_secret") or "").strip()
         if token_id and token_secret:

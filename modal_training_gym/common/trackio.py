@@ -284,8 +284,8 @@ def redeploy_trackio_for_password() -> None:
     if spec is None:
         if deployed_trackio_url():
             print(
-                "Skipping Trackio redeploy: no saved deploy options. "
-                "Run TrackioConfig.deploy_to_modal(...) or "
+                "Skipping Trackio redeploy: no saved deploy options for this "
+                "Modal environment. Run TrackioConfig.deploy_to_modal(...) or "
                 "`training-gym trackio setup`, then set-password again."
             )
         return
