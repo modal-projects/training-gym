@@ -228,6 +228,10 @@ _EXPORTS = {
         "SglangRecipe",
     ),
     "SlimeRecipe": ("modal_training_gym.train_recipes.slime_recipe", "SlimeRecipe"),
+    "TinkerGateway": (
+        "modal_training_gym.frameworks.miles.tinker_gateway",
+        "TinkerGateway",
+    ),
     "ToolCall": ("modal_training_gym.common.models", "ToolCall"),
     "TrainConfig": ("modal_training_gym.common.train", "TrainConfig"),
     "TrainingGymConfigError": (
@@ -331,6 +335,7 @@ __all__ = [
     "score_in_sandbox",
     "SglangRecipe",
     "SlimeRecipe",
+    "TinkerGateway",
     "ToolCall",
     "TrainConfig",
     "TrainingGymConfigError",
