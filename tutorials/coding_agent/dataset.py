@@ -12,7 +12,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -333,6 +332,7 @@ def convert_tasks(
 def prepare_dataset(
     root: Path,
     *,
+    converter_revision: str,
     hf_revision: str | None = None,
     min_grade: str | None = "A",
     limit: int | None = None,
@@ -344,9 +344,6 @@ def prepare_dataset(
     revision = HfApi().dataset_info(HF_DATASET, revision=hf_revision).sha
     if not revision:
         raise RuntimeError("could not resolve the dataset revision")
-    converter_revision = subprocess.check_output(
-        ["git", "-C", "/root/slime", "rev-parse", "HEAD"], text=True
-    ).strip()
     root.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=root.parent, prefix=f".{root.name}-") as temporary:
         staging = Path(temporary) / root.name
@@ -407,13 +404,18 @@ def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
 def _prepare_remote(
     root: str,
     *,
+    converter_revision: str,
     hf_revision: str | None,
     min_grade: str | None,
     limit: int | None,
     volume_name: str,
 ):
     counts = prepare_dataset(
-        Path(root), hf_revision=hf_revision, min_grade=min_grade, limit=limit
+        Path(root),
+        converter_revision=converter_revision,
+        hf_revision=hf_revision,
+        min_grade=min_grade,
+        limit=limit,
     )
     modal.Volume.from_name(volume_name).commit()
     return counts
@@ -509,6 +511,7 @@ def main() -> None:
         with app.run():
             counts = remote.remote(
                 root,
+                converter_revision=training_recipe.slime_git_revision,
                 hf_revision=args.hf_revision,
                 min_grade=None if args.min_grade.lower() == "none" else args.min_grade,
                 limit=args.limit,
