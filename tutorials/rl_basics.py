@@ -117,11 +117,8 @@ def score_haiku(response: str) -> float:
 # this is because the task is sufficiently out-of-distribution, and no existing dataset
 # will serve your needs.
 #
-# See the
-# [multi-turn example](https://gym.modal.dev/tutorials/multiturn) for a basic
-# example of creating your own dataset, or the
-# [DatasetConfig](https://gym.modal.dev/reference/datasetconfig) documentation
-# for a deeper dive.
+# See the [DatasetConfig](https://gym.modal.dev/reference/datasetconfig)
+# documentation for a deeper dive.
 
 train_dataset = HuggingFaceDataset(
     "statworx/haiku",

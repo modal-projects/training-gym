@@ -1,5 +1,5 @@
 # ---
-# order: 4
+# order: 3
 # deps: ifbench @ git+https://github.com/allenai/IFBench.git@fcd289db21d43aaa96c6d9291d32561cd6e19305
 # ---
 #
