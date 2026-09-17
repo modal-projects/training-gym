@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -21,7 +22,7 @@ from typing import Any
 import modal
 
 from modal_training_gym.common import hf_secrets
-from modal_training_gym.common.dataset_sampling import sample_rows, split_rows
+from modal_training_gym.common.dataset_partitioning import sample_rows, split_rows
 from modal_training_gym.frameworks.slime.launcher import (
     SLIME_IMAGE,
     _slime_git_overlay_command,
@@ -336,16 +337,42 @@ def prepare_dataset(
     min_grade: str | None = "A",
     limit: int | None = None,
 ) -> dict[str, int]:
+    from huggingface_hub import HfApi
+
     if limit is not None and limit < 1:
         raise ValueError("limit must be positive")
+    revision = HfApi().dataset_info(HF_DATASET, revision=hf_revision).sha
+    if not revision:
+        raise RuntimeError("could not resolve the dataset revision")
+    converter_revision = subprocess.check_output(
+        ["git", "-C", "/root/slime", "rev-parse", "HEAD"], text=True
+    ).strip()
     root.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=root.parent, prefix=f".{root.name}-") as temporary:
         staging = Path(temporary) / root.name
         staging.mkdir()
         rows = convert_tasks(
-            staging, hf_revision=hf_revision, min_grade=min_grade, limit=limit
+            staging, hf_revision=revision, min_grade=min_grade, limit=limit
         )
         counts = write_partitions(staging, rows)
+        write_text(
+            staging / "all.converted.json",
+            json.dumps(
+                {
+                    "hf_repo": HF_DATASET,
+                    "split": "train",
+                    "revision": revision,
+                    "translator_revision": converter_revision,
+                    "min_grade": min_grade,
+                    "limit": limit,
+                    "seed": SPLIT_SEED,
+                    "eval_fraction": EVAL_SPLIT_FRACTION,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        )
         previous = Path(temporary) / "previous"
         if root.exists():
             root.rename(previous)
