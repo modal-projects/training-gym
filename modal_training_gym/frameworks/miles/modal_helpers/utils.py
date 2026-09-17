@@ -50,6 +50,7 @@ def build_train_cmd(
     eval_dataset=None,
     dataset_path=None,
     eval_dataset_path=None,
+    script: str | None = None,
 ) -> str:
     return _build_train_cmd(
         miles_cfg,
@@ -61,4 +62,5 @@ def build_train_cmd(
         eval_dataset_path=eval_dataset_path,
         model_script_attr="miles_model_script",
         model_args_command=model_args_command(miles_cfg, miles_root),
+        script=script,
     )

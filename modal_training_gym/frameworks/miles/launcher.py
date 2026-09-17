@@ -457,36 +457,14 @@ def apply_source_overlays(image: Image, miles: MilesRecipe) -> Image:
     return image
 
 
-def build_miles_app(
-    *,
-    training_run_id: str,
-    miles: MilesRecipe,
-    model: ModelConfig,
-    dataset: DatasetConfig,
-    eval_dataset: DatasetConfig | None = None,
-    checkpoint: Checkpoint | None = None,
-    name: str | None = None,
-    group_id: str | None = None,
-) -> App:
-    app_name = name or miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
-    volume_prefix = miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
-    if miles.is_tinker_gateway:
-        raise TrainingGymConfigError(
-            f"{type(miles).__name__}(multi_lora_n_adapters="
-            f"{miles.multi_lora_n_adapters}) serves Miles' Tinker gateway "
-            "(serve_tinker.py) and cannot run as a dataset-driven training job; "
-            "it is not supported by TrainConfig.train()."
-        )
-    MilesRecipe._validate_datasets(dataset, eval_dataset)
-    dataset_path = MilesRecipe._resolve_data_paths(dataset)
-    eval_dataset_path = (
-        MilesRecipe._resolve_data_paths(eval_dataset)
-        if eval_dataset is not None
-        else None
-    )
+def build_miles_source_image(miles: MilesRecipe) -> Image:
+    """Miles base image with the recipe's patches and source overlays applied.
 
-    _caller_module, caller_script = resolve_caller_context()
-
+    Layers, in order: the pinned ``docker_image`` with the gym's built-in
+    patches, ``patch_files``, a ``local_miles`` checkout, ``sglang_git_ref`` /
+    ``miles_git_ref`` overlays, ``image_run_commands``, and ``image_overlay``
+    (consumed here so the callable is not shipped to the container).
+    """
     image = _build_miles_base_image(miles)
 
     for patch_file in miles.patch_files:
@@ -521,6 +499,40 @@ def build_miles_app(
     if miles.image_overlay is not None:
         image = miles.image_overlay(image)
         miles.image_overlay = None
+    return image
+
+
+def build_miles_app(
+    *,
+    training_run_id: str,
+    miles: MilesRecipe,
+    model: ModelConfig,
+    dataset: DatasetConfig,
+    eval_dataset: DatasetConfig | None = None,
+    checkpoint: Checkpoint | None = None,
+    name: str | None = None,
+    group_id: str | None = None,
+) -> App:
+    app_name = name or miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
+    volume_prefix = miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
+    if miles.is_tinker_gateway:
+        raise TrainingGymConfigError(
+            f"{type(miles).__name__}(multi_lora_n_adapters="
+            f"{miles.multi_lora_n_adapters}) serves Miles' Tinker gateway "
+            "(serve_tinker.py) and cannot run as a dataset-driven training job; "
+            "it is not supported by TrainConfig.train()."
+        )
+    MilesRecipe._validate_datasets(dataset, eval_dataset)
+    dataset_path = MilesRecipe._resolve_data_paths(dataset)
+    eval_dataset_path = (
+        MilesRecipe._resolve_data_paths(eval_dataset)
+        if eval_dataset is not None
+        else None
+    )
+
+    _caller_module, caller_script = resolve_caller_context()
+
+    image = build_miles_source_image(miles)
 
     if isinstance(dataset, HarborDataset) or isinstance(eval_dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")

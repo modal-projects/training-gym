@@ -537,9 +537,16 @@ def build_train_cmd(
     eval_dataset_path: str | None = None,
     model_script_attr: str,
     model_args_command: str = "",
+    script: str | None = None,
 ) -> str:
-    """Build the Ray job entrypoint, sourcing model arch args if needed."""
-    train_script = f"{root}/{'train_async.py' if cfg.async_mode else 'train.py'}"
+    """Build the Ray job entrypoint, sourcing model arch args if needed.
+
+    ``script`` overrides the framework entrypoint (``train.py`` /
+    ``train_async.py``) with another script under ``root``.
+    """
+    if script is None:
+        script = "train_async.py" if cfg.async_mode else "train.py"
+    train_script = f"{root}/{script}"
     args = shlex.join(
         cfg.cli_args(
             dataset=dataset,
