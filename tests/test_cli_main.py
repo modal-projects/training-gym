@@ -23,9 +23,11 @@ def test_root_help_lists_existing_commands_by_panel(runner):
     assert "Utilities:" in result.stdout
     assert "Training runs:" in result.stdout
     assert "Skills:" in result.stdout
+    assert "Trackio:" in result.stdout
     for command in (
         "run",
         "skills",
+        "trackio",
         "setup",
         "open",
         "set-password",
@@ -128,6 +130,70 @@ def test_open_dispatches_to_existing_function(runner, monkeypatch):
 
     assert result.exit_code == 0
     open_dashboard.assert_called_once_with()
+
+
+def test_trackio_setup_dispatches_to_existing_function(runner, monkeypatch):
+    setup_trackio = Mock()
+    monkeypatch.setattr("modal_training_gym.cli.trackio.setup_trackio", setup_trackio)
+
+    result = runner.invoke(cli_module.entrypoint_cli, ["trackio", "setup"])
+
+    assert result.exit_code == 0
+    setup_trackio.assert_called_once_with()
+
+
+def test_trackio_open_dispatches_to_existing_function(runner, monkeypatch):
+    open_trackio = Mock()
+    monkeypatch.setattr("modal_training_gym.cli.trackio.open_trackio", open_trackio)
+
+    result = runner.invoke(cli_module.entrypoint_cli, ["trackio", "open"])
+
+    assert result.exit_code == 0
+    open_trackio.assert_called_once_with()
+
+
+def test_setup_trackio_deploys_and_prints_url(monkeypatch, capsys):
+    from modal_training_gym.cli.trackio import setup_trackio
+    from modal_training_gym.common.trackio import TrackioConfig
+
+    url = "https://example--training-gym-trackio.modal.run"
+    deploy = Mock(return_value=TrackioConfig(server_url=url, dashboard_url=url))
+    monkeypatch.setattr(TrackioConfig, "deploy_to_modal", deploy)
+
+    assert setup_trackio() == url
+    deploy.assert_called_once_with()
+    assert url in capsys.readouterr().out
+
+
+def test_open_trackio_opens_deployed_url(monkeypatch, capsys):
+    from modal_training_gym.cli.trackio import open_trackio
+
+    url = "https://example--training-gym-trackio.modal.run"
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio.deployed_trackio_url",
+        lambda: url,
+    )
+    open_browser = Mock()
+    monkeypatch.setattr("modal_training_gym.cli.trackio.webbrowser.open", open_browser)
+
+    assert open_trackio() == url
+    open_browser.assert_called_once_with(url)
+    assert url in capsys.readouterr().out
+
+
+def test_open_trackio_prints_guidance_when_missing(monkeypatch, capsys):
+    from modal_training_gym.cli.trackio import open_trackio
+
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio.deployed_trackio_url",
+        lambda: None,
+    )
+    open_browser = Mock()
+    monkeypatch.setattr("modal_training_gym.cli.trackio.webbrowser.open", open_browser)
+
+    assert open_trackio() is None
+    open_browser.assert_not_called()
+    assert "training-gym trackio setup" in capsys.readouterr().out
 
 
 def test_set_proxy_auth_dispatches_to_existing_function(runner, monkeypatch):

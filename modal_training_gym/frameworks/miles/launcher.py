@@ -36,6 +36,7 @@ from modal_training_gym.common.metrics import (
     metric_secrets,
     preflight_metric,
 )
+from modal_training_gym.common.trackio import resolve_trackio_destination
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import (
@@ -517,6 +518,8 @@ def build_miles_app(
     if isinstance(dataset, HarborDataset) or isinstance(eval_dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
+    if miles.metrics is not None and miles.metrics.provider == "trackio":
+        resolve_trackio_destination(miles.metrics)
     image = apply_metric_image(image, miles.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")

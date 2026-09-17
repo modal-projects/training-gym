@@ -127,7 +127,7 @@ train_dataset = AgentTaskDataset(DATA_ROOT / f"{TRAIN_SUBSET}.jsonl")
 # - `eval_interval` and `save_interval`: evaluation and checkpoint frequency.
 #
 # Evaluation uses the same agent loop and verifier on the held-out tasks.
-# Set up Trackio and the dashboard with `uv run training-gym setup` before
+# Run `uv run training-gym setup` and `uv run training-gym trackio setup` before
 # launching to inspect metrics and trajectories.
 
 recipe = Qwen3_6_27B_Recipe_Agentic(

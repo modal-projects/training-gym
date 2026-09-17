@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import pytest
-
+import inspect
 import sys
 import threading
 import types
 from dataclasses import fields
 from importlib.util import find_spec
 from typing import Any
+
+import pytest
 
 from modal_training_gym.common.metrics import apply_metric_image
 from modal_training_gym.common.errors import TrainingGymConfigError
@@ -17,6 +18,8 @@ from modal_training_gym.common.trackio import (
     require_trackio_destination,
     resolve_trackio_destination,
 )
+from modal_training_gym.frameworks.miles.launcher import build_miles_app
+from modal_training_gym.frameworks.slime.launcher import build_slime_app
 
 
 def test_trackio_config_is_provider_specific_without_provider_or_label_fields():
@@ -415,6 +418,25 @@ def test_a_bare_config_resolves_to_the_deployed_server(monkeypatch):
     assert config.dashboard_url == "https://trackio.example"
     # Ingestion authenticates with the deployed server's write token.
     assert config.modal_secret_name == "_training-gym-trackio-write-token"
+
+
+@pytest.mark.parametrize(
+    ("build_app", "metrics"),
+    [
+        (build_slime_app, "slime.metrics"),
+        (build_miles_app, "miles.metrics"),
+    ],
+)
+def test_launcher_resolves_setup_only_trackio_before_preflight(build_app, metrics):
+    """preflight_trackio only asserts a destination, and it runs in-container.
+
+    Both launchers must resolve a setup-only TrackioConfig first, or Miles
+    raises and metrics never leave the training container.
+    """
+    source = inspect.getsource(build_app)
+    assert source.index(f"resolve_trackio_destination({metrics})") < source.index(
+        f"apply_metric_image(image, {metrics})"
+    )
 
 
 def test_an_explicit_destination_is_left_alone(monkeypatch):

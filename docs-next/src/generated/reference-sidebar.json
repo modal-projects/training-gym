@@ -143,6 +143,10 @@
       "link": "/reference/cli/skills"
     },
     {
+      "label": "training-gym trackio",
+      "link": "/reference/cli/trackio"
+    },
+    {
       "label": "training-gym setup",
       "link": "/reference/cli/setup"
     },

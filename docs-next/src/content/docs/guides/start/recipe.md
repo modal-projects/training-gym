@@ -21,7 +21,7 @@ recipe = Qwen3_5_4B_Recipe()
 
 We provide optimized recipes for all supported models in the Training Gym, but note that they are easily extensible to fit whatever use case you may have. Under the hood, each recipe is backed by one of two backend frameworks: [Miles](https://github.com/radixark/miles) or [Slime](https://github.com/THUDM/slime). All recipes allow you to specify framework-native parameters using the corresponding recipe fields.
 
-This guide will focus on the most important ones, but feel free to check out the full list for each model on their reference page (e.g., [Qwen3.8 27B](https://gym.modal.dev/reference/qwen3_8_27b_recipe)).
+This guide will focus on the most important ones. However, you can see the full lists for each of the base classes (i.e., [MilesRecipe](https://gym.modal.dev/reference/milesrecipe) and [SlimeRecipe](https://gym.modal.dev/reference/slimerecipe)).
 
 See [this guide](https://gym.modal.dev/guides/metric) for more details on logging integrations.
 
@@ -30,7 +30,7 @@ See [this guide](https://gym.modal.dev/guides/metric) for more details on loggin
 ```python
 recipe = Qwen3_5_4B_Recipe(
     # ...
-    gpu_type="H100",
+    gpu_type="B300",
     actor_num_nodes=1,
     actor_num_gpus_per_node=8,
     colocate=True,
@@ -40,7 +40,20 @@ recipe = Qwen3_5_4B_Recipe(
 The Gym runs your training workloads across one or more nodes on Modal, each with one or more GPUs. Smaller models (i.e., tens of billions of parameters) can be trained on a single node, while larger models may require a [multi-node cluster](https://modal.com/docs/guide/multi-node-training).
 
 Each recipe automatically provisions the smallest cluster shape that will work, but you may want to increase this to maximize throughput. You can choose any type from [Modal’s supported GPUs](https://modal.com/docs/guide/gpu#picking-a-gpu). Also, note that you may not actually need (or even want!) multiple nodes: we suggest setting `actor_num_gpus_per_node` to the [maximum amount](https://modal.com/docs/guide/gpu#specifying-gpu-count) to minimize unnecessary communication between nodes.
+
 Actor parameters pertain to your training cluster, and rollout parameters your rollout cluster. When `colocate` is set to `True`, these are one and the same. When set to `False`, this will create a separate cluster for inference (i.e., disaggregated, async RL), so be sure you have the budget for it!
+
+```python
+Qwen3_5_4B_Recipe(
+    # ...
+    gpu_type="B300",
+    colocate=False,
+    actor_num_nodes=1,
+    actor_num_gpus_per_node=8,
+    rollout_num_gpus=8,
+    rollout_num_gpus_per_engine=8,
+)
+```
 
 You can also tune how model computations are parallelized and sharded across multiple GPUs. These parameters can be difficult to determine and may differ for each model, so we provide defaults in each model’s recipe. However, if you’re experiencing out-of-memory errors or want complete control over how your GPUs are utilized, you can manually set these yourself:
 
@@ -49,6 +62,10 @@ Qwen3_5_4B_Recipe(
     # ...
     tensor_model_parallel_size=2,
     sequence_parallel=True,
+    pipeline_model_parallel_size=1,
+    context_parallel_size=1,
+    expert_model_parallel_size=1,
+    expert_tensor_parallel_size=1,
 )
 ```
 

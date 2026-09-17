@@ -18,6 +18,7 @@ from .errors import CLIError, ExitCode
 from .output import print_error, print_json
 from .run import run_group
 from .skills import skills_group
+from .trackio import trackio_group
 
 
 @click.group(
@@ -31,6 +32,7 @@ def entrypoint_cli() -> None:
 def _register_commands() -> None:
     entrypoint_cli.add_command(run_group, panel="Training runs")
     entrypoint_cli.add_command(skills_group, panel="Skills")
+    entrypoint_cli.add_command(trackio_group, panel="Trackio")
     entrypoint_cli.add_command(setup_command, panel="Configuration")
     entrypoint_cli.add_command(set_password_command, panel="Configuration")
     entrypoint_cli.add_command(set_proxy_auth_command, panel="Configuration")
