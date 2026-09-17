@@ -20,8 +20,6 @@ from typing import Any
 
 import modal
 
-from modal_training_gym import DatasetConfig
-
 from modal_training_gym.common import hf_secrets
 from modal_training_gym.common.dataset_sampling import sample_rows, split_rows
 from modal_training_gym.frameworks.slime.launcher import (
@@ -42,10 +40,7 @@ SPLIT_SEED = 0
 # Train keeps at least this many task groups of each language, so moving a
 # group to eval never leaves train without that language.
 MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE = 2
-# ``mixed`` keeps a task when all n_samples episodes were gradeable and the
-# model solved it at least once but not every time.
 MIXED_CRITERION = "fully_gradeable_and_0_lt_solved_lt_n_samples"
-# Source fields used for splitting and analysis.
 SOURCE_COLUMNS = ("repo", "language", "license", "created_at")
 DEFAULT_MIXED_RECIPE_SLUG = "qwen3-6-27b-agentic"
 
@@ -62,26 +57,6 @@ def dataset_root_name(value: str) -> str:
     if not value or value in {".", ".."} or "/" in value or "\\" in value:
         raise ValueError(f"dataset root must be a single directory name, got {value!r}")
     return value
-
-
-class PreparedTaskSubset(DatasetConfig):
-    def __init__(self, path: Path):
-        self.path = path
-
-    def input_key(self) -> str:
-        return "prompt"
-
-    def label_key(self) -> str:
-        return "label"
-
-    def apply_chat_template(self) -> bool:
-        return False
-
-    def rows(self):
-        with self.path.open() as source:
-            for line in source:
-                if line.strip():
-                    yield json.loads(line)
 
 
 def source_metadata(row: dict[str, Any]) -> dict[str, Any]:

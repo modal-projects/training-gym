@@ -10,15 +10,16 @@
 # [Harbor](https://github.com/laude-institute/harbor) sandboxes on Modal.
 # Passing the task's tests earns a reward of one; otherwise, zero.
 
+import json
+
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
 import modal
 
-from tutorials.coding_agent.dataset import PreparedTaskSubset
-
 from modal_training_gym import (
+    DatasetConfig,
     Qwen3_6_27B,
     Qwen3_6_27B_Recipe_Agentic,
     TrackioConfig,
@@ -56,19 +57,38 @@ MAX_STEPS = 2 if SMOKE else 75
 RUN_NAME = f"coding-agent-{uuid4().hex}"
 DATA_ROOT = Path("/data") / DATASET_ROOT
 
-# Read the prepared rows without applying a chat template; the agent loop
-# formats conversations. Evaluation reads the prepared files via `eval_config`.
+# `AgentTaskDataset` reads the prepared JSONL, preserving prompts, labels,
+# and task metadata. The agent loop formats conversations, so the reader
+# disables chat templating. Evaluation reads the files via `eval_config`.
 
-train_dataset = PreparedTaskSubset(DATA_ROOT / f"{TRAIN_SUBSET}.jsonl")
+
+class AgentTaskDataset(DatasetConfig):
+    def __init__(self, path: Path):
+        self.path = path
+
+    def input_key(self) -> str:
+        return "prompt"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def apply_chat_template(self) -> bool:
+        return False
+
+    def rows(self):
+        with self.path.open() as source:
+            for line in source:
+                if line.strip():
+                    yield json.loads(line)
+
+
+train_dataset = AgentTaskDataset(DATA_ROOT / f"{TRAIN_SUBSET}.jsonl")
 
 # The recipe uses one B300 for training and one for rollouts. These settings
 # configure GRPO and the episode budget. Set up Trackio and the dashboard
 # with `uv run training-gym setup` before launching.
 
 recipe = Qwen3_6_27B_Recipe_Agentic(
-    image_overlay=lambda image: image.add_local_python_source(
-        "tutorials.coding_agent", copy=True
-    ),
     metrics=TrackioConfig(project="coding-agent"),
     num_rollout=NUM_ROLLOUT,
     rollout_batch_size=ROLLOUT_BATCH_SIZE,
