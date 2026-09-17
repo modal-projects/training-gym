@@ -343,8 +343,6 @@ def _stitch_trainer_image(train: StitchTrainConfig) -> modal.Image:
     if train.image_overlay is not None:
         image = train.image_overlay(image)
         object.__setattr__(train, "image_overlay", None)
-    # Mount the package so the trainer and the Ray workers can import the hooks.
-    image = image.add_local_python_source("modal_training_gym", copy=True)
     # A model's download/convert may shell out to the shared tools, as on every
     # other framework image.
     return mount_tools_dir(image)
@@ -586,6 +584,7 @@ def build_stitch_app(
             tags["wandb_group"] = modal_tag_value(recipe.metrics.group)
 
     image = apply_metric_image(_stitch_trainer_image(train_recipe), recipe.metrics)
+    image = image.add_local_python_source("modal_training_gym")
     server_image = serving_image.build_serving_image(
         hf_cache_path=str(HF_CACHE_PATH),
         delta_volume_name=delta_volume_name,
