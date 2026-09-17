@@ -14,8 +14,6 @@ import re
 import shutil
 import sys
 from collections import Counter
-from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -25,6 +23,7 @@ import modal
 from modal_training_gym import DatasetConfig
 
 from modal_training_gym.common import hf_secrets
+from modal_training_gym.common.dataset_sampling import sample_rows, split_rows
 from modal_training_gym.frameworks.slime.launcher import (
     SLIME_IMAGE,
     _slime_git_overlay_command,
@@ -46,24 +45,13 @@ MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE = 2
 # ``mixed`` keeps a task when all n_samples episodes were gradeable and the
 # model solved it at least once but not every time.
 MIXED_CRITERION = "fully_gradeable_and_0_lt_solved_lt_n_samples"
-# Row columns kept under ``metadata.<namespace>`` for split balancing and analysis.
+# Source fields used for splitting and analysis.
 SOURCE_COLUMNS = ("repo", "language", "license", "created_at")
 DEFAULT_MIXED_RECIPE_SLUG = "qwen3-6-27b-agentic"
 
 
-@dataclass(frozen=True)
-class SweDataset:
-    hf_repo: str
-    split: str
-    key: str
-
-
-SWE_DATASETS = {
-    "swe-rebench-v2": SweDataset(
-        hf_repo="nebius/SWE-rebench-V2", split="train", key="swe_rebench_v2"
-    ),
-}
-DEFAULT_SWE_DATASET = "swe-rebench-v2"
+HF_DATASET = "nebius/SWE-rebench-V2"
+DATASET_ROOT = "swe_rebench_v2"
 
 
 def data_volume_name(recipe: Qwen3_6_27B_Recipe_Agentic) -> str:
@@ -96,20 +84,20 @@ class PreparedTaskSubset(DatasetConfig):
                     yield json.loads(line)
 
 
-def source_metadata(row: dict[str, Any], namespace: str) -> dict[str, Any]:
-    value = (row.get("metadata") or {}).get(namespace) or {}
+def source_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    value = (row.get("metadata") or {}).get("source") or {}
     return value if isinstance(value, dict) else {}
 
 
-def language(row: dict[str, Any], namespace: str) -> str:
-    metadata = source_metadata(row, namespace)
+def language(row: dict[str, Any]) -> str:
+    metadata = source_metadata(row)
     return str(metadata.get("language_bucket") or metadata.get("language") or "?")
 
 
-def task_group(row: dict[str, Any], namespace: str) -> str:
-    repo = source_metadata(row, namespace).get("repo")
+def task_group(row: dict[str, Any]) -> str:
+    repo = source_metadata(row).get("repo")
     if not repo:
-        raise ValueError(f"converted row is missing metadata.{namespace}.repo")
+        raise ValueError("converted row is missing metadata.source.repo")
     return str(repo)
 
 
@@ -146,36 +134,30 @@ def write_partitions(
     root: Path,
     rows: list[dict[str, Any]],
     *,
-    metadata_namespace: str = "source",
     seed: int = SPLIT_SEED,
 ) -> dict[str, int]:
-    source = PreparedTaskSubset(root / "all.converted.jsonl")
-    train, evaluation = source.snapshot(rows).split(
+    train_rows, eval_rows = split_rows(
+        rows,
         eval_fraction=EVAL_SPLIT_FRACTION,
         seed=seed,
-        group_key=lambda row: task_group(row, metadata_namespace),
-        stratify_key=lambda row: language(row, metadata_namespace),
+        group_key=task_group,
+        stratify_key=language,
         min_train_groups=MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE,
     )
-    train_rows, eval_rows = list(train.rows()), list(evaluation.rows())
     outputs = {"eval": eval_rows, "train-full": train_rows}
     for prefix, pool, sizes in (
-        ("eval", evaluation, EVAL_SPLIT_SIZES),
-        ("train", train, TRAIN_SPLIT_SIZES),
+        ("eval", eval_rows, EVAL_SPLIT_SIZES),
+        ("train", train_rows, TRAIN_SPLIT_SIZES),
     ):
-        pool_size = len(list(pool.rows()))
-        available = [size for size in sizes if size <= pool_size]
-        subsets = pool.nested_subsets(
-            available,
-            seed=seed,
-            stratify_key=lambda row: language(row, metadata_namespace),
-        )
+        pool_size = len(pool)
         for size in sizes:
             if size > pool_size:
                 (root / f"{prefix}-{size}.jsonl").unlink(missing_ok=True)
                 print(f"[swe] skipping {prefix}-{size}: only {pool_size} {prefix} rows")
                 continue
-            outputs[f"{prefix}-{size}"] = list(subsets[size].rows())
+            outputs[f"{prefix}-{size}"] = sample_rows(
+                pool, size, seed=seed, stratify_key=language
+            )
     staged: list[tuple[Path, Path]] = []
     for name, subset in outputs.items():
         final = root / f"{name}.jsonl"
@@ -324,139 +306,81 @@ def write_mixed_subset(
     return output_path, provenance
 
 
-class SweBenchSource:
-    def __init__(
-        self,
-        *,
-        dataset: SweDataset,
-        hf_revision: str | None,
-        metadata_namespace: str,
-        translator_revision: str,
-        min_grade: str | None,
-        limit: int | None,
-    ) -> None:
-        self.dataset = dataset
-        self.hf_revision = hf_revision
-        self.metadata_namespace = metadata_namespace
-        self.translator_revision = translator_revision
-        self.min_grade = min_grade
-        self.limit = limit
+def convert_tasks(
+    root: Path,
+    *,
+    hf_revision: str | None = None,
+    min_grade: str | None = "A",
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    from datasets import load_dataset
 
-    def resolve_revision(self) -> str:
-        from huggingface_hub import HfApi
+    if "/root/slime" not in sys.path:
+        sys.path.insert(0, "/root/slime")
+    from agentic_rl.environment.convert2slime import harbor, swerebench
 
-        return HfApi().dataset_info(self.dataset.hf_repo, revision=self.hf_revision).sha
+    source = load_dataset(
+        HF_DATASET, split="train", revision=hf_revision, streaming=True
+    )
+    rows = []
+    skipped: Counter[str] = Counter()
+    for row in source:
+        if limit is not None and len(rows) >= limit:
+            break
+        if not swerebench._passes_quality(row, min_grade):
+            skipped["quality grade"] += 1
+            continue
+        task_dir = root / "tasks" / swerebench._safe_id(row["instance_id"])
+        try:
+            swerebench.build_task_dir(row, task_dir)
+            converted = harbor.translate_task(task_dir, dataset=DATASET_ROOT)
+        except (swerebench.SkipRow, harbor.SkipTask) as exc:
+            skipped[str(exc)] += 1
+            shutil.rmtree(task_dir, ignore_errors=True)
+            continue
+        metadata = converted.setdefault("metadata", {})
+        metadata["task_path"] = f"{root.name}/tasks/{task_dir.name}"
+        metadata["source"] = {key: row[key] for key in SOURCE_COLUMNS if row.get(key)}
+        rows.append(converted)
+        if len(rows) % 500 == 0:
+            print(
+                f"[swe] converted {len(rows)} tasks ({sum(skipped.values())} skipped)"
+            )
+    if not rows:
+        raise RuntimeError("conversion produced no rows")
+    write_jsonl(root / "all.converted.jsonl", rows)
+    for reason, count in skipped.most_common():
+        print(f"[swe] skipped {count} rows: {reason}")
+    return rows
 
-    def rows(self, revision: str) -> Iterator[dict[str, Any]]:
-        from datasets import load_dataset
 
-        for row in load_dataset(
-            self.dataset.hf_repo,
-            split=self.dataset.split,
-            revision=revision,
-            streaming=True,
-        ):
-            yield dict(row)
-
-    def source_record(self, revision: str) -> dict[str, Any]:
-        return {
-            "hf_repo": self.dataset.hf_repo,
-            "split": self.dataset.split,
-            "revision": revision,
-            "key": self.dataset.key,
-            "metadata_namespace": self.metadata_namespace,
-            "translator_revision": self.translator_revision,
-            "min_grade": self.min_grade,
-            "limit": self.limit,
-        }
-
-    @staticmethod
-    def cached_rows(root: Path, source: dict[str, Any]) -> list[dict[str, Any]] | None:
-        record_path = root / "all.converted.json"
-        converted_path = root / "all.converted.jsonl"
-        if not (record_path.is_file() and converted_path.is_file()):
-            return None
-        if json.loads(record_path.read_text(encoding="utf-8")) != source:
-            return None
-        return read_jsonl(converted_path)
-
-    def convert(self, root: Path, revision: str) -> list[dict[str, Any]]:
-        if "/root/slime" not in sys.path:
-            sys.path.insert(0, "/root/slime")
-        from agentic_rl.environment.convert2slime import (  # type: ignore[import-not-found]
-            harbor,
-            swerebench,
+def prepare_dataset(
+    root: Path,
+    *,
+    hf_revision: str | None = None,
+    min_grade: str | None = "A",
+    limit: int | None = None,
+) -> dict[str, int]:
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    root.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=root.parent, prefix=f".{root.name}-") as temporary:
+        staging = Path(temporary) / root.name
+        staging.mkdir()
+        rows = convert_tasks(
+            staging, hf_revision=hf_revision, min_grade=min_grade, limit=limit
         )
-
-        tasks_root = root / "tasks"
-        rows: list[dict[str, Any]] = []
-        skipped: Counter[str] = Counter()
-        for row in self.rows(revision):
-            if self.limit is not None and len(rows) >= self.limit:
-                break
-            if not swerebench._passes_quality(row, self.min_grade):
-                skipped["quality grade"] += 1
-                continue
-            task_dir = tasks_root / swerebench._safe_id(row["instance_id"])
-            try:
-                swerebench.build_task_dir(row, task_dir)
-                converted = harbor.translate_task(task_dir, dataset=self.dataset.key)
-            except (swerebench.SkipRow, harbor.SkipTask) as exc:
-                skipped[str(exc)] += 1
-                shutil.rmtree(task_dir, ignore_errors=True)
-                continue
-            metadata = converted.setdefault("metadata", {})
-            metadata["task_path"] = f"{root.name}/tasks/{task_dir.name}"
-            if self.metadata_namespace in metadata:
-                raise ValueError(
-                    f"metadata namespace {self.metadata_namespace!r} conflicts with converted task metadata"
-                )
-            metadata[self.metadata_namespace] = {
-                key: row[key] for key in SOURCE_COLUMNS if row.get(key)
-            }
-            rows.append(converted)
-            if len(rows) % 500 == 0:
-                print(
-                    f"[swe] converted {len(rows)} tasks ({sum(skipped.values())} skipped)"
-                )
-        if not rows:
-            raise RuntimeError("conversion produced no rows")
-        write_jsonl(root / "all.converted.jsonl", rows)
-        if skipped:
-            print(f"[swe] skipped {sum(skipped.values())} rows:")
-            for reason, count in skipped.most_common():
-                print(f"{count:>8}  {reason}")
-        return rows
-
-    def partition(self, root: Path) -> dict[str, int]:
-        root.mkdir(parents=True, exist_ok=True)
-        revision = self.resolve_revision()
-        source = self.source_record(revision)
-        rows = self.cached_rows(root, source)
-        if rows is None:
-            with TemporaryDirectory(
-                dir=root.parent, prefix=f".{root.name}-"
-            ) as temporary:
-                staging = Path(temporary) / root.name
-                staging.mkdir()
-                rows = self.convert(staging, revision)
-                counts = write_partitions(
-                    staging, rows, metadata_namespace=self.metadata_namespace
-                )
-                write_text(
-                    staging / "all.converted.json",
-                    json.dumps(source, indent=2, sort_keys=True) + "\n",
-                )
-                previous = Path(f"{temporary}.previous")
-                root.rename(previous)
-                try:
-                    staging.rename(root)
-                except OSError:
-                    previous.rename(root)
-                    raise
-                shutil.rmtree(previous, ignore_errors=True)
-                return counts
-        return write_partitions(root, rows, metadata_namespace=self.metadata_namespace)
+        counts = write_partitions(staging, rows)
+        previous = Path(temporary) / "previous"
+        if root.exists():
+            root.rename(previous)
+        try:
+            staging.rename(root)
+        except OSError:
+            if previous.exists():
+                previous.rename(root)
+            raise
+    return counts
 
 
 def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
@@ -478,11 +402,16 @@ def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
     )
 
 
-def _partition_remote(
-    root: str, dataset: str, kwargs: dict[str, Any], volume_name: str
+def _prepare_remote(
+    root: str,
+    *,
+    hf_revision: str | None,
+    min_grade: str | None,
+    limit: int | None,
+    volume_name: str,
 ):
-    counts = SweBenchSource(dataset=SWE_DATASETS[dataset], **kwargs).partition(
-        Path(root)
+    counts = prepare_dataset(
+        Path(root), hf_revision=hf_revision, min_grade=min_grade, limit=limit
     )
     modal.Volume.from_name(volume_name).commit()
     return counts
@@ -523,15 +452,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--dataset-root",
-        help="Directory under /data holding the subsets. prepare defaults this "
-        "to the dataset's key.",
+        default=DATASET_ROOT,
+        help="Directory under /data holding the prepared tasks and subsets.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     prepare = subparsers.add_parser("prepare")
-    prepare.add_argument(
-        "--dataset", choices=sorted(SWE_DATASETS), default=DEFAULT_SWE_DATASET
-    )
     prepare.add_argument("--hf-revision")
     prepare.add_argument(
         "--min-grade",
@@ -542,7 +468,6 @@ def main() -> None:
     prepare.add_argument(
         "--limit", type=int, help="Stop after converting this many tasks."
     )
-    prepare.add_argument("--metadata-namespace", default="source")
 
     mixed = subparsers.add_parser("mixed")
     mixed.add_argument("--source", required=True)
@@ -555,10 +480,6 @@ def main() -> None:
     args = parser.parse_args()
 
     dataset_root = args.dataset_root
-    if args.command == "prepare":
-        dataset_root = dataset_root or SWE_DATASETS[args.dataset].key
-    if dataset_root is None:
-        parser.error("--dataset-root is required for mixed")
     try:
         dataset_root = dataset_root_name(dataset_root)
     except ValueError as exc:
@@ -582,16 +503,15 @@ def main() -> None:
     }
     if args.command == "prepare":
         remote_options["secrets"] = hf_secrets()
-        remote = app.function(**remote_options)(_partition_remote)
-        kwargs = {
-            "hf_revision": args.hf_revision,
-            "metadata_namespace": args.metadata_namespace,
-            "translator_revision": training_recipe.slime_git_revision,
-            "min_grade": None if args.min_grade.lower() == "none" else args.min_grade,
-            "limit": args.limit,
-        }
+        remote = app.function(**remote_options)(_prepare_remote)
         with app.run():
-            counts = remote.remote(root, args.dataset, kwargs, volume_name)
+            counts = remote.remote(
+                root,
+                hf_revision=args.hf_revision,
+                min_grade=None if args.min_grade.lower() == "none" else args.min_grade,
+                limit=args.limit,
+                volume_name=volume_name,
+            )
         print("\n".join(f"{name}: {count}" for name, count in counts.items()))
         return
 

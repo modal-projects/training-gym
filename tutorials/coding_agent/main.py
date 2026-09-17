@@ -28,7 +28,7 @@ from modal_training_gym import (
 # ## Prepare sandboxed tasks
 #
 # `dataset.py` converts SWE-rebench into Harbor tasks and uses
-# `DatasetConfig.split()` and `nested_subsets()` to prepare balanced,
+# the shared splitting and sampling utilities to prepare balanced,
 # repository-disjoint train/eval data. The converter grades Python tasks.
 #
 # ```bash
