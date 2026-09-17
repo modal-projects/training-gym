@@ -28,9 +28,7 @@ def _fields(**overrides) -> dict:
 
 
 def test_no_save_path_without_a_save_interval() -> None:
-    """Megatron asserts ``save_interval is not None`` whenever ``save`` is set,
-    and this recipe keeps no trainer checkpoints by default."""
-    fields = _fields()
+    fields = _fields(save_interval=None)
     assert fields.get("save_interval") is None
     assert "save" not in fields
     assert "save_hf" not in fields
@@ -40,6 +38,15 @@ def test_save_path_survives_a_save_interval() -> None:
     fields = _fields(save_interval=10)
     assert fields["save_interval"] == 10
     assert fields["save"]
+
+
+def test_default_recipe_keeps_periodic_exports_for_new_replicas() -> None:
+    recipe = Qwen3_30B_A3B_Stitch_Recipe()
+    fields = recipe.to_payload(model=Qwen3_30B()).fields
+    assert fields["save_interval"] == 10
+    assert fields["save_hf"] == "hf/weight_v{rollout_id:06d}"
+    assert recipe.train.ephemeral_disk == 512 * 1024
+    assert recipe.serve.max_containers is None
 
 
 def test_stitch_reports_miles_phases() -> None:

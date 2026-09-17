@@ -84,5 +84,5 @@ def build_serving_image(
         .run_commands(f"rm -rf {SGLANG_CACHE_PATH}")
         # The serialized Server class carries recipe objects in its closure, so the
         # package has to be importable when Modal deserializes it.
-        .add_local_python_source("modal_training_gym", copy=True)
+        .add_local_python_source("modal_training_gym")
     )

@@ -53,7 +53,10 @@ from modal_training_gym.common.framework import (
     mount_tools_dir,
     resolve_caller_module,
 )
-from modal_training_gym.common.launcher_helpers import compute_save_root
+from modal_training_gym.common.launcher_helpers import (
+    compute_save_root,
+    run_prepare_dataset,
+)
 from modal_training_gym.common.launcher_utils import timing_debug_env
 from modal_training_gym.common.modal_refs import register_modal_cloudpickle_reducers
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
@@ -84,10 +87,14 @@ from modal_training_gym.frameworks.miles.modal_helpers.patches import (
     REPORTING_PATCH_COMMANDS,
     SUBSTEP_TIMING_PATCH_COMMAND,
 )
+from modal_training_gym.frameworks.miles.modal_helpers.utils import (
+    build_train_cmd as build_miles_train_cmd,
+)
 from modal_training_gym.frameworks.stitch import serving_image
 from modal_training_gym.train_recipes.stitch_recipe.pins import (
     MEGATRON_PATH,
     MILES_ROOT,
+    MILES_RUNTIME_PATCHES,
     stitch_install_commands,
 )
 from modal_training_gym.train_recipes.base import BaseTrainRecipe
@@ -109,9 +116,9 @@ SGLANG_PORT = 8001
 # A replica serves for as long as the run does, so it gets the trainer's bound
 # rather than one a long rollout wave can reach.
 SERVER_TIMEOUT = 24 * 60 * MINUTES
-# A replica boots with the app while prepare_checkpoints may still be building
-# its baseline. Leave two minutes of the startup budget for engine initialization,
-# but always allow at least two baseline polls.
+DOWNLOAD_TIMEOUT = 2 * 60 * MINUTES
+DATASET_PREPARATION_TIMEOUT = 2 * 60 * MINUTES
+CHECKPOINT_PREPARATION_TIMEOUT = 6 * 60 * MINUTES
 BASELINE_POLL_SECONDS = 30
 # Ephemeral host-local full HF checkpoint the sidecar patches in place per delta.
 LOCAL_CHECKPOINT_PATH = "/local-checkpoint"
@@ -146,7 +153,7 @@ class _MilesArgs(BaseTrainRecipe):
     :meth:`cli_args`.
     """
 
-    _CONTROL = {"async_mode", "miles_model_script"}
+    _CONTROL = {"async_mode", "miles_model_script", "miles_model_name"}
 
     # Per-run fields the trainer injects (the rest come from the field dict).
     rollout_endpoint_url: str
@@ -155,12 +162,18 @@ class _MilesArgs(BaseTrainRecipe):
     te_precision_config_file: dict | str | None
 
     def __init__(
-        self, fields: dict, *, async_mode: bool, miles_model_script: str
+        self,
+        fields: dict,
+        *,
+        async_mode: bool,
+        miles_model_script: str,
+        miles_model_name: str = "",
     ) -> None:
         for key, val in fields.items():
             setattr(self, key, val)
         self.async_mode = async_mode
         self.miles_model_script = miles_model_script
+        self.miles_model_name = miles_model_name
 
     def _fields(self, **kwargs: Any) -> dict[str, Any]:
         # The fields are already resolved; the dataset/model keywords the base
@@ -170,22 +183,7 @@ class _MilesArgs(BaseTrainRecipe):
 
 
 def _build_train_cmd(cfg: _MilesArgs) -> str:
-    """The miles train command: source the model-arch script for its ``MODEL_ARGS``
-    bash array, then run ``train_async.py`` / ``train.py`` with it plus the args.
-
-    The cookbook dropped its generic builder when it moved to a miles revision
-    whose arch scripts are python (``megatron_model_type``); this repo's miles
-    pin still ships the ``scripts/models/*.sh`` form, which the colocated miles
-    launcher sources the same way.
-    """
-    train_script = f"{MILES_ROOT}/{'train_async.py' if cfg.async_mode else 'train.py'}"
-    if not cfg.miles_model_script:
-        return f"python3 {train_script} {shlex.join(cfg.cli_args())}"
-    inner = (
-        f"source {MILES_ROOT}/{cfg.miles_model_script} && "
-        f"python3 {train_script} ${{MODEL_ARGS[@]}} {shlex.join(cfg.cli_args())}"
-    )
-    return f"bash -c {shlex.quote(inner)}"
+    return build_miles_train_cmd(cfg, MILES_ROOT)
 
 
 def _response_parser_path(model: ModelConfig | None) -> str:
@@ -481,6 +479,7 @@ def build_stitch_app(
     model: ModelConfig,
     dataset: DatasetConfig,
     recipe: StitchRecipe,
+    eval_dataset: DatasetConfig | None = None,
     training_run_id: str = "",
     name: str | None = None,
     group_id: str | None = None,
@@ -506,7 +505,13 @@ def build_stitch_app(
             "from the recipe's source checkpoint, so a resumed trainer and the "
             "pool would disagree on the delta baseline"
         )
-    StitchRecipe._resolve_data_paths(dataset)  # validate dataset paths resolve
+    StitchRecipe._validate_datasets(dataset, eval_dataset)
+    dataset_path = StitchRecipe._resolve_data_paths(dataset)
+    eval_dataset_path = (
+        StitchRecipe._resolve_data_paths(eval_dataset)
+        if eval_dataset is not None
+        else None
+    )
 
     # Serialize the caller's module by value so inline ModelConfig/DatasetConfig
     # subclasses defined in a user script reach the containers.
@@ -538,14 +543,21 @@ def build_stitch_app(
     run_bulletin_root = f"{delta_bulletin_root}/{run_id}"
     # miles owns <run>/updates; stitch owns the pointer beside it.
     update_weight_disk_dir = f"{run_bulletin_root}/updates"
+    save_hf = train_recipe.save_hf if train_recipe.save_interval is not None else None
+    if save_hf:
+        save_hf_path = PurePosixPath(save_hf)
+        if save_hf_path.is_absolute() or ".." in save_hf_path.parts:
+            raise TrainingGymConfigError("train.save_hf must be a run-relative path")
+        if save_hf.format(rollout_id=0) == save_hf:
+            raise TrainingGymConfigError("train.save_hf must include {rollout_id}")
     # What the pool serves is what the trainer exports against: the prepared
     # baseline for a quantized run, else the model's own checkpoint.
     served_model = recipe.served_baseline(model)
     rollout_concurrency = serve_recipe.concurrency
-    baseline_wait_timeout = max(
-        serve_recipe.startup_timeout - 2 * MINUTES,
-        2 * BASELINE_POLL_SECONDS,
+    baseline_wait_timeout = (
+        DOWNLOAD_TIMEOUT + DATASET_PREPARATION_TIMEOUT + CHECKPOINT_PREPARATION_TIMEOUT
     )
+    server_startup_timeout = baseline_wait_timeout + serve_recipe.startup_timeout
     n_train_nodes = train_recipe.actor_num_nodes
     _multi_node = n_train_nodes > 1
 
@@ -594,6 +606,29 @@ def build_stitch_app(
         str(CHECKPOINTS_PATH): checkpoints_volume,
         delta_bulletin_root: delta_volume,
     }
+    server_volumes = {
+        str(HF_CACHE_PATH): hf_cache_volume,
+        serving_image.SGLANG_CACHE_PATH: sglang_cache_volume,
+        str(CHECKPOINTS_PATH): checkpoints_volume,
+        delta_bulletin_root: delta_volume,
+    }
+    for mount_path, volume in serve_recipe.volumes.items():
+        path = PurePosixPath(mount_path)
+        if (
+            not path.is_absolute()
+            or ".." in path.parts
+            or any(
+                path == PurePosixPath(reserved)
+                or path in PurePosixPath(reserved).parents
+                or PurePosixPath(reserved) in path.parents
+                for reserved in server_volumes
+            )
+        ):
+            raise TrainingGymConfigError(
+                f"Serving volume mount {mount_path!r} must be absolute and must "
+                "not overlap another serving volume."
+            )
+        server_volumes[str(path)] = volume
 
     # Optional, per AGENTS.md: a public model needs no HF token.
     hf_secret_list = hf_secrets()
@@ -636,20 +671,14 @@ def build_stitch_app(
         gpu=f"{serve_recipe.gpu}:{serve_recipe.gpus_per_replica}",
         cloud=train_recipe.cloud,
         region=train_recipe.region,
-        volumes={
-            str(HF_CACHE_PATH): hf_cache_volume,
-            serving_image.SGLANG_CACHE_PATH: sglang_cache_volume,
-            # A prepared (quantized) baseline lives on the checkpoints Volume,
-            # so the replicas mount it read-only alongside the bulletin board.
-            str(CHECKPOINTS_PATH): checkpoints_volume,
-            delta_bulletin_root: delta_volume,
-        },
+        volumes=server_volumes,
         secrets=hf_secret_list,
         memory=serve_recipe.memory,
         ephemeral_disk=serve_recipe.ephemeral_disk,
         min_containers=serve_recipe.min_containers,
         max_containers=serve_recipe.max_containers,
         timeout=SERVER_TIMEOUT,
+        startup_timeout=server_startup_timeout,
         scaledown_window=15 * MINUTES,
         serialized=True,
     )
@@ -657,7 +686,7 @@ def build_stitch_app(
         port=SIDECAR_PORT,
         proxy_regions=serve_recipe.proxy_regions,
         exit_grace_period=25,
-        startup_timeout=serve_recipe.startup_timeout,
+        startup_timeout=server_startup_timeout,
     )
     @modal.concurrent(target_inputs=rollout_concurrency)
     class Server:
@@ -667,12 +696,28 @@ def build_stitch_app(
         def startup(self) -> None:
             from cookbook.common import server
 
+            from modal_training_gym.frameworks.stitch.trainer_helpers import (
+                rollout_boot_checkpoint,
+            )
+
+            model_name = local_checkpoint(served_model)
+            delta_volume.reload()
+            model_name, boot_version = rollout_boot_checkpoint(
+                run_dir=run_bulletin_root,
+                run_id=run_id,
+                volume_name=delta_volume_name,
+                baseline=model_name,
+                save_hf=(
+                    save_hf if train_recipe.update_weights_interval == 1 else None
+                ),
+            )
             server.serve_startup(
                 self,
                 # A local path (both the engine's model and the sidecar's delta
                 # baseline): the sidecar can't seed a delta from a repo id, and a
                 # post-boot resolve would race the cache SGLang warms itself.
-                model_name=local_checkpoint(served_model),
+                model_name=model_name,
+                boot_version=boot_version,
                 sglang_args=sglang_server_args,
                 concurrency=rollout_concurrency,
                 bulletin_root=run_bulletin_root,
@@ -781,6 +826,7 @@ def build_stitch_app(
             process.apply_git_patches(
                 train_recipe.megatron_runtime_patches, MEGATRON_PATH, "megatron-patch"
             )
+        process.apply_git_patches(MILES_RUNTIME_PATCHES, MILES_ROOT, "miles-patch")
         # Same reason: a Ray actor on another node re-reads this file by path, so
         # it can't live in rank 0's per-launch tmpdir.
         cfg_yaml_owner = _MilesArgs(
@@ -807,11 +853,9 @@ def build_stitch_app(
         # ``launch(prepare_inputs=False)`` (the default, and what a sweep uses)
         # skips the client-side prep calls, so the trainer prepares its own
         # inputs when they're missing rather than failing on a cold volume.
-        prompt_data, eval_paths = StitchRecipe._resolve_data_paths(dataset)
-        if not Path(prompt_data).exists():
-            print(f"Preparing dataset ({prompt_data})...")
-            dataset.prepare(prompt_data, eval_paths)
-            data_volume.commit()
+        run_prepare_dataset(
+            dataset, eval_dataset, data_volume, dataset_path, eval_dataset_path
+        )
         # Both are no-ops on a warm cache.
         model.download()
         train_recipe.download_model()
@@ -826,11 +870,18 @@ def build_stitch_app(
                     "launch(prepare_inputs=True)) before training"
                 )
 
-        payload = recipe.to_payload(model=model, dataset=dataset)
+        payload = recipe.to_payload(
+            model=model,
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+        )
         cfg = _MilesArgs(
             payload.fields,
             async_mode=payload.async_mode,
             miles_model_script=payload.miles_model_script,
+            miles_model_name=payload.miles_model_name,
         )
         cfg.te_precision_config_file = cfg_yaml_owner.te_precision_config_file
         # The pool's Flash gateway, resolved by whoever launched this call (see
@@ -845,6 +896,8 @@ def build_stitch_app(
             cfg.rollout_endpoint_url, timeout_seconds=serve_recipe.startup_timeout
         )
         cfg.update_weight_disk_dir = update_weight_disk_dir
+        if save_hf:
+            cfg.save_hf = f"{run_bulletin_root}/{save_hf}"
         # Run-scope the saves, as the colocated miles launcher does: the
         # checkpoints Volume is keyed by recipe, so its root is shared by every
         # run of it. (A publish-only run keeps no checkpoints and has no
@@ -978,7 +1031,7 @@ def build_stitch_app(
     @app.function(
         image=image,
         volumes={str(HF_CACHE_PATH): hf_cache_volume},
-        timeout=2 * 60 * MINUTES,
+        timeout=DOWNLOAD_TIMEOUT,
         secrets=hf_secret_list,
         serialized=True,
         name="download",
@@ -1002,7 +1055,7 @@ def build_stitch_app(
             str(HF_CACHE_PATH): hf_cache_volume,
             str(CHECKPOINTS_PATH): checkpoints_volume,
         },
-        timeout=6 * 60 * MINUTES,
+        timeout=CHECKPOINT_PREPARATION_TIMEOUT,
         secrets=hf_secret_list,
         ephemeral_disk=train_recipe.ephemeral_disk,
         serialized=True,
@@ -1052,16 +1105,15 @@ def build_stitch_app(
     @app.function(
         image=image,
         volumes={str(DATA_PATH): data_volume},
-        timeout=2 * 60 * MINUTES,
+        timeout=DATASET_PREPARATION_TIMEOUT,
         secrets=hf_secret_list,
         serialized=True,
         name="prepare_dataset",
     )
     def prepare_dataset() -> None:
-        data_volume.reload()
-        prompt_data, eval_paths = StitchRecipe._resolve_data_paths(dataset)
-        dataset.prepare(prompt_data, eval_paths)
-        data_volume.commit()
+        run_prepare_dataset(
+            dataset, eval_dataset, data_volume, dataset_path, eval_dataset_path
+        )
 
     # Expose the functions as attributes (app.train, app.download, …) the way the
     # other launchers do, so callers address them without the registry.

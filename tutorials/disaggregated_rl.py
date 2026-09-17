@@ -98,7 +98,7 @@ dataset = HuggingFaceDataset(
 # is a change of lineage.
 
 recipe = Qwen3_30B_A3B_Stitch_Recipe(
-    wandb=WandbConfig(project="training-gym", group="stitch-qwen3-30b-a3b-nvfp4"),
+    metrics=WandbConfig(project="training-gym", group="stitch-qwen3-30b-a3b-nvfp4"),
 )
 print(
     f"trainer: {recipe.train.actor_num_nodes} × "

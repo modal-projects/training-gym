@@ -32,7 +32,7 @@ STITCH_ROOT = "/root/stitch"
 # ``from_registry`` per tag string and will not re-pull a moved mutable tag.
 MILES_IMAGE_TAG = "radixark/miles:dev-202607290235"
 MILES_REPO_URL = "https://github.com/modal-projects/miles.git"
-MILES_REPO_REF = "1eb7520018446cb94b7406715f66dff1a271b53b"  # stitch-weight-sync-v0516
+MILES_REPO_REF = "13fa3952ffe682955806cef8e9343b9d7d891af8"
 MILES_ROOT = "/root/miles"
 # Source-only ``megatron.training`` must be on PYTHONPATH; the image installs
 # megatron-core but the trainer imports the source tree.
@@ -45,6 +45,11 @@ MEGATRON_PATH = "/root/Megatron-LM"
 # the reshardable-step patch lets a CPU-offloaded optimizer resume across a
 # changed DP layout.
 MEGATRON_PATCH_DIR = f"{STITCH_ROOT}/cookbook/miles_disagg/patches"
+MILES_RUNTIME_PATCHES = (
+    f"{MEGATRON_PATCH_DIR}/miles-stable-weight-versions.patch",
+    f"{MEGATRON_PATCH_DIR}/miles-seed-baseline-scalars.patch",
+    f"{MEGATRON_PATCH_DIR}/miles-hf-checkpoint-dtypes.patch",
+)
 MEGATRON_R3_DISPATCH_PATCH = f"{MEGATRON_PATCH_DIR}/megatron-r3-dispatch.patch"
 MEGATRON_RESHARDABLE_STEP_PATCH = (
     f"{MEGATRON_PATCH_DIR}/megatron-hdo-dp-reshardable-step.patch"

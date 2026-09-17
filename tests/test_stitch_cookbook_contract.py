@@ -108,6 +108,7 @@ def _trainer_cfg(tmp_path: Path):
         payload.fields,
         async_mode=payload.async_mode,
         miles_model_script=payload.miles_model_script,
+        miles_model_name=payload.miles_model_name,
     )
     cfg.rollout_endpoint_url = "https://pool.modal.run"
     cfg.update_weight_disk_dir = str(tmp_path / "run" / "updates")
@@ -183,7 +184,10 @@ def test_build_train_cmd_is_a_shell_string_the_trainer_can_run(
 
     assert isinstance(cmd, str)
     script = "train_async.py" if recipe.train.async_mode else "train.py"
-    assert f"source {MILES_ROOT}/{recipe.train.miles_model_script}" in cmd
+    assert (
+        f"python3 {MILES_ROOT}/miles/utils/external_utils/model_args_utils.py "
+        f"{recipe.train.miles_model_name}"
+    ) in cmd
     assert f"python3 {MILES_ROOT}/{script}" in cmd
     assert "${MODEL_ARGS[@]}" in cmd
     assert "--rollout-endpoint-url https://pool.modal.run" in cmd
@@ -388,3 +392,71 @@ def test_the_pin_is_an_exact_commit() -> None:
     ), textwrap.dedent(
         f"""STITCH_REPO_REF must be a full commit sha, got {STITCH_REPO_REF!r}"""
     )
+
+
+def test_dependency_pins_match_the_pinned_cookbook(cookbook) -> None:
+    from modal_training_gym.train_recipes.stitch_recipe.pins import (
+        DEFAULT_SGLANG_RUNTIME,
+        MILES_IMAGE_TAG,
+        MILES_REPO_REF,
+    )
+
+    trainer = ast.parse((cookbook / "miles_disagg/trainer_image.py").read_text())
+    constants = {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in trainer.body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and isinstance(node.value, ast.Constant)
+    }
+    assert MILES_REPO_REF == constants["MILES_REPO_REF"]
+    assert MILES_IMAGE_TAG == constants["MILES_IMAGE_TAG"]
+
+    serving = ast.parse((cookbook / "common/serving_image.py").read_text())
+    runtime = next(
+        node.value
+        for node in serving.body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "DEFAULT_SGLANG_RUNTIME"
+    )
+    assert vars(DEFAULT_SGLANG_RUNTIME) == {
+        keyword.arg: ast.literal_eval(keyword.value) for keyword in runtime.keywords
+    }
+
+
+def test_new_replicas_boot_from_latest_published_complete_export(
+    cookbook, tmp_path, monkeypatch
+) -> None:
+    from modal_training_gym.frameworks.stitch.trainer_helpers import (
+        rollout_boot_checkpoint,
+    )
+
+    monkeypatch.syspath_prepend(str(cookbook.parent))
+    monkeypatch.syspath_prepend(str(cookbook.parent / "src"))
+    kwargs = dict(
+        run_dir=str(tmp_path),
+        run_id="run-1",
+        volume_name="bulletin",
+        baseline="/checkpoints/base",
+        save_hf="hf/weight_v{rollout_id:06d}",
+    )
+    assert rollout_boot_checkpoint(**kwargs) == ("/checkpoints/base", 0)
+    for iteration in (9, 19, 29):
+        export = tmp_path / "hf" / f"weight_v{iteration:06d}"
+        export.mkdir(parents=True)
+        if iteration != 19:
+            (export / ".complete").touch()
+    (tmp_path / "latest").write_text("run-1/weight_v000025")
+    assert rollout_boot_checkpoint(**kwargs) == (
+        str(tmp_path / "hf/weight_v000009"),
+        10,
+    )
+    (tmp_path / "hf/weight_v000019/.complete").touch()
+    assert rollout_boot_checkpoint(**kwargs) == (
+        str(tmp_path / "hf/weight_v000019"),
+        20,
+    )
+    (tmp_path / "latest").write_text("another-run/weight_v000025")
+    with pytest.raises(ValueError, match="latest belongs to run"):
+        rollout_boot_checkpoint(**kwargs)

@@ -350,7 +350,7 @@ class TrainConfig:
     # ── Composed configs (required) ─────────────────────────────────────────
     dataset: DatasetConfig
     model: ModelConfig
-    recipe: SlimeRecipe | MilesRecipe
+    recipe: SlimeRecipe | MilesRecipe | StitchRecipe
     eval_dataset: DatasetConfig | None = None
     resume_from_checkpoint: Checkpoint | None = None
     # Whether a run outlives the local client. The app itself is always started
@@ -387,7 +387,7 @@ class TrainConfig:
             self.model.model_path or "",
         )
 
-    def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
+    def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe | StitchRecipe:
         if self.resume_from_checkpoint is None:
             recipe = _dc.replace(self.recipe)
         else:
@@ -439,6 +439,7 @@ class TrainConfig:
                 recipe=recipe,
                 model=self.model,
                 dataset=self.dataset,
+                eval_dataset=self.eval_dataset,
                 checkpoint=self.resume_from_checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,

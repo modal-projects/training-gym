@@ -138,7 +138,8 @@ class Qwen3_30B_A3B_Stitch_Train(StitchTrainConfig):
     )
 
     # ── Checkpoints: source only; the served baseline lives on the recipe ────
-    miles_model_script: str = "scripts/models/qwen3-30B-A3B.sh"
+    miles_model_script: str = ""
+    miles_model_name: str = "qwen3-30B-A3B"
     model_name: str = "qwen3moe"  # megatron_to_hf export dispatch
     source_hf_checkpoint: str | None = "Qwen/Qwen3-30B-A3B"
     megatron_to_hf_mode: str = "bridge"
@@ -174,11 +175,8 @@ class Qwen3_30B_A3B_Stitch_Train(StitchTrainConfig):
     rollout_shuffle: bool = True
     balance_data: bool = True
     rm_type: str | None = "deepscaler"
-    # miles still writes a final megatron save on the last rollout, and a ~120 GB
-    # torch_dist save blows the trainer's ephemeral disk (the Volume write cache
-    # lives there). None means no save path exists at all; set a real interval
-    # plus ephemeral_disk for a long run.
-    save_interval: int | None = None
+    save_interval: int | None = 10
+    ephemeral_disk: int | None = 512 * 1024
 
     # ── Trainer parallelism (world = TP4 × DP2 = 8, EP over the node) ───────
     tensor_model_parallel_size: int = 4
@@ -272,12 +270,9 @@ class Qwen3_30B_A3B_Stitch_Serve(StitchServeConfig):
     delta_update_mode: str = "cpu"
     # Per-container autoscaler target, well below the trainer's client
     # concurrency: a rollout wave (32 × 8 = 256) must register as queue pressure
-    # so Flash scales OUT to the cap instead of one engine absorbing the wave.
     concurrency: int = 24
-    # The pool must be UP before the trainer sends its first rollout; the cap
-    # bounds the footprint at trainer 8 + pool 3 = 11 concurrent B200.
     min_containers: int = 1
-    max_containers: int | None = 3
+    max_containers: int | None = None
     # CPU persist is ~2× the 23.5 GiB canonical checkpoint; the request also
     # covers staging plus the serving baseline.
     memory: tuple[int, int] | None = (128 * 1024, 512 * 1024)

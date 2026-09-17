@@ -119,6 +119,7 @@ class StitchTrainConfig(MilesRecipe):
 
     megatron_to_hf_mode: str = "bridge"
     save_interval: int | None = None
+    save_hf: str | None = "hf/weight_v{rollout_id:06d}"
 
     # ── Weight sync: publish sparse deltas to the bulletin board ────────────
     update_weight_transfer_mode: str = "disk-delta"
@@ -218,9 +219,18 @@ class StitchTrainConfig(MilesRecipe):
     def _fields(
         self,
         dataset: DatasetConfig | None = None,
+        eval_dataset: DatasetConfig | None = None,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
         model: ModelConfig | None = None,
     ) -> dict[str, Any]:
-        fields = super()._fields(dataset=dataset, model=model)
+        fields = super()._fields(
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+            model=model,
+        )
         for name in _TRAINER_DROP:
             fields.pop(name, None)
         # Megatron asserts a save interval whenever a save path is set, and this

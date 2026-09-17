@@ -10,9 +10,40 @@ from __future__ import annotations
 
 import time
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 import modal
+
+
+def rollout_boot_checkpoint(
+    *,
+    run_dir: str,
+    run_id: str,
+    volume_name: str,
+    baseline: str,
+    save_hf: str | None,
+) -> tuple[str, int]:
+    if not save_hf:
+        return baseline, 0
+    from cookbook.common.storage import create_store
+    from cookbook.miles_disagg.resume import newest_complete_export
+
+    store = create_store(
+        "modal-volume",
+        local_root=Path(run_dir),
+        run_id=run_id,
+        volume_name=volume_name,
+    )
+    latest = store.read_pointer()
+    if latest is None:
+        return baseline, 0
+    if latest.run_id != run_id:
+        raise ValueError(f"latest belongs to run {latest.run_id!r}, not {run_id!r}")
+    export = newest_complete_export(
+        Path(run_dir), save_hf=save_hf, latest_version=latest.version
+    )
+    return (str(export[1]), export[0]) if export else (baseline, 0)
 
 
 def flash_gateway_url(server_cls: Any) -> str:

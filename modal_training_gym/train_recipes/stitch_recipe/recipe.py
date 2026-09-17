@@ -76,6 +76,7 @@ class StitchTrainPayload:
     fields: dict[str, Any]
     async_mode: bool
     miles_model_script: str
+    miles_model_name: str = ""
 
 
 @dataclass(config=ConfigDict(extra="forbid", arbitrary_types_allowed=True))
@@ -259,15 +260,14 @@ class StitchRecipe(BaseTrainRecipe):
 
     # ── Converters (delegated to the trainer half) ──────────────────────────
 
-    @staticmethod
-    def _resolve_data_paths(ds: DatasetConfig) -> tuple[str, dict[str, str] | None]:
-        return StitchTrainConfig._resolve_data_paths(ds)
-
     def to_payload(
         self,
         *,
         model: ModelConfig | None = None,
         dataset: DatasetConfig | None = None,
+        eval_dataset: DatasetConfig | None = None,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
     ) -> StitchTrainPayload:
         """Plain-data miles args the trainer runs with.
 
@@ -276,7 +276,13 @@ class StitchRecipe(BaseTrainRecipe):
         injects per launch (``rollout_endpoint_url``, ``update_weight_disk_dir``,
         ``custom_config_path``).
         """
-        fields = self.train._fields(dataset=dataset, model=model)
+        fields = self.train._fields(
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+            model=model,
+        )
         fields.update(
             {
                 "update_weight_delta_encoding": self.update_weight_delta_encoding,
@@ -297,4 +303,5 @@ class StitchRecipe(BaseTrainRecipe):
             fields=fields,
             async_mode=self.train.async_mode,
             miles_model_script=self.train.miles_model_script,
+            miles_model_name=self.train.miles_model_name,
         )

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import field
 
+import modal
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
 
@@ -84,9 +85,6 @@ class StitchServeConfig:
         roughly twice the checkpoint resident, plus staging headroom.
     ephemeral_disk : int | None
         Container disk MiB, for a disk-mode replica's local checkpoint copy.
-    startup_timeout : int
-        Seconds gating Modal's container startup timeout, the cookbook
-        ``serve_startup`` budget, and the served-baseline wait.
     """
 
     sglang: SglangRecipe = field(default_factory=SglangRecipe)
@@ -108,6 +106,7 @@ class StitchServeConfig:
     env: dict[str, str] = field(default_factory=dict)
     memory: tuple[int, int] | None = None
     ephemeral_disk: int | None = None
+    volumes: dict[str, modal.Volume] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         defaults = SglangRecipe()
