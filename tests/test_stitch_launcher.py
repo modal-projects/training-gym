@@ -3,6 +3,7 @@ import json
 import os
 import runpy
 import sys
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -10,7 +11,8 @@ from unittest.mock import Mock, patch
 import modal
 import pytest
 
-from modal_training_gym import Qwen3_30B, TrainConfig
+from modal_training_gym import Qwen3_30B, TrainConfig, WandbConfig
+from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.frameworks.stitch import launcher
@@ -18,6 +20,7 @@ from modal_training_gym.train_recipes import base
 from modal_training_gym.train_recipes.stitch_recipe import (
     Qwen3_30B_A3B_Stitch_Recipe,
     Qwen3_30B_A3B_Stitch_Serve,
+    Qwen3_30B_A3B_Stitch_Train,
 )
 
 
@@ -59,12 +62,13 @@ def build_app(monkeypatch, tmp_path):
     monkeypatch.setattr(modal.Volume, "reload", Mock())
     monkeypatch.setattr(modal.Volume, "commit", Mock())
 
-    def build(dataset=None, eval_dataset=None, recipe=None):
+    def build(dataset=None, eval_dataset=None, recipe=None, **kwargs):
         return launcher.build_stitch_app(
             model=Qwen3_30B(),
             dataset=dataset or RowsDataset("training"),
             eval_dataset=eval_dataset,
             recipe=recipe or Qwen3_30B_A3B_Stitch_Recipe(),
+            **kwargs,
         )
 
     return build
@@ -212,3 +216,187 @@ def test_tutorial_constructs_recipe_with_metrics(monkeypatch):
     assert recipe.metrics.project == "training-gym"
     assert recipe.train.metrics is recipe.metrics
     train.assert_called_once()
+
+
+@pytest.mark.parametrize("source_kind", ["local", "hub", "missing", "file"])
+def test_checkpoint_preparation_resolves_local_and_hub_sources(
+    build_app, monkeypatch, tmp_path, source_kind
+):
+    source = tmp_path / "source"
+    if source_kind == "file":
+        source.touch()
+    reference = "org/model" if source_kind == "hub" else str(source)
+    recipe = Qwen3_30B_A3B_Stitch_Recipe(
+        train=Qwen3_30B_A3B_Stitch_Train(source_hf_checkpoint=reference)
+    )
+    app = build_app(recipe=recipe)
+    prep = Mock()
+    monkeypatch.setitem(
+        sys.modules, "cookbook.miles_disagg", SimpleNamespace(prep=prep)
+    )
+    download = Mock(return_value=str(source))
+    monkeypatch.setattr("huggingface_hub.snapshot_download", download)
+
+    def reload_volume():
+        if source_kind in {"local", "hub"}:
+            source.mkdir(exist_ok=True)
+
+    monkeypatch.setattr(modal.Volume, "reload", Mock(side_effect=reload_volume))
+    prepare = inspect.unwrap(app.prepare_checkpoints.get_raw_f())
+    if source_kind in {"missing", "file"}:
+        with pytest.raises(FileNotFoundError, match=str(source)):
+            prepare()
+        prep.prepare_checkpoints.assert_not_called()
+    else:
+        prepare()
+        assert prep.prepare_checkpoints.call_args.kwargs["source_snapshot"] == str(
+            source
+        )
+    if source_kind == "hub":
+        download.assert_called_once_with("org/model", local_files_only=False)
+    else:
+        download.assert_not_called()
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+@pytest.mark.parametrize("preflight_fails", [False, True])
+def test_tracker_identity_is_set_before_every_ray_node(
+    build_app, monkeypatch, rank, preflight_fails
+):
+    recipe = Qwen3_30B_A3B_Stitch_Recipe(
+        metrics=WandbConfig(project="project", entity="configured-team")
+    )
+    monkeypatch.setattr(launcher, "metric_secrets", lambda _: [])
+    app = build_app(recipe=recipe, training_run_id="test-run")
+    preflight = Mock(
+        return_value="resolved-team",
+        side_effect=RuntimeError("offline") if preflight_fails else None,
+    )
+    monkeypatch.setattr(launcher, "preflight_metric", preflight)
+    monkeypatch.setitem(
+        sys.modules,
+        "cookbook.common",
+        SimpleNamespace(
+            hooks=Mock(),
+            launch=Mock(),
+            process=Mock(),
+            ray_cluster=SimpleNamespace(
+                get_modal_cluster_context=lambda _: (rank, "127.0.0.1", "127.0.0.1")
+            ),
+        ),
+    )
+
+    def start_ray(*args, **kwargs):
+        assert os.environ["WANDB_RUN_ID"] == "test-run"
+        assert os.environ["WANDB_ENTITY"] == (
+            "configured-team" if preflight_fails else "resolved-team"
+        )
+        raise RuntimeError("stop at Ray startup")
+
+    monkeypatch.setattr(launcher, "start_ray_head", start_ray)
+    monkeypatch.setattr(launcher, "start_ray_worker", start_ray)
+    with (
+        patch.dict(os.environ),
+        pytest.raises(RuntimeError, match="stop at Ray startup"),
+    ):
+        inspect.unwrap(app.train.get_raw_f())()
+    preflight.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "save_interval,fails", [(10, False), (None, False), (10, True)]
+)
+def test_trainer_persists_result_and_metric_identity(
+    build_app, monkeypatch, tmp_path, save_interval, fails
+):
+    from modal_training_gym.frameworks.stitch import trainer_helpers
+
+    checkpoints = tmp_path / "checkpoints"
+    served = tmp_path / "served"
+    masters = tmp_path / "masters"
+    served.mkdir()
+    masters.mkdir()
+    monkeypatch.setattr(launcher, "CHECKPOINTS_PATH", checkpoints)
+    monkeypatch.setattr(launcher, "metric_secrets", lambda _: [])
+    recipe = Qwen3_30B_A3B_Stitch_Recipe(
+        train=Qwen3_30B_A3B_Stitch_Train(
+            save=str(checkpoints), save_interval=save_interval
+        ),
+        served_checkpoint_path=str(served),
+        bf16_checkpoint_path=str(masters),
+        metrics=WandbConfig(project="project"),
+    )
+    app = build_app(recipe=recipe, training_run_id="test-run")
+    monkeypatch.setitem(
+        sys.modules,
+        "cookbook.common",
+        SimpleNamespace(
+            hooks=Mock(),
+            launch=Mock(),
+            process=Mock(),
+            ray_cluster=SimpleNamespace(
+                get_modal_cluster_context=lambda _: (0, "127.0.0.1", "127.0.0.1")
+            ),
+        ),
+    )
+    stored = {}
+
+    def save(run):
+        stored[run.training_run_id] = run.model_dump()
+
+    monkeypatch.setattr(TrainingRun, "save", save)
+    monkeypatch.setattr(
+        TrainingRun,
+        "from_id",
+        lambda run_id: TrainingRun.from_stored_data(stored[run_id]),
+    )
+    monkeypatch.setattr(launcher, "start_ray_head", Mock())
+    monkeypatch.setattr(Qwen3_30B, "download", Mock())
+    monkeypatch.setattr(Qwen3_30B_A3B_Stitch_Train, "download_model", Mock())
+    monkeypatch.setattr(trainer_helpers, "await_gateway_ready", Mock())
+    monkeypatch.setattr(launcher, "_build_train_cmd", Mock(return_value="miles"))
+    monkeypatch.setattr(launcher, "save_train_result_blob", Mock())
+    preflight = Mock(return_value="resolved-team")
+    monkeypatch.setattr(launcher, "preflight_metric", preflight)
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        Mock(side_effect=subprocess.CalledProcessError(1, "miles") if fails else None),
+    )
+    train = inspect.unwrap(app.train.get_raw_f())
+    with patch.dict(os.environ):
+        if fails:
+            with pytest.raises(RuntimeError, match="miles exited 1"):
+                train(modal_app_id="ap-test", rollout_endpoint_url="https://pool")
+        else:
+            result = train(modal_app_id="ap-test", rollout_endpoint_url="https://pool")
+
+    reloaded = TrainingRun.from_id("test-run")
+    assert reloaded.status == (
+        TrainingRunStatus.FAILED if fails else TrainingRunStatus.COMPLETED
+    )
+    assert reloaded.metrics["entity"] == "resolved-team"
+    assert reloaded.metrics["run_id"] == "test-run"
+    preflight.assert_called_once()
+    if fails:
+        assert reloaded.source_model is None
+        launcher.save_train_result_blob.assert_not_called()
+    else:
+        assert reloaded.checkpoint_dir == result["checkpoint_dir"]
+        assert reloaded.checkpoint_dir == (
+            str(checkpoints / "test-run") if save_interval else ""
+        )
+        assert reloaded.source_model == result["model_config"]
+        assert reloaded.metrics == result["metrics"]
+        if save_interval:
+            assert (
+                reloaded.metadata["checkpoint_location"]["checkpoints_volume_name"]
+                == result["checkpoints_volume_name"]
+            )
+        monkeypatch.setattr(
+            "modal_training_gym.common.checkpoint._list_checkpoints",
+            lambda *args, **kwargs: [],
+        )
+        assert reloaded.model.model_name == "Qwen/Qwen3-30B-A3B"
+        if save_interval:
+            assert reloaded.model.model_path == result["checkpoint_dir"]

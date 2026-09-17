@@ -57,7 +57,10 @@ from modal_training_gym.common.launcher_helpers import (
     compute_save_root,
     run_prepare_dataset,
 )
-from modal_training_gym.common.launcher_utils import timing_debug_env
+from modal_training_gym.common.launcher_utils import (
+    resolve_checkpoint_ref,
+    timing_debug_env,
+)
 from modal_training_gym.common.modal_refs import register_modal_cloudpickle_reducers
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
@@ -71,6 +74,7 @@ from modal_training_gym.common.run import (
     TrainingRunStatus,
     metric_run_id_for_attempt,
     record_metric_attempt,
+    set_checkpoint_location,
 )
 from modal_training_gym.common.train_result import (
     save_train_result_blob,
@@ -369,6 +373,8 @@ def _record_run_started(
     dataset: DatasetConfig | None,
     config_fields: dict,
     modal_app_id: str = "",
+    metric_entity: str = "",
+    metric_run_id: str = "",
 ) -> TrainingRun | None:
     """Write a ``RUNNING`` :class:`TrainingRun` to the ``training-gym-metadata``
     Volume so the disagg run shows up in the dashboard (the deployed app is
@@ -383,17 +389,10 @@ def _record_run_started(
         modal_app_id = modal_app_id or _resolve_container_app_id()
         metric_block: dict = {}
         if recipe.metrics is not None:
-            # Resolve the tracker entity for a dashboard deep-link; keep the run
-            # alive if the probe fails (bad key / no access).
-            entity = getattr(recipe.metrics, "entity", "")
-            try:
-                entity = preflight_metric(recipe.metrics) or entity
-            except Exception as exc:  # noqa: BLE001
-                print(f"metric preflight for dashboard deep-link failed: {exc}")
             metric_block = metric_metadata(
                 recipe.metrics,
-                entity=entity,
-                run_id=metric_run_id_for_attempt(run_id, 1),
+                entity=metric_entity,
+                run_id=metric_run_id,
             )
         config_summary = {
             "model": {"model_name": model.model_name} if model else {},
@@ -456,13 +455,26 @@ def _record_run_started(
 
 
 def _record_run_finished(
-    run_record: TrainingRun | None, status: TrainingRunStatus
+    run_record: TrainingRun | None,
+    status: TrainingRunStatus,
+    *,
+    result_payload: dict | None = None,
 ) -> None:
     """Stamp the terminal status + duration on the dashboard run record.
     Best-effort, mirroring :func:`_record_run_started`."""
     if run_record is None:
         return
     try:
+        if result_payload is not None:
+            run_record.app_name = result_payload["app_name"]
+            run_record.source_model = result_payload["model_config"]
+            run_record.metrics = result_payload["metrics"]
+            set_checkpoint_location(
+                run_record,
+                checkpoint_dir=result_payload["checkpoint_dir"],
+                checkpoints_volume_name=result_payload["checkpoints_volume_name"],
+                checkpoints_mount_path=result_payload["checkpoints_mount_path"],
+            )
         finished_at = int(time.time())
         run_record.status = status
         run_record.ended_at = finished_at
@@ -772,6 +784,16 @@ def build_stitch_app(
         from modal_training_gym.frameworks.stitch import trainer_helpers
 
         rank, master_addr, my_ip = ray_cluster.get_modal_cluster_context(n_train_nodes)
+        record_id = training_run_id or run_id
+        metric_run_id = ""
+        metric_entity = ""
+        if recipe.metrics is not None:
+            metric_run_id = metric_run_id_for_attempt(record_id, 1)
+            metric_entity = getattr(recipe.metrics, "entity", "")
+            try:
+                metric_entity = preflight_metric(recipe.metrics) or metric_entity
+            except Exception as exc:
+                print(f"metric preflight for dashboard deep-link failed: {exc}")
         os.environ.update(
             {
                 "MILES_HOST_IP": my_ip,
@@ -817,6 +839,11 @@ def build_stitch_app(
                 substep_timing=train_recipe.substep_timing,
                 capture_trace=train_recipe.capture_trace,
                 trace_sample_limit=train_recipe.trace_sample_limit,
+            )
+        )
+        os.environ.update(
+            metric_runtime_env(
+                recipe.metrics, run_id=metric_run_id, entity=metric_entity
             )
         )
         # Megatron is a source checkout in the image, so R3 dispatch + the
@@ -960,7 +987,6 @@ def build_stitch_app(
         )
         print(f"Command: {cmd}")
 
-        record_id = training_run_id or run_id
         run_record = _record_run_started(
             run_id=record_id,
             recipe=recipe,
@@ -968,20 +994,24 @@ def build_stitch_app(
             dataset=dataset,
             config_fields=payload.fields,
             modal_app_id=modal_app_id,
+            metric_entity=metric_entity,
+            metric_run_id=metric_run_id,
         )
-        metric_run_id = ""
-        if recipe.metrics is not None:
-            # Force miles' tracker run to use the same id recorded in the
-            # dashboard deep-link (miles honors these env vars). Without this,
-            # the tracker autogenerates a run id and the dashboard link 404s.
-            metric_run_id = metric_run_id_for_attempt(record_id, 1)
-            os.environ.update(
-                metric_runtime_env(
-                    recipe.metrics,
-                    run_id=metric_run_id,
-                    entity=getattr(recipe.metrics, "entity", ""),
-                )
-            )
+        payload_out = train_result_payload(
+            app_name=app_name,
+            framework=Framework.STITCH,
+            training_run_id=record_id,
+            checkpoint_dir=str(getattr(cfg, "save", "") or ""),
+            checkpoints_volume_name=checkpoints_volume_name,
+            checkpoints_mount_path=str(CHECKPOINTS_PATH),
+            model_config=model,
+            metrics=metric_metadata(
+                recipe.metrics,
+                entity=metric_entity,
+                run_id=metric_run_id,
+            ),
+            group_id=group_id or "",
+        )
         # Tee the trainer's output to the checkpoints volume: a container's log
         # window only keeps the tail, so a failure whose traceback scrolled past
         # (rollout retries are loud) is otherwise unreadable afterwards.
@@ -1007,24 +1037,15 @@ def build_stitch_app(
             status = TrainingRunStatus.FAILED
             raise
         finally:
-            _record_run_finished(run_record, status)
+            _record_run_finished(
+                run_record,
+                status,
+                result_payload=(
+                    payload_out if status == TrainingRunStatus.COMPLETED else None
+                ),
+            )
             checkpoints_volume.commit()
 
-        payload_out = train_result_payload(
-            app_name=app_name,
-            framework=Framework.STITCH,
-            training_run_id=record_id,
-            checkpoint_dir=str(getattr(cfg, "save", "") or CHECKPOINTS_PATH),
-            checkpoints_volume_name=checkpoints_volume_name,
-            checkpoints_mount_path=str(CHECKPOINTS_PATH),
-            model_config=model,
-            metrics=metric_metadata(
-                recipe.metrics,
-                entity=getattr(recipe.metrics, "entity", ""),
-                run_id=metric_run_id,
-            ),
-            group_id=group_id or "",
-        )
         save_train_result_blob(payload_out)
         return payload_out
 
@@ -1068,8 +1089,6 @@ def build_stitch_app(
         the baseline each sparse delta is applied against, so it must be the
         byte-exact output of the same quantizer the trainer exports with.
         """
-        from huggingface_hub import snapshot_download
-
         from cookbook.miles_disagg import prep
 
         # The cookbook's prep reads its constants off an experiment *module*; the
@@ -1088,7 +1107,15 @@ def build_stitch_app(
         # over sharded download containers, and this one takes the plain snapshot
         # into the mounted HF cache.
         prep.apply_prep_environment(exp)
-        source_snapshot = snapshot_download(exp.SOURCE_MODEL)
+        checkpoints_volume.reload()
+        hf_cache_volume.reload()
+        source_snapshot = resolve_checkpoint_ref(
+            exp.SOURCE_MODEL, local_files_only=False
+        )
+        if not Path(source_snapshot).is_dir():
+            raise FileNotFoundError(
+                f"Source checkpoint directory does not exist: {source_snapshot}"
+            )
         prep.prepare_checkpoints(
             exp,
             checkpoints_volume,
