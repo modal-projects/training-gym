@@ -1207,9 +1207,17 @@ def build_slime_app(
 
             runtime_env = {
                 "env_vars": {
-                    "no_proxy": f"127.0.0.1,{cluster.head_addr}",
+                    **slime.environment,
+                    "no_proxy": ",".join(
+                        value
+                        for value in (
+                            "127.0.0.1",
+                            cluster.head_addr,
+                            slime.environment.get("no_proxy", ""),
+                        )
+                        if value
+                    ),
                     "MASTER_ADDR": cluster.head_addr,
-                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(slime.num_rollout),
                     "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
@@ -1221,13 +1229,13 @@ def build_slime_app(
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                     "TRAINING_GYM_SUBSTEP_TIMING": slime.substep_timing,
-                    **slime.environment,
                     **metric_runtime_env(
                         slime.metrics,
                         run_id=metric_run_id,
                         entity=metric_entity,
                     ),
                     **timing_debug_env(),
+                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": checkpoints_volume_name,
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }

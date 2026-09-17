@@ -39,7 +39,7 @@ elif not DIST_DIR.exists() or not any(DIST_DIR.iterdir()):
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("fastapi[standard]==0.118.0")
+    .pip_install("fastapi[standard]==0.141.1", "starlette==1.6.0")
     .add_local_dir(DIST_DIR, remote_path=REMOTE_DIST, copy=True)
     .add_local_python_source("astro_redirects", copy=True)
 )

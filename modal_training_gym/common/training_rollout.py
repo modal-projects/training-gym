@@ -109,12 +109,6 @@ _TOOL_RESPONSE_RE = re.compile(
 
 
 def _transcript_messages(text: str) -> list[dict[str, str]] | None:
-    """Split a flattened multi-turn chat transcript into role-tagged messages.
-
-    Returns ``None`` for a plain single-turn response. A ``user`` turn that is
-    nothing but a ``<tool_response>`` block is the environment answering a tool
-    call, so it is tagged ``tool`` and unwrapped for display.
-    """
     if "<|im_start|>" not in text:
         return None
     pieces = _CHAT_TURN_RE.split(text)
