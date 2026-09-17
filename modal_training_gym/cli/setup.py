@@ -219,8 +219,7 @@ def set_password(password: str | None = None) -> None:
     """Set or clear the dashboard password, then redeploy so it takes effect.
 
     Pass an empty string to disable auth. When ``password`` is ``None`` we
-    prompt for it (hidden input). The deployed app reads the value from its
-    environment at startup, so we redeploy after updating the Secret.
+    prompt for it (hidden input).
     """
     from getpass import getpass
 
@@ -241,11 +240,15 @@ def set_password(password: str | None = None) -> None:
         print("Dashboard password cleared (open access). Redeploying...")
 
     from modal_training_gym.common.config import get_dashboard_proxy_auth
+    from modal_training_gym.common.trackio import TrackioConfig, deployed_trackio_url
 
     setup(
         interactive=False,
         require_proxy_auth=get_dashboard_proxy_auth() is True,
     )
+    if deployed_trackio_url():
+        print("Redeploying Trackio dashboard so the password takes effect...")
+        TrackioConfig.deploy_to_modal()
 
 
 def open_dashboard() -> str | None:

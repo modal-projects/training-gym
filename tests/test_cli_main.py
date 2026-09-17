@@ -225,6 +225,42 @@ def test_set_password_preserves_arguments(runner, monkeypatch, args, expected):
 
 
 @pytest.mark.parametrize(
+    ("trackio_url", "should_redeploy"),
+    [
+        ("https://example--training-gym-trackio.modal.run", True),
+        (None, False),
+    ],
+)
+def test_set_password_redeploys_trackio_only_when_deployed(
+    monkeypatch, trackio_url, should_redeploy
+):
+    from modal_training_gym.cli.setup import set_password
+    from modal_training_gym.common.trackio import TrackioConfig
+
+    setup = Mock()
+    deploy = Mock()
+    monkeypatch.setattr("modal_training_gym._dashboard.set_dashboard_password", Mock())
+    monkeypatch.setattr("modal_training_gym.cli.setup.setup", setup)
+    monkeypatch.setattr(
+        "modal_training_gym.common.config.get_dashboard_proxy_auth",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio.deployed_trackio_url",
+        lambda: trackio_url,
+    )
+    monkeypatch.setattr(TrackioConfig, "deploy_to_modal", deploy)
+
+    set_password(password="secret")
+
+    setup.assert_called_once_with(interactive=False, require_proxy_auth=False)
+    if should_redeploy:
+        deploy.assert_called_once_with()
+    else:
+        deploy.assert_not_called()
+
+
+@pytest.mark.parametrize(
     ("args", "expected"),
     [
         (["cleanup"], {"older_than_days": 7, "dry_run": False}),
