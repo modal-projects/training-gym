@@ -8,7 +8,7 @@
   import TimeAgo from "../components/TimeAgo.svelte";
   import InferenceStats from "../components/InferenceStats.svelte";
   import SampleTimeline from "../components/SampleTimeline.svelte";
-  import ConversationView from "../components/ConversationView.svelte";
+  import DynamicTrajectoryViewer from "../components/DynamicTrajectoryViewer.svelte";
   import AdvantageViolins from "../components/AdvantageViolins.svelte";
   import AdvantageSpreadChart from "../components/AdvantageSpreadChart.svelte";
   import ComparativeBarChart from "../components/ComparativeBarChart.svelte";
@@ -2078,12 +2078,14 @@
                             <div class="rollout-sample-label">prompt</div>
                             <pre class="rollout-sample-text">{activeSample.sample.prompt}</pre>
                           {/if}
-                          <div class="rollout-sample-label">conversation</div>
-                          <ConversationView
-                            messages={activeSample.sample.metadata?.trajectory_messages}
-                            response={activeSample.sample.response || ""}
-                            thinking={activeSample.sample.thinking || ""}
-                            evalReport={activeSample.sample.metadata?.eval_report}
+                          <DynamicTrajectoryViewer
+                            sample={activeSample.sample}
+                            samples={activeSample.samples}
+                            trajectory={activeSample.sample.metadata?.trajectory_messages || []}
+                            rewardEvents={activeSample.sample.reward_events || []}
+                            rollout={expandedRollout}
+                            run={run}
+                            position={`${activeBucket}/${activeSample.pos}`}
                           />
                           {#if activeSample.sample.metadata?.reference}
                             <div class="rollout-sample-label">reference</div>

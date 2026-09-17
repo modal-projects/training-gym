@@ -7,9 +7,14 @@ checkout, or the copy the wheel ships at ``modal_training_gym/_frontend``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
+import re
 import secrets as _secrets
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import (
@@ -48,12 +53,18 @@ from modal_training_gym.common.config import (
     DASHBOARD_PROXY_AUTH_PATH,
     DASHBOARD_VERSION_PATH,
     dashboard_requires_proxy_auth,
+    get_dashboard_trajectory_viewer,
 )
 from modal_training_gym.common.dashboard import (
     DASHBOARD_APP_NAME,
     DASHBOARD_PREVIEW_ENV_KEY,
     DASHBOARD_VERSION_ENV_KEY,
     current_dashboard_version,
+)
+from modal_training_gym.common.dashboard_components import (
+    DASHBOARD_OVERLAY_VOLUME_NAME,
+    MAX_COMPONENT_BYTES,
+    DashboardComponent,
 )
 from modal_training_gym.common.run import (
     FrameworkStatusUpdate,
@@ -116,6 +127,10 @@ class TimingFileCache(TypedDict):
 
 DASHBOARD_REQUIRES_PROXY_AUTH_ENV_KEY = "DASHBOARD_REQUIRES_PROXY_AUTH"
 TIMING_DEBUG_ENV = "TRAINING_GYM_TIMING_DEBUG"
+DASHBOARD_COMPONENT_VOLUME_MOUNT = "/mnt/training-gym-dashboard-overlay"
+dashboard_component_volume = modal.Volume.from_name(
+    DASHBOARD_OVERLAY_VOLUME_NAME, create_if_missing=True
+)
 
 
 def _is_preview() -> bool:
@@ -137,7 +152,7 @@ def _build_image() -> modal.Image:
     _pkg = Path(__file__).resolve().parent
     _checkout = _pkg.parent / "dashboards" / "frontend"
     _frontend = _checkout if _checkout.is_dir() else _pkg / "_frontend"
-    return (
+    base = (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("curl")
         .run_commands(
@@ -151,7 +166,25 @@ def _build_image() -> modal.Image:
             copy=True,
             ignore=["node_modules", "dist"],
         )
-        .run_commands("cd /app/frontend && npm install && npm run build")
+    )
+
+    trajectory_viewer = get_dashboard_trajectory_viewer()
+    if trajectory_viewer:
+        viewer_path = Path(trajectory_viewer).expanduser().resolve()
+        if not viewer_path.is_file():
+            raise FileNotFoundError(
+                "Configured trajectory viewer does not exist: "
+                f"{viewer_path}. Run `training-gym setup --trajectory-viewer PATH` "
+                "with a Svelte component file."
+            )
+        base = base.add_local_file(
+            str(viewer_path),
+            remote_path="/app/frontend/src/components/TrajectoryViewer.svelte",
+            copy=True,
+        )
+
+    return (
+        base.run_commands("cd /app/frontend && npm install && npm run build")
         .add_local_python_source("modal_training_gym", copy=True)
         .env(
             {
@@ -387,6 +420,122 @@ def _run_compact_sync() -> None:
         compact_summary_store(summary_store)
 
 
+# Host document for run-scoped components. It is loaded into a sandboxed
+# <iframe> (opaque origin, no network) and only talks to the dashboard through
+# postMessage: the parent sends ``props``; the frame reports ``ready``,
+# ``rendered``, ``resize`` and ``error``.
+_COMPONENT_FRAME_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark light">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body { color: #d1d1d1; font: 12px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  /* ``flow-root`` keeps child margins inside #viewer, so its box height is
+     the component's real content height. */
+  #viewer { min-height: 1px; display: flow-root; }
+</style>
+</head>
+<body>
+<div id="viewer"></div>
+<script type="module" nonce="__NONCE__">
+__COMPONENT__
+
+const __target = document.getElementById("viewer");
+let __mounted = null;
+function __post(message) {
+  window.parent.postMessage({ trainingGymDashboardComponent: true, ...message }, "*");
+}
+function __render(props) {
+  if (__mounted && typeof __mounted.unmount === "function") __mounted.unmount();
+  __mounted = null;
+  __target.replaceChildren();
+  __mounted = mountViewer(__target, props);
+}
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent) return;
+  const data = event.data;
+  if (!data || data.trainingGymDashboardComponent !== true || data.type !== "props") return;
+  try {
+    __render(data.props);
+    __post({ type: "rendered" });
+  } catch (error) {
+    __post({ type: "error", message: String((error && error.message) || error) });
+  }
+});
+window.addEventListener("error", (event) => {
+  __post({ type: "error", message: String(event.message || "component error") });
+});
+// Measure the mount target, not the document: the parent sizes this frame to
+// whatever height we report, so `documentElement.scrollHeight` (never smaller
+// than the viewport) would ratchet the frame up and never let it shrink back
+// when a shorter rollout renders.
+function __reportHeight() {
+  const box = __target.getBoundingClientRect().height;
+  __post({ type: "resize", height: Math.max(box, __target.scrollHeight) });
+}
+new ResizeObserver(__reportHeight).observe(__target);
+__post({ type: "ready" });
+</script>
+</body>
+</html>
+"""
+
+
+class DashboardComponentCompileError(Exception):
+    """A user-supplied dashboard component could not be compiled."""
+
+
+def _component_compiler_script() -> Path:
+    installed = Path("/app/frontend/component_bundle.mjs")
+    if installed.is_file():
+        return installed
+    checkout = (
+        Path(__file__).resolve().parent.parent
+        / "dashboards"
+        / "frontend"
+        / "component_bundle.mjs"
+    )
+    if checkout.is_file():
+        return checkout
+    raise DashboardComponentCompileError("Dashboard component compiler unavailable")
+
+
+def compile_dashboard_component_source(source: bytes) -> bytes:
+    """Compile Svelte component source into a self-contained ES module.
+
+    The source is written to a scratch directory that is discarded afterwards,
+    so the compiler never touches the overlay Volume or the caller's paths.
+    """
+    script = _component_compiler_script()
+    with tempfile.TemporaryDirectory(prefix="training-gym-component-") as scratch:
+        source_path = Path(scratch) / "Component.svelte"
+        output_path = Path(scratch) / "bundle.js"
+        source_path.write_bytes(source)
+        try:
+            completed = subprocess.run(
+                ["node", str(script), str(source_path), str(output_path)],
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise DashboardComponentCompileError("timed out") from exc
+        if completed.returncode != 0 or not output_path.is_file():
+            detail = (completed.stderr or completed.stdout or "compile failed").strip()
+            raise DashboardComponentCompileError(detail[-1000:])
+        return output_path.read_bytes()
+
+
+# Deliberately no secrets and no Volumes: the compiler only ever sees the
+# bytes it is handed, and a runaway or hostile build is bounded by this
+# container's limits instead of the dashboard's.
+@app.function(timeout=120, cpu=1.0, memory=1024)
+def compile_dashboard_component(source: bytes) -> bytes:
+    return compile_dashboard_component_source(source)
+
+
 @app.function(
     schedule=None if IS_PREVIEW else modal.Cron("*/30 * * * *"),
     retries=3,
@@ -420,6 +569,7 @@ def reconcile() -> None:
 @app.function(
     min_containers=0 if IS_PREVIEW else 1,
     secrets=_function_secrets(),
+    volumes={DASHBOARD_COMPONENT_VOLUME_MOUNT: dashboard_component_volume},
 )
 @modal.concurrent(max_inputs=50, target_inputs=20)
 @modal.asgi_app(requires_proxy_auth=dashboard_requires_proxy_auth())
@@ -551,7 +701,25 @@ def fastapi_app():
     cache_locks = {key: asyncio.Lock() for key in cache_keys}
     # Hold strong refs to background refresh tasks so they aren't GC'd mid-flight.
     refresh_tasks: set[asyncio.Task[list[JsonDict]]] = set()
-    web.mount("/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets")
+
+    class _HashedAssets(StaticFiles):
+        """Serve Vite's content-hashed bundles as immutable.
+
+        The filename changes whenever the contents do, so a cached copy can
+        never be stale; pairing this with a revalidated ``index.html`` (see the
+        SPA fallback) is what keeps a deploy from ever serving old HTML that
+        points at a bundle this image no longer has.
+        """
+
+        def file_response(self, *args, **kwargs):
+            response = super().file_response(*args, **kwargs)
+            if response.status_code == 200:
+                response.headers["Cache-Control"] = (
+                    "public, max-age=31536000, immutable"
+                )
+            return response
+
+    web.mount("/assets", _HashedAssets(directory=f"{STATIC_DIR}/assets"), name="assets")
 
     # ── Shared Modal client ───────────────────────────────────────────────
     # Opens a client at startup and reuses it across all requests.
@@ -961,6 +1129,202 @@ def fastapi_app():
         except KeyError:
             result = None
         return build_run_summary(run.model_dump(mode="json"), result)
+
+    def _component_manifest(
+        run: TrainingRun, component_type: str, digest: str | None = None
+    ) -> JsonDict:
+        """Resolve a run's component manifest from run metadata.
+
+        The source and an association copy are both mounted from the overlay
+        Volume. Metadata remains the authoritative list of components because
+        it is already part of the run record returned by the dashboard API.
+        When several names register the same component type, the most
+        recently attached one wins (``add_dashboard_component`` re-inserts an
+        entry on replace so insertion order is attachment order). With
+        ``digest`` the entry carrying exactly that ``sha256`` is returned, so
+        a URL that names an artifact can never be answered with another one.
+        """
+        try:
+            kind = DashboardComponent(component_type).value
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404, detail="Unknown dashboard component"
+            ) from exc
+        components = (run.metadata or {}).get("dashboard_components")
+        if not isinstance(components, dict):
+            raise HTTPException(
+                status_code=404, detail="No dashboard component attached"
+            )
+        for value in reversed(list(components.values())):
+            if not isinstance(value, dict) or value.get("type") != kind:
+                continue
+            manifest = dict(value)
+            if not manifest.get("path") or not manifest.get("sha256"):
+                continue
+            if digest is not None and manifest["sha256"] != digest:
+                continue
+            return manifest
+        raise HTTPException(status_code=404, detail="No dashboard component attached")
+
+    def _component_source_path(manifest: JsonDict) -> Path:
+        relative = str(manifest.get("path", ""))
+        root = Path(DASHBOARD_COMPONENT_VOLUME_MOUNT).resolve()
+        source = (root / relative).resolve()
+        if root != source and root not in source.parents:
+            raise HTTPException(
+                status_code=500, detail="Invalid dashboard component path"
+            )
+        if not source.is_file():
+            raise HTTPException(
+                status_code=404, detail="Dashboard component source unavailable"
+            )
+        return source
+
+    def _read_component_source(source: Path, digest: str) -> bytes:
+        """Read source whose content matches the manifest's sha256.
+
+        Run metadata selects the component, but the overlay Volume is the
+        only thing that should decide what code ships to the browser.
+        """
+        data = source.read_bytes()
+        if len(data) > MAX_COMPONENT_BYTES:
+            raise HTTPException(
+                status_code=413, detail="Dashboard component source is too large"
+            )
+        actual = hashlib.sha256(data).hexdigest()
+        if not hmac.compare_digest(actual, digest):
+            raise HTTPException(
+                status_code=409,
+                detail="Dashboard component source does not match its manifest",
+            )
+        return data
+
+    component_compile_locks: dict[str, asyncio.Lock] = {}
+
+    async def _compile_component_bundle(
+        source: Path, digest: str, bundle: Path
+    ) -> None:
+        """Compile ``source`` into ``bundle`` exactly once per digest.
+
+        Concurrent first requests for the same digest wait on a shared lock;
+        the finished bundle is installed atomically so readers never observe a
+        partial file. The lock is dropped once the compile settles so the map
+        does not grow with every component revision.
+        """
+        lock = component_compile_locks.setdefault(digest, asyncio.Lock())
+        try:
+            async with lock:
+                if bundle.is_file():
+                    return
+                data = await run_in_threadpool(_read_component_source, source, digest)
+                try:
+                    if _is_local():
+                        compiled = await run_in_threadpool(
+                            compile_dashboard_component_source, data
+                        )
+                    else:
+                        compiled = await compile_dashboard_component.remote.aio(data)
+                except DashboardComponentCompileError as exc:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Dashboard component failed to compile: {exc}",
+                    ) from exc
+                staging = bundle.with_name(f"{bundle.stem}.{_secrets.token_hex(8)}.js")
+                try:
+                    await run_in_threadpool(staging.write_bytes, compiled)
+                    os.replace(staging, bundle)
+                finally:
+                    staging.unlink(missing_ok=True)
+        finally:
+            if not lock.locked() and component_compile_locks.get(digest) is lock:
+                del component_compile_locks[digest]
+
+    _CLOSE_SCRIPT_RE = re.compile(r"</(script)", re.IGNORECASE)
+    _COMPONENT_DIGEST_RE = re.compile(r"[0-9a-f]{64}")
+
+    def _component_frame_html(bundle_js: str, nonce: str) -> str:
+        """Wrap a compiled component in a self-contained host document.
+
+        The document is served to a sandboxed ``<iframe>`` so the component
+        runs in an opaque origin: it receives props over ``postMessage`` and
+        cannot read dashboard storage or issue authenticated requests.
+        """
+        script = _CLOSE_SCRIPT_RE.sub(r"<\\/\1", bundle_js)
+        return _COMPONENT_FRAME_TEMPLATE.replace("__NONCE__", nonce).replace(
+            "__COMPONENT__", script
+        )
+
+    async def _refresh_dashboard_component_volume() -> None:
+        """Refresh the mounted overlay before reading a newly registered component.
+
+        Modal volumes are mounted from a snapshot.  A training client can attach a
+        component after the dashboard container has started, so the container must
+        reload the volume to make that version visible at the mount point.  Keep
+        this best-effort for local/test contexts where ``reload`` is unavailable.
+        """
+        if _is_local():
+            # ``reload`` is only meaningful inside a Modal container; the source
+            # path check below still works for local test mounts.
+            return
+        try:
+            await run_in_threadpool(dashboard_component_volume.reload)
+        except (AttributeError, RuntimeError, Error):
+            return
+
+    @web.get("/api/runs/{training_run_id}/dashboard-components/{component_type}")
+    async def get_dashboard_component_manifest(
+        training_run_id: str, component_type: str
+    ):
+        run = await _get_run_or_404(training_run_id)
+        manifest = _component_manifest(run, component_type)
+        return JSONResponse(manifest)
+
+    @web.get(
+        "/api/runs/{training_run_id}/dashboard-components/{component_type}"
+        "/{digest}/frame.html"
+    )
+    async def get_dashboard_component_frame(
+        training_run_id: str, component_type: str, digest: str
+    ):
+        if not _COMPONENT_DIGEST_RE.fullmatch(digest):
+            raise HTTPException(status_code=404, detail="Unknown dashboard component")
+        run = await _get_run_or_404(training_run_id)
+        manifest = _component_manifest(run, component_type, digest)
+        await _refresh_dashboard_component_volume()
+        source = _component_source_path(manifest)
+        cache_root = Path("/tmp/training-gym-dashboard-components")
+        cache_root.mkdir(parents=True, exist_ok=True)
+        bundle = cache_root / f"{digest}.js"
+
+        if not bundle.is_file():
+            await _compile_component_bundle(source, digest, bundle)
+
+        nonce = _secrets.token_urlsafe(16)
+        bundle_js = await run_in_threadpool(bundle.read_text, "utf-8")
+        csp = "; ".join(
+            [
+                "default-src 'none'",
+                f"script-src 'nonce-{nonce}'",
+                "style-src 'unsafe-inline'",
+                "img-src data: blob:",
+                "font-src data:",
+                "connect-src 'none'",
+                "frame-ancestors 'self'",
+                "base-uri 'none'",
+                "form-action 'none'",
+                "sandbox allow-scripts",
+            ]
+        )
+        return Response(
+            _component_frame_html(bundle_js, nonce),
+            media_type="text/html",
+            headers={
+                "Cache-Control": "private, max-age=31536000, immutable",
+                "Content-Security-Policy": csp,
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @web.post("/api/framework-status")
     async def framework_status(
@@ -1600,6 +1964,15 @@ def fastapi_app():
 
     @web.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        return FileResponse(f"{STATIC_DIR}/index.html")
+        # index.html names content-hashed bundles that the next deploy deletes,
+        # so it must never be served from cache without revalidating: a browser
+        # holding yesterday's HTML would request a bundle this image no longer
+        # has and get a 404 with a blank page. The document is a fraction of a
+        # kilobyte, so refetching it on every load costs nothing next to the
+        # immutable bundles it points at.
+        return FileResponse(
+            f"{STATIC_DIR}/index.html",
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )
 
     return web

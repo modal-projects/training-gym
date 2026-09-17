@@ -40,6 +40,7 @@ from modal_training_gym.utils.metadata import (
 
 if TYPE_CHECKING:
     from modal_training_gym.common.checkpoint import Checkpoint
+    from modal_training_gym.common.dashboard_components import DashboardComponent
     from modal_training_gym.common.training_rollout import TrainingRolloutResult
 
 TRAINING_RUNS_STORE_NAME = MetadataStore.TRAINING_RUNS.value
@@ -160,6 +161,7 @@ class TrainingRun(BaseModel):
     _status_display: Any = PrivateAttr(default=None)
     _metadata_removed_keys: set[str] = PrivateAttr(default_factory=set)
     _metadata_loaded_keys: set[str] | None = PrivateAttr(default=None)
+    _dashboard_component_updates: set[str] = PrivateAttr(default_factory=set)
     _closed: bool = PrivateAttr(default=False)
 
     @field_serializer("source_model")
@@ -488,6 +490,59 @@ class TrainingRun(BaseModel):
         }
         self.metadata = metadata
 
+    def add_dashboard_component(
+        self,
+        *,
+        name: str,
+        component_type: "DashboardComponent | str",
+        from_path: str | os.PathLike[str],
+        replace: bool = False,
+    ) -> dict[str, Any]:
+        """Attach a local dashboard component to this run.
+
+        The source is uploaded to the shared dashboard-overlay Volume and the
+        resulting immutable manifest is associated with this run's metadata.
+        This operation is independent of the training job and may be called
+        after a run has started or completed.
+        """
+        from modal_training_gym.common.dashboard_components import (
+            read_dashboard_component,
+            store_dashboard_component,
+        )
+
+        metadata = dict(self.metadata or {})
+        components = metadata.get("dashboard_components")
+        components = dict(components) if isinstance(components, dict) else {}
+        previous = components.get(name)
+        if previous is not None and not replace:
+            previous_hash = (
+                previous.get("sha256") if isinstance(previous, dict) else None
+            )
+            _, _, digest = read_dashboard_component(
+                component_type=component_type, from_path=from_path
+            )
+            if previous_hash != digest:
+                raise ValueError(
+                    f"dashboard component {name!r} is already attached to run "
+                    f"{self.training_run_id!r}; pass replace=True to replace it"
+                )
+
+        manifest = store_dashboard_component(
+            name=name,
+            component_type=component_type,
+            from_path=from_path,
+            training_run_id=self.training_run_id,
+        )
+        # Re-insert so dict order reflects attachment order; the dashboard
+        # resolves a component type to its most recently attached entry.
+        components.pop(name, None)
+        components[name] = manifest
+        metadata["dashboard_components"] = components
+        self.metadata = metadata
+        self._dashboard_component_updates.add(name)
+        self.save()
+        return manifest
+
     def _touch(self) -> None:
         self.updated_at = int(time.time())
 
@@ -555,6 +610,25 @@ class TrainingRun(BaseModel):
                     merged_metadata["framework_progress"] = stored_progress
             elif isinstance(stored_progress, dict):
                 merged_metadata["framework_progress"] = stored_progress
+            # Components are attached by name from independent handles (often
+            # after launch). The stored map is authoritative; only the names
+            # this handle attached since its last save are written over it,
+            # appended so insertion order stays attachment order (the
+            # dashboard picks the last matching entry). A handle that merely
+            # carries a stale copy of the map can neither drop nor revert
+            # another handle's attachments.
+            stored_components = stored_metadata.get("dashboard_components")
+            current_components = current_metadata.get("dashboard_components")
+            if isinstance(stored_components, dict) and isinstance(
+                current_components, dict
+            ):
+                merged_components = dict(stored_components)
+                for name in self._dashboard_component_updates:
+                    if name not in current_components:
+                        continue
+                    merged_components.pop(name, None)
+                    merged_components[name] = current_components[name]
+                merged_metadata["dashboard_components"] = merged_components
             payload["metadata"] = merged_metadata
             return payload
 
@@ -577,7 +651,9 @@ class TrainingRun(BaseModel):
         except Exception:
             stored = None
         if not is_async:
-            return write(payload_with_stored_metadata(stored))
+            write(payload_with_stored_metadata(stored))
+            self._dashboard_component_updates.clear()
+            return None
 
         async def _save_async() -> None:
             stored_data = None
@@ -589,6 +665,7 @@ class TrainingRun(BaseModel):
             result = write(payload_with_stored_metadata(stored_data))
             if result is not None:
                 await result
+            self._dashboard_component_updates.clear()
 
         return _save_async()
 

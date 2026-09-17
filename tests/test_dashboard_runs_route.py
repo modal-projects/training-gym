@@ -576,3 +576,33 @@ def test_persisted_non_final_timing_survives_stale_listing(
     assert writes
     assert second.status_code == 200
     assert second.json()["0"]["roles"]["driver"]["lane_start_unix_s"] == 200.0
+
+
+def test_spa_html_revalidates_and_assets_are_immutable(monkeypatch, tmp_path):
+    """A deploy must never leave a browser holding HTML for a deleted bundle.
+
+    Vite's bundle names are content-hashed, so the previous deploy's
+    ``/assets/index-<hash>.js`` is gone the moment a new image ships. If a
+    cached ``index.html`` were served without revalidating, it would keep
+    requesting that bundle and the page would fail to boot on a 404.
+    """
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("<html></html>")
+    (static / "assets" / "index-abc123.js").write_text("console.log(1)")
+    monkeypatch.setattr(_dashboard, "STATIC_DIR", str(static))
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+
+    with TestClient(_dashboard.fastapi_app.local()) as client:
+        page = client.get("/training/some-run")
+        assert page.status_code == 200
+        assert "no-cache" in page.headers["cache-control"]
+
+        asset = client.get("/assets/index-abc123.js")
+        assert asset.status_code == 200
+        assert "immutable" in asset.headers["cache-control"]
+
+        # A bundle from an older deploy is a plain 404, not the SPA fallback:
+        # the browser must see the failure rather than parse HTML as JavaScript.
+        missing = client.get("/assets/index-gone.js")
+        assert missing.status_code == 404
