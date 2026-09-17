@@ -21,7 +21,7 @@ from dataclasses import dataclass
 # sidecar entrypoint, the Server bring-up, the checkpoint prep and the Megatron
 # patches), which ships in the repo but not in the wheel.
 STITCH_REPO_URL = "https://github.com/modal-projects/stitch.git"
-STITCH_REPO_REF = "697cda79666fad8cfa7ab4a98b9f9f4f11cce1da"
+STITCH_REPO_REF = "0d1f769a725cd1133fd36d812e7a093c7b71af87"
 STITCH_ROOT = "/root/stitch"
 
 # ── miles fork ─────────────────────────────────────────────────────────────────
@@ -86,8 +86,8 @@ class SGLangRuntime:
 # loading, and the optional CPU delta cache. See the fork's SGLANG_FORK.md for the
 # patch stack and how to re-port onto a newer SGLang release.
 DEFAULT_SGLANG_RUNTIME = SGLangRuntime(
-    image="lmsysorg/sglang:v0.5.16",
+    image="lmsysorg/sglang:v0.5.17",
     repository="https://github.com/modal-projects/sglang.git",
-    branch="stitch-sglang-v0.5.16",
-    commit="1051a95a6ab16773037f8795a51aa03a1664a3b2",
+    branch="stitch-sglang-v0.5.17",
+    commit="d050d06437d96196fc68d5b4e5c246408790d537",
 )

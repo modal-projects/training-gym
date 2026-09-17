@@ -48,25 +48,41 @@ from modal_training_gym.common.run import (
     torch_dist_resume_checkpoint,
 )
 from modal_training_gym.common.launcher_helpers import (
+    apply_scoped_save,
     build_app_tags,
     build_terminal_run_record,
-    build_train_result,
-    compute_save_root,
+    compute_recipe_save_root,
     init_training_run_record,
+    persist_completed_run,
     mark_run_failed,
     mark_run_stopped,
+    mount_caller_source,
     resolve_caller_context,
     resolve_checkpoint_volumes,
     run_download_phase,
     run_prepare_dataset,
     ship_callable,
+    write_dataset_if_needed,
 )
+from modal_training_gym.common.train_result import save_train_result_blob
 from modal_training_gym.common.launcher_utils import (
+    drop_materialized_config_key,
     serialize_recipe_params,
     timing_debug_env,
 )
+from modal_training_gym.common.metrics import (
+    apply_metric_image,
+    metric_metadata,
+    metric_runtime_env,
+    metric_secrets,
+    preflight_metric,
+)
+from modal_training_gym.common.trackio import resolve_trackio_destination
 from modal_training_gym.common.wandb import WandbConfig
 from modal_training_gym.common.status import SlimeStatus
+from modal_training_gym.common.torch_dist_checkpoint import (
+    is_complete_torch_dist_checkpoint_dir,
+)
 
 from modal_training_gym.train_recipes.slime_recipe.recipe import (
     CHECKPOINTS_PATH,
@@ -81,7 +97,7 @@ from .modal_helpers.utils import (
     prepare_slime_config,
     resolve_checkpoint_ref,
 )
-from modal_training_gym.common.patches import encode_patch
+from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.framework import Framework
 
@@ -111,14 +127,17 @@ SLIME_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02
 HARBOR_PKG_VERSION = "0.8.0"
 
 _SLIME_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
-_PATCH_VALIDATION_B64 = encode_patch("patch_validation", _SLIME_PATCHES)
+_PATCH_VALIDATION_B64 = encode_patch("patch_validation", _MEGATRON_PATCHES)
 _PATCH_MEGATRON_BRIDGE_B64 = encode_patch("patch_megatron_bridge", _SLIME_PATCHES)
-_PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", _SLIME_PATCHES)
+_PATCH_TORCH_LOAD_B64 = encode_patch("patch_torch_load", _MEGATRON_PATCHES)
 _PATCH_GLOBAL_PLAN_B64 = encode_patch("patch_global_plan", _SLIME_PATCHES)
-_PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _SLIME_PATCHES)
+_PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_PATCH_CHECKPOINT_COMMIT_B64 = encode_patch(
+    "patch_checkpoint_commit", _MEGATRON_PATCHES
+)
 _PATCH_ADVANTAGES_B64 = encode_patch("patch_advantages", _SLIME_PATCHES)
 _PATCH_BRIDGE_NONE_TASK_B64 = encode_patch("patch_bridge_none_task", _SLIME_PATCHES)
-_PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", _SLIME_PATCHES)
+_PATCH_GDN_PACKED_SEQ_B64 = encode_patch("patch_gdn_packed_seq", _MEGATRON_PATCHES)
 _PATCH_BRIDGE_PER_TOKEN_LOSS_B64 = encode_patch(
     "patch_bridge_provider_per_token_loss", _SLIME_PATCHES
 )
@@ -155,37 +174,104 @@ _PATCH_LOG_ELIDE_B64 = encode_patch("patch_log_elide", _SLIME_PATCHES)
 # with inline_container.cc "unexpected pos" (e.g. the GLM-5.2 convert). No-op for
 # non-quantized tensors, so safe for every image.
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
-    "patch_dist_ckpt_quantized", _SLIME_PATCHES
+    "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
+_PATCH_DIST_CKPT_NOFORK_B64 = encode_patch("patch_dist_ckpt_nofork", _MEGATRON_PATCHES)
 # OPD / multi-turn: zero-std metrics must skip non-numeric rewards (dict/None).
 _PATCH_ZERO_STD_METRICS_B64 = encode_patch("patch_zero_std_metrics", _SLIME_PATCHES)
 _PATCH_SGLANG_PARALLEL_ALIASES_B64 = encode_patch(
     "patch_sglang_parallel_aliases", _SLIME_PATCHES
 )
+_PATCH_QWEN3_5_HF_DISPATCH_B64 = encode_patch(
+    "patch_qwen3_5_hf_dispatch", _SLIME_PATCHES
+)
+_PATCH_SGLANG_TRTLLM_MOE_REPACK_B64 = encode_patch(
+    "patch_sglang_trtllm_moe_repack", _SLIME_PATCHES
+)
+
+# Patches targeting /root/slime* — a git overlay replaces that directory, so
+# these are skipped in the base image when an overlay is configured and applied
+# after the replacement instead.
+_SLIME_ROOT_PATCHES_B64 = (
+    _PATCH_MEGATRON_BRIDGE_B64,
+    _PATCH_ADVANTAGES_B64,
+    _PATCH_STOP_TOKEN_DIAG_B64,
+    _PATCH_QWEN3_ASR_EXPORT_B64,
+    _PATCH_QWEN3_VL_EXPORT_B64,
+    _PATCH_QWEN3_VL_TORCH_DIST_B64,
+    _PATCH_ROLLOUT_STATUS_B64,
+    _PATCH_ADVANTAGE_DIST_B64,
+    _PATCH_ZERO_STD_METRICS_B64,
+    _PATCH_SGLANG_PARALLEL_ALIASES_B64,
+    _PATCH_QWEN3_5_HF_DISPATCH_B64,
+    _PATCH_SUBSTEP_TIMING_B64,
+)
+
+# Patches targeting Megatron-LM or site-packages — survive a git overlay.
+_SLIME_EXTERNAL_PATCHES_B64 = (
+    _PATCH_BRIDGE_NONE_TASK_B64,
+    _PATCH_LOG_ELIDE_B64,
+    _PATCH_DIST_CKPT_QUANTIZED_B64,
+    _PATCH_DIST_CKPT_NOFORK_B64,
+    _PATCH_SGLANG_TRTLLM_MOE_REPACK_B64,
+)
 
 
-def _build_slime_base_image() -> "Image":
+def _patch_commands(patches: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(f"echo {patch} | base64 -d | python3" for patch in patches)
+
+
+def _build_slime_base_image(*, apply_root_patches: bool = True) -> "Image":
+    patches = _SLIME_EXTERNAL_PATCHES_B64
+    if apply_root_patches:
+        patches = patches + _SLIME_ROOT_PATCHES_B64
     return (
         Image.from_registry(SLIME_IMAGE)
         .entrypoint([])
-        .run_commands(
-            "rm -rf /root/.cache/huggingface",
-            f"echo {_PATCH_MEGATRON_BRIDGE_B64} | base64 -d | python3",
-            f"echo {_PATCH_ADVANTAGES_B64} | base64 -d | python3",
-            f"echo {_PATCH_BRIDGE_NONE_TASK_B64} | base64 -d | python3",
-            f"echo {_PATCH_STOP_TOKEN_DIAG_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_ASR_EXPORT_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_VL_EXPORT_B64} | base64 -d | python3",
-            f"echo {_PATCH_QWEN3_VL_TORCH_DIST_B64} | base64 -d | python3",
-            f"echo {_PATCH_ROLLOUT_STATUS_B64} | base64 -d | python3",
-            f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
-            f"echo {_PATCH_LOG_ELIDE_B64} | base64 -d | python3",
-            f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
-            f"echo {_PATCH_ZERO_STD_METRICS_B64} | base64 -d | python3",
-            f"echo {_PATCH_SGLANG_PARALLEL_ALIASES_B64} | base64 -d | python3",
-            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
-        )
+        .run_commands("rm -rf /root/.cache/huggingface", *_patch_commands(patches))
     )
+
+
+def _slime_git_overlay_command(repository: str, revision: str) -> str:
+    """Build the reproducible image command for a fork source overlay."""
+    repo = shlex.quote(repository)
+    sha = shlex.quote(revision)
+    checkout = "/tmp/training-gym-slime"
+    return (
+        "set -eux; "
+        "command -v git >/dev/null; "
+        f"rm -rf {checkout}; "
+        f"git init {checkout}; "
+        f"git -C {checkout} remote add origin {repo}; "
+        f"git -C {checkout} fetch --depth=1 origin {sha}; "
+        f"git -C {checkout} checkout --detach FETCH_HEAD; "
+        f'test "$(git -C {checkout} rev-parse HEAD)" = {sha}; '
+        f"rm -rf {checkout}/.git {SLIME_ROOT}; "
+        f"mv {checkout} {SLIME_ROOT}"
+    )
+
+
+def _overlay_slime_source(image: "Image", slime: SlimeRecipe) -> "Image":
+    if slime.local_slime:
+        # Preserve the local dev overlay's existing semantics: use the checkout
+        # exactly as supplied rather than requiring it to match patch anchors.
+        return image.add_local_dir(
+            slime.local_slime,
+            remote_path=SLIME_ROOT,
+            copy=True,
+            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
+        )
+    if not (slime.slime_git_repository and slime.slime_git_revision):
+        return image
+
+    image = image.run_commands(
+        _slime_git_overlay_command(slime.slime_git_repository, slime.slime_git_revision)
+    )
+
+    # The pinned source replaced /root/slime after the base-image patches ran.
+    # Fail if required patches no longer apply rather than run an incompatible
+    # fork with silently missing Training Gym behavior.
+    return image.run_commands(*_patch_commands(_SLIME_ROOT_PATCHES_B64))
 
 
 def _build_conversion_config(slime_cfg: Any, model: Any = None) -> dict[str, Any]:
@@ -225,12 +311,36 @@ def _response_parser_path(model: Any) -> str:
     return f"{module}.{qualname}" if module and qualname else ""
 
 
-def _is_complete_torch_dist_checkpoint(path: str) -> bool:
-    try:
-        names = os.listdir(path)
-    except OSError:
+_PIPELINE_SPLIT_FLAGS = (
+    "--decoder-first-pipeline-num-layers",
+    "--decoder-last-pipeline-num-layers",
+)
+
+
+def _conversion_config_matches(stored: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Whether a recorded conversion still describes the current layout.
+
+    The record stores the emitted ``extra_args``, so a checkpoint converted before
+    the pipeline-split flags stopped being emitted at conversion PP1 would otherwise
+    read as stale and be re-converted for nothing. Dropping those flags is tolerated;
+    changing their values is not, since at PP>1 they define the split.
+    """
+    if stored == current:
+        return True
+    stored_rest, current_rest = dict(stored), dict(current)
+    stored_args = stored_rest.pop("extra_args", None)
+    current_args = current_rest.pop("extra_args", None)
+    if stored_rest != current_rest:
         return False
-    return "common.pt" in names and any(name.endswith(".distcp") for name in names)
+    if not isinstance(stored_args, list) or not isinstance(current_args, list):
+        return False
+    if [a for a in stored_args if not a.startswith(_PIPELINE_SPLIT_FLAGS)] != [
+        a for a in current_args if not a.startswith(_PIPELINE_SPLIT_FLAGS)
+    ]:
+        return False
+    return {a for a in current_args if a.startswith(_PIPELINE_SPLIT_FLAGS)} <= {
+        a for a in stored_args if a.startswith(_PIPELINE_SPLIT_FLAGS)
+    }
 
 
 def _checkpoint_conversion_cache_status(
@@ -240,7 +350,7 @@ def _checkpoint_conversion_cache_status(
     if not os.path.exists(save_path):
         return "missing", None
     if not has_torch_dist_checkpoint(
-        save_path, is_complete=_is_complete_torch_dist_checkpoint
+        save_path, is_complete=is_complete_torch_dist_checkpoint_dir
     ):
         return "incomplete", None
 
@@ -254,7 +364,7 @@ def _checkpoint_conversion_cache_status(
             stored_config = json.load(f)
     except (OSError, json.JSONDecodeError):
         return "stale", None
-    if stored_config != current_config:
+    if not _conversion_config_matches(stored_config, current_config):
         return "stale", stored_config
     return "hit", stored_config
 
@@ -263,7 +373,7 @@ _serialize_slime_params = serialize_recipe_params
 
 
 def _preflight_wandb(wandb_cfg: WandbConfig) -> str:
-    """Thin wrapper around :func:`~modal_training_gym.common.wandb.preflight_wandb`."""
+    """Backward-compatible wrapper for the W&B preflight helper."""
     from modal_training_gym.common.wandb import preflight_wandb
 
     return preflight_wandb(wandb_cfg)
@@ -275,6 +385,7 @@ def build_slime_app(
     slime: SlimeRecipe,
     model: ModelConfig,
     dataset: DatasetConfig,
+    eval_dataset: DatasetConfig | None = None,
     checkpoint: Checkpoint | None = None,
     name: str | None = None,
     group_id: str | None = None,
@@ -284,7 +395,13 @@ def build_slime_app(
     volume_prefix = f"slime-{type(slime).__name__.lstrip('_').lower()}"
 
     SlimeRecipe._validate_custom_model_architecture(model)
-    SlimeRecipe._validate_dataset(dataset)
+    SlimeRecipe._validate_datasets(dataset, eval_dataset)
+    dataset_path = SlimeRecipe._resolve_data_paths(dataset)
+    eval_dataset_path = (
+        SlimeRecipe._resolve_data_paths(eval_dataset)
+        if eval_dataset is not None
+        else None
+    )
 
     # Models that can't do THD packing (model.requires_bshd, e.g. Qwen3-ASR) must
     # train on padded (bshd) batches; fail fast with the fix if the recipe didn't.
@@ -295,7 +412,7 @@ def build_slime_app(
                 f"{model.model_name} requires padded (bshd) batches: its "
                 "megatron-bridge forward doesn't implement THD sequence packing. "
                 'Set extra_config={"qkv_format": "bshd", "micro_batch_size": N} and '
-                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7b_Recipe, which sets "
+                "use_dynamic_batch_size=False — or use Qwen3_ASR_1_7B_Recipe, which sets "
                 f"these. Got qkv_format={cfg.get('qkv_format')!r}, "
                 f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
             )
@@ -328,7 +445,10 @@ def build_slime_app(
     _caller_module, caller_script = resolve_caller_context()
 
     # ── Image ────────────────────────────────────────────────────────────────
-    image = _build_slime_base_image()
+    # When a git overlay will replace /root/slime, skip root patches here so they
+    # run once after the replacement instead of being applied and then discarded.
+    _needs_git_overlay = bool(slime.slime_git_repository and slime.slime_git_revision)
+    image = _build_slime_base_image(apply_root_patches=not _needs_git_overlay)
 
     # Hybrid models have layers with different parameter sets (e.g. GDN
     # layers carry linear_attn.dt_bias that standard attention layers lack).
@@ -352,34 +472,23 @@ def build_slime_app(
             copy=True,
         )
 
-    if isinstance(dataset, HarborDataset):
+    if isinstance(dataset, HarborDataset) or isinstance(eval_dataset, HarborDataset):
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
-    if slime.local_slime:
-        image = image.add_local_dir(
-            slime.local_slime,
-            remote_path=SLIME_ROOT,
-            copy=True,
-            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
-        )
+    image = _overlay_slime_source(image, slime)
 
     if slime.image_run_commands:
         image = image.run_commands(*slime.image_run_commands)
     if slime.image_env:
         image = image.env(slime.image_env)
 
+    if slime.metrics is not None and slime.metrics.provider == "trackio":
+        resolve_trackio_destination(slime.metrics)
+    image = apply_metric_image(image, slime.metrics)
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)
-
-    if caller_script is not None:
-        caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]
-        caller_remote_path = f"/root/{caller_module_name}.py"
-        image = image.add_local_file(
-            caller_script,
-            remote_path=caller_remote_path,
-            copy=True,
-        )
+    image = mount_caller_source(image, caller_script)
 
     # Patch both conversion and training images for hybrid models.
     # The validation patch lets save/load succeed despite non-uniform
@@ -504,7 +613,6 @@ def build_slime_app(
             )
         object.__setattr__(slime, "extra_config", cfg)
 
-    # Build train_image AFTER _ship_callable so shipped modules are included.
     train_image = image
     if _has_hybrid_spec:
         train_image = image.run_commands(
@@ -512,6 +620,9 @@ def build_slime_app(
             f"echo {_PATCH_GLOBAL_PLAN_B64} | base64 -d | python3",
             f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3",
         )
+    train_image = train_image.run_commands(
+        f"echo {_PATCH_CHECKPOINT_COMMIT_B64} | base64 -d | python3"
+    )
     if _has_gdn:
         train_image = train_image.run_commands(
             f"echo {_PATCH_GDN_PACKED_SEQ_B64} | base64 -d | python3",
@@ -523,13 +634,20 @@ def build_slime_app(
 
     # ── Volumes ──────────────────────────────────────────────────────────────
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
+    data_volume_name = slime.data_volume_name or f"{volume_prefix}-data"
+    data_volume = Volume.from_name(data_volume_name, create_if_missing=True)
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
         resolve_checkpoint_volumes(
             checkpoint,
             volume_prefix=volume_prefix,
             default_mount_path=str(CHECKPOINTS_PATH),
         )
+    )
+    checkpoint_dir = compute_recipe_save_root(
+        slime,
+        recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
+        mounted_save_root=checkpoints_mount_path,
+        training_run_id=training_run_id,
     )
     metadata_volume = Volume.from_name("training-gym-metadata", create_if_missing=True)
     all_volumes: dict[str | PurePosixPath, Any] = {
@@ -544,10 +662,11 @@ def build_slime_app(
         framework="slime",
         model=model,
         recipe_app_tags=slime.app_tags,
-        wandb=slime.wandb,
+        metrics=slime.metrics,
     )
+
     app = App(app_name, tags=tags)
-    gpu_spec = f"{slime.gpu_type}:{slime.actor_num_gpus_per_node}"
+    gpu_spec = f"{slime.gpu_type}:{slime.gpu_allocation.gpus_per_node}"
 
     @app.function(
         image=image,
@@ -583,9 +702,18 @@ def build_slime_app(
         name="prepare_dataset",
     )
     def prepare_dataset():
-        run_prepare_dataset(dataset, data_volume, SlimeRecipe._resolve_data_paths)
+        run_prepare_dataset(
+            dataset,
+            eval_dataset,
+            data_volume,
+            dataset_path,
+            eval_dataset_path,
+        )
 
-    convert_nnodes = get_checkpoint_conversion_policy(slime, model=model)[0]
+    convert_nnodes, convert_nproc, _ = get_checkpoint_conversion_policy(
+        slime, model=model
+    )
+    convert_gpu = f"{slime.gpu_type}:{convert_nproc}"
 
     @app.function(
         image=image,
@@ -596,6 +724,7 @@ def build_slime_app(
         timeout=60 * 60,
         secrets=[*hf_secrets(), *proxy_auth_secrets()],
         serialized=True,
+        single_use_containers=True,
         name="resolve_checkpoint",
     )
     def resolve_checkpoint(
@@ -639,6 +768,7 @@ def build_slime_app(
             if training_run_id:
                 flush_status_reporter(timeout_seconds=2.0)
             return None
+        print(f"torch_dist checkpoint at {save_path} is {cache_status}.")
 
         if cache_status == "stale":
             if stored_config is None:
@@ -669,8 +799,9 @@ def build_slime_app(
 
     @app.function(
         image=image,
-        gpu=gpu_spec,
+        gpu=convert_gpu,
         memory=slime.memory,
+        cpu=slime.cpu,
         cloud=slime.cloud,
         region=slime.region,
         volumes=all_volumes,
@@ -678,6 +809,7 @@ def build_slime_app(
         secrets=proxy_auth_secrets() or None,
         experimental_options={"efa_enabled": True},
         serialized=True,
+        single_use_containers=True,
         name="convert_checkpoint",
     )
     @clustered_if(convert_nnodes > 1, convert_nnodes, gpu_type=slime.gpu_type)
@@ -717,17 +849,14 @@ def build_slime_app(
         if model and getattr(model, "architecture", None):
             mmt = getattr(model.architecture, "megatron_model_type", "")
 
-        if num_nodes > 1:
-            spec = importlib.util.find_spec(
-                "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        spec = importlib.util.find_spec(
+            "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        )
+        convert_script = spec.origin if spec is not None else None
+        if not convert_script:
+            raise RuntimeError(
+                "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
             )
-            convert_script = spec.origin if spec is not None else None
-            if not convert_script:
-                raise RuntimeError(
-                    "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist not found"
-                )
-        else:
-            convert_script = f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"
         if mmt or slime.slime_model_script:
             model_script = (
                 f"{SLIME_ROOT}/{slime.slime_model_script}"
@@ -750,6 +879,8 @@ def build_slime_app(
 
         env = {**os.environ, **slime.environment}
         env.pop("NCCL_NVLS_ENABLE", None)
+        if any(arg.startswith("--pipeline-model-parallel-size ") for arg in extra_args):
+            env["SKIP_PP_AUTOINFLATE"] = "1"
         if num_nodes > 1:
             env["SKIP_RELEASE_RENAME"] = "1"
         print(
@@ -783,8 +914,13 @@ def build_slime_app(
     _use_clustered = _multi_node or (_full_node and _supports_rdma(slime.gpu_type))
 
     train_secrets: list[Secret] = []
-    if slime.wandb is not None:
-        train_secrets.append(Secret.from_name(slime.wandb.modal_wandb_secret_name))
+    if slime.metrics is not None:
+        train_secrets.extend(metric_secrets(slime.metrics))
+        if (
+            slime.metrics.provider == "trackio"
+            and getattr(slime.metrics, "modal_secret_name", "") == "huggingface-secret"
+        ):
+            train_secrets.extend(hf_secrets())
     # Proxy-auth tokens for any custom_rm / generate hook that calls a
     # CustomDeployment.launch() endpoint (teacher /generate, etc.).
     train_secrets.extend(proxy_auth_secrets())
@@ -808,6 +944,7 @@ def build_slime_app(
         image=train_image,
         gpu=gpu_spec,
         memory=slime.memory,
+        cpu=slime.cpu,
         cloud=slime.cloud,
         region=slime.region,
         volumes=all_volumes,
@@ -819,7 +956,7 @@ def build_slime_app(
         # before the first save_interval checkpoint) re-runs from scratch and
         # crashloops through every attempt — 10 wasted ~4h of a 40-GPU cluster on
         # a step-1 crash. Cap low so a persistent failure surfaces fast.
-        retries=Retries(max_retries=3, initial_delay=0.0),
+        retries=Retries(max_retries=slime.max_retries, initial_delay=0.0),
         single_use_containers=True,
         experimental_options=train_experimental_options or None,
         serialized=True,
@@ -863,38 +1000,58 @@ def build_slime_app(
             await cluster.wait_forever()
             return
 
-        # Fail fast on W&B access before any GPU work, not as a recurring CommError
-        # mid-training.
-        wandb_entity = ""
-        if slime.wandb is not None:
-            wandb_entity = _preflight_wandb(slime.wandb)
+        # Fail fast on tracker access before the framework starts training.
+        metric_entity = preflight_metric(slime.metrics)
 
-        wandb_run_id = ""
+        metric_run_id = ""
 
         print(f"Training run id: {training_run_id}")
         config_summary: dict = {
             "model": {"model_name": model.model_name} if model else {},
-            "recipe": _serialize_slime_params(slime, dataset=dataset, model=model),
-            "wandb": (
-                {
-                    "project": slime.wandb.project,
-                    "group": slime.wandb.group,
-                    "entity": wandb_entity,
-                    "run_id": wandb_run_id,
-                }
-                if slime.wandb
-                else {}
+            # These fields are in _SLIME_SKIP, so _serialize_slime_params drops
+            # them; record them here so the run shows what it actually used.
+            "recipe": {
+                **_serialize_slime_params(
+                    slime,
+                    dataset=dataset,
+                    eval_dataset=eval_dataset,
+                    dataset_path=dataset_path,
+                    eval_dataset_path=eval_dataset_path,
+                    model=model,
+                ),
+                **{
+                    key: value
+                    for key, value in (
+                        ("slime_git_repository", slime.slime_git_repository),
+                        ("slime_git_revision", slime.slime_git_revision),
+                        ("data_volume_name", slime.data_volume_name),
+                    )
+                    if value
+                },
+            },
+            "metrics": metric_metadata(
+                slime.metrics,
+                entity=metric_entity,
+                run_id=metric_run_id,
             ),
             "dataset": {
                 "hf_repo": getattr(dataset, "hf_repo", ""),
                 "name": type(dataset).__name__,
             },
+            "eval_dataset": (
+                {
+                    "hf_repo": getattr(eval_dataset, "hf_repo", ""),
+                    "name": type(eval_dataset).__name__,
+                }
+                if eval_dataset is not None
+                else None
+            ),
             "lr": slime.lr,
             "global_batch_size": slime.global_batch_size,
         }
         (
             run_record,
-            wandb_run_id,
+            metric_run_id,
             framework_status_token,
         ) = await init_training_run_record(
             training_run_id=training_run_id,
@@ -903,9 +1060,12 @@ def build_slime_app(
             framework=Framework.SLIME,
             initializing_status=SlimeStatus.INITIALIZING,
             config_summary=config_summary,
-            wandb_cfg=slime.wandb,
-            wandb_entity=wandb_entity,
+            metric_cfg=slime.metrics,
+            metric_entity=metric_entity,
             framework_status_token=framework_status_token,
+            checkpoint_dir=checkpoint_dir,
+            checkpoints_volume_name=checkpoints_volume_name,
+            checkpoints_mount_path=checkpoints_mount_path,
         )
 
         try:  # Wraps all post-setup work so any failure marks the run terminal.
@@ -944,42 +1104,30 @@ def build_slime_app(
 
             if dataset:
                 await _set_framework_status_async(SlimeStatus.PREPARE_DATASET)
-                prompt_data, eval_paths = SlimeRecipe._resolve_data_paths(dataset)
-                needs_prepare = not os.path.exists(prompt_data)
-                if dataset.always_prepare and os.path.exists(prompt_data):
-                    import shutil
-
-                    data_dir = os.path.dirname(prompt_data)
-                    print(f"always_prepare=True — removing {data_dir}")
-                    shutil.rmtree(data_dir, ignore_errors=True)
-                    needs_prepare = True
-                if needs_prepare:
-                    print(f"Preparing dataset ({prompt_data})...")
-                    dataset.prepare(prompt_data, eval_paths)
+                wrote_data = write_dataset_if_needed(dataset, dataset_path)
+                if eval_dataset is not None and eval_dataset_path is not None:
+                    wrote_data = (
+                        write_dataset_if_needed(
+                            eval_dataset,
+                            eval_dataset_path,
+                        )
+                        or wrote_data
+                    )
+                if wrote_data:
                     await data_volume.commit.aio()
-                dataset.validate_prepared(prompt_data)
-                for ep in (eval_paths or {}).values():
-                    dataset.validate_prepared(ep)
 
             await _set_framework_status_async(SlimeStatus.CONVERT_MODEL)
+            save_root = checkpoint_dir
+            apply_scoped_save(slime, save_root)
             prepare_slime_config(slime, model, tempfile.mkdtemp())
 
-            if wandb_key := os.environ.get("WANDB_API_KEY", ""):
-                if slime.wandb is not None:
-                    slime.wandb.key = wandb_key
-
-            save_root = compute_save_root(
-                slime.save,
-                recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
-                mounted_save_root=checkpoints_mount_path,
-                training_run_id=training_run_id,
-            )
+            os.makedirs(save_root, exist_ok=True)
 
             original_save = slime.save
             original_load = slime.load
+            original_start_rollout_id = slime.start_rollout_id
             original_ref_load = slime.ref_load
             original_no_load_optim = slime.no_load_optim
-            object.__setattr__(slime, "save", save_root)
 
             # Resolve the local HF snapshot dir (used for bridge-mode load below).
             _hf_ref: str | None = None
@@ -993,7 +1141,7 @@ def build_slime_app(
                 )
 
             resume_checkpoint = torch_dist_resume_checkpoint(
-                save_root, is_complete=_is_complete_torch_dist_checkpoint
+                save_root, is_complete=is_complete_torch_dist_checkpoint_dir
             )
             record_resume_checkpoint(run_record, resume_checkpoint)
             await run_record.save(is_async=True)
@@ -1007,13 +1155,18 @@ def build_slime_app(
                     "resuming training from last saved iteration."
                 )
                 object.__setattr__(slime, "load", save_root)
-                # Weights-only checkpoints (``no_save_optim``) have no Adam state;
-                # Megatron will KeyError on state_dict["optimizer"] unless we skip it.
+                # Continue from the iteration stored in the run's own checkpoint,
+                # even for runs launched with an explicit start_rollout_id.
+                object.__setattr__(slime, "start_rollout_id", None)
+                drop_materialized_config_key(slime, "start_rollout_id")
+                # This run's saves include Adam only when no_save_optim is false.
+                # TrainConfig.resume_from_checkpoint forces no_load_optim for the source seed;
+                # that flag is not a property of later saves in this directory.
                 if slime.no_save_optim and not slime.no_load_optim:
                     print(
                         "WARNING: no_save_optim=True — enabling no_load_optim for resume."
                     )
-                    object.__setattr__(slime, "no_load_optim", True)
+                object.__setattr__(slime, "no_load_optim", slime.no_save_optim)
             elif (
                 slime.megatron_to_hf_mode == "bridge" and not slime.ref_load and _hf_ref
             ):
@@ -1024,10 +1177,19 @@ def build_slime_app(
                 # on the missing optimizer state.
                 object.__setattr__(slime, "ref_load", _hf_ref)
             try:
-                cmd = build_train_cmd(slime, SLIME_ROOT, model=model, dataset=dataset)
+                cmd = build_train_cmd(
+                    slime,
+                    SLIME_ROOT,
+                    model=model,
+                    dataset=dataset,
+                    eval_dataset=eval_dataset,
+                    dataset_path=dataset_path,
+                    eval_dataset_path=eval_dataset_path,
+                )
             finally:
                 object.__setattr__(slime, "save", original_save)
                 object.__setattr__(slime, "load", original_load)
+                object.__setattr__(slime, "start_rollout_id", original_start_rollout_id)
                 object.__setattr__(slime, "ref_load", original_ref_load)
                 object.__setattr__(slime, "no_load_optim", original_no_load_optim)
 
@@ -1043,18 +1205,19 @@ def build_slime_app(
                     "container. Phase reporting is disabled for this run."
                 )
 
-            wandb_env = {}
-            if wandb_run_id:
-                wandb_env["WANDB_RUN_ID"] = wandb_run_id
-                wandb_env["WANDB_RESUME"] = "allow"
-            if wandb_entity:
-                wandb_env["WANDB_ENTITY"] = wandb_entity
-
             runtime_env = {
                 "env_vars": {
-                    "no_proxy": f"127.0.0.1,{cluster.head_addr}",
+                    **slime.environment,
+                    "no_proxy": ",".join(
+                        value
+                        for value in (
+                            "127.0.0.1",
+                            cluster.head_addr,
+                            slime.environment.get("no_proxy", ""),
+                        )
+                        if value
+                    ),
                     "MASTER_ADDR": cluster.head_addr,
-                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(slime.num_rollout),
                     "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
@@ -1066,9 +1229,14 @@ def build_slime_app(
                     ),
                     "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                     "TRAINING_GYM_SUBSTEP_TIMING": slime.substep_timing,
-                    **wandb_env,
-                    **slime.environment,
+                    **metric_runtime_env(
+                        slime.metrics,
+                        run_id=metric_run_id,
+                        entity=metric_entity,
+                    ),
                     **timing_debug_env(),
+                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
+                    "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": checkpoints_volume_name,
                     "TRAINING_GYM_FRAMEWORK_STATUS_TOKEN": framework_status_token,
                 }
             }
@@ -1078,7 +1246,8 @@ def build_slime_app(
                 f"Training {app_name} — {slime.total_nodes} node(s) × {gpu_spec}  ({mode})"
             )
             print(slime.gpu_allocation.summary())
-            print(f"Command: {cmd}, runtime_env: {runtime_env}")
+            print(f"Command: {cmd}")
+            print(f"Runtime environment variables: {sorted(runtime_env['env_vars'])}")
 
             await _set_framework_status_async(SlimeStatus.ROLLOUT_INITIALIZING)
             async with cluster.forward_dashboard() as tunnel:
@@ -1097,7 +1266,8 @@ def build_slime_app(
                     raise error
                 print(f"Ray job completed: {result.status}")
 
-            result = build_train_result(
+            payload = persist_completed_run(
+                run_record,
                 app_name=app_name,
                 framework=Framework.SLIME,
                 training_run_id=training_run_id,
@@ -1105,19 +1275,19 @@ def build_slime_app(
                 model=model,
                 checkpoints_volume_name=checkpoints_volume_name,
                 checkpoints_mount_path=checkpoints_mount_path,
-                wandb_cfg=slime.wandb,
-                wandb_entity=wandb_entity,
-                wandb_run_id=wandb_run_id,
+                metric_cfg=slime.metrics,
+                metric_entity=metric_entity,
+                metric_run_id=metric_run_id,
                 group_id=group_id,
             )
-            await result.save(is_async=True)
+            await save_train_result_blob(payload, is_async=True)
             run_record.status = TrainingRunStatus.COMPLETED
             mark_training_attempt_finished(
                 run_record, status="completed", ended_at=int(time.time())
             )
             await checkpoints_volume.commit.aio()
-            print(f"TrainResult saved: {training_run_id}")
-            return result._to_dict()
+            print(f"TrainingRun saved: {training_run_id}")
+            return payload
         except KeyboardInterrupt:
             mark_run_stopped(run_record)
             raise

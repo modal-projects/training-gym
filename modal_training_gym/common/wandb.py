@@ -8,31 +8,32 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import ClassVar
+from urllib.parse import quote
+
+from modal_training_gym.common.metrics import MetricConfig
 
 
 @dataclass
-class WandbConfig:
-    """Weights & Biases logging configuration shared across all frameworks.
+class WandbConfig(MetricConfig):
+    """Weights & Biases run metadata and credentials.
 
-    ## Fields
-
-    project : str
-        W&B project name. Default ``""``.
-    entity : str
-        W&B entity/team slug. Optional; when omitted, preflight resolves the
-        default entity for the configured API key.
-    group : str
-        W&B group tag for organizing related runs. Default ``""``.
-    exp_name : str
-        W&B run display name. Default ``""``.
-    key : str
-        W&B API key. Usually injected via ``WANDB_API_KEY`` at launch
-        time rather than hardcoded. Default ``""``.
-    disable_random_suffix : bool
-        When ``True``, suppresses the random suffix that W&B appends to
-        run names. Default ``True``.
-    modal_wandb_secret_name : str
-        Name of the Modal secret containing the W&B API key. Default ``"wandb-secret"``.
+    Args:
+        project:
+            W&B project name.
+        entity:
+            W&B entity or team slug. The API key's default entity applies when
+            empty.
+        group:
+            W&B group tag for related runs.
+        exp_name:
+            W&B run display name.
+        key:
+            W&B API key. ``WANDB_API_KEY`` takes precedence.
+        disable_random_suffix:
+            Preserve the configured run name.
+        modal_wandb_secret_name:
+            Modal secret containing the W&B API key.
     """
 
     project: str = ""
@@ -43,18 +44,35 @@ class WandbConfig:
     disable_random_suffix: bool = True
     modal_wandb_secret_name: str = "wandb-secret"
 
+    provider: ClassVar[str] = "wandb"
+
+    def runtime_env(self, *, run_id: str, entity: str = "") -> dict[str, str]:
+        env = super().runtime_env(run_id=run_id, entity=entity)
+        if key := os.environ.get("WANDB_API_KEY", "") or self.key:
+            env["WANDB_API_KEY"] = key
+        if run_id:
+            env.update(WANDB_RUN_ID=run_id, WANDB_RESUME="allow")
+        if entity:
+            env["WANDB_ENTITY"] = entity
+        return env
+
+    def url(self, *, entity: str = "", run_id: str = "") -> str | None:
+        entity = (entity or self.entity).strip()
+        project = self.project.strip()
+        if not entity or not project:
+            return None
+        base = f"https://wandb.ai/{quote(entity, safe='')}/{quote(project, safe='')}"
+        return f"{base}/runs/{quote(run_id, safe='')}" if run_id else base
+
 
 def preflight_wandb(wandb_cfg: WandbConfig) -> str:
-    """
-    Returns the resolved W&B entity for constructing deep-links to individual runs.
-    """
-    key = os.environ.get("WANDB_API_KEY", "") or (wandb_cfg.key or "")
+    """Return the resolved W&B entity for constructing deep links."""
+    key = os.environ.get("WANDB_API_KEY", "") or wandb_cfg.key
     if not key:
         raise RuntimeError(
-            "W&B logging is enabled (recipe.wandb=...) but no WANDB_API_KEY is "
-            f"available — add it to the Modal secret "
-            f"'{wandb_cfg.modal_wandb_secret_name}' (or set wandb.key=), or drop "
-            "wandb= from the recipe to disable logging."
+            "W&B logging is enabled but no WANDB_API_KEY is available - add it "
+            f"to Modal secret '{wandb_cfg.modal_wandb_secret_name}', set "
+            "metrics.key, or drop metrics= to disable logging."
         )
 
     import wandb
@@ -75,13 +93,15 @@ def preflight_wandb(wandb_cfg: WandbConfig) -> str:
         try:
             wandb.Api(api_key=key).run(probe_path).delete()
         except Exception:
-            pass  # a leftover empty "_preflight" run is harmless
+            pass
     except Exception as exc:
         raise RuntimeError(
             f"W&B pre-flight failed for project '{project}': {exc}\n"
-            f"The W&B key in Modal secret '{wandb_cfg.modal_wandb_secret_name}' can't "
-            "log there (bad/expired key, or no write access to its entity). Point "
-            "recipe.wandb at a project/entity you can write to, fix the secret, or "
-            "drop wandb= to disable logging."
+            f"The key in Modal secret '{wandb_cfg.modal_wandb_secret_name}' "
+            "cannot log there. Fix the secret or drop metrics=."
         ) from exc
+    finally:
+        # Ray workers must start their own services for shared-mode logging.
+        # finish() closes the probe run but leaves WANDB_SERVICE inherited.
+        wandb.teardown()
     return entity

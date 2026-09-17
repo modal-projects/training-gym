@@ -2,8 +2,8 @@
 
 The two launchers are structurally identical: they ship user callables into the
 image, resolve checkpoint volumes, tag the Modal app, run the download/prepare
-phases, initialize/finalize the ``TrainingRun`` record, and build the
-``TrainResult``. That shared machinery lives here; each framework passes its own
+phases, initialize/finalize the ``TrainingRun`` record, and persist
+completed-run artifacts. That shared machinery lives here; each framework passes its own
 status enum / recipe hooks so the behavior stays framework-specific where it
 must.
 """
@@ -33,12 +33,14 @@ from modal_training_gym.common.run import (
     TrainingRunStatus,
     mark_training_attempt_finished,
     mark_training_attempt_started,
-    record_wandb_attempt,
+    metric_run_id_for_attempt,
+    record_metric_attempt,
     run_scoped_save_root,
-    wandb_run_id_for_attempt,
+    set_checkpoint_location,
 )
-from modal_training_gym.common.train_result import TrainResult
-from modal_training_gym.common.wandb import WandbConfig
+from modal_training_gym.common.checkpoint import require_within_volume_mount
+from modal_training_gym.common.train_result import train_result_payload
+from modal_training_gym.common.metrics import MetricConfig, metric_metadata
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
 
 
@@ -57,6 +59,18 @@ def resolve_caller_context() -> tuple[Any, str | None]:
         if mod_file and os.path.isfile(mod_file):
             caller_script = os.path.abspath(mod_file)
     return caller_module, caller_script
+
+
+def mount_caller_source(image: "Image", caller_script: str | None) -> "Image":
+    """Copy the caller script onto the image at ``/root/<name>.py``."""
+    if caller_script is None:
+        return image
+    name = os.path.splitext(os.path.basename(caller_script))[0]
+    return image.add_local_file(
+        caller_script,
+        remote_path=f"/root/{name}.py",
+        copy=True,
+    )
 
 
 def ship_callable(
@@ -155,7 +169,7 @@ def build_app_tags(
     framework: str,
     model: Any,
     recipe_app_tags: dict[str, str],
-    wandb: "WandbConfig | None",
+    metrics: "MetricConfig | None",
 ) -> dict[str, str]:
     """Build the Modal app tag dict for dashboard auto-discovery."""
     tags = {
@@ -164,10 +178,13 @@ def build_app_tags(
         "_modal_model_name": modal_tag_value(model.model_name),
         **recipe_app_tags,
     }
-    if wandb is not None:
-        tags["_modal_wandb_project"] = modal_tag_value(wandb.project)
-        if wandb.group:
-            tags["_modal_wandb_group"] = modal_tag_value(wandb.group)
+    if metrics is not None:
+        tags["_modal_metric_provider"] = metrics.provider
+        tags["_modal_metric_project"] = modal_tag_value(metrics.project)
+        if metrics.group:
+            tags["_modal_metric_group"] = modal_tag_value(metrics.group)
+        # Provider-neutral tags already identify W&B. Duplicating the project
+        # and group as legacy W&B tags exceeds Modal's eight-tag limit.
     return tags
 
 
@@ -204,25 +221,30 @@ def run_download_phase(
         flush_status_reporter(timeout_seconds=2.0)
 
 
+def write_dataset_if_needed(dataset: Any, path: str) -> bool:
+    """Write and validate a dataset unless its cached materialization exists."""
+    if os.path.exists(path):
+        dataset.validate_written(path)
+        return False
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    print(f"Writing dataset ({path})...")
+    dataset.write(path)
+    dataset.validate_written(path)
+    return True
+
+
 def run_prepare_dataset(
     dataset: Any,
+    eval_dataset: Any,
     data_volume: "Volume",
-    resolve_data_paths: Callable[[Any], tuple[str, Any]],
+    dataset_path: str,
+    eval_dataset_path: str | None,
 ) -> None:
-    """Materialize the dataset onto the data volume, honoring ``always_prepare``
-    and validating the prepared prompt/eval paths."""
+    """Materialize the training and optional framework-evaluation datasets."""
     data_volume.reload()
-    prompt_data, eval_paths = resolve_data_paths(dataset)
-    if dataset.always_prepare and os.path.exists(prompt_data):
-        import shutil
-
-        data_dir = os.path.dirname(prompt_data)
-        print(f"always_prepare=True — removing {data_dir}")
-        shutil.rmtree(data_dir, ignore_errors=True)
-    dataset.prepare(prompt_data, eval_paths)
-    dataset.validate_prepared(prompt_data)
-    for ep in (eval_paths or {}).values():
-        dataset.validate_prepared(ep)
+    write_dataset_if_needed(dataset, dataset_path)
+    if eval_dataset is not None and eval_dataset_path is not None:
+        write_dataset_if_needed(eval_dataset, eval_dataset_path)
     data_volume.commit()
 
 
@@ -234,13 +256,16 @@ async def init_training_run_record(
     framework: "Framework",
     initializing_status: Any,
     config_summary: dict[str, Any],
-    wandb_cfg: "WandbConfig | None",
-    wandb_entity: str,
+    metric_cfg: "MetricConfig | None",
+    metric_entity: str,
     framework_status_token: str,
+    checkpoint_dir: str,
+    checkpoints_volume_name: str,
+    checkpoints_mount_path: str,
 ) -> tuple[Any, str, str]:
     """Create or resume the ``TrainingRun`` record for this attempt and persist
     the framework-status token. Returns
-    ``(run_record, wandb_run_id, framework_status_token)``.
+    ``(run_record, metric_run_id, framework_status_token)``.
 
     Reuses the record the local ``TrainConfig.train()`` driver creates before
     invoking download/convert (so those phases are visible in the dashboard);
@@ -264,19 +289,25 @@ async def init_training_run_record(
             created_at=created_at,
             started_at=created_at,
         )
+    set_checkpoint_location(
+        run_record,
+        checkpoint_dir=checkpoint_dir,
+        checkpoints_volume_name=checkpoints_volume_name,
+        checkpoints_mount_path=checkpoints_mount_path,
+    )
     attempt_count = mark_training_attempt_started(
         run_record, started_at=int(time.time())
     )
-    wandb_run_id = ""
-    if wandb_cfg is not None:
-        wandb_run_id = wandb_run_id_for_attempt(training_run_id, attempt_count)
-        run_record.config["wandb"]["run_id"] = wandb_run_id
-        record_wandb_attempt(
+    metric_run_id = ""
+    if metric_cfg is not None:
+        metric_run_id = metric_run_id_for_attempt(training_run_id, attempt_count)
+        metric_data = metric_metadata(
+            metric_cfg, entity=metric_entity, run_id=metric_run_id
+        )
+        run_record.config["metrics"] = metric_data
+        record_metric_attempt(
             run_record,
-            entity=wandb_entity,
-            project=wandb_cfg.project,
-            group=wandb_cfg.group,
-            run_id=wandb_run_id,
+            **metric_data,
             attempt_count=attempt_count,
         )
     if attempt_count > 1:
@@ -294,7 +325,7 @@ async def init_training_run_record(
         is_async=True,
     )
     print(f"TrainingRun recorded: {training_run_id}")
-    return run_record, wandb_run_id, framework_status_token
+    return run_record, metric_run_id, framework_status_token
 
 
 def compute_save_root(
@@ -304,21 +335,59 @@ def compute_save_root(
     mounted_save_root: str,
     training_run_id: str,
 ) -> str:
-    """Resolve the run-scoped checkpoint save root and ensure it exists. A
-    configured ``save`` equal to the recipe default is redirected to the mounted
-    volume path so checkpoints land on the checkpoints Volume."""
+    """Resolve the run-scoped checkpoint save root. A configured ``save`` equal
+    to the recipe default is redirected to the mounted volume path so checkpoints
+    land on the checkpoints Volume."""
     configured_save_root = str(save).rstrip("/") if save else mounted_save_root
-    save_root = run_scoped_save_root(
+    save_root = (
         mounted_save_root
         if configured_save_root == recipe_default_save_root
-        else configured_save_root,
-        training_run_id,
+        else configured_save_root
     )
-    os.makedirs(save_root, exist_ok=True)
-    return save_root
+    return require_within_volume_mount(
+        run_scoped_save_root(save_root, training_run_id),
+        mounted_save_root,
+    )[0]
 
 
-def build_train_result(
+def configured_recipe_save(recipe: Any) -> str | None:
+    extra = recipe.extra_config
+    save = extra.get("save") if isinstance(extra, dict) else None
+    if not save:
+        save = recipe.save
+    return str(save) if save else None
+
+
+def compute_recipe_save_root(
+    recipe: Any,
+    *,
+    recipe_default_save_root: str,
+    mounted_save_root: str,
+    training_run_id: str,
+) -> str:
+    """Resolve the run-scoped save root after ``extra_config`` save precedence.
+
+    Keys in ``extra_config`` drop the matching CLI flag, so a ``save`` override
+    is the path training writes. This function does not mutate ``recipe``.
+    """
+    return compute_save_root(
+        configured_recipe_save(recipe),
+        recipe_default_save_root=recipe_default_save_root,
+        mounted_save_root=mounted_save_root,
+        training_run_id=training_run_id,
+    )
+
+
+def apply_scoped_save(recipe: Any, save_root: str) -> None:
+    extra = recipe.extra_config
+    if isinstance(extra, dict) and extra.get("save"):
+        recipe.extra_config = {**extra, "save": save_root}
+    if recipe.save:
+        recipe.save = save_root
+
+
+def persist_completed_run(
+    run_record: Any,
     *,
     app_name: str,
     framework: "Framework",
@@ -327,30 +396,27 @@ def build_train_result(
     model: Any,
     checkpoints_volume_name: str,
     checkpoints_mount_path: str,
-    wandb_cfg: "WandbConfig | None",
-    wandb_entity: str,
-    wandb_run_id: str,
+    metric_cfg: "MetricConfig | None",
+    metric_entity: str,
+    metric_run_id: str,
     group_id: str | None,
-) -> "TrainResult":
-    """Construct a ``TrainResult``, filtering to the fields the dataclass
-    actually accepts (older/newer TrainResult versions differ)."""
-    result_kwargs = {
-        "app_name": app_name,
-        "framework": framework,
-        "training_run_id": training_run_id,
-        "checkpoint_dir": checkpoint_dir,
-        "model_config": model,
-        "checkpoints_volume_name": checkpoints_volume_name,
-        "checkpoints_mount_path": checkpoints_mount_path,
-        "wandb_project": wandb_cfg.project if wandb_cfg else "",
-        "wandb_entity": wandb_entity,
-        "wandb_training_run_id": wandb_run_id,
-        "group_id": group_id or "",
-    }
-    accepted_fields = set(inspect.signature(TrainResult).parameters)
-    return TrainResult(
-        **{k: v for k, v in result_kwargs.items() if k in accepted_fields}
+) -> dict[str, Any]:
+    metrics = metric_metadata(metric_cfg, entity=metric_entity, run_id=metric_run_id)
+    payload = train_result_payload(
+        app_name=app_name,
+        framework=framework,
+        training_run_id=training_run_id,
+        checkpoint_dir=checkpoint_dir,
+        checkpoints_volume_name=checkpoints_volume_name,
+        checkpoints_mount_path=checkpoints_mount_path,
+        model_config=model,
+        metrics=metrics,
+        group_id=group_id or "",
     )
+    run_record.app_name = app_name
+    run_record.source_model = payload["model_config"]
+    run_record.metrics = metrics
+    return payload
 
 
 def mark_run_stopped(run_record: Any) -> None:

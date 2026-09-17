@@ -137,7 +137,7 @@ def test_run_get_help_documents_flags_and_examples():
     result = CliRunner().invoke(cli_module.entrypoint_cli, ["run", "get", "--help"])
 
     assert result.exit_code == 0
-    assert "Show status and top-level metadata for a single run." in result.stdout
+    assert "Show a run's status and top-level metadata." in result.stdout
     assert "RUN_ID" in result.stdout
     assert "--verbose" in result.stdout
     assert "-j, --json" in result.stdout

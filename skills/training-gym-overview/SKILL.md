@@ -31,7 +31,7 @@ launchers from their own scripts or notebooks.
 ```
 modal_training_gym/         <- installable package
 ├── common/                 <- cross-framework pure data + helpers
-│   ├── dataset.py          <- DatasetConfig base (user subclasses)
+│   ├── dataset.py          <- dataset abstraction + built-in sources
 │   ├── models/             <- ModelConfig hierarchy (see below)
 │   ├── wandb.py            <- WandbConfig
 │   ├── framework.py        <- resolve_caller_module, TOOLS_*
@@ -41,19 +41,14 @@ modal_training_gym/         <- installable package
 └── tools/                  <- shared scripts mounted on every image at
                               /opt/training-gym/tools (see "Tools" below)
 
-tutorials/
-├── tutorial_generator/     <- decorator-annotated source files -- THIS is
-│                             what you edit; each file is one tutorial
-└── generate_tutorial.py    <- AST-walks each source, emits
-                              tutorials/<bucket>/<name>/<name>.py + .ipynb
+tutorials/                  <- runnable Python tutorial sources
 
 tests/                      <- plain-script tests (uv run tests/<x>.py)
 skills/                     <- packaged agent skills (you are here)
 ```
 
-**Never edit `tutorials/<bucket>/<name>/<name>.py` or `.ipynb` directly -- they are
-generated.** Edit `tutorials/tutorial_generator/<bucket>/<name>.py` and run
-`uv run tutorials/generate_tutorial.py`.
+Edit `tutorials/*.py` or `tutorials/<name>/main.py` (sibling helpers allowed).
+Each entry is both the runnable tutorial and the source for its docs page.
 
 ## Core abstractions
 
@@ -91,24 +86,50 @@ actionable `ValueError` if a user attaches a model with
 
 ### `DatasetConfig`
 
-In `modal_training_gym/common/dataset.py`. Plain class; subclass and override
-`prepare()` to materialize the data on a shared volume. Declarative class
-attrs (`prompt_data`, `input_key`, `rm_type`, etc.) are interpreted by each
-framework's config converter.
+In `modal_training_gym/common/dataset.py`. Instantiate built-in sources such
+as `HuggingFaceDataset` directly:
+
+```python
+dataset = HuggingFaceDataset(
+    hf_repo="org/repo",
+    hf_split="train[:100]",
+    input_column="question",
+    output_column="answer",
+    input_format="text",
+)
+```
+
+Use `input_format="text"` for plain text that should be converted into
+messages, `"messages"` for an already formatted message column, and `"raw"`
+only when the framework must not apply the model's chat template.
+
+For custom data, subclass `DatasetConfig` and implement the methods
+`input_key()`, `label_key()`, and `rows()`. `rows()` is also the interface for
+explicit local or offline loops. The default `write(path)` serializes those
+rows to JSONL; launchers create the destination directory and call `write()` to
+materialize framework input on the shared data volume. Override
+`apply_chat_template()` when its default of `True` is not appropriate.
+
+`cache_key()` controls materialization reuse. Return the same stable key when
+equivalent configurations can share written data; return `None` to make every
+training run use a fresh path and attempt materialization independently.
 
 ### `TrainConfig` + recipe
 
 `TrainConfig` composes `dataset`, `model`, and a recipe (`SlimeRecipe` /
-`MilesRecipe`). Recipes carry Modal infra + framework CLI flags
-(`extra="forbid"`). Call `.train()` / `.launch()` — no public `build_app()`.
+`MilesRecipe`). It also accepts an optional, separate `eval_dataset` for the
+framework's internal evaluation loop; this is independent from explicit
+offline evaluation over `eval_dataset.rows()`. Recipes carry Modal infra +
+framework CLI flags (`extra="forbid"`). Call `.train()` / `.launch()` — no
+public `build_app()`.
 
 ```python
 cfg = TrainConfig(
     dataset=MyDataset(...),
     model=Qwen3_4B(),
-    recipe=Qwen3_4b_Recipe(gpu_type="H100", ...),
+    recipe=Qwen3_4B_Recipe(gpu_type="H100", ...),
 )
-result = cfg.train()
+run = cfg.train()
 ```
 
 ### Caller resolution for cloudpickle
@@ -182,87 +203,34 @@ remote_path=TOOLS_REMOTE_PATH, copy=True)` on every framework image.
 
 ## Adding a new tutorial
 
-1. **Pick the framework** -- almost always one of the catalog above.
+1. **Pick the framework**. Use one of the catalog entries above in most cases.
 
-2. **Create the source** at
-   `tutorials/tutorial_generator/<bucket>/<name>.py`. Structure (follow
-   existing slime tutorials as templates):
+2. **Create `tutorials/<name>.py`** with the next contiguous `order` value:
 
    ```python
-   from tutorial_generator import code, markdown, notebook_only, py_only, shell
+   # ---
+   # order: 0
+   # ---
+   #
+   # # <Title>
+   #
+   # One-paragraph description of what this trains.
 
+   from modal_training_gym import TrainConfig
 
-   @markdown
-   def _intro():
-       """# <Title>
-
-       One-paragraph description of what this trains.
-       """
-
-
-   @notebook_only
-   @shell("%uv pip install -q git+https://github.com/modal-projects/training-gym.git@main")
-   def _install():
-       pass
-
-
-   @code
-   def _imports():
-       import modal
-
-       from modal_training_gym.common.dataset import DatasetConfig
-       from modal_training_gym.common.models import <BuiltinModelOrModelConfiguration>
-       from modal_training_gym import TrainConfig, Qwen3_4b_Recipe
-
-
-   @code
-   def _define_dataset():
-       class MyDataset(DatasetConfig):
-           ...
-           def prepare(self): ...
-
-
-   @code
-   def _define_config():
-       my_training_run = TrainConfig(
-           dataset=MyDataset(...),
-           model=<BuiltinModel>(),
-           recipe=Qwen3_4b_Recipe(gpu_type="H100", ...),
-       )
-
-
-   @py_only
-   @markdown
-   def _run_cli():
-       """```bash
-       uv run tutorials/<bucket>/<name>/<name>.py
-       ```"""
-
-
-   @notebook_only
-   @code
-   def _invoke_train():
-       train_result = my_training_run.train()
+   run = TrainConfig(...).train()
    ```
 
-3. **Decorators cheat sheet**:
-   - `@markdown` -- function docstring becomes a markdown cell.
-   - `@code` -- function body (dedented) becomes a code cell.
-   - `@shell("...")` -- string arg is the code cell verbatim (supports
-     `%uv pip install`, etc).
-   - `@py_only` / `@notebook_only` -- restrict a cell to one output format.
-     Stack on top of `@markdown` / `@code` / `@shell`.
+   Markdown comment blocks become prose on the docs page. Python blocks become
+   code cells.
 
-4. **Regenerate** and verify determinism:
+3. **Validate the source**:
+
    ```bash
-   uv run tutorials/generate_tutorial.py
-   # Run it again -- should produce byte-identical output (no git diff).
-   uv run tutorials/generate_tutorial.py
-   git diff tutorials/
+   uv run -m compileall tutorials/
    ```
-   Pre-commit hook also runs this -- committed `.py`/`.ipynb` never drift.
 
-5. **Keep training cheap by default**. Tutorials should smoke in a single
+4. **Keep training cheap by default**. Tutorials should smoke in a single
    step by default so Tier 2 validation is cheap:
    - Small `global_batch_size` / tiny dataset slice
      (e.g. `split="train[:4]"`).
@@ -275,15 +243,20 @@ If the tutorial's model isn't in the catalog, define a one-off subclass
 inline:
 
 ```python
-@code
-def _define_model():
-    class MyTinyModel(ModelConfig):
-        model_name = "HuggingFaceTB/SmolLM2-135M"
-        # For slime, also set architecture = ModelArchitecture(...)
+from huggingface_hub import snapshot_download
+from modal_training_gym import ModelArchitecture, ModelConfig
 
-        def download(self):
-            from huggingface_hub import snapshot_download
-            snapshot_download(repo_id=self.model_name)
+
+class MyTinyModel(ModelConfig):
+    model_name = "HuggingFaceTB/SmolLM2-135M"
+    # Slime also requires a populated model architecture.
+    architecture = ModelArchitecture(...)
+
+    def download(self):
+        snapshot_download(repo_id=self.model_name)
+
+
+model = MyTinyModel()
 ```
 
 Better: inherit from `HFModelConfiguration` and skip the `download`
@@ -296,8 +269,8 @@ Always follow the tiered policy in
 [example-validation](../example-validation/SKILL.md):
 
 - **Tier 0 (local compile)** -- `uv run -m compileall modal_training_gym/`.
-- **Tier 1 (cheap drift checks)** -- regenerate tutorials (byte-determinism
-  check) + local instantiation smoke across the affected frameworks. No GPU.
+- **Tier 1 (cheap drift checks):** Local instantiation smoke across the
+  affected frameworks. No GPU.
 - **Tier 2 (scheduled smoke)** -- one remote `modal run --detach` that
   reaches >=1 training step, then kill the detached app.
 - **Tier 3 (full example validation)** -- canonical multi-node runs.
@@ -323,10 +296,8 @@ tutorial only. Don't expand to all tutorials on a single change.
   `inspect.stack()[1]` inside `build_<f>_app` is not the tutorial.
   Launchers use `resolve_caller_module()` to walk past
   `modal_training_gym.*` frames. Never use raw `inspect.stack()[1]` here.
-- **Secrets required for most remote runs**: `huggingface-secret` (with
-  `HF_TOKEN`) and `wandb-secret` (with `WANDB_API_KEY`) must exist as Modal
-  Secrets in your environment.
-- **Do not edit generated tutorials**. The pre-commit hook rewrites them.
+- **Secrets for gated models and W&B**. Hugging Face auth is only needed for
+  gated or rate-limited Hub access. Pass `WandbConfig` only when you want W&B.
 - **Do not add framework-specific quirks to `TrainConfig`** that only matter
   for one model. Put those in the model's `download` override and
   make the tool script live in `modal_training_gym/tools/`.
@@ -337,6 +308,6 @@ tutorial only. Don't expand to all tutorials on a single change.
 - Adding/modifying a framework -> `modal_training_gym/frameworks/<name>/`.
 - Cross-framework scripts -> `modal_training_gym/tools/`.
 - Cross-framework helpers -> `modal_training_gym/common/framework.py`.
-- Tutorial sources -> `tutorials/tutorial_generator/<bucket>/<name>.py`.
-- Tutorial regeneration -> `uv run tutorials/generate_tutorial.py`.
+- Tutorial sources live in `tutorials/*.py` or `tutorials/<name>/main.py`;
+  their docs loader is `docs-next/src/lib/tutorial-docs-loader.ts`.
 - Tests -> `tests/test_*.py`, run via `uv run tests/<file>.py`.

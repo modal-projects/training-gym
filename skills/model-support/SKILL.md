@@ -34,4 +34,4 @@ If it is a large MoE, you may need `--optimizer-cpu-offload`, `--use-precision-a
 
 ### Validate Model Configs
 
-`.github/workflows/validate-models.yml` guards against performance regressions and is manually triggered — required before merging a new model, so ping someone who can dispatch it (escalate to Joy Liu). Register the model in `common/models/validation.py: VALIDATION_CONFIGS` with its `Framework`; `run_on_pr=False` means dispatch-only, not disabled. The recipe is used as `get_base_recipe` returns it, image included, so validating a candidate image means bumping it on a branch and dispatching.
+`.github/workflows/validate-models.yml` guards against performance regressions and is manually triggered — required before merging a new model, so ping someone who can dispatch it (escalate to Joy Liu). Register the model in `common/models/validation.py: VALIDATION_CONFIGS` with its `Framework`. The recipe is used as `get_base_recipe` returns it, image included, so validating a candidate image means bumping it on a branch and dispatching.

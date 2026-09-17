@@ -4,7 +4,7 @@ from .base import HFModelConfiguration, ModelArchitecture
 
 
 class Moonlight_16B_A3B_Instruct(HFModelConfiguration):
-    """Moonshot AI's 16B-total, 3B-active Moonlight MoE instruct model."""
+    """Moonshot AI Moonlight model with 16B total and 3B active parameters."""
 
     model_name = "moonshotai/Moonlight-16B-A3B-Instruct"
     architecture = ModelArchitecture(

@@ -25,12 +25,12 @@ from .skills import skills_group
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 def entrypoint_cli() -> None:
-    """Launch, inspect, and manage training runs."""
+    """Manage training runs, skills, and dashboard access."""
 
 
 def _register_commands() -> None:
     entrypoint_cli.add_command(run_group, panel="Training runs")
-    entrypoint_cli.add_command(skills_group, panel="Available agent skills")
+    entrypoint_cli.add_command(skills_group, panel="Skills")
     entrypoint_cli.add_command(setup_command, panel="Configuration")
     entrypoint_cli.add_command(set_password_command, panel="Configuration")
     entrypoint_cli.add_command(set_proxy_auth_command, panel="Configuration")

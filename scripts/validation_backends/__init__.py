@@ -20,7 +20,9 @@ if TYPE_CHECKING:
 
 
 def build_recipe_and_dataset(
-    framework: Framework, model_config: "ModelConfig", step_count: int
+    framework: Framework,
+    model_config: "ModelConfig",
+    step_count: int,
 ) -> tuple["BaseTrainRecipe", "DatasetConfig"]:
     """The model's base recipe and the dataset it validates against.
 

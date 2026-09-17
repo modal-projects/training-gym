@@ -154,6 +154,9 @@ class StitchServeConfig:
         exported rather than being coerced by a ``--dtype`` flag.
         """
         args = {
+            # Tensor parallelism is a server arg: the cookbook's serve entrypoint
+            # passes the engine nothing but this dict.
+            "--tp": str(self.gpus_per_replica),
             "--cuda-graph-max-bs-decode": str(self.concurrency),
             "--max-running-requests": str(self.concurrency),
             "--trust-remote-code": "",

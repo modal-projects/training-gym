@@ -40,8 +40,8 @@ from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.wandb import WandbConfig
-from modal_training_gym.train_recipes.base import BaseTrainRecipe, RecipeType
+from modal_training_gym.common.metrics import MetricConfig
+from modal_training_gym.train_recipes.base import BaseTrainRecipe
 from modal_training_gym.train_recipes.miles_recipe.recipe import (
     CHECKPOINTS_PATH,
     DATA_PATH,
@@ -114,11 +114,9 @@ class StitchRecipe(BaseTrainRecipe):
         Modal app name. Empty → derived from the model name.
     app_tags : dict[str, str]
         Extra Modal app tags, merged over the standard training-gym ones.
-    wandb : WandbConfig | None
+    metrics : MetricConfig | None
         Applied to the trainer half and to the app's dashboard tags.
     """
-
-    recipe_type: RecipeType = RecipeType.STITCH
 
     # Required (keyword-only, so they may follow the base class's defaulted
     # fields): a publish-only trainer has no meaningful default topology, and a
@@ -139,7 +137,7 @@ class StitchRecipe(BaseTrainRecipe):
 
     name: str = ""
     app_tags: dict[str, str] = field(default_factory=dict)
-    wandb: WandbConfig | None = None
+    metrics: MetricConfig | None = None
 
     @model_validator(mode="after")
     def _resolve_halves(self) -> StitchRecipe:
@@ -198,8 +196,8 @@ class StitchRecipe(BaseTrainRecipe):
         }
         if not self.served_checkpoint_path:
             derived.pop("hf_checkpoint")
-        if self.wandb is not None:
-            derived["wandb"] = self.wandb
+        if self.metrics is not None:
+            derived["metrics"] = self.metrics
         if any(getattr(train, k) != v for k, v in derived.items()):
             train = replace(train, **derived)
             self.train = train

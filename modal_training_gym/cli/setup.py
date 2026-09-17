@@ -20,12 +20,16 @@ What this does:
 """
 
 from __future__ import annotations
+
 import os
 import webbrowser
 
 from modal_training_gym.common.dashboard import (
     DASHBOARD_APP_NAME,
+    DashboardLookupUnknown,
+    current_dashboard_version,
     deployed_dashboard_url,
+    is_dashboard_upgrade,
 )
 
 
@@ -224,7 +228,10 @@ def open_dashboard() -> str | None:
     """
     from modal_training_gym.common.config import get_dashboard_url, save_dashboard_url
 
-    web_url = deployed_dashboard_url()
+    try:
+        web_url = deployed_dashboard_url()
+    except DashboardLookupUnknown:
+        web_url = None
     if web_url:
         if get_dashboard_url() != web_url:
             save_dashboard_url(web_url)
@@ -244,36 +251,42 @@ def open_dashboard() -> str | None:
 
 
 def ensure_dashboard_deployed() -> str | None:
-    """Deploy the dashboard if it isn't already; return its web URL (or ``None``).
+    """Best-effort dashboard provision for ``train()`` and ``evaluate()``.
 
-    Idempotent: if the app is already deployed we only reconcile the cached URL
-    in ``~/.training-gym.toml`` and return; we never redeploy.
-
-    Best-effort and guaranteed not to raise: this is called from the hot path
-    of ``train()`` and ``evaluate()``, where dashboard provisioning is a
-    convenience, not a precondition. Any failure — Modal deploy errors
-    (network, auth, image build, outage), a read-only/full disk on the toml
-    write, or an import error — is swallowed with a warning so the run itself
-    is never aborted. Callers therefore don't need their own try/except.
+    Never raises; failures warn so the run continues.
     """
     try:
         from modal_training_gym.common.config import (
+            DashboardVersionUnknown,
             get_dashboard_proxy_auth,
             get_dashboard_url,
+            get_dashboard_version,
             save_dashboard_url,
         )
 
-        web_url = deployed_dashboard_url()
+        try:
+            web_url = deployed_dashboard_url()
+        except DashboardLookupUnknown:
+            return get_dashboard_url()
+        incoming = current_dashboard_version()
         if web_url:
-            # Already deployed — keep the local toml in sync with the live URL.
             if get_dashboard_url() != web_url:
                 save_dashboard_url(web_url)
-            return web_url
-
-        print(
-            f"Training-gym dashboard ({DASHBOARD_APP_NAME!r}) is not deployed — "
-            "deploying it now (this happens once)."
-        )
+            try:
+                deployed = get_dashboard_version(web_url)
+            except DashboardVersionUnknown:
+                return web_url
+            if not is_dashboard_upgrade(incoming, deployed):
+                return web_url
+            print(
+                f"Training-gym dashboard ({DASHBOARD_APP_NAME!r}) is older than "
+                f"this dashboard ({incoming}): redeploying it."
+            )
+        else:
+            print(
+                f"Training-gym dashboard ({DASHBOARD_APP_NAME!r}) is not deployed: "
+                "deploying it now."
+            )
         return setup(
             interactive=False,
             require_proxy_auth=get_dashboard_proxy_auth() is True,

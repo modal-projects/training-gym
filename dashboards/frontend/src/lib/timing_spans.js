@@ -214,9 +214,7 @@ export function isAsyncSpans(spans) {
 }
 
 export const APPROXIMATE_LANE_NOTE =
-  "Recorded on another node, so bars are shifted to fit the driver's timeline — " +
-  "positions are approximate; the start and end times in each tooltip are that " +
-  "node's own clock.";
+  "Recorded on another node, so bar positions are approximate."
 
 export function isApproximateSpan(span) {
   return Boolean(span?.unaligned || span?.clockShifted);

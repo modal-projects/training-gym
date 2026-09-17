@@ -3,9 +3,7 @@ name: Validate Models
 # One workflow for every framework. Which framework a model trains on lives in
 # the registry (modal_training_gym/common/models/validation.py), not here.
 #
-# Pull requests validate only the models the diff touches, and only those
-# registered with run_on_pr=True — diff_impact.py enforces that, so a model too
-# large to gate merges on can never enter a PR matrix. workflow_dispatch can
+# Pull requests validate the models the diff touches. workflow_dispatch can
 # name any registered model, including when validating a Miles image bump.
 
 on:
@@ -13,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: "Comma-separated model names to validate (blank = all PR-gating models)"
+        description: "Comma-separated model names to validate (blank = every registered model)"
         required: false
         default: ""
       num_steps:
@@ -61,15 +59,12 @@ jobs:
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
             models=$(git diff "$BASE_SHA...HEAD" \
-              | uv run scripts/diff_impact.py --models)
+              | uv run python -m scripts.diff_impact --models)
           elif [ -n "$MODELS_INPUT" ]; then
             models=$(printf '%s' "$MODELS_INPUT" \
               | uv run python -c "import json,sys; print(json.dumps([m.strip() for m in sys.stdin.read().split(',') if m.strip()]))")
           else
-            # --pr-only is load-bearing: bare `list` prints the whole registry,
-            # so without it a dispatch left blank could fan out to models that
-            # do not gate PRs. Blank means "the set a PR would have run".
-            models=$(uv run scripts/validate_model_configs.py list --names-only --pr-only)
+            models=$(uv run scripts/validate_model_configs.py list --names-only)
           fi
           echo "Selected models: $models"
           echo "models=$models" >> "$GITHUB_OUTPUT"

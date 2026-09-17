@@ -266,7 +266,7 @@ def install_skills(*, project_dir: Path | None, force: bool) -> tuple[Path, ...]
 
 @click.group("skills", cls=_TrainingGymGroup)
 def skills_group() -> None:
-    """Manage Training Gym agent skills."""
+    """Manage agent skills."""
 
 
 @skills_group.command("install")
@@ -280,7 +280,7 @@ def skills_group() -> None:
     ),
     default=None,
     metavar="DIR",
-    help="Project root. Defaults to the nearest Git repository.",
+    help="Project root, or the nearest Git repository when omitted.",
 )
 @click.option(
     "--force",
@@ -288,5 +288,5 @@ def skills_group() -> None:
     help="Replace existing canonical skills or manageable Claude child paths.",
 )
 def install_command(*, project_dir: Path | None, force: bool) -> None:
-    """Install all bundled skills with optional Claude compatibility."""
+    """Install bundled skills and Claude-compatible links."""
     install_skills(project_dir=project_dir, force=force)

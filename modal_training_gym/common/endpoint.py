@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import time
@@ -44,10 +45,24 @@ def _create_endpoint_and_wait_for_url(
         ]
         if environment:
             stop.extend(["--env", environment])
-        try:
-            subprocess.run(stop, check=False, capture_output=True, timeout=120)
-        except subprocess.TimeoutExpired:
-            pass
+        stopped = subprocess.run(
+            stop, check=False, capture_output=True, text=True, timeout=120
+        )
+        if stopped.returncode != 0:
+            text = f"{stopped.stdout or ''}{stopped.stderr or ''}"
+            if not re.search(
+                r"endpoint '[^']+' not found|endpoint .+ is already stopped",
+                text,
+                flags=re.IGNORECASE,
+            ):
+                sys.stdout.write(stopped.stdout or "")
+                sys.stderr.write(stopped.stderr or "")
+                raise subprocess.CalledProcessError(
+                    stopped.returncode,
+                    stop,
+                    output=stopped.stdout,
+                    stderr=stopped.stderr,
+                )
 
     command = [
         sys.executable,
@@ -74,7 +89,20 @@ def _create_endpoint_and_wait_for_url(
         command.extend(["--custom-volume-name", checkpoint.checkpoints_volume_name])
         command.extend(["--custom-volume-path", checkpoint.path_relative_to_volume])
 
-    subprocess.run(command, check=True, timeout=120)
+    created = subprocess.run(
+        command, check=False, timeout=120, capture_output=True, text=True
+    )
+    if created.returncode != 0:
+        text = f"{created.stdout or ''}{created.stderr or ''}"
+        if "already exists" not in text.lower():
+            sys.stdout.write(created.stdout or "")
+            sys.stderr.write(created.stderr or "")
+            raise subprocess.CalledProcessError(
+                created.returncode,
+                command,
+                output=created.stdout,
+                stderr=created.stderr,
+            )
 
     server = modal.Server.from_name(
         f"ep-{endpoint_name}", "Server", environment_name=environment
@@ -95,31 +123,14 @@ def _create_endpoint_and_wait_for_url(
 
 
 class Endpoint:
-    """A handle to a [Modal Endpoint](https://modal.com/docs/guide/endpoints).
+    """Controls a [Modal Endpoint](https://modal.com/docs/guide/endpoints) that
+    persists until stopped.
 
-    Use ``Endpoint.launch()`` to provision one, or construct this class
-    directly to talk to an endpoint that already exists.
-
-    An endpoint serves the OpenAI Chat Completions API, so you can use any
-    OpenAI-compatible client in addition to ``chat()``.
-
-    Endpoints require a Modal [proxy token](https://modal.com/docs/guide/webhook-proxy-auth)
-    pair when launched with ``unauthenticated=False``. Export it as ``MODAL_KEY`` /
-    ``MODAL_SECRET`` environment variables or save them with ``training-gym set-proxy-auth``.
-
-    Endpoints outlive the process that launched them. List them with
-    ``modal endpoint list`` and tear one down with ``modal endpoint stop <name>``.
-
-    ## Attributes
-
-    url : str
-        Base URL of the endpoint.
-    endpoint_name : str
-        Modal endpoint name.
-    model_name : str
-        Base model ID sent in request bodies.
-    requires_proxy_auth : bool
-        Whether a proxy token is required to use the endpoint.
+    Attributes:
+        url: Base URL of the endpoint.
+        endpoint_name: Modal Endpoint name.
+        model_name: Base model ID sent in request bodies.
+        requires_proxy_auth: Whether a proxy token is required to use the endpoint.
     """
 
     url: str
@@ -153,33 +164,35 @@ class Endpoint:
         colocate_compute: bool = False,
         wait_timeout_sec: float = 300,
         recreate_if_existing: bool = False,
-    ):
-        """Provision a Modal endpoint for ``model`` and return a handle to it.
+    ) -> "Endpoint":
+        """Deploy ``model`` without waiting for readiness.
 
-        Shells out to ``modal endpoint create``; see the [Modal Endpoints
-        guide](https://modal.com/docs/guide/endpoints) for the full set of
-        options and the catalog of supported model families.
+        Args:
+            model:
+                Model configuration or Hugging Face model name.
+            checkpoint:
+                Training checkpoint to convert and serve.
+            endpoint_name:
+                Endpoint name. Derived from the configuration when omitted.
+            unauthenticated:
+                Whether the endpoint accepts requests without proxy credentials.
+            routing_region:
+                Endpoint traffic region.
+            environment:
+                Modal environment for the endpoint.
+            colocate_compute:
+                Whether to place compute in the routing region.
+            wait_timeout_sec:
+                Maximum time to wait for an endpoint URL.
+            recreate_if_existing:
+                Whether to replace an endpoint with the same name.
 
-        When ``endpoint_name`` is omitted, an endpoint name is derived for you.
+        Returns:
+            The deployed ``Endpoint`` handle.
 
-        Endpoints require proxy auth if ``unauthenticated=False``.
-        ``colocate_compute=True`` keeps containers in the routing region.
-
-        Every ``modal endpoint create`` flag has a parameter here. Custom
-        weights are a ``Checkpoint`` passed as ``checkpoint``, which maps to
-        ``--custom-volume-name`` and ``--custom-volume-path``.
-
-        ``modal endpoint create`` fails when the name already exists. Pass
-        ``recreate_if_existing=True`` to stop an endpoint with the same name
-        before creating. The default is ``False`` so existing callers keep a
-        live endpoint.
-
-        Returns once the endpoint has a URL, which may occur before it can serve
-        traffic; call ``wait_until_ready()`` to wait for the model to become ready.
-        Raises ``TimeoutError`` if no URL is published within ``wait_timeout_sec``.
-
-        Megatron training checkpoints are converted to Hugging Face format
-        before create.
+        Raises:
+            TimeoutError:
+                The endpoint does not publish a URL before ``wait_timeout_sec``.
         """
         if checkpoint:
             model_config = (
@@ -244,10 +257,19 @@ class Endpoint:
         return headers
 
     def wait_until_ready(self, timeout: float = 30 * 60) -> None:
-        """Block until the endpoint can serve traffic.
+        """Wait until the endpoint can serve traffic.
 
-        Raises ``TimeoutError`` if the endpoint is still not ready by then, and
-        ``RuntimeError`` if the endpoint rejects the proxy credentials.
+        Args:
+            timeout:
+                Maximum number of seconds to wait.
+
+        Raises:
+            TrainingGymConfigError:
+                Required proxy credentials are unavailable.
+            RuntimeError:
+                The endpoint rejects proxy credentials.
+            TimeoutError:
+                The endpoint is not ready before ``timeout``.
         """
         last_error: Exception | None = None
         deadline = time.monotonic() + timeout
@@ -284,19 +306,29 @@ class Endpoint:
         timeout: int = 120,
         max_attempts: int = 4,
         **extra: Any,
-    ):
-        """POST one chat completion to ``/v1/chat/completions``.
+    ) -> dict:
+        """Send a chat-completion request.
 
-        ``messages`` is a list of ``{"role": ..., "content": ...}`` dicts.
-        Extra keyword arguments are Chat Completions body fields such as
-        ``temperature`` or ``max_tokens``. Returns the assistant message as a
-        dict, preserving structured fields like ``tool_calls`` and
-        ``reasoning_content``.
+        Args:
+            messages:
+                OpenAI-compatible chat messages.
+            timeout:
+                Timeout in seconds for each request.
+            max_attempts:
+                Maximum request attempts for transient failures.
+            extra:
+                Additional Chat Completions request fields.
 
-        Requests are retried up to ``max_attempts`` times with a short backoff,
-        while ``timeout`` bounds each individual request. Raises ``RuntimeError``
-        if the endpoint rejects the proxy credentials, and propagates the
-        underlying ``httpx`` error on failure.
+        Returns:
+            The assistant ``message`` dict.
+
+        Raises:
+            TrainingGymConfigError:
+                Required proxy credentials are unavailable.
+            RuntimeError:
+                The endpoint rejects proxy credentials.
+            httpx.HTTPError:
+                The request fails.
         """
         url = f"{self.url}/v1/chat/completions"
         body: dict[str, Any] = {

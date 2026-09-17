@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.dataset import DatasetConfig, HuggingFaceDataset
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.stitch_recipe import StitchRecipe
-
-from .miles import DapoMath17kDataset
 
 
 def build_stitch_validation(
@@ -28,6 +26,15 @@ def build_stitch_validation(
     recipe.train.num_rollout = step_count
     # Spend the budget on the requested steps, like the miles backend.
     recipe.train.skip_eval_before_train = True
-    return recipe, DapoMath17kDataset(
-        n_rows=recipe.train.rollout_batch_size * step_count
+    recipe.train.rm_type = "deepscaler"
+    prompts_per_step = max(
+        recipe.train.rollout_batch_size, recipe.train.over_sampling_batch_size or 0
+    )
+    return recipe, HuggingFaceDataset(
+        "zhuzilin/dapo-math-17k",
+        hf_split=f"train[:{prompts_per_step * step_count}]",
+        input_column="prompt",
+        output_column="label",
+        input_format="messages",
+        always_download=True,
     )

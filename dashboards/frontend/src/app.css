@@ -930,6 +930,188 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
   }
 }
 
+/* ===== lib/brushZoom.js ===== */
+.chart-brush-host {
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.chart-brush-enabled {
+  cursor: crosshair;
+}
+
+.chart-brush-area {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-left: 1px dashed var(--color-c-gray-100, #fff);
+  border-right: 1px dashed var(--color-c-gray-100, #fff);
+}
+
+/* ===== components/ChartControls.svelte / ZoomOutButton.svelte / MetricsRangeDropdown.svelte ===== */
+.chart-controls-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.btn-group {
+  isolation: isolate;
+  display: inline-flex;
+}
+
+.btn-group .btn ~ .btn {
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.btn-group .btn:has(~ .btn) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.btn-group .btn:hover:not(:disabled),
+.btn-group .btn:active:not(:disabled),
+.btn-group .btn:focus-visible {
+  z-index: 1;
+}
+
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong, #464646);
+  background: var(--color-surface-primary, #1c1c1c);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--color-surface-primary-hover, rgba(255, 255, 255, 0.05));
+}
+
+.btn:active:not(:disabled) {
+  background: var(--color-surface-primary-active, rgba(255, 255, 255, 0.1));
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 1px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn .icon {
+  color: var(--color-icon-primary, #a3a3a3);
+}
+
+.menu-items {
+  border-radius: 8px;
+  border: 1px solid var(--border-secondary, #2f2f2f);
+  background: var(--color-surface-overlay-small, #262626);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.menu-items hr {
+  border: 0;
+  border-top: 1px solid var(--border-secondary, #2f2f2f);
+  margin: 6px 0;
+}
+
+.menu-items .menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 6px 8px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.menu-items .menu-item:focus-visible {
+  outline: none;
+}
+
+.menu-items .menu-item.disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.menu-items .menu-item.selected {
+  background: var(--color-c-gray-15, #333);
+}
+
+.menu-items .menu-item.selected .label {
+  color: var(--text-bright);
+}
+
+.menu-items .menu-item-without-index:not(.selected):hover,
+.menu-items .menu-item-focused {
+  background: var(--color-surface-primary-hover, rgba(255, 255, 255, 0.05));
+}
+
+.menu-items .menu-item .label {
+  display: block;
+  flex-grow: 1;
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.menu-items .menu-item .subtitle {
+  margin-top: 4px;
+  width: 26ch;
+  max-width: 100%;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* ===== pages/TrainingRunDetailPage.svelte: shared chart range ===== */
+.chart-range-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.chart-range-dropdown {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.chart-range-bar .chart-controls-bar {
+  margin-bottom: 0;
+  gap: 12px;
+}
+
 /* ===== components/LineChart.svelte ===== */
 .chart {
   min-width: 0;
@@ -978,6 +1160,27 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
   position: relative;
   width: 100%;
   border-bottom: 1px solid var(--border, #2f2f2f);
+}
+
+.cbc-zoom-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid var(--border, #2f2f2f);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.cbc-zoom-reset:hover {
+  color: var(--text);
+  background: var(--color-c-gray-08, #1c1c1c);
 }
 /* When the data straddles zero, the baseline floats inside the plot, so give
    it its own visible rule instead of leaning on the bottom border. */
@@ -1420,6 +1623,29 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
   font-size: 0.84rem;
 }
 
+.load-more-button {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-bright);
+  padding: 6px 14px;
+  font-size: 0.84rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.load-more-button:hover {
+  background: color-mix(in srgb, var(--border-strong) 22%, transparent);
+}
+
+.load-more-button:focus {
+  outline: none;
+}
+
+.load-more-button:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-strong) 55%, transparent);
+}
+
 .open-modal-link-disabled {
   opacity: 0.5;
   pointer-events: none;
@@ -1681,16 +1907,16 @@ table.training-runs-table td.row-open-cell {
   border-color: var(--border-strong);
 }
 
-.training-open-wandb-link {
+.training-open-metric-link {
   border-color: color-mix(in srgb, var(--yellow, #fbbf24) 45%, transparent);
 }
 
-.training-open-wandb-link .open-modal-link-label,
-.training-open-wandb-link .training-open-modal-link-icon {
+.training-open-metric-link .open-modal-link-label,
+.training-open-metric-link .training-open-modal-link-icon {
   color: var(--yellow, #fbbf24);
 }
 
-.training-open-wandb-link:hover {
+.training-open-metric-link:hover {
   border-color: color-mix(in srgb, var(--yellow, #fbbf24) 60%, transparent);
 }
 
@@ -1727,11 +1953,11 @@ table.training-runs-table td.row-open-cell {
   color: var(--accent);
 }
 
-.wandb-link {
+.metric-link {
   color: var(--yellow, #fbbf24);
 }
 
-.wandb-link:hover {
+.metric-link:hover {
   color: var(--yellow, #fbbf24);
   opacity: 0.8;
 }
@@ -2340,4 +2566,3 @@ table.rollout-table th:nth-child(4) .column-label {
     text-align: center;
     font-size: 14px;
   }
-

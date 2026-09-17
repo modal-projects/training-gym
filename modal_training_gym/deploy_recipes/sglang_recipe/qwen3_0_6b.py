@@ -16,8 +16,8 @@ _SGLANG_DEFAULTS = SglangRecipe()
 
 
 @dataclass
-class Qwen3_0_6b_SglangRecipe(SglangRecipe):
-    """Qwen3-0.6B on 1×H100 — sensible SGLang defaults for a 0.6B model."""
+class Qwen3_0_6B_SglangRecipe(SglangRecipe):
+    """Qwen3-0.6B SGLang recipe for 1×H100."""
 
     def __post_init__(self) -> None:
         for key, val in _QWEN3_0_6B_DEFAULTS.items():

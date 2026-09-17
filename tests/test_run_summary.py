@@ -156,7 +156,7 @@ def test_url_helpers_match_old_frontend_behavior():
     )
 
 
-def test_config_summary_fallbacks_and_wandb_defaults():
+def test_config_summary_fallbacks_and_metric_defaults():
     summary = run_summary_module._config_summary(
         {
             "model": {"model_name": "model"},
@@ -182,8 +182,13 @@ def test_config_summary_fallbacks_and_wandb_defaults():
     assert summary.gpu_type == "H100"
     assert summary.lr == 0
     assert summary.global_batch_size == 0
-    assert summary.wandb_training_run_id == "abcdefgh"
-    assert summary.wandb_url == "https://wandb.ai/entity/project/runs/abcdefgh"
+    assert summary.metric_run_id == "abcdefgh"
+    assert summary.metric_url == "https://wandb.ai/entity/project/runs/abcdefgh"
+    assert [link.label for link in summary.metric_links] == ["Metric"]
+    payload = summary.model_dump(mode="json")
+    assert payload["wandb_training_run_id"] == "abcdefgh"
+    assert payload["wandb_url"] == summary.metric_url
+    assert [link["label"] for link in payload["wandb_links"]] == ["W&B"]
     assert run_summary_module._config_summary(None, "run-id") == {}
 
 
@@ -263,8 +268,8 @@ def test_group_tag_helper_synthesizes_tags_from_overrides():
     ]
 
 
-def test_wandb_attempt_helpers_skip_invalid_links_and_dedupe_by_url():
-    links = run_summary_module._wandb_attempt_links(
+def test_metric_attempt_helpers_skip_invalid_links_and_dedupe_by_url():
+    links = run_summary_module._metric_attempt_links(
         {
             "wandb_attempts": [
                 None,
@@ -278,20 +283,39 @@ def test_wandb_attempt_helpers_skip_invalid_links_and_dedupe_by_url():
             ]
         }
     )
-    duplicate = run_summary_module.WandbLink(
+    duplicate = run_summary_module.MetricLink(
         label="duplicate",
         url=links[0].url,
     )
-    other = run_summary_module.WandbLink(
+    other = run_summary_module.MetricLink(
         label="other",
         url="https://wandb.ai/entity/project/runs/other",
     )
 
-    assert links[0].label == "W&B a2"
+    assert links[0].label == "Metric a2"
     assert links[0].attempt == 2
     assert run_summary_module._dedupe_links(links, [duplicate, other]) == [
         links[0],
         other,
+    ]
+
+
+def test_metric_summary_uses_provider_neutral_config():
+    metric = {
+        "provider": "wandb",
+        "project": "training",
+        "entity": "modal",
+        "run_id": "run-1",
+        "url": "https://wandb.ai/modal/training/runs/run-1",
+    }
+    run = _run(config={"metrics": metric}, metadata={"metric_attempts": [metric]})
+
+    summary = build_run_summary(run)
+
+    assert summary.config_summary.metric_provider == "wandb"
+    assert summary.config_summary.metric_url == metric["url"]
+    assert [(link.label, link.url) for link in summary.metric_links] == [
+        ("Metric", metric["url"])
     ]
 
 
@@ -338,7 +362,10 @@ def test_build_current_summary_joins_result_and_derives_public_fields():
     assert summary.modal_app_url == "https://modal.com/id/ap-123"
     assert summary.resume_state.attempt_count == 2
     assert summary.group_tags.tags[0].key == "recipe.lr"
-    assert [link.label for link in summary.wandb_links] == ["W&B a2", "W&B"]
+    assert [link.label for link in summary.metric_links] == ["Metric a2", "Metric"]
+    payload = summary.model_dump(mode="json")
+    assert [link["label"] for link in payload["wandb_links"]] == ["W&B a2", "W&B"]
+    assert payload["train_result"]["metric_url"] == payload["train_result"]["wandb_url"]
 
 
 def test_build_historical_summary_accepts_aliases_wrappers_and_iso_timestamps():
@@ -415,7 +442,9 @@ def test_missing_config_and_urls_match_old_frontend_defaults():
 
     assert summary.config_summary == {}
     assert summary.modal_app_url is None
-    assert summary.train_result.wandb_url is None
+    assert summary.train_result.metric_url is None
+    payload = summary.model_dump(mode="json")
+    assert payload["train_result"]["wandb_url"] is None
 
 
 def test_config_defaults_and_fractional_integer_fields_are_rejected():
@@ -432,7 +461,9 @@ def test_config_defaults_and_fractional_integer_fields_are_rejected():
     summary = build_run_summary(run)
 
     assert summary.config_summary.lr == 0
-    assert summary.config_summary.wandb_url is None
+    assert summary.config_summary.metric_url is None
+    payload = summary.model_dump(mode="json")
+    assert payload["config_summary"]["wandb_url"] is None
     assert summary.framework_progress.current is None
     assert summary.framework_progress.total is None
     assert summary.latest_rollout.rollout_id == 0

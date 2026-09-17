@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from scripts.diff_impact import analyze_diff
+from scripts.diff_impact import TUTORIAL_SRC_ROOT, _tutorial_slug_for_path, analyze_diff
+from scripts.tutorial_index import TutorialEntry
 
 
-def test_model_file_diff_maps_to_related_tutorials() -> None:
+def test_model_file_diff_does_not_infer_tutorial_relationships() -> None:
     diff = (
         "diff --git a/modal_training_gym/common/models/qwen3_5_9b.py "
         "b/modal_training_gym/common/models/qwen3_5_9b.py\n"
@@ -16,27 +17,22 @@ def test_model_file_diff_maps_to_related_tutorials() -> None:
     report = analyze_diff(diff)
 
     assert "Qwen3_5_9B" in report.affected_classes
-    tutorial_slugs = {slug for slug, _, _ in report.affected_tutorials}
-    assert "agent/000_agent_sandbox" in tutorial_slugs
-    assert "rl/003_on_policy_distillation" in tutorial_slugs
+    assert report.affected_tutorials == ()
 
 
-def test_generated_tutorial_diff_maps_back_to_source() -> None:
+def test_flat_tutorial_diff_maps_to_tutorial() -> None:
     diff = (
-        "diff --git a/tutorials/rl/003_on_policy_distillation/"
-        "003_on_policy_distillation.py "
-        "b/tutorials/rl/003_on_policy_distillation/003_on_policy_distillation.py\n"
+        "diff --git a/tutorials/on_policy_distillation.py "
+        "b/tutorials/on_policy_distillation.py\n"
         "index 1234567..89abcde 100644\n"
-        "--- a/tutorials/rl/003_on_policy_distillation/"
-        "003_on_policy_distillation.py\n"
-        "+++ b/tutorials/rl/003_on_policy_distillation/"
-        "003_on_policy_distillation.py\n"
+        "--- a/tutorials/on_policy_distillation.py\n"
+        "+++ b/tutorials/on_policy_distillation.py\n"
         "@@ -1,3 +1,3 @@\n"
     )
 
     report = analyze_diff(diff)
 
-    assert "rl/003_on_policy_distillation" in {
+    assert "on_policy_distillation" in {
         slug for slug, _, _ in report.affected_tutorials
     }
 
@@ -53,3 +49,21 @@ def test_stitch_shared_module_diff_maps_to_stitch_recipe() -> None:
         )
 
         assert "Qwen3_30B_A3B_Stitch_Recipe" in analyze_diff(diff).affected_classes
+
+
+def test_tutorial_slug_for_path_reads_discovered_slug() -> None:
+    flat_main = TUTORIAL_SRC_ROOT / "main.py"
+    nested_main = TUTORIAL_SRC_ROOT / "nested" / "main.py"
+    helper = TUTORIAL_SRC_ROOT / "nested" / "env.py"
+    tutorials = {
+        "main": TutorialEntry(
+            path=flat_main, slug="main", order=0, title="Main", deps=()
+        ),
+        "nested": TutorialEntry(
+            path=nested_main, slug="nested", order=1, title="Nested", deps=()
+        ),
+    }
+
+    assert _tutorial_slug_for_path(flat_main, tutorials) == "main"
+    assert _tutorial_slug_for_path(nested_main, tutorials) == "nested"
+    assert _tutorial_slug_for_path(helper, tutorials) == "nested"

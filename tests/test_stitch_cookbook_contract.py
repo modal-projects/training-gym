@@ -39,6 +39,10 @@ from modal_training_gym.train_recipes.stitch_recipe.pins import (
     STITCH_REPO_REF,
     STITCH_REPO_URL,
 )
+from modal_training_gym.frameworks.stitch.launcher import (
+    CHECKPOINT_PATH_FIELDS,
+    STORE_BACKEND,
+)
 
 LAUNCHER = (
     Path(__file__).parents[1]
@@ -110,6 +114,9 @@ def _trainer_cfg(tmp_path: Path):
     cfg.custom_config_path = {
         **{field: getattr(recipe.train, field) for field in sorted(HOOK_CONFIG_FIELDS)},
         "experiment_volume_name": "bulletin",
+        "stitch_store_backend": STORE_BACKEND,
+        "stitch_s3_root": "",
+        "stitch_s3_endpoint_url": "",
         "rollout_modal_flash_app_name": "stitch-app",
         "rollout_modal_flash_server_cls_name": "Server",
         "run_id": "run-1",
@@ -118,9 +125,16 @@ def _trainer_cfg(tmp_path: Path):
 
 
 class _Dataset(DatasetConfig):
-    hf_repo = "zhuzilin/dapo-math-17k"
-    input_key = "prompt"
-    label_key = "label"
+    hf_repo: str = "zhuzilin/dapo-math-17k"
+
+    def input_key(self) -> str:
+        return "prompt"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def rows(self):
+        return []
 
 
 def test_resolve_config_leaves_prepared_paths_alone(cookbook, tmp_path) -> None:
@@ -132,7 +146,10 @@ def test_resolve_config_leaves_prepared_paths_alone(cookbook, tmp_path) -> None:
     recipe, cfg = _trainer_cfg(tmp_path)
 
     launch.resolve_config(
-        cfg, str(tmp_path), (*YAML_CONFIG_FIELDS, "custom_config_path")
+        cfg,
+        str(tmp_path),
+        checkpoint_fields=CHECKPOINT_PATH_FIELDS,
+        yaml_fields=(*YAML_CONFIG_FIELDS, "custom_config_path"),
     )
 
     assert cfg.hf_checkpoint == recipe.served_checkpoint_path
@@ -149,15 +166,20 @@ def test_build_train_cmd_is_a_shell_string_the_trainer_can_run(
     cookbook, tmp_path
 ) -> None:
     """The launcher hands the result to ``bash -lc`` inside a ``tee`` pipeline, so
-    a list-returning (or arch-script-dropping) build_train_cmd would either
-    stringify as a Python repr or run miles without its MODEL_ARGS."""
+    a list-returning (or arch-script-dropping) builder would either stringify as
+    a Python repr or run miles without its MODEL_ARGS."""
+    from modal_training_gym.frameworks.stitch.launcher import _build_train_cmd
+
     launch = _load(cookbook / "common" / "launch.py")
     recipe, cfg = _trainer_cfg(tmp_path)
     launch.resolve_config(
-        cfg, str(tmp_path), (*YAML_CONFIG_FIELDS, "custom_config_path")
+        cfg,
+        str(tmp_path),
+        checkpoint_fields=CHECKPOINT_PATH_FIELDS,
+        yaml_fields=(*YAML_CONFIG_FIELDS, "custom_config_path"),
     )
 
-    cmd = launch.build_train_cmd(cfg, MILES_ROOT, "miles_model_script")
+    cmd = _build_train_cmd(cfg)
 
     assert isinstance(cmd, str)
     script = "train_async.py" if recipe.train.async_mode else "train.py"
@@ -249,12 +271,17 @@ def test_prepare_checkpoints_reads_the_experiment_the_launcher_builds(
         PREP_ENV=dict(recipe.prep_env),
         miles=recipe.train,
     )
-    required, _ = _reads(
-        cookbook / "miles_disagg" / "prep.py", "prepare_checkpoints", "exp"
-    )
+    prep = cookbook / "miles_disagg" / "prep.py"
+    required, _ = _reads(prep, "prepare_checkpoints", "exp")
 
     missing = {name for name in required if not hasattr(exp, name)}
     assert not missing, f"prep.prepare_checkpoints reads unsupplied fields: {missing}"
+    # The launcher downloads the source itself and hands the snapshot in; the
+    # cookbook's own prep app fans that download out over containers instead.
+    assert _keyword_only_params(prep, "prepare_checkpoints") == {
+        "source_snapshot",
+        "rollout_snapshot",
+    }
 
 
 def test_claim_pool_reads_the_args_the_launcher_builds(cookbook) -> None:
@@ -266,6 +293,9 @@ def test_claim_pool_reads_the_args_the_launcher_builds(cookbook) -> None:
         update_weight_disk_dir="/bulletin/run-1/updates",
         **{field: getattr(recipe.train, field) for field in sorted(HOOK_CONFIG_FIELDS)},
         experiment_volume_name="bulletin",
+        stitch_store_backend=STORE_BACKEND,
+        stitch_s3_root="",
+        stitch_s3_endpoint_url="",
         rollout_modal_flash_app_name="stitch-app",
         rollout_modal_flash_server_cls_name="Server",
         run_id="run-1",
@@ -302,8 +332,11 @@ def test_named_cookbook_entry_points_exist(cookbook) -> None:
         assert attr in _defines(path), f"{dotted}: not defined in {path.name}"
 
     assert {"claim_pool", "commit_and_wake"} <= _defines(cookbook / "common/hooks.py")
-    assert {"resolve_config", "build_train_cmd", "materialize_node_local_yaml"} <= (
+    assert {"resolve_config", "materialize_node_local_yaml"} <= (
         _defines(cookbook / "common/launch.py")
+    )
+    assert {"apply_prep_environment", "prepare_checkpoints"} <= _defines(
+        cookbook / "miles_disagg/prep.py"
     )
     assert "apply_git_patches" in _defines(cookbook / "common/process.py")
     assert "get_modal_cluster_context" in _defines(cookbook / "common/ray_cluster.py")
@@ -324,6 +357,15 @@ def test_serve_startup_takes_the_arguments_the_replica_passes(cookbook) -> None:
             accepted |= {arg.arg for arg in node.args.args + node.args.kwonlyargs}
 
     assert passed <= accepted, f"serve_startup no longer takes {passed - accepted}"
+
+
+def _keyword_only_params(source: Path, func_name: str) -> set[str]:
+    return {
+        arg.arg
+        for node in ast.parse(source.read_text()).body
+        if isinstance(node, ast.FunctionDef) and node.name == func_name
+        for arg in node.args.kwonlyargs
+    }
 
 
 def _call_keywords(source: Path, func_name: str) -> set[str]:

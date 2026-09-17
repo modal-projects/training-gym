@@ -8,6 +8,7 @@ on:
       - ".github/workflows/previews-app.yml"
       - "scripts/previews/frontend_previews.py"
       - "scripts/previews/nginx/**"
+      - "docs-next/astro_redirects.py"
 
 permissions:
   contents: read

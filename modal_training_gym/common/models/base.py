@@ -9,100 +9,63 @@ from typing import Any, Callable
 
 @dataclass
 class ModelArchitecture:
-    """Transformer architecture parameters for a specific model.
+    """Megatron transformer architecture parameters.
 
-    These fields map directly to Megatron-LM model-parallel configuration
-    flags. Framework launchers read them to generate the correct CLI
-    arguments for distributed training.
-
-    ## Model Dimensions
-
-    num_layers : int
-        Number of transformer layers. Default ``0``.
-    hidden_size : int
-        Hidden dimension size. Default ``0``.
-    ffn_hidden_size : int
-        Feed-forward network intermediate size. Default ``0``.
-    vocab_size : int
-        Vocabulary size. Default ``0``.
-
-    ## Attention
-
-    num_attention_heads : int
-        Number of attention heads. Default ``0``.
-    group_query_attention : bool
-        Enable grouped-query attention (GQA). Default ``True``.
-    num_query_groups : int
-        Number of KV head groups for GQA. Default ``0``.
-    kv_channels : int
-        Per-head key/value channel dimension. Default ``0``.
-
-    ## Normalization and Activation
-
-    normalization : str
-        Layer normalization type. Default ``"RMSNorm"``.
-    norm_epsilon : float
-        Normalization epsilon. Default ``1e-6``.
-    swiglu : bool
-        Use SwiGLU activation in FFN. Default ``True``.
-    disable_bias_linear : bool
-        Disable bias in linear layers. Default ``True``.
-    qk_layernorm : bool
-        Apply layer norm to query and key projections. Default ``True``.
-    untie_embeddings_and_output_weights : bool
-        Use separate output projection weights instead of tying to token
-        embeddings. Default ``False``.
-
-    ## Mixture of Experts
-
-    num_experts : int
-        Total number of MoE experts. Default ``0`` (dense model).
-    moe_ffn_hidden_size : int
-        Per-expert FFN intermediate size. Default ``0``.
-    moe_shared_expert_intermediate_size : int
-        Shared expert FFN intermediate size. Default ``0``.
-
-    ## MoE Routing
-
-    moe_router_score_function : str
-        Router scoring function (e.g. ``"softmax"``). Default ``""``.
-    moe_token_drop_policy : str
-        Token drop policy for MoE routing. Default ``""``.
-    moe_router_dtype : str
-        Data type for router computation (e.g. ``"fp32"``). Default ``""``.
-    moe_permute_fusion : bool
-        Enable permute fusion optimization for MoE. Default ``False``.
-    moe_aux_loss_coeff : float | None
-        Auxiliary load-balancing loss coefficient. Default ``None``.
-
-    ## Checkpoint Conversion
-
-    megatron_model_type : str
-        Slime/Megatron model type string for checkpoint conversion (e.g.
-        ``"qwen3.5-35B-A3B"``). Used when the training recipe selects
-        a non-bridge conversion mode. Default ``""``.
-
-    ## Normalization Extras
-
-    apply_layernorm_1p : bool
-        Use zero-centered LayerNorm (add 1 to gamma). Default ``False``.
-
-    ## Attention Extras
-
-    use_gated_attention : bool
-        Enable gated attention mechanism. Default ``False``.
-    attention_output_gate : bool
-        Enable output gating on attention layers (required by some
-        hybrid architectures such as Qwen 3.6). Default ``False``.
-
-    ## Position Encoding
-
-    use_rotary_position_embeddings : bool
-        Use RoPE positional encoding. Default ``True``.
-    rotary_base : int
-        Base frequency for RoPE. Default ``10000``.
-    rotary_percent : float
-        Fraction of hidden dims to apply RoPE to. Default ``1.0``.
+    Args:
+        num_layers: Number of transformer layers.
+        hidden_size: Hidden dimension size.
+        ffn_hidden_size: Feed-forward network intermediate size.
+        vocab_size: Vocabulary size.
+        num_attention_heads: Number of attention heads.
+        group_query_attention: Whether to enable grouped-query attention.
+        num_query_groups: Number of KV head groups for grouped-query attention.
+        kv_channels: Per-head key/value channel dimension.
+        normalization: Layer normalization type.
+        norm_epsilon: Normalization epsilon.
+        swiglu: Whether to use SwiGLU activation in the feed-forward network.
+        disable_bias_linear: Whether to disable bias in linear layers.
+        qk_layernorm: Whether to normalize query and key projections.
+        untie_embeddings_and_output_weights: Whether to use separate output
+            projection weights.
+        num_experts: Number of mixture-of-experts experts.
+        moe_ffn_hidden_size: Per-expert feed-forward intermediate size.
+        moe_shared_expert_intermediate_size: Shared-expert intermediate size.
+        moe_router_score_function: Router scoring function.
+        moe_token_drop_policy: Token drop policy for mixture-of-experts routing.
+        moe_router_dtype: Data type for router computation.
+        moe_permute_fusion: Whether to enable permute fusion.
+        moe_aux_loss_coeff: Auxiliary load-balancing loss coefficient.
+        megatron_model_type: Slime/Megatron model type used for checkpoint
+            conversion outside bridge mode.
+        apply_layernorm_1p: Whether to use zero-centered LayerNorm.
+        use_gated_attention: Whether to enable gated attention.
+        attention_output_gate: Whether to gate attention outputs.
+        use_rotary_position_embeddings: Whether to use RoPE.
+        rotary_base: Base frequency for RoPE.
+        rotary_percent: Fraction of hidden dimensions that use RoPE.
+        no_masked_softmax_fusion: Disable fused masked softmax.
+        multi_latent_attention: Use multi-latent attention instead of standard MHA.
+        kv_lora_rank: LoRA rank for compressed key/value projections.
+        qk_head_dim: Query/key head dimension for multi-latent attention.
+        qk_pos_emb_head_dim: Query/key positional-embedding head dimension.
+        v_head_dim: Value head dimension for multi-latent attention.
+        moe_layer_freq: Which layers are MoE, as a Megatron frequency string.
+        moe_grouped_gemm: Fuse MoE expert GEMMs into a grouped kernel.
+        moe_shared_expert_gate: Apply a gate to the shared expert.
+        moe_router_topk: Experts selected per token.
+        moe_router_pre_softmax: Softmax router scores before top-k.
+        moe_router_enable_expert_bias: Add a learned bias to router scores.
+        moe_router_load_balancing_type: Load-balancing loss used by the router.
+        moe_token_dispatcher_type: How tokens are dispatched to experts.
+        moe_router_bias_update_rate: Step size for router expert-bias updates.
+        moe_router_group_topk: Groups considered before the per-group top-k.
+        moe_router_num_groups: Expert groups for grouped routing.
+        moe_router_topk_scaling_factor: Scale applied to top-k router scores.
+        megatron_spec: Megatron transformer-spec import path segments.
+        rotary_scaling_factor: RoPE frequency scale for long context.
+        mscale: YaRN mscale applied to RoPE.
+        mscale_all_dim: YaRN mscale applied across all rotary dimensions.
+        no_rope_fusion: Disable fused RoPE kernels.
     """
 
     num_layers: int = 0
@@ -161,7 +124,12 @@ class ModelArchitecture:
 
 @dataclass
 class ToolCall:
-    """A parsed tool invocation from model output."""
+    """Tool invocation parsed from model output.
+
+    Attributes:
+        name: Function the model asked to call.
+        arguments: Values the model passed for that function's parameters.
+    """
 
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -169,7 +137,13 @@ class ToolCall:
 
 @dataclass
 class ParsedResponse:
-    """Structured result of parsing raw model output."""
+    """Structured result of parsing raw model output.
+
+    Attributes:
+        content: Visible text after thinking and tool-call markup is stripped.
+        tool_calls: Tool invocations parsed from the response.
+        thinking: Reasoning text when the response includes a thinking block.
+    """
 
     content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
@@ -180,24 +154,24 @@ ResponseParser = Callable[[str], ParsedResponse]
 
 
 class ModelConfig:
-    """Base class for model identity and weight-download logic.
+    """Defines model identity, weight download, and response parsing.
 
-    Subclass and set ``model_name`` (and optionally ``model_path`` and
-    ``architecture``) as class attributes, then override ``download()``
-    to materialize weights into the shared model volume.
-
-    ``model_path`` is the HF directory the weights load from. A populated
-    path is left untouched by ``download()``.
-
-    Set ``response_parser`` to a function that converts raw model output
-    into a :class:`ParsedResponse`.  For example, Qwen3 models set
-    ``response_parser = parse_qwen3_response``.
+    Attributes:
+        model_name: Hugging Face repo id or other weight identifier.
+        model_path: Local directory of already-downloaded weights, if any.
+        architecture: Megatron transformer sizes used for conversion and training.
+        response_parser: Turns raw model text into a ``ParsedResponse``.
+        requires_bshd: Use padded (bshd) batches so training skips the THD packing path.
+        audio_placeholder: Token sequence the processor expands at ``<|audio_pad|>``.
+            Raw audio in the prompt OOMs.
     """
 
     model_name: str = ""
     model_path: str | None = None
     architecture: ModelArchitecture | None = None
     response_parser: ResponseParser | None = None
+    requires_bshd: bool = False
+    audio_placeholder: str = ""
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -208,10 +182,12 @@ class ModelConfig:
         raise NotImplementedError(f"{type(self).__name__} has no download()")
 
     def parse_response(self, text: str) -> ParsedResponse:
-        """Parse raw model output into structured content.
+        """Parse model text with ``response_parser``.
 
-        Delegates to ``self.response_parser`` when set, otherwise
-        returns the text as-is.
+        Without a configured parser, the model text becomes ``ParsedResponse.content``.
+
+        Returns:
+            Parsed model output.
         """
         if self.response_parser is not None:
             return self.response_parser(text)
@@ -226,13 +202,7 @@ def _is_populated(path: str) -> bool:
 
 
 class HFModelConfiguration(ModelConfig):
-    """ModelConfig for models hosted on HuggingFace.
-
-    Implements ``download()`` via ``huggingface_hub.snapshot_download``
-    using ``self.model_name`` as the repo ID. An empty ``model_path`` is
-    seeded from the snapshot; a populated one already holds the weights to
-    load and is left untouched.
-    """
+    """Downloads Hugging Face model weights with ``snapshot_download``."""
 
     def download(self) -> None:
         from huggingface_hub import snapshot_download
@@ -370,7 +340,7 @@ def _parse_qwen_chat(
 
 
 def parse_qwen3_response(text: str) -> ParsedResponse:
-    """Parse Qwen3-family model output into structured content.
+    """Parse Qwen3 reasoning, chat delimiters, and JSON tool calls.
 
     Handles ``<think>``/``</think>`` reasoning blocks,
     ``<|im_start|>``/``<|im_end|>`` chat-template delimiters,
@@ -534,4 +504,38 @@ def parse_gemma4_response(text: str) -> ParsedResponse:
         content=content,
         tool_calls=tool_calls,
         thinking=thinking,
+    )
+
+
+# ── Inkling family (Inkling-Small) ─────────────────────────────────────
+
+_INKLING_SECTION_RE = re.compile(
+    r"<\|content_(thinking|text|invoke_tool_json)\|>(.*?)(?=<\|[a-z0-9_]+\|>|$)",
+    re.DOTALL,
+)
+
+
+def parse_inkling_response(text: str) -> ParsedResponse:
+    """Parse Inkling-family output into structured content.
+
+    Handles the ``<|content_thinking|>`` and ``<|content_text|>`` sections of a
+    ``<|message_model|>`` turn, closed by ``<|end_message|>`` and
+    ``<|content_model_end_sampling|>``, plus ``<|content_invoke_tool_json|>``
+    tool bodies. A response truncated mid-section still yields that section.
+    """
+    thinking: list[str] = []
+    content: list[str] = []
+    tool_calls: list[ToolCall] = []
+    for kind, body in _INKLING_SECTION_RE.findall(text):
+        if kind == "thinking":
+            thinking.append(body.strip())
+        elif kind == "text":
+            content.append(body.strip())
+        elif call := _parse_json_tool_block(body.strip()):
+            tool_calls.append(call)
+
+    return ParsedResponse(
+        content="\n".join(part for part in content if part),
+        tool_calls=tool_calls,
+        thinking="\n".join(part for part in thinking if part) or None,
     )

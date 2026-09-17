@@ -7,7 +7,7 @@ from modal_training_gym.common.dataset import HuggingFaceDataset
 from modal_training_gym.common.models import Qwen3_6_35B
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.training_group import TrainingGroupError
-from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import Qwen3_6_35b_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import Qwen3_6_35B_Recipe
 
 
 def _base() -> TrainConfig:
@@ -17,8 +17,9 @@ def _base() -> TrainConfig:
             hf_repo="openai/gsm8k",
             input_column="question",
             output_column="answer",
+            input_format="text",
         ),
-        recipe=Qwen3_6_35b_Recipe(num_rollout=10),
+        recipe=Qwen3_6_35B_Recipe(num_rollout=10),
     )
 
 
@@ -51,9 +52,27 @@ def test_variants_are_independent_and_base_untouched():
 
     assert configs[0].recipe.lr == 2e-6
     assert configs[1].recipe.lr == 9e-6
-    assert base.recipe.lr == Qwen3_6_35b_Recipe().lr
+    assert base.recipe.lr == Qwen3_6_35B_Recipe().lr
     assert configs[0].recipe is not configs[1].recipe
     assert all(c.recipe.num_rollout == 10 for c in configs)
+
+
+def test_variants_preserve_independent_eval_datasets():
+    base = _base()
+    base.eval_dataset = HuggingFaceDataset(
+        hf_repo="openai/gsm8k",
+        hf_split="test",
+        input_column="question",
+        output_column="answer",
+        input_format="text",
+    )
+    configs = TrainingGroup(
+        base=base, grid={"recipe.lr": [2e-6, 9e-6]}
+    ).get_train_configs()
+
+    assert all(config.eval_dataset is not None for config in configs)
+    assert configs[0].eval_dataset is not configs[1].eval_dataset
+    assert configs[0].eval_dataset is not base.eval_dataset
 
 
 def test_each_variant_shares_group_id():
@@ -141,33 +160,30 @@ def test_bad_value_type_caught_before_training():
         group.get_train_configs()
 
 
-def test_train_result_persists_group_id():
+def test_training_run_persists_group_id(fake_volume):
     from modal_training_gym.common.framework import Framework
-    from modal_training_gym.common.train_result import TrainResult
 
-    result = TrainResult(
-        app_name="run-x",
-        framework=Framework.SLIME,
+    run = TrainingRun(
         training_run_id="run-x",
-        group_id="group-abc123",
+        framework=Framework.SLIME,
+        config={},
+        metadata={"group_id": "group-abc123"},
     )
-    restored = TrainResult(**TrainResult._parse_model_config(result._to_dict()))
+    run.save()
+    restored = TrainingRun.from_id("run-x")
     assert restored.group_id == "group-abc123"
 
 
-def test_training_run_resolves_train_result():
+def test_training_run_result_returns_self(fake_volume):
     from modal_training_gym.common.framework import Framework
-    from modal_training_gym.common.train_result import TrainResult
 
     class FakeFunctionCall:
         def get(self, timeout=None):
             assert timeout == 123
-            return TrainResult(
-                app_name="run-x",
-                framework=Framework.SLIME,
-                training_run_id="run-x",
-                group_id="group-abc123",
-            )._to_dict()
+            return {
+                "app_name": "run-x",
+                "metrics": {"score": 1},
+            }
 
     run = TrainingRun(
         training_run_id="run-x",
@@ -180,12 +196,14 @@ def test_training_run_resolves_train_result():
     )
     run._function_call = FakeFunctionCall()
 
-    # group_id is derived from metadata, not stored separately.
     assert run.group_id == "group-abc123"
 
     result = run.result(timeout=123, stop_app_on_success=False)
+    assert result is run
     assert result.training_run_id == "run-x"
     assert result.group_id == "group-abc123"
+    assert result.app_name == "run-x"
+    assert result.metrics == {"score": 1}
 
 
 def test_iter_variants_pairs_overrides_with_configs():

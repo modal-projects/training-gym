@@ -66,11 +66,20 @@ from modal_training_gym.common.ray_cluster import (
 from modal_training_gym.common.run import (
     TrainingRun,
     TrainingRunStatus,
-    record_wandb_attempt,
-    wandb_run_id_for_attempt,
+    metric_run_id_for_attempt,
+    record_metric_attempt,
 )
-from modal_training_gym.common.train_result import TrainResult
-from modal_training_gym.common.wandb import preflight_wandb
+from modal_training_gym.common.train_result import (
+    save_train_result_blob,
+    train_result_payload,
+)
+from modal_training_gym.common.metrics import (
+    apply_metric_image,
+    metric_metadata,
+    metric_runtime_env,
+    metric_secrets,
+    preflight_metric,
+)
 from modal_training_gym.frameworks.miles.modal_helpers.patches import (
     REPORTING_PATCH_COMMANDS,
     SUBSTEP_TIMING_PATCH_COMMAND,
@@ -81,7 +90,7 @@ from modal_training_gym.train_recipes.stitch_recipe.pins import (
     MILES_ROOT,
     stitch_install_commands,
 )
-from modal_training_gym.train_recipes.base import BaseTrainRecipe, RecipeType
+from modal_training_gym.train_recipes.base import BaseTrainRecipe
 from modal_training_gym.train_recipes.stitch_recipe.recipe import (
     CHECKPOINTS_PATH,
     DATA_PATH,
@@ -106,6 +115,13 @@ SERVER_TIMEOUT = 24 * 60 * MINUTES
 BASELINE_POLL_SECONDS = 30
 # Ephemeral host-local full HF checkpoint the sidecar patches in place per delta.
 LOCAL_CHECKPOINT_PATH = "/local-checkpoint"
+# miles args holding a checkpoint that may be an HF repo id; the cookbook's
+# ``resolve_config`` snapshots those to a local path and leaves absolute paths
+# alone. Same set the cookbook's own miles app passes.
+CHECKPOINT_PATH_FIELDS = ("hf_checkpoint", "load", "ref_load", "critic_load")
+# The store the hooks and the sidecar publish through. The cookbook also speaks
+# S3; a training-gym run's bulletin board is always a Modal Volume.
+STORE_BACKEND = "modal-volume"
 # What the engine needs to seed a delta from the base checkpoint: weights plus the
 # config/tokenizer files beside them. Restricting the resolve to these keeps it
 # from failing on a cache SGLang populated itself (it fetches no README/figures,
@@ -130,7 +146,6 @@ class _MilesArgs(BaseTrainRecipe):
     :meth:`cli_args`.
     """
 
-    recipe_type = RecipeType.MILES
     _CONTROL = {"async_mode", "miles_model_script"}
 
     # Per-run fields the trainer injects (the rest come from the field dict).
@@ -147,9 +162,30 @@ class _MilesArgs(BaseTrainRecipe):
         self.async_mode = async_mode
         self.miles_model_script = miles_model_script
 
-    def _fields(self, dataset=None, model=None) -> dict[str, Any]:
-        del dataset, model
+    def _fields(self, **kwargs: Any) -> dict[str, Any]:
+        # The fields are already resolved; the dataset/model keywords the base
+        # class passes have nothing left to contribute.
+        del kwargs
         return {k: v for k, v in vars(self).items() if k not in self._CONTROL}
+
+
+def _build_train_cmd(cfg: _MilesArgs) -> str:
+    """The miles train command: source the model-arch script for its ``MODEL_ARGS``
+    bash array, then run ``train_async.py`` / ``train.py`` with it plus the args.
+
+    The cookbook dropped its generic builder when it moved to a miles revision
+    whose arch scripts are python (``megatron_model_type``); this repo's miles
+    pin still ships the ``scripts/models/*.sh`` form, which the colocated miles
+    launcher sources the same way.
+    """
+    train_script = f"{MILES_ROOT}/{'train_async.py' if cfg.async_mode else 'train.py'}"
+    if not cfg.miles_model_script:
+        return f"python3 {train_script} {shlex.join(cfg.cli_args())}"
+    inner = (
+        f"source {MILES_ROOT}/{cfg.miles_model_script} && "
+        f"python3 {train_script} ${{MODEL_ARGS[@]}} {shlex.join(cfg.cli_args())}"
+    )
+    return f"bash -c {shlex.quote(inner)}"
 
 
 def _response_parser_path(model: ModelConfig | None) -> str:
@@ -169,6 +205,7 @@ def dashboard_env(
     app_name: str,
     total_steps: int,
     model: ModelConfig | None,
+    checkpoints_volume_name: str = "",
     substep_timing: str = "auto",
     capture_trace: bool = False,
     trace_sample_limit: int = 16,
@@ -187,6 +224,7 @@ def dashboard_env(
         "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
         "TRAINING_GYM_APP_NAME": app_name,
         "TRAINING_GYM_TOTAL_STEPS": str(total_steps),
+        "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": checkpoints_volume_name,
         "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
         "TRAINING_GYM_SUBSTEP_TIMING": substep_timing,
         "TRAINING_GYM_CAPTURE_TRACE": "1" if capture_trace else "",
@@ -345,21 +383,20 @@ def _record_run_started(
     record would drop the group id and blank the phase."""
     try:
         modal_app_id = modal_app_id or _resolve_container_app_id()
-        wandb_block: dict = {}
-        if recipe.wandb is not None:
-            # Resolve the W&B entity for a dashboard deep-link; keep the run
+        metric_block: dict = {}
+        if recipe.metrics is not None:
+            # Resolve the tracker entity for a dashboard deep-link; keep the run
             # alive if the probe fails (bad key / no access).
-            entity = recipe.wandb.entity
+            entity = getattr(recipe.metrics, "entity", "")
             try:
-                entity = preflight_wandb(recipe.wandb) or entity
+                entity = preflight_metric(recipe.metrics) or entity
             except Exception as exc:  # noqa: BLE001
-                print(f"W&B preflight for dashboard deep-link failed: {exc}")
-            wandb_block = {
-                "project": recipe.wandb.project,
-                "group": recipe.wandb.group,
-                "entity": entity,
-                "run_id": wandb_run_id_for_attempt(run_id, 1),
-            }
+                print(f"metric preflight for dashboard deep-link failed: {exc}")
+            metric_block = metric_metadata(
+                recipe.metrics,
+                entity=entity,
+                run_id=metric_run_id_for_attempt(run_id, 1),
+            )
         config_summary = {
             "model": {"model_name": model.model_name} if model else {},
             "dataset": (
@@ -377,7 +414,7 @@ def _record_run_started(
                 "gpu_type": recipe.train.gpu_type,
                 **{k: v for k, v in config_fields.items() if k != "wandb_key"},
             },
-            "wandb": wandb_block,
+            "metrics": metric_block,
             "lr": recipe.train.lr,
             "global_batch_size": recipe.train.global_batch_size,
         }
@@ -400,13 +437,16 @@ def _record_run_started(
                 created_at=created_at,
                 started_at=created_at,
             )
-        if wandb_block:
-            record_wandb_attempt(
+        if metric_block:
+            run_record.metrics = metric_block
+            record_metric_attempt(
                 run_record,
-                entity=wandb_block["entity"],
-                project=wandb_block["project"],
-                group=wandb_block["group"],
-                run_id=wandb_block["run_id"],
+                provider=metric_block["provider"],
+                entity=metric_block["entity"],
+                project=metric_block["project"],
+                group=metric_block["group"],
+                run_id=metric_block["run_id"],
+                url=metric_block.get("url", ""),
                 attempt_count=1,
             )
         run_record.save()
@@ -479,10 +519,10 @@ def build_stitch_app(
     # after construction, i.e. after the deriving validator ran.
     recipe = replace(recipe)
     train_recipe, serve_recipe = recipe.train, recipe.serve
-    # Re-push: a caller (the validation harness) may set ``wandb`` after
+    # Re-push: a caller (the validation harness) may set ``metrics`` after
     # construction, i.e. after the validator that propagates it to the trainer.
-    if recipe.wandb is not None:
-        train_recipe.wandb = recipe.wandb
+    if recipe.metrics is not None:
+        train_recipe.metrics = recipe.metrics
     app_name = recipe.name or name or f"stitch-{modal_tag_value(model.model_name)}"
     # Volumes are keyed by recipe (not by run) so runs of the same recipe reuse
     # the same dataset / checkpoints / bulletin board.
@@ -515,13 +555,13 @@ def build_stitch_app(
         "_modal_job_type": "training",
         **{str(k): str(v) for k, v in recipe.app_tags.items()},
     }
-    if recipe.wandb is not None:
-        if recipe.wandb.project:
-            tags["wandb_project"] = modal_tag_value(recipe.wandb.project)
-        if recipe.wandb.group:
-            tags["wandb_group"] = modal_tag_value(recipe.wandb.group)
+    if recipe.metrics is not None:
+        if recipe.metrics.project:
+            tags["wandb_project"] = modal_tag_value(recipe.metrics.project)
+        if recipe.metrics.group:
+            tags["wandb_group"] = modal_tag_value(recipe.metrics.group)
 
-    image = _stitch_trainer_image(train_recipe)
+    image = apply_metric_image(_stitch_trainer_image(train_recipe), recipe.metrics)
     server_image = serving_image.build_serving_image(
         hf_cache_path=str(HF_CACHE_PATH),
         delta_volume_name=delta_volume_name,
@@ -533,7 +573,6 @@ def build_stitch_app(
     delta_update_mode = serve_recipe.delta_update_mode
     commit_mode = serve_recipe.commit_mode
     flush_cache_on_commit = serve_recipe.flush_cache_on_commit
-    gpus_per_replica = serve_recipe.gpus_per_replica
 
     hf_cache_volume = modal.Volume.from_name(
         "huggingface-cache", create_if_missing=True
@@ -559,10 +598,8 @@ def build_stitch_app(
     # Optional, per AGENTS.md: a public model needs no HF token.
     hf_secret_list = hf_secrets()
     train_secrets = [*hf_secret_list, *proxy_auth_secrets()]
-    if recipe.wandb is not None:
-        train_secrets.append(
-            modal.Secret.from_name(recipe.wandb.modal_wandb_secret_name)
-        )
+    if recipe.metrics is not None:
+        train_secrets.extend(metric_secrets(recipe.metrics))
 
     memory = train_recipe.memory
     app = modal.App(app_name, tags=tags)
@@ -637,12 +674,14 @@ def build_stitch_app(
                 # post-boot resolve would race the cache SGLang warms itself.
                 model_name=local_checkpoint(served_model),
                 sglang_args=sglang_server_args,
-                tp=gpus_per_replica,
                 concurrency=rollout_concurrency,
                 bulletin_root=run_bulletin_root,
                 local_checkpoint_dir=LOCAL_CHECKPOINT_PATH,
                 delta_update_mode=delta_update_mode,
+                store_backend=STORE_BACKEND,
                 volume_name=delta_volume_name,
+                s3_root=None,
+                s3_endpoint_url=None,
                 run_id=run_id,
                 commit_mode=commit_mode,
                 flush_cache_on_commit=flush_cache_on_commit,
@@ -729,6 +768,7 @@ def build_stitch_app(
                 app_name=app_name,
                 total_steps=train_recipe.num_rollout,
                 model=model,
+                checkpoints_volume_name=checkpoints_volume_name,
                 substep_timing=train_recipe.substep_timing,
                 capture_trace=train_recipe.capture_trace,
                 trace_sample_limit=train_recipe.trace_sample_limit,
@@ -829,6 +869,9 @@ def build_stitch_app(
         custom_config.update(
             {
                 "experiment_volume_name": delta_volume_name,
+                "stitch_store_backend": STORE_BACKEND,
+                "stitch_s3_root": "",
+                "stitch_s3_endpoint_url": "",
                 "rollout_modal_flash_app_name": app_name,
                 "rollout_modal_flash_server_cls_name": "Server",
                 "run_id": run_id,
@@ -842,9 +885,12 @@ def build_stitch_app(
         # it has to be materialized under its final name or miles is handed a
         # dict repr as a filename.
         launch.resolve_config(
-            cfg, tempfile.mkdtemp(), (*YAML_CONFIG_FIELDS, "custom_config_path")
+            cfg,
+            tempfile.mkdtemp(),
+            checkpoint_fields=CHECKPOINT_PATH_FIELDS,
+            yaml_fields=(*YAML_CONFIG_FIELDS, "custom_config_path"),
         )
-        cmd = launch.build_train_cmd(cfg, MILES_ROOT, "miles_model_script")
+        cmd = _build_train_cmd(cfg)
 
         # Claim the pool for this run before miles publishes: write the empty
         # pointer and wake the pool so every replica resets to base now.
@@ -870,16 +916,19 @@ def build_stitch_app(
             config_fields=payload.fields,
             modal_app_id=modal_app_id,
         )
-        wandb_run_id = ""
-        if recipe.wandb is not None:
-            # Force miles' W&B run to use the same id recorded in the
-            # dashboard deep-link (miles/wandb honor these env vars). Without
-            # this, wandb autogenerates a run id and the dashboard link 404s.
-            wandb_run_id = wandb_run_id_for_attempt(record_id, 1)
-            os.environ["WANDB_RUN_ID"] = wandb_run_id
-            os.environ["WANDB_RESUME"] = "allow"
-            if recipe.wandb.entity:
-                os.environ["WANDB_ENTITY"] = recipe.wandb.entity
+        metric_run_id = ""
+        if recipe.metrics is not None:
+            # Force miles' tracker run to use the same id recorded in the
+            # dashboard deep-link (miles honors these env vars). Without this,
+            # the tracker autogenerates a run id and the dashboard link 404s.
+            metric_run_id = metric_run_id_for_attempt(record_id, 1)
+            os.environ.update(
+                metric_runtime_env(
+                    recipe.metrics,
+                    run_id=metric_run_id,
+                    entity=getattr(recipe.metrics, "entity", ""),
+                )
+            )
         # Tee the trainer's output to the checkpoints volume: a container's log
         # window only keeps the tail, so a failure whose traceback scrolled past
         # (rollout retries are loud) is otherwise unreadable afterwards.
@@ -908,7 +957,7 @@ def build_stitch_app(
             _record_run_finished(run_record, status)
             checkpoints_volume.commit()
 
-        result = TrainResult(
+        payload_out = train_result_payload(
             app_name=app_name,
             framework=Framework.STITCH,
             training_run_id=record_id,
@@ -916,14 +965,15 @@ def build_stitch_app(
             checkpoints_volume_name=checkpoints_volume_name,
             checkpoints_mount_path=str(CHECKPOINTS_PATH),
             model_config=model,
-            wandb_project=recipe.wandb.project if recipe.wandb else "",
-            wandb_entity=recipe.wandb.entity if recipe.wandb else "",
-            wandb_training_run_id=wandb_run_id,
+            metrics=metric_metadata(
+                recipe.metrics,
+                entity=getattr(recipe.metrics, "entity", ""),
+                run_id=metric_run_id,
+            ),
             group_id=group_id or "",
-            extra={"rollout_endpoint_url": cfg.rollout_endpoint_url, "run_id": run_id},
         )
-        result.save()
-        return result._to_dict()
+        save_train_result_blob(payload_out)
+        return payload_out
 
     @app.function(
         image=image,
@@ -965,22 +1015,34 @@ def build_stitch_app(
         the baseline each sparse delta is applied against, so it must be the
         byte-exact output of the same quantizer the trainer exports with.
         """
+        from huggingface_hub import snapshot_download
+
         from cookbook.miles_disagg import prep
 
         # The cookbook's prep reads its constants off an experiment *module*; the
         # recipe is the same values under gym names.
+        exp = SimpleNamespace(
+            SOURCE_MODEL=train_recipe.source_hf_checkpoint or served_model,
+            BF16_CHECKPOINT_PATH=recipe.bf16_checkpoint_path,
+            SERVED_CHECKPOINT_FORMAT=recipe.served_checkpoint_format,
+            # A bf16 run with no masters path serves (and trains from) the
+            # source snapshot itself; there is nothing to materialize.
+            MATERIALIZE_BF16_MASTERS=bool(recipe.bf16_checkpoint_path),
+            PREP_ENV=dict(recipe.prep_env),
+            miles=train_recipe,
+        )
+        # The download is the caller's: the cookbook's own prep app fans it out
+        # over sharded download containers, and this one takes the plain snapshot
+        # into the mounted HF cache.
+        prep.apply_prep_environment(exp)
+        source_snapshot = snapshot_download(exp.SOURCE_MODEL)
         prep.prepare_checkpoints(
-            SimpleNamespace(
-                SOURCE_MODEL=train_recipe.source_hf_checkpoint or served_model,
-                BF16_CHECKPOINT_PATH=recipe.bf16_checkpoint_path,
-                SERVED_CHECKPOINT_FORMAT=recipe.served_checkpoint_format,
-                # A bf16 run with no masters path serves (and trains from) the
-                # source snapshot itself; there is nothing to materialize.
-                MATERIALIZE_BF16_MASTERS=bool(recipe.bf16_checkpoint_path),
-                PREP_ENV=dict(recipe.prep_env),
-                miles=train_recipe,
-            ),
+            exp,
             checkpoints_volume,
+            source_snapshot=source_snapshot,
+            # No separate published rollout base: the served baseline is built
+            # from the masters by the same quantizer the trainer exports with.
+            rollout_snapshot=None,
         )
         # The pool waits on the renamed baseline appearing, so don't take the
         # cookbook's commit on faith.

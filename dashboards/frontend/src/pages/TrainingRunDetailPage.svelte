@@ -15,6 +15,18 @@
   import ChartSkeleton from "../components/ChartSkeleton.svelte";
   import LineChart from "../components/LineChart.svelte";
   import ResizableTable from "../components/ResizableTable.svelte";
+  import ChartControls from "../components/ChartControls.svelte";
+  import MetricsRangeDropdown from "../components/MetricsRangeDropdown.svelte";
+  import ZoomOutButton from "../components/ZoomOutButton.svelte";
+  import { toEpochSeconds } from "../lib/format.js";
+  import {
+    getTimeRangeParams,
+    resolveTimeRange,
+    rolloutDomainToTimeRange,
+    rolloutTimeKnots,
+    rolloutToTime,
+    timeToRollout,
+  } from "../lib/timeRange.js";
   import {
     fetchRun,
     fetchRunRollouts,
@@ -25,6 +37,7 @@
     fetchRunLogs,
   } from "../lib/api.js";
   import { groupByRollout, rolloutIndex, rolloutScores } from "../lib/rolloutGrouping.js";
+  import { normalizeMetricLinks } from "../lib/metricLinks.js";
   import {
     MAX_TERMINAL_TIMING_FAILURES,
     TERMINAL_TIMING_SETTLE_WINDOW_MS,
@@ -33,7 +46,6 @@
     updateTimingFailureState,
   } from "../lib/timing_retry.js";
   import {
-    isLegacyTiming,
     rolloutIdForTimingKey,
     shouldShowTimingSection,
     timingIsAsync,
@@ -85,6 +97,10 @@
   let run = $state(null);
   let runLoading = $state(false);
   let runError = $state("");
+  // A run id that isn't in the metadata volume won't appear later, so the
+  // 5s poll stops instead of refetching the same 404 for as long as the page
+  // stays open.
+  let runMissing = $state(false);
 
   async function loadRun(id, parentSignal) {
     if (parentSignal.aborted) return;
@@ -103,6 +119,7 @@
       if (parentSignal.aborted) return;
       if (nextRun === null) {
         run = null;
+        runMissing = true;
         runError = `Training run "${id}" was not found.`;
         return;
       }
@@ -126,25 +143,34 @@
   // the auto-refresh hands us a new `run` object with the same status (which
   // would otherwise tear down and rebuild the log stream, flashing the tail).
   let runStatus = $derived(String(run?.status || "").toLowerCase());
-  let wandbUrl = $derived.by(() => {
-    const directUrl = run?.train_result?.wandb_url || run?.config_summary?.wandb_url || "";
+  let metricUrl = $derived.by(() => {
+    const directUrl =
+      run?.train_result?.metric_url ||
+      run?.config_summary?.metric_url ||
+      run?.train_result?.wandb_url ||
+      run?.config_summary?.wandb_url ||
+      "";
     if (directUrl) return directUrl;
 
-    const project = run?.config_summary?.wandb_project || "";
+    const project =
+      run?.config_summary?.metric_project || run?.config_summary?.wandb_project || "";
     return project ? `https://wandb.ai/home?search=${encodeURIComponent(project)}` : "";
   });
-  let wandbLinks = $derived.by(() =>
-    run?.wandb_links?.length
-      ? run.wandb_links
-      : wandbUrl
-        ? [{ label: "Open in W&B", url: wandbUrl }]
-        : [],
+  let metricLinks = $derived.by(() =>
+    run?.metric_links?.length
+      ? normalizeMetricLinks(run.metric_links)
+      : run?.wandb_links?.length
+        ? normalizeMetricLinks(run.wandb_links)
+        : metricUrl
+          ? [{ label: "Metric", url: metricUrl }]
+          : [],
   );
 
   $effect(() => {
     const id = runId;
     run = initialRun?.run_id === id ? initialRun : null;
     runError = "";
+    runMissing = false;
     if (!id) {
       runLoading = false;
       return;
@@ -153,7 +179,8 @@
     const controller = new AbortController();
     void loadRun(id, controller.signal);
     const interval = window.setInterval(() => {
-      if (runLoading || (runStatus && runStatus !== "running")) return;
+      if (runMissing || runLoading || (runStatus && runStatus !== "running"))
+        return;
       void loadRun(id, controller.signal);
     }, 5000);
 
@@ -628,7 +655,7 @@
   // steps stream in on a running run.
   $effect(() => {
     const id = runId;
-    if (!id || activeTab !== "summary") return;
+    if (!id || runMissing || activeTab !== "summary") return;
 
     const controller = new AbortController();
     void loadAdvantages(controller.signal);
@@ -649,7 +676,7 @@
   $effect(() => {
     const id = runId;
     const tab = activeTab;
-    if (!id || (tab !== "summary" && tab !== "rollouts")) return;
+    if (!id || runMissing || (tab !== "summary" && tab !== "rollouts")) return;
 
     const controller = new AbortController();
     rolloutsLoading = true;
@@ -681,7 +708,6 @@
 
   let runTimings = $state({});
   let runTimingsSerialized = $state("{}");
-  let legacyTiming = $derived(isLegacyTiming(runTimings));
   let showTimingSection = $derived(shouldShowTimingSection(runTimings));
   let timelineAsync = $derived(timingIsAsync(runTimings));
   let timelineRunOrigin = $derived(timingRunStart(runTimings));
@@ -1269,9 +1295,99 @@
     };
   });
 
+  // ── Shared chart time range ─────
+  // One `{ start, end, live }` window (epoch seconds) drives every
+  // rollout-indexed chart on the summary tab, after the Modal dashboard's
+  // metrics controls. The charts plot against rollout ids, so the window is
+  // translated to an id range through each rollout's `created_at`.
+  let chartRangeSelection = $state(null); // null → entire run
+  let clockNow = $state(Date.now() / 1000);
+  $effect(() => {
+    const interval = window.setInterval(() => {
+      clockNow = Date.now() / 1000;
+    }, 5000);
+    return () => window.clearInterval(interval);
+  });
+  $effect(() => {
+    runId;
+    chartRangeSelection = null;
+  });
+
+  let rolloutKnots = $derived(rolloutTimeKnots(rolloutSummaries));
+  let chartRunStart = $derived.by(() => {
+    const candidates = [
+      toEpochSeconds(run?.started_at || run?.created_at),
+      rolloutKnots[0]?.t,
+      timelineRunOrigin,
+    ].filter((t) => Number.isFinite(t) && t > 0);
+    return candidates.length ? Math.min(...candidates) : clockNow;
+  });
+  // A finished run's clock stops when it did, so "Past 1 hour" reads as the
+  // last hour of the run rather than an empty window.
+  let chartNow = $derived.by(() => {
+    if (isRunning) return clockNow;
+    const ended = toEpochSeconds(run?.ended_at || run?.completed_at) ?? 0;
+    const last = rolloutKnots[rolloutKnots.length - 1]?.t ?? 0;
+    const stopped = Math.max(ended, last);
+    return stopped > chartRunStart ? stopped : clockNow;
+  });
+  let chartRange = $derived(
+    resolveTimeRange(chartRangeSelection, { runStart: chartRunStart, now: chartNow }),
+  );
+  let chartRangeParams = $derived(getTimeRangeParams(chartRange));
+  let chartMaxDuration = $derived(Math.max(1, chartNow - chartRunStart));
+
+  function setChartRange(next) {
+    if (!next) {
+      chartRangeSelection = null;
+      return;
+    }
+    const start = Math.max(chartRunStart, next.start);
+    const end = Math.min(chartNow, next.end);
+    if (!(end > start)) return;
+    const live = Boolean(next.live) && end >= chartNow;
+    // A paused full-run window stays explicit so it freezes instead of
+    // tailing like "entire run" does.
+    if (live && start <= chartRunStart) {
+      chartRangeSelection = null;
+      return;
+    }
+    chartRangeSelection = { start, end, live };
+  }
+
+  // Rollout-id window the charts show; null while the whole run is visible.
+  let chartXDomain = $derived.by(() => {
+    if (chartRange.entireRun) return null;
+    const lo = timeToRollout(rolloutKnots, chartRange.start);
+    const hi = timeToRollout(rolloutKnots, chartRange.end);
+    return hi > lo ? [lo, hi] : null;
+  });
+
+  function onChartDomainChange(domain) {
+    const next = rolloutDomainToTimeRange(rolloutKnots, domain, {
+      runStart: chartRunStart,
+      now: chartNow,
+    });
+    if (next !== undefined) setChartRange(next);
+  }
+
+  function inChartDomain(x) {
+    return !chartXDomain || (x >= chartXDomain[0] && x <= chartXDomain[1]);
+  }
+
+  // Rollout id <-> wall clock for the charts' time axes; needs two timed
+  // rollouts to interpolate between.
+  let chartXToTime = $derived(
+    rolloutKnots.length >= 2 ? (x) => rolloutToTime(rolloutKnots, x) : null,
+  );
+  let chartTimeToX = $derived(
+    rolloutKnots.length >= 2 ? (t) => timeToRollout(rolloutKnots, t) : null,
+  );
+
   function _seriesStats(getY) {
-    if (!rolloutSummaries.length) return null;
-    const values = rolloutSummaries.map(getY);
+    const rows = rolloutSummaries.filter((r) => inChartDomain(Number(r.rollout_id) || 0));
+    if (!rows.length) return null;
+    const values = rows.map(getY);
     return {
       min: Math.min(...values),
       max: Math.max(...values),
@@ -1310,7 +1426,7 @@
 
   function tagChartStats(tag) {
     const values = rolloutSummaries
-      .filter((r) => r.tag_stats?.[tag])
+      .filter((r) => r.tag_stats?.[tag] && inChartDomain(Number(r.rollout_id) || 0))
       .map((r) => Number(r.tag_stats[tag].mean) || 0);
     if (!values.length) return null;
     return { min: Math.min(...values), max: Math.max(...values), latest: values[values.length - 1] };
@@ -1476,9 +1592,9 @@
           <span>Collapse</span>
         </button>
       {/if}
-      {#each wandbLinks as link (link.url)}
+      {#each metricLinks as link (link.url)}
         <a
-          class="header-link wandb-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"
+          class="header-link metric-link inline-flex items-center gap-[6px] min-h-[32px] leading-[16px]"
           href={link.url}
           target="_blank"
           rel="noopener noreferrer"
@@ -1539,6 +1655,34 @@
               <pre class="[border:1px_solid_color-mix(in_srgb,var(--red,#f87171)_45%,transparent)] rounded-[8px] bg-[color-mix(in_srgb,var(--red,#f87171)_12%,transparent)] text-(--red,#f87171) [font-family:var(--font-mono)] text-[12px] leading-[17px] m-0 max-h-[320px] overflow-auto p-[12px_14px] whitespace-pre-wrap [word-break:break-word]">{run.error_message}</pre>
             </div>
           {/if}
+          {#if showTimingSection || rolloutSummaries.length}
+            <div class="chart-range-bar">
+              <div class="chart-range-dropdown">
+                <MetricsRangeDropdown
+                  live={chartRangeParams.live}
+                  start={chartRangeParams.start}
+                  end={chartRangeParams.end}
+                  duration={chartRangeParams.duration}
+                  entireRun={chartRange.entireRun}
+                  now={chartNow}
+                  liveLabel={isRunning ? "now" : "end of run"}
+                  onupdate={setChartRange}
+                />
+              </div>
+              <ChartControls
+                timeRange={chartRange}
+                setTimeRange={setChartRange}
+                minStart={chartRunStart}
+                now={chartNow}
+              />
+              <ZoomOutButton
+                timeRange={chartRange}
+                setTimeRange={setChartRange}
+                maxDuration={chartMaxDuration}
+                now={chartNow}
+              />
+            </div>
+          {/if}
           {#if timingError || showTimingSection}
             <div class="rollout-chart">
               {#if timingError}
@@ -1559,6 +1703,8 @@
                 downloadName={`substep_timing_${runId}.json`}
                 rolloutIds={rolloutSummaries.map((r) => r.rollout_id)}
                 {attemptMarkers}
+                timeRange={chartRange.entireRun ? null : chartRange}
+                onChangeTimeRange={setChartRange}
                 onOpenRollout={(id) => {
                   selectTab("rollouts");
                   if (expandedRolloutId !== id) void toggleRolloutDetail(id);
@@ -1598,6 +1744,10 @@
                   formatX={(row) => `rollout ${row.rollout_id}`}
                   formatY={(value) => formatMean(value)}
                   ariaLabel="Reward chart"
+                  xDomain={chartXDomain}
+                  onChangeDomainX={onChartDomainChange}
+                  xToTime={chartXToTime}
+                  timeToX={chartTimeToX}
                 />
               </div>
               {#if chartStats}
@@ -1636,11 +1786,23 @@
               <div class="chart-grid">
                 <div class="rollout-chart">
                   <div class="rollout-chart-title">Advantage spread over time</div>
-                  <AdvantageSpreadChart steps={advantageSteps} />
+                  <AdvantageSpreadChart
+                    steps={advantageSteps}
+                    xDomain={chartXDomain}
+                    onChangeDomainX={onChartDomainChange}
+                    xToTime={chartXToTime}
+                    timeToX={chartTimeToX}
+                  />
                 </div>
                 <div class="rollout-chart">
                   <div class="rollout-chart-title">Advantage distribution over time</div>
-                  <AdvantageViolins steps={advantageSteps} />
+                  <AdvantageViolins
+                    steps={advantageSteps}
+                    xDomain={chartXDomain}
+                    onChangeDomainX={onChartDomainChange}
+                    xToTime={chartXToTime}
+                    timeToX={chartTimeToX}
+                  />
                 </div>
                 <div class="rollout-chart">
                   <div class="rollout-chart-title">Advantage distribution: rollout {firstRolloutId} vs latest</div>
@@ -1674,6 +1836,10 @@
                       formatX={(row) => `rollout ${row.rollout_id}`}
                       formatY={(value) => formatMean(value)}
                       ariaLabel={`${tag} chart`}
+                      xDomain={chartXDomain}
+                      onChangeDomainX={onChartDomainChange}
+                      xToTime={chartXToTime}
+                      timeToX={chartTimeToX}
                     />
                     {#if tagChartStats(tag)}
                       <div class="flex gap-[16px] mt-[6px] text-[11px] text-(--muted) [font-variant-numeric:tabular-nums]">
@@ -1722,9 +1888,9 @@
                 <td class="text-(--text-bright)">
                   {formatMean(r.mean)}
                   {#if r.error_summary?.verdict === "all_infra_failure"}
-                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(239,68,68,0.15)] text-[#ef4444] [border:1px_solid_rgba(239,68,68,0.25)]" title="All samples failed due to infrastructure error">infra failure</span>
+                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(239,68,68,0.15)] text-[#ef4444] [border:1px_solid_rgba(239,68,68,0.25)]" title="All samples hit infrastructure errors">infra failure</span>
                   {:else if r.error_summary?.verdict === "partial_infra_failure"}
-                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(251,191,36,0.15)] text-[#fbbf24] [border:1px_solid_rgba(251,191,36,0.25)]" title="Some samples failed due to infrastructure error">partial failure</span>
+                    <span class="inline-block text-[10px] font-medium p-[1px_6px] rounded-[3px] ml-[6px] align-middle bg-[rgba(251,191,36,0.15)] text-[#fbbf24] [border:1px_solid_rgba(251,191,36,0.25)]" title="Some samples hit infrastructure errors">partial failure</span>
                   {/if}
                 </td>
                 <td>{r.episode_count ?? "—"}</td>
@@ -1740,7 +1906,7 @@
                     {:else if !expandedRollout || !sampleDist}
                       <div class="detail-empty">No rollouts recorded.</div>
                     {:else}
-                      {#if runTimings[r.rollout_id] && !legacyTiming}
+                      {#if runTimings[r.rollout_id]}
                         <div class="rollout-chart">
                           <div class="rollout-chart-title">Substep timing</div>
                           <RunTimeline
@@ -1770,7 +1936,7 @@
                           <div class="rollout-diagnostics" class:diag-critical={remoteErr >= totalSamples}>
                             <div class="diag-title">
                               {#if remoteErr >= totalSamples}
-                                All {totalSamples} samples failed — infrastructure error
+                                All {totalSamples} samples hit infrastructure errors
                               {:else}
                                 {remoteErr + infraInvalid} / {totalSamples} samples hit infrastructure errors
                               {/if}
@@ -1791,7 +1957,7 @@
                             </div>
                             {#if remoteErr >= totalSamples}
                               <div class="text-[11px] text-(--muted,#a3a3a3) mt-[6px]">
-                                Check the Modal app logs for sandbox/image build errors. Common cause: the environment image failed to build.
+                                Check the Modal app logs for sandbox or image build errors.
                               </div>
                             {/if}
                           </div>

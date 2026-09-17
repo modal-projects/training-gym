@@ -45,7 +45,7 @@ def build_serving_image(
 ) -> modal.Image:
     """The rollout-pool image: the pinned SGLang fork overlaid on its base image,
     the sidecar's runtime deps, and the stitch checkout (the sidecar runs as
-    ``python3 -m cookbook.common.sidecar``)."""
+    ``python3 -m stitch.sidecar``)."""
     return (
         modal.Image.from_registry(runtime.image)
         .run_commands(

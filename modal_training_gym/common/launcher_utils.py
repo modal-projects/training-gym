@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shlex
 from enum import Enum
+from math import lcm
 from os import PathLike
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -29,7 +30,15 @@ _CONVERSION_EXTRA_ARGS = [
     ("decoder_last_pipeline_num_layers", "decoder-last-pipeline-num-layers"),
     ("mtp_num_layers", "mtp-num-layers"),
     ("make_vocab_size_divisible_by", "make-vocab-size-divisible-by"),
+    # The DeepSeek-V4 family selects its attention implementation here too: the
+    # converter builds the model, and the default (megatron) rejects TP > 1.
+    ("dsv4_impl", "dsv4-impl"),
 ]
+
+_PIPELINE_SPLIT_ARGS = {
+    "decoder_first_pipeline_num_layers",
+    "decoder_last_pipeline_num_layers",
+}
 
 # Architecture fields emitted as CLI flags for every framework.
 _ARCH_VALUE_FIELDS = [
@@ -181,6 +190,12 @@ def get_checkpoint_conversion_policy(
     ``extended_arch_args`` emits the full MoE/attention arch flag set; when
     ``arch_args_model_script_attr`` is set, arch flags are skipped if that
     attribute is populated (the model script already sources them).
+
+    TP/PP come from the ``conversion_*`` overrides when set, else from the training
+    layout. Explicit TP1/PP1 uses one rank instead of the automatic node-wide
+    conversion. EP/ETP are emitted only when their ``conversion_*`` fields are set
+    explicitly, and the pipeline-split args are dropped at conversion PP1. An EP
+    wider than tp*pp widens the world with data-parallel replicas.
     """
     gpus_per_node = getattr(cfg, "actor_num_gpus_per_node", 8)
     actor_nodes = getattr(cfg, "actor_num_nodes", 1)
@@ -192,11 +207,45 @@ def get_checkpoint_conversion_policy(
     pp = getattr(cfg, "conversion_pipeline_model_parallel_size", None) or getattr(
         cfg, "pipeline_model_parallel_size", 1
     )
-
+    pins_layout = (
+        tp > 1
+        or pp > 1
+        or getattr(cfg, "conversion_tensor_model_parallel_size", None) is not None
+        or getattr(cfg, "conversion_pipeline_model_parallel_size", None) is not None
+    )
+    # Expert parallelism is opt-in: torch_dist reshards, so most models convert fine
+    # at the implicit EP1. Models whose full expert set does not fit a rank at EP1
+    # (Inkling-Small: 256 experts) set it explicitly to mirror upstream's layout.
+    ep = getattr(cfg, "conversion_expert_model_parallel_size", None)
+    etp = getattr(cfg, "conversion_expert_tensor_parallel_size", None)
+    if (ep or etp) and not (ep and etp):
+        raise ValueError(
+            "checkpoint conversion expert parallelism needs both "
+            "conversion_expert_model_parallel_size and "
+            f"conversion_expert_tensor_parallel_size (got ep={ep}, etp={etp}); "
+            "Megatron otherwise defaults ETP to TP and the expert world size no "
+            "longer matches tp*pp"
+        )
+    if ep and etp and not pins_layout:
+        raise ValueError(
+            "checkpoint conversion expert parallelism needs a pinned conversion "
+            "layout: set conversion_tensor_model_parallel_size or "
+            "conversion_pipeline_model_parallel_size, otherwise the converter "
+            "inflates PP to the rank count and the expert world size no longer "
+            "divides it"
+        )
     if single_rank_mtp and tp == 1 and pp == 1 and getattr(cfg, "mtp_num_layers", 0):
         world_size = 1
     else:
-        world_size = tp * pp if (tp > 1 or pp > 1) else gpus_per_node
+        world_size = tp * pp if pins_layout else gpus_per_node
+
+    if ep and etp:
+        # The expert world can be wider than tp*pp: Megatron forms expert groups
+        # over the (dp x tp) ranks, so a larger EP is served by data-parallel
+        # replicas rather than by more tensor or pipeline shards. Widening the
+        # world is what makes a big MoE fit — every replica holds only its
+        # 1/EP slice of the experts.
+        world_size = lcm(world_size, etp * ep * pp)
     max_world_size = actor_nodes * gpus_per_node
     if world_size > max_world_size:
         raise ValueError(
@@ -212,13 +261,27 @@ def get_checkpoint_conversion_policy(
             continue
 
         extra_args: list[str] = []
-        if tp > 1 or pp > 1:
+        if pins_layout:
             extra_args += [
                 f"--tensor-model-parallel-size {tp}",
                 f"--pipeline-model-parallel-size {pp}",
             ]
+        if ep:
+            extra_args.append(f"--expert-model-parallel-size {ep}")
+        if etp:
+            extra_args.append(f"--expert-tensor-parallel-size {etp}")
         for attr, flag in _CONVERSION_EXTRA_ARGS:
-            if x := getattr(cfg, attr, None):
+            # A recipe carries one ``decoder_{first,last}_pipeline_num_layers`` pair
+            # shared by conversion and training. It describes a split across >1
+            # pipeline stages, so it is meaningless (and rejected by Megatron) when
+            # the conversion layout is PP1. Only drop it when that PP1 is pinned on the
+            # command line: with no layout flags the converter picks its own PP, and
+            # dropping the split would then describe a layout nobody asked for.
+            if pp == 1 and pins_layout and attr in _PIPELINE_SPLIT_ARGS:
+                continue
+            # Zero is meaningful for MTP: it overrides model-script defaults
+            # during conversion just as the recipe does during training.
+            if (x := getattr(cfg, attr, None)) is not None:
                 extra_args.append(f"--{flag} {x}")
 
         emit_arch = bool(model and getattr(model, "architecture", None))
@@ -370,6 +433,9 @@ def serialize_recipe_params(
     recipe: Any,
     *,
     dataset: Any = None,
+    eval_dataset: Any = None,
+    dataset_path: str | None = None,
+    eval_dataset_path: str | None = None,
     model: Any = None,
 ) -> dict[str, Any]:
     """The recipe's effective CLI flags, serialized for the dashboard run record.
@@ -379,7 +445,13 @@ def serialize_recipe_params(
     """
     return {
         key: serialize_recipe_param_value(key, value)
-        for key, value in recipe._fields(dataset=dataset, model=model).items()
+        for key, value in recipe._fields(
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+            model=model,
+        ).items()
     }
 
 
@@ -418,7 +490,40 @@ def prepare_launch_config(
             # (see BaseTrainRecipe._escape_hatch_keys).
             if field == escape_hatch:
                 object.__setattr__(cfg, "_materialized_config_keys", tuple(val))
+                object.__setattr__(cfg, "_materialized_config", dict(val))
             object.__setattr__(cfg, field, path)
+
+
+def drop_materialized_config_key(cfg: Any, key: str) -> None:
+    """Remove ``key`` from the recipe's already-materialized escape-hatch YAML.
+
+    Runs after ``prepare_launch_config`` has replaced the escape-hatch dict
+    with a file path, so the YAML is rewritten and the recorded keys updated
+    so ``_emit_fields`` stops suppressing the same-named flag.
+    """
+    import yaml
+
+    escape_hatch = getattr(cfg, "_ESCAPE_HATCH_FIELD", None)
+    if not escape_hatch:
+        return
+    keys = tuple(getattr(cfg, "_materialized_config_keys", ()) or ())
+    if key not in keys:
+        return
+    path = getattr(cfg, escape_hatch, None)
+    if isinstance(path, str) and os.path.isfile(path):
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        data.pop(key, None)
+        with open(path, "w") as f:
+            yaml.dump(data, f)
+    stored = getattr(cfg, "_materialized_config", None)
+    if isinstance(stored, dict):
+        stored = dict(stored)
+        stored.pop(key, None)
+        object.__setattr__(cfg, "_materialized_config", stored)
+    object.__setattr__(
+        cfg, "_materialized_config_keys", tuple(k for k in keys if k != key)
+    )
 
 
 def build_train_cmd(
@@ -427,12 +532,23 @@ def build_train_cmd(
     *,
     model: Any = None,
     dataset: Any = None,
+    eval_dataset: Any = None,
+    dataset_path: str | None = None,
+    eval_dataset_path: str | None = None,
     model_script_attr: str,
     model_args_command: str = "",
 ) -> str:
     """Build the Ray job entrypoint, sourcing model arch args if needed."""
     train_script = f"{root}/{'train_async.py' if cfg.async_mode else 'train.py'}"
-    args = shlex.join(cfg.cli_args(dataset=dataset, model=model))
+    args = shlex.join(
+        cfg.cli_args(
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+            model=model,
+        )
+    )
     if model_script := getattr(cfg, model_script_attr, ""):
         inner = (
             f"source {root}/{model_script} && "

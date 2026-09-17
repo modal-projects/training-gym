@@ -17,19 +17,12 @@ from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_response
 
 
 class Qwen3_VL_8B(HFModelConfiguration):
-    """Qwen3-VL-8B-Instruct (vision-language, 8B parameters) from Alibaba.
-
-    Pre-configured with ``ModelArchitecture`` for the text backbone. The vision
-    tower is frozen during RL training (``Qwen3_VL_8b_Recipe.freeze_params_name_list``)
-    and handled by SGLang for rollouts.
-    """
+    """Alibaba Qwen3-VL-8B-Instruct model."""
 
     response_parser = staticmethod(parse_qwen3_response)
 
     model_name = "Qwen/Qwen3-VL-8B-Instruct"
 
-    # Image patches expand prompts into many tokens; padded (bshd) batches avoid
-    # the THD packing path that VL models may not support in megatron-bridge.
     requires_bshd = True
 
     architecture = ModelArchitecture(

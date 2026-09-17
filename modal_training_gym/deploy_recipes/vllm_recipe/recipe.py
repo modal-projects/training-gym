@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from modal_training_gym.common import GPUType
 from modal_training_gym.deploy_recipes.base import BaseDeployRecipe, DeployRecipeType
@@ -8,26 +8,24 @@ from modal_training_gym.deploy_recipes.base import BaseDeployRecipe, DeployRecip
 
 @dataclass
 class VllmRecipe(BaseDeployRecipe):
-    """vLLM serving configuration.
+    """vLLM server settings.
 
-    ## Fields
-
-    gpu : GPUType | None
-        GPU type for the serving container. Default ``None`` (inferred).
-    n_gpu : int | None
-        Number of GPUs (tensor-parallel degree for vLLM). Default ``None``.
-    extra_vllm_args : list[str] | None
-        Additional CLI args passed to ``vllm serve``. Default ``None``.
-    environment_name : str | None
-        Modal environment to deploy into. Default ``None``.
-    deploy_strategy : str
-        Modal deployment strategy. Default ``"rolling"``.
-    startup_timeout : int
-        Seconds the server container is allowed to spend in startup before
-        Modal kills it. Default ``1200`` (20 minutes).
+    Args:
+        gpu:
+            GPU type for server containers.
+        n_gpu:
+            Number of GPUs and tensor-parallel degree.
+        extra_vllm_args:
+            Additional arguments for ``vllm serve``.
+        environment_name:
+            Modal deployment environment.
+        deploy_strategy:
+            Modal deployment strategy.
+        startup_timeout:
+            Maximum time in seconds for container startup.
     """
 
-    recipe_type: DeployRecipeType = DeployRecipeType.VLLM
+    _recipe_type: DeployRecipeType = field(default=DeployRecipeType.VLLM, init=False)
     gpu: GPUType | None = None
     n_gpu: int | None = None
     extra_vllm_args: list[str] | None = None

@@ -45,7 +45,6 @@ HOOK_CONFIG_FIELDS = frozenset(
         "rollout_request_weight_version_lag",
         "rollout_request_retry_attempts",
         "rollout_request_retry_sleep",
-        "rollout_session_affinity_header",
     }
 )
 
@@ -141,9 +140,6 @@ class StitchTrainConfig(MilesRecipe):
     rollout_request_weight_version_lag: int = 1
     rollout_request_retry_attempts: int = 240
     rollout_request_retry_sleep: float = 1.0
-    # The trainer hits the Flash gateway directly, which routes session affinity
-    # on Modal-Session-ID; emit that so GRPO siblings co-locate.
-    rollout_session_affinity_header: str = "Modal-Session-ID"
 
     # Synchronous publish by default: async bounded-lag rollouts need the trainer
     # to wake the pool the moment it publishes, and Flash wake is a lookup by
@@ -233,6 +229,9 @@ class StitchTrainConfig(MilesRecipe):
         if self.save_interval is None:
             fields.pop("save", None)
             fields.pop("save_hf", None)
+            # MilesRecipe derives an interval from num_rollout whenever a save
+            # path is set; with the path dropped the derived value is noise.
+            fields.pop("save_interval", None)
         # bridge mode loads HF weights directly as the reference. The reference
         # is the BF16 masters, never the served base: for a quantized run those
         # differ, and loading a quantized checkpoint as the trainer's weights

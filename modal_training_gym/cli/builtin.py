@@ -19,7 +19,7 @@ from .commands import _TrainingGymCommand
     help="Deploy the dashboard without Modal proxy authentication.",
 )
 def setup_command(proxy_auth: bool, no_proxy_auth: bool) -> None:
-    """Deploy the training-gym dashboard to Modal."""
+    """Deploy the dashboard."""
     if proxy_auth and no_proxy_auth:
         raise click.UsageError(
             "--proxy-auth and --no-proxy-auth cannot be used together."
@@ -40,7 +40,7 @@ def setup_command(proxy_auth: bool, no_proxy_auth: bool) -> None:
 
 @click.command("open", cls=_TrainingGymCommand)
 def open_command() -> None:
-    """Open the deployed dashboard in your browser."""
+    """Open the dashboard."""
     from .setup import open_dashboard
 
     open_dashboard()
@@ -48,10 +48,10 @@ def open_command() -> None:
 
 @click.command("set-proxy-auth", cls=_TrainingGymCommand)
 def set_proxy_auth_command() -> None:
-    """Set/replace the Modal proxy-auth credentials for authenticated served endpoints.
+    """Store Modal proxy-auth credentials.
 
-    You only need this after deploying a model with `unauthenticated=False`.
-    Re-run this command to change the saved credentials.
+    Used by authenticated custom deployments when `MODAL_KEY` and
+    `MODAL_SECRET` are not set in the environment. Re-running replaces the saved credentials.
     """
     from .setup import set_proxy_auth
 
@@ -63,10 +63,10 @@ def set_proxy_auth_command() -> None:
     "--password",
     default=None,
     metavar="PASSWORD",
-    help="Password to set (prompted securely if omitted; empty disables auth).",
+    help="Set a password, prompt when omitted, or disable authentication with an empty value.",
 )
 def set_password_command(password: str | None) -> None:
-    """Set or clear the dashboard password (Basic Auth) and redeploy."""
+    """Set or clear dashboard Basic Auth, then redeploy."""
     from .setup import set_password
 
     set_password(password=password)
@@ -87,7 +87,7 @@ def set_password_command(password: str | None) -> None:
     help="Show what would be deleted without deleting.",
 )
 def cleanup_command(older_than_days: int, dry_run: bool) -> None:
-    """Delete metadata for old failed or cancelled runs."""
+    """Delete old failed or cancelled run metadata."""
     from .cleanup import cleanup
 
     cleanup(older_than_days=older_than_days, dry_run=dry_run)

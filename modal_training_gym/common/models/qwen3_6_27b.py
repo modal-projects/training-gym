@@ -4,12 +4,7 @@ from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_6_respons
 
 
 class Qwen3_6_27B(HFModelConfiguration):
-    """Qwen3.6-27B dense hybrid Gated DeltaNet/attention model.
-
-    The Slime recipe validates text-only causal-language-model training. The
-    checkpoint's vision encoder is not represented by ``ModelArchitecture``;
-    multimodal training remains outside this preset's validated scope.
-    """
+    """Qwen3.6-27B dense hybrid Gated DeltaNet/attention model."""
 
     response_parser = staticmethod(parse_qwen3_6_response)
 

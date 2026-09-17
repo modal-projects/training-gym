@@ -4,11 +4,7 @@ from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_6_respons
 
 
 class Qwen3_5_9B(HFModelConfiguration):
-    """Qwen3.5-9B (9 billion parameters) from Alibaba.
-
-    Pre-configured with full ``ModelArchitecture`` for Megatron-based
-    frameworks (slime). Downloads from ``Qwen/Qwen3.5-9B`` on HuggingFace.
-    """
+    """Alibaba Qwen3.5-9B model."""
 
     response_parser = staticmethod(parse_qwen3_6_response)
 

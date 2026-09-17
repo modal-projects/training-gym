@@ -50,7 +50,7 @@ _SGLANG_DEFAULTS = SglangRecipe()
 
 @dataclass
 class DeepSeek_V4_Flash_SglangRecipe(SglangRecipe):
-    """DeepSeek-V4-Flash (284B MoE, 13B active) on 4×B200 — production SGLang defaults."""
+    """DeepSeek-V4-Flash 284B MoE SGLang recipe with 13B active parameters for 4×B200."""
 
     def __post_init__(self) -> None:
         for key, val in _DEEPSEEK_V4_FLASH_DEFAULTS.items():

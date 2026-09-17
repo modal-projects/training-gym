@@ -40,17 +40,19 @@ def _checkpoint(checkpoint_type: CheckpointType) -> Checkpoint:
     )
 
 
-def _config(recipe, checkpoint_type: CheckpointType) -> TrainConfig:
+def _config(recipe, checkpoint_type: CheckpointType | None) -> TrainConfig:
     return TrainConfig(
         model=Qwen3_5_4B(),
         dataset=HuggingFaceDataset(
             hf_repo="some/dataset",
             input_column="prompt",
             output_column="answer",
+            input_format="text",
         ),
         recipe=recipe,
-        checkpoint=_checkpoint(checkpoint_type),
-        merge_model_recipe=False,
+        resume_from_checkpoint=None
+        if checkpoint_type is None
+        else _checkpoint(checkpoint_type),
     )
 
 
@@ -61,19 +63,55 @@ def _config(recipe, checkpoint_type: CheckpointType) -> TrainConfig:
         pytest.param(MilesRecipe(), id="miles"),
     ],
 )
-def test_megatron_checkpoint_only_sets_load(recipe) -> None:
+def test_megatron_resume_starts_new_run_from_weights(recipe) -> None:
     config = _config(recipe, CheckpointType.megatron)
     prepared = config._prepare_recipe()
     fields = prepared._fields(model=config.model)
+    args = prepared.cli_args(model=config.model)
 
     assert prepared is not recipe
     assert prepared.load == "/checkpoints/run"
+    assert prepared.start_rollout_id == 0
+    assert prepared.no_load_optim is True
+    assert args[args.index("--start-rollout-id") + 1] == "0"
+    assert "--no-load-optim" in args
     assert fields["hf_checkpoint"] == "Qwen/Qwen3.5-4B"
     assert config.model.model_path is None
     assert recipe.load == ""
+    assert recipe.start_rollout_id is None
+    assert "--start-rollout-id" not in recipe.cli_args(model=config.model)
 
 
-def test_checkpoint_wins_over_recipe_load() -> None:
+def test_explicit_start_rollout_id_wins_over_resume_from_checkpoint_default() -> None:
+    config = _config(
+        SlimeRecipe(**_RECIPE_KW, start_rollout_id=5), CheckpointType.megatron
+    )
+    prepared = config._prepare_recipe()
+
+    assert prepared.start_rollout_id == 5
+    assert prepared.no_load_optim is True
+
+
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        pytest.param(SlimeRecipe(**_RECIPE_KW, load="/checkpoints/run"), id="slime"),
+        pytest.param(MilesRecipe(load="/checkpoints/run"), id="miles"),
+    ],
+)
+def test_recipe_load_without_resume_from_checkpoint_continues_with_adam(recipe) -> None:
+    config = _config(recipe, None)
+    prepared = config._prepare_recipe()
+    args = prepared.cli_args(model=config.model)
+
+    assert prepared.load == "/checkpoints/run"
+    assert prepared.start_rollout_id is None
+    assert prepared.no_load_optim is False
+    assert "--start-rollout-id" not in args
+    assert "--no-load-optim" not in args
+
+
+def test_resume_from_checkpoint_wins_over_recipe_load() -> None:
     config = _config(
         SlimeRecipe(**_RECIPE_KW, load="/checkpoints/other"),
         CheckpointType.megatron,
@@ -82,7 +120,7 @@ def test_checkpoint_wins_over_recipe_load() -> None:
     assert config._prepare_recipe().load == "/checkpoints/run"
 
 
-def test_config_summary_records_resume_without_mutating_recipe() -> None:
+def test_config_summary_records_resume_from_checkpoint() -> None:
     config = _config(SlimeRecipe(**_RECIPE_KW), CheckpointType.megatron)
 
     summary = config._build_config_summary("run-id")
@@ -110,3 +148,78 @@ def test_launchers_do_not_replace_model_path_with_checkpoint() -> None:
     assert "model.model_path = checkpoint.path" not in inspect.getsource(
         build_miles_app
     )
+
+
+def test_slime_conversion_uses_wrapper_with_expected_environment() -> None:
+    source = inspect.getsource(build_slime_app)
+
+    assert (
+        "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
+        in source
+    )
+    assert (
+        'convert_script = f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"'
+        not in source
+    )
+    assert (
+        'if any(arg.startswith("--pipeline-model-parallel-size ") '
+        "for arg in extra_args):\n"
+        '            env["SKIP_PP_AUTOINFLATE"] = "1"'
+    ) in source
+    assert 'if num_nodes > 1:\n            env["SKIP_RELEASE_RENAME"] = "1"' in source
+
+
+def test_internal_resume_loads_adam_when_the_run_saved_it() -> None:
+    miles = inspect.getsource(build_miles_app)
+    slime = inspect.getsource(build_slime_app)
+
+    assert "miles.no_load_optim = miles.no_save_optim" in miles
+    assert "miles.no_load_optim = original_no_load_optim" in miles
+    assert 'object.__setattr__(slime, "no_load_optim", slime.no_save_optim)' in slime
+
+
+def test_miles_conversion_uses_wrapper_with_expected_environment() -> None:
+    source = inspect.getsource(build_miles_app)
+
+    assert (
+        "modal_training_gym.frameworks.miles.modal_helpers.convert_hf_to_torch_dist"
+        in source
+    )
+    assert (
+        'convert_script = f"{MILES_ROOT}/tools/convert_hf_to_torch_dist.py"'
+        not in source
+    )
+    assert (
+        'if any(arg.startswith("--pipeline-model-parallel-size ") '
+        "for arg in extra_args):\n"
+        '            env["CONVERT_KEEP_PP1"] = "1"'
+    ) in source
+    assert 'if num_nodes > 1:\n            env["SKIP_RELEASE_RENAME"] = "1"' in source
+
+
+@pytest.mark.parametrize(
+    "recipe",
+    [
+        pytest.param(SlimeRecipe(**_RECIPE_KW), id="slime"),
+        pytest.param(MilesRecipe(), id="miles"),
+    ],
+)
+def test_auto_resume_drops_extra_config_start_rollout_id(recipe, tmp_path) -> None:
+    import yaml
+
+    from modal_training_gym.common.launcher_utils import (
+        drop_materialized_config_key,
+        prepare_launch_config,
+    )
+
+    recipe.extra_config = {"start_rollout_id": 0, "qkv_format": "bshd"}
+    prepare_launch_config(
+        recipe, None, str(tmp_path), yaml_config_fields=("extra_config",)
+    )
+    assert "start_rollout_id" in recipe._escape_hatch_keys()
+
+    drop_materialized_config_key(recipe, "start_rollout_id")
+
+    assert recipe._escape_hatch_keys() == ("qkv_format",)
+    with open(recipe.extra_config) as f:
+        assert yaml.safe_load(f) == {"qkv_format": "bshd"}

@@ -1,12 +1,15 @@
 import dataclasses as _dc
+import hashlib
 import json
 import os
+import re
+import uuid
 from abc import ABC
 from collections.abc import Callable
-from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.train_recipes.gpu_allocation import (
     GpuAllocation,
     resolve_gpu_allocation,
@@ -14,8 +17,8 @@ from modal_training_gym.train_recipes.gpu_allocation import (
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
+    from modal_training_gym.common.metrics import MetricConfig
     from modal_training_gym.common.models import ModelConfig
-    from modal_training_gym.common.wandb import WandbConfig
 
 # ── Volume mount paths (shared by every framework) ───────────────────────────
 
@@ -23,18 +26,20 @@ HF_CACHE_PATH = Path("/root/.cache/huggingface")
 DATA_PATH = Path("/data")
 CHECKPOINTS_PATH = Path("/checkpoints")
 
+
+def _safe_data_key(cache_key: str) -> str:
+    """Return a readable filename component with collision-resistant identity."""
+    prefix = re.sub(r"[^A-Za-z0-9._-]+", "-", cache_key).strip("._-")
+    prefix = prefix[:48] or "dataset"
+    digest = hashlib.sha256(cache_key.encode()).hexdigest()[:16]
+    return f"{prefix}-{digest}"
+
+
 # Recipe fields whose dict values are emitted as JSON CLI arguments.
 JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimodal_keys")
 
 
-class RecipeType(Enum):
-    SLIME = "slime"
-    MILES = "miles"
-    STITCH = "stitch"
-
-
 class BaseTrainRecipe(ABC):
-    recipe_type: RecipeType
     model_config_class: ClassVar["type[ModelConfig] | None"] = None
 
     # Fields consumed by the Modal launcher (image build, cluster topology,
@@ -83,23 +88,25 @@ class BaseTrainRecipe(ABC):
 
     # ── Model presets ─────────────────────────────────────────────────────────
 
-    # TOOD(joy): Remove merge_model_recipe logic everywhere.
     @classmethod
     def get_base_recipe(cls, model_config: "ModelConfig") -> "BaseTrainRecipe | None":
-        """Known-model preset recipe for ``model_config``, or ``None``.
+        """Return the model preset for ``model_config``.
 
-        ``TrainConfig.merge_model_recipe`` merges the returned preset onto the
-        fields a user left unset. ``None`` means "no preset for this model" and
-        the user's recipe is used as written.
+        Call this explicitly. ``TrainConfig`` uses the recipe it receives
+        without applying a preset.
 
-        A framework that only supports an explicit allow-list of models (e.g.
-        slime) may instead raise ``TrainingGymConfigError`` for a model it has
-        no preset for, rather than returning ``None``.
+        Returns:
+            The model preset, or ``None`` when no preset is registered.
+
+        Raises:
+            TrainingGymConfigError:
+                The recipe accepts only registered models and ``model_config`` is not
+                registered.
         """
         return None
 
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
-        """Preflight the parallelism plan. Overridden per framework."""
+        """Validate the model's parallelism settings."""
         return None
 
     # ── Container → framework flag converters ────────────────────────────────
@@ -107,43 +114,57 @@ class BaseTrainRecipe(ABC):
     @staticmethod
     def _resolve_data_paths(
         ds: "DatasetConfig",
-    ) -> tuple[str, dict[str, str] | None]:
-        """Derive on-volume file paths from a dataset's properties."""
-        hf_repo = getattr(ds, "hf_repo", "")
-        name = hf_repo.replace("/", "_") if hf_repo else type(ds).__name__
-        fmt = getattr(ds, "output_format", "parquet")
-        ext = "jsonl" if fmt == "jsonl" else "parquet"
-        split = getattr(ds, "hf_split", "train")
-        prompt_data = f"{DATA_PATH}/{name}/{split}.{ext}"
-        if getattr(ds, "writes_eval_paths", True):
-            return prompt_data, {"eval": f"{DATA_PATH}/{name}/eval.{ext}"}
-        return prompt_data, None
+    ) -> str:
+        """Return the materialized path for one dataset instance."""
+        cache_key = ds.cache_key()
+        if cache_key is None:
+            cache_key = str(uuid.uuid4())
+        safe_key = _safe_data_key(str(cache_key))
+        return f"{DATA_PATH}/{safe_key}.{ds.output_format()}"
+
+    @staticmethod
+    def _validate_datasets(
+        ds: "DatasetConfig",
+        eval_ds: "DatasetConfig | None" = None,
+    ) -> None:
+        if eval_ds is None:
+            return
+        for dataset_method in ("input_key", "label_key", "apply_chat_template"):
+            train_value = getattr(ds, dataset_method)()
+            eval_value = getattr(eval_ds, dataset_method)()
+            if train_value != eval_value:
+                raise TrainingGymConfigError(
+                    f"Training and evaluation datasets must use the same "
+                    f"{dataset_method}(): got {train_value!r} and {eval_value!r}."
+                )
 
     @classmethod
-    def _dataset_to_fields(cls, ds: "DatasetConfig") -> dict[str, Any]:
-        prompt_data, eval_paths = cls._resolve_data_paths(ds)
-        eval_prompt_data: list[str] | None = None
-        if eval_paths:
-            eval_prompt_data = [
-                v for name, path in eval_paths.items() for v in (name, path)
-            ]
+    def _dataset_to_fields(
+        cls,
+        ds: "DatasetConfig",
+        eval_ds: "DatasetConfig | None" = None,
+        *,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
+    ) -> dict[str, Any]:
+        cls._validate_datasets(ds, eval_ds)
         return {
-            "prompt_data": prompt_data,
-            "eval_prompt_data": eval_prompt_data,
-            "input_key": ds.input_key,
-            "label_key": ds.label_key,
-            "apply_chat_template": ds.apply_chat_template,
+            "prompt_data": dataset_path,
+            "eval_prompt_data": (
+                ["eval", eval_dataset_path]
+                if eval_ds is not None and eval_dataset_path is not None
+                else None
+            ),
+            "input_key": ds.input_key(),
+            "label_key": ds.label_key(),
+            "apply_chat_template": ds.apply_chat_template(),
         }
 
     @staticmethod
-    def _wandb_to_fields(w: "WandbConfig") -> dict[str, Any]:
-        return {
-            "use_wandb": True,
-            "wandb_project": w.project,
-            "wandb_group": w.group,
-            "wandb_key": w.key,
-            "disable_wandb_random_suffix": w.disable_random_suffix,
-        }
+    def _metrics_to_fields(metric: "MetricConfig") -> dict[str, Any]:
+        from modal_training_gym.common.metrics import metric_cli_fields
+
+        return metric_cli_fields(metric)
 
     # ── CLI serialization ─────────────────────────────────────────────────────
 
@@ -164,6 +185,14 @@ class BaseTrainRecipe(ABC):
         if isinstance(val, dict):
             return tuple(val)
         return tuple(getattr(self, "_materialized_config_keys", ()) or ())
+
+    def _escape_hatch_values(self) -> dict[str, Any]:
+        """The escape-hatch mapping, before or after it is written to YAML."""
+        val = getattr(self, self._ESCAPE_HATCH_FIELD, None)
+        if isinstance(val, dict):
+            return val
+        stored = getattr(self, "_materialized_config", None)
+        return stored if isinstance(stored, dict) else {}
 
     def _emit_fields(self, fields: dict[str, Any]) -> dict[str, Any]:
         """Drop launcher-only fields and let the escape hatch win over same-named flags.
@@ -186,6 +215,9 @@ class BaseTrainRecipe(ABC):
     def _fields(
         self,
         dataset: "DatasetConfig | None" = None,
+        eval_dataset: "DatasetConfig | None" = None,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
         model: "ModelConfig | None" = None,
     ) -> dict[str, Any]:
         """Recipe fields to emit as CLI flags, merged with dataset/model/wandb.
@@ -200,10 +232,19 @@ class BaseTrainRecipe(ABC):
     def cli_args(
         self,
         dataset: "DatasetConfig | None" = None,
+        eval_dataset: "DatasetConfig | None" = None,
+        dataset_path: str | None = None,
+        eval_dataset_path: str | None = None,
         model: "ModelConfig | None" = None,
     ) -> list[str]:
         out: list[str] = []
-        for key, val in self._fields(dataset=dataset, model=model).items():
+        for key, val in self._fields(
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+            model=model,
+        ).items():
             if val is None or val is False or val == "":
                 continue
             flag = f"--{key.replace('_', '-')}"

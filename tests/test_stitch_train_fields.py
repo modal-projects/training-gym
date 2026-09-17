@@ -120,6 +120,7 @@ def test_trainer_exports_the_dashboard_reporting_env() -> None:
         app_name="stitch-app",
         total_steps=7,
         model=Qwen3_30B(),
+        checkpoints_volume_name="ckpts",
         substep_timing="off",
         capture_trace=True,
         trace_sample_limit=4,
@@ -128,6 +129,7 @@ def test_trainer_exports_the_dashboard_reporting_env() -> None:
         "TRAINING_GYM_TRAINING_RUN_ID": "tr-123",
         "TRAINING_GYM_APP_NAME": "stitch-app",
         "TRAINING_GYM_TOTAL_STEPS": "7",
+        "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": "ckpts",
         "TRAINING_GYM_RESPONSE_PARSER_PATH": (
             "modal_training_gym.common.models.base.parse_qwen3_response"
         ),

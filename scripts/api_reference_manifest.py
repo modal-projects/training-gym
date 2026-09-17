@@ -1,372 +1,91 @@
-"""
-Curated manifest of public classes for API reference documentation.
+from __future__ import annotations
 
-Each entry maps a class to its module path, documentation group,
-and class type (config_data or behavior).
-"""
+import inspect
+from enum import Enum
+from typing import Any
 
-API_REFERENCE_MANIFEST = [
-    # --- Core ---
-    {
-        "class_name": "ModelConfig",
-        "module": "modal_training_gym.common.models.base",
-        "group": "core",
-        "class_type": "behavior",
-        "sidebar_label": "ModelConfig",
-    },
-    {
-        "class_name": "HFModelConfiguration",
-        "module": "modal_training_gym.common.models.base",
-        "group": "core",
-        "class_type": "behavior",
-        "sidebar_label": "HFModelConfiguration",
-    },
-    {
-        "class_name": "ModelArchitecture",
-        "module": "modal_training_gym.common.models.base",
-        "group": "core",
-        "class_type": "config_data",
-        "sidebar_label": "ModelArchitecture",
-    },
-    {
-        "class_name": "DatasetConfig",
-        "module": "modal_training_gym.common.dataset",
-        "group": "core",
-        "class_type": "config_data",
-        "sidebar_label": "DatasetConfig",
-    },
-    {
-        "class_name": "HuggingFaceDataset",
-        "module": "modal_training_gym.common.dataset",
-        "group": "core",
-        "class_type": "config_data",
-        "sidebar_label": "HuggingFaceDataset",
-    },
-    {
-        "class_name": "HarborDataset",
-        "module": "modal_training_gym.common.dataset",
-        "group": "core",
-        "class_type": "config_data",
-        "sidebar_label": "HarborDataset",
-    },
-    {
-        "class_name": "WandbConfig",
-        "module": "modal_training_gym.common.wandb",
-        "group": "core",
-        "class_type": "config_data",
-        "sidebar_label": "WandbConfig",
-    },
-    {
-        "class_name": "ModalRayCluster",
-        "module": "modal_training_gym.common.ray_cluster",
-        "group": "core",
-        "class_type": "behavior",
-        "sidebar_label": "ModalRayCluster",
-    },
-    {
-        "class_name": "TrainResult",
-        "module": "modal_training_gym.common.train_result",
-        "group": "core",
-        "class_type": "behavior",
-        "sidebar_label": "TrainResult",
-    },
-    # --- Models ---
-    {
-        "class_name": "ToolCall",
-        "module": "modal_training_gym.common.models.base",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "ToolCall",
-    },
-    {
-        "class_name": "ParsedResponse",
-        "module": "modal_training_gym.common.models.base",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "ParsedResponse",
-    },
-    {
-        "class_name": "parse_qwen3_response",
-        "module": "modal_training_gym.common.models.base",
-        "group": "models",
-        "class_type": "behavior",
-        "sidebar_label": "parse_qwen3_response",
-    },
-    {
-        "class_name": "Qwen3_0_6B",
-        "module": "modal_training_gym.common.models.qwen3_0_6b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3-0.6B",
-    },
-    {
-        "class_name": "Qwen3_1_7B",
-        "module": "modal_training_gym.common.models.qwen3_1_7b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3-1.7B",
-    },
-    {
-        "class_name": "Qwen3_4B",
-        "module": "modal_training_gym.common.models.qwen3_4b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3-4B",
-    },
-    {
-        "class_name": "Qwen3_8B",
-        "module": "modal_training_gym.common.models.qwen3_8b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3-8B",
-    },
-    {
-        "class_name": "Qwen3_5_0_8B",
-        "module": "modal_training_gym.common.models.qwen3_5_0_8b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.5-0.8B",
-    },
-    {
-        "class_name": "Qwen3_5_2B",
-        "module": "modal_training_gym.common.models.qwen3_5_2b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.5-2B",
-    },
-    {
-        "class_name": "Qwen3_5_4B",
-        "module": "modal_training_gym.common.models.qwen3_5_4b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.5-4B",
-    },
-    {
-        "class_name": "Qwen3_5_9B",
-        "module": "modal_training_gym.common.models.qwen3_5_9b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.5-9B",
-    },
-    {
-        "class_name": "Qwen3_30B",
-        "module": "modal_training_gym.common.models.qwen3_30b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3-30B-A3B",
-    },
-    {
-        "class_name": "Moonlight_16B_A3B_Instruct",
-        "module": "modal_training_gym.common.models.moonlight_16b_a3b_instruct",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Moonlight-16B-A3B-Instruct",
-    },
-    {
-        "class_name": "Gemma4_26B_A4B",
-        "module": "modal_training_gym.common.models.gemma4_26b_a4b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Gemma-4-26B-A4B-it",
-    },
-    {
-        "class_name": "Qwen3_6_35B",
-        "module": "modal_training_gym.common.models.qwen3_6_35b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.6-35B-A3B",
-    },
-    {
-        "class_name": "Qwen3_6_27B",
-        "module": "modal_training_gym.common.models.qwen3_6_27b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.6-27B",
-    },
-    {
-        "class_name": "Qwen3_8_27B",
-        "module": "modal_training_gym.common.models.qwen3_8_27b",
-        "group": "models",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.8-27B",
-    },
-    # --- Training ---
-    {
-        "class_name": "TrainConfig",
-        "module": "modal_training_gym.common.train",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "TrainConfig",
-    },
-    {
-        "class_name": "TrainingRun",
-        "module": "modal_training_gym.common.run",
-        "group": "training",
-        "class_type": "behavior",
-        "sidebar_label": "TrainingRun",
-    },
-    {
-        "class_name": "TrainingGroup",
-        "module": "modal_training_gym.common.training_group",
-        "group": "training",
-        "class_type": "behavior",
-        "sidebar_label": "TrainingGroup",
-    },
-    {
-        "class_name": "SlimeRecipe",
-        "module": "modal_training_gym.train_recipes.slime_recipe.recipe",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "SlimeRecipe",
-    },
-    {
-        "class_name": "MilesRecipe",
-        "module": "modal_training_gym.train_recipes.miles_recipe.recipe",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "MilesRecipe",
-    },
-    {
-        "class_name": "Qwen3_5_4b_Miles_Recipe",
-        "module": "modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3_5_4b_Miles_Recipe",
-    },
-    {
-        "class_name": "Moonlight_16B_A3B_Recipe",
-        "module": "modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Moonlight_16B_A3B_Recipe",
-    },
-    {
-        "class_name": "StitchRecipe",
-        "module": "modal_training_gym.train_recipes.stitch_recipe.recipe",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "StitchRecipe",
-    },
-    {
-        "class_name": "StitchTrainConfig",
-        "module": "modal_training_gym.train_recipes.stitch_recipe.train",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "StitchTrainConfig",
-    },
-    {
-        "class_name": "StitchServeConfig",
-        "module": "modal_training_gym.train_recipes.stitch_recipe.serve",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "StitchServeConfig",
-    },
-    {
-        "class_name": "Gemma4_26B_A4B_Recipe",
-        "module": "modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Gemma4_26B_A4B_Recipe",
-    },
-    {
-        "class_name": "Qwen3_6_35b_Recipe",
-        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3_6_35b_Recipe",
-    },
-    {
-        "class_name": "Qwen3_6_27b_Recipe",
-        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3_6_27b_Recipe",
-    },
-    {
-        "class_name": "Qwen3_8_27b_Recipe",
-        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_8_27b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3_8_27b_Recipe",
-    },
-    # --- Deployment ---
-    {
-        "class_name": "Qwen3_5_0_8b_Recipe",
-        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_0_8b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.5-0.8b_Recipe",
-    },
-    {
-        "class_name": "Qwen3_5_2b_Recipe",
-        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_2b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.5-2b_Recipe",
-    },
-    {
-        "class_name": "Qwen3_5_4b_Recipe",
-        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_4b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.5-4b_Recipe",
-    },
-    {
-        "class_name": "Qwen3_5_9b_Recipe",
-        "module": "modal_training_gym.train_recipes.slime_recipe.qwen3_5_9b",
-        "group": "training",
-        "class_type": "config_data",
-        "sidebar_label": "Qwen3.5-9b_Recipe",
-    },
-    # --- Deployment ---
-    {
-        "class_name": "Endpoint",
-        "module": "modal_training_gym.common.endpoint",
-        "group": "deployment",
-        "class_type": "behavior",
-        "sidebar_label": "Endpoint",
-    },
-    {
-        "class_name": "CustomDeployment",
-        "module": "modal_training_gym.common.deployment",
-        "group": "deployment",
-        "class_type": "behavior",
-        "sidebar_label": "CustomDeployment",
-    },
-    {
-        "class_name": "SglangRecipe",
-        "module": "modal_training_gym.deploy_recipes.sglang_recipe",
-        "group": "deployment",
-        "class_type": "config_data",
-        "sidebar_label": "SglangRecipe",
-    },
-    {
-        "class_name": "VllmRecipe",
-        "module": "modal_training_gym.deploy_recipes.vllm_recipe",
-        "group": "deployment",
-        "class_type": "config_data",
-        "sidebar_label": "VllmRecipe",
-    },
-]
+import modal_training_gym as gym
+from modal_training_gym._api_reference import is_excluded_from_api_reference
+from scripts.generate_models_table import (
+    collect_deploy_preset_names,
+    collect_model_preset_names,
+)
+
+API_REFERENCE_DENYLIST: frozenset[str] = frozenset(
+    name
+    for name in gym.__all__
+    if is_excluded_from_api_reference(name, getattr(gym, name))
+)
 
 GROUPS = {
-    "core": {"label": "Core", "order": 1},
-    "models": {"label": "Models", "order": 2},
-    "training": {"label": "Training", "order": 3},
-    "deployment": {"label": "Deployment", "order": 4},
+    "models": {"label": "Models", "order": 1},
+    "datasets": {"label": "Datasets", "order": 2},
+    "recipes": {"label": "Recipes", "order": 3},
+    "training": {"label": "Training", "order": 4},
+    "deployment": {"label": "Deployment", "order": 5},
 }
 
 
-def class_to_reference_path(class_name: str) -> str | None:
-    """Return the Starlight reference path for a class, or None if not in manifest."""
-    for entry in API_REFERENCE_MANIFEST:
-        if entry["class_name"] == class_name:
-            slug = class_name.lower()
-            return f"/reference/{entry['group']}/{slug}/"
+def _group_for_module(module: str) -> str:
+    if ".models" in module:
+        return "models"
+    if ".dataset" in module:
+        return "datasets"
+    if "train_recipes" in module:
+        return "recipes"
+    if (
+        "deploy_recipes" in module
+        or module.endswith(".deployment")
+        or module.endswith(".endpoint")
+    ):
+        return "deployment"
+    return "training"
+
+
+def _kind(obj: Any) -> str | None:
+    if inspect.isclass(obj):
+        return "enum" if issubclass(obj, Enum) else "class"
+    if inspect.isfunction(obj) or inspect.isroutine(obj):
+        return "function"
     return None
 
 
+def entry_sort_key(entry: dict[str, str]) -> tuple[bool, str]:
+    return (entry["kind"] == "function", entry["class_name"].casefold())
+
+
+def collect_public_api() -> list[dict[str, Any]]:
+    presets = collect_model_preset_names() | collect_deploy_preset_names()
+    entries: list[dict[str, str]] = []
+    for name in gym.__all__:
+        if name in API_REFERENCE_DENYLIST:
+            continue
+        obj = getattr(gym, name)
+        kind = _kind(obj)
+        if kind is None:
+            continue
+        entries.append(
+            {
+                "class_name": name,
+                "module": gym.__name__,
+                "group": _group_for_module(obj.__module__),
+                "sidebar_label": name,
+                "kind": kind,
+                "sidebar_excluded": name in presets,
+            }
+        )
+    entries.sort(
+        key=lambda entry: (
+            GROUPS[entry["group"]]["order"],
+            *entry_sort_key(entry),
+        )
+    )
+    return entries
+
+
+API_REFERENCE_MANIFEST = collect_public_api()
+
 CLASS_REFERENCE_PATHS = {
-    entry["class_name"]: f"/reference/{entry['group']}/{entry['class_name'].lower()}/"
+    entry["class_name"]: f"/reference/{entry['class_name'].lower()}/"
     for entry in API_REFERENCE_MANIFEST
 }
