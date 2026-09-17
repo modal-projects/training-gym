@@ -1,8 +1,7 @@
 """Prepare SWE-rebench tasks and train/eval subsets for the coding tutorial.
 
-``prepare`` converts tasks with the pinned Slime fork and writes balanced,
-repository-disjoint subsets to /data/<dataset-root>. ``mixed`` selects tasks
-with both passing and failing gradeable episodes from a prior rollout dump.
+Run with:
+uv run -m tutorials.coding_agent.dataset prepare
 """
 
 from __future__ import annotations
@@ -54,15 +53,6 @@ DEFAULT_MIXED_RECIPE_SLUG = "qwen3-6-27b-agentic"
 
 @dataclass(frozen=True)
 class SweDataset:
-    """A SWE-bench-style Hugging Face dataset the pinned fork's converter renders.
-
-    Attributes:
-        hf_repo: Hugging Face dataset repository id.
-        split: Source split to stream.
-        key: Directory under ``/data`` and the ``task_path`` prefix, following
-            the fork's dataset-key convention.
-    """
-
     hf_repo: str
     split: str
     key: str
@@ -77,12 +67,10 @@ DEFAULT_SWE_DATASET = "swe-rebench-v2"
 
 
 def data_volume_name(recipe: Qwen3_6_27B_Recipe_Agentic) -> str:
-    """The data volume the Slime launcher mounts at ``/data`` for ``recipe``."""
     return recipe.data_volume_name or f"slime-{type(recipe).__name__.lower()}-data"
 
 
 def dataset_root_name(value: str) -> str:
-    """Validate the directory name under ``/data`` that holds one dataset's subsets."""
     if not value or value in {".", ".."} or "/" in value or "\\" in value:
         raise ValueError(f"dataset root must be a single directory name, got {value!r}")
     return value
@@ -109,19 +97,16 @@ class PreparedTaskSubset(DatasetConfig):
 
 
 def source_metadata(row: dict[str, Any], namespace: str) -> dict[str, Any]:
-    """The source dataset's ``SOURCE_COLUMNS`` for this task."""
     value = (row.get("metadata") or {}).get(namespace) or {}
     return value if isinstance(value, dict) else {}
 
 
 def language(row: dict[str, Any], namespace: str) -> str:
-    """Extract the task's language for split balancing: ``language_bucket``, else ``language``, else ``?``."""
     metadata = source_metadata(row, namespace)
     return str(metadata.get("language_bucket") or metadata.get("language") or "?")
 
 
 def task_group(row: dict[str, Any], namespace: str) -> str:
-    """Extract the task group: the GitHub repository the task came from, e.g. ``aws/aws-cli``."""
     repo = source_metadata(row, namespace).get("repo")
     if not repo:
         raise ValueError(f"converted row is missing metadata.{namespace}.repo")
@@ -137,7 +122,6 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def write_text(path: Path, text: str) -> None:
-    """Replace ``path`` atomically so readers never observe a partial file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     staging = path.with_name(f".{path.name}.tmp")
     staging.write_text(text, encoding="utf-8")
@@ -165,13 +149,6 @@ def write_partitions(
     metadata_namespace: str = "source",
     seed: int = SPLIT_SEED,
 ) -> dict[str, int]:
-    """Write ``eval.jsonl``, ``train-full.jsonl``, and nested ``eval-<N>.jsonl`` and ``train-<N>.jsonl`` splits under ``root``.
-
-    ``eval`` is task-group disjoint from ``train-full``; each sized split is a
-    language-balanced subset of its pool and of every larger sized split. A
-    size larger than its pool is skipped, so a ``--limit`` dry run still
-    writes the splits that fit.
-    """
     source = PreparedTaskSubset(root / "all.converted.jsonl")
     train, evaluation = source.snapshot(rows).split(
         eval_fraction=EVAL_SPLIT_FRACTION,
@@ -218,13 +195,6 @@ def write_partitions(
 def aggregate_probe_samples(
     samples: list[Any], *, n_samples: int
 ) -> dict[str, dict[str, int]]:
-    """Count solved, gradeable, and total episodes per task in a rollout dump.
-
-    An episode is one ``(instance_id, sample index)`` pair. A dump may hold
-    several records for one episode; those are merged. An episode is gradeable
-    when the rollout kept it and the environment reported ``is_solved``, and
-    solved when that report was true.
-    """
 
     def value(sample: Any, key: str, default: Any = None) -> Any:
         return (
@@ -293,15 +263,6 @@ def write_mixed_subset(
     probe_dump: str,
     replace: bool = False,
 ) -> tuple[Path, dict[str, Any]]:
-    """Filter a train split to tasks the model sometimes solved and sometimes failed.
-
-    A task is kept when all ``n_samples`` episodes in the rollout dump were
-    gradeable and it was solved at least once but not every time
-    (``MIXED_CRITERION``). With binary rewards, always-solved and never-solved
-    tasks give GRPO no advantage. The output is ordered by closeness to a 50%
-    solve rate, where that signal is strongest. A JSON sidecar records how the
-    subset was built.
-    """
     train_splits = {f"train-{size}" for size in TRAIN_SPLIT_SIZES} | {"train-full"}
     if source not in train_splits:
         raise ValueError(f"source must be one of {sorted(train_splits)}")
@@ -364,8 +325,6 @@ def write_mixed_subset(
 
 
 class SweBenchSource:
-    """Stream a SWE-bench-style dataset, render each row as a Harbor task, and convert it."""
-
     def __init__(
         self,
         *,
@@ -400,7 +359,6 @@ class SweBenchSource:
             yield dict(row)
 
     def source_record(self, revision: str) -> dict[str, Any]:
-        """Every input the converted rows depend on; a change invalidates them."""
         return {
             "hf_repo": self.dataset.hf_repo,
             "split": self.dataset.split,
@@ -414,7 +372,6 @@ class SweBenchSource:
 
     @staticmethod
     def cached_rows(root: Path, source: dict[str, Any]) -> list[dict[str, Any]] | None:
-        """Rows converted from exactly ``source``, or ``None`` when they must be rebuilt."""
         record_path = root / "all.converted.json"
         converted_path = root / "all.converted.jsonl"
         if not (record_path.is_file() and converted_path.is_file()):
@@ -503,7 +460,6 @@ class SweBenchSource:
 
 
 def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
-    """Slime image with the recipe's pinned fork. That fork's translator converts Harbor tasks."""
     if not (recipe.slime_git_repository and recipe.slime_git_revision):
         raise ValueError(f"{type(recipe).__name__} does not pin a Slime fork")
     return (

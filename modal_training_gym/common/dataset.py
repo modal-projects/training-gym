@@ -79,11 +79,6 @@ class DatasetConfig(ABC):
                 f.write(json.dumps(row) + "\n")
 
     def snapshot(self, rows: Iterable[DatasetRow] | None = None) -> DatasetSubset:
-        """Capture rows in memory once, preserving this dataset's input settings.
-
-        This eagerly reads the source. Run expensive preparation before calling
-        it, on a machine with access to the source and enough host memory.
-        """
         return DatasetSubset(self, self.rows() if rows is None else rows)
 
     def split(
@@ -95,13 +90,6 @@ class DatasetConfig(ABC):
         seed: int = 0,
         min_train_groups: int = 1,
     ) -> tuple[DatasetSubset, DatasetSubset]:
-        """Capture one snapshot and return separate train and eval datasets.
-
-        Keys are dotted field paths or callables. Groups never cross the split.
-        Category proportions and eval size are approximate with whole groups;
-        categories unable to spare ``min_train_groups`` stay train-only.
-        An impossible nonempty eval split raises ValueError.
-        """
         rows = list(self.rows())
         train, evaluation = split_rows(
             rows,
@@ -122,7 +110,6 @@ class DatasetConfig(ABC):
         stratify_key: RowKey | None = None,
         seed: int = 0,
     ) -> DatasetSubset:
-        """Capture a deterministic sample, optionally preserving category proportions."""
         return self.nested_subsets([size], stratify_key=stratify_key, seed=seed)[size]
 
     def nested_subsets(
@@ -132,7 +119,6 @@ class DatasetConfig(ABC):
         stratify_key: RowKey | None = None,
         seed: int = 0,
     ) -> dict[int, DatasetSubset]:
-        """Sample one snapshot; every smaller selection is contained in larger ones."""
         rows = list(self.rows())
         return {
             size: DatasetSubset(
@@ -195,11 +181,7 @@ class DatasetConfig(ABC):
 
 
 class DatasetSubset(DatasetConfig):
-    """An in-memory snapshot of selected rows, materialized as JSONL.
-
-    Returned by DatasetConfig.split/sample/nested_subsets. Source and returned
-    row mutations cannot change the captured data. Materialization is uncached.
-    """
+    """An in-memory snapshot of selected dataset rows."""
 
     def __init__(self, source: DatasetConfig, rows: Iterable[DatasetRow]):
         self._rows = deepcopy(tuple(rows))

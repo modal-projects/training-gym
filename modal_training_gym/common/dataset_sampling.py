@@ -1,5 +1,3 @@
-"""Deterministic grouped splitting and stratified sampling of dataset rows."""
-
 from collections import Counter
 from collections.abc import Callable
 import random
@@ -26,7 +24,6 @@ def sample_rows(
     seed: int,
     stratify_key: RowKey | None = None,
 ) -> list[dict[str, Any]]:
-    """Select a balanced sample; smaller counts select nested row sets."""
     if count < 0 or count > len(rows):
         raise ValueError(f"sample count {count} is outside [0, {len(rows)}]")
 
@@ -73,11 +70,6 @@ def split_rows(
     stratify_key: RowKey | None = None,
     min_train_groups: int = 1,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Select whole groups, covering eligible categories before filling eval.
-
-    Size and category proportions are approximate; retaining train groups
-    and including eligible categories take priority over the target fraction.
-    """
     if not 0 < eval_fraction < 1:
         raise ValueError("eval_fraction must be between 0 and 1")
     if min_train_groups < 1:
