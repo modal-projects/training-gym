@@ -43,7 +43,7 @@ Repo: https://github.com/modal-projects/training-gym
 ## Tutorials
 
 - [Getting started with RL](https://gym.modal.dev/tutorials/rl_basics)
-- [Code RL with Harbor hello-world + Modal sandboxes](https://gym.modal.dev/tutorials/sandboxes)
+- [Painting flowers with code](https://gym.modal.dev/tutorials/paint_flowers)
 - [Training coding agents in sandboxed environments](https://gym.modal.dev/tutorials/coding_agent)
 - [Efficient inference using on-policy distillation](https://gym.modal.dev/tutorials/on_policy_distillation)
 - [Long chain-of-thought reasoning for large-scale RL](https://gym.modal.dev/tutorials/dapo)
