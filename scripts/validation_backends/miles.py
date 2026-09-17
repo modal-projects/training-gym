@@ -9,7 +9,8 @@ from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 
 
 def build_miles_validation(
-    model_config: ModelConfig, step_count: int
+    model_config: ModelConfig,
+    step_count: int,
 ) -> tuple[MilesRecipe, DatasetConfig]:
     """The model's base miles recipe and its validation dataset.
 
@@ -29,6 +30,7 @@ def build_miles_validation(
             "which is registered as a miles validation target"
         )
     recipe.skip_eval_before_train = True
+    recipe.rm_type = "deepscaler"
     prompts_per_step = max(
         recipe.rollout_batch_size, recipe.over_sampling_batch_size or 0
     )

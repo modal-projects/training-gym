@@ -16,6 +16,7 @@ from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 _SLIME_KW = dict(
     gpu_type="H100",
     colocate=False,
+    actor_num_gpus_per_node=8,
     tensor_model_parallel_size=1,
     sequence_parallel=False,
     rollout_num_gpus_per_engine=4,
@@ -66,11 +67,96 @@ def test_large_rollout_allocation_warns() -> None:
     assert any("more than 2x actor allocation" in message for message in messages)
 
 
+def test_multi_node_requires_full_node_gpus() -> None:
+    with pytest.raises(ValueError, match="8 GPUs per node"):
+        SlimeRecipe(
+            **{
+                **_SLIME_KW,
+                "gpu_type": "B300",
+                "actor_num_nodes": 2,
+                "actor_num_gpus_per_node": 4,
+                "colocate": True,
+            }
+        )
+
+
+def test_single_node_rejects_gpus_over_container_max() -> None:
+    with pytest.raises(ValueError, match="exceeds the 4 GPU container limit"):
+        SlimeRecipe(
+            **{
+                **_SLIME_KW,
+                "gpu_type": "A10",
+                "actor_num_nodes": 1,
+                "actor_num_gpus_per_node": 8,
+                "colocate": True,
+            }
+        )
+
+
+@pytest.mark.parametrize("gpu_type", ["A10", "A10!"])
+def test_a10_one_plus_three_packs_onto_one_node(gpu_type: str) -> None:
+    config = SimpleNamespace(
+        gpu_type=gpu_type,
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=1,
+        rollout_num_gpus_per_engine=1,
+        colocate=False,
+        use_critic=False,
+        rollout_num_gpus=3,
+    )
+
+    allocation = resolve_gpu_allocation(config, warn=False)
+    assert allocation.actor_gpus == 1
+    assert allocation.rollout_gpus == 3
+    assert allocation.gpus_per_node == 4
+    assert allocation.total_gpus == 4
+    assert allocation.total_nodes == 1
+
+
+def test_disagg_three_plus_one_packs_onto_one_node() -> None:
+    config = SimpleNamespace(
+        gpu_type="H100",
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=3,
+        rollout_num_gpus_per_engine=1,
+        colocate=False,
+        use_critic=False,
+        rollout_num_gpus=1,
+    )
+
+    allocation = resolve_gpu_allocation(config, warn=False)
+    assert allocation.actor_gpus == 3
+    assert allocation.rollout_gpus == 1
+    assert allocation.gpus_per_node == 4
+    assert allocation.total_gpus == 4
+    assert allocation.total_nodes == 1
+
+
+def test_disagg_one_plus_one_packs_onto_one_node() -> None:
+    config = SimpleNamespace(
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=1,
+        rollout_num_gpus_per_engine=1,
+        colocate=False,
+        use_critic=False,
+        rollout_num_gpus=1,
+    )
+
+    allocation = resolve_gpu_allocation(config, warn=False)
+    assert allocation.actor_gpus == 1
+    assert allocation.rollout_gpus == 1
+    assert allocation.critic_gpus == 0
+    assert allocation.gpus_per_node == 2
+    assert allocation.total_gpus == 2
+    assert allocation.total_nodes == 1
+
+
 def test_miles_uses_same_gpu_allocation_math() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         config = MilesRecipe(
             colocate=False,
+            actor_num_gpus_per_node=8,
             rollout_num_gpus=8,
             rollout_num_gpus_per_engine=4,
         )
@@ -181,10 +267,9 @@ def test_miles_validates_num_experts_against_expert_parallel_size() -> None:
     recipe.validate_model_parallelism(_moe_model(8))
 
 
-def test_miles_num_experts_validation_allows_unset_expert_parallel_size() -> None:
+def test_miles_default_expert_parallel_size_divides_any_expert_count() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         recipe = MilesRecipe()
 
-    assert recipe.expert_model_parallel_size is None
     recipe.validate_model_parallelism(_moe_model(160))

@@ -9,6 +9,7 @@ import remarkMath from 'remark-math';
 import { rehypeTableWrapper } from './rehype-table-wrapper.mjs';
 import { flattenDocId } from './src/lib/docs-sections.ts';
 import { parseTutorialMetadata } from './src/lib/tutorial-docs-loader.ts';
+import { discoverTutorialEntries } from './src/lib/tutorial-slugs.ts';
 import referenceSidebar from './src/generated/reference-sidebar.json';
 
 const configDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -31,17 +32,14 @@ function remarkStripPageTitle() {
   };
 }
 
-function loadTutorialPages() {
+async function loadTutorialPages() {
   const tutorialsDirectory = path.resolve(configDirectory, '../tutorials');
-  const tutorials = readdirSync(tutorialsDirectory)
-    .filter((fileName) => fileName.endsWith('.py'))
-    .map((fileName) => {
-      const tutorialPath = path.join(tutorialsDirectory, fileName);
-      const source = readFileSync(tutorialPath, 'utf8');
-      const { order } = parseTutorialMetadata(source, tutorialPath);
-      return { order, slug: path.basename(fileName, '.py') };
-    })
-    .sort((left, right) => left.order - right.order || left.slug.localeCompare(right.slug));
+  const tutorials = (await discoverTutorialEntries(tutorialsDirectory)).map((entry) => {
+    const source = readFileSync(entry.path, 'utf8');
+    const { order } = parseTutorialMetadata(source, entry.path);
+    return { order, slug: entry.slug };
+  });
+  tutorials.sort((left, right) => left.order - right.order || left.slug.localeCompare(right.slug));
   if (!tutorials[0]) {
     throw new Error('No tutorial pages found');
   }
@@ -95,7 +93,7 @@ function nestedDocRedirects() {
   return redirects;
 }
 
-const tutorialPages = loadTutorialPages();
+const tutorialPages = await loadTutorialPages();
 const firstTutorial = `/tutorials/${tutorialPages[0].slug}`;
 const firstGuide = firstGuidePath();
 
@@ -112,7 +110,8 @@ export default defineConfig({
     '/reference/core/datasetconfig': '/reference/datasetconfig',
     '/reference/core/huggingfacedataset': '/reference/huggingfacedataset',
     '/reference/core/harbordataset': '/reference/harbordataset',
-    '/reference/core/trainresult': '/reference/trainresult',
+    '/reference/core/trainresult': '/reference/trainingrun',
+    '/reference/trainresult': '/reference/trainingrun',
     '/reference/core/metricconfig': '/reference/metricconfig',
     '/reference/core/trackioconfig': '/reference/trackioconfig',
     '/reference/core/wandbconfig': '/reference/wandbconfig',
@@ -137,13 +136,11 @@ export default defineConfig({
     '/guides': firstGuide,
     '/support': '/',
     '/tutorials': firstTutorial,
-    '/tutorials/agent': firstTutorial,
-    '/tutorials/agent/000_agent_sandbox': '/tutorials/agent_sandbox',
     '/tutorials/multinode/002_glm_4_7': '/tutorials/multinode',
     '/tutorials/rl': firstTutorial,
     '/tutorials/rl/000_rl_basics': '/tutorials/rl_basics',
-    '/tutorials/rl/001_sandboxes': '/tutorials/sandboxes',
-    '/tutorials/rl/002_multiturn': '/tutorials/multiturn',
+    '/tutorials/rl/001_sandboxes': '/tutorials/paint_flowers',
+    '/tutorials/sandboxes': '/tutorials/paint_flowers',
     '/tutorials/rl/003_on_policy_distillation': '/tutorials/on_policy_distillation',
     '/tutorials/rl/005_dapo': '/tutorials/dapo',
     '/tutorials/rl/006_audio_asr': '/tutorials/audio_asr',

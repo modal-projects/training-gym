@@ -1,5 +1,5 @@
 # ---
-# order: 9
+# order: 8
 # deps: bfcl-eval, jsonschema
 # ---
 #
@@ -30,6 +30,7 @@
 import asyncio
 import json
 import re
+import time
 
 from modal_training_gym import (
     CustomDeployment,
@@ -983,8 +984,6 @@ config = TrainConfig(
             "jsonschema~=4.23.0",
             "bfcl-eval==2026.3.23",
         ),
-
-        gpu_type="H100",
         colocate=False,
         actor_num_nodes=2,
         actor_num_gpus_per_node=8,
@@ -1001,17 +1000,14 @@ config = TrainConfig(
         sglang_max_running_requests=48,
 
         num_rollout=5,
+        save_interval=5,
         rollout_batch_size=16,
         n_samples_per_prompt=8,
+        global_batch_size=16,
         rollout_max_response_len=4000,
-        rollout_temperature=1,
         sglang_mem_fraction_static=0.75,
 
-        global_batch_size=16,
-        lr=1e-6,
         kl_loss_coef=0.02,
-        # The demo has five rollouts, so save one model-only checkpoint at the end.
-        save_interval=5,
         no_save_optim=True,
 
         environment={
@@ -1037,17 +1033,24 @@ print("  Teacher: DeepSeek V4 Flash")
 print("  Student: Qwen3.6-35B-A3B")
 print("  Dataset: BFCL multi_turn_base, prefix-conditioned (task, K) rows")
 print("  Reward: schema + live exec + structural match + terminal state/response verdict")
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained student
 #
 # Deploy the last checkpoint and re-run the held-out BFCL ids with the same evaluator from our earlier baseline.
 
-result = run.result()
-print("--- Training complete ---")
-checkpoint = result.checkpoints()[-1]
-print(f"Checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print("--- Training complete ---")
+    print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True

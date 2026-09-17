@@ -28,11 +28,20 @@ class _FakeImage:
 
 def test_multinode_image_reinstalls_matching_rdma_runtime(monkeypatch):
     monkeypatch.setattr(launcher, "Image", _FakeImage)
-    recipe = MilesRecipe(colocate=False, rollout_num_gpus=8)
+    recipe = MilesRecipe(colocate=False, actor_num_gpus_per_node=8, rollout_num_gpus=8)
 
     image = launcher._build_miles_base_image(recipe)
 
     assert launcher.RDMA_RUNTIME_INSTALL_COMMAND in image.commands
+
+
+def test_colocate_multinode_skips_rdma_reinstall(monkeypatch):
+    monkeypatch.setattr(launcher, "Image", _FakeImage)
+    recipe = MilesRecipe(colocate=True, actor_num_nodes=2, actor_num_gpus_per_node=8)
+
+    image = launcher._build_miles_base_image(recipe)
+
+    assert launcher.RDMA_RUNTIME_INSTALL_COMMAND not in image.commands
 
 
 def test_single_node_image_keeps_base_rdma_runtime(monkeypatch):
@@ -56,6 +65,7 @@ def test_ld_library_path_comes_from_the_container(monkeypatch):
     )
     assert env_vars["MASTER_ADDR"] == "10.0.0.1"
     assert env_vars["no_proxy"] == "127.0.0.1,10.0.0.1"
+    assert "MASTER_PORT" not in env_vars
 
 
 def test_recipe_environment_still_wins(monkeypatch):

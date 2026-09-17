@@ -1,5 +1,5 @@
 # ---
-# order: 6
+# order: 5
 # deps: jiwer, requests, soundfile
 # ---
 #
@@ -12,18 +12,18 @@
 # in terms of WER. But there's no reason to stop there: we can achieve state-of-the-art
 # performance by post-training open models to redefine your task's Pareto frontier.
 # As an example, we show how to post-train
-# [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on the 
-# [hf-internal-testing/librispeech_asr_dummy](https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy)
-# dataset.
+# [Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) on
+# [disco-eth/EuroSpeech](https://huggingface.co/datasets/disco-eth/EuroSpeech).
+
+import base64
+import io
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import jiwer
 import requests
 import soundfile as sf
 from datasets import Audio, load_dataset
-
-import base64
-import io
-from concurrent.futures import ThreadPoolExecutor
 
 from modal_training_gym import (
     CustomDeployment,
@@ -53,12 +53,14 @@ print(f"base model deployed to {base_deployment.url}")
 # As mentioned before, we measure capability by lower WER, so that's what we'll use.
 # We can use the `jiwer` library to calculate this so we don't have to ourselves.
 
+
 def score_transcript(response: str, label: str) -> float:
     response = (response or "").lower().strip()
     label = (label or "").lower().strip()
     if not label:
         return 0.0
     return float(jiwer.wer(label, response))
+
 
 # ## Get the dataset
 #
@@ -68,20 +70,25 @@ def score_transcript(response: str, label: str) -> float:
 # In a production use case, you'd likely instead store references and
 # resolve them in a custom `generate` function.
 
-class LibriSpeechASRDataset(MultimodalDataset):
-    hf_repo = "hf-internal-testing/librispeech_asr_dummy"
-    hf_config = "clean"
 
-    def __init__(self, *, hf_split: str):
+class EuroSpeechASRDataset(MultimodalDataset):
+    hf_repo = "disco-eth/EuroSpeech"
+    hf_config = "uk"
+
+    def __init__(self, *, hf_split: str, max_seconds: float = 3600):
         self.hf_split = hf_split
+        self.max_seconds = max_seconds
         super().__init__(modality="audio")
 
     def apply_chat_template(self) -> bool:
         return False
 
     def source_rows(self):
-        ds = load_dataset(self.hf_repo, self.hf_config, split=self.hf_split)
-        ds = ds.cast_column("audio", Audio(decode=False))  # decode with soundfile instead of torchcodec
+        ds = load_dataset(
+            self.hf_repo, self.hf_config, split=self.hf_split, streaming=True
+        )
+        ds = ds.cast_column("audio", Audio(decode=False))
+        seconds = 0.0
         for ex in ds:
             audio = ex["audio"]
             data = (
@@ -90,6 +97,9 @@ class LibriSpeechASRDataset(MultimodalDataset):
                 else open(audio["path"], "rb").read()
             )
             arr, sr = sf.read(io.BytesIO(data))
+            seconds += len(arr) / sr
+            if seconds > self.max_seconds:
+                break
             buf = io.BytesIO()
             sf.write(buf, arr, sr, format="WAV")
             data_uri = "data:audio/wav;base64," + base64.b64encode(
@@ -98,16 +108,18 @@ class LibriSpeechASRDataset(MultimodalDataset):
             yield {
                 "prompt": "<audio>\nTranscribe the speech to text. Respond with only the transcript.",
                 "media": data_uri,
-                "label": ex["text"].lower().strip(),
+                "label": (ex["human_transcript"] or "").lower().strip(),
             }
 
-train_dataset = LibriSpeechASRDataset(hf_split="validation[:8]")
 
-eval_dataset = LibriSpeechASRDataset(hf_split="validation[8:16]")
+train_dataset = EuroSpeechASRDataset(hf_split="train", max_seconds=3600)
+
+eval_dataset = EuroSpeechASRDataset(hf_split="validation", max_seconds=300)
 
 # ## Evaluate the base model
 #
 # Let's get our baseline measure of performance.
+
 
 def run_eval(deployment, max_concurrency: int = 2) -> float:
     deployment.wait_until_ready(timeout=15 * 60)
@@ -138,6 +150,7 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         wers = list(executor.map(_score_one, eval_dataset.rows()))
     return sum(wers) / len(wers) if wers else float("nan")
 
+
 print("running base model evaluation...")
 base_mean = run_eval(base_deployment)
 print(f"average WER: {base_mean:.1%}")
@@ -147,8 +160,10 @@ print(f"average WER: {base_mean:.1%}")
 # To make our scoring function a reward function, we must return the
 # negative WER so that lower WER leads to higher rewards.
 
+
 async def wer_rm(args, sample, **kwargs) -> float:
     return -score_transcript(sample.response, sample.label)
+
 
 # ## Begin training
 #
@@ -156,31 +171,36 @@ async def wer_rm(args, sample, **kwargs) -> float:
 # the transcription rollout, padded (bshd) batches, and the many-samples/high-temperature
 # settings that surface reward variance. To not pass the burden of specifying onto you,
 # we created `Qwen3_ASR_1_7B_Recipe` so that you can focus on training.
-
 config = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=Qwen3_ASR_1_7B_Recipe(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=2,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus=2,
-        rollout_num_gpus_per_engine=1,
+        num_rollout=8,
+        save_interval=8,
+        rollout_batch_size=4,
+        n_samples_per_prompt=8,
+        global_batch_size=8,
+        rollout_max_response_len=128,
         custom_rm_function=wer_rm,
     ),
 )
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained checkpoint
 #
 # Let's run the same eval on the trained checkpoint.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
-print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(
     model,

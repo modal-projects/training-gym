@@ -1,35 +1,43 @@
+import re
 from collections.abc import Callable
 from dataclasses import field
-import re
 from typing import Any, ClassVar, Literal
 from urllib.parse import urlparse
 
-from modal_training_gym.train_recipes.base import (
-    BaseTrainRecipe,
-    # Re-exported for backwards compatibility (e.g. frameworks/slime/launcher.py
-    # imports the volume paths from this module).
-    CHECKPOINTS_PATH as CHECKPOINTS_PATH,
-    DATA_PATH as DATA_PATH,
-    HF_CACHE_PATH as HF_CACHE_PATH,
-    JSON_CONFIG_FIELDS as JSON_CONFIG_FIELDS,
-)
+import modal
 from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.common.models import (
     ModelArchitecture,
     ModelConfig,
 )
-from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.metrics import MetricConfig
+from modal_training_gym.train_recipes.base import (
+    # Re-exported for backwards compatibility (e.g. frameworks/slime/launcher.py
+    # imports the volume paths from this module).
+    CHECKPOINTS_PATH as CHECKPOINTS_PATH,
+)
+from modal_training_gym.train_recipes.base import (
+    DATA_PATH as DATA_PATH,
+)
+from modal_training_gym.train_recipes.base import (
+    HF_CACHE_PATH as HF_CACHE_PATH,
+)
+from modal_training_gym.train_recipes.base import (
+    JSON_CONFIG_FIELDS as JSON_CONFIG_FIELDS,
+)
+from modal_training_gym.train_recipes.base import (
+    BaseTrainRecipe,
+)
 from modal_training_gym.train_recipes.gpu_allocation import (
-    validate_num_experts_divisible_by_expert_parallel_size,
     resolve_gpu_allocation,
     validate_megatron_actor_parallelism,
+    validate_multi_node_gpu_count,
+    validate_num_experts_divisible_by_expert_parallel_size,
 )
-
-import modal
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -97,69 +105,12 @@ class SlimeRecipe(BaseTrainRecipe):
 
     Args:
 
-        recipe_type:
-            Internal discriminator fixed to slime.
         name:
             Modal app title. The launcher derives it from the recipe class when
             empty.
         app_tags:
             Extra tags merged into the Modal app metadata for dashboard
             auto-discovery.
-
-        environment:
-            Training-container environment variables such as Megatron
-            ``PYTHONPATH`` and NCCL settings.
-        async_mode:
-            Overlap rollout generation and training with slime's one-step off-policy
-            ``train_async.py``.
-        metrics:
-            Metric tracker settings; expands to slime's W&B-compatible flags.
-        image_overlay:
-            Function that modifies the Modal image.
-        local_slime:
-            Local slime checkout mounted over the image copy without rebuilding it.
-        slime_git_repository:
-            Public HTTPS Git repository to overlay onto the image's slime checkout.
-            Must be paired with ``slime_git_revision`` and is intended for
-            reproducible fork-backed runs. The selected source must remain compatible
-            with Training Gym's build-time Slime patches.
-        slime_git_revision:
-            Full 40-character commit SHA fetched from ``slime_git_repository``.
-            Branches and tags are rejected because they can move between runs.
-        data_volume_name:
-            Existing Modal data volume to mount at ``/data``. When unset, the
-            launcher derives a volume name from the concrete recipe class.
-        memory:
-            Modal Function memory request/limit in MiB.
-        cpu:
-            Modal Function CPU request/limit in cores per container.
-        cloud:
-            Modal cloud provider to pin the cluster to.
-        region:
-            Modal region to pin the cluster to.
-        slime_model_script:
-            Slime script that defines ``MODEL_ARGS`` in place of the attached
-            ``ModelConfig`` architecture.
-        source_hf_checkpoint:
-            Source checkpoint when it differs from the model's own.
-        megatron_conversion_hf_checkpoint:
-            HF checkpoint used for the HF→Megatron conversion step instead of the
-            training model's own weights.
-        patch_files:
-            Local patch scripts applied to slime and Megatron sources.
-        image_run_commands:
-            Extra shell commands run while building the image.
-        image_env:
-            Extra env vars baked into the image.
-        train_function_kwargs:
-            Additional Modal Function keyword arguments for the training function.
-        max_retries:
-            Modal retries for the training function. Each retry resumes from
-            the last checkpoint.
-        capture_trace:
-            Attach sampled per-request execution traces to recorded rollouts.
-        trace_sample_limit:
-            Maximum traced samples per rollout when ``capture_trace`` is enabled.
 
         gpu_type:
             Modal GPU type for every node.
@@ -174,26 +125,27 @@ class SlimeRecipe(BaseTrainRecipe):
             allocation resolver size it.
         rollout_num_gpus_per_engine:
             GPUs and tensor-parallel size per SGLang engine.
-        tensor_model_parallel_size:
-            Megatron tensor-parallel size for the actor.
-        sequence_parallel:
-            Megatron sequence parallelism. Requires tensor parallelism greater than one.
         use_critic:
             Train a separate critic model for PPO. GRPO does not use one.
         critic_num_nodes:
             Nodes for the critic when ``use_critic`` is set.
         critic_num_gpus_per_node:
             GPUs per critic node.
+        tensor_model_parallel_size:
+            Megatron tensor-parallel size for the actor.
+        sequence_parallel:
+            Megatron sequence parallelism. Requires tensor parallelism greater than one.
 
         num_rollout:
             Training and rollout steps for the run.
         start_rollout_id:
             Rollout step to start counting from. ``None`` continues from the
-            iteration stored in ``load``; ``TrainConfig(checkpoint=...)`` sets
-            ``0`` so ``num_rollout`` counts the steps this run performs.
+            iteration stored in ``load``.
         rollout_batch_size:
             Prompts sampled per rollout step; each prompt is expanded into a
             group of sampled responses.
+        n_samples_per_prompt:
+            Responses sampled per prompt as one GRPO group.
         rollout_max_response_len:
             Max generated tokens per sample.
         rollout_temperature:
@@ -218,27 +170,31 @@ class SlimeRecipe(BaseTrainRecipe):
             Initial delay in seconds before health checks. DeepGEMM compilation may
             require a longer delay.
 
-        save:
-            Checkpoint output directory on the mounted ``/checkpoints`` volume.
-        save_interval:
-            Save a checkpoint every N rollout steps.
-        load:
-            Checkpoint directory to resume from; empty starts from the converted
-            HF weights.
-        no_save_optim:
-            Omit optimizer state from checkpoints. The resulting checkpoints cannot
-            resume the optimizer exactly.
-        megatron_to_hf_mode:
-            Export mode for saved Megatron checkpoints. An empty value disables
-            export.
-        freeze_params_name_list:
-            Parameter-name patterns matched with ``re.search`` to select frozen
-            weights.
+        sglang_mem_fraction_static:
+            Fraction of GPU memory sglang reserves for weights + KV cache.
+        sglang_enable_dp_attention:
+            Enable data-parallel attention across engine ranks.
+        sglang_dp_size:
+            Data-parallel size for the engines.
+        sglang_ep_size:
+            Expert-parallel size for MoE models.
+        sglang_enable_dp_lm_head:
+            Data-parallel LM head paired with DP attention.
+        sglang_disable_custom_all_reduce:
+            Fall back to NCCL all-reduce instead of sglang's custom kernel.
+        sglang_cuda_graph_bs:
+            Batch sizes to capture CUDA graphs for.
+        sglang_max_running_requests:
+            Cap on concurrent in-flight requests per engine.
+        sglang_tool_call_parser:
+            Tool-call output parser.
+        sglang_reasoning_parser:
+            Parser for reasoning/thinking output.
+        sglang_request_params:
+            Additional parameters for SGLang generation requests.
 
         advantage_estimator:
             Advantage estimator.
-        n_samples_per_prompt:
-            Responses sampled per prompt as one GRPO group.
         eps_clip:
             PPO clip lower bound.
         eps_clip_high:
@@ -255,8 +211,6 @@ class SlimeRecipe(BaseTrainRecipe):
             Entropy bonus coefficient.
         calculate_per_token_loss:
             Average the loss over tokens instead of over samples.
-        ref_load:
-            Checkpoint read by the reference model for KL terms.
 
         over_sampling_batch_size:
             Extra DAPO prompts sampled to replace filtered groups.
@@ -267,6 +221,8 @@ class SlimeRecipe(BaseTrainRecipe):
 
         global_batch_size:
             Training samples per optim step.
+        num_steps_per_rollout:
+            Optimizer steps per rollout. ``None`` omits the flag.
         lr:
             Learning rate.
         lr_decay_style:
@@ -279,6 +235,16 @@ class SlimeRecipe(BaseTrainRecipe):
             Adam beta2.
         optimizer:
             Optimizer name.
+        use_distributed_optimizer:
+            Shard optimizer state across data-parallel ranks with Megatron's
+            distributed optimizer.
+        optimizer_cpu_offload:
+            Keep optimizer state on CPU to reduce GPU memory use at the cost of
+            slower steps.
+        overlap_cpu_optimizer_d2h_h2d:
+            Overlap the offloaded optimizer's device↔host copies with compute.
+        use_precision_aware_optimizer:
+            Use Megatron's precision-aware optimizer with lower-precision state.
 
         attention_dropout:
             Attention dropout probability.
@@ -288,9 +254,8 @@ class SlimeRecipe(BaseTrainRecipe):
             Compute attention softmax in fp32.
         accumulate_allreduce_grads_in_fp32:
             Accumulate and all-reduce gradients in fp32.
-        use_distributed_optimizer:
-            Shard optimizer state across data-parallel ranks with Megatron's
-            distributed optimizer.
+        attention_backend:
+            Megatron attention kernel backend.
         recompute_granularity:
             Activation recomputation granularity: ``"full"`` or ``"selective"``.
         recompute_method:
@@ -305,28 +270,6 @@ class SlimeRecipe(BaseTrainRecipe):
             ``max_tokens_per_gpu`` instead of a fixed micro batch size.
         max_tokens_per_gpu:
             Token budget per GPU per micro-batch when dynamic batching is on.
-
-        eval_interval:
-            Run eval every N rollout steps; ``None`` disables eval.
-        n_samples_per_eval_prompt:
-            Responses sampled per eval prompt.
-        eval_max_response_len:
-            Max generated tokens per eval sample.
-        eval_top_p:
-            Nucleus-sampling top-p for eval generation.
-        eval_config:
-            Evaluation defaults and datasets written to ``--eval-config`` as YAML.
-
-        update_weight_mode:
-            Weight synchronization mode. ``"full"`` sends all weights. ``"delta"``
-            sends byte-level changes from a CPU snapshot.
-        update_weight_transport:
-            ``"nccl"`` or ``"disk"``; disk requires trainer and rollout engines
-            to share a filesystem.
-        update_weight_encoding:
-            Encoding for delta payloads.
-        update_weight_disk_dir:
-            Shared directory used by the disk transport.
 
         rm_type:
             Built-in reward function name. Leave unset for a custom reward.
@@ -350,63 +293,258 @@ class SlimeRecipe(BaseTrainRecipe):
         custom_megatron_before_train_step_hook:
             Hook run in the Megatron trainer before each train step.
 
+        update_weight_mode:
+            Weight synchronization mode. ``"full"`` sends all weights. ``"delta"``
+            sends byte-level changes from a CPU snapshot.
+        update_weight_transport:
+            ``"nccl"`` or ``"disk"``; disk requires trainer and rollout engines
+            to share a filesystem.
+        update_weight_encoding:
+            Encoding for delta payloads.
+        update_weight_disk_dir:
+            Shared directory used by the disk transport.
+
+        save:
+            Checkpoint output directory on the mounted ``/checkpoints`` volume.
+        save_interval:
+            Save a checkpoint every N rollout steps. Defaults to num_rollout, so a
+            run checkpoints once at the end.
+        load:
+            Checkpoint directory to resume from; empty starts from the converted
+            HF weights.
+        ref_load:
+            Checkpoint read by the reference model for KL terms.
+        no_save_optim:
+            Omit optimizer state from checkpoints. The resulting checkpoints cannot
+            resume the optimizer exactly.
+        no_load_optim:
+            Skip loading optimizer and scheduler state from ``load``.
+        megatron_to_hf_mode:
+            Export mode for saved Megatron checkpoints. An empty value disables
+            export.
+        freeze_params_name_list:
+            Parameter-name patterns matched with ``re.search`` to select frozen
+            weights.
+        source_hf_checkpoint:
+            Source checkpoint when it differs from the model's own.
+        megatron_conversion_hf_checkpoint:
+            HF checkpoint used for the HF→Megatron conversion step instead of the
+            training model's own weights.
+
+        eval_interval:
+            Run eval every N rollout steps; ``None`` disables eval.
+        n_samples_per_eval_prompt:
+            Responses sampled per eval prompt.
+        eval_max_response_len:
+            Max generated tokens per eval sample.
+        eval_top_p:
+            Nucleus-sampling top-p for eval generation.
+        eval_config:
+            Evaluation defaults and datasets written to ``--eval-config`` as YAML.
+
+        environment:
+            Training-container environment variables such as Megatron
+            ``PYTHONPATH`` and NCCL settings.
+        async_mode:
+            Overlap rollout generation and training with slime's one-step off-policy
+            ``train_async.py``.
+        metrics:
+            Metric tracker settings; expands to slime's W&B-compatible flags.
+        image_overlay:
+            Function that modifies the Modal image.
+        local_slime:
+            Local slime checkout mounted over the image copy without rebuilding it.
+        slime_git_repository:
+            Public HTTPS Git repository to overlay onto the image's slime checkout.
+            Must be paired with ``slime_git_revision`` and is intended for
+            reproducible fork-backed runs. The selected source must remain compatible
+            with Training Gym's build-time Slime patches.
+        slime_git_revision:
+            Full 40-character commit SHA fetched from ``slime_git_repository``.
+            Branches and tags are rejected because they can move between runs.
+        data_volume_name:
+            Existing Modal data volume to mount at ``/data``. When unset, the
+            launcher derives a volume name from the concrete recipe class.
+        slime_model_script:
+            Slime script that defines ``MODEL_ARGS`` in place of the attached
+            ``ModelConfig`` architecture.
+        memory:
+            Modal Function memory request/limit in MiB.
+        cpu:
+            Modal Function CPU request/limit in cores per container.
+        cloud:
+            Modal cloud provider to pin the cluster to.
+        region:
+            Modal region to pin the cluster to.
+        patch_files:
+            Local patch scripts applied to slime and Megatron sources.
+        image_run_commands:
+            Extra shell commands run while building the image.
+        image_env:
+            Extra env vars baked into the image.
+        train_function_kwargs:
+            Additional Modal Function keyword arguments for the training function.
+        max_retries:
+            Modal retries for the training function. Each retry resumes from
+            the last checkpoint.
+        capture_trace:
+            Attach sampled per-request execution traces to recorded rollouts.
+        trace_sample_limit:
+            Maximum traced samples per rollout when ``capture_trace`` is enabled.
+
         extra_config:
             Custom configuration written to YAML and passed as
             ``--custom-config-path``. Keys become attributes on slime's parsed
             args and always override same-named recipe fields.
         sglang_config:
             SGLang engine settings written to ``--sglang-config`` as YAML.
-        sglang_request_params:
-            Additional parameters for SGLang generation requests.
         apply_chat_template_kwargs:
             Keyword arguments for tokenizer ``apply_chat_template``, passed as JSON.
         train_env_vars:
             Env vars for the training processes, passed as inline JSON.
         multimodal_keys:
             Multimodal dataset columns passed as JSON.
-
-        sglang_mem_fraction_static:
-            Fraction of GPU memory sglang reserves for weights + KV cache.
-        sglang_enable_dp_attention:
-            Enable data-parallel attention across engine ranks.
-        sglang_dp_size:
-            Data-parallel size for the engines.
-        sglang_ep_size:
-            Expert-parallel size for MoE models.
-        sglang_enable_dp_lm_head:
-            Data-parallel LM head paired with DP attention.
-        sglang_disable_custom_all_reduce:
-            Fall back to NCCL all-reduce instead of sglang's custom kernel.
-        sglang_cuda_graph_bs:
-            Batch sizes to capture CUDA graphs for.
-        sglang_max_running_requests:
-            Cap on concurrent in-flight requests per engine.
-        sglang_tool_call_parser:
-            Tool-call output parser.
-        sglang_reasoning_parser:
-            Parser for reasoning/thinking output.
+        sglang_cuda_graph_backend_prefill:
+            SGLang CUDA-graph backend used during prefill.
+        substep_timing:
+            Record per-substep timings for the dashboard. Defaults to ``auto``,
+            which enables substep time reporting.
     """
-
-    # ── Required ────────────────────────────────────────────────────────────
-    sequence_parallel: bool  # Megatron sequence parallelism (requires TP > 1)
-    rollout_max_response_len: int  # max generated tokens per sample
-    rollout_temperature: float  # sampling temperature for generation
-    save_interval: int  # save a checkpoint every N rollout steps
-
-    # ── Baseline topology and rollout ───────────────────────────────────────
-    gpu_type: str = "H100"
-    colocate: bool = True
-    tensor_model_parallel_size: int = 1
-    rollout_num_gpus_per_engine: int = 1
-    num_rollout: int = 1
-    start_rollout_id: int | None = None
-    rollout_batch_size: int = 8
 
     # ── App identity ─────────────────────────────────────────────────────────
     name: str = ""
     app_tags: dict = field(default_factory=dict)
 
-    # ── Launcher instructions (not slime CLI flags) ─────────────────────────
+    # ── Cluster ─────────────────────────────────
+    gpu_type: str = "H100"
+    colocate: bool = True
+    actor_num_nodes: int = 1
+    actor_num_gpus_per_node: int = 1
+    rollout_num_gpus: int | None = None
+    rollout_num_gpus_per_engine: int = 1
+    use_critic: bool = False
+    critic_num_nodes: int | None = None
+    critic_num_gpus_per_node: int | None = None
+
+    # ── Parallelism ─────────────────────────────────────────────────────────
+    tensor_model_parallel_size: int = 1
+    sequence_parallel: bool = False
+
+    # ── Rollout and sampling ─────────────────────────────────────────────────
+    num_rollout: int = 1
+    start_rollout_id: int | None = None
+    rollout_batch_size: int = 2
+    n_samples_per_prompt: int = 2
+    rollout_max_response_len: int = 4096
+    rollout_temperature: float = 1.0
+    rollout_shuffle: bool = True
+    rollout_top_p: float = 1.0
+    rollout_stop_token_ids: list[int] | None = None
+
+    # ── Fault Tolerance and Health Checks ───────────────────────────────────
+    use_fault_tolerance: bool = True
+    rollout_health_check_interval: int = 30
+    rollout_health_check_timeout: int = 30
+    rollout_health_check_first_wait: int = 300
+
+    # ── SGLang rollout engine ──────────────────────────────────────────────
+    sglang_mem_fraction_static: float = 0.75
+    sglang_enable_dp_attention: bool = False
+    sglang_dp_size: int | None = None
+    sglang_ep_size: int | None = None
+    sglang_enable_dp_lm_head: bool = False
+    sglang_disable_custom_all_reduce: bool = False
+    sglang_cuda_graph_bs: list[int] | None = None
+    sglang_cuda_graph_backend_prefill: str | None = None
+    sglang_max_running_requests: int | None = None
+    sglang_tool_call_parser: str | None = None
+    sglang_reasoning_parser: str | None = None
+    sglang_request_params: dict | None = None
+
+    # ── RL algorithm ────────────────────────────────────────────────────────
+    advantage_estimator: str = "grpo"
+    eps_clip: float = 0.2
+    eps_clip_high: float = 0.28
+    use_kl_loss: bool = False
+    kl_loss_type: str = "low_var_kl"
+    kl_loss_coef: float = 0.0
+    kl_coef: float = 0.0
+    entropy_coef: float = 0.0
+    calculate_per_token_loss: bool = False
+
+    # ── Dynamic sampling (DAPO) ────────────────────────────────────────────
+    over_sampling_batch_size: int | None = None
+    dynamic_sampling_filter_path: str | None = None
+    balance_data: bool = False
+
+    # ── Training ────────────────────────────────────────────────────────────
+    global_batch_size: int = 4
+    num_steps_per_rollout: int | None = None
+    lr: float = 1e-6
+    lr_decay_style: str = "constant"
+    weight_decay: float = 0.1
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.98
+    optimizer: str = "adam"
+    use_distributed_optimizer: bool = False
+    optimizer_cpu_offload: bool = False
+    overlap_cpu_optimizer_d2h_h2d: bool = False
+    use_precision_aware_optimizer: bool = False
+
+    # ── Memory and precision ────────────────────────────────────────────────
+    attention_dropout: float = 0.0
+    hidden_dropout: float = 0.0
+    attention_softmax_in_fp32: bool = True
+    accumulate_allreduce_grads_in_fp32: bool = True
+    attention_backend: str | None = None
+    recompute_granularity: str = "full"
+    recompute_method: str = "uniform"
+    recompute_num_layers: int = 1
+    qkv_format: str = "thd"
+
+    # ── Dynamic batching ────────────────────────────────────────────────────
+    use_dynamic_batch_size: bool = True
+    max_tokens_per_gpu: int = 9216
+
+    # ── Reward model ─────────────────────────────────────────────────────────
+    rm_type: str | None = None
+
+    # -- Slime customization flags ───────────────────────────────────────────
+    custom_rm_function: Callable | None = None
+    custom_generate_function: Callable | None = None
+    custom_reward_post_process_function: Callable | None = None
+    rollout_function: Callable | str | None = None
+    custom_rollout_log_function: Callable | str | None = None
+    custom_eval_rollout_log_function: Callable | str | None = None
+    custom_megatron_before_log_prob_hook: Callable | str | None = None
+    custom_megatron_before_train_step_hook: Callable | str | None = None
+
+    # ── Weight sync ──────────
+    update_weight_mode: str = "full"
+    update_weight_transport: str = "nccl"
+    update_weight_encoding: str = "indices"
+    update_weight_disk_dir: str = ""
+
+    # ── Checkpointing ───────────────────────────────────────────
+    save: str | None = str(CHECKPOINTS_PATH)
+    save_interval: int | None = None
+    load: str = ""
+    ref_load: str = ""
+    no_save_optim: bool = False
+    no_load_optim: bool = False
+    megatron_to_hf_mode: str = ""
+    freeze_params_name_list: list[str] | None = None
+    source_hf_checkpoint: str | None = None
+    megatron_conversion_hf_checkpoint: str | None = None
+
+    # ── Eval ────────────────────────────────────────────────────────────────
+    eval_interval: int | None = None
+    n_samples_per_eval_prompt: int = 2
+    eval_max_response_len: int = 4096
+    eval_top_p: float = 1.0
+    eval_config: dict | None = None
+
+    # ── Launcher instructions ─────────────────────────
     environment: dict = field(
         default_factory=lambda: {
             "PYTHONPATH": "/root/Megatron-LM/",
@@ -421,165 +559,25 @@ class SlimeRecipe(BaseTrainRecipe):
     slime_git_repository: str | None = None
     slime_git_revision: str | None = None
     data_volume_name: str | None = None
+    slime_model_script: str = ""
     memory: int | tuple[int, int] | None = None
     cpu: float | tuple[float, float] | None = None
     cloud: str | None = None
     region: str | None = None
-    slime_model_script: str = ""
-    source_hf_checkpoint: str | None = None
-    megatron_conversion_hf_checkpoint: str | None = None
     patch_files: list[str] = field(default_factory=list)
     image_run_commands: list[str] = field(default_factory=list)
     image_env: dict[str, str] = field(default_factory=dict)
     train_function_kwargs: dict[str, Any] = field(default_factory=dict)
     max_retries: int = 3
-
     substep_timing: Literal["auto", "off"] = "auto"
 
     # ── Per-sample execution tracing (dashboard timeline) ───────────────────
-    # When True, the rollout recorder attaches slime's per-sample trace (the
-    # generate/reward/tool-call timeline) to the first `trace_sample_limit`
-    # samples of each rollout. Off by default — traces inflate payloads, so
-    # sampling keeps the added volume well under 1%. Not a slime CLI flag.
     capture_trace: bool = False
     trace_sample_limit: int = 16
-
-    # ── Cluster and parallelism (optional) ─────────────────────────────────
-    actor_num_nodes: int = 1
-    actor_num_gpus_per_node: int = 8
-    rollout_num_gpus: int | None = None
-    use_critic: bool = False
-    critic_num_nodes: int | None = None
-    critic_num_gpus_per_node: int | None = None
-
-    # ── RL algorithm ────────────────────────────────────────────────────────
-    advantage_estimator: str = "grpo"
-    n_samples_per_prompt: int = 2
-    eps_clip: float = 0.2
-    eps_clip_high: float = 0.28
-    use_kl_loss: bool = False
-    kl_loss_type: str = "low_var_kl"
-    kl_loss_coef: float = 0.0
-    kl_coef: float = 0.0
-    entropy_coef: float = 0.0
-    calculate_per_token_loss: bool = False
-    ref_load: str = ""
-
-    # ── Dynamic sampling (DAPO) ────────────────────────────────────────────
-    over_sampling_batch_size: int | None = None
-    dynamic_sampling_filter_path: str | None = None
-    balance_data: bool = False
-
-    # ── Rollout (optional) ─────────────────────────────────────────────────
-    rollout_shuffle: bool = True
-    rollout_top_p: float = 1.0
-    rollout_stop_token_ids: list[int] | None = None
-    sglang_mem_fraction_static: float = 0.75
-
-    # ── Fault Tolerance and Health Checks ───────────────────────────────────
-    use_fault_tolerance: bool = True
-    rollout_health_check_interval: int = 30
-    rollout_health_check_timeout: int = 30
-    rollout_health_check_first_wait: int = 300
-
-    # ── Training ────────────────────────────────────────────────────────────
-    global_batch_size: int = 16
-    lr: float = 1e-6
-    lr_decay_style: str = "constant"
-    weight_decay: float = 0.1
-    adam_beta1: float = 0.9
-    adam_beta2: float = 0.98
-    optimizer: str = "adam"
-
-    # ── Memory and precision ────────────────────────────────────────────────
-    attention_dropout: float = 0.0
-    hidden_dropout: float = 0.0
-    attention_softmax_in_fp32: bool = True
-    accumulate_allreduce_grads_in_fp32: bool = True
-    use_distributed_optimizer: bool = False
-    recompute_granularity: str = "full"
-    recompute_method: str = "uniform"
-    recompute_num_layers: int = 1
-
-    # ── Dynamic batching ────────────────────────────────────────────────────
-    use_dynamic_batch_size: bool = True
-    max_tokens_per_gpu: int = 9216
-
-    # QKV layout for the Megatron backend. Emitted as --qkv-format (slime's own
-    # default is "thd"). Set explicitly because SLIME_IMAGE nightly-dev-20260701a's
-    # compute_advantages_and_returns reads args.qkv_format and AttributeError's at
-    # the first train step if it isn't provided.
-    qkv_format: str = "thd"
-
-    # ── Eval ────────────────────────────────────────────────────────────────
-    eval_interval: int | None = None
-    n_samples_per_eval_prompt: int = 4
-    eval_max_response_len: int = 16384
-    eval_top_p: float = 1.0
-    eval_config: dict | None = None
-
-    # ── Checkpointing (optional) ───────────────────────────────────────────
-    save: str = "/checkpoints"
-    load: str = ""
-    no_save_optim: bool = False
-    no_load_optim: bool = False
-    megatron_to_hf_mode: str = ""
-
-    # Regex patterns of parameter names to freeze (slime's
-    # --freeze-params-name-list, matched with re.search). Used e.g. to freeze a
-    # VL model's vision tower so RL only updates the language backbone.
-    freeze_params_name_list: list[str] | None = None
-
-    # ── Weight sync (megatron trainer → sglang rollout engines) ──────────
-    # Default matches slime's own default. ``delta`` mode pin-snapshots the
-    # last broadcast on CPU and ships only byte-level changes, which is
-    # ~5-10× faster than ``full`` for large models where weights barely
-    # move per rollout (e.g. 35B-class MoE). Pair with
-    # ``update_weight_transport="disk"`` if the trainer and rollout engines
-    # share a filesystem.
-    update_weight_mode: str = "full"
-    update_weight_transport: str = "nccl"
-    update_weight_encoding: str = "indices"
-    update_weight_disk_dir: str = ""
-
-    # ── Reward model ─────────────────────────────────────────────────────────
-    rm_type: str | None = None
-
-    # -- Slime customization flags ───────────────────────────────────────────
-    # See https://github.com/THUDM/slime/blob/0988f0f4a0ab55d1bb3ce6285a597d912144fa80/docs/en/get_started/customization.md#1-rollout-function---rollout-function-path
-    custom_rm_function: Callable | None = None
-    custom_generate_function: Callable | None = None
-    # Ships a callable the same way `custom_rm_function`/`custom_generate_function`
-    # do (see `build_slime_app`'s `_ship_callable`), writing the resulting import
-    # path into `extra_config["custom_reward_post_process_path"]`. Prefer this over
-    # setting `custom_reward_post_process_path` directly with a raw dotted string:
-    # a function defined in a `__main__` tutorial script has no reliably importable
-    # module name (its file may not even be a valid Python identifier, e.g.
-    # `007_my_tutorial.py`), so slime's own `importlib.import_module(...)` on that
-    # raw path fails with `ModuleNotFoundError` inside the Ray actor that loads it.
-    custom_reward_post_process_function: Callable | None = None
-    custom_rollout_log_function: Callable | str | None = None
-    custom_eval_rollout_log_function: Callable | str | None = None
-    rollout_function: Callable | str | None = None
-    custom_megatron_before_log_prob_hook: Callable | str | None = None
-    custom_megatron_before_train_step_hook: Callable | str | None = None
-
-    # ── SGLang rollout engine ──────────────────────────────────────────────
-    sglang_enable_dp_attention: bool = False
-    sglang_dp_size: int | None = None
-    sglang_ep_size: int | None = None
-    sglang_enable_dp_lm_head: bool = False
-    sglang_disable_custom_all_reduce: bool = False
-    sglang_cuda_graph_bs: list[int] | None = None
-    sglang_cuda_graph_backend_prefill: str | None = None
-    sglang_max_running_requests: int | None = None
-    sglang_tool_call_parser: str | None = None
-    sglang_reasoning_parser: str | None = None
 
     # ── SGLang / config overrides ───────────────────────────────────────────
     extra_config: dict | None = None
     sglang_config: dict | None = None
-    sglang_request_params: dict | None = None
     apply_chat_template_kwargs: dict | str = ""
     train_env_vars: dict | str | None = None
     multimodal_keys: dict | str | None = None
@@ -639,7 +637,7 @@ class SlimeRecipe(BaseTrainRecipe):
 
     @model_validator(mode="after")
     def _validate_gpu_allocation(self) -> "SlimeRecipe":
-        resolve_gpu_allocation(self)
+        validate_multi_node_gpu_count(resolve_gpu_allocation(self), self.gpu_type)
         validate_megatron_actor_parallelism(self)
         return self
 
@@ -793,6 +791,10 @@ class SlimeRecipe(BaseTrainRecipe):
         model: "ModelConfig | None" = None,
     ) -> dict[str, Any]:
         fields = self._field_values()
+        if fields["save_interval"] is None and fields["save"] is not None:
+            fields["save_interval"] = self._escape_hatch_values().get(
+                "num_rollout", self.num_rollout
+            )
         if (
             self.colocate
             and fields["sglang_cuda_graph_backend_prefill"] is None
@@ -842,9 +844,6 @@ class SlimeRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.slime_recipe.qwen3_1_7b import (
             Qwen3_1_7B_Recipe,
         )
-        from modal_training_gym.train_recipes.slime_recipe.qwen3_8b import (
-            Qwen3_8B_Recipe,
-        )
         from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import (
             Qwen3_4B_Recipe,
         )
@@ -860,15 +859,23 @@ class SlimeRecipe(BaseTrainRecipe):
         from modal_training_gym.train_recipes.slime_recipe.qwen3_5_9b import (
             Qwen3_5_9B_Recipe,
         )
-
-        from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import (
-            Qwen3_6_35B_Recipe,
-        )
         from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b import (
             Qwen3_6_27B_Recipe,
         )
+        from modal_training_gym.common.models.qwen3_6_35b import (
+            Qwen3_6_35B_Long_Context,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import (
+            Qwen3_6_35B_Recipe,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b_long_context import (
+            Qwen3_6_35B_Recipe_Long_Context,
+        )
         from modal_training_gym.train_recipes.slime_recipe.qwen3_8_27b import (
             Qwen3_8_27B_Recipe,
+        )
+        from modal_training_gym.train_recipes.slime_recipe.qwen3_8b import (
+            Qwen3_8B_Recipe,
         )
         from modal_training_gym.train_recipes.slime_recipe.qwen3_asr_1_7b import (
             Qwen3_ASR_1_7B_Recipe,
@@ -899,6 +906,8 @@ class SlimeRecipe(BaseTrainRecipe):
             return Qwen3_5_9B_Recipe()
         if model_config.model_name == "Qwen/Qwen3-8B":
             return Qwen3_8B_Recipe()
+        if isinstance(model_config, Qwen3_6_35B_Long_Context):
+            return Qwen3_6_35B_Recipe_Long_Context()
         if model_config.model_name == "Qwen/Qwen3.6-35B-A3B":
             return Qwen3_6_35B_Recipe()
         if model_config.model_name == "Qwen/Qwen3.6-27B":

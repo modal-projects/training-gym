@@ -13,7 +13,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from modal import App, Dict as ModalDict, Image, Retries, Volume
-from modal.experimental import clustered
 
 from modal_training_gym.common import (
     hf_secrets,
@@ -39,7 +38,10 @@ from modal_training_gym.common.metrics import (
 )
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.ray_cluster import ModalRayCluster
+from modal_training_gym.common.ray_cluster import (
+    ModalRayCluster,
+    clustered_if,
+)
 from modal_training_gym.common.run import (
     TrainingRun,
     TrainingRunStatus,
@@ -49,13 +51,16 @@ from modal_training_gym.common.run import (
     torch_dist_resume_checkpoint,
 )
 from modal_training_gym.common.launcher_helpers import (
+    apply_scoped_save,
     build_app_tags,
     build_terminal_run_record,
-    build_train_result,
-    compute_save_root,
+    compute_recipe_save_root,
+    configured_recipe_save,
     init_training_run_record,
+    persist_completed_run,
     mark_run_failed,
     mark_run_stopped,
+    mount_caller_source,
     resolve_caller_context,
     resolve_checkpoint_volumes,
     run_download_phase,
@@ -63,7 +68,11 @@ from modal_training_gym.common.launcher_helpers import (
     ship_callable,
     write_dataset_if_needed,
 )
+from modal_training_gym.common.train_result import save_train_result_blob
 from modal_training_gym.common.status import MilesStatus
+from modal_training_gym.common.torch_dist_checkpoint import (
+    is_complete_torch_dist_checkpoint_dir,
+)
 from modal_training_gym.train_recipes.miles_recipe.recipe import (
     CHECKPOINTS_PATH,
     DATA_PATH,
@@ -97,9 +106,14 @@ def _validate_resume_checkpoint(
 
 
 MILES_ROOT = "/root/miles"
+# Editable install location of sglang inside the miles images.
+SGLANG_ROOT = "/sgl-workspace/sglang"
 SYSTEM_LIB_DIR = "/usr/lib/x86_64-linux-gnu"
-# libibverbs and the libmlx5 provider come from incompatible rdma package versions for miles multi-node training
-# reinstalling fixes this issue, mooncake transferengine imports successfully
+# Disagg multi-node mooncake needs matching libibverbs/libmlx5. The apt
+# reinstall strips NCCL NET plugins, so 2-node SGLang dies in
+# ncclCommInitRank ("invalid usage" / "Failed to initialize any NET
+# plugin"). Colocate syncs over CUDA IPC and must keep the image NET
+# stack. 1-node jobs never take this path.
 RDMA_RUNTIME_INSTALL_COMMAND = (
     "apt-get update && apt-get install -y --no-install-recommends "
     "--reinstall libibverbs1 ibverbs-providers && "
@@ -123,16 +137,14 @@ _REPORTING_PATCH_COMMANDS = (
     f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
 )
 
-# Megatron-level torch_dist save fixes, shared with the slime image. Both no-op when
-# their target source doesn't match, so they are safe for every miles image; the
-# checkpoint-save one is skipped in the shell below when its target is absent
-# entirely, since guarding inside the script would change the bytes the slime image
-# already builds from.
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
 )
 _PATCH_DIST_CKPT_NOFORK_B64 = encode_patch("patch_dist_ckpt_nofork", _MEGATRON_PATCHES)
 _PATCH_CHECKPOINT_SAVE_B64 = encode_patch("patch_checkpoint_save", _MEGATRON_PATCHES)
+_PATCH_CHECKPOINT_COMMIT_B64 = encode_patch(
+    "patch_checkpoint_commit", _MEGATRON_PATCHES
+)
 _MEGATRON_TORCH_STRATEGY_PY = (
     "/root/Megatron-LM/megatron/core/dist_checkpointing/strategies/torch.py"
 )
@@ -290,12 +302,13 @@ def _release_convert_lock(run_id: str, volume_name: str, save_path: str) -> None
 def _is_resumable_checkpoint(path: str) -> bool:
     """Whether ``path`` holds a training save that can be resumed from.
 
-    Looser than ``_is_complete_torch_dist_checkpoint`` because miles writes more than
-    one save shape: a LoRA run stores ``adapter/`` with per-rank ``.pt`` files and no
-    ``.metadata``/``common.pt``/``.distcp`` at all, so the conversion predicate would
-    report every adapter checkpoint as absent and silently restart from ``ref_load``.
-    Only the crashed-torch_dist signature is rejected — ``.distcp`` shards present but
-    the ``.metadata`` that is written last missing.
+    Looser than ``is_complete_torch_dist_checkpoint_dir`` because miles writes
+    more than one save shape: a LoRA run stores ``adapter/`` with per-rank
+    ``.pt`` files and no ``.metadata``/``common.pt``/``.distcp`` at all, so the
+    conversion predicate would report every adapter checkpoint as absent and
+    silently restart from ``ref_load``. Only the crashed-torch_dist signature is
+    rejected: ``.distcp`` shards present but the ``.metadata`` written last
+    missing.
     """
     try:
         names = os.listdir(path)
@@ -323,29 +336,6 @@ def _unresumable_save_dirs(save_root: str) -> list[str]:
     )
 
 
-def _is_complete_torch_dist_checkpoint(path: str) -> bool:
-    """Whether ``path`` holds a *finished* torch_dist checkpoint.
-
-    ``.metadata`` is written last, by ``save_state_dict_async_finalize``, so its
-    presence is what separates a completed save from a crashed one. Without this
-    check ``torch_dist_resume_checkpoint``'s ``iter_*`` scan accepts any directory
-    (its default ``is_complete`` is ``os.path.isdir``), so a conversion that died
-    mid-write is reported as a cache hit and silently skips re-conversion — which
-    then feeds partial weights to training. A crashed conversion does leave
-    ``common.pt`` and the ``.distcp`` shards behind, so those alone are not enough
-    to tell the two apart.
-    """
-    try:
-        names = os.listdir(path)
-    except OSError:
-        return False
-    return (
-        ".metadata" in names
-        and "common.pt" in names
-        and any(name.endswith(".distcp") for name in names)
-    )
-
-
 def _build_miles_base_image(miles: MilesRecipe) -> Image:
     image = (
         Image.from_registry(miles.docker_image)
@@ -365,7 +355,11 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
             f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
         )
     )
-    if miles.total_nodes > 1:
+    if (
+        miles.total_nodes > 1
+        and not miles.colocate
+        and miles.environment.get("MILES_REINSTALL_RDMA", "1") != "0"
+    ):
         image = image.run_commands(RDMA_RUNTIME_INSTALL_COMMAND)
     if miles.image_env:
         image = image.env(miles.image_env)
@@ -420,16 +414,46 @@ def build_ray_runtime_env(
         "LD_LIBRARY_PATH": _compose_ld_library_path(),
         "TRAINING_GYM_SUBSTEP_TIMING": substep_timing,
     }
-    env_vars.update(extra_env or {})
     env_vars.update(environment)
     # Tracker identity and credentials must match the preflight configuration.
     env_vars.update(metric_env)
     env_vars.update(timing_debug_env())
+    env_vars.update(extra_env or {})
     if framework_status_token:
         # Applied after `environment` so a recipe override can't blank the
         # dashboard auth token by accident.
         env_vars["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
     return {"env_vars": env_vars}
+
+
+def apply_source_overlays(image: Image, miles: MilesRecipe) -> Image:
+    """Check out upstream sglang/miles refs over the image's own copies.
+
+    Lets a recipe train on support that landed after the last image build:
+    sglang is an editable install and miles is run from a source checkout, so
+    a checkout is all it takes as long as no compiled extension changed.
+    """
+    if miles.sglang_git_ref:
+        image = image.run_commands(
+            f"cd {SGLANG_ROOT} && git fetch --depth=1 -- origin"
+            f" {shlex.quote(miles.sglang_git_ref)} && git checkout -f FETCH_HEAD"
+        )
+
+    if miles.miles_git_ref:
+        image = image.run_commands(
+            f"cd {MILES_ROOT} && git fetch --depth=1 -- origin"
+            f" {shlex.quote(miles.miles_git_ref)} && git checkout -f FETCH_HEAD",
+            # The checkout just reverted the patched miles sources.
+            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
+            " || echo 'WARNING: sglang abort patch did not apply to the"
+            " miles_git_ref checkout; transient router failures during rollout"
+            " cleanup may crash the run'",
+            *_REPORTING_PATCH_COMMANDS,
+            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3"
+            " || echo 'WARNING: substep timing patch did not apply to the"
+            " miles_git_ref checkout; substep timings will be missing'",
+        )
+    return image
 
 
 def build_miles_app(
@@ -481,6 +505,8 @@ def build_miles_app(
             *_REPORTING_PATCH_COMMANDS,
         )
 
+    image = apply_source_overlays(image, miles)
+
     if miles.image_run_commands:
         image = image.run_commands(*miles.image_run_commands)
 
@@ -495,13 +521,7 @@ def build_miles_app(
     image = image.add_local_python_source("modal_training_gym", copy=True)
     image = image.uv_pip_install("randomname")
     image = mount_tools_dir(image)
-    if caller_script is not None:
-        caller_module_name = os.path.splitext(os.path.basename(caller_script))[0]
-        image = image.add_local_file(
-            caller_script,
-            remote_path=f"/root/{caller_module_name}.py",
-            copy=True,
-        )
+    image = mount_caller_source(image, caller_script)
 
     def _set_custom_config_value(key: str, value: str) -> None:
         cfg = dict(miles.extra_config or {})
@@ -593,6 +613,10 @@ def build_miles_app(
         )
         setattr(miles, attr, None)
 
+    image = image.run_commands(
+        f"echo {_PATCH_CHECKPOINT_COMMIT_B64} | base64 -d | python3"
+    )
+
     hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
     data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
     checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
@@ -602,6 +626,13 @@ def build_miles_app(
             default_mount_path=str(CHECKPOINTS_PATH),
         )
     )
+    checkpoint_dir = compute_recipe_save_root(
+        miles,
+        recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
+        mounted_save_root=checkpoints_mount_path,
+        training_run_id=training_run_id,
+    )
+    recorded_checkpoint_dir = checkpoint_dir if configured_recipe_save(miles) else ""
     all_volumes: dict[str | PurePosixPath, Any] = {
         str(HF_CACHE_PATH): hf_cache_volume,
         str(DATA_PATH): data_volume,
@@ -616,7 +647,7 @@ def build_miles_app(
     )
 
     app = App(app_name, tags=tags)
-    gpu_spec = f"{miles.gpu_type}:{miles.actor_num_gpus_per_node}"
+    gpu_spec = f"{miles.gpu_type}:{miles.gpu_allocation.gpus_per_node}"
 
     @app.function(
         image=image,
@@ -665,7 +696,10 @@ def build_miles_app(
             eval_dataset_path,
         )
 
-    convert_nnodes = get_checkpoint_conversion_policy(miles, model=model)[0]
+    convert_nnodes, convert_nproc, _ = get_checkpoint_conversion_policy(
+        miles, model=model
+    )
+    convert_gpu = f"{miles.gpu_type}:{convert_nproc}"
     convert_multi_node = convert_nnodes > 1
 
     @app.function(
@@ -709,7 +743,7 @@ def build_miles_app(
 
         save_path = str(miles.ref_load)
         if has_torch_dist_checkpoint(
-            save_path, is_complete=_is_complete_torch_dist_checkpoint
+            save_path, is_complete=is_complete_torch_dist_checkpoint_dir
         ):
             print(
                 f"Found existing torch_dist checkpoint at {save_path}; "
@@ -745,7 +779,7 @@ def build_miles_app(
                     for name in sorted(os.listdir(save_path))
                     if (name == "release" or name.startswith("iter_"))
                     and os.path.isdir(os.path.join(save_path, name))
-                    and not _is_complete_torch_dist_checkpoint(
+                    and not is_complete_torch_dist_checkpoint_dir(
                         os.path.join(save_path, name)
                     )
                 ]
@@ -776,7 +810,7 @@ def build_miles_app(
 
     @app.function(
         image=image,
-        gpu=gpu_spec,
+        gpu=convert_gpu,
         volumes=all_volumes,
         timeout=4 * 60 * 60,
         secrets=proxy_auth_secrets() or None,
@@ -785,7 +819,11 @@ def build_miles_app(
         serialized=True,
         name="convert_checkpoint",
     )
-    @clustered(convert_nnodes, rdma=convert_multi_node)
+    @clustered_if(
+        convert_multi_node,
+        convert_nnodes,
+        gpu_type=miles.gpu_type,
+    )
     def convert_checkpoint(
         hf_path: str,
         training_run_id: str = "",
@@ -882,11 +920,11 @@ def build_miles_app(
                     # Fail loudly here rather than leaving a partial checkpoint for a later
                     # run to mistake for a cache hit.
                     if not has_torch_dist_checkpoint(
-                        save_path, is_complete=_is_complete_torch_dist_checkpoint
+                        save_path, is_complete=is_complete_torch_dist_checkpoint_dir
                     ):
                         raise RuntimeError(
                             f"Conversion finished but {save_path} holds no complete "
-                            "torch_dist checkpoint (missing .metadata)."
+                            "torch_dist checkpoint (.metadata or .distcp shards missing)."
                         )
             if node_rank == 0:
                 _release_convert_lock(
@@ -944,7 +982,11 @@ def build_miles_app(
         serialized=True,
         name="train",
     )
-    @clustered(miles.total_nodes, rdma=_multi_node)
+    @clustered_if(
+        _multi_node,
+        miles.total_nodes,
+        gpu_type=miles.gpu_type,
+    )
     async def train(
         modal_app_id: str = "",
         modal_app_url: str = "",
@@ -1033,6 +1075,9 @@ def build_miles_app(
                 metric_cfg=miles.metrics,
                 metric_entity=metric_entity,
                 framework_status_token=framework_status_token,
+                checkpoint_dir=recorded_checkpoint_dir,
+                checkpoints_volume_name=checkpoints_volume_name,
+                checkpoints_mount_path=checkpoints_mount_path,
             )
 
         # In-flight status updates are fire-and-forget HTTP POSTs to the
@@ -1134,7 +1179,7 @@ def build_miles_app(
                     with open(prep_error) as f:
                         raise RuntimeError(f"Head preparation failed: {f.read()}")
                 if time.time() > deadline:
-                    raise TimeoutError("Timed out waiting for head preparation marker")
+                    raise RuntimeError("Timed out waiting for head preparation marker")
                 await asyncio.sleep(5)
 
         cluster.start_ray()
@@ -1145,19 +1190,16 @@ def build_miles_app(
         assert run_record is not None
 
         try:  # Wraps all post-setup work so any failure marks the run terminal.
-            extra_config = miles.extra_config or {}
+            save_root = checkpoint_dir
+            apply_scoped_save(miles, save_root)
             prepare_miles_config(miles, model, tempfile.mkdtemp())
 
-            save_root = compute_save_root(
-                miles.save,
-                recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
-                mounted_save_root=checkpoints_mount_path,
-                training_run_id=training_run_id,
-            )
+            os.makedirs(save_root, exist_ok=True)
 
             original_save = miles.save
             original_load = miles.load
             original_start_rollout_id = miles.start_rollout_id
+            original_no_load_optim = miles.no_load_optim
             miles.save = save_root if original_save else None
             resume_checkpoint = torch_dist_resume_checkpoint(
                 save_root, is_complete=_is_resumable_checkpoint
@@ -1178,6 +1220,14 @@ def build_miles_app(
                 # even for runs launched with an explicit start_rollout_id.
                 miles.start_rollout_id = None
                 drop_materialized_config_key(miles, "start_rollout_id")
+                # This run's saves include Adam only when no_save_optim is false.
+                # TrainConfig.resume_from_checkpoint forces no_load_optim for the source seed;
+                # that flag is not a property of later saves in this directory.
+                if miles.no_save_optim and not miles.no_load_optim:
+                    print(
+                        "WARNING: no_save_optim=True — enabling no_load_optim for resume."
+                    )
+                miles.no_load_optim = miles.no_save_optim
             elif unresumable := _unresumable_save_dirs(save_root):
                 print(
                     f"WARNING: {save_root} holds saves that cannot be resumed "
@@ -1201,6 +1251,7 @@ def build_miles_app(
                 miles.save = original_save
                 miles.load = original_load
                 miles.start_rollout_id = original_start_rollout_id
+                miles.no_load_optim = original_no_load_optim
 
             phase_report_url = (
                 os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL")
@@ -1226,6 +1277,7 @@ def build_miles_app(
                 extra_env={
                     "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
+                    "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": checkpoints_volume_name,
                     "TRAINING_GYM_TOTAL_STEPS": str(miles.num_rollout),
                     "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
                     "TRAINING_GYM_CAPTURE_TRACE": (
@@ -1260,14 +1312,12 @@ def build_miles_app(
             print(f"Ray job completed: {result.status}")
             print(f"Ray job message: {result.message}")
 
-            result = build_train_result(
+            payload = persist_completed_run(
+                run_record,
                 app_name=app_name,
                 framework=Framework.MILES,
                 training_run_id=training_run_id,
-                checkpoint_dir=extra_config.get(
-                    "save", save_root if original_save else ""
-                )
-                or "",
+                checkpoint_dir=recorded_checkpoint_dir,
                 model=model,
                 checkpoints_volume_name=checkpoints_volume_name,
                 checkpoints_mount_path=checkpoints_mount_path,
@@ -1276,14 +1326,14 @@ def build_miles_app(
                 metric_run_id=metric_run_id,
                 group_id=group_id,
             )
-            await result.save(is_async=True)
+            await save_train_result_blob(payload, is_async=True)
             run_record.status = TrainingRunStatus.COMPLETED
             mark_training_attempt_finished(
                 run_record, status="completed", ended_at=int(time.time())
             )
             await checkpoints_volume.commit.aio()
-            print(f"TrainResult saved: {training_run_id}")
-            return result._to_dict()
+            print(f"TrainingRun saved: {training_run_id}")
+            return payload
         except KeyboardInterrupt:
             mark_run_stopped(run_record)
             raise

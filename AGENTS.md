@@ -42,7 +42,7 @@ uv run modal deploy dashboards/app.py                  # observability dashboard
 
 # Validate model configs / map a diff to affected tutorials
 uv run scripts/validate_model_configs.py list                         # models + frameworks
-uv run scripts/validate_model_configs.py list --names-only --pr-only # PR matrix names
+uv run scripts/validate_model_configs.py list --names-only            # CI matrix names
 uv run scripts/validate_model_configs.py check -m qwen3-4b
 # miles models go through the same script; the registry picks the framework
 uv run scripts/validate_model_configs.py check -m Qwen3.5-4B-Miles
@@ -80,23 +80,23 @@ Known-model presets live under `train_recipes/`, such as `Qwen3_4B_Recipe`. `Tra
 
 One registry, one script, one workflow, across every framework.
 
-`common/models/validation.py` holds `VALIDATION_CONFIGS`: each entry maps a model name to its `ModelConfig`, the framework whose `get_base_recipe` trains it, and `run_on_pr`. The framework has to be declared — `SlimeRecipe.get_base_recipe` returns a recipe for any model it's asked about, so the recipe classes can't answer "is this model mine?".
+`common/models/validation.py` holds `VALIDATION_CONFIGS`: each entry maps a model name to its `ModelConfig` and the framework whose `get_base_recipe` trains it. The framework has to be declared — `SlimeRecipe.get_base_recipe` returns a recipe for any model it's asked about, so the recipe classes can't answer "is this model mine?".
 
 `scripts/validate_model_configs.py` owns everything framework-agnostic (CLI, result JSON, markdown summary, PR comment, and the `check` flags). `scripts/validation_backends/<framework>.py` owns the only two things that differ: which recipe trains the model and which dataset it trains on, returned as a pair from one `build_*_validation` function. Recipes are used as `get_base_recipe` returns them, image included — the image a miles model trains on is declared once, in `MilesRecipe`, and validating a candidate image means bumping it on a branch and dispatching, not passing a flag. Adding a framework is one module here plus registry entries.
 
-`run_on_pr=False` marks a model too expensive to fan out on a PR: it remains runnable by name from the CLI or `workflow_dispatch`, but `diff_impact.py` never puts it in a PR matrix. `list` prints the whole registry with each model's framework so dispatch-only models are discoverable; `--names-only --pr-only` emits the name-only PR matrix used by the workflow's blank-dispatch branch. `tests/test_model_validation_registry.py` enforces both. `diff_impact.py` also scopes re-validation per framework, so a miles-only change doesn't re-run the slime set.
+`list` and `list --names-only` print every registered model. The workflow's blank-dispatch branch and `diff_impact.py` use that same set, so a PR or weekly synmon run covers the whole registry. `diff_impact.py` scopes re-validation per framework, so a miles-only change doesn't re-run the slime set.
 
 ### Cloudpickle caller resolution
 
 Launchers use `resolve_caller_module()` (in `common/framework.py`) to find the user's tutorial module by walking the stack past `modal_training_gym.*` frames. This enables cloudpickle to serialize inline `DatasetConfig`/`ModelConfig` subclasses by value to remote containers.
 
-### TrainResult persistence
+### TrainingRun persistence
 
-`TrainResult` is a dataclass written to the metadata volume (`MetadataStore.TRAIN_RESULTS`, keyed by `training_run_id`). Created by each framework's `train()` on rank 0. Loaded by eval scripts via `TrainResult.load(training_run_id)`. The `.model` property reconstructs a `ModelConfig` pointing at the checkpoint for serving.
+`TrainingRun` is written to the metadata volume (`MetadataStore.TRAINING_RUNS`, keyed by `training_run_id`). `TrainConfig.train()` and `TrainingRun.from_id` return that handle. `.model` reconstructs a `ModelConfig` pointing at the latest megatron checkpoint. A dashboard-only blob may also be written to `MetadataStore.TRAIN_RESULTS`.
 
 ### Tutorial system
 
-Tutorials are flat runnable scripts at `tutorials/*.py`. Each starts with comment frontmatter containing `order` and optional comma-separated `deps`. `docs-next/src/lib/tutorial-docs-loader.ts` discovers the corpus, validates contiguous order values, and renders Markdown comments plus Python code into docs pages.
+Tutorials are `tutorials/*.py` or `tutorials/<name>/main.py` with sibling helpers. Each entry starts with comment frontmatter containing `order` and optional comma-separated `deps`. `docs-next/src/lib/tutorial-docs-loader.ts` discovers the corpus, validates contiguous order values, and renders Markdown comments plus Python code into docs pages.
 
 ### API reference generation
 
@@ -109,7 +109,7 @@ Tutorials are flat runnable scripts at `tutorials/*.py`. Each starts with commen
 ## Working rules
 
 - Use `uv` for all Python operations. Never install packages at the system level.
-- Tutorial sources are the flat `tutorials/*.py` files. Keep `order` values contiguous from zero.
+- Tutorial sources are `tutorials/*.py` or `tutorials/<name>/main.py`. Keep `order` values contiguous from zero.
 - Never hand-edit the models table in README.md. It is generated from `__all__` of each `train_recipes/*_recipe/__init__.py`; add the recipe and matching `ModelConfig` export, then rerun `scripts/generate_models_table.py`.
 - Ruff excludes `tutorials/**`.
 - Python 3.12 is pinned. Modal's `serialized=True` requires local ↔ remote Python version match.

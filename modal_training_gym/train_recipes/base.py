@@ -187,6 +187,14 @@ class BaseTrainRecipe(ABC):
             return tuple(val)
         return tuple(getattr(self, "_materialized_config_keys", ()) or ())
 
+    def _escape_hatch_values(self) -> dict[str, Any]:
+        """The escape-hatch mapping, before or after it is written to YAML."""
+        val = getattr(self, self._ESCAPE_HATCH_FIELD, None)
+        if isinstance(val, dict):
+            return val
+        stored = getattr(self, "_materialized_config", None)
+        return stored if isinstance(stored, dict) else {}
+
     def _emit_fields(self, fields: dict[str, Any]) -> dict[str, Any]:
         """Drop launcher-only fields and let the escape hatch win over same-named flags.
 

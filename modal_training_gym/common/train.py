@@ -13,9 +13,13 @@ from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
 from modal_training_gym.common.dataset import DatasetConfig, OnlineRollout
-from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.errors import (
+    TrainingGymConfigError,
+    TrainingGymError,
+)
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.ids import create_hash
+from modal_training_gym.common.launcher_helpers import mark_run_failed, mark_run_stopped
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.run import TrainingRun, metric_run_id_for_attempt
@@ -24,7 +28,6 @@ from modal_training_gym.common.status import (
     MilesStatus,
     SlimeStatus,
 )
-from modal_training_gym.common.train_result import TrainResult
 from modal_training_gym.frameworks.miles import build_miles_app
 from modal_training_gym.frameworks.slime import build_slime_app
 from modal_training_gym.train_recipes.base import BaseTrainRecipe
@@ -33,12 +36,37 @@ from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
 
 
+def _megatron_load_dir(checkpoint: Checkpoint) -> str:
+    if checkpoint.checkpoint_type != CheckpointType.megatron:
+        raise TrainingGymConfigError(
+            "Training can only resume from a Megatron checkpoint; "
+            "Hugging Face exports are serving artifacts."
+        )
+    return os.path.dirname(checkpoint.path.rstrip("/"))
+
+
 def _try_validate_model_parallelism(
     recipe: BaseTrainRecipe, model: ModelConfig
 ) -> None:
     # Not every framework recipe implements this preflight.
     if validate := getattr(recipe, "validate_model_parallelism", None):
         validate(model)
+
+
+def _terminalize_launch(run_record: TrainingRun, exc: BaseException) -> None:
+    finished_at = int(time.time())
+    if isinstance(exc, KeyboardInterrupt):
+        mark_run_stopped(run_record)
+    else:
+        mark_run_failed(run_record, exc)
+    run_record.ended_at = finished_at
+    run_record.completed_at = finished_at
+    if run_record.started_at:
+        run_record.duration_seconds = max(0, finished_at - run_record.started_at)
+    try:
+        run_record.save()
+    except Exception as save_exc:
+        print(f"WARNING: could not save run {run_record.training_run_id}: {save_exc}")
 
 
 def _convert_checkpoint_on_cache_miss(
@@ -81,7 +109,7 @@ def _warn_if_external_build_app() -> None:
         "app: spawning train() on it yourself means the run dies when the "
         "enclosing app.run() block exits or is interrupted. Use "
         "TrainConfig.launch() (returns a TrainingRun handle immediately) or "
-        "TrainConfig.train() (blocks for the TrainResult) instead.",
+        "TrainConfig.train() (blocks for the TrainingRun) instead.",
         stacklevel=3,
     )
 
@@ -301,9 +329,12 @@ class TrainConfig:
             Model identity and weight download behavior.
         recipe:
             Training framework, Modal resources, and framework arguments.
-        checkpoint:
-            Megatron checkpoint to resume from. ``model`` remains the source for
-            tokenizer and architecture metadata.
+        resume_from_checkpoint:
+            Start a new run from this Megatron checkpoint's weights with a
+            fresh optimizer and LR schedule; ``recipe.num_rollout`` counts
+            from zero. To continue the source run in place with its Adam
+            state and iteration count, leave ``resume_from_checkpoint`` unset
+            and point ``recipe.load`` at the checkpoint directory.
         detach:
             Keep training on Modal if the local ``train()`` wait is interrupted.
             ``False`` stops the app.
@@ -320,7 +351,7 @@ class TrainConfig:
     model: ModelConfig
     recipe: SlimeRecipe | MilesRecipe
     eval_dataset: DatasetConfig | None = None
-    checkpoint: Checkpoint | None = None
+    resume_from_checkpoint: Checkpoint | None = None
     # Whether a run outlives the local client. The app itself is always started
     # detached (the CLI's ``modal run --detach`` only detaches the entrypoint,
     # not the nested ``app.run()`` the driver opens), so this only decides
@@ -347,29 +378,27 @@ class TrainConfig:
         each launch of the same config gets its own TrainingRun record."""
         return create_hash(
             self.model.model_name,
-            self.checkpoint.path if self.checkpoint is not None else "",
+            self.resume_from_checkpoint.path
+            if self.resume_from_checkpoint is not None
+            else "",
             f"{type(self.recipe).__name__}:{self.framework.value}",
             "",
             self.model.model_path or "",
         )
 
     def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
-        if self.checkpoint is None:
+        if self.resume_from_checkpoint is None:
             recipe = _dc.replace(self.recipe)
         else:
-            if self.checkpoint.checkpoint_type != CheckpointType.megatron:
-                raise TrainingGymConfigError(
-                    "Training can only resume from a Megatron checkpoint; "
-                    "Hugging Face exports are serving artifacts."
-                )
             recipe = _dc.replace(
                 self.recipe,
-                load=os.path.dirname(self.checkpoint.path.rstrip("/")),
+                load=_megatron_load_dir(self.resume_from_checkpoint),
                 start_rollout_id=(
                     0
                     if self.recipe.start_rollout_id is None
                     else self.recipe.start_rollout_id
                 ),
+                no_load_optim=True,
             )
         _try_validate_model_parallelism(recipe, self.model)
         return recipe
@@ -386,7 +415,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.checkpoint,
+                checkpoint=self.resume_from_checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
             )
@@ -397,7 +426,7 @@ class TrainConfig:
                 model=self.model,
                 dataset=self.dataset,
                 eval_dataset=self.eval_dataset,
-                checkpoint=self.checkpoint,
+                checkpoint=self.resume_from_checkpoint,
                 name=training_run_id,
                 group_id=self.group_id,
             )
@@ -536,15 +565,15 @@ class TrainConfig:
             f"ep={getattr(recipe, 'expert_model_parallel_size', 'n/a')})"
         )
 
-    def train(self, *, show_output: bool = True) -> TrainResult:
+    def train(self, *, show_output: bool = True) -> TrainingRun:
         """Run one training configuration.
 
         Returns:
-            The completed training result.
+            The completed training run.
         """
         from modal_training_gym.common.modal_lifecycle import stop_app
 
-        launch = self.launch(show_output=show_output, prepare_inputs=True)
+        launch = self.launch(show_output=show_output)
         try:
             return launch.result(stop_app_on_success=True)
         except BaseException:
@@ -556,7 +585,6 @@ class TrainConfig:
         self,
         *,
         show_output: bool = True,
-        prepare_inputs: bool = False,
     ) -> TrainingRun:
         """Start one training run in a detached Modal app.
 
@@ -570,6 +598,8 @@ class TrainConfig:
             CONFIG_PATH,
             get_framework_status_url,
         )
+
+        from modal_training_gym.common.modal_lifecycle import stop_app
         from modal_training_gym.common.status_reporter import enqueue_framework_status
 
         training_run_id = self._generate_training_run_id()
@@ -608,74 +638,90 @@ class TrainConfig:
             framework_status_token = ""
         print(f"TrainingRun recorded: {training_run_id}")
 
-        app = self._build_app(training_run_id)
-        output_context = modal.enable_output() if show_output else nullcontext()
-        with output_context:
-            with app.run(detach=True):
-                modal_app_id = app.app_id or ""
-                modal_app_url = modal_app_dashboard_url(modal_app_id)
-                if show_output:
-                    status_display.set_modal_app_url(modal_app_url)
+        app = None
+        function_call = None
+        launch_error = None
+        try:
+            app = self._build_app(training_run_id)
+            output_context = modal.enable_output() if show_output else nullcontext()
+            with output_context:
+                with app.run(detach=True):
+                    try:
+                        modal_app_id = app.app_id or ""
+                        modal_app_url = modal_app_dashboard_url(modal_app_id)
+                        if show_output:
+                            status_display.set_modal_app_url(modal_app_url)
 
-                run_record.modal_app_id = modal_app_id
-                run_record.modal_app_url = modal_app_url
-                try:
-                    run_record.save()
-                except RuntimeError:
-                    pass
+                        run_record.modal_app_id = modal_app_id
+                        run_record.modal_app_url = modal_app_url
+                        try:
+                            run_record.save()
+                        except RuntimeError:
+                            pass
 
-                def _set_status(
-                    status: FrameworkStatus, *, is_active: bool = True
-                ) -> None:
-                    run_record.framework_status = status
-                    if show_output:
-                        status_display.emit_stage(status.value)
-                    enqueue_framework_status(
-                        training_run_id,
-                        status.value,
-                        token=framework_status_token,
-                        is_active=is_active,
-                    )
+                        def _set_status(
+                            status: FrameworkStatus, *, is_active: bool = True
+                        ) -> None:
+                            run_record.framework_status = status
+                            if show_output:
+                                status_display.emit_stage(status.value)
+                            enqueue_framework_status(
+                                training_run_id,
+                                status.value,
+                                token=framework_status_token,
+                                is_active=is_active,
+                            )
 
-                megatron_to_hf_mode = getattr(self.recipe, "megatron_to_hf_mode", "")
-                needs_conversion = megatron_to_hf_mode != "bridge"
-                if prepare_inputs:
-                    if isinstance(self.recipe, SlimeRecipe):
-                        _set_status(SlimeStatus.DOWNLOAD_MODEL, is_active=False)
+                        megatron_to_hf_mode = getattr(
+                            self.recipe, "megatron_to_hf_mode", ""
+                        )
+                        needs_conversion = megatron_to_hf_mode != "bridge"
+                        download_status, convert_status = (
+                            (SlimeStatus.DOWNLOAD_MODEL, SlimeStatus.CONVERT_MODEL)
+                            if isinstance(self.recipe, SlimeRecipe)
+                            else (MilesStatus.DOWNLOAD_MODEL, MilesStatus.CONVERT_MODEL)
+                        )
+                        _set_status(download_status, is_active=False)
                         app.download.remote(
                             training_run_id=training_run_id,
                             framework_status_url=framework_status_url,
                             framework_status_token=framework_status_token,
                         )
                         if needs_conversion:
-                            _set_status(SlimeStatus.CONVERT_MODEL, is_active=False)
+                            _set_status(convert_status, is_active=False)
                             _convert_checkpoint_on_cache_miss(
                                 app,
                                 training_run_id=training_run_id,
                                 framework_status_url=framework_status_url,
                                 framework_status_token=framework_status_token,
                             )
-                    elif isinstance(self.recipe, MilesRecipe) and needs_conversion:
-                        _set_status(MilesStatus.DOWNLOAD_MODEL, is_active=False)
-                        app.download.remote(
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
-                        _set_status(MilesStatus.CONVERT_MODEL, is_active=False)
-                        _convert_checkpoint_on_cache_miss(
-                            app,
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
 
-                function_call = app.train.spawn(
-                    modal_app_id=modal_app_id,
-                    modal_app_url=modal_app_url,
-                    framework_status_url=framework_status_url,
-                    framework_status_token=framework_status_token,
+                        function_call = app.train.spawn(
+                            modal_app_id=modal_app_id,
+                            modal_app_url=modal_app_url,
+                            framework_status_url=framework_status_url,
+                            framework_status_token=framework_status_token,
+                        )
+                    except BaseException as exc:
+                        launch_error = exc
+
+            if launch_error is not None:
+                raise launch_error
+        except (KeyboardInterrupt, Exception) as exc:
+            if function_call is None:
+                app_id = run_record.modal_app_id or (app.app_id if app else "")
+                if app_id:
+                    stop_app(app_id)
+                if isinstance(exc, KeyboardInterrupt) or app is None:
+                    _terminalize_launch(run_record, exc)
+                    raise
+                error = TrainingGymError(
+                    f'Setup of Modal app "{app.name}" was interrupted before training '
+                    "could begin. Relaunch your TrainConfig to try again."
                 )
+                _terminalize_launch(run_record, error)
+                raise error from exc
+            launch_error = exc
 
         run_record.function_call_id = function_call.object_id
         run_record._function_call = function_call
@@ -684,6 +730,16 @@ class TrainConfig:
             run_record.save()
         except RuntimeError:
             pass
+        if isinstance(launch_error, KeyboardInterrupt):
+            print(
+                f'Disconnected from Modal app "{app.name}". The app was left running.'
+            )
+            print(run_record.modal_app_url)
+            raise launch_error
+        if launch_error is not None:
+            print(
+                f"WARNING: training was launched, but Modal client cleanup failed: {launch_error}"
+            )
         print(
             f"Launched training {run_record.training_run_id}: "
             f"app={run_record.modal_app_id}, function_call={run_record.function_call_id}"

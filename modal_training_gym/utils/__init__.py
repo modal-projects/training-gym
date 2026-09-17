@@ -2,7 +2,6 @@
 
 from modal_training_gym.utils.gpu import GPUType
 from modal_training_gym.utils.metadata import (
-    METADATA_VOLUME_NAME,
     MetadataStore,
     vol_get,
     vol_list,
@@ -11,7 +10,6 @@ from modal_training_gym.utils.metadata import (
 
 __all__ = [
     "GPUType",
-    "METADATA_VOLUME_NAME",
     "MetadataStore",
     "vol_get",
     "vol_list",

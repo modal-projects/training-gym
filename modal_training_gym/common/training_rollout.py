@@ -102,19 +102,52 @@ def _clean_prompt(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
+_CHAT_TURN_RE = re.compile(r"<\|im_start\|>(\w+)\n")
+_TOOL_RESPONSE_RE = re.compile(
+    r"^\s*<tool_response>\s*(.*?)\s*</tool_response>\s*$", re.DOTALL
+)
+
+
+def _transcript_messages(text: str) -> list[dict[str, str]] | None:
+    if "<|im_start|>" not in text:
+        return None
+    pieces = _CHAT_TURN_RE.split(text)
+    turns = [("assistant", pieces[0]), *zip(pieces[1::2], pieces[2::2])]
+    messages: list[dict[str, str]] = []
+    for role, body in turns:
+        body = body.replace("<|im_end|>", "").replace("<|endoftext|>", "").strip()
+        if not body:
+            continue
+        if role == "user" and (match := _TOOL_RESPONSE_RE.match(body)):
+            role, body = "tool", match.group(1)
+        messages.append({"role": role, "content": body})
+    return messages if len(messages) > 1 else None
+
+
 def _apply_parsed(rows: object) -> None:
     if not isinstance(rows, list):
         return
     for row in rows:
         if not isinstance(row, dict):
             continue
+        raw = row.get("response")
+        transcript = _transcript_messages(raw) if isinstance(raw, str) else None
+        if transcript:
+            metadata = row.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                row["metadata"] = metadata
+            metadata.setdefault("trajectory_messages", transcript)
         parsed = row.get("parsed_response")
         if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
-            raw = row.get("response")
             if isinstance(raw, str):
                 row["raw_response"] = raw
-            row["response"] = parsed.get("content") or ""
-            if parsed.get("thinking"):
+            row["response"] = (
+                raw
+                if transcript and isinstance(raw, str)
+                else parsed.get("content") or ""
+            )
+            if parsed.get("thinking") and not transcript:
                 row["thinking"] = parsed["thinking"]
             if parsed.get("tool_calls"):
                 row["tool_calls"] = parsed["tool_calls"]

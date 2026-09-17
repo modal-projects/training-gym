@@ -35,7 +35,6 @@ from typing import Any
 
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.train import TrainConfig
-from modal_training_gym.common.train_result import TrainResult
 
 
 class TrainingGroupError(ValueError):
@@ -107,7 +106,7 @@ class TrainingGroup:
         self.name = name
         self.group_id = _slugify(name) if name else f"group-{secrets.token_hex(6)}"
 
-        self.results: list[TrainResult] = []
+        self.results: list[TrainingRun] = []
         self.launches: list[TrainingRun] = []
         self.failures: list[tuple[dict[str, Any], BaseException]] = []
         self._variants: list[tuple[dict[str, Any], TrainConfig]] | None = None
@@ -232,7 +231,7 @@ class TrainingGroup:
         *,
         max_parallel: int = 1,
         continue_on_error: bool = True,
-    ) -> list[TrainResult]:
+    ) -> list[TrainingRun]:
         """Train every variant.
 
         Args:
@@ -242,10 +241,10 @@ class TrainingGroup:
                 Continue after a variant fails.
 
         Returns:
-            Successful training results.
+            Successful training runs.
         """
         variants = self.iter_variants()
-        results: list[TrainResult] = []
+        results: list[TrainingRun] = []
         failures: list[tuple[dict[str, Any], BaseException]] = []
 
         def _record_failure(overrides: dict[str, Any], exc: BaseException) -> None:
@@ -280,7 +279,7 @@ class TrainingGroup:
                         launched.append(
                             (
                                 overrides,
-                                cfg.launch(show_output=False, prepare_inputs=True),
+                                cfg.launch(show_output=False),
                             )
                         )
                     except BaseException as exc:  # noqa: BLE001
@@ -303,15 +302,12 @@ class TrainingGroup:
         self,
         *,
         continue_on_error: bool = True,
-        prepare_inputs: bool = False,
     ) -> list[TrainingRun]:
         """Launch every variant as a detached Modal call.
 
         Args:
             continue_on_error:
                 Continue after a variant fails to launch.
-            prepare_inputs:
-                Materialize model and dataset inputs before launching.
 
         Returns:
             Launched training runs.
@@ -324,10 +320,7 @@ class TrainingGroup:
         self._print_variant_plan(variants)
         for overrides, cfg in variants:
             try:
-                launch = cfg.launch(
-                    show_output=False,
-                    prepare_inputs=prepare_inputs,
-                )
+                launch = cfg.launch(show_output=False)
                 launches.append(launch)
                 print(
                     f"[TrainingGroup] launched {overrides!r}: "

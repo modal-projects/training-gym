@@ -1,4 +1,7 @@
 from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
+from modal_training_gym.train_recipes.miles_recipe.deepseek_v41_flash import (
+    DeepSeek_V4_1_Flash_Recipe,
+)
 from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
     Gemma4_26B_A4B_Recipe,
 )
@@ -15,6 +18,7 @@ from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
 
 __all__ = [
     "MilesRecipe",
+    "DeepSeek_V4_1_Flash_Recipe",
     "Gemma4_26B_A4B_Recipe",
     "Inkling_Small_Recipe",
     "Inkling_Small_LoRA_Recipe",

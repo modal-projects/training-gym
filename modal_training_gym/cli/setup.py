@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import webbrowser
+from pathlib import Path
 
 from modal_training_gym.common.dashboard import (
     DASHBOARD_APP_NAME,
@@ -33,7 +34,9 @@ from modal_training_gym.common.dashboard import (
 )
 
 
-def _load_dashboard_for_deploy(requires_proxy_auth: bool):
+def _load_dashboard_for_deploy(
+    requires_proxy_auth: bool, trajectory_viewer: str | None = None
+):
     """Import the declarative dashboard with the selected ASGI proxy-auth mode."""
     import importlib
     import sys
@@ -42,12 +45,18 @@ def _load_dashboard_for_deploy(requires_proxy_auth: bool):
 
     module_name = "modal_training_gym._dashboard"
     config.set_dashboard_requires_proxy_auth(requires_proxy_auth)
+    config.set_dashboard_trajectory_viewer(trajectory_viewer)
     if module_name in sys.modules:
         return importlib.reload(sys.modules[module_name])
     return importlib.import_module(module_name)
 
 
-def setup(require_proxy_auth: bool, interactive: bool = True) -> str:
+def setup(
+    require_proxy_auth: bool,
+    interactive: bool = True,
+    trajectory_viewer: str | Path | None = None,
+    reset_trajectory_viewer: bool = False,
+) -> str:
     """Deploy the training-gym dashboard, persist its URL, and return it.
 
     ``interactive=False`` resolves Modal credentials silently (from env vars
@@ -56,7 +65,24 @@ def setup(require_proxy_auth: bool, interactive: bool = True) -> str:
     """
     import modal
 
-    from modal_training_gym.common.config import CONFIG_PATH, save_dashboard_url
+    from modal_training_gym.common.config import (
+        CONFIG_PATH,
+        get_dashboard_trajectory_viewer,
+        save_dashboard_trajectory_viewer,
+        save_dashboard_url,
+    )
+
+    if reset_trajectory_viewer:
+        save_dashboard_trajectory_viewer(None)
+        trajectory_viewer_path = None
+    elif trajectory_viewer is not None:
+        viewer_path = Path(trajectory_viewer).expanduser().resolve()
+        if not viewer_path.is_file():
+            raise ValueError(f"trajectory viewer must be a file: {viewer_path}")
+        trajectory_viewer_path = str(viewer_path)
+        save_dashboard_trajectory_viewer(trajectory_viewer_path)
+    else:
+        trajectory_viewer_path = get_dashboard_trajectory_viewer()
 
     if require_proxy_auth:
         print("Deploying dashboard with proxy authentication enabled.")
@@ -65,7 +91,11 @@ def setup(require_proxy_auth: bool, interactive: bool = True) -> str:
         print("If you would like to enable it, run `training-gym setup --proxy-auth`.")
         print()
 
-    dashboard = _load_dashboard_for_deploy(require_proxy_auth)
+    if trajectory_viewer_path:
+        print(f"Using custom trajectory viewer: {trajectory_viewer_path}")
+    dashboard = _load_dashboard_for_deploy(
+        require_proxy_auth, trajectory_viewer=trajectory_viewer_path
+    )
 
     has_proxy_auth_token = ensure_proxy_auth(interactive=interactive)
     if require_proxy_auth and not has_proxy_auth_token:
