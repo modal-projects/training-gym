@@ -537,7 +537,9 @@ def _compact_report_queue() -> None:
                 remaining.append(item)
                 continue
             url = str(item.get("_url", "")).rstrip("/")
-            if _is_final_timing(item):
+            # Every metric batch moves up together: they overwrite by (step,
+            # key) in arrival order, so reordering them would resurrect stale values.
+            if _is_final_timing(item) or url.endswith(_METRIC_POINTS_PATH):
                 final_priority.append(item)
             elif url.endswith("/api/timing-events"):
                 discarded += 1
