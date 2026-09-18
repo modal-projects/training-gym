@@ -273,6 +273,8 @@ def test_gateway_run_is_a_running_miles_run_without_dataset() -> None:
     assert run.metadata["n_slots"] == 4
     assert run.metadata["base_model"] == "Qwen/Qwen3-30B-A3B"
     assert run.metadata["checkpoint_root"] == "/checkpoints/demo-tinker/tinker"
+    assert run.source_model is not None
+    assert run.source_model.model_name == "Qwen/Qwen3-30B-A3B"
     assert run.metadata["checkpoints_volume_name"] == "demo-checkpoints"
     assert run.metadata["unauthenticated"] is False
     assert run.metadata["gateway_url"] == ""
@@ -490,6 +492,49 @@ def test_mark_gateway_run_failed_records_ray_error() -> None:
     assert saved[-1].status is TrainingRunStatus.FAILED
     assert saved[-1].error_message == "Ray job status FAILED"
     assert sum(r.status is TrainingRunStatus.FAILED for r in saved) == 1
+
+
+def test_launch_marks_run_failed_when_app_build_raises() -> None:
+    saved: list[TrainingRun] = []
+    with (
+        _persist_stub(saved, {}),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.resolve_checkpoint_volumes",
+            return_value=("demo-checkpoints", "/checkpoints", object()),
+        ),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.build_tinker_gateway_app",
+            side_effect=ValueError("bad overlay"),
+        ),
+        pytest.raises(ValueError, match="bad overlay"),
+    ):
+        TinkerGateway.launch(Qwen3_30B_A3B_Tinker_Recipe(), model=Qwen3_30B())
+
+    assert saved[-1].status is TrainingRunStatus.FAILED
+    assert saved[-1].error_message == "ValueError: bad overlay"
+
+
+def test_create_run_marks_run_failed_when_token_write_raises() -> None:
+    saved: list[TrainingRun] = []
+    with (
+        _persist_stub(saved, {}),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.vol_put",
+            side_effect=OSError("volume unavailable"),
+        ),
+        pytest.raises(OSError, match="volume unavailable"),
+    ):
+        create_gateway_training_run(
+            Qwen3_30B_A3B_Tinker_Recipe(),
+            Qwen3_30B(),
+            app_name="demo-tinker",
+            checkpoint_root="/checkpoints/demo-tinker/tinker",
+            checkpoints_volume_name="demo-checkpoints",
+            unauthenticated=False,
+        )
+
+    assert saved[0].status is TrainingRunStatus.RUNNING
+    assert saved[-1].status is TrainingRunStatus.FAILED
 
 
 def test_launch_marks_run_failed_when_deploy_raises() -> None:

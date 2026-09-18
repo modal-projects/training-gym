@@ -303,6 +303,7 @@ def create_gateway_training_run(
         created_at=created_at,
         started_at=created_at,
         app_name=app_name,
+        source_model=model,
         metadata=gateway_run_metadata(
             recipe,
             model,
@@ -312,11 +313,15 @@ def create_gateway_training_run(
         ),
     )
     run.save()
-    vol_put(
-        MetadataStore.FRAMEWORK_STATUS_TOKENS,
-        training_run_id,
-        {"token": framework_status_token},
-    )
+    try:
+        vol_put(
+            MetadataStore.FRAMEWORK_STATUS_TOKENS,
+            training_run_id,
+            {"token": framework_status_token},
+        )
+    except BaseException as exc:
+        _mark_gateway_run_failed(run, exc)
+        raise
     print(f"TrainingRun recorded: {training_run_id}")
     return run, GatewayRunRecord(
         training_run_id=training_run_id,
@@ -812,15 +817,15 @@ class TinkerGateway(BaseModel):
             unauthenticated=unauthenticated,
         )
 
-        app = build_tinker_gateway_app(
-            miles=recipe,
-            model=model,
-            app_name=app_name,
-            unauthenticated=unauthenticated,
-            startup_timeout=startup_timeout,
-            run_record=run_record,
-        )
         try:
+            app = build_tinker_gateway_app(
+                miles=recipe,
+                model=model,
+                app_name=app_name,
+                unauthenticated=unauthenticated,
+                startup_timeout=startup_timeout,
+                run_record=run_record,
+            )
             app.deploy(environment_name=environment_name)
         except BaseException as exc:
             _mark_gateway_run_failed(run, exc)
