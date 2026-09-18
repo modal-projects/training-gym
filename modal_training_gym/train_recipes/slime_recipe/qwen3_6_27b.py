@@ -19,14 +19,24 @@ class Qwen3_6_27B_Recipe(SlimeRecipe):
     )
 
     gpu_type: str = "B300"
+    pipeline_model_parallel_size: int = 1
     context_parallel_size: int = 1
     expert_model_parallel_size: int = 1
     expert_tensor_parallel_size: int = 1
+    conversion_tensor_model_parallel_size: int | None = None
+    conversion_pipeline_model_parallel_size: int | None = None
+    decoder_last_pipeline_num_layers: int | None = None
 
     sglang_speculative_algorithm: str | None = None
+    sglang_speculative_num_steps: int | None = None
+    sglang_speculative_eagle_topk: int | None = None
+    sglang_speculative_num_draft_tokens: int | None = None
     sglang_mamba_scheduler_strategy: str | None = "extra_buffer"
+    sglang_server_concurrency: int | None = None
 
     max_tokens_per_gpu: int = 8192
+    log_probs_chunk_size: int | None = None
+    save_debug_rollout_data: str | None = None
     calculate_per_token_loss: bool = True
     balance_data: bool = True
     optimizer_cpu_offload: bool = True

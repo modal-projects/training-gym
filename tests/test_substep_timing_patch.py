@@ -282,6 +282,56 @@ def test_a_conditional_phase_is_timed_inside_its_branch(patchers, tmp_path):
     assert before_wrap.split("#")[0].rstrip().endswith("):")
 
 
+def test_slime_driver_accepts_multiline_headers_and_inline_comments(patchers, tmp_path):
+    source = (TESTDATA / "slime/train.py.status.output").read_text()
+    source = (
+        source.replace(
+            "for rollout_id in range(args.start_rollout_id, args.num_rollout):",
+            "for rollout_id in range(\n"
+            "        args.start_rollout_id, args.num_rollout\n"
+            "    ):  # agentic fork loop",
+        )
+        .replace(
+            "rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout\n"
+            "        ):",
+            "rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout\n"
+            "        ):  # periodic checkpoint",
+        )
+        .replace(
+            "# Always push actor weights to rollout once weights are loaded.",
+            "# Synchronize the initial policy.",
+        )
+    )
+    work = tmp_path / "train.py"
+    work.write_text(source)
+    patcher = patchers["slime"]
+    patcher._patch_file(work, patcher.ENTRYPOINTS["train.py"])
+    patched = work.read_text()
+    compile(patched, "train.py", "exec")
+    for phase in (*patcher.ENTRYPOINTS["train.py"], "initial_weight_sync"):
+        assert patched.count(f"with _tg_rec.phase('{phase}'):") == 1
+    assert "):  # periodic checkpoint\n" in patched
+    patcher._patch_file(work, patcher.ENTRYPOINTS["train.py"])
+    assert work.read_text() == patched
+
+
+def test_slime_unknown_driver_boundary_fails_without_partial_write(patchers, tmp_path):
+    source = (
+        (TESTDATA / "slime/train.py.status.output")
+        .read_text()
+        .replace(
+            "_tg_report('checkpoint_save', args, rollout_id)",
+            "_tg_report('unknown_save', args, rollout_id)",
+        )
+    )
+    work = tmp_path / "train.py"
+    work.write_text(source)
+    patcher = patchers["slime"]
+    with pytest.raises(RuntimeError, match="checkpoint_save boundary"):
+        patcher._patch_entrypoint(work, patcher.ENTRYPOINTS["train.py"])
+    assert work.read_text() == source
+
+
 def test_patching_twice_is_a_no_op(miles, tmp_path, capsys):
     work = tmp_path / "train.py"
     work.write_text((TESTDATA / "miles/train.py.status.output").read_text())

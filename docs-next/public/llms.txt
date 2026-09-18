@@ -113,7 +113,6 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3_5_4B_Recipe](https://gym.modal.dev/reference/qwen3_5_4b_recipe)
 - [Qwen3_5_9B_Recipe](https://gym.modal.dev/reference/qwen3_5_9b_recipe)
 - [Qwen3_6_27B_Recipe](https://gym.modal.dev/reference/qwen3_6_27b_recipe)
-- [Qwen3_6_27B_Recipe_Agentic](https://gym.modal.dev/reference/qwen3_6_27b_recipe_agentic)
 - [Qwen3_6_35B_Recipe](https://gym.modal.dev/reference/qwen3_6_35b_recipe)
 - [Qwen3_6_35B_Recipe_Long_Context](https://gym.modal.dev/reference/qwen3_6_35b_recipe_long_context)
 - [Qwen3_8_27B_Recipe](https://gym.modal.dev/reference/qwen3_8_27b_recipe)

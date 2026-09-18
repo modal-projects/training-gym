@@ -23,7 +23,6 @@
 
 import json
 
-from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -32,9 +31,15 @@ import modal
 from modal_training_gym import (
     DatasetConfig,
     Qwen3_6_27B,
-    Qwen3_6_27B_Recipe_Agentic,
+    Qwen3_6_27B_Recipe,
     TrackioConfig,
     TrainConfig,
+)
+
+from tutorials.coding_agent.dataset import (
+    DATA_VOLUME_NAME,
+    SLIME_GIT_REPOSITORY,
+    SLIME_GIT_REVISION,
 )
 
 # ## Prepare sandboxed tasks
@@ -53,15 +58,16 @@ from modal_training_gym import (
 
 # ## Configure training
 #
-# The default checks one step with two prompts and four eval tasks.
+# The default checks two training steps with two prompts, then evaluates once
+# on four held-out tasks.
 # One sample per prompt gives GRPO no advantage variance. Set `SMOKE = False`
-# for learning, or `NUM_ROLLOUT = 10` for a longer smoke run.
+# for learning, or `NUM_ROLLOUT = 1` for a one-step check.
 
 SMOKE = True
 DATASET_ROOT = "swe_rebench_v2"
 TRAIN_SUBSET = "train-4" if SMOKE else "train-300"
 EVAL_SUBSETS = ("eval-4",) if SMOKE else ("eval",)
-NUM_ROLLOUT = 1 if SMOKE else 500
+NUM_ROLLOUT = 2 if SMOKE else 500
 ROLLOUT_BATCH_SIZE = 2 if SMOKE else 32
 N_SAMPLES_PER_PROMPT = 1 if SMOKE else 8
 MAX_STEPS = 2 if SMOKE else 75
@@ -114,9 +120,10 @@ train_dataset = AgentTaskDataset(DATA_ROOT / f"{TRAIN_SUBSET}.jsonl")
 #
 # ## Configure the recipe
 #
-# Both configurations use two B300 GPUs on one node: one for Megatron training
-# and one for SGLang inference. `colocate=False` gives each its own GPU;
-# sandbox commands run separately on CPUs.
+# Use `Qwen3_6_27B_Recipe` with the workload overrides below. Smoke uses two
+# B300 GPUs: one for Megatron training and one for SGLang inference. Full
+# training uses 16 H200s for training and 32 for rollouts. `colocate=False`
+# separates training and inference; sandbox commands run on CPUs.
 #
 # The main controls are:
 # - `num_rollout`: number of rollout/training iterations.
@@ -126,11 +133,81 @@ train_dataset = AgentTaskDataset(DATA_ROOT / f"{TRAIN_SUBSET}.jsonl")
 #   also bound tool execution.
 # - `eval_interval` and `save_interval`: evaluation and checkpoint frequency.
 #
-# Evaluation uses the same agent loop and verifier on the held-out tasks.
+# Smoke evaluates once at the end and saves no checkpoints. Full evaluation
+# is disabled; checkpoints save every 20 steps. Evaluation uses the same
+# agent loop and verifier on the held-out tasks.
 # Set up Trackio and the dashboard with `uv run training-gym setup` before
 # launching to inspect metrics and trajectories.
 
-recipe = Qwen3_6_27B_Recipe_Agentic(
+hardware_overrides = (
+    {
+        "gpu_type": "B300",
+        "actor_num_nodes": 1,
+        "actor_num_gpus_per_node": 1,
+        "rollout_num_gpus": 1,
+        "rollout_num_gpus_per_engine": 1,
+        "tensor_model_parallel_size": 1,
+        "pipeline_model_parallel_size": 1,
+        "context_parallel_size": 1,
+        "sequence_parallel": False,
+        "conversion_tensor_model_parallel_size": 1,
+        "conversion_pipeline_model_parallel_size": 1,
+        "decoder_last_pipeline_num_layers": None,
+        "attention_backend": "unfused",
+        "ref_load": "/checkpoints/Qwen3.6-27B_torch_dist_tp1pp1",
+        "sglang_speculative_algorithm": None,
+        "sglang_speculative_num_steps": None,
+        "sglang_speculative_eagle_topk": None,
+        "sglang_speculative_num_draft_tokens": None,
+    }
+    if SMOKE
+    else {
+        "gpu_type": "H200",
+        "actor_num_nodes": 2,
+        "actor_num_gpus_per_node": 8,
+        "rollout_num_gpus": 32,
+        "rollout_num_gpus_per_engine": 2,
+        "tensor_model_parallel_size": 4,
+        "pipeline_model_parallel_size": 2,
+        "context_parallel_size": 2,
+        "sequence_parallel": True,
+        "conversion_tensor_model_parallel_size": 4,
+        "conversion_pipeline_model_parallel_size": 2,
+        "decoder_last_pipeline_num_layers": 30,
+        "attention_backend": "flash",
+        "ref_load": "",
+        "sglang_speculative_algorithm": "EAGLE",
+        "sglang_speculative_num_steps": 3,
+        "sglang_speculative_eagle_topk": 1,
+        "sglang_speculative_num_draft_tokens": 4,
+    }
+)
+
+recipe = Qwen3_6_27B_Recipe(
+    slime_git_repository=SLIME_GIT_REPOSITORY,
+    slime_git_revision=SLIME_GIT_REVISION,
+    data_volume_name=DATA_VOLUME_NAME,
+    memory=(1024, 2 * 1024 * 1024),
+    train_function_kwargs={"ephemeral_disk": 2 * 1024 * 1024},
+    environment={
+        "PYTHONPATH": "/root/Megatron-LM/:/root/slime",
+        "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+        "NCCL_NVLS_ENABLE": "1",
+        "NCCL_RAS_ENABLE": "0",
+        "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        "ASYNC_RL_TASK_ROOT": "/data",
+        "SLIME_AGENT_SANDBOX_CPU": "2",
+        "SLIME_AGENT_SANDBOX_MEMORY_MB": "4096",
+        "ASYNC_RL_REWARD_SHAPE": "binary",
+    },
+    image_run_commands=[
+        "apt-get update && apt-get install -y --no-install-recommends "
+        "rdma-core libibverbs1 ibverbs-providers",
+        "uv pip install --system modal mini-swe-agent datasets",
+    ],
+    image_env={"MSWEA_SILENT_STARTUP": "1"},
+    app_tags={"agentic_rollout": "harbor"},
+    colocate=False,
     metrics=TrackioConfig(project="coding-agent"),
     num_rollout=NUM_ROLLOUT,
     rollout_batch_size=ROLLOUT_BATCH_SIZE,
@@ -148,11 +225,24 @@ recipe = Qwen3_6_27B_Recipe_Agentic(
     rollout_temperature=1.0,
     rollout_max_response_len=1024 if SMOKE else 8192,
     eval_max_response_len=1024 if SMOKE else 8192,
-    eval_interval=1 if SMOKE else 5,
+    eval_interval=NUM_ROLLOUT if SMOKE else None,
     n_samples_per_eval_prompt=1,
-    save_interval=1 if SMOKE else 5,
+    save=None if SMOKE else "/checkpoints",
+    save_interval=None if SMOKE else 20,
     sglang_server_concurrency=4 if SMOKE else 32,
-    capture_trace=not SMOKE,
+    max_tokens_per_gpu=16384,
+    log_probs_chunk_size=128,
+    capture_trace=True,
+    custom_rollout_log_function="agentic_rl.metrics.log_rollout_data",
+    extra_config={
+        "custom_generate_function_path": "agentic_rl.generate.generate",
+        "agentic_max_steps": MAX_STEPS,
+        "agentic_episode_timeout": 300 if SMOKE else 1800,
+        "agentic_eval_timeout": 120 if SMOKE else 300,
+        "agentic_exec_timeout": 60 if SMOKE else 120,
+        "router_policy": "consistent_hashing",
+        "skip_eval_before_train": SMOKE,
+    },
     eval_config={
         "defaults": {
             "n_samples_per_eval_prompt": 1,
@@ -171,16 +261,7 @@ recipe = Qwen3_6_27B_Recipe_Agentic(
     save_debug_rollout_data=(
         f"/checkpoints/agentic_rollout_dumps/{RUN_NAME}/rollout_{{rollout_id}}.pt"
     ),
-)
-recipe = replace(
-    recipe,
-    extra_config={
-        **(recipe.extra_config or {}),
-        "agentic_max_steps": MAX_STEPS,
-        "agentic_episode_timeout": 300 if SMOKE else 1800,
-        "agentic_eval_timeout": 120 if SMOKE else 300,
-        "agentic_exec_timeout": 60 if SMOKE else 120,
-    },
+    **hardware_overrides,
 )
 
 # ## Check the dataset and launch
@@ -224,14 +305,15 @@ print(f"rollout dumps: /checkpoints/agentic_rollout_dumps/{RUN_NAME}/")
 # To probe a training subset, use a short run with `EVAL_SUBSETS = ("train-300",)`
 # and set both `n_samples_per_eval_prompt` and the eval config's
 # `n_samples_per_eval_prompt` to 8. Use full episode budgets (`SMOKE = False`)
-# and `NUM_ROLLOUT = 1`. The initial evaluation produces an eval dump before
+# and `NUM_ROLLOUT = 1`, and set `eval_interval=1` to enable evaluation.
+# The initial evaluation produces an eval dump before
 # training. Use the printed dump directory in this command:
 #
 # ```bash
 # uv run -m tutorials.coding_agent.dataset --dataset-root swe_rebench_v2 mixed \
 #   --source train-300 --recipe qwen3-6-27b-agentic --n-samples 8 \
 #   --probe-dump /checkpoints/agentic_rollout_dumps/<run-name>/rollout_eval_0.pt \
-#   --checkpoints-volume slime-qwen3_6_27b_recipe_agentic-checkpoints
+#   --checkpoints-volume slime-qwen3_6_27b_recipe-checkpoints
 # ```
 #
 # This keeps tasks whose eight gradeable samples include both successes and

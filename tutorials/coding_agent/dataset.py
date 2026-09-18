@@ -27,9 +27,6 @@ from modal_training_gym.frameworks.slime.launcher import (
     _slime_git_overlay_command,
 )
 from modal_training_gym.train_recipes.base import DATA_PATH
-from modal_training_gym.train_recipes.slime_recipe import (
-    Qwen3_6_27B_Recipe_Agentic,
-)
 
 # Fraction of tasks that go to eval. Remainder go to train.
 EVAL_SPLIT_FRACTION = 0.2
@@ -47,10 +44,10 @@ DEFAULT_MIXED_RECIPE_SLUG = "qwen3-6-27b-agentic"
 
 HF_DATASET = "nebius/SWE-rebench-V2"
 DATASET_ROOT = "swe_rebench_v2"
-
-
-def data_volume_name(recipe: Qwen3_6_27B_Recipe_Agentic) -> str:
-    return recipe.data_volume_name or f"slime-{type(recipe).__name__.lower()}-data"
+# Shared with main.py so task conversion and rollout execution use the same code.
+SLIME_GIT_REPOSITORY = "https://github.com/modal-projects/slime.git"
+SLIME_GIT_REVISION = "ba324bebdd3a3cbfc1946b58404a012ad607f38b"
+DATA_VOLUME_NAME = "slime-data"
 
 
 def dataset_root_name(value: str) -> str:
@@ -382,16 +379,14 @@ def prepare_dataset(
     return counts
 
 
-def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
-    if not (recipe.slime_git_repository and recipe.slime_git_revision):
-        raise ValueError(f"{type(recipe).__name__} does not pin a Slime fork")
+def _image() -> modal.Image:
     return (
         modal.Image.from_registry(SLIME_IMAGE)
         .entrypoint([])
         .run_commands(
             _slime_git_overlay_command(
-                recipe.slime_git_repository,
-                recipe.slime_git_revision,
+                SLIME_GIT_REPOSITORY,
+                SLIME_GIT_REVISION,
             ),
             "uv pip install --system modal datasets huggingface_hub",
         )
@@ -490,8 +485,7 @@ def main() -> None:
         parser.error(str(exc))
     root = f"{DATA_PATH}/{dataset_root}"
 
-    training_recipe = Qwen3_6_27B_Recipe_Agentic()
-    volume_name = data_volume_name(training_recipe)
+    volume_name = DATA_VOLUME_NAME
     app = modal.App("partition-swe-dataset")
     volumes = {
         str(DATA_PATH): modal.Volume.from_name(volume_name, create_if_missing=True)
@@ -501,7 +495,7 @@ def main() -> None:
             args.checkpoints_volume, create_if_missing=False
         )
     remote_options: dict[str, Any] = {
-        "image": _image(training_recipe),
+        "image": _image(),
         "volumes": volumes,
         "timeout": 24 * 60 * 60,
     }
@@ -511,7 +505,7 @@ def main() -> None:
         with app.run():
             counts = remote.remote(
                 root,
-                converter_revision=training_recipe.slime_git_revision,
+                converter_revision=SLIME_GIT_REVISION,
                 hf_revision=args.hf_revision,
                 min_grade=None if args.min_grade.lower() == "none" else args.min_grade,
                 limit=args.limit,
