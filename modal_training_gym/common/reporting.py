@@ -572,9 +572,8 @@ def _compact_report_queue() -> None:
                 for i in range(0, len(points), MAX_METRIC_POINTS_PER_BATCH)
             ] or [[]]
             for chunk in chunks:
-                final_priority.append({**merged, "points": chunk, "final": False})
+                final_priority.append({**merged, "points": chunk})
                 discarded -= 1
-            final_priority[-1]["final"] = merged["final"]
         _REPORT_QUEUE.queue.clear()
         _REPORT_QUEUE.queue.extend(final_priority)
         _REPORT_QUEUE.queue.extend(status_priority)

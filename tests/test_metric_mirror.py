@@ -223,7 +223,7 @@ def test_drain_compaction_splits_merged_metrics_at_the_batch_limit(monkeypatch):
     reporting._compact_report_queue()
     batches = list(queue.queue)
     assert [[p["step"] for p in b["points"]] for b in batches] == [[0, 1], [2, 3], [4]]
-    assert [b["final"] for b in batches] == [False, False, True]
+    assert all(b["final"] for b in batches)  # every chunk keeps drain retries
     while not queue.empty():
         queue.get_nowait()
 
