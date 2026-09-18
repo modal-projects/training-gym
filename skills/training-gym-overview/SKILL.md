@@ -105,9 +105,10 @@ only when the framework must not apply the model's chat template.
 
 For custom data, subclass `DatasetConfig` and implement the methods
 `input_key()`, `label_key()`, and `rows()`. `rows()` is also the interface for
-explicit local or offline loops. `write(path)` writes
-`rows()` as JSONL while `MultimodalDataset.write(path)` rewrites media to trainer
-paths; `rows()` keeps constructor media. Override `apply_chat_template()` when
+explicit local or offline loops. `write(path)` writes `rows()` at `path` with
+the same column names. `MultimodalDataset.rows()` returns media as passed in;
+its `write(path)` stores every media item as a local file path for the
+trainer. Override `apply_chat_template()` when
 its default of `True` is not appropriate.
 
 `cache_key()` controls reuse of written data. A stable equal key shares a path.

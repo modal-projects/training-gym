@@ -2,10 +2,19 @@ from modal_training_gym import (
     Qwen3_6_35B,
     Qwen3_6_35B_Recipe,
 )
+from modal_training_gym.common.dataset import HuggingFaceDataset
+from modal_training_gym.frameworks.slime.launcher import build_slime_app
 from modal_training_gym.frameworks.slime.modal_helpers.utils import (
     get_checkpoint_conversion_policy,
 )
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+
+_DS = HuggingFaceDataset(
+    hf_repo="statworx/haiku",
+    input_column="keywords",
+    output_column="text",
+    input_format="text",
+)
 
 
 def test_qwen3_6_35b_uses_disagg_two_plus_two_b200_ep2() -> None:
@@ -28,9 +37,12 @@ def test_qwen3_6_35b_uses_disagg_two_plus_two_b200_ep2() -> None:
     assert recipe.gpu_allocation.gpus_per_node == 4
     assert recipe.gpu_allocation.total_nodes == 1
     assert recipe.gpu_allocation.rollout_engines == 1
+    assert recipe.ref_load is None
+    build_slime_app(training_run_id="text", slime=recipe, model=model, dataset=_DS)
     assert recipe.ref_load == "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp1pp1"
 
     cli_args = recipe.cli_args(model=model)
+    assert "--torch-dist-ref-load" not in cli_args
     dispatcher = cli_args.index("--moe-token-dispatcher-type")
     assert cli_args[dispatcher + 1] == "alltoall"
     assert "--moe-enable-deepep" not in cli_args

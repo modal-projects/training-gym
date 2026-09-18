@@ -6,10 +6,19 @@ from modal_training_gym import (
     Qwen3_8_27B,
     Qwen3_8_27B_Recipe,
 )
+from modal_training_gym.common.dataset import HuggingFaceDataset
+from modal_training_gym.frameworks.slime.launcher import build_slime_app
 from modal_training_gym.frameworks.slime.modal_helpers.utils import (
     get_checkpoint_conversion_policy,
 )
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+
+_DS = HuggingFaceDataset(
+    hf_repo="statworx/haiku",
+    input_column="keywords",
+    output_column="text",
+    input_format="text",
+)
 
 
 @pytest.mark.parametrize(
@@ -29,6 +38,8 @@ def test_qwen3_27b_adapts_current_slime_qwen3_5_recipe(
     assert isinstance(SlimeRecipe.get_base_recipe(model), recipe_cls)
     assert recipe.slime_model_script == "scripts/models/qwen3.5-27B.sh"
     assert recipe.hf_checkpoint == model.model_name
+    assert recipe.ref_load is None
+    build_slime_app(training_run_id="text", slime=recipe, model=model, dataset=_DS)
     assert recipe.ref_load == ref_load
     assert recipe.gpu_type == "B300"
     assert recipe.attention_backend == "unfused"
@@ -41,6 +52,7 @@ def test_qwen3_27b_adapts_current_slime_qwen3_5_recipe(
     assert "num_layers" not in fields
     assert "spec" not in fields
     cli_args = recipe.cli_args(model=model)
+    assert "--torch-dist-ref-load" not in cli_args
     prefill_backend = cli_args.index("--sglang-cuda-graph-backend-prefill")
     assert cli_args[prefill_backend + 1] == "disabled"
 

@@ -67,7 +67,7 @@ def _as_media_path(item, dest_dir: Path, index: int):
         if item.startswith(("http://", "https://")):
             raise TrainingGymConfigError(
                 "remote media URLs are not supported; download the media in "
-                "rows() and return bytes or a local path"
+                "source_rows() and return bytes or a local path"
             )
         try:
             src = Path(item)
@@ -133,10 +133,7 @@ class DatasetConfig(ABC):
         raise NotImplementedError(f"{type(self).__name__} has no rows()")
 
     def write(self, path: str) -> None:
-        """Disk hook: write ``rows()`` as JSONL at ``path``.
-
-        Column names and values match ``rows()``. Values must be JSON-serializable.
-        """
+        """Write ``rows()`` at ``path``."""
         with open(path, "w") as f:
             for row in self.rows():
                 f.write(json.dumps(row) + "\n")
@@ -189,7 +186,7 @@ class DatasetConfig(ABC):
                 f"missing required column(s) {sorted(missing)} "
                 f"(input_key={self.input_key()!r}, label_key={self.label_key()!r}). "
                 f"Columns present: {sorted(cols)}. "
-                "Either rename the column(s) on disk, or implement "
+                "Either rename the column(s) that rows() returns, or implement "
                 "input_key()/label_key() on your DatasetConfig subclass to match."
             )
 
@@ -741,9 +738,12 @@ class MultimodalDataset(DatasetConfig):
         return out
 
     def write(self, path: str) -> None:
-        """Disk hook: rewrite media to trainer paths.
+        """Disk hook: write ``rows()`` at ``path`` with media as local file paths.
 
-        ``rows()`` keeps constructor media.
+        Column names match ``rows()``. Only the media values differ: ``rows()``
+        returns each item as given (bytes, data URI, or path) while the written
+        file holds a local file path for every item, with bytes and data URIs
+        stored under ``<path>.media/``.
         """
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)

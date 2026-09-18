@@ -230,6 +230,8 @@ class MilesRecipe(BaseTrainRecipe):
             Tool-call output parser.
         sglang_reasoning_parser:
             Parser for reasoning/thinking output.
+        sglang_enable_multimodal:
+            Enable SGLang multimodal inputs. ``None`` set to ``True`` if the dataset is multimodal.
 
         advantage_estimator:
             Advantage estimator.
@@ -448,6 +450,8 @@ class MilesRecipe(BaseTrainRecipe):
             become Miles arguments and override same-named fields.
         sglang_config:
             SGLang engine settings written to ``--sglang-config`` as YAML.
+        apply_chat_template:
+            Render prompts through the tokenizer chat template.
         apply_chat_template_kwargs:
             Keyword arguments for tokenizer ``apply_chat_template``, passed as JSON.
         train_env_vars:
@@ -536,7 +540,7 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_server_concurrency: int | None = None
     sglang_tool_call_parser: str | None = None
     sglang_reasoning_parser: str | None = None
-    sglang_enable_multimodal: bool = False
+    sglang_enable_multimodal: bool | None = None
 
     # ── RL algorithm ────────────────────────────────────────────────────────
     advantage_estimator: str = "grpo"
@@ -675,6 +679,7 @@ class MilesRecipe(BaseTrainRecipe):
     # ── Config overrides ────────────────────────────────────────────────────
     extra_config: dict | None = None
     sglang_config: dict | str | None = None
+    apply_chat_template: bool | None = None
     apply_chat_template_kwargs: str | dict = ""
     train_env_vars: dict | str | None = None
     multimodal_keys: dict | str | None = None
@@ -822,8 +827,14 @@ class MilesRecipe(BaseTrainRecipe):
         model: ModelConfig | None,
     ) -> dict[str, Any]:
         out = super().overrides(dataset, model)
-        if dataset is not None and requested_modalities(dataset):
-            self._override_default(out, "sglang_enable_multimodal", True)
+        if self.apply_chat_template is not None:
+            out["apply_chat_template"] = self.apply_chat_template
+        if (
+            self.sglang_enable_multimodal is None
+            and dataset is not None
+            and requested_modalities(dataset)
+        ):
+            out["sglang_enable_multimodal"] = True
         return out
 
     # ── Internal ──────────────────────────────────────────────────────────────

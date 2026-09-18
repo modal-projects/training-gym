@@ -13,7 +13,6 @@ class Qwen3_6_27B_Recipe(SlimeRecipe):
     memory: int | tuple[int, int] | None = (128, 2_097_152)
     slime_model_script: str = "scripts/models/qwen3.5-27B.sh"
     hf_checkpoint: str = "Qwen/Qwen3.6-27B"
-    ref_load: str = "/checkpoints/Qwen3.6-27B_torch_dist_tp1pp1"
     train_function_kwargs: dict[str, int] = field(
         default_factory=lambda: {"ephemeral_disk": 1_048_576}
     )
@@ -44,3 +43,5 @@ class Qwen3_6_27B_Recipe(SlimeRecipe):
     use_precision_aware_optimizer: bool = True
     attention_backend: str = "unfused"
     eps_clip_high: float | None = None
+
+    torch_dist_ref_load: str = "/checkpoints/Qwen3.6-27B_torch_dist_tp1pp1"

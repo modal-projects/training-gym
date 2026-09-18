@@ -51,5 +51,6 @@ class Qwen3_6_35B_Recipe(SlimeRecipe):
     memory: int | tuple[int, int] | None = (128, 2_097_152)
     attention_backend: str = "unfused"
 
-    ref_load: str = "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp1pp1"
     no_save_optim: bool = True
+
+    torch_dist_ref_load: str = "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp1pp1"

@@ -157,8 +157,8 @@ class _InklingSmallRecipe(MilesRecipe):
         model: ModelConfig | None,
     ) -> dict[str, Any]:
         out = super().overrides(dataset, model)
-        if self.modality != "text":
-            self._override_default(out, "apply_chat_template", False)
+        if self.modality != "text" and self.apply_chat_template is None:
+            out["apply_chat_template"] = False
         return out
 
 

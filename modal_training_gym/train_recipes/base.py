@@ -123,26 +123,6 @@ class BaseTrainRecipe(ABC):
     ) -> dict[str, Any]:
         return {}
 
-    def is_field_default(self, key: str) -> bool:
-        """True when *key* still holds its recipe default rather than a caller value."""
-        default = _dc.MISSING
-        for field in _dc.fields(self):
-            if field.name != key:
-                continue
-            default = (
-                field.default_factory()
-                if field.default_factory is not _dc.MISSING
-                else field.default
-            )
-            break
-        return getattr(self, key, default) == default
-
-    def _override_default(self, out: dict[str, Any], key: str, value: Any) -> None:
-        if key in self._escape_hatch_keys():
-            return
-        if self.is_field_default(key):
-            out[key] = value
-
     # ── Container → framework flag converters ────────────────────────────────
 
     @staticmethod
@@ -241,10 +221,10 @@ class BaseTrainRecipe(ABC):
         model: "ModelConfig | None" = None,
     ) -> str:
         """megatron_to_hf_mode as cli_args() will emit it."""
-        configured = self._escape_hatch_values().get(
-            "megatron_to_hf_mode", getattr(self, "megatron_to_hf_mode", "")
+        resolved = self.overrides(dataset, model).get(
+            "megatron_to_hf_mode", getattr(self, "megatron_to_hf_mode", None)
         )
-        return self.overrides(dataset, model).get("megatron_to_hf_mode", configured)
+        return self._escape_hatch_values().get("megatron_to_hf_mode", resolved) or ""
 
     def _emit_fields(self, fields: dict[str, Any]) -> dict[str, Any]:
         """Drop launcher-only fields and let the escape hatch win over same-named flags.

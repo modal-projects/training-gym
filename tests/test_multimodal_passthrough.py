@@ -40,7 +40,7 @@ from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
 )
 from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_5_4b import Qwen3_5_4B_Recipe
-from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b import Qwen3_6_27B_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import Qwen3_6_35B_Recipe
 from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_asr_1_7b import (
     Qwen3_ASR_1_7B_Recipe,
@@ -98,13 +98,17 @@ def test_write_writes_media_column(tmp_path):
     assert row["prompt"] == "p" and row["label"] == "l"
 
 
-def test_text_dataset_unaffected():
-    ds = HuggingFaceDataset(
+def _text_ds():
+    return HuggingFaceDataset(
         hf_repo="statworx/haiku",
         input_column="keywords",
         output_column="text",
         input_format="text",
     )
+
+
+def test_text_dataset_unaffected():
+    ds = _text_ds()
     assert ds.modalities == frozenset()
     assert "--multimodal-keys" not in Qwen3_4B_Recipe().cli_args(
         dataset=ds, model=Qwen3_4B()
@@ -296,15 +300,79 @@ def test_yaml_bridge_mode_does_not_assign_torch_dist_ref_load():
         model=Qwen3_5_4B(),
         dataset=_mm("image"),
     )
-    assert recipe.ref_load == ""
+    assert recipe.ref_load is None
+    raw = Qwen3_5_4B_Recipe(extra_config={"megatron_to_hf_mode": "raw"})
+    assert raw.effective_megatron_to_hf_mode(_mm("image"), Qwen3_5_4B()) == "raw"
 
 
-def test_bridge_ref_load_override_keeps_caller_value():
-    """The train-time bridge branch replaces only a recipe's default ref_load."""
-    assert Qwen3_6_27B_Recipe().is_field_default("ref_load")
-    assert not Qwen3_6_27B_Recipe(
-        ref_load="/checkpoints/reference-v2"
-    ).is_field_default("ref_load")
+def test_torch_dist_recipe_ref_load_follows_mode():
+    """Image training on a hardcoded-torch_dist recipe leaves ref_load None for the
+    train-time HF fill; text training resolves the recipe's torch_dist path; an
+    explicit caller value survives both."""
+    image = Qwen3_6_35B_Recipe()
+    build_slime_app(
+        training_run_id="bridge-auto",
+        slime=image,
+        model=Qwen3_6_35B(),
+        dataset=_mm("image"),
+    )
+    assert image.ref_load is None
+    text = Qwen3_6_35B_Recipe()
+    build_slime_app(
+        training_run_id="text-auto",
+        slime=text,
+        model=Qwen3_6_35B(),
+        dataset=_text_ds(),
+    )
+    assert text.ref_load == "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp1pp1"
+    assert "--torch-dist-ref-load" not in text.cli_args(
+        model=Qwen3_6_35B(), dataset=_text_ds()
+    )
+    for run_id, ds in (("bridge-caller", _mm("image")), ("text-caller", _text_ds())):
+        caller = Qwen3_6_35B_Recipe(ref_load="/checkpoints/mine")
+        build_slime_app(
+            training_run_id=run_id, slime=caller, model=Qwen3_6_35B(), dataset=ds
+        )
+        assert caller.ref_load == "/checkpoints/mine"
+
+
+def test_none_auto_fields_resolve_and_explicit_values_win():
+    vl, vl_model = _mm("image"), Qwen3_5_4B()
+    auto = _flags(Qwen3_5_4B_Recipe().cli_args(dataset=vl, model=vl_model))
+    assert auto["--freeze-params-name-list"] == "visual"
+    assert auto["--megatron-to-hf-mode"] == "bridge"
+    assert auto["--sglang-mm-attention-backend"] == "triton_attn"
+    explicit = _flags(
+        Qwen3_5_4B_Recipe(
+            freeze_params_name_list=["other"],
+            megatron_to_hf_mode="raw",
+            sglang_mm_attention_backend="fa3",
+        ).cli_args(dataset=vl, model=vl_model)
+    )
+    assert explicit["--freeze-params-name-list"] == "other"
+    assert explicit["--megatron-to-hf-mode"] == "raw"
+    assert explicit["--sglang-mm-attention-backend"] == "fa3"
+
+    inkling = Inkling_Small_Recipe(modality="vision")
+    assert "--apply-chat-template" not in inkling.cli_args(
+        dataset=_mm("image"), model=Inkling_Small()
+    )
+    assert "--apply-chat-template" in Inkling_Small_Recipe(
+        modality="vision", apply_chat_template=True
+    ).cli_args(dataset=_mm("image"), model=Inkling_Small())
+    assert "--apply-chat-template" in Qwen3_4B_Recipe().cli_args(
+        dataset=_mm("image"), model=Qwen3_4B()
+    )
+    assert "--apply-chat-template" not in Qwen3_4B_Recipe(
+        apply_chat_template=False
+    ).cli_args(dataset=_mm("image"), model=Qwen3_4B())
+
+    assert "--sglang-enable-multimodal" in Qwen3_5_4B_Miles_Recipe().cli_args(
+        dataset=_mm("image"), model=Qwen3_5_4B()
+    )
+    assert "--sglang-enable-multimodal" not in Qwen3_5_4B_Miles_Recipe(
+        sglang_enable_multimodal=False
+    ).cli_args(dataset=_mm("image"), model=Qwen3_5_4B())
 
 
 def test_yaml_raw_mode_overrides_bridge_field_for_conversion():
@@ -346,13 +414,18 @@ def test_write_writes_media_paths(tmp_path):
         ],
         modality="image",
     )
-    raw = list(ds.rows())[0]["images"]
+    raw_row = list(ds.rows())[0]
+    raw = raw_row["images"]
     assert raw[0].startswith("data:image/png;base64,")
     assert raw[2] == b"train-bytes"
     assert raw[4] == local
     path = tmp_path / "train.jsonl"
     ds.write(str(path))
     row = json.loads(path.read_text().splitlines()[0])
+    assert row.keys() == raw_row.keys()
+    assert {k: v for k, v in row.items() if k != "images"} == {
+        k: v for k, v in raw_row.items() if k != "images"
+    }
     images = row["images"]
     media_dir = path.with_name(path.name + ".media")
     assert images[0] == str((media_dir / "000000.png").resolve())
@@ -397,7 +470,7 @@ def test_write_rejects_remote_media_urls(tmp_path):
         ],
         modality="audio",
     )
-    with pytest.raises(TrainingGymConfigError, match="remote media URLs"):
+    with pytest.raises(TrainingGymConfigError, match=r"source_rows\(\)"):
         ds.write(str(tmp_path / "train.jsonl"))
 
 

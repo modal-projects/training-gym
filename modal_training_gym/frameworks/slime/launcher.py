@@ -429,7 +429,11 @@ def build_slime_app(
         # reference checkpoint. In bridge mode we instead load the HF weights directly via
         # AutoBridge; ref_load is set to the local HF snapshot dir at train time.
         slug = model.model_name.replace("/", "--")
-        object.__setattr__(slime, "ref_load", f"/checkpoints/torch_dist/{slug}-v31")
+        object.__setattr__(
+            slime,
+            "ref_load",
+            slime.torch_dist_ref_load or f"/checkpoints/torch_dist/{slug}-v31",
+        )
 
     # ── GDN compatibility ─────────────────────────────────────────────────
     # Models with Gated Delta Net (GDN) layers (use_gated_attention=True)
@@ -1177,17 +1181,13 @@ def build_slime_app(
                         "WARNING: no_save_optim=True — enabling no_load_optim for resume."
                     )
                 object.__setattr__(slime, "no_load_optim", slime.no_save_optim)
-            elif (
-                megatron_to_hf_mode == "bridge"
-                and _hf_ref
-                and slime.is_field_default("ref_load")
-            ):
+            elif megatron_to_hf_mode == "bridge" and _hf_ref and slime.ref_load is None:
                 # Fresh bridge run: load the HF weights directly via AutoBridge. slime falls back
                 # args.load -> args.ref_load, and _load_checkpoint_hf maps the HF dir into Megatron
                 # (weights only — no optimizer/RNG state, so no torch_dist is required). Pointing
                 # ref_load at a torch_dist here would instead trigger the full-resume path and fail
-                # on the missing optimizer state, so a recipe's torch_dist default is replaced;
-                # a caller-provided ref_load is kept.
+                # on the missing optimizer state, so only an unset ref_load is filled in and a
+                # caller value is kept.
                 object.__setattr__(slime, "ref_load", _hf_ref)
             try:
                 cmd = build_train_cmd(

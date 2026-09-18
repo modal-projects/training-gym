@@ -72,6 +72,7 @@ _SLIME_SKIP = {
     "slime_model_script",
     "source_hf_checkpoint",
     "megatron_conversion_hf_checkpoint",
+    "torch_dist_ref_load",
     "patch_files",
     "image_run_commands",
     "image_env",
@@ -194,9 +195,7 @@ class SlimeRecipe(BaseTrainRecipe):
         sglang_request_params:
             Additional parameters for SGLang generation requests.
         sglang_mm_attention_backend:
-            SGLang multimodal attention kernel. Unset, SGLang picks fa4, which
-            imports flash_attn.cute and fails on the pinned slime image
-            (cutlass.utils.ampere_helpers).
+            SGLang multimodal attention kernel.
 
         advantage_estimator:
             Advantage estimator.
@@ -319,17 +318,25 @@ class SlimeRecipe(BaseTrainRecipe):
             HF weights.
         ref_load:
             Checkpoint read by the reference model for KL terms.
+            snapshot in bridge mode; any other value is used as given.
+        torch_dist_ref_load:
+            torch_dist checkpoint the launcher converts HF weights into and
+            reads as ``ref_load`` outside bridge mode when ``ref_load`` is
+            ``None``. When unset, it derives ``/checkpoints/torch_dist/<model slug>-v31``
+            from the model name.
         no_save_optim:
             Omit optimizer state from checkpoints. The resulting checkpoints cannot
             resume the optimizer exactly.
         no_load_optim:
             Skip loading optimizer and scheduler state from ``load``.
         megatron_to_hf_mode:
-            Export mode for saved Megatron checkpoints. An empty value disables
-            export.
+            Export mode for saved Megatron checkpoints. ``None`` resolves to
+            ``bridge`` for image training with a custom model provider and
+            otherwise disables export.
         freeze_params_name_list:
             Parameter-name patterns matched with ``re.search`` to select frozen
-            weights.
+            weights. ``None`` resolves to the model's vision tower for
+            multimodal training.
         source_hf_checkpoint:
             Source checkpoint when it differs from the model's own.
         megatron_conversion_hf_checkpoint:
@@ -403,6 +410,8 @@ class SlimeRecipe(BaseTrainRecipe):
             args and always override same-named recipe fields.
         sglang_config:
             SGLang engine settings written to ``--sglang-config`` as YAML.
+        apply_chat_template:
+            Render prompts through the tokenizer chat template.
         apply_chat_template_kwargs:
             Keyword arguments for tokenizer ``apply_chat_template``, passed as JSON.
         train_env_vars:
@@ -535,10 +544,11 @@ class SlimeRecipe(BaseTrainRecipe):
     save: str | None = str(CHECKPOINTS_PATH)
     save_interval: int | None = None
     load: str = ""
-    ref_load: str = ""
+    ref_load: str | None = None
+    torch_dist_ref_load: str | None = None
     no_save_optim: bool = False
     no_load_optim: bool = False
-    megatron_to_hf_mode: str = ""
+    megatron_to_hf_mode: str | None = None
     freeze_params_name_list: list[str] | None = None
     source_hf_checkpoint: str | None = None
     megatron_conversion_hf_checkpoint: str | None = None
@@ -584,6 +594,7 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── SGLang / config overrides ───────────────────────────────────────────
     extra_config: dict | None = None
     sglang_config: dict | None = None
+    apply_chat_template: bool | None = None
     apply_chat_template_kwargs: dict | str = ""
     train_env_vars: dict | str | None = None
     multimodal_keys: dict | str | None = None
@@ -794,17 +805,19 @@ class SlimeRecipe(BaseTrainRecipe):
         model: "ModelConfig | None",
     ) -> dict[str, Any]:
         out = super().overrides(dataset, model)
+        if self.apply_chat_template is not None:
+            out["apply_chat_template"] = self.apply_chat_template
         if model is None:
             return out
         media = requested_modalities(dataset) if dataset is not None else frozenset()
-        if model.vision_tower_param and media:
-            self._override_default(
-                out, "freeze_params_name_list", [model.vision_tower_param]
-            )
+        if model.vision_tower_param and media and self.freeze_params_name_list is None:
+            out["freeze_params_name_list"] = [model.vision_tower_param]
         if model.custom_model_provider and "image" in media:
             out.update(self._custom_provider_fields(model.custom_model_provider))
-            self._override_default(out, "megatron_to_hf_mode", "bridge")
-            self._override_default(out, "sglang_mm_attention_backend", "triton_attn")
+            if self.megatron_to_hf_mode is None:
+                out["megatron_to_hf_mode"] = "bridge"
+            if self.sglang_mm_attention_backend is None:
+                out["sglang_mm_attention_backend"] = "triton_attn"
         return out
 
     def _custom_provider_fields(self, path: str) -> dict[str, Any]:
