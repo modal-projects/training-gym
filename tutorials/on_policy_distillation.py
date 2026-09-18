@@ -36,7 +36,7 @@
 # </details>
 #
 # To do cross-family OPD (i.e., use a teacher from a different model family such as Deepseek), see
-# [this tutorial](https://gym.modal.dev/tutorials/cross_tokenizer_distillation).
+# [this tutorial](https://gym.modal.dev/tutorials/cross_tok_distill).
 
 import ast
 import json
@@ -65,7 +65,6 @@ from modal_training_gym import (
 # to serve the teacher.
 
 student_model = Qwen3_5_4B()
-
 base_student_deployment = Endpoint.launch(
     student_model, unauthenticated=True, recreate_if_existing=True
 )
@@ -81,7 +80,7 @@ base_student_deployment.wait_until_ready(timeout=15 * 60)
 print(f"student base model deployed to {base_student_deployment.url}")
 
 teacher_deployment.wait_until_ready(timeout=15 * 60)
-print(f"teacher base model deployed to {teacher_deployment.url}")
+print(f"teacher model deployed to {teacher_deployment.url}")
 
 TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 

@@ -46,11 +46,11 @@ Repo: https://github.com/modal-projects/training-gym
 - [Painting flowers with code](https://gym.modal.dev/tutorials/paint_flowers)
 - [Training coding agents in sandboxed environments](https://gym.modal.dev/tutorials/coding_agent)
 - [Efficient inference using on-policy distillation](https://gym.modal.dev/tutorials/on_policy_distillation)
+- [On-policy distillation across model families](https://gym.modal.dev/tutorials/cross_tok_distill)
 - [Long chain-of-thought reasoning for large-scale RL](https://gym.modal.dev/tutorials/dapo)
 - [Speech transcription that's better, faster, and cheaper](https://gym.modal.dev/tutorials/audio_asr)
 - [Massively-parallel hyperparameter sweeps](https://gym.modal.dev/tutorials/param_sweep)
 - [GUI Grounding with Qwen3-VL-8B](https://gym.modal.dev/tutorials/computer_use)
-- [On-policy Distillation (OPD) Across Model Families](https://gym.modal.dev/tutorials/cross_tokenizer_distillation)
 - [Frontier-scale training](https://gym.modal.dev/tutorials/multinode)
 
 ## Reference
@@ -80,7 +80,6 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3_5_9B](https://gym.modal.dev/reference/qwen3_5_9b)
 - [Qwen3_6_27B](https://gym.modal.dev/reference/qwen3_6_27b)
 - [Qwen3_6_35B](https://gym.modal.dev/reference/qwen3_6_35b)
-- [Qwen3_6_35B_Long_Context](https://gym.modal.dev/reference/qwen3_6_35b_long_context)
 - [Qwen3_8_27B](https://gym.modal.dev/reference/qwen3_8_27b)
 - [Qwen3_8B](https://gym.modal.dev/reference/qwen3_8b)
 - [Qwen3_ASR_1_7B](https://gym.modal.dev/reference/qwen3_asr_1_7b)
@@ -115,7 +114,6 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3_6_27B_Recipe](https://gym.modal.dev/reference/qwen3_6_27b_recipe)
 - [Qwen3_6_27B_Recipe_Agentic](https://gym.modal.dev/reference/qwen3_6_27b_recipe_agentic)
 - [Qwen3_6_35B_Recipe](https://gym.modal.dev/reference/qwen3_6_35b_recipe)
-- [Qwen3_6_35B_Recipe_Long_Context](https://gym.modal.dev/reference/qwen3_6_35b_recipe_long_context)
 - [Qwen3_8_27B_Recipe](https://gym.modal.dev/reference/qwen3_8_27b_recipe)
 - [Qwen3_8B_Recipe](https://gym.modal.dev/reference/qwen3_8b_recipe)
 - [Qwen3_ASR_1_7B_Recipe](https://gym.modal.dev/reference/qwen3_asr_1_7b_recipe)

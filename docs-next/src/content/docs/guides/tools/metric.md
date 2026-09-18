@@ -63,9 +63,7 @@ When launching a [hyperparameter sweep](https://gym.modal.dev/tutorials/param_sw
 
 ## Trackio
 
-[Trackio](https://huggingface.co/docs/trackio) is a lightweight, W&B-compatible tracker from Hugging Face. Training Gym installs it in the training image and routes the framework's existing metric calls to it whenever a recipe uses `TrackioConfig`. Scalars also appear in the dashboard's Metrics tab.
-
-There are two ways to visualize your metrics if you are using Trackio: 1) deploy on Modal, and 2) deploy on a Hugging Face Space.
+[Trackio](https://huggingface.co/docs/trackio) is an open-source W&B alternative which you can deploy on Modal or on a Hugging Face Space. You can even self-host! Training Gym installs it in the training image and routes the framework's metric calls to it whenever a recipe uses `TrackioConfig`; scalars also appear in the dashboard's Metrics tab.
 
 ### Deploy on Modal
 
@@ -77,16 +75,51 @@ from modal_training_gym import TrackioConfig
 metrics = TrackioConfig.deploy_to_modal(project="my-rl-project")
 ```
 
-The first call creates a Modal app, a Volume for Trackio's data, and a Secret holding a write token; later calls reuse them. Pass `metrics` to your recipe exactly like `WandbConfig`.
-
-Reads to Trackio are open unless you've set a [dashboard password](https://gym.modal.dev/guides/dashboard) with `training-gym set-password`:
+Just like the [main dashboard](https://gym.modal.dev/guides/dashboard), the Trackio dashboard is unauthenticated unless you set a password:
 
 ```bash
 training-gym set-password
 ```
 
-Training containers keep logging either way, since they authenticate with the write token instead. The password is read at container startup, so rerun `deploy_to_modal()` after changing it.
+Note that unlike the main dashboard, this will not redeploy the Trackio dashboard. I.e., you'll have to rerun `deploy_to_modal()` after changing it.
 
 ### Deploy on a Hugging Face Space
 
-Point `TrackioConfig` at a Hugging Face Space with `space_id="my-org/training-metrics"`, or at your own server with `server_url` plus a Modal Secret holding `TRACKIO_WRITE_TOKEN`. See the [reference page](https://gym.modal.dev/reference/core/trackioconfig) for all parameters.
+Simply specify a `space_id` and optionally a `bucket_id`:
+
+```python
+from modal_training_gym import Qwen3_5_4B, Qwen3_5_4B_Recipe, TrainConfig, TrackioConfig
+
+config = TrainConfig(
+    model=Qwen3_5_4B(),
+    dataset=my_dataset,
+    recipe=Qwen3_5_4B_Recipe(
+        # ...
+        metrics=TrackioConfig(
+            project="my-rl-project",
+            space_id="my-org/training-metrics",
+            bucket_id="my-org/training-metrics",  # optional
+        ),
+    ),
+)
+```
+
+### Self-hosted
+
+You'll need to create a [Modal Secret](https://modal.com/docs/guide/secrets) with your API key:
+
+```bash
+modal secret create trackio-write-token TRACKIO_WRITE_TOKEN=<your-api-key>
+```
+
+Then, it's as easy as:
+
+```python
+metrics = TrackioConfig(
+    project="my-rl-project",
+    server_url="https://trackio.example.com",
+    modal_secret_name="trackio-write-token",
+)
+```
+
+See the [reference page](https://gym.modal.dev/reference/trackioconfig) for all parameters.

@@ -299,13 +299,7 @@ def _format_value(value: Any) -> str:
 
 
 def read_modal_toml_creds() -> tuple[str, str, str]:
-    """Resolve ``(token_id, token_secret, profile_name)`` from ``~/.modal.toml``.
-
-    Follows Modal's own profile-selection rules: the ``MODAL_PROFILE`` env
-    var wins if set; otherwise the profile flagged ``active = true``;
-    otherwise the ``[default]`` profile; otherwise the first profile in the
-    file. Returns empty strings if no credentials can be found.
-    """
+    """Resolve ``(token_id, token_secret, profile_name)`` from ``~/.modal.toml``."""
     if not MODAL_CONFIG_PATH.is_file():
         return "", "", ""
 

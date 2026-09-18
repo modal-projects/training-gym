@@ -250,13 +250,31 @@ def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
     return image.uv_pip_install(f"trackio=={config.TRACKIO_PACKAGE_VERSION}")
 
 
-def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
-    """URL of an already-deployed Trackio server on Modal, if there is one."""
+class TrackioLookupUnknown(Exception):
+    """Modal lookup of the Trackio app failed before not-found could be observed."""
+
+
+def lookup_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
+    """URL of the deployed Trackio server, ``None`` if it is not deployed.
+
+    Raises ``TrackioLookupUnknown`` when the lookup fails for any other reason.
+    """
     import modal
+    from modal.exception import NotFoundError
 
     try:
         return modal.Function.from_name(app_name, "dashboard").get_web_url()
-    except Exception:
+    except NotFoundError:
+        return None
+    except Exception as exc:
+        raise TrackioLookupUnknown from exc
+
+
+def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
+    """URL of an already-deployed Trackio server on Modal, if there is one."""
+    try:
+        return lookup_trackio_url(app_name)
+    except TrackioLookupUnknown:
         return None
 
 

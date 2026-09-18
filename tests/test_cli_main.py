@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from modal_training_gym import cli as cli_module
 from modal_training_gym.cli.errors import CLIError, ExitCode
+from modal_training_gym.common.trackio import TrackioLookupUnknown
 
 
 @pytest.fixture
@@ -156,6 +157,56 @@ def test_set_password_preserves_arguments(runner, monkeypatch, args, expected):
 
     assert result.exit_code == 0
     set_password.assert_called_once_with(password=expected)
+
+
+@pytest.mark.parametrize(
+    ("lookup", "expect_old_password", "expect_could_not_check"),
+    [
+        ("https://example--training-gym-trackio.modal.run", True, False),
+        (None, False, False),
+        (TrackioLookupUnknown("timeout"), False, True),
+    ],
+)
+def test_set_password_warns_about_stale_trackio_password(
+    monkeypatch, capsys, lookup, expect_old_password, expect_could_not_check
+):
+    from modal_training_gym.cli.setup import set_password
+
+    monkeypatch.setattr("modal_training_gym._dashboard.set_dashboard_password", Mock())
+    monkeypatch.setattr("modal_training_gym.cli.setup.setup", Mock())
+    monkeypatch.setattr(
+        "modal_training_gym.common.config.get_dashboard_proxy_auth",
+        lambda: False,
+    )
+    if isinstance(lookup, Exception):
+        monkeypatch.setattr(
+            "modal_training_gym.common.trackio.lookup_trackio_url",
+            Mock(side_effect=lookup),
+        )
+    else:
+        monkeypatch.setattr(
+            "modal_training_gym.common.trackio.lookup_trackio_url",
+            lambda app_name="training-gym-trackio": lookup,
+        )
+
+    set_password(password="secret")
+
+    err = " ".join(capsys.readouterr().err.split())
+    if expect_old_password:
+        assert "Warning:" in err
+        assert (
+            "A Trackio dashboard is deployed on Modal and still has the old password."
+            in err
+        )
+        assert "TrackioConfig.deploy_to_modal()" in err
+        assert "Could not check" not in err
+    elif expect_could_not_check:
+        assert "Warning:" in err
+        assert "Could not check whether a Trackio dashboard is deployed" in err
+        assert "TrackioConfig.deploy_to_modal()" in err
+        assert "still has the old password" not in err
+    else:
+        assert "Warning:" not in err
 
 
 @pytest.mark.parametrize(

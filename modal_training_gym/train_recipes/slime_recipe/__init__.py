@@ -20,9 +20,6 @@ from modal_training_gym.train_recipes.slime_recipe.qwen3_5_9b import (
 from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b import (
     Qwen3_6_35B_Recipe,
 )
-from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b_long_context import (
-    Qwen3_6_35B_Recipe_Long_Context,
-)
 from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b import (
     Qwen3_6_27B_Recipe,
 )
@@ -51,7 +48,6 @@ __all__ = [
     "Qwen3_5_4B_Recipe",
     "Qwen3_5_9B_Recipe",
     "Qwen3_6_35B_Recipe",
-    "Qwen3_6_35B_Recipe_Long_Context",
     "Qwen3_6_27B_Recipe",
     "Qwen3_6_27B_Recipe_Agentic",
     "Qwen3_8_27B_Recipe",
