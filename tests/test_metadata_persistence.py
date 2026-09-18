@@ -13,11 +13,18 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from contextlib import nullcontext
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from modal_training_gym.common import run as run_mod
 from modal_training_gym.common.framework import Framework
+from modal_training_gym.common import launcher_helpers
+from modal_training_gym.common.launcher_helpers import (
+    complete_training_run,
+    training_run_lifecycle,
+)
 from modal_training_gym.common.train_result import (
     save_train_result_blob,
     train_result_payload,
@@ -25,6 +32,52 @@ from modal_training_gym.common.train_result import (
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
 from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import MetadataStore
+
+
+@pytest.mark.parametrize(
+    "error, expected",
+    [
+        (None, "completed"),
+        (RuntimeError("worker failed"), "failed"),
+        (KeyboardInterrupt(), "stopped"),
+    ],
+)
+def test_training_lifecycle_persists_terminal_state(fake_volume, error, expected):
+    run = run_mod.TrainingRun(
+        training_run_id="lifecycle", framework=Framework.SLIME, config={"metrics": {}}
+    )
+    run_mod.set_checkpoint_location(
+        run,
+        checkpoint_dir="/checkpoints/run",
+        checkpoints_volume_name="outputs",
+        checkpoints_mount_path="/checkpoints",
+    )
+    run.save()
+
+    async def exercise():
+        async with training_run_lifecycle(run):
+            pass
+        assert run_mod.TrainingRun.from_id("lifecycle").ended_at is None
+        async with training_run_lifecycle(run):
+            if error is not None:
+                raise error
+            payload = await complete_training_run(
+                run,
+                checkpoints_volume=Mock(commit=Mock(aio=AsyncMock())),
+                app_name="test",
+                model=None,
+                group_id=None,
+            )
+            assert payload["checkpoint_dir"] == "/checkpoints/run"
+            assert payload["checkpoints_volume_name"] == "outputs"
+
+    with pytest.raises(type(error)) if error else nullcontext():
+        asyncio.run(exercise())
+    saved = run_mod.TrainingRun.from_id("lifecycle")
+    assert saved.status.value == saved.metadata["last_attempt_status"] == expected
+    assert saved.ended_at is not None
+    if isinstance(error, RuntimeError):
+        assert "worker failed" in saved.error_message
 
 
 @pytest.mark.parametrize("fw", list(Framework))
@@ -203,3 +256,22 @@ def test_remote_save_from_unmounted_container():
     with modal.enable_output():
         with app.run():
             assert _save_probe.remote() == "ok"
+
+
+def test_terminal_save_failure_preserves_training_error(monkeypatch, fake_volume):
+    """A failed persist must not replace the exception that ended training."""
+    record = run_mod.TrainingRun(training_run_id="run", framework="slime", config={})
+    monkeypatch.setattr(
+        launcher_helpers,
+        "build_terminal_run_record",
+        AsyncMock(return_value=Mock(save=AsyncMock(side_effect=RuntimeError("io")))),
+    )
+    original = RuntimeError("training failed")
+
+    async def run():
+        with pytest.raises(RuntimeError) as caught:
+            async with training_run_lifecycle(record):
+                raise original
+        assert caught.value is original
+
+    asyncio.run(run())
