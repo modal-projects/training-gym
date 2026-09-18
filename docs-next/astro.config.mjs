@@ -147,7 +147,8 @@ export default defineConfig({
     '/tutorials/rl/007_param_sweep': '/tutorials/param_sweep',
     '/tutorials/rl/008_computer_use': '/tutorials/computer_use',
     '/tutorials/rl/009_cross_tokenizer_distillation':
-      '/tutorials/cross_tokenizer_distillation',
+      '/tutorials/cross_tok_distill',
+    '/tutorials/cross_tokenizer_distillation': '/tutorials/cross_tok_distill',
     '/tutorials/tools/000_observability_dashboard':
       '/guides/dashboard',
     '/guides/observability-dashboard': '/guides/dashboard',
