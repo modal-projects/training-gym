@@ -36,16 +36,16 @@ test("matchesSearch is case-insensitive and treats blanks as match-all", () => {
   assert.equal(matchesSearch("train/loss", "reward"), false);
 });
 
-test("seriesToRows keeps finite points and normalises timestamps", () => {
-  assert.deepEqual(seriesToRows([[0, 1.5, 100], [1, "2", 0], [2, null, 5], ["x", 1, 1]]), [
-    { x: 0, y: 1.5, ts: 100 },
-    { x: 1, y: 2, ts: null },
+test("seriesToRows keeps only finite points", () => {
+  assert.deepEqual(seriesToRows([[0, 1.5], [1, "2"], [2, null], ["x", 1]]), [
+    { x: 0, y: 1.5 },
+    { x: 1, y: 2 },
   ]);
   assert.deepEqual(seriesToRows(undefined), []);
 });
 
 test("seriesStats reports min, max, latest and count", () => {
-  assert.deepEqual(seriesStats(seriesToRows([[0, 3, 0], [1, -1, 0], [2, 2, 0]])), {
+  assert.deepEqual(seriesStats(seriesToRows([[0, 3], [1, -1], [2, 2]])), {
     min: -1,
     max: 3,
     latest: 2,

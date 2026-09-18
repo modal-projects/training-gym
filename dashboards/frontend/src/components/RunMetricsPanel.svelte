@@ -165,11 +165,9 @@
     <div class="detail-empty">
       <div class="text-(--text-bright) mb-[6px]">No metrics reported yet.</div>
       <div class="max-w-[64ch] leading-[1.5]">
-        Scalars logged through <code>wandb.log</code> (or Trackio) are mirrored here
-        while the run trains. Metric configs mirror by default; pass
-        <code>mirror_to_dashboard=False</code> to opt out, or use
-        <code>DashboardMetricConfig()</code> to log here without an external tracker.
-        {#if isRunning}The first points show up once the framework logs its first step.{/if}
+        Scalars the framework logs through <code>wandb.log</code> show up here
+        for every metric provider.
+        {#if isRunning}The first points arrive once training logs its first step.{/if}
       </div>
     </div>
   {:else}

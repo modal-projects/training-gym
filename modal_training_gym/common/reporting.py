@@ -274,11 +274,7 @@ def _enqueue_timing(payload: dict[str, Any], *, final: bool = False) -> None:
 
 
 def _enqueue_metric_points(payload: dict[str, Any], *, final: bool = False) -> None:
-    """Enqueue a batch of mirrored scalar metrics (see ``metric_mirror.py``).
-
-    The ``final`` batch is the process-exit flush, so like timing finals it
-    is accepted while the queue is draining and retried a few times.
-    """
+    """Enqueue mirrored scalars; ``final`` is the process-exit flush."""
     if _REPORTER_DRAINING and not final:
         return
     url = _derive_url(_METRIC_POINTS_PATH)

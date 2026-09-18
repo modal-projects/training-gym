@@ -209,12 +209,10 @@ export async function fetchRunTimings(trainingRunId, { signal } = {}) {
 // point_count, stale }`, downsampled server-side to `maxPoints` per key.
 export async function fetchRunMetrics(
   trainingRunId,
-  { signal, keys = [], minStep = null, maxStep = null, maxPoints = 1000 } = {},
+  { signal, keys = [], maxPoints = 1000 } = {},
 ) {
   const params = new URLSearchParams();
   for (const key of keys) params.append("keys", key);
-  if (minStep != null) params.set("min_step", String(minStep));
-  if (maxStep != null) params.set("max_step", String(maxStep));
   if (maxPoints != null) params.set("max_points", String(maxPoints));
   const query = params.toString();
   const res = await fetch(

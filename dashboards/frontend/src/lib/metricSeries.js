@@ -1,5 +1,5 @@
 // Helpers for the Metrics tab: W&B-style panel grouping of mirrored metric
-// keys, plus the `[step, value, ts]` rows -> LineChart rows conversion.
+// keys, plus the `[step, value]` rows -> LineChart rows conversion.
 
 // Keys without a `/` prefix land in the same panel group W&B uses for them.
 export const UNGROUPED = "Charts";
@@ -46,7 +46,7 @@ export function groupMetricKeys(keys, search = "") {
     );
 }
 
-// `[[step, value, ts], ...]` -> `[{ x, y, ts }]`, dropping anything non-finite.
+// `[[step, value], ...]` -> `[{ x, y }]`, dropping anything non-finite.
 export function seriesToRows(rows) {
   if (!Array.isArray(rows)) return [];
   const out = [];
@@ -54,9 +54,7 @@ export function seriesToRows(rows) {
     if (!Array.isArray(row) || row[0] == null || row[1] == null) continue;
     const x = Number(row[0]);
     const y = Number(row[1]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const ts = Number(row[2]);
-    out.push({ x, y, ts: Number.isFinite(ts) && ts > 0 ? ts : null });
+    if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });
   }
   return out;
 }
