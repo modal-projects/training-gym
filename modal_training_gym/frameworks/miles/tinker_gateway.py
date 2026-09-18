@@ -364,7 +364,13 @@ def _terminalize_gateway_run(
 
 
 def mark_gateway_run_stopped(training_run_id: str) -> None:
-    """Terminal ``STOPPED`` for the gateway's run once its head container exits."""
+    """Terminal ``STOPPED`` for a gateway deliberately torn down via ``stop()``.
+
+    A head container exiting is not a signal on its own: Modal may replace the
+    container while the deployment stays live. Apps stopped elsewhere (``modal
+    app stop``) are terminalized by the dashboard's orphan reconciler once it
+    sees the app is dead.
+    """
     _terminalize_gateway_run(
         TrainingRun.from_id(training_run_id), TrainingRunStatus.STOPPED, None
     )
@@ -470,7 +476,8 @@ def build_tinker_gateway_app(
     ``app.TinkerGatewayServer`` (mirroring ``build_sglang_serve_app``) so the
     launcher can resolve its URL after ``deploy()``. With ``run_record`` the
     head container reports ``serving`` and ``forward_backward`` timings for
-    that run and marks it stopped on exit.
+    that run and marks it failed if ``serve_tinker`` dies; ``TinkerGateway.stop()``
+    marks it stopped.
     """
     import modal
     from modal import App, Volume
@@ -681,10 +688,6 @@ def build_tinker_gateway_app(
                 except Exception as exc:  # noqa: BLE001
                     print(f"[tinker-gateway] final checkpoint commit failed: {exc!r}")
             if self.cluster.is_head and training_run_id:
-                try:
-                    mark_gateway_run_stopped(training_run_id)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[tinker-gateway] could not mark run stopped: {exc!r}")
                 flush_status_reporter()
             subprocess.run(["ray", "stop", "--force"], check=False)
 
@@ -901,10 +904,16 @@ class TinkerGateway(BaseModel):
         )
 
     def stop(self) -> None:
-        """Stop the gateway's Modal app. Adapter state stays on the Volume."""
+        """Stop the gateway's Modal app and mark its dashboard run ``STOPPED``.
+
+        Adapter state stays on the Volume.
+        """
         subprocess.run(
-            ["modal", "app", "stop", self.modal_app_id or self.app_name], check=True
+            ["modal", "app", "stop", "-y", self.modal_app_id or self.app_name],
+            check=True,
         )
+        if self.training_run_id:
+            mark_gateway_run_stopped(self.training_run_id)
 
 
 def _resolve(value: Any) -> Any:
