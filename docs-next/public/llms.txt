@@ -44,7 +44,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 - [Getting started with RL](https://gym.modal.dev/tutorials/rl_basics)
 - [Painting flowers with code](https://gym.modal.dev/tutorials/paint_flowers)
-- [Training coding agents in sandboxed environments](https://gym.modal.dev/tutorials/coding_agent)
+- [Training multi-turn coding agents](https://gym.modal.dev/tutorials/coding_agent)
 - [Efficient inference using on-policy distillation](https://gym.modal.dev/tutorials/on_policy_distillation)
 - [Long chain-of-thought reasoning for large-scale RL](https://gym.modal.dev/tutorials/dapo)
 - [Speech transcription that's better, faster, and cheaper](https://gym.modal.dev/tutorials/audio_asr)
