@@ -142,21 +142,7 @@ Repo: https://github.com/modal-projects/training-gym
 ### Deployment
 
 - [CustomDeployment](https://gym.modal.dev/reference/customdeployment)
-- [DeepSeek_V4_Flash_SglangRecipe](https://gym.modal.dev/reference/deepseek_v4_flash_sglangrecipe)
 - [Endpoint](https://gym.modal.dev/reference/endpoint)
-- [GLM_4_7_SglangRecipe](https://gym.modal.dev/reference/glm_4_7_sglangrecipe)
-- [Qwen3_0_6B_SglangRecipe](https://gym.modal.dev/reference/qwen3_0_6b_sglangrecipe)
-- [Qwen3_0_6B_VllmRecipe](https://gym.modal.dev/reference/qwen3_0_6b_vllmrecipe)
-- [Qwen3_1_7B_SglangRecipe](https://gym.modal.dev/reference/qwen3_1_7b_sglangrecipe)
-- [Qwen3_1_7B_VllmRecipe](https://gym.modal.dev/reference/qwen3_1_7b_vllmrecipe)
-- [Qwen3_30B_SglangRecipe](https://gym.modal.dev/reference/qwen3_30b_sglangrecipe)
-- [Qwen3_30B_VllmRecipe](https://gym.modal.dev/reference/qwen3_30b_vllmrecipe)
-- [Qwen3_4B_SglangRecipe](https://gym.modal.dev/reference/qwen3_4b_sglangrecipe)
-- [Qwen3_4B_VllmRecipe](https://gym.modal.dev/reference/qwen3_4b_vllmrecipe)
-- [Qwen3_6_35B_SglangRecipe](https://gym.modal.dev/reference/qwen3_6_35b_sglangrecipe)
-- [Qwen3_6_35B_VllmRecipe](https://gym.modal.dev/reference/qwen3_6_35b_vllmrecipe)
-- [Qwen3_8B_SglangRecipe](https://gym.modal.dev/reference/qwen3_8b_sglangrecipe)
-- [Qwen3_8B_VllmRecipe](https://gym.modal.dev/reference/qwen3_8b_vllmrecipe)
 - [SglangRecipe](https://gym.modal.dev/reference/sglangrecipe)
 - [VllmRecipe](https://gym.modal.dev/reference/vllmrecipe)
 

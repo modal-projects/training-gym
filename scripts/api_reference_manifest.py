@@ -6,10 +6,7 @@ from typing import Any
 
 import modal_training_gym as gym
 from modal_training_gym._api_reference import is_excluded_from_api_reference
-from scripts.generate_models_table import (
-    collect_deploy_preset_names,
-    collect_model_preset_names,
-)
+from scripts.generate_models_table import collect_model_preset_names
 
 API_REFERENCE_DENYLIST: frozenset[str] = frozenset(
     name
@@ -55,7 +52,7 @@ def entry_sort_key(entry: dict[str, str]) -> tuple[bool, str]:
 
 
 def collect_public_api() -> list[dict[str, Any]]:
-    presets = collect_model_preset_names() | collect_deploy_preset_names()
+    presets = collect_model_preset_names()
     entries: list[dict[str, str]] = []
     for name in gym.__all__:
         if name in API_REFERENCE_DENYLIST:
