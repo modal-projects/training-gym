@@ -62,7 +62,7 @@ class AgentTaskDataset(DatasetConfig):
 
 # ## Start training
 # 
-# With the [Qwen3_6_27B_Recipe_Agentic](https://github.com/modal-projects/training-gym/blob/dda10c3b27bc85839ae9b6d1a006595cf11e5953/modal_training_gym/train_recipes/slime_recipe/qwen3_6_27b_agentic.py),
+# With the [Qwen3_6_27B_Recipe_Agentic](https://gym.modal.dev/reference/qwen3_6_27b_recipe_agentic),
 # recipe class, it's simply too easy.
 
 RUN_NAME = f"coding-agent-{uuid4().hex}"
