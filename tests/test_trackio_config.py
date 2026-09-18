@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 import sys
 import threading
 import types
@@ -71,7 +70,10 @@ def test_trackio_dashboard_urls_do_not_expose_credentials():
     )
 
 
-def test_deploy_to_modal_returns_a_self_hosted_config(monkeypatch):
+def test_deploy_to_modal_returns_a_self_hosted_config(monkeypatch, tmp_path):
+    from modal_training_gym.common import config as gym_config
+
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
     calls = {}
 
     def fake_deploy(**kwargs):
@@ -101,6 +103,177 @@ def test_deploy_to_modal_returns_a_self_hosted_config(monkeypatch):
         dashboard_url="https://example--training-gym-trackio.modal.run",
         modal_secret_name="_my-trackio-write-token",
     )
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "my-trackio",
+        "volume_name": "my-trackio-data",
+        "modal_secret_name": "_my-trackio-write-token",
+        "TRACKIO_PACKAGE_VERSION": "0.34.0",
+    }
+
+
+def test_deploy_to_modal_persists_custom_volume_secret_and_version(
+    monkeypatch, tmp_path
+):
+    from modal_training_gym.common import config as gym_config
+
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio._deploy_modal_dashboard",
+        lambda **_kwargs: "https://example--training-gym-trackio.modal.run",
+    )
+
+    TrackioConfig.deploy_to_modal(
+        volume_name="production-metrics",
+        modal_secret_name="_production-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "production-metrics",
+        "modal_secret_name": "_production-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
+
+
+def test_get_trackio_deploy_rejects_a_partial_record(tmp_path, monkeypatch):
+    from modal_training_gym.common import config as gym_config
+
+    path = tmp_path / ".training-gym.toml"
+    path.write_text(
+        "[trackio]\n"
+        'app_name = "training-gym-trackio"\n'
+        'volume_name = "production-metrics"\n'
+    )
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", path)
+
+    assert gym_config.get_trackio_deploy() is None
+
+
+def test_get_trackio_deploy_ignores_a_record_without_environment(tmp_path, monkeypatch):
+    from modal_training_gym.common import config as gym_config
+
+    path = tmp_path / ".training-gym.toml"
+    path.write_text(
+        "[trackio]\n"
+        'app_name = "training-gym-trackio"\n'
+        'volume_name = "production-metrics"\n'
+        'modal_secret_name = "_production-trackio-token"\n'
+        'TRACKIO_PACKAGE_VERSION = "0.35.0"\n'
+    )
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", path)
+
+    assert gym_config.get_trackio_deploy() is None
+
+
+def test_get_trackio_deploy_ignores_a_record_from_another_environment(
+    tmp_path, monkeypatch
+):
+    from modal_training_gym.common import config as gym_config
+
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "staging")
+    gym_config.save_trackio_deploy(
+        app_name="training-gym-trackio",
+        volume_name="staging-metrics",
+        modal_secret_name="_staging-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "staging-metrics",
+        "modal_secret_name": "_staging-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
+
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "production")
+
+    assert gym_config.get_trackio_deploy() is None
+
+
+def test_get_trackio_deploy_uses_the_modal_toml_environment(tmp_path, monkeypatch):
+    from modal_training_gym.common import config as gym_config
+
+    monkeypatch.delenv("MODAL_ENVIRONMENT", raising=False)
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
+    monkeypatch.setattr(gym_config, "MODAL_CONFIG_PATH", tmp_path / ".modal.toml")
+    (tmp_path / ".modal.toml").write_text('[default]\nenvironment = "staging"\n')
+    gym_config.save_trackio_deploy(
+        app_name="training-gym-trackio",
+        volume_name="staging-metrics",
+        modal_secret_name="_staging-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "staging-metrics",
+        "modal_secret_name": "_staging-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
+
+    (tmp_path / ".modal.toml").write_text('[default]\nenvironment = "production"\n')
+
+    assert gym_config.get_trackio_deploy() is None
+
+
+def test_save_trackio_deploy_keeps_other_environments(tmp_path, monkeypatch):
+    from modal_training_gym.common import config as gym_config
+
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "staging")
+    gym_config.save_trackio_deploy(
+        app_name="training-gym-trackio",
+        volume_name="staging-metrics",
+        modal_secret_name="_staging-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "production")
+    gym_config.save_trackio_deploy(
+        app_name="training-gym-trackio",
+        volume_name="production-metrics",
+        modal_secret_name="_production-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "production-metrics",
+        "modal_secret_name": "_production-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
+
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "staging")
+
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "staging-metrics",
+        "modal_secret_name": "_staging-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
+
+
+def test_save_trackio_deploy_round_trips_a_dotted_environment(tmp_path, monkeypatch):
+    from modal_training_gym.common import config as gym_config
+
+    path = tmp_path / ".training-gym.toml"
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", path)
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "team.prod")
+    gym_config.save_trackio_deploy(
+        app_name="training-gym-trackio",
+        volume_name="team-prod-metrics",
+        modal_secret_name="_team-prod-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+
+    assert '[trackio."team.prod"]' in path.read_text()
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "team-prod-metrics",
+        "modal_secret_name": "_team-prod-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
 
 
 class _FakeImage:

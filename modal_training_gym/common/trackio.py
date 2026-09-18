@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
+from modal_training_gym.common.config import save_trackio_deploy
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.metrics import MetricConfig
 
@@ -82,6 +83,12 @@ class TrackioConfig(MetricConfig):
         volume_name = volume_name or f"{app_name}-data"
         modal_secret_name = modal_secret_name or f"_{app_name}-write-token"
         server_url = _deploy_modal_dashboard(
+            app_name=app_name,
+            volume_name=volume_name,
+            modal_secret_name=modal_secret_name,
+            TRACKIO_PACKAGE_VERSION=TRACKIO_PACKAGE_VERSION,
+        )
+        save_trackio_deploy(
             app_name=app_name,
             volume_name=volume_name,
             modal_secret_name=modal_secret_name,
