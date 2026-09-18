@@ -242,13 +242,25 @@ def set_password(password: str | None = None) -> None:
 
     from modal_training_gym.cli.output import print_warning
     from modal_training_gym.common.config import get_dashboard_proxy_auth
-    from modal_training_gym.common.trackio import deployed_trackio_url
+    from modal_training_gym.common.trackio import (
+        TrackioLookupUnknown,
+        lookup_trackio_url,
+    )
 
     setup(
         interactive=False,
         require_proxy_auth=get_dashboard_proxy_auth() is True,
     )
-    if deployed_trackio_url():
+    try:
+        trackio_url = lookup_trackio_url()
+    except TrackioLookupUnknown as exc:
+        print_warning(
+            f"Could not check whether a Trackio dashboard is deployed "
+            f"({exc.__cause__ or exc}). Re-run TrackioConfig.deploy_to_modal() "
+            "if you have one so the new password takes effect."
+        )
+        return
+    if trackio_url:
         print_warning(
             "A Trackio dashboard is deployed on Modal and still has the old password. "
             "Re-run TrackioConfig.deploy_to_modal() so the new password takes effect."
