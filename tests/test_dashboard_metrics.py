@@ -234,4 +234,5 @@ def test_series_response_filters_unknown_keys_and_downsamples():
     assert list(out["series"]) == ["x"]
     assert out["series"]["x"] == [[0, 0.0], [9, 9.0]]
     assert out["latest"] == {"x": 9.0}
+    assert series_response("r", table, max_points=1)["latest"] == {"x": 9.0}
     assert out["step_range"] == [0, 9]

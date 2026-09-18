@@ -287,6 +287,7 @@ def _enqueue_metric_points(payload: dict[str, Any], *, final: bool = False) -> N
         "_retry_count": 3 if final else 1,
         "_retry_delay": 1.0,
         **payload,
+        "final": final,
     }
     try:
         _REPORT_QUEUE.put_nowait(item)
@@ -320,9 +321,11 @@ def _schedule_timing_retry(payload: dict[str, Any], retries: int) -> None:
 
 
 def _is_final_timing(payload: dict[str, Any]) -> bool:
-    return bool(payload.get("final")) and str(payload.get("_url", "")).rstrip(
-        "/"
-    ).endswith("/api/timing-events")
+    """Process-exit flush whose delivery is worth retrying while draining."""
+    url = str(payload.get("_url", "")).rstrip("/")
+    return bool(payload.get("final")) and (
+        url.endswith("/api/timing-events") or url.endswith(_METRIC_POINTS_PATH)
+    )
 
 
 def _retry_timing_final_during_drain(payload: dict[str, Any], retries: int) -> bool:

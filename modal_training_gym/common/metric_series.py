@@ -109,18 +109,20 @@ def series_response(
 ) -> dict[str, Any]:
     all_keys = sorted({key for metrics in table.values() for key in metrics})
     series: dict[str, list[list[float]]] = {}
+    latest: dict[str, float] = {}
     for key in keys or all_keys:
         rows = [
             [step, table[step][key]] for step in sorted(table) if key in table[step]
         ]
         if rows:
             series[key] = downsample(rows, max_points)
+            latest[key] = rows[-1][1]
     steps = sorted(table)
     return {
         "training_run_id": training_run_id,
         "keys": all_keys,
         "series": series,
-        "latest": {key: rows[-1][1] for key, rows in series.items()},
+        "latest": latest,
         "step_range": [steps[0], steps[-1]] if steps else None,
         "point_count": len(steps),
     }

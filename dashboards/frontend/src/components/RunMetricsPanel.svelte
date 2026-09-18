@@ -39,11 +39,11 @@
   });
 
   let controller = null;
-  let inflight = false;
+  let inflight = null; // the AbortController whose request is pending
 
   async function load(id) {
-    if (inflight) return;
-    inflight = true;
+    if (inflight === controller) return;
+    inflight = controller;
     const signal = controller?.signal;
     try {
       const next = await fetchRunMetrics(id, { signal });
@@ -54,8 +54,10 @@
       if (signal?.aborted || err?.name === "AbortError") return;
       error = err instanceof Error ? err.message : String(err);
     } finally {
-      inflight = false;
-      if (!signal?.aborted) loading = false;
+      if (!signal?.aborted) {
+        inflight = null;
+        loading = false;
+      }
     }
   }
 
@@ -76,10 +78,11 @@
     };
   });
 
-  // Poll while the run is live; a finished run's history is fetched once.
+  // Poll while the run is live (or the last response was served from a
+  // stale cache); a finished run's history is otherwise fetched once.
   $effect(() => {
     const id = runId;
-    if (!id || !isRunning) return;
+    if (!id || !(isRunning || payload?.stale)) return;
     const interval = window.setInterval(() => load(id), POLL_MS);
     return () => window.clearInterval(interval);
   });
