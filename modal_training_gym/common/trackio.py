@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import secrets
-import shlex
 import sys
 import types
 import uuid
@@ -15,6 +14,12 @@ from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.metric_mirror import (
+    MIRROR_MODE_ENV,
+    MIRROR_TEE,
+    mirror_flush,
+    mirror_log,
+)
 from modal_training_gym.common.metrics import MetricConfig
 
 
@@ -22,6 +27,7 @@ _DEFAULT_TRACKIO_VERSION = "0.34.0"
 _DEFAULT_MODAL_APP_NAME = "training-gym-trackio"
 _RUN_NAME_ENV = "TRAINING_GYM_TRACKIO_RUN_NAME"
 _SHIM_MARKER = "_training_gym_trackio_adapter"
+_PTH_FILE = "_training_gym_trackio.pth"
 _PTH_LINE = (
     "import os; os.environ.get('TRAINING_GYM_METRIC_PROVIDER') != 'trackio' "
     "or __import__('modal_training_gym.common.trackio', "
@@ -43,6 +49,8 @@ class TrackioConfig(MetricConfig):
         modal_secret_name: Modal Secret with ``HF_TOKEN`` or ``TRACKIO_WRITE_TOKEN``.
         TRACKIO_PACKAGE_VERSION: Trackio release installed in the training image
             and by ``deploy_to_modal``.
+        mirror_to_dashboard: Also chart every logged scalar in the Training Gym
+            dashboard's Metrics tab.
     """
 
     project: str = ""
@@ -55,6 +63,7 @@ class TrackioConfig(MetricConfig):
     bucket_id: str = ""
     modal_secret_name: str = "huggingface-secret"
     TRACKIO_PACKAGE_VERSION: str = _DEFAULT_TRACKIO_VERSION
+    mirror_to_dashboard: bool = True
 
     provider: ClassVar[str] = "trackio"  # pyright: ignore[reportIncompatibleMethodOverride]
 
@@ -251,15 +260,13 @@ def trackio_secrets(config: TrackioConfig) -> list[Any]:
     return [Secret.from_name(config.modal_secret_name)]
 
 
-def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
-    install_code = (
-        "import pathlib, site; "
-        "pathlib.Path(site.getsitepackages()[0], "
-        f"'_training_gym_trackio.pth').write_text({_PTH_LINE!r})"
-    )
-    return image.uv_pip_install(
-        f"trackio=={config.TRACKIO_PACKAGE_VERSION}"
-    ).run_commands(f"python3 -c {shlex.quote(install_code)}")
+def install_trackio_package(image: Any, config: TrackioConfig) -> Any:
+    return image.uv_pip_install(f"trackio=={config.TRACKIO_PACKAGE_VERSION}")
+
+
+def trackio_pth_files() -> dict[str, str]:
+    """``.pth`` that swaps in the W&B adapter when the provider is Trackio."""
+    return {_PTH_FILE: _PTH_LINE}
 
 
 def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
@@ -416,6 +423,7 @@ def install_wandb_shim() -> None:
     def log(
         data: dict[str, Any],
         step: int | None = None,
+        commit: bool | None = None,
         *_args: Any,
         **_kwargs: Any,
     ) -> Any:
@@ -424,14 +432,20 @@ def install_wandb_shim() -> None:
         # go through the run object directly.
         run = shim.run
         if run is None:
-            return trackio.log(data, step=step)
-        return run.log(metrics=data, step=step)
+            result = trackio.log(data, step=step)
+        else:
+            result = run.log(metrics=data, step=step)
+        if os.environ.get(MIRROR_MODE_ENV) == MIRROR_TEE:
+            mirror_log(data, step=step, commit=commit)
+        return result
 
     def finish(*_args: Any, **_kwargs: Any) -> Any:
         try:
             return trackio.finish()
         finally:
             shim.run = None
+            if os.environ.get(MIRROR_MODE_ENV) == MIRROR_TEE:
+                mirror_flush()
 
     def save(glob_str: str, *_args: Any, **_kwargs: Any) -> Any:
         return trackio.save(glob_str)

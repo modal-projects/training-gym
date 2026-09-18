@@ -22,6 +22,7 @@ ROUTES = [
     ("/api/framework-status", {"phase": "training"}),
     ("/api/training-rollouts", {"rollout_id": 1}),
     ("/api/advantage-distributions", {"rollout_id": 1}),
+    ("/api/metric-points", {"points": [{"step": 1, "metrics": {"a": 1.0}}]}),
 ]
 ROUTE_IDS = [route.rsplit("/", 1)[-1] for route, _ in ROUTES]
 

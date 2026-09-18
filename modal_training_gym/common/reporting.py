@@ -42,6 +42,7 @@ _MAX_UNACKNOWLEDGED_TIMING_FINALS = 128
 _PHASE_PATH = "/api/framework-status"
 _ROLLOUT_PATH = "/api/training-rollouts"
 _ADVANTAGE_PATH = "/api/advantage-distributions"
+_METRIC_POINTS_PATH = "/api/metric-points"
 _PHASE_TIMEOUT_SECONDS = 1.0
 _STEP_EVENT_TIMEOUT_SECONDS = 5.0
 _ROLLOUT_TIMEOUT_SECONDS = 10.0
@@ -270,6 +271,31 @@ def _enqueue_timing(payload: dict[str, Any], *, final: bool = False) -> None:
                 "it for process-exit retry",
                 flush=True,
             )
+
+
+def _enqueue_metric_points(payload: dict[str, Any], *, final: bool = False) -> None:
+    """Enqueue a batch of mirrored scalar metrics (see ``metric_mirror.py``).
+
+    The ``final`` batch is the process-exit flush, so like timing finals it
+    is accepted while the queue is draining and retried a few times.
+    """
+    if _REPORTER_DRAINING and not final:
+        return
+    url = _derive_url(_METRIC_POINTS_PATH)
+    if not url:
+        return
+    _ensure_worker(allow_during_drain=final)
+    item = {
+        "_url": url,
+        "_timeout": _STEP_EVENT_TIMEOUT_SECONDS,
+        "_retry_count": 3 if final else 1,
+        "_retry_delay": 1.0,
+        **payload,
+    }
+    try:
+        _REPORT_QUEUE.put_nowait(item)
+    except Exception:
+        pass
 
 
 def _requeue_timing_retry(payload: dict[str, Any], retries: int) -> None:

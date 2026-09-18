@@ -34,6 +34,9 @@ class WandbConfig(MetricConfig):
             Preserve the configured run name.
         modal_wandb_secret_name:
             Modal secret containing the W&B API key.
+        mirror_to_dashboard:
+            Also chart every scalar logged to W&B in the Training Gym
+            dashboard's Metrics tab.
     """
 
     project: str = ""
@@ -43,6 +46,7 @@ class WandbConfig(MetricConfig):
     key: str = ""
     disable_random_suffix: bool = True
     modal_wandb_secret_name: str = "wandb-secret"
+    mirror_to_dashboard: bool = True
 
     provider: ClassVar[str] = "wandb"
 

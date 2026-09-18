@@ -40,6 +40,10 @@ class MetadataStore(Enum):
     EVAL_SUMMARIES = "eval-summaries"
     EVAL_CONFIGS = "eval-configs"
     SUBSTEP_TIMING = "substep-timing"
+    # Scalar metric histories mirrored from the framework's W&B-style logger.
+    # One sub-directory per run holding step-range chunk files, see
+    # ``common/metric_series.py``.
+    METRIC_SERIES = "metric-series"
 
 
 SUMMARY_KEY = "summary"
