@@ -6,9 +6,9 @@ import {
   formatMetricValue,
   groupMetricKeys,
   matchesSearch,
-  seriesStats,
   seriesToRows,
 } from "./metricSeries.js";
+import { niceTicks } from "./ticks.js";
 
 const KEYS = ["train/loss", "rollout/reward", "perf/tokens_per_s", "lr", "eval/acc", "train/grad_norm"];
 
@@ -44,14 +44,12 @@ test("seriesToRows keeps only finite points", () => {
   assert.deepEqual(seriesToRows(undefined), []);
 });
 
-test("seriesStats reports min, max, latest and count", () => {
-  assert.deepEqual(seriesStats(seriesToRows([[0, 3], [1, -1], [2, 2]])), {
-    min: -1,
-    max: 3,
-    latest: 2,
-    count: 3,
-  });
-  assert.equal(seriesStats([]), null);
+test("niceTicks picks round values inside the range", () => {
+  assert.deepEqual(niceTicks(0, 39, 5), [0, 10, 20, 30]);
+  assert.deepEqual(niceTicks(1.53, 2.07, 4), [1.6, 1.8, 2]);
+  assert.deepEqual(niceTicks(-0.012, 0.031, 4), [0, 0.02]);
+  assert.deepEqual(niceTicks(-0.012, 0.031, 8), [-0.01, 0, 0.01, 0.02, 0.03]);
+  assert.deepEqual(niceTicks(5, 5, 4), []);
 });
 
 test("formatMetricValue is compact across magnitudes", () => {

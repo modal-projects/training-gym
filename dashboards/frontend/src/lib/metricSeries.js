@@ -59,17 +59,6 @@ export function seriesToRows(rows) {
   return out;
 }
 
-export function seriesStats(rows) {
-  if (!rows.length) return null;
-  let min = Infinity;
-  let max = -Infinity;
-  for (const row of rows) {
-    if (row.y < min) min = row.y;
-    if (row.y > max) max = row.y;
-  }
-  return { min, max, latest: rows[rows.length - 1].y, count: rows.length };
-}
-
 // Compact numeric formatting for axis/tooltip/stat readouts: integers stay
 // integers, small magnitudes switch to exponent form, everything else gets
 // four significant digits.
