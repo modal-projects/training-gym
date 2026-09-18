@@ -1177,12 +1177,17 @@ def build_slime_app(
                         "WARNING: no_save_optim=True — enabling no_load_optim for resume."
                     )
                 object.__setattr__(slime, "no_load_optim", slime.no_save_optim)
-            elif megatron_to_hf_mode == "bridge" and _hf_ref:
+            elif (
+                megatron_to_hf_mode == "bridge"
+                and _hf_ref
+                and slime.is_field_default("ref_load")
+            ):
                 # Fresh bridge run: load the HF weights directly via AutoBridge. slime falls back
                 # args.load -> args.ref_load, and _load_checkpoint_hf maps the HF dir into Megatron
                 # (weights only — no optimizer/RNG state, so no torch_dist is required). Pointing
                 # ref_load at a torch_dist here would instead trigger the full-resume path and fail
-                # on the missing optimizer state.
+                # on the missing optimizer state, so a recipe's torch_dist default is replaced;
+                # a caller-provided ref_load is kept.
                 object.__setattr__(slime, "ref_load", _hf_ref)
             try:
                 cmd = build_train_cmd(

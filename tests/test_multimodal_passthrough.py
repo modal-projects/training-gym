@@ -40,6 +40,7 @@ from modal_training_gym.train_recipes.miles_recipe.qwen3_5_4b import (
 )
 from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_5_4b import Qwen3_5_4B_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b import Qwen3_6_27B_Recipe
 from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_asr_1_7b import (
     Qwen3_ASR_1_7B_Recipe,
@@ -296,6 +297,14 @@ def test_yaml_bridge_mode_does_not_assign_torch_dist_ref_load():
         dataset=_mm("image"),
     )
     assert recipe.ref_load == ""
+
+
+def test_bridge_ref_load_override_keeps_caller_value():
+    """The train-time bridge branch replaces only a recipe's default ref_load."""
+    assert Qwen3_6_27B_Recipe().is_field_default("ref_load")
+    assert not Qwen3_6_27B_Recipe(
+        ref_load="/checkpoints/reference-v2"
+    ).is_field_default("ref_load")
 
 
 def test_yaml_raw_mode_overrides_bridge_field_for_conversion():

@@ -16,6 +16,7 @@ from scripts.diff_impact import (
     REPO_ROOT,
     affected_models,
 )
+from scripts.generate_models_table import collect_models
 from scripts.validation_backends import build_recipe_and_dataset
 
 
@@ -64,6 +65,21 @@ def test_media_rows_train_on_the_modality_dataset(config):
         assert dataset.modalities == frozenset({"image"})
         return
     assert dataset.modalities == frozenset({"audio"})
+
+
+def test_every_table_modality_has_a_validation_row():
+    """The README models table must not advertise a modality nobody validates."""
+    validated = {
+        (config.model_name.rsplit("/", 1)[-1], config.modality)
+        for config in VALIDATION_CONFIGS
+    }
+    unvalidated = [
+        (row.model.display_name, modality)
+        for row in collect_models()
+        for modality in row.modalities
+        if (row.model.display_name, modality) not in validated
+    ]
+    assert unvalidated == []
 
 
 def test_registry_names_are_unique():

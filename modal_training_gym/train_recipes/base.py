@@ -123,9 +123,8 @@ class BaseTrainRecipe(ABC):
     ) -> dict[str, Any]:
         return {}
 
-    def _override_default(self, out: dict[str, Any], key: str, value: Any) -> None:
-        if key in self._escape_hatch_keys():
-            return
+    def is_field_default(self, key: str) -> bool:
+        """True when *key* still holds its recipe default rather than a caller value."""
         default = _dc.MISSING
         for field in _dc.fields(self):
             if field.name != key:
@@ -136,7 +135,12 @@ class BaseTrainRecipe(ABC):
                 else field.default
             )
             break
-        if getattr(self, key, default) == default:
+        return getattr(self, key, default) == default
+
+    def _override_default(self, out: dict[str, Any], key: str, value: Any) -> None:
+        if key in self._escape_hatch_keys():
+            return
+        if self.is_field_default(key):
             out[key] = value
 
     # ── Container → framework flag converters ────────────────────────────────
