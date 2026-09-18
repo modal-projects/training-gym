@@ -81,7 +81,7 @@ config = TrainConfig(
 )
 ```
 
-### Locally-hosted
+### Self-hosted
 
 
 You'll need to create a [Modal Secret](https://modal.com/docs/guide/secrets) with your API key:
