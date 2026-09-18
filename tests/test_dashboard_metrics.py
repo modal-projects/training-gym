@@ -220,6 +220,8 @@ def test_downsample_keeps_endpoints_and_extremes():
     assert rows[437] in out and rows[612] in out
     assert all(out[i][0] < out[i + 1][0] for i in range(len(out) - 1))
     assert downsample(rows[:50], 100) == rows[:50]
+    assert downsample(rows, 2) == [rows[0], rows[-1]]
+    assert downsample(rows, 1) == [rows[0]]
 
 
 def test_series_response_filters_unknown_keys_and_downsamples():

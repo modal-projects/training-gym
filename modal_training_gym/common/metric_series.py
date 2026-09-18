@@ -80,7 +80,9 @@ def downsample(rows: list[list[float]], max_points: int) -> list[list[float]]:
     min and max, so loss spikes survive (W&B's history sampler does the same)."""
     if len(rows) <= max_points:
         return rows
-    buckets = max(1, (max_points - 2) // 2)
+    if max_points < 4:
+        return [rows[0], rows[-1]][:max_points]
+    buckets = (max_points - 2) // 2
     lo_step, span = rows[0][0], (rows[-1][0] - rows[0][0]) or 1
 
     def bucket_of(i: int) -> int:
