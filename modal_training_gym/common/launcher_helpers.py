@@ -10,7 +10,10 @@ must.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+from pathlib import Path
+from contextlib import asynccontextmanager, contextmanager
 import inspect
 import os
 import secrets as _secrets
@@ -20,7 +23,7 @@ import time
 from typing import Any, Callable
 
 import cloudpickle
-from modal import Image, Volume
+from modal import Image, Retries, Volume
 
 from modal_training_gym.common import COMMON_TRAINING_GYM_TAGS, modal_tag_value
 from modal_training_gym.common.framework import (
@@ -28,7 +31,9 @@ from modal_training_gym.common.framework import (
     resolve_caller_module,
 )
 from modal_training_gym.common.modal_refs import register_modal_cloudpickle_reducers
+from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.run import (
+    CHECKPOINT_LOCATION_METADATA_KEY,
     TrainingRun,
     TrainingRunStatus,
     mark_training_attempt_finished,
@@ -39,9 +44,21 @@ from modal_training_gym.common.run import (
     set_checkpoint_location,
 )
 from modal_training_gym.common.checkpoint import require_within_volume_mount
-from modal_training_gym.common.train_result import train_result_payload
+from modal_training_gym.common.launcher_utils import (
+    drop_materialized_config_key,
+    serialize_recipe_params,
+)
 from modal_training_gym.common.metrics import MetricConfig, metric_metadata
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
+from modal_training_gym.common.train_result import (
+    save_train_result_blob,
+    train_result_payload,
+)
+from modal_training_gym.train_recipes.base import (
+    CHECKPOINTS_PATH,
+    DATA_PATH,
+    HF_CACHE_PATH,
+)
 
 
 def resolve_caller_context() -> tuple[Any, str | None]:
@@ -79,21 +96,11 @@ def ship_callable(
     *,
     caller_script: str | None,
     fallback_name: str,
-    set_path: Callable[[str], None],
-) -> "Image":
-    """Make a user-provided callable importable inside the remote container.
-
-    Package-internal callables need no shipping but still get ``set_path``.
-    A callable defined in its own module is added as a local file pointed at
-    ``module.symbol``. Inline callables are cloudpickled into a tiny loader
-    module. Returns the (possibly extended) image.
-    """
-    if fn is None:
-        return image
+) -> tuple[Image, str]:
+    """Return the image and the callable's remote import path."""
     fn_mod = getattr(fn, "__module__", None) or ""
     if fn_mod.startswith("modal_training_gym"):
-        set_path(f"{fn_mod}.{getattr(fn, '__name__', fallback_name)}")
-        return image
+        return image, f"{fn_mod}.{getattr(fn, '__name__', fallback_name)}"
     try:
         fn_file = os.path.abspath(inspect.getfile(fn))
     except (TypeError, OSError):
@@ -105,8 +112,7 @@ def ship_callable(
             remote_path=f"/root/{fn_module_name}.py",
             copy=True,
         )
-        set_path(f"{fn_module_name}.{getattr(fn, '__name__', fallback_name)}")
-        return image
+        return image, f"{fn_module_name}.{getattr(fn, '__name__', fallback_name)}"
     fn_name = getattr(fn, "__name__", fallback_name)
     try:
         payload = base64.b64encode(cloudpickle.dumps(fn)).decode("ascii")
@@ -136,32 +142,99 @@ def ship_callable(
         remote_path=f"/root/{mod_name}.py",
         copy=True,
     )
-    set_path(f"{mod_name}.{fn_name}")
-    return image
+    return image, f"{mod_name}.{fn_name}"
 
 
-def resolve_checkpoint_volumes(
+def create_training_volumes(
     checkpoint: Any,
     *,
     volume_prefix: str,
-    default_mount_path: str,
-) -> tuple[str, str, "Volume"]:
-    """Resolve the checkpoints volume name / mount path / Volume, honoring an
-    optional ``CheckpointConfig`` override."""
-    checkpoints_volume_name = (
-        checkpoint.checkpoints_volume_name
-        if checkpoint is not None and checkpoint.checkpoints_volume_name
-        else f"{volume_prefix}-checkpoints"
+    data_volume_name: str | None = None,
+    mount_metadata: bool = False,
+) -> tuple[str, str, dict[str, Volume]]:
+    def volume(volume_name: str) -> Volume:
+        return Volume.from_name(volume_name, create_if_missing=True)
+
+    name = (
+        getattr(checkpoint, "checkpoints_volume_name", None)
+        or f"{volume_prefix}-checkpoints"
     )
-    checkpoints_mount_path = (
-        checkpoint.checkpoints_mount_path.rstrip("/") or "/"
-        if checkpoint is not None and checkpoint.checkpoints_mount_path
-        else default_mount_path.rstrip("/")
-    )
-    checkpoints_volume = Volume.from_name(
-        checkpoints_volume_name, create_if_missing=True
-    )
-    return checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume
+    mount = (
+        getattr(checkpoint, "checkpoints_mount_path", None) or str(CHECKPOINTS_PATH)
+    ).rstrip("/") or "/"
+    volumes = {
+        str(HF_CACHE_PATH): volume("huggingface-cache"),
+        str(DATA_PATH): volume(data_volume_name or f"{volume_prefix}-data"),
+        mount: volume(name),
+    }
+    if mount_metadata:
+        volumes["/metadata"] = volume("training-gym-metadata")
+    return name, mount, volumes
+
+
+def training_function_options(
+    recipe: Any,
+    *,
+    framework: str,
+    secrets: list[Any],
+    experimental_options: dict[str, Any],
+) -> dict[str, Any]:
+    overrides = dict(recipe.train_function_kwargs or {})
+    user_secrets = overrides.pop("secrets", None) or []
+    if not isinstance(user_secrets, (list, tuple)):
+        user_secrets = [user_secrets]
+    if extra := sorted(set(overrides) - {"experimental_options", "ephemeral_disk"}):
+        raise TypeError(
+            f"Unsupported {framework}.train_function_kwargs keys: {', '.join(extra)}"
+        )
+    return {
+        "gpu": f"{recipe.gpu_type}:{recipe.gpu_allocation.gpus_per_node}",
+        "memory": recipe.memory,
+        "cpu": recipe.cpu,
+        "cloud": recipe.cloud,
+        "region": recipe.region,
+        "secrets": [*secrets, *user_secrets],
+        "ephemeral_disk": overrides.get("ephemeral_disk"),
+        "timeout": 24 * 60 * 60,
+        "retries": Retries(max_retries=recipe.max_retries, initial_delay=0.0),
+        "single_use_containers": True,
+        "experimental_options": {
+            **experimental_options,
+            **(overrides.get("experimental_options") or {}),
+        },
+        "serialized": True,
+        "name": "train",
+    }
+
+
+async def start_training_cluster(
+    recipe: Any,
+    volumes: "tuple[Volume, ...]",
+    *host_ip_vars: str,
+    modal_app_id: str,
+    modal_app_url: str,
+    framework_status_url: str,
+    framework_status_token: str,
+) -> "tuple[Any, str, str]":
+    """Reload the mounts, discover the Ray cluster, and export the dashboard URL.
+
+    The toml holding the URL lives on the user's machine, so it has to reach
+    this container's status_reporter and the worker's runtime_env through the
+    environment.
+    """
+    from modal_training_gym.common.ray_cluster import ModalRayCluster
+
+    modal_app_id = modal_app_id or os.environ.get("MODAL_APP_ID", "")
+    if framework_status_url:
+        os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
+    if framework_status_token:
+        os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
+    await asyncio.gather(*(volume.reload.aio() for volume in volumes))
+
+    cluster = ModalRayCluster()
+    cluster.discover_cluster(recipe.total_nodes)
+    os.environ.update(dict.fromkeys([*host_ip_vars, "HOST_IP"], cluster.node_ip))
+    return cluster, modal_app_id, modal_app_url or modal_app_dashboard_url(modal_app_id)
 
 
 def build_app_tags(
@@ -188,37 +261,119 @@ def build_app_tags(
     return tags
 
 
-def run_download_phase(
-    *,
-    training_run_id: str,
-    phase: str,
-    framework_status_url: str,
-    framework_status_token: str,
-    volumes: "tuple[Volume, ...]",
-    download: Callable[[], None],
+def report_phase(
+    training_run_id: str, phase: str, url: str = "", token: str = ""
 ) -> None:
-    """Report the download phase, reload the given volumes, run ``download``,
-    then commit the volumes and flush the status reporter."""
-    from modal_training_gym.common.status_reporter import (
-        enqueue_framework_status,
-        flush as flush_status_reporter,
-    )
+    """Mark a phase active on the dashboard, if this run reports at all."""
+    from modal_training_gym.common.status_reporter import enqueue_framework_status
 
     if training_run_id:
         enqueue_framework_status(
-            training_run_id,
-            phase,
-            url=framework_status_url or None,
-            token=framework_status_token or None,
-            is_active=True,
+            training_run_id, phase, url=url or None, token=token or None, is_active=True
         )
-    for volume in volumes:
-        volume.reload()
-    download()
-    for volume in volumes:
-        volume.commit()
-    if training_run_id:
-        flush_status_reporter(timeout_seconds=2.0)
+
+
+def register_recipe_functions(
+    app: Any,
+    image: Image,
+    *,
+    hf_cache_volume: Volume,
+    data_volume: Volume,
+    checkpoints_volume: Volume,
+    checkpoints_mount_path: str,
+    download_phase: str,
+    download: Callable[[], None],
+    download_timeout: int,
+    prepare_dataset: Callable[[], None],
+    dataset_timeout: int,
+) -> None:
+    """Register the ``download`` and ``prepare_dataset`` steps ``train()`` runs first."""
+    from modal_training_gym.common import hf_secrets, proxy_auth_secrets
+    from modal_training_gym.common.status_reporter import flush as flush_status
+
+    volumes = (hf_cache_volume, checkpoints_volume)
+
+    @app.function(
+        image=image,
+        volumes={
+            str(HF_CACHE_PATH): hf_cache_volume,
+            checkpoints_mount_path: checkpoints_volume,
+        },
+        timeout=download_timeout,
+        secrets=[*hf_secrets(), *proxy_auth_secrets()],
+        serialized=True,
+        name="download",
+    )
+    def _download(
+        training_run_id: str = "",
+        framework_status_url: str = "",
+        framework_status_token: str = "",
+    ) -> None:
+        report_phase(
+            training_run_id,
+            download_phase,
+            framework_status_url,
+            framework_status_token,
+        )
+        for volume in volumes:
+            volume.reload()
+        download()
+        for volume in volumes:
+            volume.commit()
+        flush_status(timeout_seconds=2.0)
+
+    @app.function(
+        image=image,
+        volumes={str(DATA_PATH): data_volume},
+        timeout=dataset_timeout,
+        secrets=hf_secrets(),
+        serialized=True,
+        name="prepare_dataset",
+    )
+    def _prepare_dataset() -> None:
+        data_volume.reload()
+        prepare_dataset()
+        data_volume.commit()
+
+
+def ship_recipe_callables(
+    image: Image,
+    recipe: Any,
+    *,
+    caller_script: str | None,
+    reward_post_process_in_config: bool,
+) -> Image:
+    hooks = {
+        "custom_rm_function": "custom_rm_path",
+        "custom_generate_function": "custom_generate_function_path",
+        "custom_reward_post_process_function": (
+            "custom_reward_post_process_path" if reward_post_process_in_config else None
+        ),
+        "rollout_function": None,
+        **{
+            attr: f"training_gym_{attr}_path"
+            for attr in (
+                "custom_rollout_log_function",
+                "custom_eval_rollout_log_function",
+                "custom_megatron_before_log_prob_hook",
+                "custom_megatron_before_train_step_hook",
+            )
+        },
+    }
+
+    for attr, key in hooks.items():
+        value = getattr(recipe, attr)
+        if not callable(value):  # A str is an import path the user vouches for.
+            continue
+        image, path = ship_callable(
+            image, value, caller_script=caller_script, fallback_name=attr
+        )
+        if key is None:
+            setattr(recipe, attr, path)
+        else:
+            recipe.extra_config = {**(recipe.extra_config or {}), key: path}
+            setattr(recipe, attr, None)
+    return image
 
 
 def write_dataset_if_needed(dataset: Any, path: str) -> bool:
@@ -233,19 +388,32 @@ def write_dataset_if_needed(dataset: Any, path: str) -> bool:
     return True
 
 
-def run_prepare_dataset(
+def download_model_if_needed(model: Any, *, always: bool = False) -> None:
+    """Download unless cached; ``always`` repatches an already-cached snapshot."""
+
+    def has_files(path: Path) -> bool:
+        return path.exists() and (not path.is_dir() or any(path.iterdir()))
+
+    hub = HF_CACHE_PATH / "hub" / f"models--{model.model_name.replace('/', '--')}"
+    local = getattr(model, "model_path", None)
+    cached = has_files(hub / "snapshots") and (not local or has_files(Path(local)))
+    if not cached:
+        print(f"Downloading model {model.model_name}...")
+    if always or not cached:
+        model.download()
+
+
+def write_datasets(
     dataset: Any,
     eval_dataset: Any,
-    data_volume: "Volume",
     dataset_path: str,
     eval_dataset_path: str | None,
-) -> None:
+) -> bool:
     """Materialize the training and optional framework-evaluation datasets."""
-    data_volume.reload()
-    write_dataset_if_needed(dataset, dataset_path)
+    wrote = write_dataset_if_needed(dataset, dataset_path)
     if eval_dataset is not None and eval_dataset_path is not None:
-        write_dataset_if_needed(eval_dataset, eval_dataset_path)
-    data_volume.commit()
+        wrote = write_dataset_if_needed(eval_dataset, eval_dataset_path) or wrote
+    return wrote
 
 
 async def init_training_run_record(
@@ -255,8 +423,13 @@ async def init_training_run_record(
     modal_app_url: str,
     framework: "Framework",
     initializing_status: Any,
-    config_summary: dict[str, Any],
-    metric_cfg: "MetricConfig | None",
+    recipe: Any,
+    model: Any,
+    dataset: Any,
+    eval_dataset: Any,
+    dataset_path: str,
+    eval_dataset_path: str | None,
+    recipe_metadata: tuple[str, ...] = (),
     metric_entity: str,
     framework_status_token: str,
     checkpoint_dir: str,
@@ -271,6 +444,32 @@ async def init_training_run_record(
     invoking download/convert (so those phases are visible in the dashboard);
     falls back to a fresh record when ``train()`` is invoked directly.
     """
+
+    def dataset_summary(value: Any) -> dict[str, str]:
+        return {"hf_repo": getattr(value, "hf_repo", ""), "name": type(value).__name__}
+
+    config_summary = {
+        "model": {"model_name": model.model_name} if model else {},
+        "recipe": serialize_recipe_params(
+            recipe,
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+            model=model,
+        )
+        | {
+            key: getattr(recipe, key) for key in recipe_metadata if getattr(recipe, key)
+        },
+        "metrics": metric_metadata(recipe.metrics, entity=metric_entity, run_id=""),
+        "dataset": dataset_summary(dataset),
+        "eval_dataset": dataset_summary(eval_dataset)
+        if eval_dataset is not None
+        else None,
+        "lr": recipe.lr,
+        "global_batch_size": recipe.global_batch_size,
+    }
+    metric_cfg = recipe.metrics
     try:
         run_record = await TrainingRun.from_id(training_run_id, is_async=True)
         run_record.modal_app_id = modal_app_id
@@ -386,36 +585,34 @@ def apply_scoped_save(recipe: Any, save_root: str) -> None:
         recipe.save = save_root
 
 
-def persist_completed_run(
-    run_record: Any,
+async def complete_training_run(
+    run_record: TrainingRun,
     *,
+    checkpoints_volume: Any,
     app_name: str,
-    framework: "Framework",
-    training_run_id: str,
-    checkpoint_dir: str,
     model: Any,
-    checkpoints_volume_name: str,
-    checkpoints_mount_path: str,
-    metric_cfg: "MetricConfig | None",
-    metric_entity: str,
-    metric_run_id: str,
     group_id: str | None,
 ) -> dict[str, Any]:
-    metrics = metric_metadata(metric_cfg, entity=metric_entity, run_id=metric_run_id)
+    assert run_record.metadata is not None
     payload = train_result_payload(
         app_name=app_name,
-        framework=framework,
-        training_run_id=training_run_id,
-        checkpoint_dir=checkpoint_dir,
-        checkpoints_volume_name=checkpoints_volume_name,
-        checkpoints_mount_path=checkpoints_mount_path,
+        framework=run_record.framework,
+        training_run_id=run_record.training_run_id,
         model_config=model,
-        metrics=metrics,
+        metrics=run_record.config["metrics"],
         group_id=group_id or "",
+        **run_record.metadata[CHECKPOINT_LOCATION_METADATA_KEY],
     )
     run_record.app_name = app_name
     run_record.source_model = payload["model_config"]
-    run_record.metrics = metrics
+    run_record.metrics = payload["metrics"]
+    await save_train_result_blob(payload, is_async=True)
+    run_record.status = TrainingRunStatus.COMPLETED
+    mark_training_attempt_finished(
+        run_record, status="completed", ended_at=int(time.time())
+    )
+    await checkpoints_volume.commit.aio()
+    print(f"TrainingRun saved: {run_record.training_run_id}")
     return payload
 
 
@@ -468,3 +665,113 @@ async def build_terminal_run_record(run_record: Any, training_run_id: str) -> An
         0, finished_at - latest_run_record.started_at
     )
     return latest_run_record
+
+
+@contextmanager
+def resumed_recipe(recipe: Any, save_root: str, checkpoint: dict[str, Any] | None):
+    """Apply this run's resume settings while the command is built, then restore."""
+    original = {
+        field: getattr(recipe, field)
+        for field in ("save", "load", "start_rollout_id", "ref_load", "no_load_optim")
+    }
+    try:
+        if checkpoint is not None:
+            iteration = checkpoint.get("resume_from_iteration")
+            num_rollout = recipe.num_rollout
+            if iteration is not None:
+                if iteration + 1 > num_rollout:
+                    raise RuntimeError(
+                        f"Resume would start at rollout {iteration + 1}, "
+                        f"but num_rollout={num_rollout}; nothing would run."
+                    )
+                if iteration + 1 == num_rollout:
+                    print(
+                        "WARNING: Resume checkpoint is already at the final configured "
+                        "rollout; the retry will exit without running another rollout.",
+                        flush=True,
+                    )
+            print(
+                f"WARNING: detected existing checkpoint in "
+                f"{checkpoint['resume_checkpoint_path']}; "
+                "resuming training from last saved iteration."
+            )
+            recipe.load = save_root
+            recipe.start_rollout_id = None
+            drop_materialized_config_key(recipe, "start_rollout_id")
+            if recipe.no_save_optim and not recipe.no_load_optim:
+                print(
+                    "WARNING: no_save_optim=True — enabling no_load_optim for resume."
+                )
+            recipe.no_load_optim = recipe.no_save_optim
+        yield
+    finally:
+        for field, value in original.items():
+            setattr(recipe, field, value)
+
+
+@asynccontextmanager
+async def training_run_lifecycle(run_record: TrainingRun, status_token: str = ""):
+    """Persist terminal state on success, interruption, or failure."""
+    from modal_training_gym.common.status_reporter import enqueue_framework_status
+
+    async def set_status(status: Any) -> None:
+        run_record.framework_status = status
+        enqueue_framework_status(
+            run_record.training_run_id, status.value, token=status_token
+        )
+
+    try:
+        yield set_status
+    except KeyboardInterrupt:
+        mark_run_stopped(run_record)
+        raise
+    except BaseException as exc:
+        mark_run_failed(run_record, exc)
+        raise
+    finally:
+        if run_record.status is not TrainingRunStatus.RUNNING:
+            latest = await build_terminal_run_record(
+                run_record, run_record.training_run_id
+            )
+            try:
+                await latest.save(is_async=True)
+            except Exception as exc:
+                print(f"Failed to save run record: {exc}")
+
+
+def check_training_result(result: Any, run_record: TrainingRun) -> None:
+    if not result.is_success:
+        training_run_id = run_record.training_run_id
+        message = result.message or f"Ray job finished with status: {result.status}"
+        error = RuntimeError(f"{message} (training_run_id={training_run_id})")
+        error.training_run_id = training_run_id  # pyright: ignore[reportAttributeAccessIssue]
+        run_record.error_message = str(error)
+        raise error
+    print(f"Ray job completed: {result.status}")
+
+
+def training_reporting_env(
+    recipe: Any, model: Any, app_name: str, framework_status_url: str
+) -> dict[str, str]:
+    status_url = os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL") or (
+        framework_status_url or ""
+    )
+    if not status_url:
+        print(
+            "WARNING: no dashboard URL passed to train() and no "
+            "TRAINING_GYM_FRAMEWORK_STATUS_URL set inside the "
+            "container. Phase reporting is disabled for this run."
+        )
+    parser = getattr(model, "response_parser", None) if model is not None else None
+    module = getattr(parser, "__module__", "")
+    name = getattr(parser, "__qualname__", "") or getattr(parser, "__name__", "")
+    return {
+        "TRAINING_GYM_APP_NAME": app_name,
+        "TRAINING_GYM_TOTAL_STEPS": str(recipe.num_rollout),
+        "TRAINING_GYM_RESPONSE_PARSER_PATH": f"{module}.{name}"
+        if module and name
+        else "",
+        "TRAINING_GYM_CAPTURE_TRACE": "1" if recipe.capture_trace else "",
+        "TRAINING_GYM_TRACE_SAMPLE_LIMIT": str(recipe.trace_sample_limit),
+        "TRAINING_GYM_FRAMEWORK_STATUS_URL": status_url,
+    }

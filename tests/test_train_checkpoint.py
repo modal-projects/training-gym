@@ -169,13 +169,35 @@ def test_slime_conversion_uses_wrapper_with_expected_environment() -> None:
     assert 'if num_nodes > 1:\n            env["SKIP_RELEASE_RENAME"] = "1"' in source
 
 
-def test_internal_resume_loads_adam_when_the_run_saved_it() -> None:
-    miles = inspect.getsource(build_miles_app)
-    slime = inspect.getsource(build_slime_app)
+@pytest.mark.parametrize("recipe_cls", [SlimeRecipe, MilesRecipe])
+@pytest.mark.parametrize("no_save_optim", [False, True])
+def test_internal_resume_uses_saved_optimizer_and_restores_recipe(
+    recipe_cls, no_save_optim
+) -> None:
+    from modal_training_gym.common.launcher_helpers import resumed_recipe
 
-    assert "miles.no_load_optim = miles.no_save_optim" in miles
-    assert "miles.no_load_optim = original_no_load_optim" in miles
-    assert 'object.__setattr__(slime, "no_load_optim", slime.no_save_optim)' in slime
+    recipe = recipe_cls(
+        num_rollout=10,
+        load="/checkpoints/seed",
+        start_rollout_id=0,
+        no_load_optim=not no_save_optim,
+        no_save_optim=no_save_optim,
+    )
+    checkpoint = {
+        "resume_from_iteration": 2,
+        "resume_checkpoint_path": "/checkpoints/run/iter_0000002",
+    }
+    with pytest.raises(RuntimeError, match="command failed"):
+        with resumed_recipe(recipe, "/checkpoints/run", checkpoint):
+            fields = recipe._fields()
+            assert fields["load"] == "/checkpoints/run"
+            assert fields["start_rollout_id"] is None
+            assert fields["no_load_optim"] is no_save_optim
+            raise RuntimeError("command failed")
+
+    assert recipe.load == "/checkpoints/seed"
+    assert recipe.start_rollout_id == 0
+    assert recipe.no_load_optim is not no_save_optim
 
 
 def test_miles_conversion_uses_wrapper_with_expected_environment() -> None:
@@ -208,9 +230,10 @@ def test_auto_resume_drops_extra_config_start_rollout_id(recipe, tmp_path) -> No
     import yaml
 
     from modal_training_gym.common.launcher_utils import (
-        drop_materialized_config_key,
         prepare_launch_config,
     )
+
+    from modal_training_gym.common.launcher_helpers import resumed_recipe
 
     recipe.extra_config = {"start_rollout_id": 0, "qkv_format": "bshd"}
     prepare_launch_config(
@@ -218,7 +241,12 @@ def test_auto_resume_drops_extra_config_start_rollout_id(recipe, tmp_path) -> No
     )
     assert "start_rollout_id" in recipe._escape_hatch_keys()
 
-    drop_materialized_config_key(recipe, "start_rollout_id")
+    with resumed_recipe(
+        recipe,
+        "/checkpoints/run",
+        {"resume_checkpoint_path": "/checkpoints/run/iter_0000000"},
+    ):
+        assert recipe.start_rollout_id is None
 
     assert recipe._escape_hatch_keys() == ("qkv_format",)
     with open(recipe.extra_config) as f:
