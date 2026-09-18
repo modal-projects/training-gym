@@ -87,10 +87,7 @@ from modal_training_gym.common.metric_series import (
     DEFAULT_MAX_POINTS_PER_KEY,
     MAX_POINTS_PER_KEY,
     MetricPointsBatch,
-    StepTable,
-    chunk_payload,
-    load_chunk,
-    merge_points,
+    RunMetrics,
     metric_series_store,
     series_response,
 )
@@ -693,14 +690,15 @@ def fastapi_app():
     # One in-memory table per run; dirty chunks hit the volume every few
     # seconds (or on the final batch), the same way timing events do. Each
     # container writes its own copy of a chunk (``chunk-000001-<writer>``) and
-    # readers merge every copy, so autoscaled replicas can't clobber each other.
+    # readers merge every copy (newest ingest per step wins), so autoscaled
+    # replicas can't clobber each other.
     METRIC_FLUSH_INTERVAL_S = 5.0
     METRIC_READ_TTL_S = 10.0
     METRIC_CACHE_MAX_RUNS = 64
 
     class MetricEntry:
         def __init__(self) -> None:
-            self.table: StepTable = {}
+            self.metrics = RunMetrics()
             self.dirty: set[str] = set()
             self.loaded_at: float | None = None
             self.flushed_at = time.monotonic()
@@ -723,7 +721,7 @@ def fastapi_app():
         for chunk in await _metadata_vol_list(
             metric_series_store(training_run_id), is_async=True
         ):
-            load_chunk(entry.table, chunk)
+            entry.metrics.load_chunk(chunk)
         entry.loaded_at = time.monotonic()
 
     async def _flush_metrics(training_run_id: str, entry: MetricEntry) -> None:
@@ -732,7 +730,7 @@ def fastapi_app():
             await _metadata_vol_put_many(
                 metric_series_store(training_run_id),
                 {
-                    f"{chunk}-{METRIC_WRITER_ID}": chunk_payload(chunk, entry.table)
+                    f"{chunk}-{METRIC_WRITER_ID}": entry.metrics.chunk_payload(chunk)
                     for chunk in entry.dirty
                 },
                 is_async=True,
@@ -1446,7 +1444,7 @@ def fastapi_app():
                     raise HTTPException(
                         status_code=503, detail="Metric store unavailable"
                     )
-            entry.dirty |= merge_points(entry.table, batch.points)
+            entry.dirty |= entry.metrics.merge_points(batch.points)
             if (
                 batch.final
                 or time.monotonic() - entry.flushed_at >= METRIC_FLUSH_INTERVAL_S
@@ -1482,7 +1480,10 @@ def fastapi_app():
             }:
                 await _flush_metrics(training_run_id, entry)
             payload = series_response(
-                training_run_id, entry.table, keys=keys or None, max_points=max_points
+                training_run_id,
+                entry.metrics.table,
+                keys=keys or None,
+                max_points=max_points,
             )
         return JSONResponse({**payload, "stale": stale})
 

@@ -2,13 +2,15 @@
 
 Stored on the metadata volume as
 ``metric-series/{run}/chunk-000001-{writer}.json``, each chunk covering
-``CHUNK_STEPS`` steps (one file per dashboard container that ingested it, all
-merged on read), so a 10k-step run is a handful of files rather than one per
-point. In memory a run is ``{step: {key: value}}``.
+``CHUNK_STEPS`` steps, so a 10k-step run is a handful of files rather than
+one per point. Every dashboard container writes its own copy of a chunk and
+readers merge all copies, newest ingest time per step winning, so autoscaled
+replicas neither clobber nor reorder each other's points.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -45,36 +47,52 @@ def chunk_key(step: int) -> str:
     return f"chunk-{step // CHUNK_STEPS:06d}"
 
 
-def merge_points(table: StepTable, points: Iterable[MetricPoint]) -> set[str]:
-    """Last write wins per ``(step, key)``. Returns the chunk keys touched."""
-    touched: set[str] = set()
-    for point in points:
-        if point.metrics:
-            table.setdefault(point.step, {}).update(point.metrics)
-            touched.add(chunk_key(point.step))
-    return touched
+class RunMetrics:
+    """One run's points, ``{step: {key: value}}``, plus when each step was
+    last ingested so copies from different containers merge deterministically."""
 
+    def __init__(self) -> None:
+        self.table: StepTable = {}
+        self.written: dict[int, float] = {}
 
-def chunk_payload(chunk: str, table: StepTable) -> dict[str, Any]:
-    return {
-        "steps": {
-            str(step): metrics
-            for step, metrics in sorted(table.items())
-            if chunk_key(step) == chunk
+    def merge_points(self, points: Iterable[MetricPoint]) -> set[str]:
+        """Last write wins per ``(step, key)``. Returns the chunk keys touched."""
+        now = time.time()
+        touched: set[str] = set()
+        for point in points:
+            if point.metrics:
+                self.table.setdefault(point.step, {}).update(point.metrics)
+                self.written[point.step] = now
+                touched.add(chunk_key(point.step))
+        return touched
+
+    def chunk_payload(self, chunk: str) -> dict[str, Any]:
+        steps = sorted(s for s in self.table if chunk_key(s) == chunk)
+        return {
+            "steps": {str(s): self.table[s] for s in steps},
+            "written": {str(s): self.written.get(s, 0.0) for s in steps},
         }
-    }
 
-
-def load_chunk(table: StepTable, payload: Mapping[str, Any]) -> None:
-    """Merge a persisted chunk; points already in memory are newer and win."""
-    steps = payload.get("steps")
-    if not isinstance(steps, Mapping):
-        return
-    for raw_step, metrics in steps.items():
-        if isinstance(metrics, Mapping) and str(raw_step).isdigit():
-            merged = dict(metrics)
-            merged.update(table.get(int(raw_step), {}))
-            table[int(raw_step)] = merged
+    def load_chunk(self, payload: Mapping[str, Any]) -> None:
+        """Merge a persisted chunk: for each step the more recently ingested
+        side (this table or the file) wins on conflicting keys."""
+        steps = payload.get("steps")
+        if not isinstance(steps, Mapping):
+            return
+        written = payload.get("written")
+        written = written if isinstance(written, Mapping) else {}
+        for raw_step, metrics in steps.items():
+            if not isinstance(metrics, Mapping) or not str(raw_step).isdigit():
+                continue
+            step = int(raw_step)
+            at = written.get(raw_step)
+            at = float(at) if isinstance(at, (int, float)) else 0.0
+            mine = self.table.get(step, {})
+            if at > self.written.get(step, -1.0):
+                self.table[step] = {**mine, **metrics}
+                self.written[step] = at
+            else:
+                self.table[step] = {**metrics, **mine}
 
 
 def downsample(rows: list[list[float]], max_points: int) -> list[list[float]]:

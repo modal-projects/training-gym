@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from fastapi.testclient import TestClient
 
@@ -12,8 +13,7 @@ from modal_training_gym.common.metric_series import (
     CHUNK_STEPS,
     MetricPoint,
     downsample,
-    load_chunk,
-    merge_points,
+    RunMetrics,
     series_response,
 )
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
@@ -144,16 +144,24 @@ def test_ingest_buffers_in_memory_and_persists_chunks_on_final(
 def test_reads_pick_up_chunks_written_by_another_replica(
     fake_volume, monkeypatch, tmp_path
 ):
-    """Two replicas each write their own copy of a chunk; reads merge them."""
+    """Two replicas each write their own copy of a chunk; reads merge them,
+    the most recently ingested value winning regardless of listing order."""
     _save_run()
     metadata.vol_put(
-        STORE, "chunk-000000-aaaa", {"steps": {"3": {"lr": 0.1}, "bad": "skip"}}
+        STORE,
+        "chunk-000000-aaaa",
+        {
+            "steps": {"3": {"lr": 0.1}, "4": {"lr": 0.9}, "bad": "skip"},
+            "written": {"4": 20},
+        },
     )
-    metadata.vol_put(STORE, "chunk-000000-bbbb", {"steps": {"4": {"lr": 0.2}}})
+    metadata.vol_put(
+        STORE, "chunk-000000-bbbb", {"steps": {"4": {"lr": 0.2}}, "written": {"4": 10}}
+    )
     metadata.vol_put(STORE, "chunk-000002-bbbb", {})
     with _client(monkeypatch, tmp_path) as client:
         result = client.get(f"/api/runs/{RUN_ID}/metrics").json()
-        assert result["series"] == {"lr": [[3, 0.1], [4, 0.2]]}
+        assert result["series"] == {"lr": [[3, 0.1], [4, 0.9]]}
         client.post(
             "/api/metric-points",
             json=_batch([(5, {"lr": 0.3})], final=True),
@@ -208,20 +216,25 @@ def test_rejects_oversized_or_malformed_points(fake_volume, monkeypatch, tmp_pat
 # ── pure helpers ─────
 
 
-def test_merge_and_load_prefer_newest_in_memory_values():
-    table = {}
-    touched = merge_points(
-        table,
+def test_merge_and_load_prefer_most_recently_ingested_values():
+    run = RunMetrics()
+    touched = run.merge_points(
         [
             MetricPoint(step=1, metrics={"a": 1.0}),
             MetricPoint(step=1, metrics={"a": 2.0, "b": 3.0}),
             MetricPoint(step=2500, metrics={}),  # no metrics: ignored
-        ],
+        ]
     )
     assert touched == {"chunk-000000"}
-    assert table == {1: {"a": 2.0, "b": 3.0}}
-    load_chunk(table, {"steps": {"1": {"a": 99.0, "d": 5.0}, "7": {"a": 1}}})
-    assert table == {1: {"a": 2.0, "b": 3.0, "d": 5.0}, 7: {"a": 1}}
+    assert run.table == {1: {"a": 2.0, "b": 3.0}}
+    # An older (or unstamped) file fills gaps but loses conflicts ...
+    run.load_chunk({"steps": {"1": {"a": 99.0, "d": 5.0}, "7": {"a": 1}}})
+    assert run.table == {1: {"a": 2.0, "b": 3.0, "d": 5.0}, 7: {"a": 1}}
+    # ... while a newer one overrides them.
+    future = time.time() + 60
+    run.load_chunk({"steps": {"1": {"a": 4.0}}, "written": {"1": future}})
+    assert run.table[1] == {"a": 4.0, "b": 3.0, "d": 5.0}
+    assert run.chunk_payload("chunk-000000")["written"]["1"] == future
 
 
 def test_downsample_keeps_endpoints_and_extremes():
@@ -239,10 +252,9 @@ def test_downsample_keeps_endpoints_and_extremes():
 
 
 def test_series_response_filters_unknown_keys_and_downsamples():
-    table = {}
-    merge_points(
-        table, [MetricPoint(step=s, metrics={"x": float(s)}) for s in range(10)]
-    )
+    run = RunMetrics()
+    run.merge_points([MetricPoint(step=s, metrics={"x": float(s)}) for s in range(10)])
+    table = run.table
     out = series_response("r", table, keys=["x", "missing"], max_points=2)
     assert out["keys"] == ["x"]
     assert list(out["series"]) == ["x"]
