@@ -40,7 +40,7 @@ When launching a [hyperparameter sweep](https://gym.modal.dev/tutorials/param_sw
 
 ## Trackio
 
-Trackio is self-hostable, so you can deploy it on Modal, via a Hugging Face Space, or locally.
+Trackio is an open-source W&B alternative which you can deploy on Modal or on a Hugging Face Space. You can even self-host!
 
 ### Deploy on Modal
 
@@ -58,7 +58,7 @@ Just like the [main dashboard](https://gym.modal.dev/guides/dashboard), the Trac
 training-gym set-password
 ```
 
-Note that unlike the main dashboard, this will not redeploy the Trackio dashboard. The password is read at container startup, so rerun `deploy_to_modal()` after changing it. `set-password` prints a warning if it finds the default Modal Trackio app.
+Note that unlike the main dashboard, this will not redeploy the Trackio dashboard. I.e., you'll have to rerun `deploy_to_modal()` after changing it.
 
 ### Deploy on a Hugging Face Space
 
@@ -82,7 +82,6 @@ config = TrainConfig(
 ```
 
 ### Self-hosted
-
 
 You'll need to create a [Modal Secret](https://modal.com/docs/guide/secrets) with your API key:
 
