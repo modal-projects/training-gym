@@ -57,9 +57,7 @@ def _audio_ref(sample: Any) -> Any:
     for item in _iter_content_items(getattr(sample, "prompt", None)):
         if isinstance(item, dict) and (item.get("type") == "audio" or "audio" in item):
             ref = item.get("audio") or item.get("audio_url")
-            if isinstance(ref, str) and not ref.startswith(
-                ("data:", "http://", "https://")
-            ):
+            if isinstance(ref, str) and not ref.startswith("data:"):
                 path = Path(ref)
                 try:
                     if path.is_file():

@@ -115,13 +115,15 @@ dataset = MultimodalDataset(
     rows=[
         {
             "prompt": "What is in this image?",
-            "media": ["/data/cat.png"], # or bytes, data URI, HTTPS URL
+            "media": ["/data/cat.png"], # or bytes, data URI
             "label": "a cat",
         }
     ],
     modality="image",
 )
 ```
+
+Download remote media in `rows()` and return bytes or a local path.
 
 Some useful methods:
 

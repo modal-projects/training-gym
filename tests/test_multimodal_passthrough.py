@@ -328,7 +328,6 @@ def test_yaml_raw_mode_overrides_bridge_field_for_conversion():
 def test_write_writes_media_paths(tmp_path):
     png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     wav = "UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
-    url = "https://example.com/img.png?" + ("a" * 8000)
     local = tmp_path / "local.png"
     local.write_bytes(b"\x89PNG\r\n\x1a\n")
     ds = MultimodalDataset(
@@ -340,7 +339,6 @@ def test_write_writes_media_paths(tmp_path):
                     "/already/a/path.png",
                     b"train-bytes",
                     "data:image/png,%89PNG%0D%0A%1A%0A",
-                    url,
                     local,
                 ],
                 "label": "l",
@@ -351,7 +349,7 @@ def test_write_writes_media_paths(tmp_path):
     raw = list(ds.rows())[0]["images"]
     assert raw[0].startswith("data:image/png;base64,")
     assert raw[2] == b"train-bytes"
-    assert raw[5] == local
+    assert raw[4] == local
     path = tmp_path / "train.jsonl"
     ds.write(str(path))
     row = json.loads(path.read_text().splitlines()[0])
@@ -362,9 +360,8 @@ def test_write_writes_media_paths(tmp_path):
     assert Path(images[0]).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     assert Path(images[2]).read_bytes() == b"train-bytes"
     assert Path(images[3]).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
-    assert images[4] == url
-    assert images[5] == str((media_dir / "000005.png").resolve())
-    assert Path(images[5]).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    assert images[4] == str((media_dir / "000004.png").resolve())
+    assert Path(images[4]).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
     audio = MultimodalDataset(
         rows=[{"prompt": "p", "media": [f"data:audio/wav;base64,{wav}"], "label": "l"}],
@@ -387,6 +384,21 @@ def test_write_writes_media_paths(tmp_path):
     eval_media = Path(json.loads(eval_path.read_text().splitlines()[0])["images"][0])
     assert train_media != eval_media
     assert eval_media.read_bytes() == b"eval-bytes"
+
+
+def test_write_rejects_remote_media_urls(tmp_path):
+    ds = MultimodalDataset(
+        rows=[
+            {
+                "prompt": "p",
+                "media": ["https://example.test/clip.wav"],
+                "label": "l",
+            }
+        ],
+        modality="audio",
+    )
+    with pytest.raises(TrainingGymConfigError, match="remote media URLs"):
+        ds.write(str(tmp_path / "train.jsonl"))
 
 
 def test_train_config_validates_eval_dataset():

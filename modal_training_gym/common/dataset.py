@@ -65,7 +65,10 @@ def _as_media_path(item, dest_dir: Path, index: int):
         return _materialize_data_uri(item, dest_dir, index)
     if isinstance(item, str):
         if item.startswith(("http://", "https://")):
-            return item
+            raise TrainingGymConfigError(
+                "remote media URLs are not supported; download the media in "
+                "rows() and return bytes or a local path"
+            )
         try:
             src = Path(item)
             is_file = src.is_file()
