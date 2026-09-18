@@ -10,6 +10,7 @@ from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.metric_mirror import DashboardMetricConfig
 from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.common.models import (
     ModelArchitecture,
@@ -350,6 +351,8 @@ class SlimeRecipe(BaseTrainRecipe):
             ``train_async.py``.
         metrics:
             Metric tracker settings; expands to slime's W&B-compatible flags.
+            Defaults to the dashboard-only tracker; ``None`` disables metric
+            logging entirely.
         image_overlay:
             Function that modifies the Modal image.
         local_slime:
@@ -553,7 +556,7 @@ class SlimeRecipe(BaseTrainRecipe):
         }
     )
     async_mode: bool = False
-    metrics: MetricConfig | None = None
+    metrics: MetricConfig | None = field(default_factory=DashboardMetricConfig)
     image_overlay: Callable[[modal.Image], modal.Image] | None = None
     local_slime: str | None = None
     slime_git_repository: str | None = None

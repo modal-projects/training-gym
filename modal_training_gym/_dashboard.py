@@ -7,6 +7,7 @@ checkout, or the copy the wheel ships at ``modal_training_gym/_frontend``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import json
@@ -744,22 +745,24 @@ def fastapi_app():
                 except Exception as exc:
                     print(f"[dashboard] metric flush failed: {exc}", flush=True)
 
-    async def _metric_flush_loop() -> None:
-        while True:
-            await asyncio.sleep(METRIC_FLUSH_INTERVAL_S)
+    async def _metric_flush_loop(stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), METRIC_FLUSH_INTERVAL_S)
             await _flush_dirty_metrics()
 
-    metric_flush_task: asyncio.Task[None] | None = None
+    metric_flush_stop: asyncio.Event | None = None
 
     @web.on_event("startup")
     async def _start_metric_flush_loop() -> None:
-        nonlocal metric_flush_task
-        metric_flush_task = asyncio.create_task(_metric_flush_loop())
+        nonlocal metric_flush_stop
+        metric_flush_stop = asyncio.Event()
+        asyncio.create_task(_metric_flush_loop(metric_flush_stop))
 
     @web.on_event("shutdown")
     async def _stop_metric_flush_loop() -> None:
-        if metric_flush_task is not None:
-            metric_flush_task.cancel()
+        if metric_flush_stop is not None:
+            metric_flush_stop.set()
         await _flush_dirty_metrics()
 
     def _rebuild_timing_lanes(entry: TimingEntry) -> None:

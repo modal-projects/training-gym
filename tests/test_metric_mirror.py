@@ -261,6 +261,16 @@ def test_dashboard_config_needs_no_secrets_or_preflight():
     assert preflight_metric(config) == ""
 
 
+def test_recipes_default_to_the_dashboard_and_none_opts_out():
+    from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
+    from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
+
+    for recipe_cls in (SlimeRecipe, MilesRecipe):
+        assert isinstance(recipe_cls().metrics, DashboardMetricConfig)
+        assert "--use-wandb" in recipe_cls().cli_args()
+        assert "--use-wandb" not in recipe_cls(metrics=None).cli_args()
+
+
 @pytest.mark.parametrize(
     "config", [DashboardMetricConfig(), WandbConfig(project="p"), TrackioConfig()]
 )

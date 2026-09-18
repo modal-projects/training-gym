@@ -8,7 +8,7 @@ The [observability dashboard](https://gym.modal.dev/guides/dashboard) captures t
 
 ## Dashboard only
 
-`DashboardMetricConfig` sends the framework's metrics to the dashboard and nowhere else — no account, API key, or extra server:
+This is the default. Every recipe's `metrics` starts as `DashboardMetricConfig()`, which sends the framework's metrics to the dashboard and nowhere else — no account, API key, or extra server. Set it explicitly to name the project or group:
 
 ```python
 from modal_training_gym import DashboardMetricConfig, Qwen3_5_4B, Qwen3_5_4B_Recipe, TrainConfig
@@ -18,7 +18,7 @@ config = TrainConfig(
     dataset=my_dataset,
     recipe=Qwen3_5_4B_Recipe(
         # ...
-        metrics=DashboardMetricConfig(project="my-rl-project"),
+        metrics=DashboardMetricConfig(project="my-rl-project"),  # optional; this is the default provider
     ),
 )
 
@@ -26,6 +26,8 @@ run = config.launch()
 ```
 
 Open the run in the dashboard and switch to the Metrics tab: keys are grouped by prefix like W&B panels (`train/`, `rollout/`, `perf/`, ...), the search box filters every group, and charts refresh while the run trains. Only finite scalars are kept (nested dicts flatten to `a/b`; images, tables, and strings are dropped).
+
+Pass `metrics=None` to turn metric logging off entirely — the framework runs without `--use-wandb` and nothing is stored.
 
 ## Weights & Biases
 
