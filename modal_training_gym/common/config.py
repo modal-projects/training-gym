@@ -249,16 +249,7 @@ def save_proxy_auth(key: str, secret: str) -> None:
     CONFIG_PATH.write_text(_render(config))
 
 
-def get_trackio_deploy() -> dict[str, str] | None:
-    section = load_config().get(TRACKIO_SECTION)
-    if not isinstance(section, dict):
-        return None
-    saved_env = section.get("environment")
-    if (
-        not isinstance(saved_env, str)
-        or saved_env.strip() != active_modal_environment()
-    ):
-        return None
+def _trackio_values(section: dict[str, Any]) -> dict[str, str] | None:
     values: dict[str, str] = {}
     for key in TRACKIO_DEPLOY_KEYS:
         value = section.get(key)
@@ -268,6 +259,26 @@ def get_trackio_deploy() -> dict[str, str] | None:
     return values
 
 
+def _is_nested_table(section: dict[str, Any]) -> bool:
+    return bool(section) and all(isinstance(value, dict) for value in section.values())
+
+
+def get_trackio_deploy() -> dict[str, str] | None:
+    section = load_config().get(TRACKIO_SECTION)
+    if not isinstance(section, dict):
+        return None
+    env = active_modal_environment()
+    if _is_nested_table(section):
+        slot = section.get(env)
+        if not isinstance(slot, dict):
+            return None
+        return _trackio_values(slot)
+    saved_env = section.get("environment")
+    if not isinstance(saved_env, str) or saved_env.strip() != env:
+        return None
+    return _trackio_values(section)
+
+
 def save_trackio_deploy(
     *,
     app_name: str,
@@ -275,14 +286,26 @@ def save_trackio_deploy(
     modal_secret_name: str,
     TRACKIO_PACKAGE_VERSION: str,
 ) -> None:
-    config = load_config()
-    config[TRACKIO_SECTION] = {
-        "environment": active_modal_environment(),
+    env = active_modal_environment()
+    values = {
         "app_name": app_name,
         "volume_name": volume_name,
         "modal_secret_name": modal_secret_name,
         "TRACKIO_PACKAGE_VERSION": TRACKIO_PACKAGE_VERSION,
     }
+    config = load_config()
+    section = config.get(TRACKIO_SECTION)
+    if isinstance(section, dict) and _is_nested_table(section):
+        nested = dict(section)
+    else:
+        nested = {}
+        if isinstance(section, dict):
+            old_env = section.get("environment")
+            old = _trackio_values(section)
+            if isinstance(old_env, str) and old_env.strip() and old:
+                nested[old_env.strip()] = old
+    nested[env] = values
+    config[TRACKIO_SECTION] = nested
     CONFIG_PATH.write_text(_render(config))
 
 
@@ -336,10 +359,17 @@ def get_framework_status_url() -> str | None:
 
 
 def _render(config: dict[str, Any]) -> str:
-    """Minimal TOML writer for the shapes we persist (string-valued tables)."""
+    """Minimal TOML writer for flat tables and one level of nested tables."""
     lines: list[str] = []
     for section, entries in config.items():
         if not isinstance(entries, dict):
+            continue
+        if _is_nested_table(entries):
+            for sub, subentries in entries.items():
+                lines.append(f"[{section}.{sub}]")
+                for key, value in subentries.items():
+                    lines.append(f"{key} = {_format_value(value)}")
+                lines.append("")
             continue
         lines.append(f"[{section}]")
         for key, value in entries.items():

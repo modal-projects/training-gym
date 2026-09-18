@@ -222,6 +222,42 @@ def test_get_trackio_deploy_uses_the_modal_toml_environment(tmp_path, monkeypatc
     assert gym_config.get_trackio_deploy() is None
 
 
+def test_save_trackio_deploy_keeps_other_environments(tmp_path, monkeypatch):
+    from modal_training_gym.common import config as gym_config
+
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "staging")
+    gym_config.save_trackio_deploy(
+        app_name="training-gym-trackio",
+        volume_name="staging-metrics",
+        modal_secret_name="_staging-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "production")
+    gym_config.save_trackio_deploy(
+        app_name="training-gym-trackio",
+        volume_name="production-metrics",
+        modal_secret_name="_production-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "production-metrics",
+        "modal_secret_name": "_production-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
+
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "staging")
+
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "staging-metrics",
+        "modal_secret_name": "_staging-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
+
+
 class _FakeImage:
     def __init__(self) -> None:
         self.packages: list[str] = []

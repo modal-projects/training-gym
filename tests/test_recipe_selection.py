@@ -235,3 +235,15 @@ def test_prepare_recipe_does_not_mutate_stored_launch_callables() -> None:
     assert recipe.custom_rm_function is custom_rm_function
     assert second.image_overlay is image_overlay
     assert second.custom_rm_function is custom_rm_function
+
+
+def test_prepare_recipe_copies_metrics_so_resolve_cannot_leak() -> None:
+    from modal_training_gym.common.trackio import TrackioConfig
+
+    metrics = TrackioConfig(project="rl")
+    config = _config(SlimeRecipe(metrics=metrics))
+    prepared = config._prepare_recipe()
+
+    assert prepared.metrics is not metrics
+    prepared.metrics.server_url = "https://stale.example"
+    assert metrics.server_url == ""

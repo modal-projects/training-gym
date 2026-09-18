@@ -400,6 +400,8 @@ class TrainConfig:
                 ),
                 no_load_optim=True,
             )
+        if recipe.metrics is not None:
+            recipe = _dc.replace(recipe, metrics=_dc.replace(recipe.metrics))
         _try_validate_model_parallelism(recipe, self.model)
         return recipe
 
