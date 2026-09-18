@@ -7,12 +7,16 @@ import types
 from dataclasses import fields
 from importlib.util import find_spec
 from typing import Any
+from unittest.mock import Mock
 
 from modal_training_gym.common.metrics import apply_metric_image
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.trackio import (
     TrackioConfig,
+    TrackioLookupUnknown,
+    deployed_trackio_url,
     install_wandb_shim,
+    lookup_trackio_url,
     require_trackio_destination,
     resolve_trackio_destination,
 )
@@ -134,6 +138,49 @@ def test_deploy_to_modal_persists_custom_volume_secret_and_version(
         "modal_secret_name": "_production-trackio-token",
         "TRACKIO_PACKAGE_VERSION": "0.35.0",
     }
+
+
+def test_deploy_to_modal_returns_config_when_saving_options_fails(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio._deploy_modal_dashboard",
+        lambda **_kwargs: "https://example--training-gym-trackio.modal.run",
+    )
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio.save_trackio_deploy",
+        Mock(side_effect=PermissionError("read-only")),
+    )
+
+    config = TrackioConfig.deploy_to_modal()
+
+    assert config.server_url == "https://example--training-gym-trackio.modal.run"
+    assert "Warning:" in capsys.readouterr().err
+
+
+def test_lookup_trackio_url_handles_not_found_and_unknown_errors(monkeypatch):
+    import modal
+    from modal.exception import NotFoundError
+
+    class _Function:
+        @staticmethod
+        def from_name(_app_name, _function_name):
+            raise NotFoundError("not deployed")
+
+    monkeypatch.setattr(modal, "Function", _Function)
+
+    assert lookup_trackio_url() is None
+    assert deployed_trackio_url() is None
+
+    class _Function:
+        @staticmethod
+        def from_name(_app_name, _function_name):
+            raise RuntimeError("lookup unavailable")
+
+    monkeypatch.setattr(modal, "Function", _Function)
+
+    with pytest.raises(TrackioLookupUnknown) as exc_info:
+        lookup_trackio_url()
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert deployed_trackio_url() is None
 
 
 def test_get_trackio_deploy_rejects_a_partial_record(tmp_path, monkeypatch):

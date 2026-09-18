@@ -204,7 +204,7 @@ def test_set_password_redeploys_trackio_with_saved_deploy_options(
     )
     expected_app = spec["app_name"] if spec else "training-gym-trackio"
     monkeypatch.setattr(
-        "modal_training_gym.common.trackio.deployed_trackio_url",
+        "modal_training_gym.common.trackio.lookup_trackio_url",
         lambda app_name="training-gym-trackio": (
             trackio_url if app_name == expected_app else None
         ),
@@ -249,7 +249,7 @@ def test_set_password_skips_trackio_when_saved_environment_does_not_match(
         lambda: False,
     )
     monkeypatch.setattr(
-        "modal_training_gym.common.trackio.deployed_trackio_url",
+        "modal_training_gym.common.trackio.lookup_trackio_url",
         lambda app_name="training-gym-trackio": (
             "https://example--training-gym-trackio.modal.run"
         ),
@@ -285,7 +285,7 @@ def test_set_password_warns_when_trackio_redeploy_fails(monkeypatch, tmp_path, c
         lambda: False,
     )
     monkeypatch.setattr(
-        "modal_training_gym.common.trackio.deployed_trackio_url",
+        "modal_training_gym.common.trackio.lookup_trackio_url",
         lambda app_name="training-gym-trackio": (
             "https://example--training-gym-trackio.modal.run"
         ),
@@ -300,6 +300,43 @@ def test_set_password_warns_when_trackio_redeploy_fails(monkeypatch, tmp_path, c
     assert "Warning:" in captured.err
     assert "Trackio" in captured.err
     assert "deployment unavailable" in captured.err
+
+
+def test_set_password_warns_when_trackio_lookup_fails(monkeypatch, tmp_path, capsys):
+    from modal_training_gym.cli.setup import set_password
+    from modal_training_gym.common import config as gym_config
+    from modal_training_gym.common.trackio import (
+        TrackioConfig,
+        TrackioLookupUnknown,
+    )
+
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", tmp_path / ".training-gym.toml")
+    gym_config.save_trackio_deploy(
+        app_name="training-gym-trackio",
+        volume_name="production-metrics",
+        modal_secret_name="_production-trackio-write-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+
+    monkeypatch.setattr("modal_training_gym._dashboard.set_dashboard_password", Mock())
+    monkeypatch.setattr("modal_training_gym.cli.setup.setup", Mock())
+    monkeypatch.setattr(
+        "modal_training_gym.common.config.get_dashboard_proxy_auth",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "modal_training_gym.common.trackio.lookup_trackio_url",
+        Mock(side_effect=TrackioLookupUnknown("lookup failed")),
+    )
+    deploy = Mock()
+    monkeypatch.setattr(TrackioConfig, "deploy_to_modal", deploy)
+
+    set_password(password="secret")
+
+    deploy.assert_not_called()
+    captured = capsys.readouterr()
+    assert "Warning:" in captured.err
+    assert "Trackio" in captured.err
 
 
 @pytest.mark.parametrize(
