@@ -364,6 +364,7 @@ class TrainConfig:
     group_axes: list[str] | None = None
 
     def __post_init__(self) -> None:
+        self._reject_tinker_gateway()
         if not isinstance(self.dataset, OnlineRollout):
             return
         path = (self.recipe.extra_config or {}).get("custom_generate_function_path")
@@ -371,6 +372,19 @@ class TrainConfig:
             raise TrainingGymConfigError(
                 "OnlineRollout requires recipe.custom_generate_function or "
                 "recipe.extra_config['custom_generate_function_path']"
+            )
+
+    def _reject_tinker_gateway(self) -> None:
+        """Gateway recipes serve requests instead of consuming a dataset, so they
+        never belong in a ``TrainConfig``. Called from the constructor and again
+        from ``launch()`` because sweep variants mutate a copied recipe without
+        re-running ``__post_init__``."""
+        if isinstance(self.recipe, MilesRecipe) and self.recipe.is_tinker_gateway:
+            raise TrainingGymConfigError(
+                f"{type(self.recipe).__name__}(multi_lora_n_adapters="
+                f"{self.recipe.multi_lora_n_adapters}) serves Miles' Tinker "
+                "gateway (serve_tinker.py) and cannot run as a dataset-driven "
+                "training job; it is not supported by TrainConfig."
             )
 
     def _generate_training_run_id(self) -> str:
@@ -593,6 +607,7 @@ class TrainConfig:
         """
         import modal
 
+        self._reject_tinker_gateway()
         from modal_training_gym.cli.setup import ensure_dashboard_deployed
         from modal_training_gym.common.config import (
             CONFIG_PATH,

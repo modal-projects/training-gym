@@ -20,6 +20,7 @@ from modal_training_gym.common import (
 )
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import (
     Framework,
     mount_tools_dir,
@@ -469,6 +470,13 @@ def build_miles_app(
 ) -> App:
     app_name = name or miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
     volume_prefix = miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
+    if miles.is_tinker_gateway:
+        raise TrainingGymConfigError(
+            f"{type(miles).__name__}(multi_lora_n_adapters="
+            f"{miles.multi_lora_n_adapters}) serves Miles' Tinker gateway "
+            "(serve_tinker.py) and cannot run as a dataset-driven training job; "
+            "it is not supported by TrainConfig.train()."
+        )
     MilesRecipe._validate_datasets(dataset, eval_dataset)
     dataset_path = MilesRecipe._resolve_data_paths(dataset)
     eval_dataset_path = (
