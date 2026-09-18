@@ -240,6 +240,9 @@ def gateway_run_config(
             "lora_rank": recipe.lora_rank,
             "lora_alpha": recipe.lora_alpha,
             "gpu_type": recipe.gpu_type,
+            "actor_num_nodes": recipe.actor_num_nodes,
+            "actor_num_gpus_per_node": recipe.actor_num_gpus_per_node,
+            "rollout_num_gpus": recipe.rollout_num_gpus,
             "total_nodes": recipe.total_nodes,
             "gpus_per_node": recipe.gpu_allocation.gpus_per_node,
         },
@@ -322,17 +325,51 @@ def create_gateway_training_run(
     )
 
 
-def mark_gateway_run_stopped(training_run_id: str) -> None:
-    """Terminal ``STOPPED`` for the gateway's run once its head container exits."""
+def bind_gateway_run_app(
+    training_run_id: str, *, modal_app_id: str, url: str
+) -> TrainingRun:
+    """Attach the deployed Modal app and gateway URL to the run.
+
+    Re-reads the stored run first: the head container may already have posted
+    ``framework_status`` transitions that a save of the pre-deploy object would
+    otherwise overwrite.
+    """
     run = TrainingRun.from_id(training_run_id)
+    run.modal_app_id = modal_app_id
+    run.modal_app_url = modal_app_dashboard_url(modal_app_id)
+    run.metadata = {**(run.metadata or {}), "gateway_url": url}
+    run.save()
+    return run
+
+
+def _terminalize_gateway_run(
+    run: TrainingRun, status: TrainingRunStatus, error_message: str | None
+) -> bool:
     if run.status is not TrainingRunStatus.RUNNING:
-        return
+        return False
     ended_at = int(time.time())
-    run.status = TrainingRunStatus.STOPPED
+    run.status = status
+    if error_message:
+        run.error_message = error_message
     run.ended_at = ended_at
     run.completed_at = ended_at
     run.duration_seconds = max(0, ended_at - run.started_at)
     run.save()
+    return True
+
+
+def mark_gateway_run_stopped(training_run_id: str) -> None:
+    """Terminal ``STOPPED`` for the gateway's run once its head container exits."""
+    _terminalize_gateway_run(
+        TrainingRun.from_id(training_run_id), TrainingRunStatus.STOPPED, None
+    )
+
+
+def mark_gateway_run_failed(training_run_id: str, error_message: str) -> None:
+    """Terminal ``FAILED`` for a gateway whose server died while its app is up."""
+    _terminalize_gateway_run(
+        TrainingRun.from_id(training_run_id), TrainingRunStatus.FAILED, error_message
+    )
 
 
 def wait_for_gateway_ready(
@@ -603,6 +640,21 @@ def build_tinker_gateway_app(
                 target=_commit_loop, daemon=True, name="tinker-gateway-commit"
             ).start()
             _report(MilesStatus.SERVING)
+
+            def _watch_job() -> None:
+                self.job_thread.join()
+                if self.stop_committing.is_set() or not training_run_id:
+                    return
+                reason = _job_failure() or "Ray job exited"
+                print(f"[tinker-gateway] serve_tinker exited: {reason}", flush=True)
+                try:
+                    mark_gateway_run_failed(training_run_id, reason)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[tinker-gateway] could not mark run failed: {exc!r}")
+
+            threading.Thread(
+                target=_watch_job, daemon=True, name="tinker-gateway-job-watch"
+            ).start()
             print(
                 f"[tinker-gateway] serving {served.tinker_base_model} on :{port} "
                 f"(tinker=={TINKER_SDK_VERSION})"
@@ -774,21 +826,27 @@ class TinkerGateway(BaseModel):
             _mark_gateway_run_failed(run, exc)
             raise
 
-        server = getattr(app, TINKER_SERVER_CLASS)
-        url = _resolve(server.get_url())
-        if not url:
-            raise RuntimeError(f"Deployed {app_name!r} but no web URL was returned.")
-        modal_app_id = app.app_id
-        if not modal_app_id:
-            raise RuntimeError(
-                f"Deployed {app_name!r} but no Modal app id was returned."
+        try:
+            server = getattr(app, TINKER_SERVER_CLASS)
+            url = _resolve(server.get_url())
+            if not url:
+                raise RuntimeError(
+                    f"Deployed {app_name!r} but no web URL was returned."
+                )
+            modal_app_id = app.app_id
+            if not modal_app_id:
+                raise RuntimeError(
+                    f"Deployed {app_name!r} but no Modal app id was returned."
+                )
+            url = url.rstrip("/")
+            bind_gateway_run_app(
+                run.training_run_id, modal_app_id=modal_app_id, url=url
             )
-        url = url.rstrip("/")
-
-        run.modal_app_id = modal_app_id
-        run.modal_app_url = modal_app_dashboard_url(modal_app_id)
-        run.metadata = {**(run.metadata or {}), "gateway_url": url}
-        run.save()
+        except BaseException as exc:
+            # The app is live but the caller gets no handle to stop it.
+            _stop_deployed_app(app.app_id or app_name, environment_name)
+            _mark_gateway_run_failed(run, exc)
+            raise
         return cls(
             app_name=app_name,
             model=model,
@@ -851,19 +909,29 @@ def _resolve(value: Any) -> Any:
     return _run_coro(value)
 
 
+def _stop_deployed_app(app_ref: str, environment_name: str | None) -> None:
+    cmd = ["modal", "app", "stop", "-y"]
+    if environment_name:
+        cmd += ["--env", environment_name]
+    try:
+        subprocess.run([*cmd, app_ref], check=False)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[tinker-gateway] could not stop {app_ref!r}: {exc!r}")
+
+
 def _mark_gateway_run_failed(run: TrainingRun, exc: BaseException) -> None:
-    ended_at = int(time.time())
-    run.status = (
+    """Terminalize a launch that failed locally; never masks ``exc``."""
+    status = (
         TrainingRunStatus.STOPPED
         if isinstance(exc, KeyboardInterrupt)
         else TrainingRunStatus.FAILED
     )
-    run.error_message = f"{type(exc).__name__}: {exc}"
-    run.ended_at = ended_at
-    run.completed_at = ended_at
-    run.duration_seconds = max(0, ended_at - run.started_at)
     try:
-        run.save()
+        stored = TrainingRun.from_id(run.training_run_id)
+    except Exception:  # noqa: BLE001
+        stored = run
+    try:
+        _terminalize_gateway_run(stored, status, f"{type(exc).__name__}: {exc}")
     except Exception:  # noqa: BLE001
         pass
 
@@ -874,6 +942,7 @@ __all__ = [
     "TINKER_SDK_VERSION",
     "GatewayRunRecord",
     "TinkerGateway",
+    "bind_gateway_run_app",
     "build_tinker_gateway_app",
     "build_tinker_gateway_cmd",
     "create_gateway_training_run",
@@ -881,5 +950,6 @@ __all__ = [
     "gateway_recipe",
     "gateway_run_config",
     "gateway_run_metadata",
+    "mark_gateway_run_failed",
     "mark_gateway_run_stopped",
 ]

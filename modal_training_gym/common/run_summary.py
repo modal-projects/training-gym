@@ -50,6 +50,7 @@ _STAGE_LABELS = {
 _QUEUEABLE_STAGES = {"download_model", "convert_model"}
 
 TINKER_GATEWAY_RUN_TYPE = "tinker_gateway"
+_GATEWAY_SERVING_STAGE = "serving"
 
 
 def is_gateway_run(metadata: Mapping[str, object] | None) -> bool:
@@ -57,15 +58,19 @@ def is_gateway_run(metadata: Mapping[str, object] | None) -> bool:
 
 
 def _display_status(
-    status: str, *, has_train_result: bool, gateway: bool = False
+    status: str,
+    *,
+    has_train_result: bool,
+    gateway: bool = False,
+    framework_status: str = "",
 ) -> str:
     normalized = status.strip().lower()
     if has_train_result or normalized == "completed":
         return "completed"
     if normalized in {"cancelled", "stopped", "failed"}:
         return normalized
-    if gateway:
-        # A gateway never "completes"; while its app is up it is ready to serve.
+    if gateway and framework_status.strip().lower() == _GATEWAY_SERVING_STAGE:
+        # A gateway never "completes"; once it answers requests it is ready.
         return "ready"
     return "pending"
 
@@ -666,6 +671,7 @@ def build_run_summary(
             status,
             has_train_result=result_summary is not None,
             gateway=gateway,
+            framework_status=framework_status,
         ),
         display_stage=_display_stage(framework_status, framework_progress),
         framework=framework,
