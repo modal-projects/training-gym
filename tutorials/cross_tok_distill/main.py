@@ -1,5 +1,5 @@
 # ---
-# order: 8
+# order: 4
 # deps: bfcl-eval, jsonschema
 # ---
 #
@@ -891,8 +891,7 @@ def cross_tokenizer_post_process(args, samples, **kwargs):
 
 # ## Start training
 #
-# Each rollout draws `rollout_batch_size × n_samples_per_prompt` trajectories.
-# After `num_rollout` steps, the curriculum increments `T`.
+# With all that in place, it's dead simple to kick off training.
 
 config = TrainConfig(
     model=student_model,
