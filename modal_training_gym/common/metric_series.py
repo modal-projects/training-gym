@@ -48,12 +48,12 @@ def chunk_key(step: int) -> str:
 
 
 class RunMetrics:
-    """One run's points, ``{step: {key: value}}``, plus when each step was
-    last ingested so copies from different containers merge deterministically."""
+    """One run's points, ``{step: {key: value}}``, plus when each value was
+    ingested so copies from different containers merge deterministically."""
 
     def __init__(self) -> None:
         self.table: StepTable = {}
-        self.written: dict[int, float] = {}
+        self.written: dict[int, dict[str, float]] = {}
 
     def merge_points(self, points: Iterable[MetricPoint]) -> set[str]:
         """Last write wins per ``(step, key)``. Returns the chunk keys touched."""
@@ -62,7 +62,9 @@ class RunMetrics:
         for point in points:
             if point.metrics:
                 self.table.setdefault(point.step, {}).update(point.metrics)
-                self.written[point.step] = now
+                self.written.setdefault(point.step, {}).update(
+                    dict.fromkeys(point.metrics, now)
+                )
                 touched.add(chunk_key(point.step))
         return touched
 
@@ -70,29 +72,33 @@ class RunMetrics:
         steps = sorted(s for s in self.table if chunk_key(s) == chunk)
         return {
             "steps": {str(s): self.table[s] for s in steps},
-            "written": {str(s): self.written.get(s, 0.0) for s in steps},
+            "written": {str(s): self.written.get(s, {}) for s in steps},
         }
 
     def load_chunk(self, payload: Mapping[str, Any]) -> None:
-        """Merge a persisted chunk: for each step the more recently ingested
-        side (this table or the file) wins on conflicting keys."""
+        """Merge a persisted chunk; per ``(step, key)`` the more recently
+        ingested value (in memory or in the file) wins."""
         steps = payload.get("steps")
         if not isinstance(steps, Mapping):
             return
         written = payload.get("written")
         written = written if isinstance(written, Mapping) else {}
         for raw_step, metrics in steps.items():
-            if not isinstance(metrics, Mapping) or not str(raw_step).isdigit():
+            if not (
+                isinstance(metrics, Mapping) and metrics and str(raw_step).isdigit()
+            ):
                 continue
             step = int(raw_step)
-            at = written.get(raw_step)
-            at = float(at) if isinstance(at, (int, float)) else 0.0
-            mine = self.table.get(step, {})
-            if at > self.written.get(step, -1.0):
-                self.table[step] = {**mine, **metrics}
-                self.written[step] = at
-            else:
-                self.table[step] = {**metrics, **mine}
+            stamps = written.get(raw_step)
+            stamps = stamps if isinstance(stamps, Mapping) else {}
+            mine = self.table.setdefault(step, {})
+            mine_at = self.written.setdefault(step, {})
+            for key, value in metrics.items():
+                at = stamps.get(key)
+                at = float(at) if isinstance(at, (int, float)) else 0.0
+                if key not in mine or at > mine_at.get(key, -1.0):
+                    mine[key] = value
+                    mine_at[key] = at
 
 
 def downsample(rows: list[list[float]], max_points: int) -> list[list[float]]:

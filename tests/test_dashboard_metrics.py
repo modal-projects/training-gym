@@ -152,11 +152,13 @@ def test_reads_pick_up_chunks_written_by_another_replica(
         "chunk-000000-aaaa",
         {
             "steps": {"3": {"lr": 0.1}, "4": {"lr": 0.9}, "bad": "skip"},
-            "written": {"4": 20},
+            "written": {"4": {"lr": 20}},
         },
     )
     metadata.vol_put(
-        STORE, "chunk-000000-bbbb", {"steps": {"4": {"lr": 0.2}}, "written": {"4": 10}}
+        STORE,
+        "chunk-000000-bbbb",
+        {"steps": {"4": {"lr": 0.2}}, "written": {"4": {"lr": 10}}},
     )
     metadata.vol_put(STORE, "chunk-000002-bbbb", {})
     with _client(monkeypatch, tmp_path) as client:
@@ -232,9 +234,11 @@ def test_merge_and_load_prefer_most_recently_ingested_values():
     assert run.table == {1: {"a": 2.0, "b": 3.0, "d": 5.0}, 7: {"a": 1}}
     # ... while a newer one overrides them.
     future = time.time() + 60
-    run.load_chunk({"steps": {"1": {"a": 4.0}}, "written": {"1": future}})
+    run.load_chunk(
+        {"steps": {"1": {"a": 4.0, "b": 0.0}}, "written": {"1": {"a": future}}}
+    )
     assert run.table[1] == {"a": 4.0, "b": 3.0, "d": 5.0}
-    assert run.chunk_payload("chunk-000000")["written"]["1"] == future
+    assert run.chunk_payload("chunk-000000")["written"]["1"]["a"] == future
 
 
 def test_downsample_keeps_endpoints_and_extremes():
