@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-from modal_training_gym.common.config import CONFIG_PATH, save_trackio_deploy
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.metrics import MetricConfig
 
@@ -88,20 +87,6 @@ class TrackioConfig(MetricConfig):
             modal_secret_name=modal_secret_name,
             TRACKIO_PACKAGE_VERSION=TRACKIO_PACKAGE_VERSION,
         )
-        try:
-            save_trackio_deploy(
-                app_name=app_name,
-                volume_name=volume_name,
-                modal_secret_name=modal_secret_name,
-                TRACKIO_PACKAGE_VERSION=TRACKIO_PACKAGE_VERSION,
-            )
-        except OSError as exc:
-            print(
-                f"Warning: could not save Trackio deploy options to {CONFIG_PATH} "
-                f"({exc}); `training-gym set-password` will not be able to redeploy "
-                "this dashboard.",
-                file=sys.stderr,
-            )
         return cls(
             project=project,
             group=group,
@@ -277,31 +262,12 @@ def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
     ).run_commands(f"python3 -c {shlex.quote(install_code)}")
 
 
-class TrackioLookupUnknown(Exception):
-    """Modal lookup of the Trackio app failed before not-found could be observed."""
-
-
-def lookup_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
-    """URL of the deployed Trackio server, ``None`` if not deployed.
-
-    Raises ``TrackioLookupUnknown`` when the lookup fails for any other reason
-    (timeout, auth, network).
-    """
+def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
     import modal
-    from modal.exception import NotFoundError
 
     try:
         return modal.Function.from_name(app_name, "dashboard").get_web_url()
-    except NotFoundError:
-        return None
-    except Exception as exc:
-        raise TrackioLookupUnknown from exc
-
-
-def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
-    try:
-        return lookup_trackio_url(app_name)
-    except TrackioLookupUnknown:
+    except Exception:
         return None
 
 

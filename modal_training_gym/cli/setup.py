@@ -240,51 +240,18 @@ def set_password(password: str | None = None) -> None:
     else:
         print("Dashboard password cleared (open access). Redeploying...")
 
-    from modal_training_gym.common.config import (
-        get_dashboard_proxy_auth,
-        get_trackio_deploy,
-    )
-    from modal_training_gym.common.trackio import (
-        TrackioConfig,
-        TrackioLookupUnknown,
-        lookup_trackio_url,
-    )
     from modal_training_gym.cli.output import print_warning
+    from modal_training_gym.common.config import get_dashboard_proxy_auth
+    from modal_training_gym.common.trackio import deployed_trackio_url
 
     setup(
         interactive=False,
         require_proxy_auth=get_dashboard_proxy_auth() is True,
     )
-    spec = get_trackio_deploy()
-    try:
-        if spec is None:
-            trackio_url = lookup_trackio_url()
-        else:
-            trackio_url = lookup_trackio_url(spec["app_name"])
-    except TrackioLookupUnknown as exc:
+    if deployed_trackio_url():
         print_warning(
-            f"Could not check whether a Trackio dashboard is deployed "
-            f"({exc.__cause__ or exc}); it was not redeployed and may keep the old "
-            "password. Re-run TrackioConfig.deploy_to_modal(...) to redeploy it."
-        )
-        return
-    if spec is None:
-        if trackio_url:
-            print_warning(
-                "A Trackio dashboard is deployed but its deploy options aren't saved, "
-                "so it was not redeployed and will keep the old password. Re-run "
-                "TrackioConfig.deploy_to_modal(...) to redeploy it."
-            )
-        return
-    if not trackio_url:
-        return
-    print("Redeploying Trackio dashboard so the password takes effect...")
-    try:
-        TrackioConfig.deploy_to_modal(**spec)
-    except Exception as exc:
-        print_warning(
-            f"Failed to redeploy the Trackio dashboard ({exc}); it will keep the old "
-            "password. Re-run TrackioConfig.deploy_to_modal(...) to redeploy it."
+            "A Trackio dashboard is deployed on Modal and still has the old password. "
+            "Re-run TrackioConfig.deploy_to_modal() so the new password takes effect."
         )
 
 

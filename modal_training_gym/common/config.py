@@ -202,26 +202,6 @@ def get_dashboard_proxy_auth() -> bool | None:
 
 
 PROXY_AUTH_SECTION = "proxy_auth"
-TRACKIO_SECTION = "trackio"
-TRACKIO_DEPLOY_KEYS = (
-    "app_name",
-    "volume_name",
-    "modal_secret_name",
-    "TRACKIO_PACKAGE_VERSION",
-)
-DEFAULT_MODAL_ENVIRONMENT = "main"
-
-
-def active_modal_environment() -> str:
-    env = os.environ.get("MODAL_ENVIRONMENT", "").strip()
-    if env:
-        return env
-    profiles = _iter_modal_profiles()
-    if profiles:
-        env = str(profiles[0][1].get("environment") or "").strip()
-        if env:
-            return env
-    return DEFAULT_MODAL_ENVIRONMENT
 
 
 def get_proxy_auth() -> tuple[str, str]:
@@ -241,66 +221,6 @@ def save_proxy_auth(key: str, secret: str) -> None:
     """Persist the proxy-auth token pair under ``[proxy_auth]``."""
     config = load_config()
     config[PROXY_AUTH_SECTION] = {"key": key.strip(), "secret": secret.strip()}
-    CONFIG_PATH.write_text(_render(config))
-
-
-def _trackio_values(section: dict[str, Any]) -> dict[str, str] | None:
-    values: dict[str, str] = {}
-    for key in TRACKIO_DEPLOY_KEYS:
-        value = section.get(key)
-        if not isinstance(value, str) or not value.strip():
-            return None
-        values[key] = value.strip()
-    return values
-
-
-def _is_nested_table(section: dict[str, Any]) -> bool:
-    return bool(section) and all(isinstance(value, dict) for value in section.values())
-
-
-def get_trackio_deploy() -> dict[str, str] | None:
-    section = load_config().get(TRACKIO_SECTION)
-    if not isinstance(section, dict):
-        return None
-    env = active_modal_environment()
-    if _is_nested_table(section):
-        slot = section.get(env)
-        if not isinstance(slot, dict):
-            return None
-        return _trackio_values(slot)
-    saved_env = section.get("environment")
-    if not isinstance(saved_env, str) or saved_env.strip() != env:
-        return None
-    return _trackio_values(section)
-
-
-def save_trackio_deploy(
-    *,
-    app_name: str,
-    volume_name: str,
-    modal_secret_name: str,
-    TRACKIO_PACKAGE_VERSION: str,
-) -> None:
-    env = active_modal_environment()
-    values = {
-        "app_name": app_name,
-        "volume_name": volume_name,
-        "modal_secret_name": modal_secret_name,
-        "TRACKIO_PACKAGE_VERSION": TRACKIO_PACKAGE_VERSION,
-    }
-    config = load_config()
-    section = config.get(TRACKIO_SECTION)
-    if isinstance(section, dict) and _is_nested_table(section):
-        nested = dict(section)
-    else:
-        nested = {}
-        if isinstance(section, dict):
-            old_env = section.get("environment")
-            old = _trackio_values(section)
-            if isinstance(old_env, str) and old_env.strip() and old:
-                nested[old_env.strip()] = old
-    nested[env] = values
-    config[TRACKIO_SECTION] = nested
     CONFIG_PATH.write_text(_render(config))
 
 
@@ -353,27 +273,13 @@ def get_framework_status_url() -> str | None:
     return base.rstrip("/") + "/api/framework-status"
 
 
-def _format_key(key: str) -> str:
-    if key and all(ch.isalnum() or ch in "-_" for ch in key):
-        return key
-    escaped = key.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-
 def _render(config: dict[str, Any]) -> str:
-    """Minimal TOML writer for flat tables and one level of nested tables."""
+    """Minimal TOML writer for the shapes we persist (string-valued tables)."""
     lines: list[str] = []
     for section, entries in config.items():
         if not isinstance(entries, dict):
             continue
-        if _is_nested_table(entries):
-            for sub, subentries in entries.items():
-                lines.append(f"[{_format_key(section)}.{_format_key(sub)}]")
-                for key, value in subentries.items():
-                    lines.append(f"{key} = {_format_value(value)}")
-                lines.append("")
-            continue
-        lines.append(f"[{_format_key(section)}]")
+        lines.append(f"[{section}]")
         for key, value in entries.items():
             lines.append(f"{key} = {_format_value(value)}")
         lines.append("")
@@ -392,21 +298,22 @@ def _format_value(value: Any) -> str:
 # ── Modal credential resolution ──────────────────────────────────────────
 
 
-def _iter_modal_profiles() -> list[tuple[str, dict[str, Any]]]:
+def read_modal_toml_creds() -> tuple[str, str, str]:
+    """Resolve ``(token_id, token_secret, profile_name)`` from ``~/.modal.toml``."""
     if not MODAL_CONFIG_PATH.is_file():
-        return []
+        return "", "", ""
 
     try:
         with MODAL_CONFIG_PATH.open("rb") as f:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
-        return []
+        return "", "", ""
 
     profiles = {
         name: section for name, section in data.items() if isinstance(section, dict)
     }
     if not profiles:
-        return []
+        return "", "", ""
 
     candidate_names: list[str] = []
     env_profile = os.environ.get("MODAL_PROFILE", "").strip()
@@ -419,25 +326,12 @@ def _iter_modal_profiles() -> list[tuple[str, dict[str, Any]]]:
         candidate_names.append("default")
     candidate_names.extend(profiles.keys())
 
-    ordered: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
     for name in candidate_names:
         if name in seen or name not in profiles:
             continue
         seen.add(name)
-        ordered.append((name, profiles[name]))
-    return ordered
-
-
-def read_modal_toml_creds() -> tuple[str, str, str]:
-    """Resolve ``(token_id, token_secret, profile_name)`` from ``~/.modal.toml``.
-
-    Follows Modal's own profile-selection rules: the ``MODAL_PROFILE`` env
-    var wins if set; otherwise the profile flagged ``active = true``;
-    otherwise the ``[default]`` profile; otherwise the first profile in the
-    file. Returns empty strings if no credentials can be found.
-    """
-    for name, section in _iter_modal_profiles():
+        section = profiles[name]
         token_id = str(section.get("token_id") or "").strip()
         token_secret = str(section.get("token_secret") or "").strip()
         if token_id and token_secret:
