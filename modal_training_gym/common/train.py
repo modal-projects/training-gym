@@ -607,14 +607,12 @@ class TrainConfig:
         Returns:
             The completed training run.
         """
-        from modal_training_gym.common.modal_lifecycle import stop_app
-
         launch = self.launch(show_output=show_output)
         try:
             return launch.result(stop_app_on_success=True)
         except BaseException:
-            if self._stop_app_on_failure and launch.modal_app_id:
-                stop_app(launch.modal_app_id)
+            if not self.detach:
+                launch.close()
             raise
 
     @property

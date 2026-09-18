@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from unittest.mock import Mock
 
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
@@ -200,3 +201,66 @@ def test_wait_all_closes_each_run_when_that_run_is_done(monkeypatch, fake_volume
     assert stopped == ["ap-a", "ap-b"]
     assert sleeps == [0.01]
     assert second.status is TrainingRunStatus.COMPLETED
+
+
+@pytest.mark.parametrize("framework", [Framework.STITCH, Framework.MILES])
+@pytest.mark.parametrize("reloaded", [False, True])
+@pytest.mark.parametrize("entrypoint", ["result", "wait_all"])
+def test_failed_run_cleanup(monkeypatch, fake_volume, framework, reloaded, entrypoint):
+    run = _run(TrainingRunStatus.RUNNING)
+    run.framework = framework
+    run.modal_app_id = "ap-1"
+    run.function_call_id = "fc-1"
+    run.save()
+    if reloaded:
+        run = TrainingRun.from_id(run.training_run_id)
+        monkeypatch.setattr("modal.FunctionCall.from_id", lambda _: _FailedCall())
+    else:
+        run._function_call = _FailedCall()
+    stop = Mock()
+    monkeypatch.setattr("modal_training_gym.common.modal_lifecycle.stop_app", stop)
+
+    if entrypoint == "result":
+        with pytest.raises(RuntimeError, match="worker died"):
+            run.result(stop_app_on_success=False)
+    else:
+        assert TrainingRun.wait_all([run]) == [run]
+
+    if framework is Framework.STITCH or entrypoint == "wait_all":
+        stop.assert_called_once_with("ap-1")
+    else:
+        stop.assert_not_called()
+
+
+@pytest.mark.parametrize("error", [TimeoutError("pending"), KeyboardInterrupt()])
+def test_stitch_result_leaves_app_running_when_wait_is_interrupted(
+    monkeypatch, fake_volume, error
+):
+    run = _run(TrainingRunStatus.RUNNING)
+    run.framework = Framework.STITCH
+    run.modal_app_id = "ap-1"
+    run._function_call = Mock(get=Mock(side_effect=error))
+    stop = Mock()
+    monkeypatch.setattr("modal_training_gym.common.modal_lifecycle.stop_app", stop)
+
+    with pytest.raises(type(error)):
+        run.result(timeout=0.01)
+
+    stop.assert_not_called()
+
+
+def test_stitch_result_closes_app_after_remote_timeout(monkeypatch, fake_volume):
+    run = _run(TrainingRunStatus.FAILED)
+    run.framework = Framework.STITCH
+    run.modal_app_id = "ap-1"
+    run.error_message = "remote setup timed out"
+    run.save()
+    run.status = TrainingRunStatus.RUNNING
+    run._function_call = _TimeoutCall()
+    stop = Mock()
+    monkeypatch.setattr("modal_training_gym.common.modal_lifecycle.stop_app", stop)
+
+    with pytest.raises(TimeoutError):
+        run.result()
+
+    stop.assert_called_once_with("ap-1")

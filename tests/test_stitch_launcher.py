@@ -47,7 +47,7 @@ class RowsDataset(DatasetConfig):
 
 
 @pytest.fixture
-def build_app(monkeypatch, tmp_path):
+def build_app(monkeypatch, tmp_path, fake_volume):
     monkeypatch.setattr(base, "DATA_PATH", tmp_path / "data")
     monkeypatch.setattr(launcher, "hf_secrets", lambda: [])
     monkeypatch.setattr(launcher, "proxy_auth_secrets", lambda: [])
@@ -159,6 +159,49 @@ def test_train_config_forwards_eval_dataset(monkeypatch):
     with pytest.warns(UserWarning, match="TrainConfig._build_app"):
         assert config._build_app("test-run") is build.return_value
     assert build.call_args.kwargs["eval_dataset"] is evaluation
+
+
+@pytest.mark.parametrize("detach", [False, True])
+def test_train_interrupt_respects_detach(monkeypatch, detach):
+    config = TrainConfig(
+        model=Qwen3_30B(),
+        dataset=RowsDataset("training"),
+        recipe=Qwen3_30B_A3B_Stitch_Recipe(),
+        detach=detach,
+    )
+    run = Mock(result=Mock(side_effect=KeyboardInterrupt()))
+    monkeypatch.setattr(TrainConfig, "launch", Mock(return_value=run))
+
+    with pytest.raises(KeyboardInterrupt):
+        config.train(show_output=False)
+
+    assert run.close.call_count == (0 if detach else 1)
+
+
+@pytest.mark.parametrize("with_metrics", [False, True])
+def test_stitch_discovery_tags(build_app, monkeypatch, with_metrics):
+    monkeypatch.setattr(launcher, "metric_secrets", lambda _: [])
+    metrics = WandbConfig(project="project", group="sweep") if with_metrics else None
+    app = build_app(
+        recipe=Qwen3_30B_A3B_Stitch_Recipe(
+            metrics=metrics,
+            app_tags={"source": "custom-source"},
+        )
+    )
+    tags = app._local_state.tags
+    assert tags["_modal_framework"] == "stitch"
+    assert tags["_modal_job_type"] == "training"
+    assert tags["_modal_model_name"] == "qwen3-30b-a3b"
+    assert tags["source"] == "custom-source"
+    if with_metrics:
+        assert tags["_modal_metric_provider"] == "wandb"
+        assert tags["_modal_metric_project"] == "project"
+        assert tags["_modal_metric_group"] == "sweep"
+        assert len(tags) == 8
+    else:
+        assert "_modal_metric_provider" not in tags
+    assert "wandb_project" not in tags
+    assert "wandb_group" not in tags
 
 
 def test_server_budget_and_draft_checkpoint_volume(build_app, monkeypatch):
@@ -302,19 +345,40 @@ def test_tracker_identity_is_set_before_every_ray_node(
         inspect.unwrap(app.train.get_raw_f())()
     preflight.assert_called_once()
 
+    if rank == 0:
+        run = TrainingRun.from_id("test-run")
+        assert run.status is TrainingRunStatus.FAILED
+        assert "stop at Ray startup" in run.error_message
+    else:
+        with pytest.raises(KeyError):
+            TrainingRun.from_id("test-run")
+
 
 @pytest.mark.parametrize(
-    "save_interval,fails", [(10, False), (None, False), (10, True)]
+    "save_interval,failure",
+    [
+        (10, None),
+        (None, None),
+        (10, "trainer"),
+        (10, "ray"),
+        (10, "dataset"),
+        (10, "checkpoint"),
+        (10, "gateway"),
+        (10, "claim"),
+        (10, "interrupt"),
+        (10, "spawn"),
+    ],
 )
 def test_trainer_persists_result_and_metric_identity(
-    build_app, monkeypatch, tmp_path, save_interval, fails
+    build_app, monkeypatch, tmp_path, save_interval, failure
 ):
     from modal_training_gym.frameworks.stitch import trainer_helpers
 
     checkpoints = tmp_path / "checkpoints"
     served = tmp_path / "served"
     masters = tmp_path / "masters"
-    served.mkdir()
+    if failure != "checkpoint":
+        served.mkdir()
     masters.mkdir()
     monkeypatch.setattr(launcher, "CHECKPOINTS_PATH", checkpoints)
     monkeypatch.setattr(launcher, "metric_secrets", lambda _: [])
@@ -327,28 +391,20 @@ def test_trainer_persists_result_and_metric_identity(
         metrics=WandbConfig(project="project"),
     )
     app = build_app(recipe=recipe, training_run_id="test-run")
+    hooks = Mock()
+    if failure == "claim":
+        hooks.claim_pool.side_effect = RuntimeError("claim failed")
     monkeypatch.setitem(
         sys.modules,
         "cookbook.common",
         SimpleNamespace(
-            hooks=Mock(),
+            hooks=hooks,
             launch=Mock(),
             process=Mock(),
             ray_cluster=SimpleNamespace(
                 get_modal_cluster_context=lambda _: (0, "127.0.0.1", "127.0.0.1")
             ),
         ),
-    )
-    stored = {}
-
-    def save(run):
-        stored[run.training_run_id] = run.model_dump()
-
-    monkeypatch.setattr(TrainingRun, "save", save)
-    monkeypatch.setattr(
-        TrainingRun,
-        "from_id",
-        lambda run_id: TrainingRun.from_stored_data(stored[run_id]),
     )
     monkeypatch.setattr(launcher, "start_ray_head", Mock())
     monkeypatch.setattr(Qwen3_30B, "download", Mock())
@@ -358,30 +414,76 @@ def test_trainer_persists_result_and_metric_identity(
     monkeypatch.setattr(launcher, "save_train_result_blob", Mock())
     preflight = Mock(return_value="resolved-team")
     monkeypatch.setattr(launcher, "preflight_metric", preflight)
+    error = None
+    if failure == "trainer":
+        error = subprocess.CalledProcessError(1, "miles")
+        trainer_log = checkpoints / "logs" / "test-run-trainer.log"
+        trainer_log.parent.mkdir(parents=True)
+        trainer_log.write_text("Megatron traceback")
+    elif failure == "interrupt":
+        error = KeyboardInterrupt("trainer interrupted")
+    elif failure == "spawn":
+        error = OSError("could not start trainer")
     monkeypatch.setattr(
         launcher.subprocess,
         "run",
-        Mock(side_effect=subprocess.CalledProcessError(1, "miles") if fails else None),
+        Mock(side_effect=error),
     )
+    if failure == "ray":
+        launcher.start_ray_head.side_effect = RuntimeError("Ray startup failed")
+    elif failure == "dataset":
+        monkeypatch.setattr(
+            launcher,
+            "run_prepare_dataset",
+            Mock(side_effect=ValueError("dataset invalid")),
+        )
+    elif failure == "gateway":
+        trainer_helpers.await_gateway_ready.side_effect = TimeoutError("pool not ready")
+    TrainingRun(
+        training_run_id="test-run",
+        framework=launcher.Framework.STITCH,
+        config={},
+        metadata={"group_id": "sweep"},
+    ).save()
     train = inspect.unwrap(app.train.get_raw_f())
     with patch.dict(os.environ):
-        if fails:
-            with pytest.raises(RuntimeError, match="miles exited 1"):
+        if failure:
+            expected = KeyboardInterrupt if failure == "interrupt" else Exception
+            with pytest.raises(expected) as raised:
                 train(modal_app_id="ap-test", rollout_endpoint_url="https://pool")
         else:
             result = train(modal_app_id="ap-test", rollout_endpoint_url="https://pool")
 
     reloaded = TrainingRun.from_id("test-run")
-    assert reloaded.status == (
-        TrainingRunStatus.FAILED if fails else TrainingRunStatus.COMPLETED
-    )
+    expected_status = TrainingRunStatus.COMPLETED
+    if failure:
+        expected_status = (
+            TrainingRunStatus.STOPPED
+            if failure == "interrupt"
+            else TrainingRunStatus.FAILED
+        )
+    assert reloaded.status == expected_status
+    assert reloaded.ended_at == reloaded.completed_at
+    assert reloaded.ended_at >= reloaded.started_at > 0
+    assert reloaded.duration_seconds >= 0
+    assert reloaded.metadata["group_id"] == "sweep"
+    assert reloaded.metadata["attempt_count"] == 1
+    assert reloaded.metadata["last_attempt_status"] == expected_status.value
+    assert reloaded.metadata["last_attempt_ended_at"] == reloaded.ended_at
     assert reloaded.metrics["entity"] == "resolved-team"
     assert reloaded.metrics["run_id"] == "test-run"
     preflight.assert_called_once()
-    if fails:
+    if failure:
+        assert (
+            reloaded.error_message == f"{type(raised.value).__name__}: {raised.value}"
+        )
+        if failure == "trainer":
+            assert "miles exited 1" in reloaded.error_message
+            assert "Megatron traceback" in reloaded.error_message
         assert reloaded.source_model is None
         launcher.save_train_result_blob.assert_not_called()
     else:
+        assert reloaded.error_message is None
         assert reloaded.checkpoint_dir == result["checkpoint_dir"]
         assert reloaded.checkpoint_dir == (
             str(checkpoints / "test-run") if save_interval else ""

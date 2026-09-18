@@ -40,7 +40,6 @@ import modal
 import modal.experimental
 
 from modal_training_gym.common import (
-    COMMON_TRAINING_GYM_TAGS,
     hf_secrets,
     modal_tag_value,
     proxy_auth_secrets,
@@ -54,6 +53,7 @@ from modal_training_gym.common.framework import (
     resolve_caller_module,
 )
 from modal_training_gym.common.launcher_helpers import (
+    build_app_tags,
     compute_save_root,
     run_prepare_dataset,
 )
@@ -72,6 +72,8 @@ from modal_training_gym.common.ray_cluster import (
 from modal_training_gym.common.run import (
     TrainingRun,
     TrainingRunStatus,
+    mark_training_attempt_finished,
+    mark_training_attempt_started,
     metric_run_id_for_attempt,
     record_metric_attempt,
     set_checkpoint_location,
@@ -432,6 +434,7 @@ def _record_run_started(
                 created_at=created_at,
                 started_at=created_at,
             )
+        mark_training_attempt_started(run_record, started_at=created_at)
         if metric_block:
             run_record.metrics = metric_block
             record_metric_attempt(
@@ -457,6 +460,7 @@ def _record_run_finished(
     status: TrainingRunStatus,
     *,
     result_payload: dict | None = None,
+    error_message: str | None = None,
 ) -> None:
     """Stamp the terminal status + duration on the dashboard run record.
     Best-effort, mirroring :func:`_record_run_started`."""
@@ -475,6 +479,10 @@ def _record_run_finished(
             )
         finished_at = int(time.time())
         run_record.status = status
+        run_record.error_message = error_message
+        mark_training_attempt_finished(
+            run_record, status=status.value, ended_at=finished_at
+        )
         run_record.ended_at = finished_at
         if run_record.completed_at is None:
             run_record.completed_at = finished_at
@@ -571,17 +579,12 @@ def build_stitch_app(
     n_train_nodes = train_recipe.actor_num_nodes
     _multi_node = n_train_nodes > 1
 
-    tags = {
-        **COMMON_TRAINING_GYM_TAGS,
-        "_modal_framework": Framework.STITCH.value,
-        "_modal_job_type": "training",
-        **{str(k): str(v) for k, v in recipe.app_tags.items()},
-    }
-    if recipe.metrics is not None:
-        if recipe.metrics.project:
-            tags["wandb_project"] = modal_tag_value(recipe.metrics.project)
-        if recipe.metrics.group:
-            tags["wandb_group"] = modal_tag_value(recipe.metrics.group)
+    tags = build_app_tags(
+        framework=Framework.STITCH.value,
+        model=model,
+        recipe_app_tags={str(k): str(v) for k, v in recipe.app_tags.items()},
+        metrics=recipe.metrics,
+    )
 
     image = apply_metric_image(_stitch_trainer_image(train_recipe), recipe.metrics)
     image = image.add_local_python_source("modal_training_gym")
@@ -793,247 +796,273 @@ def build_stitch_app(
                 metric_entity = preflight_metric(recipe.metrics) or metric_entity
             except Exception as exc:
                 print(f"metric preflight for dashboard deep-link failed: {exc}")
-        os.environ.update(
-            {
-                "MILES_HOST_IP": my_ip,
-                "SGLANG_HOST_IP": my_ip,
-                "HOST_IP": my_ip,
-                "MASTER_ADDR": master_addr,
-                "RAY_ADDRESS": f"{master_addr}:{RAY_PORT}",
-                "no_proxy": f"127.0.0.1,{master_addr},{my_ip}",
-                "NO_PROXY": f"127.0.0.1,{master_addr},{my_ip}",
-                # Source-only ``megatron.training`` in front of what the
-                # container already exports — Modal puts its own client on
-                # PYTHONPATH, and the bulletin's store imports ``modal`` from
-                # inside a Ray actor, which inherits this.
-                "PYTHONPATH": os.pathsep.join(
-                    [MEGATRON_PATH, os.environ.get("PYTHONPATH", "")]
-                ).rstrip(os.pathsep),
-                # Only the RDMA nodes take the host's libibverbs, so only they
-                # want the libmlx5 built against it (see RDMA_LIB_DIR). Set
-                # before Ray starts, since its workers inherit this.
-                **(
-                    {
-                        "LD_LIBRARY_PATH": ":".join(
-                            [RDMA_LIB_DIR, os.environ.get("LD_LIBRARY_PATH", "")]
-                        ).rstrip(":")
-                    }
-                    if _multi_node
-                    else {}
-                ),
-                **{str(k): str(v) for k, v in train_recipe.environment.items()},
-            }
-        )
-        if framework_status_url:
-            os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
-        if framework_status_token:
-            os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
-        os.environ.update(
-            dashboard_env(
-                training_run_id=training_run_id or run_id,
-                app_name=app_name,
-                total_steps=train_recipe.num_rollout,
+        run_record = None
+        if rank == 0:
+            run_record = _record_run_started(
+                run_id=record_id,
+                recipe=recipe,
                 model=model,
-                checkpoints_volume_name=checkpoints_volume_name,
-                substep_timing=train_recipe.substep_timing,
-                capture_trace=train_recipe.capture_trace,
-                trace_sample_limit=train_recipe.trace_sample_limit,
+                dataset=dataset,
+                config_fields={},
+                modal_app_id=modal_app_id,
+                metric_entity=metric_entity,
+                metric_run_id=metric_run_id,
             )
-        )
-        os.environ.update(
-            metric_runtime_env(
-                recipe.metrics, run_id=metric_run_id, entity=metric_entity
-            )
-        )
-        # Megatron is a source checkout in the image, so R3 dispatch + the
-        # reshardable optimizer step arrive as patches. Applied on every node,
-        # before the rank gate: each node's Ray actors import their own copy.
-        if train_recipe.megatron_runtime_patches:
-            process.apply_git_patches(
-                train_recipe.megatron_runtime_patches, MEGATRON_PATH, "megatron-patch"
-            )
-        process.apply_git_patches(MILES_RUNTIME_PATCHES, MILES_ROOT, "miles-patch")
-        # Same reason: a Ray actor on another node re-reads this file by path, so
-        # it can't live in rank 0's per-launch tmpdir.
-        cfg_yaml_owner = _MilesArgs(
-            {"te_precision_config_file": train_recipe.te_precision_config_file},
-            async_mode=train_recipe.async_mode,
-            miles_model_script=train_recipe.miles_model_script,
-        )
-        launch.materialize_node_local_yaml(cfg_yaml_owner, "te_precision_config_file")
-
-        # Rank 0 drives the run; the other ranks only host Ray workers, and stay
-        # alive until Modal tears the cluster down with rank 0's input.
-        if rank != 0:
-            start_ray_worker(my_ip, master_addr)
-            while True:
-                time.sleep(10)
-                # A volume mount is a snapshot: rank 0 prepares the dataset and
-                # warms the HF cache inside this same call, so a worker's Ray
-                # actors only see those files if this node keeps refreshing.
-                for volume in (hf_cache_volume, data_volume, checkpoints_volume):
-                    volume.reload()
-        start_ray_head(my_ip, n_train_nodes, worker_wait_retries=180)
-        for volume in (hf_cache_volume, data_volume, checkpoints_volume):
-            volume.reload()
-        # ``launch(prepare_inputs=False)`` (the default, and what a sweep uses)
-        # skips the client-side prep calls, so the trainer prepares its own
-        # inputs when they're missing rather than failing on a cold volume.
-        run_prepare_dataset(
-            dataset, eval_dataset, data_volume, dataset_path, eval_dataset_path
-        )
-        # Both are no-ops on a warm cache.
-        model.download()
-        train_recipe.download_model()
-        hf_cache_volume.commit()
-        # The served baseline is the one input the trainer can't build here: the
-        # conversion wants its own GPU function (prepare_checkpoints).
-        for path in (served_model, recipe.bf16_checkpoint_path):
-            if str(path).startswith("/") and not Path(path).exists():
-                raise RuntimeError(
-                    f"prepared checkpoint {path} is missing — run the app's "
-                    "prepare_checkpoints function (TrainConfig.train(), or "
-                    "launch(prepare_inputs=True)) before training"
-                )
-
-        payload = recipe.to_payload(
-            model=model,
-            dataset=dataset,
-            eval_dataset=eval_dataset,
-            dataset_path=dataset_path,
-            eval_dataset_path=eval_dataset_path,
-        )
-        cfg = _MilesArgs(
-            payload.fields,
-            async_mode=payload.async_mode,
-            miles_model_script=payload.miles_model_script,
-            miles_model_name=payload.miles_model_name,
-        )
-        cfg.te_precision_config_file = cfg_yaml_owner.te_precision_config_file
-        # The pool's Flash gateway, resolved by whoever launched this call (see
-        # _PoolAwareTrain). Falls back to a lookup by app name, which only works
-        # against a deployed pool.
-        cfg.rollout_endpoint_url = (
-            rollout_endpoint_url or trainer_helpers.deployed_gateway_url(app_name)
-        )
-        # Flash holds requests through a cold-starting pool, but the trainer's
-        # first rollout would otherwise meet engines that are still loading.
-        trainer_helpers.await_gateway_ready(
-            cfg.rollout_endpoint_url, timeout_seconds=serve_recipe.startup_timeout
-        )
-        cfg.update_weight_disk_dir = update_weight_disk_dir
-        if save_hf:
-            cfg.save_hf = f"{run_bulletin_root}/{save_hf}"
-        # Run-scope the saves, as the colocated miles launcher does: the
-        # checkpoints Volume is keyed by recipe, so its root is shared by every
-        # run of it. (A publish-only run keeps no checkpoints and has no
-        # ``save`` at all — see StitchTrainConfig._fields.)
-        if getattr(cfg, "save", None):
-            cfg.save = compute_save_root(
-                cfg.save,
-                recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
-                mounted_save_root=str(CHECKPOINTS_PATH),
-                training_run_id=training_run_id or run_id,
-            )
-        # stitch's publish + request hooks read these off the miles args
-        # namespace; merge over any user extra_config already on
-        # custom_config_path.
-        custom_config = dict(getattr(cfg, "custom_config_path", None) or {})
-        custom_config.update(
-            {
-                field: getattr(train_recipe, field)
-                for field in sorted(HOOK_CONFIG_FIELDS)
-            }
-        )
-        custom_config.update(
-            {
-                "experiment_volume_name": delta_volume_name,
-                "stitch_store_backend": STORE_BACKEND,
-                "stitch_s3_root": "",
-                "stitch_s3_endpoint_url": "",
-                "rollout_modal_flash_app_name": app_name,
-                "rollout_modal_flash_server_cls_name": "Server",
-                "run_id": run_id,
-            }
-        )
-        cfg.custom_config_path = custom_config
-
-        # ``custom_config_path`` is a *path* flag: in the colocated flow the dict
-        # is materialized while still named ``extra_config`` (which is in miles'
-        # YAML_CONFIG_FIELDS) and renamed after. Here it is already renamed, so
-        # it has to be materialized under its final name or miles is handed a
-        # dict repr as a filename.
-        launch.resolve_config(
-            cfg,
-            tempfile.mkdtemp(),
-            checkpoint_fields=CHECKPOINT_PATH_FIELDS,
-            yaml_fields=(*YAML_CONFIG_FIELDS, "custom_config_path"),
-        )
-        cmd = _build_train_cmd(cfg)
-
-        # Claim the pool for this run before miles publishes: write the empty
-        # pointer and wake the pool so every replica resets to base now.
-        hooks.claim_pool(
-            SimpleNamespace(
-                update_weight_disk_dir=cfg.update_weight_disk_dir,
-                **custom_config,
-            )
-        )
-
-        print(
-            f"Training on {app_name}: nodes={n_train_nodes}, "
-            f"rollout_endpoint={cfg.rollout_endpoint_url}"
-        )
-        print(f"Command: {cmd}")
-
-        run_record = _record_run_started(
-            run_id=record_id,
-            recipe=recipe,
-            model=model,
-            dataset=dataset,
-            config_fields=payload.fields,
-            modal_app_id=modal_app_id,
-            metric_entity=metric_entity,
-            metric_run_id=metric_run_id,
-        )
-        payload_out = train_result_payload(
-            app_name=app_name,
-            framework=Framework.STITCH,
-            training_run_id=record_id,
-            checkpoint_dir=str(getattr(cfg, "save", "") or ""),
-            checkpoints_volume_name=checkpoints_volume_name,
-            checkpoints_mount_path=str(CHECKPOINTS_PATH),
-            model_config=model,
-            metrics=metric_metadata(
-                recipe.metrics,
-                entity=metric_entity,
-                run_id=metric_run_id,
-            ),
-            group_id=group_id or "",
-        )
-        # Tee the trainer's output to the checkpoints volume: a container's log
-        # window only keeps the tail, so a failure whose traceback scrolled past
-        # (rollout retries are loud) is otherwise unreadable afterwards.
-        trainer_log = CHECKPOINTS_PATH / "logs" / f"{record_id}-trainer.log"
-        trainer_log.parent.mkdir(parents=True, exist_ok=True)
-        status = TrainingRunStatus.COMPLETED
+        status = TrainingRunStatus.FAILED
+        error_message = None
+        payload_out = None
         try:
-            subprocess.run(
-                [
-                    "bash",
-                    "-lc",
-                    f"set -o pipefail; ({cmd}) 2>&1 | tee -a {shlex.quote(str(trainer_log))}",
-                ],
-                check=True,
+            os.environ.update(
+                {
+                    "MILES_HOST_IP": my_ip,
+                    "SGLANG_HOST_IP": my_ip,
+                    "HOST_IP": my_ip,
+                    "MASTER_ADDR": master_addr,
+                    "RAY_ADDRESS": f"{master_addr}:{RAY_PORT}",
+                    "no_proxy": f"127.0.0.1,{master_addr},{my_ip}",
+                    "NO_PROXY": f"127.0.0.1,{master_addr},{my_ip}",
+                    # Source-only ``megatron.training`` in front of what the
+                    # container already exports — Modal puts its own client on
+                    # PYTHONPATH, and the bulletin's store imports ``modal`` from
+                    # inside a Ray actor, which inherits this.
+                    "PYTHONPATH": os.pathsep.join(
+                        [MEGATRON_PATH, os.environ.get("PYTHONPATH", "")]
+                    ).rstrip(os.pathsep),
+                    # Only the RDMA nodes take the host's libibverbs, so only they
+                    # want the libmlx5 built against it (see RDMA_LIB_DIR). Set
+                    # before Ray starts, since its workers inherit this.
+                    **(
+                        {
+                            "LD_LIBRARY_PATH": ":".join(
+                                [RDMA_LIB_DIR, os.environ.get("LD_LIBRARY_PATH", "")]
+                            ).rstrip(":")
+                        }
+                        if _multi_node
+                        else {}
+                    ),
+                    **{str(k): str(v) for k, v in train_recipe.environment.items()},
+                }
             )
-        except subprocess.CalledProcessError as exc:
-            status = TrainingRunStatus.FAILED
-            # A CalledProcessError carries the whole miles argv, which Modal
-            # won't return to the client ("an exception that was too large"),
-            # so the failure that matters is replaced by the log's tail.
-            raise RuntimeError(_trainer_failed(trainer_log, exc.returncode)) from None
-        except BaseException:
-            status = TrainingRunStatus.FAILED
+            if framework_status_url:
+                os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
+            if framework_status_token:
+                os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = (
+                    framework_status_token
+                )
+            os.environ.update(
+                dashboard_env(
+                    training_run_id=training_run_id or run_id,
+                    app_name=app_name,
+                    total_steps=train_recipe.num_rollout,
+                    model=model,
+                    checkpoints_volume_name=checkpoints_volume_name,
+                    substep_timing=train_recipe.substep_timing,
+                    capture_trace=train_recipe.capture_trace,
+                    trace_sample_limit=train_recipe.trace_sample_limit,
+                )
+            )
+            os.environ.update(
+                metric_runtime_env(
+                    recipe.metrics, run_id=metric_run_id, entity=metric_entity
+                )
+            )
+            # Megatron is a source checkout in the image, so R3 dispatch + the
+            # reshardable optimizer step arrive as patches. Applied on every node,
+            # before the rank gate: each node's Ray actors import their own copy.
+            if train_recipe.megatron_runtime_patches:
+                process.apply_git_patches(
+                    train_recipe.megatron_runtime_patches,
+                    MEGATRON_PATH,
+                    "megatron-patch",
+                )
+            process.apply_git_patches(MILES_RUNTIME_PATCHES, MILES_ROOT, "miles-patch")
+            # Same reason: a Ray actor on another node re-reads this file by path, so
+            # it can't live in rank 0's per-launch tmpdir.
+            cfg_yaml_owner = _MilesArgs(
+                {"te_precision_config_file": train_recipe.te_precision_config_file},
+                async_mode=train_recipe.async_mode,
+                miles_model_script=train_recipe.miles_model_script,
+            )
+            launch.materialize_node_local_yaml(
+                cfg_yaml_owner, "te_precision_config_file"
+            )
+
+            # Rank 0 drives the run; the other ranks only host Ray workers, and stay
+            # alive until Modal tears the cluster down with rank 0's input.
+            if rank != 0:
+                start_ray_worker(my_ip, master_addr)
+                while True:
+                    time.sleep(10)
+                    # A volume mount is a snapshot: rank 0 prepares the dataset and
+                    # warms the HF cache inside this same call, so a worker's Ray
+                    # actors only see those files if this node keeps refreshing.
+                    for volume in (hf_cache_volume, data_volume, checkpoints_volume):
+                        volume.reload()
+            start_ray_head(my_ip, n_train_nodes, worker_wait_retries=180)
+            for volume in (hf_cache_volume, data_volume, checkpoints_volume):
+                volume.reload()
+            # ``launch(prepare_inputs=False)`` (the default, and what a sweep uses)
+            # skips the client-side prep calls, so the trainer prepares its own
+            # inputs when they're missing rather than failing on a cold volume.
+            run_prepare_dataset(
+                dataset, eval_dataset, data_volume, dataset_path, eval_dataset_path
+            )
+            # Both are no-ops on a warm cache.
+            model.download()
+            train_recipe.download_model()
+            hf_cache_volume.commit()
+            # The served baseline is the one input the trainer can't build here: the
+            # conversion wants its own GPU function (prepare_checkpoints).
+            for path in (served_model, recipe.bf16_checkpoint_path):
+                if str(path).startswith("/") and not Path(path).exists():
+                    raise RuntimeError(
+                        f"prepared checkpoint {path} is missing — run the app's "
+                        "prepare_checkpoints function (TrainConfig.train(), or "
+                        "launch(prepare_inputs=True)) before training"
+                    )
+
+            payload = recipe.to_payload(
+                model=model,
+                dataset=dataset,
+                eval_dataset=eval_dataset,
+                dataset_path=dataset_path,
+                eval_dataset_path=eval_dataset_path,
+            )
+            if run_record is not None:
+                run_record.config["recipe"].update(
+                    {k: v for k, v in payload.fields.items() if k != "wandb_key"}
+                )
+            cfg = _MilesArgs(
+                payload.fields,
+                async_mode=payload.async_mode,
+                miles_model_script=payload.miles_model_script,
+                miles_model_name=payload.miles_model_name,
+            )
+            cfg.te_precision_config_file = cfg_yaml_owner.te_precision_config_file
+            # The pool's Flash gateway, resolved by whoever launched this call (see
+            # _PoolAwareTrain). Falls back to a lookup by app name, which only works
+            # against a deployed pool.
+            cfg.rollout_endpoint_url = (
+                rollout_endpoint_url or trainer_helpers.deployed_gateway_url(app_name)
+            )
+            # Flash holds requests through a cold-starting pool, but the trainer's
+            # first rollout would otherwise meet engines that are still loading.
+            trainer_helpers.await_gateway_ready(
+                cfg.rollout_endpoint_url, timeout_seconds=serve_recipe.startup_timeout
+            )
+            cfg.update_weight_disk_dir = update_weight_disk_dir
+            if save_hf:
+                cfg.save_hf = f"{run_bulletin_root}/{save_hf}"
+            # Run-scope the saves, as the colocated miles launcher does: the
+            # checkpoints Volume is keyed by recipe, so its root is shared by every
+            # run of it. (A publish-only run keeps no checkpoints and has no
+            # ``save`` at all — see StitchTrainConfig._fields.)
+            if getattr(cfg, "save", None):
+                cfg.save = compute_save_root(
+                    cfg.save,
+                    recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
+                    mounted_save_root=str(CHECKPOINTS_PATH),
+                    training_run_id=training_run_id or run_id,
+                )
+            # stitch's publish + request hooks read these off the miles args
+            # namespace; merge over any user extra_config already on
+            # custom_config_path.
+            custom_config = dict(getattr(cfg, "custom_config_path", None) or {})
+            custom_config.update(
+                {
+                    field: getattr(train_recipe, field)
+                    for field in sorted(HOOK_CONFIG_FIELDS)
+                }
+            )
+            custom_config.update(
+                {
+                    "experiment_volume_name": delta_volume_name,
+                    "stitch_store_backend": STORE_BACKEND,
+                    "stitch_s3_root": "",
+                    "stitch_s3_endpoint_url": "",
+                    "rollout_modal_flash_app_name": app_name,
+                    "rollout_modal_flash_server_cls_name": "Server",
+                    "run_id": run_id,
+                }
+            )
+            cfg.custom_config_path = custom_config
+
+            # ``custom_config_path`` is a *path* flag: in the colocated flow the dict
+            # is materialized while still named ``extra_config`` (which is in miles'
+            # YAML_CONFIG_FIELDS) and renamed after. Here it is already renamed, so
+            # it has to be materialized under its final name or miles is handed a
+            # dict repr as a filename.
+            launch.resolve_config(
+                cfg,
+                tempfile.mkdtemp(),
+                checkpoint_fields=CHECKPOINT_PATH_FIELDS,
+                yaml_fields=(*YAML_CONFIG_FIELDS, "custom_config_path"),
+            )
+            cmd = _build_train_cmd(cfg)
+
+            # Claim the pool for this run before miles publishes: write the empty
+            # pointer and wake the pool so every replica resets to base now.
+            hooks.claim_pool(
+                SimpleNamespace(
+                    update_weight_disk_dir=cfg.update_weight_disk_dir,
+                    **custom_config,
+                )
+            )
+
+            print(
+                f"Training on {app_name}: nodes={n_train_nodes}, "
+                f"rollout_endpoint={cfg.rollout_endpoint_url}"
+            )
+            print(f"Command: {cmd}")
+
+            payload_out = train_result_payload(
+                app_name=app_name,
+                framework=Framework.STITCH,
+                training_run_id=record_id,
+                checkpoint_dir=str(getattr(cfg, "save", "") or ""),
+                checkpoints_volume_name=checkpoints_volume_name,
+                checkpoints_mount_path=str(CHECKPOINTS_PATH),
+                model_config=model,
+                metrics=metric_metadata(
+                    recipe.metrics,
+                    entity=metric_entity,
+                    run_id=metric_run_id,
+                ),
+                group_id=group_id or "",
+            )
+            # Tee the trainer's output to the checkpoints volume: a container's log
+            # window only keeps the tail, so a failure whose traceback scrolled past
+            # (rollout retries are loud) is otherwise unreadable afterwards.
+            trainer_log = CHECKPOINTS_PATH / "logs" / f"{record_id}-trainer.log"
+            trainer_log.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                subprocess.run(
+                    [
+                        "bash",
+                        "-lc",
+                        f"set -o pipefail; ({cmd}) 2>&1 | tee -a {shlex.quote(str(trainer_log))}",
+                    ],
+                    check=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                # A CalledProcessError carries the whole miles argv, which Modal
+                # won't return to the client ("an exception that was too large"),
+                # so the failure that matters is replaced by the log's tail.
+                raise RuntimeError(
+                    _trainer_failed(trainer_log, exc.returncode)
+                ) from None
+            finally:
+                checkpoints_volume.commit()
+
+            save_train_result_blob(payload_out)
+            status = TrainingRunStatus.COMPLETED
+            return payload_out
+        except (KeyboardInterrupt, SystemExit) as exc:
+            status = TrainingRunStatus.STOPPED
+            error_message = f"{type(exc).__name__}: {exc}"
+            raise
+        except BaseException as exc:
+            error_message = f"{type(exc).__name__}: {exc}"
             raise
         finally:
             _record_run_finished(
@@ -1042,11 +1071,8 @@ def build_stitch_app(
                 result_payload=(
                     payload_out if status == TrainingRunStatus.COMPLETED else None
                 ),
+                error_message=error_message,
             )
-            checkpoints_volume.commit()
-
-        save_train_result_blob(payload_out)
-        return payload_out
 
     @app.function(
         image=image,
