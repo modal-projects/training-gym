@@ -50,7 +50,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [Speech transcription that's better, faster, and cheaper](https://gym.modal.dev/tutorials/audio_asr)
 - [Massively-parallel hyperparameter sweeps](https://gym.modal.dev/tutorials/param_sweep)
 - [GUI Grounding with Qwen3-VL-8B](https://gym.modal.dev/tutorials/computer_use)
-- [On-policy Distillation (OPD) Across Model Families](https://gym.modal.dev/tutorials/cross_tokenizer_distillation)
+- [On-policy distillation across model families](https://gym.modal.dev/tutorials/cross_tok_distill)
 - [Frontier-scale training](https://gym.modal.dev/tutorials/multinode)
 
 ## Reference
