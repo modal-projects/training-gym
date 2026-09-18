@@ -12,7 +12,6 @@ from scripts.api_reference_manifest import (
     CLASS_REFERENCE_PATHS,
 )
 from scripts.generate_models_table import (
-    collect_deploy_preset_names,
     collect_model_preset_names,
     iter_registered_recipes,
 )
@@ -248,22 +247,20 @@ def test_registered_presets_are_exported_and_sidebar_excluded() -> None:
     }
     labels = {item["label"] for item in build_reference_sidebar()["sdk"]}
     model_presets = collect_model_preset_names()
-    deploy_presets = collect_deploy_preset_names()
     registered = {name for name, *_ in iter_registered_recipes()}
 
     assert registered <= set(gym.__all__)
     assert registered <= documented
-    assert deploy_presets <= set(gym.__all__)
-    assert deploy_presets <= documented
-    assert (model_presets | deploy_presets) & set(gym.__all__) <= excluded
+    assert model_presets & set(gym.__all__) <= excluded
     assert excluded.isdisjoint(labels)
     assert {
         "SlimeRecipe",
         "MilesRecipe",
         "ModelConfig",
         "HFModelConfiguration",
+        "SglangRecipe",
+        "VllmRecipe",
     }.isdisjoint(model_presets)
-    assert {"SglangRecipe", "VllmRecipe"}.isdisjoint(deploy_presets)
 
 
 def test_eval_classes_are_not_documented() -> None:
@@ -335,7 +332,6 @@ def test_excluded_preset_pages_omit_attributes() -> None:
     for name in (
         "Qwen3_4B_Recipe",
         "Qwen3_5_4B_Miles_Recipe",
-        "Qwen3_4B_SglangRecipe",
     ):
         entry = entries[name]
         assert entry.get("sidebar_excluded")
