@@ -238,7 +238,7 @@ recipe = Qwen3_6_27B_Recipe(
         "custom_generate_function_path": "agentic_rl.generate.generate",
         "agentic_max_steps": MAX_STEPS,
         "agentic_episode_timeout": 300 if SMOKE else 1800,
-        "agentic_eval_timeout": 120 if SMOKE else 300,
+        "agentic_eval_timeout": 120 if SMOKE else None,
         "agentic_exec_timeout": 60 if SMOKE else 120,
         "router_policy": "consistent_hashing",
         "skip_eval_before_train": SMOKE,
