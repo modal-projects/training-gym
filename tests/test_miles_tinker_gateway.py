@@ -736,6 +736,61 @@ def test_handle_stop_leaves_run_alone_when_app_stop_fails() -> None:
     mark_stopped.assert_not_called()
 
 
+def test_handle_stop_retries_marking_run_after_app_is_stopped() -> None:
+    gw = TinkerGateway(
+        app_name="demo-tinker",
+        model=Qwen3_30B(),
+        recipe=_gateway(),
+        base_model="Qwen/Qwen3-30B-A3B",
+        n_slots=2,
+        checkpoint_root="/checkpoints/demo-tinker/tinker",
+        checkpoints_volume_name="demo-checkpoints",
+        url="https://demo--tinker.modal.run",
+        training_run_id="run-1",
+    )
+    with (
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.subprocess.run"
+        ) as run,
+        patch("modal_training_gym.frameworks.miles.tinker_gateway.time.sleep"),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.mark_gateway_run_stopped",
+            side_effect=[OSError("volume unavailable"), None],
+        ) as mark_stopped,
+    ):
+        gw.stop()
+    run.assert_called_once()
+    assert mark_stopped.call_count == 2
+
+
+def test_handle_stop_raises_with_recovery_hint_when_marking_keeps_failing() -> None:
+    gw = TinkerGateway(
+        app_name="demo-tinker",
+        model=Qwen3_30B(),
+        recipe=_gateway(),
+        base_model="Qwen/Qwen3-30B-A3B",
+        n_slots=2,
+        checkpoint_root="/checkpoints/demo-tinker/tinker",
+        checkpoints_volume_name="demo-checkpoints",
+        url="https://demo--tinker.modal.run",
+        training_run_id="run-1",
+    )
+    with (
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.subprocess.run"
+        ) as run,
+        patch("modal_training_gym.frameworks.miles.tinker_gateway.time.sleep"),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.mark_gateway_run_stopped",
+            side_effect=OSError("volume unavailable"),
+        ) as mark_stopped,
+        pytest.raises(RuntimeError, match="mark_gateway_run_stopped\\('run-1'\\)"),
+    ):
+        gw.stop()
+    run.assert_called_once()
+    assert mark_stopped.call_count == 3
+
+
 def test_externally_stopped_gateway_app_is_reconciled() -> None:
     from modal_training_gym.common.run_reconciler import reconcile_decision
 

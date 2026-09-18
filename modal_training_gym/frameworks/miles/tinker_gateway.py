@@ -81,6 +81,8 @@ TINKER_SERVER_CLASS = "TinkerGatewayServer"
 
 _DEFAULT_STARTUP_TIMEOUT = 60 * 60
 _CHECKPOINT_COMMIT_INTERVAL_S = 60.0
+_MARK_STOPPED_ATTEMPTS = 3
+_MARK_STOPPED_BACKOFF_SECONDS = 2.0
 
 _PATCH_TINKER_TIMING_B64 = encode_patch(
     "patch_tinker_timing", Path(__file__).parent / "modal_helpers" / "patches"
@@ -906,14 +908,29 @@ class TinkerGateway(BaseModel):
     def stop(self) -> None:
         """Stop the gateway's Modal app and mark its dashboard run ``STOPPED``.
 
-        Adapter state stays on the Volume.
+        Adapter state stays on the Volume. Marking the run is retried; if the
+        metadata Volume stays unavailable the app is already stopped, so call
+        :func:`mark_gateway_run_stopped` (idempotent) once it recovers rather
+        than ``stop()`` again.
         """
         subprocess.run(
             ["modal", "app", "stop", "-y", self.modal_app_id or self.app_name],
             check=True,
         )
-        if self.training_run_id:
-            mark_gateway_run_stopped(self.training_run_id)
+        if not self.training_run_id:
+            return
+        for attempt in range(_MARK_STOPPED_ATTEMPTS):
+            try:
+                mark_gateway_run_stopped(self.training_run_id)
+                return
+            except Exception as exc:  # noqa: BLE001
+                if attempt == _MARK_STOPPED_ATTEMPTS - 1:
+                    raise RuntimeError(
+                        f"{self.app_name!r} is stopped but run "
+                        f"{self.training_run_id!r} could not be marked STOPPED; "
+                        f"retry with mark_gateway_run_stopped({self.training_run_id!r})."
+                    ) from exc
+                time.sleep(_MARK_STOPPED_BACKOFF_SECONDS * (attempt + 1))
 
 
 def _resolve(value: Any) -> Any:
