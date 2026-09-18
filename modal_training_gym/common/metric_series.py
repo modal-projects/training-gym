@@ -1,8 +1,10 @@
 """Scalar metric histories mirrored from the framework's ``wandb.log`` calls.
 
-Stored on the metadata volume as ``metric-series/{run}/chunk-000001.json``,
-each chunk covering ``CHUNK_STEPS`` steps, so a 10k-step run is a handful of
-files rather than one per point. In memory a run is ``{step: {key: value}}``.
+Stored on the metadata volume as
+``metric-series/{run}/chunk-000001-{writer}.json``, each chunk covering
+``CHUNK_STEPS`` steps (one file per dashboard container that ingested it, all
+merged on read), so a 10k-step run is a handful of files rather than one per
+point. In memory a run is ``{step: {key: value}}``.
 """
 
 from __future__ import annotations

@@ -23,6 +23,7 @@ from modal_training_gym.utils.metadata import MetadataStore
 RUN_ID = "metric-run"
 STORE = f"{MetadataStore.METRIC_SERIES.value}/{RUN_ID}"
 AUTH = {"Authorization": "Bearer secret"}
+WRITER = _dashboard.METRIC_WRITER_ID
 
 
 def _client(monkeypatch, tmp_path) -> TestClient:
@@ -119,12 +120,15 @@ def test_ingest_buffers_in_memory_and_persists_chunks_on_final(
         )
         assert second.status_code == 200
         files = _chunk_files(fake_volume)
-        assert sorted(files) == ["chunk-000000.json", "chunk-000001.json"]
-        assert files["chunk-000000.json"]["steps"]["1"] == {
+        assert sorted(files) == [
+            f"chunk-000000-{WRITER}.json",
+            f"chunk-000001-{WRITER}.json",
+        ]
+        assert files[f"chunk-000000-{WRITER}.json"]["steps"]["1"] == {
             "train/loss": 0.7,
             "reward": 0.5,
         }
-        assert files["chunk-000001.json"]["steps"] == {
+        assert files[f"chunk-000001-{WRITER}.json"]["steps"] == {
             str(CHUNK_STEPS + 3): {"reward": 0.9}
         }
 
@@ -140,14 +144,24 @@ def test_ingest_buffers_in_memory_and_persists_chunks_on_final(
 def test_reads_pick_up_chunks_written_by_another_replica(
     fake_volume, monkeypatch, tmp_path
 ):
+    """Two replicas each write their own copy of a chunk; reads merge them."""
     _save_run()
     metadata.vol_put(
-        STORE, "chunk-000000", {"steps": {"3": {"lr": 0.1}, "bad": "skip"}}
+        STORE, "chunk-000000-aaaa", {"steps": {"3": {"lr": 0.1}, "bad": "skip"}}
     )
-    metadata.vol_put(STORE, "chunk-000002", {})
+    metadata.vol_put(STORE, "chunk-000000-bbbb", {"steps": {"4": {"lr": 0.2}}})
+    metadata.vol_put(STORE, "chunk-000002-bbbb", {})
     with _client(monkeypatch, tmp_path) as client:
         result = client.get(f"/api/runs/{RUN_ID}/metrics").json()
-        assert result["series"] == {"lr": [[3, 0.1]]}
+        assert result["series"] == {"lr": [[3, 0.1], [4, 0.2]]}
+        client.post(
+            "/api/metric-points",
+            json=_batch([(5, {"lr": 0.3})], final=True),
+            headers=AUTH,
+        )
+        files = _chunk_files(fake_volume)
+        assert f"chunk-000000-{WRITER}.json" in files  # others left untouched
+        assert files["chunk-000000-aaaa.json"]["steps"]["3"] == {"lr": 0.1}
         assert client.get("/api/runs/ghost/metrics").status_code == 404
 
 
@@ -164,7 +178,7 @@ def test_reading_a_finished_run_persists_whatever_is_still_buffered(
         _save_run(TrainingRunStatus.FAILED)
         result = client.get(f"/api/runs/{RUN_ID}/metrics").json()
         assert result["series"] == {"a": [[0, 1.0]]}
-        assert list(_chunk_files(fake_volume)) == ["chunk-000000.json"]
+        assert list(_chunk_files(fake_volume)) == [f"chunk-000000-{WRITER}.json"]
 
 
 def test_rejects_oversized_or_malformed_points(fake_volume, monkeypatch, tmp_path):

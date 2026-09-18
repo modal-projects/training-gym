@@ -240,6 +240,9 @@ PASSWORD_EXEMPT_PATHS = frozenset(
 # Only ever the *expected* side of a comparison, so publishing it is safe.
 _MISSING_TOKEN_DUMMY = "training-gym-missing-token-dummy-never-issued"
 
+# Suffix on the metric chunk files this container writes (one per process).
+METRIC_WRITER_ID = _secrets.token_hex(4)
+
 
 def _is_local() -> bool:
     """True when we're not running inside a Modal container."""
@@ -688,7 +691,9 @@ def fastapi_app():
 
     # ── Mirrored scalar metrics ──────────────────────────────────────────
     # One in-memory table per run; dirty chunks hit the volume every few
-    # seconds (or on the final batch), the same way timing events do.
+    # seconds (or on the final batch), the same way timing events do. Each
+    # container writes its own copy of a chunk (``chunk-000001-<writer>``) and
+    # readers merge every copy, so autoscaled replicas can't clobber each other.
     METRIC_FLUSH_INTERVAL_S = 5.0
     METRIC_READ_TTL_S = 10.0
     METRIC_CACHE_MAX_RUNS = 64
@@ -726,7 +731,10 @@ def fastapi_app():
         if entry.dirty:
             await _metadata_vol_put_many(
                 metric_series_store(training_run_id),
-                {chunk: chunk_payload(chunk, entry.table) for chunk in entry.dirty},
+                {
+                    f"{chunk}-{METRIC_WRITER_ID}": chunk_payload(chunk, entry.table)
+                    for chunk in entry.dirty
+                },
                 is_async=True,
             )
             entry.dirty.clear()
