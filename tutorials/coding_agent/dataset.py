@@ -46,7 +46,7 @@ HF_DATASET = "nebius/SWE-rebench-V2"
 DATASET_ROOT = "swe_rebench_v2"
 # Shared with main.py so task conversion and rollout execution use the same code.
 SLIME_GIT_REPOSITORY = "https://github.com/modal-projects/slime.git"
-SLIME_GIT_REVISION = "ba324bebdd3a3cbfc1946b58404a012ad607f38b"
+SLIME_GIT_REVISION = "a9f2e5631634affa2032d5f3f9df8d3f2bcbca62"
 DATA_VOLUME_NAME = "slime-data"
 
 

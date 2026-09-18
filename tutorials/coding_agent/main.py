@@ -114,8 +114,8 @@ train_dataset = AgentTaskDataset(DATA_ROOT / f"{TRAIN_SUBSET}.jsonl")
 # compares samples for the same task, giving higher-reward samples a positive
 # advantage. The full configuration samples eight episodes per task.
 #
-# See the pinned [rollout implementation](https://github.com/modal-projects/slime/blob/ba324bebdd3a3cbfc1946b58404a012ad607f38b/agentic_rl/generate.py)
-# and [Harbor environment](https://github.com/modal-projects/slime/blob/ba324bebdd3a3cbfc1946b58404a012ad607f38b/agentic_rl/environment/harbor.py)
+# See the pinned [rollout implementation](https://github.com/modal-projects/slime/blob/a9f2e5631634affa2032d5f3f9df8d3f2bcbca62/agentic_rl/core/generate.py)
+# and [Harbor environment](https://github.com/modal-projects/slime/blob/a9f2e5631634affa2032d5f3f9df8d3f2bcbca62/agentic_rl/envs/harbor/env.py)
 # for the interaction and verification code.
 #
 # ## Configure the recipe
