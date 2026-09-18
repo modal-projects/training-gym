@@ -40,12 +40,10 @@ from modal_training_gym import (
     CustomDeployment,
     Endpoint,
     Qwen3_6_35B,
+    SglangRecipe,
     TrainConfig,
 )
 from modal_training_gym.common.models.base import HFModelConfiguration, ToolCall
-from modal_training_gym.deploy_recipes.sglang_recipe import (
-    DeepSeek_V4_Flash_SglangRecipe,
-)
 from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_35B_Recipe
 
 # ## Deploy the base models
@@ -65,10 +63,32 @@ base_student_deployment = Endpoint.launch(
 teacher_model = HFModelConfiguration(model_name="deepseek-ai/DeepSeek-V4-Flash")
 teacher_deployment = CustomDeployment.launch(
     teacher_model,
-    recipe=DeepSeek_V4_Flash_SglangRecipe(
+    recipe=SglangRecipe(
+        gpu="B200",
+        tp=4,
+        dp=4,
         context_length=16384,
-        startup_timeout=TEACHER_READY_TIMEOUT,
+        mem_fraction_static=0.85,
+        chunked_prefill_size=4096,
         max_running_requests=64,
+        sglang_image="lmsysorg/sglang:v0.5.12.post1-cu130",
+        install_transformers_from_git=False,
+        env_vars={
+            "NCCL_CUMEM_ENABLE": "1",
+            "SGLANG_OPT_DEEPGEMM_MEGA_MOE_NUM_MAX_TOKENS_PER_RANK": "8320",
+            "SGLANG_OPT_DEEPGEMM_MEGA_MOE_USE_FP4_ACTS": "1",
+            "SGLANG_OPT_DEEPGEMM_MEGA_MOE_USE_MXF4_KIND": "1",
+        },
+        extra_server_args={
+            "--trust-remote-code": "",
+            "--moe-a2a-backend": "megamoe",
+            "--enable-breakable-cuda-graph": "",
+            "--enable-mixed-chunk": "",
+            "--piecewise-cuda-graph-max-tokens": "4096",
+            "--tool-call-parser": "deepseekv4",
+            "--reasoning-parser": "deepseek-v4",
+        },
+        startup_timeout=TEACHER_READY_TIMEOUT,
     ),
     app_name="dsv4-teacher-model",
     served_model_name="deepseek-v4-flash",

@@ -25,13 +25,8 @@ FRAMEWORKS = (
     "modal_training_gym.train_recipes.slime_recipe",
     "modal_training_gym.train_recipes.miles_recipe",
 )
-DEPLOY_FRAMEWORKS = (
-    "modal_training_gym.deploy_recipes.sglang_recipe",
-    "modal_training_gym.deploy_recipes.vllm_recipe",
-)
 BASE_RECIPES = {"SlimeRecipe", "MilesRecipe"}
-BASE_DEPLOY_RECIPES = {"SglangRecipe", "VllmRecipe"}
-FRAMEWORK_BASES = frozenset({*BASE_RECIPES, *BASE_DEPLOY_RECIPES, "MilesConfig"})
+FRAMEWORK_BASES = frozenset({*BASE_RECIPES, "MilesConfig"})
 MODEL_CONFIGS = {name.lower(): getattr(models, name) for name in models.__all__}
 FAMILY_RE = re.compile(r"^([A-Za-z]+(?:\d+(?:\.\d+)*|\d+)?)")
 HF_URL = "https://huggingface.co"
@@ -96,16 +91,6 @@ def collect_model_preset_names() -> frozenset[str]:
     for name in models.__all__:
         if _is_preset_class(getattr(models, name), name):
             names.add(name)
-    return frozenset(names)
-
-
-def collect_deploy_preset_names() -> frozenset[str]:
-    names: set[str] = set()
-    for module_path in DEPLOY_FRAMEWORKS:
-        registry = importlib.import_module(module_path)
-        for name in registry.__all__:
-            if name not in BASE_DEPLOY_RECIPES:
-                names.add(name)
     return frozenset(names)
 
 
