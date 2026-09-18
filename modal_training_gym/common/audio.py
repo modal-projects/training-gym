@@ -16,7 +16,7 @@ def data_uri_to_bytes(data_uri: str) -> bytes:
         _, _, b64 = data_uri.partition(",")
     else:
         b64 = data_uri
-    return base64.b64decode(b64, validate=True)
+    return base64.b64decode("".join(b64.split()), validate=True)
 
 
 def coerce_audio_to_bytes(value: Any) -> bytes | None:

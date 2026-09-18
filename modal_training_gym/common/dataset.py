@@ -8,6 +8,7 @@ common sources like Hugging Face and Harbor.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import mimetypes
@@ -43,7 +44,10 @@ def _materialize_data_uri(uri: str, dest_dir: Path, index: int) -> str:
         or "application/octet-stream"
     )
     if ";base64" in header:
-        raw = base64.b64decode(payload)
+        try:
+            raw = base64.b64decode("".join(payload.split()), validate=True)
+        except binascii.Error as exc:
+            raise TrainingGymConfigError(f"invalid base64 data URI: {exc}") from exc
     else:
         raw = unquote_to_bytes(payload)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -721,21 +725,19 @@ class MultimodalDataset(DatasetConfig):
             yield self._to_row(row)
 
     def _rows_with_paths(
-        self, rows: list[DatasetRow], dest_dir: Path
-    ) -> list[DatasetRow]:
+        self, rows: Iterable[DatasetRow], dest_dir: Path
+    ) -> Iterable[DatasetRow]:
         n = 0
-        out: list[DatasetRow] = []
         for row in rows:
             media = row.get(self.media_column)
             if not isinstance(media, list):
-                out.append(row)
+                yield row
                 continue
             written = [
                 _as_media_path(item, dest_dir, n + i) for i, item in enumerate(media)
             ]
             n += len(media)
-            out.append({**row, self.media_column: written})
-        return out
+            yield {**row, self.media_column: written}
 
     def write(self, path: str) -> None:
         """Disk hook: write ``rows()`` at ``path`` with media as local file paths.
@@ -747,9 +749,7 @@ class MultimodalDataset(DatasetConfig):
         """
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        rows = self._rows_with_paths(
-            list(self.rows()), dest.with_name(dest.name + ".media")
-        )
+        rows = self._rows_with_paths(self.rows(), dest.with_name(dest.name + ".media"))
         with dest.open("w") as f:
             for row in rows:
                 f.write(json.dumps(row) + "\n")

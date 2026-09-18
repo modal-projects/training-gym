@@ -100,6 +100,7 @@ def test_coerce_audio_reads_path(tmp_path):
     assert coerce_audio_to_bytes(url) is None
     raw = b"RIFF" + b"A" * 8000
     assert coerce_audio_to_bytes(base64.b64encode(raw).decode()) == raw
+    assert coerce_audio_to_bytes(base64.encodebytes(raw).decode()) == raw
 
 
 def test_audio_ref_raises_when_no_audio():
