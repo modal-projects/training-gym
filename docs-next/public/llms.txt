@@ -44,7 +44,7 @@ Repo: https://github.com/modal-projects/training-gym
 
 - [Getting started with RL](https://gym.modal.dev/tutorials/rl_basics)
 - [Painting flowers with code](https://gym.modal.dev/tutorials/paint_flowers)
-- [Training coding agents in sandboxed environments](https://gym.modal.dev/tutorials/coding_agent)
+- [Training multi-turn coding agents](https://gym.modal.dev/tutorials/coding_agent)
 - [Efficient inference using on-policy distillation](https://gym.modal.dev/tutorials/on_policy_distillation)
 - [On-policy distillation across model families](https://gym.modal.dev/tutorials/cross_tok_distill)
 - [Long chain-of-thought reasoning for large-scale RL](https://gym.modal.dev/tutorials/dapo)
@@ -112,7 +112,6 @@ Repo: https://github.com/modal-projects/training-gym
 - [Qwen3_5_4B_Recipe](https://gym.modal.dev/reference/qwen3_5_4b_recipe)
 - [Qwen3_5_9B_Recipe](https://gym.modal.dev/reference/qwen3_5_9b_recipe)
 - [Qwen3_6_27B_Recipe](https://gym.modal.dev/reference/qwen3_6_27b_recipe)
-- [Qwen3_6_27B_Recipe_Agentic](https://gym.modal.dev/reference/qwen3_6_27b_recipe_agentic)
 - [Qwen3_6_35B_Recipe](https://gym.modal.dev/reference/qwen3_6_35b_recipe)
 - [Qwen3_8_27B_Recipe](https://gym.modal.dev/reference/qwen3_8_27b_recipe)
 - [Qwen3_8B_Recipe](https://gym.modal.dev/reference/qwen3_8b_recipe)

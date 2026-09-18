@@ -27,61 +27,40 @@ from modal_training_gym.frameworks.slime.launcher import (
     _slime_git_overlay_command,
 )
 from modal_training_gym.train_recipes.base import DATA_PATH
-from modal_training_gym.train_recipes.slime_recipe import (
-    Qwen3_6_27B_Recipe_Agentic,
-)
 
-# Fraction of tasks that go to eval. Remainder go to train.
-EVAL_SPLIT_FRACTION = 0.2
-# Subset for smoke tests
-EVAL_SPLIT_SIZES = (4,)
-TRAIN_SPLIT_SIZES = (4, 100, 300, 1000)
 SPLIT_SEED = 0
-# Train keeps at least this many task groups of each language, so moving a
-# group to eval never leaves train without that language.
+TRAIN_SPLIT_SIZES = (4, 100, 300, 1000)
+EVAL_SPLIT_FRACTION = 0.2
+EVAL_SPLIT_SIZES = (4,)
+
 MIN_TRAIN_TASK_GROUPS_PER_LANGUAGE = 2
 MIXED_CRITERION = "fully_gradeable_and_0_lt_solved_lt_n_samples"
 SOURCE_COLUMNS = ("repo", "language", "license", "created_at")
 DEFAULT_MIXED_RECIPE_SLUG = "qwen3-6-27b-agentic"
 
-
 HF_DATASET = "nebius/SWE-rebench-V2"
 DATASET_ROOT = "swe_rebench_v2"
 
-
-def data_volume_name(recipe: Qwen3_6_27B_Recipe_Agentic) -> str:
-    return recipe.data_volume_name or f"slime-{type(recipe).__name__.lower()}-data"
-
-
-def dataset_root_name(value: str) -> str:
-    if not value or value in {".", ".."} or "/" in value or "\\" in value:
-        raise ValueError(f"dataset root must be a single directory name, got {value!r}")
-    return value
-
-
-def source_metadata(row: dict[str, Any]) -> dict[str, Any]:
-    value = (row.get("metadata") or {}).get("source") or {}
-    return value if isinstance(value, dict) else {}
+SLIME_GIT_REPOSITORY = "https://github.com/modal-projects/slime.git"
+SLIME_GIT_REVISION = "a9f2e5631634affa2032d5f3f9df8d3f2bcbca62"
+DATA_VOLUME_NAME = "slime-data"
 
 
 def language(row: dict[str, Any]) -> str:
-    metadata = source_metadata(row)
-    return str(metadata.get("language_bucket") or metadata.get("language") or "?")
+    source = (row.get("metadata") or {}).get("source") or {}
+    if not isinstance(source, dict):
+        source = {}
+    return str(source.get("language_bucket") or source.get("language") or "?")
 
 
 def task_group(row: dict[str, Any]) -> str:
-    repo = source_metadata(row).get("repo")
+    source = (row.get("metadata") or {}).get("source") or {}
+    if not isinstance(source, dict):
+        source = {}
+    repo = source.get("repo")
     if not repo:
         raise ValueError("converted row is missing metadata.source.repo")
     return str(repo)
-
-
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
 
 
 def write_text(path: Path, text: str) -> None:
@@ -202,13 +181,6 @@ def aggregate_probe_samples(
     return result
 
 
-def mixed_subset_name(source: str, recipe: str, n_samples: int) -> str:
-    recipe_slug = re.sub(r"[^a-z0-9]+", "-", recipe.lower()).strip("-")
-    if not recipe_slug:
-        raise ValueError("recipe name must contain a letter or number")
-    return f"{source}-mixed-reward-{recipe_slug}-n{n_samples}"
-
-
 def write_mixed_subset(
     root: Path,
     *,
@@ -227,13 +199,20 @@ def write_mixed_subset(
     if not source_path.is_file():
         raise FileNotFoundError(f"source subset does not exist: {source_path}")
 
-    name = mixed_subset_name(source, recipe, n_samples)
+    recipe_slug = re.sub(r"[^a-z0-9]+", "-", recipe.lower()).strip("-")
+    if not recipe_slug:
+        raise ValueError("recipe name must contain a letter or number")
+    name = f"{source}-mixed-reward-{recipe_slug}-n{n_samples}"
     output_path = root / f"{name}.jsonl"
     metadata_path = root / f"{name}.json"
     if (output_path.exists() or metadata_path.exists()) and not replace:
         raise FileExistsError(f"{name} already exists; pass --replace to overwrite it")
 
-    source_rows = read_jsonl(source_path)
+    source_rows = [
+        json.loads(line)
+        for line in source_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     indexed = {
         str((row.get("metadata") or {}).get("instance_id") or ""): row
         for row in source_rows
@@ -382,16 +361,14 @@ def prepare_dataset(
     return counts
 
 
-def _image(recipe: Qwen3_6_27B_Recipe_Agentic) -> modal.Image:
-    if not (recipe.slime_git_repository and recipe.slime_git_revision):
-        raise ValueError(f"{type(recipe).__name__} does not pin a Slime fork")
+def _image() -> modal.Image:
     return (
         modal.Image.from_registry(SLIME_IMAGE)
         .entrypoint([])
         .run_commands(
             _slime_git_overlay_command(
-                recipe.slime_git_repository,
-                recipe.slime_git_revision,
+                SLIME_GIT_REPOSITORY,
+                SLIME_GIT_REVISION,
             ),
             "uv pip install --system modal datasets huggingface_hub",
         )
@@ -484,14 +461,18 @@ def main() -> None:
     args = parser.parse_args()
 
     dataset_root = args.dataset_root
-    try:
-        dataset_root = dataset_root_name(dataset_root)
-    except ValueError as exc:
-        parser.error(str(exc))
+    if (
+        not dataset_root
+        or dataset_root in {".", ".."}
+        or "/" in dataset_root
+        or "\\" in dataset_root
+    ):
+        parser.error(
+            f"dataset root must be a single directory name, got {dataset_root!r}"
+        )
     root = f"{DATA_PATH}/{dataset_root}"
 
-    training_recipe = Qwen3_6_27B_Recipe_Agentic()
-    volume_name = data_volume_name(training_recipe)
+    volume_name = DATA_VOLUME_NAME
     app = modal.App("partition-swe-dataset")
     volumes = {
         str(DATA_PATH): modal.Volume.from_name(volume_name, create_if_missing=True)
@@ -501,7 +482,7 @@ def main() -> None:
             args.checkpoints_volume, create_if_missing=False
         )
     remote_options: dict[str, Any] = {
-        "image": _image(training_recipe),
+        "image": _image(),
         "volumes": volumes,
         "timeout": 24 * 60 * 60,
     }
@@ -511,7 +492,7 @@ def main() -> None:
         with app.run():
             counts = remote.remote(
                 root,
-                converter_revision=training_recipe.slime_git_revision,
+                converter_revision=SLIME_GIT_REVISION,
                 hf_revision=args.hf_revision,
                 min_grade=None if args.min_grade.lower() == "none" else args.min_grade,
                 limit=args.limit,
