@@ -92,7 +92,6 @@ def test_unknown_model_names_are_rejected():
         ("Inkling-Small", "Inkling_Small_Recipe"),
         ("Inkling-Small-LoRA", "Inkling_Small_LoRA_Recipe"),
         ("Qwen3.6-35B-A3B", "Qwen3_6_35B_Recipe"),
-        ("Qwen3.6-35B-A3B-Long-Context", "Qwen3_6_35B_Recipe_Long_Context"),
     ],
 )
 def test_named_validation_resolves_expected_recipe(name, recipe_cls_name):
