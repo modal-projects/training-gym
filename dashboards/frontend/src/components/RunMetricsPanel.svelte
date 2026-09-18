@@ -1,19 +1,15 @@
 <script>
   // Metrics tab body for a training run: the scalar series mirrored from
   // wandb/trackio, laid out like W&B's workspace — one panel group per key
-  // prefix (`train/`, `rollout/`, ...), a LineChart per key, a search box
-  // that narrows every group at once, and a shared step window so brushing
-  // one chart zooms them all.
+  // prefix (`train/`, `rollout/`, ...), a dense grid of small panels per
+  // key, a search box that narrows every group at once, one smoothing
+  // toggle for all panels, and a shared step window so brushing one chart
+  // zooms them all.
   import ChartSkeleton from "./ChartSkeleton.svelte";
   import GroupSection from "./GroupSection.svelte";
   import LineChart from "./LineChart.svelte";
   import { fetchRunMetrics } from "../lib/api.js";
-  import {
-    formatMetricValue,
-    groupMetricKeys,
-    seriesStats,
-    seriesToRows,
-  } from "../lib/metricSeries.js";
+  import { formatMetricValue, groupMetricKeys, seriesToRows } from "../lib/metricSeries.js";
 
   let { runId, isRunning = false } = $props();
 
@@ -21,6 +17,7 @@
   // Rendering hundreds of SVG charts at once is what makes W&B workspaces
   // crawl; past this many panels we ask for a narrower search instead.
   const MAX_CHARTS = 60;
+  const SMOOTHING_WINDOW = 10;
 
   let payload = $state(null);
   let loading = $state(true);
@@ -29,6 +26,7 @@
   let search = $state("");
   let collapsed = $state(new Set());
   let stepDomain = $state(null); // [lo, hi] steps while zoomed; null → all
+  let smoothing = $state(false);
 
   $effect(() => {
     const value = searchInput;
@@ -147,16 +145,16 @@
 
   function subtitleFor(group) {
     const n = group.keys.length;
-    return `${n} ${n === 1 ? "metric" : "metrics"}`;
+    return `${n} ${n === 1 ? "panel" : "panels"}`;
   }
 </script>
 
 <div class="flex flex-col gap-[16px] min-w-0">
   {#if loading && !payload}
-    <div class="chart-grid" aria-busy="true" aria-label="Loading metrics">
-      {#each [0, 1, 2, 3] as i (i)}
-        <div class="rollout-chart">
-          <ChartSkeleton variant="line" height={140} showTitle />
+    <div class="metric-grid" aria-busy="true" aria-label="Loading metrics">
+      {#each [0, 1, 2, 3, 4, 5] as i (i)}
+        <div class="metric-panel">
+          <ChartSkeleton variant="line" height={150} showTitle />
         </div>
       {/each}
     </div>
@@ -178,14 +176,21 @@
       <input
         class="flex-1 min-w-[200px] bg-(--color-c-gray-08,#1c1c1c) text-(--text) [border:1px_solid_var(--border,#3a3a3a)] rounded-[5px] p-[6px_10px] text-[12px] [font-family:inherit] focus:outline-none focus:[border-color:color-mix(in_srgb,var(--accent)_55%,transparent)]"
         type="search"
-        placeholder="filter metrics… (e.g. loss, rollout/)"
+        placeholder="Search panels (e.g. loss, rollout/)"
         bind:value={searchInput}
-        aria-label="Filter metrics by name"
+        aria-label="Search panels by metric name"
       />
+      <label
+        class="inline-flex items-center gap-[5px] text-[11px] text-(--muted) cursor-pointer select-none"
+        title={`Trailing mean over the last ${SMOOTHING_WINDOW} steps, applied to every panel`}
+      >
+        <input type="checkbox" bind:checked={smoothing} />
+        <span>Smoothing</span>
+      </label>
       <span class="text-(--muted) text-[11px] uppercase tracking-[0.04em] [font-variant-numeric:tabular-nums]">
         {#if search}{visibleKeyCount} of {allKeys.length}{:else}{allKeys.length}{/if}
-        {allKeys.length === 1 ? "metric" : "metrics"}
-        {#if stepRange}· steps {stepRange[0]}–{stepRange[1]}{/if}
+        {allKeys.length === 1 ? "panel" : "panels"}
+        {#if stepRange}· step {stepRange[0]}–{stepRange[1]}{/if}
       </span>
       {#if stepDomain}
         <button class="log-button" type="button" onclick={() => onDomainChange(null)}>
@@ -231,32 +236,25 @@
         expanded={!collapsed.has(group.name)}
         onToggle={() => toggleGroup(group.name)}
       >
-        <div class="p-[0_14px_14px]">
-          <div class="chart-grid" style:margin-bottom="0">
+        <div class="p-[0_12px_12px]">
+          <div class="metric-grid">
             {#each group.shown as key (key)}
-              {@const rows = rowsByKey.get(key) ?? []}
-              {@const stats = seriesStats(rows)}
-              <div class="rollout-chart">
+              <div class="metric-panel">
                 <LineChart
                   title={key}
-                  data={rows}
-                  height={140}
+                  data={rowsByKey.get(key) ?? []}
+                  height={150}
                   label="value"
+                  axes
                   smoothable
+                  smoothed={smoothing}
+                  smoothingWindow={SMOOTHING_WINDOW}
                   ariaLabel={`${key} over training steps`}
                   formatX={formatStep}
                   formatY={formatMetricValue}
                   xDomain={stepDomain}
                   onChangeDomainX={onDomainChange}
                 />
-                {#if stats}
-                  <div class="flex flex-wrap gap-[12px] mt-[6px] text-[11px] text-(--muted) [font-variant-numeric:tabular-nums]">
-                    <span>latest <span class="text-(--text)">{formatMetricValue(stats.latest)}</span></span>
-                    <span>min <span class="text-(--text)">{formatMetricValue(stats.min)}</span></span>
-                    <span>max <span class="text-(--text)">{formatMetricValue(stats.max)}</span></span>
-                    <span>{stats.count} {stats.count === 1 ? "point" : "points"}</span>
-                  </div>
-                {/if}
               </div>
             {/each}
           </div>

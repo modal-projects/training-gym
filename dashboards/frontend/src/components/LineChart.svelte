@@ -1,6 +1,7 @@
 <script>
   import { brushZoom, fractionsToDomain } from "../lib/brushZoom.js";
   import { trailingMean } from "../lib/smoothing.js";
+  import { niceTicks } from "../lib/ticks.js";
   import TimeAxis from "./TimeAxis.svelte";
 
   let {
@@ -13,6 +14,12 @@
     lines = [],
     smoothable = false,
     smoothingWindow = 5,
+    // When set, smoothing is controlled by the parent (no checkbox is drawn).
+    smoothed = null,
+    // W&B-style panel: fit the y range to the data instead of anchoring it
+    // at zero, draw tick labels + gridlines, and leave the wheel to the page
+    // (drag still zooms).
+    axes = false,
     ariaLabel = title || "Line chart",
     formatX = (row) => String(row?.x ?? ""),
     formatY = (value) => String(value),
@@ -59,7 +66,7 @@
       })
       .filter((row) => Number.isFinite(row.x) && row.y != null);
   });
-  let smoothingOn = $derived(smoothable && smoothing);
+  let smoothingOn = $derived(smoothable && (smoothed ?? smoothing));
   let allRows = $derived(
     smoothingOn ? trailingMean(rawRows, seriesKeys, smoothingWindow) : rawRows,
   );
@@ -96,16 +103,27 @@
   let yValues = $derived(
     rows.flatMap((row) => visibleKeys.map((key) => row[key]).filter((v) => v != null)),
   );
-  let yMin = $derived(yValues.length ? Math.min(0, ...yValues) : 0);
-  let yMax = $derived(yValues.length ? Math.max(0, ...yValues) : 1);
+  let yExtent = $derived.by(() => {
+    if (!yValues.length) return [0, 1];
+    if (!axes) return [Math.min(0, ...yValues), Math.max(0, ...yValues)];
+    const lo = Math.min(...yValues);
+    const hi = Math.max(...yValues);
+    const pad = (hi - lo || Math.abs(lo) || 1) * 0.08;
+    return [lo - pad, hi + pad];
+  });
+  let yMin = $derived(yExtent[0]);
+  let yMax = $derived(yExtent[1]);
   let ySpan = $derived(yMax - yMin || 1);
-
   let singlePoint = $derived(rows.length === 1 && !hasDomain);
+  let yTicks = $derived(axes ? niceTicks(yMin, yMax, 4) : []);
+  let xTicks = $derived(axes && !singlePoint ? niceTicks(xMin, xMax, 5) : []);
 
+  function yPercent(value) {
+    return axes ? 100 - ((value - yMin) / ySpan) * 100 : 100 - ((value - yMin) / ySpan) * 96 - 2;
+  }
   function point(row, key = "y") {
     const x = singlePoint ? 2 : ((row.x - xMin) / xSpan) * 100;
-    const y = 100 - ((row[key] - yMin) / ySpan) * 96 - 2;
-    return { x, y };
+    return { x, y: yPercent(row[key]) };
   }
   let singlePointMarkers = $derived(
     singlePoint
@@ -148,7 +166,7 @@
     hoveredIndex == null ? null : rows[Math.max(0, Math.min(rows.length - 1, hoveredIndex))],
   );
   let hoveredPoint = $derived(hoveredRow ? point(hoveredRow) : null);
-  let reverseTooltip = $derived(hoveredPoint ? hoveredPoint.x > 72 : false);
+  let reverseTooltip = $derived(hoveredPoint ? hoveredPoint.x > (axes ? 55 : 72) : false);
   let hoveredExtras = $derived(
     hoveredRow
       ? visibleExtraLines
@@ -231,7 +249,7 @@
           {/each}
         </div>
       {/if}
-      {#if smoothable}
+      {#if smoothable && smoothed == null}
         <label
           class="inline-flex items-center gap-[5px] text-[11px] text-(--muted) cursor-pointer select-none"
           title={`Trailing mean over the last ${smoothingWindow} steps`}
@@ -244,6 +262,14 @@
   {/if}
 
   {#if rows.length || (hasDomain && allRows.length)}
+    <div class:line-chart-axes={axes}>
+    {#if axes}
+      <div class="line-chart-yaxis" aria-hidden="true">
+        {#each yTicks as tick (tick)}
+          <span style:top={`${yPercent(tick)}%`}>{formatY(tick)}</span>
+        {/each}
+      </div>
+    {/if}
     <div
       class="relative overflow-hidden bg-(--color-c-gray-08,#1c1c1c) rounded-[6px] cursor-crosshair"
       bind:this={chartEl}
@@ -252,9 +278,19 @@
       aria-label={ariaLabel}
       onpointermove={onPointerMove}
       onpointerleave={onPointerLeave}
-      use:brushZoom={{ onChangeDomainX: handleBrush, enabled: zoomable }}
+      use:brushZoom={{ onChangeDomainX: handleBrush, enabled: zoomable, enableWheelZoom: !axes }}
     >
       <svg class="block w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        {#each yTicks as tick (tick)}
+          <line
+            x1="0"
+            x2="100"
+            y1={yPercent(tick)}
+            y2={yPercent(tick)}
+            class="stroke-[rgba(255,255,255,0.07)] [stroke-width:1]"
+            vector-effect="non-scaling-stroke"
+          />
+        {/each}
         {#each extraPaths as line (line.key)}
           <path
             d={line.d}
@@ -332,6 +368,18 @@
           {/if}
         </div>
       {/if}
+    </div>
+    {#if axes}
+      <div class="line-chart-xaxis" aria-hidden="true">
+        {#each xTicks as tick (tick)}
+          {@const f = (tick - xMin) / xSpan}
+          <span
+            class:anchor-start={f < 0.08}
+            class:anchor-end={f > 0.92}
+            style:left={`${f * 100}%`}>{tick}</span>
+        {/each}
+      </div>
+    {/if}
     </div>
     {#if timeAxis}
       <TimeAxis
