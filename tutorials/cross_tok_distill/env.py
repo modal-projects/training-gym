@@ -18,11 +18,6 @@ class Observation:
 
 
 @dataclass
-class StepResult:
-    observation: Observation
-
-
-@dataclass
 class EvalVerdict:
     passed: bool
     detail: str = ""
@@ -275,11 +270,11 @@ class BfclTurnEnvironment:
     exec_results: list[str] = field(default_factory=list)
     K: int = 0
 
-    def step(self, action: ToolCall) -> StepResult:
+    def step(self, action: ToolCall) -> Observation:
         call = {"name": action.name, "arguments": action.arguments or {}}
         text, is_error = execute_call(self.instances, call)
         self.exec_results.append(text)
-        return StepResult(observation=Observation(text=text, is_error=is_error))
+        return Observation(text=text, is_error=is_error)
 
     def evaluate(self) -> EvalVerdict:
         from bfcl_eval.eval_checker.multi_turn_eval.multi_turn_checker import (
@@ -367,14 +362,13 @@ def run_bfcl_episode(
         for action in actions:
             calls.append({"name": action.name, "arguments": action.arguments or {}})
             try:
-                step_result = env.step(action)
+                observation = env.step(action)
             except Exception:
                 execution_successes.append(False)
                 exit_reason = "execution_error"
                 stop = True
                 break
 
-            observation = step_result.observation
             execution_successes.append(not observation.is_error)
             observations.append(observation.text)
             consecutive_errors = consecutive_errors + 1 if observation.is_error else 0

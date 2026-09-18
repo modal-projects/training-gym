@@ -22,6 +22,7 @@ import json
 import re
 import sys
 import time
+from functools import cache
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -50,13 +51,6 @@ from modal_training_gym.train_recipes.slime_recipe import Qwen3_6_35B_Recipe
 # ## Deploy the base models
 #
 # First, we'll deploy the teacher and base models to derive a baseline.
-# We can use an [Endpoint](https://modal.com/docs/guide/endpoints)
-# to serve the student. However, for the teacher model, we need per-token logprobs,
-# which are not currently supported by Endpoints when speculative decoding is
-# enabled. So we instead use a
-# [CustomDeployment](https://gym.modal.dev/reference/customdeployment)
-# to serve the teacher.
-#
 # You'll notice that even if the Gym doesn't have a native model class for a model you want to use,
 # you can just use [HFModelConfiguration](https://gym.modal.dev/reference/hfmodelconfiguration)!
 
@@ -219,7 +213,8 @@ def trajectory_reward(
 
 # ## Get the dataset
 #
-# The dataset preprocessing code is verbose, so we simply instantiate the datasets here.
+# The [dataset preprocessing code](https://github.com/modal-projects/training-gym/blob/main/tutorials/cross_tok_distill/env.py)
+# is verbose, so we simply instantiate the datasets here.
 
 dataset_config = BfclMultiTurnConfig(eval_tail=30)
 dataset = BfclMultiTurnDataset(split="train", config=dataset_config)
@@ -270,15 +265,12 @@ EVAL_TAIL_STEPS = CURRICULUM_TAIL_MIN
 EVAL_MAX_TURNS = EVAL_TAIL_STEPS * 2
 MAX_CONSECUTIVE_TOOL_ERRORS = 3
 
-_TOKENIZERS = {}
 
-
+@cache
 def _tokenizer(name: str):
-    if name not in _TOKENIZERS:
-        from transformers import AutoTokenizer
+    from transformers import AutoTokenizer
 
-        _TOKENIZERS[name] = AutoTokenizer.from_pretrained(name, trust_remote_code=True)
-    return _TOKENIZERS[name]
+    return AutoTokenizer.from_pretrained(name, trust_remote_code=True)
 
 
 def _chat(
@@ -719,7 +711,7 @@ async def tool_step_generate(args, sample, sampling_params):
         student_calls.append({"name": action.name, "arguments": action.arguments})
         try:
             result = await asyncio.to_thread(env.step, action)
-            obs_text, is_error = result.observation.text, result.observation.is_error
+            obs_text, is_error = result.text, result.is_error
         except Exception as e:
             _log(f"turn {turn} execution error: {e!r} — ending episode")
             exec_successes.append(False)
