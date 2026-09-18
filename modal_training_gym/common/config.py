@@ -358,6 +358,13 @@ def get_framework_status_url() -> str | None:
     return base.rstrip("/") + "/api/framework-status"
 
 
+def _format_key(key: str) -> str:
+    if key and all(ch.isalnum() or ch in "-_" for ch in key):
+        return key
+    escaped = key.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _render(config: dict[str, Any]) -> str:
     """Minimal TOML writer for flat tables and one level of nested tables."""
     lines: list[str] = []
@@ -366,12 +373,12 @@ def _render(config: dict[str, Any]) -> str:
             continue
         if _is_nested_table(entries):
             for sub, subentries in entries.items():
-                lines.append(f"[{section}.{sub}]")
+                lines.append(f"[{_format_key(section)}.{_format_key(sub)}]")
                 for key, value in subentries.items():
                     lines.append(f"{key} = {_format_value(value)}")
                 lines.append("")
             continue
-        lines.append(f"[{section}]")
+        lines.append(f"[{_format_key(section)}]")
         for key, value in entries.items():
             lines.append(f"{key} = {_format_value(value)}")
         lines.append("")

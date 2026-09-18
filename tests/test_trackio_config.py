@@ -258,6 +258,28 @@ def test_save_trackio_deploy_keeps_other_environments(tmp_path, monkeypatch):
     }
 
 
+def test_save_trackio_deploy_round_trips_a_dotted_environment(tmp_path, monkeypatch):
+    from modal_training_gym.common import config as gym_config
+
+    path = tmp_path / ".training-gym.toml"
+    monkeypatch.setattr(gym_config, "CONFIG_PATH", path)
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "team.prod")
+    gym_config.save_trackio_deploy(
+        app_name="training-gym-trackio",
+        volume_name="team-prod-metrics",
+        modal_secret_name="_team-prod-trackio-token",
+        TRACKIO_PACKAGE_VERSION="0.35.0",
+    )
+
+    assert '[trackio."team.prod"]' in path.read_text()
+    assert gym_config.get_trackio_deploy() == {
+        "app_name": "training-gym-trackio",
+        "volume_name": "team-prod-metrics",
+        "modal_secret_name": "_team-prod-trackio-token",
+        "TRACKIO_PACKAGE_VERSION": "0.35.0",
+    }
+
+
 class _FakeImage:
     def __init__(self) -> None:
         self.packages: list[str] = []

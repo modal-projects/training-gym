@@ -1,3 +1,4 @@
+import copy
 import dataclasses as _dc
 import os
 import secrets as _secrets
@@ -401,7 +402,7 @@ class TrainConfig:
                 no_load_optim=True,
             )
         if recipe.metrics is not None:
-            recipe = _dc.replace(recipe, metrics=_dc.replace(recipe.metrics))
+            recipe = _dc.replace(recipe, metrics=copy.copy(recipe.metrics))
         _try_validate_model_parallelism(recipe, self.model)
         return recipe
 

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from modal_training_gym.common.dataset import HuggingFaceDataset
+from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.common.launcher_utils import (
     get_checkpoint_conversion_policy,
     prepare_launch_config,
@@ -241,6 +242,26 @@ def test_prepare_recipe_copies_metrics_so_resolve_cannot_leak() -> None:
     from modal_training_gym.common.trackio import TrackioConfig
 
     metrics = TrackioConfig(project="rl")
+    config = _config(SlimeRecipe(metrics=metrics))
+    prepared = config._prepare_recipe()
+
+    assert prepared.metrics is not metrics
+    prepared.metrics.server_url = "https://stale.example"
+    assert metrics.server_url == ""
+
+
+class _PlainMetrics(MetricConfig):
+    def __init__(self, project: str = "") -> None:
+        self.project = project
+        self.server_url = ""
+
+    @property
+    def provider(self) -> str:
+        return "plain"
+
+
+def test_prepare_recipe_copies_a_non_dataclass_metric() -> None:
+    metrics = _PlainMetrics(project="rl")
     config = _config(SlimeRecipe(metrics=metrics))
     prepared = config._prepare_recipe()
 
